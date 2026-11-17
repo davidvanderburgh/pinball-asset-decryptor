@@ -135,4 +135,40 @@ def test_every_rail_tab_is_listed_once():
     names = [t[0] for t in T.TABS]
     assert len(names) == len(set(names)), [n for n in names if names.count(n) > 1]
     win = (Path(T.__file__).parents[1] / 'window.py').read_text(encoding='utf-8')
-    assert win.count('"Network": g("modes"),') == 1
+    assert win.count('"Network": g("modes") or _ssh_offered(mfr),') == 1
+
+
+def _network_row(w):
+    return next(t for t in w.state('shell')['tabs'] if t['ns'] == 'network')
+
+
+@pytest.mark.parametrize('era,shown', [('spike3', True), ('spike2', True), ('spike1', False),
+                                       ('sam', False), ('whitestar', False)])
+def test_network_tab_follows_the_era_the_card_switches_to(tmp_path, era, shown):
+    # PAD-1399: a Spike 3 card switches the Stern era to spike3, where the mode runtime (and so g("modes")) is off;
+    # the Network tab was gated on that and vanished, hiding remote access on a platform it supports
+    with web_app(tmp_path, mfr='stern') as w:
+        if era != 'spike2':
+            w.run(w.window.set_era, era)
+        assert w.window.current_mfr.current_era == era
+        assert _network_row(w)['visible'] is shown
+        if era != 'spike2':
+            w.run(w.window.set_era, 'spike2')
+            assert _network_row(w)['visible'] is True
+
+
+def test_offered_is_stern_spike2_and_spike3_only():
+    class M:
+        def __init__(self, key, era):
+            self.key, self._era = key, era
+    assert ssh_card.offered(M('stern', 'spike3')) and ssh_card.offered(M('stern', 'spike2'))
+    assert not ssh_card.offered(M('stern', 'sam')) and not ssh_card.offered(M('jjp', 'spike3'))
+
+
+def test_no_card_picked_says_so(tmp_path, monkeypatch):
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        w.run(w.window.write_upd_var.set, '')
+        w.run(svc.publish)
+        st = w.state('network')
+        assert not st['supported'] and st['reason'] == 'Select the card image first (Select card tab).'

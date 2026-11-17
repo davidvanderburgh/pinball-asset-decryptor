@@ -32,6 +32,17 @@ DIRS = ('/usr', '/usr/local', '/usr/local/bin', '/usr/libexec', '/etc', '/etc/in
         '/etc/rc5.d', '/home', '/home/root', '/home/root/.ssh')
 
 
+#: the card eras remote access is qualified on (emulator-proven, PR #38)
+ERAS = ('spike2', 'spike3')
+
+
+def offered(mfr):
+    """True when remote access can go on a card of *mfr* as it is set now (Stern Spike 2 or Spike 3).
+
+    PAD-1399: the Network tab's rail gate and the tab itself both ask this, so the tab is never hidden on an era
+    remote access supports (it was gated on the Spike 2 mode runtime, and so vanished on Spike 3)."""
+    return getattr(mfr, 'key', '') == 'stern' and getattr(mfr, '_era', 'spike2') in ERAS
+
 
 def layout(platform='stern-spike2'):
     if platform == 'stern-spike2':

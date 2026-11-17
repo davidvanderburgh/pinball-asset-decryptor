@@ -673,6 +673,22 @@ def test_jaws_fireball_bulbs_stay_dark():
         assert n not in m["lamps"] and n in m["dark"]
 
 
+def test_jaws_fin_target_triangles_light_once():
+    # PAD-1383: each FIN TARGET lit two of JP's lights - its triangle over the
+    # harpoon below the black arc (Lchum1-7) and a second light at the fin's
+    # spot above the arc (PAD-1311). The machine lights the triangles only.
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    lamps = m["lamps"]
+    for i in range(1, 8):
+        name = "FIN TARGET %d" % i
+        on = [k for k, v in lamps.items() if k != "_" and v["name"].startswith(name)]
+        assert on == ["Lchum%d" % i], (name, on)
+    for n in ("Lbeachfinal", "Lnightfinal", "Lbarrelshark", "Ljackpotchum", "Lsharkfinal",
+              "Lhammerfinal", "Lsmimerfinal", "Lbeachfinal1", "Lnightfinal1",
+              "Lbarrelshark1", "Lhammerfinal1", "Lsmimerfinal1"):
+        assert n not in lamps and n in m["dark"]
+
+
 def test_jaws_shark_and_fin_follow_the_machine():
     # PAD-1311: the shark follows SHARK UP-MAG / DOWN-MAG (no visible pop-up
     # targets in front of it); the fin is the chum line target at SHARK

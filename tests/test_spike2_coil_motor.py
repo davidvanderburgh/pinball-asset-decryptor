@@ -134,7 +134,7 @@ def _state():
 @pytest.fixture(scope="module")
 def cbin(tmp_path_factory):
     d = tmp_path_factory.mktemp("coilmotor")
-    body = chr(10).join([_state(), _extract("motor_ms"), _extract("motor_say"),
+    body = chr(10).join([_state(), _extract("motor_ms_env"), _extract("motor_ms"), _extract("motor_say"),
                          _extract("coil_motor_on"), _extract("coil_motor_tick"),
                          _extract("coil_motor_note")])
     src = d / "coilmotor.c"

@@ -134,8 +134,19 @@ site coil_take        0x00184180 0xa9be53f3 0xaa0003f4
 site coil_give        0x001842d0 0xa9bf7bf3 0xaa0003f3
 #   lamp_free_owner: read off the lamp layer's code (PAD-1283)
 site lamp_free_owner  0x00236d30 0xa9bf7bf3 0xaa0003f3
-# site challenge_balls  NOT PLACED: no counterpart found
-# site challenge_extra_ball NOT PLACED: no counterpart found
+# ---- PAD-1330: the game's challenge games on Spike 3, read off this program's own code ----
+# The balls-per-game getter (Spike 2's 0x345428: the setting 80, the player's game mode's own, Insider Connected's) is
+# built into each of its callers here. Two are whole functions - the balls for a player (w0) and for the current player:
+site challenge_balls     0x004177c0 0xd0001401 0xf9468421
+site challenge_balls_2   0x00417880 0xd100c3ff 0xd0001401
+# the others read it into a register and compare the ball number with it: the ball-number set 0x417950 (its two ways),
+# the last-ball test 0x417a40 and the ball's end 0x417b50 (where both ways join, w20). A mode's challenge game: 1 there
+site challenge_balls_at_0 0x004179a8 0x6b1302bf 0x54000308
+site challenge_balls_at_1 0x004179fc 0x6b1302bf 0xd0001400
+site challenge_balls_at_2 0x00417a90 0x6b13029f 0x52800000
+site challenge_balls_at_3 0x00417c4c 0x91286ac0 0x39400401
+# the take-an-extra-ball test (the count byte: non-zero takes one), asked by the ball's end before the balls
+site challenge_extra_ball 0x00304ba0 0xf0002202 0x395ca041
 # ---- PAD-1327: the start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract), read off this program's own
 # menu function 0x158bb0: its entries {u32 kind, u16 caption, u64 name} 16 bytes each on its stack at sp+0xf8, room for
 # 7 (0x168 is the next object), the count in w22 until 0x159a10 keeps the LAST index at sp+164 for the loop; every
@@ -143,8 +154,12 @@ site lamp_free_owner  0x00236d30 0xa9bf7bf3 0xaa0003f3
 # Prolonged Competition (comp.cfg) is appended there (hook_full: x22 the count) and played as Standard once picked.
 site challenge_menu      0x00159a10 0x510006c1 0x2a0003f7
 site challenge_menu_pick 0x00159c38 0x7100103f 0x540033c0
-# not carried yet (its feature is 32-bit): site challenge_end_ball 0x00322180 0xf0001ba2 0xf942ec42
-# site ball_launch      NOT PLACED: no counterpart found
+# PAD-1330: the game's own challenges end the ball when they are over (end(w0, w1): the status bits 0x202, the devices
+# off): so does a mode that took the pick
+site challenge_end_ball  0x00322180 0xf0001ba2 0xf942ec42
+# PAD-1330: the launch button's handler (Spike 2's 0x103b88, its device read built in): fires the auto plunger while
+# flag 13 (PLAYER_CONTROL) or 12 (BALL_IN_DEVICE) says a ball waits there
+site ball_launch         0x0031b9b0 0xd0001be1 0xf9468421
 # PAD-1327: the end-of-game high scores (wrapped; no arguments of its own), the (category, n) entry lookup and the
 # gate: the bus question (id 91, at 0x3ef058) whose {player +0, category +2, entry +4} the game asks before filing
 site challenge_scores        0x003eecc0 0xf0001542 0xf9468442
@@ -281,17 +296,21 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value tank_path_entry_size  16
 # not carried (64-bit layout, measure it): value backdrop_surface 1
 # not carried (64-bit layout, measure it): value lamp_fade            3
-# not carried (64-bit layout, measure it): value challenge_on_flag   18
+value challenge_on_flag   18   # PAD-1330: FG_PLAYER_CHALLENGE_MODE_ACTIVE, read off the program's FG_ names
+value challenge_balls_at_0_reg 19
+value challenge_balls_at_1_reg 19
+value challenge_balls_at_2_reg 19
+value challenge_balls_at_3_reg 20
 value challenge_menu_list_at   248   # PAD-1327: measured on this program (0x158c78 .. 0x158cf8)
 value challenge_menu_count_reg 22
 value challenge_menu_cap       7
 value challenge_menu_entry     16
 value challenge_menu_pick_reg  1
-# not carried (64-bit layout, measure it): value challenge_menu_kind      2
-# not carried (64-bit layout, measure it): value challenge_menu_slot      -1
-# not carried (64-bit layout, measure it): value challenge_menu_caption   1921
-# not carried (64-bit layout, measure it): value ball_launch_flag       12
-# not carried (64-bit layout, measure it): value ball_launch_wait_flag  13
+value challenge_menu_kind      2    # PAD-1330: kind 2 clears flag 17, sets 18, clears 19-20 (0x15a2e4): the plain challenge game
+value challenge_menu_slot      -1
+value challenge_menu_caption   1921   # CHALLENGE
+value ball_launch_flag       12   # FG_MBDEV_AUTO_PLUNGER_BALL_IN_DEVICE
+value ball_launch_wait_flag  13   # FG_MBDEV_AUTO_PLUNGER_PLAYER_CONTROL
 value challenge_scores_desc_size    72   # PAD-1327: the 64-bit category descriptor
 value challenge_scores_gate_id       91
 value challenge_scores_gate_cat_at   2
@@ -300,7 +319,7 @@ value challenge_scores_cat   1   # HIGHEST SCORES (GRAND CHAMPION, HIGH SCORE #1
 value challenge_record_check_at   88   # PAD-1327: the 64-bit record (0x3ee090 resets it)
 value challenge_record_score_at   80
 value challenge_record_score_size 8
-# not carried (64-bit layout, measure it): value challenge_page_title_max 18
+value challenge_page_title_max 18   # PAD-1330: as Spike 2's (the same 800x480 one-screen cabinet)
 value sound_channel_count       8    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_size        288    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_request     272    # the 64-bit sound engine's (PAD-1282)

@@ -96,18 +96,32 @@ fi
 # THE WRAPPER FINDS ITS COMPILER BESIDE ITSELF (PAD-1090): it used to name the
 # prefix it was made in, and a rig home moved (/var/tmp/... -> /var/lib/pad-s3)
 # left a wrapper exec-ing a gcc that was not there. Rewritten when it is not this
-# version's (no "pinned kit" mark: the kit's own binutils first, PAD-1295) or missing.
-if ! grep -qs "pinned kit" "$W" || [ ! -x "$P/s3nm" ]; then
+# version's (no "own libs" mark) or missing.
+# THE KIT'S BINUTILS LOAD THE KIT'S OWN LIBRARIES (PAD-1343): as, ld and nm need
+# libopcodes/libbfd/libctf-...-arm64.so, which the binutils package unpacks under
+# root/usr/lib/x86_64-linux-gnu - a folder the loader never looks in.  They were found
+# only where the system's own binutils-aarch64-linux-gnu was installed too, so a
+# machine without it (the shipped runtime, a CI runner) failed every Spike 3 code
+# mode with "libopcodes-2.42-arm64.so: cannot open shared object file".  The folder
+# holds only those arm64 libraries, so nothing of the system's is shadowed.
+if ! grep -qs "own libs" "$W" || ! grep -qs "own libs" "$P/s3nm"; then
     cat > "$W.tmp" <<'EOF'
 #!/bin/sh
-# s3cc - self-located, pinned kit: the aarch64 gcc and binutils unpacked beside this file (xgcc.sh)
+# s3cc - self-located, pinned kit: the aarch64 gcc and binutils unpacked beside this file (xgcc.sh), own libs
 P=$(cd "$(dirname "$0")" && pwd)
+LD_LIBRARY_PATH=$P/root/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}; export LD_LIBRARY_PATH
 G=$P/root/usr/lib/gcc-cross/aarch64-linux-gnu/13
 exec "$P/root/usr/bin/aarch64-linux-gnu-gcc-13" -B"$P"/root/usr/aarch64-linux-gnu/bin/ -B"$G"/ -B"$P"/root/usr/aarch64-linux-gnu/lib/ \
     --sysroot="$P"/root -isystem "$G"/include -isystem "$P"/root/usr/aarch64-linux-gnu/include \
     -L"$P"/root/usr/aarch64-linux-gnu/lib "$@"
 EOF
-    printf '#!/bin/sh\n# s3nm - the pinned kit'"'"'s aarch64 nm (xgcc.sh)\nexec "$(cd "$(dirname "$0")" && pwd)/root/usr/bin/aarch64-linux-gnu-nm" "$@"\n' > "$P/s3nm"
+    cat > "$P/s3nm" <<'EOF'
+#!/bin/sh
+# s3nm - the pinned kit's aarch64 nm (xgcc.sh), own libs
+P=$(cd "$(dirname "$0")" && pwd)
+LD_LIBRARY_PATH=$P/root/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}; export LD_LIBRARY_PATH
+exec "$P/root/usr/bin/aarch64-linux-gnu-nm" "$@"
+EOF
     chmod +x "$W.tmp" "$P/s3nm"
     mv "$W.tmp" "$W"
 fi

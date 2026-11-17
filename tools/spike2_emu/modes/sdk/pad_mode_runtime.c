@@ -15359,32 +15359,40 @@ static int challenge_menu_said, challenge_menu_room_said;
 #define MENU_CAPTION_AT ((unsigned)pm_port_value("challenge_menu_caption_at", 4))
 #define MENU_NAME_AT ((unsigned)pm_port_value("challenge_menu_name_at", 8))
 
+static unsigned *menu_count_of(pm_reg *, unsigned char **);   /* PAD-1327: the Prolonged Competition section */
+
+/* PAD-1330: the name is a whole pointer (8 bytes on Spike 3, as comp_entry_at reads it) */
 static int own_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
 {
-    unsigned k, kind = *(const unsigned *)(ent + kat), name = *(const unsigned *)(ent + nat);
+    unsigned k, kind = *(const unsigned *)(ent + kat);
+    pm_addr name = *(const pm_addr *)(ent + nat);
     if (kind >= CHALLENGE_MENU_KIND && kind < CHALLENGE_MENU_KIND + N_OWN_CHALLENGE) return (int)(kind - CHALLENGE_MENU_KIND);
     for (k = 0; k < N_OWN_CHALLENGE; k++)
-        if (own_challenge[k].fn && name == (unsigned)(unsigned long)own_challenge[k].name) return (int)k;
+        if (own_challenge[k].fn && name == (pm_addr)(unsigned long)own_challenge[k].name) return (int)k;
     return -1;
 }
 
-static int own_entry(const unsigned *ent)
+/* PAD-1330: the kind the menu's pick holds in a register is one of ours (CHALLENGE_MENU_KIND + k): which, or -1 */
+static int own_kind(pm_reg kind)
 {
-    return own_entry_at((const unsigned char *)ent, 0, 8);
+    return kind >= CHALLENGE_MENU_KIND && kind < CHALLENGE_MENU_KIND + N_OWN_CHALLENGE ? (int)(kind - CHALLENGE_MENU_KIND) : -1;
 }
 
 static void challenge_menu_built(pm_reg *r)
 {
-    long creg = pm_port_value("challenge_menu_count_reg", -1);  /* PAD-619: Elvira - the count in a register */
-    unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp: above what was pushed */
-    unsigned *count = creg >= 0 && creg <= 12 ? (unsigned *)&r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    /* PAD-619: Elvira - the count in a register; PAD-1330: Star Wars ELG's Spike 3 menu too (w22, hook_full's x22) */
+    unsigned char *fsp;
+    unsigned *count = menu_count_of(r, &fsp);
     unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
     unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), first = (unsigned)pm_port_value("challenge_menu_kind", 3);
     unsigned es = (unsigned)pm_port_value("challenge_menu_entry", 12);
     unsigned short caption = (unsigned short)pm_port_value("challenge_menu_caption", 0);
     unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
-    unsigned i, k, k2, n0 = *count, mine = 0, tmpl = 0;
-    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
+    unsigned i, k, k2, n0, mine = 0, tmpl = 0;
+    if (!count) return;
+    n0 = *count;
+    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es
+        || nat + sizeof(pm_addr) > es || cat + 2 > es || (sizeof(pm_addr) == 8 && (nat & 7)))
         return;                                            /* not the list this hook knows: leave it alone */
     for (i = 0; i < n0; i++) {
         unsigned kind = *(unsigned *)(list + es * i + kat);
@@ -15394,7 +15402,7 @@ static void challenge_menu_built(pm_reg *r)
             if (!pm_port_value("challenge_menu_caption", 0))     /* PAD-619: the port's CHALLENGE, else the game's */
                 caption = *(unsigned short *)(list + es * i + cat);  /* own caption for a challenge */
             if (challenge_fn[kind - first] && challenge_title[kind - first][0])
-                *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)challenge_title[kind - first];   /* the game's u32 */
+                *(pm_addr *)(list + es * i + nat) = (pm_addr)(unsigned long)challenge_title[kind - first];   /* the game's pointer */
         }
     }
     if (mine) return;                                      /* PAD-619: an every-frame site - already appended */
@@ -15408,14 +15416,14 @@ static void challenge_menu_built(pm_reg *r)
         i = *count;
         if (!plain)                                        /* PAD-619: another layout - start from the game's entry */
             for (k2 = 0; k2 < es; k2++) list[es * i + k2] = list[es * tmpl + k2];
-        else if (es == 16)                                 /* the fourth word: as the entry ours stand in for */
+        else if (es == 16 && sizeof(pm_addr) == 4)         /* the fourth word: as the entry ours stand in for (Spike 3's is the name's) */
             *(unsigned *)(list + es * i + 12) = *(unsigned *)(list + es * tmpl + 12);
         *(unsigned *)(list + es * i + kat) = CHALLENGE_MENU_KIND + k;
         *(unsigned short *)(list + es * i + cat) = caption;
         if (plain) *(unsigned short *)(list + es * i + 6) = 0;
         else if (pm_port_value("challenge_menu_caption2_at", -1) >= 0)     /* TMNT keeps the caption twice */
             *(unsigned short *)(list + es * i + (unsigned)pm_port_value("challenge_menu_caption2_at", 0)) = caption;
-        *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)own_challenge[k].name;
+        *(pm_addr *)(list + es * i + nat) = (pm_addr)(unsigned long)own_challenge[k].name;
         *count = i + 1;
     }
     if (*count != n0 || !challenge_menu_said++) {
@@ -15431,22 +15439,23 @@ static void challenge_menu_built(pm_reg *r)
 static void challenge_menu_picked(pm_reg *r)
 {
     long back = pm_port_value("challenge_menu_pick_back", 0);
-    unsigned ptrk[3], *ent = back > 0 ? (unsigned *)(unsigned long)(r[3] - (unsigned)back) : ptrk;
-    unsigned char *e8 = back > 0 ? (unsigned char *)ent - MENU_KIND_AT : 0;   /* the entry's start */
+    /* PAD-1330: the register the kind under the cursor is in at the pick (r3 on Spike 2; Star Wars ELG's Spike 3: w1) */
+    long kreg = pm_port_value("challenge_menu_pick_reg", 3);
+    unsigned char *e8 = back > 0 ? (unsigned char *)(unsigned long)(r[3] - (unsigned)back) - MENU_KIND_AT : 0;   /* the entry's start */
     int was = own_pending, k;       /* the game runs this on every frame of the menu: say only a change */
-    if (back <= 0) { ptrk[0] = r[3]; ptrk[1] = 0; ptrk[2] = 0; }   /* the kind in r3 (Bond's jump) */
-    k = back > 0 ? own_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : own_entry(ent);
+    if (back <= 0 && (kreg < 0 || kreg > (sizeof(pm_addr) == 8 ? 8 : 3))) return;   /* the argument registers a plain hook saves */
+    k = back > 0 ? own_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : own_kind((unsigned)r[kreg]);
     if (k >= 0 && own_challenge[k].fn) {
         own_pending = k;
-        if (back > 0) ent[0] = (unsigned)pm_port_value("challenge_menu_kind", 0);   /* PAD-619: the entry itself */
-        else r[3] = (unsigned)pm_port_value("challenge_menu_kind", 3);   /* the game makes a challenge game of it */
+        if (back > 0) *(unsigned *)(e8 + MENU_KIND_AT) = (unsigned)pm_port_value("challenge_menu_kind", 0);   /* PAD-619: the entry itself */
+        else r[kreg] = (unsigned)pm_port_value("challenge_menu_kind", 3);   /* the game makes a challenge game of it */
         if (own_pending != was)
             say("challenge menu: %s on the menu - picked, a challenge game whose ball starts its mode",
                 own_challenge[own_pending].name);
     } else {
         if (was >= 0 && own_challenge[was].fn)                    /* PAD-663: say why a pick was not played */
-            say("challenge menu: %s no longer picked (the menu's entry is not ours: kind %" PMU ")", own_challenge[was].name,
-                back > 0 ? *(const unsigned *)(e8 + MENU_KIND_AT) : r[3]);
+            say("challenge menu: %s no longer picked (the menu's entry is not ours: kind %u)", own_challenge[was].name,
+                back > 0 ? *(const unsigned *)(e8 + MENU_KIND_AT) : (unsigned)r[kreg]);
         own_pending = -1;
     }
 }
@@ -15700,6 +15709,46 @@ static int challenge_balls_veto(pm_reg *r, unsigned n)
     return 1;
 }
 
+/* PAD-1330: Spike 3 has no balls-per-game getter to hook: its compiler built Spike 2's one into each of its callers (Star
+ * Wars ELG 1.10: the balls for a player 0x4177c0 and for the current player 0x417880 - whole functions, hooked as
+ * `site challenge_balls` / `challenge_balls_2` - and, inside a function, the ball-number set 0x417950 (twice), the
+ * last-ball test 0x417a40 and the ball's end 0x417b50). Each of those copies reads the setting (adjustment 80), the
+ * player's game mode's own and Insider Connected's into one register and compares the ball number with it; `site
+ * challenge_balls_at_<k>` is that compare (or the instruction both of its ways join at), `value
+ * challenge_balls_at_<k>_reg` the register (hook_full's numbering: x19 = 19 on Spike 3). In a mode's challenge game it
+ * says 1 there, as the getter does on Spike 2. */
+#define N_BALLS_AT 4
+static void balls_at(pm_reg *r, int k)
+{
+    char key[40];
+    long reg;
+    if (!challenge_balls_veto(r, 0)) return;
+    pm_snprintf(key, sizeof key, "challenge_balls_at_%d_reg", k);
+    reg = pm_port_value(key, -1);
+    if (reg >= 0 && reg <= FULL_REG_LAST) r[reg] = 1;
+}
+#define BALLS_AT(k) static void balls_at_##k(pm_reg *r) { balls_at(r, k); }
+BALLS_AT(0) BALLS_AT(1) BALLS_AT(2) BALLS_AT(3)
+static void (*const balls_at_fns[N_BALLS_AT])(pm_reg *) = { balls_at_0, balls_at_1, balls_at_2, balls_at_3 };
+
+static void balls_at_arm(void)
+{
+    char key[40], rkey[48];
+    int k, n = 0;
+    for (k = 0; k < N_BALLS_AT; k++) {
+        pm_snprintf(key, sizeof key, "challenge_balls_at_%d", k);
+        if (!site(key)) continue;
+        pm_snprintf(rkey, sizeof rkey, "challenge_balls_at_%d_reg", k);
+        if (!fn(key) || pm_port_value(rkey, -1) < 0 || pm_port_value(rkey, -1) > FULL_REG_LAST
+            || !hook_full(fn(key), balls_at_fns[k])) {
+            say("challenges: the balls count at %s could not be hooked - a mode's challenge game may play on past its ball", key);
+            continue;
+        }
+        n++;
+    }
+    if (n) say("challenges: %d of the game's balls-per-game reads say 1 in a mode's challenge game", n);
+}
+
 /* PAD-619: `site challenge_extra_ball` - the game's take-an-extra-ball test (the count byte: non-zero takes one and the
  * ball is played again, before the balls-per-game getter is ever asked). A mode's challenge game is one ball: an extra
  * ball earned in it is not played (Star Wars ELG 1.10 earned one 17 s into the ball and played it as a second) */
@@ -15729,7 +15778,8 @@ static int challenge_extra_veto(pm_reg *r, unsigned n)
 #define LAUNCH_CLIP_SETTLE_MS 1500u    /* the start clip begins half a second after the mode: look after that */
 #define LAUNCH_CLIP_MAX_MS 30000u      /* a clip that never ends: launch anyway */
 #define LAUNCH_GIVE_UP_MS 10000u       /* nothing launched this long after it was due: the player launches it */
-static unsigned (*plain_orig[N_PLAIN])(unsigned, unsigned, unsigned, unsigned);
+/* PAD-1330: whole registers (x0-x3 on Spike 3, where a handler's argument or result may be a pointer) */
+static pm_reg (*plain_orig[N_PLAIN])(pm_reg, pm_reg, pm_reg, pm_reg);
 static struct {
     int how;                             /* the picked challenge's setting: 0 its start clip, -1 the player, ms */
     int armed;                           /* its mode began in its challenge game: a launch owed */
@@ -15837,10 +15887,11 @@ static int chg_ours_now(void)
     return 0;
 }
 
-static unsigned plain_call(int k, unsigned a, unsigned b, unsigned c, unsigned d)
+static pm_reg plain_call(int k, pm_reg a, pm_reg b, pm_reg c, pm_reg d)
 {
     static unsigned said_game[N_PLAIN];
-    unsigned on = (unsigned)pm_port_value("challenge_on_flag", 0), ret;
+    unsigned on = (unsigned)pm_port_value("challenge_on_flag", 0);
+    pm_reg ret;
     if (!chg_ours_now()) return plain_orig[k](a, b, c, d);
     if (said_game[k] != chg_game_now() + 1) {
         char key[24];
@@ -15853,9 +15904,9 @@ static unsigned plain_call(int k, unsigned a, unsigned b, unsigned c, unsigned d
     game_flag_set(on);
     return ret;
 }
-#define PLAIN(k) static unsigned plain_##k(unsigned a, unsigned b, unsigned c, unsigned d) { return plain_call(k, a, b, c, d); }
+#define PLAIN(k) static pm_reg plain_##k(pm_reg a, pm_reg b, pm_reg c, pm_reg d) { return plain_call(k, a, b, c, d); }
 PLAIN(0) PLAIN(1) PLAIN(2) PLAIN(3)
-static unsigned (*const plain_wraps[N_PLAIN])(unsigned, unsigned, unsigned, unsigned) = { plain_0, plain_1, plain_2, plain_3 };
+static pm_reg (*const plain_wraps[N_PLAIN])(pm_reg, pm_reg, pm_reg, pm_reg) = { plain_0, plain_1, plain_2, plain_3 };
 
 static void plain_arm(void)
 {
@@ -15864,7 +15915,7 @@ static void plain_arm(void)
     for (k = 0; k < N_PLAIN; k++) {
         pm_snprintf(key, sizeof key, "challenge_plain_%d", k);
         if (!site(key)) continue;
-        plain_orig[k] = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn(key), (void *)plain_wraps[k]);
+        plain_orig[k] = (pm_reg (*)(pm_reg, pm_reg, pm_reg, pm_reg))hook_wrap(fn(key), (void *)plain_wraps[k]);
         if (!plain_orig[k])
             say("challenges: %s at 0x%08" PMA " could not be wrapped - it stays left out of a mode's challenge game", key, fn(key));
     }
@@ -15908,6 +15959,7 @@ static void challenges_arm(void)
      * balls-per-game setting and the next one (`site challenge_balls_2`) when they decide the game is over */
     if (site("challenge_balls_2") && (!fn("challenge_balls_2") || !hook_veto_n(fn("challenge_balls_2"), challenge_balls_veto, 1, 1)))
         say("challenges: the per-player balls getter could not be hooked - an older build's challenge game may run on");
+    balls_at_arm();                                  /* PAD-1330: Spike 3's, built into their callers */
     if (site("challenge_extra_ball") && (!fn("challenge_extra_ball") || !hook_veto_n(fn("challenge_extra_ball"), challenge_extra_veto, 0, 0)))
         say("challenges: the extra-ball test could not be hooked - an extra ball earned in a mode's challenge game is played");
     for (n = 0; n < (unsigned)challenges_n; n++)

@@ -120,8 +120,8 @@ def test_star_wars_elg_spike3_is_offered_it():
     v = port["value"]
     assert (v["challenge_menu_list_at"], v["challenge_menu_count_reg"], v["challenge_menu_cap"],
             v["challenge_menu_entry"], v["challenge_menu_pick_reg"]) == (248, 22, 7, 16, 1)
-    # the mode challenges stay off on Spike 3: no challenge_on_flag, no menu slot of theirs
-    assert "challenge_on_flag" not in v and "challenge_menu_slot" not in v
+    # PAD-1330: the modes' own challenges share the menu: flag 18, the plain challenge kind, no challenge of the game's
+    assert (v["challenge_on_flag"], v["challenge_menu_kind"], v["challenge_menu_slot"]) == (18, 2, -1)
     profs = MP.profiles()
     assert PCo.title_refusal(profs["star_wars_elg_1_10_spike3"]) == ""
     # (round 2, below: the newer titles; Star Wars 2025 Pro's port has no game_start / ball_start event yet)

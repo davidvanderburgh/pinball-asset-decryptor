@@ -4,6 +4,7 @@ The Spike 3 rig proof (Star Wars ELG 1.10, a code mode built through spike3_mode
 docs/plans/spike3_modes.md; these pin the pieces that make it.
 """
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -133,7 +134,29 @@ def _sh():
     return sh
 
 
+def _kit_runs_here():
+    """The pinned kit is amd64 programs; off x86-64 xgcc.sh takes a system aarch64 gcc or refuses
+    (an arm64 Mac runner has none)."""
+    if platform.machine() in ("x86_64", "AMD64"):
+        return True
+    if any(shutil.which(c) for c in ("aarch64-linux-gnu-gcc", "aarch64-linux-gnu-gcc-13", "aarch64-linux-gnu-gcc-12")):
+        return True
+    return platform.machine() in ("aarch64", "arm64") and sys.platform.startswith("linux") and bool(shutil.which("gcc"))
+
+
+def test_the_kits_binutils_load_the_kits_own_libraries():
+    """PAD-1343: the kit's as/ld/nm need libopcodes/libbfd-2.42-arm64.so, unpacked under the kit's
+    usr/lib/x86_64-linux-gnu; without the wrappers pointing the loader there, only a machine that also had
+    the system's binutils-aarch64-linux-gnu could build (CI and the shipped runtime could not)."""
+    with open(MR.xgcc_script(), encoding="utf-8") as f:
+        src = f.read()
+    lib = "LD_LIBRARY_PATH=$P/root/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}; export LD_LIBRARY_PATH"
+    assert src.count(lib) == 2                                  # s3cc and s3nm
+    assert 'grep -qs "own libs" "$W" || ! grep -qs "own libs" "$P/s3nm"' in src   # an older kit's wrappers are rewritten
+
+
 @pytest.mark.skipif(_sh() is None, reason="needs a POSIX shell over this machine's paths")
+@pytest.mark.skipif(not _kit_runs_here(), reason="no aarch64 gcc can run on this machine (xgcc.sh refuses)")
 def test_the_kit_builds_a_code_mode_and_keeps_the_rule_on_its_own_code(tmp_path):
     """build_mode.sh -a a64 with no CC unpacks the pinned kit (xgcc.sh) and builds; the runtime's own
     allocation (its std::string objects) passes, a mode's malloc is refused - the a64 nm check had

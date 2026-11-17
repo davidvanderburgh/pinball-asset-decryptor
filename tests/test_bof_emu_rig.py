@@ -356,7 +356,9 @@ def test_the_game_loads_nothing_from_the_rigs_own_folder():
         for m in re.finditer(r'LD_(?:PRELOAD|LIBRARY_PATH)="?(\S+)', line):
             assert not re.search(r"\$\{?(BOF_TOOLS|BOF_SHIM|HERE)\b", m.group(1)), line
     assert 'cp "$BOF_SHIM" "$BOF_RIG/bofhwshim.so"' in src
-    assert 'LD_PRELOAD="$BOF_RIG/bofhwshim.so"' in src
+    # PAD-1309: the boot menu's hold-EXIT library goes first when the card has one - also from the slot's folder
+    assert 'LD_PRELOAD="$MENU_PRE$BOF_RIG/bofhwshim.so"' in src
+    assert 'MENU_PRE="$BOF_RIG/padmenu.so:"' in src
 
 
 def test_the_game_window_gets_the_playfield_keys():

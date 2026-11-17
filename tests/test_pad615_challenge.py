@@ -606,8 +606,11 @@ def _menu(tmp_path, own):
     code = MENU_CONTEXT + "#include <stdlib.h>\n#define CHALLENGE_MENU_KIND 0x100u\n" \
         + "static int challenge_menu_said, challenge_menu_room_said;\n#define pm_snprintf snprintf\n" \
         + "".join(line + "\n" for line in src.splitlines() if line.startswith("#define MENU_")) \
+        + "".join(line + "\n" for line in src.splitlines()                     # PAD-1330: Spike 2's frame layout
+                  if line.startswith(("#define FULL_REG_LAST", "#define FULL_SP(", "#define HOOK_SP("))) \
+        + R._lift(src, "static unsigned *menu_count_of(pm_reg *r, unsigned char **fsp)") + "\n" \
         + R._lift(src, "static int own_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)") + "\n" \
-        + R._lift(src, "static int own_entry(const unsigned *ent)") + "\n" \
+        + R._lift(src, "static int own_kind(pm_reg kind)") + "\n" \
         + R._lift(src, "static void challenge_menu_built(pm_reg *r)") + "\n" \
         + R._lift(src, "static void challenge_menu_picked(pm_reg *r)") + MENU_MAIN
     return R._host_run(tmp_path, code, args=(str(own),)).splitlines()

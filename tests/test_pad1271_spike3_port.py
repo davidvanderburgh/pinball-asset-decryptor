@@ -188,6 +188,9 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                           "challenge_scores", "game_scores", "challenge_score_entry", "challenge_scores_gate",
                           "challenge_pages_0", "challenge_pages_1", "audit_add",  # PAD-1327: records
                           "coil_frame", "coil_off",                                 # PAD-1329: spare outputs
+                          "challenge_balls", "challenge_balls_2", "challenge_balls_at_0", "challenge_balls_at_1",
+                          "challenge_balls_at_2", "challenge_balls_at_3", "challenge_end_ball",
+                          "challenge_extra_ball", "ball_launch",                    # PAD-1330: its own challenges
                           } | SOUND_SITES | LIGHT_SITES | SCENE_SITES | PLAY_SITES
     for t in sites.values():
         t = t[:t.index("#")] if "#" in t else t                 # a show's line ends in a note (PAD-1283)
@@ -211,6 +214,7 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
               and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES
               and t[1] not in PLAY_VALUES and not t[1].startswith(("switch_", "challenge_"))}   # PAD-1322 / 1327
     assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34",
+                      "ball_launch_flag": "12", "ball_launch_wait_flag": "13",   # PAD-1330: its own challenges
                       # PAD-1286: the game's mode books, each flag by its name (the same ids on both builds)
                       "place_flag_completed_0": "69", "place_flag_completed_1": "67", "place_flag_completed_2": "68",
                       "done_flag_0": "66",

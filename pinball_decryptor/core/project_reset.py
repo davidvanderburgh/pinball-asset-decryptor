@@ -42,12 +42,15 @@ KINDS = (
     ("modes", "Modes",
      "Every mode made in this project, with its picture, clip and sound (the modes folder), "
      "and every change to the game's own modes."),
+    ("extras", "Extras",
+     "The project's SSH server setting and public keys, back to the source card's settings."),
 )
 KEYS = tuple(k for k, _l, _d in KINDS)
 LABELS = {k: label for k, label, _d in KINDS}
 
 #: the sidecar keys each kind owns (besides what :func:`drop_records` does by hand)
 _SIDECAR = {
+    "extras": ("extras",),
     "scenes": ("score_colors",),
     "images": ("image", "image_keep_size"),
     "videos": ("video", "video_asis_slots", "video_length_slots", "video_variants",

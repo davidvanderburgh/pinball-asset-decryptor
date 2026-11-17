@@ -59,6 +59,9 @@ class ExtrasTab(TabService):
     def on_manufacturer(self, mfr):
         self.publish()
 
+    def refresh_after_revert(self):
+        self.publish()
+
     def on_running(self, running, mode):
         self.set(running=bool(running))
 

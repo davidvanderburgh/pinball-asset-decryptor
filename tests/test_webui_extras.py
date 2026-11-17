@@ -69,3 +69,60 @@ def test_private_key_error_prevents_build_dispatch(tmp_path, monkeypatch):
         w.run(w.app._start_write)
         assert w.asked[-1]['title'] == 'SSH Extras'
         assert 'private' in w.asked[-1]['message'].lower()
+
+
+def test_disabling_ssh_is_pending_when_source_has_it_enabled(tmp_path, monkeypatch):
+    from tests.test_webui_write import wait_for
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        monkeypatch.setattr(ssh_card, 'inspect_image', lambda *a, **kw: dict(
+            supported=True, reason='', enabled=True, public_keys=key() + '\n'))
+        (project / '.checksums.md5').write_text('')
+        assert w.call('extras.configure', False, key(), str(project))
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        assert any('SSH server' in row['file'] and 'disable' in row['file']
+                   for row in w.state('write')['rows'])
+
+
+def test_switching_source_refreshes_whether_ssh_disable_is_a_change(tmp_path, monkeypatch):
+    from tests.test_webui_write import wait_for
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        stock = tmp_path / 'stock.raw'; stock.write_bytes(b'card')
+        monkeypatch.setattr(ssh_card, 'inspect_image', lambda path: dict(
+            supported=True, reason='', enabled=str(path) != str(stock), public_keys=key() + '\n'))
+        (project / '.checksums.md5').write_text('')
+        assert w.call('extras.configure', False, key(), str(project))
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        assert w.state('write')['count'] == 1
+        w.call('ui.select_tab', 'extras')
+        w.run(w.window.write_upd_var.set, str(stock))
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        assert w.state('write')['rows'] == []
+
+
+@pytest.mark.parametrize('source_enabled', [False, True])
+def test_revert_all_resets_extras_to_source_and_clears_keys(tmp_path, monkeypatch, source_enabled):
+    from tests.test_webui_write import wait_for
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        source_keys = key(seed=b'y') + '\n' if source_enabled else ''
+        monkeypatch.setattr(ssh_card, 'inspect_image', lambda *a, **kw: dict(
+            supported=True, reason='', enabled=source_enabled, public_keys=source_keys))
+        (project / '.checksums.md5').write_text('')
+        assert w.call('extras.configure', not source_enabled, key(), str(project))
+        assert w.call('shellx.reset_open')
+        rows = w.state('shellx')['reset']['rows']
+        assert any(row['key'] == 'extras' and row['n'] == 1 for row in rows)
+        w.answers.extend(['yes', 'ok'])
+        assert w.call('shellx.reset_run', [row['key'] for row in rows])
+        assert wait_for(w, lambda: not w.window._running
+                        and w.state('extras')['enabled'] is source_enabled
+                        and w.state('extras')['public_keys'] == source_keys)
+        assert card_extras.load(str(project)) is None
+        assert w.state('extras')['enabled'] is source_enabled
+        assert w.state('extras')['public_keys'] == source_keys
+        assert w.state('extras')['error'] == ''

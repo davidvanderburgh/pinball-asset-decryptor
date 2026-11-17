@@ -1973,17 +1973,26 @@ HELP_CONTENT = {
          "Import puts them in the project's **card_files** folder for one right-click "
          "**Replace** there."),
         ("Port + build", [
-            "**Port + build onto card image(s)…** does it all for one or more **stock** "
-            "card images: a new firmware, the other model (Pro, Premium, LE), or several.",
+            "Pick the new **stock card image** (the .raw straight from the manufacturer, "
+            "no extracting by hand) and press **Port + build**: a new firmware, the "
+            "other model (Pro, Premium, LE), or several cards at once.",
             {"flow": [
                 {"icon": "extract", "title": "Extract", "text": "each card"},
                 {"icon": "copy", "title": "Transfer", "text": "your mods onto it"},
                 {"icon": "write", "title": "Build", "text": "its modded image"}]},
-            "Extracts are kept for next time. Audio slots that now hold a different "
-            "sound are skipped; the log names everything skipped.",
+            "- **What's new in this version?** extracts the card and lists the videos, "
+            "sounds, pictures and text it **adds**, changes and drops against your "
+            "project's version, so you know what may need a replacement of your own. "
+            "It also says whether your modes can run on the new game program. The full "
+            "list is saved beside the builds.\n"
+            "- Each card is extracted once and kept: a What's new and the Port + build "
+            "after it share that extract.\n"
+            "- Audio slots that now hold a different sound are skipped; the log names "
+            "everything skipped.",
         ]),
         ("Transfer mods",
-         "**Transfer mods from another extract** (where available) carries your edits "
+         "**Advanced** (folded under Port + build) does the same move one step at a "
+         "time. **Transfer mods from another extract** (where available) carries your edits "
          "onto a newer firmware's extract, or the other model's.\n\n"
          "| Field | What it is |\n"
          "|---|---|\n"

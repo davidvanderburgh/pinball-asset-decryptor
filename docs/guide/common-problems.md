@@ -29,7 +29,7 @@ what happened, with the app's log, after showing you exactly what goes.
 | Replace tabs show a lock | They need an extract first: pick the card, then **Extract** into a project folder. |
 | **"The source image has changed"** | The card image is no longer the file you extracted from. Re-extract, or **Dismiss** it for that image. |
 | My edits are gone after extracting again | Extracting again into the same folder overwrites it (it asks first). Use one project folder per game version. |
-| **⚠ not on this card** on a row | A file from another version's project or mod pack. **Port + build onto card image(s)…** on the Mod Pack tab carries mods over to a new version. |
+| **⚠ not on this card** on a row | A file from another version's project or mod pack. **Port + build** on the Mod Pack tab carries mods over to a new version. |
 
 ## Replacing
 

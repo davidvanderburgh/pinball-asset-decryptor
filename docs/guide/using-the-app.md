@@ -508,14 +508,24 @@ A mod pack is a small zip of only your changed files, to share.
 
 ### Port + build
 
-**Port + build onto card image(s)…** takes one or more stock card images
-(a new firmware, the other model, or several), extracts each, transfers
-your mods and builds it, in one click. The log names everything skipped.
+Pick one or more stock card images (the .raw from the manufacturer: a new
+firmware, the other model, or several) and a folder to build into, then
+press **Port + build**: each card is extracted, your mods are transferred
+onto it and it is built, in one click. The log names everything skipped.
+
+**What's new in this version?** extracts the card (once: Port + build
+reuses that extract) and lists the videos, sounds, pictures and on-screen
+text the new version adds, changes and drops against your project's
+version, so you know what may need a replacement of your own. It says
+which of your replaced slots the new version changed or dropped, and
+whether your modes can run on its game program. The full list is saved
+beside the builds as `<card> - what's new.txt`.
 
 ### Transfer Mods to New Version (Stern Spike 2)
 
 New game code re-lays-out the card, so a pack can't simply be applied.
-This panel moves your mods from an old extract onto a fresh one.
+This panel (**Advanced**, folded under Port + build) moves your mods from
+an old extract onto a fresh one, one step at a time.
 
 | Field | What it is |
 |---|---|

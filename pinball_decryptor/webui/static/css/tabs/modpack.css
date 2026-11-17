@@ -64,3 +64,23 @@
 /* the action row: output-name preview left, the button right */
 .mp-arow { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 14px; }
 .mp-out { flex: 1 1 300px; min-width: 0; font-style: italic; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+
+/* PAD-1388: the one-click port's form, its What's new, and the Advanced
+   route folded away under its own heading */
+.mp-proj { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; min-height: 30px; }
+.mp-adv > summary { cursor: pointer; list-style-position: inside; }
+.mp-adv:not([open]) { gap: 0; }
+.mp-news { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line-2);
+  border-radius: 8px; background: var(--bg-2); }
+.mp-nhead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--ink); }
+.mp-nhead svg.i { color: var(--accent); }
+.mp-nrow > summary { cursor: pointer; }
+.mp-nrow, .mp-nrow > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+details.mp-nrow { display: block; }
+.mp-nk { flex: 0 0 92px; font-family: var(--cond); font-weight: 600; font-size: 13.5px; color: var(--ink-2);
+  text-transform: capitalize; }
+.mp-nlists { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 6px 0 4px 100px; }
+.mp-nlist { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.mp-names { white-space: pre; overflow: auto; max-height: 180px; padding: 6px 8px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--panel-2); color: var(--ink-2); }
+.mp-nmodes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }

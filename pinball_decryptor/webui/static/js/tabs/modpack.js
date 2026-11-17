@@ -18,8 +18,12 @@ const T = {
   exportTip: "Create a zip holding only your modified files, small enough to share.",
   importTip: "Apply a mod pack zip from another user onto this project's extracted assets.",
   moveTitle: "Move Your Mods to Another Card",
-  routeA: "New game version, or the other model (Pro ↔ Premium) — build my modded card(s) automatically",
+  routeA: "New game version, or the other model (Pro ↔ Premium): pick the new card image and build",
+  routeAsub: "No extracting by hand: each card is extracted for you (once, and reused), checked for what it adds, and built with your mods.",
   routeB: "Advanced — do each step myself (also the route for cards modded outside this app)",
+  newsTip: "Extracts each new card (once: Port + build reuses that extract) and lists the videos, sounds, pictures and on-screen text it ADDS, changes and drops compared with this project's version, so you know what may need a replacement of your own. Also says whether this project's modes can run on the new game program. Nothing is transferred or built.",
+  imgsTip: "The stock card image(s) straight from the manufacturer (.raw): no need to extract them first. Pick several (say the Pro and the LE) to build them all in one go.",
+  outTip: "Where the finished card(s) are built. Each card's extract and its What's new list land here too, and are reused the next time.",
   portTip: "Pick one or more stock card images (the new version, the other model, or both) and everything else is automatic: each card is extracted, this project's mods are transferred onto it, and its modded card is built — unattended, one after another.\n\nEach card's extract lands beside the builds and is reused next time, so re-shipping after a change is fast. Audio slots whose index now holds a different sound are skipped (the safe default); everything skipped is named in the log.",
   transferTip: "The same move as the one-click port, with you driving each stage: pick the two extract folders above, run the transfer, then build the card on the Write tab (the output-name preview on the left shows what it will build).\n\nThis is also the route for a card that was modded OUTSIDE this app: extract the modded card as field 1 and fill field 3 with a stock extract of that same version, so your mods can be told apart from the factory's own changes.",
   busyTip: "Working: the bar above the log moves and its line names the step. The log has the detail.",
@@ -98,20 +102,86 @@ function TransferRow({ s, row }) {
   </div>`;
 }
 
+const NEWS_LISTS = [["added", "new"], ["changed", "changed"], ["removed", "gone"]];
+
+function NewsKind({ k }) {
+  const any = k.n_added || k.n_changed || k.n_removed;
+  const chips = html`<span class="mp-nk">${k.noun}</span>
+    <${Chip} kind=${k.n_added ? "warn" : ""} sm>${k.n_added} new<//>
+    <${Chip} sm>${k.n_changed} changed<//>
+    <${Chip} sm>${k.n_removed} gone<//>
+    <span class="muted small">${k.same} the same</span>`;
+  if (!any) return html`<div class="mp-nrow">${chips}</div>`;
+  return html`<details class="mp-nrow" open=${!!k.n_added && k.n_added <= 40}>
+    <summary>${chips}</summary>
+    <div class="mp-nlists">
+      ${NEWS_LISTS.filter(([key]) => k["n_" + key]).map(([key, word]) => html`<div class="mp-nlist">
+        <div class="small muted">${k["n_" + key]} ${word}${k["n_" + key] > k[key].length ? " (first " + k[key].length + " listed; the full list has all)" : ""}</div>
+        <div class="mono small mp-names">${k[key].join("\n")}</div>
+      </div>`)}
+    </div>
+  </details>`;
+}
+
+function NewsCard({ n }) {
+  const yours = (n.yours_changed || []).length, gone = (n.yours_removed || []).length;
+  return html`<div class="mp-news">
+    <div class="mp-nhead"><${Icon} name="info" /><b>${n.headline}</b>
+      <span class="muted small">${n.card}${n.old_version ? " — compared with your project's " + n.old_version : ""}</span></div>
+    ${(n.kinds || []).map((k) => html`<${NewsKind} key=${k.kind} k=${k} />`)}
+    ${yours ? html`<${Note} kind="warn">${yours} slot(s) you replaced were changed in this version; your replacement still goes on: ${n.yours_changed.slice(0, 12).join(", ")}<//>` : null}
+    ${gone ? html`<${Note} kind="warn">${gone} slot(s) you replaced are gone in this version, so those replacements have nowhere to go: ${n.yours_removed.slice(0, 12).join(", ")}<//>` : null}
+    ${n.modes ? html`<div class="mp-nmodes"><span class="mp-nk">Modes</span><span class="small">${n.modes}</span></div>` : null}
+    ${n.report ? html`<div><button type="button" class="mp-link small" onClick=${() => call("modpack.open_report", n.report)}>Open the full list</button>
+      <span class="muted small mono"> ${n.report}</span></div>` : null}
+  </div>`;
+}
+
+function PortRow({ n, label, tipText, children, ver }) {
+  return html`<div class="mp-frow">
+    <label class="mp-flabel tipped" ...${tip(tipText)}><b class="mp-num">${n}</b><span class="tx">${label}</span></label>
+    <div class="mp-fctl">${children}
+      <span class="mp-ver">${ver ? html`<${Chip} kind="info" sm title=${ver}>${ver}<//>` : null}</span>
+    </div>
+  </div>`;
+}
+
+function PortRoute({ s }) {
+  const busy = !!s.running;
+  return html`<section class="mp-route">
+    <div class="mp-rhd">${T.routeA}</div>
+    <div class="small muted">${T.routeAsub}</div>
+    <div class="mp-form">
+      <${PortRow} n="1" label="Your project (has your mods):" tipText=${T.project}
+        ver=${s.proj_ver ? "version " + s.proj_ver : ""}>
+        <span class="mp-proj"><${ProjectLink} folder=${s.project} /></span>
+      <//>
+      <${PortRow} n="2" label="New card image(s) (.raw):" tipText=${T.imgsTip}
+        ver=${s.imgs_ver ? "version " + s.imgs_ver : ""}>
+        <${Field} ns="modpack" k="port_imgs" value=${s.port_imgs} mono id="mp-port_imgs" cls="grow"
+          placeholder="the new stock card image, straight from the manufacturer" title=${s.port_imgs || ""} />
+        <${Button} drop title=${T.imgsTip} onClick=${() => call("modpack.browse", "port_imgs")}>Browse…<//>
+      <//>
+      <${PortRow} n="3" label="Build into folder:" tipText=${T.outTip}>
+        <${Field} ns="modpack" k="port_out" value=${s.port_out} mono id="mp-port_out" cls="grow"
+          placeholder="defaults to the new card's folder" title=${s.port_out || ""} />
+        <${Button} drop title=${T.outTip} onClick=${() => call("modpack.browse", "port_out")}>Browse…<//>
+      <//>
+    </div>
+    <div class="mp-arow">
+      <${Button} icon="search" title=${T.newsTip} disabled=${busy} onClick=${() => call("modpack.whats_new")}>What's new in this version?<//>
+      <${Button} kind="primary" icon="modpack" title=${T.portTip} disabled=${busy} onClick=${() => call("modpack.port")}>Port + build<//>
+    </div>
+    ${(s.news || []).map((n) => html`<${NewsCard} key=${n.card} n=${n} />`)}
+  </section>`;
+}
+
 function TransferCard({ s }) {
   const next = (s.next || "").replace(/^✓\s*/, "");
   return html`<${Card} title=${T.moveTitle}>
-    <section class="mp-route">
-      <div class="mp-rhd">${T.routeA}</div>
-      <div class="mp-rrow">
-        <${Flow} boxes=${["This project's mods", "Stock card image(s) you pick", "Finished modded card(s)"]}
-          arrows=${["transfer", "build"]} />
-        <span class="grow"></span>
-        <${Button} kind="primary" icon="modpack" title=${T.portTip} onClick=${() => call("modpack.port")}>Port + build onto card image(s)…<//>
-      </div>
-    </section>
-    <section class="mp-route">
-      <div class="mp-rhd">${T.routeB}</div>
+    <${PortRoute} s=${s} />
+    <details class="mp-route mp-adv">
+      <summary class="mp-rhd">${T.routeB}</summary>
       <${Flow} boxes=${["1  Old extract (your mods)", "2  New stock extract", "Write tab", "Modded card"]}
         arrows=${["transfer", "", "build"]} />
       <div class="mp-form">
@@ -123,7 +193,7 @@ function TransferCard({ s }) {
           onClick=${() => call("modpack.transfer")}>${s.transfer_busy ? "Transferring…" : "Transfer mods → new version…"}<//>
       </div>
       ${next ? html`<${Note} kind="ok">${next}<//>` : null}
-    </section>
+    </details>
   <//>`;
 }
 

@@ -117,8 +117,10 @@ TASKS = (
      "go": "Open Mod Pack",
      "steps": (
          "Open the project that holds your mods.",
-         "On Mod Pack, press Port + build onto card image(s)….",
-         "Pick the new stock card image: a new version, or the other model.",
+         "On Mod Pack, pick the new stock card image: a new version, or the "
+         "other model. No need to extract it first.",
+         "Press What's new in this version? to see what it adds that you may want "
+         "to replace, then Port + build.",
          "It extracts that card, moves your mods onto it and builds it. The log names "
          "anything it skipped.",
      )},

@@ -42,6 +42,8 @@ class ModPackTab(TabService):
         "transfer_dst_ver_var", "transfer_oldstock_ver_var",
         "transfer_img_ver_var",
         "_prefill_transfer_dst", "_transfer_refresh_meta",
+        # PAD-1388: the one-click port's own fields and its What's new
+        "port_imgs_var", "port_out_var", "_show_news",
     )
 
     def __init__(self, window):
@@ -64,6 +66,14 @@ class ModPackTab(TabService):
         # Filled by the run logic after a successful transfer.
         self.transfer_next_var = self.var("next")
 
+        # PAD-1388: the one-click port's fields (app._port_targets reads
+        # them): the new card image(s), "; "-separated, and the build folder.
+        self.port_imgs_var = self.var("port_imgs")
+        self.port_out_var = self.var("port_out")
+        self.port_imgs_var.trace_add("write",
+                                     lambda *_a: self._port_refresh_meta())
+        self._port_ver_cache = {}
+
         self._transfer_img_probe_path = ""
         self._transfer_img_probe_after = None
         self._transfer_img_ver_cache = {}
@@ -74,7 +84,8 @@ class ModPackTab(TabService):
                   self.transfer_oldstock_var, self.transfer_newimg_var):
             v.trace_add("write", lambda *_a: self._transfer_refresh_meta())
         self.set(project="", transfer_cap=False, modpack_cap=False,
-                 running=False, transfer_busy=False)
+                 running=False, transfer_busy=False, news=[],
+                 proj_ver="", imgs_ver="")
 
     # -- the shared project folder (Tk: _project_path_display over
     #    write_assets_var) ------------------------------------------------
@@ -98,9 +109,11 @@ class ModPackTab(TabService):
         var = self._project_var
         folder = ((var.get() if var is not None else "") or "").strip()
         if not self.ctx.loop.in_loop():
-            self.ctx.loop.post(lambda: self.set(project=folder))
+            self.ctx.loop.post(self._mirror_project)
             return
-        self.set(project=folder)
+        if folder != self.get("project"):
+            self.set(news=[])
+        self.set(project=folder, proj_ver=self._dir_version(folder))
 
     # -- hooks -------------------------------------------------------------
     def on_manufacturer(self, mfr):
@@ -239,6 +252,63 @@ class ModPackTab(TabService):
         else:
             self.transfer_output_var.set("")
 
+    @staticmethod
+    def _dir_version(folder):
+        """The version an extract folder came from, ``""`` when unknown."""
+        from ...core import extract_source
+        if not folder:
+            return ""
+        try:
+            v, _exact = extract_source.version_for_dir(folder)
+        except Exception:                            # noqa: BLE001
+            return ""
+        return v or ""
+
+    # -- PAD-1388: the one-click port's form --------------------------------
+    def _port_imgs(self):
+        return [p.strip() for p in (self.port_imgs_var.get() or "").split(";")
+                if p.strip()]
+
+    def _port_refresh_meta(self):
+        """The new card(s)' version chip, and the build folder defaulted to
+        the first card's folder (each card's extract lands there too)."""
+        from ...core import extract_source
+        imgs = self._port_imgs()
+        if imgs and not (self.port_out_var.get() or "").strip():
+            self.port_out_var.set(os.path.dirname(os.path.normpath(imgs[0])))
+        guess = []
+        for img in imgs:
+            hint = extract_source.version_hint_from_name(
+                os.path.basename(img))
+            guess.append(self._port_ver_cache.get(img) or hint or "?")
+        self.set(imgs_ver=", ".join(guess) if imgs else "")
+        mfr = self.mfr
+        todo = [i for i in imgs if i not in self._port_ver_cache
+                and os.path.isfile(i)]
+        if not todo or not hasattr(mfr, "card_version"):
+            return
+
+        def _work():
+            for img in todo:
+                try:
+                    ver, exact = mfr.card_version(img)
+                except Exception:                    # noqa: BLE001
+                    ver, exact = None, False
+                self._port_ver_cache[img] = ver if (ver and exact) else ""
+            self.ctx.loop.post(self._port_refresh_meta)
+        threading.Thread(target=_work, name="pad-modpack-portver",
+                         daemon=True).start()
+
+    def _show_news(self, page):
+        """The run logic's What's new for one card (``version_news.for_page``
+        plus ``card`` / ``report`` / ``modes``); ``None`` clears the list."""
+        if page is None:
+            self.set(news=[])
+            return
+        rest = [n for n in (self.get("news") or [])
+                if n.get("card") != page.get("card")]
+        self.set(news=rest + [page])
+
     def _official_extract_for(self, src):
         """An extract of *src*'s release taken from the official card, when
         *src* itself came off a modified one; ``""`` otherwise.  Sidecars
@@ -346,6 +416,26 @@ class ModPackTab(TabService):
                     os.path.dirname(self.transfer_newimg_var.get() or ""),
                     self.transfer_dst_var.get()))
             var = self.transfer_newimg_var
+        elif field == "port_imgs":
+            got = self.window.ask_open(
+                "port_imgs",
+                "New card image(s) to port onto — pick one or several",
+                [("Card image", "*.raw *.img *.bin"), ("All files", "*.*")],
+                multiple=True,
+                initialdir=init(os.path.dirname(
+                    (self._port_imgs() or [""])[0]), self._write_assets()))
+            path = "; ".join(os.path.normpath(p) for p in (got or ()))
+            if path:
+                self.port_imgs_var.set(path)
+            return path
+        elif field == "port_out":
+            path = self.window.ask_folder(
+                "port_out",
+                "Folder for the built card image(s) — each card's extract "
+                "lands here too",
+                initialdir=init(self.port_out_var.get(),
+                                os.path.dirname((self._port_imgs() or [""])[0])))
+            var = self.port_out_var
         else:
             raise ValueError("no transfer field %r" % (field,))
         if path:
@@ -374,6 +464,26 @@ class ModPackTab(TabService):
     def port(self):
         """Port + build onto card image(s)... (app._start_port_mods)."""
         return self._run_cb("on_port_mods")
+
+    @rpc
+    def whats_new(self):
+        """What's new in this version? (app._start_whats_new)."""
+        return self._run_cb("on_whats_new")
+
+    @rpc
+    def open_report(self, path):
+        """Open a What's new list (the text file written beside the builds)."""
+        if not path or not os.path.isfile(path):
+            return False
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)                 # noqa: S606 (Windows)
+            else:
+                from ...core import desktop
+                desktop.open_path(path)
+        except Exception:                            # noqa: BLE001
+            return False
+        return True
 
     @rpc
     def transfer(self):

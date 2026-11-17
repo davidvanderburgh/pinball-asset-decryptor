@@ -1116,6 +1116,43 @@ class SternManufacturer(Manufacturer):
         from .compare import compare_cards
         return compare_cards(path_a, path_b, assets_a, assets_b)
 
+    def mode_news(self, raw, project=None, progress=None, cancel=None):
+        """Can the project's modes run on the game program of card *raw*?
+        One sentence for the Mod Pack tab's What's new (PAD-1388).  A build
+        PAD has no port for is worked out here (a few minutes the first time,
+        kept after), the same port a Write or Try it would use."""
+        from . import port_derive, title_reader
+        from .mode_project import list_modes, title_label
+        try:
+            game, version, elf = title_reader.game_program(raw)
+        except Exception as e:                       # noqa: BLE001
+            return "the game program could not be read (%s)" % e
+        label = title_label(game, version)
+        n = 0
+        if project:
+            try:
+                n = len(list_modes(project)[0])
+            except Exception:                        # noqa: BLE001
+                n = 0
+        yours = ("this project's %d mode%s" % (n, "" if n == 1 else "s")
+                 if n else "modes")
+        pr = port_derive.ensure_port(elf, game, version, progress=progress,
+                                     cancel=cancel)
+        if not pr.path:
+            lacks = ", ".join(pr.missing) or "the game's own hooks"
+            return ("%s can't run on %s yet: the app could not place %s in its "
+                    "game program." % (yours[0].upper() + yours[1:], label,
+                                       lacks))
+        if pr.origin == "shipped":
+            return "%s run on %s." % (yours[0].upper() + yours[1:], label)
+        if port_derive.ran_live(pr.path):
+            return ("%s run on %s (worked out on this PC and tried in the "
+                    "emulator)." % (yours[0].upper() + yours[1:], label))
+        return ("%s can run on %s: the app worked out its new game program on "
+                "this PC. Press Try it once on the Modes tab before a Write, "
+                "so they have run in the emulator before they go on a card."
+                % (yours[0].upper() + yours[1:], label))
+
     def compare_folders(self, dir_a, dir_b, progress=None, cancel=None):
         # The decoded sounds pair by slot and past the codec's lead-in, the
         # same diff the card report runs on two extracts (PAD-442).

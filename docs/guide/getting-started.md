@@ -105,8 +105,9 @@ original card back in (or flash your backup image onto a card).
   turn** or **At random**.
 - **A choice of soundtracks:** **Music modes** lets the service menu switch
   between sets of songs.
-- **A new game version came out:** on the Mod Pack tab, **Port + build onto
-  card image(s)…** carries your picks over to the new card and builds it.
+- **A new game version came out:** on the Mod Pack tab, pick the new card
+  image, press **What's new in this version?** to see what it adds, then
+  **Port + build** carries your picks over to the new card and builds it.
 - **Other manufacturers** follow the same four steps (pick, extract,
   replace, write); what each one can change is in [Supported
   manufacturers](manufacturers.md).

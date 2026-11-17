@@ -22,9 +22,9 @@ def _project(tmp_path, side):
 
 def test_the_order_lives_in_the_sidecar(tmp_path):
     p = _project(tmp_path, {})
-    assert SM.load(p) == {"order": []}
+    assert SM.load(p) == {"order": [], "off": []}
     SM.save(p, {"order": ["handicap", "coop_play"]})
-    assert SM.load(p) == {"order": ["handicap", "coop_play"]}
+    assert SM.load(p) == {"order": ["handicap", "coop_play"], "off": []}
     SM.save(p, {"order": []})
     assert "service_menu" not in json.load(open(os.path.join(p, ".staged_changes.json"), encoding="utf-8"))
 

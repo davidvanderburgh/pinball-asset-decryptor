@@ -86,6 +86,102 @@ def test_the_panel_ticks_music_mode_when_the_card_gets_it(tmp_path):
         w.call("ui.select_tab", "svcmenu")
         w.drain()
         rows = {r["key"]: r for r in w.state("svcmenu")["settings"]}
-        assert rows["music_mode"]["on"] and not rows["music_mode"]["can"]
+        assert rows["music_mode"]["on"] and rows["music_mode"]["can"]      # round 2: switchable here too
         assert not rows["edition"]["on"] and not rows["handicap"]["on"]
         assert rows["handicap"]["note"].startswith("Not on the card")
+
+
+def test_the_panel_unticks_music_mode_and_image_set(tmp_path):
+    """Round 2 (DragonRR): "Music mode is checked and cannot be unchecked", "Image set ... I cannot uncheck it". Their
+    rows can be left off the card on the panel; the project keeps the settings, the Write leaves them out."""
+    from pinball_decryptor.plugins.stern import service_menu as SM, sound_modes as SMo, scene_variants as SV
+    from tests.webui_harness import web_app
+    p = str(tmp_path / "proj")
+    os.makedirs(p)
+    scene = "auto_loaded/" + "c" * 40 + "/scene.radium"
+    with open(os.path.join(p, ".staged_changes.json"), "w", encoding="utf-8") as f:
+        json.dump({SMo.STAGED_KEY: {"names": ["Standard", "Orchestral"],
+                                    "slots": {"audio/idx2095 - music - x.wav": {"2": "a.wav"}}},
+                   SV.STAGED_KEY: {"names": ["Standard", "Dark"], "scenes": {scene: {"2": {"card": True}}}}}, f)
+    assert {w[0] for w in SM.wanted(p)} == {MS.MUSIC_MODE, MS.IMAGE_SET}
+    with web_app(tmp_path / "app") as w:
+        modes = w.window.service("modes")
+        var = modes._project_var() if modes is not None else None
+        if var is None:
+            pytest.skip("no project folder variable in this window")
+        w.run(lambda: var.set(p))
+        w.drain()
+        w.call("ui.select_tab", "svcmenu")
+        w.drain()
+
+        def rows():
+            return {r["key"]: r for r in w.state("svcmenu")["settings"]}
+        r = rows()
+        assert r["music_mode"]["on"] and r["music_mode"]["can"]
+        assert r["image_set"]["on"] and r["image_set"]["can"]
+        assert not r["edition"]["can"]                      # the project has no editions: nothing to tick
+        assert w.call("svcmenu.set_row", "image_set", False)
+        assert w.call("svcmenu.set_row", "music_mode", False)
+        w.drain()
+        r = rows()
+        assert not r["image_set"]["on"] and r["image_set"]["can"]
+        assert r["image_set"]["note"].startswith("Off the card")
+        assert not r["music_mode"]["on"] and r["music_mode"]["note"].startswith("Off the card")
+        assert SM.wanted(p) == []                           # the Write (and the menu page) leave both out
+        assert {x[0] for x in SM.wanted(p, honour_off=False)} == {MS.MUSIC_MODE, MS.IMAGE_SET}
+        assert SMo.load(p).count == 2 and SV.load(p)        # the settings themselves are kept
+        assert w.call("svcmenu.set_row", "music_mode", True)
+        w.drain()
+        assert rows()["music_mode"]["on"] and [x[0] for x in SM.wanted(p)] == [MS.MUSIC_MODE]
+        assert SM.load(p)["off"] == ["image_set"]
+
+
+def test_the_off_list_keeps_the_order_and_only_known_keys(tmp_path):
+    from pinball_decryptor.plugins.stern import service_menu as SM
+    p = str(tmp_path)
+    SM.save(p, {"order": ["handicap"], "off": ["image_set", "handicap", "bogus"]})
+    assert SM.load(p) == {"order": ["handicap"], "off": ["image_set"]}
+    assert SM.off_keys(p) == {"image_set"}
+    SM.save(p, {"order": [], "off": []})
+    assert SM.load(p) == {"order": [], "off": []}
+
+
+def test_an_unticked_music_mode_leaves_the_music_modes_and_keeps_the_other_sounds(tmp_path, monkeypatch):
+    """The Write's side: MUSIC MODE unticked drops the other music modes only; sounds in turn and in attract stay."""
+    from pinball_decryptor.core import staged_changes as SC
+    from pinball_decryptor.plugins.stern import engine as E, service_menu as SM, sound_modes as SMo
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: MP.profile("james_bond_pro_1_06"))
+    p = str(tmp_path)
+    SC.save(p, {"sound_modes": {"names": ["Standard", "Orchestral"],
+                                "slots": {"audio/idx2095 - music - x.wav": {"2": "a.wav"}},
+                                "attract": ["b.wav"], "turns": {"audio/idx0002.wav": ["t.wav"]}}})
+    logs = []
+
+    def build():
+        logs.clear()
+        return E._sound_modes_for_build(p, False, lambda t, lvl="info": logs.append((t, lvl)),
+                                        ext4_available=lambda: (True, ""))
+    modes, _prof = build()
+    assert modes.count == 2
+    SM.save(p, {"order": [], "off": ["music_mode"]})
+    modes, _prof = build()
+    assert modes is not None and modes.count == 0 and modes.attract == ["b.wav"] and modes.turns
+    assert any("MUSIC MODE is unticked" in t for t, _l in logs)
+    assert SMo.load(p).count == 2                          # the project keeps them
+
+
+def test_spike3_honours_the_unticked_rows(tmp_path, monkeypatch):
+    from pinball_decryptor.core import staged_changes as SC
+    from pinball_decryptor.plugins.stern import editions as Ed, service_menu as SM, spike3_menu as S3, \
+        spike3_music as S3M, sound_modes as SMo
+    p = str(tmp_path)
+    monkeypatch.setattr(Ed, "load", lambda project: ["Kaiju", "Heisei"])
+    monkeypatch.setattr(Ed, "project_refusal", lambda project: "")
+    monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: None)
+    SC.save(p, {"sound_modes": {"names": ["Standard", "Orchestral"],
+                                "slots": {"audio/idx2095 - music - x.wav": {"2": "a.wav"}}}})
+    assert [r[0] for r in S3.rows_wanted(p)] == [MS.EDITION]
+    assert S3M.wanted(p)[0] is not None
+    SM.save(p, {"order": [], "off": ["edition", "music_mode"]})
+    assert S3.rows_wanted(p) == [] and S3M.wanted(p) == (None, None)

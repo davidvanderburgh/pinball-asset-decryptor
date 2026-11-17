@@ -112,6 +112,9 @@ def wanted(project, real_card=True):
     modes = SMo.load(project)
     if not modes.count:
         return None, None
+    from . import service_menu as SvM                   # PAD-1393 round 2: unticked on the Service menu tab
+    if "music_mode" in SvM.off_keys(project):
+        return None, None
     if not SMo.enabled():
         return None, None
     prof = SMo.project_title(project, probe=True)

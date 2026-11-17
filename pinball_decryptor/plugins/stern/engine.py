@@ -8434,6 +8434,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-494: a slot's files for the other music modes ride the same delivery, as
     # records of their own in the bank and MUSIC MODE in the operator menu
     # (PAD-1324: a Spike 3 card's are spike3_modes.plan's, records swapped at the 64-bit lookup: not built here)
+    # PAD-1393 round 2: the settings the owner left off the card on the Service menu tab
+    from . import service_menu as _SvM_off
+    _menu_off = _SvM_off.off_keys(assets_dir)
     _sm_off = "music_modes" in _left or _is_spike3(disk_f)
     sound_modes, sound_modes_prof = ((None, None) if _sm_off else _sound_modes_for_build(
         assets_dir, dest_is_device, log, **_mode_gate_kw))
@@ -8446,11 +8449,18 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # this game's editions boots by
     # (PAD-1325: a Spike 3 card's is spike3_write's, spike3_menu grows its 64-bit program)
     editions = [] if _is_spike3(disk_f) else _editions_for_build(assets_dir, log)
+    if editions and "edition" in _menu_off:
+        editions = []
+        log("Editions: EDITION is unticked on the Service menu tab, so it is left off this card.", "info")
     # PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the operator menu, which the
     # runtime applies to the whole screen live (the modes' delivery, as the music modes')
     picture_prof = _picture_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     # image sets: a scene's variants, the one IMAGE SET picks read in its place (the modes' delivery)
     scenes_prof, scenes_sets = _scenes_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    if scenes_sets and "image_set" in _menu_off:
+        scenes_prof, scenes_sets = None, None
+        log("Image sets: IMAGE SET is unticked on the Service menu tab, so the scenes' variants are left out of "
+            "this card.", "info")
     # PAD-782: the owner's attract items: clips in the video bank and attract.cfg beside the runtime
     attract_prof = _attract_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _attract_on = attract_prof is not None
@@ -11439,11 +11449,19 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     """``(modes, profile)`` - the project's music modes (:mod:`.sound_modes`) this build carries
     and the title of the card they are for; ``(None, None)`` when it has none or they are left
     out (one warning says why). The modes' gate without the mode maker's preview switch, as the
-    random clips': an image file, a host that can add files to it, a title they were proven on."""
+    random clips': an image file, a host that can add files to it, a title they were proven on.
+    PAD-1393 round 2: MUSIC MODE unticked on the Service menu tab leaves the other music modes (and
+    their own files in turn) out, and keeps the rest: sounds in turn, in attract, on shots, co-op's."""
     from . import jukebox as _JB
     from . import mode_write as _MW
+    from . import service_menu as _SvM
     from . import sound_modes as _SMo
     modes = _SMo.load(assets_dir)
+    if modes.count and "music_mode" in _SvM.off_keys(assets_dir):
+        log("Music modes: MUSIC MODE is unticked on the Service menu tab, so this card carries no other music "
+            "mode: every sound plays its own.", "info")
+        modes.slots, modes.levels = {}, {}
+        modes.mode_turns, modes.mode_random, modes.mode_turn_levels = {}, {}, {}
     box = _JB.load(assets_dir)                 # PAD-685: the jukebox rides the same road
     if box.any:
         modes.jukebox = [s.audio for s in box.songs]

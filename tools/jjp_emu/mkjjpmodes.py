@@ -73,6 +73,202 @@ class Refused(Exception):
     pass
 
 
+# ============================================================================= USB stick
+# A mode stick (PAD-1349): modes onto a machine with no reinstall.  The game's
+# service menu Update USB screen has a hot fix: on that screen Plus, Minus, Plus,
+# Minus asks "Press ENTER to apply HOTFIX", two ENTERs run scripts/hotfix.sh,
+# and that runs /mnt/usb/hotfix/runme.sh with /bin/dash (as the game, root)
+# and reboots.  Nothing is verified, and nothing outside what runme.sh writes
+# changes: scores and settings in /jjpe/perm stay as they are.  The same stick
+# turns the modes off, on, or takes them out again.
+STICK_ACTIONS = ("install", "off", "on", "remove")
+STICK_DIR = "hotfix"
+STICK_LOG = "padmodes_install.log"
+RUNME_SH = r"""#!/bin/dash
+# PAD custom modes stick (mkjjpmodes.py stick, PAD-1349), written @WRITTEN@.
+# Run by the game's own scripts/hotfix.sh from the service menu's Update USB
+# screen (Plus, Minus, Plus, Minus, then ENTER twice); the game reboots after.
+# Scores and settings in /jjpe/perm are never touched (only @OFF@).
+ACTION=@ACTION@
+GAME=@GAME@
+SRC=$(dirname "$0")
+STICK=$(dirname "$SRC")
+J=${JJPEDIR:-/jjpe/gen1}
+OFF=${PAD_STICK_OFF:-@OFF@}            # the two overrides are for tests only
+LOG=${PAD_STICK_LOG:-/jjpe/temp/@LOG@}
+MARK='@MARK@'
+ANCHOR='@ANCHOR@'
+say() {
+    echo "$(date '+%F %T') $*" >> "$LOG"
+    echo "$(date '+%F %T') $*" >> "$STICK/@LOG@" 2>/dev/null
+}
+fail() { say "FAILED: $*"; exit 1; }
+say "PAD custom modes stick: $ACTION${GAME:+ for $GAME} on $J"
+if [ -n "$GAME" ] && [ ! -e "$J/$GAME/game" ]; then
+    fail "this stick is for $GAME, and this machine has no $J/$GAME/game - nothing changed"
+fi
+unhook() {
+    # rungame.sh without the hook lines (mkjjpmodes.strip_modes_hook)
+    awk -v m="$MARK" '
+        index($0, m) == 1 { h = 0; s = 1; next }
+        s { s = 0; next }
+        { if (h) print ""; h = 0 }
+        $0 == "" { h = 1; next }
+        { print }
+        END { if (h) print "" }' "$J/scripts/rungame.sh" > "$J/scripts/rungame.sh.pad" || return 1
+    cat "$J/scripts/rungame.sh.pad" > "$J/scripts/rungame.sh" && rm -f "$J/scripts/rungame.sh.pad"
+}
+case "$ACTION" in
+off)
+    mkdir -p "$(dirname "$OFF")" && touch "$OFF" || fail "could not create $OFF"
+    sync; say "modes OFF ($OFF created); a stick with 'on' turns them back on"
+    ;;
+on)
+    rm -f "$OFF"; sync; say "modes ON ($OFF removed)"
+    ;;
+remove)
+    if grep -q "^$MARK" "$J/scripts/rungame.sh"; then unhook || fail "could not edit rungame.sh"; fi
+    rm -rf "$J/padmodes" "$J/scripts/padmodes.sh"
+    sync; say "modes REMOVED: $J/padmodes gone, rungame.sh as shipped"
+    ;;
+install)
+    [ -r "$SRC/padmodes/jjpmodes.so" ] || fail "no padmodes/jjpmodes.so on the stick"
+    ( cd "$SRC" && sha256sum -c --quiet padmodes.sha256 ) >> "$LOG" 2>&1 \
+        || fail "a file on the stick does not match what was written (copy it again)"
+    if ! grep -q "^$MARK" "$J/scripts/rungame.sh"; then
+        n=$(awk -v a="$ANCHOR" '{ t = $0; gsub(/^[ \t]+|[ \t]+$/, "", t) } t == a { n++ } END { print n + 0 }' "$J/scripts/rungame.sh")
+        [ "$n" = 1 ] || fail "rungame.sh has $n '$ANCHOR' lines, not 1 - not edited, nothing changed"
+    fi
+    rm -rf "$J/padmodes.new" && mkdir -p "$J/padmodes.new" \
+        && cp -r "$SRC/padmodes/." "$J/padmodes.new/" || fail "could not copy the modes"
+    chown -R 0:0 "$J/padmodes.new"; chmod 0755 "$J/padmodes.new/jjpmodes.so"
+    chmod 0644 "$J/padmodes.new/modes/"* "$J/padmodes.new/build.json"
+    rm -rf "$J/padmodes" && mv "$J/padmodes.new" "$J/padmodes" || fail "could not put the modes in place"
+    cp "$SRC/padmodes.sh" "$J/scripts/padmodes.sh" && chmod 0755 "$J/scripts/padmodes.sh" \
+        || fail "could not write scripts/padmodes.sh"
+    if ! grep -q "^$MARK" "$J/scripts/rungame.sh"; then
+        awk -v a="$ANCHOR" -v m='@HOOK1@' -v g='@HOOK2@' '
+            { print; t = $0; gsub(/^[ \t]+|[ \t]+$/, "", t) }
+            t == a { print ""; print m; print g }' "$J/scripts/rungame.sh" > "$J/scripts/rungame.sh.pad" \
+            && cat "$J/scripts/rungame.sh.pad" > "$J/scripts/rungame.sh" && rm -f "$J/scripts/rungame.sh.pad" \
+            || fail "could not hook rungame.sh"
+    fi
+    rm -f "$OFF"
+    sync
+    say "INSTALLED $(ls "$J/padmodes/modes" | grep -c '\.mode$') mode(s): @NAMES@"
+    ;;
+*)
+    fail "unknown action $ACTION"
+    ;;
+esac
+exit 0
+"""
+
+STICK_README = """PAD custom modes stick: %(what)s
+Written %(written)s by mkjjpmodes.py %(version)s.
+
+1. Copy the folder "hotfix" (and this file) to the top of a USB stick (FAT32).
+2. Machine on, coin door open: open the service menu and go to the Update USB
+   screen (Update Game > USB), stick in.
+3. On that screen press Plus, Minus, Plus, Minus. It asks
+   "Press ENTER to apply HOTFIX". Press ENTER, then ENTER again.
+4. The game reboots. Take the stick out. What happened is written to
+   %(log)s on the stick (and /jjpe/temp/%(log)s on the machine).
+
+Scores, audits and settings are not touched. This stick only runs on
+%(game)s.
+"""
+
+
+def stick(a):
+    """A USB stick folder that installs the modes (or turns them off/on, or removes them) through
+    the game's own Update USB hot fix.  No root, no ISO: plain files, any OS."""
+    action = a.action
+    written = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    out = os.path.abspath(a.out)
+    hot = os.path.join(out, STICK_DIR)
+    if os.path.exists(hot) and not a.force:
+        raise Refused("%s already exists (--force replaces it)" % hot)
+    game = a.game or ""
+    modes, names = [], ""
+    if action == "install":
+        if not a.modes:
+            raise Refused("install needs --modes")
+        so = os.path.abspath(a.so)
+        if not os.path.isfile(so):
+            raise Refused("%s does not exist - build it with buildmods.sh" % so)
+        with open(so, "rb") as f:
+            if f.read(4) != b"\x7fELF":
+                raise Refused("%s is not an ELF library" % so)
+        port = json.load(open(a.port)) if a.port else None
+        modes, problems = check_modes(a.modes, port)
+        for p in problems:
+            print("problem: " + p)
+        if problems and not a.force:
+            raise Refused("%d problem(s) in %s (--force writes it anyway)" % (len(problems), a.modes))
+        if not modes:
+            raise Refused("no .mode files in %s" % a.modes)
+        tc = os.path.join(a.modes, "title.cfg")
+        if not game and os.path.isfile(tc):
+            with open(tc, encoding="utf-8") as f:
+                game = next((v for _n, k, v in parse_cfg(f.read()) if k == "game"), "")
+        names = ", ".join(m.get("name") or m["file"] for m in modes)
+    if not re.match(r"^[A-Za-z0-9_.-]*$", game):
+        raise Refused("game %r: letters, digits, _ . - only" % game)
+    if not game and not a.any_game:
+        raise Refused("which game is this stick for? title.cfg's 'game' key or --game "
+                      "(--any-game writes one that runs on any title)")
+    if os.path.exists(hot):
+        shutil.rmtree(hot)
+    os.makedirs(hot)
+
+    def write(rel, data, binary=False):
+        p = os.path.join(hot, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(data if binary else data.encode("utf-8"))
+        return p
+
+    sums = []
+    if action == "install":
+        def put(src, rel):
+            with open(src, "rb") as f:
+                data = f.read()
+            write(rel, data, binary=True)
+            sums.append((hashlib.sha256(data).hexdigest(), rel))
+        put(so, "padmodes/jjpmodes.so")
+        for fn in sorted(os.listdir(a.modes)):
+            p = os.path.join(a.modes, fn)
+            if os.path.isfile(p) and (fn.endswith(".mode") or fn == "title.cfg"):
+                put(p, "padmodes/modes/" + fn)
+        manifest = collections.OrderedDict([
+            ("tool", TOOL), ("version", VERSION), ("written", written), ("via", "usb hot fix"),
+            ("game", game),
+            ("modes", [collections.OrderedDict((k, m_.get(k, "")) for k in ("file", "name", "start", "seconds", "points"))
+                       for m_ in modes]),
+            ("so_sha256", sums[0][0]),
+        ])
+        bj = (json.dumps(manifest, indent=1) + "\n").encode()
+        write("padmodes/build.json", bj, binary=True)
+        sums.append((hashlib.sha256(bj).hexdigest(), "padmodes/build.json"))
+        write("padmodes.sh", PADMODES_SH)
+        write("padmodes.sha256", "".join("%s  %s\n" % s for s in sums))
+    runme = RUNME_SH
+    for k, v in (("@WRITTEN@", written), ("@ACTION@", action), ("@GAME@", game), ("@OFF@", OFF_SWITCH),
+                 ("@LOG@", STICK_LOG), ("@MARK@", MODES_HOOK_MARK), ("@ANCHOR@", RUNONCE_LINE),
+                 ("@HOOK1@", MODES_HOOK_LINES[1]), ("@HOOK2@", MODES_HOOK_LINES[2]),
+                 ("@NAMES@", names.replace("'", "").replace('"', "").replace("$", "").replace("`", ""))):
+        runme = runme.replace(k, v)
+    write("runme.sh", runme)
+    what = {"install": "install %d mode(s): %s" % (len(modes), names), "off": "turn the custom modes OFF",
+            "on": "turn the custom modes back ON", "remove": "take the custom modes out"}[action]
+    with open(os.path.join(out, "PADMODES_README.txt"), "wb") as f:
+        f.write((STICK_README % {"what": what, "written": written, "version": VERSION, "log": STICK_LOG,
+                                 "game": game or "any JJP title"}).replace("\n", "\r\n").encode())
+    print("wrote %s: %s%s" % (hot, what, " (%s only)" % game if game else ""))
+    return 0
+
+
 # ============================================================================= mode files
 #: every key jjpmodes.c reads (apply_kv), and what its value is
 KEYS = collections.OrderedDict([
@@ -396,6 +592,16 @@ def main(argv=None):
     s.add_argument("--force", action="store_true")
     s = sub.add_parser("inspect", help="list the modes a mode ISO carries")
     s.add_argument("--iso", required=True)
+    s = sub.add_parser("stick", help="write a USB stick folder: the Update USB hot fix installs the modes "
+                                     "(or turns them off/on, or removes them), no reinstall")
+    s.add_argument("--out", required=True, help="the stick (or a folder to copy to one)")
+    s.add_argument("--action", choices=STICK_ACTIONS, default="install")
+    s.add_argument("--modes", help="the mode folder (install)")
+    s.add_argument("--so", default=SO_DEFAULT, help="the runtime (default %s, buildmods.sh's)" % SO_DEFAULT)
+    s.add_argument("--port")
+    s.add_argument("--game", help="the game directory it runs on (default: title.cfg's 'game')")
+    s.add_argument("--any-game", action="store_true", help="no title check (off/on/remove)")
+    s.add_argument("--force", action="store_true")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "check":
@@ -409,6 +615,8 @@ def main(argv=None):
             return 1 if problems else 0
         if a.cmd == "build":
             return build(a)
+        if a.cmd == "stick":
+            return stick(a)
         return inspect(a)
     except Refused as e:
         print("refused: %s" % e, file=sys.stderr)

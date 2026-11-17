@@ -40,14 +40,17 @@ with name, id and proc id, on any title.
 
 ## The SDK (PAD-1337)
 
-Status 2026-11-16: **modes are data, and a PAD-written install ISO carries
-them to a real machine.** Proven on Guns N' Roses 3.03 and Wonka 03.03 in the
-emulator, same runtime on both. How to write modes: `tools/jjp_emu/MODES.md`.
+Status 2026-11-17: **modes are data, and they reach a real machine two ways:
+a USB stick applied through the game's own Update USB hot fix (no reinstall,
+scores kept), or a PAD-written install ISO.** Proven on Guns N' Roses 3.03 and
+Wonka 03.03 in the emulator, same runtime on both; on Wonka both delivery ways
+were run end to end through the game itself (PAD-1349, MODES.md "On a real
+machine"). How to write modes: `tools/jjp_emu/MODES.md`.
 
 | Piece | What it does |
 |---|---|
 | `jjpmodes.c` | The runtime. Reads `title.cfg` + `*.mode` from `JJP_MODS_DIR` (default: `modes/` beside the library) and runs each mode as an engine Mode: start shots and a start count, scoring shots, points, the game's timer, completion, sounds, lamps, the game's fonts, a `game_modes` policy |
-| `mkjjpmodes.py` | `build`: a stock install ISO in, the same ISO out with the runtime, the modes and one guarded `rungame.sh` line; `check`: a mode folder against a title's port report; `inspect`: what an ISO carries |
+| `mkjjpmodes.py` | `build`: a stock install ISO in, the same ISO out with the runtime, the modes and one guarded `rungame.sh` line; `check`: a mode folder against a title's port report; `inspect`: what an ISO carries; `stick`: a USB stick folder whose `hotfix/runme.sh` installs the modes (or turns them off/on, or removes them) when the service menu's USB Update hot fix runs it (hold left flipper, Plus Minus Plus Minus, ENTER ENTER) |
 | `jjpport.py` | What a title offers, statically from its binary: can it run modes, its Mode vtable, shot switches, lamps, sounds, fonts, Mode classes, starter defaults |
 | `modes/ports/`, `modes/examples/` | The report and a starter mode folder per JJP title in the library |
 | `run_game.sh` | `JJP_MODS_SO` + `JJP_MODS_DIR` preload the runtime on the rig; an image carrying `scripts/padmodes.sh` gets it sourced exactly where `rungame.sh` does |

@@ -93,11 +93,63 @@ lamp_blink = 4
 
 ## On a real machine
 
-`mkjjpmodes.py build --iso <stock>.iso --modes <folder> --out <new>.iso` (as
-root in WSL) writes the stock ISO again with the runtime, the modes and one
-guarded line in `scripts/rungame.sh`. Install it the way the stock ISO is
-installed. To turn the modes off without reinstalling, create
-`/jjpe/perm/padmodes.off`; delete it to turn them back on.
+Two ways in. Both put the same files in the game's root (`/jjpe/gen1/padmodes/`,
+`scripts/padmodes.sh`, one guarded line in `scripts/rungame.sh` after
+`runonce.sh`), and `/jjpe/perm/padmodes.off` turns the modes off either way.
+
+**A USB stick, no reinstall (PAD-1349, the everyday way).**
+`mkjjpmodes.py stick --out <stick> --modes <folder>` writes a `hotfix` folder
+(plain files, no root, any OS) to copy to the top of a FAT32 stick. On the
+machine: service menu > Utilities > Software Update > USB Update, stick in. The
+screen says "No update data was found". **Hold the left flipper button** and
+press Plus, Minus, Plus, Minus: it asks "Press ENTER to apply HOTFIX". ENTER,
+ENTER: the game runs the stick's `hotfix/runme.sh` through its own
+`scripts/hotfix.sh` and reboots. Scores, audits and settings are not touched.
+`runme.sh` refuses another title (`title.cfg`'s `game`), checks every file's
+sha256 before copying, refuses a `rungame.sh` it does not know, and writes what
+it did to `padmodes_install.log` on the stick and in `/jjpe/temp`. The same
+command with `--action off`, `on` or `remove` writes a stick that turns the
+modes off, back on, or takes them out (`rungame.sh` back exactly as shipped).
+Changing a mode = edit the folder, write the stick again, apply it again.
+
+How the hot fix was found: the Update USB screen (`DiagUpdateUSB`) counts
+Plus/Minus presses only while a flag is set, and the only code that sets it is
+a handler on `HookLeftFlipperDebounced` (named `du_hlfd`, "hot fix") that sets it
+while the flipper is held, the game is in test mode and the USB Update item is
+the current one. `hotfix.sh` runs `/mnt/usb/hotfix/runme.sh` if there is one
+(else it rsyncs `hotfix/` over `$JJPEDIR`), then `sync` and `reboot`. Nothing is
+verified. (The screen's full "delta" update, a `wonka_update/` folder, goes
+through a `ui.dat` the game verifies; the hot fix needs none of that.)
+
+**An install ISO.** `mkjjpmodes.py build --iso <stock>.iso --modes <folder>
+--out <new>.iso` (as root in WSL) writes the stock ISO again with the modes in
+its root pieces. Install it the way the stock ISO is installed (dongle in, and
+like any full install it resets scores and settings).
+
+**Proof, Wonka 03.03 in the emulator (hidden, muted, Wonka's own key), 2026-11-17.**
+*ISO:* `build` on the stock Wonka ISO (51 s, 3.2 GB, e2fsck clean); the rig
+restored and booted the built ISO with no rig-side preload, so the runtime came
+only from the ISO's own hook (`[rig] image hook padmodes.sh:
+LD_PRELOAD=/jjpe/gen1/padmodes/jjpmodes.so`, "PAD custom modes: 1 mode(s)
+loaded"). PAD Mode started on the TV target, scored 1,000,000 on each of five
+shots and COMPLETED at 10,000,000; with `/jjpe/perm/padmodes.off` present the
+same ISO booted with an empty `LD_PRELOAD`, no `jjpmodes.log`, and played stock.
+*Stick:* on the stock Wonka ISO, the menu walk above (driven with `jjppoke.py`)
+ran the stick: "INSTALLED 1 mode(s): PAD Mode", `hotfix.sh` asked for its reboot;
+after the restart PAD Mode played to COMPLETED (10,000,000). An `off` stick
+created `padmodes.off` and the next boot loaded no runtime; a `remove` stick left
+no `padmodes` and `rungame.sh` byte-identical to the image's. Inside `/jjpe` the
+hot fix wrote only the padmodes files, the hook and its log.
+*Every other title:* `build` against its stock ISO and starter folder: Guns N'
+Roses 03.03, CHAKA's LOTLJ GnR LE 3.03, Elton John 02.03, Godfather 02.03 and
+Pirates 01.01 all build, stage and e2fsck clean (`rungame.sh` has the one
+`runonce.sh` anchor on each), and `inspect` lists their modes.
+
+The rig: `JJP_USB=<folder>` (jail.sh) binds a folder at the jail's `/mnt/usb`
+with the automount's mode (0777), so the game sees an inserted stick, and
+run_game.sh replaces the jail's `reboot`/`poweroff`/`halt`/`shutdown` (links to
+systemctl) with a note in `/jjpe/temp/rig_reboot.log`: a script of the game's
+can never reboot WSL. A proof restarts the game where the machine would reboot.
 
 ## Titles
 

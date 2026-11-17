@@ -117,9 +117,9 @@ function Rows({ s, menu }) {
       const why = refused[x.key];
       return html`<div class="sm-our" key=${x.key}>
         <div class="sm-our-hd">
-          ${x.can || x.on ? html`<${Check} checked=${x.on} label=${x.name} disabled=${!x.can}
-                onChange=${(v) => call("svcmenu.set_row", x.key, v)} />`
-            : html`<span class="sm-our-name">${x.name}</span>`}
+          ${/* PAD-1393: every row has its box - ticked when the card gets it, greyed when its own tab switches it */
+            html`<${Check} checked=${x.on} label=${x.name} disabled=${!x.can}
+                onChange=${(v) => call("svcmenu.set_row", x.key, v)} />`}
           <span class="sp"></span>
           <${Button} size="sm" icon="up" disabled=${i === 0} title="Earlier on the page and on More Settings"
             onClick=${() => call("svcmenu.move", x.key, -1)} />

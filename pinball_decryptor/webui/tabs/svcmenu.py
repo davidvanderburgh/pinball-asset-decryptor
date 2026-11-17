@@ -95,16 +95,23 @@ class ServiceMenuTab(TabService):
         from ...plugins.stern import coop_play as CP, handicap as HC, picture_settings as PS
         from ...plugins.stern import service_menu as SM
         out = []
+        try:                                            # PAD-1393: MUSIC MODE and EDITION are on when a Write wants them
+            asked = {w[0] for w in SM.wanted(project)}
+        except Exception:                               # noqa: BLE001 - shown as off then
+            asked = set()
         for key, name, where in SETTINGS:
             if key == "brightness" and not PS.OFFERED:
                 continue
             row = {"key": key, "name": name, "where": where, "can": False, "on": False, "note": ""}
-            if key == "coop_play":
+            if key in ("music_mode", "edition"):
+                row.update(on=key in asked)
+            elif key == "coop_play":
                 on = CP.load(project)
                 row.update(can=on, on=CP.menu_asked(project),
                            note="" if on else "Turn co-op play on first, for its row.")
             elif key == "handicap":
-                row.update(can=True, on=HC.load(project))
+                on = HC.load(project)
+                row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")
             elif key == "image_set":                    # PAD-1390: on while the project has image sets
                 from ...plugins.stern import scene_variants as SV
                 row.update(on=bool(SV.load(project)))

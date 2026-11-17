@@ -39,7 +39,6 @@ html.bp-1100 .sm-layout { grid-template-columns: 1fr; }
 .sm-step-val { min-width: 160px; }
 .sm-ours .bd { display: flex; flex-direction: column; gap: 10px; }
 .sm-our { display: flex; flex-direction: column; gap: 2px; }
-.sm-our-name { font-weight: 600; }
 .sm-count { margin: 4px 0 0; border-top: 1px solid var(--line); padding-top: 8px; }
 .sm-our-hd { display: flex; align-items: center; gap: 4px; }
 .sm-our-hd .sp { flex: 1; }

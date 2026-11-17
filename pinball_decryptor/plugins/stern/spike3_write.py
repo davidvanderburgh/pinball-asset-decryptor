@@ -584,7 +584,7 @@ def _plan_modes(assets_dir, reader, work, log, coop_setting=0, coop_ok=True, han
 
 
 def write_card(original_path, assets_dir, output_path, log=None,
-               progress=None, cancel=None, phase=None, key_source=None):
+               progress=None, cancel=None, phase=None, key_source=None, allow_empty=False):
     """Build *output_path* from the Spike 3 card *original_path* with the
     project's edits.  Returns ``(n_audio, n_video, n_image, n_text)``."""
     from ...core.checksums import read_checksums
@@ -655,7 +655,7 @@ def write_card(original_path, assets_dir, output_path, log=None,
                        ", ".join(str(i) for i in p.appended)), "info")
         n_audio_c, n_video, n_image, n_text = tuple(counts)[:4]
         if not writes and not sounds and not (grow_plan or {}).get("jobs") \
-                and mplan is None and not mremove and menu is None:
+                and mplan is None and not mremove and menu is None and not allow_empty:
             raise engine.NothingToWrite(
                 "Nothing to write: no sound, video, image, scene or text in "
                 "this project differs from the card it was extracted from.")
@@ -781,6 +781,7 @@ def _write_record(output_path, original_path, complete, counts=None):
     from . import engine
     rec = {"spike3": True, "build_id": uuid.uuid4().hex,
            "original": os.path.basename(original_path),
+           "source_path": os.path.abspath(original_path),
            "complete": bool(complete)}
     if counts is not None:
         rec["counts"] = dict(zip(("audio", "video", "image", "text"), counts))
@@ -856,7 +857,16 @@ class Spike3WritePipeline(BasePipeline):
     def _run(self):
         from . import spike3, engine
         from .spike3_keys import Spike3KeyError
+        from ...core import ssh_card
+        from ...core.card_extras import ExtrasError
         self._set_phase(0)  # Detect
+        try:
+            config = ssh_card.validate_request(self.original_path, self.assets_dir, key_source=self.key_source)
+            recovering = ssh_card.pending_marker(self.output_path).exists()
+            if config is not None or recovering:
+                ssh_card.validate_output(self.original_path, self.output_path)
+        except ExtrasError as e:
+            raise PipelineError('SSH Extras', str(e)) from e
         if not spike3.is_spike3_card(self.original_path):
             raise PipelineError("Detect", "The original is not a Stern Spike 3 "
                                 "secure SD-card image.")
@@ -867,7 +877,8 @@ class Spike3WritePipeline(BasePipeline):
                                 progress=self._progress,
                                 cancel=lambda: self._cancelled,
                                 phase=self._set_phase,
-                                key_source=self.key_source)
+                                key_source=self.key_source,
+                                **({'allow_empty': True} if config is not None or recovering else {}))
         except _Cancelled:
             _discard(self.output_path)
             self._check_cancel()
@@ -885,8 +896,30 @@ class Spike3WritePipeline(BasePipeline):
                         (n_image, "image"), (n_text, "display string")):
             if n:
                 bits.append("%d %s%s" % (n, word, "" if n == 1 else "s"))
-        self._done(True, "Wrote %s to %s" % (", ".join(bits) or "the card",
-                                             self.output_path))
+        marker = ssh_card.pending_marker(self.output_path)
+        note = ''
+        if config is not None:
+            try:
+                marker.write_text('Incomplete SSH preparation; do not flash.\n')
+                note = ssh_card.apply_to_build(self.original_path, self.output_path, config,
+                    log=self._log, cancel=lambda: self._cancelled, key_source=self.key_source)
+                self._check_cancel()
+                ssh_card.note_build(self.output_path, self.assets_dir)
+                marker.unlink(missing_ok=True)
+            except Exception as e:
+                if os.path.isfile(self.output_path):
+                    try:
+                        os.replace(self.output_path, self.output_path + '.ssh-incomplete')
+                    except OSError:
+                        pass
+                raise PipelineError('SSH Extras', str(e)) from e
+        elif recovering:
+            self._check_cancel()
+            if not engine.read_build_manifest(self.output_path).get('complete'):
+                raise PipelineError('SSH Extras', 'The rebuild did not record a complete image; its failure marker was retained.')
+            marker.unlink(missing_ok=True)
+        self._done(True, "Wrote %s to %s%s" % (", ".join(bits) or ('SSH Extras' if note else 'the card'),
+                       self.output_path, ('\n' + note) if note else ''))
 
 
 def _discard(path):

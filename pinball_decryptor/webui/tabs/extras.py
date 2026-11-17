@@ -30,7 +30,7 @@ class ExtrasTab(TabService):
     def _inspect(self):
         mfr = self.mfr
         if (getattr(mfr, 'key', '') != 'stern'
-                or getattr(mfr, '_era', 'spike2') != 'spike2'):
+                or getattr(mfr, '_era', 'spike2') not in ('spike2', 'spike3')):
             return dict(supported=False, reason='SSH has not passed emulator qualification for this platform.',
                         enabled=False, public_keys='')
         return ssh_card.inspect_image(self._source())

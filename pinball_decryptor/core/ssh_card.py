@@ -16,7 +16,7 @@ from .rawdevice import is_device_path
 from ..plugins.stern.ext4 import Ext4Reader, Ext4Error
 
 # Add entries ONLY with committed functional emulator evidence for this adapter.
-QUALIFIED_PLATFORMS = {'stern-spike2'}  # docs/validation/2026-11-17-extras-ssh.md
+QUALIFIED_PLATFORMS = {'stern-spike2', 'stern-spike3'}  # docs/validation/2026-11-17-extras-ssh*.md
 RESOURCES = Path(__file__).resolve().parents[1] / 'resources' / 'ssh'
 HASHES = {
     'dropbear': '01ccdc69e1047f3c301fad7f0de7d522dde16a5c8cc6684d6846d54714dfe236',
@@ -31,6 +31,22 @@ FILES = {'dropbear': '/usr/local/bin/dropbear', 'dropbearkey': '/usr/local/bin/d
 DIRS = ('/usr', '/usr/local', '/usr/local/bin', '/usr/libexec', '/etc', '/etc/init.d',
         '/etc/rc5.d', '/home', '/home/root', '/home/root/.ssh')
 
+
+
+def layout(platform='stern-spike2'):
+    if platform == 'stern-spike2':
+        return dict(files=FILES, dirs=DIRS, hook=HOOK, target=HOOK_TARGET,
+                    linked=True, ssh_dir='/home/root/.ssh', arch='armv7', hashes=HASHES)
+    if platform == 'stern-spike3':
+        from .ssh_spike3 import AARCH64_HASHES
+        files = dict(FILES, sshd='/etc/init.d/sshd',
+                     authorized_keys='/root/.ssh/authorized_keys',
+                     **{'sftp-server': '/usr/local/libexec/pad-sftp-server'})
+        return dict(files=files, dirs=('/usr', '/usr/local', '/usr/local/bin',
+                    '/usr/local/libexec', '/etc', '/etc/init.d', '/root', '/root/.ssh'),
+                    hook='/etc/init.d/S60padsshd', target='sshd', linked=True, ssh_dir='/root/.ssh',
+                    arch='aarch64', hashes=AARCH64_HASHES)
+    raise ExtrasError('SSH has not been qualified for this card platform.')
 
 def ensure_not_incomplete(path):
     if not path:
@@ -117,13 +133,17 @@ def _managed(reader):
             (b'DAEMON=/usr/local/bin/dropbear' in script and b'KEYDIR=/data/dropbear' in script))
 
 
-def _inspect(path, allow_pending=False):
+def _inspect(path, allow_pending=False, key_source=None):
     _regular(path, allow_pending=allow_pending)
     with open(path, 'rb') as f:
         parts = _partitions(f)
         p2 = next((p for p in parts if p[0] == 2 and p[1] == 0x83), None)
         if p2 is None:
             raise ExtrasError('SSH has not been qualified for this card platform.')
+        f.seek(p2[2])
+        if f.read(6) == b'LUKS\xba\xbe':
+            from . import ssh_spike3
+            return ssh_spike3.inspect_image(path, key_source=key_source)
         r = Ext4Reader(f, p2[2], p2[3])
         passwd = _read(r, '/etc/passwd')
         game = _read(r, '/etc/init.d/game', 1024 * 1024)
@@ -133,42 +153,49 @@ def _inspect(path, allow_pending=False):
                 or b'spike2' not in game or b'/dev/mmcblk0p5' not in fstab
                 or b'/etc/init.d/rc 5' not in init):
             raise ExtrasError('SSH has not been qualified for this card platform.')
-        managed = _managed(r)
-        hook = _node(r, HOOK)
-        if hook is not None and (stat.S_IFMT(hook['mode']) != stat.S_IFLNK
-                                  or r.read_symlink(hook) != HOOK_TARGET):
-            raise ExtrasError('The SSH boot hook belongs to an unrecognized service.')
-        if _node(r, '/etc/init.d/sshd') is not None and not managed:
-            raise ExtrasError('The card has an unrecognized SSH service; it will not be overwritten.')
-        if not managed and any(_node(r, path) is not None for path in
-                               ('/usr/local/bin/dropbear', '/usr/local/bin/dropbearkey',
-                                '/usr/libexec/sftp-server')):
-            raise ExtrasError('The card has an unrecognized SSH payload; it will not be overwritten.')
-        for path in ('/usr/sbin/sshd', '/usr/sbin/dropbear', '/usr/local/sbin/sshd',
-                     '/usr/local/sbin/dropbear', '/usr/bin/dropbear', '/usr/local/bin/sshd',
-                     '/sbin/sshd', '/sbin/dropbear', '/etc/init/ssh.conf', '/etc/init/dropbear.conf'):
-            if _node(r, path) is not None:
-                raise ExtrasError('The card has a competing SSH server; it needs a separate qualified adapter.')
-        for directory in ('/etc/init.d', '/etc/rcS.d', *('/etc/rc%d.d' % i for i in range(7))):
-            node = _node(r, directory)
-            if node is None:
-                continue
-            if stat.S_IFMT(node['mode']) != stat.S_IFDIR:
-                raise ExtrasError('The card has an unrecognized service directory.')
-            for name, _, _ in r._iter_dir(node):
-                lower = name.casefold()
-                if 'ssh' in lower or 'dropbear' in lower:
-                    path = directory + '/' + name
-                    if not (managed and path in ('/etc/init.d/sshd', HOOK)):
-                        raise ExtrasError('The card has an unrecognized SSH startup service; it needs a separate qualified adapter.')
-        keys = _read(r, FILES['authorized_keys']).decode('utf-8') if managed else ''
-        return {'platform': 'stern-spike2', 'enabled': bool(managed and hook),
-                'public_keys': keys, 'partition': p2}
+        return inspect_root(r, 'stern-spike2', p2)
 
 
-def inspect_image(path, *, allow_pending=False):
+
+def inspect_root(r, platform, partition):
+    l = layout(platform)
+    files = l['files']
+    script = _read(r, files['sshd'])
+    managed = (b'# PAD key-only SSH' in script or (platform == 'stern-spike2' and
+               b'DAEMON=/usr/local/bin/dropbear' in script and b'KEYDIR=/data/dropbear' in script))
+    hook = _node(r, l['hook'])
+    if hook is not None and l['linked'] and (stat.S_IFMT(hook['mode']) != stat.S_IFLNK
+                              or r.read_symlink(hook) != l['target']):
+        raise ExtrasError('The SSH boot hook belongs to an unrecognized service.')
+    if _node(r, files['sshd']) is not None and not managed:
+        raise ExtrasError('The card has an unrecognized SSH service; it will not be overwritten.')
+    if not managed and any(_node(r, files[name]) is not None for name in
+                           ('dropbear', 'dropbearkey', 'sftp-server')):
+        raise ExtrasError('The card has an unrecognized SSH payload; it will not be overwritten.')
+    for path in ('/usr/sbin/sshd', '/usr/sbin/dropbear', '/usr/local/sbin/sshd',
+                 '/usr/local/sbin/dropbear', '/usr/bin/dropbear', '/usr/local/bin/sshd',
+                 '/sbin/sshd', '/sbin/dropbear', '/etc/init/ssh.conf', '/etc/init/dropbear.conf'):
+        if _node(r, path) is not None:
+            raise ExtrasError('The card has a competing SSH server; it needs a separate qualified adapter.')
+    for directory in ('/etc/init.d', '/etc/rcS.d', *('/etc/rc%d.d' % i for i in range(7))):
+        node = _node(r, directory)
+        if node is None:
+            continue
+        if stat.S_IFMT(node['mode']) != stat.S_IFDIR:
+            raise ExtrasError('The card has an unrecognized service directory.')
+        for name, _, _ in r._iter_dir(node):
+            lower = name.casefold()
+            if 'ssh' in lower or 'dropbear' in lower:
+                path = directory + '/' + name
+                if not (managed and path in (files['sshd'], l['hook'])):
+                    raise ExtrasError('The card has an unrecognized SSH startup service; it needs a separate qualified adapter.')
+    keys = _read(r, files['authorized_keys']).decode('utf-8') if managed else ''
+    return {'platform': platform, 'enabled': bool(managed and hook),
+            'public_keys': keys, 'partition': partition}
+
+def inspect_image(path, *, allow_pending=False, key_source=None):
     try:
-        info = _inspect(path, allow_pending=allow_pending)
+        info = _inspect(path, allow_pending=allow_pending, key_source=key_source)
         info['supported'] = info['platform'] in QUALIFIED_PLATFORMS
         info['reason'] = '' if info['supported'] else 'SSH emulator qualification is not complete for this platform.'
         return info
@@ -177,11 +204,11 @@ def inspect_image(path, *, allow_pending=False):
                 'enabled': False, 'public_keys': ''}
 
 
-def validate_request(original, project):
+def validate_request(original, project, key_source=None):
     ensure_not_incomplete(original)
     config = card_extras.configuration(project)
     if config is not None:
-        info = inspect_image(original)
+        info = inspect_image(original, key_source=key_source)
         if not info['supported']:
             raise ExtrasError(info['reason'])
     return config
@@ -231,28 +258,93 @@ def _command(ex, program, *args):
         raise ExtrasError(f'SSH preparation failed running {program}; no completed SSH build was produced.') from None
 
 
-def _verify_tree(reader, config, payload):
-    hook = _node(reader, HOOK)
+def _verify_tree(reader, config, payload, platform='stern-spike2'):
+    l = layout(platform)
+    files = l['files']
+    hook = _node(reader, l['hook'])
     if not config['enabled']:
         if hook is not None:
             raise ExtrasError('The SSH startup hook could not be disabled.')
         return
-    if (hook is None or stat.S_IFMT(hook['mode']) != stat.S_IFLNK
-            or reader.read_symlink(hook) != HOOK_TARGET):
+    if (hook is None or (l['linked'] and (stat.S_IFMT(hook['mode']) != stat.S_IFLNK
+            or reader.read_symlink(hook) != l['target']))):
         raise ExtrasError('SSH startup hook verification failed.')
-    for name, dest in FILES.items():
+    for name, dest in files.items():
         node = _node(reader, dest)
         mode = 0o600 if name == 'authorized_keys' else 0o755
         if (node is None or node['mode'] != stat.S_IFREG | mode
                 or node['uid'] or node['gid'] or node['links'] != 1
                 or _read(reader, dest, 16 << 20) != payload[name].read_bytes()):
             raise ExtrasError('SSH payload content or permissions verification failed.')
-    directory = _node(reader, '/home/root/.ssh')
+    directory = _node(reader, l['ssh_dir'])
     if directory['mode'] != stat.S_IFDIR | 0o700 or directory['uid'] or directory['gid']:
         raise ExtrasError('SSH public-key directory permissions verification failed.')
 
 
-def apply_to_build(original, output, config, log=None, cancel=None):
+
+def prepare_rootfs(part, work, config, platform='stern-spike2', cancel=None):
+    """Modify/check only a scratch plaintext ext filesystem; never a card."""
+    part, work = Path(part), Path(work)
+    size = part.stat().st_size
+    ex = create_executor()
+    l = layout(platform)
+    files, hook = l['files'], l['hook']
+    _cancel(cancel)
+    exec_part = ex.to_exec_path(str(part))
+    _command(ex, 'e2fsck', '-fn', exec_part)
+    payload = {}
+    commands = []
+    with part.open('rb') as f:
+        r = Ext4Reader(f, 0, size)
+        # Refuse symlink parents and non-regular/hard-linked destinations,
+        # even when a foreign card tries to look like a recognized system.
+        for path in l['dirs']:
+            node = _node(r, path)
+            if node is not None and stat.S_IFMT(node['mode']) != stat.S_IFDIR:
+                raise ExtrasError('An SSH destination directory is a symlink or special file.')
+            if node is None and config['enabled']:
+                commands.append(f'mkdir {path}')
+        for path in files.values():
+            node = _node(r, path)
+            if node is not None and (stat.S_IFMT(node['mode']) != stat.S_IFREG or node['links'] != 1):
+                raise ExtrasError('An SSH destination is a symlink or hard-linked file.')
+        if _node(r, hook) is not None and (l['linked'] or not config['enabled']):
+            commands.append(f'rm {hook}')
+        if config['enabled']:
+            for name, dest_path in files.items():
+                staged = work / name
+                if name == 'authorized_keys':
+                    staged.write_text(config['public_keys'], encoding='utf-8')
+                elif name == 'sshd':
+                    shutil.copyfile(RESOURCES / 'sshd', staged)
+                else:
+                    data = (RESOURCES / l['arch'] / name).read_bytes()
+                    if hashlib.sha256(data).hexdigest() != l['hashes'][name]:
+                        raise ExtrasError('The bundled SSH payload is missing or has an unexpected hash.')
+                    staged.write_bytes(data)
+                payload[name] = staged
+                if _node(r, dest_path) is not None:
+                    commands.append(f'rm {dest_path}')
+                src_path = ex.to_exec_path(str(staged))
+                if any(c in src_path for c in ('"', '\n', '\r', '\\')):
+                    raise ExtrasError('The SSH staging path contains unsupported filesystem-tool characters.')
+                commands.append(f'write "{src_path}" {dest_path}')
+                mode = '0100600' if name == 'authorized_keys' else '0100755'
+                for field, val in (('mode', mode), ('uid', '0'), ('gid', '0')):
+                    commands.append(f'set_inode_field {dest_path} {field} {val}')
+            for field, val in (('mode', '040700'), ('uid', '0'), ('gid', '0')):
+                commands.append(f"set_inode_field {l['ssh_dir']} {field} {val}")
+            if l['linked']:
+                commands.append(f"symlink {hook} {l['target']}")
+    script = work / 'debugfs.commands'
+    script.write_text('\n'.join(commands) + '\n')
+    if commands:
+        _command(ex, 'debugfs', '-w', '-f', ex.to_exec_path(str(script)), exec_part)
+    _command(ex, 'e2fsck', '-fn', exec_part)
+    with part.open('rb') as f:
+        _verify_tree(Ext4Reader(f, 0, size), config, payload, platform)
+
+def apply_to_build(original, output, config, log=None, cancel=None, key_source=None):
     """Apply desired SSH state to an existing output COPY, or raise before success.
 
     Only a verified partition is written back. A failed/canceled write is
@@ -268,7 +360,10 @@ def apply_to_build(original, output, config, log=None, cancel=None):
     _regular(original); _regular(output, allow_pending=True)
     if os.path.samefile(original, output):
         raise ExtrasError('SSH preparation must not write the original image.')
-    source = inspect_image(original)
+    source = inspect_image(original, key_source=key_source)
+    if source['platform'] == 'stern-spike3':
+        from . import ssh_spike3
+        return ssh_spike3.apply_to_build(original, output, config, log, cancel, key_source)
     dest = inspect_image(output, allow_pending=True)
     if not source['supported'] or not dest['supported'] or source['partition'] != dest['partition']:
         raise ExtrasError(source.get('reason') or dest.get('reason') or 'The system partition changed unexpectedly.')
@@ -290,58 +385,7 @@ def apply_to_build(original, output, config, log=None, cancel=None):
                     raise ExtrasError('The system partition is truncated.')
                 dst.write(chunk)
                 remaining -= len(chunk)
-        exec_part = ex.to_exec_path(str(part))
-        _command(ex, 'e2fsck', '-fn', exec_part)
-        payload = {}
-        commands = []
-        with part.open('rb') as f:
-            r = Ext4Reader(f, 0, size)
-            # Refuse symlink parents and non-regular/hard-linked destinations,
-            # even when a foreign card tries to look like a recognized system.
-            for path in DIRS:
-                node = _node(r, path)
-                if node is not None and stat.S_IFMT(node['mode']) != stat.S_IFDIR:
-                    raise ExtrasError('An SSH destination directory is a symlink or special file.')
-                if node is None and config['enabled']:
-                    commands.append(f'mkdir {path}')
-            for path in FILES.values():
-                node = _node(r, path)
-                if node is not None and (stat.S_IFMT(node['mode']) != stat.S_IFREG or node['links'] != 1):
-                    raise ExtrasError('An SSH destination is a symlink or hard-linked file.')
-            if _node(r, HOOK) is not None:
-                commands.append(f'rm {HOOK}')
-            if config['enabled']:
-                for name, dest_path in FILES.items():
-                    staged = work / name
-                    if name == 'authorized_keys':
-                        staged.write_text(config['public_keys'], encoding='utf-8')
-                    elif name == 'sshd':
-                        shutil.copyfile(RESOURCES / 'sshd', staged)
-                    else:
-                        data = (RESOURCES / 'armv7' / name).read_bytes()
-                        if hashlib.sha256(data).hexdigest() != HASHES[name]:
-                            raise ExtrasError('The bundled SSH payload is missing or has an unexpected hash.')
-                        staged.write_bytes(data)
-                    payload[name] = staged
-                    if _node(r, dest_path) is not None:
-                        commands.append(f'rm {dest_path}')
-                    src_path = ex.to_exec_path(str(staged))
-                    if any(c in src_path for c in ('"', '\n', '\r', '\\')):
-                        raise ExtrasError('The SSH staging path contains unsupported filesystem-tool characters.')
-                    commands.append(f'write "{src_path}" {dest_path}')
-                    mode = '0100600' if name == 'authorized_keys' else '0100755'
-                    for field, val in (('mode', mode), ('uid', '0'), ('gid', '0')):
-                        commands.append(f'set_inode_field {dest_path} {field} {val}')
-                for field, val in (('mode', '040700'), ('uid', '0'), ('gid', '0')):
-                    commands.append(f'set_inode_field /home/root/.ssh {field} {val}')
-                commands.append(f'symlink {HOOK} {HOOK_TARGET}')
-        script = work / 'debugfs.commands'
-        script.write_text('\n'.join(commands) + '\n')
-        if commands:
-            _command(ex, 'debugfs', '-w', '-f', ex.to_exec_path(str(script)), exec_part)
-        _command(ex, 'e2fsck', '-fn', exec_part)
-        with part.open('rb') as f:
-            _verify_tree(Ext4Reader(f, 0, size), config, payload)
+        prepare_rootfs(part, work, config, cancel=cancel)
         _cancel(cancel)
         expected = _hash_file(part)
         with open(output, 'r+b') as dst, part.open('rb') as src:

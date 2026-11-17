@@ -125,10 +125,12 @@ class ServiceMenuTab(TabService):
                 on = can and key in ticked
                 row.update(can=can, on=on, note=OFF_NOTES[key] if can and not on else "")
             elif key == "coop_play":                    # round 3: ticking it here switches co-op play on too
-                why = "" if CP.load(project) else _coop_refusal(CP, project)
+                coop = CP.load(project)
+                why = "" if coop else _coop_refusal(CP, project)
                 on = CP.menu_asked(project)
-                row.update(can=not why, on=on,
-                           note=why or ("" if on else "Not on the card: tick to add its row (and co-op play)."))
+                row.update(can=not why, on=on, note=why or ("" if on else (
+                    "Not on the card: co-op play is always on. Tick to let the operator switch it." if coop else
+                    "Not on the card: tick to add its row (and co-op play).")))
             elif key == "handicap":
                 on = HC.load(project)
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")

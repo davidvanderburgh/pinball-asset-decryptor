@@ -214,6 +214,8 @@ def test_round3_coop_row_ticks_coop_on_and_off(tmp_path, monkeypatch):
         assert w.call("svcmenu.set_row", "coop_play", True)
         assert w.call("svcmenu.set_row", "coop_play", False)
         assert CP.load(p) and not CP.menu_asked(p)
+        w.drain()
+        assert row()["note"].startswith("Not on the card: co-op play is always on")
         monkeypatch.setattr(CP, "title_refusal", lambda prof: "Godzilla has co-op play of its own.")
         CP.save(p, False)
         w.run(lambda: w.window.service("svcmenu").publish())

@@ -39,8 +39,11 @@ _R_RELATIVE = 1027
 _REC_SIZES = (24, 32, 40, 48)
 _MIN_REQUESTS = 8
 _MAX_REQUESTS = 1 << 20
-#: share of the sound ids a genuine request table reaches (Spike 2's bound, sound_requests.py)
-_SPAN_NUM, _SPAN_DEN = 9, 10
+#: share of the sound ids a genuine request table reaches. Spike 2's bound (sound_requests.py) is
+#: 9/10, and Fallout, Pokemon, both Star Wars 2025 and ELG reach 96-100%; Transformers LE 0.96's
+#: 1545 requests reach 66% of its 4945 sound ids (PAD-1359: 1490 of them name a recording). No
+#: other registry table of any of them reaches 2%, so half still tells the table apart.
+_SPAN_NUM, _SPAN_DEN = 1, 2
 LIST_MAX = 1 << 16
 #: name groups: five equal pointers to the entry's name (then a zero), 48 bytes apart
 _GROUP_PTRS = 5

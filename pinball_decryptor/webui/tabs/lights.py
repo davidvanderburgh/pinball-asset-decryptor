@@ -534,6 +534,11 @@ def project_layout(project):
     if not card or not os.path.isfile(card):
         return ("The card this project was extracted from is not on this PC, so the app cannot read its cabinet's "
                 "lights. Point the project at its card on the Extract tab."), []
+    if MP.card_arch(card) == "a64":
+        # PAD-1328: a Spike 3 program is not read by the Spike 2 tables' reader (it failed with "list index out of
+        # range"); the title's own gate says why its cabinet takes no shows of the project's yet
+        from ...plugins.stern import clip_variants as CV
+        return (CS.title_refusal(CV.project_title(project, probe=True)) or CS.NO_LIGHTS), []
     key = "%s|%d|%d" % (card, os.path.getsize(card), int(os.path.getmtime(card)))
     cache = os.path.join(TR.cache_dir("cab_layout"), hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
     try:

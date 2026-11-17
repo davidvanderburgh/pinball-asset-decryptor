@@ -249,3 +249,16 @@ def test_spike3_cabinet_shows_are_gated_until_seen_lit():
         prof = MP.profiles()[key]
         assert CS.title_refusal(prof) == (CS.NO_SPIKE3 if n else CS.NO_CAB) % prof.label
     assert "expression light shows" in S3M.FAMILY_LEFT_OUT
+
+
+def test_lights_tab_says_why_on_a_spike3_card(tmp_path, monkeypatch):
+    from pinball_decryptor.webui.tabs import lights as L
+    from pinball_decryptor.plugins.stern import cab_shows as CS, clip_variants as CV, title_reader as TR
+    card = tmp_path / "fallout_le-0_82_0_spike3.Release.64G.sdcard-secure.raw"
+    card.write_bytes(b"\0" * 1024)
+    prof = MP.profiles()["fallout_le_0_82_spike3"]
+    monkeypatch.setattr(MP, "project_card", lambda p: type("C", (), {"image": str(card)})())
+    monkeypatch.setattr(MP, "card_arch", lambda image: "a64")
+    monkeypatch.setattr(CV, "project_title", lambda p, probe=False: prof)
+    monkeypatch.setattr(TR, "game_program", lambda c: pytest.fail("a Spike 3 program is not read by the Spike 2 reader"))
+    assert L.project_layout(str(tmp_path)) == (CS.NO_SPIKE3 % prof.label, [])

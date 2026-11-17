@@ -31,7 +31,7 @@ nothing that isn't an exported function or a plain data pointer.
 | Points | `Mode::score_and_total` (+0x88) | Scores and totals like any game mode |
 | Sound | 2,342 `se_*` `SoundEffect` globals; `play` is virtual on GnR (`GnrSoundEffect`) | Find `play` in the object's vtable and call it |
 | Screen | Allegro 5 is a shared library the game imports | Interpose `al_flip_display` and draw on the backbuffer before the real flip |
-| Events | ~80 `Hook<HookX_, Arg>::list` globals (ball start, switch dispatch, score, render, keyboard, state change...). Each is a `FastLinkedList`: head `{first, magic 0x45}`, node `{prio, &desc, name, next}`, desc `{fn, name}` | Not used yet; this is how the SDK will take game events |
+| Events | ~80 `Hook<HookX_, Arg>::list` globals (ball start, switch dispatch, score, render, keyboard, state change...). Each is a `FastLinkedList`: head `{first, magic 0x45}`, node `{prio, &desc, name, next}`, desc `{fn, name}`; next is at +0x18, nodes sort by prio (the game's at 1, 1000, 2000), and the game walks a list as `node->desc->fn(arg)`, stopping at a return > 0 | Start rules (PAD-1354): one node of ours at the tail of each list a rule needs, returning 0. See "Start rules" below |
 
 `ModeManager::manager_list` is empty on GnR: modes are **named globals**
 (`slash_solo`, `song_mode`, 22 `SongMode_*` songs, `tour_mode1..3`,

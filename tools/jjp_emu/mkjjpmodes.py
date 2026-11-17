@@ -85,7 +85,28 @@ KEYS = collections.OrderedDict([
     ("game_modes", ("hold", "pause", "end", "ignore")),
     ("hold_multiballs", ("yes", "no")), ("allow_game_modes", "text"),
     ("panel", ("middle", "bottom", "top")),
+    # PAD-1354 start rules (jjpmodes.c "start rules")
+    ("start_on", "events"), ("start_after", "after"), ("start_score", "int"),
+    ("start_combo", "switches"), ("combo_seconds", "int"),
+    ("start_count_reset", ("game", "ball")), ("start_once", ("no", "ball", "game")),
 ])
+#: start_on words -> the game's Hook<...>::list each one needs (jjpmodes.c EVENTS)
+START_EVENTS = collections.OrderedDict([
+    ("ball_start", "HookBallStart_"), ("first_ball", "HookFirstBall_"), ("last_ball", "HookLastBall_"),
+    ("valid_playfield", "HookValidPlayfield_"), ("ball_saved", "HookBallSave_"),
+    ("extra_ball", "HookExtraBallAwarded_"), ("multiball_end", "HookMultiballEnd_"),
+])
+#: keys that start a mode on their own
+START_RULES = ("start", "start_on", "start_after", "start_score", "start_combo")
+
+
+def start_text(m):
+    """What starts a mode, for a summary line: its start switches and any start rules."""
+    parts = [m["start"]] if m.get("start") else []
+    for k, label in (("start_on", "on"), ("start_after", "after"), ("start_score", "score"), ("start_combo", "combo")):
+        if m.get(k):
+            parts.append("%s %s" % (label, m[k]))
+    return "; ".join(parts)
 #: keys only title.cfg takes
 TITLE_KEYS = collections.OrderedDict([
     ("game", "text"), ("ingame_state", "int"), ("background_modes", "modes"),
@@ -125,6 +146,25 @@ def check_value(kind, v, port=None):
         h = v.lstrip("#")
         ok = _HEX.match(v) and len(h) in ((6,) if kind == "rgb" else (6, 8))
         return None if ok else "must be %s hex" % ("rrggbb" if kind == "rgb" else "rrggbb or rrggbbaa")
+    if kind == "events":
+        bad = [t for t in _names(v) if t not in START_EVENTS]
+        if bad:
+            return "%s: not a start event (%s)" % (" ".join(bad), ", ".join(START_EVENTS))
+        hooks = (port or {}).get("hooks")
+        if hooks:
+            missing = [t for t in _names(v) if not hooks.get(START_EVENTS[t])]
+            if missing:
+                return "%s: %s has no %s hook" % (" ".join(missing), port.get("title", "this game"),
+                                                  " ".join(START_EVENTS[t] for t in missing))
+        return None
+    if kind == "after":
+        names = [t for t in _names(v) if t != "any"]
+        known = set((port or {}).get("game_modes", [])) | set((port or {}).get("mode_classes", []))
+        if port is None or not known or not (port or {}).get("game_modes"):
+            return None
+        missing = [t for t in names if t not in known]
+        return None if not missing else "not a game mode or Mode class of %s: %s" % (
+            port.get("title", "this game"), " ".join(missing))
     if port is None:
         return None
     table = {"switches": "switches", "lamps": "lamps", "sound": "sounds", "font": "fonts",
@@ -183,11 +223,19 @@ def check_modes(mode_dir, port=None):
             if kind in ("switches", "lamps") and len(_names(v)) > MAX_LIST:
                 problems.append("%s:%d: %s lists %d; the runtime takes %d" % (fn, n, k, len(_names(v)), MAX_LIST))
             m[k] = v
-        if not m.get("start"):
-            problems.append("%s: no start = <switch> (the mode would never start)" % fn)
+        if not any(m.get(k) for k in START_RULES):
+            problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo):"
+                            " the mode would never start" % fn)
+        if m.get("start_combo") and len(_names(m["start_combo"])) < 2:
+            problems.append("%s: start_combo needs two switches or more" % fn)
+        if m.get("start_score") and _INT.match(m["start_score"]) and int(m["start_score"].replace(",", "").replace("_", "")) <= 0:
+            problems.append("%s: start_score must be above 0" % fn)
+        complete = (m.get("complete") or "0").replace(",", "").replace("_", "")
+        if not m.get("start") and not m.get("shots") and _INT.match(complete) and int(complete) > 0:
+            problems.append("%s: complete = %s but no shots = (nothing can score it)" % (fn, m["complete"]))
         m["file"] = fn
         m.setdefault("name", fn[:-5])
-        for k in ("start", "shots"):
+        for k in ("start", "shots", "start_combo"):
             shot_switches.update(_names(m.get(k, "")))
         modes.append(m)
     if len(shot_switches) > MAX_SHOT_SWITCHES:
@@ -371,7 +419,7 @@ def inspect(a):
         print("%s %s: %d custom mode(s), written %s by %s %s" % (man.get("title"), man.get("game_version"),
               len(man.get("modes", [])), man.get("written"), man.get("tool"), man.get("version")))
         for m in man.get("modes", []):
-            print("  %-24s start %-28s %s s, %s a shot" % (m.get("name"), m.get("start"), m.get("seconds") or "20",
+            print("  %-24s start %-28s %s s, %s a shot" % (m.get("name"), start_text(m), m.get("seconds") or "20",
                                                            m.get("points") or "1000000"))
         return 0
     finally:
@@ -402,7 +450,7 @@ def main(argv=None):
             port = json.load(open(a.port)) if a.port else None
             modes, problems = check_modes(a.modes, port)
             for m in modes:
-                print("mode %-28s start %s" % (m["name"], m.get("start", "")))
+                print("mode %-28s start %s" % (m["name"], start_text(m)))
             for p in problems:
                 print("problem: " + p)
             print("%d mode(s), %d problem(s)" % (len(modes), len(problems)))

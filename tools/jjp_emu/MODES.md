@@ -48,8 +48,15 @@ lamp_blink = 4
 |---|---|---|
 | `name` | file name | the mode's name (log, engine Mode name) |
 | `title` | `name` | the line drawn at the top of the mode panel. A game font may lack punctuation: GnR's Slash Solo font draws `-` and `!` as other marks |
-| `start` | (required) | switch(es) that start the mode, space separated |
-| `start_count` | 1 | start-switch hits needed to start it |
+| `start` | none | switch(es) that start the mode, space separated. A mode needs this or one of the start rules below |
+| `start_count` | 1 | starts needed: start-switch hits, or times a start rule fires (e.g. `start_after = gobstopper_mb` with `start_count = 2`: after the second Gobstopper multiball) |
+| `start_count_reset` | game | `game`: the count carries over between balls and resets at a new game; `ball`: it resets every ball |
+| `start_on` | none | start on a game event, any of: `ball_start`, `first_ball`, `last_ball`, `valid_playfield` (the first playfield switch of a ball), `ball_saved`, `extra_ball` (one awarded), `multiball_end` |
+| `start_after` | none | start when one of these game modes ends: the game's mode globals (e.g. `mtv_mode`) or Mode classes, or `any` |
+| `start_score` | none | start when the player up's score reaches this, once per player per game |
+| `start_combo` | none | two or more switches hit in this order, each within `combo_seconds` of the one before |
+| `combo_seconds` | 5 | whole seconds |
+| `start_once` | no | `ball` or `game`: start at most once a ball or once a game |
 | `shots` | `start` | switches that score while it runs |
 | `points` | 1000000 | per scoring shot, through the game's own Mode::score_and_total |
 | `seconds` | 20 | the game's own mode timer |

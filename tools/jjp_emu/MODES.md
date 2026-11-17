@@ -104,7 +104,8 @@ installed. To turn the modes off without reinstalling, create
 `jjpport.py` reports, per title, whether its engine has every piece the
 runtime needs (`can_run_modes`). `modes/ports/` holds the report for every JJP
 image in the library and `modes/examples/` a starter folder for each title that
-can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
+can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`, and on the five
+images added 2026-11-16 (PAD-1364):
 
 | Image | Engine exported | Runs modes | Library loads |
 |---|---|---|---|
@@ -114,8 +115,13 @@ can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
 | Godfather 02.03 | 21,498 | yes | yes |
 | Wonka 03.03 | 18,717 | yes, emulator-proven | yes |
 | Pirates of the Caribbean 01.01 | 18,693 | yes | yes |
+| Dialed In 02.02 | 17,044 | yes | yes |
+| The Hobbit 04.02 | 14,855 | yes | yes |
+| Toy Story 02.04 | 21,996 | yes | yes |
+| Wizard of Oz 08.02 | 12,260 (older engine, no `Mode` class) | **no** | yes |
 | Harry Potter 01.26 | 233 (no engine) | **no** | yes |
 | Sonic 00.925, 00.926 | 246 (no engine) | **no** | yes |
+| Avatar 01.03 | 245 (no engine) | **no** | yes |
 
 "Runs modes" for a title other than GnR means its binary exports every engine
 piece the runtime uses and its Mode vtable resolves to the same slots as GnR's
@@ -149,8 +155,18 @@ booting the one unchanged runtime - GnR and Wonka, built from different games -
 is what shows the SDK is generic, so these four are taken as runs-modes without a
 separate live run each; any one can be run the same way with its own key.
 
+**Dialed In, The Hobbit and Toy Story** (PAD-1364) are mapped from Wonka the same way:
+their Mode vtable slots, hold slots and 104-byte `Switch` match Wonka's, every required
+SDK piece is exported, and their starter folders pass `check --port`. Dialed In has
+84 named shot switches, 216 lamps, 1,286 sounds and 17 Mode classes; The Hobbit
+104, 131, 1,501 and 33; Toy Story 82, 670, 2,231 and 21. Dialed In has no lamp
+named for a target, so its starter lights none (add `lamps =` by hand).
+A starter's lamp is the one whose name shares the most words with the start
+switch (`switch_u_target_1` lights `lp_upper_target_1`), which since PAD-1364 also
+moved Elton John's, Godfather's and Pirates' starter lamps onto their start shots.
+
 "Library loads" means the one `jjpmodes.so` loads with every import bound
-(`LD_BIND_NOW`) on that image's own glibc - 2.34 on all nine.
+(`LD_BIND_NOW`) on that image's own glibc - 2.34 on all fourteen.
 
 ### Our modes run alone (PAD-1348)
 
@@ -187,3 +203,9 @@ build, covered by Guns N' Roses.
 binaries export only C library and Allegro names. The runtime finds everything
 by name, and their code is ciphertext until the title's own key decrypts it,
 so nothing can be mapped without that key. Custom modes on them need their keys.
+Avatar is built the same way.
+
+**Wizard of Oz 08.02 is an older engine**: it exports 12,260 names, 120 shot
+switches, 149 lamps and 633 sounds, but has no `Mode` class at all, so the
+runtime has nothing to derive a mode from. Custom modes there need their own
+port of the runtime to that engine.

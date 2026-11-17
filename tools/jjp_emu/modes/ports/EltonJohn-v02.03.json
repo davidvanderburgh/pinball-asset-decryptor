@@ -80,7 +80,7 @@
  "defaults": {
   "start": "switch_target_left",
   "shots": "switch_target_left switch_ramp_left_made switch_ramp_right_made",
-  "lamps": "lp_inlane_left",
+  "lamps": "lp_song_target_left",
   "font_title": "font_player_menu_title",
   "font_value": "font_song_mode_total_1",
   "font_timer": "font_song_beat_mode_timer",

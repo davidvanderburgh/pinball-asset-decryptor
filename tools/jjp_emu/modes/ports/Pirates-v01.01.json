@@ -81,7 +81,7 @@
  "defaults": {
   "start": "switch_upf_target_1",
   "shots": "switch_upf_target_1 switch_l_orbit_hi switch_l_ramp_made",
-  "lamps": "lp_spot_gold_1",
+  "lamps": "lp_upf_left_spinner",
   "font_title": "font_plunder_title",
   "font_value": "font_bonus_total",
   "font_timer": "font_argh_text_timer",

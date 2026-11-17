@@ -241,3 +241,11 @@ def test_cabinet_lines_off_the_real_programs(game):
         ids, name = line.split()[1], line.split("  #")[0].split(None, 3)[3]
         # a light id is its lamp's rank in the device table + 1: the three channels of the named pixel
         assert [devs[int(i) - 1][0] for i in ids.split(",")] == [name + "-R", name + "-G", name + "-B"]
+
+
+def test_spike3_cabinet_shows_are_gated_until_seen_lit():
+    from pinball_decryptor.plugins.stern import cab_shows as CS, spike3_modes as S3M
+    for key, n in CAB_COUNTS.items():
+        prof = MP.profiles()[key]
+        assert CS.title_refusal(prof) == (CS.NO_SPIKE3 if n else CS.NO_CAB) % prof.label
+    assert "expression light shows" in S3M.FAMILY_LEFT_OUT

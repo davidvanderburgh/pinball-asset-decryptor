@@ -8985,10 +8985,16 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                     if len(_ix) > 1 for i in _ix if i is not None}
                             except Exception:  # noqa: BLE001 - the play tables' alone
                                 _sm_parts = ()
+                        # PAD-1378: the game's own sound banks whose songs have
+                        # music modes' files, read off the card
+                        _sm_bsongs = _game_bank_songs(
+                            gr_path, img_path, reader, sound_modes, work, log,
+                            cancel=cancel)
                         audio_edits, grows, sound_mode_used = _sound_modes_grow(
                             assets_dir, params, audio_edits, grows, sound_modes,
                             log, longer_ok=_sm_long, longer_why=_sm_why,
-                            sites=desc_sites, seq_parts=_sm_parts)
+                            sites=desc_sites, seq_parts=_sm_parts,
+                            banks=_sm_bsongs)
                         _sm_grows = {int(u["host"]): grows[int(u["host"])]
                                      for u in sound_mode_used}
                     # PAD-595: the modes' own sounds image.bin cannot take
@@ -9030,6 +9036,21 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                                         if mode_sound_used else []),
                             _old_bank_map, log, grows=grows,
                             user_grows=_user_grows, fixed=_sm_key)
+                    # PAD-1378: a file for a song of the game's own sound banks
+                    # plays from a bank of ours or not at all: one that found no
+                    # bank road comes off the card again
+                    _sm_lost = [u for u in sound_mode_used if u.get("vbank")
+                                and int(u["host"]) not in _sm_frags]
+                    if _sm_lost:
+                        sound_mode_used = [u for u in sound_mode_used
+                                           if not any(u is x for x in _sm_lost)]
+                        _sm_left = {int(u["host"]) for u in sound_mode_used}
+                        for _u in _sm_lost:
+                            _h = int(_u["host"])
+                            if _h not in _sm_left:
+                                grows.pop(_h, None)
+                                audio_edits.pop(_h, None)
+                                _sm_grows.pop(_h, None)
                     if (_user_grows or _old_bank_map) and desc_sites:
                         (_game_ok, _game_why, _bank_touched,
                          _game_seqs) = _game_sounds_for_banks(
@@ -12168,7 +12189,24 @@ def _sm_hosts(used):
 def _sm_level_refs(used):
     """``{host: slot}``: each music mode's file matches the loudness of the slot it plays for (of
     a song in parts, its longest part: PAD-511)."""
-    return {int(u["host"]): int(u.get("level_ref", u["slot"])) for u in used or ()}
+    return {int(u["host"]): _ref_value(u.get("level_ref", u["slot"])) for u in used or ()}
+
+
+#: PAD-1378: a level reference (``level_refs`` value) that is a WAV file, ``"wav:<path>"``: a
+#: music mode's file for a song of the game's own sound banks matches that song's loudness, off
+#: the project's copy of it (no record of ``image.bin`` holds it)
+_LEVEL_WAV = "wav:"
+
+
+def _ref_value(ref):
+    """A ``level_ref`` as :func:`_sm_level_refs` hands it on: a record's idx, or a
+    :data:`_LEVEL_WAV` reference as it is."""
+    return ref if isinstance(ref, str) else int(ref)
+
+
+def _wav_ref(ref):
+    """The WAV path of a :data:`_LEVEL_WAV` reference, else None."""
+    return ref[len(_LEVEL_WAV):] if isinstance(ref, str) and ref.startswith(_LEVEL_WAV) else None
 
 
 def _chain_level_refs(mode_refs, used):
@@ -12320,8 +12358,67 @@ def _sound_mode_bodies(slot, song, plays, byidx):
     return out
 
 
+#: PAD-1378: ``[program path, {cat: BankSongs}]`` - what :func:`_game_bank_songs` read last
+_BANK_SONGS_ONCE = [None, {}]
+
+
+def _game_bank_songs(gr_path, img_path, reader, modes, work, log, cancel=None):
+    """PAD-1378: ``{cat: .bank_songs.BankSongs}`` for the game's own sound banks whose songs
+    (``music_catNN_NNNN``) have music modes' files in *modes*: each bank copied off the card
+    (*reader*) into *work* and read through the game's own loader and resolver
+    (:func:`.bank_songs.read_banks`). Kept for the later steps of the same build
+    (:func:`_bank_songs_read`)."""
+    from . import bank_songs as _BS
+    from . import sound_modes as _SMo
+    from .spike2 import soundbank as SB
+    from .spike2.category import read_category_id
+    _BANK_SONGS_ONCE[:] = [None, {}]
+    cats = sorted({b[0] for b in (_SMo.bank_slot(r) for r in modes.slots
+                                  if _SMo.slot_idx(r) is None) if b is not None})
+    if not cats or reader is None:
+        return {}
+    local = {}
+    try:
+        for path, _ino, node in reader.iter_regular_files(min_size=1):
+            base = path.rsplit("/", 1)[-1]
+            cid = read_category_id(base)
+            if cid not in cats or cid in local:
+                continue
+            size = int(node["size"])
+            if SB.is_pad_bank_at(lambda off, k, _n=node: reader.read_range(_n, off, k), size):
+                continue                    # (a bank of this app's, not the game's)
+            dst = os.path.join(work, "game_" + base)
+            reader.extract_file(node, dst)
+            local[cid] = dst
+    except Exception as e:  # noqa: BLE001 - the bank songs' files are then left out
+        log("Music modes: the game's sound banks could not be read off the card (%s); the files "
+            "for their songs are left out." % e, "warning")
+        return {}
+    for cid in cats:
+        if cid not in local:
+            log("Music modes: this card has no sound bank image-sc%02d.bin; the files for its "
+                "songs are left out." % cid, "warning")
+    got = _BS.read_banks(gr_path, img_path, local, log, cancel=cancel)
+    if got:
+        log("Music modes: read %d of the game's own sound bank(s) (%s): which of their sound ids "
+            "play each song." % (len(got), ", ".join("image-sc%02d.bin" % c for c in sorted(got))),
+            "info")
+    _BANK_SONGS_ONCE[:] = [os.path.abspath(gr_path), got]
+    return got
+
+
+def _bank_songs_read(gr_path):
+    """PAD-1378: what :func:`_game_bank_songs` read for this build's game program *gr_path*."""
+    return _BANK_SONGS_ONCE[1] if _BANK_SONGS_ONCE[0] == os.path.abspath(gr_path) else {}
+
+
+def _bank_song_name(vb):
+    """PAD-1378: how the log names a song of the game's own sound banks (``vbank`` ``[cat, record]``)."""
+    return "song %d of the game's sound bank image-sc%02d.bin" % (int(vb[1]), int(vb[0]))
+
+
 def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer_ok=True,
-                      longer_why="", sites=(), seq_parts=()):
+                      longer_why="", sites=(), seq_parts=(), banks=None):
     """PAD-494: every music mode's file, made into its slot's format and put in a HOST record
     (:func:`_sound_mode_host`) as a forced grow, left un-pointed. Returns ``(audio_edits, grows,
     used)``: *used* ``[{"rel", "slot", "mode", "host", "frames", "name", "idx", "level_ref",
@@ -12343,7 +12440,13 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
 
     PAD-791: a record the game plays in a sequence with others (the play tables', and
     *seq_parts*, read off the descriptors whole) holds a file only when no other will do
-    (:func:`_sound_mode_host`)."""
+    (:func:`_sound_mode_host`).
+
+    PAD-1378: a song of the game's own sound banks (``music_catNN_NNNN``, *banks*
+    :func:`_game_bank_songs`) has a host as an idx slot does (its channels, its length); its
+    entry's ``slot`` is :func:`.sound_modes.bank_slot_key`, ``vbank`` ``[cat, record]``, and its
+    file matches the song's loudness off the project's copy (``level_ref`` a
+    :data:`_LEVEL_WAV`). Such a file can only play from a sound bank (:func:`_sound_modes_for_banks`)."""
     from . import sound_modes as _SMo
     from .spike2.emulator import emitted_length
     byidx = {q["idx"]: q for q in params}
@@ -12366,6 +12469,22 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
         db = modes.level(rel, mode)
         slot = _SMo.slot_idx(rel)
         p = byidx.get(slot) if slot is not None else None
+        vb = _SMo.bank_slot(rel) if slot is None else None
+        if vb is not None:
+            # PAD-1378: a song of one of the game's own sound banks
+            bk = (banks or {}).get(vb[0])
+            row = bk.rows.get(vb[1]) if bk is not None else None
+            if row is None:
+                log("%s: %s is not put on this card: the game's sound bank image-sc%02d.bin %s." % (
+                    who, what, vb[0], "has no song %d" % vb[1] if bk is not None
+                    else "could not be read"), "warning")
+                continue
+            if _SMo.is_turn(mode):
+                log("%s: %s is not put on this card: a song of the game's own sound banks takes one "
+                    "file for each music mode, not files in turn." % (who, what), "warning")
+                continue
+            slot = _SMo.bank_slot_key(*vb)
+            p = {"idx": slot, "chan": row.get("chan"), "length": int(row.get("length", 0) or 0)}
         if p is None:
             log("%s: %s is not put on this card: %s" % (who, what, _SMo.NOT_SOUND), "warning")
             continue
@@ -12383,8 +12502,8 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
         own = {i for i in (_SMo.slot_idx(r) for r, f in modes.slots.items() if mode in f)
                if i is not None and i != slot} if not _SMo.is_turn(mode) else set()
         # PAD-685: a jukebox song is a record of its own the runtime hands every part of a song mode
-        song = {} if _SMo.is_juke(mode) else _sound_mode_song(slot, plays, byidx, own)
-        bodies = {} if _SMo.is_juke(mode) else _sound_mode_bodies(slot, song, plays, byidx)
+        song = {} if _SMo.is_juke(mode) or vb else _sound_mode_song(slot, plays, byidx, own)
+        bodies = {} if _SMo.is_juke(mode) or vb else _sound_mode_bodies(slot, song, plays, byidx)
         room = emitted_length(int(p.get("length", 0) or 0))
         rest = sorted({i for parts in song.values() for i in parts})
         if song:
@@ -12400,9 +12519,15 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                     % (who, what, _m), "warning")
                 continue
             room = int(_own["frames"])
-        level_ref = max([slot] + rest, key=lambda i: (int(byidx[i].get("length", 0) or 0), -i))
+        if vb is not None:
+            # PAD-1378: no record of image.bin holds the song: its loudness off the project's copy
+            level_ref = _LEVEL_WAV + os.path.abspath(_SMo._pristine(assets_dir, rel))
+        else:
+            level_ref = int(max([slot] + rest, key=lambda i: (int(byidx[i].get("length", 0) or 0), -i)))
         entry = {"rel": rel, "slot": int(slot), "mode": int(mode), "name": modes.name(mode),
-                 "level_ref": int(level_ref), "db": db}
+                 "level_ref": level_ref, "db": db}
+        if vb is not None:
+            entry["vbank"] = [int(vb[0]), int(vb[1])]
         if song:
             entry["song"] = {int(s): [int(i) for i in parts] for s, parts in song.items()}
         if bodies:
@@ -12464,9 +12589,10 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
         hosted[key] = (host, int(want))
         used.append(dict(entry, host=int(host), frames=int(want), idx=int(host)))
         log("%s: %s (%s, %.2f s%s) goes on the card as a new record (a copy of sound idx "
-            "%d) that the game plays for sound idx %d %s." % (
+            "%d) that the game plays for %s %s." % (
                 who, what, os.path.basename(src), want / 44100.0,
-                ", its own loudness %+d dB" % db if db else "", host, slot, when), "info")
+                ", its own loudness %+d dB" % db if db else "", host,
+                _bank_song_name(vb) if vb is not None else "sound idx %d" % slot, when), "info")
     return audio_edits, grows, used
 
 
@@ -12814,6 +12940,13 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     live = 0
     banked = [u for u in used if u.get("bank") is not None]
     used = [u for u in used if u.get("bank") is None]
+    for u in [u for u in used if u.get("vbank")]:
+        # PAD-1378: a file for a song of the game's own sound banks plays from a bank of ours alone
+        u["lines"] = 0
+        log("%s: %s is left out: it could not go into a sound bank, and a song of the game's own "
+            "sound banks plays a file from nowhere else." % (
+                _SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u.get("name", ""))), "warning")
+    used = [u for u in used if not u.get("vbank")]
     # PAD-685: a jukebox song in a sound bank has no key to swap in (:func:`_jukebox_lines`)
     bsids, tsids = _bank_sid_lines(params, [u for u in banked if not _SMo.is_juke(u["mode"])],
                                    list_ids or {}, log)
@@ -16257,6 +16390,8 @@ def _level_ref_render(emu, byidx, p, ref, np, wav=None):
     (PAD-855)."""
     if ref == _LEVEL_SELF:
         return _self_level_render(wav, p, np) if wav else _LEVEL_REF_UNSET
+    if _wav_ref(ref):                                   # PAD-1378: a bank song's own WAV
+        return _self_level_render(_wav_ref(ref), p, np)
     q = byidx.get(ref) if ref is not None else None
     if q is None:
         return _LEVEL_REF_UNSET
@@ -17783,8 +17918,12 @@ class _AudioBodyCache:
         if idx in self.refs:
             # PAD-494: levelled against another record (a music mode's file
             # matches its slot's loudness, not its host's)
-            h.update(b"ref%d" % self.refs[idx])
-            h.update(self._fp_param(self.byidx.get(self.refs[idx])))
+            ref = self.refs[idx]
+            if _wav_ref(ref):                           # PAD-1378: a bank song's own WAV
+                h.update(b"refwav" + (_scan_md5(self.assets_dir, _wav_ref(ref)) or "").encode())
+            else:
+                h.update(b"ref%d" % ref)
+                h.update(self._fp_param(self.byidx.get(ref)))
         return h.hexdigest()
 
     def _path(self, idx, key):
@@ -18001,7 +18140,7 @@ def _grown_cache_sounds(assets_dir, audio_edits, grows, gains, loop_idx, own_use
             continue
         if u.get("level_ref") is not None:
             # PAD-494: a music mode's file in a host record, levelled as its slot
-            names[int(u["idx"])] = ("slot", int(u["level_ref"]), int(u["mode"]))
+            names[int(u["idx"])] = ("slot", _ref_value(u["level_ref"]), int(u["mode"]))
             continue
         names[int(u["idx"])] = (("sid", int(u["sid"])) if u.get("sid")
                                 else ("request", int(u["request"])))
@@ -20699,10 +20838,12 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
         # (PAD-855: a carried sound's reference is its own file)
         own = {i: w for i, w in want.values()}
         refs = _LazyRefs(
-            {idx: (_LEVEL_SELF if ref == _LEVEL_SELF else byidx[ref])
+            {idx: (_LEVEL_SELF if ref == _LEVEL_SELF else ref if _wav_ref(ref) else byidx[ref])
              for idx, ref in level_refs.items()
-             if (ref == _LEVEL_SELF and idx in own) or byidx.get(ref) is not None},
+             if (ref == _LEVEL_SELF and idx in own) or _wav_ref(ref)
+             or (not isinstance(ref, str) and byidx.get(ref) is not None)},
             lambda idx, q: (_self_level_render(own[idx], byidx[idx], np) if q == _LEVEL_SELF
+                            else _self_level_render(_wav_ref(q), byidx[idx], np) if _wav_ref(q)
                             else _stock_render(emu_e, q, np,
                                                stereo=byidx[idx].get("chan") == 2)))
         emu_d.boot()
@@ -20744,7 +20885,8 @@ def _chain_encode_appended(gr_path, staged, params, edits, np, log, loops=(),
                          if p["chan"] == 2 else
                          _encode_mono(emu_e, state["gr"], pe, wav, np, **refs.kw(idx, kw))),
                 gain_db=kw["gain_db"], loop=kw["loop"],
-                ref=(({"level": _LEVEL_SELF} if level_refs[idx] == _LEVEL_SELF
+                ref=(({"level": level_refs[idx]} if (level_refs[idx] == _LEVEL_SELF
+                                                     or _wav_ref(level_refs[idx]))
                       else byidx.get(level_refs[idx])) if idx in refs else None),
                 chan=p["chan"])
             emu_d._ensure_range(EM.DESC_BASE + off, len(body))
@@ -21877,7 +22019,13 @@ def _sound_modes_for_banks(gr_path, img_path, params, sites, sm_used, used, old_
     opening, PAD-511) is a plain id of ``image.bin`` a request list names, plays the
     slot alone (or as the song it opens: its descriptor then plays the file in place of
     the whole song), and is not one a mode of this Write plays (*used*).  The others
-    stay in ``image.bin``, as before."""
+    stay in ``image.bin``, as before.
+
+    PAD-1378: a file for a song of the game's own sound banks (an entry's ``vbank``) is played
+    by the bank sound ids of the game's that play that song (:func:`_game_bank_songs`) and a
+    request list names, one fragment each; where files for two songs of one sound id share a
+    mode, the longer song's has it.  Such a file has no road through ``image.bin``: one no
+    request can reach is left out (logged), and the Write takes it off the card."""
     from . import bank_build as BB
     from . import mode_write as _MW
     from . import sound_modes as _SMo
@@ -21908,9 +22056,46 @@ def _sound_modes_for_banks(gr_path, img_path, params, sites, sm_used, used, old_
         by_host.setdefault(int(u["host"]), []).append(u)
     idle = BB.never_played(plays, slots, exclude)   # PAD-784: ids the game never plays
     frags, why, in_parts = {}, {}, {}
+    # PAD-1378: the songs of the game's own sound banks, and which file has each of their sound
+    # ids in each mode (the longest song's, where one sound id plays two with files)
+    bsongs = _bank_songs_read(gr_path)
+    claim = {}
+    for u in sm_used or ():
+        vb = u.get("vbank")
+        bk = bsongs.get(int(vb[0])) if vb else None
+        if bk is None:
+            continue
+        n = int((bk.rows.get(int(vb[1])) or {}).get("length", 0) or 0)
+        for sid in bk.sids_of(int(vb[1])):
+            k = (int(u["mode"]), sid)
+            if k not in claim or n > claim[k][0]:
+                claim[k] = (n, u["rel"])
     for host, us in sorted(by_host.items()):
         got, bad, parted = [], None, None
         for u in us:
+            if u.get("vbank"):
+                # PAD-1378: a song of one of the game's own sound banks
+                vb = u["vbank"]
+                bk = bsongs.get(int(vb[0]))
+                sids = bk.sids_of(int(vb[1])) if bk is not None else []
+                every.update(sids)
+                host_sids.setdefault(host, set()).update(sids)
+                mine = [sid for sid in sids if claim.get((int(u["mode"]), sid), (0, None))[1] == u["rel"]]
+                listed = [sid for sid in mine if slots.get(sid) and sid not in exclude]
+                if not listed:
+                    bad = ("no sound id of the game's plays %s" % _bank_song_name(vb) if not sids
+                           else "every sound id of the game's that plays it plays a longer song "
+                                "that has a file in this mode too" if not mine
+                           else "no sound request of the game's plays %s" % _bank_song_name(vb)
+                           if not any(slots.get(sid) for sid in mine)
+                           else "its sound ids are ones a mode of this card plays")
+                    break
+                for sid in sorted(set(sids) - set(mine)):
+                    log("%s: sound id %#x plays %s and a longer song with a file in this mode: "
+                        "that one's file plays there." % (_SMo.who(u["mode"]), sid,
+                                                          _bank_song_name(vb)), "info")
+                got.extend((u, sid) for sid in listed)
+                continue
             slot = int(u["slot"])
             song = {int(k) for k in (u.get("song") or {})}
             bodies = {int(k) for k in (u.get("bodies") or {})}
@@ -21946,6 +22131,12 @@ def _sound_modes_for_banks(gr_path, img_path, params, sites, sm_used, used, old_
         if bad:
             why[host] = bad
             for u in us:
+                if u.get("vbank"):
+                    # PAD-1378: a bank song's file plays from a sound bank or not at all
+                    log("%s: %s is not put on this card: %s." % (
+                        _SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u.get("name", "")),
+                        bad), "warning")
+                    continue
                 log("%s: %s stays in image.bin rather than a sound bank: %s." % (
                     _SMo.who(u["mode"]), _SMo.what(u["rel"], u["mode"], u.get("name", "")), bad),
                     "info")
@@ -22962,8 +23153,10 @@ def _bank_mode_descs(gr_path, img_path, params, sites, plan, cat, places, rows, 
     fragment)]``, the ones the runtime can point the game at.  A fragment no descriptor
     could be made for takes another of its record's, and is never played."""
     from . import bank_build as BB
+    from . import bank_songs as _BS
     from . import sound_modes as _SMo
     from .spike2 import soundbank as SB
+    bsongs = _bank_songs_read(gr_path)              # PAD-1378: the game's own banks' songs
     order = {}
     for pl in sorted(places, key=lambda pl: pl.new_idx):
         if pl.idx in plan.sm_frags:
@@ -22993,13 +23186,22 @@ def _bank_mode_descs(gr_path, img_path, params, sites, plan, cat, places, rows, 
         mine = [p for p in params if p["idx"] != host] + [dict(
             byidx[host], findkey=held, length=int(r["length"]), grown=True)]
         tables, spare = {}, None
+        units = _duration_units_emitted(int(r["length"]))
         for (u, sid), pl in zip(frs, pls):
-            if id(u) not in tables:
-                tables[id(u)] = {s_: d for _m, s_, d in _mode_descriptor_table(
-                    found, mine, mask, [dict(u)], lambda *a, **k: None, ends=ends)}
-            d = tables[id(u)].get(sid)
-            if d is not None and sid in at:
-                d = _bank_descriptor(d, sid, extents[at[sid][0]], held, key, mask)
+            if u.get("vbank"):
+                # PAD-1378: the game's own bank descriptor for the sound id, every play the file
+                play = bsongs.get(int(u["vbank"][0]))
+                play = play.plays.get(sid) if play is not None else None
+                d = _BS.mode_descriptor(play[0], play[1], key, units) if play else None
+                if d is None and play and spare is None:
+                    spare = BB.compose_descriptor(play[0], key, units, False)
+            else:
+                if id(u) not in tables:
+                    tables[id(u)] = {s_: d for _m, s_, d in _mode_descriptor_table(
+                        found, mine, mask, [dict(u)], lambda *a, **k: None, ends=ends)}
+                d = tables[id(u)].get(sid)
+                if d is not None and sid in at:
+                    d = _bank_descriptor(d, sid, extents[at[sid][0]], held, key, mask)
             if d is None:
                 log("%s: %s plays its own sound for sound id %d: that sound id cannot play it "
                     "from a sound bank." % (_SMo.who(u["mode"]), _SMo.what(

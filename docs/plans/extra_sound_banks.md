@@ -844,3 +844,45 @@ Checked against real Writes (`C:\tmp\PAD-1005`): Godzilla Pro 1.16 7 x 3 five-mi
 MB vs planned 2,073; seven-minute songs, 2,240 vs a refusal at 2,241. Deadpool Pro 1.16 (6 tracks x 3
 five-minute songs), chip 2,063 vs planned 2,067 with its 80 MB bank; with idx 2131 (no request plays it)
 too, image.bin 1,771 vs 1,775 and both over.
+
+## Music modes for the game's own bank songs (PAD-1378)
+
+Seven Spike 2 titles keep their licensed songs in banks of their own (the library's newest builds, read off the
+cards: Deadpool LE/Pro 1.16 16 banks, Dungeons & Dragons LE/Pro 1.10 29, Foo Fighters LE/Pro 1.04 16, James Bond
+LE/Pro 1.06 5, John Wick LE/Pro 1.02 14, Metallica 1.04 24, Rush LE/Pro 1.19 17). An extract decodes them as
+`music_catNN_NNNN.wav` (NNNN the record in bank NN), and the Audio tab refused music modes' files for them.
+
+Read off Deadpool LE 1.16 (every fragment of all 16 banks resolved through the game's resolver,
+`bank_songs.read_banks`):
+
+- **The game plays a bank song by a sound id of the bank's own**, `NN << 16 | n`, and its request lists name those
+  ids as they name any other: 89 of them on Deadpool LE (request 89 = `0x10000` five times and two others, request
+  106 = `0x70001` alone, request 62 one of five songs, `0x70001` among them).
+- **A fragment's descriptor is an image.bin script** (`05 01 01 <duration>`, `01`, `02`, then `0b` plays, `11` waits,
+  `07` marks, `03` loops) naming the bank's records by key. Within a bank a record is named by the first four bytes
+  of its key (the row's `key0`); the rest carries bits the game fills from the sound id. Many ids play a song in
+  parts: bank 07's `0x70001` plays record 1 (26.1 s) once, then loops record 0 (151.8 s); bank 22's `0x160002` plays
+  three records. Several ids play one record (bank 01's record 1: `0x10000` and `0x10002`).
+
+So a mode file for a bank song goes PAD-608's road: it is grown into a host record as an idx slot's file is
+(`_sound_modes_grow`, the slot's channels and length off the bank's row; `slot` = `sound_modes.bank_slot_key`, below
+zero; `vbank` = `[cat, record]`), and then always into a bank of ours (`_sound_modes_for_banks`): one fragment for each
+of the game's bank ids whose descriptor plays the record and a request list names (where files for two songs of one
+id share a mode, the longer song's has it). Each fragment's descriptor is the game's own for that id rewritten by
+`bank_songs.mode_descriptor`: every play names the file's record, a part played straight after the first is dropped
+with its wait, a play in a later loop names the file too (so an intro + looped song plays the file and loops it), the
+declared length the file's per play kept. The `bsid` lines swap the game's id for ours while the setting says the
+mode; the runtime is unchanged (`blist_play` compares whole 32-bit ids). A file that finds no bank road is taken off
+the card again (it has no image.bin road: a cat-0 descriptor under a bank id streams from the wrong file). The file
+matches the song's loudness off the project's copy of it (`level_ref` `"wav:<path>"`, `engine._LEVEL_WAV`), as no
+record of image.bin holds the song. Reading the banks costs about 80 s a bank on the Write (two emulator boots each),
+only for the banks whose songs have files.
+
+Proof (2026-11-17, rigs 2-4, hidden, MUTED, 4x; `C:\tmp\PAD-1378`): an override set of Deadpool LE 1.16 from the
+library built by `engine.write_overrides` with a 700 Hz file for bank 01's song (record 1) in mode 2 and an 1100 Hz
+file for bank 07's record 0 in mode 3. The Write put both in `image-sc02.bin` (7.1 MB), the game's resolver verified
+its 3 ids, and the runtime hooked 7 requests for the 3 `bsid` lines. Booted with the build's sounds.cfg (`force`
+1, 2, 3) and the sound-fire instrument: request 89 played 100% 700 Hz in mode 2 and the game's song in modes 1 and
+3; request 106 played 100% 1100 Hz in mode 3 (the intro + song id rewritten) and the game's song in modes 1 and 2.
+Tests: tests/test_pad1378_spike2_bank_song_modes.py.
+

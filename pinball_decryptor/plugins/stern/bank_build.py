@@ -196,6 +196,9 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
         emu_e.boot()
         emu_d.boot()
         def render(idx, q):
+            if E._wav_ref(q):
+                # PAD-1378: a song of the game's own sound banks, off the project's copy
+                return E._self_level_render(E._wav_ref(q), byidx[idx], np)
             # a stock sound of image.bin's, decoded from image.bin's window
             was, emu_e.mm = emu_e.mm, emu_e._mm_img
             try:
@@ -204,8 +207,11 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
                 emu_e.mm = was
 
         # PAD-609: decoded only when an encode needs it (E._LazyRefs)
-        refs = E._LazyRefs({idx: byidx[ref] for idx, ref in (level_refs or {}).items()
-                            if byidx.get(ref) is not None and idx in edits}, render)
+        refs = E._LazyRefs({idx: (ref if E._wav_ref(ref) else byidx[ref])
+                            for idx, ref in (level_refs or {}).items()
+                            if idx in edits and (E._wav_ref(ref) or (not isinstance(ref, str)
+                                                                     and byidx.get(ref) is not None))},
+                           render)
         emu_e.set_category_file(bank_path)
 
         def after(n, row, redo):
@@ -242,7 +248,8 @@ def chain_encode(gr_path, img_path, bank_path, cat, params, places, edits, np, l
                          E._encode_mono(emu_e, state["gr"], pe, edits[idx], np,
                                         **refs.kw(idx, kw))),
                 gain_db=kw["gain_db"], loop=kw["loop"],
-                ref=byidx.get((level_refs or {}).get(idx)) if idx in refs else None,
+                ref=(({"level": refs[idx]} if E._wav_ref(refs[idx])
+                      else byidx.get((level_refs or {}).get(idx))) if idx in refs else None),
                 chan=p["chan"])
             emu_d._ensure_range(emu_d.DESC2 + off, len(body))
             emu_d.mu.mem_write(emu_d.DESC2 + off, bytes(body))

@@ -1251,8 +1251,9 @@ So a bank song's mode files are records appended to **its own bank** (the Write'
 edited bank song; Try it's `games.patch` tail), keyed with `free_key(..., like=<every bank's records>,
 keep=BANK_KEEP)`: the bits the card's bank keys vary (20-31), never the bank's number (a one-song bank varies none
 of its own). The same `mswap` lines swap them at `sound_lookup`; the runtime is unchanged. `sound_modes.offer` now
-offers a `music_catNN_NNNN` slot on a Spike 3 title (`slot_ok`); on Spike 2 it stays refused (its music modes hand
-the resolver a descriptor, a different road). The record lines say `<bank>:<record>` for such a file.
+offers a `music_catNN_NNNN` slot on a Spike 3 title (`slot_ok`); on Spike 2 too since PAD-1378, by another road
+(extra_sound_banks.md, "Music modes for the game's own bank songs"). The record lines say `<bank>:<record>` for
+such a file.
 
 Proof (2026-11-17, Spike 3 rig slot 58, hidden and MUTED, `PAD_S3_AUDIO_OUT=1`; Fallout LE 0.82 from the library,
 staged as Try it does, with sound_fire_mode.c beside the runtime): a project giving bank 02's song

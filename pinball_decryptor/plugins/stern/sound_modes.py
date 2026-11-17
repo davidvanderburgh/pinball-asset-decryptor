@@ -829,13 +829,30 @@ def bank_slot(rel):
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
+def bank_slot_key(bank, record):
+    """PAD-1378: the slot number a Spike 2 Write gives a music bank's song (record *record* of
+    ``image-scNN.bin``, NN *bank*), which has no idx: below zero, so it is never an idx."""
+    return -(((int(bank) << 16) | int(record)) + 1)
+
+
+def slot_key(rel):
+    """The slot number of *rel*: its idx (``idx2095`` -> 2095), or PAD-1378 a music bank's song's
+    :func:`bank_slot_key`; None for neither."""
+    i = slot_idx(rel)
+    if i is not None:
+        return i
+    b = bank_slot(rel)
+    return bank_slot_key(*b) if b is not None else None
+
+
 def slot_ok(rel, prof):
     """Whether slot *rel* can have files for other music modes on title *prof*: a sound of the game's
-    sound bank (an idx file), or on a Spike 3 card also a music bank's song (PAD-1358: its files go
-    into its own bank, :mod:`.spike3_music`)."""
+    sound bank (an idx file), or a music bank's song (PAD-1358 on a Spike 3 card: its files go into
+    its own bank, :mod:`.spike3_music`; PAD-1378 on a Spike 2 card: into a sound bank of this app's,
+    played by the game's bank sound ids, :mod:`.bank_songs`)."""
     if slot_idx(rel) is not None:
         return True
-    return bank_slot(rel) is not None and getattr(prof, "arch", "arm") == "a64"
+    return bank_slot(rel) is not None
 
 
 # ---- which titles -------------------------------------------------------------------------------

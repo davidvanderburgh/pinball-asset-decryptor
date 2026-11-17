@@ -1157,8 +1157,10 @@ back 2, 3, 1 as set and said `mode 2/3/1 from here on`; request 481 (idx0034) in
 PCM was 100% 700 Hz, request 477 (idx2440) in mode 3 100% 1100 Hz, request 478 (idx3945) in mode 1 the game's own
 song (no swap, no tone). Its extract had had no request map: its request table (1545 requests, 32-byte records, the
 list at +16) reaches 66% of its 4945 sound ids, under the 90% `spike3_requests` held a table to (every other Spike 3
-card reaches 96-100%, and no other registry table on any reaches 2%); the bar is half now, and its extract maps 1490
-of the 1545 requests. Walking Dead Remastered's best table reaches 17% and stays unmapped.
+card reaches 96-100%, and no other registry table on any reaches 2%). Walking Dead Remastered LE 0.92 had none either:
+its 817 requests reach 17% of its 7836 sound ids, yet 746 of them name a recording. The table is now the one reaching
+the most sound ids, taken at half of them, or at a tenth when it reaches three times any other registry table: all
+eight Spike 3 cards in the library map (Transformers 1490 of 1545, Walking Dead Remastered 746 of 817, the rest as before).
 Tests: tests/test_pad1359_transformers_music_modes.py.
 
 ## Spare switch inputs and driver outputs on Spike 3 (PAD-1329)

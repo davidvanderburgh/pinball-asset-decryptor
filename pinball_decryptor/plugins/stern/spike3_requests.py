@@ -39,11 +39,17 @@ _R_RELATIVE = 1027
 _REC_SIZES = (24, 32, 40, 48)
 _MIN_REQUESTS = 8
 _MAX_REQUESTS = 1 << 20
-#: share of the sound ids a genuine request table reaches. Spike 2's bound (sound_requests.py) is
-#: 9/10, and Fallout, Pokemon, both Star Wars 2025 and ELG reach 96-100%; Transformers LE 0.96's
-#: 1545 requests reach 66% of its 4945 sound ids (PAD-1359: 1490 of them name a recording). No
-#: other registry table of any of them reaches 2%, so half still tells the table apart.
+#: share of the sound ids a genuine request table reaches by itself. Spike 2's bound
+#: (sound_requests.py) is 9/10, and Fallout, Pokemon, both Star Wars 2025 and ELG reach 96-100%;
+#: Transformers LE 0.96's 1545 requests reach 66% of its 4945 sound ids (PAD-1359: 1490 of them
+#: name a recording).
 _SPAN_NUM, _SPAN_DEN = 1, 2
+#: a table reaching less is still the request table when it reaches at least a tenth of the sound
+#: ids and DOMINATES: :data:`_DOMINANCE` times the reach of every other registry table. Walking
+#: Dead Remastered LE 0.92's 817 requests reach 1344 of its 7836 sound ids (17%; 746 of them name
+#: a recording), the next table 9. No other registry table of any card reaches 2%.
+_FLOOR_NUM, _FLOOR_DEN = 1, 10
+_DOMINANCE = 3
 LIST_MAX = 1 << 16
 #: name groups: five equal pointers to the entry's name (then a zero), 48 bytes apart
 _GROUP_PTRS = 5
@@ -141,12 +147,13 @@ def _read_list(prog, va):
 def request_table(prog, fragments):
     """``[[sid, ...] per request]`` of the game program, or ``[]``.
 
-    A registry triple ``{table, count, size}`` is taken only when its table's last record points
-    at the table's own end, and its lists then have to reach most of the card's *fragments*
-    sound ids (the meaning test that tells the table from the generator's other tables)."""
+    A registry triple ``{table, count, size}`` is a candidate only when its table's last record
+    points at the table's own end. The one whose lists reach the most of the card's *fragments*
+    sound ids is taken when it reaches half of them, or a tenth and :data:`_DOMINANCE` times any
+    other candidate (the meaning test that tells the table from the generator's other tables)."""
     if not fragments:
         return []
-    best = None
+    found = []
     for a, table in prog.rel.items():
         count = prog.u64(a + 8)
         size = prog.u64(a + 16)
@@ -162,11 +169,18 @@ def request_table(prog, fragments):
             p = prog.ptr(table + r * size + field)
             lists.append(_read_list(prog, p) if p else [])
         reach = len({s for li in lists for s in li if s < fragments})
-        if reach * _SPAN_DEN < fragments * _SPAN_NUM:
-            continue
-        if best is None or count > len(best):
-            best = lists
-    return best or []
+        if reach:
+            found.append((reach, count, lists))
+    if not found:
+        return []
+    found.sort(key=lambda f: (f[0], f[1]), reverse=True)
+    reach, _count, lists = found[0]
+    runner_up = found[1][0] if len(found) > 1 else 0
+    if reach * _SPAN_DEN >= fragments * _SPAN_NUM:
+        return lists
+    if reach * _FLOOR_DEN >= fragments * _FLOOR_NUM and reach >= _DOMINANCE * runner_up:
+        return lists
+    return []
 
 
 def menu_entries(prog, lists):

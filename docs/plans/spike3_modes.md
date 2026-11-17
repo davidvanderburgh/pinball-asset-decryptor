@@ -338,6 +338,73 @@ retry; finish the initials with END (left flipper from A) or the next Start pres
 Tests: tests/test_pad1330_spike3_challenges.py (the menu and the balls compare lifted and run at Spike 3's word size;
 the real program with PAD_S3_PROGRAMS).
 
+## The six other Spike 3 titles' challenges (PAD-1369)
+
+A mode's own challenge on the start menu of Walking Dead Remastered LE 0.92, Fallout LE 0.82, Pokemon LE 0.82, Star Wars
+2025 LE 0.96 / Pro 0.84 and Transformers LE 0.96 (Spike 3), as PAD-1330 did on Star Wars ELG.
+
+**The challenge game's sites, every title.** ELG's PAD-1330 sites were paired across by s3port's matcher (ELG as the
+reference, 64-bit to 64-bit) and each read off the target's own code by shape (C:/tmp/PAD-1369 sites.py): the balls of a
+player and of the current player (whole functions), the ball-number set's two compares, the last-ball test's join and the
+ball's end's join (`challenge_balls_at_0..3`, registers 19 19 19 20 on all six: the same code, setting 79 on WDR and
+Pro's, 80 on the rest); the extra-ball test is the ball's end's first call after its 0x90 (Pro: 0x8f) bus question. The
+matcher's pairs needed help in three places: it paired the ball-number set and the last-ball test to one function (the
+next function is the test), on Star Wars 2025 Pro it paired the ball-number set onto the second balls function, and on
+Fallout, Pokemon, Pro and Transformers its "end of the ball" was not it: the function that ORs 0x202 into the status
+bits opens with an `adrp` and no prologue, so the scanner ran it into the function before (Fallout 0x935490, Pokemon
+0x6d48c0, Pro 0x33ea50, Transformers 0x459c80 - each ~0x58e0 past the launch handler, as on ELG). Every site is the
+program's own words, the extra-ball test ends `sub w1, w1, #1; strb; ret`, the launch handler reads flag 13 and fires
+with 8 (tests/test_pad1369_spike3_challenges.py, with PAD_S3_PROGRAMS).
+
+| title | challenge flag | menu | the end of the ball | launch |
+|---|---|---|---|---|
+| Walking Dead Remastered LE 0.92 | 18 | ELG's: kind 3 sets 18 alone (0x1f01e0), CHALLENGE 1920 | 0x36e4f0 | 0x369010 |
+| Fallout LE 0.82 | 18 | index, CHALLENGE 1922, STANDARD 1915 / NORMAL PLAY 1916 | 0x935490 | 0x92ffb0 |
+| Pokemon LE 0.82 | 17 | index, CHALLENGE 1915, STANDARD 1911 / 1912 | 0x6d48c0 | 0x6cef90 |
+| Star Wars 2025 LE 0.96 | 17 | index, CHALLENGE 1915, STANDARD 1911 / 1912 | 0x378a30 | 0x373550 |
+| Star Wars 2025 Pro 0.84 | 17 | index, CHALLENGE 1911, STANDARD 1907 / 1908 | 0x33ea50 | 0x339570 |
+| Transformers LE 0.96 | 18 | index, CHALLENGE 1922, STANDARD 1915 / 1916 | 0x459c80 | 0x4543a0 |
+
+**The index menus' game-mode tables** (64-bit, C:/tmp/PAD-1369 gpm64.py): the adapter's accessors (`cmp w1, #last;
+ubfiz x1, x1, #6; adrp; add`) give a table of 64-byte entries in .bss {index +0, flag u16 +4, caption +6, name +8, balls
+u32 +12}, filled by one constructor (its stores emulated). Fallout has two challenges of its own (RED MENACE, PIPFALL:
+flag 18, one ball), Star Wars 2025 LE two (ESCAPE BESPIN, NEVER TELL ME THE ODDS: flag 17), Pokemon a CHALLENGE MODE
+entry with Venom's words (DEFEAT KNULL) that its menu does not list, Transformers four one-ball specials with no flag,
+Pro only Standard and Competition. So Godzilla's "the game's own challenge index again" fits two of the five; the entry
+is **Standard's index again** on all five instead: the menu draws it with Standard's caption and name messages, which
+the runtime letters CHALLENGE (the game's own message, `challenge_menu_caption`) and the mode's name while the cursor is
+on it, and the game plays a plain game that the ball's start makes the mode's one-ball challenge game
+(`challenge_menu_sets_on`, `challenge_menu_slot -1`).
+
+**The runtime** (`challenge_menu_frame`, PAD-686's): the list and count in the frame or in registers
+(`challenge_menu_frame_list_reg` / `_count_reg`, hook_full's numbers), Pokemon's copy of the last index
+(`_last_at`), and a `moved` site (`challenge_menu_frame_moved 1`: hooked at Prolonged Competition's point, after the
+frame's press moved the cursor): the press is read off the cursor's change (`challenge_frame_press`), and a press away
+from our entry while a mode is left to step to puts the cursor back and steps the mode instead
+(`challenge_frame_moved`, lifted by the test). The name and caption messages come back as the cursor leaves. A plain
+index menu is armed with a ball-start event and `challenge_menu_frame_name_msg` (`mode_project._plain_index_menu` for the
+app's offer). The two hooks on the one frame point stack (PAD-1330's moved_word).
+
+**The app**: the six are in CHALLENGE_MENU_PROVEN (WDR: the game's own 2 of room for 8) and CHALLENGE_MENU_FRAME_PROVEN
+(the five), so the Mode page offers "A new challenge of its own on the game's start menu". `known_game_dir` now reads the
+shipped `ports/spike3` folder too: a Spike 3-only card (Fallout LE, ...) is named by its Stern file name, as ELG's was,
+not only once the app has opened it.
+
+Proof (2026-11-17, Spike 3 rig slots 136 / 138, hidden and MUTED, each title's set built by spike3_modes.plan from its
+library card with one mode, PAD CHALLENGE, `challenge new`; C:/tmp/PAD-1369 plan_chg.py, job.sh, play_chg.sh): on every
+title the mode was picked on the game's own menu (WDR: `3 entries (1 of the modes' own) - kinds 0 2 256`; the index
+titles: `MODE CHALLENGE appended (entry 9 of 9 / 3 of 3 / 8 of 8 / 3 of 3 / 6 of 6)` and `MODE CHALLENGE shows PAD
+CHALLENGE`), Start: `picked on the start menu: its mode starts as the ball starts`, the ball launched for the player 2 s
+in, the ball ended by the mode's clock (`the ball ends now ... 0x...`) or a drain with it, `an extra ball earned in it is
+not played`, `the balls-per-game getter says 1`, GAME OVER after the one ball (the index titles' Standard plays 4), and
+`PAD CHALLENGE's new high score` filed with the game's own initials entry. Fallout with two modes: the game's own menu
+showed CHALLENGE / PAD CHALLENGE, one right press `MODE CHALLENGE shows PAD SECOND (2 of 2)` with the cursor kept (the
+frame: CHALLENGE / PAD SECOND), and PAD SECOND played. Pokemon with Prolonged Competition beside it: both appended
+(MODE CHALLENGE 3 of 3, UNTIL POWERED OFF 4 of 4), ours picked, Prolonged Competition stayed off, one ball. Control (Star
+Wars 2025 Pro, the port's balls sites taken out): the same pick served balls 2, 3 and 4.
+Rig notes: s3run needs root (`wsl -u root`; as the user the presses find no machine); Pro steps LEFT at once after the
+chord (its window is short) - from STANDARD the left press wraps straight onto our entry.
+
 ## The Modes tab and Try it
 
 - The tab's card read (`title_reader`) opens a Spike 3 card's games partition with the user's

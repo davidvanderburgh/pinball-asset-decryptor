@@ -4768,6 +4768,15 @@ the game's own (flags 29, 37). The start menu on every build of the generation: 
   Proven (emulator, 2026-10-22, David's Heisei card with 13 modes, hidden, muted): the entry stepped through all 13
   names and on to STANDARD; JET JAGUAR, KING KONG and OXYGEN DESTROYER picked, each START as the ball started, one
   ball; MODE CHALLENGE then left back onto KING OF THE MONSTERS played the game's own challenge (its battle, no mode).
+  PAD-1369: the Spike 3 index menus (Fallout LE, Pokemon LE, Star Wars 2025 LE / Pro, Transformers LE) take the same
+  entry at Prolonged Competition's frame point, hooked after the frame's press moved the cursor
+  (`value challenge_menu_frame_moved 1`: the press is read off the cursor's change, and while a mode is left to step to
+  the cursor is put back); their list and count may be in registers (`challenge_menu_frame_list_reg`, `_count_reg`) and
+  Pokemon keeps a copy of the last index (`_last_at`). Three of the five have no challenge of their own to repeat, so
+  the entry is Standard's index again on all five: `challenge_menu_slot -1`, `challenge_menu_sets_on 1`, and the
+  runtime letters Standard's caption (`value challenge_menu_frame_caption_msg`) with the game's own CHALLENGE (`value
+  challenge_menu_caption`) and its name (`value challenge_menu_frame_name_msg`) with the mode's. Proven on all five
+  (emulator, 2026-11-17): the game's menu showing CHALLENGE / the mode's name, picked, one ball, GAME OVER.
 * **No challenge at all** - King Kong 0.97, X-Men 0.98 and D&D have none among their game modes; Bond 60th's only
   one is Challenge Mode, the whole game against the clock: their profiles say so.
 

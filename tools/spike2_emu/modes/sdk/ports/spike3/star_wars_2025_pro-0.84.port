@@ -266,3 +266,152 @@ value challenge_record_score_size 8
 # PAD-1327: the attract mode's HIGHEST SCORES screen is one list page (all five rows, their labels the scene's
 # own): a record put in its first row would read as GRAND CHAMPION, so no champion page is named - the dialog says
 # records are not shown in attract here. The page (rig-proven to take the record): # site challenge_pages_0      0x00199210 0xd10543ff 0xf0002d60
+
+# ---- attract (PAD-1328): the attract mode's page table, read off this program's sequencer (its child create at 0x1a04b8); an owner's attract items play between its pages ----
+data  attract_table       0x00754a50   # 126 entries {test, page}, 8-byte pointers (RELATIVE)
+value attract_entry_size  16
+value attract_page_at     8
+value attract_count       126
+site  attract_sleep       0x002de110 0xf0002941 0x910e0021
+#   the attract pages' own clip loop: player_advance(player, ms) ; scene_show(player, 3) each frame
+site  attract_show        0x00247ec0 0xa9be53f3 0xaa0003f4
+site  player_advance      0x00247e90 0xaa0003e1 0xb4000080
+
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read off the 64-bit device and light tables (PAD-1328) ----
+# 96 blade pixel(s), 40 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 3,4,5        25  SPEAKER L 1  # lamp 3, I/O group 3 index 1, at 95,28, speaker L
+cablamp 6,7,8        75  SPEAKER L 2  # lamp 4, I/O group 3 index 4, at 108,30, speaker L
+cablamp 9,10,11      125 SPEAKER L 3  # lamp 5, I/O group 3 index 7, at 120,36, speaker L
+cablamp 12,13,14     175 SPEAKER L 4  # lamp 6, I/O group 3 index 10, at 129,45, speaker L
+cablamp 15,16,17     225 SPEAKER L 5  # lamp 7, I/O group 3 index 13, at 135,57, speaker L
+cablamp 18,19,20     275 SPEAKER L 6  # lamp 8, I/O group 3 index 16, at 137,70, speaker L
+cablamp 21,22,23     325 SPEAKER L 7  # lamp 9, I/O group 3 index 19, at 135,83, speaker L
+cablamp 24,25,26     375 SPEAKER L 8  # lamp 10, I/O group 3 index 22, at 129,95, speaker L
+cablamp 27,28,29     425 SPEAKER L 9  # lamp 11, I/O group 3 index 25, at 120,104, speaker L
+cablamp 30,31,32     475 SPEAKER L 10  # lamp 12, I/O group 3 index 28, at 108,110, speaker L
+cablamp 33,34,35     525 SPEAKER L 11  # lamp 13, I/O group 3 index 31, at 95,112, speaker L
+cablamp 36,37,38     575 SPEAKER L 12  # lamp 14, I/O group 3 index 34, at 82,110, speaker L
+cablamp 39,40,41     625 SPEAKER L 13  # lamp 15, I/O group 3 index 37, at 70,104, speaker L
+cablamp 42,43,44     675 SPEAKER L 14  # lamp 16, I/O group 3 index 40, at 61,95, speaker L
+cablamp 45,46,47     725 SPEAKER L 15  # lamp 17, I/O group 3 index 43, at 55,83, speaker L
+cablamp 48,49,50     775 SPEAKER L 16  # lamp 18, I/O group 3 index 46, at 53,70, speaker L
+cablamp 51,52,53     825 SPEAKER L 17  # lamp 19, I/O group 3 index 49, at 55,57, speaker L
+cablamp 54,55,56     875 SPEAKER L 18  # lamp 20, I/O group 3 index 52, at 61,45, speaker L
+cablamp 57,58,59     925 SPEAKER L 19  # lamp 21, I/O group 3 index 55, at 70,36, speaker L
+cablamp 60,61,62     975 SPEAKER L 20  # lamp 22, I/O group 3 index 58, at 82,30, speaker L
+cablamp 63,64,65     25  SPEAKER R 1  # lamp 23, I/O group 3 index 61, at 205,28, speaker R
+cablamp 66,67,68     75  SPEAKER R 2  # lamp 24, I/O group 3 index 64, at 218,30, speaker R
+cablamp 69,70,71     125 SPEAKER R 3  # lamp 25, I/O group 3 index 67, at 230,36, speaker R
+cablamp 72,73,74     175 SPEAKER R 4  # lamp 26, I/O group 3 index 70, at 239,45, speaker R
+cablamp 75,76,77     225 SPEAKER R 5  # lamp 27, I/O group 3 index 73, at 245,57, speaker R
+cablamp 78,79,80     275 SPEAKER R 6  # lamp 28, I/O group 3 index 76, at 247,70, speaker R
+cablamp 81,82,83     325 SPEAKER R 7  # lamp 29, I/O group 3 index 79, at 245,83, speaker R
+cablamp 84,85,86     375 SPEAKER R 8  # lamp 30, I/O group 3 index 82, at 239,95, speaker R
+cablamp 87,88,89     425 SPEAKER R 9  # lamp 31, I/O group 3 index 85, at 230,104, speaker R
+cablamp 90,91,92     475 SPEAKER R 10  # lamp 32, I/O group 3 index 88, at 218,110, speaker R
+cablamp 93,94,95     525 SPEAKER R 11  # lamp 33, I/O group 3 index 91, at 205,112, speaker R
+cablamp 96,97,98     575 SPEAKER R 12  # lamp 34, I/O group 3 index 94, at 192,110, speaker R
+cablamp 99,100,101   625 SPEAKER R 13  # lamp 35, I/O group 3 index 97, at 180,104, speaker R
+cablamp 102,103,104  675 SPEAKER R 14  # lamp 36, I/O group 3 index 100, at 171,95, speaker R
+cablamp 105,106,107  725 SPEAKER R 15  # lamp 37, I/O group 3 index 103, at 165,83, speaker R
+cablamp 108,109,110  775 SPEAKER R 16  # lamp 38, I/O group 3 index 106, at 163,70, speaker R
+cablamp 111,112,113  825 SPEAKER R 17  # lamp 39, I/O group 3 index 109, at 165,57, speaker R
+cablamp 114,115,116  875 SPEAKER R 18  # lamp 40, I/O group 3 index 112, at 171,45, speaker R
+cablamp 117,118,119  925 SPEAKER R 19  # lamp 41, I/O group 3 index 115, at 180,36, speaker R
+cablamp 120,121,122  975 SPEAKER R 20  # lamp 42, I/O group 3 index 118, at 192,30, speaker R
+cablamp 267,268,269  10  EXPRESSION LIGHTING L 1  # lamp 142, I/O group 1 index 1, at 12,595, blade L
+cablamp 270,271,272  31  EXPRESSION LIGHTING L 2  # lamp 143, I/O group 1 index 4, at 12,586, blade L
+cablamp 273,274,275  52  EXPRESSION LIGHTING L 3  # lamp 144, I/O group 1 index 7, at 12,576, blade L
+cablamp 276,277,278  72  EXPRESSION LIGHTING L 4  # lamp 145, I/O group 1 index 10, at 12,566, blade L
+cablamp 279,280,281  93  EXPRESSION LIGHTING L 5  # lamp 146, I/O group 1 index 13, at 12,557, blade L
+cablamp 282,283,284  114 EXPRESSION LIGHTING L 6  # lamp 147, I/O group 1 index 16, at 12,547, blade L
+cablamp 285,286,287  135 EXPRESSION LIGHTING L 7  # lamp 148, I/O group 1 index 19, at 12,538, blade L
+cablamp 288,289,290  156 EXPRESSION LIGHTING L 8  # lamp 149, I/O group 1 index 22, at 12,528, blade L
+cablamp 291,292,293  177 EXPRESSION LIGHTING L 9  # lamp 150, I/O group 1 index 25, at 12,519, blade L
+cablamp 294,295,296  197 EXPRESSION LIGHTING L 10  # lamp 151, I/O group 1 index 28, at 12,509, blade L
+cablamp 297,298,299  218 EXPRESSION LIGHTING L 11  # lamp 152, I/O group 1 index 31, at 12,499, blade L
+cablamp 300,301,302  239 EXPRESSION LIGHTING L 12  # lamp 153, I/O group 1 index 34, at 12,490, blade L
+cablamp 303,304,305  260 EXPRESSION LIGHTING L 13  # lamp 154, I/O group 1 index 37, at 12,480, blade L
+cablamp 306,307,308  281 EXPRESSION LIGHTING L 14  # lamp 155, I/O group 1 index 40, at 12,471, blade L
+cablamp 309,310,311  302 EXPRESSION LIGHTING L 15  # lamp 156, I/O group 1 index 43, at 12,461, blade L
+cablamp 312,313,314  322 EXPRESSION LIGHTING L 16  # lamp 157, I/O group 1 index 46, at 12,451, blade L
+cablamp 315,316,317  343 EXPRESSION LIGHTING L 17  # lamp 158, I/O group 1 index 49, at 12,442, blade L
+cablamp 318,319,320  364 EXPRESSION LIGHTING L 18  # lamp 159, I/O group 1 index 52, at 12,432, blade L
+cablamp 321,322,323  385 EXPRESSION LIGHTING L 19  # lamp 160, I/O group 1 index 55, at 12,423, blade L
+cablamp 324,325,326  406 EXPRESSION LIGHTING L 20  # lamp 161, I/O group 1 index 58, at 12,413, blade L
+cablamp 327,328,329  427 EXPRESSION LIGHTING L 21  # lamp 162, I/O group 1 index 61, at 12,404, blade L
+cablamp 330,331,332  447 EXPRESSION LIGHTING L 22  # lamp 163, I/O group 1 index 64, at 12,394, blade L
+cablamp 333,334,335  468 EXPRESSION LIGHTING L 23  # lamp 164, I/O group 1 index 67, at 12,384, blade L
+cablamp 336,337,338  489 EXPRESSION LIGHTING L 24  # lamp 165, I/O group 1 index 70, at 12,375, blade L
+cablamp 339,340,341  510 EXPRESSION LIGHTING L 25  # lamp 166, I/O group 1 index 73, at 12,365, blade L
+cablamp 342,343,344  531 EXPRESSION LIGHTING L 26  # lamp 167, I/O group 1 index 76, at 12,356, blade L
+cablamp 345,346,347  552 EXPRESSION LIGHTING L 27  # lamp 168, I/O group 1 index 79, at 12,346, blade L
+cablamp 348,349,350  572 EXPRESSION LIGHTING L 28  # lamp 169, I/O group 1 index 82, at 12,336, blade L
+cablamp 351,352,353  593 EXPRESSION LIGHTING L 29  # lamp 170, I/O group 1 index 85, at 12,327, blade L
+cablamp 354,355,356  614 EXPRESSION LIGHTING L 30  # lamp 171, I/O group 1 index 88, at 12,317, blade L
+cablamp 357,358,359  635 EXPRESSION LIGHTING L 31  # lamp 172, I/O group 1 index 91, at 12,308, blade L
+cablamp 360,361,362  656 EXPRESSION LIGHTING L 32  # lamp 173, I/O group 1 index 94, at 12,298, blade L
+cablamp 363,364,365  677 EXPRESSION LIGHTING L 33  # lamp 174, I/O group 1 index 97, at 12,289, blade L
+cablamp 366,367,368  697 EXPRESSION LIGHTING L 34  # lamp 175, I/O group 1 index 100, at 12,279, blade L
+cablamp 369,370,371  718 EXPRESSION LIGHTING L 35  # lamp 176, I/O group 1 index 103, at 12,269, blade L
+cablamp 372,373,374  739 EXPRESSION LIGHTING L 36  # lamp 177, I/O group 1 index 106, at 12,260, blade L
+cablamp 375,376,377  760 EXPRESSION LIGHTING L 37  # lamp 178, I/O group 1 index 109, at 12,250, blade L
+cablamp 378,379,380  781 EXPRESSION LIGHTING L 38  # lamp 179, I/O group 1 index 112, at 12,241, blade L
+cablamp 381,382,383  802 EXPRESSION LIGHTING L 39  # lamp 180, I/O group 1 index 115, at 12,231, blade L
+cablamp 384,385,386  822 EXPRESSION LIGHTING L 40  # lamp 181, I/O group 1 index 118, at 12,221, blade L
+cablamp 387,388,389  843 EXPRESSION LIGHTING L 41  # lamp 182, I/O group 1 index 121, at 12,212, blade L
+cablamp 390,391,392  864 EXPRESSION LIGHTING L 42  # lamp 183, I/O group 1 index 124, at 12,202, blade L
+cablamp 393,394,395  885 EXPRESSION LIGHTING L 43  # lamp 184, I/O group 1 index 127, at 12,193, blade L
+cablamp 396,397,398  906 EXPRESSION LIGHTING L 44  # lamp 185, I/O group 1 index 130, at 12,183, blade L
+cablamp 399,400,401  927 EXPRESSION LIGHTING L 45  # lamp 186, I/O group 1 index 133, at 12,174, blade L
+cablamp 402,403,404  947 EXPRESSION LIGHTING L 46  # lamp 187, I/O group 1 index 136, at 12,164, blade L
+cablamp 405,406,407  968 EXPRESSION LIGHTING L 47  # lamp 188, I/O group 1 index 139, at 12,154, blade L
+cablamp 408,409,410  989 EXPRESSION LIGHTING L 48  # lamp 189, I/O group 1 index 142, at 12,145, blade L
+cablamp 411,412,413  10  EXPRESSION LIGHTING R 49  # lamp 190, I/O group 1 index 145, at 288,595, blade R
+cablamp 414,415,416  31  EXPRESSION LIGHTING R 50  # lamp 191, I/O group 1 index 148, at 288,586, blade R
+cablamp 417,418,419  52  EXPRESSION LIGHTING R 51  # lamp 192, I/O group 1 index 151, at 288,576, blade R
+cablamp 420,421,422  72  EXPRESSION LIGHTING R 52  # lamp 193, I/O group 1 index 154, at 288,566, blade R
+cablamp 423,424,425  93  EXPRESSION LIGHTING R 53  # lamp 194, I/O group 1 index 157, at 288,557, blade R
+cablamp 426,427,428  114 EXPRESSION LIGHTING R 54  # lamp 195, I/O group 1 index 160, at 288,547, blade R
+cablamp 429,430,431  135 EXPRESSION LIGHTING R 55  # lamp 196, I/O group 1 index 163, at 288,538, blade R
+cablamp 432,433,434  156 EXPRESSION LIGHTING R 56  # lamp 197, I/O group 1 index 166, at 288,528, blade R
+cablamp 435,436,437  177 EXPRESSION LIGHTING R 57  # lamp 198, I/O group 1 index 169, at 288,519, blade R
+cablamp 438,439,440  197 EXPRESSION LIGHTING R 58  # lamp 199, I/O group 1 index 172, at 288,509, blade R
+cablamp 441,442,443  218 EXPRESSION LIGHTING R 59  # lamp 200, I/O group 1 index 175, at 288,499, blade R
+cablamp 444,445,446  239 EXPRESSION LIGHTING R 60  # lamp 201, I/O group 1 index 178, at 288,490, blade R
+cablamp 447,448,449  260 EXPRESSION LIGHTING R 61  # lamp 202, I/O group 1 index 181, at 288,480, blade R
+cablamp 450,451,452  281 EXPRESSION LIGHTING R 62  # lamp 203, I/O group 1 index 184, at 288,471, blade R
+cablamp 453,454,455  302 EXPRESSION LIGHTING R 63  # lamp 204, I/O group 1 index 187, at 288,461, blade R
+cablamp 456,457,458  322 EXPRESSION LIGHTING R 64  # lamp 205, I/O group 1 index 190, at 288,451, blade R
+cablamp 459,460,461  343 EXPRESSION LIGHTING R 65  # lamp 206, I/O group 1 index 193, at 288,442, blade R
+cablamp 462,463,464  364 EXPRESSION LIGHTING R 66  # lamp 207, I/O group 1 index 196, at 288,432, blade R
+cablamp 465,466,467  385 EXPRESSION LIGHTING R 67  # lamp 208, I/O group 1 index 199, at 288,423, blade R
+cablamp 468,469,470  406 EXPRESSION LIGHTING R 68  # lamp 209, I/O group 1 index 202, at 288,413, blade R
+cablamp 471,472,473  427 EXPRESSION LIGHTING R 69  # lamp 210, I/O group 1 index 205, at 288,404, blade R
+cablamp 474,475,476  447 EXPRESSION LIGHTING R 70  # lamp 211, I/O group 1 index 208, at 288,394, blade R
+cablamp 477,478,479  468 EXPRESSION LIGHTING R 71  # lamp 212, I/O group 1 index 211, at 288,384, blade R
+cablamp 480,481,482  489 EXPRESSION LIGHTING R 72  # lamp 213, I/O group 1 index 214, at 288,375, blade R
+cablamp 483,484,485  510 EXPRESSION LIGHTING R 73  # lamp 214, I/O group 1 index 217, at 288,365, blade R
+cablamp 486,487,488  531 EXPRESSION LIGHTING R 74  # lamp 215, I/O group 1 index 220, at 288,356, blade R
+cablamp 489,490,491  552 EXPRESSION LIGHTING R 75  # lamp 216, I/O group 1 index 223, at 288,346, blade R
+cablamp 492,493,494  572 EXPRESSION LIGHTING R 76  # lamp 217, I/O group 1 index 226, at 288,336, blade R
+cablamp 495,496,497  593 EXPRESSION LIGHTING R 77  # lamp 218, I/O group 1 index 229, at 288,327, blade R
+cablamp 498,499,500  614 EXPRESSION LIGHTING R 78  # lamp 219, I/O group 1 index 232, at 288,317, blade R
+cablamp 501,502,503  635 EXPRESSION LIGHTING R 79  # lamp 220, I/O group 1 index 235, at 288,308, blade R
+cablamp 504,505,506  656 EXPRESSION LIGHTING R 80  # lamp 221, I/O group 1 index 238, at 288,298, blade R
+cablamp 507,508,509  677 EXPRESSION LIGHTING R 81  # lamp 222, I/O group 1 index 241, at 288,289, blade R
+cablamp 510,511,512  697 EXPRESSION LIGHTING R 82  # lamp 223, I/O group 1 index 244, at 288,279, blade R
+cablamp 513,514,515  718 EXPRESSION LIGHTING R 83  # lamp 224, I/O group 1 index 247, at 288,269, blade R
+cablamp 516,517,518  739 EXPRESSION LIGHTING R 84  # lamp 225, I/O group 1 index 250, at 288,260, blade R
+cablamp 519,520,521  760 EXPRESSION LIGHTING R 85  # lamp 226, I/O group 1 index 253, at 288,250, blade R
+cablamp 522,523,524  781 EXPRESSION LIGHTING R 86  # lamp 227, I/O group 1 index 256, at 288,241, blade R
+cablamp 525,526,527  802 EXPRESSION LIGHTING R 87  # lamp 228, I/O group 1 index 259, at 288,231, blade R
+cablamp 528,529,530  822 EXPRESSION LIGHTING R 88  # lamp 229, I/O group 1 index 262, at 288,221, blade R
+cablamp 531,532,533  843 EXPRESSION LIGHTING R 89  # lamp 230, I/O group 1 index 265, at 288,212, blade R
+cablamp 534,535,536  864 EXPRESSION LIGHTING R 90  # lamp 231, I/O group 1 index 268, at 288,202, blade R
+cablamp 537,538,539  885 EXPRESSION LIGHTING R 91  # lamp 232, I/O group 1 index 271, at 288,193, blade R
+cablamp 540,541,542  906 EXPRESSION LIGHTING R 92  # lamp 233, I/O group 1 index 274, at 288,183, blade R
+cablamp 543,544,545  927 EXPRESSION LIGHTING R 93  # lamp 234, I/O group 1 index 277, at 288,174, blade R
+cablamp 546,547,548  947 EXPRESSION LIGHTING R 94  # lamp 235, I/O group 1 index 280, at 288,164, blade R
+cablamp 549,550,551  968 EXPRESSION LIGHTING R 95  # lamp 236, I/O group 1 index 283, at 288,154, blade R
+cablamp 552,553,554  989 EXPRESSION LIGHTING R 96  # lamp 237, I/O group 1 index 286, at 288,145, blade R

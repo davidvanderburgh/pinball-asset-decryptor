@@ -386,11 +386,22 @@ _NOT_PLAYFIELD = ("system/", "topper", "backpanel", "back_panel", "speaker", "ca
 #: blade, as on the titles that do) and a speaker light (Batman 66: LEFT / RIGHT SPEAKER n, one ring each)
 _BLADE = re.compile(r"^EXPRESSIVE LIGHTING(?: ([LR]))? (\d+)$")
 _SPEAKER = re.compile(r"^(?:(LEFT|RIGHT) )?SPEAKER (\d+)$")
+#: PAD-1328: Spike 3's names (each pixel three lamps, -R / -G / -B, folded into one RGB light by the drafter): Star Wars
+#: 2025's blades `EXPRESSION LIGHTING L 1..48` / `R 49..96`; Fallout, Pokemon, Transformers and Walking Dead
+#: Remastered's six cabinet strips `CABINET L-IN UPPER 1..24`, `L-IN LOWER 25..48`, `R-IN UPPER / LOWER 49..96`,
+#: `L-OUT 97..120`, `R-OUT 121..144`; every one's speaker rings `SPEAKER L 1..20` / `SPEAKER R 1..20`
+_BLADE3 = re.compile(r"^EXPRESSION LIGHTING ([LR]) (\d+)$")
+_STRIP3 = re.compile(r"^CABINET ([LR])-(IN UPPER|IN LOWER|OUT) (\d+)$")
+_SPEAKER3 = re.compile(r"^SPEAKER ([LR]) (\d+)$")
 #: the cabinet drawing (the 0-300 x 0-600 a light show's patterns run over): the blades down its sides from the bottom
 #: to CAB_BLADE_TOP, the speaker ring(s) in the backbox above them
 CAB_BLADE_X = {"L": 12, "R": 288}
 CAB_BLADE_TOP, CAB_BLADE_BOTTOM = 140, 600
 CAB_RING = {"": (150, 70, 50), "L": (95, 70, 42), "R": (205, 70, 42)}
+#: PAD-1328: a Spike 3 cabinet's two strips a side: the inner one (UPPER + LOWER) and the outer one, each its own
+#: run along the side (x: the runtime reads a light's side off it, < 150 left); numbered from the TOP down (UPPER holds
+#: the first numbers), where the Spike 2 blades are numbered bottom up
+CAB_STRIP_X = {("L", "IN"): 22, ("L", "OUT"): 4, ("R", "IN"): 278, ("R", "OUT"): 296}
 
 
 def cabinet_role(name):
@@ -401,7 +412,22 @@ def cabinet_role(name):
     m = _SPEAKER.match(name or "")
     if m:
         return "speaker", (m.group(1) or "")[:1], int(m.group(2))
+    m = _BLADE3.match(name or "")                       # PAD-1328: Spike 3's
+    if m:
+        return "blade", m.group(1), int(m.group(2))
+    m = _STRIP3.match(name or "")
+    if m:
+        return "blade", m.group(1), int(m.group(3))
+    m = _SPEAKER3.match(name or "")
+    if m:
+        return "speaker", m.group(1), int(m.group(2))
     return None
+
+
+def cabinet_strip(name):
+    """PAD-1328: which of a Spike 3 cabinet's strips a blade light is on ("IN" / "OUT"), "" for a plain blade."""
+    m = _STRIP3.match(name or "")
+    return ("IN" if m.group(2).startswith("IN") else "OUT") if m else ""
 
 
 def playfield_image(t):
@@ -525,13 +551,19 @@ def place_cabinet(out):
     if len(speakers) > 1 and not any(c["side"] for c in speakers):
         for i, c in enumerate(speakers):
             c["side"] = "L" if i < (len(speakers) + 1) // 2 else "R"
+    for c in out:
+        c.setdefault("strip", cabinet_strip(c["name"]) if c["role"] == "blade" else "")
     for role in ("blade", "speaker"):
         for side in ("", "L", "R"):
-            row = sorted((c for c in out if c["role"] == role and c["side"] == side), key=lambda c: c["n"])
+          for strip in ("", "IN", "OUT"):
+            row = sorted((c for c in out if c["role"] == role and c["side"] == side and c["strip"] == strip),
+                         key=lambda c: c["n"])
+            if strip:                                   # PAD-1328: a Spike 3 strip is numbered from the top down
+                row.reverse()
             for i, c in enumerate(row):
                 c["u"] = int((i + 0.5) * 1000 / len(row))
                 if role == "blade":
-                    c["x"] = CAB_BLADE_X.get(side, 150)
+                    c["x"] = CAB_STRIP_X[(side, strip)] if strip else CAB_BLADE_X.get(side, 150)
                     c["y"] = CAB_BLADE_BOTTOM - round((i + 0.5) * (CAB_BLADE_BOTTOM - CAB_BLADE_TOP) / len(row))
                 else:
                     cx, cy, r = CAB_RING.get(side, CAB_RING[""])
@@ -545,7 +577,8 @@ def cabinet_line(c):
     where = ("lamp %d, I/O group %d index %d, " % (c["lamp"], c["group"], c["index"])) if c["group"] >= 0 else ""
     return "cablamp %-12s %-3d %s  # %sat %d,%d, %s" % (
         ",".join(map(str, c["lights"])), c["u"], c["name"], where, c["x"], c["y"],
-        "%s %s" % (c["role"], c["side"]) if c["side"] else c["role"])
+        ("%s %s" % (c["role"], c["side"]) if c["side"] else c["role"]) + (" %s" % c["strip"].lower()
+                                                                           if c.get("strip") else ""))
 
 
 def cabinet_lines(elf, t=None, cab=None):

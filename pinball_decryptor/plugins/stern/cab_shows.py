@@ -243,6 +243,11 @@ INSIDER_WORDS = ("They change only the cabinet's lights, not the game or its sco
 NO_TITLE = "The app cannot tell which game this project is for."
 NO_CAB = "%s has no expression lights the app knows: its port names no blades or speaker lights."
 NO_LAYER = "The app does not know how %s lights its lamps yet, so it cannot hold its cabinet's lights."
+#: PAD-1328: a Spike 3 port names its cabinet's lights (cablamp lines off the 64-bit tables) and the runtime holds them
+#: with a song, but no rig run has shown the strips lit yet (the emulated strip boards take no lamp data from the game,
+#: its own shows included): the shows wait for that proof
+NO_SPIKE3 = ("%s's cabinet lights cannot take shows of your own yet: a Spike 3 cabinet's shows are not proven on the "
+             "machine.")
 #: what the runtime needs of the port: the lamp layer (lamps_arm) and, for a show to start with its song, the sound
 #: worker and the request table
 PORT_SITES = ("lamp_group",)
@@ -286,7 +291,10 @@ def title_refusal(prof):
         port = MP.read_port(MP.port_path(prof))
     except (OSError, MP.ModeProjectError):
         return NO_CAB % prof.label
-    return port_refusal(port, prof.label)
+    why = port_refusal(port, prof.label)
+    if not why and getattr(prof, "arch", "arm") == "a64":
+        return NO_SPIKE3 % prof.label
+    return why
 
 
 def plays_with_songs(port):

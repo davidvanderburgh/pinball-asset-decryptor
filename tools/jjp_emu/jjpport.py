@@ -117,12 +117,11 @@ def _slot_of(e, vtname, fn):
     return None
 
 
-def hold(e):
-    """PAD-1348 game_modes = hold, on the file: the classes whose start/restart slots the
-    runtime gates, found as jjpmodes.c finds them in the game - each vtable's typeinfo
-    (word 1), walked up its base chain to Mode or MultiballRule.  A single-inheritance
-    typeinfo holds its base at +16; a multiple-inheritance one a count at +20 and
-    {base, offset} pairs from +24."""
+def derived_classes(e):
+    """(Mode classes, MultiballRule classes) as mangled names ("13CandyLaneMode"), found as
+    jjpmodes.c finds them in the game - each vtable's typeinfo (word 1), walked up its base
+    chain.  A single-inheritance typeinfo holds its base at +16; a multiple-inheritance one
+    a count at +20 and {base, offset} pairs from +24."""
     tis = {a: n for n, (a, s) in e.syms.items() if n.startswith("_ZTI")}
 
     def word(a):
@@ -155,6 +154,13 @@ def hold(e):
             modes.append(n[4:])
         elif ti_mb and derives(ti, ti_mb):
             mbs.append(n[4:])
+    return modes, mbs
+
+
+def hold(e):
+    """PAD-1348 game_modes = hold, on the file: the classes whose start/restart slots the
+    runtime gates (derived_classes)."""
+    modes, mbs = derived_classes(e)
     slots = collections.OrderedDict([
         ("mode_start", _slot_of(e, "_ZTV4Mode", "_ZN4Mode5startEv")),
         ("mode_restart", _slot_of(e, "_ZTV4Mode", "_ZN4Mode7restartEv")),
@@ -162,7 +168,7 @@ def hold(e):
         ("multiball_restart", _slot_of(e, "_ZTV13MultiballRule", "_ZN13MultiballRule7restartEv")),
     ])
     return collections.OrderedDict([
-        ("can_hold", bool(ti_mode) and slots["mode_start"] is not None),
+        ("can_hold", "_ZTI4Mode" in e.syms and slots["mode_start"] is not None),
         ("slots", slots),
         ("mode_classes", len(modes)),
         ("multiball_classes", sorted(mbs)),
@@ -212,6 +218,75 @@ def media(e):
     ])
 
 
+def _demangled_class(mangled):
+    m = re.match(r"^(\d+)(.*)$", mangled)
+    return m.group(2)[:int(m.group(1))] if m else mangled
+
+
+def _fn_at(e, vtname, off):
+    """The exported function a vtable slot holds (byte offset from the vptr), or None."""
+    if off is None or vtname not in e.syms:
+        return None
+    a, sz = e.syms[vtname]
+    if 16 + off + 8 > sz:
+        return None
+    w = struct.unpack("<Q", e.read(a + 16 + off, 8))[0]
+    return e.by_addr.get(w)
+
+
+#: the shot id a made shot carries, and how the runtime sets it for shots_add (jjpmodes.c stock_install)
+SHOT_GET = "_Z21shot_get_proc_shot_idv"
+SHOT_SET = ("_Z21shot_set_proc_shot_id9shot_id_t", "_Z21shot_set_proc_shot_id10_shot_id_e")
+
+
+def stock(e, live=None):
+    """PAD-1351 .stock files, on the file: for each of the title's Mode classes, which of the
+    game's own virtuals a .stock key works through - timer (its run_proc slot, then its
+    set_time), points (its score_and_total slot), shots (its own shot_dispatch, which asks
+    is_running through the vtable).  `live` (modes/ports/<title>.live.json, jjpstock.py live)
+    adds what only a running game shows: each mode global's class and the shot table."""
+    if "_ZTV4Mode" not in e.syms:
+        return collections.OrderedDict([("can_change", False)])
+    modes, _mbs = derived_classes(e)
+    slot = {k: _slot_of(e, "_ZTV4Mode", fn) for k, fn in (
+        ("run_proc", "_ZN4Mode8run_procEj"), ("set_time", "_ZN4Mode8set_timeEi"),
+        ("score", "_ZN4Mode15score_and_totalEy"), ("is_running", "_ZN4Mode10is_runningEv"),
+        ("is_running_or_grace", "_ZN4Mode19is_running_or_graceEv"),
+        ("is_running_or_grace_grace", "_ZN4Mode25is_running_or_grace_graceEv"))}
+    classes = collections.OrderedDict()
+    for mangled in sorted(modes, key=_demangled_class):
+        c = _demangled_class(mangled)
+        vt = "_ZTV" + mangled
+        own_sd = "_ZN%s13shot_dispatchEv" % mangled
+        set_time = _fn_at(e, vt, slot["set_time"])
+        score = _fn_at(e, vt, slot["score"])
+        classes[c] = collections.OrderedDict([
+            ("timer", "own set_time" if set_time and set_time != "_ZN4Mode8set_timeEi" else "Mode::set_time"),
+            ("points", "own score_and_total" if score and score != "_ZN4Mode15score_and_totalEy" else "Mode::score_and_total"),
+            ("shots", own_sd in e.syms),
+        ])
+    shot_set = next((n for n in SHOT_SET if n in e.syms), None)
+    shot_made = sorted(n for n in e.syms if re.match(r"^_Z\d+shot_made_\w+v$", n))
+    out = collections.OrderedDict([
+        ("can_change", all(v is not None for v in slot.values()) and SHOT_GET in e.syms),
+        ("slots", slot),
+        ("shot_id", collections.OrderedDict([
+            ("read", SHOT_GET in e.syms),
+            ("set_by", "shot_set_proc_shot_id" if shot_set else "the proc argument (read off shot_get_proc_shot_id)"),
+        ])),
+        ("shot_handlers", len(shot_made)),
+        ("classes", classes),
+    ])
+    live = live or {}
+    if live.get("objects"):
+        out["objects"] = collections.OrderedDict(sorted(
+            (o, c) for o, c in live["objects"].items() if c in classes))
+    if live.get("shots"):
+        out["shots"] = live["shots"]
+    out["live"] = live.get("source", "") if live else ""
+    return out
+
+
 def object_names(e, prefix, exclude=None, sizes=None):
     out = []
     for n, (a, s) in e.syms.items():
@@ -229,7 +304,7 @@ def _first(names, patterns):
     return names[0] if names else ""
 
 
-def port(elf_path, gamename=None):
+def port(elf_path, gamename=None, live=None):
     e = GameElf(elf_path)
     sdk = collections.OrderedDict()
     missing_required = []
@@ -283,6 +358,7 @@ def port(elf_path, gamename=None):
         ("mode_vtable", vt),
         ("hold", hold(e) if "_ZTV4Mode" in e.syms else {"can_hold": False}),
         ("media", media(e)),
+        ("stock", stock(e, live)),
         ("sdk", sdk),
         ("switch_object_bytes", sw_size),
         ("lamp_object_bytes", lamp_size),
@@ -319,6 +395,31 @@ def write_example(p, folder, title_label):
             f.write("lamps = %s\nlamp_color = ff2000\nlamp_blink = 4\n" % d["lamps"])
 
 
+def write_stock_example(p, folder, title_label):
+    """A starter .stock file: one of the title's own mode classes with shots of its own
+    (a mode global's name needs a live game, jjpstock.py; a class name works without)."""
+    cl = (p.get("stock") or {}).get("classes") or {}
+    pick = sorted((c for c, v in cl.items() if v["shots"]),
+                  key=lambda c: (not c.endswith("Mode"), v_own(cl[c]), c))
+    if not pick:
+        return None
+    c = pick[0]
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "%s.stock" % c)
+    with open(path, "w", newline="\n") as f:
+        f.write("# %s: the game's own %s, changed.  Every key: tools/jjp_emu/MODES.md\n" % (title_label, c))
+        f.write("# Its timer: %s; its points: %s; shots of its own: yes.\n" % (cl[c]["timer"], cl[c]["points"]))
+        f.write("mode = %s\npoints_x = 2\n" % c)
+        f.write("# seconds = 45\n# shots_off = <shot>\n# shots_add = <switch>:<shot>\n")
+        f.write("# Shot names are logged on the machine (jjpmodes.log, \"shots:\").\n")
+    return path
+
+
+def v_own(v):
+    """Sort key: classes whose points are their own first (0)."""
+    return 0 if v["points"] != "Mode::score_and_total" else 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("elf")
@@ -326,14 +427,19 @@ def main(argv=None):
     ap.add_argument("--out")
     ap.add_argument("--example", help="write a starter mode folder here")
     ap.add_argument("--label", help="title label for the example's comments")
+    ap.add_argument("--stock-example", help="write a starter .stock folder here")
+    ap.add_argument("--live", help="a running game's mode globals and shot table (jjpstock.py live) to fold in")
     a = ap.parse_args(argv)
-    p = port(a.elf, a.gamename)
+    live = json.load(open(a.live)) if a.live else None
+    p = port(a.elf, a.gamename, live)
     if a.out:
         with open(a.out, "w", newline="\n") as f:
             json.dump(p, f, indent=1)
             f.write("\n")
     if a.example:
         write_example(p, a.example, a.label or a.gamename or p["elf"])
+    if a.stock_example:
+        print("  starter .stock: %s" % write_stock_example(p, a.stock_example, a.label or a.gamename or p["elf"]))
     print("%s: %s; %d exported, %d switches, %d lamps, %d sounds, %d fonts, %d Mode classes%s" % (
         p["elf"], "CAN run modes" if p["can_run_modes"] else "can NOT run modes", p["exported_symbols"],
         len(p["switches"]), len(p["lamps"]), len(p["sounds"]), len(p["fonts"]), len(p["mode_classes"]),
@@ -342,6 +448,13 @@ def main(argv=None):
                                "no (%s)" % " ".join(k for k, v in p["media"]["ok"].items() if not v)))
     print("  vtable %s" % " ".join("%s=%s" % (k, hex(v) if v is not None else "-") for k, v in p["mode_vtable"].items()))
     print("  defaults %s" % json.dumps(p["defaults"]))
+    st = p["stock"]
+    if st.get("classes"):
+        cl = st["classes"]
+        print("  stock modes: %d classes, %d with their own shots, %d their own timer, %d their own points%s" % (
+            len(cl), sum(1 for v in cl.values() if v["shots"]), sum(1 for v in cl.values() if v["timer"] != "Mode::set_time"),
+            sum(1 for v in cl.values() if v["points"] != "Mode::score_and_total"),
+            "; %d shots named (live)" % len(st["shots"]) if st.get("shots") else ""))
     return 0 if p["can_run_modes"] else 1
 
 

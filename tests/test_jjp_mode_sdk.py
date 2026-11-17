@@ -302,3 +302,80 @@ def test_audio_capture_measures_a_tone():
     mono = cap.decode(fh.read(), 1, 2, 16)
     assert abs(cap.goertzel(mono, rate, 880) - 12000 / 32768) < 0.02
     assert cap.goertzel(mono, rate, 330) < 0.02
+
+
+# ------------------------------------------------------------------ USB mode stick (PAD-1349)
+def _stick_inputs(tmp_path):
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    (mods / "title.cfg").write_text("game = GunsNRoses\n")
+    (mods / "1_jam.mode").write_text("name = Jam Session\nstart = switch_target_jam\n")
+    so = tmp_path / "jjpmodes.so"
+    so.write_bytes(b"\x7fELF" + b"\0" * 60)
+    return str(mods), str(so)
+
+
+def test_stick_writes_runme_payload_and_sums(tmp_path):
+    import hashlib
+    mm = _load("mkjjpmodes")
+    mods, so = _stick_inputs(tmp_path)
+    out = tmp_path / "usb"
+    assert mm.main(["stick", "--out", str(out), "--modes", mods, "--so", so]) == 0
+    hot = out / "hotfix"
+    runme = (hot / "runme.sh").read_bytes()
+    assert b"\r" not in runme and b"@" not in runme.replace(b"@WRITTEN", b"")   # LF, every placeholder filled
+    text = runme.decode()
+    assert "ACTION=install" in text and "GAME=GunsNRoses" in text and "Jam Session" in text
+    assert "'[ -r $JJPEDIR/scripts/padmodes.sh ] && . $JJPEDIR/scripts/padmodes.sh'" in text   # single-quoted
+    sums = (hot / "padmodes.sha256").read_text().splitlines()
+    assert len(sums) == 4                                      # so, title.cfg, the mode, build.json
+    for ln in sums:
+        h, rel = ln.split("  ", 1)
+        assert hashlib.sha256((hot / rel).read_bytes()).hexdigest() == h
+    assert (hot / "padmodes.sh").read_text() == mm.PADMODES_SH
+    assert "Plus, Minus, Plus, Minus" in (out / "PADMODES_README.txt").read_text()
+
+
+def test_stick_refuses_without_a_game_or_over_an_old_stick(tmp_path):
+    mm = _load("mkjjpmodes")
+    mods, so = _stick_inputs(tmp_path)
+    out = str(tmp_path / "usb")
+    assert mm.main(["stick", "--out", out, "--action", "off"]) == 2          # which game?
+    assert mm.main(["stick", "--out", out, "--action", "off", "--game", "Wonka"]) == 0
+    assert mm.main(["stick", "--out", out, "--action", "on", "--game", "Wonka"]) == 2   # exists
+    assert mm.main(["stick", "--out", out, "--action", "on", "--game", "Wonka", "--force"]) == 0
+    assert mm.main(["stick", "--out", out, "--action", "on", "--game", "W;rm"]) == 2
+
+
+@pytest.mark.skipif(os.name == "nt" or not __import__("shutil").which("dash")
+                    or not __import__("shutil").which("sha256sum"), reason="needs dash + sha256sum")
+def test_stick_runme_installs_turns_off_on_and_removes_like_the_python_hook(tmp_path):
+    import subprocess
+    mm = _load("mkjjpmodes")
+    mods, so = _stick_inputs(tmp_path)
+    j = tmp_path / "J"
+    (j / "scripts").mkdir(parents=True)
+    (j / "GunsNRoses").mkdir()
+    (j / "GunsNRoses" / "game").write_text("")
+    (j / "scripts" / "rungame.sh").write_text(RUNGAME)
+    off = tmp_path / "perm" / "padmodes.off"
+    env = dict(os.environ, JJPEDIR=str(j), PAD_STICK_OFF=str(off), PAD_STICK_LOG=str(tmp_path / "log"))
+
+    def run(*args):
+        out = tmp_path / "usb"
+        assert mm.main(["stick", "--out", str(out), "--force"] + list(args)) == 0
+        return subprocess.run(["dash", str(out / "hotfix" / "runme.sh")], env=env).returncode
+
+    off.parent.mkdir()
+    off.write_text("")
+    assert run("--modes", mods, "--so", so) == 0
+    assert (j / "scripts" / "rungame.sh").read_text() == mm.hook_rungame_modes(RUNGAME)
+    assert (j / "padmodes" / "modes" / "1_jam.mode").exists() and not off.exists()
+    assert run("--modes", mods, "--so", so) == 0                # again: hooked once
+    assert (j / "scripts" / "rungame.sh").read_text() == mm.hook_rungame_modes(RUNGAME)
+    assert run("--action", "off", "--game", "GunsNRoses") == 0 and off.exists()
+    assert run("--action", "on", "--game", "GunsNRoses") == 0 and not off.exists()
+    assert run("--action", "off", "--game", "Wonka") == 1 and not off.exists()   # another title: nothing
+    assert run("--action", "remove", "--game", "GunsNRoses") == 0
+    assert (j / "scripts" / "rungame.sh").read_text() == RUNGAME
+    assert not (j / "padmodes").exists() and not (j / "scripts" / "padmodes.sh").exists()

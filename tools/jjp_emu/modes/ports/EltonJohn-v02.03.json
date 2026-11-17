@@ -84,6 +84,180 @@
    "libavutil.so.56"
   ]
  },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 36,
+  "classes": {
+   "BackstageFrenzy": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BennieAndTheSuperJets": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "FinalTour": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "JMBash": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "JMHurryUp": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "JMPattern": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "PianoMultiballWM": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "PianoRampMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongBeat": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "SongBeatMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongBeatModeLoveLiesBleeding": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": false
+   },
+   "SongModeBennieJets": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeBitchBack": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeCrocRock": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeGoodbyeYBR": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeHonkyCat": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeLevon": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModePhillyFreedom": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModePinballWizard": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeRocketman": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeSaturdayNight": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeSisterTwist": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeStillStanding": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeTakePilot": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeTinyDancer": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeYourSong": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "StarFrenzy": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "SuperSpinnerMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "TinyDancerMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   }
+  },
+  "live": ""
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,

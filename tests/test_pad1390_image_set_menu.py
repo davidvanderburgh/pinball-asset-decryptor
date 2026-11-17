@@ -84,6 +84,8 @@ def test_the_service_menu_wants_image_set_for_a_project_with_sets(tmp_path):
     assert all(w[0] != MS.IMAGE_SET for w in SM.wanted(project))
     staged_changes.save(project, {SV.STAGED_KEY: {"names": NAMES, "scenes": {SCENE: {"2": {"card": True},
                                                                                      "3": {"card": True}}}}})
+    assert all(w[0] != MS.IMAGE_SET for w in SM.wanted(project))       # PAD-1393 round 3: not until ticked
+    SM.save(project, {"on": ["image_set"]})
     rows = [w for w in SM.wanted(project) if w[0] == MS.IMAGE_SET]
     assert rows and rows[0][1] == 3 and list(rows[0][2]) == NAMES
 

@@ -9892,6 +9892,20 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     radium_overlays,
                     {bytes(fw_node["i_block"]): (fw_node, dict(_sc_ov))})
 
+        # PAD-1394: a Write that wants no setting of ours in the operator menu
+        # takes the rows an earlier Write gave its settings off it (one that
+        # wants some does it in the menu step above), as the score colours
+        retire_writes, n_retired = [], 0
+        if menu_job is None and fw_node is not None:
+            retire_writes, _rt_ov, n_retired = _retire_menu_rows(
+                reader, fw_node, log, patched_fw=patched_gr)
+            if _rt_ov:
+                fw_text_overlay = dict(fw_text_overlay)
+                fw_text_overlay.update(_rt_ov)
+                _merge_radium_overlays(
+                    radium_overlays,
+                    {bytes(fw_node["i_block"]): (fw_node, dict(_rt_ov))})
+
         # PAD-606: the game's request lists name the bank sid of every game sound
         # this Write put in a bank (and the game's own sid again for one an earlier
         # Write had banked and this one keeps in image.bin), in the staged program
@@ -10401,7 +10415,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 and not boot_writes and boot_grow is None
                 and patched_gr is None and mode_plan is None
                 and not clip_files
-                and not stock_mode_edits and not n_score
+                and not stock_mode_edits and not n_score and not n_retired
                 and bank_plan is None and not n_lists):
             raise RuntimeError(
                 "Nothing could be written: no sound re-encoded, no replaced "
@@ -10419,6 +10433,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                   + list(radimg_writes) + list(tree_writes) + list(pad_left_writes))
         writes += stock_mode_writes          # the game's own modes (item 145)
         writes += score_writes               # the score panel's colours (PAD-507)
+        writes += retire_writes              # menu rows no longer wanted (PAD-1394)
         writes += sound_list_writes          # the request lists' bank sids (PAD-606)
         # A grown sound bank is longer than the file on the card, so it can't be
         # patched in place: every re-encoded body is composed into the staged
@@ -12269,6 +12284,57 @@ def _picture_cfg(menus, grown, only, work, log):
     return path
 
 
+def _retire_menu_rows(reader, fw_node, log, patched_fw=None):
+    """PAD-1394: ``(writes, overlay, n)`` taking off the game program's operator menu the rows an
+    earlier Write gave settings of ours, on a Write that wants none of them
+    (:func:`.menu_settings.retire`): flat in-place writes and the same bytes as ``{file_offset:
+    bytes}`` for the ``.sidx`` refresh, or INTO the staged whole-file program (*patched_fw*) with no
+    in-place write, as :func:`.score_colours.compute_writes`. *n* is how many rows went. A program
+    no earlier Write grew (no text extension segment: its header is all that is read) has none.
+    Never raises."""
+    from . import menu_settings as _MSet
+    from . import progreloc as _pr
+    from .adjustments import AdjustmentTable
+    try:
+        if patched_fw is not None:
+            with open(_lp(patched_fw), "rb") as f:
+                elf = f.read()
+        else:
+            head = bytes(reader.read_range(fw_node, 0, 0x1000))
+            if not any(t == _pr.PT_LOAD and fs >= len(_pr.EXT_MAGIC) and bytes(
+                    reader.read_range(fw_node, off, len(_pr.EXT_MAGIC))) == _pr.EXT_MAGIC
+                    for (_o, t, off, _va, fs, _ms, _fl, _al) in _pr.iter_phdrs(head)):
+                return [], {}, 0
+            elf = bytes(reader.read_file_bytes(fw_node))
+        if _pr.extension_segment(elf) is None:
+            return [], {}, 0
+        ov, captions = _MSet.retire(AdjustmentTable(elf))
+        if not ov:
+            return [], {}, 0
+        said = ("Operator menu: %s, which an earlier Write added and this card no longer has, "
+                "%s taken off the menu." % (", ".join(captions),
+                                           "is" if len(captions) == 1 else "are"))
+        if patched_fw is not None:
+            buf = bytearray(elf)
+            for off, b in ov.items():
+                buf[off:off + len(b)] = b
+            with open(_lp(patched_fw), "wb") as f:
+                f.write(bytes(buf))
+            log(said, "info")
+            return [], {}, len(captions)
+        writes = []
+        for off, b in sorted(ov.items()):
+            payload = b
+            for disk, cnt in reader.disk_ranges(fw_node, off, len(b)):
+                writes.append((disk, payload[:cnt]))
+                payload = payload[cnt:]
+        log(said, "info")
+        return writes, ov, len(captions)
+    except Exception as e:                      # noqa: BLE001 - never fail a Write over this
+        log("Operator menu: rows an earlier Write added are left on it (%s)." % e, "warning")
+        return [], {}, 0
+
+
 class _MenuJobs:
     """Settings of ours that go into one game program together (PAD-494's
     MUSIC MODE, PAD-495's EDITION): their same-size writes, and ONE category
@@ -12300,6 +12366,16 @@ class _MenuJobs:
                 j.fail(refused.get(j.KEY) or "unknown")
         if not settings:
             raise _MSet.MenuSettingError(next(iter(refused.values()), "nothing to add"))
+        # PAD-1394: plan_many takes off the rows an earlier Write gave settings this one no longer wants
+        try:
+            from .adjustments import menu_label
+            gone = sorted({menu_label(t, i) for _c, i in _MSet.stale_rows(t, _MSet.menu_table(t), settings)})
+        except Exception:                                   # noqa: BLE001 - only the log line
+            gone = []
+        if gone and getattr(self.jobs[0], "log", None):
+            self.jobs[0].log("Operator menu: %s, which an earlier Write added and this card no longer "
+                             "has there, %s taken off the menu." % (", ".join(gone),
+                                                                    "is" if len(gone) == 1 else "are"), "info")
         out, blob = list(writes.items()), b""
         if cat is not None:
             blob = _MSet.table_blob(cat, *settings)

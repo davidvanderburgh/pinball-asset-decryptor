@@ -229,9 +229,10 @@ def test_the_runtime_arms_coop_on_64bit():
     arm = src[src.index("static void coop_arm(void)\n{"):]
     arm = arm[:arm.index("\n}\n")]
     assert "#if PM_A64" in arm and "if (!edge_hook(e)) {" in arm                    # the button's edges, hooked
-    assert "if (coop.setting) coop.setting += (pm_addr)game_base;" in src             # the row's word, moved
+    assert "coop.setting = setting_addr(coop.setting);" in src             # the row's word, moved (PAD-1382)
+    assert "return a + (pm_addr)game_base;" in src
     assert "pm_addr setting;" in src
-    assert "return only && v ? v + (pm_addr)game_base : 0;" in src                    # the Insider gate's too
+    assert "return only && v ? setting_addr(v) : 0;" in src                    # the Insider gate's too
     assert "static pm_addr insider_while;" in src and "pm_addr at = coop_setting_wanted();" in src
     assert src.count("ret = coop_add_game(r0, r1, r2, r3) & 0xffu;") == 2               # a bool in w0
     for fn in ("static void coop_scores_same(unsigned n)\n{",
@@ -386,7 +387,7 @@ def test_the_runtime_handicap_on_64bit():
     arm = src[src.index("static void hand_arm(void)\n{"):]
     arm = arm[:arm.index("\n}\n")]
     assert "#if PM_A64" in arm and "!edge_hook(e)" in arm
-    assert "if (hand.setting) hand.setting += (pm_addr)game_base;" in src
+    assert "hand.setting = setting_addr(hand.setting);" in src
     assert "id &= 0xffffu;" in src[src.index("static unsigned adj_chain(unsigned id)"):][:400]
 
 

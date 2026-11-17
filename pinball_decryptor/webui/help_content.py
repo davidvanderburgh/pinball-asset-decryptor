@@ -179,7 +179,7 @@ HELP_CONTENT = {
         ("Music modes",
          "Spike 2, the latest version of each game (not James Bond 007 Premium/LE, James Bond 60th or Star Wars Premium/LE, whose game programs cannot grow). One card can carry more "
          "than one set of sounds, and the machine's service menu picks the set: **Music "
-         "Mode** under Adjustments > Machine Settings > Audio Content (on a game whose "
+         "Mode** under Adjustments > Machine Settings > Custom Code (on a game whose "
          "Adjustments have Standard Adjustments: at the end of that list).\n\n"
          "- Right-click a sound > **Music modes** > **Mode 2 (Custom A): choose a "
          "sound…** (modes 2 to 4 are offered; **Add a music mode…** adds more, up to "
@@ -1526,6 +1526,45 @@ HELP_CONTENT = {
     # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
     # The key stays so every notebook tab has an entry.
     "Modes": [],
+    # PAD-1382: the game's service menu with the app's rows in it
+    "Service Menu": [
+        ("What it's for", [
+            "The settings the app adds to the game's own **service menu** (Music Mode, Edition, Co-op Play, Handicap), "
+            "as this card will show them at the machine. They all go on a page of their own, **Custom Code**: "
+            "Service menu > Adjustments > Machine Settings > Custom Code. The tab draws that page as the machine "
+            "does, with the way there and the Machine Settings list where it sits.",
+            "Click a row to see its help and its Current and Default values, as the machine shows them.",
+            "A game with the older dot-matrix menu (Aerosmith, Venom, TMNT and others) has no pages to add to: there "
+            "the app's settings are the last rows of Adjustments > Standard Adjustments, shown one adjustment at a "
+            "time as that menu does.",
+            "The menu is read from the card the project was made from. When that card has been moved or deleted, any "
+            "card of the same game and version will do: the project's own Write output, a card the app has been "
+            "pointed at, or the copy kept from the last time it was read. The tab says which card it read.",
+        ]),
+        ("The app's settings", [
+            "Tick Co-op Play or Handicap to put its row on the card (untick to leave it off). Music Mode is set on the "
+            "Audio tab, Edition on the Write tab. Values are the operator's: they are set at the machine, and **+** "
+            "and **-** here only show what each one looks like. Nothing changes on the card until you Write it.",
+            "The arrows put them in **your order**: their order on the page, and their numbers on More Settings when "
+            "they share. Each one's value is kept by name, so reordering never loses one.",
+        ]),
+        ("More settings than the game has room for", [
+            "A game has only a few spare rows for the app's settings (three on Godzilla). When a card has more "
+            "settings than that, they share two rows: **More Settings** picks one, and the row under it becomes that "
+            "setting. The card keeps each setting's value in a file of its own, so it stays set after the machine is "
+            "switched off.",
+        ]),
+        ("The game's other pages", [
+            "Below, **The game's other pages** shows the rest of the menu, read-only: nothing on them is changed.",
+        ]),
+        ("The real menu", [
+            "**Show the real menu from the emulator** boots the game in the emulator - hidden and muted, with this "
+            "project's edits, as the Emulate tab runs it - walks its service menu to the page and row picked above, "
+            "and shows the picture the game itself draws. It takes a minute or more (longer the first time a card is "
+            "used) and needs the emulator stopped, so it is off until ticked. **Read the real menu** reads it again "
+            "after a change.",
+        ]),
+    ],
     "Play Options": [
         ("What it's for", lambda: _play_options_intro()),
         ("Handicap per player", [
@@ -1553,10 +1592,12 @@ HELP_CONTENT = {
             "the service menu. **Defaults** puts the app's choices back.\n"
             "- The machine's settings are never changed: the game reads the player's level while they "
             "are up.\n"
-            "- The service menu gets a **HANDICAP** row (Adjustments > Machine Settings > Attract Mode, "
+            "- The service menu gets a **HANDICAP** row (Adjustments > Machine Settings > Custom Code, "
             "or at the end of Standard Adjustments), Off to start with: set it to **On** to play with "
-            "handicaps. Off: no player is asked and the game plays as it always has. A game with no spare "
-            "row left for it has handicaps always on.\n"
+            "handicaps. Off: no player is asked and the game plays as it always has. When a card has more "
+            "settings of the app's than the game has spare rows, they share two: pick HANDICAP's number on "
+            "**MORE SETTINGS** and the row under it becomes HANDICAP (the card keeps each one's value). A "
+            "game that cannot give even those has handicaps always on.\n"
             "- Like the operator's own settings, handicaps keep the card on Insider Connected. With "
             "modes or co-op play on the same card, the scores stay on the machine as those always do.\n"
             "- In a co-op game each teammate picks one at their first ball.",
@@ -1791,7 +1832,7 @@ HELP_CONTENT = {
          "editions...** and give every project the same names in the same order: "
          "Standard, 70th Anniversary.\n"
          "2. Write each one. Its card gets **EDITION** in the operator menu "
-         "(Adjustments > Machine Settings > Attract Mode, its help line naming the editions; "
+         "(Adjustments > Machine Settings > Custom Code, its help line naming the editions; "
          "on a game whose Adjustments have Standard Adjustments, the last row of that list).\n"
          "3. On the Multi-boot tab, add the images in that order, edition 1 first, "
          "and tick **No menu: boot the edition the game's EDITION setting names** "
@@ -3315,7 +3356,7 @@ HELP_CONTENT = {
          "each written with the same edition names on its Write tab (Editions). "
          "Add them edition 1 first.\n\n"
          "On the machine there is no menu. The operator sets **EDITION** in the "
-         "game's menu (Adjustments > Machine Settings > Attract Mode, or the last row of "
+         "game's menu (Adjustments > Machine Settings > Custom Code, or the last row of "
          "Standard Adjustments) and the edition it names boots "
          "at the next power-up. No setting yet means edition 1.\n\n"
          "- The build refuses an image without EDITION, another game or version, "
@@ -3861,9 +3902,12 @@ PREVIEW_HELP = {
                 "**Load…** puts a saved file into any project in place of its co-op settings, and also "
                 "takes a characters file of the kind Load Godzilla's set reads.",
                 "**Switch it on and off in the service menu**, under the tick, gives the game's own "
-                "menu a **CO-OP PLAY** row instead (Adjustments > Machine Settings > Attract Mode, or "
+                "menu a **CO-OP PLAY** row instead (Adjustments > Machine Settings > Custom Code, or "
                 "at the end of Standard Adjustments), 0 to start with. It says how co-op and the team games "
-                "play; which one is picked at the machine, on the game's start menu:\n\n"
+                "play; which one is picked at the machine, on the game's start menu. When a card has more "
+                "settings of the app's than the game has spare rows, they share two: pick CO-OP PLAY's number "
+                "on **MORE SETTINGS** and the row under it becomes CO-OP PLAY (the card keeps each one's "
+                "value):\n\n"
                 "- **1 (Classic):** each player still picks a character at their first ball, and its card says "
                 "**NO SPECIAL ABILITY**, but none of them changes the game.\n"
                 "- **2 (Enhanced):** the characters' abilities hold, as described above.\n"

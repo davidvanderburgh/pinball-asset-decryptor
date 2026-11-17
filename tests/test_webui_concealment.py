@@ -29,7 +29,9 @@ WORDS = re.compile(r"\b(modes?|mode maker|mode editor|try it|code modes?|film cu
 #: operator menu page EDITION sits on (PAD-495), named as the machine names it. The Audio
 #: tab's Attract flipper sounds (PAD-641) and Sounds on shots (PAD-945) tips speak of the
 #: game's own modes too; they show once its scan of the project ends
-ALLOWED = ("topper-only modes", "how a mode looks", "Attract Mode", "attract mode",
+#: PAD-1382: "Music Mode" is MUSIC MODE's row caption on the machine (PAD-494), named on the Service menu tab as the
+#: machine names it, as "Attract Mode" is
+ALLOWED = ("topper-only modes", "how a mode looks", "Attract Mode", "attract mode", "Music Mode",
            "game's modes", "pick the mode", "a mode whose lit shots")
 
 #: store keys whose VALUES are data, not words a page shows (paths, ids, option values)

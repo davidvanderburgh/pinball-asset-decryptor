@@ -256,7 +256,9 @@ def test_the_setting_moves_with_the_pies_load_address_on_64_bit_only():
     src = _runtime()
     i = src.index('str_eq(f[0], "setting")')
     blk = src[i:src.index("return;", i)]
-    assert "#if PM_A64\n        if (sndm_live) sndm_live += (pm_addr)game_base;" in blk
+    # PAD-1382: moved by the load address through setting_addr (a shared MORE SETTINGS value is not moved)
+    assert "sndm_live = setting_addr(sndm_live);" in blk
+    assert "return a + (pm_addr)game_base;" in src
 
 
 def test_mswap_lines_are_read_on_64_bit_only():

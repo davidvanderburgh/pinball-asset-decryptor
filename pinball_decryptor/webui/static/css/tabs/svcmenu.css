@@ -1,0 +1,81 @@
+/* Service menu tab (js/tabs/svcmenu.js, PAD-1382): the game's operator menu drawn as the machine draws it - a dark red
+   screen, white rows on the left with their values, the picked row cyan, a changed value orange, the help on the right
+   (Godzilla 1.16 in the emulator). The screen keeps the machine's 16:9 and its text scales with it. */
+.sm-page { gap: 14px; }
+.sm-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+html.bp-1100 .sm-layout { grid-template-columns: 1fr; }
+.sm-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sm-path { margin-top: -2px; }
+.sm-wait { display: flex; gap: 8px; align-items: center; color: var(--ink-2); }
+
+.sm-screen {
+  container-type: inline-size; aspect-ratio: 16 / 9; width: 100%; max-width: 1100px; overflow: hidden;
+  border-radius: 6px; border: 1px solid #000; color: #fff; display: flex; flex-direction: column;
+  background: radial-gradient(ellipse at 15% 10%, #8a0a0a 0%, #4a0303 45%, #250000 100%);
+  font-family: "Fjalla One", "Oswald", "Bahnschrift SemiCondensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  font-stretch: condensed;
+}
+.sm-title { text-align: center; font-size: 6.2cqw; line-height: 1.1; padding: 2.6cqw 0 1.6cqw; }
+.sm-body { display: grid; grid-template-columns: 50% 50%; flex: 1; min-height: 0; }
+.sm-rows { display: flex; flex-direction: column; padding: 0 1cqw 0 1.4cqw; overflow: hidden; }
+.sm-row {
+  all: unset; display: flex; justify-content: space-between; gap: 2cqw; cursor: pointer; font-size: 2.75cqw;
+  line-height: 1.04; white-space: nowrap; position: relative;
+}
+.sm-row .sm-cap { overflow: hidden; text-overflow: ellipsis; }
+.sm-row.on { color: #2fe3e8; }
+.sm-row:focus-visible { outline: 1px dashed #2fe3e8; }
+.sm-val.changed { color: #ffab1f; }
+.sm-row.on .sm-val.changed { color: #ffab1f; }
+/* the app's rows: a mark in the screen's margin, never over the game's own look */
+.sm-row.ours::before { content: ""; position: absolute; left: -1.1cqw; top: 15%; bottom: 15%; width: .45cqw;
+                       border-radius: 1px; background: var(--accent); }
+.sm-help { padding: 0 2cqw 0 1cqw; color: #a9a9a9; overflow: hidden; }
+.sm-help-cap { font-size: 3.6cqw; line-height: 1.15; }
+.sm-help-text { font-size: 2.4cqw; line-height: 1.2; margin-top: .5cqw; }
+.sm-help-vals { font-size: 2.4cqw; line-height: 1.2; margin-top: 2.6cqw; }
+
+.sm-step { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sm-step-val { min-width: 160px; }
+.sm-ours .bd { display: flex; flex-direction: column; gap: 10px; }
+.sm-our { display: flex; flex-direction: column; gap: 2px; }
+.sm-our-name { font-weight: 600; }
+.sm-count { margin: 4px 0 0; border-top: 1px solid var(--line); padding-top: 8px; }
+.sm-our-hd { display: flex; align-items: center; gap: 4px; }
+.sm-our-hd .sp { flex: 1; }
+.sm-real { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.sm-real-bd { display: flex; flex-direction: column; gap: 8px; }
+.sm-real-fig { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.sm-real-fig img { width: 100%; max-width: 1100px; border-radius: 6px; border: 1px solid #000; }
+/* round 4: the older dot-matrix menu - one adjustment a screen, every lit dot a dot (the game's own colours vary by
+   title: magenta on Aerosmith, white on blue on Venom; drawn here in the classic amber) */
+.sm-dmd-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; align-items: start; }
+html.bp-1100 .sm-dmd-wrap { grid-template-columns: 1fr; }
+.sm-dmd { background-color: #0b0604; border: 1px solid #000; border-radius: 6px;
+          background-image: radial-gradient(circle, rgba(255, 138, 31, .10) 30%, transparent 34%);
+          background-size: 6px 6px; padding: 22px 12px; color: #ff9a33; font-family: "Courier New", monospace;
+          font-weight: 700; text-align: center; display: flex; flex-direction: column; gap: 8px; font-size: clamp(10px, 1.05vw, 16px);
+          letter-spacing: .08em; white-space: nowrap; overflow: hidden; text-shadow: 0 0 6px rgba(255, 138, 31, .55); }
+.sm-dmd-cap, .sm-dmd-val { font-size: 1.4em; }
+.sm-dmd-list { display: flex; flex-direction: column; max-height: 420px; overflow: auto; border: 1px solid var(--line);
+               border-radius: 6px; }
+.sm-dmd-row { all: unset; display: flex; gap: 6px; padding: 3px 8px; cursor: pointer; font-size: 12.5px; position: relative; }
+.sm-dmd-row .sp { flex: 1; }
+.sm-dmd-row.on { background: var(--accent-soft); }
+.sm-dmd-row.ours::before { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 3px; background: var(--accent); }
+/* round 5: the app's own page first - the way there at the machine, the Machine Settings list with it lit - and the
+   game's other pages, read-only, below */
+.sm-hero .bd { display: flex; flex-direction: column; gap: 10px; }
+.sm-way { display: flex; flex-direction: column; gap: 6px; }
+.sm-way-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 600; }
+.sm-way-step { padding: 3px 9px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--panel-2); }
+.sm-way-step.last { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+.sm-way-sep { color: var(--ink-3); }
+.sm-way-note { margin: 0; }
+.sm-list-screen { max-width: 520px; }
+.sm-list-rows { padding: 0 2.4cqw 2cqw; }
+.sm-list-rows .sm-row { font-size: 3.7cqw; cursor: default; }
+.sm-list-screen .sm-title { font-size: 6cqw; padding: 1.6cqw 0 1cqw; }
+.sm-others { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.sm-others summary { cursor: pointer; font-weight: 600; color: var(--ink-2); }
+.sm-others > * + * { margin-top: 8px; }

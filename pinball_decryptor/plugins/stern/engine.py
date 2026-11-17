@@ -9754,10 +9754,12 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)
         # PAD-1033: HANDICAP, the row that switches the players' handicaps (the last spare setting it takes)
         hand_menu = _HandicapMenu(log) if _hand_on else None
-        menu_job = (_MenuJobs(music_menu, edition_menu, *picture_menus, coop_menu, hand_menu)
-                    if music_menu is not None or edition_menu is not None
-                    or picture_menus or coop_menu is not None or hand_menu is not None else None)
+        # PAD-1382: the owner's own settings (Service menu tab) beside them, all in the owner's order
+        from . import service_menu as _SvM
+        _menu_list = _SvM.arrange(assets_dir, [music_menu, edition_menu, *picture_menus, coop_menu, hand_menu], log)
+        menu_job = _MenuJobs(*_menu_list) if _menu_list else None
         picture_cfg = ""
+        settings_cfg = ""
         coop_setting = 0
         hand_setting = 0
         if (text_edits or shader_prof is not None or clip_job is not None
@@ -9785,6 +9787,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if hand_menu is not None and hand_menu.ok:
                 # PAD-1033: no HANDICAP row (no spare setting left): the handicaps are always on
                 hand_setting = hand_menu.setting.live
+            # PAD-1382: settings sharing the MORE SETTINGS rows - the runtime's table of them, and MUSIC MODE's
+            # cfg (written before the menu was planned) pointed at the value the menu gave it
+            settings_cfg = _shared_settings_cfg(menu_job, grow_work, log)
+            if music_menu is not None and music_menu.ok and sound_modes_cfg:
+                _point_sounds_cfg(sound_modes_cfg, music_menu.setting.live)
             # PAD-537: the rows that went in, and the runtime's table for them
             picture_cfg = _picture_cfg(picture_menus, grown_text,
                                        not (mode_list or code_list),
@@ -10053,7 +10060,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         if (bank_plan is not None and bank_plan.retired
                 and not (_modes_on or _clips_on or sound_modes_cfg or picture_cfg
                          or _attract_on or _coop_on or _idle_on or _hand_on or _cabs_on
-                         or _comp_on or _stime_on or _feed_on or _rec_on)):
+                         or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg)):
             # PAD-1235: the earlier Write's runtime files would stay and play the
             # banks this build took the place of
             raise RuntimeError(
@@ -10063,7 +10070,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "card without the earlier build's music modes, or keep a music mode or "
                 "another mode feature in the project.")
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on):
+                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -10079,7 +10086,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _cabs_on else "Adding Prolonged Competition..."
                          if _comp_on else "Adding the records on the high scores..."
                          if _rec_on and not _feed_on and not _stime_on else "Adding the score feed..."
-                         if _feed_on and not _stime_on else "Adding the screen times...")
+                         if _feed_on and not _stime_on else "Adding the screen times..."
+                         if _stime_on else "Adding the service menu settings...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
@@ -10171,6 +10179,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 if mode_plan is None:
                     raise _MW.ModeWriteError("none of the project's random clips can go on "
                                              "this card")
+                mode_plan.settings_file = settings_cfg      # PAD-1382: the shared rows' table
                 # PAD-1035: the project's own edits of a scene the modes rewrite whole (the co-op
                 # pick's screens in Godzilla's HUD, a mode's screen, random clips in the bank) go
                 # on in the rewritten scene: in-place ones were in the bytes it was built from,
@@ -11615,7 +11624,7 @@ class _PictureMenu(_MusicModeMenu):
         from . import picture_settings as _PS
         self.ok = True
         self.log("Picture settings: %s is in the operator menu (%s), values 1 to %d, %d "
-                 "(no change) to start with." % (self.setting.caption.upper(), _PS.menu_path(),
+                 "(no change) to start with." % (self.setting.caption.upper(), (self.setting.where or _PS.menu_path()),
                                                  self.count, _PS.NORMAL), "info")
 
     def fail(self, why):
@@ -12112,6 +12121,39 @@ def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     return prof
 
 
+def _shared_settings_cfg(menu_job, work, log):
+    """PAD-1382: ``settings.cfg`` in *work* when the settings of *menu_job* that went in share the MORE SETTINGS rows
+    (:func:`.menu_settings.shared_cfg_text`): its path, or ``""``."""
+    if menu_job is None or not menu_job.shared_text or not any(j.ok for j in menu_job.jobs):
+        return ""
+    from . import menu_settings as _MSet
+    shared = [j for j in menu_job.jobs if j.ok and _MSet.is_shared(j.setting)]
+    if not shared:
+        return ""
+    os.makedirs(_lp(work), exist_ok=True)
+    path = os.path.join(work, _MSet.SHARED_CFG)
+    with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
+        f.write(menu_job.shared_text)
+    log("More settings: the game has too few spare settings for each of ours to have a row, so %s share two: MORE "
+        "SETTINGS picks one and the row under it shows its value (%s). The card keeps each one's value."
+        % (", ".join(_MSet.SETTINGS[j.KEY][1] for j in shared),
+           shared[0].setting.where.rsplit(",", 1)[0]), "info")
+    return path
+
+
+def _point_sounds_cfg(path, live):
+    """PAD-1382: the music modes' ``sounds.cfg`` *path* read MUSIC MODE's value at *live* (its ``setting`` line), the
+    address the menu gave it - a row of its own, or its word on the shared rows."""
+    with open(_lp(path), encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    for k, line in enumerate(lines):
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0] == "setting":
+            lines[k] = "setting\t0x%08x\t%s" % (int(live), parts[2])
+    with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines))
+
+
 def _picture_cfg(menus, grown, only, work, log):
     """PAD-537: ``picture.cfg`` for the rows in *menus* that went into the menu, written
     under *work*; ``""`` when none did or the program cannot be re-pointed (said why)."""
@@ -12150,6 +12192,7 @@ class _MenuJobs:
 
     def __init__(self, *jobs):
         self.jobs = [j for j in jobs if j is not None]
+        self.shared_text = ""      # PAD-1382: settings.cfg when the settings share the MORE SETTINGS rows
 
     @property
     def ok(self):
@@ -12163,6 +12206,8 @@ class _MenuJobs:
         t = AdjustmentTable(raw)
         settings, writes, cat, refused = _MSet.plan_many(
             t, [j.wanted() for j in self.jobs])
+        # PAD-1382: more settings than the game has spare rows share two; the runtime's table of them
+        self.shared_text = _MSet.shared_cfg_text(settings)
         by_key = {s.key: s for s in settings}
         for j in self.jobs:
             j.setting = by_key.get(j.KEY)

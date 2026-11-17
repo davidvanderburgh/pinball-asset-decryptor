@@ -91,11 +91,13 @@ EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 64))
 #: owner's own") - a whole install too.
 #: PAD-1204: scorefeed.cfg, each game's final scores posted to the owner's server (pad_mode_runtime.c "the score
 #: feed") - a whole install too.
+#: PAD-1382: settings.cfg, the settings sharing the MORE SETTINGS rows (pad_mode_runtime.c "more settings") - never
+#: alone: it comes with the cfg of a setting that shares them.
 EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 0o100644),
                ("picture.cfg", 0o100644), ("attract.cfg", 0o100644), ("coop.cfg", 0o100644),
                ("idle.cfg", 0o100644), ("handicap.cfg", 0o100644), ("cabshow.cfg", 0o100644),
                ("comp.cfg", 0o100644), ("scorefeed.cfg", 0o100644),
-               ("records.cfg", 0o100644))
+               ("records.cfg", 0o100644), ("settings.cfg", 0o100644))
 #: the extra file that is enough for an install without a mode (PAD-446)
 CLIPS_FILE = "clips.cfg"
 #: the extra files that are each enough for an install without a mode (PAD-446, PAD-494, PAD-537)

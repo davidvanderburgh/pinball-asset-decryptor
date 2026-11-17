@@ -123,7 +123,7 @@ case "$cmd" in
         # have a later stock run take THOSE out.
         rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/mode.start "$DUMP"/mode[1-7].start \
               "$DUMP"/mode.stop "$DUMP"/mode.clip "$DUMP"/mode.log "$DUMP"/cardmodes.from \
-              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/gamecheck.on \
+              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/gamecheck.on \
               "$DUMP"/census.mark "$DUMP"/soundlog.only
         put "$S/pad_mode.so" "$LIB/pad_mode.so" || die "could not copy the mode object into $LIB"
         put "$S/game.port" "$DUMP/game.port" || die "could not copy the port into $DUMP"
@@ -156,7 +156,11 @@ case "$cmd" in
         fi
         # PAD-537: the picture settings, read beside the mode files
         if [ -f "$S/picture.cfg" ]; then
-            put "$S/picture.cfg" "$DUMP/picture.cfg" || die "could not copy picture.cfg"
+            put "$S/picture.cfg" "$DUMP/picture.cfg" "$DUMP/settings.cfg" || die "could not copy picture.cfg"
+        fi
+        # PAD-1382: the settings sharing the MORE SETTINGS rows, read beside the mode files
+        if [ -f "$S/settings.cfg" ]; then
+            put "$S/settings.cfg" "$DUMP/settings.cfg" || die "could not copy settings.cfg"
         fi
         # PAD-782: the owner's attract items, read beside the mode files
         if [ -f "$S/attract.cfg" ]; then
@@ -205,7 +209,7 @@ case "$cmd" in
         # game reads them as root), so it is said, not fatal.
         if [ "$(id -u)" = 0 ]; then
             given=("$LIB/pad_mode.so" "$DUMP/game.port")
-            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/gamecheck.on "$DUMP"/soundlog.only; do
+            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/gamecheck.on "$DUMP"/soundlog.only; do
                 [ -f "$f" ] && given+=("$f")
             done
             pad_give_back "${given[@]}"

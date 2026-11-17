@@ -232,6 +232,9 @@ static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump
  * the load address is added as the port is read. The program's headers say where they are (AT_PHDR) and where the
  * ELF has them (PT_PHDR's vaddr); the difference is the load address. */
 static unsigned long game_base;
+/* PAD-1382: a cfg's setting address - the game's own (moved by a PIE's load address), or one of the values the
+ * MORE SETTINGS rows share (the "more settings" section, near the end) */
+static pm_addr setting_addr(pm_addr a);
 #if PM_A64
 extern unsigned long getauxval(unsigned long);
 static unsigned long load_base(void)
@@ -21699,7 +21702,7 @@ static void coop_line(const char *s)
         p = s + 8;
         coop.setting = (pm_addr)number(&p, &ok);
         if (!ok) coop.setting = 0;
-        if (coop.setting) coop.setting += (pm_addr)game_base;           /* PAD-1326: a PIE's (0 on Spike 2) */
+        coop.setting = setting_addr(coop.setting);       /* PAD-1326: a PIE's; PAD-1382: or a shared one */
     }
 }
 
@@ -21726,7 +21729,7 @@ static pm_addr coop_setting_wanted(void)
             if (!ok) v = 0;
         }
     }
-    return only && v ? v + (pm_addr)game_base : 0;                          /* PAD-1326: a PIE's (0 on Spike 2) */
+    return only && v ? setting_addr(v) : 0;                 /* PAD-1326: a PIE's (0 on Spike 2); PAD-1382: or a shared one */
 }
 
 /* coop.cfg asks for co-op: the card takes the runtime's whole gate, as attract items do */
@@ -21966,7 +21969,7 @@ static void hand_line(const char *s)
         p = s + 8;
         hand.setting = (pm_addr)number(&p, &ok);
         if (!ok) hand.setting = 0;
-        if (hand.setting) hand.setting += (pm_addr)game_base;           /* a PIE's (0 on Spike 2) */
+        hand.setting = setting_addr(hand.setting);       /* a PIE's (0 on Spike 2); PAD-1382: or a shared one */
         return;
     }
     if (str_starts(s, "left ") || str_starts(s, "right ")) {
@@ -25940,9 +25943,8 @@ static void sndm_line(char *s)
     if (n >= 3 && str_eq(f[0], "setting")) {
         p = f[1];
         sndm_live = (pm_addr)number(&p, &ok);
-#if PM_A64
-        if (sndm_live) sndm_live += (pm_addr)game_base;   /* PAD-1324: the program's own address, as the port's */
-#endif
+        if (!ok) sndm_live = 0;
+        sndm_live = setting_addr(sndm_live);   /* PAD-1324: the program's own address, as the port's; PAD-1382: or shared */
         p = f[2];
         m = (unsigned)number(&p, &ok);
         sndm_n = ok && m >= 1 && m <= SNDM_MODES ? m : 0;
@@ -26560,6 +26562,7 @@ static void pic_line(char *s)
         p = f[2];
         pic_set[w].live = (unsigned)number(&p, &ok);
         if (!ok) { pic_set[w].live = 0; pic_bad++; return; }
+        pic_set[w].live = (unsigned)setting_addr(pic_set[w].live);   /* PAD-1382: or a shared one */
         for (k = 3; k < n && k - 3 < PIC_VALUES; k++) {
             p = f[k];
             pic_set[w].pm[k - 3] = (unsigned short)number(&p, &ok);
@@ -26963,6 +26966,352 @@ static void pic_arm(void)
         PIC_SYMS[0], PIC_SYMS[1], PIC_SYMS[2], PIC_SYMS[3]);
 }
 
+/* ---- PAD-1382: MORE SETTINGS - any number of settings of ours on two of the game's spare rows ---------------------
+ * Every setting of ours takes over an adjustment the game no longer reads (menu_settings.spare), and a Spike 2 game
+ * has three: MUSIC MODE, CO-OP PLAY and HANDICAP had them all on Godzilla 1.16. A game's adjustments cannot be added
+ * to (each one's value is eight bytes of the board's NVRAM mirror, by id), so when a card wants more settings of ours
+ * than the game has spare rows, the app puts them all on TWO rows (menu_settings.plan_many):
+ *
+ *   MORE SETTINGS   which one (1..n; its help line names them: "1 = Music Mode, 2 = Co-op Play, ...")
+ *   the next row    that one's value: this section writes the picked setting's name over the row's caption, its
+ *                   help line over the row's help, its range and display kind over the row's descriptor, and its
+ *                   value into the row's record, each time the pick changes. An accepted change of the value is
+ *                   that setting's new value.
+ *
+ * The values live HERE (mset_word, kept in MSET_STATE over a power cycle, by each setting's key), not in the game's
+ * store: the game keeps only the last value the row showed. A setting's reader is handed &mset_word[k] in place of a
+ * .nonvol address (setting_addr: the app writes MSET_BASE + 4k in the setting's cfg line), so MUSIC MODE, CO-OP
+ * PLAY, HANDICAP and the picture settings read a shared value exactly as they read a row of their own.
+ *
+ * The rows are watched by a thread of our own every MSET_NAP ms, not on the game's tick: a card of settings only never
+ * hooks the tick (pad_mode_start's "only" gate), and the operator menu must follow the pick whatever the game does.
+ * The game reads its store at boot (the records read 0, then the stored values): nothing it shows in the first
+ * MSET_GRACE ms after the pick is first seen counts as an operator's change - the row is put back to our value.
+ *
+ * settings.cfg (tabs; /usr/local/padmode on a card, /dump in the rig; menu_settings.shared_cfg_text writes it):
+ *   select  <the MORE SETTINGS record> <n>
+ *   value   <its value row's record> <descriptor> <help string> <help room> <row caption string> <caption room>
+ *   fields  <default> <min> <max> <kind>        descriptor offsets (kind -1: the descriptors have none)
+ *   option  <k> <key> <min> <max> <default> <kind> <row caption> <help line>      k = 1..n, as the menu numbers them
+ * Spike 2 only (the app never shares rows on a 64-bit program). */
+#define MSET_BASE  0xfade0000u
+#define MSET_N     8
+#define MSET_NAP   50u
+#define MSET_GRACE 3000u
+static const char *const MSET_FILES[] = { "/usr/local/padmode/settings.cfg", "/dump/settings.cfg" };
+static const char MSET_STATE[] = "/dump/pad_settings.state";
+static struct mset_opt { int min, max, def, kind; char key[40], cap[48], help[176]; } mset_opt[MSET_N + 1];
+static volatile unsigned mset_word[MSET_N + 1];           /* what each shared setting's reader reads ([0] always 0) */
+static unsigned mset_n;                                   /* options 1..mset_n; 0: settings.cfg carries none */
+static pm_addr mset_sel, mset_val, mset_desc, mset_help, mset_row;
+static unsigned mset_help_room, mset_row_room;
+static int mset_off[4] = { 4, 8, 12, -1 };                /* default, min, max, kind */
+static int mset_loaded, mset_bad;
+static unsigned mset_cur, mset_seen;                      /* the pick shown, and the value row's value as last put */
+static unsigned long mset_since;                          /* when the pick was first seen */
+
+static unsigned mset_fields(char *s, char **f, unsigned most)
+{
+    unsigned n = 0;
+    while (*s && n < most) {
+        f[n++] = s;
+        while (*s && *s != '\t') s++;
+        if (!*s) break;
+        *s++ = 0;
+    }
+    return n;
+}
+
+static void mset_copy(char *d, unsigned cap, const char *s)
+{
+    unsigned i;
+    for (i = 0; i + 1 < cap && s[i] && s[i] != '\r' && s[i] != '\n'; i++) d[i] = s[i];
+    d[i] = 0;
+}
+
+static long mset_num(const char *s, int *ok)
+{
+    const char *p = s;
+    int neg = *p == '-';
+    long v;
+    if (neg) p++;
+    v = (long)number(&p, ok);
+    return neg ? -v : v;
+}
+
+static void mset_line(char *s)
+{
+    char *f[9];
+    unsigned n, k;
+    int ok = 1, ok2;
+    while (*s == ' ' || *s == '\t') s++;
+    if (!*s || *s == '#') return;
+    n = mset_fields(s, f, 9);
+    if (n == 3 && str_eq(f[0], "select")) {
+        mset_sel = (pm_addr)mset_num(f[1], &ok);
+        k = (unsigned)mset_num(f[2], &ok2);
+        if (!ok || !ok2 || k < 2 || k > MSET_N) { mset_sel = 0; mset_bad++; }
+        return;
+    }
+    if (n == 7 && str_eq(f[0], "value")) {
+        mset_val = (pm_addr)mset_num(f[1], &ok);
+        mset_desc = ok ? (pm_addr)mset_num(f[2], &ok) : 0;
+        mset_help = ok ? (pm_addr)mset_num(f[3], &ok) : 0;
+        mset_help_room = ok ? (unsigned)mset_num(f[4], &ok) : 0;
+        mset_row = ok ? (pm_addr)mset_num(f[5], &ok) : 0;
+        mset_row_room = ok ? (unsigned)mset_num(f[6], &ok) : 0;
+        if (!ok || mset_help_room >= sizeof mset_opt[0].help || mset_row_room >= sizeof mset_opt[0].cap) {
+            mset_val = 0;
+            mset_bad++;
+        }
+        return;
+    }
+    if (n == 5 && str_eq(f[0], "fields")) {
+        for (k = 0; k < 4 && ok; k++) mset_off[k] = (int)mset_num(f[k + 1], &ok);
+        if (!ok || mset_off[0] < 0 || mset_off[1] < 0 || mset_off[2] < 0) { mset_off[0] = -1; mset_bad++; }
+        return;
+    }
+    if (n == 9 && str_eq(f[0], "option")) {
+        struct mset_opt *o;
+        k = (unsigned)mset_num(f[1], &ok);
+        if (!ok || k < 1 || k > MSET_N || k != mset_n + 1) { mset_bad++; return; }
+        o = &mset_opt[k];
+        mset_copy(o->key, sizeof o->key, f[2]);
+        o->min = (int)mset_num(f[3], &ok);
+        if (ok) o->max = (int)mset_num(f[4], &ok);
+        if (ok) o->def = (int)mset_num(f[5], &ok);
+        if (ok) o->kind = (int)mset_num(f[6], &ok);
+        if (!ok || o->min > o->def || o->def > o->max) { mset_bad++; return; }
+        mset_copy(o->cap, sizeof o->cap, f[7]);
+        mset_copy(o->help, sizeof o->help, f[8]);
+        mset_n = k;
+        return;
+    }
+    mset_bad++;
+}
+
+/* the values the settings had when the machine last ran, by key ("music_mode 2"); a key not there takes its default */
+static void mset_state_read(void)
+{
+    static char raw[1024];
+    long n = pm_read_file(MSET_STATE, raw, sizeof raw - 1), i;
+    unsigned k;
+    for (k = 1; k <= mset_n; k++) mset_word[k] = (unsigned)mset_opt[k].def;
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i < n; i++) {
+        char *line = raw + i, *sp;
+        int ok;
+        long v;
+        if (i && raw[i - 1] != '\n') continue;
+        for (sp = line; *sp && *sp != ' ' && *sp != '\n'; sp++) {}
+        if (*sp != ' ') continue;
+        for (k = 1; k <= mset_n; k++) {
+            unsigned len = 0;
+            while (mset_opt[k].key[len]) len++;
+            if ((unsigned)(sp - line) != len) continue;
+            {
+                unsigned j;
+                for (j = 0; j < len && line[j] == mset_opt[k].key[j]; j++) {}
+                if (j != len) continue;
+            }
+            v = mset_num(sp + 1, &ok);
+            if (ok && v >= mset_opt[k].min && v <= mset_opt[k].max) mset_word[k] = (unsigned)v;
+        }
+    }
+}
+
+extern int fsync(int);
+static void mset_state_write(void)
+{
+    static char b[1024];
+    static const char tmp[] = "/dump/pad_settings.state.tmp";
+    unsigned k;
+    int n = 0, fd;
+    for (k = 1; k <= mset_n && n < (int)sizeof b - 64; k++)
+        n += pm_snprintf(b + n, sizeof b - (unsigned)n, "%s %u\n", mset_opt[k].key, mset_word[k]);
+    fd = open(tmp, O_WRONLY | O_CREAT | 01000, 0644);   /* O_TRUNC */
+    if (fd < 0) { say("more settings: %s cannot be written - a change is lost at power-off", MSET_STATE); return; }
+    if (write(fd, b, (unsigned long)n) != n) say("more settings: %s was not written whole", MSET_STATE);
+    fsync(fd);
+    close(fd);
+    if (rename(tmp, MSET_STATE) != 0) say("more settings: %s could not be put in place", MSET_STATE);
+}
+
+/* settings.cfg, read once (the first setting_addr, or the arm) */
+static void mset_load(void)
+{
+    static char raw[4096];
+    long n = -1, i, start = 0;
+    unsigned k;
+    if (mset_loaded) return;
+    mset_loaded = 1;
+    for (k = 0; k < sizeof MSET_FILES / sizeof MSET_FILES[0] && n < 0; k++)
+        n = pm_read_file(MSET_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i <= n; i++) {
+        if (i < n && raw[i] != '\n') continue;
+        raw[i] = 0;
+        if (i > start && raw[i - 1] == '\r') raw[i - 1] = 0;
+        mset_line(raw + start);
+        start = i + 1;
+    }
+    if (mset_n < 2 || !mset_sel || !mset_val || !mset_desc || mset_off[0] < 0) {
+        if (mset_n || mset_sel || mset_val)
+            say("more settings: off - settings.cfg does not say where both rows are (%d line(s) not read)", mset_bad);
+        mset_n = 0;
+        return;
+    }
+    mset_state_read();
+}
+
+static pm_addr setting_addr(pm_addr a)
+{
+    unsigned k;
+    if (!a) return 0;
+    if (((unsigned long)a & 0xffff0000ul) != MSET_BASE) return a + (pm_addr)game_base;
+    k = (unsigned)((unsigned long)a & 0xffffu) / 4u;
+    mset_load();
+    if (k >= 1 && k <= mset_n) return (pm_addr)(unsigned long)&mset_word[k];
+    say("more settings: a setting names shared value %u, which settings.cfg does not carry - it reads 0", k);
+    return (pm_addr)(unsigned long)&mset_word[0];
+}
+
+/* a value into a record of the game's store: the word, and its check byte (the inverse of the word's byte sum) */
+static void mset_put(pm_addr rec, unsigned v)
+{
+    volatile unsigned char *b = (volatile unsigned char *)(unsigned long)rec;
+    *(volatile unsigned *)(unsigned long)rec = v;
+    b[4] = (unsigned char)~(unsigned char)(v + (v >> 8) + (v >> 16) + (v >> 24));
+}
+
+static void mset_text(pm_addr at, unsigned room, const char *s)
+{
+    volatile char *d = (volatile char *)(unsigned long)at;
+    unsigned i;
+    if (!at || !room) return;
+    for (i = 0; i < room && s[i]; i++) d[i] = s[i];
+    for (; i <= room; i++) d[i] = 0;
+}
+
+/* the value row becomes setting k's: range and kind first (the menu's own checks), then its words, then the value */
+static void mset_show(unsigned k)
+{
+    const struct mset_opt *o = &mset_opt[k];
+    volatile int *d = (volatile int *)(unsigned long)mset_desc;
+    d[mset_off[1] / 4] = o->min;
+    d[mset_off[2] / 4] = o->max;
+    d[mset_off[0] / 4] = o->def;
+    if (mset_off[3] >= 0 && o->kind > 0) d[mset_off[3] / 4] = o->kind;
+    mset_text(mset_row, mset_row_room, o->cap);
+    mset_text(mset_help, mset_help_room, o->help);
+    mset_put(mset_val, mset_word[k]);
+    mset_seen = mset_word[k];
+}
+
+static void mset_step(void)
+{
+    unsigned s = *(volatile const unsigned *)(unsigned long)mset_sel, v;
+    unsigned long now = pm_ms();
+    if (s < 1 || s > mset_n) return;               /* the store not read yet (0), or nothing of ours */
+    if (!mset_cur) {
+        mset_cur = s;
+        mset_since = now;
+        mset_show(s);
+        say("more settings: MORE SETTINGS reads %u - the next row is %s (%u)", s, mset_opt[s].cap, mset_word[s]);
+        return;
+    }
+    if (s != mset_cur) {
+        mset_cur = s;
+        mset_show(s);
+        say("more settings: MORE SETTINGS %u - the next row is %s (%u)", s, mset_opt[s].cap, mset_word[s]);
+        return;
+    }
+    v = *(volatile const unsigned *)(unsigned long)mset_val;
+    if (v == mset_seen) return;
+    if (now - mset_since < MSET_GRACE) {           /* the game still reading its store: ours stands */
+        mset_put(mset_val, mset_word[s]);
+        return;
+    }
+    if ((int)v < mset_opt[s].min || (int)v > mset_opt[s].max) {
+        say("more settings: %s %u is not one of its values (%d..%d) - put back to %u", mset_opt[s].cap, v,
+            mset_opt[s].min, mset_opt[s].max, mset_word[s]);
+        mset_put(mset_val, mset_word[s]);
+        mset_seen = mset_word[s];
+        return;
+    }
+    mset_word[s] = v;
+    mset_seen = v;
+    say("more settings: %s set to %u", mset_opt[s].cap, v);
+    mset_state_write();
+}
+
+/* The thread and its nap are the runtime's own and run on no thread of the game's, so the rule that keeps a mode from
+ * sleeping or starting threads (MODE_SDK.md rule 2: a mode's code runs on the game's threads) is not broken: both are
+ * looked up by name rather than imported, so build_mode.sh's check still holds every mode's own code to it. */
+struct mset_ts { long s, ns; };
+typedef int (*mset_nap_fn)(const struct mset_ts *, struct mset_ts *);
+static mset_nap_fn mset_nap;
+static void *mset_loop(void *u)
+{
+    static const struct mset_ts nap = { 0, (long)MSET_NAP * 1000000L };
+    static int said;
+    (void)u;
+    note_thread("more settings", &said);
+    for (;;) {
+        mset_step();
+        mset_nap(&nap, 0);
+    }
+    return 0;
+}
+
+static void mset_arm(void)
+{
+    typedef int (*thread_fn)(unsigned long *, const void *, void *(*)(void *), void *);
+    extern void *dlsym(void *, const char *);
+    thread_fn start;
+    unsigned long tid;
+    unsigned long span;
+    unsigned k;
+    mset_load();
+    if (!mset_n) return;
+#if PM_A64
+    say("more settings: off - the shared rows are Spike 2's only");
+    mset_n = 0;
+    return;
+#endif
+    if (!maps_has(mset_sel, 5, MAP_R) || !maps_has(mset_val, 5, MAP_R) || !maps_has(mset_desc, 44, MAP_R)
+        || (mset_help && !maps_has(mset_help, mset_help_room + 1, MAP_R))
+        || (mset_row && !maps_has(mset_row, mset_row_room + 1, MAP_R))) {
+        say("more settings: off - a row's record, descriptor or words are not in the game's memory; every shared "
+            "setting keeps the value it last had");
+        return;
+    }
+    /* the descriptor and the strings may sit in the program's read-only pages (and pages that hold code: kept so) */
+    span = ((unsigned long)mset_desc & 0xfffu) + 44u;
+    mprotect((void *)((unsigned long)mset_desc & ~0xffful), (span + 0xfffu) & ~0xffful, 7);
+    if (mset_help) {
+        span = ((unsigned long)mset_help & 0xfffu) + mset_help_room + 1u;
+        mprotect((void *)((unsigned long)mset_help & ~0xffful), (span + 0xfffu) & ~0xffful, 7);
+    }
+    if (mset_row) {
+        span = ((unsigned long)mset_row & 0xfffu) + mset_row_room + 1u;
+        mprotect((void *)((unsigned long)mset_row & ~0xffful), (span + 0xfffu) & ~0xffful, 7);
+    }
+    start = (thread_fn)dlsym((void *)0, "pthread_create");
+    mset_nap = (mset_nap_fn)dlsym((void *)0, "nanosleep");
+    if (!start || !mset_nap || start(&tid, 0, mset_loop, 0) != 0) {
+        say("more settings: off - no thread to watch the rows (pthread_create %s)", start && mset_nap ? "failed" : "not found");
+        return;
+    }
+    say("more settings: armed - %u settings share MORE SETTINGS (0x%08" PMA ") and its next row (0x%08" PMA
+        ")%s", mset_n, mset_sel, mset_val, mset_bad ? ", some lines of settings.cfg not read" : "");
+    for (k = 1; k <= mset_n; k++)
+        say("more settings: %u = %s (%s) %u, values %d..%d", k, mset_opt[k].cap, mset_opt[k].key, mset_word[k],
+            mset_opt[k].min, mset_opt[k].max);
+}
+
 /* PAD-1071: the Emulate tab's Sound and video log. /dump/soundlog.on at the start logs every request the
  * game's sound worker takes ("[pad] sound <request> <n>", n = 1 for a numbered variant), whatever else the
  * card carries - armed here, before the gates below, which return early on a card of clip variants only,
@@ -27012,6 +27361,7 @@ static void pad_mode_start(void)
             port.n_switch, N_SWITCHES);
     if (!port_gate()) return;
     if (soundlog_arm()) return;               /* PAD-1071: the sound log, and a stock card's stops there */
+    mset_arm();                               /* PAD-1382: the settings that share the MORE SETTINGS rows */
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
     sndm_arm();                               /* PAD-494: nor does a music mode */
     pic_arm();                                /* PAD-537: nor do the picture settings */

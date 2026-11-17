@@ -2844,9 +2844,46 @@ class EmulateTab(EmulateLogMixin, TabService):
     def _overrides_refuse(self, message, say=True):
         """A refused Start: the reason stays beside the opt-in (orange)
         until the box or the folder changes, and goes to the log."""
+        self._last_refusal = message            # PAD-1382: menu_shot says it on the Service menu tab
         if say:
             self._log("[emulate] " + message)
         self._post(lambda: self.set(ovr_hint=message, ovr_refused=True))
+
+    # -- PAD-1382: the Service menu tab's "Show the real menu" ----------------
+    def menu_shot(self, card, assets, steps, png, game=""):
+        """Boot *card* with the project's edits (the same override set a Start prepares and reuses), hidden and muted,
+        walk the operator menu by *steps* (switch numbers, ``w<s>`` waits; ``menushot.sh``) and write the frame shown
+        to *png*. Runs on the caller's worker thread; ``""`` when the picture is written, else why not. Refused while
+        this tab has a run up: the rig and the override set are the run's."""
+        if self._proc is not None or self._last_up or self._starting or self._preparing is not None \
+                or getattr(self, "_menushot", False):
+            return "The emulator is busy: stop it on the Emulate tab, then read the real menu again."
+        if no_rig() or not rig.rig_available():
+            return "This computer has no emulator set up yet (Emulate tab)."
+        self._menushot = True
+        try:
+            self.log("[emulate] Service menu: reading the game's real menu (a hidden, muted run)")
+            self._last_refusal = ""
+            if not self._rig_layer_up():         # as a Start: the rig's own layer before an install
+                return getattr(self, "_last_refusal", "") or "This rig could not be set up for the run."
+            env = self._prepare_overrides(card, assets)
+            if env is None:
+                return getattr(self, "_last_refusal", "") or                     "The project's edits could not be prepared for the emulator (see the log)."
+            env = list(env) + ["PAD_MENUSHOT_GAME=%s" % (game or "game"), "PAD_HIDDEN=1", "PAD_AUDIO=0",
+                               "PAD_PLAYFIELD=0"]
+            cmd = self._cmd("menushot.sh", rig.wsl_path(card), rig.wsl_path(png), *[str(s) for s in steps], env=env)
+            try:
+                r = self._run(cmd, capture_output=True, timeout=1800)
+                said = ((r.stdout or b"") + (r.stderr or b"")).decode("utf8", "replace")
+            except (OSError, subprocess.SubprocessError) as exc:
+                return "The emulator could not be run: %s" % exc
+            verdict = [ln for ln in said.splitlines() if "VERDICT" in ln]
+            if r.returncode == 0 and os.path.isfile(png) and os.path.getsize(png):
+                return ""
+            return "The emulator could not show the menu: %s" % ((verdict[-1] if verdict else said.strip()[-300:])
+                                                                   or "no answer")
+        finally:
+            self._menushot = False
 
     # -- the launch API the Modes tab uses (item 127) ----------------------
     def prepare_refuse(self, reason, say=True):
@@ -2948,6 +2985,10 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._repaint_preparing()
             return True
         if self._starting or self._stopping:
+            return False
+        if getattr(self, "_menushot", False) and not (self._last_up or self._launched()):
+            # PAD-1382: the Service menu tab is reading the real menu on this rig
+            self.log("[emulate] the Service menu tab is reading the game's real menu on this rig; Start when it is done")
             return False
         if self._last_up or self._launched():
             self.stop()

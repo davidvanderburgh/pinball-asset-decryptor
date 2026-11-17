@@ -123,6 +123,24 @@ panel = bottom
 * Every JJP title that runs modes has these pieces (`media` in its port
   report: `can_play_own_media`).
 
+**Emulator, Wonka 03.03** (hidden, muted; the game's sound measured through
+`audio.sh`'s `JJP_AUDIO_CAPTURE` and `jjpaudiocap.py`, test tones 880 Hz start,
+1500 Hz shot, 330 Hz music). The runtime read the `SoundEffect` layout off the
+game's code itself (sample +0x58, channel +0x18, loaded +0xd8, stream +0xf0, flags
++0x54) and made the two sounds on the fanfare channel and the music on the music
+channel. At the start the 880 Hz tone played; from then on the mix was our 330 Hz
+music alone (the game stopped its own), ducked by the game to a twentieth for
+about 1.5 s when a ramp shot played the 1500 Hz tone with the game's own callouts,
+then back up. The picture and the VP9 clip drew in their boxes (the clip at 30
+frames a second, its counter moving between shots). When the timer ran out, and
+in another run when three shots completed the mode, our rule stepped aside and
+the game's own music came back within a second. With `game_modes = pause` and
+the game's `mtv_mode` started under it, our music handed back at once and the
+screen showed only the game's mode. The other seven titles are matched
+statically: the same exports, the same 264-byte `SoundEffect`, the same FFmpeg 4.4
+and Allegro libraries, and the runtime loads with every import bound on each
+cached root (glibc 2.34).
+
 ## How a mode behaves
 
 * A custom mode runs while a ball is in play and ends with the ball, as the

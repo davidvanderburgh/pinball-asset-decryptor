@@ -487,7 +487,8 @@ int pm_can(unsigned what) { return (can & what) == what; }
  * the gate reads is checked against them first: a port for another game names addresses that
  * may not be mapped in this one (godzilla_le-1.16.port's resource_get 0x538484 falls in The
  * Beatles 1.29's hole between its code and its data), and reading one killed the game at boot. */
-#define N_MAPS   1024          /* mappings kept (the game has a few hundred; a trampoline's may be any of them) */
+#define N_MAPS   4096          /* mappings kept (the game has a few hundred; a trampoline's may be any of them; PAD-1329:
+                                 * Fallout LE's under the Spike 3 emulator has more than 1024 - its heap was cut off) */
 #define MAP_R    1u
 #define MAP_X    2u
 #define MAP_GAME 4u              /* the line names ...game: the game's own program */
@@ -518,6 +519,10 @@ static void maps_line(const char *s, const char *e)
     for (p = q; p + 4 <= e; p++)
         if (p[0] == 'g' && p[1] == 'a' && p[2] == 'm' && p[3] == 'e') { how |= MAP_GAME; break; }
 #endif
+    if (n_maps && maps[n_maps - 1].hi == lo && maps[n_maps - 1].how == how) {   /* PAD-1329: the run goes on: one entry */
+        maps[n_maps - 1].hi = hi;
+        return;
+    }
     maps[n_maps].lo = lo;
     maps[n_maps].hi = hi;
     maps[n_maps].how = how;
@@ -7211,8 +7216,36 @@ static void coils_arm(void)
 #define SPARE_WINDOW   10000ul     /* ... and of all of an output's commands in any 10 s */
 #define SPARE_ON_MAX    5000ul
 #define SPARE_RING        50u      /* commands remembered per output: at most 50 in any 10 s */
-#define SW_BLOCK(st, n) ((st) + 16u + (unsigned)(n) * 160u)
 #define SW_NODES 32u               /* the blocks: nodes 0..31, then the service's mutex at +0x1410 */
+#if PM_A64
+/* PAD-1329: Spike 3's 64-bit switch service (Star Wars ELG 1.10 0x308a10(node, bits[8]), under the mutex at struct +0x20)
+ * keeps the same things at other places: the struct (`data sw_struct`) holds the entries' pointer at +0 (48 bytes each:
+ * +16 the descriptor, +24 the device, +32 the id, +34 the bit, +36 the board, +40 the level) and the per-switch flags'
+ * at +8; the node blocks are a table of their own (`data sw_blocks`, struct + 0x298 there), 176 bytes each: +16 the
+ * board's entry list, +24 the previous 64 bits, +32 the current, +40 a u16 id per bit, +168 a "queued" byte. Every
+ * offset is checked in the program's own code (s3port.py sw_service). */
+#define SW_BLOCK(st, n) (data("sw_blocks") + (pm_addr)(n) * 176u)
+#define SW_BLOCKS_LEN   (SW_NODES * 176u)
+#define SW_CUR  32u
+#define SW_IDS  40u
+#define SW_ENT  48u
+#define SW_ENT_P1 16u              /* the entry's two pointers: the descriptor and the device */
+#define SW_ENT_P2 24u
+#define SW_ENT_BIT 34u
+#define SW_ENT_NODE 36u
+#define SW_ENT_LEVEL 40u
+#else
+#define SW_BLOCK(st, n) ((st) + 16u + (unsigned)(n) * 160u)
+#define SW_BLOCKS_LEN   (16u + SW_NODES * 160u)   /* from the struct: its blocks follow its two words */
+#define SW_CUR  20u
+#define SW_IDS  28u
+#define SW_ENT  32u
+#define SW_ENT_P1 8u
+#define SW_ENT_P2 12u
+#define SW_ENT_BIT 18u
+#define SW_ENT_NODE 20u
+#define SW_ENT_LEVEL 24u
+#endif
 
 static int spare_sw_ok;            /* 0 not checked yet, 1 the struct checks out, -1 it does not */
 static uint64_t spare_sw_named[SW_NODES];   /* the bits a switch entry of the game's names, map or not */
@@ -7283,31 +7316,43 @@ static int spare_sw_listen(void)
 }
 
 /* the switch struct, its layout checked against the game's own switch entries; 0 when not (yet) */
-static unsigned spare_sw_struct(void)
+static pm_addr spare_sw_struct(void)
 {
-    unsigned st = data("sw_struct"), ents, n, b, id, e, total = 0, bad = 0;
+    pm_addr st = data("sw_struct"), ents, e, blocks;
+    unsigned n, b, id, total = 0, bad = 0, bad_id = 0, bad_n = 0, bad_b = 0, got_n = 0, got_b = 0;
     if (!(can & PM_CAN_SPARE_SWITCHES) || spare_sw_ok < 0) return 0;
     if (!st) return spare_sw_ok > 0 || spare_sw_listen() ? data("sw_listen") : 0;   /* the older framework */
     if (spare_sw_ok > 0) return st;
-    if (!maps_has(st, 16u + SW_NODES * 160u, MAP_R)) maps_read();
-    if (!maps_has(st, 16u + SW_NODES * 160u, MAP_R)) { spare_sw_ok = -1; say("spare inputs: the switch struct at 0x%08x is not mapped - off", st); return 0; }
-    ents = *(const unsigned *)(unsigned long)st;
+    blocks = PM_A64 ? SW_BLOCK(st, 0) : st;               /* Spike 2: from the struct itself (its blocks follow) */
+    if (!maps_has(st, sizeof(pm_addr), MAP_R) || !maps_has(blocks, SW_BLOCKS_LEN, MAP_R)) maps_read();
+    if (!maps_has(st, sizeof(pm_addr), MAP_R) || !maps_has(blocks, SW_BLOCKS_LEN, MAP_R)) {
+        spare_sw_ok = -1;
+        say("spare inputs: the switch struct at 0x%08" PMA " is not mapped - off", st);
+        return 0;
+    }
+    ents = *(const pm_addr *)(unsigned long)st;           /* PAD-1329: the entries' pointer, 8 bytes on 64-bit ARM */
     if (!ents) return 0;                                  /* the game has not built its switches yet: ask later */
     for (n = 0; n < SW_NODES; n++)
         for (b = 0; b < 64; b++) {
-            id = *(const unsigned short *)(unsigned long)(SW_BLOCK(st, n) + 28u + 2u * b);
+            id = *(const unsigned short *)(unsigned long)(SW_BLOCK(st, n) + SW_IDS + 2u * b);
             if (!id) continue;
             total++;
-            e = ents + id * 32u;
-            if (!maps_has(e, 32, MAP_R)) maps_read();
-            if (!maps_has(e, 32, MAP_R) || *(const unsigned short *)(unsigned long)(e + 18) != b
-                || *(const unsigned char *)(unsigned long)(e + 20) != n)
-                bad++;
+            e = ents + (pm_addr)id * SW_ENT;
+            if (!maps_has(e, SW_ENT, MAP_R)) maps_read();
+            if (!maps_has(e, SW_ENT, MAP_R) || *(const unsigned short *)(unsigned long)(e + SW_ENT_BIT) != b
+                || *(const unsigned char *)(unsigned long)(e + SW_ENT_NODE) != n) {
+                if (!bad++ && maps_has(e, SW_ENT, MAP_R)) {   /* the first, for the log */
+                    bad_id = id, bad_n = n, bad_b = b;
+                    got_n = *(const unsigned char *)(unsigned long)(e + SW_ENT_NODE);
+                    got_b = *(const unsigned short *)(unsigned long)(e + SW_ENT_BIT);
+                }
+            }
         }
     if (total < 8 || bad) {
         spare_sw_ok = -1;
-        say("spare inputs: the switch struct at 0x%08x does not check out (%u of %u bits name another switch's entry) - off",
-            st, bad, total);
+        say("spare inputs: the switch struct at 0x%08" PMA " does not check out (%u of %u bits name another switch's "
+            "entry; the entries at 0x%08" PMA ", the first, id %u at %u:%u, says %u:%u; %d mappings read) - off", st, bad, total,
+            ents, bad_id, bad_n, bad_b, got_n, got_b, n_maps);
         return 0;
     }
     /* THE OTHER WAY ROUND (the PAD-826 sweep, Deadpool LE 1.14): a switch entry of the game's on a bit the map leaves
@@ -7316,27 +7361,28 @@ static unsigned spare_sw_struct(void)
      * (two pointers, a bit under 64, a board, a level 0/1), names its bit as the game's: never spare. */
     for (n = 0; n < SW_NODES; n++) spare_sw_named[n] = 0;
     for (id = 1, b = 0; id < 1024; id++, b++) {
-        e = ents + id * 32u;
-        if (!maps_has(e, 32, MAP_R)) maps_read();
-        if (!maps_has(e, 32, MAP_R)) break;
-        n = *(const unsigned char *)(unsigned long)(e + 20);
-        if (!maps_has(*(const unsigned *)(unsigned long)(e + 8), 4, MAP_R)
-            || !maps_has(*(const unsigned *)(unsigned long)(e + 12), 4, MAP_R)
-            || *(const unsigned short *)(unsigned long)(e + 18) >= 64 || n >= SW_NODES
-            || *(const unsigned char *)(unsigned long)(e + 24) > 1)
+        e = ents + (pm_addr)id * SW_ENT;
+        if (!maps_has(e, SW_ENT, MAP_R)) maps_read();
+        if (!maps_has(e, SW_ENT, MAP_R)) break;
+        n = *(const unsigned char *)(unsigned long)(e + SW_ENT_NODE);
+        if (!maps_has(*(const pm_addr *)(unsigned long)(e + SW_ENT_P1), 4, MAP_R)
+            || !maps_has(*(const pm_addr *)(unsigned long)(e + SW_ENT_P2), 4, MAP_R)
+            || *(const unsigned short *)(unsigned long)(e + SW_ENT_BIT) >= 64 || n >= SW_NODES
+            || *(const unsigned char *)(unsigned long)(e + SW_ENT_LEVEL) > 1)
             break;
-        spare_sw_named[n] |= (uint64_t)1 << *(const unsigned short *)(unsigned long)(e + 18);
+        spare_sw_named[n] |= (uint64_t)1 << *(const unsigned short *)(unsigned long)(e + SW_ENT_BIT);
     }
     spare_sw_ok = 1;
-    say("spare inputs: the switch struct at 0x%08x checks out (%u bits of the game's, each its own entry's; %u entries "
-        "in the array)", st, total, b);
+    say("spare inputs: the switch struct at 0x%08" PMA " checks out (%u bits of the game's, each its own entry's; %u "
+        "entries in the array)", st, total, b);
     return st;
 }
 
 /* the input's level (0/1), or -1 when it is not a spare input (a switch of the game's there, or no struct) */
 static int spare_level(unsigned node, unsigned bit)
 {
-    unsigned st = spare_sw_struct(), board;
+    pm_addr st = spare_sw_struct();
+    unsigned board;
     if (!st || node >= SW_NODES || bit > 63) return -1;
     if (!data("sw_struct")) {                             /* the older framework: the board's own bits */
         if (spare_sw_named[node] & ((uint64_t)1 << bit)) return -1;
@@ -7347,9 +7393,9 @@ static int spare_level(unsigned node, unsigned bit)
         return ((*(const volatile unsigned char *)(unsigned long)(board + 576u + bit / 8u)
                  ^ *(const volatile unsigned char *)(unsigned long)(board + 584u + bit / 8u)) >> (bit % 8u)) & 1;
     }
-    if (*(const unsigned short *)(unsigned long)(SW_BLOCK(st, node) + 28u + 2u * bit)) return -1;
+    if (*(const unsigned short *)(unsigned long)(SW_BLOCK(st, node) + SW_IDS + 2u * bit)) return -1;
     if (spare_sw_named[node] & ((uint64_t)1 << bit)) return -1;    /* a switch entry of the game's names it */
-    return (*(const volatile unsigned char *)(unsigned long)(SW_BLOCK(st, node) + 20u + bit / 8u) >> (bit % 8u)) & 1;
+    return (*(const volatile unsigned char *)(unsigned long)(SW_BLOCK(st, node) + SW_CUR + bit / 8u) >> (bit % 8u)) & 1;
 }
 
 int pm_spare_switch(unsigned node, unsigned input)
@@ -7432,7 +7478,8 @@ static void spare_switches_tick(void)
 /* is (node, output) a spare output: a driver board of the game's (some record on that node), no record on it */
 int pm_spare_output(unsigned node, unsigned output)
 {
-    unsigned tab = data("coil_table"), cnt = data("coil_count"), base, n, d, rec, board = 0;
+    pm_addr tab = data("coil_table"), cnt = data("coil_count"), base, rec;
+    unsigned n, d, board = 0;
     if (!(can & PM_CAN_SPARE_COILS) || node > 63 || output > 8) return 0;
     if (!tab && fn("coil_used")) {     /* the older framework: the game's own "a coil there" (Mando LE 1.44 0x3a1710),
                                         * which walks its device records for a coil on that board and output */
@@ -7442,14 +7489,14 @@ int pm_spare_output(unsigned node, unsigned output)
             if (used(node, d) & 0xffu) return 1;          /* a driver board of the game's, nothing on this output */
         return 0;
     }
-    if (!maps_has(tab, 4, MAP_R) || !maps_has(cnt, 4, MAP_R)) return 0;
-    base = *(const unsigned *)(unsigned long)tab;
-    n = *(const unsigned *)(unsigned long)cnt;
+    if (!maps_has(tab, sizeof(pm_addr), MAP_R) || !maps_has(cnt, 4, MAP_R)) return 0;
+    base = *(const pm_addr *)(unsigned long)tab;   /* PAD-1329: the table's pointer, 8 bytes on 64-bit ARM (PAD-1285) */
+    n = *(const unsigned *)(unsigned long)cnt;     /* (a u64 there: its low word, little-endian) */
     if (!base || !n || n > 512) return 0;
     if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) maps_read();
     if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) return 0;
     for (d = 1; d < n; d++) {
-        rec = base + d * COIL_REC_SIZE;
+        rec = base + (pm_addr)d * COIL_REC_SIZE;
         if (*(const unsigned char *)(unsigned long)(rec + COIL_REC_NODE) != node) continue;
         board = 1;
         if (*(const unsigned short *)(unsigned long)(rec + COIL_REC_COIL) == output) return 0;
@@ -7520,6 +7567,14 @@ int pm_spare_drive(unsigned node, unsigned output, unsigned pulse_power, unsigne
     spec.x = 0;
     t0 = pm_ms();
     rc = ((unsigned (*)(unsigned, const void *))(unsigned long)fn("coil_frame"))(node, &spec);
+#if PM_A64
+    /* PAD-1329: Spike 3's fire answers 0 when no frame went out - the board is not one the node bus knows (Fallout
+     * LE 0.82's coil records on board 0, the CPU board's own outputs: the rig's bus saw nothing), 1 when it did */
+    if (!(rc & 0xffu)) {
+        say("spare output %u:%u refused - the node bus did not take it (board %u is not on the bus)", node, output, node);
+        return 0;
+    }
+#endif
     o->at[o->next] = now | 1;
     o->ms[o->next] = total;
     o->next = (o->next + 1) % SPARE_RING;
@@ -7584,7 +7639,8 @@ static void spare_arm(void)
 {
     static const char *const outs[] = { "coil_frame", "coil_off", 0 };
     static const char *const old_outs[] = { "coil_frame", "coil_used", 0 };   /* the older framework */
-    if (data("sw_struct") || (data("sw_listen") && data("sw_boards"))) can |= PM_CAN_SPARE_SWITCHES;
+    if ((data("sw_struct") && (!PM_A64 || data("sw_blocks"))) || (data("sw_listen") && data("sw_boards")))
+        can |= PM_CAN_SPARE_SWITCHES;             /* PAD-1329: Spike 3's node blocks are a table of their own */
     if ((have_sites(outs) && data("coil_table") && data("coil_count")) || (!data("coil_table") && have_sites(old_outs)))
         can |= PM_CAN_SPARE_COILS;
     if (can & (PM_CAN_SPARE_SWITCHES | PM_CAN_SPARE_COILS))

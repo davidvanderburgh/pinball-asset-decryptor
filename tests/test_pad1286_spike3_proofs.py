@@ -50,8 +50,8 @@ def test_the_spike3_card_offers_ball_save_place_and_done():
 def test_spike2_proofs_still_do_not_carry_over():
     """PAD-1277's rule stands: a table holding the Spike 2 build does not offer the Spike 3 one."""
     mp, pr = _profile()
-    assert "star_wars_elg-1.10/spike3" not in mp.SPARE_IO_PROVEN
-    assert pr.spare == ()
+    assert "star_wars_elg-1.10" in mp.SPARE_IO_PROVEN          # the Spike 2 build's own proof ...
+    assert pr.spare == ("in",)                                  # ... and PAD-1329's of the Spike 3 one: no spare output
 
 
 # ---- the port ----------------------------------------------------------------------------------------------------

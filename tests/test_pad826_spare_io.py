@@ -125,9 +125,10 @@ def test_what_is_spare_is_the_games_own_tables():
     drive = _lift(src, "int pm_spare_drive(")
     assert drive.index("pm_spare_output(") < drive.index('fn("coil_frame")')     # checked before anything is sent
     level = _lift(src, "static int spare_level(")
-    assert "+ 28u + 2u * bit" in level and "return -1" in level                  # a switch of the game's: never read
+    assert "+ SW_IDS + 2u * bit" in level and "return -1" in level              # a switch of the game's: never read
+    assert re.search(r"^#define SW_IDS  28u", src, re.M) and re.search(r"^#define SW_CUR  20u", src, re.M)   # Spike 2's
     assert "spare_sw_named[node]" in level            # a bit a switch entry names is the game's, map or not (Deadpool 1.14)
-    check = _lift(src, "static unsigned spare_sw_struct(")
+    check = _lift(src, "static pm_addr spare_sw_struct(")       # PAD-1329: pointer-sized (Spike 3)
     assert "n < SW_NODES" in check and "bad" in check and "spare_sw_ok = -1" in check
     assert re.search(r"^#define SW_NODES 32u", src, re.M)
     old = _lift(src, "static int spare_sw_listen(")                             # the older framework's listener table
@@ -249,8 +250,10 @@ def test_blocks_compile_to_the_sdk_calls():
 def test_only_a_proven_build_offers_them():
     profiles = MP.profiles()
     assert profiles["godzilla_pro_1_16"].spare == ("in", "out")
-    assert sum(1 for p in profiles.values() if p.spare == ("in", "out")) == len(MP.SPARE_IO_PROVEN) == 69
-    for p in profiles.values():
+    spike2 = {k for k in MP.SPARE_IO_PROVEN if not k.endswith("/spike3")}        # PAD-1329 adds Spike 3 builds
+    s2 = [p for p in profiles.values() if not p.key.endswith("_spike3")]        # Spike 3's: test_pad1329
+    assert sum(1 for p in s2 if p.spare == ("in", "out")) == len(spike2) == 69
+    for p in s2:
         key = "%s-%s" % (p.key.rsplit("_", 2)[0], ".".join(p.key.rsplit("_", 2)[1:]))
         if key not in MP.SPARE_IO_PROVEN:
             assert p.spare == (), p.key

@@ -810,9 +810,8 @@ above through s3proof.sh:
   ran its 40 s, `ours is over` at one ball; COIL TEST's right_gate held 2015 ms and 1513 ms as ONE command each; STACK MB
   waited in the game's own multiball and started after its second drain.
 
-**Not offered on the Spike 3 card yet, and why:** spare switch inputs and driver outputs (PAD-826: the switch service
-block, the node-bus fire wrapper and coil_off read at 32-bit offsets; `sw_struct`, `coil_frame`, `coil_off` NOT PLACED)
-(the game's challenges were here too, until PAD-1330, below); see the ticket's report for where they go next. The game's "time is up" line
+**Not offered on the Spike 3 card yet, and why:** (spare switch inputs and driver outputs were here until PAD-1329, and
+the game's challenges until PAD-1330, both below); see the ticket's report for where they go next. The game's "time is up" line
 (TIME_UP_NONE) is not claimed for the Spike 3 build: the option is greyed there anyway (its port has no time-up call),
 and the Spike 3 sound bank is a differently encoded image.bin (the same size, 99.6% of its bytes differ), so PAD-479's
 transcription does not carry over by itself. Music modes, editions, menu settings: Spike 2's delivery only (above);
@@ -1148,6 +1147,41 @@ over the stock program, sounds.cfg):
   Fallout's game music is mostly in its 137 music-bank songs (`music_catNN_NNNN`), which are not idx files and take no
   mode files (as on Spike 2: the Audio tab says only an idx sound can).
 Tests: tests/test_pad1324_spike3_music_modes.py.
+
+## Spare switch inputs and driver outputs on Spike 3 (PAD-1329)
+
+PAD-826's spare I/O read the switch service's struct, its entries and the coil table at 32-bit offsets, and the Spike 3
+ports had no node-bus fire or OFF. The same three pieces are in every 64-bit program; Star Wars ELG 1.10's addresses:
+
+| piece | Spike 2 (ELG 1.10) | Spike 3 (ELG 1.10) |
+|---|---|---|
+| fire-by-address `coil_frame` (node, spec) | 0x4669ac: tail call of 0x46680c(node, spec, 0, 0) | 0x5151d0: `mov x3,#0; mov w2,#0; b 0x514fb0`, the builder refuses a coil above 8 (15 on Fallout LE, Transformers LE) |
+| the board's OFF `coil_off` (node, coil) | 0x462a98 | 0x50ee60: `8n 02 4d <coil>` through the sender 0x50d330 |
+| the switch service (node, bits[8]) | 0x36fa28, struct 0x601cc4 | 0x308a10, struct 0x7477e0 (+0 the entries' pointer, +8 the flags', +0x20 its mutex) |
+| a switch entry | 32 bytes: +18 bit, +20 board, +24 level | 48 bytes: +16 descriptor, +24 device, +32 id, +34 bit, +36 board, +40 level |
+| a node block | struct + 16 + node * 160: +12 previous, +20 current bits, +28 u16 id per bit | a table of its own, `data sw_blocks` (struct + 0x298 on all seven), node * 176: +16 its entry list, +24 previous, +32 current, +40 ids, +168 queued |
+
+- **The runtime** (pad_mode_runtime.c) reads them with that layout on 64-bit ARM (SW_CUR, SW_IDS, SW_ENT ... under
+  `#if PM_A64`), pointers 8 bytes; Spike 2's object reads what it always did. Spare inputs arm on 64-bit only with
+  `sw_blocks`. A fire the node bus did not take answers 0 there and is refused ("board N is not on the bus"):
+  Fallout LE's coil records on board 0 are the CPU board's own outputs, no node's.
+- **The runtime's memory table** (maps_line): back-to-back mappings of one kind are one entry, and it keeps 4096.
+  Fallout LE's process under the Spike 3 emulator has more than 1024 mappings; the heap holding its switch entries was
+  past the end, so its struct "did not check out (110 of 110)". Any reader of that heap had the same blind spot.
+- **The ports**: all seven carry `site coil_frame`, `site coil_off`, `data sw_struct`, `data sw_blocks`, read off each
+  program by hand from the shapes above and checked against its words (tests/test_pad1329_spike3_spare_io.py, with
+  PAD_S3_PROGRAMS). s3port.py does not draft them yet: a new Spike 3 title's port gets them the same way.
+- **The rig**: `PROOF=spare` (play.sh) closes the input spare_sweep_mode.c names with `s3press.py set` twice;
+  s3proof.sh keeps the bus trace (PAD_S3_NBTRACE=1). The sweep pulses the first spare output of every driver board on
+  the first close, and on the second holds it (200/30 ms then 60/3000 ms) and lets go a second later (the OFF).
+
+Proof (2026-11-16, Spike 3 rig slots 97-99, hidden, muted, this build's runtime): on all seven titles the struct
+checked out (69-110 switches, each its entry's) and the spare input closed on the board came as the mode's shot twice.
+Star Wars ELG has no spare output (one driver board, node 8, outputs 0-8 all the game's): spare inputs only
+(mode_project.SPARE_NO_OUTPUTS). On the other six every spare output the sweep drove (Fallout 9:1; Pokemon 1:1 9:1 10:0
+13:1; Star Wars 2025 LE 1:1 8:6 9:0 13:0, Pro 1:1 8:6 9:5; Transformers 1:1 9:0 13:1; Walking Dead Remastered 1:1)
+was on the bus as the pulse (`nN 40 0O c8 03 ..`), the held command (`.. 3c 2c 01`) and its OFF (`nN 4d 0O`), and the
+game had sent none of them anything. Tests: tests/test_pad1329_spike3_spare_io.py.
 
 ## Attract items on Spike 3 (PAD-1328, round 1)
 

@@ -11,6 +11,8 @@
 #   stackmb   start the game's own multiball, trigger a `stack no` mode inside it, drain until it starts
 #   edge      (PAD-1322) the flipper buttons in attract, then in play the trigger, the scoring shots, a slingshot, a
 #             pop bumper and the flipper buttons: with `value switch_edge_log N` in the port, every edge is logged
+#   spare     (PAD-1329) with spare_sweep_mode.c in the runtime (SO=): close the input its `sweep:` line names on the
+#             board (s3press.py set) twice, 3 s each; its shot pulses the spare output it names (the bridge's nbtrace)
 # The title's switch names (Star Wars ELG 1.10's by default) - each list is `|`-separated:
 TRIGGER_SW=${TRIGGER_SW:-TOP LANE CENTER}                   # the mode files' trigger (0x40 x3 on ELG)
 SHOT_SWS=${SHOT_SWS:-CENTER TARGET|HIDDEN TARGET|LEFT LUKE ORBIT}  # three of its scoring shots (0x20000138)
@@ -134,5 +136,15 @@ edge)
     for s in "${fl[@]}"; do $P sw "$SLOT" "$s" 600; sleep 2; done
   done
   sleep 10 ;;
+spare)
+  for i in $(seq 1 60); do grep -q "sweep: input" $L && break; sleep 1; done
+  ln=$(grep -a -m1 "sweep: input" $L); echo "[play] $ln"
+  io=$(echo "$ln" | sed -n 's/.*sweep: input \([0-9]*\):\([0-9]*\) .*/\1 \2/p')
+  [ -n "$io" ] || { echo "[play] no spare input chosen"; exit 0; }
+  for r in 1 2; do
+    echo "[play] round $r: spare input $io closed at $(date +%T)"; $P set "$SLOT" $io 1; sleep 3
+    echo "[play] round $r: spare input $io open at $(date +%T)"; $P set "$SLOT" $io 0; sleep 6
+  done
+  sleep 5 ;;
 esac
 echo "[play] done"

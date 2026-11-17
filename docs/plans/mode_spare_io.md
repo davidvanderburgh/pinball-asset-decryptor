@@ -142,3 +142,9 @@ time, and nothing of the game's lands on it. Census over every port.
   refused, a 2000 ms pulse refused, a 4 s hold OFF at the mode's end as a fire of nothing (`[coildrive] ... - OFF`),
   the 5 s in 10 s budget held.
 - `mode_project.SPARE_IO_PROVEN` names all 69 builds.
+
+## Spike 3 (PAD-1329)
+
+The 64-bit programs keep the same pieces at other offsets (entries 48 bytes, node blocks of 176 bytes in a table of
+their own, `data sw_blocks`); every Spike 3 title is proven: docs/plans/spike3_modes.md, "Spare switch inputs and
+driver outputs on Spike 3".

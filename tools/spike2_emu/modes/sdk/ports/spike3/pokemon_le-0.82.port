@@ -117,6 +117,15 @@ data game_flag_count        0x025dc348   # 29 of 29 lined-up instructions
 value game_flags_at             0    # PAD-1327: the 64-bit flag bitmap's layout (Star Wars ELG's), lost in the draft
 data coil_count             0x032ace00   # 61 of 61 lined-up instructions
 data coil_table             0x0329a2f0   # 47 of 47 lined-up instructions
+
+# ---- PAD-1329: spare switch inputs and driver outputs (PAD-826), read off this program's own code: the node-bus
+# fire-by-address (mov x3,#0; mov w2,#0; b <the frame builder>; outputs above 8 refused) and the board's OFF
+# (8n 02 4d <coil>); the switch service's struct (+0 the 48-byte entries, +0x20 its mutex) and its node blocks
+# (176 bytes each: +32 the current bits, +40 the ids) ----
+site coil_frame       0x00919ce0 0xd2800003 0x52800002
+site coil_off         0x00913980 0xd0014362 0xf9462042
+data sw_struct             0x03294ed0
+data sw_blocks             0x03295168
 # data right_gate_obj         not carried: the reference game's own (data right_gate_obj         0x00711730)
 
 # ---- values: the reference's framework offsets and counts, each read at the lined-up instruction or off the engine's own code ----

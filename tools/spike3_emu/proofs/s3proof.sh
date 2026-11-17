@@ -1,7 +1,7 @@
 # s3proof.sh - one emulator proof run of a Spike 3 port (PAD-1286; the recipe: docs/plans/spike3_modes.md,
 # "The proof pass on a Spike 3 port"). As root in WSL, hidden and muted, on rig slot $SLOT:
 #
-#   [TITLE=<game>] PROOF=ballsave|game|mb|coil|mode|clock|census|stackmb|edge  CARD=<name in D:\Pinball\images\Stern\spike3>  SLOT=88 \
+#   [TITLE=<game>] PROOF=ballsave|game|mb|coil|mode|clock|census|stackmb|edge|spare  CARD=<name in D:\Pinball\images\Stern\spike3>  SLOT=88 \
 #   CFG=save.cfg [CFG2=done.cfg] [SO=<a mode64.so>] [PORT=<a port>] TAG=<name> OUT=<a Windows dir as /mnt/c/...> \
 #     bash s3proof.sh
 #
@@ -36,7 +36,7 @@ done
 D=/var/tmp/pad-s3/slot$SLOT/connectivity.up/dump
 rm -f "$D/mode.log"
 ( PROOF=${PROOF:-game} bash "$HERE/play.sh" "$SLOT" > "$W/play_$TAG.out" 2>&1 ) &
-env PAD_LABEL=${PAD_LABEL:-PAD-s3proof} PAD_HIDDEN=1 PAD_S3_BALLS_TRACE=1 PAD_S3_MODE_SO="$W/mode64.so" \
+env PAD_LABEL=${PAD_LABEL:-PAD-s3proof} PAD_HIDDEN=1 PAD_S3_BALLS_TRACE=1 PAD_S3_NBTRACE=${PAD_S3_NBTRACE:-0} PAD_S3_MODE_SO="$W/mode64.so" \
     PAD_S3_MODE_FILES="$W/files" bash "$REPO/tools/spike3_emu/s3run.sh" "$CARD" --slot "$SLOT" --fresh --bus --bridge \
     --secs "${SECS:-230}" > "$W/run_$TAG.out" 2>&1
 echo "run exit $? ($(grep -a -m1 'cap' "$W/run_$TAG.out" || echo 'see run_'$TAG'.out'))"
@@ -44,4 +44,5 @@ wait
 cp "$D/mode.log" "$OUT/mode_$TAG.log" 2>/dev/null
 cp "$W/play_$TAG.out" "$W/run_$TAG.out" "$OUT/"
 cp "/var/tmp/pad-s3/slot$SLOT/bridge.log" "$OUT/bridge_$TAG.log"
+[ -f "/var/tmp/pad-s3/slot$SLOT/nbtrace.log" ] && cp "/var/tmp/pad-s3/slot$SLOT/nbtrace.log" "$OUT/nbtrace_$TAG.log"   # PAD_S3_NBTRACE=1 (PAD-1329)
 tail -4 "$W/play_$TAG.out"

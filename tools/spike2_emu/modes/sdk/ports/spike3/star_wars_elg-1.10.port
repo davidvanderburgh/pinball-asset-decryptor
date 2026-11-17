@@ -170,8 +170,10 @@ site challenge_scores_gate   0x003ef058 0x97f8e122 0x36000600
 site challenge_pages_0      0x0013cee0 0xb0002ae3 0xf9468463
 site challenge_pages_1      0x0016c2a0 0xb0002962 0xf9468442
 site game_scores             0x003eecc0 0xf0001542 0xf9468442
-# site coil_frame       NOT PLACED: no counterpart found
-# site coil_off         NOT PLACED: no counterpart found
+#   coil_frame / coil_off: the node-bus fire-by-address (node, spec) and the board's OFF (node, coil), read off this
+#   program's own code (PAD-1329): mov x3,#0; mov w2,#0; b 0x514fb0 (coil above 8 refused) / 8n 02 4d <coil> via 0x50d330
+site coil_frame       0x005151d0 0xd2800003 0x52800002
+site coil_off         0x0050ee60 0xf0000c42 0xf9468442
 site coop_player_change 0x00417b50 0xd0001402 0xf9468442
 site coop_add_player  0x00417710 0xa9be53f3 0x52800a20
 # site coop_first_ball  NOT PLACED: mid-way into a function on Spike 2 (0x1016c0 + 0x24)
@@ -237,7 +239,8 @@ data right_gate_obj         0x00711730   # read off the program's own code (PAD-
 data challenge_scores_table   0x006c4b40
 data challenge_scores_count   0x006a3398
 site  audit_add              0x0042d880 0x72003c00 0x54000800   # PAD-1327: the audit add (id w0, amount w1): 132 distinct ids handed it with an amount of 1, the next callee 12
-# data sw_struct              NOT PLACED: 5 of 5 paired functions agree
+data sw_struct             0x007477e0   # the switch service 0x308a10's struct: +0 the entries (48 bytes), +0x20 its mutex (PAD-1329)
+data sw_blocks             0x00747a78   # its node blocks, 176 bytes each: +32 the current bits, +40 the ids (PAD-1329)
 data coop_player            0x006b1a1a   # 2 of 3 paired functions that load it
 data coop_players           0x00792200   # 5 of 5 paired functions that load it
 

@@ -39,6 +39,190 @@
  },
  "can_balls": true,
  "can_coils": true,
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 51,
+  "classes": {
+   "AFDMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "CDMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "ComaMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "NoSympathyForTheDevil": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "RockMeter": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "SlashSolo": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeModes": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": false
+   },
+   "SongMode_Better": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_ChineseDemocracy": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_CivilWar": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_Coma": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_DontCry": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_DoubleTalkinJive": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_Estranged": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_ItsSoEasy": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_LiveAndLetDie": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_MrBrownstone": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_MyMichelle": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_Nightrain": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_NovemberRain": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_OutTaGetMe": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_ParadiseCity": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_Patience": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_RocketQueen": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_SweetChildOMine": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_ThisILove": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_WelcomeToTheJungle": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode_YouCouldBeMine": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "TourMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "UYI1Mode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "UYI2Mode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   }
+  },
+  "live": ""
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,

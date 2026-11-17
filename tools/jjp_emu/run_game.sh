@@ -133,6 +133,25 @@ jjp_nosync() {
 }
 jjp_nosync
 
+# NO REBOOTS FROM THE GAME (PAD-1349).  The game's own scripts reboot the
+# machine when they are done: hotfix.sh (the Update USB screen's hot fix),
+# waitforusbremoval.sh, factoryreset.pl.  In the jail reboot/poweroff/halt/
+# shutdown are links to systemctl, which must never get a chance to reach this
+# WSL distro.  Each is replaced, in the overlay's upper layer only, by a note in
+# /jjpe/temp/rig_reboot.log; a proof restarts the game itself where the machine
+# would have rebooted.
+jjp_noreboot() {
+    local b f
+    for b in reboot poweroff halt shutdown; do
+        f="$JJP_JAIL/usr/sbin/$b"
+        grep -qs "PAD rig: no reboots" "$f" && continue
+        rm -f "$f"
+        printf '#!/bin/sh\n# PAD rig: no reboots from the game (run_game.sh, PAD-1349)\necho "$(date "+%%F %%T") %s $*: asked for, not done on the rig" >> /jjpe/temp/rig_reboot.log\nexit 0\n' "$b" > "$f"
+        chmod 0755 "$f"
+    done
+}
+jjp_noreboot
+
 # MUTED UNLESS ASKED (PAD-1340).  audio.sh's PAD_AUDIO=0 null asound.conf was
 # not enough: Allegro's autodetect tries PulseAudio BEFORE ALSA, and with
 # PULSE_SERVER pointing at WSLg and the desktop cookie in the jail it reached

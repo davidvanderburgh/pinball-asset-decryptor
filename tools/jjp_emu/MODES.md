@@ -13,6 +13,9 @@ No game code is patched. How and why it works: `docs/plans/jjp_custom_modes.md`.
 | Starter modes per title | `modes/examples/<title>/` |
 | Install ISO with modes, for a real machine | `mkjjpmodes.py build` |
 | Check a mode folder | `mkjjpmodes.py check --modes DIR --port PORT.json` |
+| Change the game's OWN modes | `<name>.stock` files in the same folder (PAD-1351, below) |
+| A running game's mode globals and shot names | `jjpstock.py live` -> `modes/ports/<title>.live.json` |
+| Starter `.stock` file per title | `modes/stock_examples/<title>/` |
 
 ## A mode folder
 
@@ -122,6 +125,109 @@ The port report lists every named coil with what a mode may do (`coils`:
 `COIL_HOLDABLE`, `COIL_ANYWAY`; a test keeps them equal to the runtime's), and
 `mkjjpmodes.py check --port` refuses a coil the mode may not use.
 
+## The game's own modes, changed: `.stock` files (PAD-1351)
+
+A `<name>.stock` file in the mode folder changes one of the GAME's modes: its timer,
+its points and which shots count for it. No game code is patched; the runtime points
+a few slots of that mode's class vtable at its own functions, which call the game's.
+A folder may hold `.stock` files only, `.mode` files only, or both (up to 32 `.stock`).
+
+```
+# candy_lane.stock - Wonka 03.03 (modes/stock_examples/Wonka-v03.03)
+mode = cl_mode
+seconds = 60
+points_x = 3
+shots_off = target_ul_flipper
+shots_add = switch_ramp_right_made:target_tv
+```
+
+| Key | Meaning |
+|---|---|
+| `mode` | (required) the game's mode: its global (`cl_mode` is Wonka's Candy Lane; a title's port report lists them under `stock.objects` once read off a live game) or its class (`CandyLaneMode`; every title's report lists them under `stock.classes`) |
+| `seconds` | the mode's timer when it starts, in place of the game's own (Candy Lane's is 45, 30 or 15 by the Wonka Bar timer adjustment) |
+| `points` | every award the mode makes becomes this many points |
+| `points_x` | every award the mode makes times this (`2`, `1.5`, `0.5`); `points` wins if both are set |
+| `shots_off` | shots that no longer count for this mode (the game's other modes still get them) |
+| `shots_add` | `switch:shot` pairs: while the mode runs, hitting the switch also gives the mode that shot |
+
+Shots are the game's own shot names: on Wonka 03.03 the 41 in
+`modes/ports/Wonka-v03.03.live.json` (`ramp_left`, `loop_center`, `target_tv`,
+`g_target`, ...), or a shot's number. On a title read only statically, the runtime
+logs its shot table on the machine (`jjpmodes.log`, the `shots:` line), and
+`mkjjpmodes.py check` leaves shot names unchecked there. Everything the file does is
+logged with `STOCK`: each award with the game's own figure beside it, each shot let by
+or added, and when the mode starts and ends.
+
+How each works, read off Wonka 03.03's decrypted engine:
+
+* **Timer.** `Mode::start` sets a default and each class then sets its own (the Wonka Bar
+  award modes from an adjustment, 60 - 15 x the setting, into a timer the class keeps
+  itself). The mode's run proc is started through the class's `run_proc` slot, so the
+  runtime runs first there and calls the class's own `set_time`. With the run proc
+  alive, `set_time`'s restart does nothing, as when the game sets a time itself. The
+  timer then runs (or holds) by the game's own rules.
+* **Points.** Every award goes through `this->score_and_total`. The game's call sites
+  check whether the slot still holds the class's own function and call the slot when it
+  does not, so the runtime sees every award.
+* **Shots.** A made shot reaches each mode by a direct call to its class's
+  `shot_dispatch`, which reads the shot from its proc argument and first asks
+  `this->is_running` (or `_or_grace`, `_or_grace_grace`) through the vtable. The
+  runtime answers that question "not running" when it comes from inside that class's
+  own `shot_dispatch` (the return address) about a shot in `shots_off`. For `shots_add`
+  it sets the shot id in the switch's proc (`shot_set_proc_shot_id`; Wonka has no
+  setter, so the proc argument `shot_get_proc_shot_id` reads) and calls the class's
+  `shot_dispatch`. A class with no `shot_dispatch` of its own takes no shot keys
+  (the port report's `shots: false`; the runtime logs it).
+* **Shot names.** The game's shot table (one entry per shot id, each pointing at its
+  exported `shot_made_<name>` handler) is ciphertext in the file. The runtime finds it
+  in memory by those handlers' addresses; `jjpstock.py` does the same on a live game.
+  A shot is named after its handler; where several shots share one (Wonka's slings,
+  jets and 3-bank) each takes the game's display name instead (`left_sling`,
+  `top_bumper`, `g_target`).
+
+**Emulator, Wonka 03.03** (hidden, muted, `C:\tmp\PAD-1351\proof.sh`): Candy Lane
+started by the test hook (`JJP_MODS_TEST_GAMEMODE=cl_mode`), then the same shots on two
+boots. Without changes: the game's timer read 30 s (`WonkaBarAwardModes::wba_timer`),
+awards 5,000 at the start and 2,550 a target, the upper-left flipper target scored,
+the right ramp did nothing for it. With `candy_lane.stock`: the timer read 60 s, awards
+15,000 and 7,650 (x3), `target_ul_flipper goes by it`, and `switch_ramp_right_made gives
+it shot target_tv` scored 7,650. The same file naming the class (`mode = CandyLaneMode`)
+does the same. The countdown is the game's own
+`WonkaBarAwardModes::timer_run_proc`, which takes a second off that same `wba_timer`
+each second unless `game_timers_paused()` (the ball saver's pause, with every ball in
+play held in a lock or the shooter lane). On the hidden rig no ball rolls, so the
+game held the timer in both runs alike; the file changed the value it counts down
+from.
+
+### Every title, statically
+
+`jjpport.py` reports, per title, what a `.stock` file can do (`stock` in the port
+report): the vtable slots, how the shot id is read and set, and per Mode class whether
+its timer and points are its own and whether it takes shot keys. Checked 2026-11-16 on
+each title's game program; every one has the same slots as Wonka (run_proc 0x90,
+set_time 0x28, score 0x88, is_running 0x48 / 0x50 / 0x58) and `shot_get_proc_shot_id`:
+
+| Image | Mode classes | Take shot keys | Own timer | Own points | Shot id set by | Shot handlers | Starter |
+|---|---|---|---|---|---|---|---|
+| Wonka 03.03 | 25 | 17 | 5 | 10 | the proc argument | 38 | `candy_lane.stock`, emulator-proven |
+| Guns N' Roses 03.03 | 33 | 30 | 0 | 30 | `shot_set_proc_shot_id` | 51 | `AFDMode.stock` |
+| Elton John 02.03 | 31 | 29 | 0 | 28 | `shot_set_proc_shot_id` | 36 | `PianoRampMode.stock` |
+| Godfather 02.03 | 16 | 13 | 0 | 15 | `shot_set_proc_shot_id` | 57 | `BoxingMode.stock` |
+| Pirates of the Caribbean 01.01 | 2 | 0 | 0 | 0 | `shot_set_proc_shot_id` | 46 | none: its two Mode classes take no shots; its play is multiballs |
+| Dialed In 02.02 | 17 | 14 | 0 | 0 | `shot_set_proc_shot_id` | 27 | `DisasterMode_AcidRain.stock` |
+| The Hobbit 04.02 | 33 | 32 | 0 | 32 | `shot_set_proc_shot_id` | 31 | `BookMode.stock` |
+| Toy Story 02.04 | 21 | 19 | 0 | 16 | `shot_set_proc_shot_id` | 41 | `BottleBlastMode.stock` |
+
+"Own timer 0" means the class times itself through `Mode::set_time` (the engine's own
+timer, which the runtime sets the same way). Each starter folder passes `mkjjpmodes.py
+check` against its title's report, and the runtime loads with every import bound
+(`LD_BIND_NOW`) on each cached image's own glibc 2.34 (Wonka, Guns N' Roses, Dialed In,
+Hobbit, Toy Story). What is generic: the slots, the shot accessors, the shot table rule,
+and the class-name lookup. What needs a live game per title: the mode globals' names
+and the shot names (`jjpstock.py live`), both of which the runtime learns by itself on
+the machine. The CHAKA GnR LE image is a custom Guns N' Roses build and takes GnR's
+files.
+
 ## How a mode behaves
 
 * A custom mode runs while a ball is in play and ends with the ball, as the
@@ -140,11 +246,63 @@ The port report lists every named coil with what a mode may do (`coils`:
 
 ## On a real machine
 
-`mkjjpmodes.py build --iso <stock>.iso --modes <folder> --out <new>.iso` (as
-root in WSL) writes the stock ISO again with the runtime, the modes and one
-guarded line in `scripts/rungame.sh`. Install it the way the stock ISO is
-installed. To turn the modes off without reinstalling, create
-`/jjpe/perm/padmodes.off`; delete it to turn them back on.
+Two ways in. Both put the same files in the game's root (`/jjpe/gen1/padmodes/`,
+`scripts/padmodes.sh`, one guarded line in `scripts/rungame.sh` after
+`runonce.sh`), and `/jjpe/perm/padmodes.off` turns the modes off either way.
+
+**A USB stick, no reinstall (PAD-1349, the everyday way).**
+`mkjjpmodes.py stick --out <stick> --modes <folder>` writes a `hotfix` folder
+(plain files, no root, any OS) to copy to the top of a FAT32 stick. On the
+machine: service menu > Utilities > Software Update > USB Update, stick in. The
+screen says "No update data was found". **Hold the left flipper button** and
+press Plus, Minus, Plus, Minus: it asks "Press ENTER to apply HOTFIX". ENTER,
+ENTER: the game runs the stick's `hotfix/runme.sh` through its own
+`scripts/hotfix.sh` and reboots. Scores, audits and settings are not touched.
+`runme.sh` refuses another title (`title.cfg`'s `game`), checks every file's
+sha256 before copying, refuses a `rungame.sh` it does not know, and writes what
+it did to `padmodes_install.log` on the stick and in `/jjpe/temp`. The same
+command with `--action off`, `on` or `remove` writes a stick that turns the
+modes off, back on, or takes them out (`rungame.sh` back exactly as shipped).
+Changing a mode = edit the folder, write the stick again, apply it again.
+
+How the hot fix was found: the Update USB screen (`DiagUpdateUSB`) counts
+Plus/Minus presses only while a flag is set, and the only code that sets it is
+a handler on `HookLeftFlipperDebounced` (named `du_hlfd`, "hot fix") that sets it
+while the flipper is held, the game is in test mode and the USB Update item is
+the current one. `hotfix.sh` runs `/mnt/usb/hotfix/runme.sh` if there is one
+(else it rsyncs `hotfix/` over `$JJPEDIR`), then `sync` and `reboot`. Nothing is
+verified. (The screen's full "delta" update, a `wonka_update/` folder, goes
+through a `ui.dat` the game verifies; the hot fix needs none of that.)
+
+**An install ISO.** `mkjjpmodes.py build --iso <stock>.iso --modes <folder>
+--out <new>.iso` (as root in WSL) writes the stock ISO again with the modes in
+its root pieces. Install it the way the stock ISO is installed (dongle in, and
+like any full install it resets scores and settings).
+
+**Proof, Wonka 03.03 in the emulator (hidden, muted, Wonka's own key), 2026-11-17.**
+*ISO:* `build` on the stock Wonka ISO (51 s, 3.2 GB, e2fsck clean); the rig
+restored and booted the built ISO with no rig-side preload, so the runtime came
+only from the ISO's own hook (`[rig] image hook padmodes.sh:
+LD_PRELOAD=/jjpe/gen1/padmodes/jjpmodes.so`, "PAD custom modes: 1 mode(s)
+loaded"). PAD Mode started on the TV target, scored 1,000,000 on each of five
+shots and COMPLETED at 10,000,000; with `/jjpe/perm/padmodes.off` present the
+same ISO booted with an empty `LD_PRELOAD`, no `jjpmodes.log`, and played stock.
+*Stick:* on the stock Wonka ISO, the menu walk above (driven with `jjppoke.py`)
+ran the stick: "INSTALLED 1 mode(s): PAD Mode", `hotfix.sh` asked for its reboot;
+after the restart PAD Mode played to COMPLETED (10,000,000). An `off` stick
+created `padmodes.off` and the next boot loaded no runtime; a `remove` stick left
+no `padmodes` and `rungame.sh` byte-identical to the image's. Inside `/jjpe` the
+hot fix wrote only the padmodes files, the hook and its log.
+*Every other title:* `build` against its stock ISO and starter folder: Guns N'
+Roses 03.03, CHAKA's LOTLJ GnR LE 3.03, Elton John 02.03, Godfather 02.03 and
+Pirates 01.01 all build, stage and e2fsck clean (`rungame.sh` has the one
+`runonce.sh` anchor on each), and `inspect` lists their modes.
+
+The rig: `JJP_USB=<folder>` (jail.sh) binds a folder at the jail's `/mnt/usb`
+with the automount's mode (0777), so the game sees an inserted stick, and
+run_game.sh replaces the jail's `reboot`/`poweroff`/`halt`/`shutdown` (links to
+systemctl) with a note in `/jjpe/temp/rig_reboot.log`: a script of the game's
+can never reboot WSL. A proof restarts the game where the machine would reboot.
 
 ## Titles
 

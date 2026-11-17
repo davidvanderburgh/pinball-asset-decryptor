@@ -85,10 +85,15 @@ KEYS = collections.OrderedDict([
     ("game_modes", ("hold", "pause", "end", "ignore")),
     ("hold_multiballs", ("yes", "no")), ("allow_game_modes", "text"),
     ("panel", ("middle", "bottom", "top")),
+    # PAD-1353: balls and coils
+    ("multiball", "multiball"), ("multiball_on", "switches"), ("add_ball", "add_ball"), ("ball_save", "ball_save"),
+    ("coil_start", "coil_pulse"), ("coil_shot", "coil_pulse"), ("coil_complete", "coil_pulse"),
+    ("coil_hold", "coil_hold"), ("coil_hold_on", "hold_on"),
 ])
 #: keys only title.cfg takes
 TITLE_KEYS = collections.OrderedDict([
     ("game", "text"), ("ingame_state", "int"), ("background_modes", "modes"),
+    ("coil_holds", ("on", "off")),
 ])
 MAX_MODES, MAX_LIST, MAX_SHOT_SWITCHES = 24, 24, 96
 _INT = re.compile(r"^-?[0-9][0-9,_]*$")
@@ -115,8 +120,58 @@ def _names(v):
     return [t for t in re.split(r"[ ,\t]+", v) if t]
 
 
+def _coil_problem(name, want, port):
+    """A coil a mode names, against the port's `coils` (jjpport.py coil_rules)."""
+    if not name.startswith("coil_"):
+        return "%s is not a coil name (coil_...)" % name
+    coils = {c["symbol"]: c for c in (port or {}).get("coils", [])}
+    if not coils:
+        return None
+    c = coils.get(name)
+    if c is None:
+        return "not in %s: %s" % (port.get("title", "this game"), name)
+    if not c["pulse"]:
+        return "%s is one of the game's own ball, flipper, power or motor coils: a mode may not fire it" % name
+    if want == "hold" and not c["hold"]:
+        return "%s is not built to stay on (a magnet, diverter, post, gate, shaker or light): a mode may only pulse it" % name
+    return None
+
+
+def _int_in(v, lo, hi, what):
+    if not _INT.match(v):
+        return "%s must be a whole number" % what
+    return None if lo <= int(v.replace(",", "").replace("_", "")) <= hi else "%s must be %d-%d" % (what, lo, hi)
+
+
 def check_value(kind, v, port=None):
     """-> a problem string, or None."""
+    words = _names(v)
+    if kind == "multiball":       # <balls in play 2-6> [ball save s 0-120]
+        if not 1 <= len(words) <= 2:
+            return "must be <balls in play> [ball save seconds]"
+        return _int_in(words[0], 2, 6, "balls") or (len(words) > 1 and _int_in(words[1], 0, 120, "ball save")) or None
+    if kind == "ball_save":
+        return _int_in(v, 1, 120, "seconds")
+    if kind == "add_ball":        # <switches> [times 1-6]
+        if words and _INT.match(words[-1]):
+            p = _int_in(words[-1], 1, 6, "times")
+            if p:
+                return p
+            words = words[:-1]
+        if not words:
+            return "must name a switch"
+        return check_value("switches", " ".join(words), port)
+    if kind == "coil_pulse":      # <coil> [ms]
+        if not 1 <= len(words) <= 2:
+            return "must be <coil> [ms]"
+        return (len(words) > 1 and _int_in(words[1], 1, 1000, "ms")) or _coil_problem(words[0], "pulse", port)
+    if kind == "coil_hold":       # <coil> <ms> [power of 32]
+        if not 2 <= len(words) <= 3:
+            return "must be <coil> <ms> [power of 32]"
+        return (_int_in(words[1], 100, 5000, "ms") or (len(words) > 2 and _int_in(words[2], 1, 16, "power"))
+                or _coil_problem(words[0], "hold", port))
+    if kind == "hold_on":
+        return None if v in ("start", "shots") else check_value("switches", v, port)
     if isinstance(kind, tuple):
         return None if v in kind else "must be one of %s" % ", ".join(kind)
     if kind == "int":
@@ -187,8 +242,13 @@ def check_modes(mode_dir, port=None):
             problems.append("%s: no start = <switch> (the mode would never start)" % fn)
         m["file"] = fn
         m.setdefault("name", fn[:-5])
-        for k in ("start", "shots"):
-            shot_switches.update(_names(m.get(k, "")))
+        for k in ("start", "shots", "multiball_on", "add_ball", "coil_hold_on"):
+            shot_switches.update(t for t in _names(m.get(k, "")) if t.startswith(("switch_", "dswitch_")))
+        if m.get("multiball_on") and not m.get("multiball"):
+            problems.append("%s: multiball_on without a multiball line (it is ignored)" % fn)
+        if m.get("coil_hold") and title.get("coil_holds") != "on":
+            problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
+                            "(after a check on the machine)" % fn)
         modes.append(m)
     if len(shot_switches) > MAX_SHOT_SWITCHES:
         problems.append("%d different shot switches; the runtime wraps %d" % (len(shot_switches), MAX_SHOT_SWITCHES))

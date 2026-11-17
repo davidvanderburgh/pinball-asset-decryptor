@@ -4146,14 +4146,17 @@ def _with_stock_modes(counts, n=0, restored=False):
     return out
 
 
-def _compute_patches_or_restore(restore_ok, log, *args, **kwargs):
+def _compute_patches_or_restore(restore_ok, log, *args, allow_empty=False, **kwargs):
     """:func:`_compute_patches`, except that its "Nothing to write" becomes an
     empty build when *restore_ok* (:func:`_stock_mode_restore_ok`)."""
     try:
         return _compute_patches(*args, **kwargs)
     except _NothingToWrite:
-        if not restore_ok:
+        if not restore_ok and not allow_empty:
             raise
+    if allow_empty:
+        log('No asset replacements: preparing the complete image for SSH Extras.', 'info')
+        return [], _with_stock_modes((0, 0, 0, 0)), None, None, None
     log("Nothing is staged any more (the game's own modes are all back at "
         "stock), so this Write puts the card back to the original: the last "
         "build's changes come out.", "info")
@@ -10891,6 +10894,9 @@ def build_update_reason(prev, original_path, output_path, assets_dir):
         return "it was built from a different project folder"
     if not _stamp_matches(prev.get("output") or {}, output_path):
         return "the file has changed since it was built"
+    from ...core.card_extras import digest as extras_digest
+    if prev.get('ssh_extras') != extras_digest(assets_dir):
+        return 'SSH Extras changed; the system partition is built from the original'
     try:
         from .multiimage import images_for_path
         if len(images_for_path(original_path)) > 1:
@@ -14077,7 +14083,7 @@ def _report_failed_copies(failed, counts, audio_mode, log, no_space=False):
 
 
 def write_image(original_path, assets_dir, output_path, log=None, progress=None,
-                cancel=None, label=None, update=None):
+                cancel=None, label=None, update=None, allow_empty=False):
     """Patch a copy of the card image at ``output_path`` with the user's edits
     (size-neutral, in place): re-encoded cat-0 audio bodies inside ``image.bin``,
     re-encoded per-song music bodies inside their ``image-scNN.bin`` banks,
@@ -14271,7 +14277,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                     _compute_patches_or_restore(restore_ok, log,
                                                 disk_f, parts, assets_dir,
                                                 log, progress, cancel,
-                                                label=label)
+                                                label=label, allow_empty=allow_empty)
         except NothingToWrite:
             # Item 149: every mode taken out of a project with nothing else to
             # write.  The card at the output still carries the last build's

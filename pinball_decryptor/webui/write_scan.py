@@ -357,6 +357,15 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     rows.extend(colour_rows(mfr, assets_path))
     rows.extend(chosen_files_rows(mfr, assets_path))
     rows.extend(score_colour_rows(mfr, assets_path))
+    from ..core.card_extras import load, ExtrasError
+    try:
+        ssh = load(assets_path)
+        if ssh is not None:
+            rows.append(('SSH server — ' + ('enable' if ssh['enabled'] else 'disable'),
+                         'system', 'Pending (SSH Extras)', 'pending'))
+    except ExtrasError:
+        rows.append(('SSH server — invalid configuration', 'system',
+                     'Pending (SSH Extras: fix configuration)', 'pending'))
     return rows
 
 

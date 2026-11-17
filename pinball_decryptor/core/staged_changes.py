@@ -190,12 +190,14 @@ def load(assets_dir):
     return marshal.loads(got.frozen) if got is not None else {}
 
 
-def save(assets_dir, payload):
+def save(assets_dir, payload, *, strict=False):
     """Write *payload* (a JSON-able dict) to ``assets_dir``/:data:`SIDE_CAR`.
 
     Best-effort: silently no-ops if the folder doesn't exist or isn't writable.
     """
     if not assets_dir or not os.path.isdir(assets_dir):
+        if strict:
+            raise FileNotFoundError('The project folder does not exist.')
         return
     text = json.dumps(payload, indent=2)
     path = _cache_path(assets_dir)
@@ -206,6 +208,8 @@ def save(assets_dir, payload):
     except OSError:
         with _CACHE_LOCK:
             _CACHE.pop(path, None)
+        if strict:
+            raise
         return
     # the bytes on disk: text mode wrote each newline as the system's
     raw = text.replace("\n", os.linesep).encode("utf-8")

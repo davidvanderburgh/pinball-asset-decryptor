@@ -55,7 +55,7 @@ PHASE_ROW_BY_KEY = {
     "Emulate PB": "emulate",
     "Multi-boot": "multiboot",
     "Replace Audio": None, "Replace Video": None,
-    "Replace Images": None, "Replace Text": None, "Scenes": None,
+    "Replace Images": None, "Replace Text": None, "Scenes": None, "Extras": None,
     "Partition Explorer": None, "Default Settings": None, "Test Card": None,
 }
 
@@ -522,6 +522,7 @@ class WebWindow:
             "Color Profile": ((g("replace_image") or g("replace_video"))
                               and not g("dmd_shades")),
             "Write": g("write"),
+            "Extras": g("write"),
             "Mod Pack": g("modpack"),
             "Partition Explorer": g("partition_explorer"),
             "Default Settings": g("settings_editor"),

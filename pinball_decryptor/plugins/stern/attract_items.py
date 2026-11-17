@@ -220,10 +220,6 @@ def title_refusal(prof):
         return NO_CLIPS % prof.label
     if getattr(prof, "game_dir", "") in NOT_ON_GLASS:
         return NO_GLASS % prof.label
-    if getattr(prof, "arch", "arm") == "a64" and not t.get("video_clip"):
-        # PAD-1328: a Spike 3 port's attract table is read (s3port.attract_lines), but no route that puts an item on
-        # a Spike 3 game's glass is proven yet (the scene show from an item's page stalls Star Wars ELG 1.10)
-        return NO_GLASS % prof.label
     if route != "clip_play" and not t.get("video_clip") and not (route == "surface" and t.get("show")):
         return NO_GLASS % prof.label
     return ""

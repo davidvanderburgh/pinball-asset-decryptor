@@ -36,6 +36,410 @@
    "30OompaLoompaSearchMultiballRule"
   ]
  },
+ "can_balls": true,
+ "can_coils": true,
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "the proc argument (read off shot_get_proc_shot_id)"
+  },
+  "shot_handlers": 38,
+  "classes": {
+   "CandyLaneMode": {
+    "timer": "own set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "CaptiveBallAwardModes": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "DotsMode": {
+    "timer": "own set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "FactoryTourMisc": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "FactoryTourMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "FactoryTour_2XWonkaBar": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "FactoryTour_CollectBonus": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "FactoryTour_FizzyRoom": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "FactoryTour_GoldenEgg": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "FactoryTour_InventionRoom": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "FactoryTour_StartQuickMB": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "FactoryTour_SuperSpinner": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "FactoryTour_WelcomeToFactory": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "MikeTeaveeMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "OompaHurryUp": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "StoreRoom": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "UnlimitedKickback": {
+    "timer": "own set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "WonkaBarAwardModes": {
+    "timer": "own set_time",
+    "points": "own score_and_total",
+    "shots": false
+   },
+   "WonkaBarCraze": {
+    "timer": "own set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "WonkaBarRansom": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "WonkaOfficeMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "WonkaWashFrenzy": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "WonkataniaMania1": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "WorldRecordGumChewing": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   }
+  },
+  "objects": {
+   "cl_mode": "CandyLaneMode",
+   "dots_mode": "DotsMode",
+   "ftm_fizzyroom": "FactoryTour_FizzyRoom",
+   "ftm_goldenegg": "FactoryTour_GoldenEgg",
+   "ftm_inventionroom": "FactoryTour_InventionRoom",
+   "ftm_welcometofactory": "FactoryTour_WelcomeToFactory",
+   "ftmsc_2xwonkabar": "FactoryTour_2XWonkaBar",
+   "ftmsc_collectbonus": "FactoryTour_CollectBonus",
+   "ftmsc_startquickmb": "FactoryTour_StartQuickMB",
+   "ftmsc_superspinner": "FactoryTour_SuperSpinner",
+   "gum_chewing": "WorldRecordGumChewing",
+   "mtv_mode": "MikeTeaveeMode",
+   "oompa_hurryup": "OompaHurryUp",
+   "store_room": "StoreRoom",
+   "ukb_mode": "UnlimitedKickback",
+   "wbc_mode": "WonkaBarCraze",
+   "wonka_bar_ransom": "WonkaBarRansom",
+   "wonka_office": "WonkaOfficeMode",
+   "wonka_wash_frenzy": "WonkaWashFrenzy",
+   "wtm1_mode": "WonkataniaMania1"
+  },
+  "shots": [
+   {
+    "id": 2,
+    "name": "lockup_elevator",
+    "display": "WONKAVATOR"
+   },
+   {
+    "id": 3,
+    "name": "vuk_elevator",
+    "display": "WONKAVATOR"
+   },
+   {
+    "id": 4,
+    "name": "vuk_tv",
+    "display": "WONKAVISION"
+   },
+   {
+    "id": 5,
+    "name": "lockup_gobstopper",
+    "display": "GOBSTOPPER"
+   },
+   {
+    "id": 6,
+    "name": "gobstopper_hole",
+    "display": "GOBSTOPPER HOLE"
+   },
+   {
+    "id": 7,
+    "name": "ramp_left_enter",
+    "display": "GOBSTOPPER RAMP"
+   },
+   {
+    "id": 8,
+    "name": "ramp_left",
+    "display": "GOBSTOPPER RAMP"
+   },
+   {
+    "id": 9,
+    "name": "ramp_center_enter",
+    "display": "CAMERA RAMP"
+   },
+   {
+    "id": 10,
+    "name": "ramp_center",
+    "display": "CAMERA RAMP"
+   },
+   {
+    "id": 11,
+    "name": "ramp_right_enter",
+    "display": "FACTORY RAMP"
+   },
+   {
+    "id": 12,
+    "name": "ramp_right",
+    "display": "FACTORY RAMP"
+   },
+   {
+    "id": 13,
+    "name": "ramp_left_13",
+    "display": ""
+   },
+   {
+    "id": 16,
+    "name": "left_sling",
+    "display": "LEFT SLING"
+   },
+   {
+    "id": 17,
+    "name": "right_sling",
+    "display": "RIGHT SLING"
+   },
+   {
+    "id": 18,
+    "name": "top_bumper",
+    "display": "TOP BUMPER"
+   },
+   {
+    "id": 19,
+    "name": "left_bumper",
+    "display": "LEFT BUMPER"
+   },
+   {
+    "id": 20,
+    "name": "right_bumper",
+    "display": "RIGHT BUMPER"
+   },
+   {
+    "id": 21,
+    "name": "loop_left",
+    "display": "LEFT LOOP"
+   },
+   {
+    "id": 22,
+    "name": "loop_left_full",
+    "display": "LEFT LOOP"
+   },
+   {
+    "id": 23,
+    "name": "loop_center",
+    "display": "CENTER LOOP"
+   },
+   {
+    "id": 24,
+    "name": "loop_center_full",
+    "display": "CENTER LOOP"
+   },
+   {
+    "id": 25,
+    "name": "loop_right",
+    "display": "RIGHT LOOP"
+   },
+   {
+    "id": 26,
+    "name": "loop_right_full",
+    "display": "RIGHT LOOP"
+   },
+   {
+    "id": 27,
+    "name": "inlane_left_1_only",
+    "display": "LEFT INLANE"
+   },
+   {
+    "id": 28,
+    "name": "inlane_left_1_ramp",
+    "display": "LEFT INLAND"
+   },
+   {
+    "id": 29,
+    "name": "inlane_left_2_only",
+    "display": "LEFT INLANE"
+   },
+   {
+    "id": 30,
+    "name": "inlane_right_only",
+    "display": "RIGHT INLANE"
+   },
+   {
+    "id": 31,
+    "name": "inlane_right_ramp",
+    "display": "RIGHT INLANE"
+   },
+   {
+    "id": 32,
+    "name": "outlane_left",
+    "display": "LEFT OUTLANE"
+   },
+   {
+    "id": 33,
+    "name": "outlane_right",
+    "display": "RIGHT OUTLANE"
+   },
+   {
+    "id": 34,
+    "name": "spinner",
+    "display": "SPINNER"
+   },
+   {
+    "id": 35,
+    "name": "captiveball",
+    "display": "CAPTIVE BALL"
+   },
+   {
+    "id": 36,
+    "name": "target_ul_flipper",
+    "display": "KID TARGET"
+   },
+   {
+    "id": 37,
+    "name": "target_l_loop",
+    "display": "LEFT TARGET"
+   },
+   {
+    "id": 38,
+    "name": "target_gobstopper",
+    "display": "GOBSTOPPER"
+   },
+   {
+    "id": 39,
+    "name": "target_tv",
+    "display": "WONKAVISION TARGET"
+   },
+   {
+    "id": 40,
+    "name": "g_target",
+    "display": "G TARGET"
+   },
+   {
+    "id": 41,
+    "name": "u_target",
+    "display": "U TARGET"
+   },
+   {
+    "id": 42,
+    "name": "m_target",
+    "display": "M TARGET"
+   },
+   {
+    "id": 43,
+    "name": "target_r_ramp",
+    "display": "RIGHT TARGET"
+   },
+   {
+    "id": 44,
+    "name": "target_factory",
+    "display": "FACTORY TARGET"
+   }
+  ],
+  "live": "jjpstock.py live, Wonka-v03.03.elf pid 2888693"
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,
@@ -72,6 +476,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -85,7 +503,9 @@
   "font_timer": "font_wba_timer",
   "sound_start": "se_Fanfare_GobMB_Intro",
   "sound_shot": "se_Fanfare_Jackpot",
-  "sound_end": "se_Fanfare_wonka_Pure_Imagination_Mode_SummaryTotal"
+  "sound_end": "se_Fanfare_wonka_Pure_Imagination_Mode_SummaryTotal",
+  "multiball_start": "switch_ramp_center_made",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "12OompaHurryUp",
@@ -3437,5 +3857,237 @@
   "se_system_test_report",
   "se_trumpets_fanfar_2",
   "se_volume_default"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_diverter_elevator",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_lower_ramp",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flash_bulb_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_top",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_kickback",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lamp_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_lockup_elevator_release",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lockup_gobstopper_release",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_magnet_1",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_2",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_3",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_4",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_5",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_6",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_left_lane",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_gobstopper",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_stepper_1",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_stepper_2",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_stepper_3",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_stepper_4",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_drive_blue",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_drive_green",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_drive_red",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_undercabinet_led_left",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_undercabinet_led_right",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_vuk_elevator",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_gobstopper",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_tv",
+   "pulse": true,
+   "hold": false
+  }
  ]
 }

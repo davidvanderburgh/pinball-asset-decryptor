@@ -36,6 +36,136 @@
    "9TurfWarMB"
   ]
  },
+ "can_balls": true,
+ "can_coils": true,
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 57,
+  "classes": {
+   "BoxingMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "DeliveryMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "DinnerSpecialsMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "HonorMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "HungJuryMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "JobAwardMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": false
+   },
+   "JobsMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": false
+   },
+   "MarketDayMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "PursuitMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "RaidMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "ShakedownMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "TakeTheCannoliMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "TributeMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "TurnpikeMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "WeddingFavorMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   }
+  },
+  "live": ""
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,
@@ -72,6 +202,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -79,13 +223,15 @@
  "defaults": {
   "start": "switch_u_target_1",
   "shots": "switch_u_target_1 switch_l_orbit_hi switch_l_ramp_made",
-  "lamps": "lp_map_1",
+  "lamps": "lp_upper_target_1",
   "font_title": "font_cash_out_mode",
   "font_value": "font_jobs_mode_total_1",
   "font_timer": "font_timer",
   "sound_start": "se_SFX_JobMode_RampRule_ModeStart",
   "sound_shot": "se_Fanfare_TurfwarMultiball_Jackpot",
-  "sound_end": "se_job_total"
+  "sound_end": "se_job_total",
+  "multiball_start": "switch_l_orbit_hi",
+  "coil_shot": "coil_knocker_1"
  },
  "mode_classes": [
   "10BoxingMode",
@@ -4999,5 +5145,232 @@
   "se_system_switch_on",
   "se_system_test_report",
   "se_volume_default"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_auto_launch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bad_guy_drop_target_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bad_guy_drop_target_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bad_guy_stepper_a",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bad_guy_stepper_b",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bad_guy_stepper_c",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bad_guy_stepper_d",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_disk_motor",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_disk_motor_relay",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flash_bulb_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_jet_bumper",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker_1",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker_2",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lamp_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_le_topper_back_panel",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_le_topper_front_panel",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_left_flipper_hold",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_left_flipper_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_left_sling",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lift_ramp_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lift_ramp_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lockup_diverter",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_lockup_trough",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_magnet",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_orbit_diverter_down",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_right_drop_target_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_drop_target_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_flipper_hold",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_flipper_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_sling",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_scoop",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_back_panel",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_left_panel",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_right_panel",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_trough_vuk",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_under_ramp_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_upper_left_flipper_hold",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_upper_left_flipper_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_upper_left_sling",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_uturn_divider_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_uturn_entry_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_uturn_entry_up",
+   "pulse": true,
+   "hold": false
+  }
  ]
 }

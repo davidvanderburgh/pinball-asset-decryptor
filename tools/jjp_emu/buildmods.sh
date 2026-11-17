@@ -17,7 +17,7 @@ else
     mountpoint -q "$JJP_JAIL" || { echo "buildmods.sh: jail not mounted; run jail.sh (or set JJP_MODS_LIBDIR)" >&2; exit 3; }
 fi
 OUT=${JJP_MODS_SO:-/var/tmp/jjpmodes.so}
-OBJ=${OUT%.so}.o
+OBJ="${OUT%.so}.o"   # beside OUT: tickets building at once each keep their own
 CHROOT_LIB=${CHROOT_LIB:-"$JJP_JAIL/lib/x86_64-linux-gnu"}
 # A running game maps the copy run_game.sh put in the jail, never $OUT, so a
 # rebuild here cannot SIGBUS it.  -std=gnu11 keeps glibc 2.38+ headers from

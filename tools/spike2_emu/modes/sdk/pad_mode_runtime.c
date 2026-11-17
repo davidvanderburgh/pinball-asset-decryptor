@@ -4983,7 +4983,8 @@ static void status_bar_arm(void)
  * hook of the game's (0x9d334) adds it to the playfield multiplier score_add multiplies by (data score_mult). */
 unsigned pm_bond_women_mult(void)
 {
-    unsigned f = fn("bond_women_mult"), m;
+    pm_addr f = fn("bond_women_mult");
+    unsigned m;
     if (!f) return 1;
     m = ((unsigned (*)(void))(unsigned long)f)() & 0xff;
     return m ? m : 1;
@@ -5287,6 +5288,20 @@ void pm_message_restore(unsigned id)
         }
 }
 
+/* PAD-1369: message id's own words (its first language, as the game's table has them), or 0 */
+static const char *message_text(unsigned id)
+{
+    unsigned count;
+    unsigned short *remap;
+    const char **group;
+    if (!(can & PM_CAN_MESSAGES) || !id) return 0;
+    count = *(unsigned *)(unsigned long)data("message_count");
+    remap = *(unsigned short **)(unsigned long)data("message_remap");
+    if (!remap || id >= count || remap[id] >= count) return 0;
+    group = *message_slot(remap[id]);
+    return group ? group[0] : 0;
+}
+
 int pm_award_screen(unsigned type, unsigned message_id, uint64_t value)
 {
     unsigned char *node;
@@ -5344,7 +5359,7 @@ long pm_read_file(const char *path, char *buf, unsigned long cap)
  * the manager its table is empty, and a query would read through null. */
 static int stock_query(const char *site_name)
 {
-    unsigned f = fn(site_name), mgr = data("stock_mode_manager");
+    pm_addr f = fn(site_name), mgr = data("stock_mode_manager");
     if (!f || !mgr) return -1;
     if (!*(const unsigned *)(unsigned long)mgr) return -1;      /* no vtable yet: not built */
     if (!pm_player()) return 0;                                  /* no game, no game mode */
@@ -10139,7 +10154,8 @@ static int stock_active(const struct stock_rule *x)
  * object's vtable is not the port's word for it */
 static unsigned stock_object(struct stock_rule *x, int say_why)
 {
-    unsigned get = fn("stock_rule_get"), mgr = data("stock_mode_manager"), obj;
+    pm_addr get = fn("stock_rule_get"), mgr = data("stock_mode_manager");
+    unsigned obj;
     if (x->obj) return x->obj;
     if (!get || !mgr || !*(const unsigned *)(unsigned long)mgr) return 0;       /* not built yet */
     obj = (unsigned)(unsigned long)((void *(*)(void *, unsigned))(unsigned long)get)((void *)(unsigned long)mgr, x->id);
@@ -11694,7 +11710,8 @@ static unsigned rw(unsigned a) { return *(const unsigned *)(unsigned long)a; }
 /* the battle's object through the manager, checked against the port's `rule` line for it when there is one */
 static unsigned roster_battle_obj(unsigned id)
 {
-    unsigned get = fn("stock_rule_get"), mgr = data("stock_mode_manager"), obj;
+    pm_addr get = fn("stock_rule_get"), mgr = data("stock_mode_manager");
+    unsigned obj;
     struct stock_rule *x = stock_rule(id);
     if (!get || !mgr || !rw(mgr)) return 0;
     obj = (unsigned)(unsigned long)((void *(*)(void *, unsigned))(unsigned long)get)((void *)(unsigned long)mgr, id);
@@ -11780,7 +11797,8 @@ static void roster_host_begin(unsigned p, unsigned slot, unsigned id)
  * PAD-706 run2 had it 1 five seconds before its stop and travelled on). For the slots of `value battle_beaten_slots`. */
 static void roster_beaten(unsigned p, unsigned city)
 {
-    unsigned f = fn("battle_beaten"), rule = data("battle_beaten_rule"), guard = data("battle_beaten_guard"), rec;
+    pm_addr f = fn("battle_beaten"), rule = data("battle_beaten_rule"), guard = data("battle_beaten_guard");
+    unsigned rec;
     if (f && rule && (!guard || (rw(guard) & 1u)))
         ((void (*)(unsigned))(unsigned long)f)(rule);
     rec = roster_city_rec(city, pm_port_value("roster_city_beaten_vec_at", -1), 4);
@@ -11792,7 +11810,8 @@ static void roster_beaten(unsigned p, unsigned city)
 static int roster_host_end(unsigned p, int won)
 {
     struct roster_host *h;
-    unsigned stop = fn("battle_stop"), obj, v11, *mask, city, was;
+    pm_addr stop = fn("battle_stop");
+    unsigned obj, v11, *mask, city, was;
     long slot_stop = pm_port_value("stock_slot_stop", -1), reason = pm_port_value("battle_reason_at", -1);
     long wins = pm_port_value("battle_wins_at", -1);
     if (p < 1 || p > 4 || !roster_hosts[p].on) return 0;
@@ -12783,7 +12802,8 @@ static const char *place_name(unsigned id)
  * have no getter (they read the player up inline): `data mode_player_at` is the byte itself */
 static unsigned place_player(void)
 {
-    unsigned f = fn("mode_player"), at = data("mode_player_at"), p;
+    pm_addr f = fn("mode_player"), at = data("mode_player_at");
+    unsigned p;
     if (f) p = ((unsigned (*)(void))(unsigned long)f)() & 0xffu;
     else if (at && maps_has(at, 1, MAP_R)) p = *(const unsigned char *)(unsigned long)at;
     else return 0;
@@ -13079,7 +13099,8 @@ void pm_place_over(int won)
  * the field. */
 static long mode_query_slot(int kind_slot)
 {
-    unsigned f = fn("stock_any_running"), i;
+    pm_addr f = fn("stock_any_running");
+    unsigned i;
     const unsigned *w;
     if (!f || !maps_has(f, 4 * 32, MAP_R | MAP_GAME)) return -1;
     w = (const unsigned *)(unsigned long)f;
@@ -13257,7 +13278,7 @@ static unsigned done_game[5];                      /* the game (chg_game_now() +
 static unsigned done_seen[DONE_WORDS];             /* the ids whose completion the runtime can see */
 static struct { unsigned audit; unsigned char id; } done_audit[DONE_AUDITS];
 static int done_audits;
-static unsigned done_stop_fn[DONE_STOPS];
+static pm_addr done_stop_fn[DONE_STOPS];
 static int done_stops, done_stops_tried, done_tries;
 static unsigned done_flag_was[DONE_WORDS], done_flag_player, done_flag_game;
 static int done_has(const unsigned *m, unsigned id) { return id < DONE_IDS && (m[id >> 5] >> (id & 31) & 1u); }
@@ -15075,7 +15096,8 @@ static int ait_video;
  * advancing its player and showing it (Aerosmith's OilProjectorLoop page 0x286a4: player_advance, scene_show(player, 3),
  * the frame yield). An item does the same from its page while its clip plays on the bank's surface. */
 static int ait_show;
-static unsigned ait_show_fn;                /* `site attract_show` (portattract.show_lines), else the port's scene_show */
+static pm_addr ait_show_fn;                 /* `site attract_show` (portattract.show_lines), else the port's scene_show:
+                                             * an address (PAD-1371: 32 bits cut a Spike 3 one to a jump into nothing) */
 
 static void ait_line(char *s)
 {
@@ -15283,13 +15305,13 @@ static void attract_arm(void)
         return;
     }
 #if PM_A64
-    /* PAD-1328: the table, the pages and the process sleep are read 64-bit (below), but no way of putting an item on
-     * a Spike 3 game's glass is proven: on Star Wars ELG 1.10 the scene show from an item's page (attract_show, the
-     * call the game's own clip pages make) never returns - the game's dispatch watchdog ends it (exit 5) - and the
-     * clip on the bank's surface alone is not drawn in attract. docs/plans/spike3_modes.md "Attract items". */
-    if (!ait_video) {
-        say("attract items: off - a Spike 3 game's attract mode cannot show an item yet (its scene show stalls the "
-            "game from an item's page)");
+    /* PAD-1328 / PAD-1371: a Spike 3 game's attract mode never draws the video bank's scene by itself, so an item is
+     * put on the glass only by its page showing that scene each frame (attract_show, as the game's own clip pages do)
+     * or through the attract video element. The show "stalled" Star Wars ELG 1.10 in PAD-1328 only because the
+     * scene show's address was kept in 32 bits (ait_show_fn): the page jumped into nothing and the game's dispatch
+     * watchdog ended it (exit 5). docs/plans/spike3_modes.md "Attract items". */
+    if (!ait_video && !ait_show) {
+        say("attract items: off - this Spike 3 game's port has no way to show its video bank's scene from a page");
         ait_n = 0;
         return;
     }
@@ -15522,18 +15544,71 @@ static int challenge_frame_arrive(int n, int from_before)
     return n <= 0 ? 0 : from_before ? 0 : n - 1;
 }
 
+/* PAD-1369: the press a `moved` frame site saw, from where the cursor was and is (`n` entries, both ways wrapping):
+ * the Spike 3 index menus are hooked after the frame's press moved the cursor, so there are no buttons to read */
+static void challenge_frame_press(unsigned prev, unsigned cur, unsigned n, int *left, int *right)
+{
+    *left = *right = 0;
+    if (!n || prev == cur || prev >= n || cur >= n) return;
+    if (cur == (prev + 1) % n) *right = 1;
+    else if (prev == (cur + 1) % n) *left = 1;
+}
+
+/* PAD-1369: a `moved` site's frame, from the state alone (tests lift it verbatim): the cursor `was` and is now
+ * (`cursor`, the game's press already applied), `count` entries, ours at `at`, the cursor on it last frame (`on`), `n`
+ * modes of ours, *sub the one shown. A press away from our entry while there is a mode left to step to steps instead,
+ * the cursor put back; arriving, the first mode shows from before our entry, the last from after it (a left press).
+ * Returns the cursor this frame draws. */
+static unsigned challenge_frame_moved(unsigned was, unsigned cursor, unsigned count, unsigned at, int on, int n, int *sub)
+{
+    int left, right;
+    unsigned eat;
+    challenge_frame_press(was, cursor, count, &left, &right);
+    if (on && was == at && (left || right)) {
+        *sub = challenge_frame_step(n, *sub, left, right, &eat);
+        if (eat) cursor = at;
+    } else if (!on && cursor == at) {
+        *sub = challenge_frame_arrive(n, !left);
+    }
+    return cursor;
+}
+
+/* PAD-1369: the menu's list and count at the frame site: in the frame (`.._list_at` / `.._count_at`) or in registers
+ * (`.._list_reg` / `.._count_reg`, hook_full's numbers), as Prolonged Competition's comp_menu_frame reads them */
+static int challenge_frame_list(pm_reg *r, unsigned **list, unsigned **count)
+{
+    unsigned char *sp = FULL_SP(r);
+    long lreg = pm_port_value("challenge_menu_frame_list_reg", -1);
+    long nreg = pm_port_value("challenge_menu_frame_count_reg", -1);
+    if (lreg > FULL_REG_LAST || nreg > FULL_REG_LAST) return 0;
+    *list = lreg >= 0 ? (unsigned *)(unsigned long)r[lreg]
+                      : (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_list_at", 300));
+    *count = nreg >= 0 ? (unsigned *)&r[nreg]
+                       : (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_count_at", 64));
+    return 1;
+}
+
+static unsigned frame_cursor_was;            /* PAD-1369: the cursor at the last frame (a `moved` site's press) */
+static unsigned frame_caption_msg;           /* PAD-1369: the caption message we lettered CHALLENGE (0: none) */
+
 static void challenge_menu_frame(pm_reg *r)
 {
-    unsigned char *sp = (unsigned char *)(r + 14);
-    unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_list_at", 300));
-    unsigned *count = (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_count_at", 64));
+    unsigned char *sp = FULL_SP(r);
+    unsigned *list, *count;
     unsigned cap = (unsigned)pm_port_value("challenge_menu_frame_cap", 9);
     unsigned entry = (unsigned)pm_port_value("challenge_menu_frame_entry", 4);
     unsigned lbit = (unsigned)pm_port_value("challenge_menu_frame_left", 4);
     unsigned rbit = (unsigned)pm_port_value("challenge_menu_frame_right", 2);
+    unsigned moved = pm_port_value("challenge_menu_frame_moved", 0) ? 1u : 0u;
     unsigned creg = (unsigned)pm_port_value("challenge_menu_frame_cursor_reg", 6);
     unsigned breg = (unsigned)pm_port_value("challenge_menu_frame_buttons_reg", 0);
-    long msg = pm_port_value("challenge_name_msg_0", 0);
+    long last_at = pm_port_value("challenge_menu_frame_last_at", -1);
+    /* PAD-1369: the name message lettered with the mode's name - the game challenge's own (Godzilla), or on a plain
+     * index menu, whose entry is Standard's index again, Standard's (`challenge_menu_frame_name_msg`); a plain menu
+     * also letters Standard's caption (`challenge_menu_frame_caption_msg`) with the game's own CHALLENGE
+     * (`challenge_menu_caption`) */
+    long msg = pm_port_value("challenge_menu_frame_name_msg", pm_port_value("challenge_name_msg_0", 0));
+    long cmsg = pm_port_value("challenge_menu_frame_caption_msg", 0);
     long slot = pm_port_value("challenge_menu_slot", -1), flag = 0;
     unsigned *gpm = data("game_play_modes") && pm_port_value("challenge_mode_plain", -1) >= 0
         ? (unsigned *)(unsigned long)(data("game_play_modes") + (unsigned)pm_port_value("game_play_mode_at", 8)) : 0;
@@ -15541,19 +15616,20 @@ static void challenge_menu_frame(pm_reg *r)
     static int said_n, room_said;
     int own[N_OWN_CHALLENGE], n = 0, k, on, prev_sub = frame_sub;
     unsigned cursor, eat;
-    if (creg > 12 || breg > 12) return;
+    if (creg > FULL_REG_LAST || breg > FULL_REG_LAST || !challenge_frame_list(r, &list, &count)) return;
     if (slot >= 0) {
         char key[24];
         pm_snprintf(key, sizeof key, "challenge_flag_%ld", slot);
         flag = pm_port_value(key, 0);
     }
-    cursor = r[creg];
+    cursor = (unsigned)r[creg];
     for (k = 0; k < N_OWN_CHALLENGE; k++)
         if (own_challenge[k].fn) own[n++] = k;
     if (!n || *count > cap) return;
     if ((unsigned long)sp != frame_sp || ours_at >= *count || list[ours_at] != entry) {   /* a new menu: append ours */
         frame_sp = (unsigned long)sp;
         frame_on = 0;
+        frame_cursor_was = cursor;
         if (*count >= cap) {
             if (!room_said++) say("challenge menu: no room for MODE CHALLENGE - the game's menu holds %u entries", cap);
             return;
@@ -15561,17 +15637,34 @@ static void challenge_menu_frame(pm_reg *r)
         ours_at = *count;
         list[ours_at] = entry;
         *count = ours_at + 1;
+        if (last_at > 0) *(unsigned *)(sp + last_at) = ours_at;     /* the loop's copy of the last index (Pokemon) */
         if (n != said_n)
             say("challenge menu: MODE CHALLENGE appended (entry %u of %u, the game-mode index %u) - its flippers step "
                 "through %d mode(s)", ours_at + 1, *count, entry, n);
         said_n = n;
     }
-    on = cursor == ours_at;
+    if (moved) {
+        /* PAD-1369: the press already moved the cursor. A press away from our entry while a mode is left to step to
+         * puts the cursor back (the entry steps to the next or previous mode instead); arriving, the first mode shows
+         * from before it, the last from after it */
+        cursor = challenge_frame_moved(frame_cursor_was, cursor, *count, ours_at, frame_on, n, &frame_sub);
+        r[creg] = cursor;
+        frame_cursor_was = cursor;
+        on = cursor == ours_at;
+    } else {
+        on = cursor == ours_at;
+        if (on) {
+            frame_sub = challenge_frame_step(n, frame_sub, (r[breg] & lbit) != 0, (r[breg] & rbit) != 0, &eat);
+            if (eat == 1) r[breg] &= ~lbit;
+            if (eat == 2) r[breg] &= ~rbit;
+        }
+    }
     if (on) {
-        frame_sub = challenge_frame_step(n, frame_sub, (r[breg] & lbit) != 0, (r[breg] & rbit) != 0, &eat);
-        if (eat == 1) r[breg] &= ~lbit;
-        if (eat == 2) r[breg] &= ~rbit;
         if (msg > 0) pm_message_set((unsigned)msg, own_challenge[own[frame_sub]].name);
+        if (cmsg > 0 && !frame_caption_msg) {
+            const char *w = message_text((unsigned)pm_port_value("challenge_menu_caption", 0));
+            if (w && pm_message_set((unsigned)cmsg, w)) frame_caption_msg = (unsigned)cmsg;
+        }
         if (!frame_on || frame_sub != prev_sub)
             say("challenge menu: MODE CHALLENGE shows %s (%d of %d)", own_challenge[own[frame_sub]].name, frame_sub + 1, n);
         own_pending = own[frame_sub];
@@ -15584,7 +15677,9 @@ static void challenge_menu_frame(pm_reg *r)
         if (flag > 0) game_flag_clear((unsigned)flag);
     } else {
         if (frame_on) {
-            if (msg > 0) pm_message_restore((unsigned)msg);      /* the game's King of the Monsters again */
+            if (msg > 0) pm_message_restore((unsigned)msg);      /* the game's own words again */
+            if (frame_caption_msg) pm_message_restore(frame_caption_msg);
+            frame_caption_msg = 0;
             own_pending = -1;
             if (cursor < *count && list[cursor] == entry) {     /* onto the game's own entry: its pick again */
                 if (gpm) *gpm = entry;
@@ -15592,9 +15687,9 @@ static void challenge_menu_frame(pm_reg *r)
             }
         }
         /* this frame's press moves the cursor after this point: onto ours from before it, or from after it (a wrap) */
-        if ((r[breg] & rbit) && (cursor + 1 == ours_at || (ours_at == 0 && cursor + 1 == *count)))
+        if (!moved && (r[breg] & rbit) && (cursor + 1 == ours_at || (ours_at == 0 && cursor + 1 == *count)))
             frame_sub = challenge_frame_arrive(n, 1);
-        else if ((r[breg] & lbit) && (cursor == ours_at + 1 || (cursor == 0 && ours_at + 1 == *count)))
+        else if (!moved && (r[breg] & lbit) && (cursor == ours_at + 1 || (cursor == 0 && ours_at + 1 == *count)))
             frame_sub = challenge_frame_arrive(n, 0);
     }
     frame_on = on;
@@ -15995,7 +16090,7 @@ static void challenges_arm(void)
             pm_port_value("challenge_on_flag", 0));
     }
     /* PAD-640; PAD-663: a menu of challenges of the modes' own (Foo Fighters, Mandalorian) keeps their champions too */
-    if (challenges_n || site("challenge_menu")) chg_scores_arm();
+    if (challenges_n || site("challenge_menu") || site("challenge_menu_frame")) chg_scores_arm();
     if (site("challenge_menu") && site("challenge_menu_pick") && pm_port_value("challenge_menu_cap", 0) > 0
         && pm_port_value("challenge_menu_list_at", 0) > 0
         && (pm_port_value("challenge_menu_count_at", 0) > 0 || pm_port_value("challenge_menu_count_reg", -1) >= 4)
@@ -16012,13 +16107,19 @@ static void challenges_arm(void)
         }
     }
     /* PAD-686: Godzilla's menu of game-mode indices - one MODE CHALLENGE entry steps through the modes' own */
-    if (site("challenge_menu_frame") && challenges_n && pm_port_value("challenge_menu_slot", -1) == 0
-        && pm_port_value("challenge_menu_frame_cap", 0) > 0 && pm_port_value("challenge_menu_frame_list_at", 0) > 0
-        && pm_port_value("challenge_menu_frame_count_at", 0) > 0 && pm_port_value("challenge_name_msg_0", 0) > 0) {
+    /* PAD-1369: or a plain one (the Spike 3 index menus: `challenge_menu_slot -1`, `challenge_menu_sets_on`) - the entry
+     * is Standard's index again, lettered CHALLENGE and the mode's name; the list may be in the frame or a register */
+    if (site("challenge_menu_frame") && pm_port_value("challenge_menu_frame_cap", 0) > 0
+        && (pm_port_value("challenge_menu_frame_list_at", 0) > 0 || pm_port_value("challenge_menu_frame_list_reg", -1) >= 0)
+        && (pm_port_value("challenge_menu_frame_count_at", 0) > 0 || pm_port_value("challenge_menu_frame_count_reg", -1) >= 0)
+        && ((challenges_n && pm_port_value("challenge_menu_slot", -1) == 0 && pm_port_value("challenge_name_msg_0", 0) > 0)
+            || (pm_port_value("challenge_menu_slot", 0) < 0 && challenge_ball_id >= 0
+                && pm_port_value("challenge_menu_frame_name_msg", 0) > 0))) {
         if (fn("challenge_menu_frame") && hook_full(fn("challenge_menu_frame"), challenge_menu_frame)) {
             can |= PM_CAN_CHALLENGE_MENU;
             say("challenge menu: the start menu's frame at 0x%08" PMA " - one MODE CHALLENGE entry (as %s's game-mode index "
-                "%ld) steps through the modes' own challenges", fn("challenge_menu_frame"), pm_challenge_name(0),
+                "%ld) steps through the modes' own challenges", fn("challenge_menu_frame"),
+                pm_port_value("challenge_menu_slot", 0) < 0 ? "Standard" : pm_challenge_name(0),
                 pm_port_value("challenge_menu_frame_entry", 4));
         } else {
             say("challenge menu: its frame site could not be hooked - the menu stays the game's own");
@@ -17522,7 +17623,8 @@ static void coop_awards_arm(void)
 {
     static const char *const kinds[] = { "", "points scored", "the longest ball", "audit", "champion category" };
     int i, kept = 0, audits = 0;
-    unsigned count = data("challenge_scores_count"), cats;
+    pm_addr count = data("challenge_scores_count");
+    unsigned cats;
     cats = data("challenge_scores_table") && count && maps_has(count, 4, MAP_R) ? *(const unsigned *)(unsigned long)count : 0;
     for (i = 0; i < coop_aw_n; i++) audits |= coop_aw[i].kind == COOP_AW_AUDIT;
     if (audits && fn("audit_add") && hook(fn("audit_add"), coop_audit_seen)) coop_audits = 1;

@@ -114,6 +114,8 @@ function Row({ k, prefix = "", meta, value, j, have }) {
   let input;
   if (m.kind === "switches") input = html`<${NamePick} k=${key} value=${value} names=${names.switches} multi title="The game's switches" />`;
   else if (m.kind === "lamps") input = html`<${NamePick} k=${key} value=${value} names=${names.lamps} multi title="The game's lamps (lp_) and lamp groups (ls_)" />`;
+  else if (m.kind === "events") input = html`<${NamePick} k=${key} value=${value} names=${names.events || []} multi title="The game's own events (its hook lists)" />`;
+  else if (m.kind === "after") input = html`<${NamePick} k=${key} value=${value} names=${names.after || []} multi title="The game's own modes (a global or a class), or any" />`;
   else if (m.kind === "sound") input = html`<${NamePick} k=${key} value=${value} names=${names.sound} sound have=${have} title="The game's sounds" inherit=${inherit} />`;
   else if (m.kind === "font") input = html`<${NamePick} k=${key} value=${value} names=${names.font} title="The game's fonts" inherit=${inherit} />`;
   else if (m.kind === "rgb" || m.kind === "rgba") input = html`<${Colour} k=${key} value=${value} alpha=${m.kind === "rgba"} dflt=${inherit || m.default} />`;
@@ -163,7 +165,7 @@ function TitleSettings({ j, have }) {
   const t = j.title_cfg || {};
   return html`<section class="card jjpm-title-card">
     <div class="hd" style="cursor:pointer" onClick=${() => setOpen(!open)}><span class="h2">${open ? "▾" : "▸"} Every mode of this game</span>
-      <span class="muted small">defaults a mode's own settings override: fonts, colours, the panel${t.game ? ` - loads only into ${t.game}` : ""}</span></div>
+      <span class="muted small">defaults a mode's own settings override: fonts, colors, the panel${t.game ? ` - loads only into ${t.game}` : ""}</span></div>
     ${open ? html`<div class="bd">${(j.title_keys || []).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
   </section>`;
 }

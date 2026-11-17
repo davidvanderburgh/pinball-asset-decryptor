@@ -10,6 +10,6 @@ complete_points = 5000000
 sound_start = se_Fanfare_ChampMB_Intro
 sound_shot = se_Fanfare_ChampMB_SuperJackpot
 sound_end = se_SFX_AlbumTotal
-lamps = lp_inlane_left
+lamps = lp_song_target_left
 lamp_color = ff2000
 lamp_blink = 4

@@ -2,6 +2,7 @@
 rungame.sh hook in mkjjpmodes.py, the runtime's keys staying in step with the
 checker's, and jjpport.py's Mode vtable resolution (folded virtuals)."""
 import importlib.util
+import json
 import os
 import re
 import struct
@@ -104,10 +105,97 @@ def test_check_passes_a_good_folder_and_names_every_problem(tmp_path):
     assert "unknown key wobble" in text
 
 
-def test_check_wants_a_start_switch(tmp_path):
+def test_check_wants_a_start_rule(tmp_path):
     mm = _load("mkjjpmodes")
     _, problems = mm.check_modes(_folder(tmp_path, {"a.mode": "name = A\n"}))
-    assert problems == ["a.mode: no start = <switch> (the mode would never start)"]
+    assert problems == ["a.mode: no start rule (start, start_on, start_after, start_score or start_combo):"
+                        " the mode would never start"]
+
+
+def test_start_rules_alone_start_a_mode(tmp_path):
+    """PAD-1354: a mode may start on a game event, a game mode ending, a score or a combo
+    instead of a start switch."""
+    mm = _load("mkjjpmodes")
+    port = dict(PORT, hooks={h: True for h in mm.START_EVENTS.values()})
+    d = _folder(tmp_path, {
+        "1.mode": "start_on = ball_start multiball_end\nshots = switch_target_jam\nstart_once = ball\n",
+        "2.mode": "start_after = any\nshots = switch_target_jam\nstart_count = 2\nstart_count_reset = ball\n",
+        "3.mode": "start_score = 50,000,000\nshots = switch_target_jam\n",
+        "4.mode": "start_combo = switch_target_jam switch_orbit_left_hi\ncombo_seconds = 4\n",
+    })
+    _, problems = mm.check_modes(d, port)
+    assert problems == []
+
+
+def test_start_rule_problems_are_named(tmp_path):
+    mm = _load("mkjjpmodes")
+    port = dict(PORT, hooks=dict({h: True for h in mm.START_EVENTS.values()}, HookLastBall_=False))
+    d = _folder(tmp_path, {
+        "1.mode": "start_on = ball_start tilt\n",
+        "2.mode": "start_on = last_ball\n",
+        "3.mode": "start_combo = switch_target_jam\n",
+        "4.mode": "start_score = 0\n",
+        "5.mode": "start = switch_target_jam\nstart_once = always\nstart_count_reset = never\n",
+    })
+    text = "\n".join(mm.check_modes(d, port)[1])
+    assert "1.mode:1: start_on tilt: not a start event" in text
+    assert "2.mode:1: start_on last_ball: Guns N' Roses has no HookLastBall_ hook" in text
+    assert "3.mode: start_combo needs two switches or more" in text
+    assert "4.mode: start_score must be above 0" in text
+    assert "start_once must be one of no, ball, game" in text
+    assert "start_count_reset must be one of game, ball" in text
+
+
+def test_runtime_start_events_match_the_checker_and_the_port_report():
+    """The start_on words and their hook lists are one table in jjpmodes.c (EVENTS),
+    mkjjpmodes.py (START_EVENTS) and jjpport.py (RULE_HOOKS)."""
+    mm, jp = _load("mkjjpmodes"), _load("jjpport")
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    body = src[src.index("EVENTS[] = {"):src.index("#define NEVENTS")]
+    runtime = re.findall(r'\{ "([a-z_]+)", "(Hook[A-Za-z]+_)" \}', body)
+    assert runtime == list(mm.START_EVENTS.items())
+    assert set(h for _, h in runtime) <= set(jp.RULE_HOOKS)
+    for h in ("HookGameStart_", "HookBallStart_", "HookScore_") + jp.TICK_HOOKS:
+        assert 'hook_add("%s"' % h in src
+
+
+def test_port_finds_hook_lists_by_their_mangled_names():
+    """jjpport.rule_hooks reads Hook<HookX_, Arg>::list globals the way jjpmodes.c
+    hook_list finds them: _ZN4HookI<len><name>...E4listE, 16 bytes."""
+    jp = _load("jjpport")
+
+    class E:
+        syms = {"_ZN4HookI14HookBallStart_vE4listE": (0x10, 16),
+                "_ZN4HookI10HookScore_P17hook_score_data_tE4listE": (0x20, 16),
+                "_ZN4HookI14HookBallStart_vE11master_linkE": (0x30, 24),
+                "_ZN4HookI15HookLampRender_vE4listE": (0x40, 8),
+                "_Z22score_get_player_scorei": (0x50, 55), "_Z23game_flow_get_player_upv": (0x60, 59)}
+    h = jp.rule_hooks(E())
+    assert h["HookBallStart_"] and h["HookScore_"] and not h["HookLampRender_"] and not h["HookLastBall_"]
+    sr = jp.start_rules(E(), h)
+    assert sr["can_start_on_rules"] is False and sr["start_on"] == [] and sr["start_combo"] is True
+    h["HookUpdate_"] = True
+    sr = jp.start_rules(E(), h)
+    assert sr["can_start_on_rules"] and sr["start_on"] == ["ball_start"] and sr["start_score"]
+
+
+def test_every_title_that_runs_modes_offers_the_start_rules():
+    """The shipped port reports: every title that can run modes has every hook list
+    (read off each title's own game binary, PAD-1354)."""
+    jp = _load("jjpport")
+    ports = os.path.join(RIG, "modes", "ports")
+    seen = 0
+    for fn in sorted(os.listdir(ports)):
+        if not fn.endswith(".json") or fn.endswith(".live.json"):     # live mode maps (jjpstock.py)
+            continue
+        with open(os.path.join(ports, fn)) as f:
+            p = json.load(f)
+        if not p["can_run_modes"]:
+            continue
+        seen += 1
+        assert p["start_rules"]["can_start_on_rules"], fn
+        assert all(p["hooks"][h] for h in jp.RULE_HOOKS), fn
+    assert seen >= 6
 
 
 def test_every_key_the_runtime_reads_is_a_key_the_checker_knows():
@@ -154,6 +242,47 @@ def test_vtable_resolution_tells_folded_virtuals_apart():
     vt = jp.mode_vtable(_StubElf())
     assert vt == {"start": 0x10, "end": 0x20, "set_time": 0x28, "is_running": 0x48, "timer_paused": 0x38,
                   "score": 0x88, "tick": 0xa8, "start_choreo": 0xb0, "total_choreo": 0xb8}
+
+
+def test_a_lamp_group_is_a_lamp_name_too(tmp_path):
+    # PAD-1350: `lamps` takes lp_* lamps or ls_* lamp groups (MODES.md); the checker knew only lamps
+    mm = _load("mkjjpmodes")
+    port = dict(PORT, lamp_groups=["ls_all"])
+    folder = _folder(tmp_path, {"1.mode": "start = switch_target_jam\nlamps = lp_target_jam ls_all\n"})
+    assert mm.check_modes(folder, port)[1] == []
+    (tmp_path / "1.mode").write_text("start = switch_target_jam\nlamps = ls_nope\n")
+    assert "lamps not in" in "\n".join(mm.check_modes(folder, port)[1])
+
+
+def test_every_title_that_can_run_modes_has_a_starter_that_checks_clean():
+    import json
+    mm = _load("mkjjpmodes")
+    ports = os.path.join(RIG, "modes", "ports")
+    can = []
+    for fn in sorted(os.listdir(ports)):
+        if fn.endswith(".live.json"):                   # a running game's read (PAD-1351), not a title
+            continue
+        p = json.load(open(os.path.join(ports, fn), encoding="utf-8"))
+        if not p["can_run_modes"]:
+            continue
+        label = fn[:-5]
+        can.append(label)
+        modes, problems = mm.check_modes(os.path.join(RIG, "modes", "examples", label), p)
+        assert modes and problems == [], (label, problems)
+        # the vtable slots the runtime uses, resolved the same on every title
+        assert {k: p["mode_vtable"][k] for k in ("start", "end", "score", "tick")} == \
+            {"start": 16, "end": 32, "score": 136, "tick": 168}, label
+    assert len(can) == 9, can
+
+
+def test_build_needs_no_prebuilt_runtime():
+    # PAD-1350: left out, --so means "build it against the ISO's own glibc"
+    mm = _load("mkjjpmodes")
+    src = open(os.path.join(RIG, "mkjjpmodes.py"), encoding="utf-8").read()
+    build_parser = src[src.index('sub.add_parser("build"'):src.index('sub.add_parser("inspect"')]
+    assert 'add_argument("--so", help=' in build_parser and "default=SO_DEFAULT" not in build_parser
+    assert "build_runtime(mnt + ROOT_LIBDIR" in src and mm.ROOT_LIBDIR == "/lib/x86_64-linux-gnu"
+    assert "OBJ=\"${OUT%.so}.o\"" in open(os.path.join(RIG, "buildmods.sh"), encoding="utf-8").read()
 
 
 class _MemElf:
@@ -215,6 +344,135 @@ def test_runtime_policies_match_the_checker():
     body = src[src.index('!strcmp(k, "game_modes")'):src.index('!strcmp(k, "hold_multiballs")')]
     assert set(re.findall(r'!strcmp\(v, "([a-z]+)"\)', body)) | {"hold"} == set(dict(mm.KEYS)["game_modes"])
     assert "m->game_modes = POLICY_HOLD; m->hold_multiballs = 1;" in src
+
+
+# ---------------------------------------------------------------- PAD-1353: balls and coils
+COIL_PORT = dict(PORT, coils=[
+    {"symbol": "coil_magnet_1", "pulse": True, "hold": True},
+    {"symbol": "coil_vuk_tv", "pulse": True, "hold": False},
+    {"symbol": "coil_flipper_power_left", "pulse": False, "hold": False},
+])
+
+
+def _c_list(src, name):
+    body = src[src.index("static const char *const %s[] = {" % name):]
+    body = body[:body.index("};")]
+    return tuple(re.findall(r'"([a-z_]+)"', body))
+
+
+def test_runtime_coil_rules_are_the_port_reports():
+    """jjpport.py says which coils a mode may pulse or hold by the same name lists the runtime uses."""
+    jp = _load("jjpport")
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    assert _c_list(src, "COIL_NEVER") == jp.COIL_NEVER
+    assert _c_list(src, "COIL_HOLDABLE") == jp.COIL_HOLDABLE
+    assert _c_list(src, "COIL_ANYWAY") == jp.COIL_ANYWAY
+
+
+@pytest.mark.parametrize("name, pulse, hold", [
+    ("coil_magnet_1", True, True), ("coil_diverter_lower_ramp", True, True), ("coil_motor_shaker", True, True),
+    ("coil_vuk_tv", True, False), ("coil_knocker", True, False), ("coil_kickback", True, False),
+    ("coil_flipper_hold_left", False, False), ("coil_vuk_trough", False, False), ("coil_lockup_trough", False, False),
+    ("coil_autolaunch", False, False), ("coil_auto_launch", False, False), ("coil_sling_left", False, False),
+    ("coil_jet_top", False, False), ("coil_bumper_left", False, False), ("coil_motor_stepper_1", False, False),
+    ("coil_motor_gobstopper", False, False), ("coil_motor_ticket_mech", False, False),
+    ("coil_diverter_ramp_left_power", False, False), ("coil_disk_motor_relay", False, False), ("coil_null", False, False),
+])
+def test_coil_rules_keep_the_games_own_coils_out(name, pulse, hold):
+    jp = _load("jjpport")
+    assert jp.coil_rules(name) == (pulse, hold)
+
+
+def test_check_takes_balls_and_coils_and_names_every_bad_value(tmp_path):
+    mm = _load("mkjjpmodes")
+    good = _folder(tmp_path, {
+        "title.cfg": "game = GunsNRoses\ncoil_holds = on\n",
+        "1_mb.mode": "start = switch_target_jam\nmultiball = 3 15\nmultiball_on = switch_orbit_left_hi\n"
+                     "add_ball = switch_target_jam 2\ncoil_start = coil_vuk_tv\ncoil_shot = coil_magnet_1 20\n"
+                     "coil_hold = coil_magnet_1 1500 8\ncoil_hold_on = shots\n",
+        "2_save.mode": "start = switch_orbit_left_hi\nball_save = 20\ncoil_hold = coil_magnet_1 800\n"
+                       "coil_hold_on = switch_target_jam\n",
+    })
+    modes, problems = mm.check_modes(good, COIL_PORT)
+    assert problems == [], problems
+    assert modes[0]["multiball"] == "3 15"
+    (tmp_path / "3_bad.mode").write_text(
+        "start = switch_target_jam\nmultiball = 9\nadd_ball = switch_target_jam 7\nball_save = 0\n"
+        "coil_start = coil_flipper_power_left\ncoil_shot = coil_typo\ncoil_complete = magnet\n"
+        "coil_hold = coil_vuk_tv 1000\nmultiball_on = switch_nope\n")
+    (tmp_path / "4_bad.mode").write_text("start = switch_target_jam\ncoil_hold = coil_magnet_1 9000 20\n"
+                                         "multiball_on = switch_target_jam\n")
+    _, problems = mm.check_modes(good, COIL_PORT)
+    text = "\n".join(problems)
+    assert "3_bad.mode:2: multiball balls must be 2-6" in text
+    assert "3_bad.mode:3: add_ball times must be 1-6" in text
+    assert "3_bad.mode:4: ball_save seconds must be 1-120" in text
+    assert "coil_flipper_power_left is one of the game's own ball, flipper, power or motor coils" in text
+    assert "3_bad.mode:6: coil_shot not in Guns N' Roses: coil_typo" in text
+    assert "3_bad.mode:7: coil_complete magnet is not a coil name" in text
+    assert "coil_vuk_tv is not built to stay on" in text
+    assert "3_bad.mode:9: multiball_on not in Guns N' Roses: switch_nope" in text
+    assert "4_bad.mode:2: coil_hold ms must be 100-5000" in text
+    assert "4_bad.mode: multiball_on without a multiball line" in text
+
+
+def test_check_wants_title_cfg_to_turn_coil_holds_on(tmp_path):
+    mm = _load("mkjjpmodes")
+    d = _folder(tmp_path, {"1.mode": "start = switch_target_jam\ncoil_hold = coil_magnet_1 1000\n"})
+    _, problems = mm.check_modes(d, COIL_PORT)
+    assert problems == ["1.mode: coil_hold is off on this title until title.cfg says coil_holds = on "
+                        "(after a check on the machine)"]
+
+
+def test_runtime_hard_limits_are_the_documented_ones():
+    """The caps no mode file can raise (PAD-381's guardrails on JJP) are the numbers MODES.md gives."""
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    doc = open(os.path.join(RIG, "MODES.md"), encoding="utf-8").read()
+    lim = dict(re.findall(r"#define (COIL_[A-Z_]+) +(\d+)\b", src))
+    assert lim == {"COIL_PULSE_GAP_MS": "250", "COIL_PULSES_A_MIN": "20", "COIL_PULSE_MAX_MS": "1000",
+                   "COIL_HOLD_MIN_MS": "100", "COIL_HOLD_MAX_MS": "5000", "COIL_HOLD_COOL_MS": "3000",
+                   "COIL_HOLDS_A_MIN": "6", "COIL_HOLD_POWER_MAX": "16"}
+    for phrase in ("250 ms", "20 a minute", "100-5000 ms", "3 s off", "6 a minute", "16 of 32"):
+        assert phrase in doc, phrase
+
+
+def test_starter_lamp_is_the_one_at_the_start_shot():
+    """PAD-1364: the starter's lamp shares the start switch's words, not just its last one
+    (Hobbit's 'made' found nothing, Godfather's '1' found the map, Toy Story's 'target' a
+    target across the playfield)."""
+    jp = _load("jjpport")
+    assert jp._lamp_for("ramp_left_made", ["lp_gi_jets_high", "lp_gi_ramp_left_low", "lp_orc"]) == "lp_gi_ramp_left_low"
+    assert jp._lamp_for("u_target_1", ["lp_map_1", "lp_u_flasher_2", "lp_upper_target_2",
+                                       "lp_gi_upper_target_1", "lp_upper_target_1"]) == "lp_upper_target_1"
+    assert jp._lamp_for("jet_target", ["lp_target_left", "lp_jet_bot"]) == "lp_jet_bot"
+    assert jp._lamp_for("target_tv", ["lp_gi_tv", "lp_target_jam"]) == "lp_gi_tv"
+    assert jp._lamp_for("target_left", ["lp_inlane_left", "lp_song_target_left"]) == "lp_song_target_left"
+    assert jp._lamp_for("target_away", ["lp_gi_jets", "lp_target_left_x"]) == ""   # only 'target': no lamp
+    assert jp._lamp_for("target_away", ["lp_gi_skyline_1"]) == ""
+
+
+def test_every_committed_port_has_its_starter_and_it_checks():
+    """Every title in modes/ports that can run modes has a starter folder in modes/examples
+    that passes check --port against it; a title that cannot has none (PAD-1337, PAD-1364)."""
+    import glob
+    import json
+    mm = _load("mkjjpmodes")
+    ports = sorted(p for p in glob.glob(os.path.join(RIG, "modes", "ports", "*.json"))
+                   if not p.endswith(".live.json"))      # jjpstock.py live captures, not reports
+    if not ports:
+        pytest.skip("no port reports")
+    names = {os.path.basename(p)[:-5] for p in ports}
+    assert {"DialedIn-v02.02", "Hobbit-v04.02", "ToyStory-v02.04", "WizardOfOz-v08.02", "Avatar-v01.03"} <= names
+    for p in ports:
+        t = os.path.basename(p)[:-5]
+        port = json.load(open(p, encoding="utf-8"))
+        ex = os.path.join(RIG, "modes", "examples", t)
+        if not port["can_run_modes"]:
+            assert not os.path.isdir(ex), t
+            continue
+        assert port["missing_required"] == [], t
+        _, problems = mm.check_modes(ex, port)
+        assert problems == [], (t, problems)
 
 
 # ------------------------------------------------------------------ USB mode stick (PAD-1349)
@@ -292,44 +550,6 @@ def test_stick_runme_installs_turns_off_on_and_removes_like_the_python_hook(tmp_
     assert run("--action", "remove", "--game", "GunsNRoses") == 0
     assert (j / "scripts" / "rungame.sh").read_text() == RUNGAME
     assert not (j / "padmodes").exists() and not (j / "scripts" / "padmodes.sh").exists()
-
-def test_a_lamp_group_is_a_lamp_name_too(tmp_path):
-    # PAD-1350: `lamps` takes lp_* lamps or ls_* lamp groups (MODES.md); the checker knew only lamps
-    mm = _load("mkjjpmodes")
-    port = dict(PORT, lamp_groups=["ls_all"])
-    folder = _folder(tmp_path, {"1.mode": "start = switch_target_jam\nlamps = lp_target_jam ls_all\n"})
-    assert mm.check_modes(folder, port)[1] == []
-    (tmp_path / "1.mode").write_text("start = switch_target_jam\nlamps = ls_nope\n")
-    assert "lamps not in" in "\n".join(mm.check_modes(folder, port)[1])
-
-
-def test_every_title_that_can_run_modes_has_a_starter_that_checks_clean():
-    import json
-    mm = _load("mkjjpmodes")
-    ports = os.path.join(RIG, "modes", "ports")
-    can = []
-    for fn in sorted(os.listdir(ports)):
-        p = json.load(open(os.path.join(ports, fn), encoding="utf-8"))
-        if not p["can_run_modes"]:
-            continue
-        label = fn[:-5]
-        can.append(label)
-        modes, problems = mm.check_modes(os.path.join(RIG, "modes", "examples", label), p)
-        assert modes and problems == [], (label, problems)
-        # the vtable slots the runtime uses, resolved the same on every title
-        assert {k: p["mode_vtable"][k] for k in ("start", "end", "score", "tick")} == \
-            {"start": 16, "end": 32, "score": 136, "tick": 168}, label
-    assert len(can) == 9, can
-
-
-def test_build_needs_no_prebuilt_runtime():
-    # PAD-1350: left out, --so means "build it against the ISO's own glibc"
-    mm = _load("mkjjpmodes")
-    src = open(os.path.join(RIG, "mkjjpmodes.py"), encoding="utf-8").read()
-    assert 'add_argument("--so", help=' in src and "default=SO_DEFAULT" not in src
-    assert "build_runtime(mnt + ROOT_LIBDIR" in src and mm.ROOT_LIBDIR == "/lib/x86_64-linux-gnu"
-    assert "OBJ=${OUT%.so}.o" in open(os.path.join(RIG, "buildmods.sh"), encoding="utf-8").read()
-
 
 def test_stick_runtime_comes_from_the_stock_iso(tmp_path):
     # PAD-1375: the app's Write to USB stick has no prebuilt runtime; `runtime` builds it against

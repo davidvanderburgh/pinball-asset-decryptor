@@ -98,7 +98,7 @@ class JjpModesMixin:
                 st["form"] = dict(CM.read_mode(self._jjp_label, self._jjp_file)) if self._jjp_file else {}
                 st["title_cfg"] = dict(CM.read_title(self._jjp_label))
                 st["folder"] = CM.title_dir(self._jjp_label)
-                st["names"] = {k: CM.names_for(port, k) for k in ("switches", "lamps", "sound", "font")}
+                st["names"] = {k: CM.names_for(port, k) for k in ("switches", "lamps", "sound", "font", "events", "after")}
                 st["check"] = self._jjp_check_state()
                 st["sounds"] = self._jjp_sounds_state(port)
                 st["build"] = self._jjp_build_state()
@@ -360,7 +360,7 @@ class JjpModesMixin:
             if rc == 0 and os.path.isfile(out):
                 ok, msg = True, "Built %s (%.1f GB)." % (os.path.basename(out), os.path.getsize(out) / 1e9)
             elif getattr(self, "_jjp_cancelled", False):
-                msg = "Build cancelled."
+                msg = "Build canceled."
             else:
                 msg = (refused[-1][len("refused:"):].strip() if refused
                        else "The build stopped (exit %d): %s" % (rc, lines[-1] if lines else "no output"))
@@ -546,7 +546,7 @@ class JjpModesMixin:
                 os.makedirs(os.path.dirname(rt), exist_ok=True)
                 rc = self._jjp_stream(rt_argv, lines, self._jjp_stick_tick)
                 if getattr(self, "_jjp_cancelled", False):
-                    raise _Stop("Cancelled.")
+                    raise _Stop("Canceled.")
                 if rc != 0 or not os.path.isfile(rt):
                     refused = [ln for ln in lines if ln.startswith("refused:")]
                     raise _Stop("The mode runtime could not be built: " + (

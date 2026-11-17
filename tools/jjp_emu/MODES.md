@@ -13,6 +13,9 @@ No game code is patched. How and why it works: `docs/plans/jjp_custom_modes.md`.
 | Starter modes per title | `modes/examples/<title>/` |
 | Install ISO with modes, for a real machine | `mkjjpmodes.py build` |
 | Check a mode folder | `mkjjpmodes.py check --modes DIR --port PORT.json` |
+| Change the game's OWN modes | `<name>.stock` files in the same folder (PAD-1351, below) |
+| A running game's mode globals and shot names | `jjpstock.py live` -> `modes/ports/<title>.live.json` |
+| Starter `.stock` file per title | `modes/stock_examples/<title>/` |
 | Make, check and build them in the app | the **Modes** tab on a JJP game (`webui/modes_jjp.py`, PAD-1350) |
 
 ## In the app (PAD-1350)
@@ -78,8 +81,15 @@ lamp_blink = 4
 |---|---|---|
 | `name` | file name | the mode's name (log, engine Mode name) |
 | `title` | `name` | the line drawn at the top of the mode panel. A game font may lack punctuation: GnR's Slash Solo font draws `-` and `!` as other marks |
-| `start` | (required) | switch(es) that start the mode, space separated |
-| `start_count` | 1 | start-switch hits needed to start it |
+| `start` | none | switch(es) that start the mode, space separated. A mode needs this or one of the start rules below |
+| `start_count` | 1 | starts needed: start-switch hits, or times a start rule fires (e.g. `start_after = gobstopper_mb` with `start_count = 2`: after the second Gobstopper multiball) |
+| `start_count_reset` | game | `game`: the count carries over between balls and resets at a new game; `ball`: it resets every ball |
+| `start_on` | none | start on a game event, any of: `ball_start`, `first_ball`, `last_ball`, `valid_playfield` (the first playfield switch of a ball), `ball_saved`, `extra_ball` (one awarded), `multiball_end` |
+| `start_after` | none | start when one of these game modes ends: the game's mode globals (e.g. `mtv_mode`) or Mode classes, or `any` |
+| `start_score` | none | start when the player up's score reaches this, once per player per game |
+| `start_combo` | none | two or more switches hit in this order, each within `combo_seconds` of the one before |
+| `combo_seconds` | 5 | whole seconds |
+| `start_once` | no | `ball` or `game`: start at most once a ball or once a game |
 | `shots` | `start` | switches that score while it runs |
 | `points` | 1000000 | per scoring shot, through the game's own Mode::score_and_total |
 | `seconds` | 20 | the game's own mode timer |
@@ -96,6 +106,13 @@ lamp_blink = 4
 | `game_modes` | hold | `hold` (PAD-1348): while this mode runs, a start of the game's that goes through its class's start or restart (on Wonka 03.03: the multiballs, proven with the Gobstopper multiball) is refused and the game carries on as if it was not asked. Some game modes start another way (Wonka's Oompa hurry-up, Wonka Wash Frenzy) and are not held: this mode pauses for them, as `pause` does, and resumes after. Or the older choices for when a game mode or multiball runs: `pause` (timer held, shots not scored, panel hidden, lamps handed back), `end`, or `ignore` (none of these refuse the game's starts) |
 | `hold_multiballs` | yes | with `hold`: `no` lets the game's multiballs start (and pause this mode) |
 | `allow_game_modes` | none | with `hold`: the game's mode globals or classes (e.g. `mtv_mode`, `OompaHurryUp`) that may still start |
+| `multiball` | none | `<balls> [ball save s]` (PAD-1353): 2-6 balls in play, ball save 0-120 s (10 when absent). When the mode starts the game serves balls until that many are in play, and serves back any that drain inside the ball save. One ball (or none) for 2 s, once the ball save and 3 s more have passed, ends the mode (`one ball left`). With `seconds = 0` the mode has no clock: only that, or the ball's end, ends it |
+| `multiball_on` | the start | with `multiball`: switch(es) whose first hit while the mode runs serves the balls, instead of the start. The mode's `seconds` is the time to hit it; once the balls come the clock stops and one ball left ends it |
+| `add_ball` | none | `<switches> [times]`: each hit while the mode runs asks the game for one more ball, up to `times` (1-6, 1 when absent) a run, with the multiball's ball save (2 s, the game's own, when shorter). Works in a mode without a `multiball` line too |
+| `ball_save` | none | `<s>` (1-120): when the mode starts, a ball that drains in that time is served back. Ends with the mode, unless the game raised the save past ours (then the game's runs on) |
+| `coil_start`, `coil_shot`, `coil_complete` | none | `<coil> [ms]`: pulse that coil when the mode starts, on each scoring shot, on completion. `ms` can only shorten the coil's own pulse (the time the game built it with) |
+| `coil_hold` | none | `<coil> <ms> [power]`: hold a magnet, diverter, post, gate, shaker or light on for 100-5000 ms, on `power` of every 32 steps (1-16, 8 when absent). Off at its time, at the mode's end or pause, at the ball's end. Needs `coil_holds = on` in title.cfg |
+| `coil_hold_on` | shots | `shots` (each scoring shot), `start`, or switch(es) of its own |
 
 ### title.cfg only
 
@@ -104,15 +121,163 @@ lamp_blink = 4
 | `game` | the title's GAMENAME (e.g. `GunsNRoses`). The modes load only into that game: a mode ISO made from a multi-boot ISO hooks root A, which also starts image 1's game |
 | `ingame_state` | the `jjpe_state_get()` value meaning "a ball is in play" (5 on Guns N' Roses). Without it the runtime learns it on the first ball: the state that holds for a second while the game's own ball-in-play flag is set (logged) |
 | `background_modes` | game modes that are always on and must not make a custom mode yield. Without it, the game modes already running two seconds into a ball count as always-on |
+| `coil_holds` | `on` lets this title's modes hold coils (`coil_hold`). Off by default: a hold is a coil kept energised, so it is turned on per title once it has been watched on that machine. `mkjjpmodes.py check` names a `coil_hold` without it |
+
+## Balls and coils (PAD-1353)
+
+Everything goes through the game's own engine, the same exported calls on every
+title that can run modes (`can_balls` and `can_coils` in its port report):
+
+* **Balls.** The engine keeps one ball saver: "keep N balls in play for T".
+  `mb_request_balls_into_play(N, T)` starts it or raises either, and while it
+  runs it serves balls until N are in play and serves back any that drain. Read
+  off Wonka's decrypted code, the game's own ball save is that call with the
+  balls in play now, and its add-a-ball is `mb_add_balls_into_play(1, 2 s)`; a
+  mode's `multiball`, `ball_save` and `add_ball` are the same calls. A multiball
+  of the mode's own does not make it pause (the game's multiballs still do).
+* **Coils.** A coil is a named `coil_*` global in the engine's `coil_table`. A
+  pulse is `Coil::coil_pulse`; a hold is `Coil::coil_duty(ms, pattern, 32)`:
+  the game's realtime loop plays the 32-step on/off pattern for that long and
+  then turns the coil off itself, so the engine bounds every hold even if the
+  runtime stopped (measured on Wonka 03.03). The runtime ends a hold sooner
+  when it should, and at its time at the latest, from a watchdog thread of its
+  own that checks every 5 ms and does not depend on the mode ticking (the game
+  stops a mode's run proc at the ball's end); `Coil::coil_off` turns it off.
+
+The limits are in the runtime; no mode file can raise them (the guardrails of
+Spike 2's PAD-381):
+
+| Limit | Value |
+|---|---|
+| Coils a mode may never fire | the game's own ball handling, flippers and power, by name: `flipper`, `trough`, `autolaunch`, `auto_launch`, `autoplunge`, `plunger`, `sling`, `jet`, `bumper`, `stepper`, `relay`, `power`, `ticket`, `null`, `motor` (the shaker motor excepted), and whatever coil the game's `hook_trough_coil`, `hook_autoplunger_coil` or `hook_trough_jam_coil` names |
+| Coils a mode may hold | names with `magnet`, `divert`, `post`, `gate`, `shaker`, `flash`, `lamp`, `light` or `led`; every other allowed coil is pulse only |
+| A pulse | never longer than the coil's own pulse (1000 ms at most); 250 ms between two pulses of one coil; 20 a minute per coil |
+| A hold | 100-5000 ms, timed by the engine itself; at most 16 of 32 steps on; 3 s off between holds of one coil; 6 a minute per coil |
+| Off | at its time, the mode's end or pause, the ball's end (tilt included), from the watchdog |
+| The game always wins | a coil the game is driving is not fired or held (`the game is driving it`); a hold the game takes over is left to the game, with no off sent over it |
+| No ball in play | nothing is fired or held |
+
+The port report lists every named coil with what a mode may do (`coils`:
+`pulse`, `hold`), by the same name rules (`jjpport.py` `COIL_NEVER`,
+`COIL_HOLDABLE`, `COIL_ANYWAY`; a test keeps them equal to the runtime's), and
+`mkjjpmodes.py check --port` refuses a coil the mode may not use.
+
+## The game's own modes, changed: `.stock` files (PAD-1351)
+
+A `<name>.stock` file in the mode folder changes one of the GAME's modes: its timer,
+its points and which shots count for it. No game code is patched; the runtime points
+a few slots of that mode's class vtable at its own functions, which call the game's.
+A folder may hold `.stock` files only, `.mode` files only, or both (up to 32 `.stock`).
+
+```
+# candy_lane.stock - Wonka 03.03 (modes/stock_examples/Wonka-v03.03)
+mode = cl_mode
+seconds = 60
+points_x = 3
+shots_off = target_ul_flipper
+shots_add = switch_ramp_right_made:target_tv
+```
+
+| Key | Meaning |
+|---|---|
+| `mode` | (required) the game's mode: its global (`cl_mode` is Wonka's Candy Lane; a title's port report lists them under `stock.objects` once read off a live game) or its class (`CandyLaneMode`; every title's report lists them under `stock.classes`) |
+| `seconds` | the mode's timer when it starts, in place of the game's own (Candy Lane's is 45, 30 or 15 by the Wonka Bar timer adjustment) |
+| `points` | every award the mode makes becomes this many points |
+| `points_x` | every award the mode makes times this (`2`, `1.5`, `0.5`); `points` wins if both are set |
+| `shots_off` | shots that no longer count for this mode (the game's other modes still get them) |
+| `shots_add` | `switch:shot` pairs: while the mode runs, hitting the switch also gives the mode that shot |
+
+Shots are the game's own shot names: on Wonka 03.03 the 41 in
+`modes/ports/Wonka-v03.03.live.json` (`ramp_left`, `loop_center`, `target_tv`,
+`g_target`, ...), or a shot's number. On a title read only statically, the runtime
+logs its shot table on the machine (`jjpmodes.log`, the `shots:` line), and
+`mkjjpmodes.py check` leaves shot names unchecked there. Everything the file does is
+logged with `STOCK`: each award with the game's own figure beside it, each shot let by
+or added, and when the mode starts and ends.
+
+How each works, read off Wonka 03.03's decrypted engine:
+
+* **Timer.** `Mode::start` sets a default and each class then sets its own (the Wonka Bar
+  award modes from an adjustment, 60 - 15 x the setting, into a timer the class keeps
+  itself). The mode's run proc is started through the class's `run_proc` slot, so the
+  runtime runs first there and calls the class's own `set_time`. With the run proc
+  alive, `set_time`'s restart does nothing, as when the game sets a time itself. The
+  timer then runs (or holds) by the game's own rules.
+* **Points.** Every award goes through `this->score_and_total`. The game's call sites
+  check whether the slot still holds the class's own function and call the slot when it
+  does not, so the runtime sees every award.
+* **Shots.** A made shot reaches each mode by a direct call to its class's
+  `shot_dispatch`, which reads the shot from its proc argument and first asks
+  `this->is_running` (or `_or_grace`, `_or_grace_grace`) through the vtable. The
+  runtime answers that question "not running" when it comes from inside that class's
+  own `shot_dispatch` (the return address) about a shot in `shots_off`. For `shots_add`
+  it sets the shot id in the switch's proc (`shot_set_proc_shot_id`; Wonka has no
+  setter, so the proc argument `shot_get_proc_shot_id` reads) and calls the class's
+  `shot_dispatch`. A class with no `shot_dispatch` of its own takes no shot keys
+  (the port report's `shots: false`; the runtime logs it).
+* **Shot names.** The game's shot table (one entry per shot id, each pointing at its
+  exported `shot_made_<name>` handler) is ciphertext in the file. The runtime finds it
+  in memory by those handlers' addresses; `jjpstock.py` does the same on a live game.
+  A shot is named after its handler; where several shots share one (Wonka's slings,
+  jets and 3-bank) each takes the game's display name instead (`left_sling`,
+  `top_bumper`, `g_target`).
+
+**Emulator, Wonka 03.03** (hidden, muted, `C:\tmp\PAD-1351\proof.sh`): Candy Lane
+started by the test hook (`JJP_MODS_TEST_GAMEMODE=cl_mode`), then the same shots on two
+boots. Without changes: the game's timer read 30 s (`WonkaBarAwardModes::wba_timer`),
+awards 5,000 at the start and 2,550 a target, the upper-left flipper target scored,
+the right ramp did nothing for it. With `candy_lane.stock`: the timer read 60 s, awards
+15,000 and 7,650 (x3), `target_ul_flipper goes by it`, and `switch_ramp_right_made gives
+it shot target_tv` scored 7,650. The same file naming the class (`mode = CandyLaneMode`)
+does the same. The countdown is the game's own
+`WonkaBarAwardModes::timer_run_proc`, which takes a second off that same `wba_timer`
+each second unless `game_timers_paused()` (the ball saver's pause, with every ball in
+play held in a lock or the shooter lane). On the hidden rig no ball rolls, so the
+game held the timer in both runs alike; the file changed the value it counts down
+from.
+
+### Every title, statically
+
+`jjpport.py` reports, per title, what a `.stock` file can do (`stock` in the port
+report): the vtable slots, how the shot id is read and set, and per Mode class whether
+its timer and points are its own and whether it takes shot keys. Checked 2026-11-16 on
+each title's game program; every one has the same slots as Wonka (run_proc 0x90,
+set_time 0x28, score 0x88, is_running 0x48 / 0x50 / 0x58) and `shot_get_proc_shot_id`:
+
+| Image | Mode classes | Take shot keys | Own timer | Own points | Shot id set by | Shot handlers | Starter |
+|---|---|---|---|---|---|---|---|
+| Wonka 03.03 | 25 | 17 | 5 | 10 | the proc argument | 38 | `candy_lane.stock`, emulator-proven |
+| Guns N' Roses 03.03 | 33 | 30 | 0 | 30 | `shot_set_proc_shot_id` | 51 | `AFDMode.stock` |
+| Elton John 02.03 | 31 | 29 | 0 | 28 | `shot_set_proc_shot_id` | 36 | `PianoRampMode.stock` |
+| Godfather 02.03 | 16 | 13 | 0 | 15 | `shot_set_proc_shot_id` | 57 | `BoxingMode.stock` |
+| Pirates of the Caribbean 01.01 | 2 | 0 | 0 | 0 | `shot_set_proc_shot_id` | 46 | none: its two Mode classes take no shots; its play is multiballs |
+| Dialed In 02.02 | 17 | 14 | 0 | 0 | `shot_set_proc_shot_id` | 27 | `DisasterMode_AcidRain.stock` |
+| The Hobbit 04.02 | 33 | 32 | 0 | 32 | `shot_set_proc_shot_id` | 31 | `BookMode.stock` |
+| Toy Story 02.04 | 21 | 19 | 0 | 16 | `shot_set_proc_shot_id` | 41 | `BottleBlastMode.stock` |
+
+"Own timer 0" means the class times itself through `Mode::set_time` (the engine's own
+timer, which the runtime sets the same way). Each starter folder passes `mkjjpmodes.py
+check` against its title's report, and the runtime loads with every import bound
+(`LD_BIND_NOW`) on each cached image's own glibc 2.34 (Wonka, Guns N' Roses, Dialed In,
+Hobbit, Toy Story). What is generic: the slots, the shot accessors, the shot table rule,
+and the class-name lookup. What needs a live game per title: the mode globals' names
+and the shot names (`jjpstock.py live`), both of which the runtime learns by itself on
+the machine. The CHAKA GnR LE image is a custom Guns N' Roses build and takes GnR's
+files.
 
 ## How a mode behaves
 
 * A custom mode runs while a ball is in play and ends with the ball, as the
   game's own modes do (the game stops a mode's run proc at ball end). Start
   shots counted toward `start_count` carry over between balls and reset when a
-  new game starts.
+  new game starts (`start_count_reset = ball`: every ball).
 * One custom mode runs at a time. A start shot is refused (and logged as
   "yielded to <mode>") while a game mode or a multiball runs.
+* A start rule (`start_on`, `start_after`, `start_score`, `start_combo`) does not
+  start the mode on the spot: it raises the start, and the mode starts at the
+  first moment that ball when the ball is in play, no other custom mode runs and
+  nothing it yields to runs. A raised start not done by the end of the ball is
+  dropped (logged). Several rules on one mode: any of them starts it.
 * A multiball is more than one ball in play for half a second (the count blips).
 * The mode's lamps live in a lamp layer of their own, above the game's mode
   layers and below its award, tilt and diagnostic layers. When the mode ends,
@@ -161,10 +326,10 @@ through a `ui.dat` the game verifies; the hot fix needs none of that.)
 **An install ISO.** `mkjjpmodes.py build --iso <stock>.iso --modes <folder>
 --out <new>.iso` (as root in WSL) writes the stock ISO again with the modes in
 its root pieces. Install it the way the stock ISO is installed (dongle in, and
-like any full install it resets scores and settings). The runtime is compiled from
-`jjpmodes.c` during the build, against the glibc in that ISO's own root
-(`buildmods.sh` with `JJP_MODS_LIBDIR`; gcc in the WSL distro), so nothing
-prebuilt can go stale; `--so` takes one built already.
+like any full install it resets scores and settings). Left without `--so`,
+the build compiles the runtime from `jjpmodes.c` against the glibc in that ISO's
+own root (`buildmods.sh` with `JJP_MODS_LIBDIR`; gcc in the WSL distro), so
+nothing prebuilt can go stale (PAD-1350); `--so` takes one built already.
 
 **Proof, Wonka 03.03 in the emulator (hidden, muted, Wonka's own key), 2026-11-17.**
 *ISO:* `build` on the stock Wonka ISO (51 s, 3.2 GB, e2fsck clean); the rig
@@ -197,7 +362,7 @@ can never reboot WSL. A proof restarts the game where the machine would reboot.
 runtime needs (`can_run_modes`). `modes/ports/` holds the report for every JJP
 image in the library and `modes/examples/` a starter folder for each title that
 can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`, and
-2026-11-16 on the five added since (PAD-1350):
+2026-11-16 on the five added since (PAD-1350, PAD-1364):
 
 | Image | Engine exported | Runs modes | Library loads |
 |---|---|---|---|
@@ -247,9 +412,18 @@ booting the one unchanged runtime - GnR and Wonka, built from different games -
 is what shows the SDK is generic, so these four are taken as runs-modes without a
 separate live run each; any one can be run the same way with its own key.
 
+**Dialed In!, The Hobbit and Toy Story 4** (PAD-1350, PAD-1364) are mapped from Wonka the same way:
+their Mode vtable slots, hold slots and 104-byte `Switch` match Wonka's, every required
+SDK piece is exported, and their starter folders pass `check --port`. Dialed In has
+84 named shot switches, 216 lamps, 1,286 sounds and 17 Mode classes; The Hobbit
+104, 131, 1,501 and 33; Toy Story 82, 670, 2,231 and 21. Dialed In has no lamp
+named for a target, so its starter lights none (add `lamps =` by hand).
+A starter's lamp is the one whose name shares the most words with the start
+switch (`switch_u_target_1` lights `lp_upper_target_1`), which since PAD-1364 also
+moved Elton John's, Godfather's and Pirates' starter lamps onto their start shots.
+
 "Library loads" means the one `jjpmodes.so` loads with every import bound
-(`LD_BIND_NOW`) on that image's own glibc, checked in a chroot of its root (2.34 on the first
-nine; the five added 2026-11-16 load the same way).
+(`LD_BIND_NOW`) on that image's own glibc, checked in a chroot of its root - 2.34 on all fourteen.
 
 ### Our modes run alone (PAD-1348)
 
@@ -282,7 +456,104 @@ starts this way. Pirates has only two Mode classes: most of what it runs are
 multiballs, which the gate holds. The CHAKA GnR LE image is a custom Guns N' Roses
 build, covered by Guns N' Roses.
 
+### Start rules from the game's hook lists (PAD-1354)
+
+The engine announces its events through about 70 `Hook<HookX_, Arg>::list`
+globals, each a linked list of the game's own callbacks it walks wherever that
+event happens. The runtime adds one node of its own at the end of each list a
+mode's rules need (the game's callbacks run first, ours never stops the walk),
+and starts raised modes on the game's own proc thread from its lamp-render,
+update and switch-dispatch lists. No game code is patched.
+
+| `start_on` word | Game hook list | Notes |
+|---|---|---|
+| `ball_start` | `HookBallStart_` | every ball, every player |
+| `first_ball` | `HookFirstBall_` | each player's first ball |
+| `last_ball` | `HookLastBall_` | the game runs it just before the player's last ball; the runtime also takes the game's balls-left count reaching 0 at ball start (either one, once a ball) |
+| `valid_playfield` | `HookValidPlayfield_` | the ball's first playfield switch |
+| `ball_saved` | `HookBallSave_` | the game's ball save |
+| `extra_ball` | `HookExtraBallAwarded_` | run from `ExtraBall::award()` |
+| `multiball_end` | `HookMultiballEnd_` | the game runs this list every time its ball count settles, one ball or several; the runtime takes it as a multiball's end only after a multiball (more than one ball for half a second) |
+
+`start_score` reads `score_get_player_score(game_flow_get_player_up())` as the
+game scores (`HookScore_`); `start_after` watches the game's mode objects (the ones
+`game_modes` yields to) for one that stops running; combos are counted in the
+shot wrappers.
+
+`jjpport.py` reports per title which hook lists it has (`hooks`, `start_rules` in
+its port report), and `mkjjpmodes.py check` refuses a `start_on` word a title's
+report says it lacks. Every title that runs modes has all twelve lists the rules
+use: Guns N' Roses (and CHAKA's GnR LE), Elton John, Godfather, Pirates, Wonka,
+Dialed In, The Hobbit and Toy Story, read off each title's own game program. The
+runtime loads with every import bound (`LD_BIND_NOW`) on the Guns N' Roses,
+Dialed In, Hobbit and Toy Story roots; Elton John, Godfather and Pirates use the
+same glibc 2.34 the build checks against.
+
+**Emulator, Wonka 03.03** (hidden, muted, `C:\tmp\PAD-1354\proof.sh`,
+`proof2.sh`, `proof5.sh`): 13 of our nodes went onto the game's lists. The game's
+first ball raised and started `start_on = ball_start` (on the proc thread, once
+the ball was in play); five 1,000,000 shots in it took the score past 4,000,000
+and raised `start_score = 4,000,000`, which waited for the running mode and
+started when it ended; ramps hit centre, left, centre started
+`start_combo = switch_ramp_left_made switch_ramp_center_made` (the wrong order did
+not); the game's Oompa hurry-up, started and then ended through its own `Mode::end` (a test-only switch, `JJP_MODS_TEST_END_SWITCH`; it did not time out inside 90 s on the rig), started `start_after = oompa_hurryup`; on
+ball 2 `start_once = game` refused the ball-start mode; on the last ball
+`start_on = last_ball` started (balls left 2, 1, 0). `first_ball` and
+`valid_playfield` were logged as the game ran them; `multiball_end` came at every
+drain with one ball and was turned down. `ball_saved` and `extra_ball` were not
+seen live: the hidden rig cannot drain a ball inside its save window or earn an
+extra ball. They are the same mechanism, one list each, and the port reports
+show both lists on every title.
+
 **Harry Potter and Sonic are built without the engine's exports**: their
 binaries export only C library and Allegro names. The runtime finds everything
 by name, and their code is ciphertext until the title's own key decrypts it,
 so nothing can be mapped without that key. Custom modes on them need their keys.
+Avatar is built the same way.
+
+**Wizard of Oz 08.02 is an older engine**: it exports 12,260 names, 120 shot
+switches, 149 lamps and 633 sounds, but has no `Mode` class at all, so the
+runtime has nothing to derive a mode from. Custom modes there need their own
+port of the runtime to that engine.
+
+### Balls and coils on every title (PAD-1353)
+
+**Emulator, Wonka 03.03** (hidden, muted, the rig's ball feeder run headless so served
+balls reach the playfield; `C:\tmp\PAD-1353\proof.sh`), 2026-11-17:
+
+* `multiball = 3 8`: `3 ball(s) in play asked for (1 in play)`, the trough kicked two
+  balls and the game counted 3 in play. `add_ball` took it to 4; the second hit was
+  refused (`already 1 this run`). A drain inside the ball save was served straight back
+  (the trough kicked within 0.6 s, the count stayed at 4). After the save, drains to one
+  ball ended the mode (`ENDED by one ball left`), the game playing on. The mode did not
+  pause for its own multiball.
+* `ball_save = 15`: on at the start; the mode completed 1 s later and the save ended with
+  it (`ball save ended with the mode`).
+* Pulses: the knocker fired at the start and on each shot at its own 32 ms (`500` asked:
+  `the game's own pulse is the most`). `coil_flipper_power_left` and
+  `coil_motor_gobstopper` were refused and never driven (the sampler of the board's OUT
+  frames saw nothing on them).
+* Holds: `coil_magnet_left_lane 1500 8` drove 1520 ms at 25 % on (sampled) and went off at
+  its time; a shot inside it was refused (`it is held already`), one 1 s after it
+  (`3 s off between holds`). `coil_magnet_1 3000 4` (12-14 % on, sampled) went off when its
+  mode completed at 1180 ms; `coil_magnet_2 5000` went off at the ball's end at 1614 ms.
+
+**Every other title, statically** (2026-11-17): each title's port report has the ball
+saver and Coil API (`can_balls`, `can_coils`), its starter folder (now with a
+`2_multiball.mode`) passes `mkjjpmodes.py check --port`, and the library loads with every
+import bound (`LD_BIND_NOW`) on the title's own root where it is cached:
+
+| Image | Named coils | A mode may pulse | ...and hold | Library loads |
+|---|---|---|---|---|
+| Guns N' Roses 03.03 | 33 | 15 | 10 | yes |
+| CHAKA's LOTLJ GnR LE 3.03 | 33 | 15 | 10 | yes |
+| Elton John 02.03 | 42 | 23 | 6 | yes |
+| Godfather 02.03 | 45 | 24 | 7 | glibc 2.34, as the build checks |
+| Wonka 03.03 | 46 | 24 | 14 | yes, emulator-proven |
+| Pirates of the Caribbean 01.01 | 50 | 28 | 13 | glibc 2.34, as the build checks |
+| Dialed In 02.02 | 38 | 20 | 10 | yes |
+| The Hobbit 04.02 | 68 | 43 | 13 | yes |
+| Toy Story 02.04 | 43 | 22 | 8 | yes |
+
+Coil holds stay off on every title until its `title.cfg` says `coil_holds = on`: the
+emulator proves what the game was asked to drive, not what a real coil does with it.

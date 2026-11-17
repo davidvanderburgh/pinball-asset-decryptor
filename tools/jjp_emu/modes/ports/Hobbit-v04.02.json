@@ -16,6 +16,241 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 33,
+  "multiball_classes": [
+   "13MultiballRule",
+   "14BeastMultiball",
+   "14SmaugMultiball",
+   "17BookModeMultiball",
+   "19HobbitMultiballRule",
+   "20ArkIntoFireMultiball",
+   "22ArkFiveArmiesMultiball",
+   "24ArkBarrelEscapeMultiball"
+  ]
+ },
+ "can_balls": true,
+ "can_coils": true,
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 31,
+  "classes": {
+   "BMAmbush": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMAzog": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMBait": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMBolg": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMContract": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMDolGuldur": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMDoorstep": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMDuel": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMErebor": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMEscape": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMEvil": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMFireWater": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMFlashback": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMFliesSpiders": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMGandalf": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMGathering": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMGiants": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMInterrogation": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMJailbreak": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMKili": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMLodgings": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMMirkwood": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMMoonRunes": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMMutton": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMOrcs": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMParty": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMRadagast": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMResurgence": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMRiddles": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMRing": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMThief": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BookMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   }
+  },
+  "live": ""
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,
@@ -52,6 +287,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -59,13 +308,15 @@
  "defaults": {
   "start": "switch_ramp_left_made",
   "shots": "switch_ramp_left_made switch_ramp_right_made",
-  "lamps": "",
+  "lamps": "lp_gi_ramp_left_low",
   "font_title": "font_final_title",
   "font_value": "font_mode_total",
   "font_timer": "font_ff_timer",
   "sound_start": "se_Fanfare_TABA_start",
   "sound_shot": "se_Fanfare_SuperSpinnerJackpot",
-  "sound_end": "se_VO_H3_LTPCrowd_Cheers"
+  "sound_end": "se_VO_H3_LTPCrowd_Cheers",
+  "multiball_start": "switch_ramp_right_made",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "10BMContract",
@@ -2037,5 +2288,347 @@
   "se_thorin_what_in_durins_name_is_going_on",
   "se_thorin_you_think_thats_funny",
   "se_volume_default"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bumper_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bumper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bumper_upper",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_divert_rampgate",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_smaugfeed",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_subway",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_windlance",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_drop_5bank_1_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_1_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_2_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_2_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_3_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_3_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_4_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_4_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_5_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_5_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_bottom_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_bottom_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_center_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_center_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_top_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_top_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_bottom_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_bottom_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_center_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_center_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_top_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_top_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_goblin_hold",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_goblin_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_kickback",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_light_jets",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_light_spots_lower",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_light_spots_upper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_light_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_light_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_left",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_ramp",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_right",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_smaug_stepper1",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_smaug_stepper2",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_smaug_stepper3",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_smaug_stepper4",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_orc_hold",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_orc_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_upper",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_spider_hold",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_spider_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_uppost",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_vuk_balin",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_radagast",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_warg_hold",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_warg_power",
+   "pulse": false,
+   "hold": false
+  }
  ]
 }

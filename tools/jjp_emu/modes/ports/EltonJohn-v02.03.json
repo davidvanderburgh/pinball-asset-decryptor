@@ -37,6 +37,211 @@
    "8EncoreMB"
   ]
  },
+ "can_balls": true,
+ "can_coils": true,
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 36,
+  "classes": {
+   "BackstageFrenzy": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BennieAndTheSuperJets": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "FinalTour": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "JMBash": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "JMHurryUp": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "JMPattern": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "PianoMultiballWM": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "PianoRampMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongBeat": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "SongBeatMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongBeatModeLoveLiesBleeding": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": false
+   },
+   "SongModeBennieJets": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeBitchBack": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeCrocRock": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeGoodbyeYBR": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeHonkyCat": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeLevon": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModePhillyFreedom": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModePinballWizard": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeRocketman": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeSaturdayNight": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeSisterTwist": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeStillStanding": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeTakePilot": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeTinyDancer": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SongModeYourSong": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "StarFrenzy": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "SuperSpinnerMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "TinyDancerMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   }
+  },
+  "live": ""
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,
@@ -73,6 +278,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -80,13 +299,15 @@
  "defaults": {
   "start": "switch_target_left",
   "shots": "switch_target_left switch_ramp_left_made switch_ramp_right_made",
-  "lamps": "lp_inlane_left",
+  "lamps": "lp_song_target_left",
   "font_title": "font_player_menu_title",
   "font_value": "font_song_mode_total_1",
   "font_timer": "font_song_beat_mode_timer",
   "sound_start": "se_Fanfare_ChampMB_Intro",
   "sound_shot": "se_Fanfare_ChampMB_SuperJackpot",
-  "sound_end": "se_SFX_AlbumTotal"
+  "sound_end": "se_SFX_AlbumTotal",
+  "multiball_start": "switch_ramp_left_made",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "10StarFrenzy",
@@ -4441,5 +4662,217 @@
   "se_system_switch_on",
   "se_system_test_report",
   "se_volume_default"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_croc_rocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_diverter_piano",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_drop_release_rocketman",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_reset_3_bank",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_reset_rocketman",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_elton_head_stepper_a",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_elton_head_stepper_b",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_elton_head_stepper_c",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_elton_head_stepper_d",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_hands_left",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_hands_right",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_bot",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_top",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_kickback",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_kicker_rocketman",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_kickout_croc",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lamp_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_lockup_release_croc",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lockup_release_piano",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_magnet_orbit",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_tiny_dancer",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_light_unit",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_topper_panel_back",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_panel_left",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_panel_right",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_uppost_inner_lane",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_vuk_left_lane",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  }
  ]
 }

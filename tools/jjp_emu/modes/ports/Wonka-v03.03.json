@@ -16,6 +16,26 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 25,
+  "multiball_classes": [
+   "11QuickMBRule",
+   "13MultiballRule",
+   "17BratMultiballRule",
+   "19WonkavatorMultiball",
+   "20TheMostSecretMachine",
+   "23GobstopperMultiballRule",
+   "28PureImaginationMultiballRule",
+   "30OompaLoompaSearchMultiballRule"
+  ]
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,

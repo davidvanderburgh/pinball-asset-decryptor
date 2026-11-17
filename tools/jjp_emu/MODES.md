@@ -152,6 +152,37 @@ separate live run each; any one can be run the same way with its own key.
 "Library loads" means the one `jjpmodes.so` loads with every import bound
 (`LD_BIND_NOW`) on that image's own glibc - 2.34 on all nine.
 
+### Our modes run alone (PAD-1348)
+
+With `game_modes = hold` (the default) the runtime points the start and restart
+slots of every class derived from `Mode` or `MultiballRule` at its own gate: while
+one of ours runs, the gate refuses the start, and the game reads that as "did not
+start". The classes are found from the game's own exported typeinfo, so each title
+brings its own. `jjpport.py` reports what the gate covers on a title (`hold` in its
+port report), read from the file the same way the runtime reads it in the game.
+
+| Image | Mode classes | Multiball classes | Slots (start, restart; multiball start, restart) | Library loads (2026-11-16 build) |
+|---|---|---|---|---|
+| Guns N' Roses 03.03 | 33 | 9 | 0x10, 0x18; 0x88, 0x90 | yes |
+| Elton John 02.03 | 31 | 9 | same | glibc 2.34, as the build checks |
+| Godfather 02.03 | 16 | 8 | same | glibc 2.34, as the build checks |
+| Pirates of the Caribbean 01.01 | 2 | 10 | same | glibc 2.34, as the build checks |
+| Wonka 03.03 | 25 | 8 | same | yes |
+| Dialed In 02.02 | 17 | 10 | same | yes |
+| The Hobbit 04.02 | 33 | 8 | same | yes |
+| Toy Story 02.04 | 21 | 7 | same | yes |
+
+**Emulator, Wonka 03.03** (hidden, muted, `C:\tmp\PAD-1348\proof3.sh`): four rounds of
+the 40 named shots while PAD Mode ran. The Gobstopper multiball's start was refused
+three times (`HELD OFF the game's multiball gobstopper_mb`), and once PAD Mode's timer
+ran out the same shots started it (`went ahead`). The game's own modes stack on
+JJP titles, and some start without going through these slots: the Oompa hurry-up
+started while PAD Mode ran, PAD Mode paused for it (`PAUSED for oompa_hurryup (it
+started past the hold)`) and resumed when it was over. On Wonka Wonka Wash Frenzy also
+starts this way. Pirates has only two Mode classes: most of what it runs are
+multiballs, which the gate holds. The CHAKA GnR LE image is a custom Guns N' Roses
+build, covered by Guns N' Roses.
+
 **Harry Potter and Sonic are built without the engine's exports**: their
 binaries export only C library and Allegro names. The runtime finds everything
 by name, and their code is ciphertext until the title's own key decrypts it,

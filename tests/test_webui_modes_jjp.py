@@ -259,3 +259,153 @@ def test_every_mode_key_is_on_the_form_once():
     assert sorted(keys) == sorted(CM.mk().KEYS)
     assert set(CM.TITLE_FORM) <= set(CM.mk().KEYS) | set(CM.mk().TITLE_KEYS)
     assert all(k in CM.LABELS for k in keys + list(CM.TITLE_FORM))
+
+
+# ------------------------------------------------------------------ Write to USB stick (PAD-1375)
+FAKE_RUNTIME = r'''
+import sys
+out = sys.argv[sys.argv.index("--out") + 1]
+print("runtime: built against the image's glibc (69040 bytes)", flush=True)
+open(out, "wb").write(b"\x7fELF" + b"\x01" * 60)
+'''
+
+
+def _fake_runtime(tmp_path, monkeypatch):
+    fake = tmp_path / "fake_runtime.py"
+    fake.write_text(FAKE_RUNTIME)
+    calls = []
+
+    def argv(self, iso_, out_):
+        from pinball_decryptor.plugins.jjp import custom_modes as CM
+        args = CM.runtime_args(iso_, out_, lambda p: p)
+        calls.append(args)
+        return [sys.executable, str(fake)] + args[1:]
+
+    from pinball_decryptor.webui import modes_jjp
+    monkeypatch.setattr(modes_jjp.JjpModesMixin, "jjp_runtime_argv", argv)
+    return calls
+
+
+def _stock_iso(tmp_path):
+    iso = tmp_path / "lib" / "Wonka-v03.03.iso"
+    iso.parent.mkdir(exist_ok=True)
+    iso.write_bytes(b"\0" * 1024)
+    return iso
+
+
+def test_stick_builds_the_runtime_once_and_writes_the_hot_fix(tmp_path, preview_on, monkeypatch):
+    calls = _fake_runtime(tmp_path, monkeypatch)
+    iso = _stock_iso(tmp_path)
+    stick = tmp_path / "E"
+    stick.mkdir()
+    with web_app(tmp_path, mfr="jjp") as w:
+        _open_wonka(w)
+        w.call("modes.jjp_set_iso", str(iso))
+        w.call("modes.jjp_set_stick", str(stick))
+        k = _jjp(w)["stick"]
+        assert k["path"] == str(stick) and k["action"] == "install" and not k["runtime_ready"]
+        assert any("LEFT FLIPPER" in s for s in k["steps"])
+        w.call("modes.jjp_write_stick")
+        assert _wait(w, lambda: _jjp(w)["stick"].get("done"))
+        k = _jjp(w)["stick"]
+        assert k["ok"], k
+        assert k["msg"].startswith("Written: the stick installs 1 mode(s)")
+        assert k["owner"] == "pad" and k["runtime_ready"]
+        a = calls[0]
+        assert a[:2] == ["tools/jjp_emu/mkjjpmodes.py", "runtime"] and a[a.index("--iso") + 1] == str(iso)
+        hot = stick / "hotfix"
+        assert (hot / "padmodes" / "jjpmodes.so").read_bytes() == b"\x7fELF" + b"\x01" * 60
+        assert (hot / "padmodes" / "modes" / "title.cfg").is_file()
+        runme = (hot / "runme.sh").read_text()
+        assert "ACTION=install" in runme or "install" in runme
+        assert (stick / "PADMODES_README.txt").is_file()
+        # the second stick reuses the runtime and replaces our own hot fix
+        w.call("modes.jjp_write_stick")
+        assert _wait(w, lambda: _jjp(w)["stick"].get("done"))
+        assert _jjp(w)["stick"]["ok"] and len(calls) == 1
+        # the stick is remembered
+        assert svc_settings(w)["stick"] == str(stick)
+
+
+def svc_settings(w):
+    return _svc(w)._jjp_settings()
+
+
+def test_an_off_stick_needs_no_iso_or_runtime(tmp_path, preview_on, monkeypatch):
+    calls = _fake_runtime(tmp_path, monkeypatch)
+    stick = tmp_path / "F"
+    stick.mkdir()
+    with web_app(tmp_path, mfr="jjp") as w:
+        _open_wonka(w)
+        w.call("modes.jjp_set_iso", "")
+        w.call("modes.jjp_set_stick", str(stick))
+        w.call("modes.jjp_stick_action", "off")
+        assert _jjp(w)["stick"]["action"] == "off"
+        w.call("modes.jjp_write_stick")
+        assert _wait(w, lambda: _jjp(w)["stick"].get("done"))
+        k = _jjp(w)["stick"]
+        assert k["ok"] and k["msg"] == "Written: the stick turns the modes off.", k
+        runme = (stick / "hotfix" / "runme.sh").read_text()
+        assert "Wonka" in runme                     # only runs on the game it was written for
+        assert not (stick / "hotfix" / "padmodes").exists() and calls == []
+        with pytest.raises(Exception, match="unknown stick action"):
+            w.call("modes.jjp_stick_action", "format")
+
+
+def test_install_stick_waits_for_the_stock_iso_and_a_clean_check(tmp_path, preview_on, monkeypatch):
+    _fake_runtime(tmp_path, monkeypatch)
+    stick = tmp_path / "G"
+    stick.mkdir()
+    with web_app(tmp_path, mfr="jjp") as w:
+        _open_wonka(w)
+        w.call("modes.jjp_set_iso", str(tmp_path / "missing.iso"))
+        w.call("modes.jjp_set_stick", str(stick))
+        with pytest.raises(Exception, match="stock install ISO"):
+            w.call("modes.jjp_write_stick")
+        w.call("modes.jjp_set_iso", str(_stock_iso(tmp_path)))
+        w.call("modes.jjp_set", "start", "switch_typo")
+        with pytest.raises(Exception, match="problem"):
+            w.call("modes.jjp_write_stick")
+        assert not (stick / "hotfix").exists()
+
+
+def test_a_stick_with_someone_elses_hot_fix_is_never_overwritten(tmp_path, preview_on, monkeypatch):
+    _fake_runtime(tmp_path, monkeypatch)
+    stick = tmp_path / "H"
+    (stick / "hotfix").mkdir(parents=True)
+    (stick / "hotfix" / "runme.sh").write_text("#!/bin/sh\necho a JJP field fix\n")
+    with web_app(tmp_path, mfr="jjp") as w:
+        _open_wonka(w)
+        w.call("modes.jjp_set_stick", str(stick))
+        assert _jjp(w)["stick"]["owner"] == "other"
+        with pytest.raises(Exception, match="already has a hot fix"):
+            w.call("modes.jjp_write_stick")
+        assert (stick / "hotfix" / "runme.sh").read_text() == "#!/bin/sh\necho a JJP field fix\n"
+
+
+def test_the_stick_defaults_to_a_removable_drive(tmp_path, preview_on, monkeypatch):
+    from pinball_decryptor.plugins.jjp import custom_modes as CM
+    usb = tmp_path / "usb"
+    usb.mkdir()
+    monkeypatch.setattr(CM, "removable_drives", lambda: [str(usb)])
+    with web_app(tmp_path, mfr="jjp") as w:
+        _open_wonka(w)
+        k = _jjp(w)["stick"]
+        assert k["path"] == str(usb) and k["drives"] == [str(usb)]
+        # a remembered stick that is gone falls back to the drive there now
+        svc_settings(w)["stick"] = str(tmp_path / "gone")
+        w.call("modes.jjp_stick_refresh")
+        assert _jjp(w)["stick"]["path"] == str(usb)
+
+
+def test_the_runtime_is_kept_per_iso(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.jjp import custom_modes as CM
+    monkeypatch.setenv("PAD_JJP_MODES_DIR", str(tmp_path / "m"))
+    a, b = tmp_path / "Wonka-v03.03.iso", tmp_path / "GunsNRoses-v03.03.iso"
+    a.write_bytes(b"a")
+    b.write_bytes(b"b")
+    pa = CM.runtime_path(str(a))
+    assert pa == CM.runtime_path(str(a)) and pa != CM.runtime_path(str(b))
+    assert os.path.basename(pa).startswith("Wonka-v03.03-") and pa.endswith(".so")
+    a.write_bytes(b"a longer iso")                  # a different ISO at the same path builds again
+    assert CM.runtime_path(str(a)) != pa

@@ -755,3 +755,8 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .jjpm-check.bad .hd .muted { color: var(--warn); }
 .jjpm-probs { margin: 0; padding-left: 18px; }
 .jjpm-log { max-height: 220px; overflow: auto; font-size: 11px; background: var(--bg-2); padding: 8px; border-radius: 6px; margin: 8px 0 0; white-space: pre-wrap; }
+/* PAD-1375: Write to USB stick - the steps at the machine */
+.jjpm-steps { margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: var(--bg-2); }
+.jjpm-steps-hd { color: var(--ink-2); font-weight: 600; margin-bottom: 4px; }
+.jjpm-steps ol { margin: 0; padding-left: 20px; font-size: 12.5px; line-height: 1.5; }
+.jjpm-steps-now { outline: 1px solid var(--ok, #3a8); }

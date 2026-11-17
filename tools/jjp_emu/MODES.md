@@ -33,6 +33,17 @@ pick (or `D:\Pinball\images\JJP`), with its scratch in
 `/var/tmp/pad_jjpmodes_work`; Cancel stops it inside Linux, where it unmounts and
 deletes its scratch.
 
+**Write to USB stick** (PAD-1375) writes the stick below from the same folder:
+the stick is the first removable drive Windows has (or any folder, to copy to
+one), and **The stick** picks install, off, on or remove; the card lists the
+steps at the machine. An install stick needs the runtime built against the
+game's glibc: the tab runs `mkjjpmodes.py runtime` as root in the app's Linux on
+the stock ISO picked under Build, once per ISO (kept as
+`jjp_modes/.runtime/<iso>-<key>.so`, the key over the ISO's path, size and date
+and `jjpmodes.c`, so a new runtime source builds again); the stick itself is
+plain files written in-process. A stick carrying a hot fix that is not one of
+ours is never written over; one of ours is replaced.
+
 ## A mode folder
 
 One folder per title: `title.cfg` (optional, title-wide defaults) and one
@@ -130,6 +141,13 @@ it did to `padmodes_install.log` on the stick and in `/jjpe/temp`. The same
 command with `--action off`, `on` or `remove` writes a stick that turns the
 modes off, back on, or takes them out (`rungame.sh` back exactly as shipped).
 Changing a mode = edit the folder, write the stick again, apply it again.
+`stick` takes the runtime from `--so`; with `--iso <stock>.iso` instead (root,
+WSL) it builds it against that ISO's glibc first, which is also
+`mkjjpmodes.py runtime --iso <stock>.iso --out <file>.so` on its own: the ISO's
+root from the rig-shaped root cache (`/var/tmp/jjp_<label>/sda3.raw`, restored
+the first time, about 20 minutes from a Windows drive, with a progress line
+every 2%), mounted read-only with no journal replay, `buildmods.sh` against its
+`/lib/x86_64-linux-gnu`. With neither, buildmods.sh's `/var/tmp/jjpmodes.so`.
 
 How the hot fix was found: the Update USB screen (`DiagUpdateUSB`) counts
 Plus/Minus presses only while a flag is set, and the only code that sets it is

@@ -54,7 +54,7 @@ MAX_MODES = 24
 #: mkjjpmodes.KEYS appears exactly once - tests hold it to that)
 FORM_GROUPS = (
     ("Mode", ("name", "title", "start", "start_count", "shots", "points", "seconds", "complete",
-              "complete_points", "game_modes")),
+              "complete_points", "game_modes", "hold_multiballs", "allow_game_modes")),
     ("Sounds", ("sound_start", "sound_shot", "sound_complete", "sound_end")),
     ("Lamps", ("lamps", "lamp_color", "lamp_blink")),
     ("Screen", ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
@@ -64,12 +64,14 @@ FORM_GROUPS = (
 DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
     "lamp_color": "ffffff", "lamp_blink": "4", "title_color": "ffffff", "value_color": "ffdc00",
-    "timer_color": "ffffff", "panel_color": "000000b0", "panel": "middle", "game_modes": "pause",
+    "timer_color": "ffffff", "panel_color": "000000b0", "panel": "middle", "game_modes": "hold",
+    "hold_multiballs": "yes",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
     "shots": "Scoring shots", "points": "Points a shot", "seconds": "Seconds", "complete": "Shots to complete",
     "complete_points": "Completion bonus", "game_modes": "When a game mode runs",
+    "hold_multiballs": "Hold the game's multiballs", "allow_game_modes": "Game modes that may still start",
     "sound_start": "Start sound", "sound_shot": "Shot sound", "sound_complete": "Completed sound",
     "sound_end": "End sound", "lamps": "Lamps", "lamp_color": "Lamp colour", "lamp_blink": "Flashes a second",
     "font_title": "Title font", "font_value": "Total font", "font_timer": "Timer font",
@@ -416,3 +418,119 @@ def build_args(iso, label, out, to_linux):
     return [tool, "build", "--iso", to_linux(iso), "--modes", to_linux(title_dir(label)),
             "--out", to_linux(out), "--port", to_linux(os.path.join(ports_dir(), label + ".json")),
             "--workdir", WORKDIR, "--overwrite"]
+
+
+# ============================================================================ the USB stick
+# PAD-1375: the everyday way in - a folder the game's own Update USB hot fix runs
+# (mkjjpmodes.py stick, PAD-1349): no reinstall, scores and settings kept.  The stick is plain
+# files written in-process; only its runtime (jjpmodes.so, built against the game's own glibc)
+# needs Linux as root, once per stock ISO, and is kept beside the mode folders after that.
+
+#: what a stick can do, as the tab offers it (mkjjpmodes.STICK_ACTIONS)
+STICK_ACTIONS = (
+    ("install", "Install these modes"),
+    ("off", "Turn the modes off"),
+    ("on", "Turn the modes back on"),
+    ("remove", "Take the modes out"),
+)
+#: the runtime build's command line, for stopping it inside Linux (see BUILD_PATTERN)
+RUNTIME_PATTERN = "tools/jjp_emu/mkjjp[m]odes.py runtime"
+#: what to do at the machine (MODES.md "A USB stick, no reinstall"; the stick's own README)
+STICK_STEPS = (
+    "Take the stick out and put it in the machine's USB port. Machine on, coin door open.",
+    "Open the service menu and go to its USB update screen (Software Update > USB Update). "
+    "It says \"No update data was found\": that is expected.",
+    "Hold the LEFT FLIPPER button and, still holding it, press Plus, Minus, Plus, Minus. "
+    "It asks \"Press ENTER to apply HOTFIX\".",
+    "Press ENTER, then ENTER again. The game applies it and reboots. Take the stick out.",
+    "Scores, audits and settings are kept. What happened is written to padmodes_install.log on the stick.",
+)
+#: the line every stick runme.sh starts its log with (mkjjpmodes.RUNME_SH)
+_STICK_MARK = "PAD custom modes stick"
+
+
+def runtime_path(iso):
+    """Where the runtime built from *iso* is kept: one per stock ISO and per jjpmodes.c, so a
+    changed runtime source or a different ISO builds again and nothing stale is installed."""
+    import hashlib
+    st = os.stat(iso)
+    h = hashlib.sha256()
+    h.update(("%s|%d|%d|" % (os.path.normcase(os.path.abspath(iso)), st.st_size, int(st.st_mtime))).encode())
+    with open(os.path.join(tools_dir(), "jjpmodes.c"), "rb") as f:
+        h.update(f.read())
+    stem = re.sub(r"\.iso$", "", os.path.basename(iso), flags=re.I)
+    return os.path.join(modes_root(), ".runtime", "%s-%s.so" % (stem, h.hexdigest()[:12]))
+
+
+def runtime_args(iso, out, to_linux):
+    """The mkjjpmodes.py runtime argv (as root, from the checkout root)."""
+    return ["tools/jjp_emu/mkjjpmodes.py", "runtime", "--iso", to_linux(iso), "--out", to_linux(out),
+            "--workdir", "/var/tmp/pad_jjpmodes_runtime"]
+
+
+def removable_drives():
+    """The removable drives Windows has now (USB sticks), e.g. ``["E:\\\\"]``; [] elsewhere."""
+    if os.name != "nt":
+        return []
+    import ctypes
+    k = ctypes.windll.kernel32
+    out, mask = [], k.GetLogicalDrives()
+    for i in range(26):
+        if mask & (1 << i):
+            root = "%s:\\" % chr(65 + i)
+            if k.GetDriveTypeW(ctypes.c_wchar_p(root)) == 2:          # DRIVE_REMOVABLE
+                out.append(root)
+    return out
+
+
+def stick_filesystem(path):
+    """The file system of the drive *path* is on (``FAT32``, ``exFAT``, ``NTFS``), or ""."""
+    if os.name != "nt" or not path:
+        return ""
+    import ctypes
+    root = os.path.splitdrive(os.path.abspath(path))[0] + "\\"
+    buf = ctypes.create_unicode_buffer(32)
+    ok = ctypes.windll.kernel32.GetVolumeInformationW(ctypes.c_wchar_p(root), None, 0, None, None, None, buf, 32)
+    return buf.value if ok else ""
+
+
+def hotfix_on(stick):
+    """What hot fix *stick* carries already: "" none, "pad" one of ours (replaced freely),
+    "other" someone else's (never overwritten)."""
+    hot = os.path.join(stick, "hotfix")
+    if not os.path.exists(hot):
+        return ""
+    try:
+        with open(os.path.join(hot, "runme.sh"), encoding="utf-8", errors="replace") as f:
+            return "pad" if _STICK_MARK in f.read(4096) else "other"
+    except OSError:
+        return "other"
+
+
+def write_stick(label, stick, action, so=""):
+    """mkjjpmodes.py stick for *label*'s mode folder, in-process (plain files, no root).
+    -> (ok, lines).  An existing hot fix of ours is replaced; anyone else's refuses."""
+    import contextlib
+    import io
+    owner = hotfix_on(stick)
+    if owner == "other":
+        return False, ["refused: %s already has a hot fix that is not a modes stick - use another "
+                       "stick, or delete its hotfix folder first" % stick]
+    argv = ["stick", "--out", stick, "--action", action]
+    if action == "install":
+        argv += ["--modes", title_dir(label), "--so", so,
+                 "--port", os.path.join(ports_dir(), label + ".json")]
+    else:
+        port = load_port(label) or {}
+        game = read_title(label).get("game") or port.get("game") or ""
+        argv += ["--game", game] if game else ["--any-game"]
+    if owner == "pad":
+        argv.append("--force")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        try:
+            rc = mk().main(argv)
+        except Exception as e:                              # noqa: BLE001
+            print("refused: %s" % e)
+            rc = 2
+    return rc == 0, [ln for ln in buf.getvalue().splitlines() if ln.strip()]

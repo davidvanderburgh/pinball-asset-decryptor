@@ -153,6 +153,36 @@ the rig booted the old restore of an ISO written again under the same name (the
 Build overwrites `<title>.modes.iso`): `mount.sh` restores it again when the
 ISO is newer than its cached root.
 
+## Write to USB stick in the app (PAD-1375)
+
+The Modes tab's **Write to USB stick** card writes the PAD-1349 stick
+(`mkjjpmodes.py stick`) without the command line: the first removable drive (or
+any folder), install / off / on / remove, and the steps at the machine (service
+menu > Software Update > USB Update; hold the left flipper, Plus Minus Plus
+Minus; ENTER ENTER). The stick is plain files written in-process; an install
+stick's runtime comes from the new `mkjjpmodes.py runtime` (the stock ISO's
+root from the root cache, mounted read-only - `LoopRW(readonly=True)`, `ro,noload`
+- and `buildmods.sh` against its glibc), run as root in the app's Linux once
+per ISO and kept in `jjp_modes/.runtime/`. `stick --iso` does the same from the
+command line. A stick carrying someone else's hot fix is never written over.
+
+Fixed on the way: the stick's README left out holding the left flipper, without
+which the screen never asks to apply the hot fix; the Modes form lacked the
+`hold_multiballs` / `allow_game_modes` keys PAD-1348 added and showed `pause`
+as `game_modes`' default (it is `hold`); and the first use of an ISO (its game
+partition unpacked, about 20 minutes from D:) printed nothing for the whole
+restore - `build` and `runtime` now print a progress line every 2%.
+
+Proof, 2026-11-17, Wonka 03.03 (hidden, muted): the app (in-process, real
+services) with no runtime kept built it in its PAD-Runtime distro and wrote the
+install stick in 1.6 s (the first ever use of the ISO there unpacked its root
+first, 19 min); the off and remove sticks in 0.2 s each. On the rig, those
+sticks through the game's own menu walk (`jjppoke.py`): "INSTALLED 1 mode(s):
+PAD Mode", and after the reboot the runtime loaded from the installed hook and
+PAD Mode STARTED on the TV target, scored 1,000,000 a shot and COMPLETED at
+10,000,000; the off stick created `padmodes.off` and the next boot loaded no
+runtime; the remove stick took `padmodes` out and left `rungame.sh` as shipped.
+
 ## Files (PAD-1335 proof, superseded by the SDK above)
 
 - `tools/jjp_emu/jjpmodelist.py`: the live mode roster.

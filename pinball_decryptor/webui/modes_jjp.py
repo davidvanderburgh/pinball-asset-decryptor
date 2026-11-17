@@ -15,6 +15,11 @@ the tab is this instead (``JjpModesMixin``, the ``jjp`` key of the ``modes`` sta
 * Build: the stock install ISO in, the same ISO with the modes out
   (``mkjjpmodes.py build``, as root in WSL - it loop-mounts the ISO's root), run on a worker
   with its lines shown as they come.
+* Write to USB stick (PAD-1375): the everyday way in - a ``hotfix`` folder the game's own
+  Update USB hot fix runs (``mkjjpmodes.py stick``), no reinstall, scores kept; or a stick that
+  turns the modes off, back on, or takes them out.  The steps at the machine are shown with it.
+  Its runtime is built from the stock ISO once (as root in WSL) and kept; the stick itself is
+  plain files written in-process.
 
 The Stern half of the tab is untouched: every Stern hook returns early on JJP (``_jjp_on``).
 """
@@ -28,7 +33,7 @@ from ..plugins.jjp import custom_modes as CM
 from .tabs.base import rpc
 
 #: app settings key: {"label": last title, "iso": {label: path}, "out": {label: path},
-#: "sounds": {label: folder}}
+#: "sounds": {label: folder}, "stick": the stick last written to, "stick_action": {label: action}}
 SETTINGS_KEY = "jjp_modes"
 
 
@@ -37,6 +42,10 @@ class JjpModesMixin:
     _jjp_file = ""
     _jjp_proc = None
     _jjp_build_lines = None
+    #: which job holds _jjp_proc: "build" or "stick" (one Linux job at a time)
+    _jjp_job = ""
+    _jjp_stick = None
+    _jjp_stick_lines = None
 
     # ------------------------------------------------------------------ gate
     def _jjp_on(self):
@@ -93,6 +102,7 @@ class JjpModesMixin:
                 st["check"] = self._jjp_check_state()
                 st["sounds"] = self._jjp_sounds_state(port)
                 st["build"] = self._jjp_build_state()
+                st["stick"] = self._jjp_stick_state()
         self.set(jjp=st)
 
     def _jjp_fields(self):
@@ -141,7 +151,8 @@ class JjpModesMixin:
         iso = self._jjp_recall("iso") or CM.find_stock_iso(self._jjp_label, self._jjp_iso_folders())
         out = self._jjp_recall("out") or (CM.default_out(iso, self._jjp_out_folder(iso)) if iso else "")
         b = dict(getattr(self, "_jjp_build", None) or {})
-        b.update({"iso": iso, "out": out, "running": self._jjp_proc is not None})
+        b.update({"iso": iso, "out": out, "running": self._jjp_proc is not None and self._jjp_job == "build",
+                  "busy": self._jjp_proc is not None})
         return b
 
     def _jjp_iso_folders(self):
@@ -191,7 +202,7 @@ class JjpModesMixin:
             raise ValueError("no port report for %s" % label)
         self._jjp_label, self._jjp_file = label, ""
         self._jjp_remember("label", label)
-        self._jjp_build = None
+        self._jjp_build = self._jjp_stick = None
         self.jjp_refresh()
 
     @rpc
@@ -318,7 +329,7 @@ class JjpModesMixin:
     def jjp_build(self):
         label = self._jjp_need()
         if self._jjp_proc is not None:
-            raise ValueError("a build is running")
+            raise ValueError("a build or a stick is being written")
         b = self._jjp_build_state()
         iso, out = b.get("iso") or "", b.get("out") or ""
         if not iso or not os.path.isfile(iso):
@@ -335,31 +346,15 @@ class JjpModesMixin:
         self._jjp_build = {"lines": [], "done": False, "ok": False, "msg": "Starting the build...",
                            "started": time.time(), "modes": len(modes)}
         self._jjp_proc = True                               # taken: the worker fills it in
-        self._jjp_publish(build=self._jjp_build_state())
+        self._jjp_job = "build"
+        self._jjp_publish(build=self._jjp_build_state(), stick=self._jjp_stick_state())
         threading.Thread(target=self._jjp_build_worker, args=(argv, out), daemon=True,
                          name="jjp-modes-build").start()
 
     def _jjp_build_worker(self, argv, out):
         ok, msg = False, ""
         try:
-            if callable(argv):
-                argv = argv([])
-            kw = {}
-            if sys.platform == "win32":
-                kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                    encoding="utf-8", errors="replace", **kw)
-            self._jjp_proc = proc
-            last = 0.0
-            for line in proc.stdout:
-                line = line.rstrip()
-                if not line:
-                    continue
-                self._jjp_build_lines.append(line)
-                if time.time() - last > 0.5:
-                    last = time.time()
-                    self.ctx.loop.post(self._jjp_build_tick)
-            rc = proc.wait()
+            rc = self._jjp_stream(argv, self._jjp_build_lines, self._jjp_build_tick)
             lines = self._jjp_build_lines
             refused = [ln for ln in lines if ln.startswith("refused:")]
             if rc == 0 and os.path.isfile(out):
@@ -373,6 +368,28 @@ class JjpModesMixin:
             msg = "The build could not start: %s" % e
         self.ctx.loop.post(self._jjp_build_end, ok, msg)
 
+    def _jjp_stream(self, argv, lines, tick):
+        """Run *argv* (a callable on Windows: resolved here, on the worker), its lines into
+        *lines*, *tick* posted to the UI loop at most twice a second.  -> the exit code."""
+        if callable(argv):
+            argv = argv([])
+        kw = {}
+        if sys.platform == "win32":
+            kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace", **kw)
+        self._jjp_proc = proc
+        last = 0.0
+        for line in proc.stdout:
+            line = line.rstrip()
+            if not line:
+                continue
+            lines.append(line)
+            if time.time() - last > 0.5:
+                last = time.time()
+                self.ctx.loop.post(tick)
+        return proc.wait()
+
     def _jjp_build_tick(self):
         if self._jjp_build is None:
             return
@@ -382,27 +399,28 @@ class JjpModesMixin:
 
     def _jjp_build_end(self, ok, msg):
         self._jjp_proc = None
+        self._jjp_job = ""
         self._jjp_cancelled = False
         self._jjp_build = dict(self._jjp_build or {})
         self._jjp_build.update({"lines": list((self._jjp_build_lines or [])[-14:]), "done": True, "ok": ok,
                                 "msg": msg, "secs": int(time.time() - self._jjp_build.get("started", time.time()))})
         self.log(("JJP modes: " + msg), "info" if ok else "error")
-        self._jjp_publish(build=self._jjp_build_state())
+        self._jjp_publish(build=self._jjp_build_state(), stick=self._jjp_stick_state())
 
     @rpc
     def jjp_build_cancel(self):
         p = self._jjp_proc
-        if p is None or p is True:
+        if self._jjp_job != "build" or p is None or p is True:
             return
         self._jjp_cancelled = True
         # the tool runs inside Linux as root: stopping wsl.exe leaves it running, so it is
         # asked to stop there (it unmounts and deletes its scratch on SIGTERM), then wsl.exe
         threading.Thread(target=self._jjp_stop_linux, args=(p,), daemon=True).start()
 
-    def _jjp_stop_linux(self, p):
+    def _jjp_stop_linux(self, p, pattern=CM.BUILD_PATTERN):
         try:
             from ..core import runtime
-            line = "pkill -TERM -f '%s'" % CM.BUILD_PATTERN
+            line = "pkill -TERM -f '%s'" % pattern
             if sys.platform == "win32":
                 argv = runtime.wsl_head(root=True) + ["-e", "bash", "-c", line]
             else:
@@ -417,3 +435,173 @@ class JjpModesMixin:
                 p.terminate()
             except Exception:                               # noqa: BLE001
                 pass
+
+    # ------------------------------------------------------------------ USB stick (PAD-1375)
+    def _jjp_stick_path(self):
+        """The stick: the one last written to while it is still there, else the first removable
+        drive Windows has now."""
+        drives = CM.removable_drives()
+        want = self._jjp_settings().get("stick") or ""
+        if want and os.path.isdir(want):
+            return want, drives
+        return (drives[0] if drives else ""), drives
+
+    def _jjp_stick_state(self):
+        path, drives = self._jjp_stick_path()
+        action = self._jjp_recall("stick_action")
+        s = dict(self._jjp_stick or {})
+        iso = self._jjp_build_state().get("iso") or ""
+        rt = ""
+        if iso and os.path.isfile(iso):
+            try:
+                rt = CM.runtime_path(iso)
+            except OSError:
+                rt = ""
+        s.update({"path": path, "drives": drives, "fs": CM.stick_filesystem(path) if path else "",
+                  "action": action if action in dict(CM.STICK_ACTIONS) else "install",
+                  "actions": [{"value": k, "label": v} for k, v in CM.STICK_ACTIONS],
+                  "owner": CM.hotfix_on(path) if path and os.path.isdir(path) else "",
+                  "runtime_ready": bool(rt and os.path.isfile(rt)), "iso": iso,
+                  "running": self._jjp_proc is not None and self._jjp_job == "stick",
+                  "busy": self._jjp_proc is not None, "steps": list(CM.STICK_STEPS)})
+        return s
+
+    @rpc
+    def jjp_set_stick(self, path):
+        self._jjp_need()
+        self._jjp_settings()["stick"] = (path or "").strip()
+        self._jjp_stick = None
+        self._jjp_publish(stick=self._jjp_stick_state())
+
+    @rpc
+    def jjp_stick_browse(self):
+        p = self.window.ask_folder("jjp_modes_stick", "Pick the USB stick (or a folder to copy to one)")
+        if p:
+            self.jjp_set_stick(p)
+
+    @rpc
+    def jjp_stick_action(self, action):
+        self._jjp_need()
+        if action not in dict(CM.STICK_ACTIONS):
+            raise ValueError("unknown stick action %r" % action)
+        self._jjp_remember("stick_action", action)
+        self._jjp_stick = None
+        self._jjp_publish(stick=self._jjp_stick_state())
+
+    @rpc
+    def jjp_stick_refresh(self):
+        """The drives again (a stick plugged in after the tab opened)."""
+        if self._jjp_label:
+            self._jjp_publish(stick=self._jjp_stick_state())
+
+    def jjp_runtime_argv(self, iso, out):
+        """The runtime build's argv, as root in the app's Linux (see jjp_build_argv)."""
+        from . import multiboot_core as MC
+        return MC.root_command(CM.runtime_args(iso, out, MC.wsl))
+
+    @rpc
+    def jjp_write_stick(self):
+        label = self._jjp_need()
+        if self._jjp_proc is not None:
+            raise ValueError("a build or a stick is being written")
+        s = self._jjp_stick_state()
+        path, action = s["path"], s["action"]
+        if not path or not os.path.isdir(path):
+            raise ValueError("Put in a USB stick, or pick a folder to copy to one")
+        if s["owner"] == "other":
+            raise ValueError("%s already has a hot fix that is not a modes stick: use another stick, "
+                             "or delete its hotfix folder first" % path)
+        rt_argv, rt = None, ""
+        if action == "install":
+            modes, problems = CM.check(label)
+            if problems:
+                raise ValueError("Fix the %d problem(s) the check found first" % len(problems))
+            if not modes:
+                raise ValueError("Make a mode first")
+            iso = s["iso"]
+            if not iso or not os.path.isfile(iso):
+                raise ValueError("Pick the stock install ISO of %s first (under Build): the stick's "
+                                 "mode runtime is built against its system" % CM.display_name(label))
+            rt = CM.runtime_path(iso)
+            if not os.path.isfile(rt):
+                rt_argv = self.jjp_runtime_argv(iso, rt)
+        self._jjp_settings()["stick"] = path
+        self._jjp_stick_lines = []
+        self._jjp_stick = {"lines": [], "done": False, "ok": False, "started": time.time(),
+                           "msg": ("Building the mode runtime (once for this ISO)..." if rt_argv
+                                   else "Writing the stick...")}
+        self._jjp_proc = True
+        self._jjp_job = "stick"
+        self._jjp_publish(stick=self._jjp_stick_state(), build=self._jjp_build_state())
+        threading.Thread(target=self._jjp_stick_worker, args=(label, path, action, rt, rt_argv),
+                         daemon=True, name="jjp-modes-stick").start()
+
+    def _jjp_stick_worker(self, label, path, action, rt, rt_argv):
+        ok, msg = False, ""
+        lines = self._jjp_stick_lines
+        try:
+            if rt_argv is not None:
+                os.makedirs(os.path.dirname(rt), exist_ok=True)
+                rc = self._jjp_stream(rt_argv, lines, self._jjp_stick_tick)
+                if getattr(self, "_jjp_cancelled", False):
+                    raise _Stop("Cancelled.")
+                if rc != 0 or not os.path.isfile(rt):
+                    refused = [ln for ln in lines if ln.startswith("refused:")]
+                    raise _Stop("The mode runtime could not be built: " + (
+                        refused[-1][len("refused:"):].strip() if refused
+                        else "exit %d, %s" % (rc, lines[-1] if lines else "no output")))
+            self._jjp_proc = True                           # no Linux process to cancel now
+            lines.append("writing the stick at %s" % path)
+            self.ctx.loop.post(self._jjp_stick_tick)
+            ok, out = CM.write_stick(label, path, action, rt)
+            lines.extend(out)
+            if ok:
+                msg = {"install": "Written: the stick installs %d mode(s)." % len(CM.list_modes(label)),
+                       "off": "Written: the stick turns the modes off.",
+                       "on": "Written: the stick turns the modes back on.",
+                       "remove": "Written: the stick takes the modes out."}[action]
+            else:
+                refused = [ln for ln in out if ln.startswith("refused:")]
+                msg = (refused[-1][len("refused:"):].strip() if refused
+                       else (out[-1] if out else "The stick was not written."))
+        except _Stop as e:
+            msg = str(e)
+        except Exception as e:                              # noqa: BLE001
+            msg = "The stick could not be written: %s" % e
+        self.ctx.loop.post(self._jjp_stick_end, ok, msg)
+
+    def _jjp_stick_tick(self):
+        if self._jjp_stick is None:
+            return
+        self._jjp_stick["lines"] = list(self._jjp_stick_lines[-14:])
+        self._jjp_stick["msg"] = self._jjp_stick_lines[-1] if self._jjp_stick_lines else ""
+        self._jjp_publish(stick=self._jjp_stick_state())
+
+    def _jjp_stick_end(self, ok, msg):
+        self._jjp_proc = None
+        self._jjp_job = ""
+        self._jjp_cancelled = False
+        self._jjp_stick = dict(self._jjp_stick or {})
+        self._jjp_stick.update({"lines": list((self._jjp_stick_lines or [])[-14:]), "done": True, "ok": ok,
+                                "msg": msg})
+        self.log(("JJP modes stick: " + msg), "info" if ok else "error")
+        self._jjp_publish(stick=self._jjp_stick_state(), build=self._jjp_build_state())
+
+    @rpc
+    def jjp_stick_cancel(self):
+        p = self._jjp_proc
+        if self._jjp_job != "stick" or p is None or p is True:
+            return
+        self._jjp_cancelled = True
+        threading.Thread(target=self._jjp_stop_linux, args=(p, CM.RUNTIME_PATTERN), daemon=True).start()
+
+    @rpc
+    def jjp_reveal_stick(self):
+        from .shellx_common import reveal
+        p = self._jjp_stick_state().get("path") or ""
+        if p:
+            reveal(p)
+
+
+class _Stop(Exception):
+    """The stick worker's own stop: its message is the whole status line."""

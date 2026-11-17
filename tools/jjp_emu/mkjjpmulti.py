@@ -1145,10 +1145,13 @@ def unsquash_installer(squashfs, dest_dir):
 # ============================================================================= staging
 class LoopRW:
     """A raw ext4 file attached to a loop device and mounted rw for a `with` block (root) - or
-    a partition device, mounted as it is (the disk modes of `install`)."""
+    a partition device, mounted as it is (the disk modes of `install`).  *readonly* attaches
+    and mounts it read-only with no journal replay (PAD-1375: reading a cached root's glibc
+    must never change the cache)."""
 
-    def __init__(self, raw):
+    def __init__(self, raw, readonly=False):
         self.raw = raw
+        self.readonly = readonly
         self.loop = self.mnt = None
 
     def __enter__(self):
@@ -1158,11 +1161,12 @@ class LoopRW:
         if _stat.S_ISBLK(os.stat(self.raw).st_mode):
             dev = self.raw                                  # a partition on a disk: mounted as it is
         else:
-            out = _run(["losetup", "--find", "--show", self.raw]).strip().splitlines()
+            out = _run(["losetup"] + (["--read-only"] if self.readonly else []) + ["--find", "--show", self.raw]
+                       ).strip().splitlines()
             self.loop = dev = out[-1]
         self.mnt = tempfile.mkdtemp(prefix=MOUNT_PREFIX)
         try:
-            _run(["mount", "-t", "ext4", "-o", "rw,noatime", dev, self.mnt])
+            _run(["mount", "-t", "ext4", "-o", "ro,noload" if self.readonly else "rw,noatime", dev, self.mnt])
         except Refused:
             self._detach()
             raise

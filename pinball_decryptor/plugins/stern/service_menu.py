@@ -38,7 +38,8 @@ class _Log:
 def wanted(project, honour_off=True):
     """``[(key, values, names, options)]`` the project's settings ask a Write for, in the engine's order (music,
     edition, pictures, co-op, handicap, image set), each from the engine's own menu job. PAD-1393 round 2: the ones
-    unticked on the Service menu tab (:func:`off_keys`) are left out, unless *honour_off* is false."""
+    not ticked on the Service menu tab (:func:`off_keys`; round 3: they start unticked) are left out, unless
+    *honour_off* is false."""
     from . import engine as E
     from . import coop_play as CP, editions as Ed, handicap as HC, picture_settings as PS, sound_modes as SMo
     log = _Log()
@@ -74,23 +75,32 @@ def wanted(project, honour_off=True):
 # ---- the owner's order of the app's rows (PAD-1382 round 3) ---------------------------------------------------------
 # Round 5 (David): "we should just be checking off items that exist (making a new one here doesn't make sense...)":
 # the rows are the app's own settings, switched on their tabs or on the Service menu tab; the owner orders them.
-#: the sidecar key: {"order": [setting keys], "off": [setting keys]}
+#: the sidecar key: {"order": [setting keys], "on": [setting keys], "coop": true}
 STAGED_KEY = "service_menu"
 #: PAD-1393 round 2 (DragonRR: "Image set ... I cannot uncheck it"): the settings whose row the Service menu tab can
 #: leave off the card although the project has them; the Write then leaves the setting off the card, as when the game
 #: has no spare row for it (music modes: every sound plays its own; editions: none to pick; image sets: the scenes as
 #: the project has them). Co-op Play and Handicap have switches of their own.
+#: Round 3 (DragonRR: "Everything should be unchecked by default - this is important"): these rows start unticked: a
+#: setting of them goes on the card only once the owner ticks its row (the sidecar's "on" list). The round-2 "off"
+#: list is read no more: everything is off until ticked.
 OFF_KEYS = ("music_mode", "edition", "image_set")
 
 
+def on_keys(project):
+    """The settings of :data:`OFF_KEYS` the owner ticked on the Service menu tab, a set."""
+    return set(load(project)["on"])
+
+
 def off_keys(project):
-    """The settings the owner unticked on the Service menu tab (:data:`OFF_KEYS`), a set."""
-    return set(load(project)["off"])
+    """The settings of :data:`OFF_KEYS` the card leaves off: every one the owner has not ticked (round 3), a set."""
+    return set(OFF_KEYS) - on_keys(project)
 
 
 def load(project):
-    """``{"order": [...], "off": [...]}`` from the project's sidecar (empty when none)."""
-    out = {"order": [], "off": []}
+    """``{"order": [...], "on": [...], "coop": bool}`` from the project's sidecar (empty when none). *coop*: co-op
+    play was switched on by ticking its row here (so unticking it there switches it off again)."""
+    out = {"order": [], "on": [], "coop": False}
     if not project:
         return out
     from ...core import staged_changes
@@ -100,8 +110,10 @@ def load(project):
         return out
     if isinstance(raw, dict) and isinstance(raw.get("order"), list):
         out["order"] = [k for k in raw["order"] if isinstance(k, str)]
-    if isinstance(raw, dict) and isinstance(raw.get("off"), list):
-        out["off"] = [k for k in raw["off"] if k in OFF_KEYS]
+    if isinstance(raw, dict) and isinstance(raw.get("on"), list):
+        out["on"] = [k for k in raw["on"] if k in OFF_KEYS]
+    if isinstance(raw, dict):
+        out["coop"] = raw.get("coop") is True
     return out
 
 
@@ -109,9 +121,10 @@ def save(project, data):
     from ...core import staged_changes
     side = staged_changes.load(project)
     order = list(data.get("order") or [])
-    off = [k for k in OFF_KEYS if k in (data.get("off") or ())]
-    if order or off:
-        side[STAGED_KEY] = {k: v for k, v in (("order", order), ("off", off)) if v}
+    on = [k for k in OFF_KEYS if k in (data.get("on") or ())]
+    coop = data.get("coop") is True
+    if order or on or coop:
+        side[STAGED_KEY] = {k: v for k, v in (("order", order), ("on", on), ("coop", coop)) if v}
     else:
         side.pop(STAGED_KEY, None)
     staged_changes.save(project, side)

@@ -3407,7 +3407,18 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
                                  if self._mode_level(rel, m) else ""))
                   for m, f in sorted(md.items())]
         return ("Music modes - the machine's MUSIC MODE setting picks which "
-                "plays: " + "; ".join(parts) + ".")
+                "plays: " + "; ".join(parts) + "." + self._modes_unticked())
+
+    def _modes_unticked(self):
+        """PAD-1393 round 3: MUSIC MODE starts unticked on the Service menu tab; said while it is."""
+        from ...plugins.stern import service_menu as _SvM
+        try:
+            if self._scan_dir and "music_mode" not in _SvM.on_keys(self._scan_dir):
+                return (" MUSIC MODE is not on the card yet: tick Music Mode on the Service menu tab "
+                        "to put it there.")
+        except Exception:                               # noqa: BLE001 - nothing said then
+            pass
+        return ""
 
     def _modes_why(self, rel):
         offer = self._sm_offer or {}

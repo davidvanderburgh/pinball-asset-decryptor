@@ -955,7 +955,8 @@ def test_jaws_newton_ball_is_shark_hit_under_vbscript(tmp_path):
         "Dim Log, Sw(2000), Balls",
         "Class FakeObj : Public IsDropped, Visible, Enabled, Collidable, Name : End Class",
         "Class FakeBall : Public X, Y, VelX, VelY : End Class",
-        "Class FakeController : Public Default Property Get Switch(n) : Switch = Sw(n) : End Property : End Class",
+        "Class FakeController : Public Default Property Get Switch(n) : Switch = Sw(n) : End Property",
+        "  Public Function GetMech(n) : GetMech = 0 : End Function : End Class",     # PAD-1392: no motor place
         "Class FakeTimer : Public Sub PulseSw(n) : Log = Log & \"pulse\" & n & \" \" : End Sub : End Class",
         "Function GetBalls : GetBalls = Balls : End Function",
         "Function Obj(d) : Set Obj = New FakeObj : Obj.IsDropped = d : Obj.Collidable = True : End Function",
@@ -966,7 +967,7 @@ def test_jaws_newton_ball_is_shark_hit_under_vbscript(tmp_path):
         "\n".join("Dim %s : Set %s = Obj(False)" % (n, n) for n in (
             "Tquick1", "Tquick2", "Tquick3", "Tquick4", "Tbeachfinal", "Tnightfinal", "Tbarrelshark", "Tjackpot",
             "Tsharkfinal", "Thammerfinal", "Tsmimerfinal", "Targetshark1", "Targetshark2", "Targetshark3",
-            "Targetshark4", "shark", "Rsaveball", "lockpostG", "lockpostD")),
+            "Targetshark4", "shark", "Rsaveball", "lockpostG", "lockpostD", "PyramidKicker")),
         vbs, tick,
         "Dim newton, bucket : Set newton = Ball(546, 490) : Set bucket = Ball(325, 582)",
         "Balls = Array(bucket, newton)",
@@ -1110,19 +1111,22 @@ def test_jaws_far_right_ball_is_no_left_ramp_under_vbscript(tmp_path):
         "Dim vpmTimer : Set vpmTimer = New FakeTimer",
         "Dim Krampquint : Set Krampquint = New FakeKicker : Krampquint.Nm = \"K\"",
         "Dim Krampquint1 : Set Krampquint1 = New FakeKicker : Krampquint1.Nm = \"K1\"",
+        "Class FakeHole : Public Enabled : End Class",
+        "Dim PyramidKicker : Set PyramidKicker = New FakeHole : PyramidKicker.Enabled = 1",
         "Sub PlaySound(s) : End Sub",
         vbs[start:]] + subs + [
         "Krampquint_Hit : LeftRampDone_Hit : Log = Log & \"| \"",           # far right: no left ramp
         "LeftRampDone_Hit : Log = Log & \"| \"",                             # a real left ramp
         "Krampquint_Hit : Krampquint_Hit : LeftRampDone_Hit : LeftRampDone_Hit : LeftRampDone_Hit : Log = Log & \"| \"",
         "Krampquint_Hit : PadQuintAt = Timer - 20 : LeftRampDone_Hit",     # never came round: forgotten
-        "WScript.Echo Log"])
+        "WScript.Echo Log & \" hole\" & PyramidKicker.Enabled"])
     (tmp_path / "t.vbs").write_text(script, encoding="latin-1")
     r = subprocess.run(["cscript", "//nologo", str(tmp_path / "t.vbs")], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and not r.stderr, r.stdout + r.stderr
-    k = "1068 K.destroy K1.create K1.kick270/5"
+    # PAD-1392: handed on at 6, and Quint's hole on the wire is off, so the ball rolls straight on
+    k = "1068 K.destroy K1.create K1.kick270/6"
     assert r.stdout.split() == (k.split() + ["|", "1067", "|"] + k.split() + k.split() + ["1067", "|"]
-                                + k.split() + ["1067"]), r.stdout
+                                + k.split() + ["1067", "hole0"]), r.stdout
 
 
 @pytest.mark.skipif(not os.path.exists(r"C:\tmp\vpx_new\JAWS_50Th_Anniversary.3.2\JAWS_50Th_Anniversary.vpx"),
@@ -1162,6 +1166,188 @@ def test_jaws_copy_patched_before_the_far_right_ramp_asks_for_a_new_patch(tmp_pa
     name = "JAWS_50Th_Anniversary (PAD).vpx"
     (tmp_path / (name[:-4] + ".script.vbs")).write_text("Sub LeftRampDone_Hit : vpmTimer.PulseSw 1067 : End Sub\n",
                                                         encoding="utf-8")
+    assert why[0] in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
+    (tmp_path / (name[:-4] + ".script.vbs")).write_text(m["extra_vbs"], encoding="utf-8")
+    assert why[0] not in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
+
+
+# ---- PAD-1392 ----------------------------------------------------------------
+# Mike: "harpoon mode just started without the ball in the inlane, held by the
+# post"; "can the fin stay up and move along the path slowly ... The real game
+# is a single fin traveling along the arc"; "the far right lane ... should be
+# one continuous ramp without stopping the ball".
+
+def _jaws_fakes(extra=()):
+    """The objects jaws_le's extra_vbs touches, as cscript stand-ins."""
+    return "\n".join([
+        "Dim Log, Sw(2000), Balls, MechVal, GameTime, ActiveBall",
+        "Class FakeObj : Public IsDropped, Visible, Enabled, Collidable, X, Y, Z, RotZ, Orientation : End Class",
+        "Class FakeBall : Public X, Y, VelX, VelY, VelZ : End Class",
+        "Class GoneBall : Public Property Get X : Err.Raise 424 : End Property",
+        "  Public Property Get Y : Err.Raise 424 : End Property : End Class",
+        "Class FakeController : Public Default Property Get Switch(n) : Switch = Sw(n) : End Property",
+        "  Public Function GetMech(n) : GetMech = MechVal : End Function : End Class",
+        "Class FakeTimer : Public Sub PulseSw(n) : Log = Log & \"pulse\" & n & \" \" : End Sub : End Class",
+        "Function GetBalls : GetBalls = Balls : End Function",
+        "Function Obj(d) : Set Obj = New FakeObj : Obj.IsDropped = d : Obj.Collidable = True : End Function",
+        "Function Ball(x, y) : Set Ball = New FakeBall : Ball.X = x : Ball.Y = y : Ball.VelX = 3 : Ball.VelY = 14 : Ball.VelZ = 0 : End Function",
+        "Dim Controller : Set Controller = New FakeController",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Balls = Array() : MechVal = 0 : GameTime = 0",
+        "\n".join("Dim %s : Set %s = Obj(False)" % (n, n) for n in (
+            "Tquick1", "Tquick2", "Tquick3", "Tquick4", "Tbeachfinal", "Tnightfinal", "Tbarrelshark", "Tjackpot",
+            "Tsharkfinal", "Thammerfinal", "Tsmimerfinal", "Targetshark1", "Targetshark2", "Targetshark3",
+            "Targetshark4", "shark", "Rsaveball", "lockpostG", "lockpostD", "PyramidKicker", "PadFin") + tuple(extra))])
+
+
+def _cscript(tmp_path, script):
+    (tmp_path / "t.vbs").write_text(script, encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(tmp_path / "t.vbs")], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and not r.stderr, r.stdout + r.stderr
+    return r.stdout.split()
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_jaws_inlane_post_catches_the_ball_under_vbscript(tmp_path):
+    # The game raises RT/LT INLANE UP POST when the ball rolls over that lane's
+    # RETURN LANE switch; the coil reached the table with the ball already past
+    # the post, and the harpoon ran with nothing held. A post going up within
+    # 800 ms of its lane's switch puts that ball back resting on the post
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    assert m["switches"]["sw2"]["also"] == "PadInlane 0" and m["switches"]["sw3"]["also"] == "PadInlane 1"
+    assert m["solenoids"]["8"]["callback"] == "PadPostL" and m["solenoids"]["7"]["callback"] == "PadPostR"
+    show = "Sub Show(b) : Log = Log & Round(b.X) & \",\" & Round(b.Y) & \",\" & b.VelX & b.VelY & b.VelZ & \" \" : End Sub"
+    out = _cscript(tmp_path, "\n".join([
+        _jaws_fakes(), m["extra_vbs"], show,
+        # left: over sw2 at 1.000 s, on the left flipper by 1.150 s when the post comes up
+        "Dim b1 : Set b1 = Ball(135, 1538) : Set ActiveBall = b1 : GameTime = 1000 : PadInlane 0",
+        "b1.X = 300 : b1.Y = 1770 : GameTime = 1150 : PadPostL True : Show b1",
+        "Log = Log & lockpostG.IsDropped & \" \"",
+        "b1.X = 310 : PadPostL True : Show b1",                       # still up: no second catch
+        "PadPostL False : Log = Log & lockpostG.IsDropped & \" | \"",
+        # right: caught the same way
+        "Dim b2 : Set b2 = Ball(732, 1548) : Set ActiveBall = b2 : GameTime = 2000 : PadInlane 1",
+        "b2.X = 600 : b2.Y = 1765 : GameTime = 2090 : PadPostR True : Show b2 : PadPostR False",
+        # too late (900 ms): another reason for the post, the ball left alone
+        "Dim b3 : Set b3 = Ball(732, 1548) : Set ActiveBall = b3 : GameTime = 3000 : PadInlane 1",
+        "b3.X = 600 : b3.Y = 1765 : GameTime = 3900 : PadPostR True : Show b3 : PadPostR False",
+        # not down to the post yet: the post stops it itself
+        "Dim b4 : Set b4 = Ball(732, 1548) : Set ActiveBall = b4 : GameTime = 5000 : PadInlane 1",
+        "b4.Y = 1600 : b4.X = 700 : GameTime = 5040 : PadPostR True : Show b4 : PadPostR False",
+        # flipped away up the playfield already: left alone
+        "Dim b5 : Set b5 = Ball(135, 1538) : Set ActiveBall = b5 : GameTime = 6000 : PadInlane 0",
+        "b5.X = 420 : b5.Y = 900 : GameTime = 6300 : PadPostL True : Show b5 : PadPostL False",
+        # the ball is gone (drained, destroyed): nothing, no error
+        "Dim b6 : Set b6 = New GoneBall : Set ActiveBall = b6 : GameTime = 7000 : PadInlane 0",
+        "GameTime = 7100 : PadPostL True : Log = Log & \"gone \" & lockpostG.IsDropped",
+        "WScript.Echo Log"]))
+    assert out == ["199,1630,000", "False", "310,1630,000", "True", "|",
+                   "680,1632,000",
+                   "600,1765,3140", "700,1600,3140", "420,900,3140",
+                   "gone", "False"], out
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_jaws_one_fin_glides_under_vbscript(tmp_path):
+    # One fin, PadFin, slid to where the emulated motor says its car is
+    # (GetMech(0): 38000 = POSITION 1 .. 32000 = POSITION 7), rising and
+    # sinking with SHARK FIN UP/DOWN; the chum line's seven targets are unseen,
+    # the nearest standing as its physics; with no motor place it falls back
+    # to the position switches
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    assert m["mechs"]["0"]["stepper"] == [9, 0]
+    assert m["retrofit_targets"]["PadFin"] == {"clone": "BallShadow1", "look": "Tbeachfinal"}
+    assert m["retrofit_timers"]["PadFinTimer"]["interval_ms"] == 10
+    fins = ["Tbeachfinal", "Tnightfinal", "Tbarrelshark", "Tjackpot", "Tsharkfinal", "Thammerfinal", "Tsmimerfinal"]
+    assert all(m["item_fields"][f] == {"TVIS": 0} for f in fins)
+    show = "\n".join([
+        "Sub Show : Log = Log & Round(PadFin.X) & \",\" & Round(PadFin.Y) & \",\" & Round(PadFin.RotZ) & \",\" "
+        "& PadFin.Z & \",\" & PadFin.Visible & \" \" : End Sub",
+        "Sub Standing : Dim o : For Each o In PadFins : If o.IsDropped Then Log = Log & \"d\" Else Log = Log & \"U\"",
+        "  Next : Log = Log & \" \" : End Sub",
+        "Sub Ticks(n) : Dim j : For j = 1 To n : PadFinTimer_Timer : Next : End Sub"])
+    places = "\n".join("%s.X = %d : %s.Y = %d : %s.Orientation = %d" % (f, 100 * i, f, 700 + 10 * i, f, 10 * i)
+                       for i, f in enumerate(fins))
+    out = _cscript(tmp_path, "\n".join([
+        _jaws_fakes(), places, "PadFin.Z = -10", m["extra_vbs"], show,
+        "MechVal = 38000 : Ticks 1 : Show",                          # POSITION 1, down out of sight
+        "PadFinUpDown True : Ticks 5 : Show : Ticks 6 : Show",       # rising 5 a tick, then up
+        "MechVal = 35500 : Ticks 1 : Show",                          # half way from 3 to 4
+        "MechVal = 35400 : PadMechTimer_Timer : Standing",           # 3.6: the target at 4 stands
+        "MechVal = 32000 : Ticks 1 : Show",                          # POSITION 7
+        "MechVal = 0 : Sw(1103) = 1 : PadMechTimer_Timer : Ticks 1 : Show : Standing",   # no motor place: the switch
+        "PadFinUpDown False : Ticks 11 : Show : PadMechTimer_Timer : Standing",
+        "WScript.Echo Log"]))
+    assert out == ["0,700,0,-62,False",
+                   "0,700,0,-37,True", "0,700,0,-10,True",
+                   "250,725,25,-10,True",
+                   "dddUddd",
+                   "600,760,60,-10,True",
+                   "100,710,10,-10,True", "dUddddd",
+                   "100,710,10,-62,False", "ddddddd"], out
+
+
+@pytest.mark.skipif(not os.path.exists(JAWS_TABLE), reason="JP's JAWS 50th 3.2 is not on this machine")
+def test_jaws_real_table_fin_primitive():
+    # PadFin is built off JP's table: BallShadow1's record layout, Tbeachfinal's
+    # picture, material, size, place and turn, the drop target box mesh, shown,
+    # not static, no collision; the seven chum line targets are unseen
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+    import zlib
+    t = vf.VpxTable(JAWS_TABLE)
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    by = {t.item_info(d)[1]: d for d in t.items}
+    look = {tag: pl for tag, pl, _ in vf.item_records(by["Tbeachfinal"])}
+    fin = [d for d in vs.retrofit_items(t, m) if t.item_info(d)[1] == "PadFin"]
+    assert len(fin) == 1 and t.item_info(fin[0])[0] == "Primitive"
+    r = {tag: pl for tag, pl, _ in vf.item_records(fin[0])}
+    for tag in ("IMAG", "MATR"):
+        assert r[tag] == look[tag]
+    assert r["VPOS"][:12] == look["VPOS"][:12] and r["VSIZ"][:12] == look["VSIZ"][:12]
+    assert r["RTV2"] == look["ROTZ"]
+    i = lambda tag: struct.unpack("<i", r[tag])[0]
+    assert (i("TVIS"), i("STRE"), i("CLDR"), i("U3DM"), i("ISTO")) == (1, 0, 0, 1, 1)
+    vb, ib, nv, ni = vs.drop_target_mesh()
+    assert zlib.decompress(r["M3CX"]) == vb and zlib.decompress(r["M3CI"]) == ib
+    assert (i("M3VN"), i("M3FN"), i("M3CY"), i("M3CJ")) == (nv, ni, len(r["M3CX"]), len(r["M3CI"]))
+    streams = vs.item_fields(t, m)
+    out = {t.item_info(d)[1]: d for d in streams.values()}
+    for f in ("Tbeachfinal", "Tnightfinal", "Tbarrelshark", "Tjackpot", "Tsharkfinal", "Thammerfinal", "Tsmimerfinal"):
+        assert struct.unpack("<i", {tag: pl for tag, pl, _ in vf.item_records(out[f])}["TVIS"])[0] == 0
+
+
+def test_drop_target_mesh_faces_out_and_shows_the_picture():
+    # PAD-1392: a closed box but for its bottom, every triangle wound so its
+    # cross product points along its face's normal (VPX culls the other side),
+    # the face towards the player carrying the picture's face
+    vs = pytest.importorskip("vpxshadow")
+    vb, ib, nv, ni = vs.drop_target_mesh()
+    v = [struct.unpack_from("<8f", vb, k * 32) for k in range(nv)]
+    idx = struct.unpack("<%dH" % ni, ib)
+    assert (nv, ni) == (20, 30)
+    for k in range(0, ni, 3):
+        a, b, c = (v[j] for j in idx[k:k + 3])
+        u = [b[q] - a[q] for q in range(3)]
+        w = [c[q] - a[q] for q in range(3)]
+        cross = (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
+        assert sum(cross[q] * a[3 + q] for q in range(3)) > 0
+    front = [p for p in v if p[4] == 1.0]
+    assert sorted({(round(p[6], 4), round(p[7], 4)) for p in front}) == sorted(
+        {(0.0035, 0.8545), (0.8274, 0.8545), (0.8274, 0.2281), (0.0035, 0.2281)})
+    assert round(max(p[2] for p in v), 4) == 1.735 and round(min(p[2] for p in v), 4) == 0.135
+
+
+def test_jaws_copy_patched_before_pad1392_asks_for_a_new_patch(tmp_path):
+    vsu = pytest.importorskip("vpxsetup")
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    why = [r["why"] for r in m["repatch"] if "inlane post" in r["why"]]
+    assert len(why) == 1
+    name = "JAWS_50Th_Anniversary (PAD).vpx"
+    old = m["extra_vbs"].split("' PAD-1392: the inlane posts catch the ball, one fin")[0]
+    (tmp_path / (name[:-4] + ".script.vbs")).write_text(old, encoding="utf-8")
     assert why[0] in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
     (tmp_path / (name[:-4] + ".script.vbs")).write_text(m["extra_vbs"], encoding="utf-8")
     assert why[0] not in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
@@ -1484,6 +1670,7 @@ def test_rushs_drum_clock_is_the_boards_stepper():
     assert "Controller.GetMech(0)" in m["extra_vbs"]
     pc = pytest.importorskip("padcontroller")
     assert pc.VpxMap("rush_le").mechs == {0: (10, 0)}
+    assert pc.VpxMap("jaws_le").mechs == {0: (9, 0)}     # PAD-1392: the fin's end-stop motor
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),

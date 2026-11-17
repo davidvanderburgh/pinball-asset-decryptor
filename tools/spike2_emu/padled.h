@@ -202,7 +202,10 @@ struct padled_shm {
      * pop and the Visual Pinball table's clock stood still. Written by the
      * shim's stepper model at each home (0) and move (its destination):
      * step_cfg[node] bit k says motor k has been homed or moved, step_pos is
-     * its place in steps from home, either sign. Offsets for a Python reader:
+     * its place in steps from home, either sign. PAD-1392: an END-STOP motor
+     * a cmd 55 has run (jaws_le's shark fin, node 9 motor 0) is written here
+     * too, all the time: its car's place in thousandths of an input bit, part
+     * way along a move at the move's own speed. Offsets for a Python reader:
      * step_cfg 16072, step_pos 16088 (coilmap.STEP_*). */
     unsigned char step_cfg[PADLED_NODES];
     int step_pos[PADLED_NODES][4];

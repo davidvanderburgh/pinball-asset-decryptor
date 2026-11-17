@@ -1526,6 +1526,28 @@ HELP_CONTENT = {
     # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
     # The key stays so every notebook tab has an entry.
     "Modes": [],
+    # PAD-1382: the game's service menu with the app's rows in it
+    "Service Menu": [
+        ("What it's for", [
+            "The game's own **service menu** as this card will show it at the machine, with the rows the app adds "
+            "(Co-op Play, Handicap, Music Mode, Edition...) where the Write puts them. The game's own rows are drawn "
+            "in the machine's order; a small mark beside a row says it is the app's.",
+            "Click a row to see its help and its Current and Default values, as the machine shows them. The game "
+            "words some of its own values itself (12-Hour, Random...); those are left blank here.",
+        ]),
+        ("More rows than the game has room for", [
+            "A game has only a few spare rows for the app's settings (three on Godzilla). When a card has more "
+            "settings than that, they share two rows: **More Settings** picks one, and the row under it becomes that "
+            "setting. Step More Settings with **+** and **-** under the picture to see it change, as it will at the "
+            "machine. The card keeps each setting's value, so it stays set after the machine is switched off.",
+        ]),
+        ("Switching the rows", [
+            "**The app's rows** lists each setting: tick Co-op Play or Handicap to put its row on the card (or "
+            "untick to leave it off), and the menu redraws. Music Mode is set on the Audio tab, Edition on the Write "
+            "tab. Values are the operator's: they are set at the machine, and **+** and **-** here only show what "
+            "each one looks like. Nothing changes on the card until you Write it.",
+        ]),
+    ],
     "Play Options": [
         ("What it's for", lambda: _play_options_intro()),
         ("Handicap per player", [

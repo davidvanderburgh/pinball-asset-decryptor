@@ -46,6 +46,7 @@ MULTIBOOT_PHASES = ("Media", "Copy", "Inject", "Verify")
 PHASE_ROW_BY_KEY = {
     "Extract": "extract", "Compare": "extract", "Mod Pack": "extract",
     "Write": "write", "Modes": "write", "Attract": "write", "Expression Lights": "write", "Play Options": "write",
+    "Service Menu": "write",
     "Emulate": "emulate", "Emulate JJP": "emulate",
     "Emulate Spike1": "emulate", "Emulate BoF": "emulate",
     "Emulate DP": "emulate",
@@ -543,6 +544,8 @@ class WebWindow:
             "Attract": g("modes"),
             # PAD-1204: the play options ride it too, and keep Insider Connected
             "Play Options": g("modes"),
+            # PAD-1382: the service menu with the app's rows in it (Stern Spike 2, the mode runtime's)
+            "Service Menu": g("modes"),
             # PAD-1040: the expression light shows ride it too, and are no part of the mode maker
             "Expression Lights": g("modes"),
             # PAD-802: Visual Pinball on the Spike 2 emulator (a preview until

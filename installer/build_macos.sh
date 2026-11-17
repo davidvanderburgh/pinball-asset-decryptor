@@ -300,6 +300,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.media_share" \
     --hidden-import "pinball_decryptor.plugins.stern.menu_settings" \
     --hidden-import "pinball_decryptor.plugins.stern.picture_settings" \
+    --hidden-import "pinball_decryptor.plugins.stern.service_menu" \
     --hidden-import "pinball_decryptor.plugins.stern.editions" \
     --hidden-import "pinball_decryptor.plugins.stern.text_modes" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_from_card" \

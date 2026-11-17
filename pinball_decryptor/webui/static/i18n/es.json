@@ -4444,7 +4444,7 @@
 "Only a line of text has words": "Solo una línea de texto tiene palabras",
 "Only a picture has a size of its own to draw it at.": "Solo una imagen tiene un tamaño propio con el que dibujarla.",
 "Only a picture is drawn {}": "Solo una imagen se dibuja {}",
-"Only a sound the game keeps in its sound bank (an idx file) can have a file for another mode.": "Solo un sonido que el juego guarda en su banco de sonidos (un archivo idx) puede tener un archivo para otro modo.",
+"Only one of the game's own sounds (an idx file, or a song of its music banks: music_catNN_NNNN) can have a file for another mode.": "Solo uno de los sonidos propios del juego (un archivo idx, o una canción de sus bancos de música: music_catNN_NNNN) puede tener un archivo para otro modo.",
 "Only a sound the game keeps in its sound bank (an idx file) can play files in turn.": "Solo un sonido que el juego guarda en su banco de sonidos (un archivo idx) puede reproducir archivos por turnos.",
 "Only a {} SD card or bigger could hold it: if the SD card in the machine is that big, {}. Otherwise take something out ({}).": "Solo una tarjeta SD de {} o más podría contenerlo: si la tarjeta SD de la máquina es así de grande, {}. Si no, quita algo ({}).",
 "Only after": "Solo después de",

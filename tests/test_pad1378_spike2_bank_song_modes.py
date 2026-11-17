@@ -42,7 +42,7 @@ def _plays(desc):
 # the Audio tab offers a bank song on Spike 2
 # --------------------------------------------------------------------------
 def test_a_spike2_bank_song_can_have_files_for_other_modes(monkeypatch):
-    arm = SimpleNamespace(arch="arm")
+    arm = SimpleNamespace(arch="arm", game_dir="deadpool_le", version="1.16", label="Deadpool LE 1.16")
     assert SMo.slot_ok(SONG, arm) and SMo.slot_ok("audio/idx0011.wav", arm)
     assert not SMo.slot_ok("audio/foo.wav", arm)
     monkeypatch.setattr(SMo, "project_title", lambda project, probe=True: arm)
@@ -213,3 +213,19 @@ def test_a_bank_song_s_file_is_levelled_against_the_song_s_own_wav(monkeypatch):
     monkeypatch.setattr(E, "_self_level_render", lambda path, p, np: seen.append(path) or "pcm")
     assert E._level_ref_render(None, {}, {"chan": 2}, ref, None) == "pcm"
     assert seen == [r"C:\proj\audio\music_cat01_0001.wav"]
+
+
+def test_a_title_with_no_room_beside_its_own_banks_refuses_its_songs_up_front(monkeypatch):
+    # Dungeons & Dragons 1.10: image.bin and its biggest music bank fill the machine's memory, so a
+    # bank song's file would have no bank to play from (the Write leaves one out as well)
+    dnd = SimpleNamespace(arch="arm", game_dir="dungeons_and_dragons_le", version="1.10",
+                          label="Dungeons & Dragons LE 1.10")
+    monkeypatch.setattr(SMo, "project_title", lambda project, probe=True: dnd)
+    monkeypatch.setattr(SMo, "title_refusal", lambda prof, turns=False: "")
+    why, slots = SMo.offer("proj", [SONG, "audio/idx0011.wav"])
+    assert why == "" and slots["audio/idx0011.wav"] == ""
+    assert slots[SONG] == SMo.NO_BANK_ROOM % "Dungeons & Dragons LE 1.10"
+    assert "dungeons_and_dragons_pro-1.10" in SMo.BANK_SONG_NO_ROOM
+    rush = SimpleNamespace(arch="arm", game_dir="rush_le", version="1.19", label="Rush LE 1.19")
+    monkeypatch.setattr(SMo, "project_title", lambda project, probe=True: rush)
+    assert SMo.offer("proj", [SONG])[1] == {SONG: ""}

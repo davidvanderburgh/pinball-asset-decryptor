@@ -9060,22 +9060,50 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                                         if mode_sound_used else []),
                             _old_bank_map, log, exclude_sids=_sm_sids,
                             busy=set(grows) - set(_user_grows))
-                    if (mode_own_used or _game_ok or _sm_frags or _game_seqs
-                            or _sm_seqs):
-                        bank_plan, audio_edits, grows = _plan_sound_banks(
-                            gr_path, img_path, params, audio_edits, grows,
-                            _user_grows, mode_own_used, reader, img_node,
-                            space_chk, log, game_sids=_game_ok,
-                            game_why=_game_why, sm_frags=_sm_frags,
-                            game_seqs=_game_seqs, sm_seqs=_sm_seqs,
-                            sm_hold=_sm_turn_hosts(sound_mode_used, _sm_frags),
-                            # PAD-1235: the mode runtime's files go on again, so an
-                            # earlier Write's banks of its sounds are this one's to replace
-                            retire_touched=(set(_bank_touched.values()) if (
-                                mode_list or code_list or sound_mode_used or _clips_on
-                                or _attract_on or _coop_on or _idle_on or _hand_on
-                                or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on)
-                                else None))
+                    for _bank_try in (0, 1):
+                        if not (mode_own_used or _game_ok or _sm_frags or _game_seqs
+                                or _sm_seqs):
+                            break
+                        try:
+                            bank_plan, audio_edits, grows = _plan_sound_banks(
+                                gr_path, img_path, params, audio_edits, grows,
+                                _user_grows, mode_own_used, reader, img_node,
+                                space_chk, log, game_sids=_game_ok,
+                                game_why=_game_why, sm_frags=_sm_frags,
+                                game_seqs=_game_seqs, sm_seqs=_sm_seqs,
+                                sm_hold=_sm_turn_hosts(sound_mode_used, _sm_frags),
+                                # PAD-1235: the mode runtime's files go on again, so an
+                                # earlier Write's banks of its sounds are this one's to replace
+                                retire_touched=(set(_bank_touched.values()) if (
+                                    mode_list or code_list or sound_mode_used or _clips_on
+                                    or _attract_on or _coop_on or _idle_on or _hand_on
+                                    or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on)
+                                    else None))
+                            break
+                        except SoundRoomError as _room:
+                            # PAD-1378: a file for a song of the game's own sound banks
+                            # has no road but a bank: where none fits beside the game's
+                            # own (Dungeons & Dragons 1.10: image.bin and its biggest
+                            # bank fill the machine's limit) it is left out, not the Write
+                            _sm_lost = [u for u in sound_mode_used if u.get("vbank")
+                                        and int(u["host"]) in _sm_frags]
+                            if _bank_try or not _sm_lost:
+                                raise
+                            for _u in _sm_lost:
+                                log("%s: %s is left out: no sound bank has room beside "
+                                    "the game's own on this card (%s)" % (
+                                        _SMo_who(_u["mode"]), _SMo_what(_u),
+                                        str(_room).split("\n")[0].rstrip(".")), "warning")
+                            sound_mode_used = [u for u in sound_mode_used
+                                               if not any(u is x for x in _sm_lost)]
+                            _sm_left = {int(u["host"]) for u in sound_mode_used}
+                            for _u in _sm_lost:
+                                _h = int(_u["host"])
+                                if _h not in _sm_left:
+                                    _sm_frags.pop(_h, None)
+                                    grows.pop(_h, None)
+                                    audio_edits.pop(_h, None)
+                                    _sm_grows.pop(_h, None)
                         if bank_plan is not None:
                             bank_plan.old_map = dict(_old_bank_map)
                             _user_grows = {i: g for i, g in _user_grows.items()
@@ -21952,6 +21980,18 @@ def _whole_descriptors_once(gr_path, img_path):
 def _SMo_is_mode_turn(mode):
     from . import sound_modes as _SMo
     return _SMo.is_mode_turn(mode)
+
+
+def _SMo_who(mode):
+    """PAD-1378: :func:`.sound_modes.who`."""
+    from . import sound_modes as _SMo
+    return _SMo.who(mode)
+
+
+def _SMo_what(u):
+    """PAD-1378: :func:`.sound_modes.what` of a used entry *u*."""
+    from . import sound_modes as _SMo
+    return _SMo.what(u["rel"], u["mode"], u.get("name", ""))
 
 
 def _SMo_is_attract(mode):

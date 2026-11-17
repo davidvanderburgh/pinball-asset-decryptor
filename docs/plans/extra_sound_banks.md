@@ -886,3 +886,16 @@ its 3 ids, and the runtime hooked 7 requests for the 3 `bsid` lines. Booted with
 3; request 106 played 100% 1100 Hz in mode 3 (the intro + song id rewritten) and the game's song in modes 1 and 2.
 Tests: tests/test_pad1378_spike2_bank_song_modes.py.
 
+Every other title (2026-11-17, `C:\tmp\PAD-1378\sweep_all.py` + `rig\score_sw.py`): each newest build's library
+card, a request that plays one bank id alone, a 700 Hz mode 2 file on the song it plays, the override set built by
+`write_overrides`, then fired on the rig in modes 1 and 2. Deadpool Pro 1.16 (req 63, bank 16), Foo Fighters LE/Pro
+1.04 (62, bank 01), James Bond Pro 1.06 (79, bank 03's `0x30002`, two records), John Wick LE/Pro 1.02 (112, bank
+01), Metallica 1.04 (63, bank 02), Rush LE/Pro 1.19 (89, bank 01): mode 2 100% 700 Hz, mode 1 0% (the game's
+song), 9 of 9. James Bond LE 1.06 has no music modes at all (title refusal).
+
+**Dungeons & Dragons LE/Pro 1.10 have no room.** Its `image.bin` (2,142,352,388) and biggest bank (39,598,976) are
+`MAPPED_MAX` exactly, and the game may hold its biggest bank beside ours, so a bank of ours can be 0 bytes. The
+Audio tab refuses its bank songs up front (`sound_modes.BANK_SONG_NO_ROOM` / `NO_BANK_ROOM`), and a Write with such
+a file from an older project leaves just that file out with a warning (the `SoundRoomError` retry in
+`_compute_patches_inner`) instead of failing: proven on the D&D LE 1.10 card (bank 22's song, the Write finished).
+

@@ -1,12 +1,13 @@
 """PAD-1378 proof shots: music modes on a Spike 2 MUSIC-BANK song (Deadpool's songs; scripts/shot_pad1358.py's rig).
 
-    python scripts/shot_pad1378.py <repo> <out_dir> [--after]
+    python scripts/shot_pad1378.py <repo> <out_dir> [--after] [--dnd]
 
 Serves <repo> on a scratch Deadpool LE 1.16 project (PAD1378_DEADPOOL, default C:/tmp/PAD-1378/proj_dp: two of
 its music banks decoded as music_catNN_NNNN.wav, a few idx stand-ins and its .extract_source.json), with a music
 file set for mode 2 on the bank song music_cat01_0001. Writes <before_|after_>audio_bank_song.png: that
 song's right-click menu with its Music modes submenu open (and, where the app refuses the song, its "Why not this
-sound?" answer).
+sound?" answer). --dnd: the same on Dungeons & Dragons LE 1.10's bank song music_cat22_0000
+(<before_|after_>audio_dnd_bank_song.png), the build with no room for a bank of the app's beside its own.
 
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
@@ -32,6 +33,9 @@ sys.exit(host.main())
 '''
 FALLOUT = os.environ.get("PAD1378_DEADPOOL", r"C:\tmp\PAD-1378\proj_dp")
 SOUNDS = ["music_cat01_0001", "music_cat01_0000", "music_cat07_0000", "music_cat07_0001", "music_cat07_0002"]
+#: --dnd: Dungeons & Dragons LE 1.10, the build with no room for a bank of this app's beside its own
+DND = os.environ.get("PAD1378_DND", "C:/tmp/PAD-1378/sw/dungeons_and_dragons_le-1.10/proj")
+DND_SOUNDS = ["music_cat22_0000", "music_cat13_0000"]
 TONE = os.environ.get("PAD1378_TONE", r"C:\tmp\PAD-1378\tones\tone700.wav")
 
 
@@ -133,6 +137,15 @@ def _shoot(repo, project, shot, why):
 def main():
     repo, out_dir = sys.argv[1:3]
     tag = "after_" if "--after" in sys.argv else "before_"
+    if "--dnd" in sys.argv:                 # Dungeons & Dragons: a bank song refused for want of room
+        SOUNDS[:] = DND_SOUNDS
+        scratch = tempfile.mkdtemp(prefix="pad1378-")
+        try:
+            dd = _project(os.path.join(scratch, "dd"), DND, "dnd_le_110")
+            _shoot(repo, dd, os.path.join(out_dir, tag + "audio_dnd_bank_song.png"), why=True)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        return
     os.makedirs(out_dir, exist_ok=True)
     scratch = tempfile.mkdtemp(prefix="pad1378-")
     try:

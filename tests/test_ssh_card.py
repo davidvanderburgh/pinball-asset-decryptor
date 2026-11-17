@@ -10,7 +10,7 @@ from pinball_decryptor.core import ssh_card as S
 from pinball_decryptor.core.card_extras import ExtrasError
 from tests.test_card_extras import key
 
-TOOLS = '/opt/homebrew/opt/e2fsprogs/sbin'
+TOOLS = os.environ.get('PAD_E2FSPROGS_DIR', '/opt/homebrew/opt/e2fsprogs/sbin')
 
 
 @pytest.fixture

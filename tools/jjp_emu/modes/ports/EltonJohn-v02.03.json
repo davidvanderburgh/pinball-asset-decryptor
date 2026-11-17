@@ -4,6 +4,7 @@
  "game": "EltonJohn",
  "exported_symbols": 22295,
  "can_run_modes": true,
+ "engine": "mode",
  "missing_required": [],
  "mode_vtable": {
   "start": 16,
@@ -37,6 +38,7 @@
    "8EncoreMB"
   ]
  },
+ "proc_modes": [],
  "media": {
   "can_play_own_media": true,
   "ok": {

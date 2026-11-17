@@ -4,6 +4,7 @@
  "game": "GunsNRoses",
  "exported_symbols": 22265,
  "can_run_modes": true,
+ "engine": "mode",
  "missing_required": [],
  "mode_vtable": {
   "start": 16,

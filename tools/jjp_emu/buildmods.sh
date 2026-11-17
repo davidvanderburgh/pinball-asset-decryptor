@@ -22,7 +22,7 @@ CHROOT_LIB=${CHROOT_LIB:-"$JJP_JAIL/lib/x86_64-linux-gnu"}
 # A running game maps the copy run_game.sh put in the jail, never $OUT, so a
 # rebuild here cannot SIGBUS it.  -std=gnu11 keeps glibc 2.38+ headers from
 # redirecting strtol to __isoc23_strtol, which the image's glibc lacks.
-gcc -c -fPIC -O2 -std=gnu11 -Wall -Wextra -D_FORTIFY_SOURCE=0 -fno-stack-protector \
+gcc -c -fPIC -O2 -std=gnu11 -Wall -Wextra -Werror=implicit-function-declaration -D_FORTIFY_SOURCE=0 -fno-stack-protector \
     -o "$OBJ" "$HERE/jjpmodes.c" || exit 1
 LIBS="$CHROOT_LIB/libc.so.6"
 for extra in libdl.so.2 libpthread.so.0; do

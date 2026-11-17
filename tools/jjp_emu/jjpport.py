@@ -72,6 +72,63 @@ SDK = [
     ("coils", "_Z21coil_get_duty_patterni", False),
     ("coils", "coil_table", False),
 ]
+#: PAD-1365: JJP's first engine generation (The Wizard of Oz 08.02) has no Mode class; the
+#: runtime then runs a mode on a proc of its own (jjpmodes.c "the proc engine").  What that
+#: needs, all plain engine functions; the runtime takes proc_create when proc_cret is missing.
+PROC_SDK = [
+    ("proc", "_Z11proc_createjPFvjE18proc_create_flag_t14proc_survive_t", True),
+    ("proc", "_Z9proc_cretjPFvjE14proc_survive_t", False),
+    ("proc", "_Z10proc_sleepj", True),
+    ("proc", "_Z14proc_id_existsj", True),
+    ("proc", "_Z22score_add_to_player_upyb", True),
+    ("proc", "_Z15update_all_soonv", False),
+]
+#: the names every engine needs (the rest of SDK's required ones are the Mode class)
+COMMON_REQUIRED = ("_Z14jjpe_state_getv", "_ZN11SoundEffect4playEv")
+#: jjpmodes.c cb_proc_modes: a function of the proc's unsigned argument is one of the game's modes
+#: (a proc running it = that mode running) when it is named for a mode, named like Mode's own
+#: procs (<x>_run_proc, <x>_grace_proc ...), or is <x>_proc with an <x>_proc_kill_func of its own;
+#: never one of these
+PROC_MODE_NOT = ("amode", "attract", "kill", "jukebox", "timer", "test", "diag", "menu",
+                 "leff", "_lef", "lamp", "tilt", "music", "match", "hook_", "multiled", "choreo")
+PROC_MODE_ENDS = ("run_proc", "grace_proc", "proc_run", "proc_grace", "proc_grace_grace")
+
+
+def _proc_fn_name(n):
+    """jjpmodes.c demangle_proc_fn: `_Z<n>NAMEj` -> NAME, `_ZN<n>A<n>BEj` -> A::B, else None."""
+    if not n.startswith("_Z") or not n.endswith("j"):
+        return None
+    p, nested, parts = n[2:], False, []
+    if p.startswith("N"):
+        nested, p = True, p[1:]
+    while p[:1].isdigit() and p[0] != "0":
+        m = re.match(r"(\d+)", p)
+        k = int(m.group(1))
+        if k > len(p) - m.end():
+            return None
+        parts.append(p[m.end():m.end() + k])
+        p = p[m.end() + k:]
+        if not nested:
+            break
+    if not parts or p != ("Ej" if nested else "j"):
+        return None
+    return "::".join(parts)
+
+
+def proc_modes(e):
+    """The game's mode functions the runtime watches on the proc engine (PAD-1365)."""
+    out = []
+    for n, (a, s) in e.syms.items():
+        d = _proc_fn_name(n)
+        if not d or not s:
+            continue
+        low = d.lower()
+        if any(x in low for x in PROC_MODE_NOT):
+            continue
+        if ("mode" in low or low.endswith(PROC_MODE_ENDS)
+                or (low.endswith("_proc") and "::" not in d and "_Z%d%s_kill_funcj" % (len(d) + 10, d) in e.syms)):
+            out.append(d)
+    return sorted(set(out))
 #: jjpmodes.c's COIL_NEVER and COIL_HOLDABLE (PAD-1353): a coil whose name has a NEVER
 #: part is the game's own (ball handling, flippers, power, motors the game positions) and
 #: no mode fires it, unless it has a COIL_ANYWAY part; one
@@ -420,15 +477,24 @@ def _first(names, patterns):
 def port(elf_path, gamename=None, live=None):
     e = GameElf(elf_path)
     sdk = collections.OrderedDict()
-    missing_required = []
-    for what, name, required in SDK:
+    missing_mode = []
+    for what, name, required in SDK + PROC_SDK:
         ok = name in e.syms
         sdk.setdefault(what, collections.OrderedDict())[name] = ok
-        if required and not ok:
-            missing_required.append(name)
+        if required and not ok and (what, name, required) in SDK:
+            missing_mode.append(name)
     vt = mode_vtable(e) if "_ZTV4Mode" in e.syms else {}
     hooks = rule_hooks(e)
     bad_slots = [k for k, v in vt.items() if v is None and k != "total_choreo"]
+    # which engine runs a mode: the Mode class when it is there and its slots resolve (as
+    # jjpmodes.c pick_engine), else a proc of the runtime's own (PAD-1365)
+    missing_proc = [n for w, n, r in PROC_SDK if r and n not in e.syms] + [n for n in COMMON_REQUIRED if n not in e.syms]
+    if not missing_mode and not bad_slots:
+        engine, missing_required = "mode", []
+    elif not missing_proc:
+        engine, missing_required = "proc", []
+    else:
+        engine, missing_required = "", missing_mode
     # a Switch is a 104-byte global on GnR; take the size most of the numbered ones have
     sw_sizes = collections.Counter(s for n, (a, s) in e.syms.items() if re.match(r"^switch_\d+$", n))
     sw_size = sw_sizes.most_common(1)[0][0] if sw_sizes else None
@@ -470,10 +536,12 @@ def port(elf_path, gamename=None, live=None):
         ("elf", os.path.basename(elf_path)),
         ("game", gamename or ""),
         ("exported_symbols", len(e.syms)),
-        ("can_run_modes", not missing_required and not bad_slots),
+        ("can_run_modes", bool(engine)),
+        ("engine", engine),
         ("missing_required", missing_required),
         ("mode_vtable", vt),
-        ("hold", hold(e) if "_ZTV4Mode" in e.syms else {"can_hold": False}),
+        ("hold", hold(e) if engine == "mode" else {"can_hold": False}),
+        ("proc_modes", proc_modes(e) if engine == "proc" else []),
         ("media", media(e)),
         ("can_balls", all(sdk.get("balls", {}).values()) and bool(sdk.get("balls"))),
         ("can_coils", all(sdk.get("coils", {}).values()) and bool(sdk.get("coils"))),
@@ -584,12 +652,14 @@ def main(argv=None):
     if a.stock_example:
         print("  starter .stock: %s" % write_stock_example(p, a.stock_example, a.label or a.gamename or p["elf"]))
     print("%s: %s; %d exported, %d switches, %d lamps, %d sounds, %d fonts, %d Mode classes%s" % (
-        p["elf"], "CAN run modes" if p["can_run_modes"] else "can NOT run modes", p["exported_symbols"],
+        p["elf"], ("CAN run modes (%s engine)" % p["engine"]) if p["can_run_modes"] else "can NOT run modes", p["exported_symbols"],
         len(p["switches"]), len(p["lamps"]), len(p["sounds"]), len(p["fonts"]), len(p["mode_classes"]),
         ("; missing " + " ".join(p["missing_required"])) if p["missing_required"] else ""))
     print("  own media: %s" % ("yes" if p["media"]["can_play_own_media"] else
                                "no (%s)" % " ".join(k for k, v in p["media"]["ok"].items() if not v)))
     print("  vtable %s" % " ".join("%s=%s" % (k, hex(v) if v is not None else "-") for k, v in p["mode_vtable"].items()))
+    if p["engine"] == "proc":
+        print("  proc engine: %d game mode function(s) watched: %s" % (len(p["proc_modes"]), " ".join(p["proc_modes"])))
     print("  defaults %s" % json.dumps(p["defaults"]))
     cs = p["coils"]
     print("  balls %s, coils %s: %d named, %d a mode may pulse, %d it may hold" % (

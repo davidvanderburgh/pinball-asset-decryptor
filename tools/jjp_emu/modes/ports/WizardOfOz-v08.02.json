@@ -3,23 +3,91 @@
  "elf": "WizardOfOz-v08.02.elf",
  "game": "WizardOfOz",
  "exported_symbols": 12260,
- "can_run_modes": false,
- "missing_required": [
-  "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_",
-  "_ZTV4Mode",
-  "_ZN4Mode5startEv",
-  "_ZN4Mode3endEv",
-  "_ZN4Mode8set_timeEi",
-  "_ZN4Mode10is_runningEv",
-  "_ZN4Mode15is_timer_pausedEv",
-  "_ZN4Mode15score_and_totalEy",
-  "_ZN4Mode14hook_tick_workEi",
-  "_ZN4Mode25hook_do_mode_start_choreoEv"
- ],
+ "can_run_modes": true,
+ "engine": "proc",
+ "missing_required": [],
  "mode_vtable": {},
  "hold": {
   "can_hold": false
  },
+ "proc_modes": [
+  "cbm_grace_proc",
+  "cbm_proc",
+  "ecmb_grace_grace_proc",
+  "ecmb_grace_proc",
+  "ecmb_run_proc",
+  "fireball_frenzy_run_proc",
+  "haunted_grace_proc",
+  "haunted_run_proc",
+  "hurry_build_run_proc",
+  "mmf_proc",
+  "mml_proc",
+  "mmm_grace_grace_proc",
+  "mmm_grace_proc",
+  "mmm_proc",
+  "mmw_proc",
+  "rescue_mb_grace_grace_proc",
+  "rescue_mb_grace_proc",
+  "rescue_mb_run_proc",
+  "sotr_grace_grace_proc",
+  "sotr_grace_proc",
+  "sotr_run_proc",
+  "tnplh_proc",
+  "twister_mode_proc_grace",
+  "twister_mode_proc_grace_grace",
+  "twister_mode_proc_run",
+  "witch_hurryup_proc",
+  "witch_melt_run_proc"
+ ],
+ "media": {
+  "can_play_own_media": true,
+  "ok": {
+   "sounds": true,
+   "music": true,
+   "picture": true,
+   "video": true
+  },
+  "pieces": {
+   "sounds": {
+    "_ZN11SoundEffect23create_sample_instancesEPKc": true,
+    "_ZN11SoundEffect7do_playEb": true,
+    "_ZN11SoundEffect9is_loadedEv": true,
+    "_ZN11SoundEffect10is_playingEv": true,
+    "_ZN11SoundEffect17play_audio_streamEv": true,
+    "liballegro_audio.so": true,
+    "liballegro_acodec.so": true
+   },
+   "music": {
+    "_ZN6UpdateI14UpdateBGMusic_PPFvvEE4listE": true,
+    "_Z12update_musicv": true,
+    "_Z13music_requestPFvvE": true
+   },
+   "picture": {
+    "liballegro_image.so": true
+   },
+   "video": {
+    "libavformat.so": true,
+    "libavcodec.so": true,
+    "libavutil.so": true
+   }
+  },
+  "sound_object_bytes": 264,
+  "libraries": [
+   "liballegro.so.5.2",
+   "liballegro_acodec.so.5.2",
+   "liballegro_audio.so.5.2",
+   "liballegro_font.so.5.2",
+   "liballegro_image.so.5.2",
+   "liballegro_memfile.so.5.2",
+   "liballegro_primitives.so.5.2",
+   "liballegro_ttf.so.5.2",
+   "libavcodec.so.58",
+   "libavformat.so.58",
+   "libavutil.so.56"
+  ]
+ },
+ "can_balls": true,
+ "can_coils": true,
  "hooks": {
   "HookBallStart_": true,
   "HookFirstBall_": true,
@@ -88,6 +156,28 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
+  },
+  "proc": {
+   "_Z11proc_createjPFvjE18proc_create_flag_t14proc_survive_t": true,
+   "_Z9proc_cretjPFvjE14proc_survive_t": true,
+   "_Z10proc_sleepj": true,
+   "_Z14proc_id_existsj": true,
+   "_Z22score_add_to_player_upyb": true,
+   "_Z15update_all_soonv": true
   }
  },
  "switch_object_bytes": 104,
@@ -101,7 +191,9 @@
   "font_timer": "font_tnplh_timer",
   "sound_start": "se_fanfare_ecmbstart0",
   "sound_shot": "se_wz_wzjackpot",
-  "sound_end": "se_gl_glsplendid"
+  "sound_end": "se_gl_glsplendid",
+  "multiball_start": "switch_l_orbit_hi",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [],
  "switches": [
@@ -1167,5 +1259,277 @@
   "se_wz_wztriplejackpot",
   "se_wz_wzumightbgreatestimpowerful",
   "se_wz_wzurrealpinballwizard"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_reset",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_retract",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_lupf",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_rupf",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_lupf",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_rupf",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_house_wall",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_latch_castle_doors",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_left_witch_led",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_monkey",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_orbit_right",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_top_lanes",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_witch_bottom",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_witch_top",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_castle_door_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_castle_door_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_castle_lock",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_house",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_monkey",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_oz_head_light",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_pop_balloon",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_pop_bottom",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_pop_left",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_pop_right",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_ramp_diverter",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_ramp_lock_release",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_relay_monkey",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_witch_led",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_top_lanes",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_spotlights",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_start_button",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_stepper_witch_q1",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_stepper_witch_q2",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_stepper_witch_q3",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_stepper_witch_q4",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_light",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_vuk_castle_doors",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_crystal_ball",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_throne_room",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_winkie",
+   "pulse": true,
+   "hold": false
+  }
  ]
 }

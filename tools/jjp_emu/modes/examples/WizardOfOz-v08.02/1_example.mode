@@ -1,0 +1,12 @@
+# A first custom mode for The Wizard of Oz 08.02.  Every key: tools/jjp_emu/MODES.md
+name = PAD Mode
+title = PAD MODE
+start = switch_ramp_made
+shots = switch_ramp_made switch_l_orbit_hi switch_r_orbit_hi
+points = 1000000
+seconds = 20
+complete = 5
+complete_points = 5000000
+sound_start = se_fanfare_ecmbstart0
+sound_shot = se_wz_wzjackpot
+sound_end = se_gl_glsplendid

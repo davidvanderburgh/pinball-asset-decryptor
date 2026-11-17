@@ -4,6 +4,7 @@
  "game": "Pirates",
  "exported_symbols": 18693,
  "can_run_modes": true,
+ "engine": "mode",
  "missing_required": [],
  "mode_vtable": {
   "start": 16,
@@ -38,6 +39,7 @@
    "27DeadMenTellNoTalesMultiball"
   ]
  },
+ "proc_modes": [],
  "media": {
   "can_play_own_media": true,
   "ok": {

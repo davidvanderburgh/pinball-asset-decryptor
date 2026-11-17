@@ -4,6 +4,7 @@
  "game": "Sonic",
  "exported_symbols": 246,
  "can_run_modes": false,
+ "engine": "",
  "missing_required": [
   "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_",
   "_ZTV4Mode",
@@ -22,6 +23,7 @@
  "hold": {
   "can_hold": false
  },
+ "proc_modes": [],
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": false,

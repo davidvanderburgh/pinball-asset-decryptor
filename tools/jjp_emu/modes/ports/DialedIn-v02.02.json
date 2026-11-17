@@ -4,6 +4,7 @@
  "game": "DialedIn",
  "exported_symbols": 17044,
  "can_run_modes": true,
+ "engine": "mode",
  "missing_required": [],
  "mode_vtable": {
   "start": 16,
@@ -38,6 +39,7 @@
    "28DronesGoneWildQuickMultiball"
   ]
  },
+ "proc_modes": [],
  "media": {
   "can_play_own_media": true,
   "ok": {

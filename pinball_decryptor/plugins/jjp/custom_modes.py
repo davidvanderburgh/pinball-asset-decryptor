@@ -397,7 +397,8 @@ def names_for(port, kind, folder=None):
     if kind == "after":             # start_after: the game's mode globals and classes, or any
         st = port.get("stock") or {}
         return ["any"] + sorted(st.get("objects") or ()) + sorted(
-            set(st.get("classes") or ()) | set(port.get("mode_classes") or ()))
+            set(st.get("classes") or ()) | set(port.get("mode_classes") or ())
+            | set(port.get("proc_modes") or ()))   # PAD-1365: the proc engine's game modes
     return []
 
 

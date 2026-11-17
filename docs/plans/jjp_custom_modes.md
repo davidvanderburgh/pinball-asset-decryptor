@@ -282,6 +282,50 @@ PAD Mode STARTED on the TV target, scored 1,000,000 a shot and COMPLETED at
 10,000,000; the off stick created `padmodes.off` and the next boot loaded no
 runtime; the remove stick took `padmodes` out and left `rungame.sh` as shipped.
 
+## The Wizard of Oz: a second runtime path (PAD-1365)
+
+The Wizard of Oz 08.02 is JJP's first engine generation: no `Mode` class, so the Mode route
+cannot apply. Its modes are function families run on procs (`ecmb_run_proc` /
+`_grace_proc` / `_grace_grace_proc`, `twister_mode_proc_run`, `mmf_proc` +
+`mmf_proc_kill_func` ...). The runtime now picks an engine at install (`pick_engine`): the
+Mode objects where the class is, else **our own procs** (`JJP_MODS_ENGINE=proc` forces it, to
+prove it on Wonka). How to use it and the per-piece table: `tools/jjp_emu/MODES.md`, "The
+Wizard of Oz: the proc engine".
+
+Learned on Wonka 03.03 (decrypted code read through `/proc/<pid>/mem`), and why it maps to
+The Wizard of Oz:
+
+* **`Mode::start` is three engine calls**: `h = proc_cret(run_id, Mode::start_run_func, 0)`
+  (`proc_cret` is `proc_create(id, fn, flag 2, survive)`), `proc_set_arg(h, 0, this)`,
+  `update_all_soon()` (it only sets a flag). A proc's function gets its handle;
+  `start_run_func` reads `proc_get_arg(handle, 0)`.
+* **`Mode::run_proc`**: `proc_sleep(1)` a tick, 125 (0x7d) ticks to the second, the seconds
+  counted in the object, the tick hook called each tick unless it is the empty default, the
+  timer held while `is_timer_paused`. **`Mode::score_and_total`** is
+  `score_add_to_player_up(points, false)`, which returns what was scored.
+* **The engine's procs** are a list `{proc *, next}` behind an Allegro mutex; a proc has its
+  entry function at +0x1b8 and +0x1e8, id +0x1f0, handle +0x1f8, flags +0x1fc (0x10 on its way
+  out, 0x20 while being made), create flag +0x200, survive +0x204. The head is not exported;
+  the runtime reads it off `proc_id_exists`. A ball end runs
+  `proc_kill_without_survive_flag`, so a run proc made with survive 0 dies there.
+* **The engine is one library**: every name the proc engine calls is exported by both
+  generations with the same mangling and the same size. The Wizard of Oz's code is
+  ciphertext at rest (4,863 of its functions), so this, not its code, is the static evidence.
+* **Yielding without Mode objects**: a game mode is a live proc running one of the game's
+  mode functions (named for a mode, named like Mode's procs, or `<x>_proc` with its own kill
+  function), counted against the procs running it two seconds into the ball. Wonka's
+  `WonkaBarAwardModes::timer_run_proc` runs on to the ball's end after its mode ends, so timer
+  functions are left out.
+* **Hold is impossible there**: the game's mode starts are plain calls, not virtual slots, so
+  nothing can gate them without patching code; `game_modes = hold` runs as `pause`.
+* **The blink**: a sample of the game's composite once read one phase for 8 s on both engines;
+  sampled beside our own layer in the final run, both changed 24 times in 4 s (3 a second).
+  The earlier reads were the sampler, not the lamps.
+
+Fixed on the way: `buildmods.sh` now refuses an implicit function declaration (a lost
+helper built with a warning and failed only at load, `undefined symbol`); a fresh start
+clears an end asked for at the last ball end.
+
 ## Files (PAD-1335 proof, superseded by the SDK above)
 
 - `tools/jjp_emu/jjpmodelist.py`: the live mode roster.

@@ -444,7 +444,7 @@ can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`, and
 | Dialed In! 02.02 | 17,044 | yes | yes |
 | The Hobbit 04.02 | 14,855 | yes | yes |
 | Toy Story 4 02.04 | 21,996 | yes | yes |
-| The Wizard of Oz 08.02 | 12,260 (older engine, no Mode class) | **no** | yes |
+| The Wizard of Oz 08.02 | 12,260 (older engine, no Mode class) | yes, on the proc engine (static) | yes |
 | Harry Potter 01.26 | 233 (no engine) | **no** | yes |
 | Avatar 01.03 | 245 (no engine) | **no** | yes |
 | Sonic 00.925, 00.926 | 246 (no engine) | **no** | yes |
@@ -580,10 +580,66 @@ by name, and their code is ciphertext until the title's own key decrypts it,
 so nothing can be mapped without that key. Custom modes on them need their keys.
 Avatar is built the same way.
 
-**Wizard of Oz 08.02 is an older engine**: it exports 12,260 names, 120 shot
-switches, 149 lamps and 633 sounds, but has no `Mode` class at all, so the
-runtime has nothing to derive a mode from. Custom modes there need their own
-port of the runtime to that engine.
+### The Wizard of Oz: the proc engine (PAD-1365)
+
+**Wizard of Oz 08.02 is JJP's first engine generation**: it exports 12,260 names, 120
+shot switches, 149 lamps and 633 sounds, but has no `Mode` class. Its modes are plain
+functions run on procs, in families named like the later Mode class's own procs:
+`ecmb_run_proc` / `ecmb_grace_proc` / `ecmb_grace_grace_proc` (Emerald City multiball),
+`haunted_`, `sotr_`, `rescue_mb_`, `witch_melt_`, `fireball_frenzy_`, `hurry_build_`,
+`twister_mode_proc_run`, and `mmf_proc`, `mml_proc`, `mmm_proc`, `mmw_proc`, `tnplh_proc`,
+`cbm_proc` (each with its own `<x>_proc_kill_func`).
+
+There the runtime runs a mode on a **proc of its own** (`engine: our own procs` in the log),
+built the way the engine's `Mode::start` runs one, read off Wonka 03.03's decrypted code:
+
+| Piece | Mode engine (every other title) | Proc engine (The Wizard of Oz) |
+|---|---|---|
+| Run | `Mode::start` -> `proc_cret(run_id, Mode::start_run_func, 0)` | `proc_cret(0x7e00 + 3n, our run proc, 0)` (= `proc_create` flag 2, no survive flag) |
+| Clock | `Mode::run_proc`: `proc_sleep(1)`, 125 ticks to the second | the same loop, our own seconds |
+| Points | `Mode::score_and_total` -> `score_add_to_player_up(points, false)` | `score_add_to_player_up(points, false)` |
+| End | `Mode::end`; the ball end kills the run proc | the run proc returns; the ball end kills it (`proc_id_exists` says so) |
+| Lamps, sounds, screen, balls, coils, start rules, own media | the same | the same |
+| Yield | the game's Mode objects (`Mode::is_running`) | live procs running one of the game's mode functions (below) |
+| Hold | the game's Mode / MultiballRule starts gated | **not possible** (no Mode class): `game_modes = hold` runs as `pause`; the checker says so and the app offers pause |
+| `.stock` files | yes | no (no Mode class to change) |
+
+Every function it calls is the same engine function on both generations: the same mangled
+name and the same byte size on Wizard of Oz 08.02 and Wonka 03.03 (`proc_create` 1,382 bytes,
+`score_add_to_player_up` 492, `Lamp::set` 139, ...). The engine's proc list (head not
+exported) is read off the decrypted `proc_id_exists` at install (`mov MUTEX(%rip),%rdi;
+call al_lock_mutex; mov HEAD(%rip),%rax`, then `cmp ID(%rdx)` and `testb $0x10,FLAGS(%rdx)`)
+and the entry function's offset off `proc_create` (`mov %r13,FN(%rbx)`); on Wonka: head
+0xdc64d0, id +0x1f0, flags +0x1fc, entry +0x1b8/+0x1e8.
+
+A game mode is a live proc whose entry is one of the game's **mode functions**: a function of
+the proc's `unsigned` argument named for a mode (`mode` in it), or named like Mode's procs
+(`<x>_run_proc`, `<x>_grace_proc`, `<x>_proc_run`, `<x>_proc_grace...`), or `<x>_proc` with
+an `<x>_proc_kill_func` of its own - never an attract, kill, test, diagnostic, menu, timer,
+lamp effect, lamp, tilt, music, match, choreography or hook function. `jjpport.py` lists
+them (`proc_modes`: 27 on Wizard of Oz) and they are the names `start_after` takes there.
+
+**Proof.** The Wizard of Oz's key is not at hand (the rule for this work: Wonka's key stays
+plugged in), so it is **not emulator-proven on The Wizard of Oz**. What is proven:
+
+* **Emulator, Wonka 03.03, the proc engine forced** (`JJP_MODS_ENGINE=proc`, hidden, muted,
+  `C:\tmp\PAD-1365\proof.sh`), 2026-11-17: the proc list read off the code; a mode
+  started by a start rule at ball start ran its 6 s and ended by its clock; PAD Mode started
+  on the TV target, the game scored each shot (`the game scored 1000000
+  (score_add_to_player_up)`), its 20 s clock ended it; five shots completed it at
+  10,000,000; `lp_gi_tv` ff2000 in our layer and in the game's composite, blinking 3 a
+  second (24 changes in 4 s), the game's white after; with Candy Lane running our start
+  yielded to `Mode::start_run_func`, after it ended ours started, Candy Lane starting under
+  ours paused it (a shot not scored) and its end resumed it; a drain killed our run proc
+  (`over`) and the next ball's rule started a mode again; a multiball with no clock asked
+  for 3 balls, the game's ball saver put 3 in play, and it ran on with no clock.
+* **Statically, The Wizard of Oz 08.02**: `jjpport.py` says it can run modes on the proc
+  engine with every proc-engine name exported; every engine name the runtime looks up is
+  exported except the Mode-class and `.stock` ones the proc engine never uses; its starter
+  folder passes `mkjjpmodes.py check --port`; the runtime built against its own glibc
+  loads with every import bound (`LD_BIND_NOW`) through its own loader on its own root.
+  Its code is Envelope ciphertext at rest (4,863 functions), so its call signatures are
+  confirmed by the mangled names and sizes, not by reading its code.
 
 ### Balls and coils on every title (PAD-1353)
 

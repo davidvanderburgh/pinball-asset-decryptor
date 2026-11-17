@@ -45,9 +45,12 @@ class NetworkTab(TabService):
 
     def _inspect(self):
         mfr = self.mfr
-        if (getattr(mfr, 'key', '') != 'stern'
-                or getattr(mfr, '_era', 'spike2') not in ('spike2', 'spike3')):
+        if not ssh_card.offered(mfr):
             return dict(supported=False, reason='Remote access works on Stern Spike 2 and Spike 3 cards only.',
+                        enabled=False, public_keys='')
+        if not self._source():
+            # PAD-1399: no card picked yet read as "needs a regular card image file, not a device"
+            return dict(supported=False, reason='Select the card image first (Select card tab).',
                         enabled=False, public_keys='')
         return ssh_card.inspect_image(self._source())
 

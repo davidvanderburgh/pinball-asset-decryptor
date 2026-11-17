@@ -59,6 +59,11 @@ PHASE_ROW_BY_KEY = {
     "Partition Explorer": None, "Default Settings": None, "Test Card": None,
 }
 
+def _ssh_offered(mfr):
+    from ..core.ssh_card import offered
+    return offered(mfr)
+
+
 def _testcard_available(mfr):
     from .testcard_core import available
     return available(mfr)
@@ -544,8 +549,9 @@ class WebWindow:
             "Attract": g("modes"),
             # PAD-1204: the play options ride it too, and keep Insider Connected
             "Play Options": g("modes"),
-            # PR #38 review: the score feed and remote access, both for a machine on the owner's network
-            "Network": g("modes"),
+            # PR #38 review: the score feed and remote access, both for a machine on the owner's network.
+            # PAD-1399: remote access is Spike 3's too, so the tab is shown wherever either one is offered
+            "Network": g("modes") or _ssh_offered(mfr),
             # PAD-1382: the service menu with the app's rows in it (Stern Spike 2, the mode runtime's)
             "Service Menu": g("modes"),
             # PAD-1040: the expression light shows ride it too, and are no part of the mode maker

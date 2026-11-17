@@ -497,3 +497,35 @@ def test_coil_pickers_offer_the_ports_coils(tmp_path, preview_on):
         if label["can_run"]:
             p = CM.load_port(label["label"]) or {}
             assert CM.names_for(p, "coil_pulse"), label["label"]     # every runnable title has coils to pick
+
+
+def test_a_mode_started_by_start_rules_says_so_in_the_list(tmp_path, preview_on):
+    """PAD-1377: a mode needs no start switch now; the list says what starts it."""
+    with web_app(tmp_path, mfr="jjp") as w:
+        j = _open_wonka(w)
+        first = j["open"]
+        assert j["modes"][0]["starts"] == j["modes"][0]["start"]           # the starter's switch
+        w.call("modes.jjp_set", "start", "")
+        j = _jjp(w)
+        assert not j["check"]["ok"] and j["modes"][0]["starts"] == ""     # nothing starts it
+        w.call("modes.jjp_set", "start_on", "ball_start multiball_end")
+        w.call("modes.jjp_set", "start_after", "any")
+        w.call("modes.jjp_set", "start_combo", "switch_ramp_left_made switch_ramp_center_made")
+        w.call("modes.jjp_set", "start_once", "ball")
+        j = _jjp(w)
+        assert j["check"]["ok"], j["check"]
+        row = [m for m in j["modes"] if m["file"] == first][0]
+        assert row["start"] == ""
+        assert row["starts"] == ("on ball_start multiball_end; after any; "
+                                 "combo switch_ramp_left_made switch_ramp_center_made")
+        text = open(os.path.join(j["folder"], first), encoding="utf-8").read().splitlines()
+        assert "start_on = ball_start multiball_end" in text and "start_once = ball" in text
+
+
+def test_the_tips_tell_the_start_rules():
+    from pinball_decryptor.webui import help_content as H
+    making = dict(H.JJP_MODES_HELP)["Making a mode"][0]
+    for label in ("Starts on a game event", "Starts after a game mode ends", "Starts at a score",
+                  "Starts on a combo", "Combo seconds", "Start count resets", "Starts at most once a"):
+        assert label in making, label
+        assert label.split(" (")[0] in " ".join(CM.LABELS.values()), label     # the form's own words

@@ -64,7 +64,7 @@ PADMODES_SH = """#!/bin/sh
 if [ -r $JJPEDIR/padmodes/jjpmodes.so ] && [ ! -e %(off)s ]; then
     export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD }$JJPEDIR/padmodes/jjpmodes.so"
     export JJP_MODS_DIR=$JJPEDIR/padmodes/modes
-    echo "PAD custom modes: $(ls $JJPEDIR/padmodes/modes | grep -c '\\.mode$') mode(s) loaded"
+    echo "PAD custom modes: $(ls $JJPEDIR/padmodes/modes | grep -c '\\.mode$') mode(s), $(ls $JJPEDIR/padmodes/modes | grep -c '\\.stock$') changed game mode(s) loaded"
 fi
 """ % {"off": OFF_SWITCH}
 
@@ -90,9 +90,16 @@ KEYS = collections.OrderedDict([
 TITLE_KEYS = collections.OrderedDict([
     ("game", "text"), ("ingame_state", "int"), ("background_modes", "modes"),
 ])
-MAX_MODES, MAX_LIST, MAX_SHOT_SWITCHES = 24, 24, 96
+#: keys a .stock file takes (jjpmodes.c apply_stock_kv): one of the GAME's own modes, changed (PAD-1351)
+STOCK_KEYS = collections.OrderedDict([
+    ("mode", "stockmode"), ("seconds", "int"), ("points", "int"), ("points_x", "decimal"),
+    ("shots_off", "shots"), ("shots_add", "shotadds"),
+])
+MAX_MODES, MAX_LIST, MAX_SHOT_SWITCHES, MAX_STOCK = 24, 24, 96, 32
+MODE_FILES = (".mode", ".stock")
 _INT = re.compile(r"^-?[0-9][0-9,_]*$")
 _HEX = re.compile(r"^#?[0-9A-Fa-f]+$")
+_DEC = re.compile(r"^[0-9]+(\.[0-9]+)?$")
 
 
 def parse_cfg(text):
@@ -121,6 +128,29 @@ def check_value(kind, v, port=None):
         return None if v in kind else "must be one of %s" % ", ".join(kind)
     if kind == "int":
         return None if _INT.match(v) else "must be a whole number"
+    if kind == "decimal":
+        return None if _DEC.match(v) else "must be a number such as 2 or 1.5"
+    if kind == "shotadds":
+        bad = [t for t in _names(v) if t.count(":") != 1 or t.startswith(":") or t.endswith(":")]
+        if bad:
+            return "wants switch:shot pairs, not %s" % " ".join(bad)
+        if port is None:
+            return None
+        p = check_value("switches", " ".join(t.split(":")[0] for t in _names(v)), port)
+        return p or check_value("shots", " ".join(t.split(":")[1] for t in _names(v)), port)
+    if kind == "shots":
+        stock = (port or {}).get("stock") or {}
+        known = set(s["name"] for s in stock.get("shots") or [])
+        if not known:
+            return None       # this title's shot names are read on the machine (jjpmodes.log)
+        missing = [t for t in _names(v) if t not in known and not t.isdigit()]
+        return None if not missing else "no shot called %s on this title" % " ".join(missing)
+    if kind == "stockmode":
+        stock = (port or {}).get("stock") or {}
+        if port is None or not stock:
+            return None
+        known = set(stock.get("classes") or {}) | set(stock.get("objects") or {})
+        return None if v in known else "is not one of this title's modes (its mode global or class)"
     if kind in ("rgb", "rgba"):
         h = v.lstrip("#")
         ok = _HEX.match(v) and len(h) in ((6,) if kind == "rgb" else (6, 8))
@@ -160,8 +190,9 @@ def check_modes(mode_dir, port=None):
                     problems.append("title.cfg:%d: %s %s" % (n, k, p))
                 title[k] = v
     files = sorted(f for f in os.listdir(mode_dir) if f.endswith(".mode"))
-    if not files:
-        problems.append("no .mode files in %s" % mode_dir)
+    stocks = sorted(f for f in os.listdir(mode_dir) if f.endswith(".stock"))
+    if not files and not stocks:
+        problems.append("no .mode or .stock files in %s" % mode_dir)
     if len(files) > MAX_MODES:
         problems.append("%d modes: the runtime takes %d, the rest are ignored" % (len(files), MAX_MODES))
     shot_switches = set()
@@ -189,6 +220,36 @@ def check_modes(mode_dir, port=None):
         m.setdefault("name", fn[:-5])
         for k in ("start", "shots"):
             shot_switches.update(_names(m.get(k, "")))
+        modes.append(m)
+    if len(stocks) > MAX_STOCK:
+        problems.append("%d .stock files: the runtime takes %d, the rest are ignored" % (len(stocks), MAX_STOCK))
+    seen = {}
+    for fn in stocks:
+        with open(os.path.join(mode_dir, fn), encoding="utf-8", errors="replace") as f:
+            rows = parse_cfg(f.read())
+        m = {"file": fn, "stock": True}
+        for n, k, v in rows:
+            kind = STOCK_KEYS.get(k)
+            if kind is None:
+                problems.append("%s:%d: unknown key %s (a .stock file takes %s)" % (fn, n, k, ", ".join(STOCK_KEYS)))
+                continue
+            p = check_value(kind, v, port)
+            if p:
+                problems.append("%s:%d: %s %s" % (fn, n, k, p))
+            if kind in ("shots", "shotadds") and len(_names(v)) > MAX_LIST:
+                problems.append("%s:%d: %s lists %d; the runtime takes %d" % (fn, n, k, len(_names(v)), MAX_LIST))
+            m[k] = v
+        if not m.get("mode"):
+            problems.append("%s: no mode = <the game's mode> (its global, e.g. cl_mode, or its class)" % fn)
+        elif m["mode"] in seen:
+            problems.append("%s: %s is already changed by %s (the runtime keeps the first)" % (fn, m["mode"], seen[m["mode"]]))
+        else:
+            seen[m["mode"]] = fn
+        if m.get("points") and m.get("points_x"):
+            problems.append("%s: points and points_x both set (points wins)" % fn)
+        if not any(m.get(k) for k in ("seconds", "points", "points_x", "shots_off", "shots_add")):
+            problems.append("%s: changes nothing (seconds, points, points_x, shots_off or shots_add)" % fn)
+        shot_switches.update(t.split(":")[0] for t in _names(m.get("shots_add", "")))
         modes.append(m)
     if len(shot_switches) > MAX_SHOT_SWITCHES:
         problems.append("%d different shot switches; the runtime wraps %d" % (len(shot_switches), MAX_SHOT_SWITCHES))
@@ -266,7 +327,7 @@ def stage_modes(mj, raw, so_path, mode_dir, manifest):
         put(so_path, PADMODES_DIR + "/jjpmodes.so", 0o755)
         for fn in sorted(os.listdir(mode_dir)):
             p = os.path.join(mode_dir, fn)
-            if os.path.isfile(p) and (fn.endswith(".mode") or fn == "title.cfg"):
+            if os.path.isfile(p) and (fn.endswith(MODE_FILES) or fn == "title.cfg"):
                 put(p, PADMODES_DIR + "/modes/" + fn, 0o644)
         put(PADMODES_SH.encode(), MODES_HOOK, 0o755)
         with open(rg, "r", encoding="utf-8", errors="surrogateescape") as f:
@@ -323,7 +384,9 @@ def build(a):
                 ("source_iso", os.path.basename(iso)), ("title", info.title or info.name),
                 ("game_version", info.game_version),
                 ("modes", [collections.OrderedDict((k, m_.get(k, "")) for k in ("file", "name", "start", "seconds", "points"))
-                           for m_ in modes]),
+                           for m_ in modes if not m_.get("stock")]),
+                ("stock", [collections.OrderedDict((k, m_.get(k, "")) for k in ("file",) + tuple(STOCK_KEYS))
+                           for m_ in modes if m_.get("stock")]),
                 ("so_sha256", sha256_file(so)),
             ])
             staged = stage_modes(mj, work_raw, so, a.modes, manifest)
@@ -335,7 +398,7 @@ def build(a):
             os.makedirs(os.path.join(iso_dir, "modes"))
             for fn in os.listdir(a.modes):
                 p = os.path.join(a.modes, fn)
-                if os.path.isfile(p) and (fn.endswith(".mode") or fn == "title.cfg"):
+                if os.path.isfile(p) and (fn.endswith(MODE_FILES) or fn == "title.cfg"):
                     shutil.copyfile(p, os.path.join(iso_dir, "modes", fn))
             manifest["staged"] = dict(staged)
             with open(os.path.join(iso_dir, "build.json"), "w") as f:
@@ -373,6 +436,9 @@ def inspect(a):
         for m in man.get("modes", []):
             print("  %-24s start %-28s %s s, %s a shot" % (m.get("name"), m.get("start"), m.get("seconds") or "20",
                                                            m.get("points") or "1000000"))
+        for m in man.get("stock", []):
+            print("  game mode %-14s %s" % (m.get("mode"), ", ".join("%s %s" % (k, m[k]) for k in STOCK_KEYS
+                                                                      if k != "mode" and m.get(k))))
         return 0
     finally:
         shutil.rmtree(d, ignore_errors=True)
@@ -402,7 +468,10 @@ def main(argv=None):
             port = json.load(open(a.port)) if a.port else None
             modes, problems = check_modes(a.modes, port)
             for m in modes:
-                print("mode %-28s start %s" % (m["name"], m.get("start", "")))
+                if m.get("stock"):
+                    print("game mode %-23s %s" % (m.get("mode", "?"), m["file"]))
+                else:
+                    print("mode %-28s start %s" % (m["name"], m.get("start", "")))
             for p in problems:
                 print("problem: " + p)
             print("%d mode(s), %d problem(s)" % (len(modes), len(problems)))

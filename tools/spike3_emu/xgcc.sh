@@ -103,7 +103,9 @@ fi
 # only where the system's own binutils-aarch64-linux-gnu was installed too, so a
 # machine without it (the shipped runtime, a CI runner) failed every Spike 3 code
 # mode with "libopcodes-2.42-arm64.so: cannot open shared object file".  The folder
-# holds only those arm64 libraries, so nothing of the system's is shadowed.
+# also holds the pinned host libraries those programs load (libsframe, libisl, libmpc,
+# libmpfr, libjansson; PAD-1345), so a newer Linux without them builds too; only the
+# kit's own programs run under the wrapper, so nothing else sees them.
 if ! grep -qs "own libs" "$W" || ! grep -qs "own libs" "$P/s3nm"; then
     cat > "$W.tmp" <<'EOF'
 #!/bin/sh

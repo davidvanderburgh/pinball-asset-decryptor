@@ -102,6 +102,9 @@ def test_the_pins_are_whole_and_from_the_runtimes_snapshot():
         names.add(os.path.basename(path).split("_")[0])
     assert {"binutils-aarch64-linux-gnu", "gcc-13-aarch64-linux-gnu", "cpp-13-aarch64-linux-gnu",
             "libgcc-13-dev-arm64-cross", "libc6-dev-arm64-cross"} <= names
+    # PAD-1345: the host libraries its programs load, which Ubuntu 26.04 (CI) lacks: as/ld need libsframe.so.1,
+    # gold libjansson.so.4, cc1 libisl.so.23/libmpc.so.3/libmpfr.so.6
+    assert {"libsframe1", "libjansson4", "libisl23", "libmpc3", "libmpfr6"} <= names
     # the runtime's own toolchain versions (its arm cross gcc and binutils): their libraries are there
     assert any("_2.42-4ubuntu2.10_" in p for _s, _z, p in rows)
     assert any("_13.3.0-6ubuntu2~24.04.1cross1_" in p for _s, _z, p in rows)

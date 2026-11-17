@@ -345,8 +345,9 @@ def test_extras_refresh_modified_files_after_an_unchanged_scan(tmp_path, monkeyp
         assert w.call('extras.configure', False, key(), str(proj)) is True
         w.call('ui.select_tab', 'write')
         assert wait_for(w, lambda: not w.state('write')['scanning'])
-        assert any('SSH server' in row['file'] and 'disable' in row['file']
-                   for row in w.state('write')['rows'])
+        assert w.state('write')['rows'] == []
+        assert not w.run(w.window._has_pending_write_changes)
+        assert w.state('extras')['public_keys'].strip() == key()
 
 
 def test_extras_count_as_changes_before_preview_refresh(tmp_path, monkeypatch):

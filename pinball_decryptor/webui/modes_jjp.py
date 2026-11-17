@@ -110,11 +110,16 @@ class JjpModesMixin:
     def _jjp_fields(self):
         """{key: {label, kind, default, choices}} for every key the form shows."""
         out = {}
+        port = (CM.load_port(self._jjp_label) if self._jjp_label else None) or {}
         for k in list(CM.mk().KEYS) + ["ingame_state", "background_modes"]:
             kind = CM.key_kind(k)
             choices = list(kind) if isinstance(kind, tuple) else []
+            default = CM.DEFAULTS.get(k, "")
+            if k == "game_modes" and port.get("engine") == "proc":
+                # PAD-1365: no Mode class to hold off (The Wizard of Oz): a game mode pauses ours
+                choices, default = [c for c in choices if c != "hold"], "pause"
             out[k] = {"label": CM.LABELS.get(k, k), "kind": "choice" if choices else kind,
-                      "choices": choices, "default": CM.DEFAULTS.get(k, "")}
+                      "choices": choices, "default": default}
         return out
 
     def _jjp_check_state(self):

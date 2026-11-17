@@ -138,6 +138,25 @@ static uintptr_t our_vt[MODE_VT_SLOTS + 2];
 
 static inline void *vslot(void *obj, int off) { return *(void **)(*(char **)obj + off); }
 
+/* PAD-1365: JJP's first engine generation (The Wizard of Oz 08.02) has no
+ * Mode class; its modes are plain functions run on procs (twister_mode_start,
+ * twister_mode_proc_run ...).  There a custom mode runs as the engine's
+ * Mode::start does it, read off Wonka 03.03's decrypted Mode code, but with
+ * our own function as the run proc: proc_cret(id, fn, survive 0) (=
+ * proc_create flag 2), one proc_sleep(1) a tick at 125 ticks a second, the
+ * seconds counted by us, points through score_add_to_player_up(points, false)
+ * (Mode::score_and_total's own call).  The ball end kills it as it kills every
+ * proc without a survive flag; proc_id_exists says so.  Every name is the
+ * same mangled engine function on both generations (same sizes too), so the
+ * path is proven on Wonka with JJP_MODS_ENGINE=proc. */
+static int engine_proc;                /* 1: modes run on procs of ours (no Mode class, or JJP_MODS_ENGINE=proc) */
+static unsigned (*p_cret)(unsigned, void (*)(unsigned), int);
+static unsigned (*p_create)(unsigned, void (*)(unsigned), int, int);
+static void (*p_sleep)(unsigned);
+static int (*p_exists)(unsigned);
+static unsigned long long (*score_up)(unsigned long long, int);
+#define PROC_TICKS 125                 /* Mode::run_proc: 0x7d ticks of proc_sleep(1) to the second */
+
 /* ---- definitions ----------------------------------------------------------- */
 #define MAX_MODES 24
 #define MAX_LIST  24
@@ -216,6 +235,10 @@ typedef struct {
     long pending_log;
     unsigned score_done;                  /* start_score: bit p = player p already started it this game */
     int runs_ball, runs_game;
+    /* the proc engine (PAD-1365): our own run proc, our own clock */
+    unsigned pid;                         /* its proc id */
+    volatile int p_on, p_seen;            /* running; the proc has run once */
+    long p_at;                            /* ms clock it was created */
 } pm_t;
 
 static pm_t pms[MAX_MODES];
@@ -766,6 +789,12 @@ static void *gmodes[MAX_GAME_MODES];
 static const char *gmode_sym[MAX_GAME_MODES];
 static unsigned char gmode_bg[MAX_GAME_MODES];
 static int ngm;
+/* PAD-1365, the proc engine: a game mode is a proc whose entry is one of the
+ * game's exported mode functions (gmode_isproc: gmodes[i] is that function).
+ * It runs while more procs run it than ran it two seconds into the ball (one
+ * function can run several modes: Wonka's Mode::start_run_func runs all). */
+static unsigned char gmode_isproc[MAX_GAME_MODES];
+static int gmode_bgn[MAX_GAME_MODES];
 
 /* Walk the main program's dynamic symbol table in memory (DT_HASH nchain is
  * the count, as jjpelf.py reads it).  cb gets every defined object symbol. */
@@ -828,11 +857,156 @@ static void find_game_modes(void)
 
 static int is_ours(void *o) { for (int i = 0; i < npm; i++) if (pms[i].mode == o) return 1; return 0; }
 
+/* ---- the game's procs (PAD-1365) -------------------------------------------
+ * The engine keeps its procs in a list whose head is not exported.  Read off
+ * Wonka 03.03's decrypted proc_id_exists (the same function, same size, on
+ * The Wizard of Oz 08.02):
+ *     mov  MUTEX(%rip),%rdi ; call al_lock_mutex ; mov HEAD(%rip),%rax
+ *     ... node {proc *, next}: mov (%rax),%rdx ; cmp ID(%rdx),%ebx
+ *     testb $0x10,FLAGS(%rdx)          (a proc on its way out)
+ * and proc_create's `mov %rsi,%r13` ... `mov %r13,FN(%rbx)` (the entry
+ * function, stored twice: 0x1b8 and 0x1e8 on Wonka).  Everything is read off
+ * the code at install; a title whose code differs gets no proc yields (logged). */
+static void *call_import(const unsigned char *c);
+static void **plist_head, **plist_mutex;
+static int poff_id = -1, poff_flags = -1, poff_fn[2] = { -1, -1 };
+static void (*al_lock_)(void *), (*al_unlock_)(void *);
+static int plist_ok;
+static int learn_proc_list(void)
+{
+    const unsigned char *c = sym("_Z14proc_id_existsj"), *pc = sym("_Z11proc_createjPFvjE18proc_create_flag_t14proc_survive_t");
+    al_lock_ = (void (*)(void *))sym("al_lock_mutex"); al_unlock_ = (void (*)(void *))sym("al_unlock_mutex");
+    if (!c || !pc || !p_exists || !al_lock_ || !al_unlock_) { lg("procs: proc_id_exists/proc_create/al_lock_mutex missing"); return 0; }
+    p_exists(0);                         /* decrypt it (it returns at once for id 0) */
+    for (int i = 0; i < 0x40 && !plist_head; i++)
+        if (c[i] == 0x48 && c[i + 1] == 0x8b && c[i + 2] == 0x3d && c[i + 7] == 0xe8
+            && c[i + 12] == 0x48 && c[i + 13] == 0x8b && c[i + 14] == 0x05) {
+            void *lock = call_import(c + i + 7);
+            if (lock != (void *)al_lock_) { lg("procs: proc_id_exists locks through %p, not al_lock_mutex", lock); return 0; }
+            int32_t d1, d2; memcpy(&d1, c + i + 3, 4); memcpy(&d2, c + i + 15, 4);
+            plist_mutex = (void **)(c + i + 7 + d1);
+            plist_head = (void **)(c + i + 19 + d2);
+        }
+    for (int i = 0; i < 0x80 && plist_head; i++) {
+        if (poff_id < 0 && c[i] == 0x3b && c[i + 1] == 0x9a) memcpy(&poff_id, c + i + 2, 4);
+        if (poff_flags < 0 && c[i] == 0xf6 && c[i + 1] == 0x82 && c[i + 6] == 0x10) memcpy(&poff_flags, c + i + 2, 4);
+    }
+    int nf = 0, r13 = 0;
+    for (int i = 0; i < 0x500 && nf < 2; i++) {
+        if (pc[i] == 0x49 && pc[i + 1] == 0x89 && pc[i + 2] == 0xf5) r13 = 1;
+        if (r13 && pc[i] == 0x4c && pc[i + 1] == 0x89 && pc[i + 2] == 0xab) memcpy(&poff_fn[nf++], pc + i + 3, 4);
+    }
+    plist_ok = plist_head && poff_id > 0 && poff_flags > 0 && poff_fn[0] > 0 && poff_id < 0x1000 && poff_flags < 0x1000
+               && poff_fn[0] < 0x1000 && poff_fn[1] < 0x1000;
+    lg("procs: list %s (head %p, lock %p; id +%#x, flags +%#x, entry +%#x/+%#x)", plist_ok ? "read" : "NOT READ",
+       (void *)plist_head, (void *)plist_mutex, poff_id, poff_flags, poff_fn[0], poff_fn[1]);
+    return plist_ok;
+}
+
+/* How many live procs run each game-mode function, cached for 20 ms. */
+static int pcount[MAX_GAME_MODES];
+static long pcount_at = -1000;
+static pthread_mutex_t pcount_mu = PTHREAD_MUTEX_INITIALIZER;
+static void proc_counts(void)
+{
+    long t = now_ms();
+    if (!plist_ok || t - pcount_at < 20) return;
+    pthread_mutex_lock(&pcount_mu);
+    if (t - pcount_at >= 20) {
+        int n[MAX_GAME_MODES]; memset(n, 0, sizeof n);
+        void *mx = *plist_mutex;
+        if (mx) al_lock_(mx);
+        int k = 0;
+        for (void **node = (void **)*plist_head; node && k < 4096; node = (void **)node[1], k++) {
+            char *p = (char *)node[0];
+            if (!p || (*(unsigned *)(p + poff_flags) & 0x30)) continue;    /* 0x10 dying, 0x20 being made */
+            uintptr_t f0 = *(uintptr_t *)(p + poff_fn[0]), f1 = poff_fn[1] > 0 ? *(uintptr_t *)(p + poff_fn[1]) : f0;
+            for (int i = 0; i < ngm; i++)
+                if (gmode_isproc[i] && ((uintptr_t)gmodes[i] == f1 || (uintptr_t)gmodes[i] == f0)) { n[i]++; break; }
+        }
+        if (mx) al_unlock_(mx);
+        memcpy(pcount, n, sizeof pcount);
+        pcount_at = t;
+    }
+    pthread_mutex_unlock(&pcount_mu);
+}
+
 static int gm_running(int i)
 {
+    if (gmode_isproc[i]) { proc_counts(); return pcount[i] > gmode_bgn[i]; }
     void *o = gmodes[i];
     if (*(uintptr_t *)o == 0) return 0;
     return ((vbool_t)vslot(o, VT_IS_RUNNING))(o) & 0xff;
+}
+
+/* `_Z<n>NAMEj` -> NAME, `_ZN<n>A<n>BEj` -> A::B (a function of one unsigned), else NULL. */
+static const char *demangle_proc_fn(const char *n, char *out, size_t cap)
+{
+    size_t L = strlen(n);
+    if (L < 5 || strncmp(n, "_Z", 2) || n[L - 1] != 'j') return NULL;
+    const char *p = n + 2; size_t o = 0; int nested = 0;
+    if (*p == 'N') { nested = 1; p++; }
+    for (;;) {
+        if (*p < '1' || *p > '9') break;
+        long k = 0; const char *e = p;
+        while (*e >= '0' && *e <= '9' && k < 100000) k = k * 10 + (*e++ - '0');
+        if (k <= 0 || (size_t)k > strlen(e) || o + (size_t)k + 3 >= cap) return NULL;
+        if (o) { out[o++] = ':'; out[o++] = ':'; }
+        memcpy(out + o, e, (size_t)k); o += (size_t)k; out[o] = 0;
+        p = e + k;
+        if (!nested) break;
+    }
+    if (!o) return NULL;
+    if (nested) { if (strcmp(p, "Ej")) return NULL; }
+    else if (strcmp(p, "j")) return NULL;
+    return out;
+}
+/* The game's mode functions, by exported name: a function of the proc's
+ * unsigned argument (`_Z<n>NAMEj`, or a member `_ZN...Ej`) that is
+ *   - named for a mode ("mode" in it: twister_mode_proc_run, Mode::start_run_func),
+ *   - or named like Mode's own procs: <x>_run_proc, <x>_grace_proc,
+ *     <x>_grace_grace_proc (The Wizard of Oz 08.02: ecmb_, haunted_, sotr_,
+ *     rescue_mb_, witch_melt_, fireball_frenzy_, hurry_build_ ...),
+ *   - or a proc <x>_proc with a kill function of its own, <x>_proc_kill_func
+ *     (mmf_proc, mml_proc, mmm_proc, mmw_proc, tnplh_proc, cbm_proc ...).
+ * Not: attract, kill, test, diagnostic, menu, timer, lamp effect (leff),
+ * lamp, tilt, music, match, choreography and hook functions (Wonka's
+ * WonkaBarAwardModes::timer_run_proc runs on to the ball's end after its mode
+ * ended).  jjpport.py proc_modes is the twin. */
+static const char *const PROC_MODE_NOT[] = { "amode", "attract", "kill", "jukebox", "timer", "test", "diag", "menu",
+                                              "leff", "_lef", "lamp", "tilt", "music", "match", "hook_", "multiled",
+                                              "choreo", NULL };
+static int ends_with(const char *s, const char *t) { size_t a = strlen(s), b = strlen(t); return a >= b && !strcmp(s + a - b, t); }
+static void cb_proc_modes(const char *name, uintptr_t a, size_t sz)
+{
+    (void)sz;
+    char d[160];
+    if (ngm >= MAX_GAME_MODES || !demangle_proc_fn(name, d, sizeof d)) return;
+    char low[160]; size_t i = 0;
+    for (; d[i] && i < sizeof low - 1; i++) low[i] = (char)((d[i] >= 'A' && d[i] <= 'Z') ? d[i] + 32 : d[i]);
+    low[i] = 0;
+    for (int k = 0; PROC_MODE_NOT[k]; k++) if (strstr(low, PROC_MODE_NOT[k])) return;
+    int is = strstr(low, "mode") || ends_with(low, "run_proc") || ends_with(low, "grace_proc")
+             || ends_with(low, "proc_run") || ends_with(low, "proc_grace") || ends_with(low, "proc_grace_grace");
+    if (!is && ends_with(low, "_proc") && !strchr(d, ':')) {
+        char kf[200]; snprintf(kf, sizeof kf, "_Z%zu%s_kill_funcj", strlen(d) + 10, d);
+        is = sym(kf) != NULL;
+    }
+    if (!is) return;
+    gmode_sym[ngm] = strdup(d); gmodes[ngm] = (void *)a; gmode_isproc[ngm] = 1; ngm++;
+}
+static void find_proc_modes(void)
+{
+    walk_dynsym_type(STT_FUNC, cb_proc_modes);
+    for (int i = 0; i < ngm; i++)
+        if (background_explicit) {
+            char k[160]; snprintf(k, sizeof k, " %s ", gmode_sym[i]);
+            gmode_bg[i] = strstr(background_names, k) != NULL;
+        }
+    int ok = learn_proc_list();
+    char names[1024]; size_t o = 0; names[0] = 0;
+    for (int i = 0; i < ngm && o < sizeof names - 80; i++) o += snprintf(names + o, sizeof names - o, " %s", gmode_sym[i]);
+    lg("game modes: %d mode function(s) run as procs%s:%s", ngm, ok ? "" : " (NOT watched: the proc list was not read)", names);
 }
 
 /* What a custom mode would be yielding to right now, or NULL. */
@@ -1740,6 +1914,7 @@ static void build_lamp_buffer(void)
                 lg("%s: lamp #%d is a lamp group", pms[i].file, l);
 }
 
+static void (*upd_soon)(void);
 static void lamps_show(pm_t *m, int on)
 {
     if (!our_lb) return;
@@ -2011,12 +2186,9 @@ static void pad_total_choreo(void *self)
     pm_t *m = pm_of(self);
     if (m) lg("\"%s\": total choreo (mode total %lld)", m->name, m->total);
 }
-static void pad_tick_work(void *self, int arg)
+/* One tick of a running mode, on its run proc (either engine). */
+static void mode_tick(pm_t *m)
 {
-    (void)arg;
-    pm_t *m = pm_of(self);
-    if (!m) return;
-    m->secs = *(int *)((char *)self + mode_seconds_off);
     /* The lamps, from the mode's own run proc (the game's proc thread, ~125
      * ticks a second, where the game sets its own lamps) - not from the frame
      * hook, whose rate is the renderer's (about 1 a second on a busy hidden
@@ -2031,6 +2203,14 @@ static void pad_tick_work(void *self, int arg)
         int want = music_wanted(m), have = music_claimed == idx + 1;
         if (want != have && now_ms() - music_asked_at >= 500) music_reconsider(want ? "mode running" : "mode over or paused");
     }
+}
+static void pad_tick_work(void *self, int arg)
+{
+    (void)arg;
+    pm_t *m = pm_of(self);
+    if (!m) return;
+    m->secs = *(int *)((char *)self + mode_seconds_off);
+    mode_tick(m);
     const char *why = m->want_end;
     if (why) {      /* in the mode's own run proc: where the game itself ends a mode */
         m->want_end = NULL;
@@ -2046,11 +2226,59 @@ static void pad_end(void *self)
     pm_t *m = pm_of(self);
     if (m && m->music && music_claimed == (int)(m - pms) + 1) music_reconsider("mode ended");
 }
+/* a multiball with no clock, or one whose balls came on its switch, runs to one ball left */
+static int timer_held(pm_t *m) { return m->paused || m->no_clock || (m->nmb_on && m->mb_served); }
 static int pad_is_timer_paused(void *self)
 {
     pm_t *m = pm_of(self);
-    /* a multiball with no clock, or one whose balls came on its switch, runs to one ball left */
-    return m ? m->paused || m->no_clock || (m->nmb_on && m->mb_served) : 0;
+    return m ? timer_held(m) : 0;
+}
+
+/* ---- the proc engine's run proc (PAD-1365) ----------------------------------
+ * Mode::run_proc's loop with our own body: tick, proc_sleep(1), and a second
+ * off the clock every 125 ticks the timer is not held.  It ends by returning
+ * (the time, or an end asked for: completion, a multiball down to one ball,
+ * game_modes = end); a ball end kills it without a return, as the game's own. */
+static void proc_run(int idx)
+{
+    pm_t *m = &pms[idx];
+    m->p_seen = 1;
+    int ticks = PROC_TICKS;
+    const char *why = "time";
+    while (m->p_on) {
+        mode_tick(m);
+        if (m->want_end) { why = m->want_end; break; }
+        p_sleep(1);
+        if (!m->p_on) { why = "the runtime"; break; }
+        if (!timer_held(m) && --ticks <= 0) {
+            ticks = PROC_TICKS;
+            if (m->secs > 0) m->secs--;
+            if (m->secs <= 0) break;
+        }
+    }
+    m->want_end = NULL;
+    m->p_on = 0;
+    lg("\"%s\" ENDED by %s (mode total %lld)", m->name, why, m->total);
+    if (m->music && music_claimed == idx + 1) music_reconsider("mode ended");
+}
+#define PR(i) static void proc_run_##i(unsigned h) { (void)h; proc_run(i); }
+PR(0) PR(1) PR(2) PR(3) PR(4) PR(5) PR(6) PR(7) PR(8) PR(9) PR(10) PR(11)
+PR(12) PR(13) PR(14) PR(15) PR(16) PR(17) PR(18) PR(19) PR(20) PR(21) PR(22) PR(23)
+static void (*const proc_runs[])(unsigned) = {
+    proc_run_0, proc_run_1, proc_run_2, proc_run_3, proc_run_4, proc_run_5, proc_run_6, proc_run_7, proc_run_8,
+    proc_run_9, proc_run_10, proc_run_11, proc_run_12, proc_run_13, proc_run_14, proc_run_15, proc_run_16,
+    proc_run_17, proc_run_18, proc_run_19, proc_run_20, proc_run_21, proc_run_22, proc_run_23 };
+_Static_assert(sizeof proc_runs / sizeof *proc_runs == MAX_MODES, "one run proc per mode slot");
+
+/* The proc engine's pieces, all engine functions exported on both generations. */
+static int proc_api(void)
+{
+    p_cret = (unsigned (*)(unsigned, void (*)(unsigned), int))sym("_Z9proc_cretjPFvjE14proc_survive_t");
+    p_create = (unsigned (*)(unsigned, void (*)(unsigned), int, int))sym("_Z11proc_createjPFvjE18proc_create_flag_t14proc_survive_t");
+    p_sleep = (void (*)(unsigned))sym("_Z10proc_sleepj");
+    p_exists = (int (*)(unsigned))sym("_Z14proc_id_existsj");
+    score_up = (unsigned long long (*)(unsigned long long, int))sym("_Z22score_add_to_player_upyb");
+    return (p_cret || p_create) && p_sleep && p_exists && score_up;
 }
 
 /* Find each virtual by address.  `nth` picks among equal addresses: the
@@ -2091,6 +2319,11 @@ static int resolve_vtable(void)
 static int build_mode(pm_t *m, int idx)
 {
     if (m->mode) return 1;
+    if (engine_proc) {          /* no engine object: m->mode only marks the mode built (and ours) */
+        m->mode = calloc(1, 16);
+        m->pid = 0x7e00 + idx * 3;    /* clear of the game's (Wonka: 0x7531-0x7535 the highest seen) */
+        return 1;
+    }
     if (!mode_ctor) return 0;
     m->mode = calloc(1, MODE_OBJ_BYTES);
     /* ids and proc ids clear of the game's (GnR's modes: 0..911, procs 0x27xx-0x28xx) */
@@ -2113,7 +2346,23 @@ static int build_mode(pm_t *m, int idx)
     return 1;
 }
 
-static int running(pm_t *m) { return m->mode && (((vbool_t)vslot(m->mode, VT_IS_RUNNING))(m->mode) & 0xff); }
+static int running(pm_t *m)
+{
+    if (!m->mode) return 0;
+    if (engine_proc)      /* on, and its proc alive (or not yet run: made, waiting for its first turn) */
+        return m->p_on && ((p_exists(m->pid) & 0xff) || (!m->p_seen && now_ms() - m->p_at < 2000));
+    return ((vbool_t)vslot(m->mode, VT_IS_RUNNING))(m->mode) & 0xff;
+}
+/* Points through the game's scoring: Mode::score_and_total, or (the proc
+ * engine) the call it makes itself. */
+static void mode_score(pm_t *m, long long pts)
+{
+    if (engine_proc) {
+        unsigned long long got = score_up((unsigned long long)pts, 0);
+        lg("\"%s\": the game scored %llu (score_add_to_player_up)", m->name, got);
+    }
+    else ((vull_t)vslot(m->mode, VT_SCORE))(m->mode, (unsigned long long)pts);
+}
 static int any_ours_running(void) { for (int i = 0; i < npm; i++) if (running(&pms[i])) return 1; return 0; }
 
 static void start_mode(pm_t *m, int idx)
@@ -2122,15 +2371,25 @@ static void start_mode(pm_t *m, int idx)
     m->hits = 0; m->total = 0; m->paused = 0; m->ended_logged = 0; m->running_seen = 1;
     m->mb_served = m->mb_seen2 = m->adds = m->saver_ours = m->saver_cs = 0; m->mb_served_at = m->one_ball_since = 0;
     m->pending = NULL; m->combo_pos = 0; m->runs_ball++; m->runs_game++;
-    ((vbool_t)vslot(m->mode, VT_START))(m->mode);
-    ((vint_t)vslot(m->mode, VT_SET_TIME))(m->mode, m->seconds);
-    /* The seconds field: 0x48 on GnR.  Check it, and find it if a title moved it. */
-    if (*(int *)((char *)m->mode + mode_seconds_off) != m->seconds) {
-        for (int off = 0x20; off < 0x200; off += 4)
-            if (*(int *)((char *)m->mode + off) == m->seconds) {
-                lg("mode seconds field is at %#x on this title (not %#x)", off, mode_seconds_off);
-                mode_seconds_off = off; break;
-            }
+    m->want_end = NULL;         /* an end asked for at a ball end the game got to first is not this run's */
+    if (engine_proc) {
+        m->secs = m->seconds; m->p_seen = 0; m->p_at = now_ms(); m->p_on = 1;
+        unsigned h = p_cret ? p_cret(m->pid, proc_runs[idx], 0) : p_create(m->pid, proc_runs[idx], 2, 0);
+        if (!h) { m->p_on = 0; m->running_seen = 0; lg("\"%s\": FAIL - the engine made no proc %#x", m->name, m->pid); return; }
+        if (upd_soon) upd_soon();
+        lg("\"%s\": start choreo (proc %#x, handle %u)", m->name, m->pid, h);
+        play(m->snd_start);
+    } else {
+        ((vbool_t)vslot(m->mode, VT_START))(m->mode);
+        ((vint_t)vslot(m->mode, VT_SET_TIME))(m->mode, m->seconds);
+        /* The seconds field: 0x48 on GnR.  Check it, and find it if a title moved it. */
+        if (*(int *)((char *)m->mode + mode_seconds_off) != m->seconds) {
+            for (int off = 0x20; off < 0x200; off += 4)
+                if (*(int *)((char *)m->mode + off) == m->seconds) {
+                    lg("mode seconds field is at %#x on this title (not %#x)", off, mode_seconds_off);
+                    mode_seconds_off = off; break;
+                }
+        }
     }
     m->secs = m->seconds;
     if (m->no_clock) lg("\"%s\" STARTED (no clock: one ball left ends it)", m->name);
@@ -2151,6 +2410,10 @@ static int (*am_proc)(void);
 static void end_mode(pm_t *m, const char *why)
 {
     if (!running(m)) return;
+    if (engine_proc) {          /* our run proc ends itself within a tick (8 ms) */
+        if (!m->want_end) { m->want_end = why; m->paused = 0; lg("\"%s\" ending (%s)", m->name, why); }
+        return;
+    }
     if (am_proc && !am_proc()) {
         if (!m->want_end) { m->want_end = why; m->paused = 0; lg("\"%s\" ending (%s)", m->name, why); }
         return;
@@ -2579,6 +2842,7 @@ static int in_list(const int *l, int n, int v) { for (int i = 0; i < n; i++) if 
 static void *test_gm; static int test_sw = -1, test_end_sw = -1;   /* JJP_MODS_TEST_END_SWITCH ends it (PAD-1354) */
 static void test_hook(int si)
 {
+    if (VT_START < 0 || VT_END < 0 || VT_IS_RUNNING < 0) return;    /* a title with no Mode class */
     if (si == test_end_sw && test_gm && (((vbool_t)vslot(test_gm, VT_IS_RUNNING))(test_gm) & 0xff)) {
         lg("TEST: ending game mode %s", getenv("JJP_MODS_TEST_GAMEMODE"));
         ((vfn0_t)vslot(test_gm, VT_END))(test_gm);
@@ -2818,7 +3082,7 @@ static void install_rules(void)
         for (int i = 0; i < ngm; i++) {
             char k1[160], k2[160];
             snprintf(k1, sizeof k1, " %s ", gmode_sym[i]);
-            snprintf(k2, sizeof k2, " %s ", class_name(*(uintptr_t *)gmodes[i]));
+            snprintf(k2, sizeof k2, " %s ", gmode_isproc[i] ? gmode_sym[i] : class_name(*(uintptr_t *)gmodes[i]));
             if ((any && !gmode_bg[i]) || strstr(m->after, k1) || strstr(m->after, k2)) { m->after_sel[i] = 1; hit++; }
         }
         lg("\"%s\": start_after%smatches %d game mode(s)", m->name, m->after, hit);
@@ -2863,12 +3127,12 @@ static void on_switch(int si)
             if (m->hold_on == 2 && in_list(m->hold_sw, m->nhold_sw, si)) coil_hold(m, wsw[si].name);
         }
         if (!m->paused && !m->want_end && in_list(m->shot_sw, m->nshot, si)) {
-            ((vull_t)vslot(m->mode, VT_SCORE))(m->mode, (unsigned long long)m->points);
+            mode_score(m, m->points);
             m->total += m->points; m->hits++;
             lg("\"%s\" shot %s: +%lld (hits %d, mode total %lld)", m->name, wsw[si].name, m->points, m->hits, m->total);
             if (m->complete > 0 && m->hits >= m->complete) {
                 if (m->complete_points) {
-                    ((vull_t)vslot(m->mode, VT_SCORE))(m->mode, (unsigned long long)m->complete_points);
+                    mode_score(m, m->complete_points);
                     m->total += m->complete_points;
                 }
                 lg("\"%s\" COMPLETED (+%lld, mode total %lld)", m->name, m->complete_points, m->total);
@@ -2934,7 +3198,7 @@ _Static_assert(sizeof wrappers / sizeof *wrappers == MAX_SW, "one wrapper per sh
 static void mode_over(pm_t *m)
 {
     if (!m->running_seen || running(m)) return;
-    m->running_seen = 0; m->paused = 0;
+    m->running_seen = 0; m->paused = 0; m->p_on = 0;
     lamps_release(m);
     if (m->vid) { video_stop(m->vid); m->vid = NULL; }
     coil_release_mode(m, "mode end");
@@ -3002,9 +3266,14 @@ static void per_frame(void)
     }
     if (bg_snapshot_at >= 0 && now_ms() >= bg_snapshot_at) {
         bg_snapshot_at = -1;
-        if (!any_ours_running())
-            for (int i = 0; i < ngm; i++)
-                if (!gmode_bg[i] && gm_running(i)) { gmode_bg[i] = 1; lg("always-on game mode: %s", gmode_sym[i]); }
+        if (!any_ours_running()) {
+            for (int i = 0; i < ngm; i++) {
+                if (gmode_isproc[i]) {
+                    proc_counts();
+                    if (pcount[i] > gmode_bgn[i]) { gmode_bgn[i] = pcount[i]; lg("always-on game mode: %s (x%d)", gmode_sym[i], pcount[i]); }
+                } else if (!gmode_bg[i] && gm_running(i)) { gmode_bg[i] = 1; lg("always-on game mode: %s", gmode_sym[i]); }
+            }
+        }
     }
     if ((frames & 7) == 0) log_running_set();
     {   /* evidence for every multiball yield */
@@ -3155,6 +3424,28 @@ void al_flip_display(void)
 
 static void hook_crashes(int chain);
 
+/* Which engine runs our modes: Mode objects when the title has the Mode class
+ * (every title but The Wizard of Oz), else our own procs (PAD-1365).
+ * JJP_MODS_ENGINE=proc runs the proc engine on a title that has both: how it
+ * is proven on Wonka. */
+static int pick_engine(void)
+{
+    const char *want = getenv("JJP_MODS_ENGINE");
+    int force = want && !strcmp(want, "proc");
+    mode_ctor = (mode_ctor_t)sym("_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_");
+    int mode_ok = mode_ctor && sym("_ZTV4Mode") && resolve_vtable();
+    if (mode_ok && !force) { lg("engine: Mode objects"); return 1; }
+    if (proc_api()) {
+        engine_proc = 1;
+        lg("engine: our own procs (%s): proc %s, proc_sleep, proc_id_exists, score_add_to_player_up%s", force ? "JJP_MODS_ENGINE=proc" :
+           "no Mode class", p_cret ? "proc_cret" : "proc_create", upd_soon ? ", update_all_soon" : "");
+        return 1;
+    }
+    lg("engine: no Mode class%s and no proc API (proc_cret/proc_create, proc_sleep, proc_id_exists, score_add_to_player_up)",
+       mode_ctor ? " that resolves" : "");
+    return 0;
+}
+
 /* ---- install --------------------------------------------------------------- */
 static void *installer(void *arg)
 {
@@ -3172,15 +3463,23 @@ static void *installer(void *arg)
     }
     sleep(3);   /* let power-up finish before we touch anything */
     hook_crashes(1);   /* the game has its own crash handler by now: ours logs first, then hands over to it */
-    mode_ctor = (mode_ctor_t)need("_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_");
     state_get = (int_fn_t)need("_Z14jjpe_state_getv");
+    upd_soon = (void (*)(void))sym("_Z15update_all_soonv");
     balls_in_play = (int_fn_t)sym("_Z28mb_get_logical_balls_in_playv");
     if (!balls_in_play) balls_in_play = (int_fn_t)sym("_Z20mb_get_balls_in_playv");
     am_proc = (int (*)(void))sym("_Z16proc_am_i_a_procv");
     ball_flag = (int (*)(void))sym("_Z26game_flow_get_ball_in_playv");
-    if (!resolve_vtable() || !mode_ctor || !state_get) { lg("FAIL: this game's engine lacks what a mode needs"); return NULL; }
-    find_game_modes();
-    install_hold();
+    if (!pick_engine() || !state_get) { lg("FAIL: this game's engine lacks what a mode needs"); return NULL; }
+    if (engine_proc) {
+        find_proc_modes();
+        for (int i = 0; i < npm; i++)
+            if (pms[i].game_modes == POLICY_HOLD) { pms[i].game_modes = POLICY_PAUSE; hold_wanted = 1; }
+        if (hold_wanted) lg("hold: this engine has no Mode class to hold off; game_modes = hold runs as pause (a game mode that starts under ours pauses it)");
+        if (nst) { lg("stock: %d .stock file(s) ignored: changing the game's own modes needs its Mode class", nst); nst = 0; }
+    } else {
+        find_game_modes();
+        install_hold();
+    }
     install_music_node();
     {   pthread_t mt;                             /* own sound files, once the game's sounds are in */
         if (pthread_create(&mt, NULL, media_loader, NULL) == 0) pthread_detach(mt); }
@@ -3244,13 +3543,13 @@ static void *installer(void *arg)
 static void selftest(void)
 {
     int bad = 0;
-    const char *must[] = { "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_", "_Z14jjpe_state_getv",
+    const char *must[] = { "_Z14jjpe_state_getv",
                            "_ZN11SoundEffect4playEv", "_ZN10LampBufferC1EiPFvPS_EPKc9lb_flag_t",
                            "_ZN4Lamp3setER10LampBufferhhhh", "_ZN4Lamp11transparentER10LampBuffer",
                            "_ZN10LampBuffer10render_allEv", "_ZN8JJPEFont4fontEv", "al_flip_display" };
     for (unsigned i = 0; i < sizeof must / sizeof *must; i++)
         if (!sym(must[i])) { lg("SELFTEST missing %s", must[i]); bad++; }
-    if (!resolve_vtable()) { lg("SELFTEST Mode vtable did not resolve"); bad++; }
+    if (!pick_engine()) { lg("SELFTEST no engine to run modes on (no Mode class, no proc API)"); bad++; }
     load_modes();
     for (int i = 0; i < nwsw; i++)
         if (!wsw[i].obj) bad++;

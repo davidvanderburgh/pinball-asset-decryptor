@@ -4,6 +4,7 @@
  "game": "ToyStory",
  "exported_symbols": 21996,
  "can_run_modes": true,
+ "engine": "mode",
  "missing_required": [],
  "mode_vtable": {
   "start": 16,
@@ -35,6 +36,7 @@
    "20TakeAChanceMultiball"
   ]
  },
+ "proc_modes": [],
  "media": {
   "can_play_own_media": true,
   "ok": {

@@ -491,7 +491,9 @@ def check_value(kind, v, port=None):
         # live); without one a name cannot be refused, as a global is not in the file
         names = [t for t in _names(v) if t != "any"]
         st = (port or {}).get("stock") or {}
-        objects = set(st.get("objects") or ()) | set((port or {}).get("game_modes") or ())
+        # PAD-1365: on the proc engine (no Mode class) a game mode is one of its mode procs
+        objects = (set(st.get("objects") or ()) | set((port or {}).get("game_modes") or ())
+                   | set((port or {}).get("proc_modes") or ()))
         if port is None or not objects:
             return None
         known = objects | set(st.get("classes") or ()) | set(port.get("mode_classes") or ())
@@ -579,12 +581,18 @@ def check_modes(mode_dir, port=None):
         m.setdefault("name", fn[:-5])
         for k in ("start", "shots", "start_combo", "multiball_on", "add_ball", "coil_hold_on"):
             shot_switches.update(t for t in _names(m.get(k, "")) if t.startswith(("switch_", "dswitch_")))
+        if (m.get("game_modes") or "").strip().lower() == "hold" and port is not None and port.get("engine") == "proc":
+            problems.append("%s: game_modes = hold, but %s has no Mode class to hold off: use pause (hold "
+                            "runs as pause there)" % (fn, port.get("title", "this game")))
         if m.get("multiball_on") and not m.get("multiball"):
             problems.append("%s: multiball_on without a multiball line (it is ignored)" % fn)
         if m.get("coil_hold") and title.get("coil_holds") != "on":
             problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
                             "(after a check on the machine)" % fn)
         modes.append(m)
+    if stocks and port is not None and port.get("engine") == "proc":
+        problems.append("%s: %s has no Mode class, so its own modes cannot be changed (.stock files are "
+                        "ignored there)" % (" ".join(stocks), port.get("title", "this game")))
     if len(stocks) > MAX_STOCK:
         problems.append("%d .stock files: the runtime takes %d, the rest are ignored" % (len(stocks), MAX_STOCK))
     seen = {}

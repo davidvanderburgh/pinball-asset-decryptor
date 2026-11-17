@@ -269,10 +269,13 @@ def test_every_title_that_can_run_modes_has_a_starter_that_checks_clean():
         can.append(label)
         modes, problems = mm.check_modes(os.path.join(RIG, "modes", "examples", label), p)
         assert modes and problems == [], (label, problems)
+        if p["engine"] == "proc":       # PAD-1365: The Wizard of Oz has no Mode class
+            assert p["mode_vtable"] == {} and p["proc_modes"], label
+            continue
         # the vtable slots the runtime uses, resolved the same on every title
         assert {k: p["mode_vtable"][k] for k in ("start", "end", "score", "tick")} == \
             {"start": 16, "end": 32, "score": 136, "tick": 168}, label
-    assert len(can) == 9, can
+    assert len(can) == 10, can
 
 
 def test_build_needs_no_prebuilt_runtime():
@@ -675,3 +678,72 @@ def test_the_first_unpack_of_an_iso_says_how_far_it_is(capsys):
     assert lines[0] == "unpacking Wonka-v03.03.iso's game partition (once per ISO): 0%"
     assert len(lines) == 50 and lines[-1].startswith("unpacking Wonka-v03.03.iso's game partition (once per ISO): 98%")
     assert "min left" in lines[-1]
+
+
+# ---- PAD-1365: the proc engine (The Wizard of Oz 08.02, no Mode class) ------------------------
+
+def test_runtime_mode_proc_rule_is_the_port_reports():
+    """jjpport.py names the game's mode procs by the same lists the runtime watches."""
+    jp = _load("jjpport")
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    assert _c_list(src, "PROC_MODE_NOT") == jp.PROC_MODE_NOT
+    for end in jp.PROC_MODE_ENDS:
+        assert 'ends_with(low, "%s")' % end in src
+    # every engine name the proc engine needs is one the runtime looks up
+    for _, name, _ in jp.PROC_SDK:
+        assert '"%s"' % name in src, name
+
+
+@pytest.mark.parametrize("mangled, name", [
+    ("_Z13ecmb_run_procj", "ecmb_run_proc"), ("_Z21twister_mode_proc_runj", "twister_mode_proc_run"),
+    ("_ZN4Mode14start_run_funcEj", "Mode::start_run_func"),
+    ("_ZN18WonkaBarAwardModes14timer_run_procEj", "WonkaBarAwardModes::timer_run_proc"),
+    ("_Z13ecmb_run_proci", None), ("_ZN4Mode5startEv", None), ("_Z10proc_sleepjj", None), ("ecmb_run_proc", None),
+])
+def test_proc_fn_names_are_read_like_the_runtime(mangled, name):
+    assert _load("jjpport")._proc_fn_name(mangled) == name
+
+
+def test_wizard_of_oz_runs_on_the_proc_engine():
+    """Its port report: it can run modes on the proc engine, every proc-engine name is
+    exported, and the game modes it watches are its <x>_run_proc / _grace_proc families, its
+    mode-named procs and its procs with their own kill functions - not tilt, lamp effects,
+    music or attract."""
+    p = json.load(open(os.path.join(RIG, "modes", "ports", "WizardOfOz-v08.02.json"), encoding="utf-8"))
+    assert p["can_run_modes"] and p["engine"] == "proc" and p["missing_required"] == []
+    assert all(v for n, v in p["sdk"]["proc"].items())
+    pm = set(p["proc_modes"])
+    assert {"ecmb_run_proc", "ecmb_grace_proc", "twister_mode_proc_run", "haunted_run_proc", "sotr_run_proc",
+            "rescue_mb_run_proc", "mmf_proc", "tnplh_proc", "witch_melt_run_proc"} <= pm
+    assert not pm & {"tilt_proc", "leff_go_proc", "game_over_music_fade_proc", "hook_attract_mode_proc",
+                     "attract_mode_kill_func", "ecmb_run_proc_kill_func", "MultiLEDInsert::run_proc"}
+    assert p["hold"]["can_hold"] is False and p["start_rules"]["can_start_on_rules"]
+    # every title that has the Mode class stays on it
+    for fn in os.listdir(os.path.join(RIG, "modes", "ports")):
+        if fn.endswith(".json") and not fn.endswith(".live.json") and not fn.startswith("WizardOfOz"):
+            q = json.load(open(os.path.join(RIG, "modes", "ports", fn), encoding="utf-8"))
+            assert q["engine"] == ("mode" if q["can_run_modes"] else ""), fn
+
+
+def test_check_on_a_proc_engine_title(tmp_path):
+    """hold cannot hold off a game with no Mode class, and its own modes cannot be changed; its
+    mode procs are the names start_after knows."""
+    mm = _load("mkjjpmodes")
+    port = {"title": "The Wizard of Oz", "engine": "proc", "switches": ["switch_ramp_made"],
+            "lamps": [], "sounds": [], "fonts": [], "proc_modes": ["ecmb_run_proc"], "start_rules": {},
+            "hooks": {}}
+    d = _folder(tmp_path, {
+        "a.mode": "name = A\nstart = switch_ramp_made\ngame_modes = hold\n",
+        "b.mode": "name = B\nstart_after = ecmb_run_proc\n",
+        "c.mode": "name = C\nstart_after = nosuch_run_proc\n",
+        "x.stock": "mode = cl_mode\npoints_x = 2\n"})
+    modes, problems = mm.check_modes(d, port)
+    text = "\n".join(problems)
+    assert "a.mode: game_modes = hold" in text and "no Mode class" in text
+    assert "x.stock: The Wizard of Oz has no Mode class" in text
+    assert "nosuch_run_proc" in text and "b.mode" not in text
+    port["engine"] = "mode"
+    one = tmp_path / "one"
+    one.mkdir()
+    _, problems = mm.check_modes(_folder(one, {"a.mode": "name = A\nstart = switch_ramp_made\ngame_modes = hold\n"}), port)
+    assert not any("game_modes = hold" in p for p in problems)

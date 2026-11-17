@@ -4,6 +4,7 @@
  "game": "Godfather",
  "exported_symbols": 21498,
  "can_run_modes": true,
+ "engine": "mode",
  "missing_required": [],
  "mode_vtable": {
   "start": 16,
@@ -36,6 +37,7 @@
    "9TurfWarMB"
   ]
  },
+ "proc_modes": [],
  "media": {
   "can_play_own_media": true,
   "ok": {

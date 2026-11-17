@@ -14,7 +14,8 @@ from tests.webui_harness import web_app
 
 #: every title whose port report can run modes (MODES.md "Titles")
 RUNNABLE = {"GunsNRoses-v03.03", "CHAKAs_LOTLJ_V1.0_GNR_LE_3.03", "EltonJohn-v02.03", "Godfather-v02.03",
-            "Pirates-v01.01", "Wonka-v03.03", "DialedIn-v02.02", "Hobbit-v04.02", "ToyStory-v02.04"}
+            "Pirates-v01.01", "Wonka-v03.03", "DialedIn-v02.02", "Hobbit-v04.02", "ToyStory-v02.04",
+            "WizardOfOz-v08.02"}      # PAD-1365: the proc engine (no Mode class)
 
 
 @pytest.fixture
@@ -165,6 +166,25 @@ def test_a_title_that_cannot_run_modes_says_why(tmp_path, preview_on):
         w.call("modes.jjp_pick_title", "HarryPotter-v01.26")
         j = _jjp(w)
         assert not j["can_run"] and "export" in j["title"]["why"] and "modes" not in j
+
+
+def test_wizard_of_oz_runs_modes_and_offers_pause_not_hold(tmp_path, preview_on):
+    """PAD-1365: The Wizard of Oz (older engine, no Mode class) opens its starter modes; with no
+    Mode class to hold off, the form offers pause as the default and no hold, and its game
+    modes for start_after are its mode procs."""
+    with web_app(tmp_path, mfr="jjp") as w:
+        w.call("ui.select_tab", "modes")
+        w.call("modes.jjp_pick_title", "WizardOfOz-v08.02")
+        j = _jjp(w)
+        assert j["can_run"] and j["modes"]
+        gm = j["fields"]["game_modes"]
+        assert gm["default"] == "pause" and "hold" not in gm["choices"] and "end" in gm["choices"]
+        w.call("modes.jjp_pick_title", "Wonka-v03.03")
+        gm = _jjp(w)["fields"]["game_modes"]
+        assert gm["default"] == "hold" and "hold" in gm["choices"]
+    from pinball_decryptor.plugins.jjp import custom_modes as CM
+    after = CM.names_for(CM.load_port("WizardOfOz-v08.02"), "after")
+    assert "ecmb_run_proc" in after and "twister_mode_proc_run" in after
 
 
 def test_sounds_are_heard_from_an_extract_folder(tmp_path, preview_on):

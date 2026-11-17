@@ -547,6 +547,20 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `coilmap.stepper`); a map's `mechs` (`{"0": {"stepper": [10, 0]}}`) makes
   `Controller.GetMech(0)` answer it in steps from home, and a map timer turns
   the table's object by it.
+  PAD-1392: an END-STOP motor a cmd 55 runs (Jaws' shark fin, node 9 motor
+  0) is written there too, all the time: its car's place in thousandths of
+  an input bit, part way along each move at the move's own speed, so a
+  table can slide the mech between its position switches.
+* **A drop target that moves** (PAD-1392). Visual Pinball 10.8 bakes a drop
+  target's place into it when play starts (its X and Y move nothing), so
+  Jaws' fin was seven chum line targets standing in turn. `retrofit_targets`
+  (`{"PadFin": {"clone": "BallShadow1", "look": "Tbeachfinal"}}`) builds a
+  primitive from any of the table's (`clone`, only its record layout is
+  kept) with drop target `look`'s picture, material, size, place and turn on
+  a drop target's box (`vpxshadow.drop_target_mesh`): shown, drawn every
+  frame, no collision. The map's script slides it (X, Y, RotZ) and raises
+  and sinks it (Z); `item_fields` can leave the real targets unseen as its
+  physics.
 * **A sound played at a wall stops the table** (PAD-992). JP's
   `PlaySoundAt` pans by the object's `.x`, which a wall, ramp or rubber has
   not: Foo Fighters' first KICK TARGET coil stopped Visual Pinball with

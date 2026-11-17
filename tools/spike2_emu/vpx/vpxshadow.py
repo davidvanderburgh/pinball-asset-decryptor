@@ -61,6 +61,7 @@ import re
 import shutil
 import struct
 import sys
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -2000,6 +2001,18 @@ def retrofit_items(table, m):
             fields["RADI"] = struct.pack("<f", float(v["radius"]))
         item = vpxfile.reshape_item(vpxfile.clone_item(src, name, 0, 0), v["shape"])
         items.append(vpxfile.set_fields(item, fields))
+    # PAD-1392: a drop target's look on a primitive the script can move - Visual
+    # Pinball 10.8 bakes a drop target's place into its mesh when play starts
+    # (put_X/put_Y move nothing), but redraws a non-static primitive where its
+    # X, Y, Z and RotZ say every frame. JAWS 50th's fin glides along the chum
+    # line on one of these while JP's seven targets stay its unseen physics.
+    for name, v in m.get("retrofit_targets", {}).items():
+        if name == "_":
+            continue
+        kind, src = source(v["clone"], "Primitive")
+        k, look = by_name.get(v["look"].lower(), ("", None))
+        assert k == "HitTarget", "%s: no drop target named %s to take the look of" % (name, v["look"])
+        items.append(target_primitive(src, look, name))
     for name, v in m.get("retrofit_timers", {}).items():
         if name == "_":
             continue
@@ -2008,6 +2021,79 @@ def retrofit_items(table, m):
         items.append(vpxfile.set_fields(item, {"TMON": struct.pack("<i", 1),
                                                "TMIN": struct.pack("<i", int(v["interval_ms"]))}))
     return items
+
+
+#: PAD-1392: a drop target's box, in the units Visual Pinball sizes one by
+#: (x 1.05 wide, y 0.35 thick, z 0.135..1.735 high, times the target's size),
+#: and where its faces sit on the target's picture: a simple drop target's
+#: picture holds its face (u 0.0035..0.8274, v 0.2281 top .. 0.8545 bottom)
+#: and plain colour above it (the band v 0.02..0.18), which the box's back,
+#: ends and top take.
+DROP_BOX = (0.525, 0.175, 0.135, 1.735)
+DROP_FACE_UV = (0.0035, 0.8274, 0.2281, 0.8545)
+DROP_SIDE_UV = (0.05, 0.75, 0.02, 0.18)
+
+
+def drop_target_mesh():
+    """(vertex bytes, index bytes, vertices, indices) of a drop target's box as
+    a primitive's mesh: x, y, z, normal, u, v per vertex (Visual Pinball's
+    Vertex3D_NoTex2), WORD indices, each triangle wound so its edges' cross
+    product points along its face's normal (VPX's own meshes and a table's
+    ball shadow quads are wound so; the other side is culled). The face
+    towards the player (+y) shows the picture's face."""
+    x, y, z0, z1 = DROP_BOX
+    fu0, fu1, fvt, fvb = DROP_FACE_UV
+    su0, su1, sv0, sv1 = DROP_SIDE_UV
+    faces = [   # (normal, four corners going round, their (u, v))
+        ((0, 1, 0), [(-x, y, z0), (x, y, z0), (x, y, z1), (-x, y, z1)],
+         [(fu0, fvb), (fu1, fvb), (fu1, fvt), (fu0, fvt)]),
+        ((0, -1, 0), [(x, -y, z0), (-x, -y, z0), (-x, -y, z1), (x, -y, z1)], None),
+        ((1, 0, 0), [(x, y, z0), (x, -y, z0), (x, -y, z1), (x, y, z1)], None),
+        ((-1, 0, 0), [(-x, -y, z0), (-x, y, z0), (-x, y, z1), (-x, -y, z1)], None),
+        ((0, 0, 1), [(-x, y, z1), (x, y, z1), (x, -y, z1), (-x, -y, z1)], None),
+    ]
+    verts, idx = bytearray(), []
+    for n, corners, uv in faces:
+        uv = uv or [(su0, sv1), (su1, sv1), (su1, sv0), (su0, sv0)]
+        base = len(verts) // 32
+        for (px, py, pz), (u, v) in zip(corners, uv):
+            verts += struct.pack("<8f", px, py, pz, n[0], n[1], n[2], u, v)
+        a, b, c = corners[0], corners[1], corners[2]
+        cross = ((b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]),
+                 (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]),
+                 (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+        tri = [0, 1, 2, 0, 2, 3]
+        if sum(cross[i] * n[i] for i in range(3)) < 0:
+            tri = [0, 2, 1, 0, 3, 2]
+        idx += [base + i for i in tri]
+    return bytes(verts), struct.pack("<%dH" % len(idx), *idx), len(verts) // 32, len(idx)
+
+
+def target_primitive(src, look, name):
+    """PAD-1392: primitive `src` (any of the table's: only its record layout
+    is kept) remade as drop target `look` standing - its picture, material,
+    size, place and turn on drop_target_mesh() - named `name`: shown, drawn
+    every frame (not static), no collision, so a script can slide it."""
+    rec = {}
+    for tag, payload, _ in vpxfile.item_records(look, 4):
+        rec.setdefault(tag, payload)
+    prim = {}
+    for tag, payload, _ in vpxfile.item_records(src, 4):
+        prim.setdefault(tag, payload)
+    vb, ib, nv, ni = drop_target_mesh()
+    cx, ci = zlib.compress(vb), zlib.compress(ib)
+    pos = rec["VPOS"][:12] + prim["VPOS"][12:]
+    size = rec["VSIZ"][:12] + prim["VSIZ"][12:]
+    fields = {"VPOS": pos, "VSIZ": size, "IMAG": rec["IMAG"], "MATR": rec["MATR"],
+              "M3VN": struct.pack("<i", nv), "M3CY": struct.pack("<i", len(cx)), "M3CX": cx,
+              "M3FN": struct.pack("<i", ni), "M3CJ": struct.pack("<i", len(ci)), "M3CI": ci,
+              "TVIS": struct.pack("<i", 1), "STRE": struct.pack("<i", 0), "CLDR": struct.pack("<i", 0),
+              "ISTO": struct.pack("<i", 1), "U3DM": struct.pack("<i", 1), "HTEV": struct.pack("<i", 0),
+              "ADDB": struct.pack("<i", 0), "EBFC": struct.pack("<i", 0), "REEN": struct.pack("<i", 0)}
+    for i in range(9):
+        fields["RTV%d" % i] = struct.pack("<f", 0.0)
+    fields["RTV2"] = rec["ROTZ"]
+    return vpxfile.set_fields(vpxfile.clone_item(src, name, 0, 0), fields)
 
 
 def auto_plunger_item(table, m):
@@ -2114,7 +2200,8 @@ def main(argv):
         return 1
     info = [table.item_info(d) for d in table.items]
     names = {n.lower() for _, n, _ in info} | {n.lower() for n in m.get("retrofit_triggers", {})} \
-        | {n.lower() for n in m.get("retrofit_lights", {}).get("lights", {})}
+        | {n.lower() for n in m.get("retrofit_lights", {}).get("lights", {})} \
+        | {n.lower() for n in m.get("retrofit_targets", {})}
     unlit = drop_missing_lights(m, names)
     for name in list(m["switches"]) + list(saucers(m)):
         if name != "_" and name.lower() not in names:

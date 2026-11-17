@@ -5440,6 +5440,7 @@ static int nb_motor_on(void)
 }
 static void motor_note(const unsigned char *p, int n);
 static void motor_tick(unsigned nid);
+static void stepper_publish(unsigned nid, unsigned k, long pos);
 static int nb_log_budget = 400;
 static int nb_reply = 1;           /* 0 = stay silent, 1 = answer with zeros */
 
@@ -9873,12 +9874,38 @@ static void motor_path(unsigned nid, unsigned k, struct nb_motor *m, int from, i
     motor_say(line);
 }
 
+/* PAD-1392: where an end-stop motor's car is, in thousandths of an input bit
+ * (jaws_le's fin: 38000 at POSITION 1 .. 32000 at POSITION 7), part way along
+ * the move under way at its own speed; -1 while it cannot say (never sent
+ * anywhere, or a move from an unknown place). */
+static long motor_milli_now(const struct nb_motor *m)
+{
+    long a = m->mv_from, b = m->mv_to, t, e;
+    if (m->going < 0) {
+        int bit = m->at >= 0 ? motor_place_bit(m, m->at) : -1;
+        return bit < 0 ? -1 : bit * 1000L;
+    }
+    if (a < 0 || b < 0) return -1;
+    t = (long)(m->due - m->start);
+    e = (long)(pad_ms() - m->start);
+    if (t <= 0 || e >= t) return b * 1000L;
+    return a * 1000L + (b - a) * 1000L * e / t;
+}
+
 static void motor_tick(unsigned nid)
 {
     unsigned k;
     if (nid >= 64 || !nb_motor_cfg[nid] || !nb_motor_on()) return;
     for (k = 0; k < NB_MOTORS; k++) {
         struct nb_motor *m = &nb_motors[nid][k];
+        /* PAD-1392: the car's place, for a table that draws the mech moving
+         * (the Jaws fin gliding along the chum line, not hopping from one
+         * position switch to the next): the stepper plane's slot for this
+         * node and motor, which no stepper of an end-stop motor's board uses */
+        if (m->cfg && !m->enc && m->run55) {
+            long v = motor_milli_now(m);
+            if (v >= 0) stepper_publish(nid, k, v);
+        }
         if (m->cfg && !m->enc && m->going >= 0) motor_sweep(nid, k, m);
         if (!m->cfg || m->going < 0 || pad_ms() < m->due) continue;
         if (!m->enc && m->sweep_on >= 0) {          /* PAD-1339: off the last one */

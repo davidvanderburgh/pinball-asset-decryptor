@@ -120,6 +120,11 @@ static unsigned motor_switch_id(unsigned nid, unsigned bit)
     return 0;
 }
 static const char *motor_switch_name(unsigned nid, unsigned bit) { (void)nid; (void)bit; return 0; }
+/* PAD-1392: the car's place as the shim publishes it for a table to draw */
+static void stepper_publish(unsigned nid, unsigned k, long pos)
+{
+    printf("P %%lu %%u %%u %%ld\n", now_ms, nid, k, pos);
+}
 
 %s
 
@@ -169,7 +174,7 @@ def cbin(tmp_path_factory):
                          _extract("motor_say"), _extract("motor_pos"),
                          _extract("motor_status"), _extract("motor_sweep_on"),
                          _extract("motor_sweep"), _extract("motor_path"),
-                         _extract("motor_tick"),
+                         _extract("motor_milli_now"), _extract("motor_tick"),
                          _extract("motor_note"), _extract("nb_rx_count_on"),
                          _extract("nb_rx_count_says")])
     src = d / "motor.c"
@@ -673,3 +678,52 @@ def test_batman_turntable_at_full_speed(cbin):
     """Speed 128, one stretch of two: 120000/128/2 = 468 ms."""
     steps = ["t0:9", "f" + BAT_TT, "t1000:9", "f" + BAT_TT_POS2] + _ticks(1010, 2000, 2)
     assert _arrive(_run(cbin, steps), 3) == 1468
+
+
+# ---- PAD-1392: the fin glides ----------------------------------------------
+# Mike: "can the fin stay up and move along the path slowly or does it have to
+# be separate fins popping up and dropping? The real game is a single fin
+# traveling along the arc." The table only heard the seven position switches,
+# so it stood one chum line target after another. The shim now publishes the
+# car's place (thousandths of an input bit, at the move's own speed) in the
+# stepper plane's slot for the motor, and the table slides one fin by it.
+
+def _places(cbin, steps, **env):
+    e = dict(os.environ)
+    for k in ("PAD_NB_MOTOR", "PAD_MOTOR_MS", "PAD_MOTOR_SWEEP"):
+        e.pop(k, None)
+    e.update(env)
+    r = subprocess.run([cbin] + steps, capture_output=True, text=True, env=e)
+    assert r.returncode == 0, r.stderr
+    out = {}
+    for line in r.stdout.splitlines():
+        if line.startswith("P "):
+            ms, nid, k, pos = (int(x) for x in line.split()[1:])
+            assert (nid, k) == (9, 0)
+            out[ms] = pos
+    return out
+
+
+def test_fin_place_glides_along_the_track(cbin):
+    """SLOW to POSITION 7 (input 32) from POSITION 1 (input 38): the place
+    runs evenly from 38000 to 32000 over the six seconds, then rests."""
+    steps = ["t0:9", "f" + FIN, "t500:9", "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 9000)
+    p = _places(cbin, steps)
+    assert 0 not in p and 500 not in p           # nothing until the game runs it (cmd 55)
+    assert p[1050] == 38000 - 6000 * 50 // 6000
+    assert p[4000] == 35000                      # half way: POSITION 4
+    assert p[7000] == p[9000] == 32000           # arrived, and stays
+    run = [p[t] for t in sorted(p) if 1050 <= t <= 7000]
+    assert all(b < a for a, b in zip(run, run[1:]))          # never stands still or backs up
+    assert max(a - b for a, b in zip(run, run[1:])) <= 60    # no hop: 50 ms is 50 thousandths
+
+
+def test_fin_place_turned_back_starts_where_the_car_is(cbin):
+    """Sent home half way: the place turns at 35000, it does not jump."""
+    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 4000)
+    steps += ["f" + FIN_SLOW_TO_1] + _ticks(4050, 8000)
+    p = _places(cbin, steps)
+    assert p[4000] == 35000
+    assert abs(p[4050] - 35000) <= 60 and p[4050] > 35000
+    assert p[8000] == 38000
+

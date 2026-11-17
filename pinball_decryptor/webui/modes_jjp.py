@@ -457,7 +457,9 @@ class JjpModesMixin:
                 rt = CM.runtime_path(iso)
             except OSError:
                 rt = ""
-        s.update({"path": path, "drives": drives, "fs": CM.stick_filesystem(path) if path else "",
+        # a stick's file system matters; a folder to copy to one (on C:, say) is not a stick
+        on_stick = bool(path) and os.path.splitdrive(os.path.abspath(path))[0].upper() in             [os.path.splitdrive(d)[0].upper() for d in drives]
+        s.update({"path": path, "drives": drives, "fs": CM.stick_filesystem(path) if on_stick else "",
                   "action": action if action in dict(CM.STICK_ACTIONS) else "install",
                   "actions": [{"value": k, "label": v} for k, v in CM.STICK_ACTIONS],
                   "owner": CM.hotfix_on(path) if path and os.path.isdir(path) else "",

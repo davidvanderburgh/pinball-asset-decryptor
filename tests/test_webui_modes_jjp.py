@@ -392,6 +392,13 @@ def test_the_stick_defaults_to_a_removable_drive(tmp_path, preview_on, monkeypat
         _open_wonka(w)
         k = _jjp(w)["stick"]
         assert k["path"] == str(usb) and k["drives"] == [str(usb)]
+        # the stick's file system is asked only of a removable drive, never of a folder on C:
+        asked = []
+        monkeypatch.setattr(CM, "stick_filesystem", lambda p: asked.append(p) or "NTFS")
+        monkeypatch.setattr(CM, "removable_drives", lambda: ["Q:\\"])
+        w.call("modes.jjp_set_stick", str(usb))
+        assert _jjp(w)["stick"]["fs"] == "" and asked == []
+        monkeypatch.setattr(CM, "removable_drives", lambda: [str(usb)])
         # a remembered stick that is gone falls back to the drive there now
         svc_settings(w)["stick"] = str(tmp_path / "gone")
         w.call("modes.jjp_stick_refresh")

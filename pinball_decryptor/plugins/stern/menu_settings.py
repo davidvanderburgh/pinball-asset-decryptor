@@ -1269,9 +1269,15 @@ def _plan_rows(table, wanted):
             caption = SETTINGS[key][1]
             free = spare(table, taken)
             mine = [n for n in free if menu_label(table, table.by_name[n]) == caption]
-            others = {v[1] for k, v in SETTINGS.items() if k != key}
-            free = mine + [n for n in free if menu_label(table, table.by_name[n]) not in others
-                           and n not in mine]
+            # PAD-1393: a spare an earlier Write captioned for another setting of ours is held back only while that
+            # setting is wanted on this card too; one this Write no longer wants is free (a card the app wrote with
+            # MUSIC MODE, EDITION and HANDICAP had no spare left for IMAGE SET once HANDICAP and EDITION were off).
+            # Tried after the DEPRECATED ones, so the old caption is kept while there is room.
+            ours = {v[1] for v in SETTINGS.values()}
+            others = {SETTINGS[r[0]][1] for r in rows if r[0] != key and r[0] in SETTINGS}
+            labels = {n: menu_label(table, table.by_name[n]) for n in free}
+            free = (mine + [n for n in free if labels[n] not in ours]
+                    + [n for n in free if labels[n] in ours and labels[n] not in others and n not in mine])
             if not free:
                 refused[key] = ("%s %s (the card's other menu settings of ours use them)"
                                 % (NO_SPARE, caption))

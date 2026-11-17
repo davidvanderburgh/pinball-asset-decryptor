@@ -73,7 +73,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
 | records on the high scores | records.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | points records (the whole game or a mode of the owner's); the champion in attract on ELG and WDR (round 5); counts wait on 64-bit readers |
 | attract items | attract.cfg, clips | **tables read (PAD-1328), shown nowhere yet** | the 64-bit sequencer's table is in five Spike 3 ports and the runtime reads it pointer-sized; putting an item on the glass stalls ELG (below), so `attract_items.title_refusal` says no on every Spike 3 title |
-| inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
+| inactivity pausing | idle.cfg | **no Spike 3 game needs it (PAD-1328)** | census of the 64-bit adjustment tables: Fallout LE (176), Star Wars 2025 LE (182) and Transformers LE (174) read AD_INACTIVE_TIMER once, in an `adjustment(id) == 1` check before their timer test; ELG, Pokemon, WDR and Star Wars 2025 Pro have no such setting. `idle_pause.title_refusal` says which (NO_NEED / NO_SETTING) |
 | expression light shows | cabshow.cfg | left out | `cablamp` lines (ELG has no cabinet lights), the game's show table as 64-bit, voice count measured |
 
 The operator-menu rows (MUSIC MODE, EDITION, CO-OP PLAY, HANDICAP, the picture rows) all wait on

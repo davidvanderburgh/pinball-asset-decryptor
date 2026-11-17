@@ -124,3 +124,42 @@ def test_pages_of_the_real_elg_program():
     assert names[2] == "Net How To Connect Overlay"
     assert sum(n == "High score / champion page" for n in names) == 12
     assert pages[0].page == 0x139a50 and pages[0].sometimes and not pages[1].sometimes
+
+
+# ---- inactivity pausing the timers: no Spike 3 game needs it ---------------------------------------------------
+IDLE_READS = {"fallout_le": (176, 0x4873e4), "star_wars_2025_le": (182, 0x280a18), "transformers_mtmte_le": (174, 0x28323c)}
+
+
+def test_idle_pause_is_offered_on_no_spike3_title():
+    from pinball_decryptor.plugins.stern import idle_pause as IP
+    for key, prof in MP.profiles().items():
+        if key.endswith("_spike3"):
+            why = IP.title_refusal(prof)
+            if prof.game_dir in IP.NO_SETTING_TITLES:
+                assert why == IP.NO_SETTING % prof.label
+            else:
+                assert why == IP.NO_NEED % prof.label
+
+
+@pytest.mark.parametrize("game", sorted(set(TABLES) | set(NO_TABLE)))
+def test_each_spike3_title_honours_or_lacks_the_setting(game):
+    from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
+    from pinball_decryptor.plugins.stern import idle_pause as IP
+    with open(_prog(game), "rb") as f:
+        raw = f.read()
+    t = AdjustmentTable(raw, wide_ok=True)
+    ids = [i for i, n in enumerate(t.names) if n == "AD_INACTIVE_TIMER"]
+    if game in IP.NO_SETTING_TITLES:
+        assert ids == []
+        return
+    aid, at = IDLE_READS[game]
+    assert ids == [aid]
+    import s3port as S
+    e = S.Elf(_prog(game))
+    port = MP.read_port(MP.port_path(MP.profiles()[(TABLES.get(game) or (NO_TABLE[game],))[0]]))
+    adj = port["site"]["adjustment"]
+    adj = adj[0] if isinstance(adj, (tuple, list)) else adj
+    reads = [e.tva + 4 * i for i, w in enumerate(e.words) if w == 0x52800000 | aid << 5
+             and S._bl(e.tva + 4 * i + 4, e.words[i + 1]) == adj]
+    assert reads == [at]
+    assert e.u32(at + 8) == 0x7100041F                         # cmp w0, #1: the game's own should-pause test

@@ -8488,14 +8488,15 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # spike3_modes.coop_wanted, its CO-OP PLAY row spike3_menu's) and the handicaps (hand_wanted,
         # HANDICAP), and Prolonged Competition (PAD-1327: _comp_for_build above has said
         # whether it goes on), and the attract items (PAD-1328: spike3_modes.attract_wanted;
-        # _attract_for_build above has said whether they go on). The rest of
+        # _attract_for_build above has said whether they go on). Inactivity pausing the timers
+        # is no Spike 3 game's need (PAD-1328: each that shows the setting honours it):
+        # _idle_for_build has said so. The rest of
         # what rides the modes' Spike 2 delivery needs 64-bit runtime, port or menu work first
         # (the census: docs/plans/spike3_modes.md "The family on Spike 3"): each part the project
         # asked for is left out with its own sentence.
         from . import spike3_modes as _S3M
         for _line in _S3M.family_left_out_lines([w for w, on in (
                 ("picture settings", picture_prof is not None),
-                ("inactivity pausing the timers", _idle_on),
                 ("expression light shows", _cabs_on)) if on]):
             log(_line, "warning")
         variant_slots, variant_prof, sound_modes, sound_modes_prof = {}, None, None, None

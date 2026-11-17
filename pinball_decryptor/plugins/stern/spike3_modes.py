@@ -98,7 +98,6 @@ MULTIBOOT_WORDS = ("this is a multi-boot card; modes go on a card of the one gam
 #: start menu; the engine's `_comp_for_build` says why another is left out).
 FAMILY_LEFT_OUT = {
     "picture settings": "they cannot be added to a Spike 3 game yet",
-    "inactivity pausing the timers": "the 64-bit runtime cannot pause a Spike 3 game's timers yet",
     "expression light shows": "the 64-bit runtime cannot light a Spike 3 cabinet's expression lights yet",
 }
 

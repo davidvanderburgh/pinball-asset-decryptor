@@ -213,12 +213,16 @@ def title_refusal(prof):
     if prof is None:
         return NO_TITLE
     t = port_table(prof)
-    if t is None or t["size"] not in (8, 12, 16) or not 2 <= t["count"] <= 256:
+    if t is None or t["size"] not in (8, 12, 16, 24, 32) or not 2 <= t["count"] <= 256:     # 24: Pokemon LE (Spike 3)
         return NO_TABLE % prof.label
     route = CV.route_of(prof)
     if not route:
         return NO_CLIPS % prof.label
     if getattr(prof, "game_dir", "") in NOT_ON_GLASS:
+        return NO_GLASS % prof.label
+    if getattr(prof, "arch", "arm") == "a64" and not t.get("video_clip"):
+        # PAD-1328: a Spike 3 port's attract table is read (s3port.attract_lines), but no route that puts an item on
+        # a Spike 3 game's glass is proven yet (the scene show from an item's page stalls Star Wars ELG 1.10)
         return NO_GLASS % prof.label
     if route != "clip_play" and not t.get("video_clip") and not (route == "surface" and t.get("show")):
         return NO_GLASS % prof.label
@@ -318,7 +322,8 @@ def _page_name(e, page, champion_fns, clip_names):
 
 
 #: names a page's program uses for its parts that say nothing of what it shows
-_GENERIC = {"videosurface", "line1", "line2", "line3", "text", "text2", "textbox", "background", "instance"}
+_GENERIC = {"videosurface", "line1", "line2", "line3", "text", "text2", "textbox", "background", "instance",
+            "bug_layer"}
 
 
 def _generic(s):
@@ -328,6 +333,112 @@ def _generic(s):
             or re.fullmatch(r"(?i)line\d+", head) is not None)
 
 
+# ---- PAD-1328: a Spike 3 (64-bit ARM) program's pages ---------------------------------------------------------
+def _a64_calls(e, fn, limit):
+    """``[(va, word)]`` of a 64-bit function from *fn* to its first ``ret`` (at most *limit* words)."""
+    out = []
+    for i in range(limit):
+        w = e.u32(fn + 4 * i)
+        if w is None:
+            break
+        out.append((fn + 4 * i, w))
+        if w == 0xD65F03C0:                                     # ret
+            break
+    return out
+
+
+def _a64_branch(va, w):
+    """The target of a ``bl`` / ``b`` at *va*, or None."""
+    if (w & 0x7C000000) != 0x14000000:
+        return None
+    imm = w & 0x3FFFFFF
+    if imm & (1 << 25):
+        imm -= 1 << 26
+    return va + 4 * imm
+
+
+def _a64_strings_of(e, fn, depth=1, limit=240, seen=None):
+    """C strings a 64-bit function (and those it calls or branches to, *depth* levels) makes by ``adrp`` +
+    ``add``."""
+    from .screen_time import _a64_adrp
+    seen = set() if seen is None else seen
+    if fn in seen:
+        return []
+    seen.add(fn)
+    out, page, subs = [], {}, []
+    for va, w in _a64_calls(e, fn, limit):
+        if (w & 0x9F000000) == 0x90000000:                      # adrp xd
+            page[w & 31] = _a64_adrp(va, w)
+        elif (w & 0xFFC00000) == 0x91000000 and ((w >> 5) & 31) in page:     # add xd, xn, #imm
+            s = _a64_cstr(e, page[(w >> 5) & 31] + ((w >> 10) & 0xFFF))
+            if s:
+                out.append(s)
+        b = _a64_branch(va, w)
+        if b is not None and b != fn:
+            subs.append(b)
+    if depth:
+        for b in subs:
+            out += _a64_strings_of(e, b, depth - 1, limit, seen)
+    return out
+
+
+def _a64_cstr(e, va):
+    o = e.off(va)
+    if o is None:
+        return None
+    end = e.b.find(b"\0", o, o + 120)
+    b = e.b[o:end] if end > o else b""
+    if len(b) < 4 or not all(32 <= c < 127 for c in b):
+        return None
+    return b.decode()
+
+
+def _a64_page_name(e, page, champion_fns, clip_names):
+    if page in champion_fns:
+        return "High score / champion page"
+    for va, w in _a64_calls(e, page, 400):
+        if _a64_branch(va, w) in champion_fns:
+            return "High score / champion page"
+    strings = _a64_strings_of(e, page)
+    for s in strings:
+        if s in clip_names:
+            return "Clip: %s" % _nice(s)
+    for s in strings:
+        if " " not in s and any(c.isalpha() for c in s) and len(s) <= 64 and not s.startswith("/") \
+                and not _generic(s) and not s.startswith(("src/", "basic_string", "bool ", "m_p")):
+            return _nice(s)
+    return ""
+
+
+def _read_pages_a64(elf_bytes, t, champion_fns, names):
+    """:func:`read_pages` for a Spike 3 program: the table's words are 8-byte pointers (RELATIVE relocations: the
+    file holds 0, the relocation the address), 16-byte entries {test, page} or 24 {test, page, float seconds}."""
+    from .screen_time import _Elf64
+    e = _Elf64(bytes(elf_bytes))
+    out = []
+    for k in range(t["count"]):
+        va = t["table"] + t["size"] * k
+        if e.off(va + t["size"] - 1) is None:
+            break
+        test, page = e.u64(va) or 0, e.u64(va + t["page_at"]) or 0
+        secs = 0.0
+        if t["size"] >= 24:
+            secs = struct.unpack("<f", struct.pack("<I", e.u32(va + 16) or 0))[0]
+        p = Page(entry=k, page=page, test=test, seconds=secs if 0 < secs < 600 else 0.0)
+        p.name = (_a64_page_name(e, page, champion_fns, names) if page else "") or "Game screen %d" % (k + 1)
+        out.append(p)
+    # the stub pages of one screen kind (Star Wars ELG 1.10's twelve tutorial clips, one function each with the
+    # clip's number) read the same: each says which of them it is
+    seen = {}
+    for p in out:
+        seen.setdefault(p.name, []).append(p)
+    for name, ps in seen.items():
+        if len(ps) > 1 and not name.startswith(("Game screen", "High score")):
+            for n, p in enumerate(ps, 1):
+                p.name = "%s %d" % (name, n)
+    return out
+
+
 def read_pages(elf_bytes, prof, clip_names=()):
     """The game's attract pages in table order (:class:`Page`), read off its program with ``prof``'s port lines."""
     from . import mode_project as MP
@@ -335,7 +446,6 @@ def read_pages(elf_bytes, prof, clip_names=()):
     t = port_table(prof)
     if t is None:
         return []
-    e = Elf(elf_bytes)
     try:
         sites = MP.read_port(MP.port_path(prof))["site"]
     except (OSError, MP.ModeProjectError):
@@ -348,6 +458,9 @@ def read_pages(elf_bytes, prof, clip_names=()):
             if isinstance(addr, int):
                 champion_fns |= {addr, addr - 4}
     names = set(clip_names or ())
+    if bytes(elf_bytes[4:5]) == b"\x02":                        # PAD-1328: ELFCLASS64, a Spike 3 program
+        return _read_pages_a64(elf_bytes, t, champion_fns, names)
+    e = Elf(elf_bytes)
     out = []
     for k in range(t["count"]):
         va = t["table"] + t["size"] * k
@@ -372,15 +485,30 @@ def _bank_refusal(card, prof):
     bank) cannot take them on ``card``, or ``""``."""
     from . import engine as E, mode_write as MW, video_bank as VB
     from . import clip_variants as CV
+    from . import spike3
     clip = (port_table(prof) or {}).get("video_clip") or ""
+
+    def check(reader):
+        scene = element_scene(reader, prof.game_dir, clip) if clip else CV.bank_scene(prof)
+        node = MW.lookup(reader, scene) if scene else None
+        if node is None:
+            return NO_BANK % prof.label
+        VB.parse_scene(bytes(reader.read_file_bytes(node)))
+        return ""
     try:
+        if spike3.is_spike3_card(card):                 # PAD-1328: its games partition, opened with the user's key
+            from . import spike3_card
+            from .ext4 import Ext4Reader
+            vol = spike3_card.open_games(card)
+            try:
+                return check(Ext4Reader(vol, 0, vol.size))
+            finally:
+                getattr(vol, "close", lambda: None)()
         with open(card, "rb") as f:
             reader, _fw, _img = E._locate(f, E._linux_partitions(card))
-            scene = element_scene(reader, prof.game_dir, clip) if clip else CV.bank_scene(prof)
-            node = MW.lookup(reader, scene) if scene else None
-            if node is None:
-                return NO_BANK % prof.label
-            VB.parse_scene(bytes(reader.read_file_bytes(node)))
+            why = check(reader)
+            if why:
+                return why
     except VB.VideoBankError:
         return NO_BANK % prof.label
     except Exception:                                   # noqa: BLE001 - an unreadable card: the build says

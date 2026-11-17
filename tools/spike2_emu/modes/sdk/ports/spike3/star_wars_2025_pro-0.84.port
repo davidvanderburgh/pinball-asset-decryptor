@@ -257,3 +257,13 @@ value challenge_record_score_size 8
 # PAD-1327: the attract mode's HIGHEST SCORES screen is one list page (all five rows, their labels the scene's
 # own): a record put in its first row would read as GRAND CHAMPION, so no champion page is named - the dialog says
 # records are not shown in attract here. The page (rig-proven to take the record): # site challenge_pages_0      0x00199210 0xd10543ff 0xf0002d60
+
+# ---- attract (PAD-1328): the attract mode's page table, read off this program's sequencer (its child create at 0x1a04b8); an owner's attract items play between its pages ----
+data  attract_table       0x00754a50   # 126 entries {test, page}, 8-byte pointers (RELATIVE)
+value attract_entry_size  16
+value attract_page_at     8
+value attract_count       126
+site  attract_sleep       0x002de110 0xf0002941 0x910e0021
+#   the attract pages' own clip loop: player_advance(player, ms) ; scene_show(player, 3) each frame
+site  attract_show        0x00247ec0 0xa9be53f3 0xaa0003f4
+site  player_advance      0x00247e90 0xaa0003e1 0xb4000080

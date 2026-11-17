@@ -264,3 +264,10 @@ value challenge_scores_gate_entry_at 4
 value challenge_record_check_at   88
 value challenge_record_score_at   72
 value challenge_record_score_size 8
+
+# ---- attract (PAD-1328): the attract mode's page table, read off this program's sequencer (its child create at 0x4c7250); an owner's attract items play between its pages ----
+data  attract_table       0x03198290   # 10 entries {test, page, float seconds}, 8-byte pointers (RELATIVE)
+value attract_entry_size  24
+value attract_page_at     8
+value attract_count       10
+site  attract_sleep       0x00691f70 0x90016081 0x91134021

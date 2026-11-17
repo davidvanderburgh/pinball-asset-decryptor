@@ -14996,9 +14996,11 @@ struct ait_item { unsigned entry, ms; unsigned char after, anchor; char clip[64]
 static struct ait_item ait_items[AIT_ITEMS];
 static unsigned ait_n, ait_anchors, ait_bad, ait_said;
 static unsigned ait_anchor_entry[AIT_ANCHORS];
-typedef unsigned (*ait_page_fn)(unsigned, unsigned, unsigned, unsigned);
+/* PAD-1328: a page and a test take and give whole registers (8 bytes on Spike 3, where the table's words are 8-byte
+ * pointers the loader moved by the PIE's load address) */
+typedef pm_reg (*ait_page_fn)(pm_reg, pm_reg, pm_reg, pm_reg);
 static ait_page_fn ait_game_page[AIT_ANCHORS];
-static unsigned (*ait_game_test[AIT_ANCHORS])(unsigned, unsigned, unsigned, unsigned);
+static pm_reg (*ait_game_test[AIT_ANCHORS])(pm_reg, pm_reg, pm_reg, pm_reg);
 static volatile unsigned char ait_game_says[AIT_ANCHORS];   /* the game's own test said its page shows this time */
 static unsigned long ait_on_ms;
 static void (*ait_sleep)(unsigned);
@@ -15096,9 +15098,10 @@ static void ait_play(unsigned i)
     ait_want = -1;
 }
 
-static unsigned ait_page_run(unsigned a, unsigned a0, unsigned a1, unsigned a2, unsigned a3)
+static pm_reg ait_page_run(unsigned a, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3)
 {
-    unsigned i, r;
+    unsigned i;
+    pm_reg r;
     for (i = 0; i < ait_n; i++) if (ait_items[i].anchor == a && !ait_items[i].after) ait_play(i);
     r = ait_game_says[a] ? ait_game_page[a](a0, a1, a2, a3) : 0;   /* the game's own page, as it was */
     ait_game_says[a] = 1;
@@ -15108,15 +15111,15 @@ static unsigned ait_page_run(unsigned a, unsigned a0, unsigned a1, unsigned a2, 
 
 /* an entry with items whose own test says no this time round (Godzilla's last-game score page before any game) still
  * shows its items: the test is ours too, says yes, and the page runs the game's own only when the game's test did */
-static unsigned ait_test_run(unsigned a, unsigned a0, unsigned a1, unsigned a2, unsigned a3)
+static pm_reg ait_test_run(unsigned a, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3)
 {
     ait_game_says[a] = ait_game_test[a](a0, a1, a2, a3) != 0;
     return 1;
 }
 
-#define AIT_PAGE(k) static unsigned ait_page_##k(unsigned a0, unsigned a1, unsigned a2, unsigned a3) \
+#define AIT_PAGE(k) static pm_reg ait_page_##k(pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3) \
     { return ait_page_run(k, a0, a1, a2, a3); } \
-    static unsigned ait_test_##k(unsigned a0, unsigned a1, unsigned a2, unsigned a3) \
+    static pm_reg ait_test_##k(pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3) \
     { return ait_test_run(k, a0, a1, a2, a3); }
 AIT_PAGE(0) AIT_PAGE(1) AIT_PAGE(2) AIT_PAGE(3) AIT_PAGE(4) AIT_PAGE(5) AIT_PAGE(6) AIT_PAGE(7)
 AIT_PAGE(8) AIT_PAGE(9) AIT_PAGE(10) AIT_PAGE(11) AIT_PAGE(12) AIT_PAGE(13) AIT_PAGE(14) AIT_PAGE(15)
@@ -15185,7 +15188,8 @@ static void attract_arm(void)
 {
     static char raw[8192];
     long n = -1, i, start = 0;
-    unsigned k, table, size, at, count;
+    unsigned k, size, at, count;
+    pm_addr table;
     for (k = 0; k < sizeof AIT_FILES / sizeof AIT_FILES[0] && n < 0; k++)
         n = pm_read_file(AIT_FILES[k], raw, sizeof raw - 1);
     if (n <= 0) return;
@@ -15221,12 +15225,26 @@ static void attract_arm(void)
         ait_n = 0;
         return;
     }
+#if PM_A64
+    /* PAD-1328: the table, the pages and the process sleep are read 64-bit (below), but no way of putting an item on
+     * a Spike 3 game's glass is proven: on Star Wars ELG 1.10 the scene show from an item's page (attract_show, the
+     * call the game's own clip pages make) never returns - the game's dispatch watchdog ends it (exit 5) - and the
+     * clip on the bank's surface alone is not drawn in attract. docs/plans/spike3_modes.md "Attract items". */
+    if (!ait_video) {
+        say("attract items: off - a Spike 3 game's attract mode cannot show an item yet (its scene show stalls the "
+            "game from an item's page)");
+        ait_n = 0;
+        return;
+    }
+#endif
     table = data("attract_table");
     size = (unsigned)pm_port_value("attract_entry_size", 0);
     at = (unsigned)pm_port_value("attract_page_at", 4);
     count = (unsigned)pm_port_value("attract_count", 0);
     ait_sleep = (void (*)(unsigned))(unsigned long)fn("attract_sleep");
-    if (!table || (size != 8 && size != 12 && size != 16) || at + 4 > size || !count || count > 256 || !ait_sleep
+    /* PAD-1328: Spike 3's entries are 16 bytes {test, page} or 24 {test, page, float seconds} (Pokemon LE) */
+    if (!table || (size != 8 && size != 12 && size != 16 && size != 24 && size != 32) || at + sizeof(pm_addr) > size
+        || !count || count > 256 || !ait_sleep
         || !maps_has(table, size * count, MAP_R)) {
         say("attract items: off - the port has no attract page table this runtime can use");
         ait_n = 0;
@@ -15234,7 +15252,8 @@ static void attract_arm(void)
     }
     for (i = 0; i < (long)ait_n; i++) {
         struct ait_item *it = &ait_items[i];
-        unsigned a, *slot, page;
+        unsigned a;
+        pm_addr *slot, page;
         if (it->entry >= count) {
             say("attract items: item %ld names entry %u, past the game's %u - not shown", i + 1, it->entry, count);
             it->anchor = 0xFF;
@@ -15242,7 +15261,7 @@ static void attract_arm(void)
         }
         for (a = 0; a < ait_anchors && ait_anchor_entry[a] != it->entry; a++) ;
         if (a == ait_anchors) {
-            slot = (unsigned *)(unsigned long)(table + size * it->entry + at);
+            slot = (pm_addr *)(unsigned long)(table + size * it->entry + at);
             page = *slot;
             if (a >= AIT_ANCHORS || !page || !maps_has(page, 4, MAP_R | MAP_X | MAP_GAME)) {
                 say("attract items: entry %u's page cannot take items (%s) - item %ld not shown", it->entry,
@@ -15254,20 +15273,20 @@ static void attract_arm(void)
             ait_game_page[a] = (ait_page_fn)(unsigned long)page;
             ait_game_says[a] = 1;
             {   /* the entry's test, at its start (0: always shown) */
-                unsigned *test = (unsigned *)(unsigned long)(table + size * it->entry);
+                pm_addr *test = (pm_addr *)(unsigned long)(table + size * it->entry);
                 if (*test && maps_has(*test, 4, MAP_R | MAP_X | MAP_GAME)) {
-                    ait_game_test[a] = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)*test;
-                    *(volatile unsigned *)test = (unsigned)(unsigned long)ait_tests[a];
+                    ait_game_test[a] = (pm_reg (*)(pm_reg, pm_reg, pm_reg, pm_reg))(unsigned long)*test;
+                    *(volatile pm_addr *)test = (pm_addr)(unsigned long)ait_tests[a];
                 }
             }
-            *(volatile unsigned *)slot = (unsigned)(unsigned long)ait_pages[a];
+            *(volatile pm_addr *)slot = (pm_addr)(unsigned long)ait_pages[a];
             ait_anchors++;
         }
         it->anchor = (unsigned char)a;
     }
-    say("attract items: %u item(s) between the game's attract pages (table 0x%08x, %u entries of %u bytes, %u page(s) "
-        "taking items; the process sleep 0x%08x); played %s", ait_n, table, count, size, ait_anchors,
-        (unsigned)(unsigned long)ait_sleep, ait_video ? "through the attract video element (its pages' own way)"
+    say("attract items: %u item(s) between the game's attract pages (table 0x%08lx, %u entries of %u bytes, %u page(s) "
+        "taking items; the process sleep 0x%08lx); played %s", ait_n, (unsigned long)table, count, size, ait_anchors,
+        (unsigned long)ait_sleep, ait_video ? "through the attract video element (its pages' own way)"
         : ait_show ? "on the video bank's surface, its scene shown by the page as the game's own clip pages do"
         : "full screen (the clip route)");
 }

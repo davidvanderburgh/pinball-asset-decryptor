@@ -72,7 +72,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
 | Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
 | records on the high scores | records.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | points records (the whole game or a mode of the owner's); the champion in attract on ELG and WDR (round 5); counts wait on 64-bit readers |
-| attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
+| attract items | attract.cfg, clips | **tables read (PAD-1328), shown nowhere yet** | the 64-bit sequencer's table is in five Spike 3 ports and the runtime reads it pointer-sized; putting an item on the glass stalls ELG (below), so `attract_items.title_refusal` says no on every Spike 3 title |
 | inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
 | expression light shows | cabshow.cfg | left out | `cablamp` lines (ELG has no cabinet lights), the game's show table as 64-bit, voice count measured |
 
@@ -1108,3 +1108,55 @@ over the stock program, sounds.cfg):
   Fallout's game music is mostly in its 137 music-bank songs (`music_catNN_NNNN`), which are not idx files and take no
   mode files (as on Spike 2: the Audio tab says only an idx sound can).
 Tests: tests/test_pad1324_spike3_music_modes.py.
+
+## Attract items on Spike 3 (PAD-1328, round 1)
+
+**The table.** `s3port.attract_sequencer` reads the attract sequencer the 64-bit way: the call that makes a page a
+child process (`ldr x0, [xE, #8] ; mov w1, #0 ; bl <child create> ; cbz x0 ; str wC, [x0, #0x108]`, a one-frame
+`proc_sleep` after), the entry's test called through `blr x1` in the function or a helper of it, and the table base
+the address with the longest run of {test 0 or code, page code} entries (RELATIVE relocations: the file holds 0).
+Found on five of the seven titles and appended to their ports (`attract_lines`, also run by `draft_spike3`, which
+first drops whatever the matcher carried of a reference's attract lines):
+
+| title | table | entries | entry |
+|---|---|---|---|
+| Star Wars ELG 1.10 | 0x6a45c0 | 28 (a mod-28 step in its next-entry helper 0x138080) | 16 {test, page} |
+| Walking Dead Remastered LE 0.92 | 0x7b5c38 | 48 | 16 |
+| Star Wars 2025 LE 0.96 | 0x8b7a98 | 183 (`cmp w21, #0xb6`) | 16 |
+| Star Wars 2025 Pro 0.84 | 0x754a50 | 126 | 16 |
+| Pokemon LE 0.82 | 0x3198290 | 10 (to the first empty entry) | 24 {test, page, float seconds} |
+
+Fallout LE 0.82 and Transformers LE 0.96 run attract from a director with its pages coded inline (Transformers
+0x2e8590): no table, `title_refusal` says so. ELG's pages read on the Attract tab (`attract_items._read_pages_a64`,
+names from the strings each page makes by adrp/add): Credits, the two Insider overlays, Attract Background Loop 1-6,
+Star Wars Logo, twelve high-score / champion pages (stubs into 0x13cee0), two clip pages (0x138330). Every table is
+in writable `.data`, so the runtime points an entry's page at its own as on Spike 2 (`pm_addr` slots, `pm_reg` page
+and test arguments, 24/32-byte entries allowed).
+
+**The show, and why it is gated.** ELG's own clip pages (0x138330) put the video bank on the glass themselves each
+frame: `surface_set_video` / `surface_play` on the bank scene's VideoSurface, then `player_advance(player, ms)`
+(0x1b4a70) ; `scene_show(player, 3)` (0x1b4aa0) ; the frame yield 0x315f80. The same pair is on WDR and both Star Wars
+2025 builds (`site attract_show` / `player_advance` in their ports). The attract player (`*0x70fc58`, the one the
+sequencer keeps) IS the bank's scene player. Emulator runs (Spike 3 rig slots 1/2, hidden, muted, C:/tmp/PAD-1328
+run_att.sh: a Try it set from `spike3_modes.plan` with one photo item after entry 10, its clip PadAttract1 added to the
+bank and staged by games.patch):
+- the runtime armed it (`table 0x...a445c0, 28 entries of 16 bytes ... the process sleep 0x...315000`), the item
+  page ran after Star Wars Logo and the clip reached the decoder (s3vid opened 655.asset);
+- with the show, the item's page never came back from `scene_show` - any layer (3 or 0), our clip or the game's own
+  (`trench`), the clip started from the tick or from the page process itself - and ~10 s on the game ended itself:
+  `exit 5 = DISPATCH TIMEOUT`. The page process passes scene_show's own check (flags 0x0804 has 0x4); the hang is
+  inside the manager's show (0x2d6a30, which locks the manager's mutex at +0x10 the first time a player goes on a
+  layer);
+- with `player_advance` alone, or nothing, the item runs its 8 s and the game plays on, but the glass keeps the
+  logo: the bank's scene is not drawn in attract by itself;
+- calling the game's own clip page (0x138330) from the item's page, its clip list's next name (0x6a4780[idx], idx at
+  0x70fc70) pointed at the item's clip, does not hang, but it ends its play loop at once (~0.6 s, then its own
+  125-frame pause), for the game's own `trench` as for ours: the surface is not "playing" (state 2) at its first
+  check in this emulator.
+So the runtime turns attract items off on 64-bit unless the port names an attract video element (`attract items:
+off - a Spike 3 game's attract mode cannot show an item yet`), and `attract_items.title_refusal` gives every Spike 3
+title the NO_GLASS sentence; `spike3_modes.attract_wanted` and the engine plumbing are in place for the day a route is
+proven. Next to try: why the manager's show blocks from an item page and not from the game's own clip page (a
+backtrace of the dispatch thread under qemu-user's gdbstub), and whether the game's own clip pages end as early in
+this emulator (frame dumps across entries 11 / 24).
+Tests: tests/test_pad1328_spike3_attract.py.

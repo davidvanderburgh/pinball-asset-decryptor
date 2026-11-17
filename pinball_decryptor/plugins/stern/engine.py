@@ -8487,14 +8487,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # (PAD-1325: spike3_menu grows the 64-bit program's menu), and co-op play (PAD-1326:
         # spike3_modes.coop_wanted, its CO-OP PLAY row spike3_menu's) and the handicaps (hand_wanted,
         # HANDICAP), and Prolonged Competition (PAD-1327: _comp_for_build above has said
-        # whether it goes on). The rest of
+        # whether it goes on), and the attract items (PAD-1328: spike3_modes.attract_wanted;
+        # _attract_for_build above has said whether they go on). The rest of
         # what rides the modes' Spike 2 delivery needs 64-bit runtime, port or menu work first
         # (the census: docs/plans/spike3_modes.md "The family on Spike 3"): each part the project
         # asked for is left out with its own sentence.
         from . import spike3_modes as _S3M
         for _line in _S3M.family_left_out_lines([w for w, on in (
                 ("picture settings", picture_prof is not None),
-                ("attract items", _attract_on),
                 ("inactivity pausing the timers", _idle_on),
                 ("expression light shows", _cabs_on)) if on]):
             log(_line, "warning")

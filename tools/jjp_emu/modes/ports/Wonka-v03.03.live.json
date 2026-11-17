@@ -1,0 +1,232 @@
+{
+ "source": "jjpstock.py live, Wonka-v03.03.elf pid 2888693",
+ "objects": {
+  "cl_mode": "CandyLaneMode",
+  "dots_mode": "DotsMode",
+  "ftm_fizzyroom": "FactoryTour_FizzyRoom",
+  "ftm_goldenegg": "FactoryTour_GoldenEgg",
+  "ftm_inventionroom": "FactoryTour_InventionRoom",
+  "ftm_welcometofactory": "FactoryTour_WelcomeToFactory",
+  "ftmsc_2xwonkabar": "FactoryTour_2XWonkaBar",
+  "ftmsc_collectbonus": "FactoryTour_CollectBonus",
+  "ftmsc_startquickmb": "FactoryTour_StartQuickMB",
+  "ftmsc_superspinner": "FactoryTour_SuperSpinner",
+  "gum_chewing": "WorldRecordGumChewing",
+  "mtv_mode": "MikeTeaveeMode",
+  "oompa_hurryup": "OompaHurryUp",
+  "store_room": "StoreRoom",
+  "ukb_mode": "UnlimitedKickback",
+  "wbc_mode": "WonkaBarCraze",
+  "wonka_bar_ransom": "WonkaBarRansom",
+  "wonka_office": "WonkaOfficeMode",
+  "wonka_wash_frenzy": "WonkaWashFrenzy",
+  "wtm1_mode": "WonkataniaMania1"
+ },
+ "shots": [
+  {
+   "id": 2,
+   "name": "lockup_elevator",
+   "display": "WONKAVATOR"
+  },
+  {
+   "id": 3,
+   "name": "vuk_elevator",
+   "display": "WONKAVATOR"
+  },
+  {
+   "id": 4,
+   "name": "vuk_tv",
+   "display": "WONKAVISION"
+  },
+  {
+   "id": 5,
+   "name": "lockup_gobstopper",
+   "display": "GOBSTOPPER"
+  },
+  {
+   "id": 6,
+   "name": "gobstopper_hole",
+   "display": "GOBSTOPPER HOLE"
+  },
+  {
+   "id": 7,
+   "name": "ramp_left_enter",
+   "display": "GOBSTOPPER RAMP"
+  },
+  {
+   "id": 8,
+   "name": "ramp_left",
+   "display": "GOBSTOPPER RAMP"
+  },
+  {
+   "id": 9,
+   "name": "ramp_center_enter",
+   "display": "CAMERA RAMP"
+  },
+  {
+   "id": 10,
+   "name": "ramp_center",
+   "display": "CAMERA RAMP"
+  },
+  {
+   "id": 11,
+   "name": "ramp_right_enter",
+   "display": "FACTORY RAMP"
+  },
+  {
+   "id": 12,
+   "name": "ramp_right",
+   "display": "FACTORY RAMP"
+  },
+  {
+   "id": 13,
+   "name": "ramp_left_13",
+   "display": ""
+  },
+  {
+   "id": 16,
+   "name": "left_sling",
+   "display": "LEFT SLING"
+  },
+  {
+   "id": 17,
+   "name": "right_sling",
+   "display": "RIGHT SLING"
+  },
+  {
+   "id": 18,
+   "name": "top_bumper",
+   "display": "TOP BUMPER"
+  },
+  {
+   "id": 19,
+   "name": "left_bumper",
+   "display": "LEFT BUMPER"
+  },
+  {
+   "id": 20,
+   "name": "right_bumper",
+   "display": "RIGHT BUMPER"
+  },
+  {
+   "id": 21,
+   "name": "loop_left",
+   "display": "LEFT LOOP"
+  },
+  {
+   "id": 22,
+   "name": "loop_left_full",
+   "display": "LEFT LOOP"
+  },
+  {
+   "id": 23,
+   "name": "loop_center",
+   "display": "CENTER LOOP"
+  },
+  {
+   "id": 24,
+   "name": "loop_center_full",
+   "display": "CENTER LOOP"
+  },
+  {
+   "id": 25,
+   "name": "loop_right",
+   "display": "RIGHT LOOP"
+  },
+  {
+   "id": 26,
+   "name": "loop_right_full",
+   "display": "RIGHT LOOP"
+  },
+  {
+   "id": 27,
+   "name": "inlane_left_1_only",
+   "display": "LEFT INLANE"
+  },
+  {
+   "id": 28,
+   "name": "inlane_left_1_ramp",
+   "display": "LEFT INLAND"
+  },
+  {
+   "id": 29,
+   "name": "inlane_left_2_only",
+   "display": "LEFT INLANE"
+  },
+  {
+   "id": 30,
+   "name": "inlane_right_only",
+   "display": "RIGHT INLANE"
+  },
+  {
+   "id": 31,
+   "name": "inlane_right_ramp",
+   "display": "RIGHT INLANE"
+  },
+  {
+   "id": 32,
+   "name": "outlane_left",
+   "display": "LEFT OUTLANE"
+  },
+  {
+   "id": 33,
+   "name": "outlane_right",
+   "display": "RIGHT OUTLANE"
+  },
+  {
+   "id": 34,
+   "name": "spinner",
+   "display": "SPINNER"
+  },
+  {
+   "id": 35,
+   "name": "captiveball",
+   "display": "CAPTIVE BALL"
+  },
+  {
+   "id": 36,
+   "name": "target_ul_flipper",
+   "display": "KID TARGET"
+  },
+  {
+   "id": 37,
+   "name": "target_l_loop",
+   "display": "LEFT TARGET"
+  },
+  {
+   "id": 38,
+   "name": "target_gobstopper",
+   "display": "GOBSTOPPER"
+  },
+  {
+   "id": 39,
+   "name": "target_tv",
+   "display": "WONKAVISION TARGET"
+  },
+  {
+   "id": 40,
+   "name": "g_target",
+   "display": "G TARGET"
+  },
+  {
+   "id": 41,
+   "name": "u_target",
+   "display": "U TARGET"
+  },
+  {
+   "id": 42,
+   "name": "m_target",
+   "display": "M TARGET"
+  },
+  {
+   "id": 43,
+   "name": "target_r_ramp",
+   "display": "RIGHT TARGET"
+  },
+  {
+   "id": 44,
+   "name": "target_factory",
+   "display": "FACTORY TARGET"
+  }
+ ]
+}

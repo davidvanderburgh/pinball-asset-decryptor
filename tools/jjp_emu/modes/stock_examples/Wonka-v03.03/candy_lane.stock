@@ -1,0 +1,9 @@
+# Candy Lane, Wonka 03.03's own mode, changed (PAD-1351).  Every key: tools/jjp_emu/MODES.md
+# Proven in the emulator: the game's 30 s became 60 s, its awards three times as big,
+# the upper-left flipper target no longer counts for it, and the right ramp counts as
+# the TV target while it runs.
+mode = cl_mode
+seconds = 60
+points_x = 3
+shots_off = target_ul_flipper
+shots_add = switch_ramp_right_made:target_tv

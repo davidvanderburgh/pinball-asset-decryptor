@@ -53,7 +53,7 @@ function Level({ n, words }) {
   </div>`;
 }
 
-function Tile({ k, off, onPick, compact }) {
+export function Tile({ k, off, onPick, compact }) {
   return html`<button type="button" class=${cx("nmw-tile", "nmw-" + k.key, off && "off", compact && "compact")} data-kind=${k.key}
       disabled=${!!off} onClick=${() => onPick(k.key)} ...${off ? tip(off) : {}}>
     <div class="nmw-tile-top">
@@ -74,14 +74,15 @@ function Tile({ k, off, onPick, compact }) {
   </button>`;
 }
 
-// The three tiles: the wizard's first step, and the first-mode page's choice.
-export function KindTiles({ s, onPick, compact }) {
+// The three tiles: the wizard's first step, and the first-mode page's choice. PAD-1384: the JJP tab
+// passes its own three (kinds) and says itself why one can't be used (offOf).
+export function KindTiles({ s, onPick, compact, kinds = KINDS, offOf = kindOff }) {
   return html`<div class=${cx("nmw-tiles", compact && "compact")}>
-    ${KINDS.map((k) => html`<${Tile} key=${k.key} k=${k} off=${kindOff(s, k.key)} onPick=${onPick} compact=${compact} />`)}
+    ${kinds.map((k) => html`<${Tile} key=${k.key} k=${k} off=${offOf(s, k.key)} onPick=${onPick} compact=${compact} />`)}
   </div>`;
 }
 
-function EnterKey({ onEnter }) {
+export function EnterKey({ onEnter }) {
   const ref = useRef(onEnter);
   ref.current = onEnter;
   useEffect(() => {
@@ -116,7 +117,7 @@ export function agentBrief({ game, file, sdkDoc, brief }) {
   ].join("\n");
 }
 
-function NameField({ id, name, setName, ask }) {
+export function NameField({ id, name, setName, ask }) {
   return html`<div class="stack nmw-name">
     <label class="lbl" for=${id}>${ask || "What is the mode called?"}</label>
     <${Field} id=${id} value=${name} onChange=${setName} autoFocus />

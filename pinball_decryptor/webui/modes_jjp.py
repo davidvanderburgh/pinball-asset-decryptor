@@ -16,6 +16,11 @@ the tab is this instead (``JjpModesMixin``, the ``jjp`` key of the ``modes`` sta
 * Build: the stock install ISO in, the same ISO with the modes out
   (``mkjjpmodes.py build``, as root in WSL - it loop-mounts the ISO's root), run on a worker
   with its lines shown as they come.
+* three ways to make a mode (PAD-1384), as on Stern: the form; its own C++ against the JJP
+  mode SDK's ``jjp_mode.h`` (edited here, built to a library the runtime loads in the game);
+  or blocks (the Stern Blocks editor with JJP's palette, plugins/jjp/block_modes.py), which
+  write that C++.  A changed mode's code is built in the app's Linux at once (one build at a
+  time, ``mkjjpmodes.py code`` as root: it installs g++ the first time), its result in Check;
 * Write to USB stick (PAD-1375): the everyday way in - a ``hotfix`` folder the game's own
   Update USB hot fix runs (``mkjjpmodes.py stick``), no reinstall, scores kept; or a stick that
   turns the modes off, back on, or takes them out.  The steps at the machine are shown with it.
@@ -47,6 +52,10 @@ class JjpModesMixin:
     _jjp_job = ""
     _jjp_stick = None
     _jjp_stick_lines = None
+    #: the code build (PAD-1384): {"running", "lines", "ok", "msg"}; _jjp_code_again: a change
+    #: came in while it ran, so it runs once more
+    _jjp_code = None
+    _jjp_code_again = False
 
     # ------------------------------------------------------------------ gate
     def _jjp_on(self):
@@ -97,6 +106,10 @@ class JjpModesMixin:
                 st["modes"] = modes
                 st["open"] = self._jjp_file
                 st["form"] = dict(CM.read_mode(self._jjp_label, self._jjp_file)) if self._jjp_file else {}
+                st["kind"] = CM.mode_kind(self._jjp_label, self._jjp_file) if self._jjp_file else ""
+                st["blocks"] = self._jjp_blocks_state(port) if st["kind"] == "blocks" else None
+                st["code"] = self._jjp_code_state()
+                st["api"] = CM.api_header()
                 st["title_cfg"] = dict(CM.read_title(self._jjp_label))
                 st["folder"] = CM.title_dir(self._jjp_label)
                 st["names"] = {k: CM.names_for(port, k, st["folder"]) for k in (
@@ -122,6 +135,27 @@ class JjpModesMixin:
             out[k] = {"label": CM.LABELS.get(k, k), "kind": "choice" if choices else kind,
                       "choices": choices, "default": default}
         return out
+
+    def _jjp_blocks_state(self, port):
+        """The open blocks mode: its program, the names the editor offers, what is wrong with it
+        and the C++ it makes (PAD-1384)."""
+        folder = CM.title_dir(self._jjp_label)
+        prog = CM.read_blocks(self._jjp_label, self._jjp_file)
+        choices = CM.blocks_names(port, folder)
+        try:
+            with open(CM.code_path(self._jjp_label, self._jjp_file), encoding="utf-8") as f:
+                cpp = f.read()
+        except OSError:
+            cpp = ""
+        names = {"switches": choices["shots"], "lamps": choices["lamps"], "sound": choices["sounds"],
+                 "coil_pulse": choices["coils"]}
+        return {"program": prog, "choices": choices, "cpp": cpp,
+                "problems": CM.BM.problems(prog, names), "code": CM.code_of(self._jjp_label, self._jjp_file)}
+
+    def _jjp_code_state(self):
+        c = dict(self._jjp_code or {})
+        c["stale"] = [code for _f, code in CM.code_stale(self._jjp_label)] if self._jjp_label else []
+        return c
 
     def _jjp_check_state(self):
         try:
@@ -219,9 +253,12 @@ class JjpModesMixin:
         self.jjp_refresh()
 
     @rpc
-    def jjp_new(self, name="New Mode"):
-        self._jjp_file = CM.new_mode(self._jjp_need(), (name or "New Mode").strip() or "New Mode")
+    def jjp_new(self, name="New Mode", how="form"):
+        """A new mode (PAD-1384: made with blocks, in C++ or with the form)."""
+        self._jjp_file = CM.new_mode(self._jjp_need(), (name or "New Mode").strip() or "New Mode", how or "form")
         self.jjp_refresh()
+        if how in ("blocks", "cpp"):
+            self.jjp_build_code()
         return self._jjp_file
 
     @rpc
@@ -229,6 +266,108 @@ class JjpModesMixin:
         if self._jjp_file:
             self._jjp_file = CM.duplicate_mode(self._jjp_need(), self._jjp_file)
         self.jjp_refresh()
+        if self._jjp_file and CM.code_of(self._jjp_label, self._jjp_file):
+            self.jjp_build_code()
+
+    # ------------------------------------------------------------------ C++ and blocks (PAD-1384)
+    @rpc
+    def jjp_code_text(self):
+        """The open mode's C++ (CEditor's read)."""
+        try:
+            return {"text": CM.read_code(self._jjp_need(), self._jjp_file),
+                    "file": os.path.basename(CM.code_path(self._jjp_label, self._jjp_file))}
+        except (OSError, ValueError) as e:
+            return {"text": "", "error": str(e)}
+
+    @rpc
+    def jjp_code_save(self, text):
+        try:
+            CM.write_code(self._jjp_need(), self._jjp_file, text or "")
+        except (OSError, ValueError) as e:
+            return {"ok": False, "error": str(e)}
+        self._jjp_publish(check=self._jjp_check_state(), code=self._jjp_code_state())
+        self.jjp_build_code()
+        return {"ok": True}
+
+    @rpc
+    def jjp_blocks_save(self, fn, program):
+        """The Blocks editor's whole program (after each change): saved, its C++ written again,
+        built.  *fn* is the mode it was made for: one opened since is left alone."""
+        label = self._jjp_need()
+        if os.path.basename(fn or "") != self._jjp_file:
+            return
+        CM.save_blocks(label, self._jjp_file, program or {})
+        port = CM.load_port(label) or {}
+        self._jjp_publish(blocks=self._jjp_blocks_state(port), check=self._jjp_check_state(),
+                          code=self._jjp_code_state())
+        self.jjp_build_code()
+
+    @rpc
+    def jjp_blocks_to_cpp(self):
+        """Edit as C++ (one way): the blocks mode becomes a C++ mode for good."""
+        from . import compat
+        if not compat.messagebox.askyesno(
+                "Edit as C++", "Turn this mode into C++ for good? Its blocks are kept beside it as a "
+                "backup, but C++ can't be turned back into blocks."):
+            return
+        CM.blocks_to_cpp(self._jjp_need(), self._jjp_file)
+        self.jjp_refresh()
+
+    @rpc
+    def jjp_open_api(self):
+        """The C++ API (jjp_mode.h) in the system's editor (the Stern tab's open_sdk_doc)."""
+        self.open_path(CM.api_header())
+        return True
+
+    @rpc
+    def jjp_build_code(self):
+        """Build every changed mode's C++ in the app's Linux (one build at a time: a change while
+        one runs builds once more after it)."""
+        label = self._jjp_need()
+        if not CM.code_stale(label):
+            self._jjp_publish(code=self._jjp_code_state(), check=self._jjp_check_state())
+            return
+        if self._jjp_code and self._jjp_code.get("running"):
+            self._jjp_code_again = True
+            return
+        self._jjp_code = {"running": True, "lines": [], "ok": False, "msg": "Building the C++..."}
+        self._jjp_code_again = False
+        self._jjp_publish(code=self._jjp_code_state())
+        threading.Thread(target=self._jjp_code_worker, args=(label, self.jjp_code_argv(label)),
+                         daemon=True, name="jjp-modes-code").start()
+
+    def jjp_code_argv(self, label):
+        from . import multiboot_core as MC
+        return MC.root_command(CM.code_args(label, MC.wsl))
+
+    def _jjp_code_worker(self, label, argv):
+        lines = []
+        try:
+            if callable(argv):
+                argv = argv([])
+            kw = {}
+            if sys.platform == "win32":
+                kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                               encoding="utf-8", errors="replace", timeout=900, **kw)
+            lines = [ln.rstrip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+            ok = r.returncode == 0
+            msg = "Built." if ok else "The C++ did not build: see the lines below."
+        except Exception as e:                              # noqa: BLE001
+            ok, msg = False, "The C++ build could not start: %s" % e
+        self.ctx.loop.post(self._jjp_code_end, label, ok, msg, lines)
+
+    def _jjp_code_end(self, label, ok, msg, lines):
+        self._jjp_code = {"running": False, "ok": ok, "msg": msg, "lines": lines[-40:]}
+        if not ok:
+            self.log("JJP modes: " + msg, "error")
+        if label != self._jjp_label:
+            return
+        self._jjp_publish(code=self._jjp_code_state(), check=self._jjp_check_state(),
+                          modes=CM.list_modes(label))
+        if self._jjp_code_again:
+            self._jjp_code_again = False
+            self.jjp_build_code()
 
     @rpc
     def jjp_delete(self):
@@ -256,7 +395,7 @@ class JjpModesMixin:
         else:
             if not self._jjp_file:
                 raise ValueError("no mode open")
-            if CM.key_kind(key) is None:
+            if CM.key_kind(key) is None or key in CM.NOT_ON_FORM:
                 raise ValueError("unknown key %s" % key)
             vals = CM.read_mode(label, self._jjp_file)
             vals[key] = value
@@ -268,6 +407,8 @@ class JjpModesMixin:
     @rpc
     def jjp_check(self):
         self._jjp_publish(check=self._jjp_check_state())
+        if self._jjp_label and CM.code_stale(self._jjp_label):
+            self.jjp_build_code()
 
     @rpc(loop=False)
     def jjp_sound_path(self, name):

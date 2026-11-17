@@ -280,11 +280,13 @@ export function ScriptView({ c, pg }) {
 }
 
 // ------------------------------------------------------------------ a mode written in C, edited here
-export function CEditor({ c }) {
+// PAD-1384: the JJP tab's C++ modes use it too, through their own calls (textRpc, saveRpc) and file name
+export function CEditor({ c, textRpc = "modes.code_text", saveRpc = "modes.code_save", file, lang = "c" }) {
   const [text, setText] = useState(null);
   const [saved, setSaved] = useState(null);
   const [why, setWhy] = useState("");
-  const load = () => Promise.resolve(call("modes.code_text")).then((r) => {
+  const name = file || c.slug + ".c";
+  const load = () => Promise.resolve(call(textRpc)).then((r) => {
     if (!r) return;
     setText(r.text || "");
     setSaved(r.text || "");
@@ -292,7 +294,7 @@ export function CEditor({ c }) {
   });
   useEffect(() => { setText(null); load(); }, [c.slug]);
   const dirty = text != null && text !== saved;
-  const save = () => Promise.resolve(call("modes.code_save", text)).then((r) => {
+  const save = () => Promise.resolve(call(saveRpc, text)).then((r) => {
     if (r && r.ok) { setSaved(text); setWhy(""); } else setWhy((r && r.error) || "It could not be saved.");
   });
   const onKey = (e) => {
@@ -307,7 +309,7 @@ export function CEditor({ c }) {
       <span class=${cx("small", dirty ? "warn" : "muted")}>${dirty ? "Not saved (Ctrl+S saves)" : "Saved"}</span>
     </div>
     ${why ? html`<${Note} kind="warn">${why}<//>` : null}
-    ${text == null ? html`<div class="small muted">Reading ${c.slug}.c…</div>`
-      : html`<${CodeEditor} text=${text} lang="c" onInput=${setText} onKey=${onKey} label=${c.slug + ".c"} />`}
+    ${text == null ? html`<div class="small muted">Reading ${name}…</div>`
+      : html`<${CodeEditor} text=${text} lang=${lang} onInput=${setText} onKey=${onKey} label=${name} />`}
   </div>`;
 }

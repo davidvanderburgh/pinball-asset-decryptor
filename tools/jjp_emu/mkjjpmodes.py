@@ -24,6 +24,7 @@ Turning the modes off on a machine without reinstalling: create
 /jjpe/perm/padmodes.off (padmodes.sh checks for it).
 
     mkjjpmodes.py check --modes DIR [--port PORT.json]
+    mkjjpmodes.py code --modes DIR [--all]     (the modes' own C++ -> <name>.so; needs g++, root installs it)
     mkjjpmodes.py build --iso IN.iso --modes DIR --out OUT.iso [--port P.json] [--so jjpmodes.so]   (root, WSL)
         (no --so: the runtime is built from jjpmodes.c against the ISO's own glibc)
     mkjjpmodes.py inspect --iso OUT.iso
@@ -35,6 +36,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -304,6 +306,8 @@ KEYS = collections.OrderedDict([
     ("start_on", "events"), ("start_after", "after"), ("start_score", "int"),
     ("start_combo", "switches"), ("combo_seconds", "int"),
     ("start_count_reset", ("game", "ball")), ("start_once", ("no", "ball", "game")),
+    # PAD-1384: its own C++ - <name>.cpp, built to <name>.so in the mode folder (modes/sdk/jjp_mode.h)
+    ("code", "code"),
 ])
 #: start_on words -> the game's Hook<...>::list each one needs (jjpmodes.c EVENTS)
 START_EVENTS = collections.OrderedDict([
@@ -406,6 +410,8 @@ def _int_in(v, lo, hi, what):
 def check_value(kind, v, port=None):
     """-> a problem string, or None."""
     words = _names(v)
+    if kind == "code":
+        return None if CODE_NAME.match(v) else "must be a name of letters, digits and _ (its <name>.cpp)"
     if kind == "multiball":       # <balls in play 2-6> [ball save s 0-120]
         if not 1 <= len(words) <= 2:
             return "must be <balls in play> [ball save seconds]"
@@ -567,9 +573,12 @@ def check_modes(mode_dir, port=None):
             if v and (k in ("music", "picture", "video") or is_sound_file(v)) and media_kind(v) \
                     and "/" not in v and not os.path.isfile(os.path.join(mode_dir, v)):
                 problems.append("%s: %s = %s, but there is no %s in the mode folder" % (fn, k, v, v))
-        if not any(m.get(k) for k in START_RULES):
-            problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo):"
-                            " the mode would never start" % fn)
+        code = m.get("code", "")
+        if code and CODE_NAME.match(code):
+            problems.extend(code_problems(mode_dir, fn, code, port, shot_switches))
+        if not any(m.get(k) for k in START_RULES) and not (code and code_starts_itself(mode_dir, code)):
+            problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo%s):"
+                            " the mode would never start" % (fn, ", or an idle() in its code that calls jm_start" if code else ""))
         if m.get("start_combo") and len(_names(m["start_combo"])) < 2:
             problems.append("%s: start_combo needs two switches or more" % fn)
         if m.get("start_score") and _INT.match(m["start_score"]) and int(m["start_score"].replace(",", "").replace("_", "")) <= 0:
@@ -628,6 +637,118 @@ def check_modes(mode_dir, port=None):
     return modes, problems
 
 
+# ============================================================================= a mode's own C++ (PAD-1384)
+CODE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,40}$")
+#: string literals in a mode's C++ that name the game's things, by prefix -> (what, port check)
+_CODE_LITERAL = re.compile(r'"((?:switch|dswitch|coil|lp|ls|se)_[A-Za-z0-9_]+)"')
+
+
+def code_source(mode_dir, code):
+    p = os.path.join(mode_dir, code + ".cpp")
+    if not os.path.isfile(p):
+        return None
+    with open(p, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def code_starts_itself(mode_dir, code):
+    """A mode whose C++ registers idle() starts itself (jm_start), so needs no start rule. With no
+    source here (a built .so alone), it is taken at its word."""
+    src = code_source(mode_dir, code)
+    return src is None or re.search(r"\.idle\s*=", src) is not None
+
+
+def code_names(src):
+    return sorted(set(_CODE_LITERAL.findall(src or "")))
+
+
+def code_problems(mode_dir, fn, code, port, shot_switches):
+    """A mode's code: built, and every game name its C++ writes is one the game has."""
+    out = []
+    so = os.path.join(mode_dir, code + ".so")
+    src_path = os.path.join(mode_dir, code + ".cpp")
+    src = code_source(mode_dir, code)
+    if src is None and not os.path.isfile(so):
+        return ["%s: code = %s, but there is no %s.cpp (or %s.so) in the mode folder" % (fn, code, code, code)]
+    if not os.path.isfile(so):
+        out.append("%s: %s.cpp is not built yet (Check builds it)" % (fn, code))
+    elif src is not None and os.path.getmtime(src_path) > os.path.getmtime(so) + 1:
+        out.append("%s: %s.cpp changed since it was built (Check builds it)" % (fn, code))
+    for name in code_names(src):
+        if name.startswith(("switch_", "dswitch_")):
+            p = check_value("switches", name, port)
+            shot_switches.add(name)
+        elif name.startswith("coil_"):
+            p = _coil_problem(name, "pulse", port) if port else None
+        elif name.startswith(("lp_", "ls_")):
+            p = check_value("lamps", name, port)
+        else:
+            p = check_value("sound", name, port)
+        if p:
+            out.append("%s: %s.cpp names %s: %s" % (fn, code, name, p))
+    return out
+
+
+def build_code(mode_dir, code, cxx=None):
+    """<code>.cpp -> <code>.so in the mode folder with modes/sdk/build_code.sh (g++ in this Linux)
+    -> (ok, output)."""
+    env = dict(os.environ)
+    if cxx:
+        env["CXX"] = cxx
+    r = subprocess.run(["bash", os.path.join(HERE, "modes", "sdk", "build_code.sh"),
+                        os.path.join(mode_dir, code + ".cpp"), os.path.join(mode_dir, code + ".so")],
+                       env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    return r.returncode == 0, r.stdout
+
+
+def code_modes(mode_dir):
+    """[(mode file, code name)] of the folder's modes that have code."""
+    out = []
+    for fn in sorted(f for f in os.listdir(mode_dir) if f.endswith(".mode")):
+        with open(os.path.join(mode_dir, fn), encoding="utf-8", errors="replace") as f:
+            for _n, k, v in parse_cfg(f.read()):
+                if k == "code" and CODE_NAME.match(v):
+                    out.append((fn, v))
+    return out
+
+
+def ensure_cxx():
+    """g++ here, installed the first time (as root: the app's Linux), as the JJP pipeline does
+    gcc -> None, or why there is none."""
+    if shutil.which("g++"):
+        return None
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        print("g++ is not in this Linux: installing it (once)...", flush=True)
+        for cmd in ("DEBIAN_FRONTEND=noninteractive apt-get install -y g++",
+                    "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y g++",
+                    "dnf install -y gcc-c++", "pacman -S --noconfirm gcc", "apk add --no-cache g++"):
+            if subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0                     and shutil.which("g++"):
+                return None
+    return "no g++ in this Linux (install it: apt-get install g++)"
+
+
+def build_codes(a):
+    """`code`: build every mode's C++ in a folder (only those changed, or all with --all)."""
+    bad = 0
+    todo = [c for _f, c in code_modes(a.modes) if os.path.isfile(os.path.join(a.modes, c + ".cpp"))]
+    why = ensure_cxx() if todo else None
+    if why:
+        print("refused: " + why)
+        return 2
+    for fn, code in code_modes(a.modes):
+        src, so = os.path.join(a.modes, code + ".cpp"), os.path.join(a.modes, code + ".so")
+        if not os.path.isfile(src):
+            print("%s: no %s.cpp (keeping %s)" % (fn, code, "its .so" if os.path.isfile(so) else "nothing"))
+            continue
+        if not a.all and os.path.isfile(so) and os.path.getmtime(so) + 1 >= os.path.getmtime(src):
+            print("%s: %s.so is up to date" % (fn, code))
+            continue
+        ok, out = build_code(a.modes, code)
+        print("%s: %s" % (fn, out.strip() or ("built" if ok else "FAILED")))
+        bad += not ok
+    return 1 if bad else 0
+
+
 # ============================================================================= rungame.sh
 def has_modes_hook(text):
     return any(ln.startswith(MODES_HOOK_MARK) for ln in text.split("\n"))
@@ -662,12 +783,13 @@ def strip_modes_hook(text):
 
 # ============================================================================= build
 def folder_files(mode_dir):
-    """The files a mode folder carries to the machine: title.cfg, every .mode and .stock, and every
-    sound, picture and video file (a mode's own media, PAD-1352)."""
+    """The files a mode folder carries to the machine: title.cfg, every .mode and .stock, every
+    sound, picture and video file (a mode's own media, PAD-1352) and every mode's built code
+    (<name>.so, PAD-1384; its .cpp and blocks stay home)."""
     out = []
     for fn in sorted(os.listdir(mode_dir)):
         p = os.path.join(mode_dir, fn)
-        if os.path.isfile(p) and (fn.endswith(MODE_FILES) or fn == "title.cfg" or media_kind(fn)):
+        if os.path.isfile(p) and (fn.endswith(MODE_FILES + (".so",)) or fn == "title.cfg" or media_kind(fn)):
             out.append((fn, p))
     return out
 
@@ -920,6 +1042,9 @@ def main(argv=None):
     s = sub.add_parser("check", help="check a mode folder (and, with --port, its names against a title)")
     s.add_argument("--modes", required=True)
     s.add_argument("--port", help="the title's port JSON (jjpport.py) to check every name against")
+    s = sub.add_parser("code", help="build the modes' own C++ (<name>.cpp -> <name>.so; needs g++)")
+    s.add_argument("--modes", required=True)
+    s.add_argument("--all", action="store_true", help="build them all, not only the changed ones")
     s = sub.add_parser("build", help="write the install ISO with the modes (root, WSL)")
     s.add_argument("--iso", required=True)
     s.add_argument("--modes", required=True)
@@ -965,6 +1090,8 @@ def main(argv=None):
                 print("problem: " + p)
             print("%d mode(s), %d problem(s)" % (len(modes), len(problems)))
             return 1 if problems else 0
+        if a.cmd == "code":
+            return build_codes(a)
         if a.cmd == "build":
             return build(a)
         if a.cmd == "stick":

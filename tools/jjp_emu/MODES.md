@@ -17,6 +17,7 @@ No game code is patched. How and why it works: `docs/plans/jjp_custom_modes.md`.
 | A running game's mode globals and shot names | `jjpstock.py live` -> `modes/ports/<title>.live.json` |
 | Starter `.stock` file per title | `modes/stock_examples/<title>/` |
 | Make, check and build them in the app | the **Modes** tab on a JJP game (`webui/modes_jjp.py`, PAD-1350) |
+| A mode's own rules in C++ (or blocks that write it) | `code = <name>`, `modes/sdk/jjp_mode.h`, `build_code.sh` (PAD-1384, below) |
 
 ## In the app (PAD-1350)
 
@@ -172,6 +173,76 @@ The port report lists every named coil with what a mode may do (`coils`:
 `pulse`, `hold`), by the same name rules (`jjpport.py` `COIL_NEVER`,
 `COIL_HOLDABLE`, `COIL_ANYWAY`; a test keeps them equal to the runtime's), and
 `mkjjpmodes.py check --port` refuses a coil the mode may not use.
+
+## A mode's own rules: C++ and blocks (PAD-1384)
+
+A mode file's keys are its settings. Rules of its own (a bonus that grows, a shot
+it takes over, more time at the fifth shot, a start of its own) are C++: the
+line `code = <name>` makes the runtime load `<name>.so` from the mode folder,
+built from `<name>.cpp` against `modes/sdk/jjp_mode.h`:
+
+```cpp
+#include "jjp_mode.h"
+static long long bonus;
+static void start() { bonus = 0; jm_title("CODE RUSH"); }
+static void scored(const char *sw) { bonus += 250000; jm_score(bonus); }   // after the form scored it
+static int shot(const char *sw) {                                         // any switch while it runs
+    if (jm_is(sw, "switch_ramp_left_made")) { jm_score(7777777); return JM_TAKEN; }
+    return JM_GO_ON;                                                      // the form's own handling goes on
+}
+JM_REGISTER({ .api = JM_API, .start = start, .shot = shot, .scored = scored });
+```
+
+| Callback | When |
+|---|---|
+| `start()` | it has just started (after the form's start sound, multiball, coil) |
+| `shot(sw)` | any switch while it runs: `JM_TAKEN` = the form scores nothing for this hit |
+| `scored(sw)` | after the form scored one of its scoring shots |
+| `tick()` | ten times a second while it runs (not while paused) |
+| `end(why)` | it is over: `time`, `completion`, `its code`, `ball end`... |
+| `idle(sw)` | any switch in a game while it is NOT running: `jm_start()` starts it (no start rule needed) |
+
+Calls: `jm_score`, `jm_total`, `jm_hits`, `jm_switch_hits`, `jm_seconds_left`,
+`jm_set_seconds`, `jm_add_seconds`, `jm_ms`, `jm_end`, `jm_start`, `jm_running`,
+`jm_title` (the panel's title this run), `jm_sound`, `jm_lamp` / `jm_lamp_off`
+(the mode's own lamp layer), `jm_coil` (the coils a mode may fire, with the
+form's limits), `jm_multiball`, `jm_ball_save`, `jm_log`. Each acts on the mode
+whose callback is running, on the game's proc thread.
+
+**Built to load on every image.** `modes/sdk/build_code.sh` (or `mkjjpmodes.py
+code --modes DIR`, which builds the changed ones and installs g++ as root the
+first time) links the library against nothing: its libc calls and the
+runtime's `jm_*` bind inside the game's process, so one build loads whatever
+glibc the image has. No C++ standard library, exceptions, RTTI or new/delete
+(the build refuses them by name); classes, templates and statics are fine. The
+runtime finds the switches and coils a mode's code uses from its string
+literals (it wraps and resolves them like the form's), and `check` reads the
+same literals in the `.cpp` against the port report. A stick or an ISO carries
+`<name>.so`, never the source; `check` refuses one not built or older than its
+`.cpp`.
+
+**Blocks.** The Modes tab's Blocks editor (the Stern one, with a JJP palette)
+keeps `<name>.blocks.json` beside the mode and writes `<name>.cpp` from it at
+every change (`plugins/jjp/block_modes.py`): When the mode starts / ends, a
+switch is hit (while it runs, or before it to start it), a scoring shot is
+made, every N seconds, N seconds left; score, variables, If, the clock,
+multiball, ball save, the game's sounds, lamps and coils, the panel's title.
+
+**In the app**, New mode offers the Stern tab's three ways: Blocks, C++ or the
+form. A Blocks or C++ mode has the form too, as its Settings page. The tab
+builds a changed mode's C++ in the app's Linux after each save, and Check shows
+how that went.
+
+**Proof, Wonka 03.03 in the emulator (hidden, muted), 2026-11-17.** A C++ mode
+took a switch the form does not score (7,777,777 on the left ramp), added a
+growing bonus after each form-scored shot, took the clock from 20 to 46 s
+and ended itself from `tick()` ("ENDED by its code", `end("its
+code")`); a mode with no start rule was started by its own `idle()` on the
+second hit of a target and ran its 6 s; a drain reached `end("ball end")`.
+Then the modes the app itself made through New mode (a Blocks starter and the
+C++ template, built by the app) ran the same way: the blocks' bonus 250,000
+then 500,000 and their "5 seconds left" script; the template's bonus on five
+shots and +10 s at the fifth.
 
 ## A mode's own sounds, music, picture and video (PAD-1352)
 

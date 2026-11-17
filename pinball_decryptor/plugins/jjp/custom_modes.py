@@ -26,6 +26,8 @@ import os
 import re
 import shutil
 
+from . import block_modes as BM
+
 #: the display names of the JJP titles, by GAMENAME (setenv.sh) - a port report carries the
 #: GAMENAME; a label like "Wonka-v03.03" is the image's own file name
 GAME_NAMES = {
@@ -67,6 +69,9 @@ FORM_GROUPS = (
     ("Balls", ("multiball", "multiball_on", "add_ball", "ball_save")),                       # PAD-1353
     ("Coils", ("coil_start", "coil_shot", "coil_complete", "coil_hold", "coil_hold_on")),     # PAD-1353
 )
+#: mode keys the form does not show: ``code`` is set when a mode is made with blocks or in C++
+#: (the New mode window, PAD-1384) and shown as how the mode is made
+NOT_ON_FORM = ("code",)
 #: the runtime's defaults (MODES.md "Mode keys"): what an empty key means
 DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
@@ -100,7 +105,7 @@ LABELS = {
     "start_on": "Starts on a game event", "start_after": "Starts after a game mode ends",
     "start_score": "Starts at a score", "start_combo": "Starts on a combo (in order)",
     "combo_seconds": "Combo seconds between shots", "start_count_reset": "Start count resets every",
-    "start_once": "Starts at most once a",
+    "start_once": "Starts at most once a", "code": "Its own code",
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
@@ -266,14 +271,138 @@ def mode_files(label):
 
 
 def list_modes(label):
-    """[{file, name, start, starts}] in the runtime's load order (file name); *starts* says
-    everything that starts it, its switches and its start rules (PAD-1377)."""
+    """[{file, name, start, starts, kind, code}] in the runtime's load order (file name); *starts*
+    says everything that starts it, its switches and its start rules (PAD-1377); *kind* is how
+    it is made: "form", "cpp" (its own C++) or "blocks" (PAD-1384)."""
     out = []
+    d = title_dir(label)
     for fn in mode_files(label):
-        v = read_cfg(os.path.join(title_dir(label), fn))
+        v = read_cfg(os.path.join(d, fn))
+        starts = mk().start_text(v)
+        code = v.get("code", "")
+        if not starts and code and mk().code_starts_itself(d, code):
+            starts = "its own code"
         out.append({"file": fn, "name": v.get("name") or fn[:-5], "start": v.get("start", ""),
-                    "starts": mk().start_text(v)})
+                    "starts": starts, "kind": kind_of(d, code), "code": code})
     return out
+
+
+# ============================================================================ C++ and blocks (PAD-1384)
+#: how a new mode is made, as the New mode window offers it (the Stern tab's three ways)
+HOWS = ("blocks", "cpp", "form")
+
+
+def sdk_dir():
+    return os.path.join(tools_dir(), "modes", "sdk")
+
+
+def api_header():
+    """The C++ API a mode's code is written against (the "C++ API" button opens it)."""
+    return os.path.join(sdk_dir(), "jjp_mode.h")
+
+
+def kind_of(folder, code):
+    if not code:
+        return "form"
+    return "blocks" if os.path.isfile(os.path.join(folder, code + BM.SUFFIX)) else "cpp"
+
+
+def mode_kind(label, fn):
+    return kind_of(title_dir(label), read_mode(label, fn).get("code", ""))
+
+
+def code_of(label, fn):
+    code = read_mode(label, fn).get("code", "")
+    return code if mk().CODE_NAME.match(code or "") else ""
+
+
+def code_path(label, fn, ext=".cpp"):
+    code = code_of(label, fn)
+    if not code:
+        raise ValueError("%s has no code of its own" % fn)
+    return os.path.join(title_dir(label), code + ext)
+
+
+def _codes_used(label):
+    return {read_mode(label, f).get("code", "") for f in mode_files(label)} - {""}
+
+
+def _free_code(label, name):
+    """A code name for a new mode: its slug, not used by a mode or a file of the folder."""
+    d = title_dir(label)
+    base = re.sub(r"^[^a-z_]+", "", _slug(name)) or "mode"
+    used = _codes_used(label)
+    code, n = base, 2
+    while code in used or any(os.path.exists(os.path.join(d, code + e)) for e in (".cpp", ".so", BM.SUFFIX)):
+        code, n = "%s_%d" % (base, n), n + 1
+    return code
+
+
+def template_text(name, title):
+    with open(os.path.join(sdk_dir(), "template_mode.cpp"), encoding="utf-8") as f:
+        text = f.read()
+    return text.replace("MODE_NAME", name).replace("MODE_TITLE", title.replace('"', "'"))
+
+
+def read_code(label, fn):
+    with open(code_path(label, fn), encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def write_code(label, fn, text):
+    if mode_kind(label, fn) == "blocks":
+        raise ValueError("this mode is made of blocks: its C++ is written from them")
+    p = code_path(label, fn)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text.replace("\r\n", "\n"))
+    os.replace(tmp, p)
+
+
+def read_blocks(label, fn):
+    return BM.load(code_path(label, fn, BM.SUFFIX))
+
+
+def save_blocks(label, fn, program):
+    """The program saved, and the C++ it makes written again beside it."""
+    if mode_kind(label, fn) != "blocks":
+        raise ValueError("%s is not made of blocks" % fn)
+    code = code_of(label, fn)
+    BM.save(code_path(label, fn, BM.SUFFIX), program)
+    v = read_mode(label, fn)
+    with open(code_path(label, fn) + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+        f.write(BM.to_cpp(program, v.get("name") or fn[:-5], code))
+    os.replace(code_path(label, fn) + ".tmp", code_path(label, fn))
+
+
+def blocks_to_cpp(label, fn):
+    """A blocks mode becomes a C++ mode for good: its program is kept as <code>.blocks.json.bak."""
+    p = code_path(label, fn, BM.SUFFIX)
+    if os.path.isfile(p):
+        os.replace(p, p + ".bak")
+
+
+def blocks_names(port, folder):
+    """What the Blocks editor offers for this title: its switches, lamps, sounds and coils."""
+    return {"kit": "jjp", "shots": names_for(port, "switches"), "lamps": names_for(port, "lamps"),
+            "sounds": names_for(port, "sound"), "coils": names_for(port, "coil_pulse")}
+
+
+def code_stale(label):
+    """The modes whose C++ is not built, or changed since: [(file, code)]."""
+    d = title_dir(label)
+    out = []
+    for f in mode_files(label):
+        code = code_of(label, f)
+        src, so = os.path.join(d, code + ".cpp"), os.path.join(d, code + ".so")
+        if code and os.path.isfile(src) and (not os.path.isfile(so) or os.path.getmtime(src) > os.path.getmtime(so) + 1):
+            out.append((f, code))
+    return out
+
+
+def code_args(label, to_linux):
+    """The mkjjpmodes.py code argv (as root, from the checkout root: it installs g++ the first time)."""
+    return ["tools/jjp_emu/mkjjpmodes.py", "code", "--modes", to_linux(title_dir(label))]
 
 
 def read_mode(label, fn):
@@ -321,8 +450,12 @@ def _next_file(label, name):
     return fn
 
 
-def new_mode(label, name="New Mode"):
-    """A new mode from the title's starter defaults (its port report's picks) -> its file."""
+def new_mode(label, name="New Mode", how="form"):
+    """A new mode from the title's starter defaults (its port report's picks) -> its file.
+    *how* (PAD-1384): "form", "cpp" (with the SDK's template C++) or "blocks" (a starter program
+    and the C++ it makes)."""
+    if how not in HOWS:
+        raise ValueError("a mode is made with blocks, in C++ or with the form, not %r" % how)
     if len(mode_files(label)) >= MAX_MODES:
         raise ValueError("a title takes %d modes; delete one first" % MAX_MODES)
     d = (load_port(label) or {}).get("defaults") or {}
@@ -335,6 +468,19 @@ def new_mode(label, name="New Mode"):
     if d.get("lamps"):
         v["lamps"], v["lamp_color"], v["lamp_blink"] = d["lamps"], "ff2000", "4"
     fn = _next_file(label, name)
+    if how != "form":
+        code = _free_code(label, name)
+        v["code"] = code
+        v["complete"] = "0"         # its code decides when it is done (the form's completion off)
+        folder = title_dir(label)
+        if how == "blocks":
+            prog = BM.starter(d, name)
+            BM.save(os.path.join(folder, code + BM.SUFFIX), prog)
+            text = BM.to_cpp(prog, name, code)
+        else:
+            text = template_text(name, v["title"])
+        with open(os.path.join(folder, code + ".cpp"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
     write_mode(label, fn, v)
     return fn
 
@@ -345,12 +491,29 @@ def duplicate_mode(label, fn):
     v = read_mode(label, fn)
     v["name"] = (v.get("name") or fn[:-5]) + " copy"
     new = _next_file(label, v["name"])
+    old = v.get("code", "")
+    if old:                                 # its code goes with it, under a name of its own
+        d = title_dir(label)
+        code = _free_code(label, v["name"])
+        for ext in (".cpp", BM.SUFFIX):
+            if os.path.isfile(os.path.join(d, old + ext)):
+                shutil.copyfile(os.path.join(d, old + ext), os.path.join(d, code + ext))
+        v["code"] = code
+        if os.path.isfile(os.path.join(d, code + BM.SUFFIX)):
+            with open(os.path.join(d, code + ".cpp"), "w", encoding="utf-8", newline="\n") as f:
+                f.write(BM.to_cpp(BM.load(os.path.join(d, code + BM.SUFFIX)), v["name"], code))
     write_mode(label, new, v)
     return new
 
 
 def delete_mode(label, fn):
+    code = code_of(label, fn)
     os.unlink(os.path.join(title_dir(label), _safe(fn)))
+    if code and code not in _codes_used(label):     # its code, unless another mode shares it
+        for ext in (".cpp", ".so", BM.SUFFIX):
+            p = os.path.join(title_dir(label), code + ext)
+            if os.path.isfile(p):
+                os.unlink(p)
 
 
 def check(label):
@@ -507,8 +670,9 @@ def runtime_path(iso):
     st = os.stat(iso)
     h = hashlib.sha256()
     h.update(("%s|%d|%d|" % (os.path.normcase(os.path.abspath(iso)), st.st_size, int(st.st_mtime))).encode())
-    with open(os.path.join(tools_dir(), "jjpmodes.c"), "rb") as f:
-        h.update(f.read())
+    for src in ("jjpmodes.c", os.path.join("modes", "sdk", "jjp_mode.h")):    # PAD-1384: its API too
+        with open(os.path.join(tools_dir(), src), "rb") as f:
+            h.update(f.read())
     stem = re.sub(r"\.iso$", "", os.path.basename(iso), flags=re.I)
     return os.path.join(modes_root(), ".runtime", "%s-%s.so" % (stem, h.hexdigest()[:12]))
 

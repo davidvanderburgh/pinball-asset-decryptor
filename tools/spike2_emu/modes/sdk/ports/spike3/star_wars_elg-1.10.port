@@ -495,3 +495,13 @@ text example_start_shot     Death star target
 # number as the Spike 2 build's), the line that says whose turn it is
 data message_table          0x006c96e8
 value coop_ball_msg          1255
+
+# ---- attract (PAD-1328): the attract mode's page table, read off this program's sequencer (its child create at 0x13889c); an owner's attract items play between its pages ----
+data  attract_table       0x006a45c0   # 28 entries {test, page}, 8-byte pointers (RELATIVE)
+value attract_entry_size  16
+value attract_page_at     8
+value attract_count       28
+site  attract_sleep       0x00315000 0x900021a1 0x910f4021
+#   the attract pages' own clip loop: player_advance(player, ms) ; scene_show(player, 3) each frame
+site  attract_show        0x001b4aa0 0xa9be53f3 0xaa0003f4
+site  player_advance      0x001b4a70 0xaa0003e1 0xb4000080

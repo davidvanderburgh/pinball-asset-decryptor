@@ -72,8 +72,8 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
 | Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
 | records on the high scores | records.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | points records (the whole game or a mode of the owner's); the champion in attract on ELG and WDR (round 5); counts wait on 64-bit readers |
-| attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
-| inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
+| attract items | attract.cfg, clips | **tables read (PAD-1328), shown nowhere yet** | the 64-bit sequencer's table is in five Spike 3 ports and the runtime reads it pointer-sized; putting an item on the glass stalls ELG (below), so `attract_items.title_refusal` says no on every Spike 3 title |
+| inactivity pausing | idle.cfg | **no Spike 3 game needs it (PAD-1328)** | census of the 64-bit adjustment tables: Fallout LE (176), Star Wars 2025 LE (182) and Transformers LE (174) read AD_INACTIVE_TIMER once, in an `adjustment(id) == 1` check before their timer test; ELG, Pokemon, WDR and Star Wars 2025 Pro have no such setting. `idle_pause.title_refusal` says which (NO_NEED / NO_SETTING) |
 | expression light shows | cabshow.cfg | left out | `cablamp` lines (ELG has no cabinet lights), the game's show table as 64-bit, voice count measured |
 
 The operator-menu rows (MUSIC MODE, EDITION, CO-OP PLAY, HANDICAP, the picture rows) all wait on
@@ -1148,3 +1148,94 @@ over the stock program, sounds.cfg):
   Fallout's game music is mostly in its 137 music-bank songs (`music_catNN_NNNN`), which are not idx files and take no
   mode files (as on Spike 2: the Audio tab says only an idx sound can).
 Tests: tests/test_pad1324_spike3_music_modes.py.
+
+## Attract items on Spike 3 (PAD-1328, round 1)
+
+**The table.** `s3port.attract_sequencer` reads the attract sequencer the 64-bit way: the call that makes a page a
+child process (`ldr x0, [xE, #8] ; mov w1, #0 ; bl <child create> ; cbz x0 ; str wC, [x0, #0x108]`, a one-frame
+`proc_sleep` after), the entry's test called through `blr x1` in the function or a helper of it, and the table base
+the address with the longest run of {test 0 or code, page code} entries (RELATIVE relocations: the file holds 0).
+Found on five of the seven titles and appended to their ports (`attract_lines`, also run by `draft_spike3`, which
+first drops whatever the matcher carried of a reference's attract lines):
+
+| title | table | entries | entry |
+|---|---|---|---|
+| Star Wars ELG 1.10 | 0x6a45c0 | 28 (a mod-28 step in its next-entry helper 0x138080) | 16 {test, page} |
+| Walking Dead Remastered LE 0.92 | 0x7b5c38 | 48 | 16 |
+| Star Wars 2025 LE 0.96 | 0x8b7a98 | 183 (`cmp w21, #0xb6`) | 16 |
+| Star Wars 2025 Pro 0.84 | 0x754a50 | 126 | 16 |
+| Pokemon LE 0.82 | 0x3198290 | 10 (to the first empty entry) | 24 {test, page, float seconds} |
+
+Fallout LE 0.82 and Transformers LE 0.96 run attract from a director with its pages coded inline (Transformers
+0x2e8590): no table, `title_refusal` says so. ELG's pages read on the Attract tab (`attract_items._read_pages_a64`,
+names from the strings each page makes by adrp/add): Credits, the two Insider overlays, Attract Background Loop 1-6,
+Star Wars Logo, twelve high-score / champion pages (stubs into 0x13cee0), two clip pages (0x138330). Every table is
+in writable `.data`, so the runtime points an entry's page at its own as on Spike 2 (`pm_addr` slots, `pm_reg` page
+and test arguments, 24/32-byte entries allowed).
+
+**The show, and why it is gated.** ELG's own clip pages (0x138330) put the video bank on the glass themselves each
+frame: `surface_set_video` / `surface_play` on the bank scene's VideoSurface, then `player_advance(player, ms)`
+(0x1b4a70) ; `scene_show(player, 3)` (0x1b4aa0) ; the frame yield 0x315f80. The same pair is on WDR and both Star Wars
+2025 builds (`site attract_show` / `player_advance` in their ports). The attract player (`*0x70fc58`, the one the
+sequencer keeps) IS the bank's scene player. Emulator runs (Spike 3 rig slots 1/2, hidden, muted, C:/tmp/PAD-1328
+run_att.sh: a Try it set from `spike3_modes.plan` with one photo item after entry 10, its clip PadAttract1 added to the
+bank and staged by games.patch):
+- the runtime armed it (`table 0x...a445c0, 28 entries of 16 bytes ... the process sleep 0x...315000`), the item
+  page ran after Star Wars Logo and the clip reached the decoder (s3vid opened 655.asset);
+- with the show, the item's page never came back from `scene_show` - any layer (3 or 0), our clip or the game's own
+  (`trench`), the clip started from the tick or from the page process itself - and ~10 s on the game ended itself:
+  `exit 5 = DISPATCH TIMEOUT`. The page process passes scene_show's own check (flags 0x0804 has 0x4); the hang is
+  inside the manager's show (0x2d6a30, which locks the manager's mutex at +0x10 the first time a player goes on a
+  layer);
+- with `player_advance` alone, or nothing, the item runs its 8 s and the game plays on, but the glass keeps the
+  logo: the bank's scene is not drawn in attract by itself;
+- calling the game's own clip page (0x138330) from the item's page, its clip list's next name (0x6a4780[idx], idx at
+  0x70fc70) pointed at the item's clip, does not hang, but it ends its play loop at once (~0.6 s, then its own
+  125-frame pause), for the game's own `trench` as for ours: the surface is not "playing" (state 2) at its first
+  check in this emulator.
+So the runtime turns attract items off on 64-bit unless the port names an attract video element (`attract items:
+off - a Spike 3 game's attract mode cannot show an item yet`), and `attract_items.title_refusal` gives every Spike 3
+title the NO_GLASS sentence; `spike3_modes.attract_wanted` and the engine plumbing are in place for the day a route is
+proven. Next to try: why the manager's show blocks from an item page and not from the game's own clip page (a
+backtrace of the dispatch thread under qemu-user's gdbstub), and whether the game's own clip pages end as early in
+this emulator (frame dumps across entries 11 / 24).
+Tests: tests/test_pad1328_spike3_attract.py.
+
+## Expression light shows on Spike 3 (PAD-1328: what the next round builds)
+
+The census (2026-11-16, `s3port.lamp_devices` on each program): six titles have cabinet lights under Spike 3's own
+names, which `lampmap.cabinet_role` (Spike 2's `EXPRESSIVE LIGHTING L n` / `SPEAKER n`) does not match yet:
+`SPEAKER L 1-R` / `-G` / `-B` .. and `SPEAKER R ..` (one lamp per colour channel, a ring each side), `CABINET L-IN
+UPPER` / `L-IN LOWER` / `R-IN ..` / `L-OUT` / `R-OUT` (the side strips) on Fallout, Pokemon, Transformers and WDR,
+`EXPRESSION LIGHTING L` / `R` on Star Wars 2025 LE; Star Wars ELG has none. What is there already: the 64-bit lamp
+layer and the per-light setter's light table (16-byte records {u16 list, kind}, `s3port.light_lists`), the lamp
+lines' light ids by device name (`light_engine`), `cab_voice_count` reads the channel's voice pointers pointer-sized
+(`PM_PTR`). To build: (1) the names in `cabinet_role` and `cablamp` lines drafted off the 64-bit device and light
+tables (each pixel's three channel lamps folded into one `R,G,B` line); (2) the voice's played-sample offset measured
+on 64-bit (`value sound_voice_played`, 12 on Spike 2); (3) `spike3_modes` carrying `cabshow.cfg` with the song's
+sound ids read off the 64-bit program, and the engine's family line for it dropped; (4) a rig proof read off the node
+bus (`PAD_NB_TRACE`: the speaker panel sends no lamp frames in attract on any title, docs/plans/spike3_emulation.md).
+
+**Round 2 (PAD-1328).** Done: `lampmap.cabinet_role` knows Spike 3's names (`EXPRESSION LIGHTING L/R n` blades,
+`CABINET L/R-IN UPPER|LOWER|OUT n` strips, `SPEAKER L/R n` rings) and `cabinet_strip` / `place_cabinet` give each of
+a Spike 3 cabinet's strips its own run (inner x 22 / 278, outer x 4 / 296, numbered from the top down);
+`s3port.cabinet_lines_a64` drafts the `cablamp` lines off the 64-bit tables: on the six newer titles each colour
+channel is a lamp of the device table and a light's id is its rank among the lamps + 1 (every 3-light record of the
+light table names one fixture's -R/-G/-B that way: Fallout 316/316, SW2025 LE 345/345, WDR 259/259, Pokemon 381/381,
+SW2025 Pro 158/158; Transformers 241 of 261, its cabinet all among them). Six ports carry them: Fallout, Pokemon,
+Transformers and WDR 184 pixels (six 24-pixel strips, two 20-pixel rings), Star Wars 2025 LE / Pro 136 (two
+48-pixel blades, the rings). The runtime's cabinet range is 192 (N_CAB, was 160).
+
+Rig (Fallout LE 0.82, slot 1, hidden, muted, C:/tmp/PAD-1328/cab run_cab.sh: cabshow.cfg `only` with a show on the
+two main-play songs, sids 65536 / 131072): `expression lights: 1 show(s) of the card's over 184 cabinet light(s)`,
+`show "PROOF" plays with sound 65536 and the others that start it (2 request(s))`, at the song's request (119.5 s)
+the show started, our layer on top (priority 255) over all 184 lights, handed back at its end and started again with
+the song. Not yet seen: the light itself. The rig's strip boards (node 2 cabinet, node 7 speakers: ws2812node, both
+claimed) get from the game only `f2` reads at boot, `46 ff 01` / `48 00 00`, one walking-zero `72` channel mask, and
+then the `ff` status poll once a second (answered `2d 00 ...`) - never a lamp frame, for the game's own shows as for
+ours (PAD_S3_NBTRACE=1, nbtrace.log). Fallout's AD_CABINET_EXPRESSION_HARDWARE / AD_SPEAKER_EXPRESSION_HARDWARE
+default to 1 (present), so the game most likely judges the emulated boards to have no strips from their answers.
+Next: what the game reads in those answers (the `ff` status and the `f2` reads; the ws2812node firmware is on the
+card) so the rig's strip boards take lamp frames; then the proof on padled's node 2 / 7 hi plane, the song timing
+(`value sound_voice_played`: the show did not lock to the voice at 12, it ran on its own clock), the app's Spike 3
+side (spike3_modes carrying cabshow.cfg and the Expression lights tab's layout from the port), and the family line.

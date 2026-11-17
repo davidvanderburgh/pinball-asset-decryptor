@@ -177,7 +177,10 @@ def test_every_part_the_engine_leaves_out_has_its_reason():
     # PAD-1323: random clips and screen times go on now; PAD-1324: the music modes; PAD-1325: EDITION;
     # PAD-1326: co-op and the handicaps ; PAD-1327: Prolonged Competition - five parts are left out
     # PAD-1327 round 4: the records on the high scores too - four parts are left out
-    assert len(named) == 4 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    # PAD-1328: the attract items' and inactivity pausing's own gates (_attract_for_build / _idle_for_build) say why -
+    # two parts are left out with the family's sentence
+    assert len(named) == 2 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    assert "attract items" not in named and "inactivity pausing the timers" not in named
     assert "music modes" not in S3M.FAMILY_LEFT_OUT
     assert "handicaps" not in named and "handicaps" not in S3M.FAMILY_LEFT_OUT
     assert "co-op play" not in named and "co-op play" not in S3M.FAMILY_LEFT_OUT
@@ -195,8 +198,8 @@ def test_the_old_blanket_sentence_is_gone():
 
 
 def test_each_left_out_part_reads_as_its_own_sentence():
-    lines = S3M.family_left_out_lines(["attract items", "Prolonged Competition", "not a part", "co-op play"])
-    assert lines == ["Attract items: left out of this build: " + S3M.FAMILY_LEFT_OUT["attract items"] + "."]
+    lines = S3M.family_left_out_lines(["picture settings", "Prolonged Competition", "not a part", "co-op play"])
+    assert lines == ["Picture settings: left out of this build: " + S3M.FAMILY_LEFT_OUT["picture settings"] + "."]
     for why in S3M.FAMILY_LEFT_OUT.values():
         assert "—" not in why and not why.endswith(".")
 

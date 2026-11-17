@@ -21,6 +21,14 @@ PORT_VALUE = "inactive_adj"
 LABEL = "Inactivity pauses timers"
 NO_TITLE = "The app cannot tell which game this project is for."
 NO_NEED = "%s pauses its timers by itself when its ALLOW INACTIVITY TO PAUSE TIMERS setting is on."
+#: PAD-1328: the games whose operator menu has no ALLOW INACTIVITY TO PAUSE TIMERS (AD_INACTIVE_TIMER) at all, so
+#: there is no setting of theirs to honour. Spike 3 census (2026-11-16, each program's 64-bit adjustment table): Star
+#: Wars ELG 1.10, Pokemon LE 0.82, Walking Dead Remastered LE 0.92 and Star Wars 2025 Pro 0.84 have none; Fallout LE
+#: 0.82 (176), Star Wars 2025 LE 0.96 (182) and Transformers LE 0.96 (174) read theirs once each, in the
+#: `adjustment(id) == 1` check before their timer test (as TMNT and Godzilla do on Spike 2), so none needs the fix.
+#: Star Wars ELG's Spike 2 build has none either (PAD-1022's census).
+NO_SETTING_TITLES = ("star_wars_elg", "pokemon_le", "walking_dead_remastered_le", "star_wars_2025_pro")
+NO_SETTING = "%s has no ALLOW INACTIVITY TO PAUSE TIMERS setting: its timers run as the game sets them."
 #: what the card does, for the tab and the log
 HOW = ("with ALLOW INACTIVITY TO PAUSE TIMERS on (the game's own setting, on by default), the missions' clocks and "
        "the hurry-ups wait when nobody has scored for 6 seconds, and run on at the next score")
@@ -62,6 +70,8 @@ def title_refusal(prof):
     """Why ``prof``'s game does not need (or cannot have) it, or ``""``."""
     if prof is None:
         return NO_TITLE
+    if getattr(prof, "game_dir", "") in NO_SETTING_TITLES:
+        return NO_SETTING % prof.label
     from . import mode_project as MP
     try:
         port = MP.read_port(MP.port_path(prof))

@@ -1931,6 +1931,243 @@ def edge_lines(t, body, placed, notes):
     return e
 
 
+# ---- PAD-1328: the attract sequencer (the 64-bit counterpart of pinball_decryptor/plugins/stern/portattract.py) -----
+#: entries the runtime looks at (pad_mode_runtime.c: count <= 256; portattract.MAX_ENTRIES on Spike 2)
+ATTRACT_MAX = 256
+
+
+def _attract_run(t, entry, stride, page_at):
+    """how many entries in a row from `entry` hold a page that is code and a test that is 0 or code (each a
+    pointer-sized word: a RELATIVE relocation's target, or 0)"""
+    k = 0
+    while k < ATTRACT_MAX:
+        va = entry + stride * k
+        if t.off(va + stride - 1) is None or va in t.holes:
+            break
+        page = t.ptr.get(va + page_at)
+        test = t.ptr.get(va)
+        raw = t.b[t.off(va):t.off(va) + 8]
+        if page is None or not t.in_text(page) or not (test is None and raw == b"\0" * 8 or
+                                                       test is not None and t.in_text(test)):
+            break
+        k += 1
+    return k
+
+
+def attract_sequencer(t, proc_sleep):
+    """the attract sequencer's table, read off a 64-bit program: {"entry", "size", "page_at", "count", "create",
+    "sleep", "at", "seconds_at"} or None when the program has not exactly one.
+
+    The sequencer starts each page as a child process and stamps the cycle on it, as on Spike 2 (portattract.py):
+        ldr x0, [xE, #8] ; mov w1, #0 ; bl <child create> ; cbz x0 ; str wC, [x0, #0x108] ; ... mov w0, #1 ; bl <sleep>
+    with xE an entry of a table whose tests it calls through `blr x1` in the same function. Star Wars ELG 1.10: 28
+    entries of 16 bytes {test, page} at 0x6a45c0, Walking Dead Remastered and Star Wars 2025 the same shape; Pokemon
+    LE 0.82: 24 bytes {test, page, float seconds} (its page process gets seconds x 60 at +0x110). The words are
+    RELATIVE relocations (the file holds 0): the runtime reads them moved by the PIE's load address."""
+    found = {}
+    for i, w in enumerate(t.words):
+        if (w & 0xFC000000) != 0x94000000:
+            continue
+        a = t.tva + 4 * i
+        pre = [t.words[j] for j in range(max(0, i - 5), i)]
+        page_at = None
+        for x in pre:
+            ls = _ls(x)
+            if ls and ls[0] == "ldr" and ls[1] == 0 and 8 <= ls[3] <= 16:
+                page_at = ls[3]
+        if page_at is None or not any(x in (0x52800001, 0xD2800001) for x in pre):     # mov w1, #0 / mov x1, #0
+            continue
+        post = t.words[i + 1:i + 14]
+        stamp = None
+        for x in post[:6]:
+            ls = _ls(x)
+            if ls and ls[0] in ("strw", "str") and ls[2] == 0 and ls[3] >= 0x100:
+                stamp = ls[3]
+                break
+            if (x & 0xFFC003E0) == 0xBD000000 and ((x >> 10) & 0xFFF) * 4 >= 0x100:     # str s, [x0, #imm]
+                stamp = ((x >> 10) & 0xFFF) * 4
+                break
+        if stamp is None:
+            continue
+        if not any(_bl(a + 4 * (k + 1), x) == proc_sleep for k, x in enumerate(post)):
+            continue
+        f = func_of(t, a)
+        if f is None or a - f > 4 * 1200:
+            continue
+        body = [t.words[j] for j in range((f - t.tva) // 4, i)]
+
+        def tests(ws):                                                  # blr x1: the entry's test
+            return any((x & 0xFFFFFC1F) == 0xD63F0000 and ((x >> 5) & 31) == 1 for x in ws)
+        if not tests(body):
+            # Star Wars ELG 1.10 calls the tests in a helper of its own (0x138080: the next entry shown)
+            subs = {_bl(f + 4 * k, x) for k, x in enumerate(body)} - {None}
+            if not any(tests([x for _a, x in _window(t, s, 120)]) for s in subs if t.in_text(s)):
+                continue
+        bases = set()
+        for _a, _w, reg in _regs_walk(t, f, (a - f) // 4 + 1):
+            for kind, v in reg.values():
+                if kind in ("a", "g"):
+                    bases.add(v)
+        best = None
+        for b in sorted(bases):
+            if not t.is_data(b):
+                continue
+            for stride in (16, 24, 32):
+                run = _attract_run(t, b, stride, page_at)
+                if run >= 4 and (best is None or run > best[2]):
+                    best = (b, stride, run)
+        if best is None:
+            continue
+        b, stride, run = best
+        # a fixed count: the index's `cmp wI, #imm` (Star Wars 2025 LE: 0xb6), when it fits the run
+        cmps = [((x >> 10) & 0xFFF) for x in body if (x & 0xFFC0001F) == 0x7100001F and 8 <= ((x >> 10) & 0xFFF) < 255]
+        count = max(cmps) + 1 if cmps and max(cmps) + 1 <= run else run
+        if not 2 <= count <= ATTRACT_MAX:
+            continue
+        secs = None
+        if stride >= 24:
+            ok = 0
+            for k in range(count):
+                v = t.u32(b + stride * k + 16)
+                fv = struct.unpack("<f", struct.pack("<I", v or 0))[0]
+                ok += 0 <= fv < 600
+            secs = 16 if ok == count else None
+        found[(b, stride, count)] = {"entry": b, "size": stride, "page_at": page_at, "count": count,
+                                     "create": a + 4 * sext(w & 0x3FFFFFF, 26), "sleep": proc_sleep, "at": a,
+                                     "stamp": stamp, "seconds_at": secs}
+    return next(iter(found.values())) if len(found) == 1 else None
+
+
+def attract_pages(t, s):
+    """the page functions of the sequencer's table, in order (0 where an entry has none)"""
+    return [t.ptr.get(s["entry"] + s["size"] * k + s["page_at"], 0) for k in range(s["count"])]
+
+
+def attract_show(t, s):
+    """(player_advance, scene_show) the attract pages that play a clip put the scene on the glass with, each frame,
+    or None - read off the pages' own frame loop (Star Wars ELG 1.10's VideoSurface pages, 0x138330):
+        mov x0, xP ; bl <player_advance(player, float ms)> ; mov w1, #3 ; mov x0, xP ; bl <scene_show(player, 3)>
+    the same pair Aerosmith's OilProjectorLoop page calls on Spike 2 (portattract.show_lines)."""
+    votes = Counter()
+    seen = set()
+
+    def look(f, depth):
+        if not f or f in seen or not t.in_text(f):
+            return
+        seen.add(f)
+        ws = list(_window(t, f, 700))
+        for k in range(len(ws) - 4):
+            (a0, w0), (a1, w1), (a2, w2), (a3, w3), (a4, w4) = ws[k:k + 5]
+            mv = _mov_reg(w0)
+            if (mv and mv[0] == 0 and _bl(a1, w1) and w2 == 0x52800061 and _mov_reg(w3) == mv and _bl(a4, w4)):
+                votes[(_bl(a1, w1), _bl(a4, w4))] += 1
+        if depth:
+            for a, w in ws:
+                b = _bl(a, w) or _b(a, w)
+                if b and abs(b - f) < 0x20000:
+                    look(b, depth - 1)
+    for p in attract_pages(t, s):
+        look(p, 1)
+    return votes.most_common(1)[0][0] if votes else None
+
+
+#: the attract lines are always the target's own, read by attract_lines - never carried over from a reference port
+_ATTRACT_NAMES = ("attract_table", "attract_entry_size", "attract_page_at", "attract_count", "attract_sleep",
+                  "attract_show", "player_advance")
+_ATTRACT_LINE = re.compile(r"^(#.*?)?\b(site|data|value)\s+(%s)\b" % "|".join(_ATTRACT_NAMES))
+_ATTRACT_HOW = re.compile(r"^#\s+(%s):|^# ---- attract \(PAD-1328\)|^#   the attract pages' own clip loop"
+                          % "|".join(_ATTRACT_NAMES))
+
+
+def drop_carried_attract(body, placed, missing=None):
+    """PAD-1328: take out of a draft what the matcher carried over of the reference port's attract lines (the
+    reference's table and pages are its own game's); attract_lines reads the target's"""
+    body[:] = [l for l in body if not (_ATTRACT_LINE.match(l) or _ATTRACT_HOW.match(l))]
+    for n in _ATTRACT_NAMES:
+        placed.pop(n, None)
+        placed.pop("data:" + n, None)
+    if missing is not None:
+        missing[:] = [n for n in missing if n not in _ATTRACT_NAMES]
+
+
+def attract_lines(t, placed):
+    """PAD-1328: the port lines for the program's attract table ([] when it has none the runtime can use): the same
+    names as Spike 2's (portattract.lines), the table's words pointer-sized; and the scene show an item's page puts
+    the video bank's scene on the glass with (portattract.show_lines), when its pages have one"""
+    ps = placed.get("proc_sleep")
+    s = attract_sequencer(t, ps) if ps else None
+    if s is None:
+        return []
+    placed["data:attract_table"] = s["entry"]
+    out = ["# ---- attract (PAD-1328): the attract mode's page table, read off this program's sequencer (its child "
+           "create at 0x%x); an owner's attract items play between its pages ----" % s["at"],
+           "data  attract_table       0x%08x   # %d entries {test, page%s}, 8-byte pointers (RELATIVE)"
+           % (s["entry"], s["count"], ", float seconds" if s["seconds_at"] else ""),
+           "value attract_entry_size  %d" % s["size"],
+           "value attract_page_at     %d" % s["page_at"],
+           "value attract_count       %d" % s["count"],
+           "site  attract_sleep       0x%08x 0x%08x 0x%08x" % (s["sleep"], t.u32(s["sleep"]), t.u32(s["sleep"] + 4))]
+    sh = attract_show(t, s)
+    if sh:
+        adv, show = sh
+        out += ["#   the attract pages' own clip loop: player_advance(player, ms) ; scene_show(player, 3) each frame",
+                "site  attract_show        0x%08x 0x%08x 0x%08x" % (show, t.u32(show), t.u32(show + 4))]
+        if "player_advance" not in placed:
+            out.append("site  player_advance      0x%08x 0x%08x 0x%08x" % (adv, t.u32(adv), t.u32(adv + 4)))
+            placed["player_advance"] = adv
+        placed["attract_show"] = show
+    return out
+
+
+# ---- PAD-1328: the cabinet's expression lights on a Spike 3 program --------------------------------------------
+def cabinet_a64(t, lamp_group):
+    """the cabinet's expression lights of a 64-bit program, as lampmap.cabinet's dicts (placed on the cabinet drawing),
+    or []. Each colour channel of a Spike 3 pixel is a lamp of its own in the device table (`SPEAKER L 1-R`, `-G`,
+    `-B`), and a light's id is its rank among the table's lamps + 1 (every 3-light record of the light table names
+    one fixture's R, G and B that way on all six titles with cabinet lights); a pixel is the light-table record
+    holding its three channels."""
+    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from pinball_decryptor.plugins.stern import lampmap as LM
+    calls = [b for a, w in _window(t, lamp_group, 40) for b in [_bl(a, w)] if b] if lamp_group else []
+    lists = light_lists(t, calls[1]) if len(calls) > 1 else []
+    devs = [d for d in device_records(t) if d[3] == 3]
+    order, out = {"R": 0, "G": 1, "B": 2}, []
+    for k, ids in enumerate(lists):
+        if len(ids) != 3 or not all(0 < i <= len(devs) for i in ids):
+            continue
+        names = [devs[i - 1][0].upper() for i in ids]
+        m = [re.match(r"^(.*)-([RGB])$", n) for n in names]
+        if not all(m) or len({x.group(1) for x in m}) != 1 or sorted(x.group(2) for x in m) != ["B", "G", "R"]:
+            continue
+        name = m[0].group(1)
+        role = LM.cabinet_role(name)
+        if not role:
+            continue
+        rgb = [0, 0, 0]
+        for i, x in zip(ids, m):
+            rgb[order[x.group(2)]] = i
+        g, idx = devs[rgb[0] - 1][1:3]
+        out.append(dict(lamp=k, name=name, lights=rgb, role=role[0], side=role[1], n=role[2], group=g, index=idx,
+                        x=0, y=0))
+    return LM.place_cabinet(out)
+
+
+def cabinet_lines_a64(t, placed):
+    """PAD-1328: the port's `cablamp` lines, read off this program's own device and light tables ([] with no cabinet)"""
+    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from pinball_decryptor.plugins.stern import lampmap as LM
+    cab = cabinet_a64(t, placed.get("lamp_group"))
+    if not cab:
+        return []
+    lines = LM.cabinet_lines(None, cab=cab)
+    lines[0] = lines[0].replace("read by lamp_map.py", "read off the 64-bit device and light tables (PAD-1328)")
+    return lines
+
+
 def draft(ref, rport, tgt, game=None, version=None):
     scan(ref)
     scan(tgt)
@@ -2769,6 +3006,14 @@ def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
     edge_lines(tgt, body, placed, notes)
     if "switch_edge" in placed:
         missing = [n for n in missing if n not in _EDGE_NAMES]
+    drop_carried_attract(body, placed, missing)                         # PAD-1328: the target's own, below
+    att = attract_lines(tgt, placed)
+    if att:
+        body += [""] + att
+    body[:] = [l for l in body if not l.startswith(("cablamp ", "# cablamp "))]   # the reference's cabinet is its own
+    cab = cabinet_lines_a64(tgt, placed)                                # PAD-1328
+    if cab:
+        body += [""] + cab
     if notes:
         body += ["", "# ---- checks ----"] + ["# " + n for n in notes]
     core_missing = [grp for grp in CORE if not any(n in placed for n in grp) and not

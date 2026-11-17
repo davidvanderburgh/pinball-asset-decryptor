@@ -265,3 +265,190 @@ value challenge_record_score_size 8
 
 # PAD-1327: no champion page function here: the attract mode's champion screens ask each category through binding
 # thunks (0x24d350 .. 0x24d3f0, traced on the rig), as Fallout LE's and Pokemon LE's do
+
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read off the 64-bit device and light tables (PAD-1328) ----
+# 144 blade pixel(s), 40 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 5,6,7        25  SPEAKER L 1  # lamp 5, I/O group 3 index 1, at 95,28, speaker L
+cablamp 8,9,10       75  SPEAKER L 2  # lamp 6, I/O group 3 index 4, at 108,30, speaker L
+cablamp 11,12,13     125 SPEAKER L 3  # lamp 7, I/O group 3 index 7, at 120,36, speaker L
+cablamp 14,15,16     175 SPEAKER L 4  # lamp 8, I/O group 3 index 10, at 129,45, speaker L
+cablamp 17,18,19     225 SPEAKER L 5  # lamp 9, I/O group 3 index 13, at 135,57, speaker L
+cablamp 20,21,22     275 SPEAKER L 6  # lamp 10, I/O group 3 index 16, at 137,70, speaker L
+cablamp 23,24,25     325 SPEAKER L 7  # lamp 11, I/O group 3 index 19, at 135,83, speaker L
+cablamp 26,27,28     375 SPEAKER L 8  # lamp 12, I/O group 3 index 22, at 129,95, speaker L
+cablamp 29,30,31     425 SPEAKER L 9  # lamp 13, I/O group 3 index 25, at 120,104, speaker L
+cablamp 32,33,34     475 SPEAKER L 10  # lamp 14, I/O group 3 index 28, at 108,110, speaker L
+cablamp 35,36,37     525 SPEAKER L 11  # lamp 15, I/O group 3 index 31, at 95,112, speaker L
+cablamp 38,39,40     575 SPEAKER L 12  # lamp 16, I/O group 3 index 34, at 82,110, speaker L
+cablamp 41,42,43     625 SPEAKER L 13  # lamp 17, I/O group 3 index 37, at 70,104, speaker L
+cablamp 44,45,46     675 SPEAKER L 14  # lamp 18, I/O group 3 index 40, at 61,95, speaker L
+cablamp 47,48,49     725 SPEAKER L 15  # lamp 19, I/O group 3 index 43, at 55,83, speaker L
+cablamp 50,51,52     775 SPEAKER L 16  # lamp 20, I/O group 3 index 46, at 53,70, speaker L
+cablamp 53,54,55     825 SPEAKER L 17  # lamp 21, I/O group 3 index 49, at 55,57, speaker L
+cablamp 56,57,58     875 SPEAKER L 18  # lamp 22, I/O group 3 index 52, at 61,45, speaker L
+cablamp 59,60,61     925 SPEAKER L 19  # lamp 23, I/O group 3 index 55, at 70,36, speaker L
+cablamp 62,63,64     975 SPEAKER L 20  # lamp 24, I/O group 3 index 58, at 82,30, speaker L
+cablamp 65,66,67     25  SPEAKER R 1  # lamp 25, I/O group 3 index 61, at 205,28, speaker R
+cablamp 68,69,70     75  SPEAKER R 2  # lamp 26, I/O group 3 index 64, at 218,30, speaker R
+cablamp 71,72,73     125 SPEAKER R 3  # lamp 27, I/O group 3 index 67, at 230,36, speaker R
+cablamp 74,75,76     175 SPEAKER R 4  # lamp 28, I/O group 3 index 70, at 239,45, speaker R
+cablamp 77,78,79     225 SPEAKER R 5  # lamp 29, I/O group 3 index 73, at 245,57, speaker R
+cablamp 80,81,82     275 SPEAKER R 6  # lamp 30, I/O group 3 index 76, at 247,70, speaker R
+cablamp 83,84,85     325 SPEAKER R 7  # lamp 31, I/O group 3 index 79, at 245,83, speaker R
+cablamp 86,87,88     375 SPEAKER R 8  # lamp 32, I/O group 3 index 82, at 239,95, speaker R
+cablamp 89,90,91     425 SPEAKER R 9  # lamp 33, I/O group 3 index 85, at 230,104, speaker R
+cablamp 92,93,94     475 SPEAKER R 10  # lamp 34, I/O group 3 index 88, at 218,110, speaker R
+cablamp 95,96,97     525 SPEAKER R 11  # lamp 35, I/O group 3 index 91, at 205,112, speaker R
+cablamp 98,99,100    575 SPEAKER R 12  # lamp 36, I/O group 3 index 94, at 192,110, speaker R
+cablamp 101,102,103  625 SPEAKER R 13  # lamp 37, I/O group 3 index 97, at 180,104, speaker R
+cablamp 104,105,106  675 SPEAKER R 14  # lamp 38, I/O group 3 index 100, at 171,95, speaker R
+cablamp 107,108,109  725 SPEAKER R 15  # lamp 39, I/O group 3 index 103, at 165,83, speaker R
+cablamp 110,111,112  775 SPEAKER R 16  # lamp 40, I/O group 3 index 106, at 163,70, speaker R
+cablamp 113,114,115  825 SPEAKER R 17  # lamp 41, I/O group 3 index 109, at 165,57, speaker R
+cablamp 116,117,118  875 SPEAKER R 18  # lamp 42, I/O group 3 index 112, at 171,45, speaker R
+cablamp 119,120,121  925 SPEAKER R 19  # lamp 43, I/O group 3 index 115, at 180,36, speaker R
+cablamp 122,123,124  975 SPEAKER R 20  # lamp 44, I/O group 3 index 118, at 192,30, speaker R
+cablamp 125,126,127  989 CABINET L-IN UPPER 1  # lamp 45, I/O group 1 index 1, at 22,145, blade L in
+cablamp 128,129,130  968 CABINET L-IN UPPER 2  # lamp 46, I/O group 1 index 4, at 22,154, blade L in
+cablamp 131,132,133  947 CABINET L-IN UPPER 3  # lamp 47, I/O group 1 index 7, at 22,164, blade L in
+cablamp 134,135,136  927 CABINET L-IN UPPER 4  # lamp 48, I/O group 1 index 10, at 22,174, blade L in
+cablamp 137,138,139  906 CABINET L-IN UPPER 5  # lamp 49, I/O group 1 index 13, at 22,183, blade L in
+cablamp 140,141,142  885 CABINET L-IN UPPER 6  # lamp 50, I/O group 1 index 16, at 22,193, blade L in
+cablamp 143,144,145  864 CABINET L-IN UPPER 7  # lamp 51, I/O group 1 index 19, at 22,202, blade L in
+cablamp 146,147,148  843 CABINET L-IN UPPER 8  # lamp 52, I/O group 1 index 22, at 22,212, blade L in
+cablamp 149,150,151  822 CABINET L-IN UPPER 9  # lamp 53, I/O group 1 index 25, at 22,221, blade L in
+cablamp 152,153,154  802 CABINET L-IN UPPER 10  # lamp 54, I/O group 1 index 28, at 22,231, blade L in
+cablamp 155,156,157  781 CABINET L-IN UPPER 11  # lamp 55, I/O group 1 index 31, at 22,241, blade L in
+cablamp 158,159,160  760 CABINET L-IN UPPER 12  # lamp 56, I/O group 1 index 34, at 22,250, blade L in
+cablamp 161,162,163  739 CABINET L-IN UPPER 13  # lamp 57, I/O group 1 index 37, at 22,260, blade L in
+cablamp 164,165,166  718 CABINET L-IN UPPER 14  # lamp 58, I/O group 1 index 40, at 22,269, blade L in
+cablamp 167,168,169  697 CABINET L-IN UPPER 15  # lamp 59, I/O group 1 index 43, at 22,279, blade L in
+cablamp 170,171,172  677 CABINET L-IN UPPER 16  # lamp 60, I/O group 1 index 46, at 22,289, blade L in
+cablamp 173,174,175  656 CABINET L-IN UPPER 17  # lamp 61, I/O group 1 index 49, at 22,298, blade L in
+cablamp 176,177,178  635 CABINET L-IN UPPER 18  # lamp 62, I/O group 1 index 52, at 22,308, blade L in
+cablamp 179,180,181  614 CABINET L-IN UPPER 19  # lamp 63, I/O group 1 index 55, at 22,317, blade L in
+cablamp 182,183,184  593 CABINET L-IN UPPER 20  # lamp 64, I/O group 1 index 58, at 22,327, blade L in
+cablamp 185,186,187  572 CABINET L-IN UPPER 21  # lamp 65, I/O group 1 index 61, at 22,336, blade L in
+cablamp 188,189,190  552 CABINET L-IN UPPER 22  # lamp 66, I/O group 1 index 64, at 22,346, blade L in
+cablamp 191,192,193  531 CABINET L-IN UPPER 23  # lamp 67, I/O group 1 index 67, at 22,356, blade L in
+cablamp 194,195,196  510 CABINET L-IN UPPER 24  # lamp 68, I/O group 1 index 70, at 22,365, blade L in
+cablamp 197,198,199  489 CABINET L-IN LOWER 25  # lamp 69, I/O group 1 index 73, at 22,375, blade L in
+cablamp 200,201,202  468 CABINET L-IN LOWER 26  # lamp 70, I/O group 1 index 76, at 22,384, blade L in
+cablamp 203,204,205  447 CABINET L-IN LOWER 27  # lamp 71, I/O group 1 index 79, at 22,394, blade L in
+cablamp 206,207,208  427 CABINET L-IN LOWER 28  # lamp 72, I/O group 1 index 82, at 22,404, blade L in
+cablamp 209,210,211  406 CABINET L-IN LOWER 29  # lamp 73, I/O group 1 index 85, at 22,413, blade L in
+cablamp 212,213,214  385 CABINET L-IN LOWER 30  # lamp 74, I/O group 1 index 88, at 22,423, blade L in
+cablamp 215,216,217  364 CABINET L-IN LOWER 31  # lamp 75, I/O group 1 index 91, at 22,432, blade L in
+cablamp 218,219,220  343 CABINET L-IN LOWER 32  # lamp 76, I/O group 1 index 94, at 22,442, blade L in
+cablamp 221,222,223  322 CABINET L-IN LOWER 33  # lamp 77, I/O group 1 index 97, at 22,451, blade L in
+cablamp 224,225,226  302 CABINET L-IN LOWER 34  # lamp 78, I/O group 1 index 100, at 22,461, blade L in
+cablamp 227,228,229  281 CABINET L-IN LOWER 35  # lamp 79, I/O group 1 index 103, at 22,471, blade L in
+cablamp 230,231,232  260 CABINET L-IN LOWER 36  # lamp 80, I/O group 1 index 106, at 22,480, blade L in
+cablamp 233,234,235  239 CABINET L-IN LOWER 37  # lamp 81, I/O group 1 index 109, at 22,490, blade L in
+cablamp 236,237,238  218 CABINET L-IN LOWER 38  # lamp 82, I/O group 1 index 112, at 22,499, blade L in
+cablamp 239,240,241  197 CABINET L-IN LOWER 39  # lamp 83, I/O group 1 index 115, at 22,509, blade L in
+cablamp 242,243,244  177 CABINET L-IN LOWER 40  # lamp 84, I/O group 1 index 118, at 22,519, blade L in
+cablamp 245,246,247  156 CABINET L-IN LOWER 41  # lamp 85, I/O group 1 index 121, at 22,528, blade L in
+cablamp 248,249,250  135 CABINET L-IN LOWER 42  # lamp 86, I/O group 1 index 124, at 22,538, blade L in
+cablamp 251,252,253  114 CABINET L-IN LOWER 43  # lamp 87, I/O group 1 index 127, at 22,547, blade L in
+cablamp 254,255,256  93  CABINET L-IN LOWER 44  # lamp 88, I/O group 1 index 130, at 22,557, blade L in
+cablamp 257,258,259  72  CABINET L-IN LOWER 45  # lamp 89, I/O group 1 index 133, at 22,566, blade L in
+cablamp 260,261,262  52  CABINET L-IN LOWER 46  # lamp 90, I/O group 1 index 136, at 22,576, blade L in
+cablamp 263,264,265  31  CABINET L-IN LOWER 47  # lamp 91, I/O group 1 index 139, at 22,586, blade L in
+cablamp 266,267,268  10  CABINET L-IN LOWER 48  # lamp 92, I/O group 1 index 142, at 22,595, blade L in
+cablamp 269,270,271  989 CABINET R-IN LOWER 49  # lamp 93, I/O group 1 index 145, at 278,145, blade R in
+cablamp 272,273,274  968 CABINET R-IN LOWER 50  # lamp 94, I/O group 1 index 148, at 278,154, blade R in
+cablamp 275,276,277  947 CABINET R-IN LOWER 51  # lamp 95, I/O group 1 index 151, at 278,164, blade R in
+cablamp 278,279,280  927 CABINET R-IN LOWER 52  # lamp 96, I/O group 1 index 154, at 278,174, blade R in
+cablamp 281,282,283  906 CABINET R-IN LOWER 53  # lamp 97, I/O group 1 index 157, at 278,183, blade R in
+cablamp 284,285,286  885 CABINET R-IN LOWER 54  # lamp 98, I/O group 1 index 160, at 278,193, blade R in
+cablamp 287,288,289  864 CABINET R-IN LOWER 55  # lamp 99, I/O group 1 index 163, at 278,202, blade R in
+cablamp 290,291,292  843 CABINET R-IN LOWER 56  # lamp 100, I/O group 1 index 166, at 278,212, blade R in
+cablamp 293,294,295  822 CABINET R-IN LOWER 57  # lamp 101, I/O group 1 index 169, at 278,221, blade R in
+cablamp 296,297,298  802 CABINET R-IN LOWER 58  # lamp 102, I/O group 1 index 172, at 278,231, blade R in
+cablamp 299,300,301  781 CABINET R-IN LOWER 59  # lamp 103, I/O group 1 index 175, at 278,241, blade R in
+cablamp 302,303,304  760 CABINET R-IN LOWER 60  # lamp 104, I/O group 1 index 178, at 278,250, blade R in
+cablamp 305,306,307  739 CABINET R-IN LOWER 61  # lamp 105, I/O group 1 index 181, at 278,260, blade R in
+cablamp 308,309,310  718 CABINET R-IN LOWER 62  # lamp 106, I/O group 1 index 184, at 278,269, blade R in
+cablamp 311,312,313  697 CABINET R-IN LOWER 63  # lamp 107, I/O group 1 index 187, at 278,279, blade R in
+cablamp 314,315,316  677 CABINET R-IN LOWER 64  # lamp 108, I/O group 1 index 190, at 278,289, blade R in
+cablamp 317,318,319  656 CABINET R-IN LOWER 65  # lamp 109, I/O group 1 index 193, at 278,298, blade R in
+cablamp 320,321,322  635 CABINET R-IN LOWER 66  # lamp 110, I/O group 1 index 196, at 278,308, blade R in
+cablamp 323,324,325  614 CABINET R-IN LOWER 67  # lamp 111, I/O group 1 index 199, at 278,317, blade R in
+cablamp 326,327,328  593 CABINET R-IN LOWER 68  # lamp 112, I/O group 1 index 202, at 278,327, blade R in
+cablamp 329,330,331  572 CABINET R-IN LOWER 69  # lamp 113, I/O group 1 index 205, at 278,336, blade R in
+cablamp 332,333,334  552 CABINET R-IN LOWER 70  # lamp 114, I/O group 1 index 208, at 278,346, blade R in
+cablamp 335,336,337  531 CABINET R-IN LOWER 71  # lamp 115, I/O group 1 index 211, at 278,356, blade R in
+cablamp 338,339,340  510 CABINET R-IN LOWER 72  # lamp 116, I/O group 1 index 214, at 278,365, blade R in
+cablamp 341,342,343  489 CABINET R-IN UPPER 73  # lamp 117, I/O group 1 index 217, at 278,375, blade R in
+cablamp 344,345,346  468 CABINET R-IN UPPER 74  # lamp 118, I/O group 1 index 220, at 278,384, blade R in
+cablamp 347,348,349  447 CABINET R-IN UPPER 75  # lamp 119, I/O group 1 index 223, at 278,394, blade R in
+cablamp 350,351,352  427 CABINET R-IN UPPER 76  # lamp 120, I/O group 1 index 226, at 278,404, blade R in
+cablamp 353,354,355  406 CABINET R-IN UPPER 77  # lamp 121, I/O group 1 index 229, at 278,413, blade R in
+cablamp 356,357,358  385 CABINET R-IN UPPER 78  # lamp 122, I/O group 1 index 232, at 278,423, blade R in
+cablamp 359,360,361  364 CABINET R-IN UPPER 79  # lamp 123, I/O group 1 index 235, at 278,432, blade R in
+cablamp 362,363,364  343 CABINET R-IN UPPER 80  # lamp 124, I/O group 1 index 238, at 278,442, blade R in
+cablamp 365,366,367  322 CABINET R-IN UPPER 81  # lamp 125, I/O group 1 index 241, at 278,451, blade R in
+cablamp 368,369,370  302 CABINET R-IN UPPER 82  # lamp 126, I/O group 1 index 244, at 278,461, blade R in
+cablamp 371,372,373  281 CABINET R-IN UPPER 83  # lamp 127, I/O group 1 index 247, at 278,471, blade R in
+cablamp 374,375,376  260 CABINET R-IN UPPER 84  # lamp 128, I/O group 1 index 250, at 278,480, blade R in
+cablamp 377,378,379  239 CABINET R-IN UPPER 85  # lamp 129, I/O group 1 index 253, at 278,490, blade R in
+cablamp 380,381,382  218 CABINET R-IN UPPER 86  # lamp 130, I/O group 1 index 256, at 278,499, blade R in
+cablamp 383,384,385  197 CABINET R-IN UPPER 87  # lamp 131, I/O group 1 index 259, at 278,509, blade R in
+cablamp 386,387,388  177 CABINET R-IN UPPER 88  # lamp 132, I/O group 1 index 262, at 278,519, blade R in
+cablamp 389,390,391  156 CABINET R-IN UPPER 89  # lamp 133, I/O group 1 index 265, at 278,528, blade R in
+cablamp 392,393,394  135 CABINET R-IN UPPER 90  # lamp 134, I/O group 1 index 268, at 278,538, blade R in
+cablamp 395,396,397  114 CABINET R-IN UPPER 91  # lamp 135, I/O group 1 index 271, at 278,547, blade R in
+cablamp 398,399,400  93  CABINET R-IN UPPER 92  # lamp 136, I/O group 1 index 274, at 278,557, blade R in
+cablamp 401,402,403  72  CABINET R-IN UPPER 93  # lamp 137, I/O group 1 index 277, at 278,566, blade R in
+cablamp 404,405,406  52  CABINET R-IN UPPER 94  # lamp 138, I/O group 1 index 280, at 278,576, blade R in
+cablamp 407,408,409  31  CABINET R-IN UPPER 95  # lamp 139, I/O group 1 index 283, at 278,586, blade R in
+cablamp 410,411,412  10  CABINET R-IN UPPER 96  # lamp 140, I/O group 1 index 286, at 278,595, blade R in
+cablamp 413,414,415  979 CABINET L-OUT 97  # lamp 141, I/O group 1 index 289, at 4,150, blade L out
+cablamp 416,417,418  937 CABINET L-OUT 98  # lamp 142, I/O group 1 index 292, at 4,169, blade L out
+cablamp 419,420,421  895 CABINET L-OUT 99  # lamp 143, I/O group 1 index 295, at 4,188, blade L out
+cablamp 422,423,424  854 CABINET L-OUT 100  # lamp 144, I/O group 1 index 298, at 4,207, blade L out
+cablamp 425,426,427  812 CABINET L-OUT 101  # lamp 145, I/O group 1 index 301, at 4,226, blade L out
+cablamp 428,429,430  770 CABINET L-OUT 102  # lamp 146, I/O group 1 index 304, at 4,245, blade L out
+cablamp 431,432,433  729 CABINET L-OUT 103  # lamp 147, I/O group 1 index 307, at 4,265, blade L out
+cablamp 434,435,436  687 CABINET L-OUT 104  # lamp 148, I/O group 1 index 310, at 4,284, blade L out
+cablamp 437,438,439  645 CABINET L-OUT 105  # lamp 149, I/O group 1 index 313, at 4,303, blade L out
+cablamp 440,441,442  604 CABINET L-OUT 106  # lamp 150, I/O group 1 index 316, at 4,322, blade L out
+cablamp 443,444,445  562 CABINET L-OUT 107  # lamp 151, I/O group 1 index 319, at 4,341, blade L out
+cablamp 446,447,448  520 CABINET L-OUT 108  # lamp 152, I/O group 1 index 322, at 4,360, blade L out
+cablamp 449,450,451  479 CABINET L-OUT 109  # lamp 153, I/O group 1 index 325, at 4,380, blade L out
+cablamp 452,453,454  437 CABINET L-OUT 110  # lamp 154, I/O group 1 index 328, at 4,399, blade L out
+cablamp 455,456,457  395 CABINET L-OUT 111  # lamp 155, I/O group 1 index 331, at 4,418, blade L out
+cablamp 458,459,460  354 CABINET L-OUT 112  # lamp 156, I/O group 1 index 334, at 4,437, blade L out
+cablamp 461,462,463  312 CABINET L-OUT 113  # lamp 157, I/O group 1 index 337, at 4,456, blade L out
+cablamp 464,465,466  270 CABINET L-OUT 114  # lamp 158, I/O group 1 index 340, at 4,475, blade L out
+cablamp 467,468,469  229 CABINET L-OUT 115  # lamp 159, I/O group 1 index 343, at 4,495, blade L out
+cablamp 470,471,472  187 CABINET L-OUT 116  # lamp 160, I/O group 1 index 346, at 4,514, blade L out
+cablamp 473,474,475  145 CABINET L-OUT 117  # lamp 161, I/O group 1 index 349, at 4,533, blade L out
+cablamp 476,477,478  104 CABINET L-OUT 118  # lamp 162, I/O group 1 index 352, at 4,552, blade L out
+cablamp 479,480,481  62  CABINET L-OUT 119  # lamp 163, I/O group 1 index 355, at 4,571, blade L out
+cablamp 482,483,484  20  CABINET L-OUT 120  # lamp 164, I/O group 1 index 358, at 4,590, blade L out
+cablamp 485,486,487  979 CABINET R-OUT 121  # lamp 165, I/O group 1 index 361, at 296,150, blade R out
+cablamp 488,489,490  937 CABINET R-OUT 122  # lamp 166, I/O group 1 index 364, at 296,169, blade R out
+cablamp 491,492,493  895 CABINET R-OUT 123  # lamp 167, I/O group 1 index 367, at 296,188, blade R out
+cablamp 494,495,496  854 CABINET R-OUT 124  # lamp 168, I/O group 1 index 370, at 296,207, blade R out
+cablamp 497,498,499  812 CABINET R-OUT 125  # lamp 169, I/O group 1 index 373, at 296,226, blade R out
+cablamp 500,501,502  770 CABINET R-OUT 126  # lamp 170, I/O group 1 index 376, at 296,245, blade R out
+cablamp 503,504,505  729 CABINET R-OUT 127  # lamp 171, I/O group 1 index 379, at 296,265, blade R out
+cablamp 506,507,508  687 CABINET R-OUT 128  # lamp 172, I/O group 1 index 382, at 296,284, blade R out
+cablamp 509,510,511  645 CABINET R-OUT 129  # lamp 173, I/O group 1 index 385, at 296,303, blade R out
+cablamp 512,513,514  604 CABINET R-OUT 130  # lamp 174, I/O group 1 index 388, at 296,322, blade R out
+cablamp 515,516,517  562 CABINET R-OUT 131  # lamp 175, I/O group 1 index 391, at 296,341, blade R out
+cablamp 518,519,520  520 CABINET R-OUT 132  # lamp 176, I/O group 1 index 394, at 296,360, blade R out
+cablamp 521,522,523  479 CABINET R-OUT 133  # lamp 177, I/O group 1 index 397, at 296,380, blade R out
+cablamp 524,525,526  437 CABINET R-OUT 134  # lamp 178, I/O group 1 index 400, at 296,399, blade R out
+cablamp 527,528,529  395 CABINET R-OUT 135  # lamp 179, I/O group 1 index 403, at 296,418, blade R out
+cablamp 530,531,532  354 CABINET R-OUT 136  # lamp 180, I/O group 1 index 406, at 296,437, blade R out
+cablamp 533,534,535  312 CABINET R-OUT 137  # lamp 181, I/O group 1 index 409, at 296,456, blade R out
+cablamp 536,537,538  270 CABINET R-OUT 138  # lamp 182, I/O group 1 index 412, at 296,475, blade R out
+cablamp 539,540,541  229 CABINET R-OUT 139  # lamp 183, I/O group 1 index 415, at 296,495, blade R out
+cablamp 542,543,544  187 CABINET R-OUT 140  # lamp 184, I/O group 1 index 418, at 296,514, blade R out
+cablamp 545,546,547  145 CABINET R-OUT 141  # lamp 185, I/O group 1 index 421, at 296,533, blade R out
+cablamp 548,549,550  104 CABINET R-OUT 142  # lamp 186, I/O group 1 index 424, at 296,552, blade R out
+cablamp 551,552,553  62  CABINET R-OUT 143  # lamp 187, I/O group 1 index 427, at 296,571, blade R out
+cablamp 554,555,556  20  CABINET R-OUT 144  # lamp 188, I/O group 1 index 430, at 296,590, blade R out

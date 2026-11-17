@@ -2430,6 +2430,11 @@ class App:
     # Write
     # ------------------------------------------------------------------
 
+    def _extras_form_problem(self):
+        service = getattr(self.window, 'service', None)
+        extras = service('extras') if callable(service) else None
+        return extras.get('error', '') if extras is not None else ''
+
     def _start_write(self, chain_flash_device=None, again=False,
                      chain_flash_verify=True, chain_flash_keep_data=False):
         """Dispatch a Build.  ``chain_flash_device`` (the Build / flash
@@ -2444,6 +2449,9 @@ class App:
         folder, replacing the file at the output) are not asked twice; a
         different file at the output, from the new size's default name, still
         is."""
+        if self._extras_form_problem():
+            messagebox.showerror('SSH Extras', self._extras_form_problem())
+            return
         if not self._current_mfr.capabilities.write:
             return
 
@@ -2482,6 +2490,13 @@ class App:
         if not os.path.isdir(assets_dir):
             messagebox.showerror("Invalid Folder",
                 f"Folder not found:\n{assets_dir}")
+            return
+        from .core.ssh_card import validate_request
+        from .core.card_extras import ExtrasError
+        try:
+            validate_request(original, assets_dir)
+        except ExtrasError as e:
+            messagebox.showerror('SSH Extras', str(e))
             return
         if not output_dir:
             messagebox.showwarning("Missing Input",
@@ -2735,6 +2750,16 @@ class App:
 
     def _start_direct_ssd_write(self):
         """Dispatch the Direct-SSD write pipeline from the GUI."""
+        if self._extras_form_problem():
+            messagebox.showerror('SSH Extras', self._extras_form_problem())
+            return
+        from .core.card_extras import configuration, ExtrasError
+        try:
+            if configuration(self.window.write_assets_var.get().strip()) is not None:
+                raise ExtrasError('Build the complete image to apply SSH Extras, then flash it. Direct-SD/SSD cannot change the system partition.')
+        except ExtrasError as e:
+            messagebox.showerror('SSH Extras', str(e))
+            return
         if not self._confirm_admin_for_ssd():
             return
 
@@ -2860,6 +2885,16 @@ class App:
         get here."""
         mfr = self._current_mfr
         if mfr is None or not mfr.capabilities.flash_image:
+            return
+        if self._extras_form_problem():
+            messagebox.showerror('SSH Extras', self._extras_form_problem())
+            return
+        from .core.ssh_card import guard_flash
+        from .core.card_extras import ExtrasError
+        try:
+            guard_flash(self.window.write_assets_var.get().strip(), image_path)
+        except ExtrasError as e:
+            messagebox.showerror('SSH Extras', str(e))
             return
         # ``target`` (item 123): the dialog's second place for the image - the
         # game's own disk in a dock, installed here.  On Windows that hands the

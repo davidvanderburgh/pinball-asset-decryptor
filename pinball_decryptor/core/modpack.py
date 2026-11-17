@@ -22,6 +22,13 @@ from .extract_source import read_extract_source, version_hint_from_name
 # help text has always promised this; nothing wrote it until batch 16.
 MANIFEST_NAME = ".modpack.json"
 
+
+def _local_project_state(member):
+    # Raw project state must never travel as an asset: it now also contains
+    # SSH authorization. Account for zip normalization and Windows casing.
+    name = str(member).replace('\\', '/').rstrip('/').rsplit('/', 1)[-1]
+    return name.rstrip(' .').casefold() == staged_changes.SIDE_CAR.casefold()
+
 # Staged-changes keys a pack carries as VALUES rather than files: the Defaults
 # tab's edits and the image/scene names.  They live in the folder's
 # ``.staged_changes.json`` sidecar, which is not a baselined file, so the
@@ -826,6 +833,7 @@ def inspect_mod_pack(zip_path, assets_folder):
         # them would report every one as a file "this card doesn't have".
         names = [n for n in zf.namelist()
                  if n != MANIFEST_NAME and not n.endswith(("/", "\\"))
+                 and not _local_project_state(n)
                  and not n.startswith((CARD_DIR + "/", MODES_DIR + "/",
                                        CLIPS_DIR + "/", ATTRACT_DIR + "/"))]
         try:
@@ -1084,7 +1092,7 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
     """
     plan = plan or inspect_mod_pack(zip_path, assets_folder)
     manifest = plan.get("manifest") or {}
-    applicable = plan["applicable"]
+    applicable = [name for name in plan["applicable"] if not _local_project_state(name)]
     modes_only = (not plan["names"]
                   and any(isinstance((manifest.get("extras") or {}).get(k), dict)
                           for k in (_EXTRA_SOUND_MODES, _EXTRA_VARIANTS, _EXTRA_ATTRACT)))
@@ -1131,6 +1139,8 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
     removed = []
     if remove_leftovers:
         for name in plan["leftovers"]:
+            if _local_project_state(name):
+                continue
             rel = name.replace("\\", "/")
             path = os.path.join(assets_folder, *rel.split("/"))
             try:

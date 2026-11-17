@@ -1,0 +1,25 @@
+{
+  "source": "Stern King Kong LE 0.97.0 factory Release 16G image",
+  "output": "ssh-card.raw (disposable test output)",
+  "platform": "stern-spike2",
+  "source_sha256": "27ab28bc5a020e96265c615dcd36108f6ca396fdaa84b4a1c3a2df890349af44",
+  "output_sha256": "ec96d42a5deedf697c2b991fa334113c900539dcbdd8cf8e8559de883297257c",
+  "rootfs_sha256": "f7572ad24be523255134c86de4a1fe9dd712d380d92630e832239b27b31495f5",
+  "container_image": "docker.io/library/pad-spike2-emu:c2977305564",
+  "payload_sha256": {
+    "dropbear": "01ccdc69e1047f3c301fad7f0de7d522dde16a5c8cc6684d6846d54714dfe236",
+    "dropbearkey": "d6fbc9fa5042c9c6af5c8da0f4813995a2c81fe6cc0258554abd054caa6e0d76",
+    "sftp-server": "bd8396f4b450b371b9762f2b879229434b084316ae8ca77110af7205461f09e9"
+  },
+  "checks": [
+    "SSH-only card built through the real PAD pipeline",
+    "All authorized key types authenticate as root through installed boot hook",
+    "Unknown key and password-only authentication refused; only publickey advertised",
+    "SFTP upload/download is byte-identical",
+    "Service restart preserves persistent host identity",
+    "Changed key list replaces earlier keys; host identity survives image reboot",
+    "Disabled card has no startup hook, daemon or login; host keys retained",
+    "All bytes outside system partition match source"
+  ],
+  "scope": "Guest rootfs/QEMU service emulation, not a complete kernel boot"
+}

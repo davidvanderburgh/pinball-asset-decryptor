@@ -28,6 +28,7 @@ TABS = (
     # PAD-305: the colour correction a build applies for the machine's display
     ("color", "color", "Color Profile", "Color profile", "Replace",
      "palette"),
+    ("extras", "extras", "Extras", "Extras", "Replace", "gear"),
     ("modes", "modes", "Modes", "Modes", "Make", "modes"),
     ("defaults", "defaults", "Default Settings", "Defaults", "Make",
      "defaults"),

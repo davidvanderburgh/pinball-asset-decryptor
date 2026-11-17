@@ -1,0 +1,32 @@
+#!/bin/sh
+# PAD key-only SSH; host identity belongs to this cabinet's data partition.
+set -e
+DAEMON=/usr/local/bin/dropbear
+KEYDIR=/data/dropbear
+PIDFILE=/var/run/pad-sshd.pid
+case "$1" in
+  start)
+    if [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then exit 0; fi
+    mkdir -p "$KEYDIR"
+    chmod 700 "$KEYDIR"
+    for kind in rsa ecdsa ed25519; do
+      key="$KEYDIR/dropbear_${kind}_host_key"
+      if [ ! -f "$key" ]; then
+        /usr/local/bin/dropbearkey -t "$kind" -f "$key"
+      fi
+      chmod 600 "$key"
+    done
+    "$DAEMON" -P "$PIDFILE" \
+      -r "$KEYDIR/dropbear_rsa_host_key" \
+      -r "$KEYDIR/dropbear_ecdsa_host_key" \
+      -r "$KEYDIR/dropbear_ed25519_host_key"
+    ;;
+  stop)
+    if [ -s "$PIDFILE" ]; then
+      kill "$(cat "$PIDFILE")" 2>/dev/null || true
+      rm -f "$PIDFILE"
+    fi
+    ;;
+  restart) "$0" stop; "$0" start ;;
+  *) echo "Usage: $0 {start|stop|restart}" >&2; exit 1 ;;
+esac

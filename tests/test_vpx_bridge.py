@@ -925,11 +925,16 @@ def test_jaws_newton_ball_is_shark_hit_under_vbscript(tmp_path):
     # PAD-1339: SHARK HIT is the newton ball (JP's captive ball beside
     # CaptiveKick) being knocked while the shark is up - not two unseen targets
     # standing at the ends of the SHARK! insert. One pulse per knock; nothing
-    # while the shark is down; the other captive ball is not it; the pop-up
-    # targets stay down and JP's outlane save wire stays shut
+    # while the shark is down; the pop-up targets stay down and JP's outlane
+    # save wire stays shut. PAD-1374: the other captive ball (CaptiveKick1) is
+    # the chum bucket's newton ball: CHUM BUCKET TGT on a knock at any angle,
+    # not when it reached Tchum1 up its lane; slowing at the top of its swing
+    # does not count it again; neither ball counts before it has settled
     m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    assert "Tchum1" not in m["switches"] and 89 not in [v["id"] for k, v in m["switches"].items() if k != "_"]
     vbs = m["extra_vbs"].replace("On Error Resume Next", "")     # an error ends the run here
-    tick = "\n".join(["Sub Tick : PadMechTimer_Timer : End Sub"])
+    tick = "\n".join(["Sub Tick : PadMechTimer_Timer : End Sub",
+                      "Sub Settle : Dim j : For j = 1 To 12 : Tick : Next : End Sub"])
     script = "\n".join([
         "Dim Log, Sw(2000), Balls",
         "Class FakeObj : Public IsDropped, Visible, Enabled, Collidable, Name : End Class",
@@ -947,15 +952,20 @@ def test_jaws_newton_ball_is_shark_hit_under_vbscript(tmp_path):
             "Tsharkfinal", "Thammerfinal", "Tsmimerfinal", "Targetshark1", "Targetshark2", "Targetshark3",
             "Targetshark4", "shark", "Rsaveball", "lockpostG", "lockpostD")),
         vbs, tick,
-        "Dim newton, other : Set newton = Ball(546, 490) : Set other = Ball(325, 582)",
-        "Balls = Array(other, newton)",
-        "Tick",                                                   # finds the newton ball
-        "newton.VelY = -12 : Tick : Log = Log & \"down \"",      # shark down: no SHARK HIT
-        "newton.VelY = 0 : Sw(1079) = 1 : Tick : Sw(1079) = 0",  # SHARK UP-MAG: up
-        "other.VelX = 20 : Tick : other.VelX = 0 : Log = Log & \"other \"",
+        "Dim newton, bucket : Set newton = Ball(546, 490) : Set bucket = Ball(325, 582)",
+        "Balls = Array(bucket, newton)",
+        "Tick",                                                   # finds both newton balls
+        "newton.VelY = -12 : bucket.VelY = -12 : Tick : Log = Log & \"unsettled \"",   # not yet at rest: nothing
+        "newton.VelY = 0 : bucket.VelY = 0 : Settle",
+        "newton.VelY = -12 : Tick : newton.VelY = 0 : Settle : Log = Log & \"down \"",   # shark down: no SHARK HIT
+        "Sw(1079) = 1 : Tick : Sw(1079) = 0",                    # SHARK UP-MAG: up
         "newton.VelY = -12 : Dim i : For i = 1 To 20 : Tick : Next",          # one knock, however long it swings
         "newton.VelY = 9 : Tick : newton.VelY = -3 : Tick : Log = Log & \"knock \"",
-        "newton.VelY = 0 : Tick : newton.VelY = -15 : Tick : Log = Log & \"again \"",   # settled, knocked again
+        "newton.VelY = 0 : Settle : newton.VelY = -15 : Tick : newton.VelY = 0 : Settle : Log = Log & \"again \"",   # settled, knocked again
+        "bucket.VelX = 1.8 : bucket.VelY = -1.5 : Tick : Tick : Log = Log & \"glancing \"",   # off the straight: counts once
+        "bucket.Y = 500 : bucket.VelX = 0 : bucket.VelY = 0 : Tick : Tick : Tick",           # the top of its swing
+        "bucket.VelY = 8 : Tick : Log = Log & \"swing \"",                                 # rolling back: no second hit
+        "bucket.Y = 584 : bucket.VelY = 0 : Tick : Tick : Tick : bucket.VelY = -2.5 : Tick : Log = Log & \"back \"",   # home again: a new knock
         "Rsaveball.Collidable = False : Tick",                   # JP's Targetsave_Hit opened it
         "Log = Log & Targetshark1.IsDropped & Targetshark2.IsDropped & Targetshark3.IsDropped & Targetshark4.IsDropped",
         "Log = Log & \" \" & Rsaveball.Collidable",
@@ -964,7 +974,8 @@ def test_jaws_newton_ball_is_shark_hit_under_vbscript(tmp_path):
     import subprocess
     r = subprocess.run(["cscript", "//nologo", str(tmp_path / "t.vbs")], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and not r.stderr, r.stdout + r.stderr
-    assert r.stdout.split() == ["down", "other", "pulse1081", "knock", "pulse1081", "again",
+    assert r.stdout.split() == ["unsettled", "down", "pulse1081", "knock", "pulse1081", "again",
+                                "pulse1089", "glancing", "swing", "pulse1089", "back",
                                 "TrueTrueTrueTrue", "True", "|"], r.stdout
 
 

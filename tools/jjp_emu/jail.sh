@@ -78,6 +78,22 @@ if mountpoint -q "$JJP_ROOTB" 2>/dev/null; then
         -o "lowerdir=$JJP_ROOTB,upperdir=$JJP_OVLB/up,workdir=$JJP_OVLB/work" "$JJP_JAIL$JJP_MULTI_B"
 fi
 
+# A USB stick (PAD-1349).  The machine automounts a stick at /mnt/usb with
+# umask=000 (70-usbautomount.rules), and the game's Update USB screen
+# (checkusb.pl) tells "inserted" from "not" by that directory's mode alone:
+# 0777 mounted, 0755 not.  JJP_USB=<dir> binds a folder there as the stick, so
+# the screen, its hot fix and the full update path all run as on a cabinet.
+# Without JJP_USB any stick a previous run left is taken out.
+if [ -n "${JJP_USB:-}" ] && [ -d "$JJP_USB" ]; then
+    chmod 0777 "$JJP_USB"
+    mkdir -p "$JJP_JAIL/mnt/usb"
+    mountpoint -q "$JJP_JAIL/mnt/usb" && umount -l "$JJP_JAIL/mnt/usb"
+    mount --bind "$JJP_USB" "$JJP_JAIL/mnt/usb"
+    echo "usb     : $JJP_USB at /mnt/usb"
+elif mountpoint -q "$JJP_JAIL/mnt/usb" 2>/dev/null; then
+    umount -l "$JJP_JAIL/mnt/usb"
+fi
+
 echo "jail    : $JJP_JAIL ($(mountpoint -q "$JJP_JAIL" && echo mounted || echo FAILED))"
 echo "binds   : $(mount | grep -c "$JJP_JAIL")"
 echo "X socket: $(ls "$JJP_JAIL/tmp/.X11-unix" 2>/dev/null | tr '\n' ' ')"

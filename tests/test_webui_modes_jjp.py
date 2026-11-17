@@ -259,3 +259,11 @@ def test_every_mode_key_is_on_the_form_once():
     assert sorted(keys) == sorted(CM.mk().KEYS)
     assert set(CM.TITLE_FORM) <= set(CM.mk().KEYS) | set(CM.mk().TITLE_KEYS)
     assert all(k in CM.LABELS for k in keys + list(CM.TITLE_FORM))
+
+
+def test_a_live_report_is_not_a_title():
+    # PAD-1351 keeps <title>.live.json (a running game's read) beside the port reports
+    from pinball_decryptor.plugins.jjp import custom_modes as CM
+    labels = [t["label"] for t in CM.titles()]
+    assert not [l for l in labels if l.endswith(".live")]
+    assert len(labels) == len(set(labels))

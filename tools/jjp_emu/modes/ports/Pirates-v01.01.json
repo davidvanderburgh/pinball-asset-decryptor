@@ -16,6 +16,57 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 2,
+  "multiball_classes": [
+   "13MultiballRule",
+   "15PirateMultiball",
+   "16RagettiMultiball",
+   "16TortugaMultiball",
+   "19BlackPearlMultiball",
+   "20AtWorldsEndMultiball",
+   "20PirateMovieMultiball",
+   "22DeadMansChestMultiball",
+   "24OnStrangerTidesMultiball",
+   "27DeadMenTellNoTalesMultiball"
+  ]
+ },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 46,
+  "classes": {
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "PirateMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   }
+  },
+  "live": ""
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,

@@ -2323,6 +2323,14 @@ int main(int argc, char **argv)
         se.ctx = &pctx;
         se.stop = &g_stop;
         se.testcard = 1;
+        /* THE SCREEN TEXTURE FIRST. The menu creates it just before its own
+         * loop, below this branch, and every present() after that is only a
+         * sub-rect upload INTO it - so a test card that went straight to the
+         * settings loop uploaded every frame into no texture and the glass
+         * stayed black (the emulator showed it; --headless never makes one,
+         * so the snapshot tests could not). */
+        if (!headless) egl_stern_texture(&egl, w, h, gfx_pixels(&g, invert));
+        gfx_clean(&g);
         sel_say("testcard: nothing boots: the test card menu until power-off");
         while (!g_stop) settings_run(&se);
         goto testcard_done;

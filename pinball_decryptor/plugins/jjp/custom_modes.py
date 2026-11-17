@@ -54,7 +54,7 @@ MAX_MODES = 24
 #: mkjjpmodes.KEYS appears exactly once - tests hold it to that)
 FORM_GROUPS = (
     ("Mode", ("name", "title", "start", "start_count", "shots", "points", "seconds", "complete",
-              "complete_points", "game_modes")),
+              "complete_points", "game_modes", "hold_multiballs", "allow_game_modes")),
     ("Sounds", ("sound_start", "sound_shot", "sound_complete", "sound_end")),
     ("Lamps", ("lamps", "lamp_color", "lamp_blink")),
     ("Screen", ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
@@ -64,12 +64,14 @@ FORM_GROUPS = (
 DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
     "lamp_color": "ffffff", "lamp_blink": "4", "title_color": "ffffff", "value_color": "ffdc00",
-    "timer_color": "ffffff", "panel_color": "000000b0", "panel": "middle", "game_modes": "pause",
+    "timer_color": "ffffff", "panel_color": "000000b0", "panel": "middle", "game_modes": "hold",
+    "hold_multiballs": "yes",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
     "shots": "Scoring shots", "points": "Points a shot", "seconds": "Seconds", "complete": "Shots to complete",
     "complete_points": "Completion bonus", "game_modes": "When a game mode runs",
+    "hold_multiballs": "Hold off multiballs too", "allow_game_modes": "Game modes still allowed",
     "sound_start": "Start sound", "sound_shot": "Shot sound", "sound_complete": "Completed sound",
     "sound_end": "End sound", "lamps": "Lamps", "lamp_color": "Lamp colour", "lamp_blink": "Flashes a second",
     "font_title": "Title font", "font_value": "Total font", "font_timer": "Timer font",
@@ -79,7 +81,7 @@ LABELS = {
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
-              "panel_color", "panel", "game_modes", "ingame_state")
+              "panel_color", "panel", "game_modes", "hold_multiballs", "ingame_state")
 
 
 # ============================================================================ where things are
@@ -166,7 +168,8 @@ def titles():
     out = []
     d = ports_dir()
     for fn in sorted(os.listdir(d)) if os.path.isdir(d) else ():
-        if not fn.endswith(".json"):
+        # <title>.live.json is jjpstock.py's read of a running game (PAD-1351), not a title
+        if not fn.endswith(".json") or fn.endswith(".live.json"):
             continue
         label = fn[:-5]
         try:

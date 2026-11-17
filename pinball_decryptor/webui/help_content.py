@@ -4261,8 +4261,9 @@ JJP_MODES_HELP = [
         "game's own code: a switch of the game's starts it, the game's mode timer "
         "times it, its shots score through the game's scoring, it lights the game's "
         "lamps and draws its panel in the game's fonts. The game's own modes go on as "
-        "they were; while one of them or a multiball runs, yours waits (or ends, if "
-        "you say so).",
+        "they were. While yours runs it holds off the game's own mode and multiball "
+        "starts, and pauses for the few it cannot hold; **When a game mode runs** can "
+        "make it pause, end or carry on instead.",
     ]),
     ("Which games", lambda: _jjp_modes_games()),
     ("Making a mode", [

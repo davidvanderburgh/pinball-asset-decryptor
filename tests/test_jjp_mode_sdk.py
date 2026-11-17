@@ -99,7 +99,7 @@ def test_check_passes_a_good_folder_and_names_every_problem(tmp_path):
     assert "2_bad.mode:1: start not in Guns N' Roses: switch_typo" in text
     assert "seconds must be a whole number" in text
     assert "lamp_color must be rrggbb hex" in text
-    assert "game_modes must be one of pause, end, ignore" in text
+    assert "game_modes must be one of hold, pause, end, ignore" in text
     assert "ingame_state belongs in title.cfg" in text
     assert "unknown key wobble" in text
 

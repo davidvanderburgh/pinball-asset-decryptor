@@ -82,7 +82,8 @@ KEYS = collections.OrderedDict([
     ("sound_end", "sound"), ("sound_complete", "sound"), ("lamps", "lamps"), ("lamp_color", "rgb"),
     ("lamp_blink", "int"), ("font_title", "font"), ("font_value", "font"), ("font_timer", "font"),
     ("title_color", "rgba"), ("value_color", "rgba"), ("timer_color", "rgba"), ("panel_color", "rgba"),
-    ("game_modes", ("pause", "end", "ignore")),
+    ("game_modes", ("hold", "pause", "end", "ignore")),
+    ("hold_multiballs", ("yes", "no")), ("allow_game_modes", "text"),
     ("panel", ("middle", "bottom", "top")),
 ])
 #: keys only title.cfg takes

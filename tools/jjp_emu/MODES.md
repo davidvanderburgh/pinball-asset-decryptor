@@ -63,7 +63,9 @@ lamp_blink = 4
 | `title_color`, `value_color`, `timer_color` | ffffff, ffdc00, ffffff | rrggbb or rrggbbaa |
 | `panel_color` | 000000b0 | the panel behind the text, rrggbbaa |
 | `panel` | middle | `middle`, `bottom` or `top` (the game's score panel is at the bottom on most titles) |
-| `game_modes` | pause | when a game mode or multiball runs: `pause` (timer held, shots not scored, panel hidden, lamps handed back), `end`, or `ignore` |
+| `game_modes` | hold | `hold` (PAD-1348): while this mode runs the game's own modes, award modes and multiballs cannot start: their start is refused and the game carries on as if it was not asked. Anything that still starts pauses this mode, as `pause` does. Or the older choices for when a game mode or multiball runs: `pause` (timer held, shots not scored, panel hidden, lamps handed back), `end`, or `ignore` (none of these refuse the game's starts) |
+| `hold_multiballs` | yes | with `hold`: `no` lets the game's multiballs start (and pause this mode) |
+| `allow_game_modes` | none | with `hold`: the game's mode globals or classes (e.g. `mtv_mode`, `OompaHurryUp`) that may still start |
 
 ### title.cfg only
 

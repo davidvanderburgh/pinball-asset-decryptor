@@ -95,12 +95,28 @@ EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 
                ("picture.cfg", 0o100644), ("attract.cfg", 0o100644), ("coop.cfg", 0o100644),
                ("idle.cfg", 0o100644), ("handicap.cfg", 0o100644), ("cabshow.cfg", 0o100644),
                ("comp.cfg", 0o100644), ("scorefeed.cfg", 0o100644),
-               ("records.cfg", 0o100644))
+               ("records.cfg", 0o100644), ("scenes.cfg", 0o100644))
 #: the extra file that is enough for an install without a mode (PAD-446)
 CLIPS_FILE = "clips.cfg"
 #: the extra files that are each enough for an install without a mode (PAD-446, PAD-494, PAD-537)
 STANDALONE_FILES = (CLIPS_FILE, "sounds.cfg", "picture.cfg", "attract.cfg", "coop.cfg", "idle.cfg", "handicap.cfg",
-                    "cabshow.cfg", "comp.cfg", "scorefeed.cfg", "records.cfg")
+                    "cabshow.cfg", "comp.cfg", "scorefeed.cfg", "records.cfg", "scenes.cfg")
+#: image sets: a scene's variant beside scenes.cfg (scene_variants.file_name), any number of them; one an earlier
+#: install left and this one does not bring is removed too
+SCENE_PREFIX, SCENE_SUFFIX = "scn_", ".radium"
+
+
+def scene_name_ok(name):
+    """``scn_<12 hex>_<set>.radium``: an image set's variant of a scene."""
+    if not (name.startswith(SCENE_PREFIX) and name.endswith(SCENE_SUFFIX)):
+        return False
+    hexid, _u, n = name[len(SCENE_PREFIX):-len(SCENE_SUFFIX)].partition("_")
+    return len(hexid) == 12 and all(c in "0123456789abcdef" for c in hexid) and n.isdigit()
+
+
+def _extra_mode(name):
+    """The mode bits of an extra file of the runtime's (EXTRA_FILES, or a scene's variant)."""
+    return dict(EXTRA_FILES).get(name) or (0o100644 if scene_name_ok(name) else None)
 #: PAD-432: the project's modes as the Modes tab saves them to a file (sources, pictures, clips and
 #: sounds), so another project can load them straight from this card. The runtime never reads it;
 #: placed when the install is given one (--bundle) and it fits, taken off when it is not
@@ -215,7 +231,7 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
     assets = list(assets or ())
     extras = list(extras or ())
     for x in extras:
-        if os.path.basename(x) not in dict(EXTRA_FILES):
+        if _extra_mode(os.path.basename(x)) is None:
             raise mk.Refused("%s is not a file the mode runtime reads (%s) - nothing has been written"
                              % (os.path.basename(x), ", ".join(n for n, _m in EXTRA_FILES)))
     if len(extra_cfgs) > len(EXTRA_CFGS):
@@ -240,7 +256,7 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
             raise mk.Refused("%s is not a file - nothing has been written" % p)
     files = ((CARD_FILES if cfg_path else CARD_FILES[:1]) + ((PORT_FILE,) if port_path else ())
              + EXTRA_CFGS[:len(extra_cfgs)] + tuple((os.path.basename(a), ASSET_MODE) for a in assets)
-             + tuple((os.path.basename(x), dict(EXTRA_FILES)[os.path.basename(x)]) for x in extras))
+             + tuple((os.path.basename(x), _extra_mode(os.path.basename(x))) for x in extras))
     ref, off = _ref(card)
 
     # The script we are about to edit, and the hook, BEFORE anything is written:
@@ -300,6 +316,7 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
         # outlive the object it was measured for.
         cmds += ["rm " + mk.dq(MODE_DIR + "/" + n) for (n, _m) in ALL_FILES if n in present]
         cmds += ["rm " + mk.dq(MODE_DIR + "/" + n) for n in sorted(present) if n.endswith(ASSET_SUFFIX)]
+        cmds += ["rm " + mk.dq(MODE_DIR + "/" + n) for n in sorted(present) if scene_name_ok(n)]
         cmds.append("rm " + mk.dq(mon_path))
         cmds += ["write %s %s" % (mk.dq(p), mk.dq(MODE_DIR + "/" + n)) for (p, n, _m) in staged]
         cmds.append("write %s %s" % (mk.dq(p_mon), mk.dq(mon_path)))
@@ -344,6 +361,7 @@ def remove(card, workdir=None):
     try:
         cmds = ["rm " + mk.dq(MODE_DIR + "/" + n) for (n, _m) in ALL_FILES if n in present]
         cmds += ["rm " + mk.dq(MODE_DIR + "/" + n) for n in sorted(present) if n.endswith(ASSET_SUFFIX)]
+        cmds += ["rm " + mk.dq(MODE_DIR + "/" + n) for n in sorted(present) if scene_name_ok(n)]
         if present or mk.debugfs_exists(ref, MODE_DIR):
             cmds.append("rmdir " + mk.dq(MODE_DIR))
         if mon_after != mon_before:
@@ -371,7 +389,7 @@ def remove(card, workdir=None):
     if modehook.has_hook(back):
         raise mk.Refused("%s still carries the mode hook after the removal" % mon_path)
     mk.write_p2_sidecar(card)
-    return sorted(n for n in present if n in dict(ALL_FILES) or n.endswith(ASSET_SUFFIX))
+    return sorted(n for n in present if n in dict(ALL_FILES) or n.endswith(ASSET_SUFFIX) or scene_name_ok(n))
 
 
 def main(argv=None):

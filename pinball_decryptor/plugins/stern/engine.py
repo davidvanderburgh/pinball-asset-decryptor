@@ -8449,6 +8449,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the operator menu, which the
     # runtime applies to the whole screen live (the modes' delivery, as the music modes')
     picture_prof = _picture_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    # image sets: a scene's variants, the one IMAGE SET picks read in its place (the modes' delivery)
+    scenes_prof, scenes_sets = _scenes_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     # PAD-782: the owner's attract items: clips in the video bank and attract.cfg beside the runtime
     attract_prof = _attract_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _attract_on = attract_prof is not None
@@ -8502,6 +8504,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         variant_slots, variant_prof, sound_modes, sound_modes_prof = {}, None, None, None
         _juke_clips = _clips_on = False
         editions, picture_prof = [], None
+        scenes_prof, scenes_sets = None, None
         attract_prof = coop_prof = idle_prof = hand_prof = comp_prof = None
         _attract_on = _coop_on = _idle_on = _hand_on = _comp_on = False
         cabs_prof, cabs_shows, _cabs_on = None, [], False
@@ -9984,6 +9987,19 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # every other edit's record refresh is known (below).
         mode_plan = mode_payload = None
         _modes_on = bool(mode_list or code_list)
+        # image sets: each variant's scene file and scenes.cfg, for the runtime beside the modes
+        scenes_staged = ("", [])
+        if scenes_sets:
+            from . import scene_variants as _SV
+            from . import mode_write as _MWs
+            grow_work = grow_work or _work_dir(label, base="spike2_grow_")
+            scenes_staged = _SV.stage(
+                assets_dir, scenes_sets, bytes(reader.read_file_bytes(fw_node)),
+                lambda _card: (lambda _n: bytes(reader.read_file_bytes(_n)) if _n is not None else None)(
+                    _MWs.lookup(reader, _card)),
+                os.path.join(grow_work, "scenes"),
+                only=not (mode_list or code_list), log=log)
+        _scenes_on = bool(scenes_staged[0])
         # PAD-446: a build of random clips and no mode says so in its own words
         _who = ("Modes" if _modes_on else "Random clips" if variant_slots
                 else "Music modes" if sound_modes_cfg and (sound_modes.count or sound_modes.turns)
@@ -9999,6 +10015,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Prolonged Competition" if _comp_on
                 else "High score records" if _rec_on and not _feed_on and not _stime_on   # PAD-1280
                 else "Score feed" if _feed_on and not _stime_on
+                else "Image sets" if _scenes_on and not _stime_on
                 else "Screen times")
         _who_hud = _who
         if (bank_plan is not None and bank_plan.retired
@@ -10014,7 +10031,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "card without the earlier build's music modes, or keep a music mode or "
                 "another mode feature in the project.")
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on):
+                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on or _scenes_on):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -10035,7 +10052,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             try:
                 _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
                     variant_prof, sound_modes_prof, picture_prof, attract_prof, coop_prof, idle_prof,
-                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof))
+                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof, scenes_prof))
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -10114,6 +10131,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     screen_times=stime_lines, screen_prof=stime_prof,  # PAD-1115
                     score_feed=feed_url, score_feed_prof=feed_prof,   # PAD-1204
                     records=rec_list, records_prof=rec_prof,          # PAD-1280
+                    scenes=scenes_staged, scenes_prof=scenes_prof,    # image sets
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -12061,6 +12079,38 @@ def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     log("Picture settings: this card gets BRIGHTNESS, CONTRAST and SATURATION in its operator "
         "menu, applied to the screen from the game's next start after they are changed.", "info")
     return prof
+
+
+def _scenes_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """Image sets: ``(profile, sets)`` of the card the project's scene variants go on, or ``(None, None)`` when it has
+    none or they are left out (one warning says why). The modes' gate: an image file, a host that can add files to
+    it."""
+    from . import scene_variants as _SV
+    from . import mode_write as _MW
+    sets = _SV.load(assets_dir)
+    if not sets:
+        return None, None
+    if dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry them"
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        from . import picture_settings as _PS
+        prof = _PS.project_title(assets_dir, probe=True)
+        if prof is None:
+            why = "the app cannot tell which game this project is for"
+    if why:
+        log("Image sets: the scenes' variants are left out of this build: %s." % why.rstrip("."), "warning")
+        return None, None
+    return prof, sets
 
 
 def _picture_cfg(menus, grown, only, work, log):

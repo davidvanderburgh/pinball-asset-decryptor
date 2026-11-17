@@ -546,8 +546,6 @@ class WebWindow:
             "Play Options": g("modes"),
             # PR #38 review: the score feed and remote access, both for a machine on the owner's network
             "Network": g("modes"),
-            # PR #38 review: the score feed and remote access, both for a machine on the owner's network
-            "Network": g("modes"),
             # PAD-1382: the service menu with the app's rows in it (Stern Spike 2, the mode runtime's)
             "Service Menu": g("modes"),
             # PAD-1040: the expression light shows ride it too, and are no part of the mode maker

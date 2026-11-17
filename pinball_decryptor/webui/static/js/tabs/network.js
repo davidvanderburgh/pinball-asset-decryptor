@@ -73,7 +73,7 @@ function RemoteAccess({ n }) {
       <li>read the game's logs when something goes wrong</li>
       <li>run add-on programs of their own on the machine</li>
     </ul>
-    <p class="net-does">You need an SSH key on your computer. Paste its <b>public</b> half below (the line that starts
+    <p class="net-does">You need an SSH key on your computer. Paste its <b>public</b> half below (the line that starts${" "}
       <span class="mono">ssh-ed25519</span>, <span class="mono">ssh-rsa</span> or <span class="mono">ecdsa-</span>),
       one per line, then connect as <span class="mono">root</span> on port 22 at the machine's address on your network.</p>
     <${Note} kind="warn">Leave it off if you are not sure you need it. Anyone with a matching key has full control of

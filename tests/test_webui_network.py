@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 from pinball_decryptor.core import card_extras, ssh_card, staged_changes
 from tests.test_card_extras import key
@@ -126,3 +127,12 @@ def test_revert_all_resets_extras_to_source_and_clears_keys(tmp_path, monkeypatc
         assert w.state('network')['enabled'] is source_enabled
         assert w.state('network')['public_keys'] == source_keys
         assert w.state('network')['error'] == ''
+
+
+def test_every_rail_tab_is_listed_once():
+    # PR #38 review: a doubled TABS entry drew "Network" twice in the rail
+    from pinball_decryptor.webui import tabs as T
+    names = [t[0] for t in T.TABS]
+    assert len(names) == len(set(names)), [n for n in names if names.count(n) > 1]
+    win = (Path(T.__file__).parents[1] / 'window.py').read_text(encoding='utf-8')
+    assert win.count('"Network": g("modes"),') == 1

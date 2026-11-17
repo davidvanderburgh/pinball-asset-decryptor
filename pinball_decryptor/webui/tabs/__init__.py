@@ -35,8 +35,6 @@ TABS = (
     ("playopts", "playopts", "Play Options", "Play options", "Make", "gear"),
     # PR #38 review: what the card does on the owner's home network: the score feed (PAD-1204) and remote access
     ("network", "network", "Network", "Network", "Make", "globe"),
-    # PR #38 review: what the card does on the owner's home network: the score feed (PAD-1204) and remote access
-    ("network", "network", "Network", "Network", "Make", "globe"),
     # PAD-1382: the game's service menu as the card will show it, with the app's rows in it (Stern Spike 2)
     ("svcmenu", "svcmenu", "Service Menu", "Service menu", "Make", "list"),
     # PAD-782: the attract mode editor (Stern Spike 2)

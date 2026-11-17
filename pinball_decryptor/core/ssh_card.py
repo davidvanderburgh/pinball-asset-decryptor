@@ -72,7 +72,7 @@ def pending_marker(path):
 
 def _regular(path, allow_pending=False, writable=False):
     if not path or is_device_path(str(path)) or not os.path.isfile(path):
-        raise ExtrasError('SSH Extras requires a regular card image file, not a device.')
+        raise ExtrasError('Remote access (SSH) needs a regular card image file, not a device.')
     if not allow_pending:
         ensure_not_incomplete(path)
     if writable and os.stat(path).st_nlink != 1:
@@ -232,7 +232,7 @@ def guard_flash(project, image):
     state = inspect_image(image)
     if (state['enabled'] != config['enabled'] or
             (config['enabled'] and state['public_keys'] != config['public_keys'])):
-        raise ExtrasError('Build the complete image first to apply the pending SSH Extras change, then flash that build.')
+        raise ExtrasError('Build the complete image first to apply the pending remote access (SSH) change, then flash that build.')
 
 
 def note_build(output, project):

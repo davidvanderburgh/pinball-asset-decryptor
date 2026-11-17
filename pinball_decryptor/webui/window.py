@@ -55,7 +55,7 @@ PHASE_ROW_BY_KEY = {
     "Emulate PB": "emulate",
     "Multi-boot": "multiboot",
     "Replace Audio": None, "Replace Video": None,
-    "Replace Images": None, "Replace Text": None, "Scenes": None, "Extras": None,
+    "Replace Images": None, "Replace Text": None, "Scenes": None, "Network": None,
     "Partition Explorer": None, "Default Settings": None, "Test Card": None,
 }
 
@@ -522,7 +522,6 @@ class WebWindow:
             "Color Profile": ((g("replace_image") or g("replace_video"))
                               and not g("dmd_shades")),
             "Write": g("write"),
-            "Extras": g("write"),
             "Mod Pack": g("modpack"),
             "Partition Explorer": g("partition_explorer"),
             "Default Settings": g("settings_editor"),
@@ -545,6 +544,10 @@ class WebWindow:
             "Attract": g("modes"),
             # PAD-1204: the play options ride it too, and keep Insider Connected
             "Play Options": g("modes"),
+            # PR #38 review: the score feed and remote access, both for a machine on the owner's network
+            "Network": g("modes"),
+            # PR #38 review: the score feed and remote access, both for a machine on the owner's network
+            "Network": g("modes"),
             # PAD-1382: the service menu with the app's rows in it (Stern Spike 2, the mode runtime's)
             "Service Menu": g("modes"),
             # PAD-1040: the expression light shows ride it too, and are no part of the mode maker

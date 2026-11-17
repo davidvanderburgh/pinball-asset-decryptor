@@ -1,0 +1,18 @@
+/* Network tab (js/tabs/network.js, PR #38 review): the score feed and remote access, one card each. */
+.net-page { gap: 16px; }
+.net-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 16px; align-items: start; }
+html.bp-1100 .net-grid { grid-template-columns: 1fr; }
+.net-opt .bd { display: flex; flex-direction: column; gap: 10px; }
+.net-does { margin: 0; color: var(--ink-2); line-height: 1.45; }
+.net-uses { margin: 0; padding-left: 20px; color: var(--ink-2); line-height: 1.5; }
+.net-field { display: flex; flex-direction: column; gap: 4px; }
+.net-keys { width: 100%; resize: vertical; min-height: 8rem; }
+.net-contract { border-top: 1px solid var(--line); padding-top: 8px; }
+.net-contract-hd { font: inherit; font-weight: 600; color: var(--ink-2); background: transparent; border: 0; padding: 2px 0;
+                   cursor: pointer; text-align: left; }
+.net-contract-bd { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.net-pre { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap;
+           word-break: break-all; max-height: 480px; overflow: auto; }
+.net-fields { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.net-fields th, .net-fields td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.net-fields th { color: var(--ink-3); font-weight: 600; }

@@ -327,8 +327,8 @@ def test_extras_refresh_modified_files_after_an_unchanged_scan(tmp_path, monkeyp
         w.call('ui.select_tab', 'write')
         assert wait_for(w, lambda: not w.state('write')['scanning'])
         assert w.state('write')['rows'] == []
-        w.call('ui.select_tab', 'extras')
-        assert w.call('extras.configure', True, key(), str(proj)) is True
+        w.call('ui.select_tab', 'network')
+        assert w.call('network.configure', True, key(), str(proj)) is True
         w.call('ui.select_tab', 'write')
         assert wait_for(w, lambda: not w.state('write')['scanning'])
         assert any('SSH server' in row['file'] and 'enable' in row['file']
@@ -341,13 +341,13 @@ def test_extras_refresh_modified_files_after_an_unchanged_scan(tmp_path, monkeyp
             assert w.call('write.flash_start') is True
         assert len(builds) == 1
         assert not any(a['title'] == 'Nothing modified' for a in w.asked)
-        w.call('ui.select_tab', 'extras')
-        assert w.call('extras.configure', False, key(), str(proj)) is True
+        w.call('ui.select_tab', 'network')
+        assert w.call('network.configure', False, key(), str(proj)) is True
         w.call('ui.select_tab', 'write')
         assert wait_for(w, lambda: not w.state('write')['scanning'])
         assert w.state('write')['rows'] == []
         assert not w.run(w.window._has_pending_write_changes)
-        assert w.state('extras')['public_keys'].strip() == key()
+        assert w.state('network')['public_keys'].strip() == key()
 
 
 def test_extras_count_as_changes_before_preview_refresh(tmp_path, monkeypatch):

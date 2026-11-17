@@ -42,8 +42,8 @@ KINDS = (
     ("modes", "Modes",
      "Every mode made in this project, with its picture, clip and sound (the modes folder), "
      "and every change to the game's own modes."),
-    ("extras", "Extras",
-     "The project's SSH server setting and public keys, back to the source card's settings."),
+    ("extras", "Remote access",
+     "The project's remote access (SSH) setting and public keys, back to the source card's settings."),
 )
 KEYS = tuple(k for k, _l, _d in KINDS)
 LABELS = {k: label for k, label, _d in KINDS}

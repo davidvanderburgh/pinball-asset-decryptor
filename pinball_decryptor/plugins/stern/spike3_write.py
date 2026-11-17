@@ -866,7 +866,7 @@ class Spike3WritePipeline(BasePipeline):
             if config is not None or recovering:
                 ssh_card.validate_output(self.original_path, self.output_path)
         except ExtrasError as e:
-            raise PipelineError('SSH Extras', str(e)) from e
+            raise PipelineError('Remote access', str(e)) from e
         if not spike3.is_spike3_card(self.original_path):
             raise PipelineError("Detect", "The original is not a Stern Spike 3 "
                                 "secure SD-card image.")
@@ -912,13 +912,13 @@ class Spike3WritePipeline(BasePipeline):
                         os.replace(self.output_path, self.output_path + '.ssh-incomplete')
                     except OSError:
                         pass
-                raise PipelineError('SSH Extras', str(e)) from e
+                raise PipelineError('Remote access', str(e)) from e
         elif recovering:
             self._check_cancel()
             if not engine.read_build_manifest(self.output_path).get('complete'):
-                raise PipelineError('SSH Extras', 'The rebuild did not record a complete image; its failure marker was retained.')
+                raise PipelineError('Remote access', 'The rebuild did not record a complete image; its failure marker was retained.')
             marker.unlink(missing_ok=True)
-        self._done(True, "Wrote %s to %s%s" % (", ".join(bits) or ('SSH Extras' if note else 'the card'),
+        self._done(True, "Wrote %s to %s%s" % (", ".join(bits) or ('remote access (SSH)' if note else 'the card'),
                        self.output_path, ('\n' + note) if note else ''))
 
 

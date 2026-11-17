@@ -461,7 +461,7 @@ class SternWritePipeline(BasePipeline):
             if recovering_ssh:
                 self.update = False
         except ExtrasError as e:
-            raise PipelineError('SSH Extras', str(e)) from e
+            raise PipelineError('Remote access', str(e)) from e
         key = detect_game(self.original_path)
         if key is None:
             raise PipelineError("Detect", _not_a_card(
@@ -547,13 +547,13 @@ class SternWritePipeline(BasePipeline):
                         os.replace(self.output_path, self.output_path + '.ssh-incomplete')
                     except OSError:
                         pass  # pending marker continues to refuse flashes
-                raise PipelineError('SSH Extras', str(e)) from e
+                raise PipelineError('Remote access', str(e)) from e
         if ssh_note and summary == 'no changes':
-            summary = 'SSH Extras'
+            summary = 'remote access (SSH)'
         if recovering_ssh and ssh_config is None:
             self._check_cancel()
             if not after.get('complete'):
-                raise PipelineError('SSH Extras', 'The rebuilt image has no complete build record; the previous failure marker was retained.')
+                raise PipelineError('Remote access', 'The rebuilt image has no complete build record; the previous failure marker was retained.')
             ssh_card.pending_marker(self.output_path).unlink(missing_ok=True)
         self._done(True, "Wrote %s to %s%s%s%s%s"
                    % (summary, self.output_path,
@@ -650,7 +650,7 @@ class SternDirectSsdWritePipeline(BasePipeline):
         self._set_phase(0)  # Scan
         from ...core.card_extras import configuration
         if configuration(self.assets_dir) is not None:
-            raise PipelineError('SSH Extras', 'Build a complete image to apply SSH Extras, then flash it; Direct-SD cannot change the system partition.')
+            raise PipelineError('Remote access', 'Build a complete image to turn remote access (SSH) on or off, then flash it; Direct-SD cannot change the system partition.')
         if not is_device_path(self.device_path):
             raise PipelineError(
                 "Scan",

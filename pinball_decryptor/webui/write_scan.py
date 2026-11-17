@@ -369,10 +369,10 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
                            != source.get('public_keys', '').strip()))
             if changed:
                 rows.append(('SSH server — ' + ('enable' if ssh['enabled'] else 'disable'),
-                             'system', 'Pending (SSH Extras)', 'pending'))
+                             'system', 'Pending (Network tab)', 'pending'))
     except card_extras.ExtrasError:
         rows.append(('SSH server — invalid configuration', 'system',
-                     'Pending (SSH Extras: fix configuration)', 'pending'))
+                     'Pending (Network tab: fix the keys)', 'pending'))
     return rows
 
 

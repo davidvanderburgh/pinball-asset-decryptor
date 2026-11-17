@@ -4155,7 +4155,7 @@ def _compute_patches_or_restore(restore_ok, log, *args, allow_empty=False, **kwa
         if not restore_ok and not allow_empty:
             raise
     if allow_empty:
-        log('No asset replacements: preparing the complete image for SSH Extras.', 'info')
+        log('No asset replacements: preparing the complete image for remote access (SSH).', 'info')
         return [], _with_stock_modes((0, 0, 0, 0)), None, None, None
     log("Nothing is staged any more (the game's own modes are all back at "
         "stock), so this Write puts the card back to the original: the last "
@@ -10896,7 +10896,7 @@ def build_update_reason(prev, original_path, output_path, assets_dir):
         return "the file has changed since it was built"
     from ...core.card_extras import digest as extras_digest
     if prev.get('ssh_extras') != extras_digest(assets_dir):
-        return 'SSH Extras changed; the system partition is built from the original'
+        return 'remote access (SSH) changed; the system partition is built from the original'
     try:
         from .multiimage import images_for_path
         if len(images_for_path(original_path)) > 1:

@@ -3645,3 +3645,27 @@ def test_the_plan_says_which_images_run_custom_modes():
     assert [r.modes for r in rows] == ["1 mode file, 0 code modes", ""]
     assert multiboot_core.modes_line(rows[1]) == "" and "runs custom modes (1 mode file" in \
         multiboot_core.modes_line(rows[0])
+
+
+def test_default_output_is_the_projects_with_one_open(tmp_path):
+    """PAD-1385: with a project open the card is the PROJECT'S - two projects
+    starting from the same stock card no longer share one default file."""
+    primary = _images(tmp_path, 1)[0]
+    a = tmp_path / "Godzilla two"
+    b = tmp_path / "Godzilla three"
+    got_a = default_output_path(primary, project=str(a))
+    got_b = default_output_path(primary, project=str(b))
+    assert os.path.normpath(got_a) == os.path.normpath(
+        str(a / "multi" / "Godzilla two.multi.raw"))
+    assert os.path.normpath(got_b) == os.path.normpath(
+        str(b / "multi" / "Godzilla three.multi.raw"))
+    # a trailing separator still names the project
+    assert default_output_path(primary, project=str(a) + os.sep) == got_a
+    # no project: beside the primary, as before
+    assert default_output_path(primary, project="") == default_output_path(primary)
+    # a JJP ISO is named for the project too; a BOF update keeps the name
+    # its machine's updater looks for, in the project's folder
+    assert default_output_path(primary, "jjp", project=str(a)).endswith(
+        os.path.join("multi", "Godzilla two.multi.iso"))
+    assert os.path.normpath(default_output_path("D:/x/lab.fun", "bof", project=str(a))) \
+        == os.path.normpath(str(a / "multi" / "lab.fun"))

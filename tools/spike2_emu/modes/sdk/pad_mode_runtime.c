@@ -26963,6 +26963,269 @@ static void pic_arm(void)
         PIC_SYMS[0], PIC_SYMS[1], PIC_SYMS[2], PIC_SYMS[3]);
 }
 
+/* ---- IMAGE SETS: a scene of the game's, one of several, by a setting of the operator's -------------------------
+ * An owner (the Kaiju Battle Select screen of a Godzilla retheme, drawn dark) asked for "a dark or light or perhaps
+ * even multiple versions" of a screen, picked in the service menu and kept over a power cycle. The Scenes tab gives a
+ * scene variants of its own (a copy of the scene with its own pictures and colours), the build puts each one on the
+ * card as a file beside the scene's own (`scene.radium` -> the variant's file), the operator menu gets IMAGE SET, and
+ * this swaps the FILE: the game opens every scene.radium with fopen64 (tools/spike2_emu/hwshim.c: "Radium's FileStream
+ * uses the large-file variant"), so the game program's fopen64 import slot is re-pointed and a listed scene's path is
+ * opened as the variant's file while the set says that variant. Nothing of the scene's id, its library or the
+ * resource manager changes: the game reads the variant exactly where it would have read its own scene.
+ *
+ * WHEN. Most of the screens worth a variant are in auto_loaded/ (the Battle Select screen, cac32730), read once at
+ * boot, before the game has read its settings out of NVM. So the set a start uses is the one the game LAST RAN with,
+ * kept in SCNV_STATE the way the picture settings keep theirs (PAD-575): eglSwapBuffers is re-pointed to note the
+ * setting's value once a frame and the file is rewritten when it changes. A change in the menu shows from the next
+ * start of the game (the help line says so); a demand-loaded scene opened after the change shows it at once.
+ *
+ * scenes.cfg (/usr/local/padmode/scenes.cfg on a card, /dump/scenes.cfg in the rig), one TAB-separated line each:
+ *
+ *     only                                      the card carries no modes: arm this and nothing else
+ *     got <TAB> <symbol> <TAB> <addr>            fopen64 or eglSwapBuffers: an import slot of the game program
+ *     setting <TAB> <live> <TAB> <n>             IMAGE SET's value (1..n) in the game's memory (0: none, the state's)
+ *     scene <TAB> <path tail> <TAB> <set> <TAB> <file>
+ *                                               a scene file whose path ENDS with <path tail> is opened as <file>
+ *                                               while the set is <set> (2..n; set 1 is always the scene's own)
+ *     force <TAB> <v>                            a rig run's own set (the build never writes it)
+ *
+ * A variant's file that does not open falls back to the scene's own, said once, so a card is never left without its
+ * screen. */
+#define SCNV_FILE_MAX   16384
+#define SCNV_LINES      128
+#define SCNV_PATH_MAX   200
+#define SCNV_SETS       16
+static const char *const SCNV_FILES[] = { "/usr/local/padmode/scenes.cfg", "/dump/scenes.cfg" };
+static const char SCNV_STATE[] = "/dump/pad_imageset.state";
+enum { SCNV_FOPEN64, SCNV_SWAP, SCNV_GOTS };
+static const char *const SCNV_SYMS[SCNV_GOTS] = { "fopen64", "eglSwapBuffers" };
+static char scnv_raw[SCNV_FILE_MAX + 1];
+static unsigned scnv_got[SCNV_GOTS];
+static struct { const char *tail; const char *file; unsigned set, tail_len, said; } scnv_line[SCNV_LINES];
+static int scnv_n, scnv_only, scnv_bad;
+static unsigned scnv_live, scnv_sets, scnv_force, scnv_ran, scnv_boot;
+static void *(*scnv_real_fopen64)(const char *, const char *);
+static unsigned (*scnv_real_swap)(void *, void *);
+
+static unsigned scnv_strlen(const char *s)
+{
+    unsigned n = 0;
+    while (s[n]) n++;
+    return n;
+}
+
+/* does *path* end with the n bytes of *tail*, at a '/' or the whole path? */
+static int scnv_tail_is(const char *path, const char *tail, unsigned n)
+{
+    unsigned p = scnv_strlen(path), k;
+    if (n == 0 || p < n) return 0;
+    for (k = 0; k < n; k++)
+        if (path[p - n + k] != tail[k]) return 0;
+    return p == n || tail[0] == '/' || path[p - n - 1] == '/';
+}
+
+static void scnv_line_read(char *s)
+{
+    char *f[5];
+    const char *p;
+    int n = 0, ok;
+    unsigned k;
+    if (!*s || *s == '#') return;
+    while (n < 5) {
+        f[n++] = s;
+        while (*s && *s != '\t') s++;
+        if (!*s) break;
+        *s++ = 0;
+    }
+    if (n == 1 && str_eq(f[0], "only")) { scnv_only = 1; return; }
+    if (n >= 3 && str_eq(f[0], "got")) {
+        for (k = 0; k < SCNV_GOTS; k++)
+            if (str_eq(f[1], SCNV_SYMS[k])) {
+                p = f[2];
+                scnv_got[k] = (unsigned)number(&p, &ok);
+                if (!ok) { scnv_got[k] = 0; scnv_bad++; }
+                return;
+            }
+        scnv_bad++;
+        return;
+    }
+    if (n >= 3 && str_eq(f[0], "setting")) {
+        p = f[1];
+        scnv_live = (unsigned)number(&p, &ok);
+        if (!ok) { scnv_live = 0; scnv_bad++; return; }
+        p = f[2];
+        scnv_sets = (unsigned)number(&p, &ok);
+        if (!ok || scnv_sets < 2 || scnv_sets > SCNV_SETS) { scnv_sets = 0; scnv_bad++; }
+        return;
+    }
+    if (n >= 2 && str_eq(f[0], "force")) {
+        p = f[1];
+        scnv_force = (unsigned)number(&p, &ok);
+        if (!ok) { scnv_force = 0; scnv_bad++; }
+        return;
+    }
+    if (n >= 4 && str_eq(f[0], "scene") && scnv_n < SCNV_LINES) {
+        unsigned set;
+        p = f[2];
+        set = (unsigned)number(&p, &ok);
+        if (!ok || set < 2 || set > SCNV_SETS || !*f[1] || f[3][0] != '/'
+            || scnv_strlen(f[1]) >= SCNV_PATH_MAX || scnv_strlen(f[3]) >= SCNV_PATH_MAX) { scnv_bad++; return; }
+        scnv_line[scnv_n].tail = f[1];
+        scnv_line[scnv_n].tail_len = scnv_strlen(f[1]);
+        scnv_line[scnv_n].set = set;
+        scnv_line[scnv_n].file = f[3];
+        scnv_line[scnv_n].said = 0;
+        scnv_n++;
+        return;
+    }
+    scnv_bad++;
+}
+
+static int scnv_read(void)
+{
+    long n = -1, i, start = 0;
+    unsigned k;
+    for (k = 0; k < sizeof SCNV_FILES / sizeof SCNV_FILES[0] && n < 0; k++)
+        n = pm_read_file(SCNV_FILES[k], scnv_raw, SCNV_FILE_MAX);
+    if (n <= 0) return 0;
+    scnv_raw[n] = 0;
+    for (i = 0; i <= n; i++)
+        if (i == n || scnv_raw[i] == '\n' || scnv_raw[i] == '\r') {
+            scnv_raw[i] = 0;
+            scnv_line_read(scnv_raw + start);
+            start = i + 1;
+        }
+    return 1;
+}
+
+/* the set the game last ran with ("set <v>"; none, or unreadable: 1, the scenes' own) */
+static unsigned scnv_state_read(void)
+{
+    char b[64];
+    long n = pm_read_file(SCNV_STATE, b, sizeof b - 1);
+    const char *p;
+    unsigned v;
+    int ok;
+    if (n < 5) return 1;
+    b[n] = 0;
+    if (b[0] != 's' || b[1] != 'e' || b[2] != 't' || b[3] != ' ') return 1;
+    p = b + 4;
+    v = (unsigned)number(&p, &ok);
+    return ok && v >= 1 && v <= scnv_sets ? v : 1;
+}
+
+static void scnv_state_write(unsigned v)
+{
+    char b[32];
+    int n = pm_snprintf(b, sizeof b, "set %u\n", v), fd;
+    if (n <= 0 || n >= (int)sizeof b) return;
+    unlink(SCNV_STATE);
+    fd = open(SCNV_STATE, O_WRONLY | O_CREAT, 0644);
+    if (fd < 0) { say("image sets: %s cannot be written - the next start shows set %u", SCNV_STATE, scnv_ran); return; }
+    if (write(fd, b, (unsigned long)n) != n) say("image sets: %s was not written whole", SCNV_STATE);
+    close(fd);
+}
+
+/* the set the game holds now (0: not read out of its store yet) */
+static unsigned scnv_value(void)
+{
+    if (scnv_force) return scnv_force;
+    if (!scnv_live) return 0;
+    return *(volatile const unsigned *)(unsigned long)scnv_live;
+}
+
+/* the game's fopen64: a listed scene's file is opened as its variant's while the set says so */
+static void *scnv_fopen64(const char *path, const char *mode)
+{
+    int i;
+    unsigned set = scnv_boot;
+    {   /* a scene opened after the game read its settings (demand loaded) takes the setting as it is now */
+        unsigned v = scnv_value();
+        if (v >= 1 && v <= scnv_sets) set = v;
+    }
+    if (path && set >= 2)
+        for (i = 0; i < scnv_n; i++) {
+            void *f;
+            if (scnv_line[i].set != set || !scnv_tail_is(path, scnv_line[i].tail, scnv_line[i].tail_len)) continue;
+            f = scnv_real_fopen64(scnv_line[i].file, mode);
+            if (f) {
+                if (!scnv_line[i].said++) say("image sets: %s opened as set %u's %s", path, set, scnv_line[i].file);
+                return f;
+            }
+            if (!scnv_line[i].said++)
+                say("image sets: set %u's %s does not open - the game's own %s is shown", set, scnv_line[i].file,
+                    path);
+            break;
+        }
+    return scnv_real_fopen64(path, mode);
+}
+
+/* once a frame: the set as the game holds it, kept for the next start when it changes */
+static unsigned scnv_swap(void *dpy, void *surf)
+{
+    unsigned v = scnv_value();
+    if (v >= 1 && v <= scnv_sets && v != scnv_ran) {
+        say("image sets: IMAGE SET %u (this start shows set %u) - kept for the game's next start", v, scnv_boot);
+        scnv_ran = v;
+        scnv_state_write(v);
+    }
+    return scnv_real_swap(dpy, surf);
+}
+
+/* from the constructor, after the picture settings (whose eglSwapBuffers this one calls on to): read
+ * scenes.cfg, check both slots, re-point them. All or nothing. */
+static void scnv_arm(void)
+{
+    unsigned k, v;
+#if PM_A64
+    if (scnv_read()) say("image sets: off - Spike 3 is not supported yet");
+    return;
+#endif
+    if (!scnv_read()) return;
+    if (scnv_bad) say("image sets: %d line(s) of scenes.cfg not read", scnv_bad);
+    if (!scnv_sets || !scnv_n) { say("image sets: scenes.cfg names no setting or no scene - nothing hooked"); return; }
+    if (scnv_live && !maps_has(scnv_live, 4, MAP_R)) {
+        say("image sets: IMAGE SET's value at 0x%08x is not in the game's memory - the last start's set stays",
+            scnv_live);
+        scnv_live = 0;
+    }
+    for (k = 0; k < SCNV_GOTS; k++) {
+        if (!scnv_got[k] || !maps_has(scnv_got[k], 4, MAP_R | MAP_GAME)) {
+            say("image sets: off - scenes.cfg names no import slot of the game's program for %s", SCNV_SYMS[k]);
+            return;
+        }
+        v = *(volatile const unsigned *)(unsigned long)scnv_got[k];
+        if (!v || !maps_has(v & ~1u, 4, MAP_R | MAP_X)) {
+            say("image sets: off - %s's slot 0x%08x holds 0x%08x, not a function", SCNV_SYMS[k], scnv_got[k], v);
+            return;
+        }
+    }
+    /* what is called on: a slot already bound (to the library, or to another hook of ours - the picture settings
+     * re-point eglSwapBuffers before this) is kept; a slot still holding the program's own lazy-binding stub cannot
+     * be called from C, so the function is looked up as the dynamic linker would bind it (the rig's shim first) */
+    for (k = 0; k < SCNV_GOTS; k++) {
+        void *fn_;
+        v = *(volatile const unsigned *)(unsigned long)scnv_got[k];
+        if (!maps_has(v & ~1u, 4, MAP_R | MAP_X | MAP_GAME))
+            fn_ = (void *)(unsigned long)v;
+        else if (k == SCNV_SWAP) {
+            void *egl = dlopen("libEGL.so.1", PIC_RTLD_NOW | PIC_RTLD_NOLOAD);
+            fn_ = egl ? dlsym(egl, SCNV_SYMS[k]) : 0;
+        } else
+            fn_ = dlsym((void *)0 /* RTLD_DEFAULT */, SCNV_SYMS[k]);
+        if (!fn_) { say("image sets: off - no %s to call on", SCNV_SYMS[k]); return; }
+        if (k == SCNV_FOPEN64) scnv_real_fopen64 = (void *(*)(const char *, const char *))fn_;
+        else scnv_real_swap = (unsigned (*)(void *, void *))fn_;
+    }
+    scnv_boot = scnv_force ? scnv_force : scnv_state_read();
+    if (scnv_boot > scnv_sets) scnv_boot = 1;
+    scnv_ran = scnv_boot;
+    *(volatile unsigned *)(unsigned long)scnv_got[SCNV_FOPEN64] = (unsigned)(unsigned long)scnv_fopen64;
+    *(volatile unsigned *)(unsigned long)scnv_got[SCNV_SWAP] = (unsigned)(unsigned long)scnv_swap;
+    say("image sets: armed - %u set(s), %d scene file(s), IMAGE SET at 0x%08x; this start shows set %u%s",
+        scnv_sets, scnv_n, scnv_live, scnv_boot, scnv_force ? " (FORCED by the file)" : "");
+}
+
 /* PAD-1071: the Emulate tab's Sound and video log. /dump/soundlog.on at the start logs every request the
  * game's sound worker takes ("[pad] sound <request> <n>", n = 1 for a numbered variant), whatever else the
  * card carries - armed here, before the gates below, which return early on a card of clip variants only,
@@ -27015,21 +27278,24 @@ static void pad_mode_start(void)
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
     sndm_arm();                               /* PAD-494: nor does a music mode */
     pic_arm();                                /* PAD-537: nor do the picture settings */
+    scnv_arm();                               /* image sets: nor does which scene file a screen reads (after pic_arm:
+                                               * it calls on to the picture settings' eglSwapBuffers) */
     idle_arm();                               /* PAD-1022: nor does inactivity pausing the timers */
     hand_arm();                               /* PAD-1033: nor does a player's handicap (the operator's settings) */
     comp_arm();                               /* PAD-1041: nor does Prolonged Competition (the game's own Competition) */
     cabs_arm();                               /* PAD-1040: nor do the card's expression light shows */
     feed_arm();                               /* PAD-1204: nor does the score feed (it only reads the scores) */
-    if (((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))
+    if (((clipv_only || sndm_only || pic_only || scnv_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))
          || feed_cfg_only())
         && !attract_wanted() && !coop_wanted() && !rec_wanted()) {   /* PAD-782: attract items take the whole gate;
                                                                          * PAD-1017: co-op too; PAD-1280: records too */
-        say("armed: %s%s%s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
+        say("armed: %s%s%s%s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
+            scnv_only ? "image sets " : "",
             idle_only ? "inactivity pausing timers " : "", hand_cfg_only() ? "handicaps " : "",
             comp_cfg_only() ? "prolonged competition " : "", cabs_only && n_cabs ? "expression light shows " : "",
             feed_cfg_only() ? "score feed " : "",
-            clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : idle_only ? "idle.cfg"
+            clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : scnv_only ? "scenes.cfg" : idle_only ? "idle.cfg"
             : hand_cfg_only() ? "handicap.cfg" : comp_cfg_only() ? "comp.cfg" : feed_cfg_only() ? "scorefeed.cfg"
             : "cabshow.cfg");
         if (n_cabs) lamps_arm();              /* PAD-1040: the shows hold the cabinet's lights on the lamp layer */

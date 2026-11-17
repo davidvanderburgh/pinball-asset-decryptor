@@ -142,7 +142,8 @@ def test_need_materializer_refuses_only_when_a_delta_is_planned(mk, tmp_path):
 def test_selector_files_ship_materialize_py_as_optional(mk):
     name, (card, mode, required) = "materialize.py", mk.SELECTOR_FILES["materialize.py"]
     assert card == "materialize.py" and mode == 0o755 and required is False
-    assert list(mk.SELECTOR_FILES) == ["codeselect", "select.sh", "font.ttf", "materialize.py"]
+    assert list(mk.SELECTOR_FILES) == ["codeselect", "select.sh", "font.ttf", "materialize.py",
+                                  "padmenu.so"]   # PAD-1309: the hold-BACK way back to the menu
 
 
 def _store_plan_with(mk, monkeypatch, whole_extra):

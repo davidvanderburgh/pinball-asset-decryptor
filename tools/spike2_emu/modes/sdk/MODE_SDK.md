@@ -4696,7 +4696,11 @@ already hold them, and copies a 16-byte entry's fourth word from the entry ours 
 (Deadpool Pro 1.16, flag 18 alone: ball 2 followed). `site challenge_balls` - `push {r4, r5, lr} ; mov r5, r0 ; sub sp,
 sp, #12 ; mov r0, #<AD_BALLS_PER_GAME> ; bl ...`, the same on every Spike 2 build - is hooked to answer 1 from the
 moment a mode takes a challenge game until the next game starts, so every challenge game a mode plays is one ball,
-as Bond's own are.
+as Bond's own are. PAD-1330: a Spike 3 program builds that getter into each of its callers - the whole-function ones
+are `site challenge_balls` / `challenge_balls_2` as before, and each copy inside a function is `site
+challenge_balls_at_<k>` (k 0-3: the compare of the ball number with it) with `value challenge_balls_at_<k>_reg` (the
+register holding it, hook_full's numbering: x19 = 19), which the runtime sets to 1 there (Star Wars ELG 1.10's Spike 3
+port: four of them).
 
 Proven (emulator, 2026-10-19, the stock cards, hidden, muted): Deadpool Pro 1.16 - two of our own on the menu
 (CHALLENGE over MERC WIZARD and TACO RUN), MERC WIZARD picked: START (challenge pick) as the ball started, GAME OVER

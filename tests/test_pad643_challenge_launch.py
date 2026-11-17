@@ -124,7 +124,7 @@ def test_the_runtime_launches_from_the_tick_and_wraps_the_plain_handlers():
     arm = src[src.index("static void plain_arm(void)"):]
     arm = arm[:arm.index("\n}\n")]
     assert "hook_wrap(fn(key), (void *)plain_wraps[k])" in arm
-    call = src[src.index("static unsigned plain_call("):]
+    call = src[src.index("static pm_reg plain_call("):]
     call = call[:call.index("\n}\n")]
     # the challenge flag cleared for the game's call only, and only in a mode's challenge game
     assert call.index("if (!chg_ours_now()) return plain_orig[k](a, b, c, d);") < call.index("game_flag_clear(on);") \

@@ -741,7 +741,9 @@ def test_the_game_loads_nothing_from_the_rigs_own_folder():
         for m in re.finditer(r'LD_(?:PRELOAD|LIBRARY_PATH)="?(\S+)', line):
             assert not re.search(r"\$\{?(SPK_TOOLS|SPK_SHIM|HERE)\b", m.group(1)), line
     assert 'cp "$SPK_SHIM" "$SPK_RIG/spkshim.so"' in src
-    assert "LD_PRELOAD=$SPK_RIG/spkshim.so" in src
+    # PAD-1309: the boot menu's hold-BACK library goes first when the card has one - also from the slot's folder
+    assert "LD_PRELOAD=$MENU_PRE$SPK_RIG/spkshim.so" in src
+    assert 'MENU_PRE="$SPK_RIG/padmenu.so:"' in src
     assert "LD_LIBRARY_PATH=$SPK_RIG/lib" in src
 
 

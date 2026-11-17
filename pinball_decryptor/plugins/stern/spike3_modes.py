@@ -99,6 +99,7 @@ MULTIBOOT_WORDS = ("this is a multi-boot card; modes go on a card of the one gam
 FAMILY_LEFT_OUT = {
     "picture settings": "they cannot be added to a Spike 3 game yet",
     "expression light shows": "the 64-bit runtime cannot light a Spike 3 cabinet's expression lights yet",
+    "image sets": "the 64-bit runtime cannot swap a Spike 3 game's scene files yet",   # PAD-1390
 }
 
 

@@ -37,7 +37,7 @@ class _Log:
 
 def wanted(project):
     """``[(key, values, names, options)]`` the project's settings ask a Write for, in the engine's order (music,
-    edition, pictures, co-op, handicap), each from the engine's own menu job."""
+    edition, pictures, co-op, handicap, image set), each from the engine's own menu job."""
     from . import engine as E
     from . import coop_play as CP, editions as Ed, handicap as HC, picture_settings as PS, sound_modes as SMo
     log = _Log()
@@ -60,6 +60,10 @@ def wanted(project):
         jobs.append(E._CoopMenu(log))
     if HC.load(project):
         jobs.append(E._HandicapMenu(log))
+    from . import scene_variants as SV
+    sets = SV.load(project)                             # PAD-1390: IMAGE SET, when the project has image sets
+    if sets:
+        jobs.append(E._ImageSetMenu(sets["names"], log))
     return [j.wanted() for j in arrange(project, jobs, log)]
 
 

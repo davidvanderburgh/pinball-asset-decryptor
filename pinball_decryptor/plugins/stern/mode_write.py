@@ -602,6 +602,9 @@ class ModePlan:
     picture_file: str = ""
     #: PAD-1382: ``settings.cfg`` beside the mode files, the settings sharing the MORE SETTINGS rows ("" = none)
     settings_file: str = ""
+    #: image sets: ``scenes.cfg`` beside the mode files ("" = none) and the variants' own scene files with it
+    scenes_file: str = ""
+    scene_files: list = field(default_factory=list)
     #: PAD-782: ``attract.cfg`` beside the mode files, the owner's attract items ("" = none)
     attract_file: str = ""
     #: PAD-1017: ``coop.cfg`` beside the mode files, co-op play ("" = none)
@@ -836,7 +839,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
          cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
-         score_feed_prof=None, records=None, records_prof=None, code_ok=True, arch="arm"):
+         score_feed_prof=None, records=None, records_prof=None, code_ok=True, arch="arm", scenes=None,
+         scenes_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -893,7 +897,10 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     PAD-1280: *records* (:func:`.mode_records.load`'s) put ``records.cfg`` beside the mode files: the owner's records
     on the game's high scores, each game's mode named by its object read off *game_elf*; with nothing else it is a
     plan of its own, for *records_prof* (a whole install, as co-op play: the score gate holds Insider's reports
-    back)."""
+    back).
+
+    Image sets: *scenes* ``(scenes.cfg, [variant files])`` the engine staged (:mod:`.scene_variants`) go beside the
+    mode files; with nothing else they are a plan of their own, for *scenes_prof*."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -965,6 +972,12 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                                       or handicap_prof or idle_prof or coop_prof or attract_prof or variants_prof
                                       or sound_modes_prof or picture_prof)
             records_into(result, game_elf, scratch, records)
+        if scenes and scenes[0]:                     # image sets, alone or with the above
+            if result is None:
+                result = scenes_plan(project, game_elf, scenes_prof or records_prof or score_feed_prof or screen_prof
+                                     or comp_prof or handicap_prof or idle_prof or coop_prof or attract_prof
+                                     or variants_prof or sound_modes_prof or picture_prof)
+            result.scenes_file, result.scene_files = scenes[0], list(scenes[1])
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -1044,6 +1057,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                      read_card=read_card, find_scene=find_scene)
     result.sounds_file = sound_modes or ""
     result.picture_file = picture or ""
+    if scenes and scenes[0]:                         # image sets
+        result.scenes_file, result.scene_files = scenes[0], list(scenes[1])
     if coop:                                         # PAD-1017
         coop_into(result, game_elf, scratch, coop_setting,   # PAD-1031: the pick's screens went in with the modes' build
                   stock_bank=stock_bank, ffmpeg=ffmpeg, progress=progress, read_card=read_card)
@@ -1903,6 +1918,20 @@ def picture_plan(project, game_elf, prof, cfg):
     return result
 
 
+# ---- image sets: a scene's variants by IMAGE SET ---------------------------------------------------
+def scenes_plan(project, game_elf, prof):
+    """A plan carrying only the image sets (:mod:`.scene_variants`): the runtime and the title's port on p2 with
+    the engine's ``scenes.cfg`` (which says ``only``) and the variants' files."""
+    if prof is None:
+        raise ModeWriteError("The app cannot tell which game this project is for, so it cannot give it image sets.")
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to swap screens on"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
 # ---- PAD-446: clips that play one of several at random -----------------------------------------
 def CV_scene_counts(reader, game_dir, names):
     """PAD-723: :func:`.clip_variants.scene_counts`, for the engine."""
@@ -2387,6 +2416,15 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             dst = os.path.join(out_dir, MSet.SHARED_CFG)
             shutil.copyfile(result.settings_file, dst)
             extras.append(dst)
+        if getattr(result, "scenes_file", ""):         # image sets: scenes.cfg and the variants' scene files
+            from . import scene_variants as SV
+            dst = os.path.join(out_dir, SV.CFG_NAME)
+            shutil.copyfile(result.scenes_file, dst)
+            extras.append(dst)
+            for src in getattr(result, "scene_files", None) or ():
+                dst = os.path.join(out_dir, os.path.basename(src))
+                shutil.copyfile(src, dst)
+                extras.append(dst)
         if getattr(result, "attract_file", ""):        # PAD-782: attract.cfg, the attract items
             from . import attract_items as AI
             dst = os.path.join(out_dir, AI.CFG_NAME)

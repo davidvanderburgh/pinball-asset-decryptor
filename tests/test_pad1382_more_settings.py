@@ -144,7 +144,8 @@ def test_the_runtime_reads_shared_values_where_the_app_puts_them():
     assert '"/usr/local/padmode/%s", "/dump/%s"' % (MS.SHARED_CFG, MS.SHARED_CFG) in src
     # every setting's reader takes its address through setting_addr (a row's, or a shared word)
     for reader in ("coop.setting = setting_addr(", "hand.setting = setting_addr(", "sndm_live = setting_addr(",
-                   "pic_set[w].live = (unsigned)setting_addr(", "return only && v ? setting_addr(v)"):
+                   "pic_set[w].live = (unsigned)setting_addr(", "return only && v ? setting_addr(v)",
+                   "scnv_live = (unsigned)setting_addr(scnv_live)"):   # PAD-1390: IMAGE SET
         assert reader in src, reader
     # the rows are watched before the card's "only" gate, so a card of settings alone has them too
     assert src.index("mset_arm();") < src.index("clipv_arm();")

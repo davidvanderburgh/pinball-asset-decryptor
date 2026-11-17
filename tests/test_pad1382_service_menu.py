@@ -48,8 +48,11 @@ def test_shared_rows_are_drawn_as_the_machine_drew_them():
     assert page["rows"][6]["shared_value"] and page["rows"][6]["value"] == "5"
 
 
-def test_no_rows_of_ours_no_pages():
-    assert SM.pages(_program(LE116), [])["pages"] == []
+def test_no_rows_of_ours_still_shows_the_menu():
+    """Round 4: every Machine Settings page shows, to see the menu before adding to it."""
+    pages = SM.pages(_program(LE116), [])["pages"]
+    assert len(pages) == 9 and not any(p["ours"] for p in pages)
+    assert [r["caption"] for r in _attract({"pages": pages})["rows"]] == GAME_ROWS
 
 
 def test_the_project_asks_for_what_its_tabs_switched(tmp_path):

@@ -57,7 +57,7 @@ def test_ones_own_settings_take_rows_as_the_apps_do_and_share_when_short(tmp_pat
     raw = _program(LE116)
     p = _project(tmp_path, {"service_menu": {"custom": [{"name": "Dark Screens", "values": ["Off", "On"]}]}})
     menu = SM.pages(raw, SM.wanted(p))
-    rows = [r for r in menu["pages"][0]["rows"] if r["ours"]]
+    rows = [r for p in menu["pages"] for r in p["rows"] if r["ours"]]
     assert [r["caption"] for r in rows] == ["Dark Screens"] and not menu["shared"]
     p = _project(tmp_path, {"coop_play": {"on": True, "menu": True}, "handicap": {"on": True},
                             "service_menu": {"order": ["custom_dark_screens"],
@@ -66,7 +66,7 @@ def test_ones_own_settings_take_rows_as_the_apps_do_and_share_when_short(tmp_pat
     rows_wanted = SM.wanted(p)
     menu = SM.pages(raw, rows_wanted)
     assert menu["shared"] and menu["refused"] == {}
-    more = next(r for r in menu["pages"][0]["rows"] if r.get("key") == MS.MORE_SELECT)
+    more = next(r for p in menu["pages"] for r in p["rows"] if r.get("key") == MS.MORE_SELECT)
     assert [o["caption"] for o in more["options"]] == ["Dark Screens", "Co-op Play", "Handicap", "Attract Music"]
     from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
     settings = MS.plan_many(AdjustmentTable(raw), rows_wanted)[0]
@@ -81,7 +81,7 @@ def test_ones_own_settings_take_rows_as_the_apps_do_and_share_when_short(tmp_pat
 
 def test_the_walk_reaches_each_machine_settings_page_by_its_place():
     t_pages = SM.pages(_program(LE116), [("coop_play", 3, (), {"from_zero": True})])["pages"]
-    assert [(p["name"], p["rank"]) for p in t_pages] == [("Attract Mode", 7)]
+    assert [(p["name"], p["rank"]) for p in t_pages if p["ours"]] == [("Attract Mode", 7)]
     w = SM.walk(7, 5)
     assert w[:14] == ["25", "w2", "25", "w2", "26", "26", "26", "26", "25", "w1.5", "26", "26", "25", "w1.5"]
     assert w[14:] == ["26"] * 7 + ["25", "w2"] + ["26"] * 5 + ["w1"]

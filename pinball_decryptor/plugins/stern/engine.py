@@ -8461,6 +8461,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1033: a handicap for each player - handicap.cfg beside the runtime (the modes' delivery)
     hand_prof = _handicap_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _hand_on = hand_prof is not None
+    # PAD-1382: the owner's own service-menu settings (Service menu tab): rows of the game program, and the runtime
+    # with settings.cfg when they share MORE SETTINGS or the card's own code reads them
+    own_prof = None if _is_spike3(disk_f) else _own_settings_for_build(assets_dir, dest_is_device, log,
+                                                                        **_mode_gate_kw)
+    _own_on = own_prof is not None
     # PAD-1040: the cabinet's expression light shows - cabshow.cfg beside the runtime (the modes' delivery)
     cabs_prof, cabs_shows = _cabs_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _cabs_on = cabs_prof is not None
@@ -8504,6 +8509,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         editions, picture_prof = [], None
         attract_prof = coop_prof = idle_prof = hand_prof = comp_prof = None
         _attract_on = _coop_on = _idle_on = _hand_on = _comp_on = False
+        own_prof, _own_on = None, False                 # PAD-1382: Spike 2 only for now
         cabs_prof, cabs_shows, _cabs_on = None, [], False
         feed_prof, feed_url, _feed_on = None, "", False
         stime_lines, stime_prof, _stime_on = [], None, False
@@ -8517,6 +8523,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not variant_slots and not sound_modes and not editions
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
             and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
+            and not _own_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -10011,7 +10018,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         if (bank_plan is not None and bank_plan.retired
                 and not (_modes_on or _clips_on or sound_modes_cfg or picture_cfg
                          or _attract_on or _coop_on or _idle_on or _hand_on or _cabs_on
-                         or _comp_on or _stime_on or _feed_on or _rec_on)):
+                         or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg)):
             # PAD-1235: the earlier Write's runtime files would stay and play the
             # banks this build took the place of
             raise RuntimeError(
@@ -10021,7 +10028,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "card without the earlier build's music modes, or keep a music mode or "
                 "another mode feature in the project.")
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on):
+                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -10037,12 +10044,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _cabs_on else "Adding Prolonged Competition..."
                          if _comp_on else "Adding the records on the high scores..."
                          if _rec_on and not _feed_on and not _stime_on else "Adding the score feed..."
-                         if _feed_on and not _stime_on else "Adding the screen times...")
+                         if _feed_on and not _stime_on else "Adding the screen times..."
+                         if _stime_on else "Adding the service menu settings...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
                     variant_prof, sound_modes_prof, picture_prof, attract_prof, coop_prof, idle_prof,
-                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof))
+                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof, own_prof))
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -10121,6 +10129,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     screen_times=stime_lines, screen_prof=stime_prof,  # PAD-1115
                     score_feed=feed_url, score_feed_prof=feed_prof,   # PAD-1204
                     records=rec_list, records_prof=rec_prof,          # PAD-1280
+                    settings=settings_cfg, settings_prof=own_prof,    # PAD-1382
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -12034,6 +12043,40 @@ class _CoopMenu(_MusicModeMenu):
         self.why = str(why).rstrip(".") or "unknown"
         self.log("Co-op play: CO-OP PLAY could not be added to the operator menu (%s), so co-op play is left out of "
                  "this card." % self.why, "warning")
+
+
+def _own_settings_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-1382: the title of the card the owner's own service-menu settings go on (the Service menu tab's "Add a
+    setting"), or ``None`` when the project has none or they are left out (one warning says why): the picture
+    settings' gate - an image file, a host that can add files to it, a title the runtime has a port for."""
+    from . import mode_write as _MW
+    from . import mode_project as _MP
+    from . import service_menu as _SvM
+    mine = _SvM.load(assets_dir)["custom"]
+    if not mine:
+        return None
+    if dest_is_device:
+        why = ("a direct-SD write cannot add files to the card or grow its game program; build "
+               "an image file to carry them")
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        _card, prof = _MP.project_profile(assets_dir, probe=True)
+        if prof is None:
+            why = "the app has no runtime for this card's game and version yet"
+    if why:
+        log("Your settings: %s are left out of this build: %s." % (", ".join(c["name"].upper() for c in mine),
+                                                                   why.rstrip(".")), "warning")
+        return None
+    return prof
 
 
 def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):

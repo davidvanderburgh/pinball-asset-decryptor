@@ -80,3 +80,29 @@ mapped yet) and those are left blank.
   glshots the frame. Walk, measured on Godzilla LE 1.16: 25, 25, Adjustments (5th), Machine Settings (3rd), then the
   page by its place among categories 8-17 that have rows, in number order (Attract Mode 16 = 8th), then the row.
   Refused while the Emulate tab has a run up; a Start waits while a read holds the rig.
+
+## Round 4: every project, every menu
+
+David, on his own project: "This game's service menu could not be read (The card image could not be opened ... No
+such file or directory ...). we need to make this work for all game images".
+
+- **Which program** (`service_menu.find_program`): the card the project records when it is there; else any card of the
+  same game and version (by its own index, `probe_card_title`) among the project's recorded paths, its own Write output
+  (`build/`), the cards the app's settings name and every card in those folders; else the copy kept from the last read
+  (`titles/menu_programs/<game>-<version>.elf`). The tab says which card it read. David's project (its recorded card,
+  stock image, Write original and Emulate card all gone) reads in 0.6 s from its `build` v38 card.
+- **Every page**: all Machine Settings pages (categories 8-17 that have rows, in number order), named by the game's own
+  page-name table (`category_names`: five language pointers and a zero a line, category c c lines above the INVALID
+  line - the linker shares string tails, so INVALID ends another string), with or without rows of ours.
+- **The older dot-matrix menu** (`StandardList`, 22 of 53 newest builds): Standard Adjustments (the id list, ours at
+  the end) and Feature Adjustments (the id range). Measured on Aerosmith LE 1.16 and Venom LE 1.07 in the emulator:
+  icons DIAG AUD ADJ NET UTIL RED QUIT; ADJ's STANDARD FEATURE PREV QUIT; one adjustment a screen ("STANDARD ADJUSTMENT
+  #n", the ROW caption upper case - so the runtime's live rename shows there too - its value); MINUS from #1 wraps to
+  the last row; the caption blinks (menushot.sh keeps the frame with the most lit pixels).
+- **Bug found by it**: the settings sharing MORE SETTINGS all name the row under it, and a Standard list listed it
+  once per shared setting (#97-#101 on Aerosmith). `menu_settings._new_rows` lists each new row once, for every table.
+- **Spike 3**: its 64-bit tables (`wide_category_names`, the table's own field offsets), rows from `spike3_menu`; the
+  game's own feature rows are not mapped there yet, and the real menu stays Spike 2 (Spike 3's emulator opens no
+  settings page).
+- **Write**: settings of one's own alone are a reason to Write (`_own_settings_for_build`, the picture settings' gate),
+  and a card whose only runtime need is `settings.cfg` gets the runtime by `mode_write.settings_plan`.

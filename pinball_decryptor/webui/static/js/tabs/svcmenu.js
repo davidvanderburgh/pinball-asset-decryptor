@@ -30,6 +30,28 @@ function valueText(r, picks) {
   return hit ? hit.text : r.value;
 }
 
+// round 4: the games without a category table (Aerosmith, Venom, TMNT... 22 of 53) have the older dot-matrix menu,
+// one adjustment a screen (Aerosmith LE 1.16 in the emulator): "STANDARD ADJUSTMENT #n", the row's caption, its value
+function DmdScreen({ page, sel, setSel, picks }) {
+  const rows = shownRows(page, picks);
+  const cur = rows[sel] || rows[0];
+  const now = cur ? valueText(cur, picks) : "";
+  return html`<div class="sm-dmd-wrap">
+    <div class="sm-dmd" role="img" aria-label=${page.name}>
+      <div>${page.label} #${sel + 1}</div>
+      <div class="sm-dmd-cap">${(cur && cur.caption || "").toUpperCase()}</div>
+      <div class="sm-dmd-val">${(now === "" ? "·" : now).toUpperCase()}</div>
+      <div>${now !== "" && now === (cur && cur.default) ? "(INSTALLED/FACTORY DEFAULT)" : "(INSTALLED)"}</div>
+    </div>
+    <div class="sm-dmd-list" role="listbox" aria-label=${page.name}>
+      ${rows.map((r, i) => html`<button type="button" key=${i} role="option" aria-selected=${i === sel}
+          ref=${i === sel ? (el) => { if (el) el.scrollIntoView({ block: "nearest" }); } : null}
+          class=${cx("sm-dmd-row", i === sel && "on", r.ours && "ours")} onClick=${() => setSel(i)}>
+        <span class="muted">#${i + 1}</span> ${r.caption}<span class="sp"></span>${valueText(r, picks)}</button>`)}
+    </div>
+  </div>`;
+}
+
 function Screen({ page, sel, setSel, picks }) {
   const rows = shownRows(page, picks);
   const cur = rows[sel] || rows[0];
@@ -168,6 +190,13 @@ export default function ServiceMenuTab() {
   const [sel, setSel] = useState(0);
   const [picks, setPicks] = useState({});
   const page = pages[Math.min(pi, pages.length - 1)];
+  // round 4: every Machine Settings page is listed; open on the first that holds a row of the app's, else Attract Mode
+  useEffect(() => {
+    if (!pages.length) return;
+    let want = pages.findIndex((p) => p.ours);
+    if (want < 0) want = pages.findIndex((p) => p.category === 16);
+    setPi(want < 0 ? 0 : want);
+  }, [menu]);
   useEffect(() => {
     if (!page) return;
     const first = page.rows.findIndex((r) => r.ours);
@@ -190,8 +219,10 @@ export default function ServiceMenuTab() {
         <div class="sm-main">
           ${pages.length > 1 ? html`<${Seg} value=${pi} options=${pages.map((p, i) => ({ value: i, label: p.name }))}
               onChange=${(v) => setPi(Number(v))} />` : null}
-          ${page ? html`<div class="small muted sm-path">${page.path}</div>
-              <${Screen} page=${page} sel=${sel} setSel=${setSel} picks=${picks} />
+          ${page ? html`<div class="small muted sm-path">${page.path}${menu.source ? html` · read from <span class="mono">${menu.source}</span>` : null}
+              ${menu.wide ? " · Spike 3: the page's system rows and the app's (the game's own rows for this game are not listed yet)" : null}</div>
+              ${page.style === "dmd" ? html`<${DmdScreen} page=${page} sel=${sel} setSel=${setSel} picks=${picks} />`
+                : html`<${Screen} page=${page} sel=${sel} setSel=${setSel} picks=${picks} />`}
               <${Stepper} row=${rows[sel]} picks=${picks} setPicks=${setPicks} />
               <${Real} s=${s} page=${page} pi=${pi} sel=${sel} />`
             : html`<${Empty} icon="list" title="No rows of the app's yet">Nothing on this project adds a row to the

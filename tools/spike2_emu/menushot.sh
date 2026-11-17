@@ -21,6 +21,7 @@ job_sleep 6
 for s in "$@"; do
     case "$s" in
         w*) job_sleep "${s#w}" ;;
+        s*) bash "$RIG/glshot.sh" "$(dirname "$OUT")/${s#s}.png" > /dev/null 2>&1 < /dev/null ;;   # a picture on the way
         *[!0-9]*|'') job_fail "not a step: $s" ;;
         *) job_press "$s"; job_sleep 0.6 ;;
     esac
@@ -33,4 +34,24 @@ for try in 1 2; do
     job_sleep 2
 done
 [ -s "$OUT" ] || job_fail "the game's frame could not be read: $(tail -2 "$JOB_OUT/glshot.txt" | tr '\n' ' ')"
+# The older dot-matrix menu blinks its caption line (Aerosmith LE 1.16: blank in about half the frames), so a few more
+# frames are taken and the one with the most lit pixels kept (menurow.py's reader: glshot's PNGs need no library).
+for k in 1 2 3; do
+    job_sleep 0.35
+    bash "$RIG/glshot.sh" "$JOB_OUT/more$k.png" > /dev/null 2>&1 < /dev/null
+done
+RIG="$RIG" python3 - "$OUT" "$JOB_OUT"/more?.png <<'PY' 2>/dev/null
+import os, shutil, sys
+sys.path.insert(0, os.environ["RIG"])
+from menurow import read_png
+def lit(p):
+    try:
+        _w, _h, rows = read_png(p)
+    except Exception:
+        return -1
+    return sum(1 for r in rows for x in range(0, len(r), 9) if r[x] + r[x + 1] + r[x + 2] > 240)
+best = max(sys.argv[1:], key=lit)
+if best != sys.argv[1]:
+    shutil.copyfile(best, sys.argv[1])
+PY
 job_pass "the service menu's frame is in $OUT"

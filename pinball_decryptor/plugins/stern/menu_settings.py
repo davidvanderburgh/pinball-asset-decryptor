@@ -128,6 +128,18 @@ _MOVW = 0x03000000
 _ADD_IMM = 0x02800000
 
 
+def _new_rows(table, settings):
+    """``[(category, id)]`` of *settings* the menu *table* does not list yet, each once, in order (PAD-1382: the
+    settings sharing MORE SETTINGS all name the row under it, which the menu must list once - a Standard Adjustments
+    list listed it once per shared setting, five times on Aerosmith LE 1.16 in the emulator)."""
+    out = []
+    for st in settings:
+        row = (st.category, st.id)
+        if row not in out and not table.has(st.category, st.id):
+            out.append(row)
+    return out
+
+
 class MenuSettingError(ValueError):
     """The program cannot take the setting; the message says why, in the user's words."""
 
@@ -171,12 +183,11 @@ class CategoryTable:
         return "Adjustments > Machine Settings > %s" % CATEGORY_NAMES.get(category, "?")
 
     def blob(self, *settings):
-        recs = list(self.records) + [(s.category, KIND_ADJUSTMENT, s.id) for s in settings
-                                     if not self.has(s.category, s.id)]
+        recs = list(self.records) + [(c, KIND_ADJUSTMENT, i) for c, i in _new_rows(self, settings)]
         return b"".join(struct.pack("<3I", *r) for r in recs)
 
     def records_with(self, *settings):
-        return len(self.records) + sum(1 for s in settings if not self.has(s.category, s.id))
+        return len(self.records) + len(_new_rows(self, settings))
 
     def writes(self, table, new_va, *settings):
         return self.writes_for(table, new_va, self.records_with(*settings))
@@ -220,7 +231,7 @@ class StandardList:
         return "Adjustments > Standard Adjustments, at the end"
 
     def blob(self, *settings):
-        ids = list(self.ids) + [s.id for s in settings if s.id not in self.ids]
+        ids = list(self.ids) + [i for _c, i in _new_rows(self, settings)]
         out = struct.pack("<%dH" % (len(ids) + 1), *(ids + [0]))
         return out + b"\x00" * (-len(out) % 4)
 
@@ -253,12 +264,11 @@ class WideCategoryTable:
         return "Adjustments"
 
     def blob(self, *settings):
-        recs = list(self.records) + [(s.category, KIND_ADJUSTMENT, s.id) for s in settings
-                                     if not self.has(s.category, s.id)]
+        recs = list(self.records) + [(c, KIND_ADJUSTMENT, i) for c, i in _new_rows(self, settings)]
         return b"".join(struct.pack("<3I", *r) for r in recs)
 
     def records_with(self, *settings):
-        return len(self.records) + sum(1 for s in settings if not self.has(s.category, s.id))
+        return len(self.records) + len(_new_rows(self, settings))
 
     def writes(self, table, new_va, *settings):
         # a 64-bit program's menu is grown by :func:`grow_wide_program`, not a same-size write
@@ -849,6 +859,31 @@ def _row_caption_line(table, i):
             return None
         end = data.find(b"\x00", o)
         return o, data[o:end].decode("latin1")
+    # PAD-1382: the table is found once a program and remembered (the Service menu tab asks for every row's caption:
+    # a scan of the whole program per row was 58 s for Elvira 3's 386 rows)
+    found = getattr(table, "_pad_row_lines", False)
+    if found is False:
+        found = _row_caption_table(table)
+        try:
+            table._pad_row_lines = found
+        except AttributeError:
+            pass
+    if found is None:
+        return None
+    ptrs = struct.unpack_from("<5I", data, found + 24 * (table.count - 1 - i))
+    if len(set(ptrs)) != 1:
+        return None
+    o = table._off(ptrs[0])
+    if o is None:
+        return None
+    end = data.find(b"\x00", o)
+    return o, data[o:end].decode("latin1")
+
+
+def _row_caption_table(table):
+    """The file offset of the row captions' text table (``count`` lines of five language pointers and a zero), or
+    None."""
+    data = table.data
     for po, pv, fsz in table._loads:
         base = (po + 3) & ~3
         n = (po + fsz - base) // 4
@@ -863,15 +898,8 @@ def _row_caption_line(table, i):
             run = k
             while run + 6 <= n and words[run + 5] == 0 and words[run] and table._off(words[run]) is not None:
                 run += 6
-            lines = (run - k) // 6
-            if lines == table.count:
-                line = k + 6 * (table.count - 1 - i)
-                ptrs = [words[line + m] for m in range(5)]
-                if len(set(ptrs)) != 1:
-                    return None
-                o = table._off(ptrs[0])
-                end = data.find(b"\x00", o)
-                return o, data[o:end].decode("latin1")
+            if (run - k) // 6 == table.count:
+                return base + 4 * k
             k = run if run > k else k + 1
     return None
 
@@ -1087,7 +1115,9 @@ def plan_many(table, wanted, share=True):
     if not share or getattr(table, "wide", False):
         return settings, writes, cat, refused
     rows = [tuple(w) + ({},) if len(w) == 3 else tuple(w) for w in wanted]
-    if (not any(str(why).startswith(NO_SPARE) for why in refused.values())
+    # a shareable setting refused a row of its own - no spare left, or the spare it last tried cannot be used (Iron
+    # Maiden Pro 1.18's first shares its row caption: the library sweep, round 4) - is tried on the shared rows
+    if (not any(k not in NOT_SHARED for k in refused)
             or len([r for r in rows if r[0] not in NOT_SHARED]) < 2):
         return settings, writes, cat, refused
     try:

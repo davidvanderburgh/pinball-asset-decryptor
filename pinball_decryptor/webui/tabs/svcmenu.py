@@ -34,24 +34,34 @@ SETTINGS = (
 
 def project_menu(project):
     """``(why, menu)`` for *project*: :func:`.service_menu.pages` of its card's game program, or the reason none."""
-    from ...plugins.stern import mode_project as MP
     from ...plugins.stern import service_menu as SM
-    from ...plugins.stern import title_reader as TR
-    got = MP.project_card(project) if project else None
-    card = getattr(got, "image", "") if got is not None else ""
-    if not card:
-        return ("This project's card image is not where it was extracted from, so its game's menu cannot be read.",
-                None)
-    rows = SM.wanted(project)
-    elf = _ELF.get(card)
-    if elf is None:
-        elf = TR.game_program(card)[2]
+    if not project or not os.path.isdir(project):
+        return "Open a project first.", None
+    got = _ELF.get(project)
+    if got is None:
+        try:
+            got = SM.find_program(project)
+        except ValueError as e:
+            return str(e), None
         _ELF.clear()
-        _ELF[card] = elf
+        _ELF[project] = got
+    elf, source = got
+    from ...plugins.stern.adjustments import is_wide
+    wide = is_wide(elf)
     try:
-        return "", SM.pages(elf, rows)
+        if wide:                                        # Spike 3: the rows its own Write puts on a card
+            from ...plugins.stern import spike3_menu as S3
+            rows = S3.rows_wanted(project)
+        else:
+            rows = SM.wanted(project)
+        menu = SM.pages(elf, rows)
     except Exception as e:                              # noqa: BLE001 - said on the page
         return "This game's service menu could not be read (%s)." % e, None
+    if wide:
+        for c in SM.load(project)["custom"]:
+            menu["refused"][c["key"]] = "settings of your own are on Spike 2 cards only for now"
+    menu["source"] = source
+    return "", menu
 
 
 _ELF = {}
@@ -226,6 +236,10 @@ class ServiceMenuTab(TabService):
         if not project or not (0 <= int(page_index) < len(pages)) or self.get("real_busy"):
             return False
         page = pages[int(page_index)]
+        if menu.get("wide"):
+            self.set(real_why="The real menu is read on Spike 2 games only for now: the Spike 3 emulator does not open "
+                              "the settings pages yet.")
+            return False
         if page.get("rank") is None:
             self.set(real_why="The real menu can be read for the Machine Settings pages only.")
             return False
@@ -242,7 +256,7 @@ class ServiceMenuTab(TabService):
         folder = os.path.join(tempfile.gettempdir(), "spike2_svcmenu")
         os.makedirs(folder, exist_ok=True)
         png = os.path.join(folder, "%s.png" % hashlib.sha1(repr(key).encode("utf-8")).hexdigest()[:16])
-        steps = SM.walk(page["rank"], int(row))
+        steps = SM.walk(page["rank"], int(row), page.get("style", "list"), len(page["rows"]))
         self.set(real_busy=True, real_why="", real_png="")
 
         def work():

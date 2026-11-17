@@ -1534,6 +1534,12 @@ HELP_CONTENT = {
             "in the machine's order; a small mark beside a row says it is the app's.",
             "Click a row to see its help and its Current and Default values, as the machine shows them. The game "
             "words some of its own values itself (12-Hour, Random...); those are left blank here.",
+            "Every Machine Settings page is there, whether or not the app adds a row to it. Games with the older "
+            "dot-matrix menu (Aerosmith, Venom, TMNT and others) show their Standard and Feature Adjustments one "
+            "adjustment at a time, as that menu does, with every row listed beside it.",
+            "The menu is read from the card the project was made from. When that card has been moved or deleted, any "
+            "card of the same game and version will do: the project's own Write output, a card the app has been "
+            "pointed at, or the copy kept from the last time it was read. The tab says which card it read.",
         ]),
         ("More rows than the game has room for", [
             "A game has only a few spare rows for the app's settings (three on Godzilla). When a card has more "

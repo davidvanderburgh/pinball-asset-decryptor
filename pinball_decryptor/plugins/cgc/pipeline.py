@@ -655,9 +655,9 @@ class ExtractPipeline(BasePipeline):
                       f"audio decode.", "warning")
             return 0
         if dcs_decode.find_dcs_explorer() is None:
-            self._log("  DCSExplorer not available (bundled Windows binary; on "
-                      "macOS/Linux put it on PATH) — skipping DCS audio "
-                      "decode.", "warning")
+            self._log("  DCS audio decode skipped: "
+                      + dcs_decode.missing_tool_message("DCSExplorer"),
+                      "warning")
             return 0
         self._check_cancel()
         self._log("Decoding original DCS audio (s2-s7.rom) to streams...",

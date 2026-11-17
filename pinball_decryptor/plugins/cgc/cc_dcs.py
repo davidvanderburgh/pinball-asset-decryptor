@@ -34,7 +34,9 @@ import zipfile
 import zipfile as _zip
 from typing import Callable, List, Optional
 
-from ..williams.dcs_decode import find_dcs_encoder, find_dcs_explorer
+from ..williams.dcs_decode import (find_dcs_encoder, find_dcs_explorer,
+                                   launch_error_message,
+                                   missing_tool_message)
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 _ZIP_NAME = "cc_113.zip"          # basename must match ^cc_\d.*  (loader rule)
@@ -62,9 +64,14 @@ def _build_zip(rom_paths: List[str], dest_zip: str):
 
 
 def _run(cmd, timeout):
-    return subprocess.run(cmd, capture_output=True, text=True,
-                          stdin=subprocess.DEVNULL, timeout=timeout,
-                          creationflags=_CREATE_FLAGS)
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=timeout,
+                              creationflags=_CREATE_FLAGS)
+    except OSError as e:
+        # Quarantined or blocked by the antivirus: say so (PAD-1391).
+        tool = os.path.splitext(os.path.basename(cmd[0]))[0]
+        raise DcsRepackError(launch_error_message(tool, e)) from e
 
 
 def available() -> bool:
@@ -115,8 +122,13 @@ def repack(rom_dir: str, streams_dir: str, out_rom_dir: str,
     encoder = find_dcs_encoder()
     roms = _sound_roms(rom_dir)
     edited = _glob.glob(os.path.join(streams_dir, "*.wav"))
-    if explorer is None or encoder is None or len(roms) < 2 or not edited:
+    if len(roms) < 2 or not edited:
         return {"modified_count": 0, "total": 0}
+    # WAVs to write but no tool to write them with: refuse out loud, or
+    # the user's sound edits never reach the card (PAD-919, PAD-1391).
+    for tool, exe in (("DCSExplorer", explorer), ("DCSEncoder", encoder)):
+        if exe is None:
+            raise DcsRepackError(missing_tool_message(tool))
 
     with tempfile.TemporaryDirectory(prefix="cc_dcs_rp_") as td:
         zp = os.path.join(td, _ZIP_NAME)

@@ -28,6 +28,7 @@ Output layout::
 """
 
 import os
+import sys
 import zipfile
 
 from ...core.checksums import generate_checksums
@@ -142,6 +143,12 @@ class ExtractPipeline(BasePipeline):
             self._set_phase(5)
             dcs_track_count = self._extract_dcs_audio(game_dir)
             cleanup_phase = 6
+        elif dcs_decode.tool_problem():
+            # Without the decoder a DCS game looks like a pre-DCS one;
+            # say so instead of quietly extracting no sounds (PAD-1391).
+            self._log("  Sound-ROM audio skipped (DCS games, 1993-1998): "
+                      + dcs_decode.tool_problem(),
+                      "warning" if sys.platform == "win32" else "info")
 
         # ---- Cleanup / checksums ----
         self._set_phase(cleanup_phase)

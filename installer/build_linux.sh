@@ -207,6 +207,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.multiimage" \
     --hidden-import "pinball_decryptor.plugins.stern.card_size" \
     --hidden-import "pinball_decryptor.plugins.stern.bank_build" \
+    --hidden-import "pinball_decryptor.plugins.stern.bank_songs" \
     --hidden-import "pinball_decryptor.plugins.stern.image_compact" \
     --hidden-import "pinball_decryptor.core.image_info" \
     --hidden-import "pinball_decryptor.core.hashcache" \
@@ -248,6 +249,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.mode_hud" \
     --hidden-import "pinball_decryptor.plugins.stern.more_kaiju" \
     --hidden-import "pinball_decryptor.plugins.stern.battle_select" \
+    --hidden-import "pinball_decryptor.plugins.stern.scene_variants" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_project" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_records" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_runtime" \

@@ -28,6 +28,8 @@ SETTINGS = (
     ("edition", "Edition", "Set on the Write tab (Editions...) for a card that is one of several editions."),
     ("coop_play", "Co-op Play", ""),
     ("handicap", "Handicap", ""),
+    ("image_set", "Image Set", "Set by the project's image sets (scene variants): the operator picks which one the "
+                               "screens show."),
     ("brightness", "Picture settings", "Brightness, Contrast and Saturation (Write tab)."),
 )
 
@@ -103,6 +105,9 @@ class ServiceMenuTab(TabService):
                            note="" if on else "Turn co-op play on first, for its row.")
             elif key == "handicap":
                 row.update(can=True, on=HC.load(project))
+            elif key == "image_set":                    # PAD-1390: on while the project has image sets
+                from ...plugins.stern import scene_variants as SV
+                row.update(on=bool(SV.load(project)))
             out.append(row)
         mine = SM.load(project)
         rank = {k: n for n, k in enumerate(mine["order"])}

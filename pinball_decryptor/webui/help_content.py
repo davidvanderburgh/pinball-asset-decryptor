@@ -1525,6 +1525,35 @@ HELP_CONTENT = {
     # The Modes tab's own tips are in PREVIEW_HELP, read through sections_for;
     # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
     # The key stays so every notebook tab has an entry.
+    "Extras": [
+        ("SSH access", [
+            "**Enable SSH server** adds key-only SSH access to the card image you build. "
+            "Connect as **root** on port **22** with the private key matching one of the "
+            "public keys entered here. Password login is disabled.",
+            "- Paste public keys, one per line. Private keys are never accepted.\n"
+            "- The settings belong to this project and are excluded from shared mods.\n"
+            "- SSH is available only for card layouts that passed emulator qualification: "
+            "recognized Stern Spike 2 and Spike 3 cards. An unsupported card shows why the "
+            "controls are unavailable.",
+        ]),
+        ("Build the card", [
+            "SSH alone is a change: no audio, image or video replacement is needed. "
+            "The Write tab lists the pending SSH change in **Modified Files**.",
+            "Build the complete card image, then flash that build. A direct SD/SSD write "
+            "or an emulator asset override cannot install the SSH server. Flashing an "
+            "existing image is allowed only when it already matches the requested SSH settings.",
+        ]),
+        ("Change or reset SSH", [
+            "Changing the public-key list replaces the keys accepted by the next build. "
+            "The card keeps its host identity on its persistent data partition.",
+            "- Unchecking SSH withdraws the change when SSH is already off in the source "
+            "image. If the source has the recognized SSH service enabled, the next build "
+            "disables its startup instead.\n"
+            "- Public keys stay in the form while unchecked, ready to use again.\n"
+            "- **Revert all changes…** includes **Extras**: it clears the project's SSH "
+            "setting and keys and returns the form to the source image's settings.",
+        ]),
+    ],
     "Modes": [],
     # PAD-1382: the game's service menu with the app's rows in it
     "Service Menu": [

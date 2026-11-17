@@ -26986,7 +26986,8 @@ static void pic_arm(void)
  *     setting <TAB> <live> <TAB> <n>             IMAGE SET's value (1..n) in the game's memory (0: none, the state's)
  *     scene <TAB> <path tail> <TAB> <set> <TAB> <file>
  *                                               a scene file whose path ENDS with <path tail> is opened as <file>
- *                                               while the set is <set> (2..n; set 1 is always the scene's own)
+ *                                               while the set is <set> (2..n; set 1 is always the scene's own);
+ *                                               a bare name is beside scenes.cfg (/usr/local/padmode, /dump)
  *     force <TAB> <v>                            a rig run's own set (the build never writes it)
  *
  * A variant's file that does not open falls back to the scene's own, said once, so a card is never left without its
@@ -26996,6 +26997,9 @@ static void pic_arm(void)
 #define SCNV_PATH_MAX   200
 #define SCNV_SETS       16
 static const char *const SCNV_FILES[] = { "/usr/local/padmode/scenes.cfg", "/dump/scenes.cfg" };
+static const char *const SCNV_DIRS[] = { "/usr/local/padmode/", "/dump/" };
+static char scnv_paths[SCNV_LINES][SCNV_PATH_MAX + 24];
+static unsigned scnv_from;
 static const char SCNV_STATE[] = "/dump/pad_imageset.state";
 enum { SCNV_FOPEN64, SCNV_SWAP, SCNV_GOTS };
 static const char *const SCNV_SYMS[SCNV_GOTS] = { "fopen64", "eglSwapBuffers" };
@@ -27068,8 +27072,20 @@ static void scnv_line_read(char *s)
         unsigned set;
         p = f[2];
         set = (unsigned)number(&p, &ok);
-        if (!ok || set < 2 || set > SCNV_SETS || !*f[1] || f[3][0] != '/'
+        if (!ok || set < 2 || set > SCNV_SETS || !*f[1] || !*f[3]
             || scnv_strlen(f[1]) >= SCNV_PATH_MAX || scnv_strlen(f[3]) >= SCNV_PATH_MAX) { scnv_bad++; return; }
+        if (f[3][0] != '/') {                     /* a bare name: beside the scenes.cfg that was read */
+            char *o = scnv_paths[scnv_n];
+            const char *d = SCNV_DIRS[scnv_from];
+            unsigned i = 0, j = 0;
+            while (d[j]) o[i++] = d[j++];
+            for (j = 0; f[3][j]; j++) {
+                if (f[3][j] == '/') { scnv_bad++; return; }
+                o[i++] = f[3][j];
+            }
+            o[i] = 0;
+            f[3] = o;
+        }
         scnv_line[scnv_n].tail = f[1];
         scnv_line[scnv_n].tail_len = scnv_strlen(f[1]);
         scnv_line[scnv_n].set = set;
@@ -27085,8 +27101,10 @@ static int scnv_read(void)
 {
     long n = -1, i, start = 0;
     unsigned k;
-    for (k = 0; k < sizeof SCNV_FILES / sizeof SCNV_FILES[0] && n < 0; k++)
+    for (k = 0; k < sizeof SCNV_FILES / sizeof SCNV_FILES[0] && n < 0; k++) {
         n = pm_read_file(SCNV_FILES[k], scnv_raw, SCNV_FILE_MAX);
+        scnv_from = k;
+    }
     if (n <= 0) return 0;
     scnv_raw[n] = 0;
     for (i = 0; i <= n; i++)

@@ -669,6 +669,11 @@ def fingerprint(window, assets_path, epoch, grow_on):
         parts.append(sorted(score_colours.picks(assets_path).items()))
     except Exception:                                   # noqa: BLE001
         parts.append(None)
+    from ..core import card_extras
+    try:
+        parts.append(card_extras.load(assets_path))
+    except card_extras.ExtrasError:
+        parts.append('invalid Extras configuration')
     return repr(parts)
 
 

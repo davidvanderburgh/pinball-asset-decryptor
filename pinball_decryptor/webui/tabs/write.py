@@ -2056,7 +2056,9 @@ class WriteTab(TabService):
     def _has_pending_write_changes(self):
         if self._scanning:
             return True
-        return bool(self._rows)
+        assets_path = (self.write_assets_var.get() or "").strip()
+        # Staged intent may have changed since the last completed scan.
+        return bool(self._rows or (assets_path and self._pending(assets_path)))
 
     # ------------------------------------------------------------------
     # Modified Files: the list

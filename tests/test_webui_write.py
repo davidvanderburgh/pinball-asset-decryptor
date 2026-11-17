@@ -312,6 +312,62 @@ def test_plain_build_button_and_nothing_modified_guard(tmp_path):
         assert len(rec) == 1
 
 
+@pytest.mark.parametrize('era', ['spike2', 'spike3'])
+def test_extras_refresh_modified_files_after_an_unchanged_scan(tmp_path, monkeypatch, era):
+    from pinball_decryptor.core import ssh_card
+    from tests.test_card_extras import key
+    proj = make_project(tmp_path, changed=False)
+    orig = tmp_path / 'source.raw'
+    orig.write_bytes(b'card')
+    monkeypatch.setattr(ssh_card, 'inspect_image', lambda path: dict(
+        supported=True, reason='', enabled=False, public_keys=''))
+    fake_drives(monkeypatch, drives=[])
+    with web_app(tmp_path, mfr='stern', era=era) as w:
+        point_at(w, orig, proj)
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        assert w.state('write')['rows'] == []
+        w.call('ui.select_tab', 'extras')
+        assert w.call('extras.configure', True, key(), str(proj)) is True
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        assert any('SSH server' in row['file'] and 'enable' in row['file']
+                   and row['tag'] == 'pending' for row in w.state('write')['rows'])
+        builds = recorder(w, 'on_build_flash' if era == 'spike2' else 'on_write')
+        assert w.call('write.primary') is True
+        if era == 'spike2':
+            assert w.state('write')['flash_dlg']['build'] is True
+            w.call('write.flash_set', 'write', False)
+            assert w.call('write.flash_start') is True
+        assert len(builds) == 1
+        assert not any(a['title'] == 'Nothing modified' for a in w.asked)
+        w.call('ui.select_tab', 'extras')
+        assert w.call('extras.configure', False, key(), str(proj)) is True
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        assert any('SSH server' in row['file'] and 'disable' in row['file']
+                   for row in w.state('write')['rows'])
+
+
+def test_extras_count_as_changes_before_preview_refresh(tmp_path, monkeypatch):
+    from pinball_decryptor.core import card_extras
+    from tests.test_card_extras import key
+    proj = make_project(tmp_path, changed=False)
+    orig = tmp_path / 'source.raw'
+    orig.write_bytes(b'card')
+    fake_drives(monkeypatch, drives=[])
+    with web_app(tmp_path, mfr='stern') as w:
+        point_at(w, orig, proj)
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        assert not w.run(w.window._has_pending_write_changes)
+        card_extras.save(str(proj), True, key())
+        # No tab switch or refresh: preflight must read current staged intent.
+        assert w.run(w.window._has_pending_write_changes)
+        w.call('write.primary')
+        assert w.state('write')['flash_dlg']['build'] is True
+
+
 def test_one_live_cancel(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:
         win = w.window

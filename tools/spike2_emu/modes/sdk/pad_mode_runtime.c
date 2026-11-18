@@ -11521,6 +11521,8 @@ static void on_ball_end(pm_reg *r)
  *   callout, callout_nth   no calls of the game's
  *   multiball_serve        no multiball or rule ball save of the game's (pm_multiball_start / pm_ball_save are ours)
  *   award_screen           no award screen or video of the game's (a refusal answers 0, as its own failures do)
+ *   rule_dispatch          (a port whose modes take their shots from `switch` lines: Foo Fighters LE, Venom) where
+ *                          the game's rules hear a switch; refused like shot_dispatch, but nothing is handed on
  *   show_start             no light show of the game's (0, as its own failures; a show of ours playing goes on: its
  *                          process is the game's code, so show_start passes while show_now has one)
  *
@@ -11543,7 +11545,8 @@ static int event_bus_id(const char *name);
 #define OG_SHOT   0
 #define OG_SHOW   7                              /* og_sites[] index of show_start */
 #define OG_COUNT  0x80u                          /* og_sites[].how: counted, never refused */
-#define OG_N      10
+#define OG_N      11
+#define OG_RULE   10                             /* og_sites[] index of rule_dispatch */
 static const struct { const char *site, *what; unsigned how; } og_sites[OG_N] = {
     { "shot_dispatch", "shots", 0 },
     { "score_add", "scores", 0 },
@@ -11555,6 +11558,7 @@ static const struct { const char *site, *what; unsigned how; } og_sites[OG_N] = 
     { "show_start", "light shows", 0 },
     { "display_effect_start", "display effects", OG_COUNT },
     { "sound_play", "sounds", OG_COUNT },
+    { "rule_dispatch", "rule shots", 0 },
 };
 extern const char __ehdr_start[] __attribute__((weak, visibility("hidden")));
 extern const char _end[] __attribute__((weak, visibility("hidden")));
@@ -11602,7 +11606,7 @@ static int og_veto(pm_reg *r, unsigned n)
 {
     int ours, refuse;
     if (!og.owner || n >= OG_N) return 0;
-    if (n == OG_SHOT && og.fresh) og_shot_seen();
+    if ((n == OG_SHOT || n == OG_RULE) && og.fresh) og_shot_seen();
     ours = og_ours((pm_addr)r[PM_REG_LR]) || (n == OG_SHOW && show_now.n);   /* a show of ours runs as the game's */
     refuse = og_refuses(1, pm_in_game(), og.fresh, og.tilted, pm_ms(), og.pass_until, ours, og_self, og_sites[n].how);
     if (!refuse) {
@@ -11691,7 +11695,7 @@ static int og_arm(void)
     }
     og.armed = 1;
     say("own game: armed on %s (tilt warning %d, tilt %d, game start %d on the bus)%s", line, og.tiltw_id, og.tilt_id,
-        og.game_id, og.hooked & 1u ? "" : " - no shot_dispatch: the game's rules still hear shots, its block_rule sites "
+        og.game_id, og.hooked & (1u | 1u << OG_RULE) ? "" : " - no shot_dispatch: the game's rules still hear shots, its block_rule sites "
         "and mode starts hold them");
     return 1;
 }
@@ -11715,7 +11719,7 @@ int pm_own_game(int on)
     og.balls = 0;
     og.owner = current;
     say("own game: %s has the whole game - the game's own %s held back while a ball is in play%s", og.who,
-        og.hooked & 1u ? "shots, points, calls, serves, award screens and light shows"
+        og.hooked & (1u | 1u << OG_RULE) ? "shots, points, calls, serves, award screens and light shows"
                        : "points, calls, serves, award screens and light shows",
         og.blocked || block_owner == current ? ", and its modes and rules held off" : "");
     return 1;

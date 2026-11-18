@@ -22,6 +22,9 @@ site award_screen     0x0021949c 0xe92d4070 0xe24dd008
 # PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
 # program from venom_le-1.07, elvira3-1.13, foo_fighters_le-1.04 and 14 more (every reference agreed)
 site show_start       0x0034dbd0 0xe92d47f0 0xe2508000
+# PAD-1400: where the game's rules hear a shot (Foo Fighters Pro's shot_dispatch, located (strict) in this
+# build's own program); this build's modes take their shots from its switch lines, so only a whole-game mode uses it
+site rule_dispatch    0x00192fb4 0xe92d4070 0xe1a05001
 site string_new       0x00016954 0xe28fc606 0xe28cca6d
 site dynamic_cast     0x00016354 0xe28fc606 0xe28cca6d
 site resource_get     0x002aa5d0 0xe92d43f0 0xe1a04000

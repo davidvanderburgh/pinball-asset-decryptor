@@ -106,6 +106,9 @@ site caward_add       0x00041e08 0xe92d41f0 0xe1a04000
 site caward_add_scaled 0x00041ec8 0xe92d4ff8 0xe1a09002
 #   show_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 site show_start       0x00378cdc 0xe92d47f0 0xe2508000
+# PAD-1400: where the game's rules hear a shot (Foo Fighters Pro's shot_dispatch, located (strict) in this
+# build's own program); this build's modes take their shots from its switch lines, so only a whole-game mode uses it
+site rule_dispatch    0x00196e10 0xe92d4070 0xe1a05001
 #   game_event: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 site game_event       0x003d5838 0xe92d47f0 0xe1a09000
 #   event_post_replacing: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]

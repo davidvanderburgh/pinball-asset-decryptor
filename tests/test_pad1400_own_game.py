@@ -131,7 +131,7 @@ def test_the_sites_held_back_and_the_ones_only_counted():
     refused = re.findall(r'\{ "(\w+)", "[^"]+", 0 \}', table)
     counted = re.findall(r'\{ "(\w+)", "[^"]+", OG_COUNT \}', table)
     assert refused == ["shot_dispatch", "score_add", "score_add32", "callout", "callout_nth", "multiball_serve",
-                       "award_screen", "show_start"]
+                       "award_screen", "show_start", "rule_dispatch"]
     # the score display's own effects run through display_effect_start; sound_play carries the music beds
     assert set(counted) == {"display_effect_start", "sound_play"}
     assert 'og_sites[OG_SHOW]' not in text and '#define OG_SHOW   7' in text and refused[7] == "show_start"

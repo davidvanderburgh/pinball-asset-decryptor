@@ -18,6 +18,9 @@ site callout          0x002eb93c 0xe92d4010 0xe30de588
 site callout_nth      0x002ebaf0 0xe92d4010 0xe30de588
 site lamp_group       0x002e98b0 0xe92d4038 0xe1a04000
 site award_screen     0x003c62d8 0xe92d4070 0xe24dd008
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from james_bond_le-1.06, elvira3-1.13, foo_fighters_le-1.04 and 14 more (every reference agreed)
+site show_start       0x0026a16c 0xe92d47f0 0xe2508000
 site string_new       0x000167f8 0xe28fc607 0xe28cca8f
 site dynamic_cast     0x00016204 0xe28fc607 0xe28cca8f
 site resource_get     0x00520ac0 0xe92d43f0 0xe1a04000

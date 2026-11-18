@@ -39,6 +39,9 @@ site lamp_group       0x003e7aac 0xe92d4038 0xe1a04000
 site show_priority    0x0026bca0 0xe30439bc 0xe340306c
 #   award_screen: located (strict)
 site award_screen     0x00200b74 0xe92d4070 0xe24dd008
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from turtles_le-1.59, elvira3-1.13, foo_fighters_le-1.04 and 14 more (every reference agreed)
+site show_start       0x0026ba40 0xe92d47f0 0xe2508000
 #   string_new: PLT stub
 site string_new       0x000167f4 0xe28fc605 0xe28ccad4
 #   dynamic_cast: PLT stub

@@ -130,9 +130,13 @@ def test_the_sites_held_back_and_the_ones_only_counted():
     table = text[text.index("og_sites[OG_N] = {"):text.index("};", text.index("og_sites[OG_N] = {"))]
     refused = re.findall(r'\{ "(\w+)", "[^"]+", 0 \}', table)
     counted = re.findall(r'\{ "(\w+)", "[^"]+", OG_COUNT \}', table)
-    assert refused == ["shot_dispatch", "score_add", "score_add32", "callout", "callout_nth", "multiball_serve"]
-    # these return the object the game writes into next: a refusal could crash it
-    assert set(counted) == {"award_screen", "show_start", "display_effect_start", "sound_play"}
+    assert refused == ["shot_dispatch", "score_add", "score_add32", "callout", "callout_nth", "multiball_serve",
+                       "award_screen", "show_start"]
+    # the score display's own effects run through display_effect_start; sound_play carries the music beds
+    assert set(counted) == {"display_effect_start", "sound_play"}
+    assert 'og_sites[OG_SHOW]' not in text and '#define OG_SHOW   7' in text and refused[7] == "show_start"
+    # a show of ours (its process is the game's code) still plays
+    assert "(n == OG_SHOW && show_now.n)" in text
     assert "#define OG_N      %d" % (len(refused) + len(counted)) in text
     # the shot the game's rules do not hear still reaches our modes
     assert "if (n == OG_SHOT) on_shot(r);" in text
@@ -143,7 +147,10 @@ def test_the_sites_held_back_and_the_ones_only_counted():
 def test_a_site_a_logger_hooked_already_still_takes_a_veto():
     text = RUNTIME.read_text(encoding="utf-8")
     body = text[text.index("static int hook_veto(unsigned addr, veto_fn logger)"):]
-    assert "p[0] != 0xe51ff004u &&" in body[:1200]
+    assert "!(og_chaining && p[0] == 0xe51ff004u)" in body[:1400]
+    # only og_arm's own vetoes go on top of a logger's hook: every other veto is refused there, as before
+    arm = text[text.index("static int og_arm(void)"):]
+    assert "og_chaining = 1;" in arm[:2500] and "og_chaining = 0;" in arm[:2500]
 
 
 # ---- the app ---------------------------------------------------------------------------------------------------
@@ -190,6 +197,7 @@ def test_a_blocks_mode_as_the_whole_game():
     c = BM.to_c(prog, "sentinel_war")
     assert "#define GAME_MODES       3" in c
     assert "#define ENDS_ON_DRAIN    0" in c                      # the whole game runs through every drain
+    assert re.search(r"#define RUN_SECONDS +0 ", c)              # ... and has no clock (emulator: 30 s ended it)
     assert "pm_own_game(1)" in c
     assert 'start("the game\'s start", 0);' in c
     assert 'end_now("the game is over");' in c

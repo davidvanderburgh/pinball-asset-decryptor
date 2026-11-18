@@ -448,7 +448,7 @@ function ModePage({ s, f, off, dis, rs, lim }) {
     { value: "give_way", label: "may start, and end this one", disabled: !!dis.give_way },
     { value: "block", label: "cannot start (the ones ticked)", disabled: !!dis.block && f.game_modes !== "block" }];
   // PAD-1400: the mode is the whole game - the game's own rules switched off underneath it
-  gmOpts.push({ value: "own_game", label: "are switched off: this is the whole game", disabled: !!dis.own_game && f.game_modes !== "own_game" });
+  gmOpts.push({ value: "own_game", label: "are off: this is the whole game", disabled: !!dis.own_game && f.game_modes !== "own_game" });
   // PAD-436: the game's own mini-wizard instead of a mode of its own
   const wizOff = off || dis.wizard;
   const handOff = handsOver(f, dis);

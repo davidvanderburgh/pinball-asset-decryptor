@@ -1039,7 +1039,7 @@ function Timers({ prog, ed }) {
 // PAD-373: what the mode does about the game's own modes, as the form asks it (PAD-363). No ticks
 // saved = the title's usual ones, shown ticked; the last tick stays, so the list never goes back to
 // those by itself.
-// PAD-1400: what "are switched off: this is the whole game" does, under the choice
+// PAD-1400: what "are off: this is the whole game" does, under the choice
 const OWN_GAME_NOTE = "This mode starts with every game and runs through every ball and every player (each keeps their own scores and total), ending with the game; its clock and draining are not used. While a ball is in play the game's own rules are off: its shots, points, calls, multiballs and ball saves do nothing, so every point is this mode's. The game still runs the balls, tilt, the bonus and the high scores.";
 function GameModes({ prog, ed }) {
   const ch = ed.ch;
@@ -1057,7 +1057,7 @@ function GameModes({ prog, ed }) {
     { value: "give_way", label: "may start, and end this one", disabled: !!ch.give_way_off && gm !== "give_way" },
     { value: "block", label: "cannot start (the ones ticked)", disabled: !!ch.block_off && gm !== "block" },
     // PAD-1400: the mode is the whole game - the game's own rules switched off underneath it
-    { value: "own_game", label: "are switched off: this is the whole game", disabled: !!ch.own_game_off && gm !== "own_game" }];
+    { value: "own_game", label: "are off: this is the whole game", disabled: !!ch.own_game_off && gm !== "own_game" }];
   const holds = gm === "block" || gm === "own_game";
   const tick = (id, v) => {
     const next = new Set(on);

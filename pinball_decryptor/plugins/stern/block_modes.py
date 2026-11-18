@@ -531,7 +531,7 @@ OPS = {"+": "+", "-": "-", "*": "*", "/": "/"}
 CMPS = {"<": "<", "<=": "<=", "=": "==", "!=": "!=", ">=": ">=", ">": ">"}
 #: PAD-373: what the mode does about the game's own modes while it runs (the form's choice, PAD-363)
 GAME_MODES = {"stack": "may start", "give_way": "may start, and end this one", "block": "cannot start",
-              "own_game": "are switched off: this is the whole game"}   # PAD-1400
+              "own_game": "are off: this is the whole game"}   # PAD-1400
 BLOCK_ID_MAX = 127
 #: PAD-374: where a clip block plays the mode's own clip
 CLIP_WHERE = {"full": "full screen", "behind": "behind the HUD, once",
@@ -2796,7 +2796,8 @@ def to_c(program, slug):
         L.append('#include "pad_mode_assets.h"     /* its own clips and sounds, as Write carried them */')
     L.append("")
     L.append('#define MODE_NAME        %s' % _c_str(title))
-    L.append("#define RUN_SECONDS      %d          /* 0 = no clock */" % program["seconds"])
+    L.append("#define RUN_SECONDS      %d          /* 0 = no clock (PAD-1400: the whole game has none) */"
+             % (0 if program["game_modes"] == "own_game" else program["seconds"]))
     L.append("#define ENDS_ON_DRAIN    %d" % (1 if program["ends_on_drain"] and program["game_modes"] != "own_game"
                                                   else 0))   # PAD-1400: the whole game runs through every drain
     L.append("#define TICKS_PER_SECOND 60")

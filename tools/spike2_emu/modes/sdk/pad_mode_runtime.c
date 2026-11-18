@@ -574,6 +574,8 @@ static int is_game_process(pm_addr addr)
     return maps_has(addr, 8, MAP_R | MAP_X | MAP_GAME);
 }
 
+static int og_chaining;     /* PAD-1400: og_arm is hooking - only its vetoes may go on top of a logger's hook */
+
 #if !PM_A64
 /* ---- rule 2: the words, followed through another preloaded object's trampoline --------
  * Called only for a site inside the game's code (site_check); a hook jump's target is read only
@@ -684,7 +686,8 @@ static int hook_veto(unsigned addr, veto_fn logger)
     if (!addr || (tramp_used + 1) * 16 > TRAMP_WORDS) return 0;
     /* PAD-1400: a site a logger hooked already (`ldr pc, [pc, #-4]` and its literal) moves as it is: the pair reads
      * only itself, so from t[9] it jumps on to that hook's trampoline (the veto first, then that logger) */
-    if (p[0] != 0xe51ff004u && ((p[0] & 0x0F7F0000u) == 0x051F0000u || (p[1] & 0x0F7F0000u) == 0x051F0000u)) return 0;
+    if (!(og_chaining && p[0] == 0xe51ff004u)
+        && ((p[0] & 0x0F7F0000u) == 0x051F0000u || (p[1] & 0x0F7F0000u) == 0x051F0000u)) return 0;
     t = tramp + tramp_used++ * 16;
     t[0] = 0xe92d500fu;   /* push {r0,r1,r2,r3,ip,lr} */
     t[1] = 0xe1a0000du;   /* mov r0, sp */
@@ -719,7 +722,7 @@ static int hook_veto_n(unsigned addr, veto_n_fn logger, unsigned n, unsigned ref
 {
     unsigned *t;
     if (n > 255 || refused > 1) return 0;
-    if (((unsigned *)(unsigned long)addr)[0] != 0xe51ff004u                        /* (PAD-1400: hooked already) */
+    if (!(og_chaining && ((unsigned *)(unsigned long)addr)[0] == 0xe51ff004u)    /* (PAD-1400: hooked already) */
         && (((unsigned *)(unsigned long)addr)[1] & 0xFF000000u) == 0xEB000000u)   /* `push {.., lr}; bl check` */
         return hook_veto_bl(addr, logger, n, refused);
     if (!hook_veto(addr, (veto_fn)(void (*)(void))logger)) return 0;
@@ -8611,7 +8614,7 @@ int pm_game_show(int n)
     pm_snprintf(key, sizeof key, "show_%d", n);
     if (arg >= 0) {                                     /* PAD-642: the game's own call starts this one */
         pm_addr at = fn(key);
-        ((void (*)(unsigned))(unsigned long)at)((unsigned)arg);
+        OG_SELF(((void (*)(unsigned))(unsigned long)at)((unsigned)arg));   /* PAD-1400: ours, not the game's */
         show_now.n = n;
         show_now.call = 1;
         show_now.started = pm_ms();
@@ -11517,10 +11520,15 @@ static void on_ball_end(pm_reg *r)
  *   score_add/score_add32  no points of the game's: every point comes from the mode (pm_score_add)
  *   callout, callout_nth   no calls of the game's
  *   multiball_serve        no multiball or rule ball save of the game's (pm_multiball_start / pm_ball_save are ours)
+ *   award_screen           no award screen or video of the game's (a refusal answers 0, as its own failures do)
+ *   show_start             no light show of the game's (0, as its own failures; a show of ours playing goes on: its
+ *                          process is the game's code, so show_start passes while show_now has one)
  *
- * Counted, never refused (OG_COUNT): award_screen, show_start and display_effect_start return the object the game
- * writes into next, so a refusal there could crash it; with the shots held back they have nothing to show (the
- * per-ball line says how many came anyway). sound_play is counted the same way: the ball's own sounds are Stern's.
+ * Counted, never refused (OG_COUNT): display_effect_start (the score display's own effects run through it, ~200 a
+ * ball) and sound_play (the game's sound effects and music beds; on Uncanny X-Men it is callout's own function, so
+ * there every sound request is refused). The per-ball line says how many came. Uncanny X-Men LE 0.98, disassembled:
+ * the callers of the award screens and shows that came through while the shots were held back (0x481b9c, 0x2ef614)
+ * and of the bonus screen (0x1a50c4) throw r0 away, and both functions return 0 on their own failures.
  *
  * What stays the game's, all of it outside "a ball in play": the start of each ball (from the ball's end - or the
  * game's start - to its first switch: the player-up call, the ball's launch), the tilt warning (3 s from the
@@ -11533,6 +11541,7 @@ static int event_bus_id(const char *name);
 #define PM_REG_LR 5                              /* the 32-bit trampolines push {r0-r3, ip, lr}: r[5] is the lr */
 #endif
 #define OG_SHOT   0
+#define OG_SHOW   7                              /* og_sites[] index of show_start */
 #define OG_COUNT  0x80u                          /* og_sites[].how: counted, never refused */
 #define OG_N      10
 static const struct { const char *site, *what; unsigned how; } og_sites[OG_N] = {
@@ -11542,8 +11551,8 @@ static const struct { const char *site, *what; unsigned how; } og_sites[OG_N] = 
     { "callout", "callouts", 0 },
     { "callout_nth", "callouts", 0 },
     { "multiball_serve", "serves", 0 },
-    { "award_screen", "award screens", OG_COUNT },
-    { "show_start", "light shows", OG_COUNT },
+    { "award_screen", "award screens", 0 },
+    { "show_start", "light shows", 0 },
     { "display_effect_start", "display effects", OG_COUNT },
     { "sound_play", "sounds", OG_COUNT },
 };
@@ -11594,7 +11603,7 @@ static int og_veto(pm_reg *r, unsigned n)
     int ours, refuse;
     if (!og.owner || n >= OG_N) return 0;
     if (n == OG_SHOT && og.fresh) og_shot_seen();
-    ours = og_ours((pm_addr)r[PM_REG_LR]);
+    ours = og_ours((pm_addr)r[PM_REG_LR]) || (n == OG_SHOW && show_now.n);   /* a show of ours runs as the game's */
     refuse = og_refuses(1, pm_in_game(), og.fresh, og.tilted, pm_ms(), og.pass_until, ours, og_self, og_sites[n].how);
     if (!refuse) {
         if (ours || og_self || !pm_in_game()) return 0;
@@ -11652,6 +11661,7 @@ static int og_arm(void)
 {
     char line[300];
     unsigned i, at = 0;
+    int ok;
     if (og.armed) return og.armed > 0;
     og.armed = -1;
     events_arm();
@@ -11661,7 +11671,10 @@ static int og_arm(void)
     for (i = 0; i < OG_N; i++) {
         pm_addr a = fn(og_sites[i].site);
         if (!a) continue;
-        if (!hook_veto_n(a, og_veto, i, 0u)) {   /* a refused call answers 0: nothing added, served or made */
+        og_chaining = 1;
+        ok = hook_veto_n(a, og_veto, i, 0u);     /* a refused call answers 0: nothing added, served or made */
+        og_chaining = 0;
+        if (!ok) {
             say("own game: %s at 0x%08" PMA " could not be hooked - the game's %s go on", og_sites[i].site, a,
                 og_sites[i].what);
             continue;
@@ -11702,7 +11715,8 @@ int pm_own_game(int on)
     og.balls = 0;
     og.owner = current;
     say("own game: %s has the whole game - the game's own %s held back while a ball is in play%s", og.who,
-        og.hooked & 1u ? "shots, points, calls and serves" : "points, calls and serves",
+        og.hooked & 1u ? "shots, points, calls, serves, award screens and light shows"
+                       : "points, calls, serves, award screens and light shows",
         og.blocked || block_owner == current ? ", and its modes and rules held off" : "");
     return 1;
 }

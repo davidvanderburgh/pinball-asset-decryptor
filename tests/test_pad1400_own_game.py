@@ -239,7 +239,7 @@ def test_the_drain_question_is_answered_no_on_every_newest_build():
     """The trough asks the game's callback (event 10) whether to serve a drained ball back; the whole game answers 0
     (Star Wars LE served every one back). One framework site per build: `mov rN, #10; blx rM`."""
     text = RUNTIME.read_text(encoding="utf-8")
-    patch = text[text.index("static int og_drain_patch(pm_addr at)"):]
+    patch = text[text.index("static int og_drain_patch(pm_addr at)\n{"):]
     patch = patch[:patch.index("\n}\n")]
     assert "(p[0] & 0xFFFF0FFFu) != 0xE3A0000Au" in patch and "s[5] = 0x13a00000u;" in patch
     assert "og_drain_hold = og.owner && !og.tilted;" in text

@@ -178,9 +178,10 @@ def test_every_part_the_engine_leaves_out_has_its_reason():
     # PAD-1326: co-op and the handicaps ; PAD-1327: Prolonged Competition - five parts are left out
     # PAD-1327 round 4: the records on the high scores too - four parts are left out
     # PAD-1328: the attract items' and inactivity pausing's own gates (_attract_for_build / _idle_for_build) say why -
-    # two parts are left out with the family's sentence
-    assert len(named) == 3 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    # two parts are left out with the family's sentence; PAD-1379: the expression light shows go on (cabs_wanted)
+    assert len(named) == 2 and set(named) == set(S3M.FAMILY_LEFT_OUT)
     assert "attract items" not in named and "inactivity pausing the timers" not in named
+    assert "expression light shows" not in named and "expression light shows" not in S3M.FAMILY_LEFT_OUT
     assert "music modes" not in S3M.FAMILY_LEFT_OUT
     assert "handicaps" not in named and "handicaps" not in S3M.FAMILY_LEFT_OUT
     assert "co-op play" not in named and "co-op play" not in S3M.FAMILY_LEFT_OUT

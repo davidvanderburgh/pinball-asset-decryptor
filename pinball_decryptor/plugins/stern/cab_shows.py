@@ -140,7 +140,8 @@ def uses_game(show):
 def norm_show(s):
     s = s if isinstance(s, dict) else {}
     slot = s.get("slot")
-    slot = slot if isinstance(slot, int) and not isinstance(slot, bool) and slot >= 0 else None
+    # a sound-bank record's idx, or PAD-1379 a music bank's song (sound_modes.bank_slot_key: below zero)
+    slot = slot if isinstance(slot, int) and not isinstance(slot, bool) and slot >= -(1 << 32) else None
     out = {"name": str(s.get("name") or "").strip()[:NAME_MAX] or "Show", "slot": slot, "loop": bool(s.get("loop"))}
     for lane in LANES:
         out[lane] = [norm_step(x) for x in (s.get(lane) if isinstance(s.get(lane), list) else [])][:STEPS_MAX]
@@ -223,6 +224,17 @@ def cfg_text(shows, sids_of, only, stock=None):
     return "\n".join(lines) + "\n", skipped
 
 
+def layout_from_port(port):
+    """PAD-1379: :func:`layout` for a title whose port carries its cabinet's lights (a Spike 3 port's ``cablamp``
+    lines, drafted off the 64-bit tables: s3port.cabinet_lines_a64), placed as the runtime places them."""
+    out = []
+    for c in _LM.cabinet_from_port([(name, ids) for name, ids, _u in port.get("cablamp") or ()]):
+        out.append({"name": c["name"], "lane": 1 if c["role"] == "speaker" else 0,
+                    "side": -1 if c["side"] == "L" else 1 if c["side"] == "R" else 0,
+                    "u": c["u"], "x": c["x"], "y": c["y"]})
+    return out
+
+
 def layout(game_elf):
     """The cabinet drawing for the preview: ``[{name, lane, side, u, x, y}]`` of the card's expression lights (lane 0
     the blades, 1 the speakers; side -1 the left blade or speaker, 1 the right, 0 one ring alone), as the port's ``cablamp`` lines
@@ -244,11 +256,10 @@ NO_TITLE = "The app cannot tell which game this project is for."
 NO_CAB = "%s has no expression lights the app knows: its port names no blades or speaker lights."
 NO_LAYER = "The app does not know how %s lights its lamps yet, so it cannot hold its cabinet's lights."
 #: PAD-1328: a Spike 3 port names its cabinet's lights (cablamp lines off the 64-bit tables) and the runtime holds them
-#: with a song. PAD-1370: the strips' lamp data is the netbridge's (host cmd 2f), and the rig now lights them, the
-#: game's own shows and a cabshow.cfg show alike; the app's side (spike3_modes carrying cabshow.cfg, the show locked
-#: to its song's voice on 64-bit) is still to build, so the shows stay refused here until it is
-NO_SPIKE3 = ("%s's cabinet lights cannot take shows of your own yet: a Spike 3 cabinet's shows are not proven on the "
-             "machine.")
+#: with a song; PAD-1370: the strips' lamp data is the netbridge's (host cmd 2f), which the rig lights; PAD-1379: the
+#: Write carries cabshow.cfg (spike3_modes.cabs_wanted), each show started by its song's sound ids off image.bin's and
+#: the music banks' own descriptors and locked to its song's voice. A Spike 3 title takes them as a Spike 2 one does:
+#: by its port (Star Wars ELG names no cabinet lights: NO_CAB)
 #: what the runtime needs of the port: the lamp layer (lamps_arm) and, for a show to start with its song, the sound
 #: worker and the request table
 PORT_SITES = ("lamp_group",)
@@ -292,10 +303,7 @@ def title_refusal(prof):
         port = MP.read_port(MP.port_path(prof))
     except (OSError, MP.ModeProjectError):
         return NO_CAB % prof.label
-    why = port_refusal(port, prof.label)
-    if not why and getattr(prof, "arch", "arm") == "a64":
-        return NO_SPIKE3 % prof.label
-    return why
+    return port_refusal(port, prof.label)
 
 
 def plays_with_songs(port):

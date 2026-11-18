@@ -37,11 +37,13 @@ LAYOUT_V = 2
 STOCK_V = 1
 
 
-def _songs(audio, keep=(), seen=None):
+def _songs(audio, keep=(), seen=None, banks=False):
     """The project's songs, from the Audio tab's scan: ``[{slot, rel, name, seconds, path, replaced}]`` - every sound
     of a sound-bank record at least :data:`SONG_MIN_SECONDS` long (its replacement's length and file when it has
     one), and the records in *keep* however long (PAD-1068: the songs of the game's own shows). *seen*, a set, gets
-    every record the scan has a file for."""
+    every record the scan has a file for. PAD-1379: *banks* (a Spike 3 card's project) takes the songs of the
+    game's music banks too (``music_catNN_NNNN``, :func:`.sound_modes.bank_slot_key` below zero): a Spike 3 Write
+    reads the sound ids that start them off the banks themselves (most of Fallout's music is in them)."""
     from ...core import audio as _A
     from ...plugins.stern import sound_modes as SM
     if audio is None:
@@ -49,7 +51,7 @@ def _songs(audio, keep=(), seen=None):
     assign = dict(getattr(audio, "_assign", {}) or {})
     out = []
     for s in list(getattr(audio, "_slots", ()) or ()):
-        slot = SM.slot_idx(s.rel_path)
+        slot = SM.slot_key(s.rel_path) if banks else SM.slot_idx(s.rel_path)
         if slot is None:
             continue
         if seen is not None:
@@ -74,7 +76,7 @@ def _songs(audio, keep=(), seen=None):
         name = os.path.splitext(os.path.basename(s.rel_path))[0]
         out.append({"slot": slot, "rel": s.rel_path, "name": name, "seconds": round(secs, 3), "path": path,
                     "replaced": bool(repl), "file": os.path.basename(repl) if repl else ""})
-    out.sort(key=lambda r: r["slot"])
+    out.sort(key=lambda r: (r["slot"] < 0, abs(r["slot"])))     # the idx songs, then the music banks' in order
     return out
 
 
@@ -119,6 +121,7 @@ class LightsTab(TabService):
         self._project = ""
         self._shows = []
         self._read_id = 0
+        self._spike3 = False                            # PAD-1379: the project is a Spike 3 card's
         self._songs_id = 0
         from ...plugins.stern import cab_shows as CS
         self.set(project="", available=False, why="", reading=False, lights=[], songs=[], shows=[], intro=INTRO,
@@ -180,7 +183,7 @@ class LightsTab(TabService):
         def work():
             seen = set()
             try:
-                songs = _songs(audio, keep, seen)
+                songs = _songs(audio, keep, seen, banks=self._spike3)
             except Exception:                           # noqa: BLE001 - a scan replaced under it: the next one's
                 return
             # PAD-1068: why a game's show has no song here, said on the page (not a bare "not one of its songs")
@@ -217,6 +220,7 @@ class LightsTab(TabService):
 
         def work():
             why, lights = "", []
+            self._spike3 = project_is_spike3(folder)
             try:
                 why, lights = project_layout(folder)
             except Exception as e:                      # noqa: BLE001 - said on the page
@@ -293,7 +297,7 @@ class LightsTab(TabService):
         if not self._project or len(self._shows) >= CS.SHOWS_MAX:
             return -1
         s = CS.norm_show(CS.preset(str(preset)))
-        if isinstance(slot, int) and slot >= 0:
+        if isinstance(slot, int) and not isinstance(slot, bool):     # PAD-1379: a music bank's song is below 0
             s["slot"] = slot
             song = next((x for x in self.get("songs") or [] if x["slot"] == slot), None)
             if song:
@@ -432,6 +436,10 @@ class LightsTab(TabService):
     @rpc
     def try_it(self):
         """Run in emulator: the Emulate tab, started with the project's changes (the shows among them)."""
+        from ..modes_tryit import run_spike3_project
+        handed = run_spike3_project(self.window, self._folder())          # PAD-1379: a Spike 3 card's
+        if handed is not None:
+            return handed
         emu = self.window.service("emulate")
         if emu is None:
             return False
@@ -487,6 +495,10 @@ def project_stock(project):
     card = getattr(got, "image", "") if got is not None else ""
     if not card or not os.path.isfile(card):
         return "", None
+    if MP.card_arch(card) == "a64":
+        # PAD-1379: cab_stock reads the 32-bit show table Led Zeppelin and Rush keep ("list index out of range" on a
+        # 64-bit program); no Spike 3 game keeps one the app can read
+        return NO_STOCK, None
     key = _card_key(card)
     base = os.path.join(TR.cache_dir("cab_stock"), hashlib.sha1(key.encode("utf-8")).hexdigest())
     cache = base + ".json"
@@ -523,6 +535,17 @@ def project_stock(project):
     return ("" if stock else NO_STOCK), stock
 
 
+def project_is_spike3(project):
+    """PAD-1379: whether *project* was made from a Spike 3 card (its songs then include the music banks')."""
+    from ...plugins.stern import mode_project as MP
+    try:
+        got = MP.project_card(project) if project else None
+        card = getattr(got, "image", "") if got is not None else ""
+        return bool(card) and os.path.isfile(card) and MP.card_arch(card) == "a64"
+    except Exception:                                   # noqa: BLE001 - unknown: Spike 2's songs
+        return False
+
+
 def project_layout(project):
     """``(why, lights)``: the cabinet's expression lights of the card *project* was made from (cab_shows.layout),
     cached per card; ``why`` says why there are none ("" when there are)."""
@@ -536,9 +559,15 @@ def project_layout(project):
                 "lights. Point the project at its card on the Extract tab."), []
     if MP.card_arch(card) == "a64":
         # PAD-1328: a Spike 3 program is not read by the Spike 2 tables' reader (it failed with "list index out of
-        # range"); the title's own gate says why its cabinet takes no shows of the project's yet
+        # range"). PAD-1379: its cabinet is its port's `cablamp` lines (drafted off the 64-bit tables), the lights
+        # the runtime holds; the title's own gate says why one takes no shows
         from ...plugins.stern import clip_variants as CV
-        return (CS.title_refusal(CV.project_title(project, probe=True)) or CS.NO_LIGHTS), []
+        prof = CV.project_title(project, probe=True)
+        why = CS.title_refusal(prof)
+        if why:
+            return why, []
+        lights = CS.layout_from_port(MP.read_port(MP.port_path(prof)))
+        return ("" if lights else CS.NO_LIGHTS), lights
     key = "%s|%d|%d" % (card, os.path.getsize(card), int(os.path.getmtime(card)))
     cache = os.path.join(TR.cache_dir("cab_layout"), hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
     try:

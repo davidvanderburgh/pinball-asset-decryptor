@@ -31,9 +31,10 @@ TABLES = {
     "walking_dead_remastered_le": ("walking_dead_remastered_le_0_92_spike3", 0x7b5c38, 16, 48),
     "star_wars_2025_le": ("star_wars_2025_le_0_96_spike3", 0x8b7a98, 16, 183),
     "star_wars_2025_pro": ("star_wars_2025_pro_0_84_spike3", 0x754a50, 16, 126),
-    "pokemon_le": ("pokemon_le_0_82_spike3", 0x3198290, 24, 10),
 }
-NO_TABLE = {"fallout_le": "fallout_le_0_82_spike3", "transformers_mtmte_le": "transformers_mtmte_le_0_96_spike3"}
+#: PAD-1380: Pokemon LE's {test, page, float seconds} table never ran in attract on the rig; a director starts its pages
+NO_TABLE = {"fallout_le": "fallout_le_0_82_spike3", "transformers_mtmte_le": "transformers_mtmte_le_0_96_spike3",
+            "pokemon_le": "pokemon_le_0_82_spike3"}
 
 
 def _prog(game):
@@ -67,14 +68,17 @@ def test_show_pair_on_the_titles_whose_pages_have_it():
 
 def test_spike3_items_go_on_where_the_bank_scene_can_be_shown():
     # PAD-1371: Star Wars ELG 1.10's items are on the glass (its page shows the bank's scene, as the game's own clip
-    # pages do); the titles whose ports carry no clip route yet are refused for that, not for the glass
+    # pages do); the titles whose ports carry no clip route yet are refused for that, not for the glass. PAD-1380:
+    # Walking Dead Remastered has its clip route (its play bank), and its items wait on its attract bank (the glass)
     prof = MP.profiles()["star_wars_elg_1_10_spike3"]
     assert prof.arch == "a64"
     assert AI.title_refusal(prof) == ""
-    for key in ("walking_dead_remastered_le_0_92_spike3", "star_wars_2025_le_0_96_spike3",
-                "star_wars_2025_pro_0_84_spike3", "pokemon_le_0_82_spike3"):
-        other = MP.profiles()[key]
-        assert AI.title_refusal(other) == AI.NO_CLIPS % other.label, key
+    wdr = MP.profiles()["walking_dead_remastered_le_0_92_spike3"]
+    assert AI.title_refusal(wdr) == AI.NO_GLASS % wdr.label
+    # PAD-1380: Star Wars 2025 LE's and Pro's clip route is proven (their in-play bank 3a9d7db5), and so their items
+    # (47% of the glass on the rig)
+    for key in ("star_wars_2025_le_0_96_spike3", "star_wars_2025_pro_0_84_spike3"):
+        assert AI.title_refusal(MP.profiles()[key]) == "", key
 
 
 def test_spike3_modes_carries_them_on_elg(tmp_path, monkeypatch):
@@ -130,7 +134,9 @@ def test_finder_on_the_real_programs(game):
     sleep = sleep[0] if isinstance(sleep, (tuple, list)) else sleep
     s = S.attract_sequencer(t, sleep)
     if game in NO_TABLE:
-        assert s is None
+        # PAD-1380: Pokemon's timed slideshow table is found, and left out: it is not the attract sequence
+        assert s is None or (game == "pokemon_le" and s["entry"] == 0x3198290 and s["seconds_at"] == 16)
+        assert S.attract_lines(t, {"proc_sleep": sleep}) == []
         return
     _key, table, size, count = TABLES[game]
     assert (s["entry"], s["size"], s["page_at"], s["count"]) == (table, size, 8, count)
@@ -268,17 +274,19 @@ def test_cabinet_lines_off_the_real_programs(game):
         assert [devs[int(i) - 1][0] for i in ids.split(",")] == [name + "-R", name + "-G", name + "-B"]
 
 
-def test_spike3_cabinet_shows_are_gated_until_seen_lit():
+def test_spike3_cabinet_shows_go_on_a_title_whose_port_names_its_lights():
+    # PAD-1379: the gate PAD-1328 kept until the cabinet was seen lit (PAD-1370) is gone: a port with cablamp lines
+    # takes shows (spike3_modes.cabs_wanted), Star Wars ELG (none) says why not
     from pinball_decryptor.plugins.stern import cab_shows as CS, spike3_modes as S3M
     for key, n in CAB_COUNTS.items():
         prof = MP.profiles()[key]
-        assert CS.title_refusal(prof) == (CS.NO_SPIKE3 if n else CS.NO_CAB) % prof.label
-    assert "expression light shows" in S3M.FAMILY_LEFT_OUT
+        assert CS.title_refusal(prof) == ("" if n else CS.NO_CAB % prof.label)
+    assert "expression light shows" not in S3M.FAMILY_LEFT_OUT
 
 
-def test_lights_tab_says_why_on_a_spike3_card(tmp_path, monkeypatch):
+def test_lights_tab_draws_a_spike3_cabinet_from_its_port(tmp_path, monkeypatch):
     from pinball_decryptor.webui.tabs import lights as L
-    from pinball_decryptor.plugins.stern import cab_shows as CS, clip_variants as CV, title_reader as TR
+    from pinball_decryptor.plugins.stern import clip_variants as CV, title_reader as TR
     card = tmp_path / "fallout_le-0_82_0_spike3.Release.64G.sdcard-secure.raw"
     card.write_bytes(b"\0" * 1024)
     prof = MP.profiles()["fallout_le_0_82_spike3"]
@@ -286,4 +294,6 @@ def test_lights_tab_says_why_on_a_spike3_card(tmp_path, monkeypatch):
     monkeypatch.setattr(MP, "card_arch", lambda image: "a64")
     monkeypatch.setattr(CV, "project_title", lambda p, probe=False: prof)
     monkeypatch.setattr(TR, "game_program", lambda c: pytest.fail("a Spike 3 program is not read by the Spike 2 reader"))
-    assert L.project_layout(str(tmp_path)) == (CS.NO_SPIKE3 % prof.label, [])
+    why, lights = L.project_layout(str(tmp_path))
+    assert why == "" and len(lights) == CAB_COUNTS["fallout_le_0_82_spike3"]
+    assert L.project_stock(str(tmp_path)) == (L.NO_STOCK, None)       # no 32-bit show table read off it

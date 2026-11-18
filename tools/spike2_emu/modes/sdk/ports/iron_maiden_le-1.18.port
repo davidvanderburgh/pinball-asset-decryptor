@@ -73,6 +73,9 @@ site proc_create      0x0035bd90 0xe308cc18 0xe340c065
 site proc_sleep       0x0035bee0 0xe3083c18 0xe3403065
 site switch_edge      0x002fef5c 0xe30f3c90 0xe3403065
 site switch_drain     0x002ffc3c 0xe92d4ff0 0xe3079900
+# PAD-1400: inside the drain, where it starts a switch's handler (r0 group, r1 handler, r2 argument); a
+# whole-game mode refuses the game's RULE handlers there (descriptor flags with no low 10 bits)
+site switch_spawn     0x002ffcc4 0xeb016ff5 0xe3500000
 site live_records     0x0035c428 0xe3082c18 0xe3402065
 
 # ---- globals ----

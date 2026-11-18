@@ -11523,6 +11523,15 @@ static void on_ball_end(pm_reg *r)
  *   award_screen           no award screen or video of the game's (a refusal answers 0, as its own failures do)
  *   rule_dispatch          (a port whose modes take their shots from `switch` lines: Foo Fighters LE, Venom) where
  *                          the game's rules hear a switch; refused like shot_dispatch, but nothing is handed on
+ *   switch_spawn           (a port whose rules hear their switches straight from the switch drain: Rush, Batman,
+ *                          Star Wars, Stranger Things...) the drain's call that starts a switch's handler as a
+ *                          process (r0 group, r1 handler, r2 argument), wrapped where it is made: a RULE handler -
+ *                          one whose descriptor flags have none of the low 10 bits, the ones that run in normal
+ *                          play only - is not started (0, which the drain tests). Device, cabinet and service
+ *                          handlers (low bits set: they run in every state) start as always, and the drain's own
+ *                          switch_hit broadcasts (ball search, playfield valid) do not depend on it. The rule
+ *                          handlers are read from the switch descriptors at og_arm (switch_records, desc_via,
+ *                          flags_at; the handler at +0)
  *   show_start             no light show of the game's (0, as its own failures; a show of ours playing goes on: its
  *                          process is the game's code, so show_start passes while show_now has one)
  *
@@ -11539,18 +11548,24 @@ static void on_ball_end(pm_reg *r)
  * search, the node bus, display and audio are the game's throughout: none of them is one of these sites. */
 static void events_arm(void);
 static int event_bus_id(const char *name);
+#define OG_RULE_H 192
+static unsigned og_rule_h[OG_RULE_H];            /* the game's rule handlers (switch_spawn), sorted */
+static int og_rule_n;
+static unsigned (*og_spawn_target)(unsigned, unsigned, unsigned, unsigned);
 #ifndef PM_REG_LR
 #define PM_REG_LR 5                              /* the 32-bit trampolines push {r0-r3, ip, lr}: r[5] is the lr */
 #endif
 #define OG_SHOT   0
 #define OG_SHOW   7                              /* og_sites[] index of show_start */
 #define OG_COUNT  0x80u                          /* og_sites[].how: counted, never refused */
-#define OG_N      11
+#define OG_ZERO   0x40u                          /* og_sites[].how: not refused - it runs with 0 points (score) */
+#define OG_N      12
 #define OG_RULE   10                             /* og_sites[] index of rule_dispatch */
+#define OG_SPAWN  11                             /* og_sites[] index of switch_spawn (a wrapped call, not a veto) */
 static const struct { const char *site, *what; unsigned how; } og_sites[OG_N] = {
     { "shot_dispatch", "shots", 0 },
-    { "score_add", "scores", 0 },
-    { "score_add32", "scores", 0 },
+    { "score_add", "scores", OG_ZERO },
+    { "score_add32", "scores", OG_ZERO },
     { "callout", "callouts", 0 },
     { "callout_nth", "callouts", 0 },
     { "multiball_serve", "serves", 0 },
@@ -11559,6 +11574,7 @@ static const struct { const char *site, *what; unsigned how; } og_sites[OG_N] = 
     { "display_effect_start", "display effects", OG_COUNT },
     { "sound_play", "sounds", OG_COUNT },
     { "rule_dispatch", "rule shots", 0 },
+    { "switch_spawn", "switch rules", 0 },
 };
 extern const char __ehdr_start[] __attribute__((weak, visibility("hidden")));
 extern const char _end[] __attribute__((weak, visibility("hidden")));
@@ -11620,7 +11636,83 @@ static int og_veto(pm_reg *r, unsigned n)
     }
     if (__sync_fetch_and_add(&og.refused[n], 1u) == 0) og.first[n] = (unsigned)r[PM_REG_LR];
     if (n == OG_SHOT) on_shot(r);                /* our modes see the shot the game's rules do not */
+    if (og_sites[n].how & OG_ZERO) {             /* the game's score call runs with 0 points: its own bookkeeping */
+#if PM_A64                                       /* (Star Wars LE: the playfield is valid once something scored, */
+        r[1] = 0;                                /* and a drain before that is served back - for ever, refused) */
+#else
+        if (n == 2) r[1] = 0;                    /* score_add32(player, points) */
+        else r[2] = r[3] = 0;                    /* score_add(player, uint64 points): r2:r3 */
+#endif
+        return 0;
+    }
     return 1;
+}
+
+/* PAD-1400: is h one of the game's rule handlers (og_rule_h, sorted)? */
+static int og_rule_handler(unsigned h)
+{
+    int lo = 0, hi = og_rule_n - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (og_rule_h[mid] == h) return 1;
+        if (og_rule_h[mid] < h) lo = mid + 1; else hi = mid - 1;
+    }
+    return 0;
+}
+
+/* the drain's call that starts a switch's handler: a rule handler is not started while the game is the mode's */
+static unsigned og_spawn_wrap(unsigned group, unsigned handler, unsigned arg, unsigned r3)
+{
+    if (og.owner && og_rule_handler(handler)) {
+        if (og.fresh) og_shot_seen();
+        if (og_refuses(1, pm_in_game(), og.fresh, og.tilted, pm_ms(), og.pass_until, 0, og_self, 0)) {
+            if (__sync_fetch_and_add(&og.refused[OG_SPAWN], 1u) == 0) og.first[OG_SPAWN] = handler;
+            return 0;
+        }
+    }
+    return og_spawn_target(group, handler, arg, r3);
+}
+
+/* the rule handlers, from the switch descriptors the port describes: a handler whose flags have no low 10 bits.
+ * 0 when the port lacks the tables or none could be read. */
+static const char *og_rule_why;                  /* why og_rule_handlers_read found none */
+static int og_rule_handlers_read(void)
+{
+    pm_addr recs = data("switch_records"), cnt = data("switch_count");
+    long size = pm_port_value("switch_record_size", -1), via = pm_port_value("switch_desc_via", -1);
+    long flags_at = pm_port_value("switch_flags_at", -1), h_at = pm_port_value("switch_handler_at", 0);
+    unsigned base, n, i, k;
+    unsigned no_desc = 0, no_h = 0, dev = 0;
+    og_rule_why = "the port names no switch tables";
+    if (!recs || !cnt || size <= 0 || flags_at < 0 || !maps_has(recs, 4, MAP_R) || !maps_has(cnt, 4, MAP_R)) return 0;
+    base = *(const unsigned *)(unsigned long)recs;
+    n = *(const unsigned *)(unsigned long)cnt;
+    og_rule_why = "the switch records are not mapped yet (or the count is off)";
+    if (base && n && n <= 512 && !maps_has(base, n * (unsigned)size, MAP_R)) maps_read();   /* the game's heap, grown since the gate */
+    if (!base || n == 0 || n > 512 || !maps_has(base, n * (unsigned)size, MAP_R)) {
+        say("own game: switch records 0x%08x, count %u, %ld bytes each - not readable", base, n, size);
+        return 0;
+    }
+    og_rule_n = 0;
+    for (i = 0; i < n; i++) {
+        unsigned rec = base + i * (unsigned)size, desc, h, fl;
+        desc = via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)via) : rec;
+        if (desc && !maps_has(desc, (unsigned)flags_at + 2, MAP_R)) maps_read();
+        if (!desc || !maps_has(desc, (unsigned)flags_at + 2, MAP_R)) { no_desc++; continue; }
+        h = *(const unsigned *)(unsigned long)(desc + (unsigned)h_at);
+        fl = *(const unsigned short *)(unsigned long)(desc + (unsigned)flags_at);
+        if (!h || !maps_has(h, 8, MAP_X)) { no_h++; continue; }
+        if (fl & 0x3ffu) { dev++; continue; }
+        for (k = 0; k < (unsigned)og_rule_n && og_rule_h[k] != h; k++) ;
+        if (k < (unsigned)og_rule_n || og_rule_n >= OG_RULE_H) continue;
+        for (k = (unsigned)og_rule_n; k > 0 && og_rule_h[k - 1] > h; k--) og_rule_h[k] = og_rule_h[k - 1];
+        og_rule_h[k] = h;
+        og_rule_n++;
+    }
+    say("own game: %u switches - %d rule handlers, %u device/cabinet ones started as always, %u with no descriptor, "
+        "%u with no handler", n, og_rule_n, dev, no_desc, no_h);
+    og_rule_why = "no switch's descriptor names a rule handler";
+    return og_rule_n;
 }
 
 /* the bus, on the game's own call (on_event_dispatch) */
@@ -11675,6 +11767,23 @@ static int og_arm(void)
     for (i = 0; i < OG_N; i++) {
         pm_addr a = fn(og_sites[i].site);
         if (!a) continue;
+        if (i == OG_SPAWN) {                     /* a call wrapped where it is made, with the rule handlers read */
+            if (!og_rule_handlers_read()) {
+                say("own game: switch_spawn - %s, so the game's rules still hear their switches", og_rule_why);
+                continue;
+            }
+            if (!(og_spawn_target = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)
+                  hook_call(a, (void *)og_spawn_wrap))) {
+                say("own game: switch_spawn at 0x%08" PMA " could not be wrapped - the game's rules still hear their "
+                    "switches", a);
+                continue;
+            }
+            og.hooked |= 1u << i;
+            if (at < sizeof line - 60)
+                at += (unsigned)pm_snprintf(line + at, sizeof line - at, "%sswitch_spawn (%d rule handlers)",
+                                            at ? ", " : "", og_rule_n);
+            continue;
+        }
         og_chaining = 1;
         ok = hook_veto_n(a, og_veto, i, 0u);     /* a refused call answers 0: nothing added, served or made */
         og_chaining = 0;
@@ -11695,7 +11804,7 @@ static int og_arm(void)
     }
     og.armed = 1;
     say("own game: armed on %s (tilt warning %d, tilt %d, game start %d on the bus)%s", line, og.tiltw_id, og.tilt_id,
-        og.game_id, og.hooked & (1u | 1u << OG_RULE) ? "" : " - no shot_dispatch: the game's rules still hear shots, its block_rule sites "
+        og.game_id, og.hooked & (1u | 1u << OG_RULE | 1u << OG_SPAWN) ? "" : " - no shot_dispatch: the game's rules still hear shots, its block_rule sites "
         "and mode starts hold them");
     return 1;
 }
@@ -11719,7 +11828,7 @@ int pm_own_game(int on)
     og.balls = 0;
     og.owner = current;
     say("own game: %s has the whole game - the game's own %s held back while a ball is in play%s", og.who,
-        og.hooked & (1u | 1u << OG_RULE) ? "shots, points, calls, serves, award screens and light shows"
+        og.hooked & (1u | 1u << OG_RULE | 1u << OG_SPAWN) ? "shots, points, calls, serves, award screens and light shows"
                        : "points, calls, serves, award screens and light shows",
         og.blocked || block_owner == current ? ", and its modes and rules held off" : "");
     return 1;

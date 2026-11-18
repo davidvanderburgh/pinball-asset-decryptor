@@ -63,6 +63,9 @@ site balls_in_play    0x00383094 0xe92d4010 0xe3014f40
 site multiball_serve  0x00383210 0xe92d41f0 0xe30becd2
 site switch_edge      0x0013abfc 0xe3073f38 0xe3403062
 site switch_drain     0x0013b824 0xe92d4ff0 0xe3009ffc
+# PAD-1400: inside the drain, where it starts a switch's handler (r0 group, r1 handler, r2 argument); a
+# whole-game mode refuses the game's RULE handlers there (descriptor flags with no low 10 bits)
+site switch_spawn     0x0013b8ac 0xeb083f65 0xe3500000
 site live_records     0x0034bdd0 0xe30f2b50 0xe3402064
 
 # ---- globals ----

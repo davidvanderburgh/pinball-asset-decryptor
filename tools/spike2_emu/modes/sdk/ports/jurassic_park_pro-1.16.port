@@ -49,6 +49,9 @@ site switch_hit       0x004716fc 0xe2503000 0x012fff1e
 site switch_hit2      0x0047179c 0xe92d4010 0xe2504000
 site switch_edge      0x00322038 0xe30b3f38 0xe340307a
 site switch_drain     0x00322d18 0xe92d4ff0 0xe30d928c
+# PAD-1400: inside the drain, where it starts a switch's handler (r0 group, r1 handler, r2 argument); a
+# whole-game mode refuses the game's RULE handlers there (descriptor flags with no low 10 bits)
+site switch_spawn     0x00322da0 0xeb03976f 0xe3500000
 site surface_find     0x005651d0 0xe92d4070 0xe24dd008
 site surface_set_video 0x0055c8b4 0xe5d030d4 0xe92d4ff0
 site surface_play     0x0055a6c0 0xe5d030d4 0xe92d43f0

@@ -147,6 +147,9 @@ site switch_hit2      0x0011abbc 0xe92d4010 0xe2504000
 site switch_edge      0x000e41b0 0xe3093380 0xe3403062
 #   switch_drain: the drain itself, never hooked: an edge counts only when switch_edge is called from it
 site switch_drain     0x000e4e90 0xe92d4ff0 0xe3079ce0
+# PAD-1400: inside the drain, where it starts a switch's handler (r0 group, r1 handler, r2 argument); a
+# whole-game mode refuses the game's RULE handlers there (descriptor flags with no low 10 bits)
+site switch_spawn     0x000e4f18 0xeb00e13f 0xe3500000
 
 # ---- globals: data <name> <address> ----
 #   cur_player: derived from 2 places, e.g. 0x338790+0x60 [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool Pro 1.16, Jaws LE 1.02, TMNT Pro 1.59]

@@ -128,10 +128,10 @@ int main(void)
 def test_the_sites_held_back_and_the_ones_only_counted():
     text = RUNTIME.read_text(encoding="utf-8")
     table = text[text.index("og_sites[OG_N] = {"):text.index("};", text.index("og_sites[OG_N] = {"))]
-    refused = re.findall(r'\{ "(\w+)", "[^"]+", 0 \}', table)
+    refused = re.findall(r'\{ "(\w+)", "[^"]+", (?:0|OG_ZERO) \}', table)
     counted = re.findall(r'\{ "(\w+)", "[^"]+", OG_COUNT \}', table)
     assert refused == ["shot_dispatch", "score_add", "score_add32", "callout", "callout_nth", "multiball_serve",
-                       "award_screen", "show_start", "rule_dispatch"]
+                       "award_screen", "show_start", "rule_dispatch", "switch_spawn"]
     # the score display's own effects run through display_effect_start; sound_play carries the music beds
     assert set(counted) == {"display_effect_start", "sound_play"}
     assert 'og_sites[OG_SHOW]' not in text and '#define OG_SHOW   7' in text and refused[7] == "show_start"
@@ -210,3 +210,25 @@ def test_the_shield_and_building_accept_the_whole_game():
     assert MP.holds_game_modes(s)
     s.game_modes = "stack"
     assert not MP.holds_game_modes(s)
+
+
+def test_the_games_points_run_with_zero_rather_than_being_refused():
+    """Star Wars LE serves a drained ball back while nothing has scored: the game's score call still runs, at 0."""
+    text = RUNTIME.read_text(encoding="utf-8")
+    assert '{ "score_add", "scores", OG_ZERO }' in text and '{ "score_add32", "scores", OG_ZERO }' in text
+    veto = text[text.index("static int og_veto(pm_reg *r, unsigned n)"):]
+    veto = veto[:veto.index("\n}\n")]
+    assert "r[2] = r[3] = 0;" in veto and "if (n == 2) r[1] = 0;" in veto
+
+
+def test_switch_spawn_refuses_only_rule_handlers():
+    """Rush, Batman...: a switch's handler with none of the low 10 flag bits is a rule's (it runs in play only)."""
+    text = RUNTIME.read_text(encoding="utf-8")
+    read = text[text.index("static int og_rule_handlers_read(void)"):]
+    read = read[:read.index("\n}\n")]
+    assert "if (fl & 0x3ffu) { dev++; continue; }" in read
+    wrap = text[text.index("static unsigned og_spawn_wrap("):]
+    wrap = wrap[:wrap.index("\n}\n")]
+    assert "og_rule_handler(handler)" in wrap and "return og_spawn_target(group, handler, arg, r3);" in wrap
+    ports = sorted(p.stem for p in (SDK / "ports").glob("*.port") if "\nsite switch_spawn " in p.read_text(encoding="utf-8"))
+    assert {"rush_le-1.19", "batman-1.14", "star_wars_le-1.31"} <= set(ports) and len(ports) == 19

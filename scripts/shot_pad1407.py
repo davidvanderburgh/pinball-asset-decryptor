@@ -1,7 +1,7 @@
 r"""PAD-1407 proof shots: the Attract tab on an Uncanny X-Men LE 0.98 project whose owner puts a title card of his own
 ("UNCANNY X-MEN 2.0 / PRESS START") in front of the game's attract.
 
-    python scripts/shot_pad1407.py <app tree> <out png> [--replace] [--card NAME]
+    python scripts/shot_pad1407.py <app tree> <out png> [--replace] [--kept <png>] [--card NAME]
 
 A scratch project made from the library card, its record seeded with the text card before the game's first screen,
 served by <app tree> (main for the before shot, the ticket's branch for the after). --replace also presses the page's
@@ -90,6 +90,12 @@ def main():
                     print("page:", line.strip()[:240], flush=True)
             page.screenshot(path=out, full_page=True)
             print("shot", out, "| page errors:", errors, flush=True)
+            if "--kept" in sys.argv:         # the second shot: the rows from the game's screen 22 on (its high scores)
+                kept = _arg("--kept", "")
+                page.locator(".at-row", has_text="screen 22").first.evaluate("e => e.scrollIntoView({block: 'start'})")
+                time.sleep(1.5)
+                page.screenshot(path=kept)
+                print("shot", kept, flush=True)
             browser.close()
     finally:
         proc.terminate()

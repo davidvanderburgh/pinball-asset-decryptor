@@ -6815,7 +6815,8 @@
   "layer_pause": false,
   "layer_takes_shots": false,
   "keep_rules": [],
-  "block_modes": []
+  "block_modes": [],
+  "meters": []
  },
  "recipe": {
   "clips": {

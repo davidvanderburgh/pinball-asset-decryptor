@@ -52,6 +52,10 @@ const UNDO_STEPS = 100;
 const MERGE_MS = 1000;        // the same box changed again within this is the same step
 
 const TIP = {
+  meters: "Bars it shows while it runs, each filled with a value out of the most it can be (a health bar per character, an energy meter), its label over it. Up to four, down the right edge of the screen. Hidden under the game's own displays and gone at its end.",
+  meterNumbers: "Show the value and its most after the label: CYCLOPS 3/5.",
+  metersOff: "This card's game cannot take a mode's screens, so its meters would not show: the mode runs the same without them.",
+  fade: "The whole screen fades to a color, over the time given (0 = at once): 100% is the color full, 0% clear again. \"edge glow\" is the color at the screen's edges only. Its meters and words stay over it; it clears at its end. Up to three colors and looks a mode.",
   palette: "Drag a block into a script, or press it to add it to the script you picked last (the one with the lit edge).",
   hat: "A script: what sets it off, and the blocks it runs, top to bottom.",
   vars: "A variable holds a number for each player. Reset says when it goes back to 0. A saved one never does: the card keeps it between games and over a power-off (a story's chapter, a character unlocked), each player's by their Insider login while they are logged in, else by their player number; \"for everyone\" is one number for the whole machine. The service menu's SAVED PROGRESS (Clear) and a factory reset clear them.",
@@ -253,6 +257,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
     ["Show and sound", [{ op: "callout", role: "ten_seconds" }, { op: "words", text: "JACKPOT", value: null },
       { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" }, { op: "gi", gi: "dark" },
       { op: "show", show: "burst" }, { op: "game_show", name: (ch.game_shows || []).find((x) => x.kind === "flashy")?.name || ((ch.game_shows || [])[0] || {}).name || "" },
+      { op: "fade", color: "#000000", style: "flat", to: num(80), ms: num(1000) },          // PAD-1405
       { op: "log", text: "" }]],
     ["Its own clips and sounds", [{ op: "clip", clip, where: "full" }, { op: "sound", sound, fallback: null },
       { op: "music", bed: ((prog.beds || [])[0] || {}).name || "" }]],
@@ -293,7 +298,7 @@ const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: 
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
 export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", drain_to_one: "mode", game_wizard: "mode", score: "score",
-  set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show", log: "show",
+  set: "var", change: "var", if: "flow", callout: "show", words: "show", fade: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech", spare_drive: "mech",
@@ -543,6 +548,11 @@ function StmtBody({ b, path, ed }) {
       ${b.sub != null ? html`<${Text} value=${b.sub} max=${16} width=${120} onChange=${(v) => set("sub", v)} placeholder="words" />` : null}
       <${Check} checked=${b.label != null} label="and its label to" onChange=${(on) => set("label", on ? "" : null)} />
       ${b.label != null ? html`<${Text} value=${b.label} max=${16} width=${110} onChange=${(v) => set("label", v)} placeholder="label" />` : null}`;
+    case "fade": return html`<span class="bk-w" ...${tip(TIP.fade)}>Fade the screen to</span>
+      <input type="color" class="bk-color" value=${b.color || "#000000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The color it fades to")} />
+      <${Pick} value=${b.style || "flat"} options=${FADE_STYLES} onChange=${(v) => set("style", v)} />
+      <${Slot} kind="num" value=${b.to} path=${[...path, "to"]} ed=${ed} /><span class="bk-w">% over</span>
+      <${Slot} kind="num" value=${b.ms} path=${[...path, "ms"]} ed=${ed} /><span class="bk-w">ms</span>`;
     case "hud_gauge": return html`<span class="bk-w">Fill the HUD's gauge to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} /><span class="bk-w">pips</span>`;
     case "hud_progress": return html`<span class="bk-w">Show on the progress panel</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />`;
     case "roster_progress": return html`<span class="bk-w">Show on its selection screen tile</span><${Slot} kind="num" value=${b.done} path=${[...path, "done"]} ed=${ed} /><span class="bk-w">of</span><${Slot} kind="num" value=${b.of} path=${[...path, "of"]} ed=${ed} />`;
@@ -861,7 +871,7 @@ function jjpHatLabel(h) {
 export function stmtLabel(b) {
   return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball", ball_save: "Ball save", drain_to_one: "Take the extra balls away",
     score: "Score points", set: "Set a variable", change: "Change a variable", set_hits: "Set the hits of a shot", callout: "Say a callout",
-    words: "Show words", light_shot: "Light a shot or insert", lights_off: "Hand back lights", gi: "Turn the GI dark", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
+    words: "Show words", fade: "Fade the screen", light_shot: "Light a shot or insert", lights_off: "Hand back lights", gi: "Turn the GI dark", show: "Run a light show", game_show: "Play the game's light show", log: "Write in the log",
     clip: "Play a clip", sound: "Play a sound", music: "Play the music",
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     hud_progress: "Progress panel number", roster_progress: "Selection screen count",
@@ -961,6 +971,30 @@ function Hud({ prog, ed }) {
       <${Text} value=${gauge.full} max=${16} width=${110} onChange=${(v) => ed.set(at_("gauge", "full"), v)} placeholder="100%" />
       <${Pick} value=${gauge.icon || "rage"} options=${icons} onChange=${(v) => ed.set(at_("gauge", "icon"), v)} title="Its icon" />
     </div>` : null}
+  </div>`;
+}
+
+// PAD-1405: its bar meters - each a label, a color, a value out of its most
+const FADE_STYLES = [{ value: "flat", label: "all over" }, { value: "glow", label: "edge glow" }];
+const METER_COLORS = ["#e02020", "#20b0ff", "#ffcc00", "#30d040"];
+function Meters({ prog, ed }) {
+  const ms = prog.meters || [];
+  const add = () => ed.edit((d) => {
+    d.meters = [...(d.meters || []), { label: "METER " + ((d.meters || []).length + 1), color: METER_COLORS[(d.meters || []).length % 4],
+      value: null, max: { k: "num", v: 100 }, numbers: false }];
+  });
+  return html`<div class="bk bk-hud bk-hudset">
+    <div class="bk-line"><span class="bk-w b" ...${tip(TIP.meters)}>Meters</span>
+      ${ed.ch.info_line === false ? html`<span class="bk-w small" ...${tip(TIP.metersOff)}>(not on this card's game)</span>` : null}</div>
+    ${ms.map((m, i) => html`<div class="bk-line" key=${i}>
+      <${Text} value=${m.label} max=${24} width=${120} onChange=${(v) => ed.set(["meters", i, "label"], v)} placeholder="ENERGY" />
+      <input type="color" class="bk-color" value=${m.color || "#e02020"} onInput=${(e) => ed.set(["meters", i, "color"], e.target.value)} ...${tip("Its color")} />
+      <span class="bk-w">filled with</span><${Slot} kind="num" value=${m.value} path=${["meters", i, "value"]} ed=${ed} />
+      <span class="bk-w">out of</span><${Slot} kind="num" value=${m.max} path=${["meters", i, "max"]} ed=${ed} />
+      <${Check} checked=${!!m.numbers} label="with numbers" title=${TIP.meterNumbers} onChange=${(v) => ed.set(["meters", i, "numbers"], v)} />
+      <${X} title="Take this meter out" onClick=${() => ed.edit((d) => { d.meters.splice(i, 1); })} />
+    </div>`)}
+    ${ms.length < 4 ? html`<div class="bk-line"><${Button} size="xs" kind="ghost" icon="plus" onClick=${add}>Meter<//></div>` : null}
   </div>`;
 }
 
@@ -1392,9 +1426,12 @@ export function BlocksEditor({ s, c, pg }) {
               options=${[{ value: "clock", label: "its clock along it" }, { value: "value", label: "filling as shots are made" }]} />` : null}` : null}
         <${Check} checked=${!!(prog.info || {}).on} label="a line under its name" title=${ed.ch.info_line === false ? TIP.infoOff : TIP.info}
           onChange=${(v) => ed.set(["info", "on"], v)} />
+        <${Check} checked=${(prog.meters || []).length > 0} label="meters" title=${ed.ch.info_line === false ? TIP.metersOff : TIP.meters}
+          onChange=${(v) => ed.edit((d) => { d.meters = v ? [{ label: "ENERGY", color: "#20b0ff", value: null, max: { k: "num", v: 100 }, numbers: false }] : []; })} />
       </div>
       ${(prog.bar || {}).on && prog.bar.fill === "value" ? html`<${BarFill} prog=${prog} ed=${ed} />` : null}
       ${(prog.info || {}).on ? html`<${InfoLine} prog=${prog} ed=${ed} slug=${c.slug} />` : null}
+      ${(prog.meters || []).length ? html`<${Meters} prog=${prog} ed=${ed} />` : null}
       <${GameModes} prog=${prog} ed=${ed} />
       <${WithMyModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />

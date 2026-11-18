@@ -142,7 +142,12 @@ class _ChunkFile(io.RawIOBase):
     """A file of the build image, read in order, for an upload."""
 
     def __init__(self, tree, node):
-        self._it = iter(tree.chunks(node))
+        self._tree, self._node = tree, node
+        self.rewind()
+
+    def rewind(self):
+        """PAD-1436: from the first byte again (an upload cut off by a dropped connection is sent again whole)."""
+        self._it = iter(self._tree.chunks(self._node))
         self._buf, self._at = b"", 0
 
     def readable(self):
@@ -449,6 +454,11 @@ def _open_spike3(build, rec, log):
 class Machine:
     """What a Send asks of the machine.  :class:`SshMachine` over remote access; tests use a stand-in."""
 
+    #: PAD-1436: where a machine says it lost the connection and got it back, and what it asks whether to stop
+    #: trying; the Send sets them
+    log = staticmethod(lambda *a, **k: None)
+    cancel = staticmethod(lambda: False)
+
     def state(self, paths):
         """``{path: None | ("file", sha1) | ("link", target) | ("dir",) | ("other",)}``."""
         raise NotImplementedError
@@ -751,14 +761,71 @@ done
 """
 
 
+#: PAD-1436: a connection that drops part way through a Send (a remote machine's internet link, its Wi-Fi) is dialled
+#: again for this long before the Send gives up; the step it cut off is then done again
+RECONNECT_FOR = 300
+#: the waits between tries, seconds (the last one repeats)
+RECONNECT_WAITS = (2, 5, 10, 15, 30)
+#: PAD-1436: a keepalive this often keeps a router's or a tunnel's idle timer from dropping the connection while
+#: the machine works on a long command (hashing a big file) and nothing else crosses it
+KEEPALIVE = 15
+
+#: PAD-1436: after a reconnect, the game hold as it was: the watchdog that gave up on PAD started again (the game
+#: still held), or the game it had put back held again (nothing had changed yet)
+REHOLD_SCRIPT = r"""
+W=@W@
+[ -f $W/fns ] || { echo PAD_SEND_GONE; exit 0; }
+. $W/fns
+date +%s > $W/alive
+if [ ! -f $W/done ]; then echo PAD_SEND_HELD; exit 0; fi
+if [ -f $W/monitor ]; then
+  rm -f $W/done
+  (trap '' HUP; exec /bin/sh $W/watch) </dev/null >/dev/null 2>&1 &
+  echo PAD_SEND_WATCHING
+else
+  echo PAD_SEND_RESUMED
+fi
+"""
+
+
+def _again(fn):
+    """PAD-1436: a step of a Send that can be done twice to the same end: when the connection drops under it, the
+    machine is dialled again and the step done again from its start."""
+    def step(self, *a, **kw):
+        tries = 0
+        while True:
+            try:
+                return fn(self, *a, **kw)
+            except SendError:
+                raise
+            except Exception as e:                      # noqa: BLE001 - only a dead connection is retried
+                if self._alive():
+                    raise
+                tries += 1
+                if tries > 5:
+                    raise SendError("The connection to the machine kept dropping; send again.") from None
+                self.reconnect(e)
+                for arg in list(a) + list(kw.values()):
+                    if hasattr(arg, "rewind"):          # a file being sent goes again from its start
+                        arg.rewind()
+    step.__name__, step.__doc__ = fn.__name__, fn.__doc__
+    return step
+
+
 class SshMachine(Machine):
     """A machine over remote access, logged in as root with this computer's key."""
 
     def __init__(self, host, port=22, timeout=15):
+        self.host, self.port, self._timeout = host, int(port), timeout
+        self._dial()
+        _rc, out = self.sh("cat /proc/sys/kernel/random/boot_id 2>/dev/null", check=False)
+        self._boot = out.strip()
+
+    def _dial(self):
         import socket
         import paramiko
         from . import pad_ssh_key
-        self.host, self.port = host, int(port)
+        host, timeout = self.host, self._timeout
         try:
             # a machine on the home network answers in milliseconds: an address nothing answers at is said soon
             # (PAD-1427: and a remembered machine is then looked for at another one)
@@ -782,11 +849,65 @@ class SshMachine(Machine):
                                 "Remote access on, from this computer, and Send works after that." % host) from None
             if known is None:
                 pad_ssh_key.remember_host(host, self.port, *mine)
+            t.set_keepalive(KEEPALIVE)
             self.t = t
             self.sftp = paramiko.SFTPClient.from_transport(t)
         except BaseException:
             t.close()
             raise
+
+    def _alive(self):
+        t = getattr(self, "t", None)
+        return t is not None and t.is_active()
+
+    def reconnect(self, why=None):
+        """PAD-1436: the connection dropped under a Send: dial the machine again (for :data:`RECONNECT_FOR`
+        seconds), check it is the same run of it (not restarted), and put the game hold back as it was."""
+        self.close()
+        self.log("The connection to the machine dropped%s; connecting again..."
+                 % ((" (%s)" % str(why).strip().rstrip(":")) if why is not None and str(why).strip() else ""),
+                 "warning")
+        until = time.monotonic() + RECONNECT_FOR
+        n = 0
+        while True:
+            if self.cancel():
+                raise SendError("Send canceled.")
+            try:
+                self._dial()
+                break
+            except SendError as e:
+                if not isinstance(e, Unreachable):
+                    raise                               # a different identity, a refused key: never retried
+                last = e
+            except Exception as e:                      # noqa: BLE001 - the link half up: tried again
+                last = e
+            wait = RECONNECT_WAITS[min(n, len(RECONNECT_WAITS) - 1)]
+            n += 1
+            if time.monotonic() + wait > until:
+                raise SendError("The connection to the machine dropped and it didn't answer again for %d minutes "
+                                "(%s). Send again once it can be reached: the next Send picks up where this one "
+                                "stopped." % (RECONNECT_FOR // 60, str(last).strip() or type(last).__name__)) from None
+            for _ in range(int(wait * 10)):
+                if self.cancel():
+                    raise SendError("Send canceled.")
+                time.sleep(0.1)
+        _rc, out = self.sh("cat /proc/sys/kernel/random/boot_id 2>/dev/null", check=False)
+        if self._boot and out.strip() and out.strip() != self._boot:
+            self._paused = False
+            raise SendError("The machine restarted while the Send was running. Send again: the next Send picks up "
+                            "where this one stopped.")
+        if getattr(self, "_paused", False):
+            _rc, out = self.sh(self._fns(REHOLD_SCRIPT), check=False, timeout=60)
+            if "PAD_SEND_GONE" in out:
+                self._paused = False
+                raise SendError("The machine restarted while the Send was running. Send again: the next Send "
+                                "picks up where this one stopped.")
+            if "PAD_SEND_RESUMED" in out:
+                # its watchdog gave the game back (nothing had changed yet): held again before going on
+                self._beat_stop.set()
+                self._paused = False
+                self.pause_game()
+        self.log("Connected again; the Send carries on.", "info")
 
     def close(self):
         with contextlib.suppress(Exception):
@@ -807,7 +928,8 @@ class SshMachine(Machine):
             cmd = "/bin/sh %s; r=$?; rm -f %s; exit $r" % (name, name)
         else:
             cmd = "/bin/sh -c " + _q(full)
-        chan = self.t.open_session()
+        t = self.t
+        chan = t.open_session()
         chan.settimeout(timeout)
         chan.exec_command(cmd)
         if stdin:
@@ -826,6 +948,10 @@ class SshMachine(Machine):
             if not got:
                 if chan.exit_status_ready() and not chan.recv_ready() and not chan.recv_stderr_ready():
                     break
+                if not t.is_active():
+                    # PAD-1436: the connection dropped under the command: said now, not at its timeout (hours for
+                    # a big file's hashes), so the Send connects again and does the step again
+                    raise EOFError("Server connection dropped")
                 if time.monotonic() > until:
                     chan.close()
                     raise SendError("The machine stopped answering; check it and Send again.")
@@ -900,7 +1026,8 @@ class SshMachine(Machine):
     def commit(self, renames, links, deletes):
         lines = ["set -e"]
         for tmp, final in renames:
-            lines.append("mv -f %s %s" % (_q(tmp), _q(final)))
+            # PAD-1436: done again after a dropped connection: a copy already renamed into place is not missed
+            lines.append("{ [ ! -e %s ] && [ -e %s ]; } || mv -f %s %s" % (_q(tmp), _q(final), _q(tmp), _q(final)))
         for path, target, uid, gid in links:
             tmp = posixpath.join(posixpath.dirname(path), "." + posixpath.basename(path) + TMP_TAG)
             # mv -T where it exists: a plain mv onto a link to a folder would move the new link INTO it
@@ -1000,7 +1127,9 @@ class SshMachine(Machine):
 
     def mount_part(self, num, path):
         # read-only: compared first; made writable only when the Send changes it (PAD-1427)
-        self.sh("mkdir -p %s && mount -t ext4 -o ro /dev/mmcblk0p%d %s" % (_q(path), int(num), _q(path)))
+        # PAD-1436: done again after a dropped connection, so a partition it already mounted is left as it is
+        self.sh("mkdir -p %s && { awk -v p=%s '$2 == p {f = 1} END {exit !f}' /proc/mounts || "
+                "mount -t ext4 -o ro /dev/mmcblk0p%d %s; }" % (_q(path), _q(path), int(num), _q(path)))
 
     def umount_part(self, path):
         self.sh("sync; umount %s && rmdir %s" % (_q(path), _q(path)), check=False)
@@ -1163,6 +1292,14 @@ class SshMachine(Machine):
         self.sh(self._fns(". @W@/fns\npad_resume"), check=False, timeout=90)
         self._paused = False
 
+
+# PAD-1436: the steps a dropped connection is reconnected under and done again (each comes to the same end twice)
+for _name in ("state", "sizes", "read_ranges", "free", "remount", "mkdir", "upload", "commit", "write_ranges", "remove",
+              "sync", "read_ledger", "write_ledger", "layout", "mounts", "walk", "mount_part", "umount_part",
+              "raw_sha1", "raw_write", "set_mtime", "block_hashes", "file_sha1s", "truncate", "set_attrs", "copy",
+              "in_use", "describe"):
+    setattr(SshMachine, _name, _again(getattr(SshMachine, _name)))
+del _name
 
 def connect(address, log=None):
     """An :class:`SshMachine` for ``host`` or ``host:port``.
@@ -1501,7 +1638,15 @@ class Target:
 
 class _RawFile(io.RawIOBase):
     def __init__(self, chunks):
-        self._it, self._buf, self._at = iter(chunks), b"", 0
+        # *chunks*: the chunks, or (PAD-1436) what makes them afresh, so a send cut off by a dropped connection
+        # starts again from the first
+        self._make = chunks if callable(chunks) else None
+        self._it, self._buf, self._at = iter(chunks() if callable(chunks) else chunks), b"", 0
+
+    def rewind(self):
+        if self._make is None:
+            raise SendError("This copy can't be sent again; send again.")
+        self._it, self._buf, self._at = iter(self._make()), b"", 0
 
     def readable(self):
         return True
@@ -1963,7 +2108,7 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         for num, want in raws.items():
             check()
             log("Writing the boot partition (%s)..." % _human(target.raw[num][1]), "info")
-            machine.raw_write(num, _RawFile(target.raw_chunks(num)), target.raw[num][1], want)
+            machine.raw_write(num, _RawFile(lambda num=num: target.raw_chunks(num)), target.raw[num][1], want)
         machine.sync()
         rec = target.plan.record() if target.plan is not None else {"paths": [], "ranges": {}}
         machine.write_ledger(dict(rec, card=target.card_id, pending=False))
@@ -2083,6 +2228,7 @@ class SendPipeline(BasePipeline):
             machine = self._connect(self.address)
         except SendError as e:
             raise PipelineError("Connect", str(e)) from None
+        machine.log, machine.cancel = self._log, (lambda: self._cancelled)    # PAD-1436: a reconnect says so
         try:
             summary = send_image(self.image, machine, self._log, self._send_progress, lambda: self._cancelled)
         except SendError as e:

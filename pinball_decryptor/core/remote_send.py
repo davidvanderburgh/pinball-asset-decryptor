@@ -915,6 +915,9 @@ class SshMachine(Machine):
 
     def write_ranges(self, path, ranges):
         with self.sftp.open(path, "r+b") as f:
+            # PAD-1433: pipelined, as putfo is: each 32 KB packet no longer waits for the last one's answer (+25%
+            # measured over a machine's Wi-Fi).  A write the machine refuses still raises, at the close
+            f.set_pipelined(True)
             for off, data in ranges:
                 f.seek(off)
                 f.write(data)
@@ -1132,8 +1135,8 @@ class SshMachine(Machine):
         if not getattr(self, "_paused", False):
             return
         self._screen["pct"] = max(0, min(100, int(done * 100 / total))) if total else 0
-        self._screen["what"] = {"Uploading": "RECEIVING", "Updating": "UPDATING",
-                                "Comparing": "CHECKING"}.get(what, "WORKING")
+        self._screen["what"] = {"Uploading": "RECEIVING", "Updating": "UPDATING", "Comparing": "CHECKING",
+                                "Finishing": "FINISHING"}.get((what or "").split(" ")[0], "WORKING")
 
     def screen_changing(self):
         if getattr(self, "_paused", False):
@@ -1368,7 +1371,8 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
                     machine.screen_changing()
                     changed = True
                 log("Updating %s in place (only the parts that differ)..." % op.path, "info")
-                delta_put(machine, plan.trees[op.mount][0], op, cancel)
+                delta_put(machine, plan.trees[op.mount][0], op, cancel,
+                          progress=lambda done, base=sent: progress(base + done, total, "Updating"))
                 sent += op.size
                 progress(sent, total, "Updating")
                 continue
@@ -1392,6 +1396,7 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
                 raise SendError("%s didn't arrive whole on the machine (its check failed); nothing was changed. "
                                 "Send again." % ", ".join(bad[:3]))
         log("Every file arrived whole; putting them in place.", "info")
+        progress(1, 1, "Finishing")
         check()
         links = [(op.path, op.target, op.uid, op.gid) for op in needed if op.kind == "link"]
         deletes = [(op.path, getattr(op, "cur", None) == ("dir",))
@@ -1517,6 +1522,11 @@ class _RawFile(io.RawIOBase):
 #: block at a time and only the blocks that differ are written, in place - no second copy needs room, and only the
 #: changes cross the network
 DELTA_BLOCK = 1 << 20
+#: the machine hashes the same-size files a full Send compares in batches this big, the bar moving after each
+COMPARE_BATCH_FILES = 200
+#: differing blocks written per SFTP open: the bar moves after each batch (4 MB: a few seconds over Wi-Fi)
+DELTA_BATCH = 4
+COMPARE_BATCH_BYTES = 128 << 20
 
 
 def _blocks(tree, node, bs=None):
@@ -1532,10 +1542,11 @@ def _blocks(tree, node, bs=None):
         yield at, buf
 
 
-def delta_put(machine, tree, op, cancel=None, at=None):
+def delta_put(machine, tree, op, cancel=None, at=None, progress=None):
     """Make the machine's existing copy of ``op.path`` (or the copy of it at *at*) the build's file by writing
     only the blocks that differ, in place.  Only with the game stopped (it would read a half-changed file), and
-    never on the system partition itself (:func:`delta_replace`).  Returns the bytes written."""
+    never on the system partition itself (:func:`delta_replace`).  Returns the bytes written.  *progress(done)*
+    (PAD-1433) is told how far through the file it is after each batch written, so a big file moves the bar."""
     path = at or op.path
     size, theirs = machine.block_hashes(path)
     sent, batch = 0, []
@@ -1545,9 +1556,11 @@ def delta_put(machine, tree, op, cancel=None, at=None):
             continue
         batch.append((off, block))
         sent += len(block)
-        if len(batch) >= 16:
+        if len(batch) >= DELTA_BATCH:
             machine.write_ranges(path, batch)
             batch = []
+            if progress is not None:
+                progress(min(off + len(block), op.size))
         if cancel is not None and cancel():
             raise SendError("Send canceled.")
     if batch:
@@ -1562,7 +1575,7 @@ def delta_put(machine, tree, op, cancel=None, at=None):
     return sent
 
 
-def delta_replace(machine, tree, op, cancel=None):
+def delta_replace(machine, tree, op, cancel=None, progress=None):
     """:func:`delta_put` for a system-partition file: the remote access session runs on those (busybox is the
     shell and every tool a Send uses; the server and libc too), and a program changed under its running copy
     breaks, as a file cut off half-written would on the next boot.  So the machine copies the file beside
@@ -1572,7 +1585,7 @@ def delta_replace(machine, tree, op, cancel=None):
     tmp = posixpath.join(posixpath.dirname(op.path), "." + posixpath.basename(op.path) + TMP_TAG)
     machine.copy(op.path, tmp)
     try:
-        sent = delta_put(machine, tree, op, cancel, at=tmp)
+        sent = delta_put(machine, tree, op, cancel, at=tmp, progress=progress)
         machine.commit([(tmp, op.path)], [], [])
     except BaseException:
         with contextlib.suppress(Exception):
@@ -1780,10 +1793,23 @@ def sync_ops(tree, mine, prefix, protected, own_mounts, hashes_on_machine, log=N
     if same_size:
         if log:
             log("Comparing %d file(s) the same size on the machine and the image..." % len(same_size), "info")
-        theirs = hashes_on_machine([p for p, _n, _o in same_size])
-        for i, (path, node, own) in enumerate(same_size):
-            if progress:
-                progress(i, len(same_size), "Comparing")
+        # PAD-1433: the machine hashes its copies in batches, and the bar moves by the bytes hashed.  One call for
+        # every file sat the bar at the last partition's 99% for the minutes the machine read gigabytes
+        what = "Comparing the %s files" % ("system" if prefix == ROOT else "game" if prefix == GAMES else prefix)
+        total_b = sum(n["size"] for _p, n, _o in same_size) or 1
+        theirs, done_b, batch, batch_b = {}, 0, [], 0
+        if progress:
+            progress(0, total_b, what)
+        for i, (path, n, _own) in enumerate(same_size):
+            batch.append(path)
+            batch_b += n["size"]
+            if len(batch) >= COMPARE_BATCH_FILES or batch_b >= COMPARE_BATCH_BYTES or i == len(same_size) - 1:
+                theirs.update(hashes_on_machine(batch))
+                done_b += batch_b
+                batch, batch_b = [], 0
+                if progress:
+                    progress(min(done_b, total_b), total_b, what)
+        for path, node, own in same_size:
             digest = tree.sha1(node)
             m_mode, m_uid, m_gid = mine[path][3:6]
             # the card's SFTP server doesn't say who owns a file (None): an owner it doesn't name isn't a difference
@@ -1900,7 +1926,9 @@ def sync(target, machine, log=None, progress=None, cancel=None):
                     # system files in a copy renamed over them (delta_replace: the session runs on those)
                     log("Updating %s (%s; only the parts that differ are sent)..." % (op.path, _human(op.size)),
                         "info")
-                    delta_bytes += (delta_replace if mount == ROOT else delta_put)(machine, tree, op, cancel)
+                    delta_bytes += (delta_replace if mount == ROOT else delta_put)(
+                        machine, tree, op, cancel,
+                        progress=lambda done, base=sent: progress(base + done, total, "Updating"))
                     sent += op.size
                     progress(sent, total, "Updating")
                     continue
@@ -1954,6 +1982,7 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             with contextlib.suppress(Exception):
                 machine.umount_part(mount)
     n = sum(len(v) for v in all_ops.values())
+    progress(1, 1, "Finishing")
     if reboot:
         log("Restarting the machine on the new card...", "info")
         machine.reboot()
@@ -2013,6 +2042,12 @@ def send_image(image, machine, log=None, progress=None, cancel=None):
 from .pipeline_base import BasePipeline, PipelineError  # noqa: E402
 
 
+#: PAD-1433: a Send's own chips in the status bar (it used to borrow the Write build's, and never moved them)
+SEND_PHASES = ("Connect", "Compare", "Send", "Finish")
+#: the word a Send's progress starts with -> its chip
+_PHASE_OF = (("Comparing", 1), ("Updating", 2), ("Uploading", 2), ("Writing", 2), ("Finishing", 3))
+
+
 class SendPipeline(BasePipeline):
     """A Send as one of the app's runs: its log, its progress bar, its Cancel (the Write tab's)."""
 
@@ -2020,18 +2055,36 @@ class SendPipeline(BasePipeline):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image, self.address = image, address
         self._connect = connect_fn or connect
+        self._phase_now = -1
+        self._rate = []
+
+    def _to_phase(self, index):
+        if index != self._phase_now:
+            self._phase_now = index
+            self._rate = []
+            self._set_phase(index)
+
+    def _send_progress(self, done, total, what=""):
+        """The bar, its chip, and (PAD-1433) for the bytes going to the machine the rate and the time left: over a
+        machine's Wi-Fi a big Send takes hours, and the user should see that, not a crawling bar."""
+        for word, index in _PHASE_OF:
+            if what.startswith(word):
+                self._to_phase(index)
+                break
+        if self._phase_now == 2 and total:
+            from .rawdevice import _rate_note
+            what = "Sending %s of %s%s" % (_human(done), _human(total), _rate_note(self._rate, done, total))
+        self._progress(int(done * 100 / total) if total else 0, 100, what)
 
     def _run(self):
+        self._to_phase(0)
         self._log("Sending %s to the machine at %s..." % (os.path.basename(self.image), self.address), "info")
         try:
             machine = self._connect(self.address)
         except SendError as e:
             raise PipelineError("Connect", str(e)) from None
         try:
-            summary = send_image(self.image, machine, self._log,
-                                 lambda done, total, what="": self._progress(
-                                     int(done * 100 / total) if total else 0, 100, what),
-                                 lambda: self._cancelled)
+            summary = send_image(self.image, machine, self._log, self._send_progress, lambda: self._cancelled)
         except SendError as e:
             raise PipelineError("Send", str(e)) from None
         finally:

@@ -524,3 +524,20 @@ def test_network_tab_sets_up_the_picked_card_and_keeps_it_on_for_the_project(tmp
 def test_network_tab_needs_no_project():
     from pinball_decryptor.webui.tabs.network import NetworkTab
     assert NetworkTab.rail_needs(None) == 'none'
+
+
+def test_a_send_shows_its_own_phase_chips_in_the_footer(tmp_path, monkeypatch):
+    """PAD-1433: a Send borrowed the Write build's chips and never moved them; it has its own now, and a Write
+    afterwards gets the build's back."""
+    from tests.webui_harness import web_app
+    monkeypatch.setattr(remote_send.SendPipeline, 'run', lambda self: None)
+    with web_app(tmp_path, mfr='stern') as w:
+        build = list(w.window._phases['write'])
+        w.run(w.app._start_send, str(tmp_path / 'card.raw'), '192.168.4.130')
+        f = w.window._footer()
+        assert f['mode'] == 'write' and f['phases'] == list(remote_send.SEND_PHASES) and f['run_label'] == 'Sending'
+        w.run(lambda: w.window.set_running(False, mode='write'))
+        w.app._send_active = False
+        assert not w.window._footer().get('run_label')
+        w.run(w.window._refresh_extract_phases)
+        assert list(w.window._phases['write']) == build != list(remote_send.SEND_PHASES)

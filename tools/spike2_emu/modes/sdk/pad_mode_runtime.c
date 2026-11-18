@@ -11587,13 +11587,16 @@ static struct {
     int blocked;                                 /* pm_own_game asked pm_block_game_modes (and lifts it) */
     volatile int fresh;                          /* a ball's start: from its end (or the game's start) to its first switch */
     volatile int tilted;                         /* from the tilt event to the ball's end */
+    volatile int ball_on;                        /* from the bus's ball_start to the ball's end: points are zeroed
+                                                  * even before the first switch (Elvira's skill shot) - the bonus,
+                                                  * between a ball's end and the next one's start, is the game's */
     volatile unsigned long pass_until;           /* the tilt warning: the game's own reactions pass until then */
     volatile unsigned refused[OG_N], passed[OG_N];
     volatile unsigned first[OG_N];               /* said once a ball: the first refused (or passed) call's return address */
     volatile unsigned between[OG_N], first_between[OG_N];   /* the game's calls between balls (its end, the next's start) */
-    int tiltw_id, tilt_id, game_id;              /* the bus ids of the port's events, -1 = none */
+    int tiltw_id, tilt_id, game_id, ball_id;     /* the bus ids of the port's events, -1 = none */
     unsigned balls;
-} og = { .fresh = 1, .tiltw_id = -1, .tilt_id = -1, .game_id = -1 };
+} og = { .fresh = 1, .tiltw_id = -1, .tilt_id = -1, .game_id = -1, .ball_id = -1 };
 
 
 /* a return address in this object (its code, or one of its trampolines) */
@@ -11624,7 +11627,8 @@ static int og_veto(pm_reg *r, unsigned n)
     if (!og.owner || n >= OG_N) return 0;
     if ((n == OG_SHOT || n == OG_RULE) && og.fresh) og_shot_seen();
     ours = og_ours((pm_addr)r[PM_REG_LR]) || (n == OG_SHOW && show_now.n);   /* a show of ours runs as the game's */
-    refuse = og_refuses(1, pm_in_game(), og.fresh, og.tilted, pm_ms(), og.pass_until, ours, og_self, og_sites[n].how);
+    refuse = og_refuses(1, pm_in_game(), og.fresh && !((og_sites[n].how & OG_ZERO) && og.ball_on), og.tilted, pm_ms(),
+                        og.pass_until, ours, og_self, og_sites[n].how);
     if (!refuse) {
         if (ours || og_self || !pm_in_game()) return 0;
         if ((og.fresh || og.tilted) && n != OG_SHOT) {     /* between balls: the game's own (its bonus, its ball start) */
@@ -11720,7 +11724,8 @@ static void og_event(unsigned id)
 {
     if ((int)id == og.tiltw_id) og.pass_until = pm_ms() + 3000ul;
     if ((int)id == og.tilt_id) og.tilted = 1;
-    if ((int)id == og.game_id) og.fresh = 1, og.tilted = 0;
+    if ((int)id == og.game_id) og.fresh = 1, og.tilted = 0, og.ball_on = 0;
+    if ((int)id == og.ball_id) og.ball_on = 1;
 }
 
 static void og_ball_end(void)
@@ -11729,6 +11734,7 @@ static void og_ball_end(void)
     unsigned i, at = 0, any = 0;
     og.fresh = 1;
     og.tilted = 0;
+    og.ball_on = 0;
     og.pass_until = 0;
     if (!og.owner) return;
     og.balls++;
@@ -11764,6 +11770,7 @@ static int og_arm(void)
     og.tiltw_id = event_bus_id("tilt_warning");
     og.tilt_id = event_bus_id("tilt");
     og.game_id = event_bus_id("game_start");
+    og.ball_id = event_bus_id("ball_start");
     for (i = 0; i < OG_N; i++) {
         pm_addr a = fn(og_sites[i].site);
         if (!a) continue;
@@ -11826,6 +11833,7 @@ int pm_own_game(int on)
     og.blocked = (can & PM_CAN_BLOCK_GAME) && block_owner != current ? pm_block_game_modes(1) : 0;
     pm_snprintf(og.who, sizeof og.who, "%s", mode_name(current, "a mode"));
     og.balls = 0;
+    og.ball_on = pm_in_game();                   /* it takes the game as it starts: ball 1 has begun */
     og.owner = current;
     say("own game: %s has the whole game - the game's own %s held back while a ball is in play%s", og.who,
         og.hooked & (1u | 1u << OG_RULE | 1u << OG_SPAWN) ? "shots, points, calls, serves, award screens and light shows"

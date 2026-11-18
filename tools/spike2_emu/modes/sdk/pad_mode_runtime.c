@@ -16044,7 +16044,10 @@ static pm_reg ait_page_run(unsigned a, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a
 {
     unsigned i;
     pm_reg r;
-    if (ait_wrapped) ait_up(ait_anchor_entry[a]);
+    if (ait_wrapped) {                    /* a screen taken off whose place items take: only they come up */
+        if (ait_bit(ait_hidden, ait_anchor_entry[a])) ait_noes = 0;
+        else ait_up(ait_anchor_entry[a]);
+    }
     for (i = 0; i < ait_n; i++) if (ait_items[i].anchor == a && !ait_items[i].after) ait_play(i);
     /* the game's own page, as it was - unless the owner took it off (PAD-1407): then only the items show */
     r = ait_game_says[a] && !ait_bit(ait_hidden, ait_anchor_entry[a]) ? ait_game_page[a](a0, a1, a2, a3) : 0;

@@ -228,6 +228,19 @@ HOSTPID=""; AS_USER=()
 for p in "padglhost $SD/padgl.ring" "s3bridge.py $SD( |\$)" "s3vidhost.py $SD( |\$)" "s3press.py (auto|watch)guide $SLOT( |$)" "s3keys.py $SLOT( |\$)"; do
     pkill -f "$p" 2>/dev/null && echo "[s3run] stopped a leftover: $p"
 done
+# A BUILD FROM THESE SOURCES (PAD-1380). s3launch.sh (the app) rebuilds when the build's .srcsum no longer matches;
+# rig and proof runs come here directly and ran a build from before PAD-1340 for days: no pad_nosync.so, so every
+# game's first settings save called the real sync(), sat in D state for good, and wedged each later run until
+# `wsl --shutdown`. Rebuild here the same way, one at a time machine-wide.
+if [ "$(cat "$B/.srcsum" 2>/dev/null)" != "$(bash "$S/s3build.sh" --sum)" ] || [ ! -e "$B/pad_nosync.so" ]; then
+    mkdir -p "$B"
+    echo "[s3run] the rig build in $B is not from these sources: building it (a few minutes)"
+    ( flock 9
+      [ "$(cat "$B/.srcsum" 2>/dev/null)" = "$(bash "$S/s3build.sh" --sum)" ] && [ -e "$B/pad_nosync.so" ] \
+          || bash "$S/s3build.sh" "$B" 2>&1 | sed -u 's/^/[s3build] /'
+    ) 9>"$B.lock"
+fi
+[ -e "$B/pad_nosync.so" ] || { echo "[s3run] no $B/pad_nosync.so: the game's sync() would wedge WSL (bash s3build.sh)" >&2; exit 1; }
 if [ "$BRIDGE" = 1 ]; then
     for f in libGLESv2.so.2 libEGL.so.1 s3kms.so padglhost; do
         [ -e "$B/$f" ] || { echo "[s3run] --bridge needs $B/$f: bash s3build.sh" >&2; exit 1; }

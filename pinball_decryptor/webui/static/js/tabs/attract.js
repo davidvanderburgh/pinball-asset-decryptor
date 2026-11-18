@@ -16,6 +16,10 @@ const T = {
   drag: "Drag to move it between the game's screens, or use the arrows.",
   seconds: "How long it stays on the screen, in seconds. A clip at 0 plays to its end.",
   tryit: "Start the emulator with this project's changes, your attract items among them.",
+  hide: "Take this screen of the game's off the attract mode. Your items next to it still show.",
+  show: "Show this screen of the game's in the attract mode again.",
+  replace: "For a whole new game of your own: every screen of the game's attract is taken off but its high score and "
+    + "champion screens, and your own title card, photos and clips show in their place.",
   flipper: "Sounds the machine plays when a flipper button is pressed in attract mode. Kept with the project's "
     + "other sounds.",
 };
@@ -37,12 +41,16 @@ function addMenu(e, g, running) {
 
 function GameRow({ g, running }) {
   const span = g.n > 1 ? `screens ${g.first + 1}–${g.last + 1}` : `screen ${g.first + 1}`;
-  return html`<div class="at-row at-game">
+  return html`<div class=${cx("at-row at-game", g.hidden && "off")}>
     <span class="at-ic"><${Icon} name="sd" /></span>
     <span class="at-name">${g.name}${g.n > 1 ? html` <span class="muted">×${g.n}</span>` : null}</span>
     <span class="muted small">${span}</span>
     ${g.sometimes ? html`<span ...${tip(T.sometimes)}><${Chip}>at times<//></span>` : null}
+    ${g.hidden ? html`<${Chip} kind="warn">taken off<//>` : null}
     <span class="sp"></span>
+    <${Button} size="sm" kind="ghost" icon=${g.hidden ? "eye" : "eye-off"} disabled=${running}
+      title=${g.hidden ? T.show : T.hide}
+      onClick=${() => call("attract.set_hidden", g.first, g.last, !g.hidden)}>${g.hidden ? "Show" : "Hide"}<//>
     <${Button} size="sm" kind="ghost" icon="plus" disabled=${running} title="Add your own here"
       onClick=${(e) => addMenu(e, g, running)}>Add<//>
   </div>`;
@@ -123,6 +131,19 @@ export default function AttractTab() {
   return html`<div class="page at-page">
     ${head}
     <${Note} kind="warn">${s.insider}<//>
+    <${Card} title="Your own game's attract" sub=${T.replace}>
+      <div class="row">
+        ${s.replaced
+          ? html`<${Button} icon="refresh" disabled=${s.running} onClick=${() => call("attract.replace_all", false)}>Show the game's own screens again<//>`
+          : html`<${Button} kind="primary" icon="star" disabled=${s.running} onClick=${() => call("attract.replace_all", true)}>Replace the game's attract<//>`}
+        ${s.hidden ? html`<${Chip} kind="warn">${s.hidden} of ${s.pages} game screens taken off<//>` : null}
+      </div>
+      <div class="row small muted">
+        <span>The high score screens keep the game's own words (GRAND CHAMPION, HIGH SCORE #1…). Rename them to your
+          game's on the Text page.</span>
+        <${Button} size="sm" kind="ghost" icon="text" onClick=${() => call("ui.select_tab", "text")}>Go to Text<//>
+      </div>
+    <//>
     <${Card} title="Attract, in order" sub="The game's own screens, and yours between them">
       <${Sequence} s=${s} />
     <//>

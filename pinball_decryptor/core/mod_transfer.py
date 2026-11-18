@@ -2034,9 +2034,10 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     # as a whole: carried when the target has none of its own. Their files stay where they were picked.
     n_attract = 0
     at = src_saved.get("attract_items")
-    if isinstance(at, dict) and at.get("items") and not (tgt.get("attract_items") or {}).get("items"):
+    from ..plugins.stern.attract_items import asks as _attract_asks
+    if _attract_asks(at) and not _attract_asks(tgt.get("attract_items")):
         tgt["attract_items"] = at
-        n_attract = len(at["items"])
+        n_attract = len(at.get("items") or []) or 1        # PAD-1407: a record of hidden screens alone counts
 
     # Staged Defaults-tab edits, merged per setting / per high-score slot so
     # anything already set on the target extract stays as the user left it.

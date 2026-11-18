@@ -193,7 +193,7 @@ def project_extras(assets_folder):
     if vv:
         extras[_EXTRA_VARIANTS] = vv
     at = data.get(_EXTRA_ATTRACT)
-    if isinstance(at, dict) and (at.get("items") or at.get("champions") is False):
+    if isinstance(at, dict) and (at.get("items") or at.get("champions") is False or at.get("hidden")):
         extras[_EXTRA_ATTRACT] = json.loads(json.dumps(at))
     return extras
 
@@ -221,13 +221,21 @@ def pack_attract(rec):
             it["file"] = members[key]
         items.append(it)
     out = dict(rec, items=items) if isinstance(rec, dict) else None
-    keep = out is not None and (items or out.get("champions") is False)
+    keep = out is not None and (items or out.get("champions") is False or out.get("hidden"))
     return (out if keep else None), files, gone
 
 
 def _attract_words(rec):
     n = len(rec.get("items") or [])
-    return "%d attract item(s)" % n if n else "the attract settings"
+    h = len(rec.get("hidden") or [])
+    words = "%d attract item(s)" % n if n else "the attract settings"
+    return words + (" (%d of the game's attract screens taken off)" % h if h else "")
+
+
+def _attract_asks(raw):
+    """PAD-1407: an attract record that asks something (items, champions off, the game's screens taken off)."""
+    from ..plugins.stern.attract_items import asks
+    return asks(raw)
 
 
 def _unpack_attract(zip_path, assets_folder, rec, log_cb=None):
@@ -268,7 +276,7 @@ def _unpack_attract(zip_path, assets_folder, rec, log_cb=None):
                 it["file"] = written[member]
             items.append(it)
     out = dict(rec, items=items)
-    if not items and out.get("champions") is not False:
+    if not items and out.get("champions") is not False and not out.get("hidden"):
         return None
     if written and log_cb:
         log_cb("The pack's attract photos and clips (%d) are in this project's "
@@ -529,7 +537,7 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
     _staged = staged_changes.load(assets_folder)
     if not changed and not staged_changes.sound_modes_of(_staged) \
             and not _variant_map(_staged.get(_EXTRA_VARIANTS)) \
-            and not (_staged.get(_EXTRA_ATTRACT) or {}).get("items"):
+            and not _attract_asks(_staged.get(_EXTRA_ATTRACT)):
         # a project of music modes (PAD-494) or random clips (PAD-553) alone
         # changes no file of the extract, and is still something to pack
         raise ValueError("No modified files found. Modify some files first.")
@@ -1034,7 +1042,7 @@ def apply_extras(assets_folder, extras, log_cb=None):
         data[_EXTRA_VARIANTS] = merged
         applied[_EXTRA_VARIANTS] = len(vv)
     at = extras.get(_EXTRA_ATTRACT)
-    if isinstance(at, dict) and (at.get("items") or at.get("champions") is False):
+    if _attract_asks(at):          # items, the champions off, or (PAD-1407) the game's screens taken off
         # PAD-782: the pack's attract items take the project's place (one attract mode)
         data[_EXTRA_ATTRACT] = at
         applied[_EXTRA_ATTRACT] = len(at.get("items") or []) or 1

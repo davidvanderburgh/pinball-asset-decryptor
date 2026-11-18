@@ -340,12 +340,149 @@ def test_network_tab_scan_remembers_every_machine_and_picks_one(tmp_path, monkey
         w.call('network.scan')
         _settle(w, 'scanning')
         st = w.state('network')
-        assert st['scan_kind'] == 'err' and 'only other devices' in st['scan_note'] and len(st['found']) == 1
+        assert st['scan_kind'] == 'err' and 'only the 1 other device' in st['scan_note'] and len(st['found']) == 1
+        # PAD-1430: the device says what it is, from its server's own name
+        assert st['found'][0]['line'].startswith('192.168.1.20 runs OpenSSH, so it is a computer')
 
-        monkeypatch.setattr(machine_scan, 'scan', lambda **k: [])
+        def scan_with_report(**k):
+            k['report'].update(networks=['192.168.4.0/22'], addresses=1022, passes=2, known=57)
+            return []
+        monkeypatch.setattr(machine_scan, 'scan', scan_with_report)
         w.call('network.scan')
         _settle(w, 'scanning')
-        assert w.state('network')['scan_kind'] == 'err' and 'Found no machine' in w.state('network')['scan_note']
+        note = w.state('network')['scan_note']
+        assert w.state('network')['scan_kind'] == 'err' and 'Found no device with remote login' in note
+        assert 'Looked at 1022 addresses on 192.168.4.0/22, the 57 devices this computer knew of first' in note
+
+
+def test_check_connection_finds_the_machine_at_another_address(tmp_path, monkeypatch):
+    """PAD-1430: David's typed 192.168.4.150 answered nothing; the machine was at .130.  A typed address has no
+    identity to look for, so Check connection looks over the network for a machine that lets this computer in."""
+    from tests.webui_harness import web_app
+    godzilla = dict(address='192.168.4.130', banner='SSH-2.0-dropbear_2025.88', lets_in=True, game='godzilla_le',
+                    host_key=('ssh-ed25519', 'GGGG'), note='')
+
+    def unreachable(address, log=None):
+        raise remote_send.Unreachable('Nothing answered at 192.168.4.150 on port 22 in 5 seconds.')
+    monkeypatch.setattr(remote_send, 'connect', unreachable)
+    monkeypatch.setattr(machine_scan, 'scan', lambda **k: [dict(godzilla)])
+    with web_app(tmp_path, mfr='stern') as w:
+        w.call('network.set_address', '192.168.4.150')
+        w.call('network.check_connection')
+        _settle(w, 'checking')
+        st = w.state('network')
+    assert st['check_kind'] == 'ok', st['check']
+    assert st['check'].startswith('Nothing answered at 192.168.4.150')
+    assert 'Found Godzilla LE at 192.168.4.130 instead' in st['check'] and 'switched to it' in st['check']
+    assert st['address'] == '192.168.4.130' and pad_ssh_key.last_address() == '192.168.4.130'
+
+
+def test_networks_scan_the_home_network_at_its_real_size():
+    """PAD-1430: a mesh network is a /22 (192.168.4.0 - 192.168.7.255 on David's); only the default route's
+    network is widened, and never past a /22."""
+    a = [ipaddress.IPv4Address('192.168.4.162'), ipaddress.IPv4Address('172.24.0.1')]
+    assert [str(n) for n in machine_scan.networks(a, {'192.168.4.162': 22, '172.24.0.1': 20})] == \
+        ['192.168.4.0/22', '172.24.0.0/24']
+    assert [str(n) for n in machine_scan.networks(a[:1], {'192.168.4.162': 16})] == ['192.168.4.0/22']
+    assert [str(n) for n in machine_scan.networks(a[:1], {'192.168.4.162': 26})] == ['192.168.4.0/24']
+    assert [str(n) for n in machine_scan.networks(a[:1], {})] == ['192.168.4.0/24']
+
+
+def test_prefixes_are_read_from_ip_and_ifconfig():
+    assert machine_scan._prefixes_text('2: wlan0    inet 192.168.4.162/22 brd 192.168.7.255 scope global') == \
+        {'192.168.4.162': 22}
+    assert machine_scan._prefixes_text('\tinet 10.0.0.5 netmask 0xfffffc00 broadcast 10.0.3.255') == {'10.0.0.5': 22}
+    assert machine_scan._prefixes_text('inet 10.0.0.5  netmask 255.255.255.0') == {'10.0.0.5': 24}
+
+
+def test_neighbours_read_from_the_arp_table(monkeypatch):
+    import subprocess
+    arp = ('Interface: 192.168.4.162 --- 0x4\n  Internet Address      Physical Address      Type\n'
+           '  192.168.4.1           c4-a8-16-b8-64-12     dynamic\n'
+           '  192.168.4.130         80-3f-5d-26-9e-4e     dynamic\n'
+           '  192.168.7.255         ff-ff-ff-ff-ff-ff     static\n'
+           '  224.0.0.22            01-00-5e-00-00-16     static\n')
+    linux = ('192.168.4.130 dev wlan0 lladdr 80:3f:5d:26:9e:4e REACHABLE\n'
+             '192.168.4.9 dev wlan0 FAILED\n')
+    out = arp if machine_scan.sys.platform in ('win32', 'darwin') else linux
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(a, 0, out, ''))
+    got = machine_scan.neighbours()
+    assert '192.168.4.130' in got and '192.168.7.255' not in got and '224.0.0.22' not in got
+    assert '192.168.4.9' not in got
+
+
+@pytest.fixture
+def slow_ssh_server():
+    """An SSH server that takes 0.8 s to say hello: a machine whose answer queues behind a sweep."""
+    import socket
+    import threading
+    import time
+    srv = socket.socket()
+    srv.bind(('127.0.0.1', 0))
+    srv.listen(8)
+    stop = threading.Event()
+
+    def serve():
+        srv.settimeout(0.2)
+        while not stop.is_set():
+            try:
+                c, _ = srv.accept()
+            except OSError:
+                continue
+            with c:
+                time.sleep(0.8)
+                try:
+                    c.sendall(b'SSH-2.0-dropbear_2025.88\r\n')
+                except OSError:
+                    pass
+    t = threading.Thread(target=serve, daemon=True)
+    t.start()
+    yield srv.getsockname()[1]
+    stop.set()
+    t.join(3)
+    srv.close()
+
+
+def test_a_known_device_is_asked_unhurried_before_the_sweep(slow_ssh_server, monkeypatch):
+    """PAD-1430: on David's mesh one quick sweep missed the machine; a device this computer already knows is
+    there is asked first, with a long timeout."""
+    monkeypatch.setattr(machine_scan, 'neighbours', lambda: [])
+    net = [ipaddress.IPv4Network('127.0.0.1/32')]
+    monkeypatch.setattr(machine_scan, '_banner', _short_banner(machine_scan._banner))
+    assert machine_scan.scan(net, port=slow_ssh_server, timeout=0.1, retry_timeout=None, log_in=False,
+                             remembered=[]) == []
+    report = {}
+    found = machine_scan.scan(net, port=slow_ssh_server, timeout=0.1, retry_timeout=None, log_in=False,
+                              remembered=['127.0.0.1'], report=report)
+    assert [f['address'] for f in found] == ['127.0.0.1'] and report['known'] == 1
+
+
+def _short_banner(real):
+    """_banner waits at least 1.5 s for the hello once connected; a sweep's short timeout is the point here."""
+    def banner(host, port, timeout):
+        import socket
+        try:
+            with socket.create_connection((str(host), port), timeout=timeout) as s:
+                s.settimeout(timeout)
+                data = s.recv(256)
+        except OSError:
+            return None
+        line = data.split(b'\n', 1)[0].strip().decode('ascii', 'replace')
+        return line if line.startswith('SSH-') else None
+    return banner
+
+
+def test_unreachable_says_what_happened():
+    import errno
+    import socket
+    r = remote_send.unreachable_reason
+    assert r('192.168.4.150', 22, socket.timeout('timed out'), 5).startswith(
+        'Nothing answered at 192.168.4.150 on port 22 in 5 seconds')
+    refused = OSError(errno.ECONNREFUSED, 'Connection refused')
+    assert 'turned the connection away' in r('192.168.4.162', 22, refused, 5)
+    unreach = OSError(errno.EHOSTUNREACH, 'No route to host')
+    assert 'no route to 10.9.9.9 on port 22' in r('10.9.9.9', 22, unreach, 5)
+    assert "Couldn't reach" in r('10.9.9.9', 22, OSError(errno.EIO, 'I/O error'), 5)
 
 
 def test_network_tab_sets_up_the_picked_card_and_keeps_it_on_for_the_project(tmp_path, monkeypatch):

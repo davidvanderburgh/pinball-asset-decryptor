@@ -8,18 +8,57 @@ IPv4 addresses) for an SSH server on port 22, then tries to log in to each one a
 this computer in (``pad_ssh_key``, the same login Send to machine uses) and asks it which game it runs.  Nothing
 is changed on anything it finds, and no host key is remembered: the user's pick (or the only machine found) is
 remembered with :func:`pad_ssh_key.remember_machine`, its identity with it, so :func:`find_moved` can find the same
-machine again after the router hands it another address."""
+machine again after the router hands it another address.
+
+PAD-1430: a mesh network (eero and the like) is often bigger than a /24 (192.168.4.0/22 on David's), so the network
+the computer's default route is on is scanned at its real size, down to a /22; and an address that did not answer
+the first pass is asked once more, slower, because one pass missed a machine that was there (three back-to-back
+passes found three different sets of devices on David's mesh)."""
 
 import concurrent.futures
 import ipaddress
+import re
 import socket
+import struct
+import subprocess
+import sys
 
 PORT = 22
 #: how long one address gets to answer on port 22; a home network answers in a few milliseconds
 CONNECT_TIMEOUT = 0.6
+#: the second pass, over the addresses that did not answer the first: a device slow to answer once is not a miss
+RETRY_TIMEOUT = 3.0
 WORKERS = 128
-#: never more addresses than this in one scan (a /24 per network; a computer on many networks stops here)
+#: never more addresses than this in one scan (a /22 for the home network, a /24 for any other)
 MAX_HOSTS = 2048
+#: the widest network scanned at its real size (1022 addresses); a wider one is scanned as the /22 around us
+WIDEST_PREFIX = 22
+#: how long a device this computer already knows is there gets to answer (asked before the sweep, unhurried)
+NEAR_TIMEOUT = 3.0
+
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def neighbours():
+    """The addresses this computer has lately talked to on its networks (the ARP / neighbour table): devices
+    that are there.  Empty when the system won't say."""
+    found = []
+    for cmd in ((["arp", "-a"],) if sys.platform in ("win32", "darwin") else (["ip", "neigh"], ["arp", "-an"])):
+        try:
+            text = subprocess.run(cmd, capture_output=True, text=True, timeout=5,
+                                  creationflags=_NO_WINDOW).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for ip, mac in re.findall(r"\(?(\d+\.\d+\.\d+\.\d+)\)?\s+(?:at\s+|dev \S+ lladdr\s+)?"
+                                  r"([0-9a-fA-F]{1,2}(?:[-:][0-9a-fA-F]{1,2}){5})", text):
+            m = mac.lower().replace("-", ":")
+            if m.startswith(("ff:ff:ff", "01:00:5e")) or m == "0:0:0:0:0:0" or m == "00:00:00:00:00:00":
+                continue
+            if ip not in found:
+                found.append(ip)
+        if found:
+            break
+    return found
 
 
 def _private(ip):
@@ -56,13 +95,80 @@ def local_addresses():
     return found
 
 
-def networks(addresses=None):
-    """The /24 networks to scan: one around each of *addresses* (this computer's own by default)."""
+def _prefixes_windows():
+    """``{address: prefix length}`` from the IP address table (iphlpapi GetIpAddrTable)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Row(ctypes.Structure):
+        _fields_ = [("addr", wintypes.DWORD), ("index", wintypes.DWORD), ("mask", wintypes.DWORD),
+                    ("bcast", wintypes.DWORD), ("reasm", wintypes.DWORD), ("unused", wintypes.USHORT),
+                    ("type", wintypes.USHORT)]
+    get = ctypes.windll.iphlpapi.GetIpAddrTable
+    size = wintypes.ULONG(0)
+    get(None, ctypes.byref(size), False)
+    if not size.value:
+        return {}
+    buf = ctypes.create_string_buffer(size.value)
+    if get(buf, ctypes.byref(size), False) != 0:
+        return {}
+    (count,) = struct.unpack_from("<I", buf.raw, 0)
+    rows = (Row * count).from_buffer_copy(buf.raw[4:4 + count * ctypes.sizeof(Row)])
+    out = {}
+    for r in rows:
+        ip = socket.inet_ntoa(struct.pack("<I", r.addr))
+        out[ip] = bin(r.mask).count("1")
+    return out
+
+
+def _prefixes_text(text):
+    """``{address: prefix length}`` from ``ip -4 -o addr`` (``inet a.b.c.d/22``) or ``ifconfig``
+    (``inet a.b.c.d netmask 0xfffffc00`` / ``netmask 255.255.252.0``)."""
+    out = {}
+    for ip, plen in re.findall(r"inet (\d+\.\d+\.\d+\.\d+)/(\d+)", text):
+        out[ip] = int(plen)
+    for ip, mask in re.findall(r"inet (\d+\.\d+\.\d+\.\d+)\s+netmask\s+(0x[0-9a-fA-F]+|\d+\.\d+\.\d+\.\d+)", text):
+        m = int(mask, 16) if mask.startswith("0x") else int(ipaddress.IPv4Address(mask))
+        out[ip] = bin(m).count("1")
+    return out
+
+
+def prefixes():
+    """This computer's IPv4 addresses with the size of the network each is on, ``{address: prefix}``; empty when
+    the system won't say (then every network is taken as a /24)."""
+    try:
+        if sys.platform == "win32":
+            return _prefixes_windows()
+        for cmd in (["ip", "-4", "-o", "addr", "show"], ["ifconfig"]):
+            try:
+                text = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+            except (OSError, subprocess.SubprocessError):
+                continue
+            got = _prefixes_text(text)
+            if got:
+                return got
+    except Exception:                                   # noqa: BLE001 - a /24 is the fallback, never an error
+        pass
+    return {}
+
+
+def networks(addresses=None, sizes=None):
+    """The networks to scan: one around each of *addresses* (this computer's own by default).  The first address
+    (the default route's) is scanned at the size of its network from *sizes* (``{address: prefix}``, the system's
+    by default), no wider than a /22; every other network as a /24."""
+    if addresses is None:
+        addresses = local_addresses()
+        if sizes is None:
+            sizes = prefixes()
+    sizes = sizes or {}
     nets = []
-    for ip in addresses if addresses is not None else local_addresses():
-        net = ipaddress.IPv4Network("%s/24" % ip, strict=False)
-        if net not in nets:
-            nets.append(net)
+    for i, ip in enumerate(addresses):
+        plen = 24
+        if i == 0 and str(ip) in sizes:
+            plen = min(24, max(WIDEST_PREFIX, int(sizes[str(ip)])))
+        net = ipaddress.IPv4Network("%s/%d" % (ip, plen), strict=False)
+        if not any(net.subnet_of(n) for n in nets):
+            nets = [n for n in nets if not n.subnet_of(net)] + [net]
     return nets
 
 
@@ -130,35 +236,73 @@ def probe(host, port=PORT, timeout=8):
     return res
 
 
-def scan(nets=None, *, port=PORT, timeout=CONNECT_TIMEOUT, progress=None, cancel=None, log_in=True):
+def scan(nets=None, *, port=PORT, timeout=CONNECT_TIMEOUT, progress=None, cancel=None, log_in=True,
+         retry_timeout=RETRY_TIMEOUT, report=None, near_first=True, remembered=None):
     """Every SSH server on the home networks: a list of ``{'address', 'banner', 'lets_in', 'game', 'host_key',
-    'note'}``, the machines that let this computer in first.  *progress(done, total)* is called as it goes."""
+    'note'}``, the machines that let this computer in first.  *progress(done, total)* is called as it goes.
+
+    The addresses this computer already knows a device at (:func:`neighbours`, plus *remembered*, by default the
+    machines it remembers) are asked first with a long timeout; the rest are swept, and what did not answer is asked
+    once more with *retry_timeout* (``None``: no second pass).  *report*, a dict, is filled with what was looked
+    at: ``networks`` (their names), ``addresses`` (how many), ``known`` (asked first) and ``passes`` (sweeps)."""
     nets = networks() if nets is None else nets
+    if remembered is None:
+        try:
+            from . import pad_ssh_key
+            remembered = [m["address"].split(":")[0] for m in pad_ssh_key.machines()]
+        except Exception:                               # noqa: BLE001 - only a head start
+            remembered = []
     own = {str(a) for a in local_addresses()}
     hosts = []
+    seen = set()
     for net in nets:
         for h in net.hosts():
-            if str(h) not in own and h not in hosts:
-                hosts.append(h)
             if len(hosts) >= MAX_HOSTS:
                 break
-    total = len(hosts)
+            if str(h) not in own and h not in seen:
+                seen.add(h)
+                hosts.append(h)
+    # PAD-1430: the devices this computer already knows are there (its neighbour table, and the machines it
+    # remembers) are asked first, alone and unhurried: a sweep of a /22 sends a thousand ARP broadcasts at once,
+    # and on a mesh's Wi-Fi the machine's answer can queue behind them past the sweep's timeout
+    near = set(neighbours()) | set(remembered or ())
+    first = [h for h in hosts if str(h) in near] if near_first else []
+    rest = [h for h in hosts if str(h) not in near] if near_first else hosts
+    if report is not None:
+        report.update(networks=[str(n) for n in nets], addresses=len(hosts), passes=0, known=len(first))
+    stages = [(first, NEAR_TIMEOUT, False), (rest, timeout, bool(retry_timeout))]
+    total = len(hosts) + (len(rest) if retry_timeout else 0)
     found = []
     done = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        futs = {ex.submit(_banner, h, port, timeout): h for h in hosts}
-        for fut in concurrent.futures.as_completed(futs):
-            done += 1
-            banner = fut.result()
-            if banner:
-                found.append(dict(address=str(futs[fut]), banner=banner, lets_in=False, game="", host_key=None,
-                                  note=""))
-            if progress is not None and (done % 16 == 0 or done == total):
-                progress(done, total)
-            if cancel is not None and cancel():
-                for f in futs:
-                    f.cancel()
+    for todo, stage_timeout, retry in stages:
+        while todo and not (cancel is not None and cancel()):
+            if report is not None and todo is not first:
+                report["passes"] += 1
+            missed = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as ex:
+                futs = {ex.submit(_banner, h, port, stage_timeout): h for h in todo}
+                for fut in concurrent.futures.as_completed(futs):
+                    done += 1
+                    banner = fut.result()
+                    if banner:
+                        found.append(dict(address=str(futs[fut]), banner=banner, lets_in=False, game="",
+                                          host_key=None, note=""))
+                    else:
+                        missed.append(futs[fut])
+                    if progress is not None and (done % 16 == 0 or done == total):
+                        progress(done, total)
+                    if cancel is not None and cancel():
+                        for f in futs:
+                            f.cancel()
+                        break
+            if not retry:
                 break
+            # the second pass asks again only what did not answer AND the sweep showed is there (it answered the
+            # sweep's ARP, so it is in the neighbour table now): a device, not an empty address
+            alive = set(neighbours())
+            missed = [h for h in missed if str(h) in alive]
+            total = done + len(missed)
+            todo, stage_timeout, retry = missed, retry_timeout, False
     if log_in and found:
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
             for rec, res in zip(found, ex.map(lambda r: probe(r["address"], port), found)):

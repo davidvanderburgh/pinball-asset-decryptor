@@ -3601,8 +3601,8 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
     def _turn_words(random, names):
         listed = "; ".join("%d. %s" % (k, n) for k, n in enumerate(names, 1)) + "."
         if random:
-            return ("Each time the game plays this sound it plays one of these at random, never "
-                    "the same one twice in a row: " + listed)
+            return ("Each time the game plays this sound it plays one of these at random, and none "
+                    "of them again in the same game until all have played: " + listed)
         return ("Each time the game plays this sound it plays the next of these, then starts "
                 "again: " + listed)
 

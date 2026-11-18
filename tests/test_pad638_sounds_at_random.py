@@ -91,10 +91,13 @@ _HARNESS = r"""
 int main(int argc, char **argv)
 {
     struct sndt t = {0};
-    unsigned i, n = (unsigned)atoi(argv[2]);
+    unsigned i, n = (unsigned)atoi(argv[2]), game = argc > 4 ? (unsigned)atoi(argv[4]) : 0;
     t.n = (unsigned char)atoi(argv[1]);
     t.random = (unsigned char)atoi(argv[3]);
-    for (i = 0; i < n; i++) { t.pick = sndt_next(&t); t.plays++; printf("%u ", t.pick); }
+    for (i = 0; i < n; i++) {
+        if (game && i && !(i % game)) t.played = 0;            /* PAD-1428: a new game (sndt_game) */
+        t.pick = sndt_next(&t); t.plays++; printf("%u ", t.pick);
+    }
     printf("\n");
     return 0;
 }
@@ -124,6 +127,7 @@ def picks(tmp_path_factory):
     struct = src[src.index("struct sndt {"):src.index("};", src.index("struct sndt {")) + 2]
     state = ("#define SNDT_MAX 16\n" + struct + "\nstatic unsigned clipv_rng;\n")
     funcs = [_c_function(src, r) for r in (r"static unsigned clipv_rand\(void\)",
+                                            r"static unsigned bag_pick\(",
                                             r"static unsigned char sndt_next\(")]
     d = tmp_path_factory.mktemp("sndt")
     (d / "h.c").write_text(_HARNESS.replace("@STATE@", state).replace("@FUNCS@", "\n".join(funcs)))
@@ -135,8 +139,8 @@ def picks(tmp_path_factory):
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 
-    def run(n, plays, random):
-        out = subprocess.run([str(exe), str(n), str(plays), str(int(random))], capture_output=True,
+    def run(n, plays, random, game=0):
+        out = subprocess.run([str(exe), str(n), str(plays), str(int(random)), str(game)], capture_output=True,
                              text=True, check=True).stdout.split()
         return [int(x) for x in out]
     return run
@@ -152,6 +156,25 @@ def test_at_random_never_plays_one_twice_running_and_plays_them_all(picks):
     assert all(a != b for a, b in zip(got, got[1:]))
     assert set(got) == set(range(5))
     assert got[:12] != [0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1]   # not in turn
+
+
+    """PAD-1428: the random sounds deal from the clip variants' bag - all of a slot's files before one again"""
+    got = picks(5, 500, True)
+    for r in range(0, 500, 5):
+        assert sorted(got[r:r + 5]) == [0, 1, 2, 3, 4], got[r:r + 5]
+    got = picks(3, 300, True, game=4)                     # a new game every 4 plays deals all three again
+    for g in range(0, 300, 4):
+        assert sorted(got[g:g + 3]) == [0, 1, 2], got[g:g + 4]
+    assert all(a != b for a, b in zip(got, got[1:]))
+
+
+def test_the_runtime_empties_a_random_sound_bag_at_a_new_game():
+    with open(RUNTIME, encoding="utf-8") as f:
+        c = f.read()
+    assert c.count("sndt_game(t);\n        t->pick = sndt_next(t);") == 2
+    g = _c_function(c, r"static void sndt_game\(")
+    assert "rand_game_now()" in g and "t->played = 0" in g
+    assert "if (r) events_arm();" in c
 
 
 # ---- carried: mod routes, the music modes file, back out of a card ---------------------------------
@@ -255,7 +278,8 @@ def test_the_audio_tab_switches_a_slot_s_files_to_random_and_back(tmp_path, monk
         r = next(r for r in w.state("audio")["rows"] if r["k"] == rel)
         assert r["tn"] == 2 and r["tr"] is True
         assert r["tn_tip"].startswith("Each time the game plays this sound it plays one of these at "
-                                      "random, never the same one twice in a row: 1. ")
+                                      "random, and none of them again in the same game until all have "
+                                      "played: 1. ")
         assert w.call("audio.menu_action", "turn_order:1", rel) is False    # already
     with web_app(tmp_path / "again", mfr="stern", era="spike2") as w:
         _open(w, proj)

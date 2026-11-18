@@ -25117,7 +25117,9 @@ static int insider_arm(void)
  * a port with neither clip_play nor the clip v2 lines, and the name swapped when obj is the layer's own video.
  *
  * Every time the game asks for the clip, one of the line's clips plays: its own (the game's, or the
- * replacement over it) or one of the names after it, at random and never the same one twice in a row.
+ * replacement over it) or one of the names after it, at random, and none of them twice in a game until
+ * every one has played in it (PAD-1428, DoomWalrus666: "never play the same variant unless all the
+ * variants have been played this game"; before, only the last one was kept out). bag_pick deals them.
  * The game asks by NAME (clip_play's r0, a C string; on a clip v2 build surface_set_video's r1, a
  * std::string, on the video bank's own surface only), so the swap is the name in the saved registers,
  * the way on_sound_lookup swaps a sound key. Asking again for the clip that is still playing gets the
@@ -25138,6 +25140,7 @@ struct clipv {
     const char *name[CLIPV_PICKS];          /* [0] the game's own name */
     pm_str str[CLIPV_PICKS];                /* clip v2: each name as a std::string, made at first use */
     unsigned n, last, plays;
+    unsigned played, game;                  /* PAD-1428: bit k: clip k played this round; the game it is of */
 };
 static char clipv_raw[CLIPV_FILE_MAX + 1];
 static struct clipv clipv[CLIPV_SLOTS];
@@ -25295,13 +25298,39 @@ static unsigned clipv_rand(void)
     return clipv_rng = x;
 }
 
-/* which of the slot's clips plays: any, the first time; after that any but the last one */
+/* PAD-1428: a shuffle bag of n (2..32) picks. *played has bit k set for each pick dealt this round; a round
+ * deals every pick once, at random, before any comes again (a new game empties the bag: a new round). A round's
+ * first deal is never the last pick, `last` (n or more: none yet), so none plays twice running, not even across
+ * two rounds or two games. r is a random number. (tests lift it verbatim) */
+static unsigned bag_pick(unsigned *played, unsigned n, unsigned last, unsigned r)
+{
+    unsigned all = n >= 32 ? ~0u : (1u << n) - 1u, left, k, c = 0;
+    if ((*played & all) == all) *played = 0;
+    left = ~*played & all;
+    if (!*played && last < n && n > 1) left &= ~(1u << last);
+    for (k = 0; k < n; k++) c += left >> k & 1u;
+    r %= c;
+    for (k = 0; k < n; k++)
+        if ((left >> k & 1u) && !r--) break;
+    *played |= 1u << k;
+    return k;
+}
+
+/* PAD-1428: the game the random picks are of - the game's game_start count, and player 1's first ball after
+ * anything else (Godzilla LE 1.16's menu-started game dispatches no game_start, emulator: PAD-1052), each a new
+ * game. Read at each pick, so a game with no pick in it is not seen; that does not matter: its bag stays empty. */
+static unsigned rand_game_now(void)
+{
+    static unsigned up, fresh;
+    int ev = pm_event("game_start");
+    if (data("coop_player") && hand_new_game(&up, pm_player(), hand_ball())) fresh++;
+    return (ev >= 0 ? event_count(ev) : 0u) + (fresh << 16);
+}
+
+/* which of the slot's clips plays: none twice in a game before all have played (bag_pick) */
 static unsigned clipv_pick(struct clipv *v)
 {
-    unsigned k;
-    if (v->last >= v->n) return clipv_rand() % v->n;
-    k = clipv_rand() % (v->n - 1);
-    return k >= v->last ? k + 1 : k;
+    return bag_pick(&v->played, v->n, v->last, clipv_rand());
 }
 
 static int clipv_playing(void *surface)
@@ -25315,6 +25344,12 @@ static unsigned clipv_choose(struct clipv *v, void *surface)
 {
     unsigned k;
     if (v == clipv_now && v->last < v->n && clipv_playing(surface)) return v->last;
+    if (rand_game_now() != v->game) {         /* PAD-1428: a new game, a full bag */
+        if (v->played && clipv_says < CLIPV_SAY_MAX)
+            say("clip variants: a new game - every clip of \"%s\" can play again", v->name[0]);
+        v->game = rand_game_now();
+        v->played = 0;
+    }
     k = clipv_pick(v);
     v->last = k;
     v->plays++;
@@ -25457,6 +25492,12 @@ static void clipv_arm(void)
         say("clip variants: off - the port has no clip_play, no clip v2 lines that match this build and no clip "
             "layer; every clip plays the game's own");
     }
+    if (n_clipv) {
+        events_arm();                         /* PAD-1428: counting only - the game's game_start empties the bags */
+        say("clip variants: none plays twice in a game before all of its slot's have (%s)",
+            pm_event("game_start") >= 0 ? "a game starts at its game_start or player 1's first ball"
+                                         : "a game starts at player 1's first ball");
+    }
 }
 
 /* ---- music modes (PAD-494): an operator setting picks which set of sounds the game plays ---------
@@ -25571,8 +25612,9 @@ struct sndt {                               /* a sound that plays files in turn 
     unsigned char host[SNDT_MAX][8];        /* file k's record key at host[k - 1], k = 2..n */
     unsigned char n, pick;                  /* n files, its own one included; pick 0 = its own */
     unsigned char by_worker;                /* PAD-608: a file is in a bank: the worker moves the turn on */
-    unsigned char random;                   /* PAD-638: any file but the last, not the next one */
+    unsigned char random;                   /* PAD-638: at random, not the next one (PAD-1428: each once a game) */
     unsigned plays;
+    unsigned played, game;                  /* PAD-1428: random: bit k dealt this round (bag_pick); its game */
     unsigned long last;                     /* pm_ms() of its last lookup (of its last play: by_worker) */
 };
 static struct sndt sndt[SNDT_SLOTS];
@@ -26919,14 +26961,21 @@ static int msw_lookup(pm_reg *r)
 #endif
 
 /* PAD-565 / PAD-638: the file a new play of sndt `t` takes - the next in turn (its own one first), or
- * at random any but the last one played (sndt_rand stirs the clip variants' generator) */
+ * at random (clipv_rand, the clip variants' generator), PAD-1428: none twice in a game before all have
+ * played in it (bag_pick; the caller empties t->played at a new game) */
 static unsigned char sndt_next(struct sndt *t)
 {
-    unsigned k;
     if (!t->random) return t->plays ? (unsigned char)((t->pick + 1) % t->n) : 0;
-    if (!t->plays) return (unsigned char)(clipv_rand() % t->n);
-    k = clipv_rand() % (t->n - 1u);
-    return (unsigned char)(k >= t->pick ? k + 1 : k);
+    return (unsigned char)bag_pick(&t->played, t->n, t->plays ? t->pick : SNDT_MAX, clipv_rand());
+}
+
+/* PAD-1428: a random slot's bag empties when a new game starts */
+static void sndt_game(struct sndt *t)
+{
+    unsigned g;
+    if (!t->random) return;
+    g = rand_game_now();
+    if (g != t->game) t->game = g, t->played = 0;
 }
 
 /* PAD-565: the record the game looks up for a sound with files in turn - the next one, or the same
@@ -26947,6 +26996,7 @@ static void sndt_lookup(pm_reg *r)
     }
     now = pm_ms();
     if (!t->plays || now - t->last > SNDT_GAP) {
+        sndt_game(t);
         t->pick = sndt_next(t);
         t->plays++;
         if (sndt_says < 40 || !(t->plays % 50)) {
@@ -26967,6 +27017,7 @@ static void sndt_play(struct sndt *t)
 {
     unsigned long now = pm_ms();
     if (!t->plays || now - t->last > SNDT_GAP) {
+        sndt_game(t);
         t->pick = sndt_next(t);
         t->plays++;
         if (sndt_says < 40 || !(t->plays % 50)) {
@@ -27131,6 +27182,7 @@ static void sndt_arm(void)
         for (j = 0; j < n_sndt; j++) r += sndt[j].random;
         say("sounds in turn: %u sound(s) play their files in turn (%u of them at random); sound_lookup "
             "0x%08" PMA " is hooked", n_sndt, r, fn("sound_lookup"));
+        if (r) events_arm();                  /* PAD-1428: counting only - a new game empties the random bags */
     }
 }
 

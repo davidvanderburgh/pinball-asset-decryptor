@@ -2828,8 +2828,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             return ""
         own = (os.path.basename(self._assign[rel]) if self._assign.get(rel)
                else "the game's own clip")
-        return ("Plays one of %d clips at random each time, never the same "
-                "one twice in a row: %s, %s." % (
+        return ("Plays one of %d clips at random each time, and none of them "
+                "again in the same game until all have played: %s, %s." % (
                     1 + len(files), own,
                     ", ".join(os.path.basename(f) for f in files)))
 

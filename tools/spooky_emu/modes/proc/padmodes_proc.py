@@ -79,8 +79,10 @@ def _make_modes(game):
     title = type(game).__name__
     modes = [m for m in spec.get("modes", []) if m.get("title") in (title, "*")]
     log("game %s up; active modes at run_loop: %s" % (title, active_modes(game)))
-    for m in modes:
-        _new_mode(game, m)
+    # SkeletonGame.notify_mode_registered keeps only weakref.ref(mode) in known_modes:
+    # a mode nobody else holds is collected, and game_started then adds None (start
+    # crashed: "'NoneType' object has no attribute 'priority'").  We hold them.
+    _state["modes"] = [_new_mode(game, m) for m in modes]
 
 
 def _new_mode(game, m):

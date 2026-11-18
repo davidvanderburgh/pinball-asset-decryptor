@@ -102,3 +102,20 @@ the rig's shim does not (the proof ran a copy with that one DT_NEEDED added); an
 glPixelStorei, which boot_display calls for its one-byte font glyphs - glbridge.c now takes the unpack alignment
 and sends rows at the host's 4-byte layout (the game's RGBA uploads go byte for byte as before). dprint reaches
 boot_display through the FIFO /dev/boot_display.
+
+## A clean, isolated update path (David: "I'm concerned about letting the game run while we are doing updates")
+
+Every Send goes through `send_image`, and it holds the game first: right after the machine's partition layout is
+read (one line from /sys), before the Send reads or changes any file of the card. Nothing of a Send runs beside a
+game being played: not the Quick Send's check of the files the build changes, not the full Send's comparison of
+every file (minutes of reading), not a single write. A game in progress ends at that moment (the game is killed,
+as the card's own update and restart paths do; its loop frozen so nothing starts it again), and the machine's
+screen says PAD IS UPDATING / CHECKING n% until the Send is done.
+
+The game comes back only through the card's own loop, and only when that is safe: after the Send (Quick Send), a
+reboot (full Send of system, game or boot files), NOTHING TO UPDATE when nothing differed, SEND STOPPED / NOTHING
+CHANGED when the Send was refused or failed before its first write, or the watchdog when PAD went quiet before any
+change. Once a write has begun, the game stays held until the Send finishes (or the machine says SEND AGAIN FROM
+PAD). A multi-boot card's spare game partitions are mounted read-only for the comparison and made writable only
+when the Send writes them; a Send that changes only those now holds the game too (it used to write them while the
+game ran).

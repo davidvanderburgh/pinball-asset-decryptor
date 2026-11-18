@@ -533,8 +533,12 @@ class Machine:
     def pause_game(self):
         """Hold the game for a Send: the card's own message screen says PAD is updating it."""
 
-    def resume_game(self):
-        """The game back after a Send (the card's own loop starts it again)."""
+    def game_held(self):
+        """True while a Send holds the machine's game (pause_game until resume_game or a stop)."""
+        return False
+
+    def resume_game(self, text=None):
+        """The game back after a Send (the card's own loop starts it again); *text* is the screen's last word."""
         return self.restart_game()
 
     def screen_progress(self, done, total, what=""):
@@ -969,7 +973,8 @@ class SshMachine(Machine):
         return out
 
     def mount_part(self, num, path):
-        self.sh("mkdir -p %s && mount -t ext4 /dev/mmcblk0p%d %s" % (_q(path), int(num), _q(path)))
+        # read-only: compared first; made writable only when the Send changes it (PAD-1427)
+        self.sh("mkdir -p %s && mount -t ext4 -o ro /dev/mmcblk0p%d %s" % (_q(path), int(num), _q(path)))
 
     def umount_part(self, path):
         self.sh("sync; umount %s && rmdir %s" % (_q(path), _q(path)), check=False)
@@ -1055,6 +1060,9 @@ class SshMachine(Machine):
     def _fns(self, script):
         return script.replace("@W@", SCREEN_DIR)
 
+    def game_held(self):
+        return bool(getattr(self, "_paused", False))
+
     def pause_game(self):
         if getattr(self, "_paused", False):
             return
@@ -1075,8 +1083,11 @@ class SshMachine(Machine):
     def _screen_line(self):
         st = self._screen
         marks = ("*   ", " *  ", "  * ", "   *")
-        return screen_text("PAD IS UPDATING", "%s %d%%" % (st["what"], st["pct"]),
-                           "LINK OK " + marks[st["tick"] % 4], "KEEP POWER ON")
+        # the comparison counts per partition (a fast one reaches 99% and a slow one then says nothing for
+        # minutes): no percentage while checking or starting, the moving mark says it is alive
+        status = {"STARTING": "GETTING READY", "CHECKING": "CHECKING FILES"}.get(
+            st["what"], "%s %d%%" % (st["what"], st["pct"]))
+        return screen_text("PAD IS UPDATING", status, "LINK OK " + marks[st["tick"] % 4], "KEEP POWER ON")
 
     def _heartbeat(self):
         """Every few seconds: tell the machine PAD is still there, and redraw its screen (the moving mark)."""
@@ -1098,16 +1109,17 @@ class SshMachine(Machine):
         if not getattr(self, "_paused", False):
             return
         self._screen["pct"] = max(0, min(100, int(done * 100 / total))) if total else 0
-        self._screen["what"] = {"Uploading": "RECEIVING", "Updating": "UPDATING"}.get(what, "WORKING")
+        self._screen["what"] = {"Uploading": "RECEIVING", "Updating": "UPDATING",
+                                "Comparing": "CHECKING"}.get(what, "WORKING")
 
     def screen_changing(self):
         if getattr(self, "_paused", False):
             self.sh("echo changing > %s/phase" % SCREEN_DIR, check=False)
 
-    def resume_game(self):
+    def resume_game(self, text=None):
         if not getattr(self, "_paused", False):
             return self.restart_game()
-        self._screen_finish(screen_text("UPDATE DONE", "RESTARTING GAME"))
+        self._screen_finish(text or screen_text("UPDATE DONE", "RESTARTING GAME"))
         time.sleep(2)
         _rc, out = self.sh(self._fns(". @W@/fns\npad_resume"), check=False, timeout=90)
         self._paused = False
@@ -1262,6 +1274,8 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
                            "is" if len(odd) == 1 else "are"))
     if not needed:
         log("The machine already has every change in this build; nothing to send.", "success")
+        if machine.game_held():
+            machine.resume_game(screen_text("NOTHING TO", "UPDATE", "RESTARTING GAME"))
         return "The machine already has this build."
 
     puts = [op for op in needed if op.kind == "put"]
@@ -1763,13 +1777,17 @@ def sync(target, machine, log=None, progress=None, cancel=None):
     busy = [num for num in target.parts.values() if any(dev.endswith("p%d" % num) for dev, _mp in mounts)]
     if busy:
         raise SendError("The machine is using its partition %d; switch it to the main game and send again." % busy[0])
-    own_mounts = [m for m in on if m not in (ROOT, GAMES)]
     log("Comparing everything on the machine with %s (the image isn't a build of the card the machine runs, so "
         "this reads every file it may need to change: a few minutes)." % os.path.basename(target.path), "info")
     mounted, rw, all_ops, temps, walks = [], [], {}, [], {}
     reboot = False
     changed = False
     delta_bytes = 0
+    # PAD-1427 (David: "I'm concerned about letting the game run while we are doing updates and I want to make sure
+    # we have a clean isolated update path"): the game is held, the machine's screen saying so, BEFORE the
+    # comparison reads the card - nothing of a Send runs beside a game being played
+    machine.pause_game()                    # already held when it came through send_image
+    progress = _also_on_screen(machine, progress)
     try:
         for mount, num in sorted(target.parts.items()):
             machine.mount_part(num, mount)
@@ -1790,7 +1808,10 @@ def sync(target, machine, log=None, progress=None, cancel=None):
                 raws[num] = want
         n = sum(len(v) for v in all_ops.values())
         if not n and not raws:
-            log("The machine already has everything on this image; nothing to send.", "success")
+            log("The machine already has everything on this image; nothing to send. Its game starts again.",
+                "success")
+            if machine.game_held():
+                machine.resume_game(screen_text("NOTHING TO", "UPDATE", "RESTARTING GAME"))
             return "The machine already has this image."
         puts = [op for ops in all_ops.values() for op in ops if op.kind == "put"]
         total = sum(op.size for op in puts) or 1
@@ -1804,19 +1825,16 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         root_puts = [op for op in all_ops.get(ROOT, ()) if op.kind == "put"]
         _check_root_room(machine, root_puts, {op.path: walks[ROOT][op.path][1] for op in root_puts
                                               if (walks[ROOT].get(op.path) or ("",))[0] == "file"})
-        # the game is stopped for the whole of it: an update, not an edit, and it may need the room the files it
-        # replaces hold while it runs
-        if all_ops.get(ROOT) or all_ops.get(GAMES) or raws:
-            machine.stop_game()
-            reboot = True
-            progress = _also_on_screen(machine, progress)
-        for mount in all_ops:
-            if mount in (ROOT, GAMES):
-                machine.remount(mount, True)
-                rw.append(mount)
+        # the game was held before the comparison: an update, not an edit.  The machine restarts on a new system
+        # or game partition or boot files; other changes (a multi-boot card's spare images) restart only its game
+        reboot = bool(all_ops.get(ROOT) or all_ops.get(GAMES) or raws)
         if reboot:
-            machine.screen_changing()
-            changed = True
+            machine.stop_game()                 # held already: the game's loop stays frozen until the reboot
+        machine.screen_changing()
+        changed = True
+        for mount in all_ops:
+            machine.remount(mount, True)
+            rw.append(mount)
         sent = 0
         for mount, ops in all_ops.items():
             tree = target.trees[mount]
@@ -1880,9 +1898,8 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         if temps:
             with contextlib.suppress(Exception):
                 machine.remove(temps)
-        if reboot:
-            with contextlib.suppress(Exception):
-                machine.screen_stopped(changed)
+        with contextlib.suppress(Exception):
+            machine.screen_stopped(changed)
         raise
     finally:
         for mount in rw:
@@ -1895,6 +1912,8 @@ def sync(target, machine, log=None, progress=None, cancel=None):
     if reboot:
         log("Restarting the machine on the new card...", "info")
         machine.reboot()
+    else:
+        machine.resume_game()
     if delta_bytes:
         log("Of the files the machine already had, only the parts that differ were sent: %s." % _human(delta_bytes),
             "info")
@@ -1917,19 +1936,32 @@ def send_image(image, machine, log=None, progress=None, cancel=None):
     log = log or (lambda *a, **k: None)
     with open_target(image, log) as target:
         check_layout(target, machine.layout())
-        if target.plan is not None:
-            try:
-                return send(target.plan, machine, log, progress, cancel)
-            except NotThisCard as e:
-                log(str(e).split(" Write the card")[0] + "; sending the whole image's differences instead.", "info")
-        if target.info.get("enabled"):
-            from . import pad_ssh_key
-            mine = pad_ssh_key.public_line().split()
-            if len(mine) < 2 or mine[1] not in target.info.get("public_keys", ""):
-                raise SendError("This image's remote access doesn't let this computer in, so after it the machine "
-                                "couldn't be reached from here again. Build it with Remote access on, on this "
-                                "computer.")
-        return sync(target, machine, log, progress, cancel)
+        # PAD-1427 (David: "I'm concerned about letting the game run while we are doing updates and I want to make
+        # sure we have a clean isolated update path"): the game is held, the machine's screen saying PAD is updating
+        # it, before the Send reads or changes anything of the card - nothing of a Send runs beside a game
+        log("Holding the machine's game for the Send (a game being played ends); its screen shows PAD updating it "
+            "until the Send is done.", "info")
+        machine.pause_game()
+        try:
+            if target.plan is not None:
+                try:
+                    return send(target.plan, machine, log, progress, cancel)
+                except NotThisCard as e:
+                    log(str(e).split(" Write the card")[0] + "; sending the whole image's differences instead.",
+                        "info")
+            if target.info.get("enabled"):
+                from . import pad_ssh_key
+                mine = pad_ssh_key.public_line().split()
+                if len(mine) < 2 or mine[1] not in target.info.get("public_keys", ""):
+                    raise SendError("This image's remote access doesn't let this computer in, so after it the "
+                                    "machine couldn't be reached from here again. Build it with Remote access on, "
+                                    "on this computer.")
+            return sync(target, machine, log, progress, cancel)
+        except BaseException:
+            # refused before anything changed: the game back (a Send that stopped part way has said so already)
+            with contextlib.suppress(Exception):
+                machine.screen_stopped(False)
+            raise
 
 
 # ===================================================================== the app's run

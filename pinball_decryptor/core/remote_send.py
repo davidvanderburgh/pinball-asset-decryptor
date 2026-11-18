@@ -22,6 +22,12 @@ So a Send:
 4. **restarts the game** (``kill -9`` of the ``game`` process: game_monitor starts it again on the new files; on
    Spike 3 the crash mark its restart counter would count is taken off again) and remounts read-only.
 
+The remote access session itself runs on the system partition (busybox is the shell and every tool a Send uses;
+the server and libc are there too), so a file there is never changed in place, even by the delta: it is replaced
+by a new file renamed over it (:func:`delta_replace`), which running programs don't see until the machine
+restarts, and system files are removed only after every new one is in place.  Only game files, with the game
+stopped, change in place.
+
 Files go on with the build's own owner and mode.  Nothing outside ``/`` and ``/games`` is touched apart from the
 record in ``/data/pad``.  A Send interrupted part way leaves the machine running the files it had, with temporary
 files removed; one cut off during the in-place step is finished by the next Send (the record says so)."""
@@ -502,6 +508,16 @@ class Machine:
     def set_attrs(self, path, mode, uid, gid):
         raise NotImplementedError
 
+    def copy(self, src, dst):
+        """A copy of the machine's file made on the machine (mode, owner and times kept): the system partition's
+        delta goes into it, then it is renamed over the original."""
+        raise NotImplementedError
+
+    def in_use(self):
+        """Every file a running program has loaded or open (its program, libraries, open files): replacing one
+        frees no room until the machine restarts, as the program keeps the old copy."""
+        return set()
+
     def stop_game(self):
         raise NotImplementedError
 
@@ -561,6 +577,15 @@ while [ $i -lt $n ]; do
   dd if="$f" bs=@BS@ skip=$i count=1 2>/dev/null | sha1sum
   i=$((i+1))
 done
+"""
+
+#: what running programs hold: each one's program, its mapped libraries and its open files (busybox tools only)
+IN_USE_SCRIPT = r"""
+for d in /proc/[0-9]*; do
+  readlink "$d/exe"
+  for f in "$d"/fd/*; do readlink "$f"; done
+  sed -n 's|^[^/]*\(/.*\)$|\1|p' "$d/maps"
+done 2>/dev/null | sort -u
 """
 
 STATE_SCRIPT = r"""
@@ -883,6 +908,14 @@ class SshMachine(Machine):
         self.sftp.chown(path, uid, gid)
         self.sftp.chmod(path, mode)
 
+    def copy(self, src, dst):
+        self.sh("rm -f %s && cp -p %s %s" % (_q(dst), _q(src), _q(dst)), timeout=7200)
+
+    def in_use(self):
+        _rc, out = self.sh(IN_USE_SCRIPT, check=False, timeout=120)
+        return {ln[:-len(" (deleted)")] if ln.endswith(" (deleted)") else ln
+                for ln in out.splitlines() if ln.startswith("/")}
+
     def stop_game(self):
         """For an update: game_monitor stopped first, so nothing starts the game again on half the files."""
         self.sh(PIDS_FN + "m=$(pids_named game_monitor); [ -n \"$m\" ] && kill -9 $m; "
@@ -1003,8 +1036,9 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
     puts = [op for op in needed if op.kind == "put"]
     total = sum(op.size for op in puts) or 1
     # room: a new copy beside each file it replaces, while the game runs.  Without it (David: "space is scarce on
-    # the SD card"), the game is stopped and the files the machine has are changed in place, only the blocks that
-    # differ (delta_put): then only growth and new files need room, and the machine restarts at the end
+    # the SD card"), the game is stopped and the game files the machine has are changed in place, only the blocks
+    # that differ (delta_put): then only growth and new files need room, and the machine restarts at the end.
+    # System files always need the room: the session runs on them
     tight = False
     for mount in (ROOT, GAMES):
         mine = [op for op in puts if op.mount == mount]
@@ -1014,6 +1048,10 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
         free = machine.free(mount)
         if free >= want + SPARE:
             continue
+        if mount == ROOT:
+            # never in place there: the remote access session runs on the system files (delta_replace)
+            raise SendError("There isn't room on the machine's system partition for the %s of files this Send "
+                            "changes there. Write the card instead." % _human(want))
         has = {op.path: getattr(op, "cur", None) for op in mine}
         grow = sum(op.size for op in mine if not (has[op.path] and has[op.path][0] == "file"))
         if free < grow + SPARE:
@@ -1023,7 +1061,7 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
         tight = True
     if tight:
         log("Not enough room on the machine for a second copy of the changed files: the game is stopped and they "
-            "are changed in place, only the parts that differ; the machine restarts at the end.", "info")
+            "game files are changed in place, only the parts that differ; the machine restarts at the end.", "info")
     log("Sending %d change(s) to the machine: %d file(s) (%s), %d link(s), %d removal(s), %d in-place patch(es)."
         % (len(needed), len(puts), _human(sum(op.size for op in puts)),
            sum(op.kind == "link" for op in needed), sum(op.kind == "delete" for op in needed),
@@ -1051,7 +1089,7 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
         for op in puts:
             check()
             cur = getattr(op, "cur", None)
-            if tight and cur and cur[0] == "file":
+            if tight and op.mount == GAMES and cur and cur[0] == "file":
                 log("Updating %s in place (only the parts that differ)..." % op.path, "info")
                 delta_put(machine, plan.trees[op.mount][0], op, cancel)
                 sent += op.size
@@ -1215,10 +1253,12 @@ def _blocks(tree, node, bs=None):
         yield at, buf
 
 
-def delta_put(machine, tree, op, cancel=None):
-    """Make the machine's existing copy of ``op.path`` the build's file by writing only the blocks that differ,
-    in place.  Only with the game stopped (it would read a half-changed file).  Returns the bytes written."""
-    size, theirs = machine.block_hashes(op.path)
+def delta_put(machine, tree, op, cancel=None, at=None):
+    """Make the machine's existing copy of ``op.path`` (or the copy of it at *at*) the build's file by writing
+    only the blocks that differ, in place.  Only with the game stopped (it would read a half-changed file), and
+    never on the system partition itself (:func:`delta_replace`).  Returns the bytes written."""
+    path = at or op.path
+    size, theirs = machine.block_hashes(path)
     sent, batch = 0, []
     for off, block in _blocks(tree, op.node):
         i = off // DELTA_BLOCK
@@ -1227,20 +1267,62 @@ def delta_put(machine, tree, op, cancel=None):
         batch.append((off, block))
         sent += len(block)
         if len(batch) >= 16:
-            machine.write_ranges(op.path, batch)
+            machine.write_ranges(path, batch)
             batch = []
         if cancel is not None and cancel():
             raise SendError("Send canceled.")
     if batch:
-        machine.write_ranges(op.path, batch)
+        machine.write_ranges(path, batch)
     if size > op.size:
-        machine.truncate(op.path, op.size)
-    machine.set_attrs(op.path, op.mode, op.uid, op.gid)
-    machine.set_mtime(op.path, op.node["mtime"])
-    if machine.state([op.path]).get(op.path) != ("file", op.sha1):
+        machine.truncate(path, op.size)
+    machine.set_attrs(path, op.mode, op.uid, op.gid)
+    machine.set_mtime(path, op.node["mtime"])
+    if machine.state([path]).get(path) != ("file", op.sha1):
         raise SendError("%s didn't check out on the machine after its changes were written; send again (the game "
                         "stays stopped until it does)." % op.path)
     return sent
+
+
+def delta_replace(machine, tree, op, cancel=None):
+    """:func:`delta_put` for a system-partition file: the remote access session runs on those (busybox is the
+    shell and every tool a Send uses; the server and libc too), and a program changed under its running copy
+    breaks, as a file cut off half-written would on the next boot.  So the machine copies the file beside
+    itself, the differing blocks go into the copy, and it is renamed over the original: running programs keep
+    the old one until the machine restarts, and the file is always either old or new.  Returns the bytes
+    written."""
+    tmp = posixpath.join(posixpath.dirname(op.path), "." + posixpath.basename(op.path) + TMP_TAG)
+    machine.copy(op.path, tmp)
+    try:
+        sent = delta_put(machine, tree, op, cancel, at=tmp)
+        machine.commit([(tmp, op.path)], [], [])
+    except BaseException:
+        with contextlib.suppress(Exception):
+            machine.remove([tmp])
+        raise
+    return sent
+
+
+def root_room(machine, root_puts, existing):
+    """The room the system partition needs for *root_puts* replaced by copy and rename (:func:`delta_replace`)
+    or uploaded beside: new files whole; each file a running program holds keeps its old copy until the restart,
+    so both stay; any other replaced one frees its old copy at its rename, so only the largest counts once."""
+    held = machine.in_use()
+    new = sum(op.size for op in root_puts if op.path not in existing)
+    pinned = sum(op.size for op in root_puts if op.path in existing and op.path in held)
+    other = max([op.size for op in root_puts if op.path in existing and op.path not in held] or [0])
+    grow = sum(max(0, op.size - existing[op.path]) for op in root_puts
+               if op.path in existing and op.path not in held)
+    return new + pinned + other + grow + SPARE
+
+
+def _check_root_room(machine, root_puts, existing):
+    if not root_puts:
+        return
+    need, free = root_room(machine, root_puts, existing), machine.free(ROOT)
+    if free < need:
+        raise SendError("There isn't room on the machine's system partition to change its files safely (%s "
+                        "needed, %s free): its running programs keep their old copies until it restarts. Write "
+                        "the card instead." % (_human(need), _human(free)))
 
 
 def open_target(image, log=None):
@@ -1474,6 +1556,11 @@ def sync(target, machine, log=None, progress=None, cancel=None):
                sum(op.kind == "link" for v in all_ops.values() for op in v),
                sum(op.kind == "delete" for v in all_ops.values() for op in v),
                (", and the boot partition" if raws else "")), "info")
+        # the system partition is what the session runs on: its files change by copy and rename, never in place,
+        # so its room is checked before anything is touched
+        root_puts = [op for op in all_ops.get(ROOT, ()) if op.kind == "put"]
+        _check_root_room(machine, root_puts, {op.path: walks[ROOT][op.path][1] for op in root_puts
+                                              if (walks[ROOT].get(op.path) or ("",))[0] == "file"})
         # the game is stopped for the whole of it: an update, not an edit, and it may need the room the files it
         # replaces hold while it runs
         if all_ops.get(ROOT) or all_ops.get(GAMES) or raws:
@@ -1488,7 +1575,9 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             tree = target.trees[mount]
             dels = [(op.path, getattr(op, "cur", None) == ("dir",))
                     for op in sorted((o for o in ops if o.kind == "delete"), key=lambda o: -o.path.count("/"))]
-            if dels:
+            # game files go first (their room is wanted); system files last, so every command the Send still runs
+            # finds the libraries it was built against
+            if dels and mount != ROOT:
                 machine.commit([], [], dels)
             for op in sorted((o for o in ops if o.kind == "mkdir"), key=lambda o: o.path.count("/")):
                 machine.mkdir(op.path, op.mode, op.uid, op.gid)
@@ -1496,16 +1585,17 @@ def sync(target, machine, log=None, progress=None, cancel=None):
                 check()
                 have = walks[mount].get(op.path)
                 if have is not None and have[0] == "file":
-                    # the machine has a copy: only its changed blocks go, in place (the game is stopped; a cut-off
-                    # Send is finished by the next one, which compares everything again)
-                    log("Updating %s in place (%s; only the parts that differ are sent)..."
-                        % (op.path, _human(op.size)), "info")
-                    delta_bytes += delta_put(machine, tree, op, cancel)
+                    # the machine has a copy: only its changed blocks go (the game is stopped; a cut-off Send is
+                    # finished by the next one, which compares everything again).  Game files change in place;
+                    # system files in a copy renamed over them (delta_replace: the session runs on those)
+                    log("Updating %s (%s; only the parts that differ are sent)..." % (op.path, _human(op.size)),
+                        "info")
+                    delta_bytes += (delta_replace if mount == ROOT else delta_put)(machine, tree, op, cancel)
                     sent += op.size
                     progress(sent, total, "Updating")
                     continue
                 tmp = posixpath.join(posixpath.dirname(op.path), "." + posixpath.basename(op.path) + TMP_TAG)
-                direct = machine.free(mount) < op.size + SPARE
+                direct = mount != ROOT and machine.free(mount) < op.size + SPARE
                 dest = op.path if direct else tmp
                 if direct and machine.free(mount) < op.size + (1 << 20):
                     raise SendError("There isn't room on the machine for %s (%s); write the card instead."
@@ -1530,6 +1620,8 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             links = [(op.path, op.target, op.uid, op.gid) for op in ops if op.kind == "link"]
             if links:
                 machine.commit([], links, [])
+            if dels and mount == ROOT:
+                machine.commit([], [], dels)
         for num, want in raws.items():
             check()
             log("Writing the boot partition (%s)..." % _human(target.raw[num][1]), "info")

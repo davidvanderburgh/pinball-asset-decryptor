@@ -36,8 +36,8 @@ remount them; `/etc/init.d/game_monitor` (Spike 2 and Spike 3 alike) runs `/game
    goes by the command line; not `pkill -f`, which matches its own shell); game_monitor starts it on the new
    files. Spike 3's crash mark in `/tmp/game_restarts` is taken off again (5 clear the connectivity cache, 10
    reboot). Remount read-only (retried: the old game held replaced files).
-5. No room for a second copy: the game is stopped and the files the machine has are changed in place, only the
-   blocks that differ (the delta, below); the machine reboots at the end.
+5. No room for a second copy: the game is stopped and the game files the machine has are changed in place, only
+   the blocks that differ (the delta, below); the machine reboots at the end. System files never go in place (below).
 
 **Full Send** (any other image, or a build of a card the machine doesn't run, `open_target` + `sync`):
 partition layout must match the machine's (`/sys/block/mmcblk0`); every file of `/`, `/games` and a multi-boot
@@ -47,6 +47,18 @@ touched; remote access files are kept where the image has none. The game and gam
 machine has are changed by **delta** (David: "space is scarce on the SD card"): 1 MiB block sha1s on the machine
 (`dd | sha1sum`), only differing blocks written, then the whole file checked; new files upload whole; the boot
 partition is written whole from a checked copy on `/data` when it differs; then the machine reboots.
+
+**The session runs on the card it changes** (David, 2026-11-18: how can a full Send work when the card needs remote
+access running during it?). Everything a Send runs on the machine lives on `/`: busybox (the shell and every tool
+used), dropbear, libc. A program changed in place under its running copy breaks, and a file cut off half-written
+would break the next boot. So on `/` nothing is changed in place: a changed file is copied on the machine
+(`cp -p`, no network), the delta goes into the copy, and the copy is renamed over it (`delta_replace`); new files
+go up beside and are renamed. Running programs keep their old copy (the open inode) until the reboot at the end, so
+the session never sees a change, and each file is always either old or new. System files are removed only after
+every new one is in place. Room is checked before the game is stopped: new files, plus each replaced file a running
+program holds (`/proc/*/exe`, `maps`, `fd`: its old copy stays until the restart), plus the largest other one (its
+old copy goes at its rename); without it the Send is refused and the card must be written. Game files (game
+stopped) and unmounted game-image partitions still change in place.
 
 Machine-side quirks found on the stand-in and handled: the session PATH lacks `/sbin`; the file server reports
 no owners; dropbear drops command lines past ~9000 bytes (long scripts go as files in `/run`).

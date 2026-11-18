@@ -115,6 +115,7 @@ class FakeMachine(R.Machine):
         self.restarts = 0
         self.corrupt = corrupt or set()
         self.events = []
+        self.held = set()
 
     def _w(self, path):
         mount = R._mount_of(path)
@@ -171,16 +172,32 @@ class FakeMachine(R.Machine):
         for tmp, final in renames:
             self._w(final)
             self.fs[final] = self.fs.pop(tmp)
+            self.events.append(("mv", final))
         for path, target, _u, _g in links:
             self._w(path)
             self.fs[path] = ("link", target, 0o777)
         for path, _is_dir in deletes:
             self._w(path)
             self.fs.pop(path, None)
+            self.events.append(("rm", path))
         self.events.append(("commit",))
+
+    def _running(self, path):
+        # the remote access session's own programs (busybox, the server, libc): changed under them, they break
+        if path in self.held:
+            raise AssertionError("a running program's file was changed in place: " + path)
+
+    def copy(self, src, dst):
+        self._w(dst)
+        self.fs[dst] = self.fs[src]
+        self.events.append(("copy", src))
+
+    def in_use(self):
+        return set(self.held)
 
     def write_ranges(self, path, ranges):
         self._w(path)
+        self._running(path)
         data = self.fs[path][1]
         for off, b in ranges:
             data = patched(data, off, b)
@@ -196,6 +213,7 @@ class FakeMachine(R.Machine):
 
     def truncate(self, path, size):
         self._w(path)
+        self._running(path)
         e = self.fs[path]
         self.fs[path] = (e[0], e[1][:size], e[2])
 
@@ -599,3 +617,72 @@ def test_a_build_of_another_card_than_the_machine_runs_falls_back_to_the_full_se
     assert m.view(R.GAMES) == as_machine(build_games())
     assert any("sending the whole image's differences instead" in t for t in said)
     assert m.rebooted
+
+
+# ------------------------------------------------------------------ the system partition the session runs on
+#: David (2026-11-18): "How can it do a full [Send] if the SD card needs the [remote access] to run during that
+#: process?"  The session's own programs live there: busybox is the shell and every tool a Send uses.
+BUSYBOX = bytes(range(256)) * 16 + b"busybox 1.31"
+RUN_ROOT = dict(STOCK_ROOT, **{
+    "bin": ("dir",), "bin/busybox": ("file", BUSYBOX, {"mode": 0o755}),
+    "lib": ("dir",), "lib/libc.so.6": ("file", b"libc as running"), "lib/libold.so.1": ("file", b"old lib"),
+})
+NEXT_ROOT = dict(STOCK_ROOT, **{
+    "bin": ("dir",), "bin/busybox": ("file", patched(BUSYBOX, 1500, b"1.36"), {"mode": 0o755}),
+    "lib": ("dir",), "lib/libc.so.6": ("file", b"libc of the next version"), "lib/libnew.so.2": ("file", b"new"),
+})
+HELD = {"/bin/busybox", "/lib/libc.so.6"}
+
+
+def test_full_send_never_changes_a_running_system_file_in_place(monkeypatch):
+    monkeypatch.setattr(R, "DELTA_BLOCK", 1024)
+    m = FullMachine(root=RUN_ROOT)
+    m.held = set(HELD)                       # FakeMachine fails any in-place write to these
+    _uploads, written = _counting(m)
+    R.sync(FakeTarget(STOCK_GAMES, NEXT_ROOT), m)
+    root = m.view(R.ROOT)
+    assert root["/bin/busybox"] == ("file", NEXT_ROOT["bin/busybox"][1])
+    assert root["/lib/libc.so.6"] == ("file", b"libc of the next version")
+    assert "/lib/libold.so.1" not in root and root["/lib/libnew.so.2"] == ("file", b"new")
+    # the delta still sends only busybox's changed block, into a copy renamed over it
+    assert ("copy", "/bin/busybox") in m.events and ("mv", "/bin/busybox") in m.events
+    assert dict(written) == {"/bin/.busybox" + R.TMP_TAG: 1024, "/lib/.libc.so.6" + R.TMP_TAG: 24}
+    # a removed system file goes after every new one is in place: commands keep finding their libraries
+    assert m.events.index(("rm", "/lib/libold.so.1")) > max(
+        m.events.index(("mv", p)) for p in ("/bin/busybox", "/lib/libc.so.6", "/lib/libnew.so.2"))
+    assert not any(p.endswith(R.TMP_TAG) for p in m.fs) and m.rebooted
+
+
+def test_full_send_without_room_for_the_running_files_old_copies_is_refused_before_anything_changes():
+    used = sum(len(e[1]) for p, e in FullMachine(root=RUN_ROOT).fs.items()
+               if e[0] == "file" and R._mount_of(p) == R.ROOT)
+    m = FullMachine(root=RUN_ROOT, free=used + R.SPARE + 100)      # not the room busybox's old copy keeps
+    m.held = set(HELD)
+    before = dict(m.fs)
+    with pytest.raises(R.SendError, match="system partition"):
+        R.sync(FakeTarget(STOCK_GAMES, NEXT_ROOT), m)
+    assert m.fs == before and ("stop",) not in m.events and not m.rebooted
+
+
+def test_room_for_the_system_partition_counts_held_old_copies_and_one_other():
+    m = FakeMachine()
+    m.held = {"/bin/busybox"}
+    ops = [R.Op("put", "/bin/busybox", size=1000), R.Op("put", "/lib/a.so", size=300),
+           R.Op("put", "/lib/b.so", size=500), R.Op("put", "/lib/new.so", size=70)]
+    need = R.root_room(m, ops, {"/bin/busybox": 1000, "/lib/a.so": 300, "/lib/b.so": 400})
+    assert need == 70 + 1000 + 500 + 100 + R.SPARE      # new, held busybox, the largest other, b.so's growth
+
+
+def test_quick_send_short_of_room_changes_game_files_in_place_but_never_system_files(monkeypatch):
+    monkeypatch.setattr(R, "DELTA_BLOCK", 1024)
+    out = build_games()
+    out["kingkong/video.mp4"] = ("file", b"video stock but longer now", {"block": 300, "mtime": 9})
+    out_root = dict(STOCK_ROOT, **{"etc/fstab": ("file", b"/dev/mmcblk0p3 /games ext4 ro,noatime 0 2\n")})
+    m = FullMachine(free=sum(len(e[1]) for p, e in FakeMachine().fs.items() if e[0] == "file"
+                             and p.startswith("/games/")) + R.SPARE + 20)
+    m.held = {"/etc/fstab"}
+    uploads, written = _counting(m)
+    R.send(make_plan(STOCK_GAMES, out, BUILD_RANGES, out_root=out_root), m)
+    assert ("/games/kingkong/video.mp4", len(b"video stock but longer now")) in written     # game file: delta
+    assert "/etc/.fstab" + R.TMP_TAG in uploads                                             # system: beside
+    assert m.view(R.ROOT)["/etc/fstab"] == ("file", out_root["etc/fstab"][1])

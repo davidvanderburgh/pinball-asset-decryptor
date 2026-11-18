@@ -179,6 +179,8 @@ function Destination({ s }) {
   const note = primaryNote(s);
   const footer = html`<${PrimaryButton} s=${s} />
     ${note ? html`<span class="dim small grow wr-note">${note}</span>` : html`<span class="grow"></span>`}
+    ${s.send_cap ? html`<${Button} icon="globe" onClick=${() => call("write.send_to_machine")} disabled=${s.running}
+      title=${s.running ? T.busyTip : s.send_tip}>Send to machine<//>` : null}
     ${s.diagnose ? html`<${Button} onClick=${() => call("write.diag_open")} disabled=${s.running}>Card diagnostics…<//>` : null}`;
   return html`<${Card} head=${head} bodyCls="wr-dest" footer=${footer}>
     <div class="kv wr-kv">

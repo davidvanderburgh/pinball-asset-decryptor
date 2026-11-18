@@ -113,10 +113,22 @@ def load(project):
     return {'enabled': rec['enabled'], 'public_keys': _text(rec['public_keys'])}
 
 
+def with_pad_key(text):
+    """*text* with this computer's own public key added (PAD-1397): every card built with remote access on lets
+    PAD in, so Send to machine works without the user handing PAD a private key.  Unchanged when the key can't
+    be made."""
+    from . import pad_ssh_key
+    line = pad_ssh_key.public_line()
+    if not line:
+        return text
+    return (text.rstrip('\n') + '\n' + line) if text.strip() else line
+
+
 def configuration(project):
+    """The effective record a build uses: the saved keys plus this computer's own (:func:`with_pad_key`)."""
     rec = load(project)
     if rec is not None and rec['enabled']:
-        rec['public_keys'] = validate_keys(rec['public_keys'])
+        rec['public_keys'] = validate_keys(with_pad_key(rec['public_keys']))
     return rec
 
 
@@ -137,7 +149,8 @@ def save(project, enabled, public_keys):
         raise ExtrasError('SSH enablement must be a checkbox value.')
     text = _text(public_keys)
     if enabled:
-        text = validate_keys(text)
+        # PAD-1397: no key of the user's own is fine, this computer's is added to the card (configuration)
+        text = validate_keys(text) if text.strip() else ''
     elif text.strip():
         # Retain an unfinished public-key draft when disabled, but normalize
         # complete lists so toggling produces stable build records.

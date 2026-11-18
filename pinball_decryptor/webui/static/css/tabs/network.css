@@ -7,6 +7,7 @@ html.bp-1100 .net-grid { grid-template-columns: 1fr; }
 .net-uses { margin: 0; padding-left: 20px; color: var(--ink-2); line-height: 1.5; }
 .net-field { display: flex; flex-direction: column; gap: 4px; }
 .net-keys { width: 100%; resize: vertical; min-height: 8rem; }
+.net-send-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .net-contract { border-top: 1px solid var(--line); padding-top: 8px; }
 .net-contract-hd { font: inherit; font-weight: 600; color: var(--ink-2); background: transparent; border: 0; padding: 2px 0;
                    cursor: pointer; text-align: left; }

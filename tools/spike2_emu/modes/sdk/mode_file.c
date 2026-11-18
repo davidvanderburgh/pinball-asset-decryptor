@@ -517,6 +517,13 @@ static int stack_line(struct slot *M, const char *line)
 #define GM_STACK    0
 #define GM_GIVE_WAY 1
 #define GM_BLOCK    2
+/* PAD-1400: `game_modes own_game` - the mode IS the game. It starts with each game (no start shot or trigger file),
+ * runs through every ball and player (each player's count and total kept and resumed on their turn; a drain does not
+ * end it) and ends with the game. While it runs, as block, and the game's own rules are switched off underneath it
+ * (pm_own_game): they hear no shot, add no points, make no call and serve no ball. Its clock (`seconds`) is not used. */
+#define GM_OWN      3
+static struct { unsigned hits; uint64_t total, lost; int seen; } own_p[5];   /* per player, this game */
+static int own_done;                         /* the whole-game mode ended in this game: not again until the next */
 /* 1 when the line's value is exactly `w` (any case), followed by nothing but spaces or a comment */
 static int value_is(const char *a, const char *w)
 {
@@ -533,9 +540,10 @@ static int game_modes_line(struct slot *M, const char *line)
     if (value_is(a, "block")) cfg.game_modes = GM_BLOCK;
     else if (value_is(a, "give_way")) cfg.game_modes = GM_GIVE_WAY;
     else if (value_is(a, "stack")) cfg.game_modes = GM_STACK;
+    else if (value_is(a, "own_game")) cfg.game_modes = GM_OWN;   /* PAD-1400 */
     else {
         cfg.game_modes = GM_BLOCK;           /* PAD-398: what a file that says nothing does */
-        pm_log("game_modes needs stack, give_way or block - \"%.40s\" read as block", a);
+        pm_log("game_modes needs stack, give_way, block or own_game - \"%.40s\" read as block", a);
     }
     return 1;
 }
@@ -2064,7 +2072,7 @@ static int trigger_on_line(struct slot *M, const char *line)
 /* it has something to run: a clock, a multiball (which may have no clock), or the game's mini-wizard (PAD-436) */
 static int runs(const struct slot *M)
 {
-    return cfg.seconds || cfg.mball_balls || cfg.wizard[0];
+    return cfg.seconds || cfg.mball_balls || cfg.wizard[0] || cfg.game_modes == GM_OWN;   /* PAD-1400: the game is its clock */
 }
 
 static void trigger_on_validate(struct slot *M)
@@ -2237,6 +2245,7 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     }
     cfg.valid = runs(M) && cfg.trigger_count;   /* a multiball may have no clock */
     trigger_on_validate(M);
+    if (cfg.game_modes == GM_OWN && !cfg.wizard[0]) cfg.valid = 1;   /* PAD-1400: it starts with the game, no trigger */
     pm_log("loaded \"%s\": trigger %08x_%08x x%u, %u s, shots %08x_%08x, award %llu%s",
            cfg.name, (unsigned)(cfg.trigger_bits >> 32), (unsigned)cfg.trigger_bits, cfg.trigger_count, cfg.seconds,
            (unsigned)(cfg.shot_bits >> 32), (unsigned)cfg.shot_bits, (unsigned long long)cfg.award,
@@ -2483,7 +2492,9 @@ static void mode_start(struct slot *M, const char *why)
     }
     if (!starts_allowed(M, why)) return;     /* item 139: how often it can start */
     if (!roster_force && !stack_allows(M, why)) return;   /* item 140: the game's own modes (PAD-768: not for a pick) */
-    if (cfg.game_modes != GM_STACK && !challenge_force && !place_force && !roster_force
+    if (cfg.game_modes == GM_OWN && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0)   /* PAD-1400: the game is ours */
+        pm_game_modes_end("the whole game is a mode's own");
+    else if (cfg.game_modes != GM_STACK && !challenge_force && !place_force && !roster_force
         && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) { /* PAD-363 */
         pm_log("%s not started (%s): %s is running - its trigger count is kept", cfg.name, why,
                pm_stock_mode_what((unsigned)k));
@@ -2492,11 +2503,13 @@ static void mode_start(struct slot *M, const char *why)
     if (!pm_begin()) return;                 /* a mode written in C is running */
     pm_running_name(cfg.name);               /* PAD-363: the runtime's lines say this mode, not "mode" */
     ending_gives_way(1);                     /* PAD-413: before its own screen and clip */
-    if (cfg.game_modes == GM_BLOCK) {        /* PAD-363: the listed game's modes cannot start while it runs */
+    if (cfg.game_modes == GM_BLOCK || cfg.game_modes == GM_OWN) {   /* PAD-363: the listed game's modes cannot start */
         pm_block_list(cfg.block_ids, cfg.block_n);
         pm_block_rules_keep(cfg.keep_rules, cfg.keep_n);   /* PAD-398 */
         if (!pm_block_game_modes(1)) pm_log("%s: this game's port cannot hold its modes off - it gives way to them", cfg.name);
     }
+    if (cfg.game_modes == GM_OWN && !pm_own_game(1))     /* PAD-1400 */
+        pm_log("%s: this game's port cannot switch the game's own rules off - they run beside it", cfg.name);
     run.mball_on = run.mball_wait = 0;
     run.by_challenge = why[0] == 'c' && why[1] == 'h' && why[2] == 'a' && why[3] == 'l';   /* "challenge pick" */
     run.by_place = name_is(why, "in place of the game's mode");                          /* PAD-710 */
@@ -2525,7 +2538,7 @@ static void mode_start(struct slot *M, const char *why)
     shakes_at(M, SHAKE_AT_START, 0);                     /* PAD-414 */
     run.shield_due = cfg.shield ? (pm_ms() + SHIELD_DELAY_MS) | 1ul : 0;   /* PAD-392 */
     run.building_due = cfg.building_1 && !cfg.building_bits ? (pm_ms() + SHIELD_DELAY_MS) | 1ul : 0;   /* PAD-589 */
-    run.no_clock = cfg.seconds == 0;
+    run.no_clock = cfg.seconds == 0 || cfg.game_modes == GM_OWN;   /* PAD-1400: the whole game has no clock */
     run.active = 1;
     run.slot = M;
     run.player = pm_player();
@@ -2536,6 +2549,11 @@ static void mode_start(struct slot *M, const char *why)
     run.lost = 0;                            /* PAD-314 */
     run.score_at_start = pm_score(run.player);
     run.started_ms = pm_ms();
+    if (cfg.game_modes == GM_OWN && run.player <= 4) {   /* PAD-1400: a new game's first player */
+        unsigned q;
+        for (q = 0; q < 5; q++) own_p[q].hits = 0, own_p[q].total = own_p[q].lost = 0, own_p[q].seen = 0;
+        own_p[run.player].seen = 1;
+    }
     if (run.player <= 4) M->trig[run.player] = 0;
     also_clear(M, run.player);               /* PAD-227 */
     seq_clear(M, run.player);                /* PAD-314 */
@@ -2583,6 +2601,7 @@ static void mode_end(const char *why)
     uint64_t net;
     if (!run.active || !M) return;
     run.active = 0;
+    if (cfg.game_modes == GM_OWN && pm_in_game()) own_done = 1;   /* PAD-1400: not again until the next game */
     pm_block_game_modes(0);                  /* PAD-363: the game's modes may start again */
     starts_ended(M);
     end_pending = 0;
@@ -3328,6 +3347,12 @@ static void done_tick(void)
 /* `ends_on clock`: the running mode goes on through the end of a ball. 1 = keep it running. */
 static int keeps_through_ball_end(void)
 {
+    if (run.active && run.slot && run.slot->c.game_modes == GM_OWN) {   /* PAD-1400 */
+        pm_log("%s: the ball ended - the whole game's mode runs on (player %u: %u hits, awarded %llu, score %llu)",
+               run.slot->c.name, run.player, run.hits, (unsigned long long)run.total,
+               (unsigned long long)pm_score(run.player));
+        return 1;
+    }
     if (!run.active || !run.slot || run.slot->c.end_on != END_CLOCK) return 0;
     if (roster_run) {                        /* item 146: a picked mode running on would get its pick given back */
         pm_log("%s: the ball ended - a roster pick ends with its ball, as the game's battles do (ends_on clock ignored)",
@@ -3387,6 +3412,44 @@ static void screen_aside_tick(struct slot *M)
     else pm_log("%s: its screen is back - the game's mode is over", cfg.name);
 }
 
+/* PAD-1400: the whole game's mode on another player's turn: the last one's count and total are kept, this one's
+ * (or a fresh one's) come back */
+static void own_turn(struct slot *M, unsigned p)
+{
+    if (run.player <= 4) {
+        own_p[run.player].hits = run.hits;
+        own_p[run.player].total = run.total;
+        own_p[run.player].lost = run.lost;
+    }
+    if (p > 4) return;
+    run.hits = own_p[p].seen ? own_p[p].hits : 0;
+    run.total = own_p[p].seen ? own_p[p].total : 0;
+    run.lost = own_p[p].seen ? own_p[p].lost : 0;
+    pm_log("%s: player %u's turn - %s (%u hits, %llu)", cfg.name, p, own_p[p].seen ? "resumed" : "their first ball",
+           run.hits, (unsigned long long)run.total);
+    own_p[p].seen = 1;
+    run.player = p;
+    run.score_at_start = pm_score(p);
+}
+
+/* PAD-1400: the whole game's mode starts with each game - the first valid slot that says own_game */
+static void own_tick(void)
+{
+    unsigned k;
+    if (!pm_in_game()) {
+        own_done = 0;
+        return;
+    }
+    if (run.active || own_done || pm_player() < 1) return;
+    for (k = 0; k < MODES_MAX; k++) {
+        struct slot *M = &slots[k];
+        if (!cfg.valid || cfg.game_modes != GM_OWN || cfg.wizard[0]) continue;
+        mode_start(M, "the game's start");
+        if (!run.active) own_done = 1;       /* refused (said why): not every tick of this game */
+        return;
+    }
+}
+
 static void on_tick(void)
 {
     static unsigned ticks;
@@ -3439,7 +3502,13 @@ static void on_tick(void)
         pm_log("borrowed messages restored");
     }
     own_sounds_stops_tick();                 /* item 150: a call's own length */
+    own_tick();                              /* PAD-1400 */
     if (!run.active || !(M = run.slot)) return;
+    if (cfg.game_modes == GM_OWN && !pm_in_game()) {    /* PAD-1400 */
+        mode_end("the game is over");
+        return;
+    }
+    if (cfg.game_modes == GM_OWN && pm_player() != run.player && pm_player() >= 1) own_turn(M, pm_player());
     if (!pm_in_game() || pm_player() != run.player) {
         mode_end("left the game, or the player changed");
         return;
@@ -3449,7 +3518,7 @@ static void on_tick(void)
      * PAD-710: nor in the place of one of the game's modes - the game started it as its own (Venom starts a mini mode as
      * a ball starts, beside its other modes) */
     if (run.pick_mball && pm_balls_in_play() < 2) run.pick_mball = 0;   /* PAD-768: the game's multiball is over */
-    if (cfg.game_modes != GM_STACK && !run.by_challenge && !run.by_place && pm_aside()
+    if (cfg.game_modes != GM_STACK && cfg.game_modes != GM_OWN && !run.by_challenge && !run.by_place && pm_aside()
         && !(run.pick_mball && pm_aside() == (int)PM_STOCK_MULTIBALL)) {
         mode_end("the game's own mode began");
         return;

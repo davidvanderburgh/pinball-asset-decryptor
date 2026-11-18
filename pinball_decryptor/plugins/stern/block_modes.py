@@ -530,7 +530,8 @@ BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock", "can_start", "lit",
 OPS = {"+": "+", "-": "-", "*": "*", "/": "/"}
 CMPS = {"<": "<", "<=": "<=", "=": "==", "!=": "!=", ">=": ">=", ">": ">"}
 #: PAD-373: what the mode does about the game's own modes while it runs (the form's choice, PAD-363)
-GAME_MODES = {"stack": "may start", "give_way": "may start, and end this one", "block": "cannot start"}
+GAME_MODES = {"stack": "may start", "give_way": "may start, and end this one", "block": "cannot start",
+              "own_game": "are switched off: this is the whole game"}   # PAD-1400
 BLOCK_ID_MAX = 127
 #: PAD-374: where a clip block plays the mode's own clip
 CLIP_WHERE = {"full": "full screen", "behind": "behind the HUD, once",
@@ -2796,7 +2797,8 @@ def to_c(program, slug):
     L.append("")
     L.append('#define MODE_NAME        %s' % _c_str(title))
     L.append("#define RUN_SECONDS      %d          /* 0 = no clock */" % program["seconds"])
-    L.append("#define ENDS_ON_DRAIN    %d" % (1 if program["ends_on_drain"] else 0))
+    L.append("#define ENDS_ON_DRAIN    %d" % (1 if program["ends_on_drain"] and program["game_modes"] != "own_game"
+                                                  else 0))   # PAD-1400: the whole game runs through every drain
     L.append("#define TICKS_PER_SECOND 60")
     L.append("#define CLOCK_MAX        %d         /* the most seconds the clock holds */" % SECONDS_MAX)
     L.append("#define WAITS_OUT_MULTIBALL %d       /* 1 = a start while a multiball runs waits for the next */"
@@ -2819,8 +2821,10 @@ def to_c(program, slug):
     ids = program["block_modes"]
     L.append("/* While it runs, the game's own modes %s. */" % GAME_MODES[gm])
     L.append("#define GAME_MODES       %d          /* 0 = they may start, 1 = it starts only while none runs and one"
-             % {"stack": 0, "give_way": 1, "block": 2}[gm])
-    L.append("                                   * starting ends it, 2 = as 1, and the ones in BLOCK_IDS cannot start */")
+             % {"stack": 0, "give_way": 1, "block": 2, "own_game": 3}[gm])
+    L.append("                                   * starting ends it, 2 = as 1, and the ones in BLOCK_IDS cannot start,")
+    L.append("                                   * 3 = as 2 for the whole game: it starts with the game, runs through")
+    L.append("                                   * every ball and player, and the game's own rules are off (PAD-1400) */")
     L.append("UNUSED static const unsigned char BLOCK_IDS[%d] = {%s};   /* the game's mode ids; none = the port's defaults */"
              % (max(1, len(ids)), ", ".join(str(i) for i in ids) or "0"))
     L.append("#define BLOCK_N          %d" % len(ids))
@@ -2908,6 +2912,9 @@ def to_c(program, slug):
     L.append("    unsigned player, ticks_left, seconds_shown, elapsed, shots;")
     L.append("    uint64_t total;")
     L.append("} run;")
+    L.append("/* PAD-1400: GAME_MODES 3 - each player's shots and total, kept across their turns; it ended in this game */")
+    L.append("UNUSED static struct { unsigned shots; uint64_t total; } own_p[5];")
+    L.append("UNUSED static int own_done;")
     L.append("static int sec_changed, ending;")
     L.append("UNUSED static int end_clip;                /* PAD-658: When the mode ends played a full-screen clip */")
     L.append("#define END_CLIP_MS      7000      /* ... its TOTAL stays this much longer: the clip covers it first (it "
@@ -3413,7 +3420,7 @@ def to_c(program, slug):
     L.append("    if (!pm_begin()) return;          /* another of our modes is running */")
     L.append("    pm_running_name(MODE_NAME);")
     L.append("    if (DISPLAY_PRIORITY) pm_display_priority(DISPLAY_PRIORITY);   /* first: before the screen */")
-    L.append("    if (GAME_MODES == 2) {            /* the game's modes it holds off cannot start while it runs */")
+    L.append("    if (GAME_MODES >= 2) {            /* the game's modes it holds off cannot start while it runs */")
     L.append("        pm_block_list(BLOCK_IDS, BLOCK_N);")
     L.append("        pm_block_rules_keep_names(KEEP_RULES);")
     L.append("        if (pm_block_game_modes(1))")
@@ -3423,6 +3430,12 @@ def to_c(program, slug):
     L.append("            pm_log(\"isolated: this port cannot hold the game's modes off - it gives way to them\");")
     L.append("    } else if (GAME_MODES == 1) {")
     L.append("        pm_log(\"isolated: gives way - one of the game's modes starting ends it\");")
+    L.append("    }")
+    L.append("    if (GAME_MODES == 3) {            /* PAD-1400: the whole game - the game's own rules off underneath it */")
+    L.append("        unsigned q;")
+    L.append("        for (q = 0; q < 5; q++) own_p[q].shots = 0, own_p[q].total = 0;")
+    L.append("        if (!pm_own_game(1))")
+    L.append("            pm_log(\"the whole game: this port cannot switch the game's own rules off - they run beside it\");")
     L.append("    }")
     L.append("    run.own_mball = run.pick_mball = 0;")
     L.append("    if (pick_go == 2 && GAME_MODES) {   /* PAD-768: the pick ends the game's mini modes; a multiball plays on */")
@@ -3554,7 +3567,8 @@ def to_c(program, slug):
         L.append('        kit_hud_award(&hud, ENDING_HOLD_MS, kit_num(n, sizeof n, run.total), " ");')
         L.append("        kit_hud_hide_in(&hud, ENDING_HOLD_MS);")
         L.append("    }")
-    L.append("    if (GAME_MODES == 2) pm_block_game_modes(0);   /* the game's modes may start again */")
+    L.append("    if (GAME_MODES == 3 && pm_in_game()) own_done = 1;   /* PAD-1400: not again until the next game */")
+    L.append("    if (GAME_MODES >= 2) pm_block_game_modes(0);   /* the game's modes may start again */")
     L.append("    /* the total keeps the display watched for its moment on its HUD or its own screen (the kit's")
     L.append("     * kit_end_after, pm_end_holding); a drain or the game hands it back at once (end_now) */")
     L.append("    if (!(DISPLAY_PRIORITY && %s && pm_end_holding(ENDING_HOLD_MS + total_due * 1000 / TICKS_PER_SECOND))) {"
@@ -4058,6 +4072,25 @@ def to_c(program, slug):
         L.append("        } else kit_hud_meter(&hud, -1, 0);")
         L.append("    }")
     L.append("    sec_changed = 0;")
+    L.append("    if (GAME_MODES == 3) {            /* PAD-1400: it starts with each game and follows its players */")
+    L.append("        if (!in_game) own_done = 0;")
+    L.append("        else if (!run.on && !own_done && pm_player() >= 1) {")
+    L.append("            start(\"the game's start\", 0);")
+    L.append("            if (!run.on) own_done = 1;")
+    L.append("        }")
+    L.append("        if (run.on && !in_game) {")
+    L.append("            end_now(\"the game is over\");")
+    L.append("            return;")
+    L.append("        }")
+    L.append("        if (run.on && pm_player() != run.player && pm_player() >= 1 && pm_player() <= 4) {")
+    L.append("            unsigned q = pm_player();")
+    L.append("            if (run.player >= 1 && run.player <= 4) own_p[run.player].shots = run.shots, own_p[run.player].total = run.total;")
+    L.append("            run.shots = own_p[q].shots;")
+    L.append("            run.total = own_p[q].total;")
+    L.append("            run.player = q;")
+    L.append('            pm_log("the whole game: player %u is up (%u scores, %llu)", q, run.shots, (unsigned long long)run.total);')
+    L.append("        }")
+    L.append("    }")
     L.append("    if (!run.on) return;")
     L.append("    if (!in_game || pm_player() != run.player) {")
     L.append('        end_now("the game moved on");')
@@ -4066,7 +4099,7 @@ def to_c(program, slug):
     L.append("    if (run.own_mball && pm_balls_in_play() < 2) run.own_mball = 0;   /* its multiball is over */")
     L.append("    if (run.pick_mball && pm_balls_in_play() < 2) run.pick_mball = 0;   /* PAD-768: the game's is over */")
     # PAD-710: a mode in the place of one of the game's modes is that mode: the game's others beside it do not end it
-    L.append("    if (GAME_MODES && pm_aside() && !((run.own_mball || run.pick_mball) && pm_aside() == (int)PM_STOCK_MULTIBALL)%s) {"
+    L.append("    if (GAME_MODES && GAME_MODES != 3 && pm_aside() && !((run.own_mball || run.pick_mball) && pm_aside() == (int)PM_STOCK_MULTIBALL)%s) {"
              % (" && !place_held" if place_ids else ""))
     L.append("        end_now(\"the game's own mode began\");   /* its screen and HUD go at once, as a tilt's */")
     L.append("        return;")

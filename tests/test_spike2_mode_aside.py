@@ -314,7 +314,7 @@ def test_game_modes_validates_and_writes_only_what_differs_from_block():
     assert MP.validate_game_modes(spec, dp) == [] and MP.game_modes_lines(spec) == []
     assert MP.held_off(spec, gz) == tuple(range(12, 27))                 # every mode the port names
     spec.game_modes = "sideways"
-    assert MP.validate_game_modes(spec, dp) == ["What it does about the game's own modes is stack, give_way or block."]
+    assert MP.validate_game_modes(spec, dp) == ["What it does about the game's own modes is stack, give_way, block or own_game."]
     spec.game_modes = "give_way"
     assert MP.game_modes_lines(spec) == ["game_modes     give_way"]
     spec.game_modes = "stack"

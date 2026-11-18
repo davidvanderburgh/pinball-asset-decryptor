@@ -682,7 +682,9 @@ static int hook_veto(unsigned addr, veto_fn logger)
 {
     unsigned *p = (unsigned *)(unsigned long)addr, *t;
     if (!addr || (tramp_used + 1) * 16 > TRAMP_WORDS) return 0;
-    if ((p[0] & 0x0F7F0000u) == 0x051F0000u || (p[1] & 0x0F7F0000u) == 0x051F0000u) return 0;
+    /* PAD-1400: a site a logger hooked already (`ldr pc, [pc, #-4]` and its literal) moves as it is: the pair reads
+     * only itself, so from t[9] it jumps on to that hook's trampoline (the veto first, then that logger) */
+    if (p[0] != 0xe51ff004u && ((p[0] & 0x0F7F0000u) == 0x051F0000u || (p[1] & 0x0F7F0000u) == 0x051F0000u)) return 0;
     t = tramp + tramp_used++ * 16;
     t[0] = 0xe92d500fu;   /* push {r0,r1,r2,r3,ip,lr} */
     t[1] = 0xe1a0000du;   /* mov r0, sp */
@@ -717,7 +719,8 @@ static int hook_veto_n(unsigned addr, veto_n_fn logger, unsigned n, unsigned ref
 {
     unsigned *t;
     if (n > 255 || refused > 1) return 0;
-    if ((((unsigned *)(unsigned long)addr)[1] & 0xFF000000u) == 0xEB000000u)   /* `push {.., lr}; bl check` */
+    if (((unsigned *)(unsigned long)addr)[0] != 0xe51ff004u                        /* (PAD-1400: hooked already) */
+        && (((unsigned *)(unsigned long)addr)[1] & 0xFF000000u) == 0xEB000000u)   /* `push {.., lr}; bl check` */
         return hook_veto_bl(addr, logger, n, refused);
     if (!hook_veto(addr, (veto_fn)(void (*)(void))logger)) return 0;
     t = tramp + (tramp_used - 1) * 16;
@@ -1094,9 +1097,16 @@ static unsigned long show_ended_ms;
 static struct { const struct pm_mode *mode; unsigned long ended; int seen; } fin;
 static void spare_outs_off(const char *why);   /* PAD-826: the spare outputs section */
 static int finish_on(void);
+static void og_mode_ended(const struct pm_mode *m);   /* PAD-1400, below */
+/* PAD-1400: one of our own calls into the game runs (what it calls in turn is ours too, not the game's) */
+static volatile int og_self;
+#define OG_SELF(stmt) do { __sync_fetch_and_add(&og_self, 1); stmt; __sync_fetch_and_sub(&og_self, 1); } while (0)
+static void og_shot_seen(void);
+static void og_event(unsigned id);
 void pm_end(void)
 {
     int was_taker = running && running == current;
+    og_mode_ended(current);                  /* PAD-1400: the game has its rules back */
     if (was_taker && pm_in_game()) fin.mode = current, fin.ended = pm_ms(), fin.seen = 0;   /* PAD-707 */
     if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
     if (running == current) running = 0, running_as[0] = 0, refused_forget();
@@ -5309,8 +5319,8 @@ int pm_award_screen(unsigned type, unsigned message_id, uint64_t value)
 {
     unsigned char *node;
     if (!(can & PM_CAN_AWARD_SCREEN) || !type) return 0;
-    node = ((unsigned char *(*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("award_screen"))
-           (type, 0u, 0u, data("award_screen_arg"));
+    OG_SELF(node = ((unsigned char *(*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("award_screen"))
+                   (type, 0u, 0u, data("award_screen_arg")));
     if (!node) return 0;
     *(unsigned short *)(node + pm_port_value("award_message_at", 0)) = (unsigned short)message_id;
     *(uint64_t *)(node + pm_port_value("award_value_at", 0)) = value;
@@ -6429,8 +6439,8 @@ int pm_multiball_start(unsigned balls, unsigned ballsave_s)
     if (balls > 6) balls = 6;
     if (ballsave_s > 120) ballsave_s = 120;
     arg3 = (unsigned)pm_port_value("multiball_arg3", 0xbb);
-    r = ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("multiball_serve"))
-            (balls, 0, ballsave_s * 62u, arg3, 0, 0);
+    OG_SELF(r = ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)
+                 fn("multiball_serve"))(balls, 0, ballsave_s * 62u, arg3, 0, 0));
     say("multiball: %u balls asked for (%d in play now), ball save %u s: the game %s", balls, pm_balls_in_play(),
         ballsave_s, r ? "is serving" : "refused");
     if (r) ours_mb_at = pm_ms() ? pm_ms() : 1;   /* PAD-1285: these balls are ours, not one of the game's multiballs */
@@ -6445,8 +6455,8 @@ int pm_ball_save(unsigned seconds)
     if (seconds > 120) seconds = 120;
     if (now < 1) now = 1;                   /* a ball on its way to the plunger counts as the one in play */
     arg3 = (unsigned)pm_port_value("multiball_arg3", 0xbb);
-    r = ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("multiball_serve"))
-            ((unsigned)now, 0, seconds * 62u, arg3, 0, 0);
+    OG_SELF(r = ((unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)
+                 fn("multiball_serve"))((unsigned)now, 0, seconds * 62u, arg3, 0, 0));
     say("ball save: %u s with %d ball(s) in play: the game %s", seconds, now, r ? "is saving" : "refused");
     return r ? 1 : 0;
 }
@@ -11091,7 +11101,9 @@ uint64_t pm_stock_build(struct pm_stock_rule *r, uint64_t value)
 void *pm_stock_show(unsigned id)
 {
     pm_addr f = stock161_site("show_start");
-    return f ? ((void *(*)(unsigned))(unsigned long)f)(id) : 0;
+    void *s = 0;
+    if (f) OG_SELF(s = ((void *(*)(unsigned))(unsigned long)f)(id));
+    return s;
 }
 
 int pm_stock_event(unsigned id, uint64_t value)
@@ -11387,6 +11399,7 @@ static void on_shot(pm_reg *r)
     uint64_t shot = at <= 3 ? r[at] : 0;
     if (at <= 2 && pm_port_value("shot_mask_bits", 64) == 64) shot |= (uint64_t)r[at + 1] << 32;
     note_thread("shot", &said);
+    og_shot_seen();                              /* PAD-1400: a switch - the ball is in play */
     EACH_MODE(m) if (m->shot) { current = m; m->shot(shot); }
     current = 0;
 }
@@ -11460,6 +11473,7 @@ static void roster_owed_ball_end(void);   /* item 146 */
 static void more_ball_end(void);          /* PAD-707 */
 static void roster_late_run(const char *why);
 static void place_ball_end(void);         /* PAD-710 */
+static void og_ball_end(void);                   /* PAD-1400, below */
 static void on_ball_end(pm_reg *r)
 {
     static int said;
@@ -11489,6 +11503,221 @@ static void on_ball_end(pm_reg *r)
     more_ball_end();                          /* PAD-707: the selection screen is gone with the ball */
     roster_owed_ball_end();
     place_ball_end();                         /* PAD-710 */
+    og_ball_end();                            /* PAD-1400 */
+}
+
+/* ---- the whole game, the game's own rules switched off (PAD-1400) ---------------------------------------------
+ * A maker's own game on Stern's board and program (the PAD-1398 analysis, rows 1, 3 and 6): one mode of ours runs
+ * the whole game, and while a ball is in play nothing of the game's own rules reaches the player. pm_own_game(1)
+ * (a mode file's `game_modes own_game`) holds off every one of the game's modes and rules the port names, as
+ * pm_block_game_modes does, and refuses the game's OWN calls into the sites below at their entry: a call from this
+ * object (its return address inside our image, or one of our calls running: og_self) goes through as it always did.
+ *
+ *   shot_dispatch          the game's rules never hear a shot (our modes still do: the veto hands it them)
+ *   score_add/score_add32  no points of the game's: every point comes from the mode (pm_score_add)
+ *   callout, callout_nth   no calls of the game's
+ *   multiball_serve        no multiball or rule ball save of the game's (pm_multiball_start / pm_ball_save are ours)
+ *
+ * Counted, never refused (OG_COUNT): award_screen, show_start and display_effect_start return the object the game
+ * writes into next, so a refusal there could crash it; with the shots held back they have nothing to show (the
+ * per-ball line says how many came anyway). sound_play is counted the same way: the ball's own sounds are Stern's.
+ *
+ * What stays the game's, all of it outside "a ball in play": the start of each ball (from the ball's end - or the
+ * game's start - to its first switch: the player-up call, the ball's launch), the tilt warning (3 s from the
+ * game's tilt_warning event) and a tilted ball (from its tilt event to its end), the end of the ball and its
+ * bonus, and the end of the game with its high-score entry (the mode is over by then). Ball handling, trough, ball
+ * search, the node bus, display and audio are the game's throughout: none of them is one of these sites. */
+static void events_arm(void);
+static int event_bus_id(const char *name);
+#ifndef PM_REG_LR
+#define PM_REG_LR 5                              /* the 32-bit trampolines push {r0-r3, ip, lr}: r[5] is the lr */
+#endif
+#define OG_SHOT   0
+#define OG_COUNT  0x80u                          /* og_sites[].how: counted, never refused */
+#define OG_N      10
+static const struct { const char *site, *what; unsigned how; } og_sites[OG_N] = {
+    { "shot_dispatch", "shots", 0 },
+    { "score_add", "scores", 0 },
+    { "score_add32", "scores", 0 },
+    { "callout", "callouts", 0 },
+    { "callout_nth", "callouts", 0 },
+    { "multiball_serve", "serves", 0 },
+    { "award_screen", "award screens", OG_COUNT },
+    { "show_start", "light shows", OG_COUNT },
+    { "display_effect_start", "display effects", OG_COUNT },
+    { "sound_play", "sounds", OG_COUNT },
+};
+extern const char __ehdr_start[] __attribute__((weak, visibility("hidden")));
+extern const char _end[] __attribute__((weak, visibility("hidden")));
+
+static struct {
+    const struct pm_mode *owner;                 /* the mode that switched the game's rules off; 0 = none */
+    char who[40];
+    int armed;                                   /* og_arm ran: 1 = some site hooked, -1 = none could be */
+    unsigned hooked;                             /* a bit per og_sites entry hooked */
+    int blocked;                                 /* pm_own_game asked pm_block_game_modes (and lifts it) */
+    volatile int fresh;                          /* a ball's start: from its end (or the game's start) to its first switch */
+    volatile int tilted;                         /* from the tilt event to the ball's end */
+    volatile unsigned long pass_until;           /* the tilt warning: the game's own reactions pass until then */
+    volatile unsigned refused[OG_N], passed[OG_N];
+    volatile unsigned first[OG_N];               /* said once a ball: the first refused (or passed) call's return address */
+    volatile unsigned between[OG_N], first_between[OG_N];   /* the game's calls between balls (its end, the next's start) */
+    int tiltw_id, tilt_id, game_id;              /* the bus ids of the port's events, -1 = none */
+    unsigned balls;
+} og = { .fresh = 1, .tiltw_id = -1, .tilt_id = -1, .game_id = -1 };
+
+
+/* a return address in this object (its code, or one of its trampolines) */
+static int og_ours(pm_addr lr)
+{
+    if (!__ehdr_start || !_end) return 0;
+    return lr >= (pm_addr)(unsigned long)__ehdr_start && lr < (pm_addr)(unsigned long)_end;
+}
+
+/* The decision, from the state alone (tests lift it): 1 = refuse the game's call. */
+static int og_refuses(int owner, int in_game, int fresh, int tilted, unsigned long now, unsigned long pass_until,
+                      int ours, int self, unsigned how)
+{
+    if (!owner || !in_game || ours || self) return 0;
+    if (fresh || tilted || now < pass_until) return 0;
+    return !(how & OG_COUNT);
+}
+
+/* the first switch of a ball: the ball is in play from here on */
+static void og_shot_seen(void)
+{
+    og.fresh = 0;
+}
+
+static int og_veto(pm_reg *r, unsigned n)
+{
+    int ours, refuse;
+    if (!og.owner || n >= OG_N) return 0;
+    if (n == OG_SHOT && og.fresh) og_shot_seen();
+    ours = og_ours((pm_addr)r[PM_REG_LR]);
+    refuse = og_refuses(1, pm_in_game(), og.fresh, og.tilted, pm_ms(), og.pass_until, ours, og_self, og_sites[n].how);
+    if (!refuse) {
+        if (ours || og_self || !pm_in_game()) return 0;
+        if ((og.fresh || og.tilted) && n != OG_SHOT) {     /* between balls: the game's own (its bonus, its ball start) */
+            if (__sync_fetch_and_add(&og.between[n], 1u) == 0) og.first_between[n] = (unsigned)r[PM_REG_LR];
+        } else if (og_sites[n].how & OG_COUNT) {
+            if (__sync_fetch_and_add(&og.passed[n], 1u) == 0 && !og.refused[n]) og.first[n] = (unsigned)r[PM_REG_LR];
+        }
+        return 0;
+    }
+    if (__sync_fetch_and_add(&og.refused[n], 1u) == 0) og.first[n] = (unsigned)r[PM_REG_LR];
+    if (n == OG_SHOT) on_shot(r);                /* our modes see the shot the game's rules do not */
+    return 1;
+}
+
+/* the bus, on the game's own call (on_event_dispatch) */
+static void og_event(unsigned id)
+{
+    if ((int)id == og.tiltw_id) og.pass_until = pm_ms() + 3000ul;
+    if ((int)id == og.tilt_id) og.tilted = 1;
+    if ((int)id == og.game_id) og.fresh = 1, og.tilted = 0;
+}
+
+static void og_ball_end(void)
+{
+    char line[600];
+    unsigned i, at = 0, any = 0;
+    og.fresh = 1;
+    og.tilted = 0;
+    og.pass_until = 0;
+    if (!og.owner) return;
+    og.balls++;
+    for (i = 0; i < OG_N && at < sizeof line - 60; i++) {
+        unsigned c = og.refused[i] + og.passed[i];
+        if (!c) continue;
+        at += (unsigned)pm_snprintf(line + at, sizeof line - at, "%s%s %u %s", any ? ", " : "", og_sites[i].site, c,
+                                    og.passed[i] ? "passed" : "refused");
+        at += (unsigned)pm_snprintf(line + at, sizeof line - at, " (first from 0x%08x)", og.first[i]);
+        any = 1;
+        og.refused[i] = og.passed[i] = 0;
+    }
+    say("own game: %s - ball %u ended; the game's own calls while it was in play: %s", og.who, og.balls,
+        any ? line : "none");
+    for (i = 0, at = 0, any = 0; i < OG_N && at < sizeof line - 60; i++) {
+        if (!og.between[i]) continue;
+        at += (unsigned)pm_snprintf(line + at, sizeof line - at, "%s%s %u (first from 0x%08x)", any ? ", " : "",
+                                    og_sites[i].site, og.between[i], og.first_between[i]);
+        any = 1;
+        og.between[i] = 0;
+    }
+    if (any) say("own game: %s - the game's own calls before it, between balls (passed): %s", og.who, line);
+}
+
+static int og_arm(void)
+{
+    char line[300];
+    unsigned i, at = 0;
+    if (og.armed) return og.armed > 0;
+    og.armed = -1;
+    events_arm();
+    og.tiltw_id = event_bus_id("tilt_warning");
+    og.tilt_id = event_bus_id("tilt");
+    og.game_id = event_bus_id("game_start");
+    for (i = 0; i < OG_N; i++) {
+        pm_addr a = fn(og_sites[i].site);
+        if (!a) continue;
+        if (!hook_veto_n(a, og_veto, i, 0u)) {   /* a refused call answers 0: nothing added, served or made */
+            say("own game: %s at 0x%08" PMA " could not be hooked - the game's %s go on", og_sites[i].site, a,
+                og_sites[i].what);
+            continue;
+        }
+        og.hooked |= 1u << i;
+        if (at < sizeof line - 40)
+            at += (unsigned)pm_snprintf(line + at, sizeof line - at, "%s%s%s", at ? ", " : "", og_sites[i].site,
+                                        og_sites[i].how & OG_COUNT ? " (counted)" : "");
+    }
+    if (!(og.hooked & ((1u << 1) | (1u << 2))) || !(og.hooked & (1u << 3))) {
+        say("own game: off - this port %s, so the game's own %s would go on", !(og.hooked & 6u)
+            ? "has no score_add to hold back" : "has no callout to hold back", !(og.hooked & 6u) ? "points" : "calls");
+        return 0;
+    }
+    og.armed = 1;
+    say("own game: armed on %s (tilt warning %d, tilt %d, game start %d on the bus)%s", line, og.tiltw_id, og.tilt_id,
+        og.game_id, og.hooked & 1u ? "" : " - no shot_dispatch: the game's rules still hear shots, its block_rule sites "
+        "and mode starts hold them");
+    return 1;
+}
+
+int pm_own_game(int on)
+{
+    if (!on) {
+        if (og.owner && (!current || og.owner == current)) {
+            if (og.blocked) pm_block_game_modes(0);
+            og.blocked = 0;
+            say("own game: %s gives the game its rules back", og.who);
+            og.owner = 0;
+        }
+        return 1;
+    }
+    if (!running || running != current) return 0;
+    if (og.owner == current) return 1;
+    if (!og_arm()) return 0;
+    og.blocked = (can & PM_CAN_BLOCK_GAME) && block_owner != current ? pm_block_game_modes(1) : 0;
+    pm_snprintf(og.who, sizeof og.who, "%s", mode_name(current, "a mode"));
+    og.balls = 0;
+    og.owner = current;
+    say("own game: %s has the whole game - the game's own %s held back while a ball is in play%s", og.who,
+        og.hooked & 1u ? "shots, points, calls and serves" : "points, calls and serves",
+        og.blocked || block_owner == current ? ", and its modes and rules held off" : "");
+    return 1;
+}
+
+int pm_own_game_on(void) { return og.owner != 0; }
+
+/* pm_end: a mode that ends gives the game its rules back */
+static void og_mode_ended(const struct pm_mode *m)
+{
+    if (og.owner && og.owner == m) {
+        say("own game: %s ended - the game has its rules back", og.who);
+        if (og.blocked) pm_block_game_modes(0);   /* (a mode file's end lifted its own block already) */
+        og.owner = 0;
+        og.blocked = 0;
+    }
 }
 
 /* ---- the battle roster (item 146, optional, title specific) ------------------------------------
@@ -16229,6 +16458,7 @@ static void on_event_dispatch(pm_reg *r)
 {
     static volatile int said;
     if (r[0] < N_BUS_IDS) __sync_fetch_and_add(&event_fired[r[0]], 1u);
+    og_event((unsigned)r[0]);                    /* PAD-1400: the tilt warning passes, before the game acts on it */
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
@@ -16396,6 +16626,7 @@ static void switches_deliver(void)
         for (j = i; j < port.n_switch; j++)
             if (port.sw[j].id == id) mask |= port.sw[j].mask;
         if (n > 8) n = 8;                            /* a flood is not N separate hits */
+        og_shot_seen();                              /* PAD-1400: a switch - the ball is in play */
         while (n--) EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); }
         current = 0;
     }

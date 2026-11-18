@@ -364,6 +364,20 @@ int pm_block_list(const unsigned char *ids, int n);
  * cannot block. */
 int pm_block_rules_keep(const unsigned char *ns, int n);
 int pm_block_rules_keep_names(const char *names);   /* the same by name: "Destruction Jackpot, Bridge" */
+/* PAD-1400: THE WHOLE GAME. A mode that IS the game: while it runs and a ball is in play, the game's own rules are
+ * switched off underneath it. Every one of the game's modes and rules the port names is held off (as
+ * pm_block_game_modes(1), with the mode's own list and kept rules), and the game's OWN calls are refused at their
+ * entry: its rules hear no shot (your .shot still does), it adds no points, makes no call and serves no multiball
+ * or rule ball save. Your own pm_score_add, pm_callout, pm_multiball_start... go through as always, so every point
+ * is yours. What stays the game's: ball handling, the trough, ball search, tilt (its warning too), the node bus,
+ * display and audio, each ball's start (up to its first switch), the end of the ball and its bonus, and the end
+ * of the game with its high-score entry, from the scores you gave. The mode keeps running through a drain (do not
+ * pm_end in .ball_end; a mode file's `game_modes own_game` does this for you) and ends at the game's end.
+ * 1 = on (0 to give the game its rules back; pm_end does too); 0 when this port cannot (no score_add or callout
+ * site to hold back), or the caller is not the running mode. The log says, each ball, how many of the game's
+ * calls were held back. */
+int pm_own_game(int on);
+int pm_own_game_on(void);    /* 1 while a mode of ours has the whole game */
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

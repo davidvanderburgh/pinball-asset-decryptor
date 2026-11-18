@@ -1159,6 +1159,27 @@ unless the mode keeps that rule counting - the same `keep_rules` / Keep counting
 rules ask no such check) and `gate_rule_lines` writes the port lines; a drafted Bond port gets its own
 (`portgen.own_gate_rules`).
 
+**The whole game (PAD-1400).** A maker who wants a game of his own on Stern's board (20SidedDies' Uncanny X-Men
+2.0, the PAD-1398 analysis) needs more than isolation: Stern's per-shot scoring, callouts, shows, multiballs and ball
+saves go on under a blocking mode. `pm_own_game(1)` (a mode file's `game_modes own_game`, a blocks mode's "are switched
+off: this is the whole game", `GAME_MODES 3`) switches them off for as long as the mode has it. The runtime holds the
+game's modes and rules off as `pm_block_game_modes` does, and refuses the game's OWN calls at the entry of five sites
+every Spike 2 port names: `shot_dispatch` (the rules hear no shot; the veto hands it to our modes' `.shot`),
+`score_add` / `score_add32`, `callout` / `callout_nth` (on Uncanny X-Men the game's every sound request: its
+`sound_play` is the same function) and `multiball_serve` (its multiballs and rule ball saves). A call is ours when its
+return address is in this object, or while one of our own calls into the game runs (`OG_SELF`): `pm_score_add`,
+`pm_callout`, `pm_multiball_start`, `pm_award_screen` go through as before. The vetoes are installed on first use, on
+top of any logger already hooked there (`hook_veto` moves a logger's jump pair as it is). What the game keeps: ball
+handling, trough, ball search, tilt (3 s from the `tilt_warning` event, and a tilted ball to its end), the node bus,
+display and audio, each ball's start up to its first switch, BONUS_SENTENCE and the end of the game with its high-score
+entry, from the scores the mode gave. A mode file's whole-game mode starts with each game (no trigger, no clock), runs
+through every drain, keeps each player's hits and total across their turns and ends with the game. Each ball's end logs
+what was held back and where the first call came from. Emulator (Uncanny X-Men LE 0.98, a two-player game, every shot
+1000): each ball the game's 27-32 shots, 28-34 point awards and 18-26 calls were refused and the score at each ball's
+end was exactly the mode's awards (ball 1: 27000 = 27000); the control (the same mode as an ordinary one) saw the game
+score 5,880,640 on one ball. `award_screen`, `show_start`, `display_effect_start` and `sound_play` are hooked only to
+count the game's calls (they hand back an object the game writes into next).
+
 **Coverage.** `pm_aside()` is as good as the port's stock route (above and below). On the 37
 shipped builds: the manager's own queries on the three Godzillas, the mode table on 21, and the
 balls in play plus the game's own mode flags, live records, running bytes or rule objects on 11

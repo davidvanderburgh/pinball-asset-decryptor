@@ -4,7 +4,7 @@ Where the Modes tab's reach ends, with the things people ask for most as example
 
 ## The short version
 
-Stern's own modes are compiled into the game program, and the app doesn't rewrite that code. Your mode runs next to it and talks to the game through hooks the app knows for each build. That gives three zones:
+Stern's own modes are compiled into the game program, and the app doesn't rewrite that code. Your mode runs next to it and talks to the game through hooks the app knows for each build. Or your mode can be the whole game: Stern's rules are switched off underneath it and only the game's machinery is left (see "Make my own game" below). That gives three zones:
 
 - **Your modes:** wide open. Your own start, shots, scoring, screen, clips, sounds, music and lights.
 - **The game's modes:** you can change their numbers (timers, awards), not how they work.
@@ -24,6 +24,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Start it when the player beats one of the game's battles | No. No game reports a win. |
 | Start it as one of the game's challenges (a Player Challenge game, one ball, picked as the game starts or set by Default Game Mode) | James Bond 007 LE / Pro 1.06 (Chaos at Crab Key, Ahoy Mr. Bond, Goldfinger's Jackpot, Duel on the Disco Volante, Her Majesty's Secret Service) and Stranger Things 1.13 / LE 1.12 / LE 1.13 (Demogorgon, Send It Back, Light the Fire, Final Showdown): yes, in that challenge's place, at the first ball. Mode > Starts on > a challenge game of, or the block When the player picks the challenge. A quick way to play a mode that is hard to reach. On James Bond the start menu also shows the mode's name, and a mode can be a new challenge of its own after the game's five (room for 2). A challenge game a mode played keeps the mode's own high score, entered under its name. The attract mode shows that champion after the game's own challenge champions. Other games' challenges are not a list a mode can join |
 | Run two of mine at once | No. One at a time. |
+| Make my own game: switch Stern's rules off and have mine be the whole game | Yes, on every Spike 2 game. Mode > The game's own modes > *are switched off: this is the whole game* (or the same choice in Blocks). It starts with every game, lasts every ball and every player (each keeps their own count), and ends with the game. While a ball is in play none of Stern's rules does anything: no points, calls, light shows, modes, multiballs or ball saves of the game's, so every point is yours. The game still runs the balls, the trough, ball search, tilt, the bonus and the high scores. Your own modes inside it, running together, are not there yet |
 | Take points away | Form modes only (a minus number under Points per shot) |
 | Give it sounds of its own | Yes, up to 16. Each rides on a game sound that never plays; the card has a fixed number of those (21 on Godzilla), shared by every mode on it. |
 
@@ -38,6 +39,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 | Give it different music | Not for one mode. A swap on the Audio tab changes it everywhere. |
 | Add a monster to Godzilla's battle selection | No, but you can take over a slot. [Example 1](#1-add-mothra-to-godzillas-battle-selection) |
 | Keep them from starting while mine runs | Yes, and that's the usual: while yours runs, nothing of the game's starts or counts. [Example 5](#5-running-alongside-the-games-modes) |
+| Switch them all off for the whole game | Yes: a mode set to be the whole game (above, "Make my own game") |
 | Make their screens wait for mine | No. [Why](#why-your-mode-always-gives-way) |
 | Change progression (Godzilla's cities, tier 2 battles, King of the Monsters, wizard modes) | No |
 

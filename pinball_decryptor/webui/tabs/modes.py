@@ -3307,7 +3307,7 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
             dis = {k: True for k in ("screen", "clip", "lights", "countdown", "own_sound",
                                      "end_game", "clip_both", "stack", "events", "film_clip",
                                      "film_still", "film_sound", "own_extra", "lit_shots",
-                                     "show_order", "multiball", "ball_save", "give_way", "block",
+                                     "show_order", "multiball", "ball_save", "give_way", "block", "own_game",
                                      "magnet", "scoop", "coils", "shield", "building", "shaker", "shows",
                                      "wizard", "roster", "challenge", "place", "done")}
             self.set(reasons={}, limits={}, dis=dis, hide={}, editor_on=False, dup_ok=False,
@@ -3396,6 +3396,11 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
             reasons["block"] = ("Not on this game yet: the app has not found where %s starts its own modes, so "
                                 "a mode cannot keep them from starting; set to hold them off, it gives way to "
                                 "them instead." % p.label)
+        dis["own_game"] = not getattr(p, "own_game", False)                 # PAD-1400
+        if dis["own_game"]:
+            reasons["own_game"] = ("Not on this game yet: the app has not found where %s adds its own points, "
+                                   "makes its calls and starts its modes, so a mode cannot switch them off."
+                                   % p.label)
         off = []
         for take, part, words in self._FILM_PARTS:
             dis["film_" + take] = not p.can(part)
@@ -4156,6 +4161,9 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
                 "game_modes_default": [i for i, _n, on in getattr(p, "game_modes", ()) if on] if p is not None else [],
                 "game_rules": [n for _i, n in getattr(p, "game_rules", ())] if p is not None else [],   # PAD-398
                 "give_way_off": ("Not on this game: " + stack_why) if stack_why else "",
+                "own_game_off": ("" if p is None or getattr(p, "own_game", False) else    # PAD-1400
+                                 "Not on this game yet: the app has not found where %s adds its own points, makes "
+                                 "its calls and starts its modes, so a mode cannot switch them off." % p.label),
                 # PAD-395: the mechanisms its blocks may hold here, and why the blocks are greyed if not
                 "mechs": [{"name": n, "label": lab} for n, lab in self._blocks_mechs(p).items()],
                 "mechs_off": self._blocks_mechs_off(p),

@@ -33,6 +33,16 @@ MODE_FILE = "mode.json"
 MAX_MODES = 64
 
 
+#: PAD-1400: the port's sites pad_mode_runtime.c's pm_own_game must hold back (one of each group), or a whole-game
+#: mode would run with the game's own points or calls beside it
+OWN_GAME_SITES = (("score_add", "score_add32"), ("callout",))
+
+
+def own_game_sites(sites):
+    """PAD-1400: True when a port with these sites can switch the game's own rules off (pm_own_game)."""
+    return all(any(s in sites for s in group) for group in OWN_GAME_SITES)
+
+
 class ModeProjectError(ValueError):
     """A mode that cannot be saved, loaded or built as asked."""
 
@@ -75,6 +85,8 @@ class TitleProfile:
     #                              mode can keep from starting (the port's block_start_<id> lines)
     game_rules: tuple = ()       # PAD-398: ((n, name), ...) the game's rules (its features) that see no
     #                              shots while a mode blocks, unless it keeps them (block_rule_<n> lines)
+    own_game: bool = False       # PAD-1400: a mode can be the whole game (game_modes own_game): the port names
+    #                              the game's score and callout sites the runtime holds back, and its mode starts
     lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
     #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
     light_route: str = ""        # item 164: how a mode's Lights run - "language" (the game's own light
@@ -2819,6 +2831,7 @@ def profile_from_port(path):
         runtime_can=runtime,
         cannot=tuple(cannot),
         insider_gate=all(n in sites for n in INSIDER_GATE_SITES),
+        own_game=own_game_sites(sites) and bool(_game_modes(port)),            # PAD-1400
         # item 147's events, as pad_mode_runtime.c's events_arm would arm them: a bus event
         # needs hook_dispatch, a site event its site. What each run measured is in the port.
         events=events,
@@ -3203,6 +3216,7 @@ try:
     _key_115, _label_115 = "godzilla_pro-1.15", "Godzilla Pro 1.15"
     GODZILLA_PRO_1_15 = replace(
         GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), game_rules=_game_rules(_port_115),
+        own_game=own_game_sites(_port_115["site"]) and bool(_game_modes(_port_115)),   # PAD-1400
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),
@@ -3792,7 +3806,9 @@ class ModeSpec:
     # cannot start. Never a multiball (game_mode_blocks.py). PAD-398 (David, 2026-10-05: "when our custom
     # modes start, we should ONLY be in those modes unless explicitly noted"): "block" is the default, and
     # while it blocks every rule of the game's (its features: game_rules) sees no shots but the ones named in
-    # keep_rules, so none of the game's jackpots, locks or multiballs light or count
+    # keep_rules, so none of the game's jackpots, locks or multiballs light or count. PAD-1400: "own_game": the
+    # mode IS the game - it starts with each game, runs through every ball and player and ends with the game,
+    # holding off the game's modes as "block" does, and the game's own rules are switched off underneath it
     game_modes: str = "block"
     block_modes: list = field(default_factory=list)
     keep_rules: list = field(default_factory=list)   # PAD-398: names from the title's game_rules
@@ -5134,13 +5150,17 @@ def validate(spec, folder=None):
 
 
 # ---- PAD-363: the game's own modes while it runs -----------------------------------------
-GAME_MODES = ("stack", "give_way", "block")
+GAME_MODES = ("stack", "give_way", "block", "own_game")
+def holds_game_modes(spec):
+    """PAD-363 / PAD-1400: True when *spec* keeps the game's modes from starting while it runs ("block", and
+    "own_game", which holds them off the same way for the whole game)."""
+    return (getattr(spec, "game_modes", None) or "block") in ("block", "own_game")
 
 
 def held_off(spec, p):
     """The ids of *p*'s modes *spec* keeps from starting: its own list, else the port's checked defaults
     (what pad_mode_runtime.c does with an empty `block_modes`); () unless it blocks."""
-    if spec.game_modes != "block":
+    if not holds_game_modes(spec):
         return ()
     if spec.block_modes:
         return tuple(sorted({int(i) for i in spec.block_modes if isinstance(i, int)}))
@@ -5149,8 +5169,11 @@ def held_off(spec, p):
 
 def validate_game_modes(spec, p):
     if spec.game_modes not in GAME_MODES:
-        return ["What it does about the game's own modes is stack, give_way or block."]
-    if spec.game_modes != "block":
+        return ["What it does about the game's own modes is stack, give_way, block or own_game."]
+    if spec.game_modes == "own_game" and not getattr(p, "own_game", False):            # PAD-1400
+        return ["Being the whole game is not on %s yet: the app has not found where it adds its own points, "
+                "makes its calls and starts its modes, so it could not switch them off." % p.label]
+    if not holds_game_modes(spec):
         return []
     have = {i: name for i, name, _on in getattr(p, "game_modes", ())}
     if not have:
@@ -5184,9 +5207,9 @@ def game_modes_lines(spec, p=None):
     that says nothing runs alone), so "stack" is written out and "block" is not."""
     if spec.game_modes == "give_way":
         return ["game_modes     give_way"]
-    if spec.game_modes != "block":
+    if not holds_game_modes(spec):
         return ["game_modes     stack"]
-    out = []
+    out = ["game_modes     own_game"] if spec.game_modes == "own_game" else []     # PAD-1400
     ids = sorted({i for i in spec.block_modes or () if isinstance(i, int) and 0 <= i < 128})
     if ids:
         out.append("block_modes    " + " ".join(str(i) for i in ids))
@@ -5356,7 +5379,7 @@ def validate_shield(spec, p):
     if not p.can("shield"):
         return ["Turning the shield targets is not on %s yet (Mode says why)." % p.label]
     feature = p.shield_rule or "shield"
-    if (spec.game_modes or "block") != "block":
+    if not holds_game_modes(spec):
         return ["The shield targets stay toward the player only while the game's modes cannot start: otherwise "
                 "the game's own %s feature turns them back." % feature]
     if p.shield_rule and p.shield_rule in (spec.keep_rules or []):
@@ -5387,7 +5410,7 @@ def validate_building(spec, p):
     if shot and shot not in dict(p.shots):
         out.append("%s has no shot called %r to move the building on." % (p.label, shot))
     feature = p.building_rule or "building locks"
-    if (spec.game_modes or "block") != "block":
+    if not holds_game_modes(spec):
         out.append("The building moves only while the game's modes cannot start: otherwise the game's own %s "
                    "may want it." % feature)
     elif p.building_rule and p.building_rule in (spec.keep_rules or []):

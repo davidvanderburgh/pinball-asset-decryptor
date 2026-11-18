@@ -35,7 +35,7 @@
 // color the Font bar gave the line (drawn in exactly it, the profile no longer changing it),
 // and a word that lines of text can be colored directly there.
 
-import { html, useEffect, useRef, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
+import { html, useEffect, useRef, useState, Button, Check, Icon, Seg, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { Controls, Ranges, CurveEditor, WhichFiles, MODES, MODE_WORDS, useProfile, statusNote,
   UndoRedo, undoKey } from "./color.js";
@@ -202,6 +202,8 @@ const TEXT_ALL_TIP = "This will change all of your unlocked lines of text to the
 // PAD-462: or the files selected together, the one on show named first.
 function FileLine({ s, host }) {
   const f = s.file;
+  const sets = useNs("imgsets");
+  const [scope, setScope] = useState("this");
   if (!f) return null;
   const n = f.count || 1;
   const all = (ALL_HOSTS[host] || []).includes(f.kind) ? ALL_WORDS[f.kind] : null;
@@ -209,8 +211,26 @@ function FileLine({ s, host }) {
   // PAD-438: a line of text in Scenes has one too (PAD-471: and Apply to all, of lines)
   const what = f.kind === "text" ? "This line of text" : n > 1 ? `These ${n} ${many}` : "This file";
   const shared = `“${s.asset_name || "Recommended"}”`;
-  const sameBtn = (head) => html`<${Button} size="xs" onClick=${() => call("color.file_shared")}
-    title=${head}>Same as the other files<//>`;
+  // themes (Simon: "Apply to all ... ALL, SET 1...N", "Same as these files ... ALL, SET 1...N"): on the Images tab with
+  // themes on, the buttons act on this theme or on every theme
+  const themed = host === "images" && f.kind === "images" && sets.enabled && (sets.names || []).length > 1;
+  const inTheme = /^@\d+:/.test(f.rel || "");
+  const themes = themed ? scope : "this";
+  const sameBtn = (head) => inTheme && themes === "this"
+    ? html`<${Button} size="xs" onClick=${() => call("color.file_shared", themes)}
+        title="Drop this theme's own profile for it: it has theme 1's again">Same as theme 1<//>`
+    : html`<${Button} size="xs" onClick=${() => call("color.file_shared", themes)}
+        title=${themes === "all" ? `${head} - in every theme, theme 1 too` : head}>Same as the other files<//>`;
+  if (inTheme && !f.own && n === 1) {
+    return html`<div class="cpd-file">
+      <div class="row cpd-file-hd"><span class="eyebrow nw">${what}</span>
+        <span class="mono small ellip" title=${f.rel}>${f.label}</span></div>
+      <div class="row cpd-file-own"><span class="small muted">Same as theme 1. A change here gives it a profile of its
+        own in this theme only.</span></div>
+      ${all ? html`<${ApplyAll} f=${f} all=${all} host=${host} s=${s} themed=${themed} scope=${scope}
+        setScope=${setScope} />` : null}
+    </div>`;
+  }
   const own = n > 1
     ? (f.own_n ? html`<span class="small muted grow">${f.own_n === n ? "Each has a color profile of its own."
         : `${f.own_n} of them have a color profile of their own.`}</span>
@@ -220,20 +240,30 @@ function FileLine({ s, host }) {
       ? html`<span class="small muted grow">It has a color profile of its own.</span>
         ${sameBtn(`Drop this file's own profile: it gets the individual files profile every other file gets (${shared})`)}`
       : html`<span class="small muted">${`Same as the other files (${shared}). A change here gives it a profile of its own.`}</span>`;
-  const profile = { profile: s.name || "Recommended" };
   return html`<div class="cpd-file">
     <div class="row cpd-file-hd"><span class="eyebrow nw">${what}</span>
       <span class="mono small ellip" title=${f.rel}>${n > 1 ? `${f.label} and ${n - 1} more` : f.label}</span></div>
     <div class="row cpd-file-own">${own}</div>
-    ${all ? html`<div class="row cpd-file-all">
-      <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "profiled")}
-        title=${{ head: `Apply this ${all[0]} color profile to all profiled ${all[1]}`, lines: [profile,
-          `Every ${all[2]} ${f.kind === "text" ? "in every scene" : host === "scenes" ? "on the Images tab" : "on this tab"} with a color profile attached gets this one, in place of the one it has now.`,
-          `A ${all[2]} with no color profile attached is left as it is.`,
-          "You are asked first. Undo puts them all back."] }}>Apply to all profiled ${all[1]}…<//>
-      <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "all")}
-        title=${f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(all[2], all[1])}>Apply to all ${all[1]}…<//>
-    </div>` : null}
+    ${all ? html`<${ApplyAll} f=${f} all=${all} host=${host} s=${s} themed=${themed} scope=${scope}
+      setScope=${setScope} />` : null}
+  </div>`;
+}
+
+// Apply to all (PAD-439 / PAD-462), and with themes (Simon) which themes it reaches: this one or every one
+function ApplyAll({ f, all, host, s, themed, scope, setScope }) {
+  const profile = { profile: s.name || "Recommended" };
+  const themes = themed ? scope : "this";
+  return html`<div class="row cpd-file-all">
+    ${themed ? html`<span ...${tip("Which themes Apply to all and Same as... reach: the theme picked on the Images tab, or every theme (theme 1 too). You are always asked first.")}>
+      <${Seg} value=${scope === "all" ? "All themes" : "This theme"} options=${["This theme", "All themes"]}
+        onChange=${(v) => setScope(v === "All themes" ? "all" : "this")} /></span>` : null}
+    <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "profiled", null, themes)}
+      title=${{ head: `Apply this ${all[0]} color profile to all profiled ${all[1]}`, lines: [profile,
+        `Every ${all[2]} ${f.kind === "text" ? "in every scene" : host === "scenes" ? "on the Images tab" : "on this tab"} with a color profile attached gets this one, in place of the one it has now.`,
+        `A ${all[2]} with no color profile attached is left as it is.`,
+        "You are asked first. Undo puts them all back."] }}>Apply to all profiled ${all[1]}…<//>
+    <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "all", null, themes)}
+      title=${f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(all[2], all[1])}>Apply to all ${all[1]}…<//>
   </div>`;
 }
 

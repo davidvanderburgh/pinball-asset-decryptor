@@ -54,16 +54,18 @@ def load(project):
         return None
     from ...core import staged_changes
     try:
-        raw = staged_changes.load(project).get(STAGED_KEY)
+        side = staged_changes.load(project)
     except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
         return None
-    return normalise(raw)
+    return normalise(side.get(STAGED_KEY), theme_colour_rels(side))
 
 
-def normalise(raw):
-    """*raw* (the sidecar's value) as :func:`load` returns it, ``None`` when it holds no variant."""
+def normalise(raw, colour=None):
+    """*raw* (the sidecar's value) as :func:`load` returns it, ``None`` when it holds no variant. *colour*:
+    :func:`theme_colour_rels` - a theme whose only change is a colour profile is a variant too."""
     if not isinstance(raw, dict):
         return None
+    colour = {n: set(r) for n, r in (colour or {}).items() if 2 <= n <= MAX_SETS and r}
     scenes = {}
     top = 1
     for card, sets in (raw.get("scenes") or {}).items():
@@ -91,7 +93,9 @@ def normalise(raw):
         if keep:
             images[n] = keep
             top = max(top, n)
-    if not scenes and not images:
+    if colour:
+        top = max(top, max(colour))
+    if not scenes and not images and not colour:
         return None
     names = [str(x) for x in (raw.get("names") or ()) if str(x).strip()][:MAX_SETS]
     while len(names) < top:
@@ -103,7 +107,94 @@ def normalise(raw):
     out = {"names": names, "scenes": scenes, "force": force if 1 <= force <= len(names) else 0}
     if images:
         out["images"] = images
+    if colour:
+        out["colour"] = colour
     return out
+
+
+# ---- a theme's own colour profiles (Simon: "every single image can be colour profiled", per theme) -----------------
+# A picture's colour switch and its own profile live where theme 1's do (core/colour_profile: image_color_slots,
+# image_color_profiles), under a THEME KEY "@<n>:<picture rel>" - so the Colours bar, its undo and Apply to all work on
+# a theme's picture unchanged, and nothing of theme 1's is ever touched. A theme key is never a file, so theme 1's build
+# never sees one. A theme with nothing of its own for a picture is theme 1's: its switch, then its profile.
+
+_THEME_KEY_RE = re.compile(r"^@(\d+):(.+)$")
+
+
+def theme_key(n, rel):
+    """Theme *n*'s key for picture *rel* (theme 1's is the picture's own rel)."""
+    return rel if int(n) <= 1 else "@%d:%s" % (int(n), rel)
+
+
+def split_theme_key(key):
+    """``(n, rel)`` of a theme key, ``(1, key)`` of a plain picture rel."""
+    m = _THEME_KEY_RE.match(str(key or ""))
+    return (int(m.group(1)), m.group(2)) if m else (1, key)
+
+
+def theme_colour_rels(side):
+    """``{n: {picture rel}}``: the pictures each theme has a colour switch or profile of its own for, read from the
+    sidecar dict *side* (``staged_changes.load``)."""
+    from ...core import colour_profile as cp
+    out = {}
+    for key in (cp.IMAGE_SLOTS_KEY, cp.FILE_PROFILES_KEY["images"]):
+        m = side.get(key) if isinstance(side, dict) else None
+        for k in (m or {}) if isinstance(m, dict) else ():
+            n, rel = split_theme_key(k)
+            if n >= 2:
+                out.setdefault(n, set()).add(rel)
+    return out
+
+
+def _theme1_switch(project, side, settings, rel):
+    """Theme 1's colour switch for picture *rel*, as the Images tab has it: its own, else - a replaced picture, or
+    one an earlier build put in - the tab-wide box; a game picture has no box (off)."""
+    own = settings["images"].get(rel)
+    if own is not None:
+        return bool(own)
+    from ...core import colour_profile as cp
+    if not settings.get("all_images"):
+        return False
+    if isinstance(side, dict) and (side.get("image") or {}).get(rel):
+        return True
+    try:
+        return rel in cp.built_image_rels(project, side)
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def theme_colour(project, n, rel, side=None, settings=None):
+    """``(on, profile or None)``: theme *n*'s colour switch for picture *rel* and the profile baked in with it on -
+    the theme's own, else theme 1's (its own, else the project's individual files profile)."""
+    from ...core import colour_profile as cp, staged_changes
+    side = staged_changes.peek(project) if side is None else side
+    settings = cp.asset_settings(project) if settings is None else settings
+    key = theme_key(n, rel)
+    own_on = settings["images"].get(key)
+    on = bool(own_on) if own_on is not None else _theme1_switch(project, side, settings, rel)
+    prof = cp.own_profile(project, "images", key) if int(n) >= 2 else None
+    if prof is None:
+        prof = cp.file_profile(project, "images", rel)
+    return on, prof
+
+
+def theme1_source(project, rel):
+    """Theme 1's picture *rel* as a file, before any colour profile of theme 1's was baked into it: the replacement
+    the Images tab chose, else the uncorrected copy a build kept, else the game's own (its snapshot, where a build
+    corrected the project's copy), else the project's file."""
+    from ...core import colour_profile as cp, staged_changes, staged_originals as SO
+    rep = (staged_changes.peek(project).get("image") or {}).get(rel)
+    if isinstance(rep, str) and os.path.isfile(rep):
+        return rep
+    kept = cp.uncorrected_path(project, rel)
+    if kept:
+        return kept
+    try:
+        if SO.has_snapshot(project, rel):
+            return SO.snapshot_path(project, rel)
+    except Exception:                                   # noqa: BLE001
+        pass
+    return os.path.join(project, *rel.split("/"))
 
 
 # ---- the sets themselves: names, made and removed on the app's set picker -----------------------------------------
@@ -200,6 +291,28 @@ def rename_set(project, n, name):
     _put(project, side, raw)
 
 
+def _renumber_colour(side, order):
+    """The themes' colour switches and profiles (theme keys in the sidecar *side*) by *order* (``order[new - 1] =
+    old``; a theme missing is dropped)."""
+    from ...core import colour_profile as cp
+    new_of = {old: new for new, old in enumerate(order, 1)}
+    for key in (cp.IMAGE_SLOTS_KEY, cp.FILE_PROFILES_KEY["images"]):
+        m = side.get(key)
+        if not isinstance(m, dict):
+            continue
+        out = {}
+        for k, v in m.items():
+            n, rel = split_theme_key(k)
+            if n < 2:
+                out[k] = v
+            elif new_of.get(n, 0) >= 2:
+                out[theme_key(new_of[n], rel)] = v
+        if out:
+            side[key] = out
+        else:
+            side.pop(key, None)
+
+
 def _renumber(raw, order):
     """Every set-keyed part of *raw* by *order* (``order[new - 1] = old``; an old set missing is dropped)."""
     new_of = {old: new for new, old in enumerate(order, 1)}
@@ -236,6 +349,7 @@ def remove_set(project, n):
     order = [k for k in range(1, len(names) + 1) if k != n]
     raw["names"] = [names[k - 1] for k in order]
     _renumber(raw, order)
+    _renumber_colour(side, order)
     _put(project, side, raw)
 
 
@@ -250,6 +364,7 @@ def move_set(project, n, to):
     order.insert(to - 1, n)
     raw["names"] = [names[k - 1] for k in order]
     _renumber(raw, order)
+    _renumber_colour(side, order)
     _put(project, side, raw)
 
 
@@ -374,15 +489,37 @@ def picture_variants(project, sets, base_scene, work, log=None):
     *work* as a ``{"file": ...}`` source. A scene the set already has a variant file of keeps that one."""
     log = log or (lambda *a, **k: None)
     picks_by_set = (sets or {}).get("images") or {}
-    if not picks_by_set:
+    colour_by_set = (sets or {}).get("colour") or {}
+    if not picks_by_set and not colour_by_set:
         return sets
     rows = picture_rows(project)
     out = dict(sets)
     scenes = {c: dict(v) for c, v in (sets.get("scenes") or {}).items()}
     os.makedirs(work, exist_ok=True)
-    for n, picks in sorted(picks_by_set.items()):
-        name = sets["names"][n - 1] if n - 1 < len(sets["names"]) else "set %d" % n
+    from ...core import colour_profile as cp, staged_changes
+    side = staged_changes.peek(project)
+    settings = cp.asset_settings(project)
+    for n in sorted(set(picks_by_set) | set(colour_by_set)):
+        picks = dict(picks_by_set.get(n) or {})
+        name = sets["names"][n - 1] if n - 1 < len(sets["names"]) else "theme %d" % n
         by_card = {}
+        # every picture the theme changes: its own file, or theme 1's before theme 1's colours (theme1_source), with
+        # the theme's colour profile baked in where its switch is on (Simon: "every single image can be colour
+        # profiled", per theme)
+        for rel in sorted(set(picks) | set(colour_by_set.get(n) or ())):
+            src = picks.get(rel) or theme1_source(project, rel)
+            if rows.get(rel) and os.path.isfile(src):
+                try:
+                    on, prof = theme_colour(project, n, rel, side, settings)
+                    if on and prof is not None and not prof.is_identity():
+                        from PIL import Image
+                        coloured = os.path.join(work, "colour%d_%s.png" % (n, re.sub(r"[^\w.-]", "_", rel)))
+                        prof.apply_image(Image.open(src)).save(coloured)
+                        src = coloured
+                except Exception as e:                  # noqa: BLE001
+                    log("Themes: theme %d (%s)'s colour profile could not be baked into %s (%s); it goes in "
+                        "without it." % (n, name, rel, e), "warning")
+            picks[rel] = src
         for rel, src in sorted(picks.items()):
             if not os.path.isfile(src):
                 log("Themes: theme %d (%s)'s picture for %s is missing (%s); left out." % (n, name, rel, src),
@@ -415,8 +552,8 @@ def picture_variants(project, sets, base_scene, work, log=None):
             scenes.setdefault(card, {})[n] = {"file": path}
             made += 1
         if made:
-            log("Themes: theme %d (%s): %d picture(s) of its own, in %d scene(s)." % (n, name, len(picks), made),
-                "info")
+            log("Themes: theme %d (%s): %d picture(s) of its own (chosen or colour profiled), in %d scene(s)."
+                % (n, name, len(picks), made), "info")
     out["scenes"] = scenes
     return out
 

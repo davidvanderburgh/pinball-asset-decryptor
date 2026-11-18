@@ -459,7 +459,14 @@ class ColorTab(TabService):
         if fm is None:
             return None
         try:
-            return cp.own_profile(self._project, *fm)
+            own = cp.own_profile(self._project, *fm)
+            if own is None and fm[0] == "images":
+                # a theme's picture with no profile of its own has theme 1's (Simon: themes, scene_variants)
+                from ...plugins.stern import scene_variants as SV
+                n, base = SV.split_theme_key(fm[1])
+                if n > 1:
+                    own = cp.own_profile(self._project, "images", base)
+            return own
         except Exception:                               # noqa: BLE001
             log.exception("color profile own")
             return None
@@ -584,13 +591,18 @@ class ColorTab(TabService):
         if not f or self._file_mode() is None:
             return None
         rels = self._file_rels()
-        own_n = int(self._own() is not None)
+        # its OWN profile, not the one shown: a theme's picture shows theme 1's until it has one of its own
+        try:
+            mine = cp.own_profile(self._project, f["kind"], f["rel"]) is not None
+        except Exception:                               # noqa: BLE001
+            mine = self._own() is not None
+        own_n = int(mine)
         if len(rels) > 1:
             m = self._raw(staged_changes.peek(self._project),
                           "files\n" + f["kind"])
             own_n = sum(1 for r in rels if isinstance(m, dict) and r in m)
         return {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
-                "on": f.get("on"), "own": self._own() is not None,
+                "on": f.get("on"), "own": mine,
                 "count": len(rels), "own_n": own_n}
 
     def _skips_plain(self):
@@ -1089,7 +1101,7 @@ class ColorTab(TabService):
         return True
 
     @rpc
-    def file_shared(self):
+    def file_shared(self, themes="this"):
         """"Same as the other files": the file on show drops its own profile
         and gets the project's individual files profile again (PAD-368)."""
         fm = self._file_mode()
@@ -1098,6 +1110,13 @@ class ColorTab(TabService):
         key = self._mode_key()
         rels = self._file_rels()
         mkey = "files\n" + fm[0]
+        if themes == "all" and fm[0] == "images":
+            # every theme: theme 1's own profile and each theme's go, for the picture(s) on show
+            from ...plugins.stern import scene_variants as SV
+            bases = {SV.split_theme_key(r)[1] for r in rels}
+            svc = self.window.service("imgsets")
+            names = (svc.get("names") or []) if svc is not None else []
+            rels = sorted({SV.theme_key(t, b) for b in bases for t in range(1, max(2, len(names)) + 1)})
         before = (self._files_raw(mkey, rels) if len(rels) > 1
                   else self._stored_raw(key))
         try:
@@ -1157,6 +1176,36 @@ class ColorTab(TabService):
     _ALL_EACH = {"images": "each replaced one", "videos": "each replaced one",
                  "text": "each one added in Scenes"}
 
+    def _theme_words(self, kind, rel, themes):
+        """" in theme 2 (Dark)" / " in every theme" for Apply to all's warning; "" with no themes (images only)."""
+        svc = self.window.service("imgsets")
+        names = (svc.get("names") or []) if svc is not None and svc.get("enabled") else []
+        if kind != "images" or len(names) < 2:
+            return ""
+        if themes == "all":
+            return " in every theme"
+        from ...plugins.stern import scene_variants as SV
+        n = SV.split_theme_key(rel)[0]
+        return " in theme %d (%s)" % (n, names[n - 1] if n - 1 < len(names) else "")
+
+    def _theme_cost(self, kind, targets):
+        """What Apply to all costs the card in the themes: each theme's own copy of every scene holding one of its
+        pictures (scene_variants.picture_variants)."""
+        if kind != "images":
+            return ""
+        from ...plugins.stern import scene_variants as SV
+        themed = {}
+        for key in targets:
+            n, base = SV.split_theme_key(key)
+            if n > 1:
+                themed.setdefault(n, set()).add(base)
+        if not themed:
+            return ""
+        rows = SV.picture_rows(self._project or "")
+        scenes = sum(len({row[0] for b in rels for row in rows.get(b, ())}) for rels in themed.values())
+        return ("\n\nOn the card: each theme gets its own copy of every scene holding one of these pictures - %d "
+                "scene file(s) in all, made at the next Write." % scenes)
+
     def _none_left(self, kind, prefix):
         """The toast for no file of *kind* to give a profile to."""
         if kind == "text":
@@ -1178,7 +1227,7 @@ class ColorTab(TabService):
                    else ("One line", "is", "it is", "it is")))
 
     @rpc
-    def apply_to_all(self, scope="profiled", kind=None):
+    def apply_to_all(self, scope="profiled", kind=None, themes="this"):
         """The file on show's color profile for other files of its kind,
         after an "Are you sure?".  *scope* (PAD-462, DragonRR): "profiled",
         every file with a color profile attached (``color_targets``), which
@@ -1205,12 +1254,21 @@ class ColorTab(TabService):
             scope = "profiled"
         kind, rel = fm
         one, many = self._ALL_WORDS[kind]
-        fn = getattr(self._all_service(kind), "color_targets", None)
+        svc = self._all_service(kind)
+        fn = getattr(svc, "color_targets", None)
+        # Simon (themes): "apply to all in this set ... ALL, SET 1...N" - this theme, or every theme (images)
+        themes = "all" if themes == "all" else "this"
         try:
+            if svc is not None:
+                svc._targets_themes = themes
             targets = dict(fn(scope) or {}) if fn is not None else {}
         except Exception:                               # noqa: BLE001
             log.exception("color profile targets %s", kind)
             targets = {}
+        finally:
+            if svc is not None:
+                svc._targets_themes = "this"
+        theme_words = self._theme_words(kind, rel, themes)
         if not set(targets) - {rel}:
             if scope == "profiled":
                 self.toast("No other %s has a color profile attached: attach "
@@ -1236,14 +1294,17 @@ class ColorTab(TabService):
                 len(targets), many, self._ALL_SCOPES[scope].replace(
                     "is not", "are not"), name), "info")
             return False
+        # Simon: "make sure it is very clear - WARNING THIS WILL APPLY THE PROFILE TO ALL ..."
+        warn = "WARNING: THIS WILL APPLY THE PROFILE “%s” TO ALL %d %s%s%s.\n\n" % (
+            name, len(targets), "PROFILED " if scope == "profiled" else "", many.upper(), theme_words.upper())
         if scope == "profiled":
-            msg = ("Are you sure?\n\nAll %d %s with a color profile attached "
+            msg = (warn + "All %d %s with a color profile attached "
                    "get “%s”, this %s's color profile, in place of the one "
                    "each has now. %s without a color profile attached are "
                    "left as they are." % (len(targets), many, name, one,
                                           many.capitalize()))
         else:
-            msg = ("Are you sure?\n\nEvery %s that is not locked (%s, and "
+            msg = (warn + "Every %s that is not locked (%s, and "
                    "%s), all %d of them, gets “%s”, this %s's color profile, "
                    "in place of the one each has now."
                    % (one, self._ALL_EACH[kind], self._ALL_UNLOCK[kind],
@@ -1254,6 +1315,7 @@ class ColorTab(TabService):
                         else " It is attached to the one that has none "
                         "attached.")
             msg += self._left_out_words(kind)
+        msg += self._theme_cost(kind, targets)
         msg += "\n\nUndo in the Colors bar puts them all back."
         key = self._mode_key()
         title = ("Apply to all profiled %s" if scope == "profiled"

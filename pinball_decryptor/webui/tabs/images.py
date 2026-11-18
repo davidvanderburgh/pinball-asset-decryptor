@@ -958,6 +958,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
             slots = {r: v for r, v in self._color.items()
                      if r in self._assignments or self._is_built(r)
                      or (self._color_unlocked and r in self._by_rel)}
+            # the themes' switches ("@<n>:<rel>", scene_variants.theme_key) are kept as they are
+            slots.update({k: v for k, v in (data.get("image_color_slots") or {}).items()
+                          if str(k).startswith("@")})
             if slots:
                 data["image_color_slots"] = slots
             else:
@@ -1134,10 +1137,84 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         except Exception:                               # noqa: BLE001
             return False
 
+    # -- themes' colour (Simon: "every single image can be colour profiled", per theme) -------------------------------
+    def _theme_of(self, rel):
+        """``(n, picture rel, in a scene)`` for *rel* - a plain picture rel (the theme picked now) or a theme key
+        ("@<n>:<rel>", the Colours bar's for a theme's picture)."""
+        from ...plugins.stern import scene_variants as SV
+        n, base = SV.split_theme_key(rel)
+        if n == 1:
+            n = self._image_set()
+        rows = {}
+        if n > 1:
+            state = getattr(self, "_set_state", None)
+            rows = state()[2] if state is not None else {}
+        return n, base, bool(rows.get(base))
+
+    def _theme_color_state(self, n, rel):
+        """Theme *n*'s switch for scene picture *rel*: its own, else theme 1's."""
+        from ...plugins.stern import scene_variants as SV
+        try:
+            on, _prof = SV.theme_colour(self._scan_dir or "", n, rel)
+        except Exception:                               # noqa: BLE001
+            return False
+        return bool(on)
+
+    def _put_theme_switches(self, switches):
+        """Theme keys' switches (``{key: True / False / None}``), one save; returns what each was."""
+        from ...core import colour_profile as cp, staged_changes
+        folder = self._scan_dir or ""
+        if not folder or not switches:
+            return {}
+        data = staged_changes.load(folder)
+        m = dict(data.get(cp.IMAGE_SLOTS_KEY) or {})
+        before = {}
+        for key, value in switches.items():
+            before[key] = m.get(key)
+            if value is None:
+                m.pop(key, None)
+            else:
+                m[key] = bool(value)
+        if m:
+            data[cp.IMAGE_SLOTS_KEY] = m
+        else:
+            data.pop(cp.IMAGE_SLOTS_KEY, None)
+        staged_changes.save(folder, data)
+        return before
+
+    def _set_theme_color(self, n, rel, in_scene, value):
+        from ...plugins.stern import scene_variants as SV
+        if not (in_scene and self._per_file_colour()):
+            return False
+        self._put_theme_switches({SV.theme_key(n, rel): value})
+        self.log("Replace Images: theme %d: %s %s." % (
+            n, rel, "has the color profile attached" if value else "has no color profile attached"
+            if value is not None else "follows theme 1's color switch again"), "info")
+        i = self._idx.get(rel)
+        if i is not None:
+            self._publish_chunks({i // CHUNK})
+        if rel == self._current_rel:
+            self._render_preview(rel)
+        else:
+            self.publish_look()
+        self._color_changed()
+        return True
+
     def _color_state(self, rel):
         """``True`` / ``False`` for a replaced picture (its own switch, else
         the tab-wide box) or, behind the advanced unlock, a game picture (its
-        own switch only, PAD-335); ``None`` when there is nothing to correct."""
+        own switch only, PAD-335); ``None`` when there is nothing to correct.
+        With a theme picked (2 and up): the theme's switch for a picture in a
+        scene - every one has one, locked or not - and none for any other."""
+        if not (rel and self._per_file_colour()):
+            return None
+        n, base, in_scene = self._theme_of(rel) if hasattr(self, "_set_state") else (1, rel, False)
+        if n > 1:
+            return self._theme_color_state(n, base) if in_scene else None
+        return self._color_state1(rel)
+
+    def _color_state1(self, rel):
+        """:meth:`_color_state` of theme 1, whichever theme is picked."""
         if not (rel and self._per_file_colour()):
             return None
         if not self._assignments.get(rel):
@@ -1150,7 +1227,12 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
 
     def _color_locked(self, rel):
         """The game's own picture with the advanced box off (PAD-335): no
-        switch, shown as a blue lock, the way Scenes and Video show it."""
+        switch, shown as a blue lock, the way Scenes and Video show it.
+        In a theme (2 and up) a picture in a scene is never locked."""
+        if hasattr(self, "_set_state") and rel and self._per_file_colour():
+            n, _base, in_scene = self._theme_of(rel)
+            if n > 1:
+                return not in_scene
         return bool(rel and not self._assignments.get(rel)
                     and not self._color_unlocked
                     and not self._is_built(rel)
@@ -1230,6 +1312,16 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         if on is None:
             return None
         from ...core import colour_profile as cp
+        n, base, _in = self._theme_of(rel)
+        if n > 1:
+            from ...plugins.stern import scene_variants as SV
+            key = SV.theme_key(n, base)
+            try:
+                name = SV.theme_colour(self._scan_dir or "", n, base)[1].label()
+            except Exception:                           # noqa: BLE001
+                name = "color profile"
+            own = cp.asset_settings(self._scan_dir or "")["images"].get(key) is not None
+            return {"on": on, "own": own, "all": False, "name": name, "stock": False, "theme": n, "key": key}
         try:
             # its own profile (PAD-368), else the project's
             name = cp.file_profile(self._assets_dir() or "", "images",
@@ -1279,7 +1371,12 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
     @rpc
     def set_color(self, rel, value):
         """This picture's own colour switch (PAD-312): True / False, or
-        None to follow the Color profile tab's box again."""
+        None to follow the Color profile tab's box again. With a theme picked,
+        or a theme key (the Colours bar's), the theme's switch (None: theme 1's
+        again)."""
+        n, base, in_scene = self._theme_of(rel)
+        if n > 1:
+            return self._set_theme_color(n, base, in_scene, value)
         if not (rel in self._by_rel and self._per_file_colour()):
             return False
         built = self._is_built(rel)
@@ -1336,13 +1433,44 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         every one."""
         if not self._per_file_colour():
             return {}
-        rels = (self._by_rel if scope == "all" else set(self._assignments)
-                | {r for r, v in self._color.items() if v})
         out = {}
-        for rel in rels:
-            on = self._color_state(rel) if rel in self._by_rel else None
-            if on is not None and (on or scope == "all"):
-                out[rel] = on
+        n = self._image_set() if hasattr(self, "_set_state") else 1
+        themes = getattr(self, "_targets_themes", "this")
+        if n == 1 or themes == "all":
+            rels = (self._by_rel if scope == "all" else set(self._assignments)
+                    | {r for r, v in self._color.items() if v})
+            for rel in rels:
+                on = self._color_state1(rel) if rel in self._by_rel else None
+                if on is not None and (on or scope == "all"):
+                    out[rel] = on
+        # the themes (Simon: "apply to all in this set ... all, set 1...N"): a theme's every picture in a scene, by its
+        # theme key; "all" follows the unlock as theme 1 does (unlocked: every one; else the ones replaced - in theme 1
+        # or in the theme - or built)
+        names = (self.window.service("imgsets").get("names") or []) if self.window.service("imgsets") else []
+        themes_n = (range(2, len(names) + 1) if themes == "all" else [n] if n > 1 else [])
+        if themes_n:
+            from ...plugins.stern import scene_variants as SV
+            from ...core import colour_profile as cp, staged_changes
+            _n, _picks, rows = self._set_state()
+            rows = rows or SV.picture_rows(self._scan_dir or "")
+            side = staged_changes.peek(self._scan_dir or "")
+            settings = cp.asset_settings(self._scan_dir or "")
+            slots = settings["images"]
+
+            def _theme_on(t, rel):              # SV.theme_colour's switch, read once for the whole list
+                own = slots.get(SV.theme_key(t, rel))
+                return bool(own) if own is not None else SV._theme1_switch(self._scan_dir, side, settings, rel)
+            for t in themes_n:
+                picks = SV.set_pictures(self._scan_dir or "", t)
+                for rel in self._by_rel:
+                    if not rows.get(rel):
+                        continue
+                    if scope == "all" and not (self._color_unlocked or rel in picks
+                                               or self._assignments.get(rel) or self._is_built(rel)):
+                        continue
+                    on = _theme_on(t, rel)
+                    if on or scope == "all":
+                        out[SV.theme_key(t, rel)] = on
         return out
 
     # ---- Save with color profile (PAD-604) -----------------------------
@@ -1374,7 +1502,13 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         off is no switch, and one a build already corrected gets its own
         colors back, as its palette does it (``set_color``)."""
         from ...core import colour_profile as cp
-        before, stock, built = {}, [], []
+        from ...plugins.stern import scene_variants as SV
+        themed = {k: v for k, v in (switches or {}).items() if SV.split_theme_key(k)[0] > 1}
+        before = self._put_theme_switches(themed) if themed else {}
+        if themed:
+            self._publish_chunks()
+            self._color_changed()
+        stock, built = [], []
         for rel, value in (switches or {}).items():
             if rel not in self._by_rel:
                 continue

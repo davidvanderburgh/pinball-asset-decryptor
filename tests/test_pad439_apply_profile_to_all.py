@@ -53,7 +53,7 @@ def test_apply_to_all_videos_asks_first_and_undoes_as_one_step(tmp_path):
         assert w.call("color.apply_to_all", "all") is False
         q = w.asked[-1]
         assert q["title"] == "Apply to all videos"
-        assert q["message"].startswith("Are you sure?")
+        assert q["message"].startswith("WARNING: THIS WILL APPLY THE PROFILE")   # Simon: "very clear - WARNING ..."
         assert "all 3 of them" in q["message"] and "“Custom red”" in q["message"]
         assert "attached to the 2 that have none" in q["message"]
         assert set(cp.own_profile_names(assets)["videos"]) == {CLIPS[0]}
@@ -157,8 +157,8 @@ def test_apply_to_all_images_and_the_lone_file(tmp_path):
 
 def test_the_button_is_on_the_images_and_video_bars_only():
     pane = open(os.path.join(_TABS, "color_pane.js"), encoding="utf-8").read()
-    assert 'call("color.apply_to_all", "all")' in pane
-    assert 'call("color.apply_to_all", "profiled")' in pane
+    assert 'call("color.apply_to_all", "all", null, themes)' in pane    # themes: this one or all (Simon)
+    assert 'call("color.apply_to_all", "profiled", null, themes)' in pane
     assert "Apply to all ${all[1]}…" in pane
     assert "Apply to all profiled ${all[1]}…" in pane
     # (PAD-471: and the Scenes bar on a line of text; PAD-566: and on a picture in Scenes)

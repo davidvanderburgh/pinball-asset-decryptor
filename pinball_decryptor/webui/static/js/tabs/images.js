@@ -289,6 +289,8 @@ function RenameModal({ spec, onClose }) {
 
 export default function ImagesTab() {
   const s = useNs("images");
+  const sets = useNs("imgsets");
+  const themeNow = sets.on && sets.enabled ? (sets.current || 1) : 1;
   const shell = useNs("shell");
   // PAD-364 (DragonRR): the Color profiles bar on the right edge, as on the Scenes tab,
   // so a profile is picked from the Saved profiles list with each picture's Color switch
@@ -636,6 +638,13 @@ export default function ImagesTab() {
       colorFile = { kind: "images", ...one, attach: { ns: "images" },
         more: selOpen.filter((r) => r.r !== one.rel).map((r) => r.r) };
     }
+  }
+  // themes (Simon: "every single image can be colour profiled", per theme): with theme 2 or up picked, the Colours bar
+  // is on the theme's own key for the picture ("@<n>:<rel>", scene_variants.theme_key), so theme 1's is never touched
+  if (colorFile && themeNow > 1) {
+    const key = (r) => `@${themeNow}:${r}`;
+    colorFile = { ...colorFile, rel: key(colorFile.rel), label: `${colorFile.label} (theme ${themeNow})`,
+      more: (colorFile.more || []).map(key) };
   }
   // the selected pictures, in list order, side by side; the Colors bar opens beside them
   async function openCompare(rels) {

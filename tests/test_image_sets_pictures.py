@@ -94,7 +94,7 @@ def test_picture_variants_make_a_scene_file_for_the_set(tmp_path):
     assert SV.variant_source(p, src)[0] == "file"
     with open(src["file"], "rb") as f:
         assert f.read() != data
-    assert any("1 picture(s) of its own, in 1 scene(s)" in m for m in said)
+    assert any("1 picture(s) of its own (chosen or colour profiled), in 1 scene(s)" in m for m in said)
 
 
 def test_the_images_tabs_own_name_finds_the_picture(tmp_path):

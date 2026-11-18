@@ -123,7 +123,7 @@ def test_the_panel_unticks_music_mode_and_image_set(tmp_path):
         r = rows()
         assert r["music_mode"]["on"] and r["music_mode"]["can"]
         assert r["image_set"]["on"] and r["image_set"]["can"]
-        assert not r["edition"]["can"]                      # the project has no editions: nothing to tick
+        assert r["edition"]["can"] and not r["edition"]["on"]   # no editions yet: tickable all the same (a placeholder)
         assert w.call("svcmenu.set_row", "image_set", False)
         assert w.call("svcmenu.set_row", "music_mode", False)
         w.drain()
@@ -177,7 +177,7 @@ def test_round3_every_row_starts_unticked(tmp_path):
         w.drain()
         r = {x["key"]: x for x in w.state("svcmenu")["settings"]}
         assert not any(x["on"] for x in r.values()), r
-        assert r["music_mode"]["can"] and r["image_set"]["can"] and not r["edition"]["can"]
+        assert r["music_mode"]["can"] and r["image_set"]["can"] and r["edition"]["can"]   # every row tickable
         assert r["music_mode"]["note"].startswith("Off the card")
 
 

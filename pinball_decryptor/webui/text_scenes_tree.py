@@ -530,10 +530,34 @@ class TreeEditMixin:
                     "it" if n == 1 else "them", "it" if n == 1 else "them"))
 
     def _tree_pictures(self):
-        """The Images tab's picks (read each time: they change on another tab)."""
+        """The Images tab's picks (read each time: they change on another tab); with a theme
+        shown (Simon: "a drop down in scenes to show the scene as it will appear in theme N"),
+        that theme's pictures and colours over them."""
         from ..plugins.stern import scene_render
-        return scene_render.pending_pictures(self.assets_dir,
+        pics = scene_render.pending_pictures(self.assets_dir,
                                              bake=self._look_sw()["files"])
+        n = getattr(self, "_preview_theme", 1)
+        if n > 1:
+            from ..plugins.stern import scene_variants as SV
+            try:
+                pics = dict(pics)
+                pics.update(SV.theme_pictures(self.assets_dir, n, bake=self._look_sw()["files"]))
+            except Exception:                           # noqa: BLE001
+                log.exception("scenes theme pictures")
+        return pics
+
+    @rpc
+    def set_preview_theme(self, n):
+        """The Scenes tab's theme drop-down: draw the scenes as theme *n* will show them (a
+        preview: what the editor changes is still theme 1's)."""
+        try:
+            n = max(1, int(n or 1))
+        except (TypeError, ValueError):
+            n = 1
+        self._preview_theme = n
+        self.set(preview_theme=n)
+        self.pictures_changed()
+        return n
 
     def _look_sw(self):
         """The preview's three switches (PAD-330): the whole screen overlay, the

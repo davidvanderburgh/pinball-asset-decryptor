@@ -2,13 +2,37 @@
 // editor.  Python: webui/tabs/scenes.py (ns "scenes": which project shows) and
 // webui/text_scenes.py (ns "text_scenes": the scenes themselves, ScenesPage).
 
-import { html, useState, PageHead, Empty, Spinner, call } from "../core/ui.js";
+import { html, useState, PageHead, Empty, Spinner, Select, Note, Button, call } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { ScenesPage, ScenesActions } from "./text_scenes.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 import { FontBar, fontBarOpenAtStart, rememberFontBarOpen } from "./scene_fonts.js";
 
 const INTRO = "Each scene of the card, drawn the way the machine draws it. Click a picture or a line of text to move, resize, recolour, hide or re-layer it, or add your own; Write puts it on the card. Preview colors change only the preview: the card is not changed.";
+
+// Simon (themes, 2026-11-18): "We need a drop down in scenes to show the scene as it will appear in theme N" - a preview:
+// the theme's pictures and colours (scene_variants.theme_pictures) drawn over theme 1's; what the editor changes is
+// still theme 1's, so the strip says so
+function ThemeView({ s }) {
+  const sets = useNs("imgsets");
+  const names = sets.names || [];
+  if (!sets.on || !sets.enabled || names.length < 2) return null;
+  const options = names.map((n, i) => ({ value: String(i + 1), label: `Show theme ${i + 1}: ${n}` }));
+  return html`<${Select} sm value=${String(s.preview_theme || 1)} options=${options}
+    title="Draw the scenes as each theme will show them on the machine (its pictures and colour profiles). A preview: what you change here is theme 1's."
+    onChange=${(v) => call("text_scenes.set_preview_theme", Number(v))} />`;
+}
+
+function ThemeStrip({ s }) {
+  const sets = useNs("imgsets");
+  const t = s.preview_theme || 1;
+  if (!sets.on || !sets.enabled || t < 2) return null;
+  const name = (sets.names || [])[t - 1] || "";
+  return html`<div class="imgsets-strip"><${Note} kind="warn" action=${html`<${Button} size="sm"
+      onClick=${() => call("text_scenes.set_preview_theme", 1)}>Show theme 1<//>`}>
+    <b>Showing theme ${t}: ${name}</b> - its pictures and colour profiles, as the machine will show them. A preview
+    only: anything you change in Scenes changes theme 1.<//></div>`;
+}
 
 export default function ScenesTab() {
   const p = useNs("scenes");
@@ -54,7 +78,8 @@ export default function ScenesTab() {
     body = html`<${ScenesPage} colorsOpen=${colors || fontOn} openColors=${openColors} openFont=${() => setFont(true)} />`;
   }
   return html`<div class="cpd-shell"><div class="page scenes-page">
-    <${PageHead} title="Scenes" sub=${INTRO}><${ScenesActions} /><//>
+    <${PageHead} title="Scenes" sub=${INTRO}><${ThemeView} s=${s} /><${ScenesActions} /><//>
+    ${ready ? html`<${ThemeStrip} s=${s} />` : null}
     ${body}
   </div>${ready && s.tree ? html`<${FontBar} open=${fontOn} setOpen=${setFont} t=${t} />` : null}${ready
     ? html`<${ColorBar} host="scenes" open=${colors} setOpen=${setColors} file=${file} cls=${fontOn ? "cpd-beside" : ""}

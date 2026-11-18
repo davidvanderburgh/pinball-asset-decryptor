@@ -178,6 +178,30 @@ def theme_colour(project, n, rel, side=None, settings=None):
     return on, prof
 
 
+def theme_pictures(project, n, bake=True):
+    """Theme *n*'s pictures as the Scenes preview draws them (:func:`.scene_render.pending_pictures`' shape, keyed by
+    the picture's name under images/): each picture the theme changes - its own file, else theme 1's before theme 1's
+    colours - with the theme's colour profile where its switch is on (Simon: "a drop down in scenes to show the scene
+    as it will appear in theme N"). Only the pictures the theme changes; the rest are theme 1's."""
+    from ...core import colour_profile as cp, staged_changes
+    if not project or int(n) < 2:
+        return {}
+    side = staged_changes.peek(project) or {}
+    settings = cp.asset_settings(project)
+    rels = set(set_pictures(project, n)) | set(theme_colour_rels(side).get(int(n)) or ())
+    picks = set_pictures(project, n)
+    out = {}
+    for rel in rels:
+        if not rel.startswith("images/"):
+            continue
+        path = picks.get(rel) or theme1_source(project, rel)
+        on, prof = theme_colour(project, n, rel, side, settings)
+        colour = prof if (bake and on and prof is not None and not prof.is_identity()) else None
+        out[rel[len("images/"):]] = {"path": path if os.path.isfile(path) else None, "keep": False,
+                                     "colour": colour, "skip": not on}
+    return out
+
+
 def theme1_source(project, rel):
     """Theme 1's picture *rel* as a file, before any colour profile of theme 1's was baked into it: the replacement
     the Images tab chose, else the uncorrected copy a build kept, else the game's own (its snapshot, where a build

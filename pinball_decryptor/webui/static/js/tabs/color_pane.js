@@ -214,6 +214,9 @@ function FileLine({ s, host }) {
   // themes (Simon: "Apply to all ... ALL, SET 1...N", "Same as these files ... ALL, SET 1...N"): on the Images tab with
   // themes on, the buttons act on this theme or on every theme
   const themed = host === "images" && f.kind === "images" && sets.enabled && (sets.names || []).length > 1;
+  // Simon: "the apply to.... whatever - this needs to be reworked to make it clear what we are doing" - with themes
+  // on, the picture's theme, where its profile comes from, and ONE copy action with its two choices spelled out
+  if (themed) return html`<${ThemeFileLine} s=${s} f=${f} n=${n} sets=${sets} />`;
   const inTheme = /^@\d+:/.test(f.rel || "");
   const themes = themed ? scope : "this";
   const sameBtn = (head) => inTheme && themes === "this"
@@ -246,6 +249,56 @@ function FileLine({ s, host }) {
     <div class="row cpd-file-own">${own}</div>
     ${all ? html`<${ApplyAll} f=${f} all=${all} host=${host} s=${s} themed=${themed} scope=${scope}
       setScope=${setScope} />` : null}
+  </div>`;
+}
+
+// The Colors bar's file section on the Images tab with themes on (Simon, 2026-11-18): which theme the picture is in,
+// where its profile comes from, and one copy action - which pictures, which themes - asked first with a WARNING
+// (color.py apply_to_all).
+const COPY_WHICH = ["Pictures with a profile attached", "All pictures"];
+const COPY_THEMES = ["This theme", "Every theme"];
+
+function ThemeFileLine({ s, f, n, sets }) {
+  const [which, setWhich] = useState(COPY_WHICH[0]);
+  const [where, setWhere] = useState(COPY_THEMES[0]);
+  const m = /^@(\d+):/.exec(f.rel || "");
+  const t = m ? Number(m[1]) : 1;
+  const names = sets.names || [];
+  const themeName = names[t - 1] || "";
+  const label = String(f.label || "").replace(/ \(theme \d+\)$/, "");
+  const shared = `“${s.asset_name || "Recommended"}”`;
+  const own = n > 1 ? (f.own_n || 0) > 0 : !!f.own;
+  const status = t > 1
+    ? (own ? `${n > 1 ? "Some have" : "It has"} a profile of ${n > 1 ? "their" : "its"} own in this theme (“${s.name || ""}”).`
+      : `It uses theme 1's profile. Change anything below and it gets a profile of its own in this theme only.`)
+    : (own ? `It has a profile of its own (“${s.name || ""}”).`
+      : `It uses the individual files profile (${shared}), like the other pictures.`);
+  const reset = own ? html`<${Button} size="xs" onClick=${() => call("color.file_shared", "this")}
+      title=${t > 1 ? "Drop this theme's own profile for it: it uses theme 1's again"
+        : "Drop its own profile: it uses the individual files profile again"}>${t > 1 ? "Reset to theme 1"
+        : "Use the shared profile"}<//>` : null;
+  const scope = which === COPY_WHICH[0] ? "profiled" : "all";
+  const themes = where === COPY_THEMES[0] ? "this" : "all";
+  return html`<div class="cpd-file cpd-theme">
+    <div class="row cpd-file-hd"><span class="eyebrow nw">${n > 1 ? `These ${n} pictures` : "This picture"}</span>
+      <span class="mono small ellip" title=${f.rel}>${n > 1 ? `${label} and ${n - 1} more` : label}</span></div>
+    <div class="row"><span class="cpd-theme-chip">Theme ${t}: ${themeName}</span>
+      <span class="small muted">the theme picked on the Images tab</span></div>
+    <div class="row cpd-file-own"><span class="small muted grow">${status}</span>${reset}</div>
+    <div class="cpd-copy">
+      <div class="eyebrow">Copy this profile to other pictures</div>
+      <div class="cpd-copy-row"><span class="small">Which pictures</span>
+        <span ...${tip("With a profile attached: only pictures whose colour switch is on. All pictures: every picture that is not locked - with Unlock extracted images ticked that is every picture of the game, otherwise the ones replaced or built.")}>
+          <${Seg} value=${which} options=${COPY_WHICH} onChange=${setWhich} /></span></div>
+      <div class="cpd-copy-row"><span class="small">Which themes</span>
+        <span ...${tip(`This theme: theme ${t} (${themeName}) only. Every theme: theme 1 and every other theme too.`)}>
+          <${Seg} value=${where === COPY_THEMES[1] ? COPY_THEMES[1] : `This theme (${themeName || t})`}
+            options=${[`This theme (${themeName || t})`, COPY_THEMES[1]]}
+            onChange=${(v) => setWhere(v === COPY_THEMES[1] ? v : COPY_THEMES[0])} /></span></div>
+      <div class="row"><${Button} size="sm" icon="copy" onClick=${() => call("color.apply_to_all", scope, null, themes)}
+          title="You are asked first, with how many pictures it changes. Undo in the Colors bar puts them all back.">Copy profile…<//>
+        <span class="small muted">You are asked first.</span></div>
+    </div>
   </div>`;
 }
 

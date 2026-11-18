@@ -84,3 +84,22 @@ def test_the_write_bakes_a_themes_profile_into_theme_1s_picture(tmp_path):
     assert coloured
     px = Image.open(os.path.join(str(tmp_path / "work"), coloured[0])).convert("RGB").getpixel((0, 0))
     assert px[0] < 200
+
+
+def test_scenes_draws_a_themes_pictures_and_colours(tmp_path):
+    """Simon: "a drop down in scenes to show the scene as it will appear in theme N"."""
+    data, off = _scene()
+    p = _project(tmp_path, off)
+    _png(os.path.join(p, *TREL.split("/")), (200, 200, 200, 255))
+    SV.set_themes_on(p, True)
+    SV.add_set(p, "Dark")
+    assert SV.theme_pictures(p, 2) == {} and SV.theme_pictures(p, 1) == {}
+    cp.store_own_profile(p, "images", SV.theme_key(2, TREL), DARK)
+    cp.set_asset_slot(p, "images", SV.theme_key(2, TREL), True)
+    got = SV.theme_pictures(p, 2)
+    assert set(got) == {REL}                            # keyed as the Scenes preview keys pictures
+    assert got[REL]["colour"].name == "Dark" and got[REL]["path"].endswith(".png")
+    assert SV.theme_pictures(p, 2, bake=False)[REL]["colour"] is None
+    pick = _png(tmp_path / "light.png", (250, 250, 250, 255))
+    SV.set_picture(p, 2, TREL, pick)
+    assert SV.theme_pictures(p, 2)[REL]["path"] == pick

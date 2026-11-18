@@ -1589,8 +1589,28 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         """The pane of the file *rel*'s color profile is on: its
         Replacement (a pick, or the user's own picture an earlier build put
         in), else (a game's own picture, unlocked) its Original."""
+        if rel and hasattr(self, "_set_state"):
+            n, picks, _rows = self._set_state()
+            if n > 1 and picks.get(rel):
+                return "rep"                            # the theme's own picture
         return "rep" if rel and (self._assignments.get(rel)
                                  or self._is_built(rel)) else "orig"
+
+    def _look_rel(self, folder, rel):
+        """The name the preview's colours are looked up by: with a theme picked, the theme's key for a picture in a
+        scene where the theme has a profile of its own for it, else theme 1's (what the theme has until then)."""
+        if not (rel and hasattr(self, "_set_state")):
+            return rel
+        n, base, in_scene = self._theme_of(rel)
+        if n < 2 or not in_scene:
+            return rel
+        from ...core import colour_profile as cp
+        from ...plugins.stern import scene_variants as SV
+        key = SV.theme_key(n, base)
+        try:
+            return key if cp.own_profile(folder, "images", key) is not None else base
+        except Exception:                               # noqa: BLE001
+            return base
 
     def _pane_views(self, folder, rel, switch):
         """Each pane's Original / With its color profile switch, as the Video
@@ -1613,7 +1633,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
             return out
         try:
             from ...core import colour_profile as cp
-            prof = cp.asset_resolver(folder)("images", rel)
+            prof = cp.asset_resolver(folder)("images", self._look_rel(folder, rel))
         except Exception:                               # noqa: BLE001
             log.exception("images pane views")
             prof = None
@@ -1651,7 +1671,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         sw = self._lsw
         return cp.video_look_exact(
             folder, switch, self._own_colours(), overlay_on=sw["overlay"],
-            files_on=sw["files"], screen_on=sw["screen"], rel=rel,
+            files_on=sw["files"], screen_on=sw["screen"], rel=self._look_rel(folder, rel),
             kind="images")
 
     def publish_look(self):
@@ -1713,7 +1733,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         show, if it is one, is shown with it on the pane of the file it is
         on (the Video tab's PAD-462 rule).  The bar redraws after."""
         rel = self._current_rel
-        if not rel or rel not in set(rels or ()):
+        from ...plugins.stern import scene_variants as SV
+        # a theme's picture is named by its theme key ("@<n>:<rel>")
+        if not rel or rel not in {SV.split_theme_key(r)[1] for r in (rels or ())}:
             return False
         self._pview[self._profile_side(rel)] = "profile"
         return True

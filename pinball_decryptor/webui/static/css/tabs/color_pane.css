@@ -100,3 +100,10 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-textcol .sp { flex: 1 1 auto; }
 .cpd-textcol-sw { display: inline-block; width: 26px; height: 16px; border-radius: 4px; border: 1px solid var(--line-2); }
 .cpd-textcol-def { padding: 1px 8px; border: 1px dashed var(--line-2); border-radius: 4px; color: var(--ink-2); }
+
+/* themes (Simon, 2026-11-18): the picture's theme, and one clear copy action */
+.cpd-theme-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--warn-soft);
+  color: var(--ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.cpd-copy { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--line); }
+.cpd-copy-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }

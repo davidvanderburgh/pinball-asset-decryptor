@@ -282,6 +282,13 @@ REMOTE_STATES = {
                     "The key server answers but does not offer %s: it is in "
                     "use by another PC, not shared (usbipd bind), or on "
                     "another bus ID."),
+    "nokey": ("Key not offered by the server",
+              "%s answers but offers no security key: on a JJP machine with "
+              "key sharing, is the key in it? On a PC, is it shared there "
+              "(usbipd bind)?"),
+    "several": ("Several keys on the key server",
+                "%s offers more than one security key. Type the bus ID of "
+                "this game's key."),
     "noclient": ("No USB/IP client",
                  "A key on another PC (%s) needs the usbip client that "
                  "usbipd-win installs. Install usbipd-win on this PC."),

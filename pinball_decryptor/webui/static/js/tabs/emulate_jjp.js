@@ -43,9 +43,13 @@ export default function EmulateJJP() {
             ${s.key_where === "usbip" ? html`<div class="row" style="gap:8px">
               <${Field} ns="emulate_jjp" k="key_server" value=${s.key_server} mono cls="grow"
                 title=${s.server_tip} placeholder="Key server: name or IP address" />
-              <${Field} ns="emulate_jjp" k="key_busid" value=${s.key_busid} mono width=${110}
-                title=${s.busid_tip} placeholder="Bus ID" />
+              <${Field} ns="emulate_jjp" k="key_busid" value=${s.key_busid} mono width=${140}
+                title=${s.busid_tip} placeholder="Bus ID (any)" />
               <${Button} onClick=${() => call("emulate_jjp.test_key")}>Test<//>
+            </div>` : null}
+            ${s.key_where === "usbip" ? html`<div class="row" style="gap:8px" ...${tip(s.stick_tip)}>
+              <${Button} kind="ghost" onClick=${() => call("emulate_jjp.keyshare_stick", "install")}>Key sharing stick for a JJP machine…<//>
+              <${Button} kind="ghost" onClick=${() => call("emulate_jjp.keyshare_stick", "remove")}>Stick that takes it out…<//>
             </div>` : null}
             ${s.key_where === "usbip" && s.key_msg
               ? html`<span class=${"small " + (s.key_bad ? "warn-ink" : "muted")}>${s.key_msg}</span>` : null}

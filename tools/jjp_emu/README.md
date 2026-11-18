@@ -154,6 +154,42 @@ wsl -d Ubuntu -- python3 tools/jjp_emu/usbip_standin.py --port 3241 --bus 1-4 --
 Untested with a real key over a real LAN: the licence daemon's session over
 USB/IP latency is the one part only a real key can prove. Prefer a wired link.
 
+## The key in the JJP machine itself (key sharing stick, PAD-1416)
+
+A JJP machine can be the key server: its Ubuntu kernel ships `usbip-host.ko`
+(GnR: 5.13.0-40-generic) and it has Python 3, so `padkeyshare.py` here - a
+small stdlib USB/IP server - offers the key in the machine on TCP 3240, to
+private / link-local / loopback addresses only. It is put on with a **key
+sharing stick** (Emulate > Security key > *Key sharing stick for a JJP
+machine…*, [`keyshare.py`](../../pinball_decryptor/plugins/jjp/keyshare.py)),
+run through the game's own hot fix like a mode stick: it copies the server to
+`/jjpe/gen1/padkeyshare/`, writes `scripts/padkeyshare.sh` and adds one hook
+line after `runonce.sh` in `rungame.sh`, which starts the server once per boot
+as its own systemd unit (`systemd-run --unit=padkeyshare`), so the game
+restarting never stops it. The stick checks for python3 and usbip-host first
+and changes nothing without them. The other button writes the stick that
+takes it out.
+
+ONE AT A TIME. The key is a Sentinel HL Pro: its licence manager refuses other
+computers (the ACC lists every feature as `"acc":"Loc"`), so the machine and a
+PC can never share it at once. A PC's attach takes it from the machine; the
+game then exits for a missing key and `rungame.sh` shows "SECURITY KEY MISSING
+... Game will rescan" and retries, exactly as if it had been pulled out. When
+the PC lets go (`usbip_status` back to 1) the server gives it back - unbind,
+`rebind`, then delete the bus id entry, in that order: deleting first leaves a
+"removed" entry and the next lend's bind fails with ENODEV - and the game
+starts again. In the panel the Bus ID stays empty: `remote_key` then takes the
+one `0529:0001` the server lists.
+
+Proven 2026-11-18 on the real GnR v3.03 system booted in QEMU/KVM (its own
+kernel, with the stick applied by its `runme.sh`, the real key passed in by
+`usb-host,hostbus=,hostaddr=`), attached from WSL by `remote_key`'s own
+commands with a blank bus ID: offered, attached, released and attached again;
+a second import while lent got "Device busy"; WSL's Sentinel licence manager,
+run where the key's original device node was hidden, saw the key only while
+it was lent. Never prove it by re-exporting a WSL-attached key in the same
+WSL kernel: that deadlocks the kernel.
+
 ## The image is never written to
 
 `jail.sh` builds an **overlayfs**: the restored ext4 is the read-only lower, a

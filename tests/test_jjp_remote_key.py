@@ -56,7 +56,10 @@ def test_only_a_complete_valid_entry_is_a_key_server():
     assert rk.from_settings({"where": "usbip", "server": "",
                              "busid": "1-4"}) is None
     assert rk.from_settings({"where": "usbip", "server": "h",
-                             "busid": ""}) is None
+                             "busid": "1-"}) is None
+    # PAD-1416: an empty bus id is complete - the server's one key
+    assert rk.from_settings({"where": "usbip", "server": "h",
+                             "busid": ""}) == rk.Remote("h", 3240, "")
     assert rk.from_settings({"where": "usbip", "server": "h:3241",
                              "busid": "2-1"}) == rk.Remote("h", 3241, "2-1")
 
@@ -113,6 +116,7 @@ attach)
     HOST=$3; BUS=$5
     [ "$HOST" = deadhost ] && { echo "usbip: error: tcp connect"; exit 1; }
     [ "$BUS" = 1-5 ] && { echo "usbip: error: Attach Request for 1-5 failed - Device busy (exported)"; exit 1; }
+    [ "$BUS" = 1-7 ] && { echo "usbip: error: Attach Request for 1-7 failed - Device Busy - exported"; exit 1; }
     [ "$BUS" = 1-4 ] || { echo "usbip: error: Attach Request for $BUS failed - Device not found"; exit 1; }
     n=0; while [ -e "$S/port$n" ]; do n=$((n+1)); done
     echo "usbip://$HOST:$PORT/$BUS" > "$S/port$n" ;;
@@ -121,7 +125,9 @@ detach)
 list)
     [ "$3" = deadhost ] && { echo "usbip: error: could not connect"; exit 1; }
     echo "Exportable USB devices"; echo " - $3"
-    echo "        1-4: unknown vendor : unknown product (0529:0001)" ;;
+    [ "$3" = nokeys ] && { echo "        2-1: Logitech, Inc. : Unifying Receiver (046d:c52b)"; exit 0; }
+    echo "        1-4: unknown vendor : unknown product (0529:0001)"
+    if [ "$3" = twokeys ]; then echo "        1-6: unknown vendor : unknown product (0529:0001)"; fi ;;
 esac
 '''
 
@@ -244,6 +250,54 @@ def test_probe_faults(sh):
 
 def test_release_of_a_key_that_is_gone_is_quiet(sh):
     assert rk.release(sh, K4, "extract")[0] == "gone"
+
+
+# PAD-1416: no bus id = the server's one key (a JJP machine lending its own)
+KB = rk.Remote("keybox", 3240, "")
+
+
+def test_a_blank_bus_id_takes_the_one_key_the_server_offers(sh):
+    assert rk.probe(sh, KB) == "offered"
+    assert rk.attach(sh, KB, "emulate") == ("attached", "0")
+    assert (sh.state / "port0").read_text().strip() == "usbip://keybox:3240/1-4"
+    assert rk.probe(sh, KB) == "attached"
+    # the extract, also with no bus id, borrows the same attachment
+    assert rk.attach(sh, KB, "extract") == ("borrowed", "0")
+    assert rk.release(sh, KB, "emulate") == ("kept", "extract")
+    assert rk.release(sh, KB, "extract") == ("detached", "0")
+    assert not list(sh.state.iterdir())
+    assert rk.release(sh, KB, "extract")[0] == "gone"
+
+
+def test_a_blank_bus_id_shares_with_one_named_the_same(sh):
+    rk.attach(sh, K4, "extract")
+    assert rk.attach(sh, KB, "emulate") == ("borrowed", "0")
+    assert rk.release(sh, KB, "emulate") == ("kept", "extract")
+
+
+@pytest.mark.parametrize("remote,kind,said", [
+    (rk.Remote("twokeys", 3240, ""), "several", "1-4, 1-6"),
+    (rk.Remote("nokeys", 3240, ""), "nokey", "no security key"),
+    (rk.Remote("deadhost", 3240, ""), "unreachable", "deadhost"),
+    (rk.Remote("keybox", 3240, "1-7"), "busy", "in use"),     # the real client's "Device Busy"
+])
+def test_a_blank_bus_id_names_what_stops_it(sh, remote, kind, said):
+    with pytest.raises(rk.RemoteKeyError) as e:
+        rk.attach(sh, remote, "extract")
+    assert e.value.kind == kind and said in str(e.value)
+    assert not list(sh.state.iterdir())
+
+
+def test_a_blank_bus_id_is_a_complete_setting(monkeypatch):
+    assert rk.parse_busid("", optional=True) == ""
+    with pytest.raises(ValueError):
+        rk.parse_busid("")
+    assert rk.from_settings({"where": "usbip", "server": "192.168.1.50", "busid": ""}) \
+        == rk.Remote("192.168.1.50", 3240, "")
+    assert rk.describe(rk.Remote("192.168.1.50", 3240, "")) == "the key on 192.168.1.50"
+    monkeypatch.setenv(rk.ENV, "192.168.1.50:3300")
+    assert rk.current() == rk.Remote("192.168.1.50", 3300, "")
+    assert "''" in rk.command("probe", rk.Remote("pinball", 3240, ""), client="/u")
 
 
 # --------------------------------------------------- the extract pipeline

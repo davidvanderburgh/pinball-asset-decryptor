@@ -45,16 +45,27 @@ FIX_TIP = ("Force-restart WSL to clear a wedged emulator — a frozen window "
 KEY_TIP = ("Where the purple key is. In this PC: usbipd-win hands it to WSL. "
            "On another PC: that PC shares it over the network (USB/IP: "
            "usbipd-win's 'usbipd bind', or Linux usbipd) and Start attaches "
-           "it here; Stop hands it back so the other PC can use it. The "
-           "Extract tab's dongle decrypt uses the same key.")
+           "it here; Stop hands it back so the other PC can use it. A JJP "
+           "machine can lend its own key the same way once a key sharing "
+           "stick has been run on it. The Extract tab's dongle decrypt uses "
+           "the same key.")
 
-SERVER_TIP = ("The PC the key is plugged into: its name or IP address, and "
-              ":port only if usbipd there does not use 3240.")
+SERVER_TIP = ("The PC or JJP machine the key is plugged into: its name or IP "
+              "address, and :port only if usbipd there does not use 3240.")
 
-BUSID_TIP = ("The key's bus ID as that PC lists it ('usbipd list' on Windows, "
-             "'usbip list -l' on Linux), like 1-4. Every JJP key has the same "
-             "hardware ID, so with several keys on a hub the bus ID is what "
-             "picks this game's.")
+BUSID_TIP = ("Leave it empty when there is one key there (a JJP machine always "
+             "has one): the key it offers is used. With several keys on a hub, "
+             "type this game's bus ID as that PC lists it ('usbipd list' on "
+             "Windows, 'usbip list -l' on Linux), like 1-4: every JJP key has "
+             "the same hardware ID.")
+
+STICK_TIP = ("Writes a USB stick that makes a JJP machine lend its security key "
+             "to PAD on the same network, so it can stay in the machine. Run "
+             "it with the game's hot fix (the stick's PADKEYSHARE_README.txt "
+             "says how; no reinstall, scores and settings are kept). While PAD "
+             "uses the key the machine shows SECURITY KEY MISSING; when PAD "
+             "stops, the game starts again by itself. Only one of them can use "
+             "the key at a time.")
 
 VOLUME_TIP = ("This PC's volume for the emulated game and its boot menu - not "
               "the machine's own volume setting. It changes a running game at "
@@ -91,6 +102,8 @@ WRONG_KEY = ("Wrong key for this game",
 _REMOTE_FAULTS = {"unreachable": "Key server not answering",
                   "busy": "Key in use by another PC",
                   "notexported": "Key not offered by the server",
+                  "nokey": "Key not offered by the server",
+                  "several": "Several keys: type the bus ID",
                   "noclient": "No USB/IP client"}
 
 #: The footer ladder (Tk's MainWindow.EMULATE_PHASES_JJP, item 118).
@@ -181,7 +194,8 @@ class EmulateJJPTab(RigTabMixin, TabService):
                                         str(entry.get("server") or ""))
         self._key_busid_var = self.var("key_busid", "str",
                                        str(entry.get("busid") or ""))
-        self.set(key_tip=KEY_TIP, server_tip=SERVER_TIP, busid_tip=BUSID_TIP)
+        self.set(key_tip=KEY_TIP, server_tip=SERVER_TIP, busid_tip=BUSID_TIP,
+                 stick_tip=STICK_TIP)
         self._key_check(entry)
         for v in (self._key_where_var, self._key_server_var,
                   self._key_busid_var):
@@ -200,7 +214,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
         if entry.get("where") == "usbip":
             try:
                 remote_key.parse_server(entry.get("server"))
-                remote_key.parse_busid(entry.get("busid"))
+                remote_key.parse_busid(entry.get("busid"), True)
                 msg = ("Start attaches the key (%s) over the network; Stop "
                        "hands it back." % remote_key.describe(remote))
             except ValueError as exc:
@@ -227,8 +241,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
         """Ask the key server about the key, without taking it."""
         remote = self._remote()
         if remote is None:
-            self.set(key_msg="Type the key server and the key's bus ID "
-                             "first.", key_bad=True)
+            self.set(key_msg="Type the key server first.", key_bad=True)
             return False
 
         def work():
@@ -243,6 +256,32 @@ class EmulateJJPTab(RigTabMixin, TabService):
         threading.Thread(target=work, daemon=True,
                          name="pad-jjp-keytest").start()
         return True
+
+    @rpc
+    def keyshare_stick(self, action="install"):
+        """Write a key sharing stick (PAD-1416): *action* "install" makes a
+        JJP machine lend its key to PAD, "remove" takes that out again."""
+        from ...plugins.jjp import keyshare
+        if action not in keyshare.ACTIONS:
+            raise ValueError("unknown stick action %r" % action)
+        path = self.window.ask_folder(
+            "jjp_keyshare_stick",
+            "Pick the USB stick (or a folder to copy to one)")
+        if not path:
+            return False
+        ok, lines = keyshare.write_stick(path, action)
+        for ln in lines:
+            self._log("JJP: key sharing stick: " + ln)
+        if ok:
+            msg = ("Stick written in %s: run it on the machine with the game's "
+                   "hot fix (PADKEYSHARE_README.txt on the stick says how)%s."
+                   % (path, ", then type the machine's IP address here"
+                      if action == "install" else ""))
+        else:
+            msg = lines[-1].replace("refused: ", "") if lines else \
+                "The stick was not written."
+        self.set(key_msg=msg, key_bad=not ok)
+        return ok
 
     def _attach_remote(self, remote):
         """Attach the network key under this tab's lease and wait until WSL

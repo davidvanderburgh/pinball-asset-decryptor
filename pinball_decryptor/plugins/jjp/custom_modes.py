@@ -690,6 +690,8 @@ STICK_STEPS = (
 )
 #: the line every stick runme.sh starts its log with (mkjjpmodes.RUNME_SH)
 _STICK_MARK = "PAD custom modes stick"
+#: keyshare.MARK: a key sharing stick (PAD-1416) is PAD's too, so either stick replaces the other
+_KEYSHARE_MARK = "PAD key sharing stick"
 
 
 def runtime_path(iso):
@@ -746,7 +748,8 @@ def hotfix_on(stick):
         return ""
     try:
         with open(os.path.join(hot, "runme.sh"), encoding="utf-8", errors="replace") as f:
-            return "pad" if _STICK_MARK in f.read(4096) else "other"
+            head = f.read(4096)
+        return "pad" if _STICK_MARK in head or _KEYSHARE_MARK in head else "other"
     except OSError:
         return "other"
 

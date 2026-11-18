@@ -24,7 +24,11 @@ when we came - by hand, or by something that is not us - gets a lease no one
 ever gives back, so it is left exactly as it was found.
 
 All HASP keys are 0529:0001, so a server with several titles' keys on a hub
-is told apart by BUS ID, never by hardware id.
+is told apart by BUS ID, never by hardware id.  An EMPTY bus id means "the
+one key the server has" (PAD-1416): the attachment already made from that
+server, else the only 0529:0001 the server lists.  A JJP machine lending its
+own key (tools/jjp_emu/padkeyshare.py, put on by a key sharing stick, see
+keyshare.py) has just one, so its owner types only the machine's address.
 """
 
 import base64
@@ -35,9 +39,10 @@ import shlex
 from collections import namedtuple
 
 #: settings.json key: {"where": "local"|"usbip", "server": "host[:port]",
-#: "busid": "1-4"}
+#: "busid": "1-4" or "" (the server's one key)}
 SETTINGS_KEY = "jjp_remote_key"
-#: Overrides the settings, for a headless run: "host[:port]/busid".
+#: Overrides the settings, for a headless run: "host[:port]/busid", or
+#: "host[:port]" for the server's one key.
 ENV = "JJP_DONGLE_REMOTE"
 #: The USB/IP port both usbipd-win and Linux usbipd listen on.
 DEFAULT_PORT = 3240
@@ -55,7 +60,9 @@ class RemoteKeyError(Exception):
     """An attach or release that did not happen.  ``kind`` says which fault
     it was, so the caller can word it: ``noclient``, ``novhci``,
     ``unreachable``, ``busy`` (the key is in use by another PC),
-    ``notexported`` (the server does not offer that bus id) or ``failed``."""
+    ``notexported`` (the server does not offer that bus id), ``nokey`` (no
+    bus id given and the server offers no key), ``several`` (no bus id given
+    and the server offers more than one) or ``failed``."""
 
     def __init__(self, kind, message):
         super().__init__(message)
@@ -81,9 +88,12 @@ def parse_server(text):
     return host, DEFAULT_PORT
 
 
-def parse_busid(text):
-    """A USB/IP bus id as the server lists it: ``1-4``, ``3-1.2``."""
+def parse_busid(text, optional=False):
+    """A USB/IP bus id as the server lists it: ``1-4``, ``3-1.2``.  With
+    *optional*, empty is fine too: the server's one key."""
     text = (text or "").strip()
+    if optional and not text:
+        return ""
     if not _BUSID.match(text):
         raise ValueError("Type the key's bus ID as the server lists it, "
                          "like 1-4.")
@@ -98,7 +108,7 @@ def from_settings(entry):
         return None
     try:
         host, port = parse_server(entry.get("server"))
-        return Remote(host, port, parse_busid(entry.get("busid")))
+        return Remote(host, port, parse_busid(entry.get("busid"), True))
     except ValueError:
         return None
 
@@ -122,7 +132,9 @@ def current():
     was given; then the saved settings, for a process with no window."""
     env = os.environ.get(ENV, "").strip()
     if env:
-        server, _, busid = env.rpartition("/")
+        server, sep, busid = env.rpartition("/")
+        if not sep:
+            server, busid = env, ""
         return from_settings({"where": "usbip", "server": server,
                               "busid": busid})
     if _current["set"]:
@@ -136,9 +148,12 @@ def current():
 
 
 def describe(remote):
-    """``bus 1-4 on 192.168.1.20`` (the port only when it is not the usual)."""
+    """``bus 1-4 on 192.168.1.20`` (the port only when it is not the usual),
+    or ``the key on 192.168.1.20`` when the bus id is left to the server."""
     where = remote.host if remote.port == DEFAULT_PORT else \
         "%s:%d" % (remote.host, remote.port)
+    if not remote.busid:
+        return "the key on %s" % where
     return "bus %s on %s" % (remote.busid, where)
 
 
@@ -159,6 +174,28 @@ set -u
 VERB=$1; U=$2; HOST=$3; PORT=$4; BUSID=$5; TAG=${6:-}
 if [ -z "$U" ] || [ ! -x "$U" ]; then U=$(command -v usbip 2>/dev/null); fi
 [ -n "$U" ] || { echo "RESULT noclient"; exit 0; }
+attached_busid() {
+    # the bus id of what is attached here from HOST:PORT already
+    "$U" port 2>/dev/null | awk -v pre="usbip://$HOST:$PORT/" '
+        { for (i = 1; i <= NF; i++) if (index($i, pre) == 1) {
+              print substr($i, length(pre) + 1); exit } }'
+}
+if [ -z "$BUSID" ]; then
+    # no bus id: the server's one key (PAD-1416) - what is attached from it
+    # already, else the only 0529:0001 it lists
+    BUSID=$(attached_busid)
+    if [ -z "$BUSID" ] && [ "$VERB" != release ]; then
+        OUT=$("$U" --tcp-port "$PORT" list -r "$HOST" 2>&1); RC=$?
+        KEYS=$(printf '%s\n' "$OUT" | awk '/\(0529:0001\)/ { b = $1; sub(/:$/, "", b); print b }')
+        case $(printf '%s\n' "$KEYS" | grep -c .) in
+            1) BUSID=$KEYS ;;
+            0) if [ $RC -ne 0 ]; then echo "RESULT unreachable"; else echo "RESULT nokey"; fi
+               exit 0 ;;
+            *) echo "RESULT several" $KEYS; exit 0 ;;
+        esac
+    fi
+    [ -n "$BUSID" ] || { echo "RESULT gone"; exit 0; }
+fi
 LEASES=/mnt/wsl/pad-remotekey
 [ -d /mnt/wsl ] || LEASES=/run/pad-remotekey
 LEASES=${PAD_REMOTEKEY_LEASES:-$LEASES}
@@ -189,7 +226,7 @@ attach)
     if [ $RC -ne 0 ]; then
         rmdir "$L" 2>/dev/null
         case "$OUT" in
-            *"Device busy"*|*"busy"*) echo "RESULT busy" ;;
+            *"Device busy"*|*"busy"*|*"Busy"*) echo "RESULT busy" ;;
             *"Device not found"*|*"not found"*|*"No such"*|*"unavailable"*) echo "RESULT notexported" ;;
             *vhci*) echo "RESULT novhci" ;;
             *"tcp connect"*|*"connect"*|*"resolve"*|*"refused"*|*"timed out"*|*"unreachable"*) echo "RESULT unreachable" ;;
@@ -230,7 +267,7 @@ def command(verb, remote, tag="", client=None):
         raise ValueError(tag)
     # re-checked here: these are the only words that reach a shell
     parse_server("%s:%d" % (remote.host, remote.port))
-    parse_busid(remote.busid)
+    parse_busid(remote.busid, True)
     b64 = base64.b64encode(_SCRIPT.encode("utf-8")).decode("ascii")
     args = [verb, client_path() if client is None else client,
             remote.host, str(remote.port), remote.busid, tag]
@@ -264,16 +301,21 @@ MESSAGES = {
                    "the bus ID, and share the key on the server (Windows: "
                    "usbipd bind --busid %(busid)s, Linux: usbip bind -b "
                    "%(busid)s).",
+    "nokey": "%(where)s answers but offers no security key. On a JJP "
+             "machine with key sharing: is the key in it? On a PC: share it "
+             "there (usbipd bind).",
+    "several": "%(where)s offers several security keys (bus %(detail)s). "
+               "Type the bus ID of this game's key.",
     "failed": "Could not attach the key (%(what)s).",
 }
 
 
-def message(kind, remote):
+def message(kind, remote, detail=""):
     where = remote.host if remote.port == DEFAULT_PORT else \
         "%s:%d" % (remote.host, remote.port)
     return MESSAGES.get(kind, MESSAGES["failed"]) % {
         "where": where, "port": remote.port, "busid": remote.busid,
-        "what": describe(remote)}
+        "what": describe(remote), "detail": detail}
 
 
 def attach(run, remote, tag):
@@ -286,7 +328,7 @@ def attach(run, remote, tag):
     res = _result(out)
     if res[0] in ("attached", "borrowed"):
         return res[0], (res[1] if len(res) > 1 else "?")
-    msg = message(res[0], remote)
+    msg = message(res[0], remote, ", ".join(res[1:]))
     detail = _detail(out)
     if res[0] == "failed" and detail:
         msg += "\n" + detail

@@ -137,13 +137,22 @@ function RemoteAccess({ n }) {
 function SendToMachine({ n }) {
   const busy = n.running || n.checking || n.scanning;
   const found = n.found || [];
-  const many = found.filter((f) => f.lets_in).length > 1;
-  return html`<${Card} cls="net-opt" title="Your machine">
+  const machines = n.machines || [];
+  // David: "I can have MANY machines on my network": every one found is remembered, and this picks where Send goes
+  return html`<${Card} cls="net-opt" title=${machines.length > 1 ? "Your machines" : "Your machine"}>
     <p class="net-does">${n.send_intro}</p>
-    <div class="net-machine">
+    ${machines.length > 1 ? html`<div class="net-field">
+        <label for="net-machine" class="lbl">Send to</label>
+        <${Select} id="net-machine" value=${n.address || ""} disabled=${busy}
+          options=${machines.map((m) => ({ value: m.address, label: m.label }))}
+          onChange=${(v) => call("network.use_machine", v)} />
+        <span class="small muted">Send to machine on the Write tab picks the machine that runs that card's game
+          by itself.</span>
+      </div>`
+      : html`<div class="net-machine">
       ${n.address ? html`<span>Your machine: <b>${n.machine_game || "the machine"}</b> at <span class="mono">${n.address}</span></span>`
         : html`<span class="muted">No machine yet: switch it on, then Find my machine.</span>`}
-    </div>
+    </div>`}
     <div class="row net-send-row">
       <${Button} kind=${n.address ? "" : "primary"} icon="search" disabled=${busy} onClick=${() => call("network.scan")}>
         ${n.scanning ? "Looking…" : "Find my machine"}<//>
@@ -153,11 +162,8 @@ function SendToMachine({ n }) {
     </div>
     ${n.scanning ? html`<${Progress} pct=${n.scan_pct} />` : null}
     <${Said} text=${n.scan_note} kind=${n.scan_kind} />
-    ${found.length && (many || !found.some((f) => f.lets_in)) ? html`<ul class="net-found">
-      ${found.map((f) => html`<li key=${f.address} class=${f.lets_in ? "" : "muted"}>
-        <span>${f.line}</span>
-        ${f.lets_in ? html`<${Button} size="sm" disabled=${busy} onClick=${() => call("network.use_machine", f.address)}>This one<//>` : null}
-      </li>`)}
+    ${found.length ? html`<ul class="net-found">
+      ${found.map((f) => html`<li key=${f.address} class="muted"><span>${f.line}</span></li>`)}
     </ul>` : null}
     <${Said} text=${n.check} kind=${n.check_kind} />
     <${Advanced} title="Advanced: type the machine's address">

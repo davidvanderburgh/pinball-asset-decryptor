@@ -25,6 +25,12 @@ from tests.test_card_extras import key
 from tests.test_ssh_card import card  # noqa: F401 - the fixture
 
 
+@pytest.fixture(autouse=True)
+def own_key_dir(tmp_path, monkeypatch):
+    """Each test its own PAD key and machine list (conftest's is shared by the whole session)."""
+    monkeypatch.setattr(pad_ssh_key, 'KEY_DIR', str(tmp_path / 'remote_access'))
+
+
 @pytest.fixture
 def qualified(monkeypatch):
     monkeypatch.setattr(S, 'QUALIFIED_PLATFORMS', {'stern-spike2'})
@@ -190,15 +196,65 @@ def test_networks_are_the_24_around_each_address():
     assert [str(n) for n in nets] == ['192.168.4.0/24', '10.0.0.0/24']
 
 
-def test_a_typed_address_keeps_the_identity_only_for_the_same_address():
+def test_every_machine_found_is_remembered_and_one_is_picked():
+    """David: "I can have MANY machines on my network (deadpool, guardians, bond, etc.) so I need a way to connect
+    to a specific one"."""
     pad_ssh_key.remember_machine('192.168.1.57', ('ssh-ed25519', 'AAAA'), 'deadpool_le')
-    assert pad_ssh_key.machine() == {'address': '192.168.1.57', 'host_key': ('ssh-ed25519', 'AAAA'),
-                                     'game': 'deadpool_le'}
-    pad_ssh_key.remember_address('192.168.1.57')
-    assert pad_ssh_key.machine()['host_key'] == ('ssh-ed25519', 'AAAA')
+    pad_ssh_key.remember_machine('192.168.1.58', ('ssh-ed25519', 'BBBB'), 'guardians_le', make_current=False)
+    pad_ssh_key.remember_machine('192.168.1.59', ('ssh-ed25519', 'CCCC'), 'james_bond_007_le', make_current=False)
+    assert [m['game'] for m in pad_ssh_key.machines()] == ['deadpool_le', 'guardians_le', 'james_bond_007_le']
+    assert pad_ssh_key.last_address() == '192.168.1.57'
+    assert pad_ssh_key.select_machine('192.168.1.58') and pad_ssh_key.machine()['game'] == 'guardians_le'
+    assert not pad_ssh_key.select_machine('192.168.1.99')
+    assert pad_ssh_key.machine_for_game('james_bond_007_le') == '192.168.1.59'
+    assert pad_ssh_key.machine_for_game('godzilla_pro') == ''
+    # the router moves Guardians: the same identity at a new address is the same machine, still the one picked
+    pad_ssh_key.remember_machine('192.168.1.70', ('ssh-ed25519', 'BBBB'), 'guardians_le', make_current=False)
+    assert [m['address'] for m in pad_ssh_key.machines()] == ['192.168.1.57', '192.168.1.70', '192.168.1.59']
+    assert pad_ssh_key.last_address() == '192.168.1.70'
+    # forgetting the one picked moves to the first left
+    pad_ssh_key.forget_machine('192.168.1.70')
+    assert pad_ssh_key.last_address() == '192.168.1.57' and len(pad_ssh_key.machines()) == 2
+
+
+def test_a_typed_address_becomes_the_machine_used():
+    pad_ssh_key.remember_machine('192.168.1.57', ('ssh-ed25519', 'AAAA'), 'deadpool_le')
     pad_ssh_key.remember_address('192.168.1.80')
     assert pad_ssh_key.machine() == {'address': '192.168.1.80', 'host_key': None, 'game': ''}
-    assert pad_ssh_key.last_address() == '192.168.1.80'
+    pad_ssh_key.remember_address('192.168.1.57')
+    assert pad_ssh_key.machine()['host_key'] == ('ssh-ed25519', 'AAAA')
+    assert len(pad_ssh_key.machines()) == 2
+
+
+def test_the_one_address_file_of_before_reads_as_one_machine():
+    os.makedirs(pad_ssh_key.KEY_DIR, exist_ok=True)
+    with open(os.path.join(pad_ssh_key.KEY_DIR, 'machines.json'), 'w') as fh:
+        json.dump({'address': '192.168.1.40'}, fh)
+    assert pad_ssh_key.last_address() == '192.168.1.40'
+    assert pad_ssh_key.machines() == [{'address': '192.168.1.40', 'host_key': None, 'game': ''}]
+
+
+def test_write_tab_send_goes_to_the_machine_that_runs_the_card(tmp_path, monkeypatch):
+    from pinball_decryptor.webui import compat
+    from tests.webui_harness import web_app
+    pad_ssh_key.remember_machine('192.168.1.57', ('ssh-ed25519', 'AAAA'), 'deadpool_le')
+    pad_ssh_key.remember_machine('192.168.1.58', ('ssh-ed25519', 'BBBB'), 'guardians_le')
+    project = tmp_path / 'project'
+    project.mkdir()
+    card_extras.save(str(project), True, '')
+    sent = []
+    with web_app(tmp_path, mfr='stern') as w:
+        w.run(w.window.write_assets_var.set, str(project))
+        w.run(w.window.write_upd_var.set, str(tmp_path / 'deadpool_le-1_16_0.Release.8G.sdcard.raw'))
+        write = w.window.service('write')
+        monkeypatch.setattr(write, '_target_write_path', lambda: str(tmp_path / 'out.raw'))
+        monkeypatch.setitem(w.window.cb, 'on_build_send', sent.append)
+        monkeypatch.setattr(compat.messagebox, 'showinfo', lambda *a, **k: pytest.fail(a))
+        assert w.call('write.send_to_machine') is True
+        # a card no known machine runs goes to the one picked
+        w.run(w.window.write_upd_var.set, str(tmp_path / 'godzilla_pro-1_0_0.Release.8G.sdcard.raw'))
+        assert w.call('write.send_to_machine') is True
+    assert sent == ['192.168.1.57', '192.168.1.58']
 
 
 def test_connect_finds_a_remembered_machine_the_router_moved(monkeypatch):
@@ -241,32 +297,50 @@ def _settle(w, key):
         time.sleep(0.02)
 
 
-def test_network_tab_scan_remembers_the_only_machine_and_lists_many(tmp_path, monkeypatch):
+def test_network_tab_scan_remembers_every_machine_and_picks_one(tmp_path, monkeypatch):
     from tests.webui_harness import web_app
-    one = [dict(address='192.168.1.57', banner='SSH-2.0-dropbear', lets_in=True, game='deadpool_le',
-                host_key=('ssh-ed25519', 'AAAA'), note=''),
-           dict(address='192.168.1.20', banner='SSH-2.0-OpenSSH', lets_in=False, game='', host_key=None,
-                note="doesn't let this computer in")]
+    deadpool = dict(address='192.168.1.57', banner='dropbear', lets_in=True, game='deadpool_le',
+                    host_key=('ssh-ed25519', 'AAAA'), note='')
+    other = dict(address='192.168.1.20', banner='OpenSSH', lets_in=False, game='', host_key=None,
+                 note="doesn't let this computer in")
     with web_app(tmp_path, mfr='stern') as w:
-        monkeypatch.setattr(machine_scan, 'scan', lambda **k: [dict(r) for r in one])
+        monkeypatch.setattr(machine_scan, 'scan', lambda **k: [dict(deadpool), dict(other)])
         w.call('network.scan')
         _settle(w, 'scanning')
         st = w.state('network')
         assert st['address'] == '192.168.1.57' and st['machine_game'] == 'Deadpool LE'
-        assert 'remembered' in st['scan_note'] and st['scan_kind'] == 'ok'
+        assert 'remembered it' in st['scan_note'] and st['scan_kind'] == 'ok'
         assert pad_ssh_key.machine()['host_key'] == ('ssh-ed25519', 'AAAA')
         assert pad_ssh_key.host_key('192.168.1.57') == ('ssh-ed25519', 'AAAA')
 
-        two = one + [dict(one[0], address='192.168.1.58', game='godzilla_pro', host_key=('ssh-ed25519', 'BBBB'))]
-        monkeypatch.setattr(machine_scan, 'scan', lambda **k: [dict(r) for r in two])
+        # David's network: Deadpool, Guardians and Bond.  All are remembered; Deadpool stays the one picked
+        many = [dict(deadpool), dict(deadpool, address='192.168.1.58', game='guardians_le',
+                                     host_key=('ssh-ed25519', 'BBBB')),
+                dict(deadpool, address='192.168.1.59', game='james_bond_007_le', host_key=('ssh-ed25519', 'CCCC')),
+                dict(other)]
+        monkeypatch.setattr(machine_scan, 'scan', lambda **k: [dict(r) for r in many])
         w.call('network.scan')
         _settle(w, 'scanning')
         st = w.state('network')
-        assert 'pick yours' in st['scan_note'] and len(st['found']) == 3
+        assert 'Found 3 machines (Deadpool LE, Guardians LE, James Bond 007 LE)' in st['scan_note']
+        assert '2 of them new' in st['scan_note'] and 'Pick the one' in st['scan_note']
+        assert [m['label'] for m in st['machines']] == ['Deadpool LE at 192.168.1.57', 'Guardians LE at 192.168.1.58',
+                                                         'James Bond 007 LE at 192.168.1.59']
+        assert st['address'] == '192.168.1.57' and st['found'] == []
         assert w.call('network.use_machine', '192.168.1.20') is False      # it doesn't let PAD in
-        assert w.call('network.use_machine', '192.168.1.58') is True
-        assert w.state('network')['address'] == '192.168.1.58'
-        assert w.state('network')['machine_game'] == 'Godzilla PRO'
+        assert w.call('network.use_machine', '192.168.1.59') is True
+        assert w.state('network')['address'] == '192.168.1.59'
+        assert w.state('network')['machine_game'] == 'James Bond 007 LE'
+        assert pad_ssh_key.last_address() == '192.168.1.59'
+        # forget the one picked: the next is used
+        w.call('network.forget_machine')
+        assert w.state('network')['address'] == '192.168.1.57' and len(w.state('network')['machines']) == 2
+
+        monkeypatch.setattr(machine_scan, 'scan', lambda **k: [dict(other)])
+        w.call('network.scan')
+        _settle(w, 'scanning')
+        st = w.state('network')
+        assert st['scan_kind'] == 'err' and 'only other devices' in st['scan_note'] and len(st['found']) == 1
 
         monkeypatch.setattr(machine_scan, 'scan', lambda **k: [])
         w.call('network.scan')

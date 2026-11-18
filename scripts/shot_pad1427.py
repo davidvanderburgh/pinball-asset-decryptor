@@ -33,7 +33,11 @@ if os.environ.get("PAD1427_STANDIN"):
                                                                 7948206080, "USB")]
     machine_scan.scan = lambda **k: [
         dict(address="192.168.1.57", banner="dropbear", lets_in=True, game="deadpool_le",
-             host_key=("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIKDaXqujG6r80I"), note="")]
+             host_key=("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIKDaXqujG6r80I"), note=""),
+        dict(address="192.168.1.62", banner="dropbear", lets_in=True, game="guardians_le",
+             host_key=("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIGuardiansGuard"), note=""),
+        dict(address="192.168.1.73", banner="dropbear", lets_in=True, game="james_bond_007_le",
+             host_key=("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAIBondJamesBond0"), note="")]
 from pinball_decryptor.webui import host
 sys.argv = ["host"] + sys.argv[1:]
 sys.exit(host.main())

@@ -942,8 +942,9 @@ def connect(address, log=None):
         return SshMachine(host, port)
     except Unreachable:
         from . import machine_scan, pad_ssh_key
-        rec = pad_ssh_key.machine()
-        if not rec["host_key"] or parse_address(rec["address"] or address) != (host, port):
+        rec = next((m for m in pad_ssh_key.machines() if m["host_key"] and _same_address(m["address"], host, port)),
+                   None)
+        if rec is None:
             raise
         if log is not None:
             log("The machine didn't answer at %s: looking for it on your network..." % host, "info")
@@ -952,10 +953,18 @@ def connect(address, log=None):
             raise
         pad_ssh_key.remember_host(moved, port, *rec["host_key"])
         new = machine_scan.address_of({"address": moved}, port)
-        pad_ssh_key.remember_machine(new, rec["host_key"], rec["game"])
+        # the same machine at its new address: still the one used if it was
+        pad_ssh_key.remember_machine(new, rec["host_key"], rec["game"], make_current=False)
         if log is not None:
             log("Found it at %s." % moved, "info")
         return SshMachine(moved, port)
+
+
+def _same_address(address, host, port):
+    try:
+        return parse_address(address) == (host, port)
+    except SendError:
+        return False
 
 
 def parse_address(address):

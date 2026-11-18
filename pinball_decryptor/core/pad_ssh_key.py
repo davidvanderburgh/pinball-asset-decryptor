@@ -115,9 +115,17 @@ def _machines_file():
     return os.path.join(KEY_DIR, "machines.json")
 
 
-def machine():
-    """The machine Send to machine uses from this computer: ``{'address', 'host_key', 'game'}`` (PAD-1427: found
-    by a scan and remembered with its identity, so it can be found again when its address changes)."""
+def _entry(rec):
+    hk = rec.get("host_key")
+    return {"address": str(rec.get("address") or "").strip(),
+            "host_key": tuple(hk) if isinstance(hk, (list, tuple)) and len(hk) == 2 else None,
+            "game": str(rec.get("game") or "")}
+
+
+def _load_machines():
+    """``(current address, [machine, ...])`` as kept in machines.json.  PAD-1427: every machine this computer
+    has found (David: "I can have MANY machines on my network"), each ``{'address', 'host_key', 'game'}``, and
+    which one Send to machine uses.  The PAD-1397 file held one ``{"address"}``: it reads as a list of one."""
     try:
         with open(_machines_file(), encoding="utf-8") as fh:
             data = json.load(fh)
@@ -125,34 +133,89 @@ def machine():
         data = {}
     if not isinstance(data, dict):
         data = {}
-    hk = data.get("host_key")
-    return {"address": str(data.get("address") or ""),
-            "host_key": tuple(hk) if isinstance(hk, list) and len(hk) == 2 else None,
-            "game": str(data.get("game") or "")}
+    if isinstance(data.get("machines"), list):
+        machines = [_entry(m) for m in data["machines"] if isinstance(m, dict)]
+        current = str(data.get("current") or "")
+    else:
+        old = _entry(data)
+        machines = [old] if old["address"] else []
+        current = old["address"]
+    return current, [m for m in machines if m["address"]]
+
+
+def _save_machines(current, machines):
+    os.makedirs(KEY_DIR, exist_ok=True)
+    write_json_atomic(_machines_file(), {"current": current, "machines": [
+        dict(m, host_key=list(m["host_key"]) if m["host_key"] else None) for m in machines]})
+
+
+def machines():
+    """Every machine this computer knows, in the order they were found: ``[{'address', 'host_key', 'game'}]``."""
+    return _load_machines()[1]
+
+
+def machine():
+    """The machine Send to machine uses: ``{'address', 'host_key', 'game'}`` (all empty when there is none)."""
+    current, ms = _load_machines()
+    return next((m for m in ms if m["address"] == current), _entry({"address": current}))
 
 
 def last_address():
-    """The machine address Send to machine last used on this computer, or ``""``."""
-    return machine()["address"]
+    """The address of the machine Send to machine uses on this computer, or ``""``."""
+    return _load_machines()[0]
+
+
+def machine_for_game(game):
+    """The address of the one known machine that runs *game* (``deadpool_le``), or ``""`` (none, or several)."""
+    hits = [m["address"] for m in machines() if game and m["game"] == game]
+    return hits[0] if len(hits) == 1 else ""
 
 
 def remember_address(address):
-    """An address typed in by hand: the identity found with the old one goes unless it is the same address."""
+    """An address typed in by hand: it becomes the machine used, a known machine's identity kept with it."""
     address = (address or "").strip()
     with _lock:
-        old = machine()
-        rec = {"address": address}
-        if old["address"] == address and old["host_key"]:
-            rec.update(host_key=list(old["host_key"]), game=old["game"])
-        os.makedirs(KEY_DIR, exist_ok=True)
-        write_json_atomic(_machines_file(), rec)
+        _current, ms = _load_machines()
+        if address and not any(m["address"] == address for m in ms):
+            ms.append(_entry({"address": address}))
+        _save_machines(address, ms)
 
 
-def remember_machine(address, host_key=None, game=""):
-    """The machine found (a scan, or a connection that let this computer in), with its identity and game."""
-    rec = {"address": (address or "").strip(), "game": game or ""}
-    if host_key:
-        rec["host_key"] = list(host_key)
+def remember_machine(address, host_key=None, game="", make_current=True):
+    """A machine found (a scan, or a connection that let this computer in), with its identity and game.  The same
+    identity at a new address is the same machine, moved."""
+    address = (address or "").strip()
     with _lock:
-        os.makedirs(KEY_DIR, exist_ok=True)
-        write_json_atomic(_machines_file(), rec)
+        current, ms = _load_machines()
+        old = (next((m for m in ms if host_key and m["host_key"] == tuple(host_key)), None)
+               or next((m for m in ms if m["address"] == address), None))
+        rec = _entry({"address": address, "host_key": host_key or (old or {}).get("host_key"),
+                      "game": game or (old or {}).get("game") or ""})
+        if old is not None:
+            if current == old["address"]:
+                current = address
+            ms[ms.index(old)] = rec
+            ms = [m for m in ms if m is rec or m["address"] != address]
+        else:
+            ms = [m for m in ms if m["address"] != address] + [rec]
+        _save_machines(address if make_current or not current else current, ms)
+
+
+def select_machine(address):
+    """Make the known machine at *address* the one Send to machine uses."""
+    with _lock:
+        _current, ms = _load_machines()
+        if not any(m["address"] == address for m in ms):
+            return False
+        _save_machines(address, ms)
+        return True
+
+
+def forget_machine(address):
+    """Forget the machine at *address*: its identity and its place in the list (the next one is used)."""
+    with _lock:
+        current, ms = _load_machines()
+        ms = [m for m in ms if m["address"] != address]
+        if current == address:
+            current = ms[0]["address"] if ms else ""
+        _save_machines(current, ms)

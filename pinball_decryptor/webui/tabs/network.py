@@ -36,6 +36,13 @@ def _game_name(game):
                     for w in words if w)
 
 
+def _machines_state():
+    """The machines this computer knows, for the picker: ``[{'address', 'label'}]`` (PAD-1427: David has many)."""
+    return [{'address': m['address'],
+             'label': '%s at %s' % (_game_name(m['game']) or 'A machine', m['address'])}
+            for m in pad_ssh_key.machines()]
+
+
 def _found_line(rec):
     """One machine a scan found, said plainly."""
     if rec.get('lets_in'):
@@ -60,7 +67,7 @@ class NetworkTab(TabService):
                  # PAD-1427: remote access on a card with one button, and the machine found by a scan
                  cards=[], cards_state='', card='', setup_busy=False, setup_note='', setup_kind='', setup_pct=0,
                  scanning=False, scan_pct=0, scan_note='', scan_kind='', found=[],
-                 machine_game=_game_name(pad_ssh_key.machine()['game']))
+                 machine_game=_game_name(pad_ssh_key.machine()['game']), machines=_machines_state())
         self._card_seq = 0
         self._scan_cancel = False
         self._found = {}
@@ -251,18 +258,35 @@ class NetworkTab(TabService):
         return bool(self.get('scanning'))
 
     def _scanned(self, found, err):
-        self._found = {r['address']: r for r in found}
-        rows = [dict(address=r['address'], lets_in=bool(r['lets_in']), game=_game_name(r.get('game')),
-                     line=_found_line(r)) for r in found]
+        from ...core import machine_scan
         ours = [r for r in found if r['lets_in']]
-        self.set(scanning=False, scan_pct=100, found=rows)
+        rows = [dict(address=r['address'], lets_in=False, game='', line=_found_line(r))
+                for r in found if not r['lets_in']]
+        # every machine that lets this computer in is remembered (David: "I can have MANY machines on my
+        # network"), each by its identity: one found at a new address is the same machine, moved
+        known = {m['address'] for m in pad_ssh_key.machines()}
+        for r in ours:
+            if r.get('host_key'):
+                pad_ssh_key.forget_host(r['address'], machine_scan.PORT)
+                pad_ssh_key.remember_host(r['address'], machine_scan.PORT, *r['host_key'])
+            pad_ssh_key.remember_machine(r['address'], r.get('host_key'), r.get('game') or '', make_current=False)
+        current = pad_ssh_key.last_address()
+        if ours and current not in {m['address'] for m in pad_ssh_key.machines()} | {r['address'] for r in ours}:
+            current = ''
+        if ours and not current:
+            pad_ssh_key.select_machine(ours[0]['address'])
+        self.set(scanning=False, scan_pct=100, found=rows if not ours else [])
+        self._show_machine()
+        new = [r for r in ours if r['address'] not in known]
         if err:
             self.set(scan_note="Couldn't look over the network: %s" % err, scan_kind='err')
         elif len(ours) == 1:
-            self.use_machine(ours[0]['address'])
+            self.set(scan_note='Found %s at %s, and remembered it.' % (
+                _game_name(ours[0].get('game')) or 'a machine', ours[0]['address']), scan_kind='ok')
         elif ours:
-            self.set(scan_note='Found %d machines that let this computer in: pick yours.' % len(ours),
-                     scan_kind='ok')
+            self.set(scan_note='Found %d machines (%s), and remembered them%s. Pick the one to send to.' % (
+                len(ours), ', '.join(_game_name(r.get('game')) or r['address'] for r in ours),
+                '' if len(new) == len(ours) else ', %d of them new' % len(new)), scan_kind='ok')
         elif found:
             self.set(scan_note=("Found no machine that lets this computer in, only other devices. Is the machine "
                                 "switched on, and was its card set up for remote access from this computer?"),
@@ -273,20 +297,17 @@ class NetworkTab(TabService):
 
     @rpc
     def use_machine(self, address):
-        """Remember the machine a scan found at *address* as this computer's machine."""
-        rec = self._found.get(address)
-        if rec is None or not rec.get('lets_in'):
+        """Make the known machine at *address* the one Send to machine (and Check connection) uses."""
+        if not pad_ssh_key.select_machine(address):
             return False
-        from ...core import machine_scan
-        if rec.get('host_key'):
-            pad_ssh_key.forget_host(address, machine_scan.PORT)
-            pad_ssh_key.remember_host(address, machine_scan.PORT, *rec['host_key'])
-        pad_ssh_key.remember_machine(address, rec.get('host_key'), rec.get('game') or '')
-        game = _game_name(rec.get('game'))
-        self.set(address=address, machine_game=game, check='', check_kind='',
-                 scan_note='Found %s at %s, and remembered it.' % (game or 'your machine', address), scan_kind='ok')
-        self.set(known=self._known())
+        self.set(check='', check_kind='')
+        self._show_machine()
         return True
+
+    def _show_machine(self):
+        rec = pad_ssh_key.machine()
+        self.set(address=rec['address'], machine_game=_game_name(rec['game']), machines=_machines_state())
+        self.set(known=self._known())
 
     # ---- PAD-1397: Send to machine
     def _known(self):
@@ -301,8 +322,8 @@ class NetworkTab(TabService):
     def set_address(self, address):
         address = (address or '').strip()
         pad_ssh_key.remember_address(address)
-        self.set(address=address, check='', check_kind='', machine_game=_game_name(pad_ssh_key.machine()['game']))
-        self.set(known=self._known())
+        self.set(check='', check_kind='')
+        self._show_machine()
         return True
 
     @rpc
@@ -326,7 +347,8 @@ class NetworkTab(TabService):
                     m.close()
                 where = machine_scan.address_of({'address': host}, port)
                 game = machine_scan.game_of(out)
-                pad_ssh_key.remember_machine(where, pad_ssh_key.host_key(host, port), game)
+                pad_ssh_key.remember_machine(where, pad_ssh_key.host_key(host, port), game,
+                                             make_current=where == address or pad_ssh_key.last_address() == address)
                 text, kind = ('Connected: the machine runs %s, and lets this computer in.'
                               % (_game_name(game) or 'a game'), 'ok')
                 if where != address:
@@ -340,10 +362,8 @@ class NetworkTab(TabService):
         return True
 
     def _checked(self, text, kind):
-        rec = pad_ssh_key.machine()
-        self.set(checking=False, check=text, check_kind=kind, address=rec['address'] or self.get('address'),
-                 machine_game=_game_name(rec['game']))
-        self.set(known=self._known())
+        self.set(checking=False, check=text, check_kind=kind)
+        self._show_machine()
 
     @rpc
     def forget_machine(self):
@@ -353,8 +373,10 @@ class NetworkTab(TabService):
         except remote_send.SendError:
             return False
         pad_ssh_key.forget_host(host, port)
-        self.set(known=False, check="Forgotten: the next connection takes the machine's identity afresh.",
+        pad_ssh_key.forget_machine(self.get('address'))
+        self.set(check="Forgotten. Find my machine finds it again, with its identity taken afresh.",
                  check_kind='')
+        self._show_machine()
         return True
 
     @rpc
@@ -374,12 +396,14 @@ class NetworkTab(TabService):
                                     filetypes=[('SD card images', '*.raw *.img'), ('All files', '*.*')])
         if not path:
             return False
+        game = self.get('machine_game')
+        which = ('%s (at %s)' % (game, address)) if game else ('the machine at %s' % address)
         if not compat.messagebox.askyesno(
                 'Send to machine',
-                "Make the machine at %s run %s?\n\nOnly the files that differ are copied. The machine's own "
+                "Make %s run %s?\n\nOnly the files that differ are copied. The machine's own "
                 'settings, audits and high scores stay as they are. If the image is another version or card, '
                 'the machine restarts when it is done; leave it switched on until then.'
-                % (address, os.path.basename(path)), icon='warning'):
+                % (which, os.path.basename(path)), icon='warning'):
             return False
         fn(path, address)
         return True
@@ -387,6 +411,7 @@ class NetworkTab(TabService):
     def on_show(self):
         self._visible = True
         self.publish()
+        self._show_machine()
         if not self.get('cards_state'):
             self.refresh_cards()
 

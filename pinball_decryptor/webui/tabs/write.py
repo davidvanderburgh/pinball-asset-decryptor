@@ -2272,15 +2272,18 @@ class WriteTab(TabService):
             rec = card_extras.load(project)
         except card_extras.ExtrasError:
             rec = None
-        address = pad_ssh_key.last_address()
+        # PAD-1427: with several machines on the network, the one that runs this card's game (one known machine
+        # runs it), else the one picked on the Network tab
+        game = os.path.basename(self.write_upd_var.get().strip()).split(".", 1)[0].split("-", 1)[0]
+        address = pad_ssh_key.machine_for_game(game) or pad_ssh_key.last_address()
         missing = None
         if not self.write_upd_var.get().strip() or not project or not self._target_write_path():
             missing = "Set the original image, the project folder and where the build goes, here on the Write tab."
         elif not (rec and rec.get("enabled")):
-            missing = ("Turn on Remote access on the Network tab, then write the card onto the machine once: "
-                       "after that, Send to machine updates it over your network.")
+            missing = ("Set up remote access on the Network tab first (and keep it on for cards written from "
+                       "this project): after that, Send to machine updates the machine over your network.")
         elif not address:
-            missing = "Enter the machine's address on the Network tab (Send to machine)."
+            missing = "Find your machine on the Network tab first (Find my machine)."
         if missing:
             compat.messagebox.showinfo("Send to machine", missing)
             return False

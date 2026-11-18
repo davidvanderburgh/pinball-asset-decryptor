@@ -201,8 +201,93 @@ static int refused_said(const struct pm_mode *m)
     }
     return 0;
 }
+/* PAD-1401: layers, as the runtime keeps them (pad_mode_runtime.c, "layers"): the base is `running`; up to 8 more of
+ * ours run over it, ranked by priority, the later begun over at the same one */
+#define LAYERS_MAX 8
+static struct { const struct pm_mode *m; unsigned prio, flags, seq; } layers[LAYERS_MAX];
+static int n_layers;
+static unsigned layer_seq;
+static int layer_of(const struct pm_mode *m)
+{
+    int i;
+    for (i = 0; m && i < n_layers; i++)
+        if (layers[i].m == m) return i;
+    return -1;
+}
+static int runs_now(const struct pm_mode *m) { return m && (m == running || layer_of(m) >= 0); }
+static long layer_rank(const struct pm_mode *m)
+{
+    int i = layer_of(m);
+    if (!m) return -1;
+    if (m == running) return 0;
+    return i < 0 ? -1 : (long)(layers[i].prio + 1) * 65536L + (long)(layers[i].seq & 0xffffu);
+}
+int pm_begin_layer(unsigned prio, unsigned flags)
+{
+    int i;
+    if (!current) return 0;
+    if (prio > 255) prio = 255;
+    if (current == running) return 1;
+    if ((i = layer_of(current)) >= 0) { layers[i].prio = prio; layers[i].flags = flags; return 1; }
+    if (n_layers >= LAYERS_MAX) {
+        pm_log("not started: %d modes of ours already run over the base mode - the most at once", LAYERS_MAX);
+        return 0;
+    }
+    i = n_layers++;
+    layers[i].m = current, layers[i].prio = prio, layers[i].flags = flags, layers[i].seq = ++layer_seq;
+    begun++;
+    printf("%6lu LAYER BEGIN %s %u%s (%d run)\n", now_ms, current->name, prio, flags & PM_LAYER_PAUSE_BELOW ? " pause" : "",
+           (running ? 1 : 0) + n_layers);
+    if (clip_on && clip_owner != current) {
+        printf("%6lu CLIP STOPPED %s (another mode began)\n", now_ms, clip_owner ? clip_owner->name : "-");
+        clip_on = 0;
+    }
+    return 1;
+}
+int pm_layer_top(void)
+{
+    long r = layer_rank(current);
+    int i;
+    if (r < 0) return 0;
+    for (i = 0; i < n_layers; i++)
+        if (layer_rank(layers[i].m) > r) return 0;
+    return 1;
+}
+int pm_paused(void)
+{
+    long r = layer_rank(current);
+    int i;
+    if (r < 0) return 0;
+    for (i = 0; i < n_layers; i++)
+        if ((layers[i].flags & PM_LAYER_PAUSE_BELOW) && layer_rank(layers[i].m) > r) return 1;
+    return 0;
+}
+int pm_layers(void) { return n_layers; }
+int pm_mode_running_named(const char *name)
+{
+    int i;
+    if (running && running->name && !strcasecmp(running->name, name)) return 1;
+    for (i = 0; i < n_layers; i++)
+        if (layers[i].m->name && !strcasecmp(layers[i].m->name, name)) return 1;
+    return 0;
+}
+static long shot_claim = -1;
+static int shot_delivering;
+void pm_shot_claim(void)
+{
+    long r = layer_rank(current);
+    if (shot_delivering && r >= 0 && r > shot_claim) shot_claim = r;
+}
+int pm_shot_taken(void)
+{
+    long r = layer_rank(current);
+    return shot_delivering && r >= 0 && shot_claim > r;
+}
+static void lamps_layer_ended(const struct pm_mode *m);   /* the fake inserts, below */
+
 int pm_begin(void)
 {
+    if (layer_of(current) >= 0) return 1;
     if (running && running != current) {
         if (!refused_said(current)) pm_log("not started: %s is running", running->name);
         return 0;
@@ -224,11 +309,20 @@ unsigned pm_begun(void) { return begun; }
 static void mechs_let_go(const char *why);   /* PAD-395: the held mechanisms, below */
 void pm_end(void)
 {
+    int li = layer_of(current), j;
+    if (li >= 0) {                               /* PAD-1401: a layer ends; the rest run on */
+        for (j = li + 1; j < n_layers; j++) layers[j - 1] = layers[j];
+        n_layers--;
+        printf("%6lu LAYER END %s (%d run)\n", now_ms, current->name, (running ? 1 : 0) + n_layers);
+        lamps_layer_ended(current);
+        if (!running && !n_layers) mechs_let_go("the mode ended");
+        return;
+    }
     if (running == current) running = 0, refused_forget();
     if (!running) backdrop_mode_ended();
-    if (!running) mechs_let_go("the mode ended");
+    if (!running && !n_layers) mechs_let_go("the mode ended");
 }
-int pm_running(void) { return running && running == current; }
+int pm_running(void) { return runs_now(current); }
 int pm_other_running(void) { return running && running != current; }   /* PAD-675 */
 unsigned pm_callout_id(const char *role)
 {
@@ -927,10 +1021,22 @@ int pm_lamp_find(const char *name)
         if (lamp_is(k, name, strlen(name))) return k;
     return -1;
 }
+/* PAD-1401: a light of a running mode under a layer of ours that holds the insert waits under it (one deep here) */
+static struct { const struct pm_mode *owner; unsigned rgb, ms; int pattern; } under[N_LAMPS];
 static void lamp_hold(int k, unsigned rgb, int pattern, unsigned ms)
 {
     if (pattern < 0 || pattern > 3) pattern = 0;
     if (!ms) ms = pattern == PM_LAMP_BLINK ? 500 : pattern == PM_LAMP_PULSE ? 1600 : pattern == PM_LAMP_CHASE ? 150 : 0;
+    if (held[k].owner && held[k].owner != current && runs_now(current) && runs_now(held[k].owner)
+        && layer_rank(held[k].owner) > layer_rank(current)) {
+        under[k].owner = current, under[k].rgb = rgb & 0xffffffu, under[k].pattern = pattern, under[k].ms = ms;
+        printf("%6lu LAMP UNDER %s %06x %s %u %s\n", now_ms, LAMPS[k].name, rgb & 0xffffffu, PATTERN[pattern], ms,
+               mode_name(current));
+        return;
+    }
+    if (held[k].owner && held[k].owner != current && runs_now(held[k].owner))
+        under[k].owner = held[k].owner, under[k].rgb = held[k].rgb, under[k].pattern = held[k].pattern,
+        under[k].ms = held[k].ms;
     held[k].owner = current;
     held[k].rgb = rgb & 0xffffffu;
     held[k].pattern = pattern;
@@ -941,6 +1047,18 @@ static void lamp_off(int k)
 {
     printf("%6lu LAMP OFF %s %s\n", now_ms, LAMPS[k].name, mode_name(current));
     held[k].owner = 0;
+    if (under[k].owner && under[k].owner != current && runs_now(under[k].owner)) {   /* PAD-1401: handed down */
+        held[k].owner = under[k].owner, held[k].rgb = under[k].rgb, held[k].pattern = under[k].pattern,
+        held[k].ms = under[k].ms;
+        printf("%6lu LAMP BACK %s %06x %s\n", now_ms, LAMPS[k].name, held[k].rgb, mode_name(held[k].owner));
+    }
+    under[k].owner = 0;
+}
+static void lamps_layer_ended(const struct pm_mode *m)
+{
+    int k;
+    for (k = 0; k < N_LAMPS; k++)
+        if (under[k].owner == m) under[k].owner = 0;
 }
 /* each name of a comma-separated list: fn(k) for an insert found; unknown names are printed */
 static int lamp_each(const char *names, void (*fn)(int, unsigned, int, unsigned), unsigned rgb, int pattern, unsigned ms,
@@ -1078,7 +1196,7 @@ int pm_display_priority(unsigned p)
         }
         return 1;
     }
-    if (!running || running != current) return 0;
+    if (!runs_now(current)) return 0;
     disp_prio = p > 255 ? 255 : p;
     disp_owner = current;
     printf("%6lu DISPLAY %u %s\n", now_ms, disp_prio, mode_name(current));
@@ -1122,10 +1240,27 @@ static void tick(void)
 
 static void dispatch(uint64_t mask)
 {
-    const struct pm_mode *m;
+    const struct pm_mode *m, *order[LAYERS_MAX + 1];
+    int n = 0, i, j;
     shield_knock(mask);
-    EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); }
+    shot_claim = -1;
+    shot_delivering = 1;
+    for (i = 0; i < n_layers; i++) order[n++] = layers[i].m;   /* PAD-1401: ours running, top-down, first */
+    if (n && running) order[n++] = running;
+    for (i = 1; i < n; i++)
+        for (j = i; j > 0 && layer_rank(order[j]) > layer_rank(order[j - 1]); j--) {
+            const struct pm_mode *t = order[j];
+            order[j] = order[j - 1];
+            order[j - 1] = t;
+        }
+    for (i = 0; i < n; i++)
+        if (order[i]->shot) { current = order[i]; order[i]->shot(mask); }
+    EACH_MODE(m) {
+        for (i = 0; i < n && order[i] != m; i++) ;
+        if (i == n && m->shot) { current = m; m->shot(mask); }
+    }
     current = 0;
+    shot_delivering = 0;
 }
 
 static void ticks_for_ms(unsigned long ms)

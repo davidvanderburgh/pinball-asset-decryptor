@@ -109,6 +109,29 @@ unsigned pm_begun(void);   /* PAD-413: how many times one of our modes has begun
                               moves, another mode has the screen, so drop your ending (total, own screen) at once.
                               A full-screen clip of yours still playing is stopped by the runtime then. */
 
+/* ---- several of yours at once: layers (PAD-1401) -----------------------------------------
+ * pm_begin keeps your modes to one at a time: that one is the BASE. A mode that begins with
+ * pm_begin_layer runs OVER it instead, beside up to 7 more layers, ranked by its priority (0-255;
+ * the later begun is over at the same one). A game-long mode of yours (the whole game, PAD-1400)
+ * is the base; modes stacking on it are layers, and a multiball or wizard over them a higher one.
+ * The layers share by rank: a shot reaches your running modes top-down first (pm_shot_claim keeps
+ * it from the ones under), an insert a higher one holds stays its while a lower one paints it (the
+ * lower light waits under it and is back when it lets go), and one HUD shows: the top one's. The
+ * game's modes, held off by the base, stay held off; a layer asking pm_block_game_modes never takes
+ * that hold over. The backdrop is the base's. pm_end ends a layer as it ends the base; ending the
+ * base does not end the layers (a mode that lives inside another ends itself: pm_mode_running_named). */
+#define PM_LAYER_PAUSE_BELOW 0x1u  /* while it runs, your modes under it stand still (pm_paused) */
+int pm_begin_layer(unsigned priority, unsigned flags);   /* 1 = your mode runs now, as a layer */
+int pm_layer_top(void);       /* your mode runs and none of yours runs over it: its HUD and screen show */
+int pm_paused(void);          /* your mode runs under a layer begun with PM_LAYER_PAUSE_BELOW: hold its
+                                 clock, score nothing, wait */
+int pm_layers(void);          /* how many layers run (the base not counted) */
+int pm_mode_running_named(const char *name);   /* one of yours by that name runs (as pm_running_name
+                                                  named it, or its .name; case aside) */
+void pm_shot_claim(void);     /* in .shot, while yours runs: the shot is yours - the modes of yours running
+                                 under it see pm_shot_taken() */
+int pm_shot_taken(void);      /* in .shot: a mode of yours running over yours claimed this shot */
+
 /* ---- scoring ------------------------------------------------------------------------
  * Through the game's own scoring, so its playfield multiplier and its rules about when a
  * score may be added apply. Returns what was actually added (can be 0). A title whose

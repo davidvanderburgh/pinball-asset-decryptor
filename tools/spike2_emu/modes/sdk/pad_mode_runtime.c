@@ -1005,9 +1005,51 @@ static void clip_other_began(void);
 static void bd_other_began(void);              /* PAD-658: the backdrop section */
 static void bd_mode_ended(void);
 
+/* PAD-1401: SEVERAL OF OURS AT ONCE - LAYERS. `running` is still the one BASE mode (pm_begin: one at a time, as
+ * ever); a mode that begins with pm_begin_layer runs OVER it as a layer, beside up to LAYERS_MAX-1 more layers of
+ * ours, ranked by the priority it gave (ties: the later begun is over). A whole game of a maker's own (X-Men 2.0's
+ * game-long Future, PAD-1400's own-game mode) is the base; its mutant modes stack on it as layers, and a multiball
+ * or wizard over those as a higher one. What the layers share is shared by rank: a shot goes to the running modes
+ * top-down first (pm_shot_claim keeps it from the ones under), the inserts a higher one holds stay its while a
+ * lower one paints them (the lower one's light waits under it, PAD-601's hand-down), one HUD is up (the top one's:
+ * pm_layer_top), and a layer begun with PM_LAYER_PAUSE_BELOW stands the ones under it still (pm_paused). With no
+ * layer running, nothing here changes anything: every order, owner and check is what it was. */
+#define LAYERS_MAX 8
+static struct layer {
+    const struct pm_mode *m;
+    unsigned prio, flags, seq;
+    const struct pm_mode *parent;  /* the mode of ours it began over (the base, or the top layer then); 0 = none */
+    char as[40];                   /* pm_running_name, as `running_as` is the base's */
+} layers[LAYERS_MAX];
+static int n_layers;
+static unsigned layer_seq;
+static int layer_of(const struct pm_mode *m)
+{
+    int i;
+    if (!m) return -1;
+    for (i = 0; i < n_layers; i++)
+        if (layers[i].m == m) return i;
+    return -1;
+}
+/* m is running: the base, or a layer */
+static int runs_now(const struct pm_mode *m) { return m && (m == running || layer_of(m) >= 0); }
+/* any mode of ours is running */
+static int any_ours(void) { return running || n_layers; }
+/* where m runs: -1 not running, 0 the base, above that a layer (its priority, then the later begun over) */
+static long layer_rank(const struct pm_mode *m)
+{
+    int i;
+    if (!m) return -1;
+    if (m == running) return 0;
+    i = layer_of(m);
+    return i < 0 ? -1 : (long)(layers[i].prio + 1) * 65536L + (long)(layers[i].seq & 0xffffu);
+}
+
 /* the name the runtime's lines give mode m: what pm_running_name said while it runs, else its .name */
 static const char *mode_name(const struct pm_mode *m, const char *none)
 {
+    int li = layer_of(m);
+    if (li >= 0 && layers[li].as[0]) return layers[li].as;
     if (m && m == running && running_as[0]) return running_as;
     return m && m->name ? m->name : none;
 }
@@ -1042,6 +1084,7 @@ static void chg_end_ball_now(const char *from);
 
 int pm_begin(void)
 {
+    if (layer_of(current) >= 0) return 1;           /* PAD-1401: it runs already, as a layer */
     if (running && running != current) {
         if (!refused_said(current)) pm_log("not started: %s is running", mode_name(running, "another mode"));
         return 0;
@@ -1073,6 +1116,11 @@ unsigned pm_begun(void) { return begun; }
  * the runtime's own lines ("block: ... - BLOCKTEST is running") say which. Only while it runs; pm_end forgets. */
 void pm_running_name(const char *name)
 {
+    int li = layer_of(current);
+    if (li >= 0) {                                  /* PAD-1401: a layer's name */
+        pm_snprintf(layers[li].as, sizeof layers[li].as, "%s", name ? name : "");
+        return;
+    }
     if (!running || running != current) return;
     refused_forget();
     pm_snprintf(running_as, sizeof running_as, "%s", name ? name : "");
@@ -1106,24 +1154,145 @@ static volatile int og_self;
 #define OG_SELF(stmt) do { __sync_fetch_and_add(&og_self, 1); stmt; __sync_fetch_and_sub(&og_self, 1); } while (0)
 static void og_shot_seen(void);
 static void og_event(unsigned id);
+static void layer_disp_ended(const struct pm_mode *m);   /* PAD-1401: the display section */
+static void layers_end_lets_go(void)
+{
+    if (any_ours()) return;                  /* another of ours still runs: what it holds stays */
+    magnet_let_go("the mode ended");
+    spare_outs_off("the mode ended");
+    scoop_let_go();
+    building_let_go("the mode ended");
+    shield_let_go("the mode ended");
+    shake_mode_ended();
+}
 void pm_end(void)
 {
     int was_taker = running && running == current;
+    int li = layer_of(current);
+    if (li >= 0) {                           /* PAD-1401: a layer ends; the base and the other layers run on */
+        const char *nm = mode_name(current, "a mode");
+        int j;
+        say("layers: %s ends (priority %u) - %d of ours run on", nm, layers[li].prio,
+            (running ? 1 : 0) + n_layers - 1);
+        for (j = li + 1; j < n_layers; j++) layers[j - 1] = layers[j];
+        n_layers--;
+        show_ended_by = current, show_ended_ms = pm_ms();
+        refused_forget();
+        layer_disp_ended(current);
+        layers_end_lets_go();
+        return;
+    }
     og_mode_ended(current);                  /* PAD-1400: the game has its rules back */
     if (was_taker && pm_in_game()) fin.mode = current, fin.ended = pm_ms(), fin.seen = 0;   /* PAD-707 */
     if (running && running == current) show_ended_by = current, show_ended_ms = pm_ms();
     if (running == current) running = 0, running_as[0] = 0, refused_forget();
     if (was_taker) chg_mode_ended(1);   /* PAD-630: a challenge game's mode ended - its ball ends */
     if (!running) bd_mode_ended();
-    if (!running) magnet_let_go("the mode ended");
-    if (!running) spare_outs_off("the mode ended");   /* PAD-826 */
-    if (!running) scoop_let_go();
-    if (!running) building_let_go("the mode ended");
-    if (!running) shield_let_go("the mode ended");
-    if (!running) shake_mode_ended();
+    if (!running) layer_disp_ended(current);    /* PAD-1401: a layer asking has the display order next */
+    layers_end_lets_go();                     /* PAD-826 spare outputs too; PAD-1401: not while a layer runs on */
 }
-int pm_running(void) { return running && running == current; }
-int pm_other_running(void) { return running && running != current; }   /* PAD-675 */
+int pm_running(void) { return runs_now(current); }   /* PAD-1401: the base, or a layer */
+int pm_other_running(void) { return running && running != current; }   /* PAD-675: the BASE is another's */
+
+/* ---- PAD-1401: layers (the section's story is at `layers`, above) ------------------------------- */
+int pm_begin_layer(unsigned priority, unsigned flags)
+{
+    int i;
+    const struct pm_mode *over;
+    if (!current) return 0;
+    if (priority > 255) priority = 255;
+    if (current == running) return 1;        /* the base already: it stays the base */
+    if ((i = layer_of(current)) >= 0) {      /* already a layer: its priority and flags as asked now */
+        layers[i].prio = priority;
+        layers[i].flags = flags;
+        return 1;
+    }
+    if (chg_refuses()) {                     /* PAD-630: the challenge game's challenge is over */
+        if (!refused_said(current)) pm_log("not started: this challenge game's challenge is over - its ball ends");
+        return 0;
+    }
+    if (n_layers >= LAYERS_MAX) {
+        if (!refused_said(current))
+            pm_log("not started: %d modes of ours already run over the base mode - the most at once", LAYERS_MAX);
+        return 0;
+    }
+    over = running;                          /* its parent: the top one of ours running now */
+    for (i = 0; i < n_layers; i++)
+        if (!over || layer_rank(layers[i].m) > layer_rank(over)) over = layers[i].m;
+    i = n_layers++;
+    layers[i].m = current;
+    layers[i].prio = priority;
+    layers[i].flags = flags;
+    layers[i].seq = ++layer_seq;
+    layers[i].parent = over;
+    layers[i].as[0] = 0;
+    refused_forget();
+    begun++;                                 /* PAD-413: an ending on the glass gives way to it */
+    lit_hold_until = 0;                      /* PAD-503 */
+    disp_linger_other_began();
+    clip_other_began();                      /* the newest has the screen; the base's backdrop stays (bd_) */
+    say("layers: %s begins as a layer at priority %u over %s%s - %d of ours run now", current->name ? current->name : "a mode",
+        priority, over ? mode_name(over, "a mode") : "nothing of ours",
+        flags & PM_LAYER_PAUSE_BELOW ? ", the ones under it paused" : "", (running ? 1 : 0) + n_layers);
+    return 1;
+}
+
+int pm_layer_top(void)
+{
+    long r = layer_rank(current);
+    int i;
+    if (r < 0) return 0;
+    for (i = 0; i < n_layers; i++)
+        if (layer_rank(layers[i].m) > r) return 0;
+    return 1;
+}
+
+int pm_paused(void)
+{
+    long r = layer_rank(current);
+    int i;
+    if (r < 0) return 0;
+    for (i = 0; i < n_layers; i++)
+        if ((layers[i].flags & PM_LAYER_PAUSE_BELOW) && layer_rank(layers[i].m) > r) return 1;
+    return 0;
+}
+
+int pm_layers(void) { return n_layers; }
+
+static int name_same(const char *a, const char *b)   /* the same mode name, case aside */
+{
+    if (!a || !b || !*a) return 0;
+    for (; *a && *b; a++, b++) {
+        char x = *a >= 'a' && *a <= 'z' ? (char)(*a - 32) : *a, y = *b >= 'a' && *b <= 'z' ? (char)(*b - 32) : *b;
+        if (x != y) return 0;
+    }
+    return !*a && !*b;
+}
+
+int pm_mode_running_named(const char *name)
+{
+    int i;
+    if (running && (name_same(mode_name(running, ""), name) || (running->name && name_same(running->name, name)))) return 1;
+    for (i = 0; i < n_layers; i++)
+        if (name_same(mode_name(layers[i].m, ""), name) || (layers[i].m->name && name_same(layers[i].m->name, name)))
+            return 1;
+    return 0;
+}
+
+/* a shot goes to our running modes top-down first; one of them claiming it keeps it from the ones under */
+static long shot_claim = -1;             /* the highest rank that claimed the shot being delivered; -1 none */
+static int shot_delivering;
+void pm_shot_claim(void)
+{
+    long r = layer_rank(current);
+    if (shot_delivering && r >= 0 && r > shot_claim) shot_claim = r;
+}
+int pm_shot_taken(void)
+{
+    long r = layer_rank(current);
+    return shot_delivering && r >= 0 && shot_claim > r;
+}
+
 
 /* ---- sound ---------------------------------------------------------------------------------- */
 /* PAD-1282: the sound engine's structs on either machine. A request record is three pointers, then
@@ -2248,17 +2417,46 @@ static void lamp_under_drop(int k, const struct pm_mode *m)
         }
 }
 
+/* PAD-1401: where a hold sits in insert k's list under the top: a layer's by its rank, every other one level with
+ * the rest (so with no layer running the list is what it was: the latest last, next back). The slot it goes in */
+static long lamp_under_key(const struct pm_mode *m) { long r = layer_rank(m); return r > 0 ? r : 0; }
+static struct lamp_under *lamp_under_slot(int k, const struct pm_mode *m)
+{
+    int i, j;
+    long key = lamp_under_key(m);
+    lamp_under_drop(k, m);
+    if (lamp_n_under[k] == LAMP_UNDER) lamp_under_drop(k, lamp_under[k][0].owner);
+    for (i = lamp_n_under[k]; i > 0 && lamp_under_key(lamp_under[k][i - 1].owner) > key; i--)
+        ;
+    for (j = lamp_n_under[k]; j > i; j--) lamp_under[k][j] = lamp_under[k][j - 1];
+    lamp_n_under[k]++;
+    return &lamp_under[k][i];
+}
+
 /* PAD-601: insert k's owner's hold kept under the mode taking it over (the oldest goes when the list is full) */
 static void lamp_under_push(int k)
 {
     struct lamp_held *h = &lamp_held[k];
     struct lamp_under *u;
     if (!h->owner || h->flash_only) return;     /* a hit's strobe alone holds nothing to come back to */
-    lamp_under_drop(k, h->owner);
-    if (lamp_n_under[k] == LAMP_UNDER) lamp_under_drop(k, lamp_under[k][0].owner);
-    u = &lamp_under[k][lamp_n_under[k]++];
+    u = lamp_under_slot(k, h->owner);
     u->owner = h->owner; u->rgb = h->rgb; u->period = h->period; u->chase_i = h->chase_i;
     u->chase_n = h->chase_n; u->on_ms = h->on_ms; u->pattern = h->pattern; u->layer = h->layer;
+}
+
+/* PAD-1401: insert k is held by a layer of ours ranked over `me` (which runs too): me's light waits under it, to be
+ * handed down when the layer lets go, and the insert stays the layer's. 1 = put under */
+static int lamp_goes_under(int k, const struct pm_mode *me, unsigned rgb, int pattern, unsigned period, unsigned chase_i,
+                           unsigned chase_n, unsigned on_ms, int layer)
+{
+    struct lamp_held *h = &lamp_held[k];
+    struct lamp_under *u;
+    if (!n_layers || !h->owner || h->owner == me || h->flash_only || !runs_now(me) || !runs_now(h->owner)
+        || layer_rank(h->owner) <= layer_rank(me)) return 0;
+    u = lamp_under_slot(k, me);
+    u->owner = me; u->rgb = rgb; u->period = period; u->chase_i = chase_i;
+    u->chase_n = chase_n; u->on_ms = on_ms; u->pattern = pattern; u->layer = layer;
+    return 1;
 }
 
 /* PAD-601: the mode on top let go of insert k: the latest hold still under it has it back (1), else the game (0) */
@@ -2293,6 +2491,9 @@ static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned
     for (j = 0; j < n; j++) {
         struct lamp_held *h = &lamp_held[list[j]];
         const struct pm_mode *me = current ? current : (const struct pm_mode *)&lamps;   /* a call from outside a callback */
+        if (lamp_goes_under(list[j], me, rgb, pattern, period_ms, (unsigned)j, (unsigned)n,
+                            lamp_hold_on_ms < period_ms ? lamp_hold_on_ms : 0, layer))
+            continue;                           /* PAD-1401: a layer over it has the insert */
         if (h->owner && h->owner != me) {
             lamp_say("lamps: %s takes %s from %s", current && current->name ? current->name : "a mode",
                      lamps[list[j]].name, h->owner->name ? h->owner->name : "another mode");
@@ -2330,6 +2531,7 @@ static int lamp_paint_as(int k, unsigned rgb, const struct pm_mode *me, unsigned
     }
     layer = lamp_layer_for(prio);
     if (layer < 0) return 0;
+    if (lamp_goes_under(k, me, rgb, PM_LAMP_SOLID, 150u, 0, 1, 0, layer)) return 1;   /* PAD-1401 */
     if (h->owner && h->owner != me)
         lamp_under_push(k);                     /* PAD-601: a show over another mode's light gives it back */
     lamp_under_drop(k, me);
@@ -3668,7 +3870,7 @@ static long long ck_ms(const char *which, void *surf)
 
 static int ck_mode_runs(void)
 {
-    return running && running == ck.owner && begun == ck.begun;
+    return runs_now(ck.owner) && begun == ck.begun;   /* PAD-1401: or a layer */
 }
 
 static void ck_drop(const char *why)
@@ -4755,6 +4957,7 @@ int pm_backdrop(const char *name)
     unsigned i;
     if (!(can & PM_CAN_BACKDROP)) return 0;
     if (running && running != current) return 0;     /* PAD-658: another of ours runs - the backdrop is its */
+    if (!running && n_layers && !pm_layer_top()) return 0;   /* PAD-1401: no base - the top layer's */
     bd_lingers = 0;
     bd_crop_next[0] = 0;                              /* PAD-1028: a mode's backdrop plays at the port's crop */
     if (!name || !*name) {
@@ -5099,16 +5302,53 @@ static void disp_release(const char *why)
     if (bd_lingers && !running) bd_reset(why);       /* PAD-658: the loop kept behind the ending goes with it */
 }
 
+/* PAD-1401: every running mode of ours that asked, so the one under a layer has it back when the layer ends */
+static struct { const struct pm_mode *m; unsigned prio; } disp_asks[LAYERS_MAX + 1];
+static void disp_ask_set(const struct pm_mode *m, unsigned prio)
+{
+    unsigned i, free_i = LAYERS_MAX + 1;
+    for (i = 0; i < LAYERS_MAX + 1; i++) {
+        if (disp_asks[i].m == m) { disp_asks[i].prio = prio; if (!prio) disp_asks[i].m = 0; return; }
+        if (!disp_asks[i].m && free_i > LAYERS_MAX) free_i = i;
+    }
+    if (prio && free_i <= LAYERS_MAX) disp_asks[free_i].m = m, disp_asks[free_i].prio = prio;
+}
+/* the owner is gone: the highest-ranked running mode of ours that asked has it now (1), or none did (0) */
+static int disp_hand_on(void)
+{
+    unsigned i, best = LAYERS_MAX + 1;
+    for (i = 0; i < LAYERS_MAX + 1; i++) {
+        if (disp_asks[i].m && !runs_now(disp_asks[i].m)) disp_asks[i].m = 0;   /* ended: its ask goes */
+        if (disp_asks[i].m && disp_asks[i].m != disp_owner
+            && (best > LAYERS_MAX || layer_rank(disp_asks[i].m) > layer_rank(disp_asks[best].m))) best = i;
+    }
+    if (best > LAYERS_MAX) return 0;
+    disp_owner = disp_asks[best].m;
+    disp_prio = disp_asks[best].prio;
+    disp_linger_until = 0;
+    say("display: %s has display priority %u again - the mode over it ended", mode_name(disp_owner, "a mode"), disp_prio);
+    return 1;
+}
+static void layer_disp_ended(const struct pm_mode *m)
+{
+    disp_ask_set(m, 0);
+    if (disp_prio && disp_owner == m && !disp_linger_until) disp_hand_on();
+}
+
 int pm_display_priority(unsigned priority)
 {
     unsigned char *m;
     if (!(can & PM_CAN_DISPLAY_PRIORITY)) return 0;
     if (!priority) {
-        if (disp_prio && (!current || disp_owner == current)) disp_release("the mode gave it up");
+        if (current) disp_ask_set(current, 0);
+        if (disp_prio && (!current || disp_owner == current) && !disp_hand_on()) disp_release("the mode gave it up");
         return 1;
     }
-    if (!running || running != current) return 0;
+    if (!runs_now(current)) return 0;        /* PAD-1401: the base, or a layer */
     if (priority > 255) priority = 255;
+    disp_ask_set(current, priority);
+    if (disp_prio && disp_owner && disp_owner != current && runs_now(disp_owner)
+        && layer_rank(disp_owner) > layer_rank(current)) return 1;   /* a layer over it has it; it is next */
     disp_owner = current;
     disp_prio = priority;
     m = disp_manager();
@@ -5181,10 +5421,10 @@ static void display_tick(void)
     unsigned now;
     int covered;
     if (!disp_prio) return;
-    if (!disp_owner || running != disp_owner) {
-        if (!disp_linger_until) { disp_release("the mode that asked ended"); return; }
+    if (!disp_owner || !runs_now(disp_owner)) {   /* PAD-1401: a layer is running too */
+        if (!disp_linger_until) { if (!disp_hand_on()) disp_release("the mode that asked ended"); return; }
         if (running) { disp_release("another mode began"); return; }
-        if (pm_ms() >= disp_linger_until) { disp_release("its ending is over"); return; }
+        if (pm_ms() >= disp_linger_until) { if (!disp_hand_on()) disp_release("its ending is over"); return; }
     }
     if (!pm_in_game()) { disp_release("left the game"); return; }
     m = disp_manager();
@@ -6223,7 +6463,12 @@ int pm_block_game_modes(int on)
         }
         return 1;
     }
-    if (!running || running != current) return 0;
+    if (!runs_now(current)) return 0;        /* PAD-1401: the base, or a layer */
+    if (block_owner && block_owner != current && runs_now(block_owner)) {
+        say("block: %s asks too - %s holds the game's modes off already, and goes on holding them", mode_name(current, "a mode"),
+            block_who);
+        return 1;                            /* a layer never takes the hold (and its list) from the base under it */
+    }
     block_owner = current;
     own = block_list_by == current && bm_count(block_list);
     if (own) for (i = 0; i < BLOCK_WORDS; i++) block_mask[i] = block_list[i];
@@ -7146,7 +7391,7 @@ static void magnet_tick(void)
         if (coil_game_busy(c)) { c->game_took = 1; coil_let_go(c, "the game wants it"); }
         else if (pm_ms() >= c->until) coil_let_go(c, "its time ran out");
         else if (!pm_in_game()) coil_let_go(c, "the game ended or tilted");
-        else if (!running) coil_let_go(c, "no mode is running");
+        else if (!any_ours()) coil_let_go(c, "no mode is running");
     }
 }
 
@@ -7663,7 +7908,7 @@ static void spare_tick(void)
         struct spare_out *o = &spare_outs[i];
         if (!o->live) continue;
         if (!pm_in_game()) spare_out_off(o, "the game ended or tilted");
-        else if (!running) spare_out_off(o, "no mode is running");
+        else if (!any_ours()) spare_out_off(o, "no mode is running");
         else if (pm_ms() >= o->until) o->live = 0;        /* the board ended it */
     }
 }
@@ -7847,20 +8092,20 @@ static unsigned scoop_wrap(unsigned ev, unsigned a1, unsigned a2, unsigned a3)
         pick_at = 0;
         return r;
     }
-    if (!(scoop.hold_ms && running) && !(!running && finish_on())) return r;   /* PAD-707: or the last one's finish */
+    if (!(scoop.hold_ms && any_ours()) && !(!running && finish_on())) return r;   /* PAD-707: or the last one's finish */
     t0 = pm_ms();
-    scoop.until = t0 + (running ? scoop.hold_ms : SCOOP_MAX_MS);
+    scoop.until = t0 + (any_ours() ? scoop.hold_ms : SCOOP_MAX_MS);
     scoop.release = 0;
-    if (running) say("scoop: a ball settled - holding it %u ms for the mode; then the game kicks it out", scoop.hold_ms);
+    if (any_ours()) say("scoop: a ball settled - holding it %u ms for the mode; then the game kicks it out", scoop.hold_ms);
     else say("scoop: a ball settled while %s's finish plays - held until it is over", fin.mode && fin.mode->name ? fin.mode->name : "a mode");
     /* PAD-707: a mode that ends while it holds the ball keeps it through its finish, so the kick-out comes as it ends */
     while (!scoop.release && pm_in_game() && pm_ms() - t0 < SCOOP_MAX_MS
-           && ((scoop.hold_ms && running && pm_ms() < scoop.until) || (!running && finish_on()))) {
+           && ((scoop.hold_ms && any_ours() && pm_ms() < scoop.until) || (!running && finish_on()))) {
         scoop_search_off();
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
     }
     why = scoop.release ? "the mode let go" : !pm_in_game() ? "the game ended or tilted"
-        : pm_ms() - t0 >= SCOOP_MAX_MS ? "the most a ball is held" : running ? "its time ran out"
+        : pm_ms() - t0 >= SCOOP_MAX_MS ? "the most a ball is held" : any_ours() ? "its time ran out"
         : fin.seen ? "the mode's finish is over" : "the mode ended";
     say("scoop: let go after %lu ms (%s) - the game kicks it out", pm_ms() - t0, why);
     scoop.until = 0;
@@ -8146,7 +8391,7 @@ static void shield_tick(void)
     if (!obj) { shd.home = shd.keep = shd.hold = 0, shd.putback_why = 0; return; }
     if (!shd.putback_why) {
         if (!pm_in_game()) shield_let_go("the game ended or tilted");
-        else if (!running) shield_let_go("no mode is running");
+        else if (!any_ours()) shield_let_go("no mode is running");
     }
     if (shd.putback_why) { shield_putback(obj); return; }
     if (!shd.keep) return;
@@ -8161,7 +8406,7 @@ static void shield_tick(void)
                 "it sees none)", at == PM_SHIELD_AWAY ? "AWAY" : "TOWARD", shield_word(shd.keep));
         return;
     }
-    why = shield_refusal(running != 0, pm_in_game(), pm_aside() != 0, shd.last, pm_ms(), shd.starts);
+    why = shield_refusal(any_ours(), pm_in_game(), pm_aside() != 0, shd.last, pm_ms(), shd.starts);
     if (why) {
         if (shd.said_wait++ < 3) say("shield: not turned back %s yet - %s", shield_word(shd.keep), why);
         return;
@@ -8189,7 +8434,7 @@ int pm_shield_position(void)
 static int shield_update_veto(pm_reg *r)
 {
     unsigned obj = shield_obj();
-    if (!shd.hold || !obj || r[0] != obj || !running || pm_aside()) return 0;
+    if (!shd.hold || !obj || r[0] != obj || !any_ours() || pm_aside()) return 0;
     if (!shd.said_hold++)
         say("shield: the game's own return of the platform to its resting place waits while %s has it (every ~3 s; "
             "its ball search, its own motor processes and its modes still move it)", mode_name(running, "the mode"));
@@ -8375,10 +8620,10 @@ static void building_keep_closed(void)
     unsigned obj = building_obj();
     unsigned long now = pm_ms();
     int at, to;
-    if (!obj || !running) return;
+    if (!obj || !any_ours()) return;
     at = building_field(obj, "building_at", 44);
     to = building_field(obj, "building_target_at", 48);
-    if (building_close_why(running != 0, pm_in_game(), pm_aside() != 0, bld.putback_until != 0, bld.ours, at, to,
+    if (building_close_why(any_ours(), pm_in_game(), pm_aside() != 0, bld.putback_until != 0, bld.ours, at, to,
                            building_busy(obj), ((coil_virtual(obj, 2) | coil_virtual(obj, 0)) & 0xffu) != 0,
                            bld.last, now, bld.starts))
         return;
@@ -8410,7 +8655,7 @@ static int building_move_veto(pm_reg *r)
     unsigned obj = building_obj();
     if (!obj || r[0] != obj)
         return 0;
-    if (!building_raise_refused(bld_sending, running != 0, pm_in_game(), aside.kind != 0, bld.home >= 0 && bld.ours == 0,
+    if (!building_raise_refused(bld_sending, any_ours(), pm_in_game(), aside.kind != 0, bld.home >= 0 && bld.ours == 0,
                                 bld.putback_until != 0, (int)r[1]))
         return 0;
     if (said++ < 3 || said % 20 == 0)
@@ -8427,7 +8672,7 @@ static void building_tick(void)
     if (bld.home < 0) return;
     if (!bld.putback_until) {
         if (!pm_in_game()) building_let_go("the game ended or tilted");
-        else if (!running) building_let_go("no mode is running");
+        else if (!any_ours()) building_let_go("no mode is running");
         if (!bld.putback_until) return;
     }
     obj = building_obj();
@@ -9078,7 +9323,7 @@ static void shake_tick(void)
     shake_watch(pm_ms(), shake_left());      /* PAD-658/670: the motor's running time, the game's and ours, as it runs */
     if (!shk.until) return;
     if (!pm_in_game()) { shake_let_go("the game ended or tilted"); return; }
-    if (!running && !shk.outlast) { shake_let_go("no mode is running"); return; }
+    if (!any_ours() && !shk.outlast) { shake_let_go("no mode is running"); return; }
     while (shk.i_step < shk.n_step && pm_ms() - shk.t0 >= shk.step[shk.i_step].at) {
         s = &shk.step[shk.i_step];
         if (!shake_send(s->ms, s->strength)) {
@@ -11395,10 +11640,41 @@ static void on_tick(pm_reg *r)
     lamps_tick();                             /* named inserts: their patterns (lights section) */
 }
 
+/* every mode's .shot, as it always was when no layer runs (the modes in the order they are registered); with
+ * layers running, our running modes first, top-down, then the rest - each mode once, whatever begins or ends */
+static void deliver_shot(uint64_t mask)
+{
+    const struct pm_mode *m, *order[LAYERS_MAX + 1];
+    int n = 0, i, j;
+    shot_claim = -1;
+    shot_delivering = 1;
+    if (!n_layers) {
+        EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); }
+    } else {
+        for (i = 0; i < n_layers; i++) order[n++] = layers[i].m;
+        if (running) order[n++] = running;
+        for (i = 1; i < n; i++)              /* by rank, the highest first */
+            for (j = i; j > 0 && layer_rank(order[j]) > layer_rank(order[j - 1]); j--) {
+                const struct pm_mode *t = order[j];
+                order[j] = order[j - 1];
+                order[j - 1] = t;
+            }
+        for (i = 0; i < n; i++)
+            if (order[i]->shot) { current = order[i]; order[i]->shot(mask); }
+        EACH_MODE(m) {
+            for (i = 0; i < n && order[i] != m; i++)
+                ;
+            if (i == n && m->shot) { current = m; m->shot(mask); }
+        }
+    }
+    current = 0;
+    shot_delivering = 0;
+    shot_claim = -1;
+}
+
 static void on_shot(pm_reg *r)
 {
     static int said;
-    const struct pm_mode *m;
     /* Where the dispatch carries the mask: a 64-bit value in r2:r3 on Godzilla and Jaws;
      * a 32-bit value in r1 on TMNT Pro (item 137). The port says, with shot_mask_at (the
      * register of the low word) and shot_mask_bits. */
@@ -11407,8 +11683,7 @@ static void on_shot(pm_reg *r)
     if (at <= 2 && pm_port_value("shot_mask_bits", 64) == 64) shot |= (uint64_t)r[at + 1] << 32;
     note_thread("shot", &said);
     og_shot_seen();                              /* PAD-1400: a switch - the ball is in play */
-    EACH_MODE(m) if (m->shot) { current = m; m->shot(shot); }
-    current = 0;
+    deliver_shot(shot);                          /* PAD-1401: top-down while layers run */
 }
 
 /* ---- the end of a ball held for a mode's total (PAD-622) ------------------------------------------
@@ -16875,7 +17150,6 @@ static void on_switch_hit(pm_reg *r)
 /* every tick: each switch hit since the last, as its shots (all the lines naming that switch) */
 static void switches_deliver(void)
 {
-    const struct pm_mode *m;
     int i, j;
     if (!(can & PM_CAN_SWITCH_SHOTS)) return;
     for (i = 0; i < port.n_switch; i++) {
@@ -16887,17 +17161,14 @@ static void switches_deliver(void)
             if (port.sw[j].id == id) mask |= port.sw[j].mask;
         if (n > 8) n = 8;                            /* a flood is not N separate hits */
         og_shot_seen();                              /* PAD-1400: a switch - the ball is in play */
-        while (n--) EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); }
-        current = 0;
+        while (n--) deliver_shot(mask);          /* PAD-1401 */
     }
 }
 
 /* PAD-826: a spare input's close, to every mode's .shot (spare_switches_tick) */
 static void spare_deliver(uint64_t mask)
 {
-    const struct pm_mode *m;
-    EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); }
-    current = 0;
+    deliver_shot(mask);                          /* PAD-1401 */
 }
 
 static int is_switch_hit(const char *name)

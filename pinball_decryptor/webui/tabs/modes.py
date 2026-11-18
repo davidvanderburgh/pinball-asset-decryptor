@@ -4217,12 +4217,35 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
                 "info_line": p is None or bool(p.can("screen")),
                 # PAD-600: the project's other blocks modes, whose light a Put out the light of block may put out
                 "modes": [{"slug": s, "name": n} for s, n in self._blocks_modes() if s != self._code_slug],
+                # PAD-1401: the names the project's other modes run under: one of them a layer may run inside
+                "my_modes": self._my_mode_names(),
                 "game_wizards_off": ("Not on this game: " + p.why_not("wizard")) if p is not None and not p.can("wizard")
                                     else "" if p is not None else "No card picked yet.",
                 "block_off": ("" if gms or p is None else
                               "Not on this game yet: the app has not found where %s starts its own modes, so a "
                               "mode cannot keep them from starting; set to hold them off, it gives way to them "
                               "instead." % p.label)}
+
+    def _my_mode_names(self):
+        """PAD-1401: the names the project's other modes run under (what the runtime matches a mode's ``inside``
+        against): a blocks mode's C title, a form mode's name. The one being edited is left out."""
+        project = self.project()
+        if not project:
+            return []
+        out = []
+        for s, n in self._code_list:
+            if s == self._code_slug or not BM.is_blocks(project, s):
+                continue
+            try:
+                out.append(MT._c_title(BM.load(project, s).get("name") or s.upper(), s))
+            except (OSError, ValueError, BM.BlocksError):
+                continue
+        try:
+            specs, _broken = MP.list_modes(project)
+        except OSError:
+            specs = []
+        out += [str(getattr(sp, "name", "") or "") for _s, sp in specs]
+        return sorted({n.strip() for n in out if n and n.strip()}, key=str.lower)
 
     def _blocks_modes(self):
         """PAD-600: ``[(slug, name)]`` of the project's modes made of blocks."""

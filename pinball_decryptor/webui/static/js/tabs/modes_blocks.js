@@ -95,6 +95,12 @@ const TIP = {
   lit: "A Light the mode at block has lit it for the player up, and it has not started since.",
   canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
   displayPriority: "Kept for the total on its own screen. It no longer makes the game's displays wait: a mode always gives way to them (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off).",
+  // PAD-1401: several of the maker's own modes at once
+  layer: "One at a time (the usual): while it runs no other mode of yours starts, and it waits for one that runs. Over them, as a layer: it starts while your other modes run and runs on top of them - a mode that is the whole game, the modes stacking on it, and a multiball or wizard over those. Up to 8 layers at once. The top one's screen and HUD show; an insert it lights stays its while one under it lights the same one, which gets it back when the top one lets go.",
+  layerPriority: "Which layer is on top when several run: the higher number is over the lower (0-255). At the same number the one that began last is on top. Every layer is over the mode that runs one at a time.",
+  inside: "A mode it lives inside: it starts only while that one runs, and ends when that one ends. Any: it starts whenever it would, over whatever of yours runs.",
+  layerPause: "While it runs, your modes under it stand still: their clocks stop, their shots don't count, and they carry on where they were when it ends (a wizard over the modes it came from).",
+  layerShots: "While it runs, the shots made are its alone: your modes under it don't see them (their clocks still run unless they wait too).",
   gameModes: "Cannot start (the usual): while this mode runs it is the only thing going - the modes ticked below cannot start, and none of the game's features lights, locks, counts or awards unless you tick it under Keep counting. May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Its own Multiball block does not end it. Switched off: this mode is the whole game - it starts with every game, lasts every ball and player, and the game's own scoring, calls, multiballs and ball saves are off underneath it.",
   keepRule: "Ticked: this feature of the game's goes on counting its shots while this mode runs (its progress, its jackpots, its locks and the multiball it leads to). Not ticked: it sees none of them until this mode ends.",
   blockPick: "While this mode runs, the game does not start this one of its modes. A shot that would have started it does what it does when the mode is not lit.",
@@ -1042,7 +1048,7 @@ function Timers({ prog, ed }) {
 // saved = the title's usual ones, shown ticked; the last tick stays, so the list never goes back to
 // those by itself.
 // PAD-1400: what "are off: this is the whole game" does, under the choice
-const OWN_GAME_NOTE = "This mode starts with every game and runs through every ball and every player (each keeps their own scores and total), ending with the game; its clock and draining are not used. While a ball is in play the game's own rules are off: its shots, points, calls, award screens, light shows, multiballs and ball saves do nothing, so every point scored in play is this mode's. The game still runs the balls, tilt, its own end-of-ball bonus and the high scores.";
+const OWN_GAME_NOTE = "This mode starts with every game and runs through every ball and every player (each keeps their own scores and total), ending with the game; its clock and draining are not used. While a ball is in play the game's own rules are off: its shots, points, calls, award screens, light shows, multiballs and ball saves do nothing, so every point scored in play is this mode's. The game still runs the balls, tilt, its own end-of-ball bonus and the high scores. Your other modes run inside it as layers (With my other modes: over them, as a layer)."
 function GameModes({ prog, ed }) {
   const ch = ed.ch;
   const gm = prog.game_modes || "block";
@@ -1088,6 +1094,38 @@ function GameModes({ prog, ed }) {
           onChange=${(v) => keepTick(n, v)} />`)}
       </div>
       <div class="small muted">${keep.size ? "The ones ticked go on counting; every other feature of the game's waits until this mode ends." : "None ticked: only this mode counts while it runs."}</div>` : null}
+  </div>`;
+}
+
+// PAD-1401: with the maker's other modes - one at a time (the base), or over them as a layer: its priority, the mode
+// it lives inside, whether the ones under it wait, and whether the shots are its alone while it runs.
+function WithMyModes({ prog, ed }) {
+  const own = prog.game_modes === "own_game";
+  const layer = !!prog.layer && !own;
+  const names = ed.ch.my_modes || [];
+  const opts = [{ value: "alone", label: "one at a time" },
+    { value: "layer", label: "over them, as a layer", disabled: own }];
+  const inside = [{ value: "", label: "any of them" }, ...names.map((n) => ({ value: n, label: n }))];
+  if (prog.inside && !names.includes(prog.inside)) inside.push({ value: prog.inside, label: `${prog.inside} (no mode of that name)` });
+  const why = own ? "A mode that is the whole game is the one your other modes run over: set them to run over it, as layers."
+    : layer ? (prog.inside ? `It starts only while ${prog.inside} runs, and ends with it.` : "It starts while your other modes run, on top of them.")
+    : "";
+  return html`<div class="bk-gamemodes">
+    <div class="row wrap">
+      <span class="lbl" ...${tip(TIP.layer)}>With my other modes, it runs</span>
+      <${Select} sm value=${layer ? "layer" : "alone"} options=${opts} width=${200} title=${TIP.layer}
+        onChange=${(v) => ed.edit((d) => { d.layer = v === "layer"; if (!d.layer) d.inside = ""; })} />
+      ${layer ? html`
+        <span class="lbl" ...${tip(TIP.layerPriority)}>at priority</span>
+        <${Num} value=${prog.layer_priority ?? 10} width=${50} title=${TIP.layerPriority}
+          onChange=${(v) => ed.set(["layer_priority"], Number.isInteger(v) ? Math.max(0, Math.min(255, v)) : 10)} />
+        <span class="lbl" ...${tip(TIP.inside)}>inside</span>
+        <${Select} sm value=${prog.inside || ""} options=${inside} width=${200} title=${TIP.inside} onChange=${(v) => ed.set(["inside"], v)} />
+        <${Check} checked=${!!prog.layer_pause} label="the ones under it wait" title=${TIP.layerPause} onChange=${(v) => ed.set(["layer_pause"], v)} />
+        <${Check} checked=${!!prog.layer_takes_shots} label="the shots are its alone" title=${TIP.layerShots}
+          onChange=${(v) => ed.set(["layer_takes_shots"], v)} />` : null}
+    </div>
+    ${why ? html`<div class="small muted">${why}</div>` : null}
   </div>`;
 }
 
@@ -1358,6 +1396,7 @@ export function BlocksEditor({ s, c, pg }) {
       ${(prog.bar || {}).on && prog.bar.fill === "value" ? html`<${BarFill} prog=${prog} ed=${ed} />` : null}
       ${(prog.info || {}).on ? html`<${InfoLine} prog=${prog} ed=${ed} slug=${c.slug} />` : null}
       <${GameModes} prog=${prog} ed=${ed} />
+      <${WithMyModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />
       <${Timers} prog=${prog} ed=${ed} />
       ${(prog.hud || {}).on ? html`<${Hud} prog=${prog} ed=${ed} />` : null}

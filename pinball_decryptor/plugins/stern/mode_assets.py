@@ -952,6 +952,13 @@ def _code_screens(project, code, prof):
     # PAD-547: a mode's info line, a screen of its own wherever the title's port puts one
     out += [with_layout(info_screen(MP.asset_names(slug), prof), getattr(spec, "info_layout", None))
             for slug, spec in code or () if getattr(spec, "info_line", False) and prof.can("screen")]
+    # PAD-1405: its bar meters and its screen fades, screens of their own (mode_meters.py)
+    if prof.can("screen"):
+        from . import mode_meters as MM
+        for slug, spec in code or ():
+            out += MM.meter_screens(slug, getattr(spec, "meters", None) or [])
+        # the fades first, so every screen of the modes' is drawn over them
+        out[:0] = [f for slug, spec in code or () for f in MM.fade_screens(slug, getattr(spec, "fades", None) or [])]
     # PAD-574: a words-alone screen's TOTAL, where the game's own modes put theirs; PAD-709: and its scored shots
     return out + [s for slug, spec in code or ()
                   if spec.screen and getattr(spec, "screen_style", "") == "words" and prof.can("screen")

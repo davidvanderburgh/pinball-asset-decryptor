@@ -82,7 +82,8 @@ class DroppingMachine(R.SshMachine):
     """An SshMachine whose connection is a stand-in that can be dropped at a chosen moment."""
 
     def __init__(self, boot="boot-1", drop_after=None, redial_fails=0):
-        self.host, self.port, self._timeout = "pin.example", 22, 15
+        self.host, self.port, self._timeout, self._expect = "pin.example", 22, 15, None
+        self._lanes, self._parked, self._wide, self._wide_port, self._widened = [], None, None, None, False
         self.files, self.logs, self.dials, self.scripts = {}, [], 0, []
         self.drop_after = drop_after          # writes before the connection drops (once)
         self.redial_fails = redial_fails
@@ -329,3 +330,14 @@ def test_a_command_whose_session_died_is_a_dropped_connection_not_a_refused_step
     m.t = _Link()
     with pytest.raises(EOFError):
         R.SshMachine.sh(m, "sha1sum /games/x", check=check)
+
+
+def test_a_widened_send_is_widened_again_after_a_reconnect():
+    # PAD-1434's faster connection went with the dropped one: started again once connected again
+    m = DroppingMachine(drop_after=1)
+    m._widened, widened = True, []
+    m.widen = lambda log=None: widened.append(log)
+    m.files["/games/a"] = b"." * 10
+    m.write_ranges("/games/a", [(0, b"AA"), (5, b"BB")])
+    assert m.files["/games/a"] == b"AA...BB..."
+    assert widened == [m.log] and m.dials == 2

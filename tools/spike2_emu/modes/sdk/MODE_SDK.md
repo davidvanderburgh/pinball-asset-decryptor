@@ -5819,6 +5819,26 @@ or hidden (a Text's visibility slot is another virtual), so the badge, the gauge
 are Sprite groups of their own. The names are `PadMode_<folder>_Hud`, `..._Hud_Title`, `..._Hud_C1_Value`,
 `..._Hud_Timer.PadMode_<folder>_Hud_Timer_Num`, `..._Hud_Gauge.PadMode_<folder>_Hud_G1_On` and so on.
 
+### Bar meters and the screen fade (PAD-1405)
+
+On every title that takes a mode's screens (not only Godzilla), a mode can have up to four BAR METERS (a health bar
+per character, an energy meter) and up to three SCREEN FADES (the whole glass to a colour: X-Men 2.0's fade to black
+with a red glow before the Optic Blast), with no clip. The card build (`mode_meters.py`) adds them as screens of the
+mode's own in the title's `hud` scene: a meter `PadMode_<folder>_Meter<k>` is a frame, its words
+(`..._Meter<k>_Words`, the game's words font) and 20 fill pictures `..._Meter<k>_L<j>` (the bar filled to j of 20);
+a fade `PadMode_<folder>_Fade<k>` is 16 pictures `..._Fade<k>_L<j>` of one colour over the whole glass at stepped
+strengths, even (`flat`) or strongest at the edges (`glow`). Each level is a Sprite holding its picture (only a
+Sprite can be shown and hidden), premultiplied as the game blends them. A blocks mode names them in its settings
+(`meters`) and with Fade the screen blocks (`{"op": "fade", "color", "style", "to": percent, "ms"}`): one fade
+per colour and look its blocks use.
+
+In C, `intricate_kit.h`: `struct kit_meter` (`{ .scene = "hud", .node = "PadMode_<folder>_Meter1" }`),
+`kit_meter_set(m, value, most, words)` (words 0 = the label the build gave it), `kit_meter_hide`, and
+`kit_meter_tick` every tick; `struct kit_fade`, `kit_fade_to(f, percent, ms)` (0 ms = at once; from wherever it is
+now), `kit_fade_off`, `kit_fade_tick` every tick. The ticks find the nodes twice a second until the scene has loaded,
+hide every one at once (a built screen is visible until a mode hides it) and then write only what changed. A card
+built without them finds nothing and shows nothing; the mode runs. Emulator-proven on Uncanny X-Men LE and Pro 0.98.
+
 ### Clips by cue
 
 `assets.json` `"clips": {"intro": "intro.mp4", "loop": "loop.mp4", "sever": "sever.mp4", "won": ..., "lost": ...}`:

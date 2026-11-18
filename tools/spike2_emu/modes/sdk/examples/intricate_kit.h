@@ -1780,4 +1780,190 @@ static KIT_UNUSED void kit_show_stop(struct kit_show *s, struct kit_lamps *lamps
     if (lamps) lamps->n_now = 0;
 }
 
+/* ---- PAD-1405: bar meters and the screen fade ----------------------------------------------------------------------
+ * Built by the card build as screens of the mode's own, on every title that takes a mode's screens (mode_meters.py):
+ *   a METER "PadMode_<slug>_Meter<k>": a frame, its words ("..._Meter<k>_Words") and KIT_METER_LEVELS fill pictures
+ *     ("..._Meter<k>_L<j>": the bar filled to j of them). kit_meter_set(m, value, most, words) shows the one value out
+ *     of most comes to (none at 0, all of them at most), and the words when given (written only when they change);
+ *   a FADE "PadMode_<slug>_Fade<k>": KIT_FADE_LEVELS pictures of one colour over the whole glass at stepped strengths.
+ *     kit_fade_to(f, percent, ms) goes from where it is to percent (0 clear, 100 the colour full) over ms; 0 ms = at once.
+ * Call kit_meter_tick / kit_fade_tick every tick: they find the nodes (twice a second until the scene has loaded, then
+ * every one hidden at once: a built screen is visible until a mode hides it) and write only what changed. A card built
+ * without them finds nothing and shows nothing; the mode runs. */
+#define KIT_METER_LEVELS 20
+#define KIT_FADE_LEVELS  16
+
+struct kit_meter {
+    const char *scene;                       /* "hud": the role the port names */
+    char node[64];                           /* PadMode_<slug>_Meter<k> */
+    void *group, *words, *lvl[KIT_METER_LEVELS];
+    int found, n, up, shown;                 /* shown: the level on the glass now */
+    int want_up, want;                       /* what the mode asked for */
+    unsigned tries;
+    char said[48], say[48];
+};
+
+static KIT_UNUSED void kit_meter_init(struct kit_meter *m, const char *scene, const char *node)
+{
+    int k;
+    m->scene = scene;
+    for (k = 0; k < (int)sizeof m->node - 1 && node[k]; k++) m->node[k] = node[k];
+    m->node[k] = 0;
+    m->found = m->n = m->up = m->shown = m->want_up = m->want = 0;
+    m->tries = 0;
+    m->said[0] = m->say[0] = 0;
+}
+
+static KIT_UNUSED int kit_meter_find(struct kit_meter *m)
+{
+    char p[160];
+    int j;
+    if (m->found) return 1;
+    if (!m->node[0] || !pm_can(PM_CAN_SCREENS) || (m->tries++ % KIT_POLL) != 0) return 0;
+    m->group = pm_node(m->scene, m->node);
+    if (!m->group) return 0;
+    pm_snprintf(p, sizeof p, "%s.%s_Words", m->node, m->node);
+    m->words = pm_text(m->scene, p);
+    for (j = 0; j < KIT_METER_LEVELS; j++) {
+        pm_snprintf(p, sizeof p, "%s.%s_L%d", m->node, m->node, j + 1);
+        m->lvl[j] = pm_node(m->scene, p);
+        if (!m->lvl[j]) break;
+        pm_show(m->lvl[j], 0);
+    }
+    m->n = j;
+    pm_show(m->group, 0);                    /* built shown, as every screen is */
+    m->found = 1;
+    m->up = m->shown = 0;
+    m->said[0] = 0;
+    pm_log("meter %s found: %d levels, words %s", m->node, m->n, m->words ? "yes" : "none");
+    return 1;
+}
+
+/* the level `value` out of `most` comes to: 0 only at 0 (or less), all of them only at most (or more) */
+static KIT_UNUSED int kit_meter_level(long long value, long long most, int n)
+{
+    long long l;
+    if (most <= 0 || value <= 0 || n <= 0) return 0;
+    if (value >= most) return n;
+    l = (value * n + most / 2) / most;
+    if (l < 1) l = 1;
+    if (l >= n) l = n - 1;
+    return (int)l;
+}
+
+static KIT_UNUSED void kit_meter_set(struct kit_meter *m, long long value, long long most, const char *words)
+{
+    int k;
+    m->want_up = 1;
+    m->want = kit_meter_level(value, most, KIT_METER_LEVELS);
+    if (words) {
+        for (k = 0; k < (int)sizeof m->say - 1 && words[k]; k++) m->say[k] = words[k];
+        m->say[k] = 0;
+    }
+}
+
+static KIT_UNUSED void kit_meter_hide(struct kit_meter *m) { m->want_up = 0; }
+
+static KIT_UNUSED void kit_meter_tick(struct kit_meter *m)
+{
+    int lvl, k;
+    if (!kit_meter_find(m)) return;
+    if (m->want_up != m->up) {
+        pm_show(m->group, m->want_up);
+        m->up = m->want_up;
+    }
+    if (!m->up) return;
+    /* a card built with fewer levels than KIT_METER_LEVELS: the same share of them */
+    lvl = m->n == KIT_METER_LEVELS ? m->want : (m->want * m->n + KIT_METER_LEVELS / 2) / KIT_METER_LEVELS;
+    if (m->want > 0 && lvl < 1 && m->n > 0) lvl = 1;
+    if (lvl != m->shown) {
+        if (m->shown > 0 && m->shown <= m->n) pm_show(m->lvl[m->shown - 1], 0);
+        if (lvl > 0 && lvl <= m->n) pm_show(m->lvl[lvl - 1], 1);
+        m->shown = lvl;
+    }
+    if (m->words && m->say[0]) {
+        for (k = 0; m->say[k] && m->say[k] == m->said[k]; k++)
+            ;
+        if (m->say[k] != m->said[k]) {
+            pm_set_text(m->words, m->say);
+            for (k = 0; k < (int)sizeof m->said - 1 && (m->said[k] = m->say[k]) != 0; k++)
+                ;
+            m->said[sizeof m->said - 1] = 0;
+        }
+    }
+}
+
+struct kit_fade {
+    const char *scene;
+    char node[64];                           /* PadMode_<slug>_Fade<k> */
+    void *group, *lvl[KIT_FADE_LEVELS];
+    int found, n, shown;                     /* the step on the glass now (0 = none) */
+    int from, to;                            /* percent */
+    unsigned long t0, ms;
+    unsigned tries;
+};
+
+static KIT_UNUSED void kit_fade_init(struct kit_fade *f, const char *scene, const char *node)
+{
+    int k;
+    f->scene = scene;
+    for (k = 0; k < (int)sizeof f->node - 1 && node[k]; k++) f->node[k] = node[k];
+    f->node[k] = 0;
+    f->found = f->n = f->shown = f->from = f->to = 0;
+    f->t0 = f->ms = 0;
+    f->tries = 0;
+}
+
+/* where the fade is now, in percent */
+static KIT_UNUSED int kit_fade_now(const struct kit_fade *f)
+{
+    unsigned long el;
+    if (!f->ms) return f->to;
+    el = pm_ms() - f->t0;
+    if (el >= f->ms) return f->to;
+    return f->from + (int)((long)(f->to - f->from) * (long)el / (long)f->ms);
+}
+
+static KIT_UNUSED void kit_fade_to(struct kit_fade *f, int percent, int ms)
+{
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    f->from = kit_fade_now(f);
+    f->to = percent;
+    f->t0 = pm_ms();
+    f->ms = ms > 0 ? (unsigned long)ms : 0;
+    pm_log("fade %s: %d%% to %d%% over %d ms", f->node, f->from, percent, ms > 0 ? ms : 0);
+}
+
+static KIT_UNUSED void kit_fade_off(struct kit_fade *f) { f->from = f->to = 0; f->ms = 0; }
+
+static KIT_UNUSED void kit_fade_tick(struct kit_fade *f)
+{
+    char p[160];
+    int j, step;
+    if (!f->found) {
+        if (!f->node[0] || !pm_can(PM_CAN_SCREENS) || (f->tries++ % KIT_POLL) != 0) return;
+        f->group = pm_node(f->scene, f->node);
+        if (!f->group) return;
+        for (j = 0; j < KIT_FADE_LEVELS; j++) {
+            pm_snprintf(p, sizeof p, "%s.%s_L%d", f->node, f->node, j + 1);
+            f->lvl[j] = pm_node(f->scene, p);
+            if (!f->lvl[j]) break;
+            pm_show(f->lvl[j], 0);
+        }
+        f->n = j;
+        pm_show(f->group, 0);                /* built shown, as every screen is */
+        f->found = 1;
+        f->shown = 0;
+        pm_log("fade %s found: %d steps", f->node, f->n);
+    }
+    step = (kit_fade_now(f) * f->n + 50) / 100;
+    if (step == 0 && kit_fade_now(f) > 0 && f->n > 0) step = 1;
+    if (step == f->shown) return;
+    if (f->shown > 0) pm_show(f->lvl[f->shown - 1], 0);
+    if (step > 0) pm_show(f->lvl[step - 1], 1);
+    if ((step > 0) != (f->shown > 0)) pm_show(f->group, step > 0);
+    f->shown = step;
+}
+
 #endif

@@ -96,6 +96,8 @@ class CodeAssets:
     screen_style: str = ""                        # PAD-521: "words" = no panel, its words large and white
     info_line: bool = False                       # PAD-547: a line of words and a value under its name (PadMode_<slug>_Info)
     info_layout: dict = field(default_factory=dict)     # PAD-547: where the Scenes editor put that line (LAYOUT_KEYS)
+    meters: list = field(default_factory=list)    # PAD-1405: its bar meters [{"label", "color", "at"}] (PadMode_<slug>_Meter<k>)
+    fades: list = field(default_factory=list)     # PAD-1405: its screen fades [{"color", "style"}] (PadMode_<slug>_Fade<k>)
     points_layout: dict = field(default_factory=dict)   # PAD-709: where it put a words-alone mode's scored number
     more: dict = field(default_factory=dict)      # PAD-707: {"slot": n, "picture": file} - a monster on MORE KAIJU
     clip: str = ""

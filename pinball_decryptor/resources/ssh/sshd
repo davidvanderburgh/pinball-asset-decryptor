@@ -16,7 +16,9 @@ case "$1" in
       fi
       chmod 600 "$key"
     done
-    "$DAEMON" -P "$PIDFILE" \
+    # PAD-1434: a 4 MB receive window. Dropbear's own 24 KB held one connection to ~1.4 MB/s over a
+    # machine's Wi-Fi; 3.9 MB/s with this.
+    "$DAEMON" -P "$PIDFILE" -W 4194304 \
       -r "$KEYDIR/dropbear_rsa_host_key" \
       -r "$KEYDIR/dropbear_ecdsa_host_key" \
       -r "$KEYDIR/dropbear_ed25519_host_key"

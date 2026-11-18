@@ -268,17 +268,19 @@ def test_cabinet_lines_off_the_real_programs(game):
         assert [devs[int(i) - 1][0] for i in ids.split(",")] == [name + "-R", name + "-G", name + "-B"]
 
 
-def test_spike3_cabinet_shows_are_gated_until_seen_lit():
+def test_spike3_cabinet_shows_go_on_a_title_whose_port_names_its_lights():
+    # PAD-1379: the gate PAD-1328 kept until the cabinet was seen lit (PAD-1370) is gone: a port with cablamp lines
+    # takes shows (spike3_modes.cabs_wanted), Star Wars ELG (none) says why not
     from pinball_decryptor.plugins.stern import cab_shows as CS, spike3_modes as S3M
     for key, n in CAB_COUNTS.items():
         prof = MP.profiles()[key]
-        assert CS.title_refusal(prof) == (CS.NO_SPIKE3 if n else CS.NO_CAB) % prof.label
-    assert "expression light shows" in S3M.FAMILY_LEFT_OUT
+        assert CS.title_refusal(prof) == ("" if n else CS.NO_CAB % prof.label)
+    assert "expression light shows" not in S3M.FAMILY_LEFT_OUT
 
 
-def test_lights_tab_says_why_on_a_spike3_card(tmp_path, monkeypatch):
+def test_lights_tab_draws_a_spike3_cabinet_from_its_port(tmp_path, monkeypatch):
     from pinball_decryptor.webui.tabs import lights as L
-    from pinball_decryptor.plugins.stern import cab_shows as CS, clip_variants as CV, title_reader as TR
+    from pinball_decryptor.plugins.stern import clip_variants as CV, title_reader as TR
     card = tmp_path / "fallout_le-0_82_0_spike3.Release.64G.sdcard-secure.raw"
     card.write_bytes(b"\0" * 1024)
     prof = MP.profiles()["fallout_le_0_82_spike3"]
@@ -286,4 +288,6 @@ def test_lights_tab_says_why_on_a_spike3_card(tmp_path, monkeypatch):
     monkeypatch.setattr(MP, "card_arch", lambda image: "a64")
     monkeypatch.setattr(CV, "project_title", lambda p, probe=False: prof)
     monkeypatch.setattr(TR, "game_program", lambda c: pytest.fail("a Spike 3 program is not read by the Spike 2 reader"))
-    assert L.project_layout(str(tmp_path)) == (CS.NO_SPIKE3 % prof.label, [])
+    why, lights = L.project_layout(str(tmp_path))
+    assert why == "" and len(lights) == CAB_COUNTS["fallout_le_0_82_spike3"]
+    assert L.project_stock(str(tmp_path)) == (L.NO_STOCK, None)       # no 32-bit show table read off it

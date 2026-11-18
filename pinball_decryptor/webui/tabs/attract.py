@@ -314,6 +314,10 @@ class AttractTab(TabService):
     @rpc
     def try_it(self):
         """Run in emulator: the Emulate tab, started with the project's changes (the attract items among them)."""
+        from ..modes_tryit import run_spike3_project
+        handed = run_spike3_project(self.window, self._folder())          # PAD-1379: a Spike 3 card's
+        if handed is not None:
+            return handed
         emu = self.window.service("emulate")
         if emu is None:
             return False

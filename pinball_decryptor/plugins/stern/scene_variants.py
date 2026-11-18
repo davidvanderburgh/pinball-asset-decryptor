@@ -92,6 +92,122 @@ def normalise(raw):
     return {"names": names, "scenes": scenes, "force": force if 1 <= force <= len(names) else 0}
 
 
+# ---- the sets themselves: names, made and removed on the app's set picker -----------------------------------------
+# Simon (2026-11-18): "add a drop down ... which would let the user switch between video (etc.) sets. The first option
+# would be the main set, then SET 2 and so on". The sets are the project's, named here; set 1 is the project as it is.
+
+def _raw(project):
+    from ...core import staged_changes
+    try:
+        side = staged_changes.load(project)
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
+        side = {}
+    raw = side.get(STAGED_KEY)
+    return side, (dict(raw) if isinstance(raw, dict) else {})
+
+
+def _put(project, side, raw):
+    from ...core import staged_changes
+    names = raw.get("names") or []
+    if len(names) <= 1 and names in ([], list(DEFAULT_NAMES)) and not raw.get("scenes") and not raw.get("force"):
+        side.pop(STAGED_KEY, None)                      # one set of the default name and nothing in it: none
+    else:
+        side[STAGED_KEY] = raw
+    staged_changes.save(project, side)
+
+
+def set_names(project):
+    """The project's sets by name, set 1 first; ``["Standard"]`` when it has made none."""
+    if not project:
+        return list(DEFAULT_NAMES)
+    _side, raw = _raw(project)
+    names = [str(x).strip() for x in (raw.get("names") or ()) if str(x).strip()][:MAX_SETS]
+    top = max([int(k) for sets in (raw.get("scenes") or {}).values() if isinstance(sets, dict)
+               for k in sets if str(k).isdigit()] or [1])
+    while len(names) < max(1, min(top, MAX_SETS)):
+        names.append(DEFAULT_NAMES[0] if not names else "Set %d" % (len(names) + 1))
+    return names
+
+
+def _clean_name(name, names, skip=None):
+    name = " ".join(str(name or "").split())[:24]
+    if not name:
+        raise SceneVariantError("a set needs a name")
+    if any(i != skip and n.lower() == name.lower() for i, n in enumerate(names)):
+        raise SceneVariantError("there is already a set called %s" % name)
+    return name
+
+
+def add_set(project, name=""):
+    """A new set at the end; returns its number. :data:`MAX_SETS` at most."""
+    side, raw = _raw(project)
+    names = set_names(project)
+    if len(names) >= MAX_SETS:
+        raise SceneVariantError("%d sets is the most the service menu can offer" % MAX_SETS)
+    n = len(names) + 1
+    names.append(_clean_name(name or "Set %d" % n, names))
+    raw["names"] = names
+    _put(project, side, raw)
+    return n
+
+
+def rename_set(project, n, name):
+    side, raw = _raw(project)
+    names = set_names(project)
+    if not 1 <= int(n) <= len(names):
+        raise SceneVariantError("there is no set %s" % n)
+    names[int(n) - 1] = _clean_name(name, names, skip=int(n) - 1)
+    raw["names"] = names
+    _put(project, side, raw)
+
+
+def _renumber(raw, order):
+    """Every set-keyed part of *raw* by *order* (``order[new - 1] = old``; an old set missing is dropped)."""
+    new_of = {old: new for new, old in enumerate(order, 1)}
+    scenes = {}
+    for card, sets in (raw.get("scenes") or {}).items():
+        if not isinstance(sets, dict):
+            continue
+        keep = {str(new_of[int(k)]): v for k, v in sets.items()
+                if str(k).isdigit() and int(k) in new_of and new_of[int(k)] >= 2}
+        if keep:
+            scenes[card] = keep
+    raw["scenes"] = scenes
+    force = raw.get("force")
+    raw["force"] = new_of.get(force, 0) if isinstance(force, int) else 0
+    if not raw["force"]:
+        raw.pop("force")
+
+
+def remove_set(project, n):
+    """Set *n* (2 and up: set 1 is the project itself) and everything made for it; the sets after it move up."""
+    side, raw = _raw(project)
+    names = set_names(project)
+    n = int(n)
+    if n == 1:
+        raise SceneVariantError("set 1 is the project itself and cannot be removed")
+    if not 2 <= n <= len(names):
+        raise SceneVariantError("there is no set %d" % n)
+    order = [k for k in range(1, len(names) + 1) if k != n]
+    raw["names"] = [names[k - 1] for k in order]
+    _renumber(raw, order)
+    _put(project, side, raw)
+
+
+def move_set(project, n, to):
+    """Set *n* to place *to* (both 2 and up: set 1 stays the project itself)."""
+    side, raw = _raw(project)
+    names = set_names(project)
+    n, to = int(n), int(to)
+    if not (2 <= n <= len(names) and 2 <= to <= len(names)):
+        raise SceneVariantError("set 1 stays first")
+    order = [k for k in range(1, len(names) + 1) if k != n]
+    order.insert(to - 1, n)
+    raw["names"] = [names[k - 1] for k in order]
+    _renumber(raw, order)
+    _put(project, side, raw)
+
+
 def scene_id(card_path):
     """The 40-hex id of a scene's card path (``.../<id>/scene.radium``)."""
     m = _SCENE_RE.search(card_path)

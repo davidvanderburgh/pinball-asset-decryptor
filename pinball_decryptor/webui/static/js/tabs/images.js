@@ -15,6 +15,7 @@ import { LookRow } from "../core/look.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 import { OriginalsWindow } from "./originals.js";
 import { testCol } from "../core/testtick.js";
+import { SetPicker, SetStrip } from "../core/image_sets.js";
 
 export const css = true;
 
@@ -691,6 +692,7 @@ export default function ImagesTab() {
 
     ${s.pil_ok === false ? html`<${Note} kind="err">${PILLOW}<//>` : null}
 
+    <${SetStrip} what="pictures you choose" tab="images" />
     <section class="card img-card" onMouseDownCapture=${onCardMouseDown} onKeyDown=${onTreeKey}>
       <div class="toolbar">
         <${Field} ns="images" k="search" value=${s.search} placeholder="Search" cls="search"
@@ -701,6 +703,7 @@ export default function ImagesTab() {
           <${Seg} value=${s.show || "All"} options=${s.shows || []} onChange=${(v) => call("images.set_show", v)} />
         </span>
         ${s.shades_only ? null : html`<${Check} checked=${!!s.grouped} onChange=${(v) => call("images.set_grouped", v)} label="Group by scene" title=${GROUP_TIP} />`}
+        <${SetPicker} />
         <span class="sp"></span>
         ${s.color_unlock && s.color_unlock.offered ? html`<span class="img-unlock">
           <span class="eyebrow">Advanced</span>

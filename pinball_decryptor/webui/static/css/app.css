@@ -479,3 +479,13 @@ html.h-short .page { padding-top: 12px; gap: 10px; }
 .sx-gs-probs dl > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
 .sx-gs-probs dt { font-weight: 600; margin-bottom: 4px; }
 .sx-gs-probs dd { margin: 0; color: var(--ink-2); line-height: 1.45; }
+
+/* the image sets picker (core/image_sets.js, Simon 2026-11-18) */
+.imgsets-pick { display: inline-flex; align-items: center; }
+.imgsets-pick .field select { min-width: 150px; }
+.imgsets-strip { margin: 0 0 8px; }
+.imgsets-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.imgsets-row { display: flex; align-items: center; gap: 8px; }
+.imgsets-num { width: 18px; text-align: right; color: var(--ink-2); }
+.imgsets-acts { display: inline-flex; gap: 2px; }
+.imgsets-add { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }

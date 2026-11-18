@@ -7,6 +7,7 @@ import { useNs } from "../core/store.js";
 import { ScenesPage, ScenesActions } from "./text_scenes.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 import { FontBar, fontBarOpenAtStart, rememberFontBarOpen } from "./scene_fonts.js";
+import { SetPicker, SetStrip } from "../core/image_sets.js";
 
 const INTRO = "Each scene of the card, drawn the way the machine draws it. Click a picture or a line of text to move, resize, recolour, hide or re-layer it, or add your own; Write puts it on the card. Preview colors change only the preview: the card is not changed.";
 
@@ -54,7 +55,8 @@ export default function ScenesTab() {
     body = html`<${ScenesPage} colorsOpen=${colors || fontOn} openColors=${openColors} openFont=${() => setFont(true)} />`;
   }
   return html`<div class="cpd-shell"><div class="page scenes-page">
-    <${PageHead} title="Scenes" sub=${INTRO}><${ScenesActions} /><//>
+    <${PageHead} title="Scenes" sub=${INTRO}><${SetPicker} /><${ScenesActions} /><//>
+    ${ready ? html`<${SetStrip} what="scene changes" tab="scenes" />` : null}
     ${body}
   </div>${ready && s.tree ? html`<${FontBar} open=${fontOn} setOpen=${setFont} t=${t} />` : null}${ready
     ? html`<${ColorBar} host="scenes" open=${colors} setOpen=${setColors} file=${file} cls=${fontOn ? "cpd-beside" : ""}

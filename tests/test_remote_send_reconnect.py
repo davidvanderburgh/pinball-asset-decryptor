@@ -281,3 +281,51 @@ def test_rehold_script_tells_each_state_apart(tmp_path):
     assert _rehold(w) == "PAD_SEND_WATCHING"         # it gave up with the card changing: watched again
     assert not (w / "done").exists()
     assert os.path.exists(w / "alive")
+
+
+class _DeadChannel:
+    """A command's channel whose session went with the connection: closed, no exit status (paramiko's -1)."""
+
+    def __init__(self, t):
+        self.t = t
+
+    def settimeout(self, s):
+        pass
+
+    def exec_command(self, cmd):
+        self.t.up = False                             # the connection goes while the command runs
+
+    def shutdown_write(self):
+        pass
+
+    def recv_ready(self):
+        return False
+
+    def recv_stderr_ready(self):
+        return False
+
+    def exit_status_ready(self):
+        return True
+
+    def recv_exit_status(self):
+        return -1
+
+    def close(self):
+        pass
+
+
+class _Link(FakeTransport):
+    def open_session(self):
+        if not self.up:
+            raise EOFError("SSH session not active")
+        return _DeadChannel(self)
+
+
+@pytest.mark.parametrize("check", [True, False])
+def test_a_command_whose_session_died_is_a_dropped_connection_not_a_refused_step(check):
+    # the stand-in showed it: a killed session came back as "The machine refused a step (...):", never retried;
+    # unchecked, as an empty answer (a half list of hashes)
+    m = object.__new__(R.SshMachine)
+    m.t = _Link()
+    with pytest.raises(EOFError):
+        R.SshMachine.sh(m, "sha1sum /games/x", check=check)

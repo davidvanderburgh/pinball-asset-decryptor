@@ -958,6 +958,14 @@ class SshMachine(Machine):
                 time.sleep(0.005)
         rc = chan.recv_exit_status()
         chan.close()
+        if rc == -1:
+            # PAD-1436: no exit status: the session went with the connection (paramiko closes the channel as if
+            # the command ended).  Said as the dropped connection it is - never as a step the machine refused, nor
+            # as a half answer - once the connection's end is seen (a moment after the channel's)
+            for _ in range(30):
+                if not t.is_active():
+                    raise EOFError("Server connection dropped")
+                time.sleep(0.1)
         text = out.getvalue().decode("utf-8", "replace")
         if check and rc != 0:
             raise SendError("The machine refused a step (%s): %s" % (

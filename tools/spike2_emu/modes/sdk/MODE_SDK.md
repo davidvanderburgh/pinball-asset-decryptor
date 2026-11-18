@@ -1165,12 +1165,26 @@ saves go on under a blocking mode. `pm_own_game(1)` (a mode file's `game_modes o
 is the whole game", `GAME_MODES 3`) switches them off for as long as the mode has it. The runtime holds the
 game's modes and rules off as `pm_block_game_modes` does, and refuses the game's OWN calls at the entry of sites
 every Spike 2 port names: `shot_dispatch` (the rules hear no shot; the veto hands it to our modes' `.shot`),
-`score_add` / `score_add32`, `callout` / `callout_nth` (on Uncanny X-Men the game's every sound request: its
-`sound_play` is the same function), `multiball_serve` (its multiballs and rule ball saves), `award_screen` (its award
+`score_add` / `score_add32` (not refused: the call runs with 0 points, from the bus's ball_start, so the game's own
+bookkeeping still happens - Star Wars LE serves back any ball that drains before something has scored),
+`callout` / `callout_nth` (on Uncanny X-Men the game's every sound request: its `sound_play` is the same function), `multiball_serve` (its multiballs and rule ball saves), `award_screen` (its award
 screens and videos) and `show_start` (its light shows; one of ours, `pm_game_show`, still plays: its process is the
 game's code, so `show_start` passes while it runs). A refused call answers 0, as each function's own failures do:
 disassembled on Uncanny X-Men LE 0.98, the callers of the award screens and shows that still came once the shots were
-held back throw that value away. A call is ours when its
+held back throw that value away. Three more sites hold the RULES back on builds whose rules do not hear one
+`shot_dispatch`: `rule_dispatch` (Foo Fighters LE, Venom LE / Pro: Foo Fighters Pro's dispatcher, named apart because
+their modes take shots from `switch` lines; refused, nothing handed on); `switch_spawn` (19 builds: Rush, Batman,
+Star Wars, Stranger Things, Guardians, Iron Maiden, Jurassic Park, Metallica, Elvira, Aerosmith, Bond 60th), the
+framework switch drain's call that starts a switch's handler as a process, wrapped where it is made: a RULE handler -
+its descriptor flags have none of the low 10 bits, the ones that run in normal play only - is not started (0, which
+the drain tests), device, cabinet and service handlers start as always, read from the switch records at arm time
+(Rush: 21 rule handlers of 105 switches, Batman 31 refused a ball, the game's own score calls down from 109 to 22 and
+140 to 12); and `drain_rule_call` (all 53 newest builds), the trough's drain asking the game's own callback (event 10,
+`mov rN, #10; blx reg`) whether to serve the drained ball back - skipped with r0 = 0, the framework's own no-callback
+answer, so the drain ends the ball (Star Wars LE's video-mode branch served every drained ball back for ever; Guardians
+LE and Aerosmith LE looped too). The framework's own ball saver and playfield validation are not that call and stay the
+game's: on Star Wars LE the ball-start save covers about three drains, where a stock game whose modes run ends it at
+once (its saver's countdown pauses while none of its own modes runs). A call is ours when its
 return address is in this object, or while one of our own calls into the game runs (`OG_SELF`): `pm_score_add`,
 `pm_callout`, `pm_multiball_start`, `pm_award_screen` go through as before. The vetoes are installed on first use, on
 top of any logger already hooked there (`hook_veto` moves a logger's jump pair as it is). What the game keeps: ball

@@ -41,12 +41,25 @@ Library (newest builds; C:/tmp/PAD-1407/names_all.py): Replace keeps 19 of 49 on
 Wars, 3-4 on Aerosmith/Guardians (their HIGH SCORES list and champions), 30-56 on Godzilla, Jaws, KK, Mando, TMNT,
 Munsters.... A screen kept that is not a high score (King Kong's and Jaws' credit overlays share the grand champion
 scene) is the safe direction. Batman 1.14, Beatles 1.29 and Iron Maiden 1.18 keep none: the page says so through the
-count chip and the owner uses Show on the rows; see "Census" below for what the emulator showed on those.
+Replace says so and the owner uses Show on the rows; see "Census" below.
+
+## Census (12 builds, every entry's test wrapped, `census on`; C:/tmp/PAD-1407/out/census.*/sheet2.png)
+
+All 12 ran with every test wrapped, segv 0 (seven first runs died while a 16 GB card copy loaded the disks:
+`unshare: sigprocmask unblock failed`, no runtime fault; re-run clean). What Replace keeps, against the glass:
+X-Men LE: exactly GRAND CHAMPION, HIGH SCORE #1-4, the champions. Foo Fighters LE: the HSTD board and every
+champion (one machine clip kept too). Aerosmith / Guardians LE: the HIGH SCORES list and the champions. Star Wars LE:
+GRAND CHAMPION to the last champion, both times round. Batman 66, Iron Maiden, Metallica, Munsters and Rush are
+refused by the page already (their clip bank, PAD-782), so Replace is never offered there. The Beatles runs its whole
+attract from one long page (entry 4): no high score screen of its own to keep, so Replace says so and takes all off.
 
 ## Proof
 
 - X-Men LE 0.98 card built by the app's own Write (C:/tmp/PAD-1407/card1407.py -> D:/tmp/PAD-1407/xm1407.raw:
   the Attract tab's Replace run on a scratch project, the title card UNCANNY X-MEN 2.0 / PRESS START): attract.cfg
   with 30 hide lines and the item, the clip in the bank, the runtime on p2. Booted on the rig with its own runtime
-  (rig job cardjob.sh, PAD_CARD_MODES=1) - results in the ticket's report.
-- tests/test_pad1407_attract_replace.py (12), tests/test_pad782_attract_items.py.
+  (rig job C:/tmp/PAD-1407/cardjob2.sh, PAD_CARD_MODES=1): the title card on the glass, then entries 23-41 (the
+  19 kept screens) and nothing else, then the title card again at the next cycle (826 s); Start began a game;
+  segv 0. Shots: work/artifacts/PAD-1407 attract_cycle pair.
+- tests/test_pad1407_attract_replace.py (13, also under WSL), tests/test_pad782_attract_items.py,
+  tests/test_pad1328_spike3_attract.py, tests/test_stern_mode_runtime.py.

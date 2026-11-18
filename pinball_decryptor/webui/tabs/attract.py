@@ -353,6 +353,12 @@ class AttractTab(TabService):
             rec.items.insert(0, AI.Item("text", first, "before", text=TITLE_TEXT, seconds=6))
             added = "; a title card of yours comes first (type your game's name on it)"
         kept = len(self._pages) - len(rec.hidden)
+        if not kept:
+            compat.messagebox.showinfo("Attract", "The app could not tell which of this game's attract screens show "
+                                       "its high scores, so every one of them is taken off. Use Show on the screens "
+                                       "you want back (Run in emulator shows what each one is).")
+            return self._save("the game's own attract replaced: all %d of its screens taken off (none known to show "
+                              "its high scores)%s" % (len(rec.hidden), added))
         return self._save("the game's own attract replaced: %d of its screens taken off, its %d high score and "
                           "champion screen(s) kept%s" % (len(rec.hidden), kept, added))
 

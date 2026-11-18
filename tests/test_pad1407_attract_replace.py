@@ -167,3 +167,13 @@ def test_hiding_every_screen_with_nothing_of_yours_is_refused(tmp_path, monkeypa
     monkeypatch.setattr(p.T.compat, "messagebox", types.SimpleNamespace(showinfo=lambda *a: said.append(a)))
     assert not _rpc(p.T.AttractTab.set_hidden)(p.tab, 0, 4, True)
     assert p.tab._rec.hidden == [] and said
+
+
+def test_replace_on_a_game_with_no_known_high_score_screen_says_so(tmp_path, monkeypatch):
+    pages = [AI.Page(entry=k, page=0x1000 + k, test=0, name="Game screen %d" % (k + 1)) for k in range(3)]
+    p = _Page(tmp_path, pages)
+    said = []
+    monkeypatch.setattr(p.T.compat, "messagebox", types.SimpleNamespace(showinfo=lambda *a: said.append(a)))
+    assert _rpc(p.T.AttractTab.replace_all)(p.tab, True)
+    assert p.tab._rec.hidden == [0, 1, 2] and len(p.tab._rec.items) == 1      # the title card shows in their place
+    assert said and "could not tell" in said[0][1]

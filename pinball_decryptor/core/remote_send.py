@@ -1692,15 +1692,37 @@ def open_target(image, log=None):
         raise
 
 
+def _gb(sectors):
+    return "%.1f GB" % (sectors * 512 / 1e9)
+
+
 def check_layout(target, machine_layout):
-    """Refuse an image whose partitions don't sit where the machine's do: those need the card written."""
+    """Refuse an image the machine's card can't take file by file: those need the card written.
+
+    PAD-1432: on a Spike 2 card only what the Send needs is checked, not where each partition sits: a machine whose
+    card was written with a bigger game partition (or an image built with one) still takes a Send.  A partition
+    copied whole (the boot partition) must be the same size; the system and game partitions are synced file by file
+    into the machine's own, whose free space the Send checks; any other partition the Send syncs (a multi-boot
+    card's game images) must be at least as big on the machine; partitions the Send doesn't touch (the extended
+    one, /data, /dump) may be anywhere.  Other platforms keep the exact layout."""
     bad = []
+    spike2 = getattr(target, "platform", "") == "stern-spike2"
+    synced = set(getattr(target, "parts", {}).values())
+    raw = set(getattr(target, "raw", {}) or ())
     for num, (start, sectors, ptype) in sorted(target.layout.items()):
         have = machine_layout.get(num)
         if have is None:
             bad.append("partition %d is missing" % num)
-        elif have[0] != start or (ptype not in EXTENDED_TYPES and have[1] != sectors):
-            bad.append("partition %d is placed or sized differently" % num)
+        elif not spike2:
+            if have[0] != start or (ptype not in EXTENDED_TYPES and have[1] != sectors):
+                bad.append("partition %d is placed or sized differently" % num)
+        elif num in raw:
+            if have[1] != sectors:
+                bad.append("partition %d (the boot partition, copied whole) is %s on the machine but %s in the "
+                           "image" % (num, _gb(have[1]), _gb(sectors)))
+        elif num in synced and have[1] < sectors:
+            bad.append("partition %d is %s on the machine, smaller than the image's %s"
+                       % (num, _gb(have[1]), _gb(sectors)))
     extra = sorted(set(machine_layout) - set(target.layout))
     if extra:
         bad.append("the machine has partition%s %s that the image doesn't"

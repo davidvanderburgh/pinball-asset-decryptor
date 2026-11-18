@@ -131,7 +131,8 @@ def test_the_sites_held_back_and_the_ones_only_counted():
     refused = re.findall(r'\{ "(\w+)", "[^"]+", (?:0|OG_ZERO) \}', table)
     counted = re.findall(r'\{ "(\w+)", "[^"]+", OG_COUNT \}', table)
     assert refused == ["shot_dispatch", "score_add", "score_add32", "callout", "callout_nth", "multiball_serve",
-                       "award_screen", "show_start", "rule_dispatch", "switch_spawn"]
+                       "award_screen", "show_start", "rule_dispatch", "switch_spawn",
+                       "drain_rule_call"]
     # the score display's own effects run through display_effect_start; sound_play carries the music beds
     assert set(counted) == {"display_effect_start", "sound_play"}
     assert 'og_sites[OG_SHOW]' not in text and '#define OG_SHOW   7' in text and refused[7] == "show_start"
@@ -232,3 +233,20 @@ def test_switch_spawn_refuses_only_rule_handlers():
     assert "og_rule_handler(handler)" in wrap and "return og_spawn_target(group, handler, arg, r3);" in wrap
     ports = sorted(p.stem for p in (SDK / "ports").glob("*.port") if "\nsite switch_spawn " in p.read_text(encoding="utf-8"))
     assert {"rush_le-1.19", "batman-1.14", "star_wars_le-1.31"} <= set(ports) and len(ports) == 19
+
+
+def test_the_drain_question_is_answered_no_on_every_newest_build():
+    """The trough asks the game's callback (event 10) whether to serve a drained ball back; the whole game answers 0
+    (Star Wars LE served every one back). One framework site per build: `mov rN, #10; blx rM`."""
+    text = RUNTIME.read_text(encoding="utf-8")
+    patch = text[text.index("static int og_drain_patch(pm_addr at)"):]
+    patch = patch[:patch.index("\n}\n")]
+    assert "(p[0] & 0xFFFF0FFFu) != 0xE3A0000Au" in patch and "s[5] = 0x13a00000u;" in patch
+    assert "og_drain_hold = og.owner && !og.tilted;" in text
+    ports = [p for p in (SDK / "ports").glob("*.port")]
+    have = [p.stem for p in ports if "\nsite drain_rule_call " in p.read_text(encoding="utf-8")]
+    assert len(have) == 53
+    for p in ports:
+        m = re.search(r"^site drain_rule_call\s+\S+\s+(0x\w+)\s+(0x\w+)", p.read_text(encoding="utf-8"), re.M)
+        if m:
+            assert int(m.group(1), 16) & 0xFFFF0FFF == 0xE3A0000A and int(m.group(2), 16) & 0xFFFFFFF0 == 0xE12FFF30

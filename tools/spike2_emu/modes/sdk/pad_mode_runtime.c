@@ -11532,6 +11532,14 @@ static void on_ball_end(pm_reg *r)
  *                          switch_hit broadcasts (ball search, playfield valid) do not depend on it. The rule
  *                          handlers are read from the switch descriptors at og_arm (switch_records, desc_via,
  *                          flags_at; the handler at +0)
+ *   drain_rule_call        the trough's drain asking the game's own callback (event 10: `mov r0|r1, #10; blx reg`, the
+ *                          same framework code in every build) whether to serve the ball back - its video mode, an
+ *                          outlane save, a wizard's return. While the mode has the game (not on a tilted ball) the
+ *                          call is skipped with r0 = 0, the framework's own "no callback" answer: the drain ends the
+ *                          ball. Star Wars LE served every drained ball back for ever (reason 5, the video-mode
+ *                          branch, emulator probe); the framework's ball saver and playfield validation are not
+ *                          this call and stay the game's. Every other event through that callback is device handling
+ *                          and goes through: only this one call site is patched (og_drain_patch)
  *   show_start             no light show of the game's (0, as its own failures; a show of ours playing goes on: its
  *                          process is the game's code, so show_start passes while show_now has one)
  *
@@ -11548,6 +11556,8 @@ static void on_ball_end(pm_reg *r)
  * search, the node bus, display and audio are the game's throughout: none of them is one of these sites. */
 static void events_arm(void);
 static int event_bus_id(const char *name);
+static volatile unsigned og_drain_hold;          /* PAD-1400: read by the drain_rule_call trampoline: 1 = skip the call */
+static int og_drain_patch(pm_addr at);
 #define OG_RULE_H 192
 static unsigned og_rule_h[OG_RULE_H];            /* the game's rule handlers (switch_spawn), sorted */
 static int og_rule_n;
@@ -11559,7 +11569,8 @@ static unsigned (*og_spawn_target)(unsigned, unsigned, unsigned, unsigned);
 #define OG_SHOW   7                              /* og_sites[] index of show_start */
 #define OG_COUNT  0x80u                          /* og_sites[].how: counted, never refused */
 #define OG_ZERO   0x40u                          /* og_sites[].how: not refused - it runs with 0 points (score) */
-#define OG_N      12
+#define OG_N      13
+#define OG_DRAIN  12                             /* og_sites[] index of drain_rule_call (patched, not a veto) */
 #define OG_RULE   10                             /* og_sites[] index of rule_dispatch */
 #define OG_SPAWN  11                             /* og_sites[] index of switch_spawn (a wrapped call, not a veto) */
 static const struct { const char *site, *what; unsigned how; } og_sites[OG_N] = {
@@ -11575,6 +11586,7 @@ static const struct { const char *site, *what; unsigned how; } og_sites[OG_N] = 
     { "sound_play", "sounds", OG_COUNT },
     { "rule_dispatch", "rule shots", 0 },
     { "switch_spawn", "switch rules", 0 },
+    { "drain_rule_call", "ball returns", 0 },
 };
 extern const char __ehdr_start[] __attribute__((weak, visibility("hidden")));
 extern const char _end[] __attribute__((weak, visibility("hidden")));
@@ -11719,11 +11731,56 @@ static int og_rule_handlers_read(void)
     return og_rule_n;
 }
 
+/* the drain's question to the game's callback is answered "no" (0) while the mode has the game and the ball is not
+ * tilted */
+static void og_drain_sync(void)
+{
+    og_drain_hold = og.owner && !og.tilted;
+}
+
+/* drain_rule_call: the site's two words (`mov rN, #10`, `blx reg`) move into a slot that first reads og_drain_hold:
+ *   0 push {r0}   1 ldr r0,[pc,#36] -> t[12]   2 ldr r0,[r0]   3 cmp r0,#0   4 pop {r0}   5 movne r0,#0
+ *   6 bne -> 9    7,8 the two words (the call returns to 9)   9 ldr pc,[pc,#-4] -> t[10]   10 at + 8   12 &og_drain_hold
+ * The stack is as it was at every step that matters (push/pop balanced, the call made with the caller's sp). */
+static int og_drain_patch(pm_addr at)
+{
+#if PM_A64
+    (void)at;
+    return 0;                                    /* a Spike 3 port names no such site */
+#else
+    unsigned *p = (unsigned *)(unsigned long)at, *s;
+    int i;
+    if (!at || (tramp_used + 1) * 16 > TRAMP_WORDS) return 0;
+    if ((p[0] & 0xFFFF0FFFu) != 0xE3A0000Au || (p[1] & 0xFFFFFFF0u) != 0xE12FFF30u) return 0;   /* mov rN,#10; blx rM */
+    s = tramp + tramp_used++ * 16;
+    for (i = 0; i < 16; i++) s[i] = 0;
+    s[0] = 0xe52d0004u;                          /* push {r0} */
+    s[1] = 0xe59f0024u;                          /* ldr r0, [pc, #36] -> s[12] */
+    s[2] = 0xe5900000u;                          /* ldr r0, [r0] */
+    s[3] = 0xe3500000u;                          /* cmp r0, #0 */
+    s[4] = 0xe49d0004u;                          /* pop {r0} */
+    s[5] = 0x13a00000u;                          /* movne r0, #0 */
+    s[6] = 0x1a000001u;                          /* bne s[9] */
+    s[7] = p[0];                                 /* mov rN, #10 */
+    s[8] = p[1];                                 /* blx rM: returns to s[9] */
+    s[9] = 0xe51ff004u;                          /* ldr pc, [pc, #-4] -> s[10] */
+    s[10] = at + 8u;
+    s[12] = (unsigned)(unsigned long)&og_drain_hold;
+    mprotect(tramp, sizeof tramp, 7);
+    mprotect((void *)(unsigned long)(at & ~0xfffu), 0x2000, 7);
+    __builtin___clear_cache((char *)s, (char *)(s + 16));
+    p[1] = (unsigned)(unsigned long)s;
+    p[0] = 0xe51ff004u;                          /* ldr pc, [pc, #-4] */
+    __builtin___clear_cache((char *)p, (char *)(p + 2));
+    return 1;
+#endif
+}
+
 /* the bus, on the game's own call (on_event_dispatch) */
 static void og_event(unsigned id)
 {
     if ((int)id == og.tiltw_id) og.pass_until = pm_ms() + 3000ul;
-    if ((int)id == og.tilt_id) og.tilted = 1;
+    if ((int)id == og.tilt_id) og.tilted = 1, og_drain_sync();
     if ((int)id == og.game_id) og.fresh = 1, og.tilted = 0, og.ball_on = 0;
     if ((int)id == og.ball_id) og.ball_on = 1;
 }
@@ -11736,6 +11793,7 @@ static void og_ball_end(void)
     og.tilted = 0;
     og.ball_on = 0;
     og.pass_until = 0;
+    og_drain_sync();
     if (!og.owner) return;
     og.balls++;
     for (i = 0; i < OG_N && at < sizeof line - 60; i++) {
@@ -11774,6 +11832,17 @@ static int og_arm(void)
     for (i = 0; i < OG_N; i++) {
         pm_addr a = fn(og_sites[i].site);
         if (!a) continue;
+        if (i == OG_DRAIN) {                     /* a register call patched in place (og_drain_patch) */
+            if (!og_drain_patch(a)) {
+                say("own game: drain_rule_call at 0x%08" PMA " could not be patched - the game's rules may still serve "
+                    "a drained ball back", a);
+                continue;
+            }
+            og.hooked |= 1u << i;
+            if (at < sizeof line - 40)
+                at += (unsigned)pm_snprintf(line + at, sizeof line - at, "%sdrain_rule_call", at ? ", " : "");
+            continue;
+        }
         if (i == OG_SPAWN) {                     /* a call wrapped where it is made, with the rule handlers read */
             if (!og_rule_handlers_read()) {
                 say("own game: switch_spawn - %s, so the game's rules still hear their switches", og_rule_why);
@@ -11824,6 +11893,7 @@ int pm_own_game(int on)
             og.blocked = 0;
             say("own game: %s gives the game its rules back", og.who);
             og.owner = 0;
+            og_drain_sync();
         }
         return 1;
     }
@@ -11835,6 +11905,7 @@ int pm_own_game(int on)
     og.balls = 0;
     og.ball_on = pm_in_game();                   /* it takes the game as it starts: ball 1 has begun */
     og.owner = current;
+    og_drain_sync();
     say("own game: %s has the whole game - the game's own %s held back while a ball is in play%s", og.who,
         og.hooked & (1u | 1u << OG_RULE | 1u << OG_SPAWN) ? "shots, points, calls, serves, award screens and light shows"
                        : "points, calls, serves, award screens and light shows",
@@ -11851,6 +11922,7 @@ static void og_mode_ended(const struct pm_mode *m)
         say("own game: %s ended - the game has its rules back", og.who);
         if (og.blocked) pm_block_game_modes(0);   /* (a mode file's end lifted its own block already) */
         og.owner = 0;
+        og_drain_sync();
         og.blocked = 0;
     }
 }

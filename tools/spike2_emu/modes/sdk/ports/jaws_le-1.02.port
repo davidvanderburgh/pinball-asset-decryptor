@@ -40,6 +40,9 @@ site lamp_group       0x004a1be0 0xe92d4038 0xe1a04000
 site show_priority    0x0032e980 0xe30d3afc 0xe340308a
 #   award_screen: located (strict)
 site award_screen     0x003c7714 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x0055f308 0xe3a0000a 0xe12fff33
 # PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
 # program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
 site show_start       0x0032e720 0xe92d47f0 0xe2508000

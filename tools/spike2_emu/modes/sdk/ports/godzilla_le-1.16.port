@@ -25,6 +25,9 @@ site light_run        0x001c78b0 0xeafffdc4 0xe92d40f0
 site lamp_group       0x003e828c 0xe92d4038 0xe1a04000
 site show_priority    0x001f3734 0xe306327c 0xe340307d
 site award_screen     0x00405908 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x00389414 0xe3a0000a 0xe12fff33
 site string_new       0x00016954 0xe28fc606 0xe28ccaf3
 site dynamic_cast     0x00016348 0xe28fc606 0xe28ccaf3
 site resource_get     0x00538484 0xe92d43f0 0xe1a04000

@@ -35,6 +35,9 @@ site lamp_group       0x00459a58 0xe92d4038 0xe1a04000
 site show_priority    0x00522950 0xe30b3c8c 0xe340308e
 #   award_screen: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
 site award_screen     0x0051720c 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x0059a5a8 0xe3a0000a 0xe12fff33
 #   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
 site string_new       0x000169c8 0xe28fc607 0xe28ccaf6
 #   dynamic_cast: PLT stub for __dynamic_cast [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]

@@ -41,6 +41,9 @@ site lamp_group       0x001a4a7c 0xe92d4038 0xe1a04000
 site show_priority    0x00150818 0xe3063ca4 0xe34036ff
 #   award_screen: located (strict)
 site award_screen     0x00152890 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x003e3494 0xe3a0000a 0xe12fff33
 #   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE
 site string_new       0x00016784 0xe28fc606 0xe28cca23
 #   dynamic_cast: PLT stub for __dynamic_cast

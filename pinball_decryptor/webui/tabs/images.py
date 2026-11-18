@@ -1815,9 +1815,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         if rep:
             disp, tag = os.path.basename(rep), "assigned"
         elif rows.get(rel):
-            disp, tag = "Same as set 1 · Choose…", ""
+            disp, tag = "Same as theme 1 · Choose…", ""
         else:
-            disp, tag = "Set 1 only", "foreign"
+            disp, tag = "Theme 1 only", "foreign"
         res = "…" if (s.info is None and not s.probed) else s.resolution_str()
         return {"r": rel, "s": res, "f": s.format_summary(), "o": source_label(rel), "k": self._keep_state(rel),
                 "p": disp, "t": tag, "c": self._color_state(rel), "co": rel in self._color,
@@ -1834,18 +1834,18 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         from ...plugins.stern import scene_variants as SV
         _n, _picks, rows = self._set_state()
         names = (self.window.service("imgsets").get("names") or []) if self.window.service("imgsets") else []
-        name = names[n - 1] if n - 1 < len(names) else "set %d" % n
+        name = names[n - 1] if n - 1 < len(names) else "theme %d" % n
         if not rows.get(rel):
             compat.messagebox.showinfo(
-                "Image sets", "%s is not inside a scene, so it cannot differ between image sets: the card switches "
-                "whole scenes. Pick set 1 to replace it for every set." % rel)
+                "Themes", "%s is not inside a scene, so it cannot differ between themes: the card switches "
+                "whole scenes. Pick theme 1 to replace it for every theme." % rel)
             return None
         path = self._pick(self.window.ask_open, "image_replacement",
-                          "Choose set %d (%s)'s picture for %s" % (n, name, rel), self._image_filetypes())
+                          "Choose theme %d (%s)'s picture for %s" % (n, name, rel), self._image_filetypes())
         if not path:
             return None
         SV.set_picture(self._scan_dir, n, rel, path)
-        self.log("Replace Images: set %d (%s): %s ← %s" % (n, name, rel, os.path.basename(path)), "info")
+        self.log("Replace Images: theme %d (%s): %s ← %s" % (n, name, rel, os.path.basename(path)), "info")
         self.on_image_set(n)
         self._focus([rel], rel)
         return rel
@@ -1857,7 +1857,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         for rel in gone:
             SV.set_picture(self._scan_dir, n, rel, None)
         if gone:
-            self.log("Replace Images: set %d: %d picture(s) back to set 1's." % (n, len(gone)), "info")
+            self.log("Replace Images: theme %d: %d picture(s) back to theme 1's." % (n, len(gone)), "info")
             self.on_image_set(n)
         return len(gone)
 

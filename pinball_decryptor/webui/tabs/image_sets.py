@@ -1,4 +1,4 @@
-"""The image sets picker (Simon, 2026-11-18): one choice, shared by the Images, Video and Scenes tabs, of which set
+"""The themes picker (Simon, 2026-11-18; "image sets" in the code): one choice, on the Images tab, of which theme
 of the project's pictures the user is looking at and changing.
 
 Simon: "add a drop down ... which would let the user switch between video (etc.) sets. The first option would be the
@@ -58,9 +58,18 @@ class ImageSetsService(TabService):
         else:
             current = int(self.get("current", 1) or 1)
         names = SV.set_names(project) if project else []
-        current = max(1, min(current, len(names) or 1))
-        self.set(on=bool(project), project=project, names=names, most=SV.MAX_SETS, why=why)
+        # Simon: themes stay behind an Advanced switch (the Images tab's); off, the project is theme 1 alone
+        enabled = bool(project) and SV.themes_on(project)
+        current = max(1, min(current, len(names) or 1)) if enabled else 1
+        self.set(on=bool(project), enabled=enabled, can_off=len(names) <= 1, project=project, names=names,
+                 most=SV.MAX_SETS, why=why)
         self._use(current)
+
+    @rpc
+    def set_enabled(self, on):
+        """The Images tab's Advanced "Themes" switch."""
+        from ...plugins.stern import scene_variants as SV
+        return self._do(SV.set_themes_on, bool(on))
 
     #: the services told when the set picked changes (each has ``on_image_set(n)``)
     LISTENERS = ("images",)

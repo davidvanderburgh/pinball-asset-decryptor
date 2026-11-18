@@ -130,15 +130,15 @@ OWN_HELP = "Settings added by this card's custom code."
 #: Simon and David (2026-11-18): "When we know an item will require a reboot we should put an asterisk on it" - the
 #: settings a change of shows only from the next power-up: IMAGE SET (the auto_loaded scenes are read at boot, before
 #: the game reads its settings) and EDITION (read off the board's store before the game starts, NOT_SHARED). Their
-#: row caption gets " *" where it has room, and the page's help line says what the asterisk means (Simon's words)
+#: row caption gets " (*)" where it has room, and the page's help line says what the mark means (Simon's words)
 POWER_UP = frozenset({IMAGE_SET, EDITION})
-POWER_UP_MARK = " *"
-OWN_HELP_POWER_UP = ("Settings added by custom code. Items with * take effect on next power up.",
-                     "Items with * take effect on next power up.")
+POWER_UP_MARK = " (*)"
+OWN_HELP_POWER_UP = ("Settings added by custom code. Items with (*) take effect on next power up",
+                     "Items with (*) take effect on next power up.")
 
 
 def shown_caption(key, room=None):
-    """Setting *key*'s row caption as the menu shows it: a :data:`POWER_UP` one marked "Image Set *" when *room*
+    """Setting *key*'s row caption as the menu shows it: a :data:`POWER_UP` one marked "Image Set (*)" when *room*
     (characters, None: any) holds the mark, else its plain caption."""
     plain = SETTINGS[key][2]
     if key in POWER_UP and (room is None or len(plain) + len(POWER_UP_MARK) <= room):
@@ -1211,7 +1211,7 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     cap_room, help_room = _room(table, cap_va, consts), _room(table, help_va, consts)
     row_room = _room(table, row_va, consts)
     if row_room >= len(row_caption):
-        row_caption = shown_caption(key, row_room)  # "Image Set *": a change shows from the next power-up
+        row_caption = shown_caption(key, row_room)  # "Image Set (*)": a change shows from the next power-up
     if cap_room < len(caption) or row_room < len(row_caption):
         raise MenuSettingError("%s's caption has no room for \"%s\"" % (ad, row_caption))
     if help_room < 12:

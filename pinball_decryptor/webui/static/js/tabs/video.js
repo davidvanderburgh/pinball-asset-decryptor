@@ -11,7 +11,6 @@ import { LookRow } from "../core/look.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 import { LookGL } from "./video_gl.js";
 import { testCol } from "../core/testtick.js";
-import { SetPicker, SetStrip } from "../core/image_sets.js";
 
 export const css = true;
 
@@ -1362,7 +1361,6 @@ export default function VideoTab() {
         ], { align: "right" })} />
     <//>
     ${s.ffmpeg_missing ? html`<${Note} kind="err">${T.ffmpeg}<//>` : null}
-    <${SetStrip} what="clips you choose" tab="video" />
     <section class="card vid-card" ref=${cardRef}>
       <div class="toolbar">
         <${Field} ns="video" k="search" value=${s.search} placeholder="Search" cls="search"
@@ -1374,7 +1372,6 @@ export default function VideoTab() {
           onChange=${(v) => call("video.set_mode_filter", v)} />`
           : md.busy ? html`<span class="small muted nw vid-modes-busy"><${Spinner} /> ${T.modesBusy}</span>`
           : md.why ? html`<span class="small muted nw vid-modes-why" ...${tip(md.why.tip)}>${md.why.line}</span>` : null}
-        <${SetPicker} />
         <span class="sp"></span>
         <span class="vid-opts">
           <${Check} checked=${s.no_conversion} label=${T.noconv} title=${T.noconvTip} cls="small"

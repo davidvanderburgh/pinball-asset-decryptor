@@ -15,7 +15,7 @@ import { LookRow } from "../core/look.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 import { OriginalsWindow } from "./originals.js";
 import { testCol } from "../core/testtick.js";
-import { SetPicker, SetStrip } from "../core/image_sets.js";
+import { SetPicker, SetStrip, ThemesSwitch } from "../core/image_sets.js";
 
 export const css = true;
 
@@ -692,7 +692,7 @@ export default function ImagesTab() {
 
     ${s.pil_ok === false ? html`<${Note} kind="err">${PILLOW}<//>` : null}
 
-    <${SetStrip} what="pictures you choose" tab="images" />
+    <${SetStrip} />
     <section class="card img-card" onMouseDownCapture=${onCardMouseDown} onKeyDown=${onTreeKey}>
       <div class="toolbar">
         <${Field} ns="images" k="search" value=${s.search} placeholder="Search" cls="search"
@@ -705,11 +705,13 @@ export default function ImagesTab() {
         ${s.shades_only ? null : html`<${Check} checked=${!!s.grouped} onChange=${(v) => call("images.set_grouped", v)} label="Group by scene" title=${GROUP_TIP} />`}
         <${SetPicker} />
         <span class="sp"></span>
-        ${s.color_unlock && s.color_unlock.offered ? html`<span class="img-unlock">
+        <span class="img-unlock">
           <span class="eyebrow">Advanced</span>
-          <${Check} checked=${!!s.color_unlock.on} onChange=${(v) => call("images.set_color_unlocked", v)} disabled=${running}
-            label="Unlock extracted images" title=${UNLOCK_TIP} />
-        </span>` : null}
+          <${ThemesSwitch} />
+          ${s.color_unlock && s.color_unlock.offered ? html`<${Check} checked=${!!s.color_unlock.on}
+            onChange=${(v) => call("images.set_color_unlocked", v)} disabled=${running}
+            label="Unlock extracted images" title=${UNLOCK_TIP} />` : null}
+        </span>
       </div>
       <${Table} cls="img-tbl" columns=${columns} rows=${view} rowKey=${idOf} selected=${cur}
         onSelect=${onSelect} onActivate=${onActivate} onContext=${onContext} rowClass=${rowClass}

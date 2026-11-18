@@ -68,3 +68,25 @@ def test_back_to_one_default_set_leaves_no_trace(tmp_path):
 def test_the_tab_rows_are_registered_hidden():
     from pinball_decryptor.webui.tabs import TABS
     assert ("image_sets", "imgsets", "", "", "", "") in TABS
+
+
+def test_themes_stay_hidden_until_switched_on(tmp_path):
+    """Simon: "hide ... image alternates behind an advanced curtain" - a project shows themes once switched on."""
+    p = str(tmp_path)
+    assert not SV.themes_on(p)
+    SV.set_themes_on(p, True)
+    assert SV.themes_on(p)
+    assert SV.set_names(p) == ["Standard"]
+    SV.set_themes_on(p, False)
+    assert not SV.themes_on(p) and SV.STAGED_KEY not in staged_changes.load(p)
+
+
+def test_themes_cannot_be_switched_off_while_there_are_others(tmp_path):
+    p = str(tmp_path)
+    SV.set_themes_on(p, True)
+    SV.add_set(p, "Dark")
+    with pytest.raises(SV.SceneVariantError, match="remove the other themes first"):
+        SV.set_themes_on(p, False)
+    SV.remove_set(p, 2)
+    SV.set_themes_on(p, False)
+    assert not SV.themes_on(p)

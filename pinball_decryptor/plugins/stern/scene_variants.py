@@ -124,11 +124,34 @@ def _put(project, side, raw):
     from ...core import staged_changes
     names = raw.get("names") or []
     if len(names) <= 1 and names in ([], list(DEFAULT_NAMES)) and not raw.get("scenes") and not raw.get("images") \
-            and not raw.get("force"):
+            and not raw.get("force") and not raw.get("on"):
         side.pop(STAGED_KEY, None)                      # one set of the default name and nothing in it: none
     else:
         side[STAGED_KEY] = raw
     staged_changes.save(project, side)
+
+
+# Simon (2026-11-18): "hide ... image alternates behind an advanced curtain because to a new user it will be very hard to
+# understand all the possibilities" - the project's themes are switched on (Images tab, Advanced) before any of it shows
+
+def themes_on(project):
+    """True when the project shows its themes: switched on, or it has more than one already."""
+    if not project:
+        return False
+    _side, raw = _raw(project)
+    return bool(raw.get("on")) or len(set_names(project)) > 1
+
+
+def set_themes_on(project, on):
+    """Switch the project's themes on or off; off only while it has theme 1 alone (nothing would be hidden)."""
+    if not on and len(set_names(project)) > 1:
+        raise SceneVariantError("remove the other themes first (Manage themes), then switch themes off")
+    side, raw = _raw(project)
+    if on:
+        raw["on"] = True
+    else:
+        raw.pop("on", None)
+    _put(project, side, raw)
 
 
 def set_names(project):
@@ -148,9 +171,9 @@ def set_names(project):
 def _clean_name(name, names, skip=None):
     name = " ".join(str(name or "").split())[:24]
     if not name:
-        raise SceneVariantError("a set needs a name")
+        raise SceneVariantError("a theme needs a name")
     if any(i != skip and n.lower() == name.lower() for i, n in enumerate(names)):
-        raise SceneVariantError("there is already a set called %s" % name)
+        raise SceneVariantError("there is already a theme called %s" % name)
     return name
 
 
@@ -159,7 +182,7 @@ def add_set(project, name=""):
     side, raw = _raw(project)
     names = set_names(project)
     if len(names) >= MAX_SETS:
-        raise SceneVariantError("%d sets is the most the service menu can offer" % MAX_SETS)
+        raise SceneVariantError("%d themes is the most the service menu can offer" % MAX_SETS)
     n = len(names) + 1
     names.append(_clean_name(name or "Set %d" % n, names))
     raw["names"] = names
@@ -171,7 +194,7 @@ def rename_set(project, n, name):
     side, raw = _raw(project)
     names = set_names(project)
     if not 1 <= int(n) <= len(names):
-        raise SceneVariantError("there is no set %s" % n)
+        raise SceneVariantError("there is no theme %s" % n)
     names[int(n) - 1] = _clean_name(name, names, skip=int(n) - 1)
     raw["names"] = names
     _put(project, side, raw)
@@ -207,9 +230,9 @@ def remove_set(project, n):
     names = set_names(project)
     n = int(n)
     if n == 1:
-        raise SceneVariantError("set 1 is the project itself and cannot be removed")
+        raise SceneVariantError("theme 1 is the project itself and cannot be removed")
     if not 2 <= n <= len(names):
-        raise SceneVariantError("there is no set %d" % n)
+        raise SceneVariantError("there is no theme %d" % n)
     order = [k for k in range(1, len(names) + 1) if k != n]
     raw["names"] = [names[k - 1] for k in order]
     _renumber(raw, order)
@@ -222,7 +245,7 @@ def move_set(project, n, to):
     names = set_names(project)
     n, to = int(n), int(to)
     if not (2 <= n <= len(names) and 2 <= to <= len(names)):
-        raise SceneVariantError("set 1 stays first")
+        raise SceneVariantError("theme 1 stays first")
     order = [k for k in range(1, len(names) + 1) if k != n]
     order.insert(to - 1, n)
     raw["names"] = [names[k - 1] for k in order]
@@ -248,10 +271,10 @@ def set_picture(project, n, rel, path):
     """Set *n*'s own picture for *rel* (*path* empty or None: back to set 1's)."""
     n = int(n)
     if n < 2:
-        raise SceneVariantError("set 1 is the project itself: its pictures are the Images tab's own")
+        raise SceneVariantError("theme 1 is the project itself: its pictures are the Images tab's own")
     names = set_names(project)
     if n > len(names):
-        raise SceneVariantError("there is no set %d" % n)
+        raise SceneVariantError("there is no theme %d" % n)
     side, raw = _raw(project)
     raw["names"] = names
     images = dict(raw.get("images") or {})
@@ -316,13 +339,13 @@ def encode_pictures(data, places, log=None):
     for src, rel, off, length, pad_w, pad_h, fmt in places:
         im0 = found.get(off)
         if im0 is None or im0["length"] != length or im0["fmt"] != fmt:
-            log("Image sets: %s is not where the Extract found it in its scene; that place keeps set 1's picture."
+            log("Themes: %s is not where the Extract found it in its scene; that place keeps theme 1's picture."
                 % rel, "warning")
             continue
         try:
             im = Image.open(src).convert("RGBA")
         except Exception as e:                          # noqa: BLE001
-            log("Image sets: %s cannot be read (%s); that place keeps set 1's picture." % (src, e), "warning")
+            log("Themes: %s cannot be read (%s); that place keeps theme 1's picture." % (src, e), "warning")
             continue
         w, h = im.size
         if (w, h) != (pad_w, pad_h) and (E._padded4(w), E._padded4(h)) == (pad_w, pad_h):
@@ -337,7 +360,7 @@ def encode_pictures(data, places, log=None):
         arr, _changed = E._premultiply_like_stock(arr, lambda: decode(raw, pad_w, pad_h))
         enc = _dds.encode_bc1(arr) if fmt == E._DXT1_FORMAT else _dds.encode_bc3(arr)
         if len(enc) != length:
-            log("Image sets: %s did not encode to its place's size; that place keeps set 1's picture." % rel,
+            log("Themes: %s did not encode to its place's size; that place keeps theme 1's picture." % rel,
                 "warning")
             continue
         buf[off:off + length] = enc
@@ -362,12 +385,12 @@ def picture_variants(project, sets, base_scene, work, log=None):
         by_card = {}
         for rel, src in sorted(picks.items()):
             if not os.path.isfile(src):
-                log("Image sets: set %d (%s)'s picture for %s is missing (%s); left out." % (n, name, rel, src),
+                log("Themes: theme %d (%s)'s picture for %s is missing (%s); left out." % (n, name, rel, src),
                     "warning")
                 continue
             places = rows.get(rel)
             if not places:
-                log("Image sets: %s is not inside a scene, so set %d (%s) cannot change it; left out."
+                log("Themes: %s is not inside a scene, so theme %d (%s) cannot change it; left out."
                     % (rel, n, name), "warning")
                 continue
             for card, off, length, pw, ph, fmt in places:
@@ -375,12 +398,12 @@ def picture_variants(project, sets, base_scene, work, log=None):
         made = 0
         for card, places in sorted(by_card.items()):
             if n in scenes.get(card, {}):
-                log("Image sets: set %d (%s) has a scene file of its own for %s; its pictures are not added to it."
+                log("Themes: theme %d (%s) has a scene file of its own for %s; its pictures are not added to it."
                     % (n, name, card), "info")
                 continue
             base = base_scene(card)
             if not base:
-                log("Image sets: the card has no %s; set %d (%s)'s pictures in it are left out." % (card, n, name),
+                log("Themes: the card has no %s; theme %d (%s)'s pictures in it are left out." % (card, n, name),
                     "warning")
                 continue
             data, done = encode_pictures(base, places, log)
@@ -392,7 +415,7 @@ def picture_variants(project, sets, base_scene, work, log=None):
             scenes.setdefault(card, {})[n] = {"file": path}
             made += 1
         if made:
-            log("Image sets: set %d (%s): %d picture(s) of its own, in %d scene(s)." % (n, name, len(picks), made),
+            log("Themes: theme %d (%s): %d picture(s) of its own, in %d scene(s)." % (n, name, len(picks), made),
                 "info")
     out["scenes"] = scenes
     return out

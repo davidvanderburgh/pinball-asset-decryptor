@@ -2096,7 +2096,10 @@ def attract_lines(t, placed):
     the video bank's scene on the glass with (portattract.show_lines), when its pages have one"""
     ps = placed.get("proc_sleep")
     s = attract_sequencer(t, ps) if ps else None
-    if s is None:
+    if s is None or s["seconds_at"]:
+        # PAD-1380: a table whose entries carry their own seconds is a timed slideshow of its own, not the attract
+        # sequence: Pokemon LE 0.82's (0x3198290, sequencer 0x4c7190) never ran in attract on the rig - gdb on the
+        # child create saw its attract pages started inline by a director (0x4dbca0..), as Fallout's and Transformers'
         return []
     placed["data:attract_table"] = s["entry"]
     out = ["# ---- attract (PAD-1328): the attract mode's page table, read off this program's sequencer (its child "
@@ -2500,12 +2503,12 @@ GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w
 #: coil_give lines up, its coil_take has no counterpart, and the runtime arms held coils on both or neither)
 SITE_PAIRS = (("coil_take", "coil_give"),)
 GAME_DATA = re.compile(r"right_gate_obj$")
-#: the screen and clip features name the title's own hud / video bank scenes (per game): their sites, globals and
-#: values are placed and written as comments until a title's scenes are named
-SCREEN_CLIP_SITES = SCREEN_SITES + CLIP_SITES + ("dynamic_cast", "resource_get", "surface_set_video",
-                                                  "surface_duration", "surface_position", "string_new", "surface_seek")
-SCREEN_CLIP_DATA = ("resource_manager", "typeinfo_resource", "typeinfo_scene_player")
-SCREEN_CLIP_VALUES = ("scene_player_scene", "node_visible_vfn", "surface_playing")
+#: the screen and clip features name the title's own hud / video bank scenes (per game). PAD-1380: the clip route's
+#: sites, globals and values are carried (unused until the port names its video bank, proven on the rig); the
+#: screen's finders are placed and written as comments until a title's HUD is measured
+SCREEN_ONLY_SITES = SCREEN_SITES
+SCREEN_ONLY_VALUES = ("node_visible_vfn",)
+SCREEN_NOTE = "# not carried - the screen feature needs this title's hud scene measured: "
 #: a placed function must be at least this alike its reference (the share of instructions that line up)
 SIM_MIN = 0.75
 
@@ -2835,9 +2838,8 @@ def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
             missing.append(name)
             continue
         line = "site %-16s 0x%08x 0x%08x 0x%08x" % (name, b, tgt.u32(b), tgt.u32(b + 4))
-        if name in SCREEN_CLIP_SITES:
-            body.append("# not carried - the screen and clip features name this title's hud / video bank scenes: "
-                        + line)
+        if name in SCREEN_ONLY_SITES:
+            body.append(SCREEN_NOTE + line)
             continue
         body.append("#   %s: %s (%.0f%% alike)" % (name, how, 100 * sm))
         body.append(line)
@@ -2896,9 +2898,6 @@ def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
         how = ("read off the engine's own code" if eng is not None else
                "%d of %d lined-up instructions" % (top[0][1], sum(c.values())))
         line = "data %-22s 0x%08x   # %s" % (name, b, how)
-        if name in SCREEN_CLIP_DATA:
-            body.append("# not carried (screens/clips): " + line)
-            continue
         body.append(line)
         placed["data:" + name] = b
     # ---- values
@@ -2956,8 +2955,8 @@ def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
             nv = top[0][0]
             line = "value %-25s %s    # %d of %d lined-up instructions of the placed sites" % (
                 name, ("0x%x" % nv) if t[2].startswith("0x") else nv, top[0][1], sum(c.values()))
-        if name in SCREEN_CLIP_VALUES:
-            body.append("# not carried (screens/clips): " + line)
+        if name in SCREEN_ONLY_VALUES:
+            body.append(SCREEN_NOTE + line)
             continue
         body.append(line)
         placed["value:" + name] = nv

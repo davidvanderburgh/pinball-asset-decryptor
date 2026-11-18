@@ -1,0 +1,212 @@
+# Custom modes on Spooky Pinball (PAD-1387)
+
+## The ask
+
+Pinballpal on Pinside: "Can you change the rules on Spooky's games?" David,
+2026-11-18: we have modes on JJP, Spike 2 and Spike 3, do it for Spooky too;
+there are several architectures; start the work here and split the rest into
+about 10 tickets at most.
+
+## The four code worlds
+
+Every Spooky title PAD knows runs in one of four engines. Every one of them
+already runs in a PAD emulator, so every one can be proven there.
+
+| engine | titles | rules are | rig |
+|---|---|---|---|
+| Unity 2019/2022 Mono (C#) | Scooby-Doo, Beetlejuice, Texas Chainsaw Massacre, Evil Dead, Halloween, Ultraman | `Assembly-CSharp.dll` | `tools/spooky_emu` (Warden, Pinotaur) |
+| Godot 4.1 (GDScript) | Looney Tunes | scripts in the PCK inside the ELF | `tools/spooky_emu` (Warden) |
+| P-ROC / SkeletonGame (Python 2.7) | Rick and Morty, Alice Cooper's Nightmare Castle | `.pyc` + plain `.py` in the .pkg | `tools/spooky_emu/proc` |
+| pinHeck System (PIC32 MIPS, compiled C) | Jetsons, Domino's, Rob Zombie's Spookshow | `<GAME>_Vnnn.PRG`, raw flash | `tools/pinheck_emu` |
+
+Not possible today: **Total Nuclear Annihilation** (its .pkg key is unknown),
+**America's Most Haunted** (its update is the SD card only, with no PIC32
+program in it; changing its rules needs the PIC dumped with a programmer).
+
+## The design: one mode format, four runtimes
+
+JJP's design carries over (`docs/plans/jjp_custom_modes.md`): a mode is a
+small `key = value` file, a title has a port report (its switches, lamps,
+sounds, fonts, the game's own modes), and a runtime loaded beside the game
+runs the modes through the game's own machinery. Spooky's runtimes read the
+**same `.mode` keys as JJP's** (`tools/jjp_emu/MODES.md`: `start`,
+`start_count`, `shots`, `points`, `seconds`, `complete`, `sound_*`, `lamps`,
+`picture`, `video`, `multiball`, `coil_*`...), so the Modes tab's JJP editor
+(`webui/modes_jjp.py`, `plugins/jjp/custom_modes.py`) becomes the editor for
+Spooky too, fed by each title's port report. A key a runtime cannot do yet is
+refused by the check, by name, never silently ignored.
+
+## What each engine offers (proven here, in the emulator)
+
+### Unity (Scooby-Doo v2025.12.01.09)
+
+The games share one framework (Spooky's, in `Assembly-CSharp`): `Machine`,
+`Modes` (`Modes.modes`, `Modes.add_mode`, `Machine.modes_loaded`), a `Mode`
+base class (`init`, `update`, `process_message(int[])`), messages
+(`Messages.switch_active`, `ball_start`, `end_of_ball`, `new_game_started`,
+`mode_started`/`mode_stopped`), `Switches.get_switch_name`, scoring
+`Mode.score_points(points, tags)` -> `Game.score_points`, `popup_text`.
+
+How our code gets in: `padunity.so` (LD_PRELOAD) waits for the game's Mono
+domain, attaches, loads `PadModes.dll` (compiled against the title's own
+`Managed/`) and calls `Loader.Init`. Init only subscribes to
+`Application.onBeforeRender`; on the main thread, once `Machine.modes_loaded`,
+it registers a `Mode` subclass of ours with the game's `Modes.add_mode`. No
+game file changes. On a machine, the update carries the game's own launch line
+(`sway_config` / `i3_config`: `exec /game/code/uptest/main.x86_64`), which a
+PAD-written update starts with the preload.
+
+Proof (`tools/spooky_emu/modes/unity/run_proof.sh`, slot 4, hidden, muted):
+
+```
+[native] preloaded into /game/code/uptest/main.x86_64
+[managed] loaded: PadModes in domain "Unity Root Domain"
+[managed] registered ProbeMode as mode 9001 via Modes.add_mode; now 59 modes
+[managed] switch_active 87 "start_button"
+[managed] new_game_started
+[managed] ball_start (data -1)
+[managed] mode_started 51 SKILLSHOT ... 64 GREEN GHOUL
+[managed] switch_active 20 "right_inlane"
+[managed] scored via Mode.score_points(1000000, base): returned 10000000, player 1 score 10000 -> 10010000
+```
+
+Three hits, and the game's own score panel showed 30,016,000. Note the game
+scales points x10 inside `score_points` (1,000,000 asked, 10,000,000 given):
+the runtime must divide by the title's scale, which its port report records.
+
+### Godot (Looney Tunes 2025.10.08)
+
+Engine 4.1.2-rc custom build; autoloads `Logger, Delays, SpriteCache, Warden,
+Settings, Audits, Data, Switches, Coils, Leds, Servos, Audio, Game, Events,
+Values, Modes, Flippers, Replay`. 68 game modes in `Modes.all_modes`, each with
+a type (BALL...) and priority; modes get `sw_<name>_active` and `evt_*`
+calls, timers through `Delays`, points through `Game.score`.
+
+How our code gets in: `override.cfg` beside `main.x86_64` adds one autoload
+(`PadModes="*/game/code/uptest/pad/pad_modes.gd"`); Godot reads it at start.
+Our autoload adds its modes to `Modes.all_modes`. No game file changes, and
+the update is a plain tar PAD writes anyway.
+
+Proof (`tools/spooky_emu/modes/godot/probe.sh`, slot 3, hidden, muted):
+
+```
+loaded: /game/code/uptest/pad/pad_modes.gd, engine 4.1.2-rc (custom_build), game LOONEY TUNES 2025.10.08
+pad_probe added to Modes.all_modes (BALL, priority 116)
+game_started
+pad_probe: started by the mode manager; running modes: sw_monitor, trough, coinop, ...
+pad_probe: evt_ball_started (shoot again false)
+pad_probe: 2 s timer (Delays) fired, ball 1, score 0
+pad_probe: sw_spinner_active #1: Game.score(12340) -> 12340, score 0 -> 12340
+pad_probe: sw_spinner_active #3: Game.score(12340) -> 12340, score 28540 -> 40880
+```
+
+### P-ROC (Rick and Morty 2022-09-02, Alice Cooper 1.1.0.5)
+
+Both are SkeletonGame with their own procgame copy; modes are
+`procgame.game.advancedmode.AdvancedMode` (System/Ball/Game/Manual), events
+`evt_<name>`, switches `sw_<name>_active` / `add_switch_handler`, timers
+`delay`, coils `game.coils.<name>.pulse()`, lights `game.LEDs` / `LEDshow`,
+sound `game.sound.play(key)`. They differ in scoring (`RMGame.score` vs
+`mf._score`) and screen: Rick and Morty draws SkeletonGame layers
+(`HDTextLayer`), Alice Cooper sends `||{'cmd':...}` messages to its Unity
+player on 127.0.0.1:9999 (SCENE, QUICK_VIDEO, APPEND_TEXT, ADD_IMAGE...).
+
+How our code gets in: `GameController.create_pinproc()` imports the class
+named by `config.yaml`'s `pinproc_class`; one added line
+(`pinproc_class: padmodes_proc.PinPROC`) loads `padmodes_proc.py` beside the
+launcher, which hands back the real board, finds the game and adds its modes
+once the game is up. No bytecode changes; the Spooky Write pipeline
+re-encrypts the whole .pkg, so it carries the file and the line.
+
+SkeletonGame keeps only a `weakref` to each registered mode
+(`notify_mode_registered`), so the runtime must hold its modes itself: the
+first run's mode was collected and Start crashed the game
+("'NoneType' object has no attribute 'priority'").
+
+Proof (`tools/spooky_emu/modes/proc/mkprobe.sh` + `proc/run_game.sh`, Ubuntu
+slot 3, hidden, muted; PAD-Runtime's py27 env is gone):
+
+```
+loaded: pinproc_class hook in RMGame (RMGame.pyc)
+made mode Pad_probe (AdvancedMode.Game, priority 200) on switch slingRight
+mode started: probe; active modes: [... 'Pad_probe', 'ScoreDisplay', 'DimensionController', ...]
+evt_ball_starting: ball 1
+switch slingRight active (hit 1): game.score(4321) -> 4400, player score 300 -> 4700
+sound.play(u'hs_forward'): known=True enabled=True
+text layer shown: u'PAD MODE HIT 1'
+delay() timer fired 1.0 s after hit 1
+switch slingRight active (hit 2): game.score(4321) -> 4400, player score 5300 -> 9700
+```
+
+The game's own sling scoring still runs between our hits (4700 -> 5300), and
+`RMGame.score` rounds to 100 (4321 -> 4400). Alice Cooper's adapter
+(`mf._score`, the Unity player's `append_text`) is written, not yet run.
+
+### pinHeck (Jetsons V004, Domino's V006, Rob Zombie V026)
+
+Compiled C on a PIC32MX795; no mode engine to borrow, so the runtime is ours
+(MIPS C in free flash). Room: free flash 320 KB (Jetsons), 314 KB (Domino's),
+211 KB (Rob Zombie); ~115 KB free RAM each. Functions found per title
+(Jetsons, as an example: link send 0x9D028BD8, video 0x9D02E58C, playSFX
+0x9D02F684, numbers 0x9D02E538, SetScore 0x9D02EB4C, AddScore 0x9D02BE84,
+score array 0xA000271C + 4 x player); Domino's and Rob Zombie's equivalents
+are in the PAD-1387 commit's `pinheck_poc.py` notes. Not found yet: coil
+fire, lamp set, ball start/end, a central switch dispatcher (switch handlers
+are inlined per switch).
+
+How our code gets in: a `jal` to a game function is re-pointed at a
+trampoline in free flash that calls the original and then ours. The PRG has
+no header or checksum. On a machine, Service -> UPDATE CODE flashes the
+card's `*.PRG` into the PIC (settings reset). Every build has its own
+addresses, so `build` refuses a PRG it does not know.
+
+Proof (`python -m tools.pinheck_emu.modes.pinheck_poc build|prove`): switch
+0's AddScore(150) re-pointed; on the hit the packets show the game's 150,
+then our 1,000,000, our video `EB0` and sound `EB0`; the game plays on
+(second hit: its own SDA/SKF video and sound); final score 2,000,300 against
+300 stock; the DMD frame at 27.3 s shows EB0.
+
+## Rig fix made on the way
+
+Both Spooky rigs now stub `sync` (logging no-op on the game's PATH): WSL's
+shared kernel has a superblock that never answers, every `sync` hangs for
+good, and Scooby-Doo, Looney Tunes, Rick and Morty and Alice Cooper all run
+`sync` at boot. That hang, not our code, is what stopped the first Unity and
+P-ROC probe runs right after `bash command: sync`.
+
+## The split (8 tickets)
+
+Each runtime ticket delivers a mode made in the app running on its title in
+the emulator, from an update file PAD wrote, with the core `.mode` keys
+(start, start count, shots, points, timer, completion, the game's sounds, a
+text panel). The last ticket brings the rest of the keys to every runtime.
+
+1. **Unity runtime + Scooby-Doo, end to end.** `padunity.so` + `PadModes.dll`
+   as a real runtime reading `.mode` files; Scooby-Doo's port report from its
+   `Assembly-CSharp` (switches, lamps, sounds, the game's modes, the points
+   scale); Write builds a `.scooby` whose launch line preloads the runtime;
+   the Modes tab on Spooky (the JJP editor, fed by the port report) and Try it
+   on the Spooky rig. This ticket also builds the shared Spooky Modes-tab
+   wiring the others reuse.
+2. **Unity: the other five titles.** Beetlejuice (GPG-signed update),
+   Texas Chainsaw (Unity 2019), Evil Dead, Halloween and Ultraman (Pinotaur):
+   port reports, per-title framework differences, each proven on the rig.
+3. **Godot runtime + Looney Tunes, end to end.** `pad_modes.gd` reading
+   `.mode` files, the port report from the PCK, Write adds `override.cfg` +
+   `pad/`, Modes tab and Try it.
+4. **P-ROC runtime + Rick and Morty, end to end.** `padmodes_proc.py` reading
+   `.mode` files, port report from the machine yaml and asset lists, Write
+   adds the file and the `config.yaml` line inside the re-encrypted .pkg.
+5. **Alice Cooper on the P-ROC runtime.** Its score call and its Unity
+   player's screen messages; port report; rig proof.
+6. **pinHeck runtime + Jetsons, end to end.** The C runtime in free flash,
+   modes compiled into the PRG as data, Jetsons' hook table (ball start/end,
+   lamps, coils found by the dynamic method), Write puts the patched PRG on
+   the update; the emulator proof.
+7. **pinHeck: Domino's and Rob Zombie.** Their hook tables and proofs.
+8. **Spooky modes to JJP parity.** Lights on the game's lamp/LED layers,
+   a mode's own sounds, music, picture and video, multiball and ball save,
+   coil pulses and holds, start rules, on every runtime that can do them.
+
+Out: Total Nuclear Annihilation (no key), America's Most Haunted (no PIC
+program on its card).

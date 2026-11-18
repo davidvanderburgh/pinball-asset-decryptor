@@ -19,6 +19,27 @@ site callout          0x00287a74 0xe92d4010 0xe301e228
 site callout_nth      0x00287c28 0xe92d4010 0xe301e228
 site lamp_group       0x00136698 0xe92d4038 0xe1a04000
 site award_screen     0x001752ac 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x00337874 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x00032018
+value own_pass_1          0x00045890
+value own_pass_2          0x0004b898
+value own_pass_3          0x0007efc4
+value own_pass_4          0x000f113c
+value own_pass_5          0x001f162c
+value own_pass_6          0x001f6da8
+value own_pass_7          0x0022168c
+value own_pass_8          0x00226a64
+value own_pass_9          0x00259c54
+value own_pass_10         0x0026c62c
+value own_pass_11         0x003410d0
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
+site show_start       0x00221da4 0xe92d47f0 0xe2508000
 site string_new       0x000167e0 0xe28fc605 0xe28ccaae
 site dynamic_cast     0x000161e0 0xe28fc605 0xe28ccaae
 site resource_get     0x001bbf60 0xe92d43f0 0xe1a04000
@@ -75,6 +96,9 @@ site proc_create      0x0026ff00 0xe30ec720 0xe340c067
 site proc_sleep       0x00270050 0xe30e3720 0xe3403067
 site switch_edge      0x00282c40 0xe30e3718 0xe3403067
 site switch_drain     0x00283868 0xe92d4ff0 0xe3019cdc
+# PAD-1400: inside the drain, where it starts a switch's handler (r0 group, r1 handler, r2 argument); a
+# whole-game mode refuses the game's RULE handlers there (descriptor flags with no low 10 bits)
+site switch_spawn     0x002838f0 0xebffb146 0xe3500000
 site live_records     0x00270598 0xe30e2720 0xe3402067
 
 # ---- globals ----

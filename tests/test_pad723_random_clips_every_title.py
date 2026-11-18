@@ -65,15 +65,11 @@ def test_a_scene_naming_its_clips_twice_outside_the_library_is_refused():
 
 
 def test_every_shipped_build_but_turtles_pro_158_has_a_route():
-    # PAD-1271: the Spike 3 port of Star Wars ELG 1.10 shares the Spike 2 port's title key and has no route yet;
-    # PAD-1287: nor has Walking Dead Remastered's (a Spike 3-only title); PAD-1289: nor Pokemon LE's; PAD-1288: nor Fallout's;
-    # PAD-1290: nor Star Wars 2025 LE's; PAD-1291: nor Star Wars 2025 Pro's; PAD-1293: nor Transformers LE's
-    # (Star Wars ELG's Spike 3 port has one since PAD-1323: the clip v2 route, "surface")
+    # PAD-1271 .. PAD-1293: the Spike 3 ports had no route; Star Wars ELG's has the clip v2 route ("surface") since
+    # PAD-1323, and PAD-1380 named every drafted port's play bank, each one's clip seen on the glass in the emulator
     spike3 = [p for p in MP.profiles().values() if p.arch == "a64"]
-    assert sorted(CV.title_key(p) for p in spike3 if not CV.route_of(p)) == ["fallout_le-0.82", "pokemon_le-0.82",
-                                                                              "star_wars_2025_le-0.96", "star_wars_2025_pro-0.84",
-                                                                              "transformers_mtmte_le-0.96",
-                                                                              "walking_dead_remastered_le-0.92"]
+    assert len(spike3) == 7
+    assert {CV.title_key(p): CV.route_of(p) for p in spike3 if CV.route_of(p) != "surface"} == {}
     routes = {CV.title_key(p): CV.route_of(p) for p in MP.profiles().values() if p.arch != "a64"}
     assert {k for k, r in routes.items() if not r} == {"turtles_pro-1.58"}
     assert {routes[k] for k in ("deadpool_le-1.14", "deadpool_le-1.16", "deadpool_pro-1.16")} == {"layer"}

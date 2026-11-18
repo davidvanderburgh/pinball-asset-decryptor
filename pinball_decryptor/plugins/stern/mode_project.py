@@ -33,6 +33,16 @@ MODE_FILE = "mode.json"
 MAX_MODES = 64
 
 
+#: PAD-1400: the port's sites pad_mode_runtime.c's pm_own_game must hold back (one of each group), or a whole-game
+#: mode would run with the game's own points or calls beside it
+OWN_GAME_SITES = (("score_add", "score_add32"), ("callout",))
+
+
+def own_game_sites(sites):
+    """PAD-1400: True when a port with these sites can switch the game's own rules off (pm_own_game)."""
+    return all(any(s in sites for s in group) for group in OWN_GAME_SITES)
+
+
 class ModeProjectError(ValueError):
     """A mode that cannot be saved, loaded or built as asked."""
 
@@ -75,6 +85,8 @@ class TitleProfile:
     #                              mode can keep from starting (the port's block_start_<id> lines)
     game_rules: tuple = ()       # PAD-398: ((n, name), ...) the game's rules (its features) that see no
     #                              shots while a mode blocks, unless it keeps them (block_rule_<n> lines)
+    own_game: bool = False       # PAD-1400: a mode can be the whole game (game_modes own_game): the port names
+    #                              the game's score and callout sites the runtime holds back, and its mode starts
     lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
     #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
     light_route: str = ""        # item 164: how a mode's Lights run - "language" (the game's own light
@@ -2368,6 +2380,15 @@ TITLE_SCENES = {
     # one texture block (scene_write.PROFILES carries it as its own)
     "star_wars_elg-1.10/spike3": dict(hud="be374b87996e190f23897bd33dffbf23", screen_proven=True,
                                       bank="895f74e53622cf5acfa55a1df89a8fc8", clip_proven=True),
+    # PAD-1380: the drafted Spike 3 ports' video bank (the file as each card carries it); the screens wait on each
+    # title's HUD measured. Proofs: Spike 3 rig, hidden, muted, a Try it set (spike3_modes.plan) with CLIP TEST, its
+    # magenta title clip at the mode's start, on one trigger shot; the share of the glass it covered
+    "walking_dead_remastered_le-0.92/spike3": dict(bank="537bf7815a04a655b5388f11c4762664", clip_proven=True),   # its in-play bank 71e39c43; 2026-11-18: 38-40% of the glass at 0-8 s, 0% before; on 60ed7e50 the same clip played unseen
+    "star_wars_2025_le-0.96/spike3": dict(bank="f4eba4baa564300f00bd2a6c0b484ce7", clip_proven=True),   # its in-play bank 3a9d7db5; 2026-11-18: 49% at 1 s (the game's skill-shot video back by 3 s), 0% before; an attract item 47%; on 60ed7e50 the clip played unseen
+    "star_wars_2025_pro-0.84/spike3": dict(bank="4b0834ccf5aac497528a805d5f6b35a4", clip_proven=True),   # its in-play bank 3a9d7db5, as the LE; 2026-11-18: 49% at 0-3 s, 0% before and at 8 s; an attract item 47%
+    "pokemon_le-0.82/spike3": dict(bank="8b0ceb32002a4c661217be7019bdbb11", clip_proven=True),   # 60ed7e50, its only bank; 2026-11-18: 72% at 0-3 s of the 6 s clip, 0% before and at 8 s
+    "fallout_le-0.82/spike3": dict(bank="4ccd1a8c8814e7db01666271105f6cc7", clip_proven=True),   # 60ed7e50, its only bank; 2026-11-18: 64% at 1-3 s, 0% before and at 8 s
+    "transformers_mtmte_le-0.96/spike3": dict(bank="26d398bdc2be14090caf149bb4d34210", clip_proven=True),   # 60ed7e50, its only bank; 2026-11-18: 33-35% at 0-3 s (the play screen's video), 0% before and at 8 s
     "star_wars_le-1.31": dict(screen_proven=True, hud="9183de0da4e6ed603f16064ec7a8493b", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=True),   # PAD-420 2026-10-08 media proof (stock card, hidden, muted; the ball-start hero / path choice confirmed with the Action Button first): our screen and clip seen on the glass (magenta 44% clip, 45% screen, 0.0% before)
     "star_wars_pro-1.31": dict(screen_proven=True, hud="101c344663e5acdcf0e9e5d42ef0f2ae", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 4: two playfield switches first, its ball-start path/hero choice off the glass) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 44% clip, 45.1% screen, 0.0% before)
     "stranger_things-1.13": dict(screen_proven=True, hud="e3bb429535838471027451e9f6f86950", bank="e3bb429535838471027451e9f6f86950", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet; PAD-420 2026-10-08 media proof (round 7, no census): the clip seen on the glass (magenta 75%) in a Video grafted into the HUD - its HUD draws no video bank in play
@@ -2819,6 +2840,7 @@ def profile_from_port(path):
         runtime_can=runtime,
         cannot=tuple(cannot),
         insider_gate=all(n in sites for n in INSIDER_GATE_SITES),
+        own_game=own_game_sites(sites) and bool(_game_modes(port)),            # PAD-1400
         # item 147's events, as pad_mode_runtime.c's events_arm would arm them: a bus event
         # needs hook_dispatch, a site event its site. What each run measured is in the port.
         events=events,
@@ -3203,6 +3225,7 @@ try:
     _key_115, _label_115 = "godzilla_pro-1.15", "Godzilla Pro 1.15"
     GODZILLA_PRO_1_15 = replace(
         GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), game_rules=_game_rules(_port_115),
+        own_game=own_game_sites(_port_115["site"]) and bool(_game_modes(_port_115)),   # PAD-1400
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),
@@ -3792,7 +3815,9 @@ class ModeSpec:
     # cannot start. Never a multiball (game_mode_blocks.py). PAD-398 (David, 2026-10-05: "when our custom
     # modes start, we should ONLY be in those modes unless explicitly noted"): "block" is the default, and
     # while it blocks every rule of the game's (its features: game_rules) sees no shots but the ones named in
-    # keep_rules, so none of the game's jackpots, locks or multiballs light or count
+    # keep_rules, so none of the game's jackpots, locks or multiballs light or count. PAD-1400: "own_game": the
+    # mode IS the game - it starts with each game, runs through every ball and player and ends with the game,
+    # holding off the game's modes as "block" does, and the game's own rules are switched off underneath it
     game_modes: str = "block"
     block_modes: list = field(default_factory=list)
     keep_rules: list = field(default_factory=list)   # PAD-398: names from the title's game_rules
@@ -5134,13 +5159,17 @@ def validate(spec, folder=None):
 
 
 # ---- PAD-363: the game's own modes while it runs -----------------------------------------
-GAME_MODES = ("stack", "give_way", "block")
+GAME_MODES = ("stack", "give_way", "block", "own_game")
+def holds_game_modes(spec):
+    """PAD-363 / PAD-1400: True when *spec* keeps the game's modes from starting while it runs ("block", and
+    "own_game", which holds them off the same way for the whole game)."""
+    return (getattr(spec, "game_modes", None) or "block") in ("block", "own_game")
 
 
 def held_off(spec, p):
     """The ids of *p*'s modes *spec* keeps from starting: its own list, else the port's checked defaults
     (what pad_mode_runtime.c does with an empty `block_modes`); () unless it blocks."""
-    if spec.game_modes != "block":
+    if not holds_game_modes(spec):
         return ()
     if spec.block_modes:
         return tuple(sorted({int(i) for i in spec.block_modes if isinstance(i, int)}))
@@ -5149,8 +5178,11 @@ def held_off(spec, p):
 
 def validate_game_modes(spec, p):
     if spec.game_modes not in GAME_MODES:
-        return ["What it does about the game's own modes is stack, give_way or block."]
-    if spec.game_modes != "block":
+        return ["What it does about the game's own modes is stack, give_way, block or own_game."]
+    if spec.game_modes == "own_game" and not getattr(p, "own_game", False):            # PAD-1400
+        return ["Being the whole game is not on %s yet: the app has not found where it adds its own points, "
+                "makes its calls and starts its modes, so it could not switch them off." % p.label]
+    if not holds_game_modes(spec):
         return []
     have = {i: name for i, name, _on in getattr(p, "game_modes", ())}
     if not have:
@@ -5184,9 +5216,9 @@ def game_modes_lines(spec, p=None):
     that says nothing runs alone), so "stack" is written out and "block" is not."""
     if spec.game_modes == "give_way":
         return ["game_modes     give_way"]
-    if spec.game_modes != "block":
+    if not holds_game_modes(spec):
         return ["game_modes     stack"]
-    out = []
+    out = ["game_modes     own_game"] if spec.game_modes == "own_game" else []     # PAD-1400
     ids = sorted({i for i in spec.block_modes or () if isinstance(i, int) and 0 <= i < 128})
     if ids:
         out.append("block_modes    " + " ".join(str(i) for i in ids))
@@ -5356,7 +5388,7 @@ def validate_shield(spec, p):
     if not p.can("shield"):
         return ["Turning the shield targets is not on %s yet (Mode says why)." % p.label]
     feature = p.shield_rule or "shield"
-    if (spec.game_modes or "block") != "block":
+    if not holds_game_modes(spec):
         return ["The shield targets stay toward the player only while the game's modes cannot start: otherwise "
                 "the game's own %s feature turns them back." % feature]
     if p.shield_rule and p.shield_rule in (spec.keep_rules or []):
@@ -5387,7 +5419,7 @@ def validate_building(spec, p):
     if shot and shot not in dict(p.shots):
         out.append("%s has no shot called %r to move the building on." % (p.label, shot))
     feature = p.building_rule or "building locks"
-    if (spec.game_modes or "block") != "block":
+    if not holds_game_modes(spec):
         out.append("The building moves only while the game's modes cannot start: otherwise the game's own %s "
                    "may want it." % feature)
     elif p.building_rule and p.building_rule in (spec.keep_rules or []):

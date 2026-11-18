@@ -19,6 +19,41 @@ site callout          0x003386c0 0xe92d4010 0xe309e060
 site callout_nth      0x00338874 0xe92d4010 0xe309e060
 site lamp_group       0x0031cfac 0xe92d4038 0xe1a04000
 site award_screen     0x0017a1c0 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x0040bdc8 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x000731cc
+value own_pass_1          0x00089044
+value own_pass_2          0x0008fa50
+value own_pass_3          0x0008fbbc
+value own_pass_4          0x0008fc68
+value own_pass_5          0x00094cf4
+value own_pass_6          0x0009d488
+value own_pass_7          0x000a784c
+value own_pass_8          0x000a78f0
+value own_pass_9          0x000ae4d8
+value own_pass_10         0x000b5060
+value own_pass_11         0x000e0d64
+value own_pass_12         0x000ec0dc
+value own_pass_13         0x000ec180
+value own_pass_14         0x000ed5c4
+value own_pass_15         0x000f0004
+value own_pass_16         0x000f0084
+value own_pass_17         0x000f8d80
+value own_pass_18         0x000fe000
+value own_pass_19         0x00130b14
+value own_pass_20         0x00163b54
+value own_pass_21         0x001f1d5c
+value own_pass_22         0x002e69fc
+value own_pass_23         0x0030dc84
+value own_pass_24         0x00318430
+value own_pass_25         0x004085f0
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
+site show_start       0x002d2174 0xe92d47f0 0xe2508000
 site string_new       0x000167e0 0xe28fc606 0xe28cca0e
 site dynamic_cast     0x000161e0 0xe28fc606 0xe28cca0e
 site resource_get     0x002f8754 0xe92d43f0 0xe1a04000

@@ -19,6 +19,29 @@ site callout          0x001b3f10 0xe92d4010 0xe30feec8
 site callout_nth      0x001b40c4 0xe92d4010 0xe30feec8
 site lamp_group       0x00306bbc 0xe92d4038 0xe1a04000
 site award_screen     0x0011dd74 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x00323dd0 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x00046ab4
+value own_pass_1          0x0005e424
+value own_pass_2          0x0009aa5c
+value own_pass_3          0x0009adfc
+value own_pass_4          0x000a927c
+value own_pass_5          0x000b1368
+value own_pass_6          0x000bd714
+value own_pass_7          0x000c7868
+value own_pass_8          0x00154544
+value own_pass_9          0x0017e8a0
+value own_pass_10         0x001a2b64
+value own_pass_11         0x00269f94
+value own_pass_12         0x002cefe8
+value own_pass_13         0x00308e54
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
+site show_start       0x00188294 0xe92d47f0 0xe2508000
 site string_new       0x000167c8 0xe28fc605 0xe28ccac5
 site dynamic_cast     0x000161c8 0xe28fc605 0xe28ccac5
 site resource_get     0x0035a9ec 0xe92d43f0 0xe1a04000

@@ -95,7 +95,7 @@ const TIP = {
   lit: "A Light the mode at block has lit it for the player up, and it has not started since.",
   canStart: "The mode is not running, a game is on, and (with waits out a multiball) no multiball is running: a Start the mode block now would start it.",
   displayPriority: "Kept for the total on its own screen. It no longer makes the game's displays wait: a mode always gives way to them (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off).",
-  gameModes: "Cannot start (the usual): while this mode runs it is the only thing going - the modes ticked below cannot start, and none of the game's features lights, locks, counts or awards unless you tick it under Keep counting. May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Its own Multiball block does not end it.",
+  gameModes: "Cannot start (the usual): while this mode runs it is the only thing going - the modes ticked below cannot start, and none of the game's features lights, locks, counts or awards unless you tick it under Keep counting. May start: the game's modes start as usual while this one runs. End this one: it starts only while none of the game's modes runs (a Start the mode then waits, and the next one starts it), and one of them starting ends it. Its own Multiball block does not end it. Switched off: this mode is the whole game - it starts with every game, lasts every ball and player, and the game's own scoring, calls, multiballs and ball saves are off underneath it.",
   keepRule: "Ticked: this feature of the game's goes on counting its shots while this mode runs (its progress, its jackpots, its locks and the multiball it leads to). Not ticked: it sees none of them until this mode ends.",
   blockPick: "While this mode runs, the game does not start this one of its modes. A shot that would have started it does what it does when the mode is not lit.",
   blockLast: "One at least: to let them all start, choose \"may start\" above.",
@@ -1041,6 +1041,8 @@ function Timers({ prog, ed }) {
 // PAD-373: what the mode does about the game's own modes, as the form asks it (PAD-363). No ticks
 // saved = the title's usual ones, shown ticked; the last tick stays, so the list never goes back to
 // those by itself.
+// PAD-1400: what "are off: this is the whole game" does, under the choice
+const OWN_GAME_NOTE = "This mode starts with every game and runs through every ball and every player (each keeps their own scores and total), ending with the game; its clock and draining are not used. While a ball is in play the game's own rules are off: its shots, points, calls, award screens, light shows, multiballs and ball saves do nothing, so every point scored in play is this mode's. The game still runs the balls, tilt, its own end-of-ball bonus and the high scores.";
 function GameModes({ prog, ed }) {
   const ch = ed.ch;
   const gm = prog.game_modes || "block";
@@ -1055,20 +1057,23 @@ function GameModes({ prog, ed }) {
   const on = new Set(prog.block_modes && prog.block_modes.length ? prog.block_modes : (ch.game_modes_default || []));
   const opts = [{ value: "stack", label: "may start (this one carries on)" },
     { value: "give_way", label: "may start, and end this one", disabled: !!ch.give_way_off && gm !== "give_way" },
-    { value: "block", label: "cannot start (the ones ticked)", disabled: !!ch.block_off && gm !== "block" }];
+    { value: "block", label: "cannot start (the ones ticked)", disabled: !!ch.block_off && gm !== "block" },
+    // PAD-1400: the mode is the whole game - the game's own rules switched off underneath it
+    { value: "own_game", label: "are off: this is the whole game", disabled: !!ch.own_game_off && gm !== "own_game" }];
+  const holds = gm === "block" || gm === "own_game";
   const tick = (id, v) => {
     const next = new Set(on);
     if (v) next.add(id); else next.delete(id);
     ed.set(["block_modes"], [...next].sort((a, b) => a - b));
   };
-  const why = gm === "give_way" ? ch.give_way_off : gm === "block" ? (ch.block_off
+  const why = gm === "give_way" ? ch.give_way_off : gm === "own_game" ? (ch.own_game_off || OWN_GAME_NOTE) : gm === "block" ? (ch.block_off
     || (rows.length && !on.size ? "None ticked: none is held off, and one of them starting ends this mode." : "")) : "";
   return html`<div class="bk-gamemodes">
     <div class="row wrap">
       <span class="lbl" ...${tip(TIP.gameModes)}>While it runs, the game's modes</span>
       <${Select} sm value=${gm} options=${opts} width=${260} title=${TIP.gameModes} onChange=${(v) => ed.set(["game_modes"], v)} />
     </div>
-    ${gm === "block" && rows.length ? html`<div class="modes-shots">
+    ${holds && rows.length ? html`<div class="modes-shots">
       ${rows.map((m) => {
         const last = on.size === 1 && on.has(m.id);
         return html`<${Check} key=${"b" + m.id} label=${m.label} checked=${on.has(m.id)} disabled=${last}
@@ -1076,7 +1081,7 @@ function GameModes({ prog, ed }) {
       })}
     </div>` : null}
     ${why ? html`<div class="small muted">${why}</div>` : null}
-    ${gm === "block" && rules.length ? html`
+    ${holds && rules.length ? html`
       <div class="row wrap"><span class="lbl" ...${tip(TIP.keepRule)}>The game's features that keep counting while it runs</span></div>
       <div class="modes-shots">
         ${rules.map((n) => html`<${Check} key=${"k" + n} label=${n} checked=${keep.has(n)} title=${TIP.keepRule}

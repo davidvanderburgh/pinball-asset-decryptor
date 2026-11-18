@@ -33,6 +33,31 @@ site lamp_group       0x001d4b78 0xe92d4038 0xe1a04000
 site show_priority    0x002208a8 0xe3043ab4 0xe34033c3
 #   award_screen: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool Pro 1.16, TMNT Pro 1.59, Deadpool LE 1.14]
 site award_screen     0x0013fa24 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x001718ac 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x000353d8
+value own_pass_1          0x0005f934
+value own_pass_2          0x00062afc
+value own_pass_3          0x00068b98
+value own_pass_4          0x00078a94
+value own_pass_5          0x0007a540
+value own_pass_6          0x000f77f0
+value own_pass_7          0x0010a080
+value own_pass_8          0x00111930
+value own_pass_9          0x00125220
+value own_pass_10         0x0012881c
+value own_pass_11         0x001317a4
+value own_pass_12         0x0013d5a8
+value own_pass_13         0x0018b078
+value own_pass_14         0x0021e9cc
+value own_pass_15         0x002482e0
+value own_pass_16         0x002a3b7c
+value own_pass_17         0x002e0b48
+value own_pass_18         0x00381670
 #   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool Pro 1.16, TMNT Pro 1.59, Deadpool LE 1.14]
 site string_new       0x000167e4 0xe28fc605 0xe28ccadc
 #   dynamic_cast: PLT stub for __dynamic_cast [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool Pro 1.16, TMNT Pro 1.59, Deadpool LE 1.14]
@@ -108,6 +133,9 @@ site caward_add       0x0002d554 0xe92d41f0 0xe1a04000
 site caward_add_scaled 0x0002d614 0xe92d4ff8 0xe1a09002
 #   show_start: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 site show_start       0x00220648 0xe92d47f0 0xe2508000
+# PAD-1400: where the game's rules hear a shot (Foo Fighters Pro's shot_dispatch, located (strict) in this
+# build's own program); this build's modes take their shots from its switch lines, so only a whole-game mode uses it
+site rule_dispatch    0x00129a70 0xe92d4070 0xe1a05001
 #   game_event: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 site game_event       0x00290b3c 0xe92d47f0 0xe1a09000
 #   event_post_replacing: located (strict) [Godzilla Premium/LE 1.16, Godzilla Pro 1.15]

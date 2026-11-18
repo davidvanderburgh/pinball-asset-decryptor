@@ -104,8 +104,11 @@ done
 # Scooby-Doo compares ~/.profile with its own and reboots to install it.
 [ -f "$UPTEST/_profile" ] && cp "$UPTEST/_profile" "$NV/home/.profile"
 chown -R "$SPK_USER": "$NV"
+# sync too (PAD-1387): /game here is the rig's scratch copy, and a sync(1) on
+# WSL's shared kernel hangs for good while one superblock never answers (the
+# sync wedge) - Scooby-Doo then never gets past "bash command: sync".
 for c in sudo unlock-root lock-root reboot shutdown poweroff halt systemctl \
-         avrdude timedatectl hwclock swaymsg xrandr wpctl; do
+         avrdude timedatectl hwclock swaymsg xrandr wpctl sync; do
     printf '#!/bin/sh\necho "$(date +%%T) %s $*" >> %s/shell.log\nexit 0\n' \
         "$c" "$SPK_RIG" > "$SPK_RIG/bin/$c"
 done

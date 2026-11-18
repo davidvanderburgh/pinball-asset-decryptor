@@ -1159,6 +1159,48 @@ unless the mode keeps that rule counting - the same `keep_rules` / Keep counting
 rules ask no such check) and `gate_rule_lines` writes the port lines; a drafted Bond port gets its own
 (`portgen.own_gate_rules`).
 
+**The whole game (PAD-1400).** A maker who wants a game of his own on Stern's board (20SidedDies' Uncanny X-Men
+2.0, the PAD-1398 analysis) needs more than isolation: Stern's per-shot scoring, callouts, shows, multiballs and ball
+saves go on under a blocking mode. `pm_own_game(1)` (a mode file's `game_modes own_game`, a blocks mode's "are off: this
+is the whole game", `GAME_MODES 3`) switches them off for as long as the mode has it. The runtime holds the
+game's modes and rules off as `pm_block_game_modes` does, and refuses the game's OWN calls at the entry of sites
+every Spike 2 port names: `shot_dispatch` (the rules hear no shot; the veto hands it to our modes' `.shot`),
+`score_add` / `score_add32` (not refused: the call runs with 0 points, from the bus's ball_start, so the game's own
+bookkeeping still happens - Star Wars LE serves back any ball that drains before something has scored),
+`callout` / `callout_nth` (on Uncanny X-Men the game's every sound request: its `sound_play` is the same function), `multiball_serve` (its multiballs and rule ball saves), `award_screen` (its award
+screens and videos) and `show_start` (its light shows; one of ours, `pm_game_show`, still plays: its process is the
+game's code, so `show_start` passes while it runs). A refused call answers 0, as each function's own failures do - but
+only from a caller that throws that value away. Every build has callers that store into the show or screen they get
+back (TMNT Pro's show_start(178) at 0x147cf0 writes [r5,#168]: a refused 0 crashed the game in the library sweep), so
+each scanned port lists them (`value own_ret_scanned 1`, `value own_pass_<k> <bl address>`: scan_ret_use.py follows
+r0 after every call - used as a base, stored, passed on or returned = listed) and those calls are never refused; a
+port whose callers were not scanned (the older versions) only counts the two. Three more sites hold the RULES back on builds whose rules do not hear one
+`shot_dispatch`: `rule_dispatch` (Foo Fighters LE, Venom LE / Pro: Foo Fighters Pro's dispatcher, named apart because
+their modes take shots from `switch` lines; refused, nothing handed on); `switch_spawn` (19 builds: Rush, Batman,
+Star Wars, Stranger Things, Guardians, Iron Maiden, Jurassic Park, Metallica, Elvira, Aerosmith, Bond 60th), the
+framework switch drain's call that starts a switch's handler as a process, wrapped where it is made: a RULE handler -
+its descriptor flags have none of the low 10 bits, the ones that run in normal play only - is not started (0, which
+the drain tests), device, cabinet and service handlers start as always, read from the switch records at arm time
+(Rush: 21 rule handlers of 105 switches, Batman 31 refused a ball, the game's own score calls down from 109 to 22 and
+140 to 12); and `drain_rule_call` (all 53 newest builds), the trough's drain asking the game's own callback (event 10,
+`mov rN, #10; blx reg`) whether to serve the drained ball back - skipped with r0 = 0, the framework's own no-callback
+answer, so the drain ends the ball (Star Wars LE's video-mode branch served every drained ball back for ever; Guardians
+LE and Aerosmith LE looped too). The framework's own ball saver and playfield validation are not that call and stay the
+game's: on Star Wars LE the ball-start save covers about three drains, where a stock game whose modes run ends it at
+once (its saver's countdown pauses while none of its own modes runs). A call is ours when its
+return address is in this object, or while one of our own calls into the game runs (`OG_SELF`): `pm_score_add`,
+`pm_callout`, `pm_multiball_start`, `pm_award_screen` go through as before. The vetoes are installed on first use, on
+top of any logger already hooked there (`hook_veto` moves a logger's jump pair as it is). What the game keeps: ball
+handling, trough, ball search, tilt (3 s from the `tilt_warning` event, and a tilted ball to its end), the node bus,
+display and audio, each ball's start up to its first switch, the end of each ball with its bonus (the game's own: on Uncanny X-Men LE 0.98 its per-switch handlers count every playfield switch toward it themselves, after their shot dispatch - 0x11da30, 5,710 a hit - so a ball of 28 switches ends with 160,810 of the game's on top of the mode's; disassembled, docs/plans/pad1400_own_game.md) and the end of the game with its high-score
+entry, from the scores the mode gave. A mode file's whole-game mode starts with each game (no trigger, no clock), runs
+through every drain, keeps each player's hits and total across their turns and ends with the game. Each ball's end logs
+what was held back and where the first call came from. Emulator (Uncanny X-Men LE 0.98, a two-player game, every shot
+1000): each ball the game's 27-32 shots, 28-34 point awards and 18-26 calls were refused and the score at each ball's
+end was exactly the mode's awards (ball 1: 27000 = 27000); the control (the same mode as an ordinary one) saw the game
+score 5,880,640 on one ball. `display_effect_start` (the score display's own effects, about 200 a ball) and `sound_play`
+(sound effects and music beds) are hooked only to count the game's calls.
+
 **Coverage.** `pm_aside()` is as good as the port's stock route (above and below). On the 37
 shipped builds: the manager's own queries on the three Godzillas, the mode table on 21, and the
 balls in play plus the game's own mode flags, live records, running bytes or rule objects on 11
@@ -7121,7 +7163,7 @@ Up to 32 shows, 128 steps a lane, 8 sound ids a show. A lane with no steps leave
 steps ran out holds them dark.
 
 **In step with the song, not a clock.** A show's time is where its song IS: the played-sample count of the voice of
-the channel playing its request (voice `+12`, `value sound_voice_played`, 44,100 a second; the channel and voice layout
+the channel playing its request (voice `+12`, `+24` on Spike 3, `value sound_voice_played`, 44,100 a second; the channel and voice layout
 is the framework's, the same on all 68 ports; measured on Led Zeppelin LE 1.22 and Rush LE 1.19). A re-used voice shows
 its last sound's count for a tick or two, so the show takes the count once it has moved off its first reading and
 advances with the game's clock; until then (and on a port without the channel lines) it runs on its own clock from the

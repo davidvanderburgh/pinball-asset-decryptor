@@ -44,7 +44,10 @@ def _entries(text):
 
 #: the lines measured by hand on this program, not drafted from the reference: PAD-1326's co-op (portcoop: the
 #: message table and its BALL line) and PAD-1327's start menu, champion framework and audit add
-HAND = ("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add")
+#: (and what was measured by hand since: the challenge game's ball launch (ae44e7916), the spare outputs' coil_off
+#: (ec3294b5e), the video bank named once a clip of it was seen on the glass (PAD-1380), and this program's surface_set_video, read off its own code)
+HAND = ("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add",
+        "ball_launch", "coil_off", "video_bank", "surface_set_video")
 
 
 def _own(entries):
@@ -77,7 +80,8 @@ def test_the_fallout_port_carries_the_core_and_none_of_star_wars_content():
     assert e[("switch", "38")] == "0x40"                       # Junk target: the proofs' trigger
     assert re.search(r"^text example_start_shot\s+Junk target$", text, re.M)
     body = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
-    assert not [ln for ln in body if ln.split()[0] in ("lamp", "scene", "callout")]
+    # PAD-1380: the title's own video bank, named and proven on the rig, is its own scene
+    assert not [ln for ln in body if ln.split()[0] in ("lamp", "callout") or ln.split()[:2] == ["scene", "hud"]]
     assert not [ln for ln in body if re.match(r"(site|value|text)\s+(show_(\d|name|kind|secs|proc)|block_|right_gate|"
                                                r"mode_flag|held_coils|place_flag|done_flag|coil_give|coil_take)", ln)]
     assert "NOT RUN" not in text and "Emulator-proven 2026-11-15 (PAD-1288)" in text
@@ -96,7 +100,7 @@ def test_the_app_lists_and_takes_the_fallout_port_for_spike3_only():
     # what the rig proved is offered; what it has not seen stays greyed
     cannot = {c[0] for c in prof.cannot}
     assert "ball_save" not in cannot and "multiball" not in cannot
-    assert {"stack", "place", "done", "lights", "screen", "clip", "own_sound"} <= cannot
+    assert {"stack", "place", "done", "lights", "screen", "own_sound"} <= cannot   # clip: PAD-1380
     assert MP.table_key("fallout_le", "0.82", "a64") in MP.BALL_SAVE_PROVEN & MP.MULTIBALL_PROVEN
 
 

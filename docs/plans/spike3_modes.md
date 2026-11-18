@@ -72,9 +72,9 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
 | Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
 | records on the high scores | records.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | points records (the whole game or a mode of the owner's); the champion in attract on ELG and WDR (round 5); counts wait on 64-bit readers |
-| attract items | attract.cfg, clips | **goes on (PAD-1371) on Star Wars ELG 1.10** | tables read (PAD-1328) on five titles; the item's page shows the bank's scene as the game's own clip pages do. The 'stall' was the runtime's 32-bit hold of the scene show's address (below). Walking Dead Remastered, Star Wars 2025 LE / Pro and Pokemon wait on a clip route (their ports' video_bank scene is not named: `attract_items.title_refusal` says NO_CLIPS); Pokemon has no show pair either |
+| attract items | attract.cfg, clips | **goes on (PAD-1371) on Star Wars ELG 1.10, (PAD-1380) Star Wars 2025 LE / Pro** | tables read (PAD-1328) on four titles; the item's page shows the bank's scene as the game's own clip pages do. The 'stall' was the runtime's 32-bit hold of the scene show's address (below). PAD-1380: Walking Dead Remastered's items wait on an attract bank of their own (NO_GLASS); Pokemon's table was not its attract (a director starts its pages, as Fallout's and Transformers'), so it is refused with them; Star Wars 2025 Pro's go on with its clip route (below) |
 | inactivity pausing | idle.cfg | **no Spike 3 game needs it (PAD-1328)** | census of the 64-bit adjustment tables: Fallout LE (176), Star Wars 2025 LE (182) and Transformers LE (174) read AD_INACTIVE_TIMER once, in an `adjustment(id) == 1` check before their timer test; ELG, Pokemon, WDR and Star Wars 2025 Pro have no such setting. `idle_pause.title_refusal` says which (NO_NEED / NO_SETTING) |
-| expression light shows | cabshow.cfg | left out | `cablamp` lines (ELG has no cabinet lights), the game's show table as 64-bit, voice count measured |
+| expression light shows | cabshow.cfg | **goes on (PAD-1379)** on the six titles whose port names its cabinet lights | `spike3_modes.cabs_wanted`; a show starts by the sound ids that start its song, image.bin's or a music bank's own (`spike3_requests.song_plays`), and follows the song's voice (+24 on 64-bit). ELG has no cabinet lights; the game's own shows (a step of `game`) are Led Zeppelin's and Rush's only |
 
 The operator-menu rows (MUSIC MODE, EDITION, CO-OP PLAY, HANDICAP, the picture rows) all wait on
 one piece: adjustments.py / menu_settings.py writing a 64-bit program. Co-op, handicaps and the
@@ -135,6 +135,44 @@ log says the same lines; on Spike 3 the engine leaves them to this build). A mul
 
 Tests: tests/test_pad1323_spike3_clips_stime.py (a synthetic 64-bit program; the real Fallout / Pokemon programs
 with PAD_S3_PROGRAMS).
+
+## The clip route on the drafted Spike 3 ports (PAD-1380)
+
+The drafted ports (WDR, Star Wars 2025 LE / Pro, Pokemon, and the same gap on Fallout and Transformers) placed every
+clip site but wrote them as comments and named no video bank, so mode clips, random clips and attract items stayed off.
+
+- **The ports.** s3port now carries the clip route's sites, globals and values (dynamic_cast, resource_get, the
+  surface_* sites, resource_manager / typeinfo_*, scene_player_scene, surface_playing); only the screen's finders
+  (find_node / find_text / set_text / node_visible_vfn) stay a comment until a title's HUD is measured. Fallout's
+  surface_set_video did not line up (0.41 alike ELG's): read off its own code as scene_engine does, 0x9c3440.
+- **The bank, per title, as the rig showed it.** Every card has the framework's in_game_videos scene 60ed7e50; where a
+  title has a second bank, 60ed7e50 is its attract bank and is not drawn in play (a mode clip there played, "still
+  drawing", and was never on the glass). Proofs: Spike 3 rig, hidden, muted, a Try it set (`spike3_modes.plan`) with
+  CLIP TEST - a magenta title clip at the mode's start - on one trigger shot; the share of the glass it covered:
+
+| title | video_bank | mode clip on the glass | attract items |
+|---|---|---|---|
+| Walking Dead Remastered LE 0.92 | 71e39c43 (Arena, Blood Bath, Walkers) | 38-40% at 0-8 s | NO_GLASS: on 71e39c43 an item drew in that bank's mid-screen box (16%); 60ed7e50 is its attract bank |
+| Star Wars 2025 LE 0.96 | 3a9d7db5 (the play screen's middle video) | 49% at 1 s; the game's skill-shot video back by 3 s (the port cannot hold its modes off) | **on**: 47% of the glass for its 8 s |
+| Star Wars 2025 Pro 0.84 | 3a9d7db5, as the LE | 49% at 0-3 s | **on**: 47% |
+| Pokemon LE 0.82 | 60ed7e50 (its only bank) | 72% at 0-3 s of the 6 s clip | refused: no attract table (below) |
+| Fallout LE 0.82 | 60ed7e50 (its only bank) | 64% at 1-3 s | refused: a director, no table (PAD-1328) |
+| Transformers LE 0.96 | 60ed7e50 (its only bank) | 33-35% at 0-3 s (the play screen's video) | refused: a director, no table (PAD-1328) |
+
+- **Pokemon's attract.** Its 10-entry {test, page, float seconds} table (0x3198290, sequencer 0x4c7190, each page's
+  seconds x 62 at the child's +0x110) never ran in attract: no item before or after any entry played in 150 s. gdb on
+  the child create (0x691ea0, the patched qemu's stub) saw the attract pages - high scores, champions, the website,
+  the coin-door clip - started inline by a director (0x4dbca0..0x4dc3a4), as on Fallout and Transformers. s3port's
+  attract_lines leaves a table whose entries carry their own seconds out, so the port has no attract table and
+  `attract_items.title_refusal` says what it says for those two.
+- **Why every run after WDR's wedged** (the first round): the rig build in /var/lib/pad-s3/build dated from before
+  PAD-1340, so no pad_nosync.so went into the slot root; each game's first settings save called the real sync() and
+  sat in D state behind the Windows drives' virtiofs (fuse_sync_fs), and every later run's sync queued behind it.
+  s3launch.sh (the app) rebuilds a build whose .srcsum no longer matches; rig and proof runs go straight to s3run.sh,
+  which now does the same (one build at a time, flock) and refuses to start a game without pad_nosync.so. With the
+  guard back the runs went through while the old stuck sync was still in the kernel.
+
+Tests: tests/test_pad1380_spike3_clip_route.py.
 
 ## Prolonged Competition on Spike 3 (PAD-1327)
 
@@ -1418,3 +1456,41 @@ bring-up there; every lamp frame for them goes to the netbridge's own WS2812 out
 [the node frame's cmd + body]), channel 0 = node 7, 1 = node 14, 2 = node 2 (docs/plans/spike3_emulation.md, "The
 cabinet strips are the netbridge's"). s3bridge now feeds them to padled, so the rig's strips light. Left for the
 shows: the song timing, the app's Spike 3 side and the family line above.
+
+**Round 3 (PAD-1379): the shows go on.**
+- **The song's sound ids.** A Fallout main-play song is a music bank's (`music_cat01_0000`, request 65), so a show's
+  song may be a bank song: its slot is `sound_modes.bank_slot_key` (below zero), as PAD-1378's Spike 2 bank songs.
+  `spike3_requests.sound_parts` reads a bank too (header 0x20 = 0: its own sound-id table 0x28..0x48, five u64 per
+  id, the count at 0x5c, the records at 0x60), and `song_plays` maps every id, image.bin's by idx and bank NN's
+  `NN << 16 | n` by its records' bank keys; `spike3_modes.cab_sids` keeps the ones the request lists name and
+  `cab_shows.sids_for_slot` picks those that play the song FIRST. Fallout off the card: bank 1's song starts with
+  65536, bank 41's records 1 / 3 with 0x290000 / 0x290001 (its sid 0 plays records 1 then 2, sid 1 3 then 0); all
+  112 bank ids the requests name are read.
+- **The voice.** The 64-bit voice counts its played samples at **+24** (u32, 200-frame mixer steps, 44,100 a
+  second); +28 is the decoder's cursor (1,200-frame chunks, lagging). Spike 2's +12 read nothing useful there:
+  the runtime's default is now `PM_PTR == 8 ? 24 : 12` (`value sound_voice_played` still overrides it); Spike 2's
+  mode.so is byte-identical. Measured on Fallout LE 0.82 by sampling the qemu process's channels (request 65's
+  voice: +24 from 1000 to 144,200 in 3.25 s).
+- **Why the rig never followed a song before.** A rig run is muted with the game's sound OFF unless
+  `PAD_S3_AUDIO_OUT=1` (muted, the PCM kept in /dump): no channel ever plays, so a show ends 1.5 s after its
+  request. And the rig store's Fallout tree has lost `fallout_le/image.bin` (its object is still in
+  /var/lib/pad-s3/store/objects, 1,839,089,636 bytes: the manifest counts 2919 files, the tree holds 2918), so
+  even with the sound on Fallout plays nothing; the proof hands it in through games.patch (`|whole|`).
+- **The app.** `spike3_modes.plan` carries `cabshow.cfg` (`cabs_wanted`, the multi-boot line), the engine's family
+  line for it is gone and `cab_shows.title_refusal` takes a Spike 3 title as a Spike 2 one (by its port). The
+  Expression lights tab draws the cabinet from the port's `cablamp` lines (`cab_shows.layout_from_port`: the six
+  strips on four columns, the two rings), lists the music banks' songs on a Spike 3 project, and says the game keeps
+  no shows of its own the app can read (cab_stock reads 32-bit tables). Its "Run in emulator" - and the Attract
+  tab's - starts a Spike 3 run through the Modes tab's Try it preparation (`modes_tryit.run_spike3_project`): a
+  plain Start runs a Spike 3 card as it is.
+- **Rig proof** (2026-11-18, Spike 3 slot 137, hidden, muted with `PAD_S3_AUDIO_OUT=1`, Fallout LE 0.82 from the
+  library, the set `spike3_modes.plan` built from a project with a show on `music_cat01_0000`; C:/tmp/PAD-1379):
+  `show "VAULT" plays with sound 65536 (1 request(s))`; at the song's request (118.0 s) `follows its song from
+  0.01 s in (12 ms after the request)`; padled's node 2 held all 144 pixels blue and node 7 its 120 channels white
+  (the show's step) from 118.1 s, and gave them back to the game when the song stopped (126.6 s). Control, the old
+  runtime (+12): never followed, the show cut short.
+  A second set with two shows (INTRO, yellow blades only, on `music_cat01_0000`; MAIN, blue / red / green 10 s each
+  with white speakers, on `music_cat02_0000`, request 66): INTRO followed request 65 (12 ms) with the speaker rings
+  left to the game (no steps of its own there), then MAIN followed request 66 (16 ms after it) and node 2 went blue
+  at 127.0 s, red at 137.0, green at 146.5 and back to the game at 156.6 (`over (its steps are over) after 30003
+  ms`). The strips take G, R, B per pixel.

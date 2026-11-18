@@ -284,7 +284,12 @@ def sound_parts(image_path):
     """``{sid: [idx, ...]}``: the master-directory records (Extract's ``idxNNNN.wav``) each sound
     id of the plaintext Spike 3 ``image.bin`` at *image_path* plays, its first part first.
     ``{}`` when the container's descriptor table is not where its header says. *image_path* may
-    be an open binary file (PAD-1296: one read off a card's volume)."""
+    be an open binary file (PAD-1296: one read off a card's volume).
+
+    PAD-1379: a music bank ``image-scNN.bin`` too (docs/plans/spike3_modes.md "Music modes for bank
+    songs"): its header's 0x20 is 0 and its own descriptor table runs from 0x28 to 0x48, the sound-id
+    count at 0x5c and the records at 0x60; its sound id ``n`` is the game's ``NN << 16 | n``, and the
+    indices are the bank's records (Extract's ``music_catNN_NNNN``)."""
     import contextlib
     from .info import container_counts
     opened = (open(image_path, "rb") if isinstance(image_path, (str, bytes, os.PathLike))
@@ -292,14 +297,25 @@ def sound_parts(image_path):
     with opened as f:
         f.seek(0)
         head = f.read(0x100)
-        fragments, count = container_counts(head)
-        if not fragments or not count:
+        if len(head) < 0x68:
             return {}
         md = struct.unpack_from("<Q", head, 0x40)[0]
-        tend = struct.unpack_from("<Q", head, _DESC_TABLE_END)[0]
-        tstart = tend - 8 * _PTRS_PER_SID * fragments
+        if struct.unpack_from("<Q", head, _DESC_TABLE_END)[0] == 0:          # a music bank
+            tstart, tend = struct.unpack_from("<Q", head, 0x28)[0], struct.unpack_from("<Q", head, 0x48)[0]
+            fragments, count = struct.unpack_from("<II", head, 0x5c)
+            if not (0 < fragments < 500_000 and 0 < count < 500_000) \
+                    or tend - tstart != 8 * _PTRS_PER_SID * fragments:
+                return {}
+            low = 0x68
+        else:
+            fragments, count = container_counts(head)
+            if not fragments or not count:
+                return {}
+            tend = struct.unpack_from("<Q", head, _DESC_TABLE_END)[0]
+            tstart = tend - 8 * _PTRS_PER_SID * fragments
+            low = 0x80
         size = f.seek(0, 2)
-        if not 0x80 <= tstart < tend <= md or md + 24 * count > size:
+        if not low <= tstart < tend <= md or md + 24 * count > size:
             return {}
         f.seek(tstart)
         t = f.read(tend - tstart)
@@ -332,6 +348,21 @@ def sound_parts(image_path):
                 parts.append(i)
         if parts:
             out[sid] = parts
+    return out
+
+
+def song_plays(image, banks=None):
+    """PAD-1379: ``{sid: [slot, ...]}`` - every sound id of the card the records it plays, first part first, as
+    the project's song slots name them: ``image.bin``'s (*image*, a path or an open file) by their idx, a music
+    bank's (*banks*, ``{NN: path or file}`` of ``image-scNN.bin``) as ``NN << 16 | n`` playing
+    :func:`.sound_modes.bank_slot_key` of its records. What :func:`.cab_shows.sids_for_slot` reads a show's
+    song's sound ids from (engine._sound_id_plays' shape on Spike 2)."""
+    from .sound_modes import bank_slot_key
+    out = dict(sound_parts(image)) if image is not None else {}
+    for nn, f in sorted((banks or {}).items()):
+        for n, recs in sound_parts(f).items():
+            if 0 <= n <= 0xFFFF:
+                out[(int(nn) << 16) | n] = [bank_slot_key(nn, r) for r in recs]
     return out
 
 

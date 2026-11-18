@@ -55,7 +55,10 @@ def _entries(text):
 
 #: the lines measured by hand on this program, not drafted from the reference: PAD-1326's co-op (portcoop: the
 #: message table and its BALL line) and PAD-1327's start menu, champion framework and audit add
-HAND = ("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add")
+#: (and what was measured by hand since: the challenge game's ball launch (ae44e7916), the spare outputs' coil_off
+#: (ec3294b5e), the video bank named once a clip of it was seen on the glass (PAD-1380))
+HAND = ("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add",
+        "ball_launch", "coil_off", "video_bank")
 
 
 def _own(entries):
@@ -133,7 +136,8 @@ def test_the_pokemon_port_carries_the_core_with_its_own_switch_ids_and_none_of_s
     assert sw[50] == (0x100000, "Rear ramp made") and sw[71] == (0x8000000000, "Captive ball-target")
     assert re.search(r"^text example_start_shot\s+Berry target left$", text, re.M)
     body = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
-    assert not [l for l in body if l.split()[0] in ("lamp", "scene", "callout")]
+    # PAD-1380: the title's own video bank, named and proven on the rig, is its own scene
+    assert not [l for l in body if l.split()[0] in ("lamp", "callout") or l.split()[:2] == ["scene", "hud"]]
     assert not [l for l in body if re.match(r"(site|value|text)\s+(show_(\d|name|kind|secs|proc)|block_|right_gate|"
                                             r"mode_flag|held_coils|place_flag|done_flag)", l)]
     assert "NOT RUN" not in text and "Emulator-proven 2026-11-15 (PAD-1289)" in text

@@ -30,7 +30,11 @@ export function SetPicker({ cls = "" }) {
 
 // The tabs whose changes already go to the picked set (the rest still change set 1: said on the strip, so nothing
 // made while trying the picker lands somewhere unexpected)
-const WIRED = new Set([]);
+const WIRED = new Set(["images"]);
+// what the strip says is per set on a wired tab, beyond its own words (the tab's other tools still change set 1)
+const WIRED_NOTE = {
+  images: " Choose… and Clear work on this set's pictures (scene pictures only). Replace from folder, groups, Keep size and colour still change set 1.",
+};
 
 // Above a tab's list while a set other than set 1 is picked
 export function SetStrip({ what = "changes", tab = "" }) {
@@ -39,8 +43,8 @@ export function SetStrip({ what = "changes", tab = "" }) {
   const name = (s.names || [])[(s.current || 1) - 1] || "";
   return html`<div class="imgsets-strip"><${Note} kind="warn" action=${html`<${Button} size="sm"
       onClick=${() => call("imgsets.pick", 1)}>Back to set 1<//>`}>
-    ${WIRED.has(tab) ? html`<b>Editing set ${s.current}: ${name}.</b> The ${what} you make now are for this set only;
-      anything you leave alone is the same as set 1.` : html`<b>Set ${s.current}: ${name} is picked.</b> This tab does
+    ${WIRED.has(tab) ? html`<b>Editing set ${s.current}: ${name}.</b> The ${what} now are for this set only;
+      anything you leave alone is the same as set 1.${WIRED_NOTE[tab] || ""}` : html`<b>Set ${s.current}: ${name} is picked.</b> This tab does
       not keep changes per set yet: anything you change here still changes set 1.`}<//></div>`;
 }
 

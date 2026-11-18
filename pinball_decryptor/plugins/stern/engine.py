@@ -10097,6 +10097,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             from . import scene_variants as _SV
             from . import mode_write as _MWs
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
+            # Simon: a set's own pictures (the Images tab with that set picked) - a variant of each scene holding one,
+            # built from the scene as this Write has it (set 1's same-size edits on), the set's pictures encoded in
+            scenes_sets = _SV.picture_variants(
+                assets_dir, scenes_sets,
+                lambda _card: (lambda _n: _scene_with_overlay(reader, _n, radium_overlays) if _n is not None
+                               else None)(_MWs.lookup(reader, _card)),
+                os.path.join(grow_work, "scene_sets"), log=log)
             scenes_staged = _SV.stage(
                 assets_dir, scenes_sets, bytes(reader.read_file_bytes(fw_node)),
                 lambda _card: (lambda _n: bytes(reader.read_file_bytes(_n)) if _n is not None else None)(

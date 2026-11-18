@@ -1606,6 +1606,10 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         """The Replacement pane's picture: the pick, else the folder's copy a
         build changed (for the user's own picture an earlier build put in,
         its uncorrected copy where a build corrected it, PAD-345)."""
+        state = getattr(self, "_set_state", None)
+        n, picks, _rows = state() if state is not None else (1, {}, {})
+        if n > 1 and rel is not None:
+            return picks.get(rel)                       # a set's own picture, or none (the same as set 1)
         rep = self._assignments.get(rel) if rel is not None else None
         if rep:
             return rep
@@ -1783,8 +1787,86 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
     # ------------------------------------------------------------------
     # the list (Tk _refresh_image_list)
     # ------------------------------------------------------------------
+    # -- image sets (Simon, 2026-11-18): with set 2 or up picked, a row is that set's -------------------------------
+    def _image_set(self):
+        """The set picked on the set picker (1 = the project as it is)."""
+        svc = self.window.service("imgsets")
+        try:
+            return svc.current() if svc is not None else 1
+        except Exception:                               # noqa: BLE001
+            return 1
+
+    def _set_state(self):
+        """``(n, {rel: file}, {rel: scene rows})`` for the set picked, read once per list refresh."""
+        n = self._image_set()
+        cached = getattr(self, "_set_cache", None)
+        if cached is not None and cached[0] == n and cached[3] == self._scan_dir:
+            return cached[:3]
+        from ...plugins.stern import scene_variants as SV
+        folder = self._scan_dir or ""
+        picks = SV.set_pictures(folder, n) if n > 1 and folder else {}
+        rows = SV.picture_rows(folder) if n > 1 and folder else {}
+        self._set_cache = (n, picks, rows, self._scan_dir)
+        return n, picks, rows
+
+    def _set_row(self, s, n, picks, rows):
+        rel = s.rel_path
+        rep = picks.get(rel)
+        if rep:
+            disp, tag = os.path.basename(rep), "assigned"
+        elif rows.get(rel):
+            disp, tag = "Same as set 1 · Choose…", ""
+        else:
+            disp, tag = "Set 1 only", "foreign"
+        res = "…" if (s.info is None and not s.probed) else s.resolution_str()
+        return {"r": rel, "s": res, "f": s.format_summary(), "o": source_label(rel), "k": self._keep_state(rel),
+                "p": disp, "t": tag, "c": self._color_state(rel), "co": rel in self._color,
+                "cl": self._color_locked(rel), "cg": not rep}
+
+    def on_image_set(self, n):
+        """The set picker changed set: every row and the preview show that set's pictures."""
+        self._set_cache = None
+        self._refresh_image_list()
+        if self._current_rel:
+            self._render_preview(self._current_rel)
+
+    def _set_choose(self, rel, n):
+        from ...plugins.stern import scene_variants as SV
+        _n, _picks, rows = self._set_state()
+        names = (self.window.service("imgsets").get("names") or []) if self.window.service("imgsets") else []
+        name = names[n - 1] if n - 1 < len(names) else "set %d" % n
+        if not rows.get(rel):
+            compat.messagebox.showinfo(
+                "Image sets", "%s is not inside a scene, so it cannot differ between image sets: the card switches "
+                "whole scenes. Pick set 1 to replace it for every set." % rel)
+            return None
+        path = self._pick(self.window.ask_open, "image_replacement",
+                          "Choose set %d (%s)'s picture for %s" % (n, name, rel), self._image_filetypes())
+        if not path:
+            return None
+        SV.set_picture(self._scan_dir, n, rel, path)
+        self.log("Replace Images: set %d (%s): %s ← %s" % (n, name, rel, os.path.basename(path)), "info")
+        self.on_image_set(n)
+        self._focus([rel], rel)
+        return rel
+
+    def _set_clear(self, rels, n):
+        from ...plugins.stern import scene_variants as SV
+        _n, picks, _rows = self._set_state()
+        gone = [r for r in rels if r in picks]
+        for rel in gone:
+            SV.set_picture(self._scan_dir, n, rel, None)
+        if gone:
+            self.log("Replace Images: set %d: %d picture(s) back to set 1's." % (n, len(gone)), "info")
+            self.on_image_set(n)
+        return len(gone)
+
     def _row(self, s):
         rel = s.rel_path
+        state = getattr(self, "_set_state", None)       # (a test's stand-in borrows _row alone)
+        n, picks, rows = state() if state is not None else (1, {}, {})
+        if n > 1:
+            return self._set_row(s, n, picks, rows)
         rep = self._assignments.get(rel)
         is_changed = rel in self._changed_on_disk
         if rep:
@@ -2229,6 +2311,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
                 compat.messagebox.showinfo("No Slot Selected",
                                            "Select an image to assign.")
             return None
+        n = self._image_set()
+        if n > 1:
+            return self._set_choose(rel, n)
         path = self._pick(
             self.window.ask_open, "image_replacement",
             "Choose a replacement for %s" % rel, self._image_filetypes())
@@ -2415,12 +2500,18 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         """The row menu's / preview's "Clear replacement" (one slot)."""
         if rel not in self._by_rel:
             return 0
+        n = self._image_set()
+        if n > 1:
+            return self._set_clear([rel], n)
         return self._clear_replacement_picks([rel])
 
     @rpc
     def clear_selected(self, rels):
         """Tk _clear_selected_replacements: the whole selection."""
         rels = [r for r in (rels or []) if r in self._by_rel]
+        n = self._image_set()
+        if n > 1:
+            return self._set_clear(rels, n)
         targets = self._replacement_targets(rels)
         if len(targets) > 1 and not compat.messagebox.askyesno(
                 "Clear replacements",

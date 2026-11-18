@@ -59,7 +59,28 @@ class ImageSetsService(TabService):
             current = int(self.get("current", 1) or 1)
         names = SV.set_names(project) if project else []
         current = max(1, min(current, len(names) or 1))
-        self.set(on=bool(project), project=project, names=names, current=current, most=SV.MAX_SETS, why=why)
+        self.set(on=bool(project), project=project, names=names, most=SV.MAX_SETS, why=why)
+        self._use(current)
+
+    #: the services told when the set picked changes (each has ``on_image_set(n)``)
+    LISTENERS = ("images",)
+
+    def _use(self, n, **more):
+        """Pick set *n* and tell the tabs that show it; told once per real change."""
+        self.set(current=n, **more)
+        if n == getattr(self, "_told", None):
+            return
+        self._told = n
+        for ns in self.LISTENERS:
+            svc = self.window.service(ns)
+            hook = getattr(svc, "on_image_set", None)
+            if hook is None:
+                continue
+            try:
+                hook(n)
+            except Exception:                           # noqa: BLE001 - one tab's trouble never stops the picker
+                import logging
+                logging.getLogger(__name__).exception("on_image_set %s", ns)
 
     def current(self):
         """The set picked now (1 = the project as it is)."""
@@ -86,7 +107,7 @@ class ImageSetsService(TabService):
         names = self.get("names") or []
         n = int(n)
         if 1 <= n <= max(1, len(names)):
-            self.set(current=n, why="")
+            self._use(n, why="")
         return self.current()
 
     @rpc
@@ -94,7 +115,7 @@ class ImageSetsService(TabService):
         from ...plugins.stern import scene_variants as SV
         got = self._do(SV.add_set, name)
         if got["ok"]:
-            self.set(current=got["n"])                  # a new set is the one shown, ready to fill
+            self._use(got["n"])                         # a new set is the one shown, ready to fill
         return got
 
     @rpc
@@ -116,7 +137,7 @@ class ImageSetsService(TabService):
         got = self._do(SV.remove_set, int(n))
         if got["ok"]:
             n = int(n)
-            self.set(current=1 if cur == n else (cur - 1 if cur > n else cur))
+            self._use(1 if cur == n else (cur - 1 if cur > n else cur))
         return got
 
     @rpc
@@ -131,7 +152,7 @@ class ImageSetsService(TabService):
                 cur -= 1
             elif to <= cur < n:
                 cur += 1
-            self.set(current=cur)
+            self._use(cur)
         return got
 
     @rpc

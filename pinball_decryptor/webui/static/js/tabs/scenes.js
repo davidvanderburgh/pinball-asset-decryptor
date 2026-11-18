@@ -56,7 +56,7 @@ export default function ScenesTab() {
   }
   return html`<div class="cpd-shell"><div class="page scenes-page">
     <${PageHead} title="Scenes" sub=${INTRO}><${SetPicker} /><${ScenesActions} /><//>
-    ${ready ? html`<${SetStrip} what="scene changes" tab="scenes" />` : null}
+    ${ready ? html`<${SetStrip} what="scene changes you make" tab="scenes" />` : null}
     ${body}
   </div>${ready && s.tree ? html`<${FontBar} open=${fontOn} setOpen=${setFont} t=${t} />` : null}${ready
     ? html`<${ColorBar} host="scenes" open=${colors} setOpen=${setColors} file=${file} cls=${fontOn ? "cpd-beside" : ""}

@@ -80,7 +80,18 @@ def normalise(raw):
                 top = max(top, n)
         if keep:
             scenes[card] = keep
-    if not scenes:
+    images = {}                                         # Simon: a set's own pictures, chosen on the Images tab
+    for k, picks in (raw.get("images") or {}).items():
+        try:
+            n = int(k)
+        except (TypeError, ValueError):
+            continue
+        keep = ({r: p for r, p in picks.items() if isinstance(r, str) and isinstance(p, str) and p}
+                if isinstance(picks, dict) and 2 <= n <= MAX_SETS else {})
+        if keep:
+            images[n] = keep
+            top = max(top, n)
+    if not scenes and not images:
         return None
     names = [str(x) for x in (raw.get("names") or ()) if str(x).strip()][:MAX_SETS]
     while len(names) < top:
@@ -89,7 +100,10 @@ def normalise(raw):
         force = int(raw.get("force") or 0)
     except (TypeError, ValueError):
         force = 0
-    return {"names": names, "scenes": scenes, "force": force if 1 <= force <= len(names) else 0}
+    out = {"names": names, "scenes": scenes, "force": force if 1 <= force <= len(names) else 0}
+    if images:
+        out["images"] = images
+    return out
 
 
 # ---- the sets themselves: names, made and removed on the app's set picker -----------------------------------------
@@ -109,7 +123,8 @@ def _raw(project):
 def _put(project, side, raw):
     from ...core import staged_changes
     names = raw.get("names") or []
-    if len(names) <= 1 and names in ([], list(DEFAULT_NAMES)) and not raw.get("scenes") and not raw.get("force"):
+    if len(names) <= 1 and names in ([], list(DEFAULT_NAMES)) and not raw.get("scenes") and not raw.get("images") \
+            and not raw.get("force"):
         side.pop(STAGED_KEY, None)                      # one set of the default name and nothing in it: none
     else:
         side[STAGED_KEY] = raw
@@ -123,7 +138,8 @@ def set_names(project):
     _side, raw = _raw(project)
     names = [str(x).strip() for x in (raw.get("names") or ()) if str(x).strip()][:MAX_SETS]
     top = max([int(k) for sets in (raw.get("scenes") or {}).values() if isinstance(sets, dict)
-               for k in sets if str(k).isdigit()] or [1])
+               for k in sets if str(k).isdigit()]
+              + [int(k) for k, v in (raw.get("images") or {}).items() if str(k).isdigit() and v] or [1])
     while len(names) < max(1, min(top, MAX_SETS)):
         names.append(DEFAULT_NAMES[0] if not names else "Set %d" % (len(names) + 1))
     return names
@@ -173,6 +189,12 @@ def _renumber(raw, order):
         if keep:
             scenes[card] = keep
     raw["scenes"] = scenes
+    images = {str(new_of[int(k)]): v for k, v in (raw.get("images") or {}).items()
+              if str(k).isdigit() and int(k) in new_of and new_of[int(k)] >= 2 and v}
+    if images:
+        raw["images"] = images
+    else:
+        raw.pop("images", None)
     force = raw.get("force")
     raw["force"] = new_of.get(force, 0) if isinstance(force, int) else 0
     if not raw["force"]:
@@ -206,6 +228,174 @@ def move_set(project, n, to):
     raw["names"] = [names[k - 1] for k in order]
     _renumber(raw, order)
     _put(project, side, raw)
+
+
+# ---- a set's own pictures (the Images tab with that set picked) ------------------------------------------------------
+# Simon: "When the user selects set 2 - there will be an empty list of chosen images. The user can then choose the
+# variants". A set keeps {picture rel: file}; a picture it does not name is set 1's. A scene picture is inside its
+# scene file, so the Write makes a variant of every scene that holds one of the set's pictures (picture_variants).
+
+def set_pictures(project, n):
+    """``{picture rel: file}`` set *n* gives a picture of its own (empty for set 1 and a set with none)."""
+    if not project or int(n) < 2:
+        return {}
+    _side, raw = _raw(project)
+    picks = (raw.get("images") or {}).get(str(int(n))) or {}
+    return {r: p for r, p in picks.items() if isinstance(r, str) and isinstance(p, str) and p}
+
+
+def set_picture(project, n, rel, path):
+    """Set *n*'s own picture for *rel* (*path* empty or None: back to set 1's)."""
+    n = int(n)
+    if n < 2:
+        raise SceneVariantError("set 1 is the project itself: its pictures are the Images tab's own")
+    names = set_names(project)
+    if n > len(names):
+        raise SceneVariantError("there is no set %d" % n)
+    side, raw = _raw(project)
+    raw["names"] = names
+    images = dict(raw.get("images") or {})
+    picks = dict(images.get(str(n)) or {})
+    if path:
+        picks[rel] = path
+    else:
+        picks.pop(rel, None)
+    if picks:
+        images[str(n)] = picks
+    else:
+        images.pop(str(n), None)
+    if images:
+        raw["images"] = images
+    else:
+        raw.pop("images", None)
+    _put(project, side, raw)
+
+
+#: the Extract's table of every scene picture's place (engine._RADIUM_IMAGE_MANIFEST)
+PICTURE_ROWS = ("images", "scene_textures", "radium_images.txt")
+
+
+def picture_rows(project):
+    """``{picture rel: [(scene card path, data offset, length, pad w, pad h, format)]}`` from the Extract's table:
+    where each scene picture is, in every scene that holds it. A picture rel is the Images tab's
+    (``scene_textures/...``)."""
+    out = {}
+    try:
+        with open(os.path.join(project, *PICTURE_ROWS), "r", encoding="utf-8") as f:
+            for line in f:
+                cols = line.rstrip("\r\n").split("\t")
+                if len(cols) < 6 or cols[0].startswith("#"):
+                    continue
+                try:
+                    row = (cols[1], int(cols[2]), int(cols[3]), int(cols[4]), int(cols[5]),
+                           int(cols[6]) if len(cols) > 6 else 5)
+                except ValueError:
+                    continue
+                out.setdefault(cols[0], []).append(row)
+                # the Images tab names the same picture from the project folder ("images/scene_textures/..."); Simon
+                # found every scene picture refused as "not inside a scene" while only the table's name was here
+                out.setdefault("images/" + cols[0], out[cols[0]])
+    except OSError:
+        pass
+    return out
+
+
+def encode_pictures(data, places, log=None):
+    """``(bytes, n)``: *data* (a scene file) with each of *places* ``[(picture file, rel, data offset, length, pad w,
+    pad h, format)]`` encoded in, fitted to its place (a picture of another size is scaled to it, as the Images tab
+    does with Keep size off); *n* how many went in. A place the scene does not hold as the table says keeps its
+    picture, said in the log."""
+    log = log or (lambda *a, **k: None)
+    from PIL import Image
+    import numpy as np
+    from . import dds as _dds
+    from . import engine as E
+    buf = bytearray(data)
+    found = {im["data_off"]: im for im in E.parse_radium_images(bytes(data))}
+    done = 0
+    for src, rel, off, length, pad_w, pad_h, fmt in places:
+        im0 = found.get(off)
+        if im0 is None or im0["length"] != length or im0["fmt"] != fmt:
+            log("Image sets: %s is not where the Extract found it in its scene; that place keeps set 1's picture."
+                % rel, "warning")
+            continue
+        try:
+            im = Image.open(src).convert("RGBA")
+        except Exception as e:                          # noqa: BLE001
+            log("Image sets: %s cannot be read (%s); that place keeps set 1's picture." % (src, e), "warning")
+            continue
+        w, h = im.size
+        if (w, h) != (pad_w, pad_h) and (E._padded4(w), E._padded4(h)) == (pad_w, pad_h):
+            grid = Image.new("RGBA", (pad_w, pad_h), (0, 0, 0, 0))
+            grid.paste(im, (0, 0))
+            im = grid
+        elif (w, h) != (pad_w, pad_h):
+            im = im.resize((pad_w, pad_h), Image.LANCZOS)
+        arr = np.asarray(im, dtype=np.uint8)
+        raw = bytes(buf[off:off + length])
+        decode = _dds.decode_bc1 if fmt == E._DXT1_FORMAT else _dds.decode_bc3
+        arr, _changed = E._premultiply_like_stock(arr, lambda: decode(raw, pad_w, pad_h))
+        enc = _dds.encode_bc1(arr) if fmt == E._DXT1_FORMAT else _dds.encode_bc3(arr)
+        if len(enc) != length:
+            log("Image sets: %s did not encode to its place's size; that place keeps set 1's picture." % rel,
+                "warning")
+            continue
+        buf[off:off + length] = enc
+        done += 1
+    return bytes(buf), done
+
+
+def picture_variants(project, sets, base_scene, work, log=None):
+    """*sets* (:func:`load`) with a variant made for every scene that holds a picture a set gives its own: the scene
+    as *base_scene* ``(card path) -> bytes or None`` has it (set 1's), the set's pictures encoded in, written under
+    *work* as a ``{"file": ...}`` source. A scene the set already has a variant file of keeps that one."""
+    log = log or (lambda *a, **k: None)
+    picks_by_set = (sets or {}).get("images") or {}
+    if not picks_by_set:
+        return sets
+    rows = picture_rows(project)
+    out = dict(sets)
+    scenes = {c: dict(v) for c, v in (sets.get("scenes") or {}).items()}
+    os.makedirs(work, exist_ok=True)
+    for n, picks in sorted(picks_by_set.items()):
+        name = sets["names"][n - 1] if n - 1 < len(sets["names"]) else "set %d" % n
+        by_card = {}
+        for rel, src in sorted(picks.items()):
+            if not os.path.isfile(src):
+                log("Image sets: set %d (%s)'s picture for %s is missing (%s); left out." % (n, name, rel, src),
+                    "warning")
+                continue
+            places = rows.get(rel)
+            if not places:
+                log("Image sets: %s is not inside a scene, so set %d (%s) cannot change it; left out."
+                    % (rel, n, name), "warning")
+                continue
+            for card, off, length, pw, ph, fmt in places:
+                by_card.setdefault(card, []).append((src, rel, off, length, pw, ph, fmt))
+        made = 0
+        for card, places in sorted(by_card.items()):
+            if n in scenes.get(card, {}):
+                log("Image sets: set %d (%s) has a scene file of its own for %s; its pictures are not added to it."
+                    % (n, name, card), "info")
+                continue
+            base = base_scene(card)
+            if not base:
+                log("Image sets: the card has no %s; set %d (%s)'s pictures in it are left out." % (card, n, name),
+                    "warning")
+                continue
+            data, done = encode_pictures(base, places, log)
+            if not done:
+                continue
+            path = os.path.join(work, "set%d_%s.radium" % (n, scene_id(card)[:12]))
+            with open(path, "wb") as f:
+                f.write(data)
+            scenes.setdefault(card, {})[n] = {"file": path}
+            made += 1
+        if made:
+            log("Image sets: set %d (%s): %d picture(s) of its own, in %d scene(s)." % (n, name, len(picks), made),
+                "info")
+    out["scenes"] = scenes
+    return out
 
 
 def scene_id(card_path):

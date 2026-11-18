@@ -73,7 +73,7 @@ forget() {
     [ -f "$MARK" ] || return 0
     rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP/game.port" \
           "$DUMP"/mode.start "$DUMP"/mode[1-7].start "$DUMP/mode.stop" "$DUMP/mode.clip" \
-          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$DUMP/sounds.cfg" "$DUMP/picture.cfg" "$DUMP/settings.cfg" "$DUMP/attract.cfg" "$DUMP/coop.cfg" "$DUMP/idle.cfg" "$DUMP/handicap.cfg" "$DUMP/comp.cfg" "$DUMP/cabshow.cfg" "$DUMP/addcab.cfg" "$DUMP/scorefeed.cfg" "$DUMP/records.cfg" "$DUMP/saved.cfg" "$DUMP/buttons.cfg" "$MARK" 2>/dev/null
+          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$DUMP/sounds.cfg" "$DUMP/picture.cfg" "$DUMP/settings.cfg" "$DUMP/attract.cfg" "$DUMP/coop.cfg" "$DUMP/idle.cfg" "$DUMP/handicap.cfg" "$DUMP/comp.cfg" "$DUMP/cabshow.cfg" "$DUMP/addcab.cfg" "$DUMP/scorefeed.cfg" "$DUMP/records.cfg" "$DUMP/saved.cfg" "$DUMP/buttons.cfg" "$DUMP/scenes.cfg" "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
     return 0
 }
 
@@ -227,6 +227,15 @@ if [ "$REC" != 0 ]; then
     if [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ]; then WHAT="records on the high scores"
     else WHAT="$WHAT and records on the high scores"; fi
 fi
+# Image sets (PAD-1390; Simon 2026-11-18: a card whose only runtime feature was its image sets booted without the
+# runtime, so the operator's IMAGE SET changed nothing in the emulator): scenes.cfg is a reason of its own too
+SCENES=0
+[ -f "$S/scenes.cfg" ] && SCENES=$(grep -c "^scene	" "$S/scenes.cfg" 2>/dev/null)
+case "$SCENES" in ''|*[!0-9]*) SCENES=0 ;; esac
+if [ "$SCENES" != 0 ]; then
+    if [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ]; then WHAT="image sets ($SCENES scene file(s))"
+    else WHAT="$WHAT and image sets ($SCENES scene file(s))"; fi
+fi
 
 if ! python3 "$RIG/parts.py" --rootfs-file /etc/init.d/game_monitor "$CARD" 2>/dev/null \
         | grep -qF "$HOOK"; then
@@ -240,7 +249,7 @@ if [ -n "${PAD_MODE_SO:-}" ]; then
         "(PAD_MODE_SO=$PAD_MODE_SO): that one runs, the card's own modes are left out"
     exit 0
 fi
-if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ]; }; then
+if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ] && [ "$SCENES" = 0 ]; }; then
     forget
     say "$WHO carries a mode object but no $([ -f "$S/game.port" ] && echo "mode file" || echo "port file") beside it:"
     say "  nothing the emulator can run. This run boots without it"
@@ -262,7 +271,7 @@ fi
 if [ "$(id -u)" = 0 ]; then
     _o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
     [ -n "$_o" ] && [ "$_o" != root ] && chown "$_o" "$ROOT$OBJECT" "$DUMP/game.port" \
-        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$MARK" 2>/dev/null
+        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$DUMP"/scenes.cfg "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
 fi
 say "$WHO carries $WHAT: their runtime runs in this game, as on the machine"
 echo "$OBJECT"

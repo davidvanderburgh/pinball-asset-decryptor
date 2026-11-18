@@ -2392,7 +2392,11 @@ HELP_CONTENT = {
             "- Plug it into this PC before **Start**; the app hands it to the emulator.\n"
             "- Key on another PC? Pick **On another PC** in the Security key card, enter "
             "the key server and bus ID, and **Test**: **Start** borrows it over the "
-            "network and **Stop** hands it back.",
+            "network and **Stop** hands it back.\n"
+            "- Key in your JJP machine? Write a **Key sharing stick for a JJP machine** "
+            "there and run it on the machine with the game's hot fix. Then type the "
+            "machine's IP address and leave the bus ID empty. While PAD uses the key "
+            "the machine shows SECURITY KEY MISSING; it plays again after **Stop**.",
         ]),
         ("Getting started", [
             {"flow": [

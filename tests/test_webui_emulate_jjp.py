@@ -527,6 +527,40 @@ def test_key_setting_is_saved_and_checked(tmp_path):
         assert rk.current() is None
 
 
+def test_a_jjp_machine_needs_only_its_address(tmp_path):
+    # PAD-1416: a machine lending its own key has one, so the bus ID may stay empty
+    from pinball_decryptor.plugins.jjp import remote_key as rk
+    with web_app(tmp_path, mfr="jjp") as w:
+        w.call("ui.set", NS, "key_where", "usbip")
+        w.call("ui.set", NS, "key_server", "192.168.1.50")
+        w.drain()
+        s = w.state(NS)
+        assert not s["key_bad"]
+        assert "the key on 192.168.1.50" in s["key_msg"]
+        assert rk.current() == rk.Remote("192.168.1.50", 3240, "")
+        assert "JJP machine" in s["stick_tip"] and "SECURITY KEY MISSING" in s["stick_tip"]
+    rk.configure({"where": "local"})
+
+
+def test_the_key_sharing_stick_is_written_where_picked(tmp_path, monkeypatch):
+    stick = tmp_path / "usb"
+    stick.mkdir()
+    with web_app(tmp_path, mfr="jjp") as w:
+        monkeypatch.setattr(w.window, "ask_folder", lambda key, title, initialdir=None: str(stick))
+        assert w.run(_svc(w).keyshare_stick, "install")
+        s = w.state(NS)
+        assert not s["key_bad"] and "Stick written" in s["key_msg"]
+        assert "IP address" in s["key_msg"]
+        assert (stick / "hotfix" / "padkeyshare" / "padkeyshare.py").exists()
+        w.drain()
+        assert _wait(lambda: "key sharing stick" in _log_text(w))
+        (stick / "hotfix" / "runme.sh").write_text("#!/bin/sh\necho theirs\n")
+        assert not w.run(_svc(w).keyshare_stick, "remove")
+        assert w.state(NS)["key_bad"]
+        monkeypatch.setattr(w.window, "ask_folder", lambda *a, **k: "")
+        assert w.run(_svc(w).keyshare_stick, "install") is False      # canceled: nothing said
+
+
 def test_a_saved_key_server_is_restored(tmp_path):
     from pinball_decryptor.plugins.jjp import remote_key as rk
     entry = {"where": "usbip", "server": "keybox:3241", "busid": "2-1"}

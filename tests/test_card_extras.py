@@ -40,7 +40,10 @@ def test_project_state_preserves_others_and_disabled_keys(tmp_path):
     b = tmp_path / 'b'; b.mkdir()
     staged_changes.save(str(a), {'settings': {'volume': 2}})
     E.save(str(a), True, key())
-    assert E.configuration(str(a)) == {'enabled': True, 'public_keys': key() + '\n'}
+    # PAD-1397: the build's keys are the user's plus this computer's own
+    from pinball_decryptor.core import pad_ssh_key
+    assert E.configuration(str(a)) == {'enabled': True, 'public_keys': key() + '\n' + pad_ssh_key.public_line()}
+    assert E.load(str(a))['public_keys'] == key() + '\n'
     assert E.load(str(b)) is None
     E.save(str(a), False, key())
     assert E.configuration(str(a)) == {'enabled': False, 'public_keys': key() + '\n'}
@@ -90,3 +93,17 @@ def test_failed_project_save_is_reported(tmp_path, monkeypatch):
     with pytest.raises(E.ExtrasError, match='could not be saved'):
         E.save(str(tmp_path), True, key())
     assert E.configuration(str(tmp_path)) is None
+
+
+def test_remote_access_on_with_no_key_of_your_own_trusts_this_computer(tmp_path):
+    """PAD-1397: Send to machine logs in with PAD's own key, so remote access can be switched on with no key
+    pasted; the card still gets exactly one valid key, this computer's."""
+    from pinball_decryptor.core import pad_ssh_key
+    E.save(str(tmp_path), True, '')
+    assert E.load(str(tmp_path)) == {'enabled': True, 'public_keys': ''}
+    line = pad_ssh_key.public_line()
+    assert line.startswith('ssh-ed25519 ') and line.rstrip().endswith(' pinball-asset-decryptor')
+    assert E.configuration(str(tmp_path))['public_keys'] == E.validate_keys(line)
+    # the same key every time, and the private half stays in the key folder only
+    assert pad_ssh_key.public_line() == line
+    assert 'PRIVATE' not in repr(staged_changes.load(str(tmp_path)))

@@ -722,6 +722,8 @@ def write_card(original_path, assets_dir, output_path, log=None,
                     "sector_size": out._sector,
                     "cipher": out.header.segment("0")["encryption"]}
             poff, psize = out.part_offset, out.part["sectors"] * 512
+            written = getattr(out, "written", None) or []
+            send_ranges = written_by_file(Ext4Reader(out, 0, out.size), written) if written else {}
         finally:
             out.close()
         if jobs:
@@ -752,7 +754,7 @@ def write_card(original_path, assets_dir, output_path, log=None,
                 raise PipelineError("Write card", "Modes: %s, so this card is not complete."
                                     % e) from None
         _write_record(output_path, original_path, complete=True,
-                      counts=(n_audio, n_video, n_image, n_text))
+                      counts=(n_audio, n_video, n_image, n_text), send_ranges=send_ranges)
         log("Wrote the Spike 3 card in %.0f s: %s (%d sound(s), %d video(s), "
             "%d image(s), %d display string(s))."
             % (time.monotonic() - t0, output_path, n_audio, n_video, n_image,
@@ -772,7 +774,45 @@ class _Cancelled(Exception):
     pass
 
 
-def _write_record(output_path, original_path, complete, counts=None):
+def written_by_file(reader, written):
+    """PAD-1397: the games volume's in-place *written* ``[(offset, n)]`` as ``{"/games/<path>": [[file_off, n]]}``,
+    merged, for the files they landed in.  A Send to a machine patches exactly these ranges rather than uploading a
+    sound container or the game's image files whole.  Writes outside any file (a directory block, the
+    filesystem's own bookkeeping) are not file changes and are left out; files copied whole afterwards are found
+    by their changed inodes."""
+    import bisect
+    from . import engine
+    if not written:
+        return {}
+    index = []
+    for path, _ino, node in reader.iter_regular_files(max_depth=32, min_size=1):
+        try:
+            runs = reader.mapped_ranges(node)
+        except Exception:                               # noqa: BLE001 - an inode the reader can't map
+            continue
+        for f_off, disk, n in runs:
+            index.append((disk, disk + n, path, f_off))
+    index.sort()
+    starts = [e[0] for e in index]
+    out = {}
+    for off, n in written:
+        pos = off
+        while pos < off + n:
+            i = bisect.bisect_right(starts, pos) - 1
+            if i < 0 or not (index[i][0] <= pos < index[i][1]):
+                nxt = bisect.bisect_right(starts, pos)
+                if nxt >= len(index) or index[nxt][0] >= off + n:
+                    break
+                pos = index[nxt][0]
+                continue
+            d0, d1, path, f_off = index[i]
+            take = min(d1, off + n) - pos
+            out.setdefault("/games/" + path.lstrip("/"), []).append((f_off + pos - d0, take))
+            pos += take
+    return {p: [[int(a), int(b)] for a, b in engine._merge_ranges(rr)] for p, rr in sorted(out.items())}
+
+
+def _write_record(output_path, original_path, complete, counts=None, send_ranges=None):
     """The build record beside the card (engine.BUILD_MANIFEST_SUFFIX).  Its
     fresh ``build_id`` is what tells the Spike 3 card store this card from
     the last build under the same name (tools/spike3_emu/s3store.py
@@ -786,6 +826,8 @@ def _write_record(output_path, original_path, complete, counts=None):
            "complete": bool(complete)}
     if counts is not None:
         rec["counts"] = dict(zip(("audio", "video", "image", "text"), counts))
+    if send_ranges is not None:
+        rec["send_ranges"] = send_ranges
     try:
         engine._write_build_manifest(output_path, rec)
     except OSError:

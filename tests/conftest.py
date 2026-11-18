@@ -215,6 +215,16 @@ def _isolate_card_prints(tmp_path_factory):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolate_pad_ssh_key(tmp_path_factory):
+    """PAD-1397: this computer's remote-access key and the machines it has met
+    (core/pad_ssh_key.py) live beside settings.json; a build with remote access
+    on makes the key, so a test would otherwise make one in the developer's
+    own app-data folder."""
+    from pinball_decryptor.core import pad_ssh_key
+    pad_ssh_key.KEY_DIR = str(tmp_path_factory.mktemp("remote_access"))
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _isolate_audio_ctl(tmp_path_factory):
     """Point the Emulate tabs' volume/mute file (item 56) at a temp path for
     the whole run — same reason and same shape as ``_isolate_card_edits``

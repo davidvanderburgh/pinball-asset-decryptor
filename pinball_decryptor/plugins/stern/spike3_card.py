@@ -47,6 +47,9 @@ class GamesVolume(_s3.DecryptingSegmentReader):
         self.header = header
         self.master_key = master_key
         self.writable = writable
+        #: every ``(volume offset, length)`` written, in order: what a Send to a machine patches in place
+        #: (PAD-1397, spike3_write's ``send_ranges``)
+        self.written = []
         self._enc = _s3._luks_otp().aes_xts_encrypt
         self.sectors_written = 0
         #: the partition's byte offset on the card and the segment's offset
@@ -63,6 +66,7 @@ class GamesVolume(_s3.DecryptingSegmentReader):
             return 0
         start = self._pos
         end = start + n
+        self.written.append((start, n))
         if end > self.size:
             raise OSError("write past the end of the games volume "
                           "(0x%x > 0x%x)" % (end, self.size))

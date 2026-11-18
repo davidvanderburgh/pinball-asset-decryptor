@@ -312,6 +312,9 @@ class App:
         # ticked); None otherwise.  Armed at build dispatch, consumed (and
         # cleared) in _on_done.
         self._chain_flash_after_build = None
+        # PAD-1397: the same for Send to machine, (address, image); and a Send's own run under way
+        self._chain_send_after_build = None
+        self._send_active = False
         # (in_path, out_path) for the SECOND card of a Compare "Extract Both"
         # while the first one runs; None otherwise.  Armed at dispatch,
         # consumed (and cleared) in _on_done, exactly like the flash chain
@@ -467,6 +470,8 @@ class App:
             on_flash_image=self._start_flash_image,
             on_read_card=self._start_read_card,
             on_build_flash=self._on_build_flash_request,
+            on_build_send=self._on_build_send_request,
+            on_send_image=self._start_send,
             on_save_project=self._save_project,
             on_load_project=self._load_project,
             on_new_project=self._new_project,
@@ -2436,7 +2441,8 @@ class App:
         return extras.get('error', '') if extras is not None else ''
 
     def _start_write(self, chain_flash_device=None, again=False,
-                     chain_flash_verify=True, chain_flash_keep_data=False):
+                     chain_flash_verify=True, chain_flash_keep_data=False,
+                     chain_send=None):
         """Dispatch a Build.  ``chain_flash_device`` (the Build / flash
         dialog with both sections ticked) makes a successful build chain
         straight into flashing its output onto that device — armed only at
@@ -2690,6 +2696,9 @@ class App:
             (chain_flash_device, output_path, bool(chain_flash_verify))
             + ((True,) if chain_flash_keep_data else ())
             if chain_flash_device else None)
+        # PAD-1397: Send to machine - armed at dispatch, like the flash
+        self._chain_send_after_build = ((chain_send, output_path)
+                                        if chain_send else None)
         # what _offer_bigger_card needs if this build is refused for room
         self._last_build_output = output_path
         self._space_refusal = None
@@ -2981,6 +2990,27 @@ class App:
             self.window.set_running(False, mode="write")
             raise
         threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    def _on_build_send_request(self, address):
+        """PAD-1397: the Write tab's Send to machine - build to the Write tab's destination as usual, then send the
+        fresh image's changes to the machine at *address* (chained from :meth:`_on_done`)."""
+        self._start_write(chain_send=address)
+
+    def _start_send(self, image_path, address):
+        """PAD-1397: send *image_path* to the machine at *address* over remote access (core/remote_send.py), as a
+        run of its own: the log, the progress bar and the Write tab's Cancel."""
+        from .core import remote_send
+        if self.window._running:
+            return
+        self._save_settings()
+        self._active_mode = "write"
+        self._cancel_requested = False
+        self._send_active = True
+        self.window.set_running(True, mode="write")
+        self.window.reset_steps(mode="write")
+        log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb)
+        threading.Thread(target=self.pipeline.run, daemon=True, name="pad-send").start()
 
     def _start_read_card(self, device_path, image_path):
         """Save a whole card into a raw image file (the inverse of a flash).
@@ -5413,6 +5443,24 @@ class App:
         # leave a stale flash queued for a later, unrelated success.
         chain_flash = self._chain_flash_after_build
         self._chain_flash_after_build = None
+        chain_send = getattr(self, "_chain_send_after_build", None)
+        self._chain_send_after_build = None
+        # PAD-1397: a Send's own end - nothing of a build's completion applies
+        if getattr(self, "_send_active", False):
+            self._send_active = False
+            self.window.set_running(False, mode="write")
+            if self._cancel_requested:
+                self._cancel_requested = False
+                self.window.set_status("Canceled")
+                self.window.append_log("Send canceled.", "info")
+            elif success:
+                self.window.set_status("Sent")
+                messagebox.showinfo("Sent to the machine", summary)
+            else:
+                self.window.set_status("Send failed")
+                self.window.append_log(summary, "error")
+                messagebox.showerror("Send to machine", summary)
+            return
         # Same up-front consume for the Extract Both pair, and for the same
         # reason: a cancelled or failed first card must not leave the second
         # one armed for whatever run finishes next.
@@ -5734,8 +5782,13 @@ class App:
                         f"play/show their original asset):\n\n"
                         f"{self._failure_lines(fails)}\n\n"
                         f"{self._noop_stage_hint()}")
-                elif not chain_flash:
+                elif not chain_flash and not chain_send:
                     messagebox.showinfo("Write Complete", summary)
+                if chain_send:
+                    # PAD-1397: Write tab's Send to machine - the fresh build goes over the network instead
+                    address, image_path = chain_send
+                    self.window.append_log("Build complete — sending its changes to the machine...", "info")
+                    self.root.after(0, lambda: self._start_send(image_path, address))
                 if chain_flash:
                     # Build / flash dialog, both sections ticked: chain the
                     # freshly-built image straight onto the card.  No "Write

@@ -174,6 +174,9 @@ pyinstaller \
     --hidden-import "Crypto.Cipher" \
     --hidden-import "Crypto.Cipher.AES" \
     --hidden-import "Crypto.Util.Padding" \
+    --hidden-import "paramiko" \
+    --hidden-import "pinball_decryptor.core.remote_send" \
+    --hidden-import "pinball_decryptor.core.pad_ssh_key" \
     --collect-all "UnityPy" \
     --collect-all "fsb5" \
     --collect-all "pyogg" \

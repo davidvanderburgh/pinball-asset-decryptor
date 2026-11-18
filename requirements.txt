@@ -31,6 +31,10 @@
 # check, AcoustID lookup): the frozen macOS builds link a Homebrew OpenSSL
 # whose default CA path doesn't exist on non-Homebrew Macs, so without a
 # bundled trust store every HTTPS request fails certificate verification.
+# paramiko is the SSH client Send to machine logs in to a machine with
+# (PAD-1397, core/remote_send.py): the card's own key-only server from Remote
+# access, with this computer's key (core/pad_ssh_key.py, which uses its
+# cryptography dependency to make that key).
 Pillow==12.3.0
 certifi==2026.7.22
 zstandard==0.25.0
@@ -38,3 +42,4 @@ pycryptodome==3.23.0
 numpy==2.5.3
 unicorn==2.1.4
 capstone==5.0.9
+paramiko==5.1.0

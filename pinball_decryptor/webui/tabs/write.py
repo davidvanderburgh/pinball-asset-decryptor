@@ -37,6 +37,12 @@ FLASH_BTN_TIP = (
     "both in the dialog to build and flash in one step. Flashing "
     "erases and replaces the whole card, and needs Administrator "
     "(approved when the write starts).")
+#: PAD-1397: the Write tab's Send to machine button
+SEND_TIP = (
+    "Build the image, then copy only what changed onto the machine over "
+    "your network and restart its game: no SD card out. Needs Remote "
+    "access on (Network tab) on the card the machine runs, and the "
+    "machine's address there.")
 EXPORT_TIP = (
     "Save this list — every file the next build will write, with its "
     "type and whether it already differs from the extract or is "
@@ -676,6 +682,9 @@ class WriteTab(TabService):
             revert_cap=bool(has_replace
                             and self.window.cb.get("on_revert_all")),
             diagnose=bool(flash and getattr(mfr, "diagnose_card", None)),
+            # PAD-1397: a Spike 2 / Spike 3 card with remote access can take a build over the network
+            send_cap=bool(flash and self._send_offered(mfr)),
+            send_tip=SEND_TIP,
             editable_hint=(EDITABLE_HINT if mfr.key == "bof" and g("write")
                            else ""),
             text_grow_cap=bool(g("replace_text") and g("write")),
@@ -2240,6 +2249,42 @@ class WriteTab(TabService):
         fn = self.window.cb.get("on_write")
         if fn is not None:
             fn()
+        return True
+
+    # ------------------------------------------------------------------
+    # PAD-1397: Send to machine
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _send_offered(mfr):
+        from ...core import ssh_card
+        return ssh_card.offered(mfr)
+
+    @rpc
+    def send_to_machine(self):
+        """Build the image as the Build / flash dialog would, then send its changes to the machine over remote
+        access (core/remote_send.py) instead of writing the SD card."""
+        from ...core import card_extras, pad_ssh_key
+        fn = self.window.cb.get("on_build_send")
+        if fn is None or self.window._running:
+            return False
+        project = self.write_assets_var.get().strip()
+        try:
+            rec = card_extras.load(project)
+        except card_extras.ExtrasError:
+            rec = None
+        address = pad_ssh_key.last_address()
+        missing = None
+        if not self.write_upd_var.get().strip() or not project or not self._target_write_path():
+            missing = "Set the original image, the project folder and where the build goes, here on the Write tab."
+        elif not (rec and rec.get("enabled")):
+            missing = ("Turn on Remote access on the Network tab, then write the card onto the machine once: "
+                       "after that, Send to machine updates it over your network.")
+        elif not address:
+            missing = "Enter the machine's address on the Network tab (Send to machine)."
+        if missing:
+            compat.messagebox.showinfo("Send to machine", missing)
+            return False
+        fn(address)
         return True
 
     # ------------------------------------------------------------------

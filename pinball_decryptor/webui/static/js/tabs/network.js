@@ -2,7 +2,7 @@
 // someone who has never heard of it. The score feed (PAD-1204) moved here from Play options, whose other options
 // change how the game plays; its state and actions are the Modes service's (the `modes` namespace). Remote access
 // (SSH, PR #38) is this tab's own (the `network` namespace).
-import { html, useState, useEffect, PageHead, Card, Field, Check, Note, Empty, call, cx } from "../core/ui.js";
+import { html, useState, useEffect, PageHead, Card, Field, Check, Note, Empty, Button, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -31,7 +31,7 @@ function FeedContract({ c }) {
 }
 
 function Said({ text, kind }) {
-  return text ? html`<span class=${cx("small", kind === "err" ? "err-ink" : "muted")}>${text}</span>` : null;
+  return text ? html`<span class=${cx("small", kind === "err" ? "err-ink" : kind === "ok" ? "ok-ink" : "muted")}>${text}</span>` : null;
 }
 
 function ScoreFeed({ s }) {
@@ -73,7 +73,8 @@ function RemoteAccess({ n }) {
       <li>read the game's logs when something goes wrong</li>
       <li>run add-on programs of their own on the machine</li>
     </ul>
-    <p class="net-does">You need an SSH key on your computer. Paste its <b>public</b> half below (the line that starts${" "}
+    <p class="net-does">PAD's <b>Send to machine</b> needs nothing more: this computer's own key goes on the card
+      with it. To log in with a program of your own as well, you need an SSH key on your computer. Paste its <b>public</b> half below (the line that starts${" "}
       <span class="mono">ssh-ed25519</span>, <span class="mono">ssh-rsa</span> or <span class="mono">ecdsa-</span>),
       one per line, then connect as <span class="mono">root</span> on port 22 at the machine's address on your network.</p>
     <${Note} kind="warn">Leave it off if you are not sure you need it. Anyone with a matching key has full control of
@@ -94,6 +95,27 @@ function RemoteAccess({ n }) {
   <//>`;
 }
 
+// PAD-1397: Send to machine - the machine's address, a check that this computer gets in, and any card image sent
+// over (the Write tab's Send to machine builds and sends the project's own changes)
+function SendToMachine({ n }) {
+  const busy = n.running || n.checking;
+  return html`<${Card} cls="net-opt" title="Send to machine">
+    <p class="net-does">${n.send_intro}</p>
+    <div class="net-field"><label for="net-send-address" class="lbl">The machine's address on your network</label>
+      <${Field} id="net-send-address" value=${n.address || ""} mono placeholder="192.168.1.40"
+        title="Its IP address or name (192.168.1.40, or 192.168.1.40:2222 for another port). Your router's list of connected devices shows it."
+        onChange=${() => {}} onCommit=${(v) => call("network.set_address", v)} /></div>
+    <div class="row net-send-row">
+      <${Button} disabled=${busy || !n.address} onClick=${() => call("network.check_connection")}>${n.checking ? "Checking…" : "Check connection"}<//>
+      <${Button} kind="primary" disabled=${busy || !n.address} title="Pick any card image: a new code version, a custom code card, a multi-boot card or a build"
+        onClick=${() => call("network.send_image")}>Send an image to the machine…<//>
+      ${n.known ? html`<${Button} kind="ghost" disabled=${busy} title="If the machine's card was written from scratch, it has a new identity: forget the old one"
+        onClick=${() => call("network.forget_machine")}>Forget this machine<//>` : null}
+    </div>
+    <${Said} text=${n.check} kind=${n.check_kind} />
+  <//>`;
+}
+
 export default function NetworkTab() {
   const n = useNs("network");
   const s = useNs("modes");
@@ -104,6 +126,7 @@ export default function NetworkTab() {
       : html`<div class="net-grid">
         ${s.feed_shown ? html`<${ScoreFeed} s=${s} />` : null}
         <${RemoteAccess} n=${n} />
+        ${n.offered ? html`<${SendToMachine} n=${n} />` : null}
       </div>`}
   </div>`;
 }

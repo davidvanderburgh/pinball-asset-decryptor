@@ -623,6 +623,8 @@ class ModePlan:
     records_file: str = ""
     #: PAD-1402: ``saved.cfg`` beside the mode files, the modes' saved progress ("" = none)
     saved_file: str = ""
+    #: PAD-1403: ``buttons.cfg`` beside the mode files, the cabinet buttons as shots ("" = none)
+    buttons_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -1051,6 +1053,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         result.lines += describe_code(code, result, prof=prof, project=project)
     stock_plan(project, result, tree)
     result.mode_names = [spec.name for _s, spec in modes] + [c.name for _s, c in code]
+    if getattr(prof, "button_shots", ()):              # PAD-1403: the cabinet buttons as shots
+        buttons_into(result, game_elf, scratch, prof, modes, code)
     if variants:
         variants_into(project, result, stock_bank, tree, only=False, log=log, progress=progress,
                       cancel=cancel, read_card=read_card, scan_card=scan_card)
@@ -1080,6 +1084,52 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         records_into(result, game_elf, scratch, records)
     if saved:                                        # PAD-1402
         saved_into(result, game_elf, scratch, saved_setting)
+    return result
+
+
+# ---- PAD-1403: the cabinet buttons as shots ---------------------------------------------------------------------
+def _named_in(name, modes, code):
+    """True when a mode (*modes*: ``[(slug, spec)]``) or a code mode (*code*) names the shot *name*."""
+    import json
+    from dataclasses import asdict, is_dataclass
+    want = json.dumps(name)
+    for _s, spec in modes or ():
+        try:
+            text = json.dumps(asdict(spec) if is_dataclass(spec) else spec.__dict__, default=str)
+        except (TypeError, ValueError):
+            text = repr(spec)
+        if want in text or repr(name) in text:
+            return True
+    for _s, c in code or ():
+        if want in repr(getattr(c, "__dict__", c)) or name in str(getattr(c, "source", "") or ""):
+            return True
+    return False
+
+
+def buttons_into(result, game_elf, scratch, prof, modes=(), code=()):
+    """``buttons.cfg`` for *result*'s card (:mod:`.cabinet_buttons`): each of the title's button shots, on the switch
+    ids the card's own game program names. Raises :class:`ModeWriteError` when a mode uses a button shot whose
+    button the program does not name."""
+    from . import cabinet_buttons as CB
+    names = set(getattr(prof, "button_shots", ()) or ())
+    shots = [(n, m) for n, m in prof.shots if n in names]
+    ids = CB.switch_ids(game_elf)
+    lines, missing = CB.cfg_lines(shots, ids)
+    used = [n for n, _m in shots if _named_in(n, modes, code)]
+    for name in missing:
+        if name in used:
+            raise ModeWriteError(CB.NO_BUTTON % (prof.label, " and ".join(
+                "the %s button" % b for b in CB.buttons_of(name) if b not in ids), name))
+    if not lines:
+        return result
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, CB.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(CB.cfg_text(shots, ids))
+    result.buttons_file = path
+    result.lines.append("cabinet buttons: %d button shots on switches %s%s" % (
+        len(lines), ", ".join("%s %d" % (b, ids[b]) for b in ("action", "left", "right", "start") if b in ids),
+        ("; the modes use " + ", ".join(used)) if used else ""))
     return result
 
 
@@ -2498,6 +2548,11 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             from . import saved_progress as SP
             dst = os.path.join(out_dir, SP.CFG_NAME)
             shutil.copyfile(result.saved_file, dst)
+            extras.append(dst)
+        if getattr(result, "buttons_file", ""):        # PAD-1403: buttons.cfg, the cabinet buttons as shots
+            from . import cabinet_buttons as CB
+            dst = os.path.join(out_dir, CB.CFG_NAME)
+            shutil.copyfile(result.buttons_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

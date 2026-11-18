@@ -161,7 +161,8 @@ def test_a_profile_per_port(name):
     game, version = name.split("-")
     assert (p.game_dir, p.version, p.port) == (game, version, name + ".port")
     assert p.key == "%s_%s" % (game, version.replace(".", "_"))
-    assert len(p.shots) == shots and len({n for n, _m in p.shots}) == shots
+    port_shots = len(p.shots) - len(p.button_shots)       # PAD-1403: the cabinet buttons' shots come on top
+    assert port_shots == shots and len({n for n, _m in p.shots}) == len(p.shots)
     assert p.shot_mask_bits == bits and p.proven is proven
     cannot = (set(cannot) - {"multiball", "ball_save", "magnet", "scoop", "coils", "shield", "shaker", "shows",
                              "wizard", "building", "roster", "challenge", "place", "done"}) | _mb(name)         | (set() if name in MP.PLACE_PROVEN else {"place"})          | (set() if name in MP.DONE_PROVEN else {"done"})            # PAD-710: a game mode's place where proven; PAD-747: the game's modes completed

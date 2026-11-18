@@ -11598,6 +11598,7 @@ static void note_thread(const char *what, int *said)
 static void events_deliver(void);             /* the events section below */
 static void event_census(void);
 static void switches_deliver(void);           /* the switches section below */
+static void btn_tick(void);                    /* PAD-1403, the same section */
 static void roster_deferred_tick(void);   /* item 146 */
 static void roster_late_tick(void);       /* PAD-707 */
 static void dto_tick(void);               /* PAD-733 */
@@ -11639,6 +11640,7 @@ static void on_tick(pm_reg *r)
     events_deliver();
     event_census();                           /* PAD-420: `value event_census 1` */
     switches_deliver();
+    btn_tick();                               /* PAD-1403: the cabinet buttons' shots */
     spare_tick();                             /* PAD-826: spare inputs' closes as shots; spare outputs' ends */
     stock_balls_tick();                      /* PAD-687: how long two balls have been in play */
     dto_tick();                               /* PAD-733: dead flippers until the balls drain to one */
@@ -17539,6 +17541,8 @@ static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
 static int coop_live;                        /* PAD-1031: co-op characters watch the flippers and Action */
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
 static int coop_hides(unsigned id);
+static int n_btn;                            /* PAD-1403: button shots from buttons.cfg (btn_edge counts their edges) */
+static void btn_edge(unsigned id, unsigned level, unsigned polarity);
 
 /* ---- PAD-1051: a switch the game does not see for a while ----------------------------------------------------------
  * DoomWalrus666 (Godzilla): the co-op pick's flippers also walked the game's own player language select ("USE FLIPPERS
@@ -17693,6 +17697,7 @@ static void on_switch_edge(pm_reg *r)
     if (att_live) att_edge(id, level, flags, pol, mask);   /* PAD-641: a flipper button in attract */
     if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
     if (coop_live) coop_edge(id, level, flags, pol);       /* PAD-1031: a co-op character's pick, its save */
+    if (n_btn) btn_edge(id, level, pol);                   /* PAD-1403: a button shot's press or release */
     if (coop_live || edge_hid_n)                           /* PAD-1051: a press the game is not to see, or sees again */
         edge_hide_edge(id, base, desc, (volatile unsigned char *)(unsigned long)(st + (unsigned)edge.level_at),
                        (pol & 4u) ? 1u : 0u, (level & 1u) == ((pol & 4u) ? 1u : 0u));
@@ -17798,6 +17803,7 @@ static void on_switch_edge64(pm_reg *r, pm_reg *x)
     if (att_live) att_edge(id, level, flags, pol, mask);   /* PAD-641: a flipper button in attract */
     if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
     if (coop_live) coop_edge(id, level, flags, pol);       /* PAD-1031: a co-op character's pick, its save */
+    if (n_btn) btn_edge(id, level, pol);                   /* PAD-1403: a button shot's press or release */
     playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
     if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
         say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level,
@@ -17904,6 +17910,211 @@ static void switches_arm(void)
     } else {
         say("switch shots off: %s", sites ? "no switch_hit site matches this build" : "the port has no switch_hit site");
     }
+}
+
+/* ---- PAD-1403: the cabinet buttons as shots (MODE_SDK.md "The cabinet buttons as shots") ---------------------------
+ * The Action button, the flipper buttons and the Start button, each as a press, a release and a hold, and two buttons
+ * together (Cyclops' visor in Uncanny X-Men 2.0: "hold a flipper plus the Action button"), on every build: the app
+ * reads the buttons' switch ids off the card's own game program and puts buttons.cfg beside the runtime (or /dump for
+ * a rig), one line per button shot, each on a shot bit of its own that the port's lines do not use:
+ *   button <mask> press <id> <name>             the button's press edge (to its closed level)
+ *   button <mask> release <id> <name>           its release edge
+ *   button <mask> hold <id> <ms> <name>         once, when it has been held <ms> since its press (again only after
+ *                                               a release and a new press)
+ *   button <mask> combo <id> <id2> <name>       the press that makes both buttons held, either order
+ * The edges come from the framework's switch drain (site switch_edge, the same hook as the switch shots, PAD-641's
+ * attract sounds and co-op's picks), counted lock-free on the drain's thread whatever the switch's handler bits or
+ * the game's mode mask say (Godzilla LE 1.16's flippers and Action have no handler at all); the level for a hold or
+ * a combo is the switch's level byte (switch_held). Every tick hands the modes what came since the last, only while a
+ * game is played (pm_in_game): a press in attract, a tilt or the bonus is counted and dropped. Each button shot is
+ * also a named shot of the port's (pm_shot_mask finds it; a spare input's bit is never one of these). */
+#define N_BUTTON_SHOTS 24
+#define N_BUTTON_IDS 8
+enum { BTN_PRESS = 1, BTN_RELEASE, BTN_HOLD, BTN_COMBO };
+static const char *const BUTTON_FILES[] = { "/usr/local/padmode/buttons.cfg", "/dump/buttons.cfg" };
+static struct { unsigned kind, id, id2, ms; uint64_t mask; unsigned long down_at; int fired; char name[48]; }
+    btn[N_BUTTON_SHOTS];
+static unsigned btn_ids[N_BUTTON_IDS]; static int n_btn_ids;   /* the switches the button shots watch */
+static volatile unsigned btn_press_n[N_SWITCH_IDS], btn_release_n[N_SWITCH_IDS];
+static unsigned btn_press_seen[N_SWITCH_IDS], btn_release_seen[N_SWITCH_IDS];
+static volatile unsigned char btn_watch[N_SWITCH_IDS];
+static volatile unsigned char btn_down[N_SWITCH_IDS];   /* its press counted: its release will */
+static int switch_held(unsigned id);         /* the co-op section below */
+static long btn_log_left = 64;              /* the first button shots each boot, in the log (proving a build) */
+
+/* the drain's thread: one edge of a watched button (level: the switch's level after this edge). Only while a game is
+ * played at the edge itself: the press that starts a game (X-Men's Action button in attract) is not a shot of it. */
+static void btn_edge(unsigned id, unsigned level, unsigned polarity)
+{
+    if (id >= N_SWITCH_IDS || !btn_watch[id]) return;
+    if ((level & 1u) == ((polarity & 4u) ? 1u : 0u)) {
+        if (!(btn_down[id] = (unsigned char)(pm_in_game() != 0))) return;
+        __sync_fetch_and_add(&btn_press_n[id], 1u);
+    } else if (btn_down[id]) {               /* a release only of a press that counted (not Start's that began it) */
+        btn_down[id] = 0;
+        __sync_fetch_and_add(&btn_release_n[id], 1u);
+    }
+}
+
+static void btn_fire(int i, const char *why)
+{
+    if (btn_log_left > 0 && btn_log_left--)
+        say("button shot: %s (0x%016llx, %s)", btn[i].name, (unsigned long long)btn[i].mask, why);
+    deliver_shot(btn[i].mask);
+}
+
+/* 1 when (kind, the switch's presses / releases this tick, its level now; a combo's other button's) fire the button
+ * shot; *down_at / *fired: a hold's clock (the tests lift this verbatim) */
+static int btn_due(unsigned kind, unsigned presses, unsigned releases, int held, unsigned presses2, int held2,
+                   unsigned long now, unsigned ms, unsigned long *down_at, int *fired)
+{
+    switch (kind) {
+    case BTN_PRESS: return presses != 0;
+    case BTN_RELEASE: return releases != 0;
+    case BTN_COMBO: return (presses && held2) || (presses2 && held);
+    case BTN_HOLD:
+        if (presses) *down_at = 0, *fired = 0;               /* a new press: its own clock */
+        if (!held) { *down_at = 0; *fired = 0; return 0; }
+        if (!*down_at) *down_at = now ? now : 1u;          /* never ahead of now: the difference cannot wrap */
+        if (*fired || now - *down_at < ms) return 0;
+        *fired = 1;
+        return 1;
+    }
+    return 0;
+}
+
+static void btn_tick(void)
+{
+    unsigned dp[N_BUTTON_IDS], dr[N_BUTTON_IDS];
+    int hd[N_BUTTON_IDS], i, k, playing;
+    unsigned long now;
+    if (!n_btn) return;
+    for (k = 0; k < n_btn_ids; k++) {
+        unsigned id = btn_ids[k], p = btn_press_n[id], r = btn_release_n[id];
+        dp[k] = p - btn_press_seen[id];
+        dr[k] = r - btn_release_seen[id];
+        btn_press_seen[id] = p;
+        btn_release_seen[id] = r;
+        hd[k] = switch_held(id);
+    }
+    playing = pm_in_game();
+    now = pm_ms();
+    for (i = 0; i < n_btn; i++) {
+        int a = -1, b = -1, times;
+        for (k = 0; k < n_btn_ids; k++) {
+            if (btn_ids[k] == btn[i].id) a = k;
+            if (btn_ids[k] == btn[i].id2) b = k;
+        }
+        if (a < 0) continue;
+        if (!playing) { btn[i].down_at = 0; btn[i].fired = 0; continue; }
+        if (!btn_due(btn[i].kind, dp[a], dr[a], hd[a], b >= 0 ? dp[b] : 0u, b >= 0 ? hd[b] : 0, now, btn[i].ms,
+                     &btn[i].down_at, &btn[i].fired))
+            continue;
+        times = btn[i].kind == BTN_PRESS ? (int)dp[a] : btn[i].kind == BTN_RELEASE ? (int)dr[a] : 1;
+        if (times > 8) times = 8;                        /* a flood is not N separate presses */
+        while (times--)
+            btn_fire(i, btn[i].kind == BTN_PRESS ? "press" : btn[i].kind == BTN_RELEASE ? "release"
+                        : btn[i].kind == BTN_HOLD ? "held" : "both held");
+    }
+}
+
+/* one buttons.cfg line; 0 when it is not a button line the runtime can take */
+static int btn_line(const char *s)
+{
+    char kind[16], nm[48];
+    int ok = 1, k;
+    uint64_t mask;
+    unsigned id, x = 0;
+    while (*s == ' ' || *s == '\t') s++;
+    if (!str_starts(s, "button ") || n_btn >= N_BUTTON_SHOTS) return 0;
+    s += 7;
+    mask = number(&s, &ok);
+    if (!ok || !mask || (mask & (mask - 1))) return 0;
+    s = word(s, kind, sizeof kind);
+    id = (unsigned)number(&s, &ok);
+    if (!ok || !id || id >= N_SWITCH_IDS) return 0;
+    if (str_eq(kind, "hold") || str_eq(kind, "combo")) {
+        x = (unsigned)number(&s, &ok);
+        if (!ok || !x || (str_eq(kind, "combo") && x >= N_SWITCH_IDS)) return 0;
+    }
+    rest(s, nm, sizeof nm);
+    if (!nm[0]) return 0;
+    btn[n_btn].kind = str_eq(kind, "press") ? BTN_PRESS : str_eq(kind, "release") ? BTN_RELEASE
+                    : str_eq(kind, "hold") ? BTN_HOLD : str_eq(kind, "combo") ? BTN_COMBO : 0;
+    if (!btn[n_btn].kind) return 0;
+    btn[n_btn].id = id;
+    btn[n_btn].id2 = btn[n_btn].kind == BTN_COMBO ? x : 0;
+    btn[n_btn].ms = btn[n_btn].kind == BTN_HOLD ? x : 0;
+    btn[n_btn].mask = mask;
+    btn[n_btn].down_at = 0;
+    btn[n_btn].fired = 0;
+    for (k = 0; nm[k] && k + 1 < (int)sizeof btn[n_btn].name; k++) btn[n_btn].name[k] = nm[k];
+    btn[n_btn].name[k] = 0;
+    n_btn++;
+    return 1;
+}
+
+static void btn_watch_id(unsigned id)
+{
+    int k;
+    if (!id || id >= N_SWITCH_IDS) return;
+    for (k = 0; k < n_btn_ids; k++)
+        if (btn_ids[k] == id) return;
+    if (n_btn_ids < N_BUTTON_IDS) btn_ids[n_btn_ids++] = id;
+    btn_watch[id] = 1;
+}
+
+static void buttons_arm(void)
+{
+    static char raw[4096];
+    long n = -1, i, start = 0;
+    unsigned k;
+    int j, added = 0;
+    uint64_t used = 0;
+    const char *why = 0;
+    struct site *e = site("switch_edge");
+    for (k = 0; k < sizeof BUTTON_FILES / sizeof BUTTON_FILES[0] && n < 0; k++)
+        n = pm_read_file(BUTTON_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i < port.n_shot; i++) used |= port.shot[i].mask;
+    for (i = 0; i < port.n_switch; i++) used |= port.sw[i].mask;
+    for (i = 0; i <= n; i++)
+        if (i == n || raw[i] == '\n' || raw[i] == '\r') {
+            raw[i] = 0;
+            btn_line(raw + start);
+            start = i + 1;
+        }
+    if (!n_btn) return;
+    for (j = 0; j < n_btn; j++)
+        if (btn[j].mask & used) {                    /* the port's own shot's bit: not ours to give */
+            say("button shots: %s's bit 0x%016llx is a shot of the port's - left out", btn[j].name,
+                (unsigned long long)btn[j].mask);
+            btn[j--] = btn[--n_btn];
+        }
+    if (!n_btn) return;
+    if (!e || !e->ok || !edge_arm(&why) || !edge_hook(e)) {
+        say("button shots off: the buttons cannot be read (%s)", !e ? "the port has no switch_edge"
+            : !e->ok ? "switch_edge does not match this build" : why ? why : "switch_edge could not be hooked");
+        n_btn = 0;
+        return;
+    }
+    for (j = 0; j < n_btn; j++) {
+        btn_watch_id(btn[j].id);
+        if (btn[j].kind == BTN_COMBO) btn_watch_id(btn[j].id2);
+        if (port.n_shot < N_SHOTS) {                 /* a named shot of the port's: pm_shot_mask, spare bits */
+            struct shot *x = &port.shot[port.n_shot++];
+            x->mask = btn[j].mask;
+            rest(btn[j].name, x->name, sizeof x->name);
+            added++;
+        }
+    }
+    for (k = 0; k < (unsigned)n_btn_ids; k++) {      /* what came before the gate is not a press now */
+        btn_press_seen[btn_ids[k]] = btn_press_n[btn_ids[k]];
+        btn_release_seen[btn_ids[k]] = btn_release_n[btn_ids[k]];
+    }
+    say("button shots: %d from buttons.cfg on %d switch(es) (%d named), from the switch drain's edges (switch_edge "
+        "0x%08" PMA ")", n_btn, n_btn_ids, added, e->addr);
 }
 
 /* ---- PAD-1017: co-op play (MODE_SDK.md "Co-op play"; docs/plans/pad1017_coop.md) ------------------------------
@@ -29189,6 +29400,7 @@ static void pad_mode_start(void)
     }
     events_arm();
     switches_arm();                           /* shots from switches, when the port maps some */
+    buttons_arm();                            /* PAD-1403: the cabinet buttons as shots (buttons.cfg) */
     {   /* item 146: the battle roster, when the port has one */
         static const char *const roster_s[] = { "roster_start", "roster_done", 0 };   /* both: a pick taken must be given back */
         static const char *const roster_d[] = { "rule_battle", 0 };

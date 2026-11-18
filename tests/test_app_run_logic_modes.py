@@ -1494,10 +1494,10 @@ def test_modes_tab_on_a_tmnt_pro_project_lists_its_shots_and_greys_what_it_canno
         _project(w, project)
         st = _st(w)
         names = [n for n, _m in tmnt.shots]
-        assert len(names) == 17
+        assert len(names) == 17 + 18                    # PAD-1403: + the buttons' shots
         assert st["profile"]["shots"] == names
         title = st["title_text"]
-        assert "TMNT Pro 1.59" in title and "17 shots" in title and "port" not in title
+        assert "TMNT Pro 1.59" in title and "35 shots" in title and "port" not in title
         assert st["title_port"] == "turtles_pro-1.59.port"          # the head's tooltip has it
         assert [e["name"] for e in st["examples"]] == ["TARGET RUSH"]
         assert st["new_ok"] is True
@@ -1541,7 +1541,7 @@ def test_modes_tab_premium_1_16_project_offers_godzillas_names(tmp_path):
         _project(w, project)
         st = _st(w)
         names = st["profile"]["shots"]
-        assert len(names) == 26 and "Shield target center" in names and "Maser target" in names
+        assert len(names) == 26 + 15 and "Shield target center" in names and "Maser target" in names
         assert {"Right scoop", "Mecha exit top"} <= set(names)                                 # PAD-658
         assert {"Action button", "Left flipper button", "Right flipper button"} <= set(names)   # PAD-228
         assert "Left spinner" in names and "Top spinner" in names and "Shield ramp spinner" in names
@@ -1604,7 +1604,7 @@ def test_modes_tab_jaws_greys_lights_and_screen_and_a_godzilla_mode_is_retargete
         monkeypatch.setattr(w.window, "append_log", log)
         _project(w, project)
         st = _st(w)
-        assert len(st["profile"]["shots"]) == 27 and st["profile"]["cols"] == 3
+        assert len(st["profile"]["shots"]) == 27 + 18 and st["profile"]["cols"] == 3   # PAD-1403
         assert not st["dis"]["screen"]              # item 164: its score panel carries a screen
         assert not st["dis"]["lights"]              # item 164: every insert in the mode's colour
         assert not st["dis"]["clip"] and "clip" not in st["reasons"]
@@ -1729,7 +1729,7 @@ def test_modes_tab_no_port_card_after_another_title_never_rewrites_a_modes_shots
         jaws = _modes_card_project(tmp_path, "jaws_le-1_02_0.Release.16G.sdcard.raw", "1.02.0",
                                    folder="jaws")
         _project(w, jaws)
-        assert len(_st(w)["profile"]["shots"]) == 27
+        assert len(_st(w)["profile"]["shots"]) == 27 + 18
         empty = _modes_card_project(tmp_path, "godzilla_pro-1_14_0_spike2.Release.8G.sdcard.raw",
                                     "1.14.0", folder="empty")
         _project(w, empty)

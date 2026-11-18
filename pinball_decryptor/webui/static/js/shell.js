@@ -558,7 +558,7 @@ function StatusBar({ shell }) {
   const emuLive = !running && f.mode === "emulate" && idx >= 0;
   const chip = shell.cancelling ? html`<${Chip} kind="warn" dot>Canceling<//>`
     : emuLive ? html`<${Chip} kind=${idx >= phases.length - 1 ? "ok" : "acc"} dot>${idx >= phases.length - 1 ? (f.status || "Running") : "Starting"}<//>`
-    : running ? html`<${Chip} kind="acc" dot>${f.mode === "write" ? "Building" : f.mode === "extract" ? "Working" : "Running"}<//>`
+    : running ? html`<${Chip} kind="acc" dot>${f.run_label || (f.mode === "write" ? "Building" : f.mode === "extract" ? "Working" : "Running")}<//>`
     : f.task ? html`<${Chip} kind="acc" dot>Working<//>`
     : html`<${Chip} kind="ok" dot>Ready<//>`;
   return html`<div class="statusbar" role="status">

@@ -3006,7 +3006,12 @@ class App:
         self._active_mode = "write"
         self._cancel_requested = False
         self._send_active = True
+        # PAD-1433: the Send's own chips (Connect / Compare / Send / Finish), in the footer whatever tab it was
+        # started from; the next Write puts the build's back (_start_write -> _refresh_extract_phases)
+        self.window.set_write_phases(remote_send.SEND_PHASES)
+        self.window.show_phase_row("write", borrow=True)
         self.window.set_running(True, mode="write")
+        self.window._set_footer(run_label="Sending")
         self.window.reset_steps(mode="write")
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
         self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb)
@@ -5454,6 +5459,8 @@ class App:
                 self.window.set_status("Canceled")
                 self.window.append_log("Send canceled.", "info")
             elif success:
+                from .core import remote_send
+                self.window.set_phase(len(remote_send.SEND_PHASES), mode="write")
                 self.window.set_status("Sent")
                 messagebox.showinfo("Sent to the machine", summary)
             else:

@@ -63,3 +63,33 @@ remembers the machine so we don't enter the IP address. The manual steps can sta
   root filesystem changed, read back re-encrypted; it reads remote access on, trusting PAD's key; again: already.
 * `tests/test_remote_setup.py` (17, the card ones under WSL with real e2fsprogs, the device path through
   `RawDeviceFile`), `tests/test_webui_network.py`, and the SSH/flash/send suites.
+
+## The machine's screen during a Send (David: "what happens if we copy files over in the middle of a game?")
+
+Before: a Quick Send uploaded while the game kept running, then killed it (Stern's "RESTARTING GAME" for a second, a
+game in progress lost); a full Send stopped the game with nothing on screen until the reboot. Nothing on the
+machine said PAD was there.
+
+Now a Send holds the game the way the card itself does for an update: game_monitor (the card's restart loop) is
+frozen with SIGSTOP and the game ended, and the card's own message screen runs: `boot_display` + `dprint`, which
+Stern's updater uses for "APPLYING UPDATE PLEASE WAIT" (Spike 2 `/usr/local/bin`; Spike 3 `/games/spike3/bin` or
+`/usr/local/spike`, same 4 lines x 16 characters). Every 2.5 s PAD redraws it from a heartbeat thread: "PAD IS
+UPDATING / RECEIVING 42% / LINK OK *  / KEEP POWER ON", the mark moving while the connection is live. At the end:
+"UPDATE DONE / RESTARTING GAME" and SIGCONT, so the card's own loop starts the game again (Spike 3's restart mark
+taken off, as before); a full Send ends "UPDATE DONE / RESTARTING / THE MACHINE" and reboots.
+
+A watchdog left on the machine (`/run/pad-send-screen/watch`) checks PAD's heartbeat: after 45 s of silence, if
+nothing was changed yet it shows "CONNECTION LOST / NOTHING CHANGED / RESTARTING GAME" and puts the game back;
+once files are changing (a full Send, or a Quick Send changing game files in place) it shows "CONNECTION LOST /
+SEND AGAIN / FROM PAD" and leaves the game held rather than start it on half the files. A Send that stops short
+with the connection fine (an error, Cancel) says the same, at once. The card's busybox has no `setsid`: the screen
+and the watchdog are detached with `(trap '' HUP; exec ...)`.
+
+Proof on the stand-in (the card's own rootfs and game_monitor under qemu-arm; `boot_display`/`dprint` replaced by
+loggers, since the LCD can't draw there), driving the real `SshMachine` calls (`C:\tmp\PAD-1427\screen_proof.py`,
+log in the ticket's artifacts as `machine_screen_proof.txt`): a Send held the game (game_monitor in state T, the
+game gone), the screen counted 0 to 100 % with the mark moving every ~3 s, then the game came back through the
+card's own loop; with the PC gone before any change the machine said CONNECTION LOST / NOTHING CHANGED and the game
+was back 48 s later; with files changing it said SEND AGAIN FROM PAD and kept the game held. Not proven: the pixels
+on a real LCD. The emulator never runs `boot_display` (it starts the game directly), so the messages are proven
+as handed to Stern's own tool in Stern's own format, not as drawn.

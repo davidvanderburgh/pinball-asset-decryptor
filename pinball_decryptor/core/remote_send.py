@@ -40,6 +40,7 @@ import os
 import posixpath
 import shlex
 import stat
+import threading
 import time
 
 GAMES = "/games"
@@ -528,6 +529,28 @@ class Machine:
     def reboot(self):
         raise NotImplementedError
 
+    # ---- PAD-1427: what the machine shows while a Send changes it (a machine with no screen shows nothing)
+    def pause_game(self):
+        """Hold the game for a Send: the card's own message screen says PAD is updating it."""
+
+    def resume_game(self):
+        """The game back after a Send (the card's own loop starts it again)."""
+        return self.restart_game()
+
+    def screen_progress(self, done, total, what=""):
+        """How far the Send is, for the machine's screen."""
+
+    def screen_changing(self):
+        """From here the machine's files change: a lost connection no longer puts the game back by itself."""
+
+    def screen_stopped(self, changed):
+        """A Send that stopped short (an error, Cancel): said on the machine; the game back if nothing changed."""
+
+
+def screen_text(*lines):
+    """A message for the card's own ``dprint``: four lines of sixteen characters, each centred."""
+    return "".join(str(l)[:16].center(16) for l in lines[:4]).rstrip()
+
 
 def _q(path):
     return shlex.quote(path)
@@ -568,6 +591,102 @@ for f in $(ls $R 2>/dev/null); do
   case "$before" in *" $f "*) ;; *) rm -f "$R/$f" ;; esac
 done
 if [ -n "$new" ]; then echo "PAD_SEND_RESTARTED $new"; else echo "PAD_SEND_NOT_BACK"; fi
+"""
+
+#: PAD-1427 (David: "what happens if we copy files over in the middle of a game? ... we need some way on the
+#: machine to see feedback that the update is happening (and the connection is live)").  A Send holds the game the
+#: way the card itself does for an update: game_monitor (its restart loop) is frozen (SIGSTOP), the game ended,
+#: and the card's own message screen runs: boot_display + dprint, which Stern's updater uses for "APPLYING UPDATE
+#: PLEASE WAIT" (/etc/init.d/game; Spike 3's S95game and game_monitor alike).  PAD redraws it every few seconds
+#: with how far the Send is and a mark that moves while the connection is live; a watchdog on the machine puts
+#: the game back (SIGCONT: the card's own loop restarts it) when PAD has gone quiet and nothing was changed yet.
+SCREEN_DIR = "/run/pad-send-screen"
+#: seconds without a word from PAD before the machine gives up on it
+SCREEN_LOST = 45
+SCREEN_FNS = PIDS_FN + r"""
+W=@W@
+pad_tools() {
+  BD=""; DP=""
+  for d in /games/spike3/bin /usr/local/spike /usr/local/bin; do
+    if [ -z "$BD" ] && [ -x "$d/boot_display" ]; then BD="$d/boot_display"; fi
+    if [ -z "$DP" ] && [ -x "$d/dprint" ]; then DP="$d/dprint"; fi
+  done
+  [ -n "$BD" ] && [ -n "$DP" ]
+}
+pad_say() {
+  pad_tools || return 0
+  if [ -z "$(pids_named boot_display)" ]; then
+    # detached from this session (the card's busybox has no setsid): hangup ignored, so it outlives the login
+    (trap '' HUP; exec "$BD") </dev/null >/dev/null 2>&1 &
+    sleep 1
+  fi
+  "$DP" "$1" >/dev/null 2>&1
+}
+pad_resume() {
+  touch $W/done
+  for p in $(pids_named boot_display); do kill $p 2>/dev/null; done
+  m=$(cat $W/monitor 2>/dev/null)
+  if [ -z "$m" ]; then echo "PAD_SEND_NOT_RUNNING"; return 0; fi
+  old=" $(cat $W/game 2>/dev/null) "
+  before=" $(cat $W/marks 2>/dev/null) "
+  kill -CONT $m
+  i=0
+  new=""
+  while [ $i -lt 40 ]; do
+    sleep 1
+    for p in $(pids_named game); do
+      case "$old" in *" $p "*) ;; *) new=$p ;; esac
+    done
+    [ -n "$new" ] && break
+    i=$((i+1))
+  done
+  for f in $(ls /tmp/game_restarts 2>/dev/null); do
+    case "$before" in *" $f "*) ;; *) rm -f "/tmp/game_restarts/$f" ;; esac
+  done
+  rm -f $W/monitor
+  if [ -n "$new" ]; then echo "PAD_SEND_RESTARTED $new"; else echo "PAD_SEND_NOT_BACK"; fi
+}
+"""
+
+#: the watchdog, left running on the machine for the length of the Send
+SCREEN_WATCH = r"""
+. @W@/fns
+while true; do
+  sleep 5
+  [ -f $W/done ] && exit 0
+  now=$(date +%s)
+  last=$(cat $W/alive 2>/dev/null || echo $now)
+  [ $((now - last)) -lt @LOST@ ] && continue
+  if [ "$(cat $W/phase 2>/dev/null)" = "changing" ]; then
+    touch $W/done
+    pad_say @LOST_CHANGED@
+  else
+    pad_say @LOST_SAFE@
+    sleep 4
+    pad_resume >/dev/null
+  fi
+  exit 0
+done
+"""
+
+#: the game held for a Send: its loop frozen, the game ended, the message screen up, the watchdog started
+PAUSE_SCRIPT = r"""
+. @W@/fns
+rm -f $W/done
+date +%s > $W/alive
+echo safe > $W/phase
+ls /tmp/game_restarts 2>/dev/null | tr '
+' ' ' > $W/marks
+m=$(pids_named game_monitor)
+g=$(pids_named game)
+echo "$m" > $W/monitor
+echo "$g" > $W/game
+[ -n "$m" ] && kill -STOP $m
+[ -n "$g" ] && kill -9 $g
+sleep 1
+pad_say @TEXT@
+(trap '' HUP; exec /bin/sh $W/watch) </dev/null >/dev/null 2>&1 &
+echo "PAD_SEND_PAUSED $m"
 """
 
 #: the delta's view of a machine file: its size, then the sha1 of each block (busybox dd + sha1sum, both cards)
@@ -923,12 +1042,88 @@ class SshMachine(Machine):
                 for ln in out.splitlines() if ln.startswith("/")}
 
     def stop_game(self):
-        """For an update: game_monitor stopped first, so nothing starts the game again on half the files."""
-        self.sh(PIDS_FN + "m=$(pids_named game_monitor); [ -n \"$m\" ] && kill -9 $m; "
-                "p=$(pids_named game); [ -n \"$p\" ] && kill -9 $p; sleep 1; true", check=False)
+        """For an update: nothing starts the game again on half the files.  PAD-1427: its loop is held, not
+        killed, so the game can come back if the Send stops before anything changed, and the machine's screen
+        says what is happening."""
+        self.pause_game()
 
     def reboot(self):
+        self._screen_finish(screen_text("UPDATE DONE", "RESTARTING", "THE MACHINE"))
         self.sh("sync; (sleep 2; reboot) </dev/null >/dev/null 2>&1 &", check=False, timeout=30)
+
+    # ---- PAD-1427: the machine's screen while a Send changes it
+    def _fns(self, script):
+        return script.replace("@W@", SCREEN_DIR)
+
+    def pause_game(self):
+        if getattr(self, "_paused", False):
+            return
+        self.sh("mkdir -p %s" % SCREEN_DIR, check=False)
+        watch = (SCREEN_WATCH.replace("@LOST@", str(SCREEN_LOST))
+                 .replace("@LOST_SAFE@", _q(screen_text("CONNECTION LOST", "NOTHING CHANGED", "RESTARTING GAME")))
+                 .replace("@LOST_CHANGED@", _q(screen_text("CONNECTION LOST", "SEND AGAIN", "FROM PAD"))))
+        for name, text in (("fns", SCREEN_FNS), ("watch", watch)):
+            with self.sftp.open(SCREEN_DIR + "/" + name, "wb") as f:
+                f.write(self._fns(text).encode("utf-8"))
+        self._screen = {"pct": 0, "what": "STARTING", "tick": 0, "last": 0.0}
+        self.sh(self._fns(PAUSE_SCRIPT).replace("@TEXT@", _q(self._screen_line())), check=False, timeout=60)
+        self._paused = True
+        self._beat_stop = threading.Event()
+        self._beat = threading.Thread(target=self._heartbeat, daemon=True, name="pad-send-screen")
+        self._beat.start()
+
+    def _screen_line(self):
+        st = self._screen
+        marks = ("*   ", " *  ", "  * ", "   *")
+        return screen_text("PAD IS UPDATING", "%s %d%%" % (st["what"], st["pct"]),
+                           "LINK OK " + marks[st["tick"] % 4], "KEEP POWER ON")
+
+    def _heartbeat(self):
+        """Every few seconds: tell the machine PAD is still there, and redraw its screen (the moving mark)."""
+        while not self._beat_stop.wait(2.5):
+            self._screen["tick"] += 1
+            with contextlib.suppress(Exception):
+                self.sh(self._fns(". @W@/fns\ndate +%s > $W/alive\n[ -f $W/done ] || pad_say ")
+                        + _q(self._screen_line()), check=False, timeout=20)
+
+    def _screen_finish(self, text):
+        """The Send's last word on the machine's screen; the heartbeat and the watchdog stop."""
+        if not getattr(self, "_paused", False):
+            return
+        self._beat_stop.set()
+        self._beat.join(25)
+        self.sh(self._fns(". @W@/fns\ntouch $W/done\npad_say ") + _q(text), check=False, timeout=30)
+
+    def screen_progress(self, done, total, what=""):
+        if not getattr(self, "_paused", False):
+            return
+        self._screen["pct"] = max(0, min(100, int(done * 100 / total))) if total else 0
+        self._screen["what"] = {"Uploading": "RECEIVING", "Updating": "UPDATING"}.get(what, "WORKING")
+
+    def screen_changing(self):
+        if getattr(self, "_paused", False):
+            self.sh("echo changing > %s/phase" % SCREEN_DIR, check=False)
+
+    def resume_game(self):
+        if not getattr(self, "_paused", False):
+            return self.restart_game()
+        self._screen_finish(screen_text("UPDATE DONE", "RESTARTING GAME"))
+        time.sleep(2)
+        _rc, out = self.sh(self._fns(". @W@/fns\npad_resume"), check=False, timeout=90)
+        self._paused = False
+        return out.strip().splitlines()[-1] if out.strip() else "PAD_SEND_NOT_BACK"
+
+    def screen_stopped(self, changed):
+        if not getattr(self, "_paused", False):
+            return
+        if changed:
+            self._screen_finish(screen_text("SEND STOPPED", "SEND AGAIN", "FROM PAD"))
+            self._paused = False
+            return
+        self._screen_finish(screen_text("SEND STOPPED", "NOTHING CHANGED", "RESTARTING GAME"))
+        time.sleep(2)
+        self.sh(self._fns(". @W@/fns\npad_resume"), check=False, timeout=90)
+        self._paused = False
 
 
 def connect(address, log=None):
@@ -1109,6 +1304,12 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
     rw = []
     temp_ops = []
     reboot_after = False
+    changed = False
+    # PAD-1427: the game is held for the Send (a game being played ends), and the machine's screen says PAD is
+    # updating it, how far along, and that the connection is live
+    if restart or tight:
+        machine.pause_game()
+    progress = _also_on_screen(machine, progress)
     try:
         if tight:
             machine.stop_game()
@@ -1126,6 +1327,9 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
             check()
             cur = getattr(op, "cur", None)
             if tight and op.mount == GAMES and cur and cur[0] == "file":
+                if not changed:
+                    machine.screen_changing()
+                    changed = True
                 log("Updating %s in place (only the parts that differ)..." % op.path, "info")
                 delta_put(machine, plan.trees[op.mount][0], op, cancel)
                 sent += op.size
@@ -1173,7 +1377,7 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
             restart = False
             reboot_after = True
         if restart:
-            line = machine.restart_game()
+            line = machine.resume_game()
             if "RESTARTED" in line:
                 log("The game restarted on the new files.", "success")
             elif "NOT_RUNNING" in line:
@@ -1185,6 +1389,8 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
         if temps:
             with contextlib.suppress(Exception):
                 machine.remove(temps)
+        with contextlib.suppress(Exception):
+            machine.screen_stopped(changed)
         raise
     finally:
         for mount in rw:
@@ -1562,6 +1768,7 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         "this reads every file it may need to change: a few minutes)." % os.path.basename(target.path), "info")
     mounted, rw, all_ops, temps, walks = [], [], {}, [], {}
     reboot = False
+    changed = False
     delta_bytes = 0
     try:
         for mount, num in sorted(target.parts.items()):
@@ -1602,10 +1809,14 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         if all_ops.get(ROOT) or all_ops.get(GAMES) or raws:
             machine.stop_game()
             reboot = True
+            progress = _also_on_screen(machine, progress)
         for mount in all_ops:
             if mount in (ROOT, GAMES):
                 machine.remount(mount, True)
                 rw.append(mount)
+        if reboot:
+            machine.screen_changing()
+            changed = True
         sent = 0
         for mount, ops in all_ops.items():
             tree = target.trees[mount]
@@ -1669,6 +1880,9 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         if temps:
             with contextlib.suppress(Exception):
                 machine.remove(temps)
+        if reboot:
+            with contextlib.suppress(Exception):
+                machine.screen_stopped(changed)
         raise
     finally:
         for mount in rw:
@@ -1686,6 +1900,15 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             "info")
     return "Sent %d change(s)%s to the machine%s." % (
         n, " and its boot partition" if raws else "", "; it is restarting" if reboot else "")
+
+
+def _also_on_screen(machine, progress):
+    """*progress*, also shown on the machine's screen (PAD-1427)."""
+    def both(done, total, what=""):
+        machine.screen_progress(done, total, what)
+        if progress is not None:
+            progress(done, total, what)
+    return both
 
 
 def send_image(image, machine, log=None, progress=None, cancel=None):

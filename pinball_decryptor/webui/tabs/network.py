@@ -19,7 +19,9 @@ from ...core import card_extras, pad_ssh_key, ssh_card
 
 #: PAD-1397: Send to machine, said for someone who has never heard of it
 SEND_INTRO = ("Changes go to the machine over your network instead of writing the SD card: only the files that "
-              "differ are copied, then the game restarts. Use Send to machine on the Write tab after you change "
+              "differ are copied. While it updates, the machine's screen says PAD is updating it and how far "
+              "along (a game being played ends), then the game restarts. Use Send to machine on the Write tab "
+              "after you change "
               "something, or send a whole card image here (a new code version, a custom code card or a "
               "multi-boot card). Set up the machine's card for remote access first, from this computer.")
 
@@ -219,7 +221,6 @@ class NetworkTab(TabService):
         return True
 
     def _set_up_done(self, text, kind, project):
-        self.set(setup_busy=False, setup_note=text, setup_kind=kind, setup_pct=100 if kind == 'ok' else 0)
         if kind == 'ok' and project and project == self._project() and self._inspect().get('supported'):
             # a card written later from this project keeps remote access, or the machine would lose it again
             try:
@@ -229,6 +230,8 @@ class NetworkTab(TabService):
                     self.publish()
             except card_extras.ExtrasError:
                 pass
+        # last: the project's setting is saved before the page reads the setup as done
+        self.set(setup_busy=False, setup_note=text, setup_kind=kind, setup_pct=100 if kind == 'ok' else 0)
 
     # ---- PAD-1427: find the machine on the network
     @rpc
@@ -400,7 +403,8 @@ class NetworkTab(TabService):
         which = ('%s (at %s)' % (game, address)) if game else ('the machine at %s' % address)
         if not compat.messagebox.askyesno(
                 'Send to machine',
-                "Make %s run %s?\n\nOnly the files that differ are copied. The machine's own "
+                "Make %s run %s?\n\nA game being played on it ends: its screen shows PAD updating it until "
+                "it is done. Only the files that differ are copied. The machine's own "
                 'settings, audits and high scores stay as they are. If the image is another version or card, '
                 'the machine restarts when it is done; leave it switched on until then.'
                 % (which, os.path.basename(path)), icon='warning'):

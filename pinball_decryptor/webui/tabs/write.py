@@ -40,9 +40,9 @@ FLASH_BTN_TIP = (
 #: PAD-1397: the Write tab's Send to machine button
 SEND_TIP = (
     "Build the image, then copy only what changed onto the machine over "
-    "your network and restart its game: no SD card out. Needs Remote "
-    "access on (Network tab) on the card the machine runs, and the "
-    "machine's address there.")
+    "your network and restart its game: no SD card out. A game being "
+    "played on it ends, and its screen shows PAD updating it. Needs "
+    "remote access set up (Network tab) on the card the machine runs.")
 EXPORT_TIP = (
     "Save this list — every file the next build will write, with its "
     "type and whether it already differs from the extract or is "

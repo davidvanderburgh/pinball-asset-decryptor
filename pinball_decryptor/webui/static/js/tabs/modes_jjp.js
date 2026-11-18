@@ -522,14 +522,19 @@ export function JjpModes({ s }) {
   const [newMode, setNewMode] = useState(false);
   const titles = j.titles || [];
   const have = new Set(((j.sounds || {}).have) || []);
-  const opts = titles.map((t) => ({ value: t.label, label: t.name + (t.can_run ? "" : " - can't run modes"),
-                                    disabled: !t.can_run, group: t.can_run ? "Can run custom modes" : "Can't run custom modes" }));
+  // PAD-1412: the game is the selected card's, no picker
+  const runs = titles.filter((t) => t.can_run).map((t) => t.name);
+  const selectCard = () => call("ui.select_tab", "card");
   return html`<div class="page modes-page jjpm-page">
     <div class="pagehead"><div class="grow"><h1 class="h1">Modes</h1>
       <p>Custom modes that run inside a Jersey Jack game: started by its switches or its own events, timed by its mode timer, scored by its scoring, lit with its lamps and drawn in its fonts. The game's own modes go on as they were.</p></div>
-      <div class="actions"><${Select} value=${j.label} options=${opts} width=${360} onChange=${(v) => call("modes.jjp_pick_title", v)} title="The game" /></div>
+      ${j.label ? html`<div class="actions"><span class="jjpm-game" ...${tip({ head: "The selected card's game", lines: [j.card_name || ""] })}>${(j.title || {}).name || j.label}</span></div>` : null}
     </div>
     ${!titles.length ? html`<${Empty} icon="modes" title="No games">No port reports were found in tools/jjp_emu/modes/ports.<//>` : null}
+    ${titles.length && !j.card ? html`<${Empty} icon="modes" title="No card selected">Select the Jersey Jack card to make modes for: its game is the one these modes are for.
+      <div style="margin-top:10px"><${Button} size="sm" kind="primary" icon="sd" onClick=${selectCard}>Select card<//></div><//>` : null}
+    ${titles.length && j.card && !j.label ? html`<${Note} kind="warn">${j.card_name} isn't a game custom modes know. Modes are made for: ${runs.join(", ")}.
+      <div style="margin-top:8px"><${Button} size="xs" icon="sd" onClick=${selectCard}>Select another card<//></div><//>` : null}
     ${j.label && !j.can_run ? html`<${Note} kind="warn">${(j.title || {}).name} can't run custom modes: ${(j.title || {}).why}.<//>` : null}
     ${j.can_run ? html`
       <${SoundsRow} j=${j} />

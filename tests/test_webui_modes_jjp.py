@@ -34,6 +34,22 @@ def _jjp(w):
     return w.state("modes").get("jjp") or {}
 
 
+def select_card(w, name):
+    """PAD-1412: select a card (an empty stand-in file named *name*, or a path) - the Modes tab
+    takes its game from it; returns the published state."""
+    path = name
+    if not os.path.isabs(name):
+        d = os.path.join(os.path.dirname(CM.modes_root()), "cards")
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, name if name.lower().endswith((".iso", ".img", ".raw")) else name + ".iso")
+        if not os.path.exists(path):
+            open(path, "wb").close()
+    w.run(lambda: w.window.extract_input_var.set(path))
+    w.drain()
+    w.run(_svc(w).jjp_refresh)
+    return _jjp(w)
+
+
 def _wait(w, cond, timeout=20.0):
     end = time.time() + timeout
     while time.time() < end:
@@ -46,8 +62,7 @@ def _wait(w, cond, timeout=20.0):
 
 def _open_wonka(w):
     w.call("ui.select_tab", "modes")
-    w.call("modes.jjp_pick_title", "Wonka-v03.03")
-    return _jjp(w)
+    return select_card(w, "Wonka-v03.03")
 
 
 def test_the_tab_shows_on_jjp_with_every_title_that_can_run_modes(tmp_path, preview_on):
@@ -150,21 +165,62 @@ def test_new_duplicate_delete(tmp_path, preview_on):
         assert j["open"] == "1_example.mode"
 
 
-def test_the_title_is_remembered(tmp_path, preview_on):
+def _fake_iso(path, volume_id):
+    """An ISO 9660 stand-in: just the primary volume descriptor, carrying *volume_id*."""
+    from pinball_decryptor.plugins.jjp import machine_info as MI
+    pvd = bytearray(2048)
+    pvd[0], pvd[1:6] = 1, b"CD001"
+    pvd[40:72] = volume_id.encode("latin1").ljust(32)
+    with open(path, "wb") as f:
+        f.seek(MI._PVD_AT)
+        f.write(pvd)
+    return str(path)
+
+
+def test_label_for_card_reads_the_name_then_the_volume_id(tmp_path):
+    """PAD-1412: the card's name first (CHAKA's mod carries GnR's volume ID), then the volume ID."""
+    chaka = _fake_iso(tmp_path / "CHAKAs_LOTLJ_V1.0_GNR_LE_3.03.iso", "GunsNRoses-v03.03")
+    assert CM.label_for_card(chaka) == "CHAKAs_LOTLJ_V1.0_GNR_LE_3.03"
+    # Windows' own name for it (spaces, another case) is the same card
+    spaced = _fake_iso(tmp_path / "chakas lotlj v1.0 gnr le 3.03.iso", "GunsNRoses-v03.03")
+    assert CM.label_for_card(spaced) == "CHAKAs_LOTLJ_V1.0_GNR_LE_3.03"
+    assert CM.label_for_card(_fake_iso(tmp_path / "my wonka.iso", "Wonka-v03.03")) == "Wonka-v03.03"
+    assert CM.label_for_card(_fake_iso(tmp_path / "other.iso", "Nothing-v1.00")) == ""
+    assert CM.label_for_card(str(tmp_path)) == "" and CM.label_for_card("") == ""
+    assert CM.label_for_card(str(tmp_path / "gone.iso")) == ""
+
+
+def test_the_title_is_the_selected_cards(tmp_path, preview_on):
+    """PAD-1412: no game picker - the Modes tab follows Select card, live."""
     with web_app(tmp_path, mfr="jjp") as w:
         w.call("ui.select_tab", "modes")
-        w.call("modes.jjp_pick_title", "Hobbit-v04.02")
         j = _jjp(w)
-        assert j["label"] == "Hobbit-v04.02" and j["check"]["ok"], j["check"]
-        assert w.app._settings["jjp_modes"]["label"] == "Hobbit-v04.02"
+        assert j["label"] == "" and not j["card"] and "modes" not in j
         with pytest.raises(Exception):
-            w.call("modes.jjp_pick_title", "NoSuchGame-v1.0")
+            w.call("modes.jjp_pick_title", "Wonka-v03.03")            # the picker is gone
+        j = select_card(w, "Hobbit-v04.02")
+        assert j["label"] == "Hobbit-v04.02" and j["check"]["ok"], j["check"]
+        assert j["card_name"] == "Hobbit-v04.02.iso"
+        # the build takes the selected card itself
+        assert j["build"]["iso"] == j["card"]
+        j = select_card(w, _fake_iso(tmp_path / "CHAKAs_LOTLJ_V1.0_GNR_LE_3.03.iso", "GunsNRoses-v03.03"))
+        assert j["label"] == "CHAKAs_LOTLJ_V1.0_GNR_LE_3.03" and j["can_run"]
+        assert j["title"]["name"].startswith("CHAKA")
+        # a card no port report knows: no title, no modes, its name to say so
+        j = select_card(w, "NoSuchGame-v1.0")
+        assert j["label"] == "" and "modes" not in j and j["card_name"] == "NoSuchGame-v1.0.iso"
+        # a card picked while the tab shows is followed without a refresh of ours
+        path = os.path.join(os.path.dirname(j["card"]), "Wonka-v03.03.iso")
+        open(path, "wb").close()
+        w.run(lambda: w.window.extract_input_var.set(path))
+        assert _wait(w, lambda: _jjp(w).get("label") == "Wonka-v03.03")
+        assert _jjp(w)["open"] == "1_example.mode"
 
 
 def test_a_title_that_cannot_run_modes_says_why(tmp_path, preview_on):
     with web_app(tmp_path, mfr="jjp") as w:
         w.call("ui.select_tab", "modes")
-        w.call("modes.jjp_pick_title", "HarryPotter-v01.26")
+        select_card(w, "HarryPotter-v01.26")
         j = _jjp(w)
         assert not j["can_run"] and "export" in j["title"]["why"] and "modes" not in j
 
@@ -175,12 +231,12 @@ def test_wizard_of_oz_runs_modes_and_offers_pause_not_hold(tmp_path, preview_on)
     modes for start_after are its mode procs."""
     with web_app(tmp_path, mfr="jjp") as w:
         w.call("ui.select_tab", "modes")
-        w.call("modes.jjp_pick_title", "WizardOfOz-v08.02")
+        select_card(w, "WizardOfOz-v08.02")
         j = _jjp(w)
         assert j["can_run"] and j["modes"]
         gm = j["fields"]["game_modes"]
         assert gm["default"] == "pause" and "hold" not in gm["choices"] and "end" in gm["choices"]
-        w.call("modes.jjp_pick_title", "Wonka-v03.03")
+        select_card(w, "Wonka-v03.03")
         gm = _jjp(w)["fields"]["game_modes"]
         assert gm["default"] == "hold" and "hold" in gm["choices"]
     from pinball_decryptor.plugins.jjp import custom_modes as CM
@@ -473,7 +529,7 @@ def test_a_modes_own_media_files_are_offered_and_check(tmp_path, preview_on):
         j = _open_wonka(w)
         for fn in ("start.wav", "logo.png", "clip.webm", "notes.txt"):
             open(os.path.join(j["folder"], fn), "wb").close()
-        w.call("modes.jjp_pick_title", "Wonka-v03.03")
+        select_card(w, "Wonka-v03.03")
         j = _jjp(w)
         names = j["names"]
         assert names["sound_or_file"][0] == "start.wav" and "se_Fanfare_Jackpot" in names["sound_or_file"]

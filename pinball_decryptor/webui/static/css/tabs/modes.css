@@ -766,3 +766,5 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 /* PAD-1376: balls and coils keys, a word per input */
 .jjpm-parts { gap: 8px; align-items: center; }
 .jjpm-num { display: inline-flex; align-items: center; gap: 6px; }
+/* PAD-1412: the selected card's game, where the game picker was */
+.jjpm-game { display: inline-block; padding: 6px 12px; border: 1px solid var(--line, #3a3f47); border-radius: 6px; font-weight: 600; white-space: nowrap; }

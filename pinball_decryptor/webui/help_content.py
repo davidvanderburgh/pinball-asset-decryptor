@@ -4340,7 +4340,8 @@ def _jjp_modes_games():
     from ..plugins.jjp import custom_modes as CM
     names = [t["name"] for t in CM.titles() if t["can_run"]]
     return ("Every game whose code the app has read and found able to run them: "
-            + ", ".join(names) + ". The others are listed greyed, with why.") if names else ""
+            + ", ".join(names) + ". The game is the selected card's: select another card for "
+            "another game's modes.") if names else ""
 
 
 #: PAD-1350: the Modes tab on a Jersey Jack game (webui/modes_jjp.py) - a different editor
@@ -4358,7 +4359,7 @@ JJP_MODES_HELP = [
     ]),
     ("Which games", lambda: _jjp_modes_games()),
     ("Making a mode", [
-        "Pick the game at the top right. Your modes are on the left; **New mode** "
+        "The game is the selected card's (its name shows at the top right). Your modes are on the left; **New mode** "
         "starts one from picks that suit the game. Every switch, lamp, lamp group, "
         "sound and font is picked from the game's own list, so nothing can be "
         "misspelt. A game takes 24 modes.\n\n"

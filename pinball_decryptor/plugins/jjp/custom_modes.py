@@ -218,6 +218,35 @@ def titles():
     return out
 
 
+def _squash(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def label_for_card(path):
+    """PAD-1412: the port report a selected card is, or "".  The card's own file name first
+    (a mod like CHAKA's LOTLJ carries its base game's volume ID, so its name is what tells it
+    apart; spaces, case and punctuation aside), then a JJP ISO's volume ID (a stock card under
+    another name)."""
+    path = (path or "").strip()
+    if not path or not os.path.isfile(path):
+        return ""
+    labels = [t["label"] for t in titles()]
+    stem = _squash(re.sub(r"\.(iso|img|raw|bin)$", "", os.path.basename(path), flags=re.I))
+    for label in labels:
+        if _squash(label) == stem:
+            return label
+    try:
+        from .machine_info import read_volume_id
+        got = read_volume_id(path)
+    except (OSError, ValueError):
+        got = None
+    vol = _squash(got[0]) if got else ""
+    for label in labels if vol else ():
+        if _squash(label) == vol:
+            return label
+    return ""
+
+
 # ============================================================================ a title's folder
 def title_dir(label, seed=True):
     """The person's mode folder for *label*; made (from the title's starter folder when there

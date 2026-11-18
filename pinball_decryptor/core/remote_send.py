@@ -61,6 +61,30 @@ class Unreachable(SendError):
     """Nothing answered at the machine's address (PAD-1427: a remembered machine is looked for again)."""
 
 
+def unreachable_reason(host, port, err, waited):
+    """PAD-1430: what a failed connection to the machine means, said so the user knows what to do next.  A
+    timeout means nothing is at that address; a refusal means a device is there without remote login; no route
+    means this computer can't get to that network at all."""
+    import errno
+    import socket
+    code = getattr(err, "winerror", None) or getattr(err, "errno", None)
+    where = "%s on port %d" % (host, port)
+    detail = getattr(err, "strerror", None) or str(err) or err.__class__.__name__
+    if isinstance(err, socket.timeout) or code in (errno.ETIMEDOUT, 10060):
+        return ("Nothing answered at %s in %g seconds: no device seems to be at that address right now. The router "
+                "may have given the machine a different address since; press Find my machine to look for it. "
+                "Is the machine switched on and finished starting up?" % (where, waited))
+    if code in (errno.ECONNREFUSED, 10061):
+        return ("A device is at %s, but it turned the connection away: it is not running remote login. Either "
+                "it is not the machine (another device has that address now: press Find my machine), or the "
+                "machine's card was not set up for remote access." % where)
+    if code in (errno.EHOSTUNREACH, errno.ENETUNREACH, 10065, 10051):
+        return ("This computer has no route to %s (%s). Is this computer on the same network as the machine, not "
+                "a guest network or a VPN?" % (where, detail))
+    return ("Couldn't reach %s (%s). Is the machine on, on your network, and running a card set up for remote "
+            "access?" % (where, detail))
+
+
 class NotThisCard(SendError):
     """The machine isn't running the card a build was made from: the quick Send can't be used, the full one can."""
 
@@ -740,8 +764,7 @@ class SshMachine(Machine):
             # (PAD-1427: and a remembered machine is then looked for at another one)
             sock = socket.create_connection((host, self.port), timeout=min(timeout, 5))
         except OSError as e:
-            raise Unreachable("Couldn't reach %s on port %d (%s). Is the machine on, on your network, and running "
-                            "a card built with remote access on?" % (host, self.port, e.strerror or e)) from None
+            raise Unreachable(unreachable_reason(host, self.port, e, min(timeout, 5))) from None
         t = paramiko.Transport(sock)
         try:
             t.start_client(timeout=timeout)

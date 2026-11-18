@@ -46,10 +46,31 @@ def _machines_state():
 
 
 def _found_line(rec):
-    """One machine a scan found, said plainly."""
+    """One machine a scan found, said plainly; one that doesn't let this computer in says what it is
+    (PAD-1430: its server's own name, so a PC or a Raspberry Pi is told apart from a pinball machine's card)."""
     if rec.get('lets_in'):
         return '%s at %s' % (_game_name(rec.get('game')) or 'A machine', rec['address'])
-    return '%s: %s' % (rec['address'], rec.get('note') or "doesn't let this computer in")
+    banner = (rec.get('banner') or '').replace('SSH-2.0-', '').strip()
+    note = rec.get('note') or "doesn't let this computer in"
+    if 'dropbear' in banner.lower():
+        what = 'looks like a pinball machine card (%s) but %s: was its card set up from another computer?' % (
+            banner, note)
+    elif banner:
+        what = 'runs %s, so it is a computer or other device, not a pinball machine; %s' % (banner, note)
+    else:
+        what = note
+    return '%s %s' % (rec['address'], what)
+
+
+def _scan_scope(report):
+    """``'1022 addresses on 192.168.4.0/22, the 57 devices this computer knew of first'``: what a scan looked at
+    (PAD-1430)."""
+    if not report or not report.get('addresses'):
+        return ''
+    known = report.get('known') or 0
+    return '%d addresses on %s%s' % (report['addresses'], ', '.join(report.get('networks') or []),
+                                     ', the %d devices this computer knew of first, unhurried' % known
+                                     if known else '')
 
 
 class NetworkTab(TabService):
@@ -248,11 +269,13 @@ class NetworkTab(TabService):
 
         def work():
             from ...core import machine_scan
+            report = {}
             try:
-                found, err = machine_scan.scan(progress=progress, cancel=lambda: self._scan_cancel), ''
+                found, err = machine_scan.scan(progress=progress, cancel=lambda: self._scan_cancel,
+                                               report=report), ''
             except Exception as e:                              # noqa: BLE001
                 found, err = [], str(e) or e.__class__.__name__
-            loop.post(self._scanned, found, err)
+            loop.post(self._scanned, found, err, report)
         threading.Thread(target=work, daemon=True, name='pad-network-scan').start()
         return True
 
@@ -260,8 +283,10 @@ class NetworkTab(TabService):
     def scan_state(self):
         return bool(self.get('scanning'))
 
-    def _scanned(self, found, err):
+    def _scanned(self, found, err, report=None):
         from ...core import machine_scan
+        scope = _scan_scope(report)
+        looked = (' Looked at %s.' % scope) if scope else ''
         ours = [r for r in found if r['lets_in']]
         rows = [dict(address=r['address'], lets_in=False, game='', line=_found_line(r))
                 for r in found if not r['lets_in']]
@@ -291,12 +316,16 @@ class NetworkTab(TabService):
                 len(ours), ', '.join(_game_name(r.get('game')) or r['address'] for r in ours),
                 '' if len(new) == len(ours) else ', %d of them new' % len(new)), scan_kind='ok')
         elif found:
-            self.set(scan_note=("Found no machine that lets this computer in, only other devices. Is the machine "
-                                "switched on, and was its card set up for remote access from this computer?"),
+            self.set(scan_note=("Found no machine that lets this computer in, only the %d other device%s with "
+                                "remote login listed below.%s Is the machine switched on and finished starting "
+                                "up, on the same network as this computer (not a guest network), and was its card "
+                                "set up for remote access from this computer?"
+                                % (len(found), '' if len(found) == 1 else 's', looked)),
                      scan_kind='err')
         else:
-            self.set(scan_note=("Found no machine. Is it switched on and plugged into your network, and was its "
-                                "card set up for remote access?"), scan_kind='err')
+            self.set(scan_note=("Found no device with remote login at all.%s Is the machine switched on and finished "
+                                "starting up, on the same network as this computer (not a guest network), and was "
+                                "its card set up for remote access?" % looked), scan_kind='err')
 
     @rpc
     def use_machine(self, address):
@@ -356,6 +385,12 @@ class NetworkTab(TabService):
                               % (_game_name(game) or 'a game'), 'ok')
                 if where != address:
                     text += ' It is at %s now.' % where
+            except remote_send.Unreachable as e:
+                # PAD-1430: a typed address (no identity to look for) or one the router moved: look over the
+                # network for any machine that lets this computer in, and say what was found
+                self.ctx.loop.post(lambda: self.set(check='%s Looking over your network for it...' % e))
+                self.ctx.loop.post(self._check_by_scan, str(e), *self._scan_for_check())
+                return
             except remote_send.SendError as e:
                 text, kind = str(e), 'err'
             except Exception as e:                      # noqa: BLE001 - said, never raised into the UI
@@ -367,6 +402,31 @@ class NetworkTab(TabService):
     def _checked(self, text, kind):
         self.set(checking=False, check=text, check_kind=kind)
         self._show_machine()
+
+    @staticmethod
+    def _scan_for_check():
+        """``(found, err, report)``: a whole scan, on the Check connection worker."""
+        from ...core import machine_scan
+        report = {}
+        try:
+            return machine_scan.scan(report=report), '', report
+        except Exception as e:                          # noqa: BLE001 - said, never raised into the UI
+            return [], str(e) or e.__class__.__name__, report
+
+    def _check_by_scan(self, reason, found, err, report):
+        """The machine didn't answer at its address: what a scan found instead (PAD-1430)."""
+        ours = [r for r in found if r['lets_in']]
+        self._scanned(found, err, report)
+        if len(ours) == 1:
+            pad_ssh_key.select_machine(ours[0]['address'])
+            text, kind = ('%s Found %s at %s instead, which lets this computer in, and switched to it.' % (
+                reason, _game_name(ours[0].get('game')) or 'your machine', ours[0]['address']), 'ok')
+        elif ours:
+            text, kind = ('%s Found %d machines that let this computer in (%s): pick the one to use above.' % (
+                reason, len(ours), ', '.join(_found_line(r) for r in ours)), 'err')
+        else:
+            text, kind = '%s %s' % (reason, self.get('scan_note') or ''), 'err'
+        self._checked(text.strip(), kind)
 
     @rpc
     def forget_machine(self):

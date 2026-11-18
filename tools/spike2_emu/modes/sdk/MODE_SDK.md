@@ -7073,9 +7073,9 @@ variable may be saved too (key `shared:<name>`: every mode naming it keeps the s
 `<slug>:<name>`. New Game Plus is a Set block putting the chapter back to 0.
 
 Proof (emulator, X-Men LE and Pro 0.98; `docs/plans/pad1402_saved_progress.md`): a 2-player game and a 1-player game
-counted each player's balls and everyone's total on from the store, a power cycle kept them and the row at Keep, and
-a factory reset (the title's NVRAM wiped) put the row back at Clear: the runtime cleared the store and the next game
-counted from 1.
+counted each player's balls and everyone's total on from the store, power cycles kept them, and a factory reset (the
+title's NVRAM wiped) put the row back at Clear: the runtime cleared the store and the next game counted from 1. A
+power cut before the game had saved its settings after such a clear booted on the same Clear: not cleared again.
 
 ## Expression light shows (PAD-1040)
 

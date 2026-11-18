@@ -55,8 +55,33 @@ cycle. This adds that store and the blocks' way into it.
 
 ## Proof (emulator)
 
-PROOF_RESULTS
+X-Men LE and Pro 0.98, rig kit `C:/tmp/PAD-1402` (mkset.py builds an Emulate set through `engine.write_overrides` from a
+scratch project with one blocks mode, STORY, counting each ended ball in `drains` (saved, each player's), `total`
+(saved, for everyone) and `this game` (each game); job.sh / job2.sh on rigjob.sh, go.sh / go2.sh = rigbatch). Balls end
+by a sling and pop hit, the tilt four times and `plunge.py drain` (rig drains alone are ball-saved forever). Both
+builds, the same numbers:
+
+| step | the store after it |
+|---|---|
+| 1 boot (the row already Keep on that rig) | empty |
+| 2 a 2-player game | p1 3, p2 3, total 6 |
+| 3 a 1-player game | p1 6, p2 3, total 9 |
+| 4 power cycle | p1 6, p2 3, total 9 - the row reads Keep, nothing cleared |
+| 5 a 1-player game | p1 9, p2 3, total 12 |
+| 6 factory reset (the title's NVRAM wiped) | cleared: the row read its default, Clear; the runtime put it back to Keep, and Guided Setup's Save & Exit stored that Keep (`the game saved its settings (generation 2) with SAVED PROGRESS at Keep`) |
+| 7 a 1-player game | p1 3, total 3 |
+| 8 power cycle | p1 3, total 3 - kept |
+| 9 a 1-player game | p1 6, total 6 |
+
+The Clear already answered (job2.sh): a factory reset, cleared at boot (the mark names settings generation 1), the
+power cut before the game saved its settings, `p1 story:drains 5` put into the store while it was down; the next boot
+read the same Clear with generation 1 still newest: `not cleared again; Keep again`, the 5 kept, and the next game
+counted it on to 8.
+
+What an earlier build of this ticket did on the same rig, and why the mark exists: the runtime's Keep is only the
+game's memory, and two games and a power cycle later the stored row still said Clear - that boot cleared the progress.
 
 Tests: `tests/test_pad1402_saved_progress.py` (the store lifted from the runtime and driven on the host: put, get,
-update to the end, the oldest dropped at the cap, owners; the runtime's hooks and files; the blocks' resets, checks
+update to the end, the oldest dropped at the cap, owners; the Keep/Clear state machine through a first boot, an old
+Clear, a factory reset, a stored Keep and a live Clear; the runtime's hooks and files; the blocks' resets, checks
 and C; the simulator; the row; saved.cfg and the install lists; which modes ask for it).

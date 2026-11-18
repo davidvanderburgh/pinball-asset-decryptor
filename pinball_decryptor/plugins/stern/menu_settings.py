@@ -127,6 +127,23 @@ OWN_CATEGORY = 15
 OWN_PAGE = "Custom Code"
 #: and the Machine Settings list's help line for it
 OWN_HELP = "Settings added by this card's custom code."
+#: Simon and David (2026-11-18): "When we know an item will require a reboot we should put an asterisk on it" - the
+#: settings a change of shows only from the next power-up: IMAGE SET (the auto_loaded scenes are read at boot, before
+#: the game reads its settings) and EDITION (read off the board's store before the game starts, NOT_SHARED). Their
+#: row caption gets " *" where it has room, and the page's help line says what the asterisk means (Simon's words)
+POWER_UP = frozenset({IMAGE_SET, EDITION})
+POWER_UP_MARK = " *"
+OWN_HELP_POWER_UP = ("Settings added by custom code. Items with * take effect on next power up.",
+                     "Items with * take effect on next power up.")
+
+
+def shown_caption(key, room=None):
+    """Setting *key*'s row caption as the menu shows it: a :data:`POWER_UP` one marked "Image Set *" when *room*
+    (characters, None: any) holds the mark, else its plain caption."""
+    plain = SETTINGS[key][2]
+    if key in POWER_UP and (room is None or len(plain) + len(POWER_UP_MARK) <= room):
+        return plain + POWER_UP_MARK
+    return plain if room is None else plain[:room]
 #: the firmware's own word for an adjustment nothing reads any more
 DEPRECATED = "DEPRECATED"
 #: how many values a setting of ours may offer (the picture settings' 9 are their own)
@@ -1193,6 +1210,8 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
         raise MenuSettingError("%s's row caption is shared with other text" % ad)
     cap_room, help_room = _room(table, cap_va, consts), _room(table, help_va, consts)
     row_room = _room(table, row_va, consts)
+    if row_room >= len(row_caption):
+        row_caption = shown_caption(key, row_room)  # "Image Set *": a change shows from the next power-up
     if cap_room < len(caption) or row_room < len(row_caption):
         raise MenuSettingError("%s's caption has no room for \"%s\"" % (ad, row_caption))
     if help_room < 12:
@@ -1258,7 +1277,7 @@ def _category_rows(table, cat, category):
     return ids
 
 
-def own_page(table):
+def own_page(table, starred=False):
     """PAD-1382: ``{file offset: bytes}`` that name :data:`OWN_CATEGORY`'s page :data:`OWN_PAGE` in the game's own table
     of page names, or raise :class:`MenuSettingError` when this program cannot have a page of our own (its rows go on the
     pages each setting names, as before): a category table (not the older Standard Adjustments list, nor a 64-bit
@@ -1299,8 +1318,16 @@ def own_page(table):
         o = table._off(help_va) if r % 4 == 0 else None
         if o is not None and table.data.count(struct.pack("<I", help_va)) == 1:
             end = table.data.find(b"\x00", o)
-            if len(OWN_HELP) <= end - o:
-                writes[o] = OWN_HELP.encode("ascii") + b"\x00" * (end - o - len(OWN_HELP))
+            # its room: the string and the zeros after it but the last (a card an earlier Write gave the shorter
+            # help keeps the stock line's room in those zeros)
+            pad = end
+            while pad + 1 < len(table.data) and table.data[pad + 1] == 0:
+                pad += 1
+            room = pad - o
+            # a power-up setting on the page: the help says what its asterisk means, in the longest form with room
+            text = next((t for t in (OWN_HELP_POWER_UP if starred else ()) + (OWN_HELP,) if len(t) <= room), None)
+            if text is not None:
+                writes[o] = text.encode("ascii") + b"\x00" * (room - len(text))
             break
         r = table.data.find(struct.pack("<I", line_va), r + 1)
     return writes
@@ -1336,7 +1363,7 @@ def _plan_many(table, wanted, share=True):
     page = {}
     if wanted:
         try:
-            page = own_page(table)
+            page = own_page(table, starred=any(w[0] in POWER_UP for w in wanted))
         except MenuSettingError:
             page = {}
     if page:
@@ -1491,7 +1518,7 @@ def plan_shared(table, rows):
     for k, (key, values, names, opts, kind) in enumerate(share, 1):
         low = 0 if opts.get("onoff") or opts.get("from_zero") else 1
         out.append(MenuSetting(
-            key, value.id, SETTINGS[key][2][:row_room], _help_text(names, values, opts.get("help_text"), help_room),
+            key, value.id, shown_caption(key, row_room), _help_text(names, values, opts.get("help_text"), help_room),
             values, SHARED_BASE + 4 * k, value.category, int(opts.get("default", 1)) - 1 + low,
             "%s, %s %d" % (pick.where, SETTINGS[MORE_SELECT][1], k), low, kind, (k,)))
     return out, writes, cat, refused

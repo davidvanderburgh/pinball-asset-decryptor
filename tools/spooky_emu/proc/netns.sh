@@ -52,7 +52,9 @@ run_as() {      # <log> <cmd...>: as $SPP_USER, env built from scratch
 # reboot, killall, lsblk...) that must not reach this PC: logging no-ops
 # first on its PATH.
 mkdir -p "$SPP_RIG/bin"
-for c in unlock-root lock-root reboot shutdown killall hwclock timedatectl mount umount; do
+# sync was named above but missing here (PAD-1387): on WSL's shared kernel a
+# sync(1) can hang for good (the sync wedge) and the game with it.
+for c in unlock-root lock-root reboot shutdown killall hwclock timedatectl mount umount sync; do
     printf '#!/bin/sh\necho "$(date +%%T) %s $*" >> %s/shell.log\n' "$c" "$SPP_RIG" > "$SPP_RIG/bin/$c"
     chmod 755 "$SPP_RIG/bin/$c"
 done

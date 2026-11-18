@@ -1040,7 +1040,7 @@ function Timers({ prog, ed }) {
 // saved = the title's usual ones, shown ticked; the last tick stays, so the list never goes back to
 // those by itself.
 // PAD-1400: what "are off: this is the whole game" does, under the choice
-const OWN_GAME_NOTE = "This mode starts with every game and runs through every ball and every player (each keeps their own scores and total), ending with the game; its clock and draining are not used. While a ball is in play the game's own rules are off: its shots, points, calls, multiballs and ball saves do nothing, so every point is this mode's. The game still runs the balls, tilt, the bonus and the high scores.";
+const OWN_GAME_NOTE = "This mode starts with every game and runs through every ball and every player (each keeps their own scores and total), ending with the game; its clock and draining are not used. While a ball is in play the game's own rules are off: its shots, points, calls, award screens, light shows, multiballs and ball saves do nothing, so every point scored in play is this mode's. The game still runs the balls, tilt, its own end-of-ball bonus and the high scores.";
 function GameModes({ prog, ed }) {
   const ch = ed.ch;
   const gm = prog.game_modes || "block";

@@ -603,7 +603,7 @@ function ModePage({ s, f, off, dis, rs, lim }) {
           <span class="dim nw">While it runs, the game's modes</span>
           <${Select} value=${f.game_modes || "block"} options=${gmOpts} ns="modes" k="f:game_modes" disabled=${off} width=${260} title=${T.gameModes} />
         </div>
-        ${f.game_modes === "own_game" ? html`<div class="small muted wrap">${rs.own_game || "This mode starts with every game and runs through every ball and every player (each keeps their own count), ending with the game; its start shot and clock are not used. While a ball is in play the game's own rules are off: its shots, points, calls, multiballs and ball saves do nothing, so every point is this mode's. The game still runs the balls, tilt, the bonus and the high scores."}</div>` : null}
+        ${f.game_modes === "own_game" ? html`<div class="small muted wrap">${rs.own_game || "This mode starts with every game and runs through every ball and every player (each keeps their own count), ending with the game; its start shot and clock are not used. While a ball is in play the game's own rules are off: its shots, points, calls, award screens, light shows, multiballs and ball saves do nothing, so every point scored in play is this mode's. The game still runs the balls, tilt, its own end-of-ball bonus and the high scores."}</div>` : null}
         ${holds && gms.length ? html`<div class="modes-shots" style="padding-left:26px;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr))">
           ${gms.map((m) => html`<${Check} key=${"b" + m.id} label=${m.label} checked=${blockOn.has(m.id)} disabled=${off || (blockOn.size === 1 && blockOn.has(m.id))} title=${T.blockPick}
               onChange=${(v) => setField("modes", "block:" + m.id, v, { flush: true })} />`)}

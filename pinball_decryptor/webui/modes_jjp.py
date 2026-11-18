@@ -5,8 +5,9 @@ edit: a JJP custom mode is a ``key = value`` file the JJP mode SDK's runtime rea
 retail game (tools/jjp_emu/MODES.md), and a title's modes are one folder of them.  So on JJP
 the tab is this instead (``JjpModesMixin``, the ``jjp`` key of the ``modes`` state):
 
-* a title list - every title's port report (plugins/jjp/custom_modes.titles), the nine that
-  can run modes first, the ones that cannot greyed with why;
+* the title is the selected card's (PAD-1412: custom_modes.label_for_card - its file name,
+  else its volume ID; no game picker), a card no port report knows says so, a title that
+  cannot run modes says why;
 * the title's modes, each a form: what starts it (the game's switches, its events, a game
   mode ending, a score, a combo), the scoring shots,
   points, timer, completion, the game's sounds (heard from an extract folder), its lamps and
@@ -38,7 +39,7 @@ import time
 from ..plugins.jjp import custom_modes as CM
 from .tabs.base import rpc
 
-#: app settings key: {"label": last title, "iso": {label: path}, "out": {label: path},
+#: app settings key: {"iso": {label: path}, "out": {label: path},
 #: "sounds": {label: folder}, "stick": the stick last written to, "stick_action": {label: action}}
 SETTINGS_KEY = "jjp_modes"
 
@@ -62,6 +63,26 @@ class JjpModesMixin:
         mfr = getattr(self.window, "current_mfr", None)
         return bool(mfr is not None and getattr(mfr.capabilities, "jjp_modes", False))
 
+    def _jjp_card(self):
+        """The selected card (Select card's path), or ""."""
+        v = getattr(self.window, "extract_input_var", None)
+        try:
+            return (v.get() if v is not None else "").strip()
+        except Exception:                                   # noqa: BLE001
+            return ""
+
+    def _jjp_hook_card(self):
+        """Follow the selected card: another card is another title (PAD-1412)."""
+        v = getattr(self.window, "extract_input_var", None)
+        if v is None or v is getattr(self, "_jjp_card_hooked", None):
+            return
+        self._jjp_card_hooked = v
+
+        def changed(*_a):
+            if self._jjp_on() and getattr(self, "_visible", False):
+                self._post(self.jjp_refresh)
+        v.trace_add("write", changed)
+
     def _jjp_settings(self):
         s = getattr(self.app, "_settings", None)
         if not isinstance(s, dict):
@@ -73,11 +94,7 @@ class JjpModesMixin:
         return d
 
     def _jjp_remember(self, kind, value):
-        st = self._jjp_settings()
-        if kind == "label":
-            st["label"] = value
-        else:
-            st.setdefault(kind, {})[self._jjp_label] = value
+        self._jjp_settings().setdefault(kind, {})[self._jjp_label] = value
 
     def _jjp_recall(self, kind):
         return (self._jjp_settings().get(kind) or {}).get(self._jjp_label, "")
@@ -86,12 +103,15 @@ class JjpModesMixin:
     def jjp_refresh(self):
         """Publish the whole JJP state (title list, the title's modes, the open form, check)."""
         titles = CM.titles()
-        if not self._jjp_label:
-            want = self._jjp_settings().get("label") or ""
-            runnable = [t["label"] for t in titles if t["can_run"]]
-            self._jjp_label = want if want in runnable else ("Wonka-v03.03" if "Wonka-v03.03" in runnable
-                                                             else (runnable[0] if runnable else ""))
+        self._jjp_hook_card()
+        card = self._jjp_card()
+        label = CM.label_for_card(card)
+        if label != self._jjp_label:
+            # PAD-1412: the game is the selected card's - a new card is a new title
+            self._jjp_label, self._jjp_file = label, ""
+            self._jjp_build = self._jjp_stick = None
         st = {"on": True, "titles": titles, "label": self._jjp_label, "max": CM.MAX_MODES,
+              "card": card, "card_name": os.path.basename(card),
               "groups": [{"title": g, "keys": list(ks)} for g, ks in CM.FORM_GROUPS],
               "title_keys": list(CM.TITLE_FORM), "fields": self._jjp_fields()}
         if self._jjp_label:
@@ -190,7 +210,10 @@ class JjpModesMixin:
         return folder if name.lower().startswith(self._jjp_label.lower()) else ""
 
     def _jjp_build_state(self):
-        iso = self._jjp_recall("iso") or CM.find_stock_iso(self._jjp_label, self._jjp_iso_folders())
+        card = self._jjp_card()
+        if not (card.lower().endswith(".iso") and CM.label_for_card(card) == self._jjp_label):
+            card = ""
+        iso = self._jjp_recall("iso") or card or CM.find_stock_iso(self._jjp_label, self._jjp_iso_folders())
         out = self._jjp_recall("out") or (CM.default_out(iso, self._jjp_out_folder(iso)) if iso else "")
         b = dict(getattr(self, "_jjp_build", None) or {})
         b.update({"iso": iso, "out": out, "running": self._jjp_proc is not None and self._jjp_job == "build",
@@ -234,19 +257,10 @@ class JjpModesMixin:
 
     def _jjp_need(self):
         if not self._jjp_label:
-            raise ValueError("pick a title first")
+            raise ValueError("select a Jersey Jack card first")
         return self._jjp_label
 
     # ------------------------------------------------------------------ rpcs
-    @rpc
-    def jjp_pick_title(self, label):
-        if label not in [t["label"] for t in CM.titles()]:
-            raise ValueError("no port report for %s" % label)
-        self._jjp_label, self._jjp_file = label, ""
-        self._jjp_remember("label", label)
-        self._jjp_build = self._jjp_stick = None
-        self.jjp_refresh()
-
     @rpc
     def jjp_open(self, fn):
         self._jjp_file = os.path.basename(fn or "")

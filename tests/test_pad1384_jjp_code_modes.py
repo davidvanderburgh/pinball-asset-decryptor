@@ -18,6 +18,7 @@ import pytest
 from tests.webui_harness import web_app
 from pinball_decryptor.plugins.jjp import block_modes as BM
 from pinball_decryptor.plugins.jjp import custom_modes as CM
+from tests.test_webui_modes_jjp import select_card
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SDK = os.path.join(ROOT, "tools", "jjp_emu", "modes", "sdk")
@@ -211,7 +212,7 @@ def test_new_mode_by_blocks_and_in_cpp_builds_and_checks_clean(tmp_path, preview
     calls = _fake_code(tmp_path, monkeypatch)
     with web_app(tmp_path, mfr="jjp") as w:
         w.call("ui.select_tab", "modes")
-        w.call("modes.jjp_pick_title", "Wonka-v03.03")
+        select_card(w, "Wonka-v03.03")
         fn = w.call("modes.jjp_new", "Block Rush", "blocks")
         j = w.state("modes")["jjp"]
         assert j["kind"] == "blocks" and j["form"]["code"] == "block_rush" and j["blocks"]["program"]["scripts"]
@@ -257,7 +258,7 @@ def test_edit_as_cpp_turns_a_blocks_mode_into_cpp(tmp_path, preview_on, monkeypa
     monkeypatch.setattr("pinball_decryptor.webui.compat.messagebox.askyesno", lambda *a, **k: True)
     with web_app(tmp_path, mfr="jjp") as w:
         w.call("ui.select_tab", "modes")
-        w.call("modes.jjp_pick_title", "Wonka-v03.03")
+        select_card(w, "Wonka-v03.03")
         w.call("modes.jjp_new", "Blocky", "blocks")
         w.call("modes.jjp_blocks_to_cpp")
         j = w.state("modes")["jjp"]

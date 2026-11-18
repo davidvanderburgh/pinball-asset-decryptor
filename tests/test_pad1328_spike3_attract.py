@@ -104,7 +104,7 @@ def test_runtime_reads_the_table_pointer_sized():
     assert "size != 24" in body and "at + sizeof(pm_addr) > size" in body
     # PAD-1371: off on Spike 3 only without a way to show the bank's scene from a page
     assert re.search(r"#if PM_A64\s+/\* PAD-1328 / PAD-1371", body)
-    assert "if (!ait_video && !ait_show) {" in body
+    assert "if (ait_n && !ait_video && !ait_show) {" in body          # PAD-1407: hidden screens arm without items
     assert "cannot show an item yet" not in src
 
 

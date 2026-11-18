@@ -15,6 +15,9 @@
 /* the game's own screens: quiet */
 .at-game { color: var(--ink-2); background: transparent; border: 1px dashed var(--line); }
 .at-game .at-ic { background: var(--panel-2); color: var(--ink-3); }
+/* PAD-1407: a screen of the game's taken off */
+.at-game.off { opacity: 0.55; }
+.at-game.off .at-name { text-decoration: line-through; }
 
 /* the owner's items: they stand out */
 .at-item { background: var(--panel-2); border: 1px solid var(--accent-line); }

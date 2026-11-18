@@ -10,7 +10,8 @@ The project records them (``attract_items`` in ``.staged_changes.json``)::
     {"items": [{"kind": "photo" | "clip" | "text", "file": path, "text": "line\\nline",
                 "seconds": 0..120 (0: a clip's own length), "entry": <the game page's number>,
                 "where": "after" | "before"}, ...],
-     "champions": true}          # false: the modes' challenge champions (PAD-660/663) are not shown in attract
+     "champions": true,          # false: the modes' challenge champions (PAD-660/663) are not shown in attract
+     "hidden": [<entry>, ...]}   # PAD-1407: the game's own screens taken off (a whole new game's own attract)
 
 and a Write (or a run in the emulator) makes every item a clip of the title's video bank - a photo or a text card a still clip of
 its time at the screen's size, a video converted as a slot's replacement is, the project's colour profile applied,
@@ -32,6 +33,8 @@ STAGED_KEY = "attract_items"
 #: items a card may carry (pad_mode_runtime.c AIT_ITEMS) and game pages that may take them (AIT_ANCHORS)
 MAX_ITEMS = 48
 MAX_PAGES = 16
+#: PAD-1407: the game's screens past this cannot be taken off (the runtime's AIT_WRAP)
+MAX_HIDE = 192
 #: an item's time on the glass, seconds
 MAX_SECONDS = 120
 DEFAULT_SECONDS = {"photo": 5, "text": 5, "clip": 0}
@@ -99,12 +102,22 @@ class Item:
 class Record:
     items: list = field(default_factory=list)
     champions: bool = True
+    hidden: list = field(default_factory=list)          # PAD-1407: the game's screens (entries) taken off, sorted
 
     def as_dict(self):
-        return {"items": [i.as_dict() for i in self.items], "champions": bool(self.champions)}
+        d = {"items": [i.as_dict() for i in self.items], "champions": bool(self.champions)}
+        if self.hidden:
+            d["hidden"] = sorted(set(self.hidden))
+        return d
 
     def empty(self):
-        return not self.items and self.champions
+        return not self.items and self.champions and not self.hidden
+
+
+def asks(raw):
+    """Whether a sidecar's raw ``attract_items`` value asks anything of the attract mode (for the code that carries
+    the record without loading it: mod packs, Move Your Mods)."""
+    return isinstance(raw, dict) and bool(raw.get("items") or raw.get("champions") is False or raw.get("hidden"))
 
 
 def clean_seconds(v, kind):
@@ -132,6 +145,15 @@ def clean(raw):
     if not isinstance(raw, dict):
         return rec
     rec.champions = raw.get("champions", True) is not False
+    hidden = set()
+    for e in raw.get("hidden") or ():
+        try:
+            e = int(e)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= e < MAX_HIDE:
+            hidden.add(e)
+    rec.hidden = sorted(hidden)
     for d in raw.get("items") or ():
         if not isinstance(d, dict) or d.get("kind") not in KINDS:
             continue
@@ -333,6 +355,98 @@ def _generic(s):
             or re.fullmatch(r"(?i)line\d+", head) is not None)
 
 
+#: PAD-1407: the words a page's name has when it shows the game's high scores or champions
+_KEPT_WORDS = ("high score", "highscore", "champ", "hstd")       # HSTD: high score to date
+
+
+def kept_on_replace(page):
+    """Whether Replace the game's attract keeps ``page``: its high score and champion screens (the scores played on
+    the machine, and the modes' challenge champions shown after them), not its title, tutorials and logos."""
+    name = (getattr(page, "name", "") or "").lower()
+    return any(w in name for w in _KEPT_WORDS)
+
+
+# ---- PAD-1407: a screen named by the words of its own scene -------------------------------------------------------
+
+
+
+def scene_words(raw, limit=6):
+    """The words a scene file shows (its text boxes' own text: 8-byte length, then the text), capital letters only so
+    that ids and paths are left out: ``["HIGH SCORES", "CHAMPION"]``."""
+    import re
+    out = []
+    for m in re.finditer(rb"([\x03-\x30])\x00{7}", raw):
+        n = raw[m.start()]
+        s = raw[m.end():m.end() + n]
+        if len(s) != n or not re.fullmatch(rb"[A-Z0-9][A-Z0-9 #!'.,&:%/-]*", s):
+            continue
+        if sum(65 <= c <= 90 for c in s) < 4:
+            continue
+        if len({c for c in s if 65 <= c <= 90}) < 3:      # a text box's filler: WWWWWWWWWW, MMMM
+            continue
+        t = s.decode("ascii").strip()
+        if t and t not in out:
+            out.append(t)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _weak(pages):
+    """The pages whose program name says nothing of what they show: "Game screen N", or a name many pages share (the
+    score layout's, "Layout 4 players"), and not a champion page already."""
+    from collections import Counter
+    n = Counter(p.name for p in pages)
+    return [p for p in pages if not kept_on_replace(p) and (p.name.startswith("Game screen") or n[p.name] >= 3)]
+
+
+def name_from_scenes(card, elf, prof, pages):
+    """PAD-1407: name the pages the program names vaguely by the words of the scene each loads, read off the card
+    (Aerosmith LE 1.16's six "Layout 4 players" pages: HIGH SCORES / CHAMPION, REPLAY AT, PRESENTS, ...; emulator
+    census). A page's own scene is the one, of the scene ids its code names, the fewest other pages name. Spike 3
+    programs keep their names. Changes ``pages`` in place."""
+    import re
+    from collections import Counter
+    from . import engine as E
+    from .portchallenge import Elf
+    if bytes(elf[4:5]) == b"\x02":
+        return pages
+    weak = _weak(pages)
+    if not weak:
+        return pages
+    e = Elf(elf)
+    ids = {}
+    for p in pages:
+        ids[p.entry] = set(re.findall(r"[0-9a-f]{40}", " ".join(_strings_of(e, p.page))))
+    count = Counter(h for s in ids.values() for h in s)
+    own = {}
+    for p in weak:
+        hs = ids.get(p.entry) or set()
+        if hs:
+            least = min(count[h] for h in hs)
+            own[p.entry] = {h for h in hs if count[h] == least}
+    wanted = {h for s in own.values() for h in s}
+    if not wanted:
+        return pages
+    words = {}
+    top = "/%s/assets/lcd/" % prof.game_dir
+    with open(card, "rb") as f:
+        reader, _fw, _img = E._locate(f, E._linux_partitions(card))
+        for path, _ino, node in reader.iter_regular_files(max_depth=12):
+            if not path.endswith("/scene.radium") or not ("/" + path.lstrip("/")).startswith(top):
+                continue
+            h = path.rstrip("/").split("/")[-2]
+            if h in wanted and node is not None:
+                words[h] = scene_words(bytes(reader.read_file_bytes(node)))
+    for p in weak:
+        got = [w for h in sorted(own.get(p.entry, ())) for w in words.get(h, [])]
+        got.sort(key=lambda w: not any(k in w for k in ("SCORE", "CHAMP")))      # what the screen is about, first
+        if got:
+            p.name = " / ".join(dict.fromkeys(" ".join(x[:1].upper() + x[1:].lower() for x in w.split())
+                                              for w in got[:2]))
+    return pages
+
+
 # ---- PAD-1328: a Spike 3 (64-bit ARM) program's pages ---------------------------------------------------------
 def _a64_calls(e, fn, limit):
     """``[(va, word)]`` of a 64-bit function from *fn* to its first ``ret`` (at most *limit* words)."""
@@ -473,7 +587,38 @@ def read_pages(elf_bytes, prof, clip_names=()):
         p = Page(entry=k, page=page, test=test, seconds=secs if 0 < secs < 600 else 0.0)
         p.name = _page_name(e, page, champion_fns, names) or "Game screen %d" % (k + 1)
         out.append(p)
-    return out
+    return _score_runs(out)
+
+
+def _score_runs(pages, least=4, widest=0x400):
+    """PAD-1407: the high score and champion screens of a build whose port names no champion page. The game makes
+    them one per category from a template: a run of entries whose page functions (and tests) are the same size, so
+    they lie evenly spaced (Uncanny X-Men LE 0.98: entries 23-41, 0x74 apart - GRAND CHAMPION, HIGH SCORE #1-#4, the
+    champions, emulator census), or stubs of one each laid out downwards with one test (Foo Fighters LE 1.04: 8 bytes
+    apart; Star Wars LE 1.31: 16, its first five just beside the run). Such a run's pages whose program name says
+    nothing of them (:func:`_weak`) are named as the champion pages are."""
+    weak = _weak(pages)
+    k = 0
+    while k < len(pages):
+        j = k
+        step = pages[k + 1].page - pages[k].page if k + 1 < len(pages) else 0
+        if 0 < abs(step) <= widest and pages[k].test:
+            tstep = pages[k + 1].test - pages[k].test
+            while (j + 1 < len(pages) and pages[j + 1].page - pages[j].page == step and pages[j + 1].test
+                   and pages[j + 1].test - pages[j].test == tstep):
+                j += 1
+        if j - k + 1 >= least:
+            run = pages[k:j + 1]
+            if abs(step) <= 0x40:       # stubs: the category's others lie just beside (Star Wars LE 1.31: 14-18)
+                lo, hi, pad = min(p.page for p in run), max(p.page for p in run), 8 * abs(step)
+                run = [p for p in pages if lo - pad <= p.page <= hi + pad]
+            for p in run:
+                if p in weak:
+                    p.name = "High score / champion page"
+            k = j + 1
+        else:
+            k += 1
+    return pages
 
 
 NO_BANK = ("%s keeps its clips in a way the app cannot add to yet, so this game's attract screens cannot take "
@@ -545,7 +690,7 @@ def project_pages(project, prof=None):
     try:
         with open(cache, encoding="utf-8") as f:
             got = json.load(f)
-        if got.get("key") == key and got.get("v") == 2:
+        if got.get("key") == key and got.get("v") == 4:
             _CARD_WHY[os.path.abspath(project)] = got.get("why", "")
             return [Page(**p) for p in got["pages"]]
     except (OSError, ValueError, KeyError, TypeError):
@@ -557,12 +702,16 @@ def project_pages(project, prof=None):
     names = {os.path.splitext(os.path.basename(r))[0] for r in CV.manifest(project)}
     names |= {n.split("_", 1)[-1] for n in names}
     pages = read_pages(elf, prof, names)
+    try:
+        name_from_scenes(card, elf, prof, pages)
+    except Exception:                                   # noqa: BLE001 - the program's names stay
+        pass
     why = _bank_refusal(card, prof) if pages else ""
     _CARD_WHY[os.path.abspath(project)] = why
     try:
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         with open(cache, "w", encoding="utf-8") as f:
-            json.dump({"v": 2, "key": key, "sha1": hashlib.sha1(elf).hexdigest(), "why": why,
+            json.dump({"v": 4, "key": key, "sha1": hashlib.sha1(elf).hexdigest(), "why": why,
                        "pages": [p.__dict__ for p in pages]}, f)
     except OSError:
         pass
@@ -685,13 +834,28 @@ class AttractBuild:
     scene: str = ""
 
 
-def cfg_text(entries, champions=True):
-    """``attract.cfg``: ``entries`` = ``[(entry, where, clip name, ms), ...]`` in play order."""
+def cfg_text(entries, champions=True, hidden=()):
+    """``attract.cfg``: ``entries`` = ``[(entry, where, clip name, ms), ...]`` in play order; ``hidden``: the game's
+    own screens (entries) taken off (PAD-1407)."""
     out = ["# PAD-782: the owner's attract items (pad_mode_runtime.c attract items)"]
     if not champions:
         out.append("champions off")
+    out += ["hide %d" % e for e in sorted(set(hidden))]
     out += ["item %d %s %s %d" % (e, w, n, ms) for e, w, n, ms in entries]
     return "\n".join(out) + "\n"
+
+
+def hidden_words(hidden):
+    """``[0, 1, 2, 5]`` -> ``"screens 1-3, 6"`` (the page counts screens from 1)."""
+    runs, out = [], []
+    for e in sorted(set(hidden)):
+        if runs and runs[-1][1] == e - 1:
+            runs[-1][1] = e
+        else:
+            runs.append([e, e])
+    for a, b in runs:
+        out.append("%d" % (a + 1) if a == b else "%d-%d" % (a + 1, b + 1))
+    return ("screen " if len(hidden) == 1 else "screens ") + ", ".join(out)
 
 
 def element_scene(reader, game_dir, clip):
@@ -730,6 +894,7 @@ def build(project, prof, bank, out_dir, log=None, progress=None, cancel=None, re
         raise AttractError(why)
     count = port_table(prof)["count"]
     items = [i for i in rec.items if i.entry < count]
+    hidden = [e for e in rec.hidden if e < count]
     for i in rec.items:
         if i.entry >= count:
             log("Attract items: %s is left out: the game has no screen %d" % (i.label(), i.entry + 1), "warning")
@@ -737,6 +902,9 @@ def build(project, prof, bank, out_dir, log=None, progress=None, cancel=None, re
     for i in gone:
         log("Attract items: %s is left out: the file is not on this PC any more" % i.label(), "warning")
     items = [i for i in items if i not in gone]
+    if hidden and len(hidden) >= count and not items:
+        raise AttractError("every one of the game's attract screens is taken off and nothing of yours is shown in "
+                           "their place; add a title card or a clip of your own, or show one of the game's screens")
     anchors = []
     for i in items:
         if i.entry not in anchors:
@@ -808,7 +976,9 @@ def build(project, prof, bank, out_dir, log=None, progress=None, cancel=None, re
             progress(len(items), len(items), "")
     if not rec.champions:
         lines.append("the modes' challenge champions are not shown in attract")
+    if hidden:
+        lines.append("%d of the game's %d attract screens taken off (%s)" % (len(hidden), count, hidden_words(hidden)))
     cfg = os.path.join(out_dir, CFG_NAME)
     with open(cfg, "w", encoding="utf-8", newline="\n") as f:
-        f.write(cfg_text(entries, rec.champions))
+        f.write(cfg_text(entries, rec.champions, hidden))
     return AttractBuild(bank=data, new=new, cfg=cfg, lines=lines, items=items, scene=scene)

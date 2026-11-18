@@ -11745,9 +11745,10 @@ def _attract_for_build(assets_dir, dest_is_device, log, ext4_available=None):
             % why.rstrip("."), "warning")
         return None
     n = len(rec.items)
-    log("Attract items: %s%s. %s" % (
+    log("Attract items: %s%s%s. %s" % (
         "%d item(s) of your own go between the game's attract screens" % n if n else
         "the attract mode is changed",
+        "; %d of the game's own attract screens are taken off" % len(rec.hidden) if rec.hidden else "",
         "" if rec.champions else "; the modes' challenge champions are not shown in attract",
         _AI.INSIDER_WORDS), "info")
     return prof

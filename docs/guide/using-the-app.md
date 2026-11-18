@@ -405,6 +405,21 @@ lasts until the app closes or another project opens.
 tab, and Write puts it on the card. Which of them you see depends on the
 machine, and each tab's **?** explains its own controls.
 
+### Attract screens (Stern Spike 2)
+
+The **Attract** tab lists the screens the game shows in attract mode, in
+order, named by what they show where the card says so (High Scores,
+Replay At, the champions...). Put your own photos, clips and text cards
+between them with **Add**, each for as many seconds as you like.
+
+For a whole new game of your own, **Replace the game's attract** takes off
+every screen of the game's except its high score and champion screens, and
+puts a title card of yours first (type your game's name on it, PRESS START
+under it). **Hide** and **Show** on each screen take one off or put it back.
+The high score screens keep the game's own words (GRAND CHAMPION, HIGH
+SCORE #1...): rename them on the Text tab. **Run in emulator** shows the
+result before you Write.
+
 ## Bulk picks and clearing
 
 These work on the Audio, Video and Images tabs.
@@ -488,7 +503,9 @@ Spike 3, Star Wars ELG 1.10, Fallout 0.81 and 0.82 and Transformers 0.96
    EDITION setting names** in Menu settings.
 
 The card then shows no menu, and a change to Edition takes effect at the
-next power-up. The editions share the machine's settings, so give every
+next power-up. A whole new game built on the stock one can be one of the
+editions: give it its own name with **Name the editions…**, and its own
+title and attract with **Replace the game's attract** on the Attract tab. The editions share the machine's settings, so give every
 edition music modes, or none.
 
 ## Mod Pack tab

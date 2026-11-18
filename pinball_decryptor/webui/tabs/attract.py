@@ -3,7 +3,9 @@
 The page lists the screens the game shows in attract (read off its program: the last scores, PRESS START, the high
 scores and champions, the tutorial clips, the logos) and lets the owner put items of their own between them - photos
 (several at once: a slideshow), a clip, a text card - each with its time on the glass, moved up and down past the
-game's screens. The modes' challenge champions (PAD-660) are switched on or off here, and the attract flipper sounds
+game's screens, and take the game's own screens off (PAD-1407: Replace the game's attract keeps only its high score
+and champion screens, for a whole new game's own title and attract). The modes' challenge champions (PAD-660) are
+switched on or off here, and the attract flipper sounds
 (PAD-641, kept by the Audio tab with the project's other sounds) are set here too, so attract has one home. Run in
 emulator starts the Emulate tab with the project's changes.
 
@@ -23,6 +25,8 @@ INTRO = ("Put your own photos, clips and text cards between the game's own attra
 PHOTO_TYPES = [("Pictures", "*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff"), ("All files", "*.*")]
 CLIP_TYPES = [("Videos", "*.mp4 *.mov *.m4v *.mkv *.avi *.webm *.wmv *.mpg *.mpeg"), ("All files", "*.*")]
 NEW_TEXT = "Your words here"
+#: PAD-1407: the title card Replace the game's attract puts first when the project has no item of its own yet
+TITLE_TEXT = "YOUR GAME'S NAME\nPRESS START"
 
 
 class AttractTab(TabService):
@@ -39,7 +43,8 @@ class AttractTab(TabService):
         self._pages = []
         self._rec = None
         self._read_id = 0
-        self.set(project="", available=False, why="", reading=False, pages=[], seq=[], champions=True,
+        self.set(project="", available=False, why="", reading=False, pages=[], seq=[], champions=True, hidden=0,
+                 replaced=False,
                  champions_tip="", champions_shown=False, insider="", running=False, intro=INTRO, count=0, max=0)
 
     # -- the project ---------------------------------------------------------------------------------------------
@@ -129,16 +134,20 @@ class AttractTab(TabService):
     def _paint(self):
         from ...plugins.stern import attract_items as AI
         rec = self._rec or AI.Record()
+        hidden = set(rec.hidden)
         seq, run = [], None
         for kind, k in self._sequence():
             if kind == "game":
                 p = self._pages[k]
-                if run is not None and run["name"] == p.name and run["sometimes"] == p.sometimes:
+                off = p.entry in hidden
+                if run is not None and run["name"] == p.name and run["sometimes"] == p.sometimes \
+                        and run["hidden"] == off:
                     run["last"] = p.entry
                     run["n"] += 1
                     continue
                 run = {"t": "game", "name": p.name, "first": p.entry, "last": p.entry, "n": 1,
-                       "sometimes": p.sometimes, "seconds": round(p.seconds, 1)}
+                       "sometimes": p.sometimes, "seconds": round(p.seconds, 1), "hidden": off,
+                       "kept": AI.kept_on_replace(p)}
                 seq.append(run)
             else:
                 run = None
@@ -150,7 +159,10 @@ class AttractTab(TabService):
         # the modes' challenge champions (PAD-660): a part of the mode maker, so only with its preview on
         from ...core import preview
         shown = bool(preview.enabled("modes"))
-        self.set(pages=len(self._pages), seq=seq, champions=bool(rec.champions), count=len(rec.items),
+        n_off = sum(1 for p in self._pages if p.entry in hidden)
+        self.set(hidden=n_off, replaced=bool(self._pages) and n_off == sum(
+                     1 for p in self._pages if not AI.kept_on_replace(p)) and n_off > 0,
+                 pages=len(self._pages), seq=seq, champions=bool(rec.champions), count=len(rec.items),
                  max=AI.MAX_ITEMS, insider=AI.INSIDER_WORDS, champions_shown=shown,
                  champions_tip=("The champion of each mode's challenge game, shown in attract after the game's own "
                                 "champions. Off: only the game's own.") if shown else "")
@@ -302,6 +314,53 @@ class AttractTab(TabService):
             return False
         rec.items[i].text = t
         return self._save("")
+
+    # -- PAD-1407: the game's own screens taken off ------------------------------------------------------------------
+    @rpc
+    def set_hidden(self, first, last, off):
+        """Take the game's screens ``first..last`` off the attract mode (``off``), or put them back."""
+        from ...plugins.stern import attract_items as AI
+        if self._rec is None or not self.get("available") or self.get("running"):
+            return False
+        span = {p.entry for p in self._pages if int(first) <= p.entry <= int(last)}
+        hidden = set(self._rec.hidden)
+        hidden = (hidden | span) if off else (hidden - span)
+        if off and len(hidden) >= len(self._pages) and not self._rec.items:
+            compat.messagebox.showinfo("Attract", "Add a title card or a clip of your own first: with every one of "
+                                       "the game's screens taken off and nothing of yours, the attract mode would "
+                                       "show nothing.")
+            return False
+        self._rec.hidden = sorted(e for e in hidden if e < AI.MAX_HIDE)
+        what = AI.hidden_words(sorted(span)).replace("screen", "the game's screen", 1)
+        return self._save("%s %s" % (what, "taken off the attract mode" if off else "shown again"))
+
+    @rpc
+    def replace_all(self, on):
+        """Replace the game's attract (a whole new game's own): every screen of the game's taken off but its high
+        score and champion screens, a title card of the owner's first when the project has no item yet; off: every
+        screen of the game's shown again."""
+        from ...plugins.stern import attract_items as AI
+        if self._rec is None or not self.get("available") or self.get("running"):
+            return False
+        rec = self._rec
+        if not on:
+            rec.hidden = []
+            return self._save("every one of the game's own attract screens is shown again")
+        rec.hidden = sorted(p.entry for p in self._pages if not AI.kept_on_replace(p) and p.entry < AI.MAX_HIDE)
+        added = ""
+        if not rec.items and self._pages:
+            first = self._pages[0].entry
+            rec.items.insert(0, AI.Item("text", first, "before", text=TITLE_TEXT, seconds=6))
+            added = "; a title card of yours comes first (type your game's name on it)"
+        kept = len(self._pages) - len(rec.hidden)
+        if not kept:
+            compat.messagebox.showinfo("Attract", "The app could not tell which of this game's attract screens show "
+                                       "its high scores, so every one of them is taken off. Use Show on the screens "
+                                       "you want back (Run in emulator shows what each one is).")
+            return self._save("the game's own attract replaced: all %d of its screens taken off (none known to show "
+                              "its high scores)%s" % (len(rec.hidden), added))
+        return self._save("the game's own attract replaced: %d of its screens taken off, its %d high score and "
+                          "champion screen(s) kept%s" % (len(rec.hidden), kept, added))
 
     @rpc
     def set_champions(self, on):

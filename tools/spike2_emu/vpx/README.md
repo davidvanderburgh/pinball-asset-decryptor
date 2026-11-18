@@ -22,6 +22,15 @@ ping and the controller falls back to swkeys.py plus re-reading padled over
 \\wsl.localhost, handing over every switch still held. `PAD_VPX_LINK=0` in the
 environment VPX starts in skips the link.
 
+A PC whose Windows cannot open the run's files over \\wsl.localhost at all
+(PAD-1437) runs on the link alone: when padled will not open from Windows
+but WSL reads it with its mark (asked 12 s after the board record, then every
+5 s), the controller attaches through padlink.py, fetches the run's tables
+and boot logs through one `tar` over wsl.exe, writes ballfeed.off and reads
+the pause flag inside WSL, and starts a dropped link again instead of falling
+back to the share. Only a link that cannot come up either stops the run with
+"Restart WSL" (PAD-1247). `PAD_VPX_SHARE=0` takes that path from the start.
+
 | file | what |
 |---|---|
 | `padcontroller.py` | `PAD.Controller`, an out-of-process COM server in the shape of `VPinMAME.Controller`. `--register` once (HKLM; David's PC elevates silently), `--status`, `--selftest`. |

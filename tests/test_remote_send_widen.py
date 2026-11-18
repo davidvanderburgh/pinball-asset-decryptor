@@ -68,10 +68,18 @@ class FakeSftp:
 
 class Lane:
     def __init__(self, port, sftp):
-        self.port, self.sftp, self.t, self.closed = port, sftp, "t%d" % port, False
+        self.port, self.sftp, self.t, self.closed = port, sftp, _T("t%d" % port), False
 
     def close(self):
         self.closed = True
+
+
+class _T(str):
+    """A connection's stand-in: its name, and whether it is still up (PAD-1436 asks)."""
+    up = True
+
+    def is_active(self):
+        return self.up
 
 
 def machine(args=OLD_ARGS, start_rc=0):
@@ -79,7 +87,7 @@ def machine(args=OLD_ARGS, start_rc=0):
     m.host, m.port, m.identity = "10.0.0.5", 22, ID
     m._lanes, m._parked, m._wide, m._wide_port = [], None, None, None
     m.store, lock = bytearray(), threading.Lock()
-    m.t, m.sftp = "t22", FakeSftp(m.store, lock)
+    m.t, m.sftp = _T("t22"), FakeSftp(m.store, lock)
     m.lock, m.scripts = lock, []
 
     def sh(script, stdin=b"", timeout=600, check=True):
@@ -189,3 +197,17 @@ def test_small_files_stay_on_one_connection(monkeypatch):
     made[0].sftp.putfo = lambda f, path, file_size, callback, confirm: puts.append((path, file_size))
     m._put("/games/small.bin", io.BytesIO(b"x" * 100), 100)
     assert puts == [("/games/small.bin", 100)]
+
+
+def test_a_lane_whose_connection_dropped_is_a_dropped_connection_not_a_refusal(monkeypatch):
+    # PAD-1436 meets PAD-1434: a lane cut off with its connection raises as a dropped connection, so the Send
+    # connects again and does the step again (a refusal, "stopped taking", is never retried)
+    m, made = machine(), []
+    monkeypatch.setattr(R, "_connect_lane", lanes_from(m, made))
+    m.widen()
+    made[1].sftp.who["fail_after"] = 0
+    made[1].t.up = False
+    with pytest.raises(Exception) as got:
+        m._put("/games/x.bin", io.BytesIO(b"" * (12 << 20)), 12 << 20)
+    assert not isinstance(got.value, R.SendError)
+    assert not m._alive()

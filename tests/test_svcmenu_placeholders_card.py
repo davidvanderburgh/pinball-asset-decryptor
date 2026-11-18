@@ -31,7 +31,9 @@ def test_placeholders_plan_on_godzilla_116():
     t = AdjustmentTable(_program(LE116))
     settings, _writes, _cat, refused = MS.plan_many(t, rows)
     assert not refused, refused
-    assert {s.key for s in settings} == {r[0] for r in rows}
+    keys = {s.key for s in settings}
+    assert {r[0] for r in rows} <= keys
+    assert {"more_select", "more_value"} <= keys        # five settings, three spare rows: some share MORE SETTINGS
     for s in settings:
         if s.key in SM.OFF_KEYS:
             assert "NULL1" in s.help and "NULL2" in s.help, s.help

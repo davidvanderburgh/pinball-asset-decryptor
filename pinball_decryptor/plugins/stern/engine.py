@@ -9122,12 +9122,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                     grows.pop(_h, None)
                                     audio_edits.pop(_h, None)
                                     _sm_grows.pop(_h, None)
-                        if bank_plan is not None:
-                            bank_plan.old_map = dict(_old_bank_map)
-                            _user_grows = {i: g for i, g in _user_grows.items()
-                                           if i not in bank_plan.grows}
-                            _sm_grows = {i: g for i, g in _sm_grows.items()
-                                         if i not in bank_plan.grows}
+                    # PAD-1438: after the tries, not inside them: a plan that came out at once
+                    # breaks out of the loop, and its banked sounds must still leave _user_grows
+                    if bank_plan is not None:
+                        bank_plan.old_map = dict(_old_bank_map)
+                        _user_grows = {i: g for i, g in _user_grows.items()
+                                       if i not in bank_plan.grows}
+                        _sm_grows = {i: g for i, g in _sm_grows.items()
+                                     if i not in bank_plan.grows}
                     if _user_grows:
                         # The bank's budget: the game's 2 GB, and the room on
                         # the games partition beside the full-size videos,
@@ -23549,7 +23551,18 @@ def _bank_seq_descs(params, sites, groups, places, rows, family, first_alias):
     if not groups:
         return {}, {}
     mask = _desc_key_mask(params, sites)
-    byidx = {p["idx"]: p for p in params}
+    # PAD-1438: the game's own records as its own descriptors name them.  A part the user
+    # made longer is also re-pointed at its longer record in the staged image.bin, so its
+    # params carry that record's key and length; the game's descriptors still name the stock
+    # record's key (and declare its length), the one to match and move from.
+    byidx = {}
+    for p in params:
+        q = dict(p)
+        if p.get("stock_findkey"):
+            q["findkey"] = p["stock_findkey"]
+        if p.get("stock_length") is not None:
+            q["length"] = p["stock_length"]
+        byidx[q["idx"]] = q
     byrow = {r["idx"]: r for r in rows}
     rec = {pl.idx: pl for pl in SB.records(places)}
     more = sorted((pl for pl in places if pl.record is not None),

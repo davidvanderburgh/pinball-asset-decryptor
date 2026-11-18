@@ -222,3 +222,29 @@ def test_bank_seq_descs_give_every_sound_id_its_own_descriptor(monkeypatch):
     # idx 3 and 4 open no sound id: a descriptor naming them that nothing plays
     assert names(rec[3])[0] == b"\xa3" * 8 and names(rec[4])[0] == b"\xa4" * 8
     assert set(given) == {pl.new_idx for pl in places} - {4}
+
+
+def test_bank_seq_descs_match_a_part_grown_in_image_bin_by_its_stock_key(monkeypatch):
+    """PAD-1438: Godzilla Pro 1.16 idx 456, played in parts by sound ids 2489 and 2527, was
+    also grown in the staged image.bin (re-pointed at its longer record), so its params carried
+    that record's key and length.  The game's descriptors name the stock key: the bank's
+    descriptors are matched and moved from it, not refused as naming a record outside the bank."""
+    g = _group()
+    params = [{"idx": i, "chan": 2, "length": 1000, "findkey": _key(i)} for i in range(1, 5)]
+    params[1].update(findkey=b"\xee" * 8, length=4000, grown=True,
+                     stock_findkey=_key(2), stock_length=1000)
+    edits = [SB.BankEdit(i, b"\0" * 24, 1000, 1000 if i in (1, 4) else 5000, 20000)
+             for i in (2, 3, 1, 4)]
+    _d, places = SB.plan_bank(edits, aliases=[1, 2], desc_slot=0x60, mapped=1)
+    rows = [{"idx": pl.new_idx, "host": pl.idx, "length": pl.length,
+             "findkey": bytes([0xa0 + pl.idx]) * 8} for pl in SB.records(places)]
+    sites = [E._DescSite(10, 0, b"", _key(1), 0, b"", 0)]
+    monkeypatch.setattr(E, "_desc_key_mask", lambda *a: E._DESC_KEY2_MASK)
+    given, played = E._bank_seq_descs(params, sites, [g], places, rows, False, 1)
+    rec = {pl.idx: pl.new_idx for pl in SB.records(places)}
+    names = lambda n: [pl for _o, pl in E._op11_payloads(given[n])]
+    assert names(rec[1]) == [b"\xa1" * 8, b"\xa2" * 8]
+    assert names(rec[2]) == [b"\xa2" * 8]
+    # the declared duration moves from the stock length the game's descriptor was written for
+    dur = struct.unpack_from("<I", given[rec[2]], E._DESC_DUR_OFF)[0]
+    assert dur == 40000 + E._duration_units(5000) - E._duration_units(1000)

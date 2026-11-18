@@ -19,6 +19,50 @@ site callout          0x00399e60 0xe92d4010 0xe30ce958
 site callout_nth      0x0039a014 0xe92d4010 0xe30ce958
 site lamp_group       0x0034a3bc 0xe92d4038 0xe1a04000
 site award_screen     0x00305790 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x00279038 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x0001c500
+value own_pass_1          0x0004be50
+value own_pass_2          0x00071fb4
+value own_pass_3          0x00072e54
+value own_pass_4          0x00074190
+value own_pass_5          0x000748fc
+value own_pass_6          0x0007cf28
+value own_pass_7          0x0008e9f8
+value own_pass_8          0x000b5d00
+value own_pass_9          0x000b785c
+value own_pass_10         0x000beaa0
+value own_pass_11         0x000bec5c
+value own_pass_12         0x000bedc8
+value own_pass_13         0x000bf004
+value own_pass_14         0x000bf0cc
+value own_pass_15         0x00101208
+value own_pass_16         0x00131858
+value own_pass_17         0x0014a198
+value own_pass_18         0x0015a470
+value own_pass_19         0x001640d0
+value own_pass_20         0x00164518
+value own_pass_21         0x00164928
+value own_pass_22         0x00173668
+value own_pass_23         0x0017397c
+value own_pass_24         0x001a41b0
+value own_pass_25         0x001a4fac
+value own_pass_26         0x001b6b38
+value own_pass_27         0x001ba534
+value own_pass_28         0x001df3bc
+value own_pass_29         0x001e95cc
+value own_pass_30         0x00265b38
+value own_pass_31         0x002ca900
+value own_pass_32         0x002fcf94
+value own_pass_33         0x0030c098
+value own_pass_34         0x00435750
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
+site show_start       0x00351070 0xe92d47f0 0xe2508000
 site string_new       0x000167fc 0xe28fc606 0xe28cca70
 site dynamic_cast     0x000161fc 0xe28fc606 0xe28cca70
 site resource_get     0x0043a424 0xe92d43f0 0xe1a04000

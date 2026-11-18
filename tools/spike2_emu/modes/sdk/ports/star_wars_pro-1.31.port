@@ -18,6 +18,31 @@ site callout          0x001b2060 0xe92d4010 0xe309e358
 site callout_nth      0x001b2214 0xe92d4010 0xe309e358
 site lamp_group       0x001a3928 0xe92d4038 0xe1a04000
 site award_screen     0x0031f620 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x003aa07c 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x0004234c
+value own_pass_1          0x00049a20
+value own_pass_2          0x00061bb8
+value own_pass_3          0x000775b8
+value own_pass_4          0x0008f948
+value own_pass_5          0x00091f74
+value own_pass_6          0x00094d08
+value own_pass_7          0x00095934
+value own_pass_8          0x000c7c68
+value own_pass_9          0x000cc108
+value own_pass_10         0x00170110
+value own_pass_11         0x00172818
+value own_pass_12         0x0017dc54
+value own_pass_13         0x0027fe94
+value own_pass_14         0x00365aa8
+value own_pass_15         0x00415b44
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
+site show_start       0x00172138 0xe92d47f0 0xe2508000
 site string_new       0x00016870 0xe28fc605 0xe28ccaec
 site dynamic_cast     0x0001627c 0xe28fc605 0xe28ccaec
 site resource_get     0x00420ea4 0xe92d43f0 0xe1a04000
@@ -43,6 +68,9 @@ site switch_hit       0x00288828 0xe2503000 0x012fff1e
 site switch_hit2      0x002888c8 0xe92d4010 0xe2504000
 site switch_edge      0x0011cfb0 0xe30c3128 0xe3403069
 site switch_drain     0x0011dc90 0xe92d4ff0 0xe301996c
+# PAD-1400: inside the drain, where it starts a switch's handler (r0 group, r1 handler, r2 argument); a
+# whole-game mode refuses the game's RULE handlers there (descriptor flags with no low 10 bits)
+site switch_spawn     0x0011dd18 0xeb06e7cf 0xe3500000
 site surface_find     0x004b98b8 0xe92d4070 0xe24dd008
 site surface_set_video 0x004b0f9c 0xe5d030d4 0xe92d4ff0
 site surface_play     0x004aeda8 0xe5d030d4 0xe92d43f0

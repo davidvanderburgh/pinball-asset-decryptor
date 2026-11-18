@@ -18,6 +18,25 @@ site callout          0x0032d068 0xe92d4010 0xe306ed18
 site callout_nth      0x0032d21c 0xe92d4010 0xe306ed18
 site lamp_group       0x002a7038 0xe92d4038 0xe1a04000
 site award_screen     0x001a7214 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x00221474 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x00028f28
+value own_pass_1          0x00083a8c
+value own_pass_2          0x000be8b0
+value own_pass_3          0x00108404
+value own_pass_4          0x0016ca2c
+value own_pass_5          0x0023a50c
+value own_pass_6          0x0029ab04
+value own_pass_7          0x002c49f4
+value own_pass_8          0x002cea90
+value own_pass_9          0x0032b2bc
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
+site show_start       0x0021ceb0 0xe92d47f0 0xe2508000
 site string_new       0x000167ac 0xe28fc605 0xe28ccaa5
 site dynamic_cast     0x000161b8 0xe28fc605 0xe28ccaa5
 site resource_get     0x0028a1f4 0xe92d43f0 0xe1a04000
@@ -70,6 +89,9 @@ site proc_create      0x0011e270 0xe300cd80 0xe340c061
 site proc_sleep       0x0011e3c0 0xe3003d80 0xe3403061
 site switch_edge      0x00313ca0 0xe302306c 0xe3403061
 site switch_drain     0x00314980 0xe92d4ff0 0xe3069568
+# PAD-1400: inside the drain, where it starts a switch's handler (r0 group, r1 handler, r2 argument); a
+# whole-game mode refuses the game's RULE handlers there (descriptor flags with no low 10 bits)
+site switch_spawn     0x00314a08 0xebf825dc 0xe3500000
 site live_records     0x0011e908 0xe3002d80 0xe3402061
 
 # ---- globals ----

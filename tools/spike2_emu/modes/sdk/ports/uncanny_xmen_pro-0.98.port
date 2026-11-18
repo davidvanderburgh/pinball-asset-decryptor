@@ -19,6 +19,35 @@ site callout          0x001f5634 0xe92d4010 0xe301e9c8
 site callout_nth      0x001f57e8 0xe92d4010 0xe301e9c8
 site lamp_group       0x002bf31c 0xe92d4038 0xe1a04000
 site award_screen     0x0016f800 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x0030727c 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x0002d134
+value own_pass_1          0x0002f470
+value own_pass_2          0x0004db78
+value own_pass_3          0x000d7c2c
+value own_pass_4          0x000d7cec
+value own_pass_5          0x000d9b18
+value own_pass_6          0x000deebc
+value own_pass_7          0x000e0030
+value own_pass_8          0x000e03a8
+value own_pass_9          0x000e0594
+value own_pass_10         0x000e0a00
+value own_pass_11         0x000e0af0
+value own_pass_12         0x000f3848
+value own_pass_13         0x00130ca0
+value own_pass_14         0x00291624
+value own_pass_15         0x0029e7b8
+value own_pass_16         0x002b07dc
+value own_pass_17         0x002b62e4
+value own_pass_18         0x00310754
+value own_pass_19         0x00324d94
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from uncanny_xmen_le-0.98, elvira3-1.13, foo_fighters_le-1.04 and 14 more (every reference agreed)
+site show_start       0x003cb33c 0xe92d47f0 0xe2508000
 site string_new       0x000167e0 0xe28fc605 0xe28ccad1
 site dynamic_cast     0x000161e0 0xe28fc605 0xe28ccad1
 site resource_get     0x0039c4ac 0xe92d43f0 0xe1a04000

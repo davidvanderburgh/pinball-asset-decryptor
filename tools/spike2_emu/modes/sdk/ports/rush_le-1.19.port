@@ -19,6 +19,36 @@ site callout          0x0019bc98 0xe92d4010 0xe305e668
 site callout_nth      0x0019be4c 0xe92d4010 0xe305e668
 site lamp_group       0x002cfe5c 0xe92d4038 0xe1a04000
 site award_screen     0x00287e50 0xe92d4070 0xe24dd008
+# PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
+# (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
+site drain_rule_call  0x0016066c 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x0006d81c
+value own_pass_1          0x0006de74
+value own_pass_2          0x00071178
+value own_pass_3          0x00076388
+value own_pass_4          0x00077318
+value own_pass_5          0x0008237c
+value own_pass_6          0x000991dc
+value own_pass_7          0x0009bb60
+value own_pass_8          0x000a396c
+value own_pass_9          0x000a7150
+value own_pass_10         0x000adbd8
+value own_pass_11         0x000c1254
+value own_pass_12         0x000d8ca4
+value own_pass_13         0x000f33f4
+value own_pass_14         0x0015b790
+value own_pass_15         0x0016396c
+value own_pass_16         0x00196314
+value own_pass_17         0x00239b78
+value own_pass_18         0x002a8e20
+value own_pass_19         0x002ac128
+value own_pass_20         0x003a54a0
+# PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
+# program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
+site show_start       0x002da5d0 0xe92d47f0 0xe2508000
 site string_new       0x0001679c 0xe28fc605 0xe28ccabf
 site dynamic_cast     0x0001619c 0xe28fc605 0xe28ccabf
 site resource_get     0x00168e54 0xe92d43f0 0xe1a04000
@@ -74,6 +104,9 @@ site proc_create      0x002d75f0 0xe30ec5d0 0xe340cb67
 site proc_sleep       0x002d7740 0xe30e35d0 0xe3403b67
 site switch_edge      0x00352ddc 0xe30e35ac 0xe3403b67
 site switch_drain     0x00353a04 0xe92d4ff0 0xe3029e88
+# PAD-1400: inside the drain, where it starts a switch's handler (r0 group, r1 handler, r2 argument); a
+# whole-game mode refuses the game's RULE handlers there (descriptor flags with no low 10 bits)
+site switch_spawn     0x00353a8c 0xebfe0e9b 0xe3500000
 site live_records     0x002d7c88 0xe30e25d0 0xe3402b67
 site layer_add        0x000205ec 0xe30ec5d4 0xe1a03002
 site layer_remove     0x00020604 0xe92d40f8 0xe5913004

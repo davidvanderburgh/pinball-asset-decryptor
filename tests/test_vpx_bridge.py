@@ -1262,43 +1262,79 @@ def test_jaws_center_ramp_ball_comes_back_to_the_left_post_under_vbscript(tmp_pa
     # Mike (reopened): "The harpoon should only be on the left inlane. You
     # shoot from the left flipper." jaws_le 1.02 starts the harpoon on CENTER
     # RAMP MADE and holds it on the LEFT post (0x1d0254 / 0x1cc80c); JP's
-    # middle lane (Target2) carries the ball up onto the upper deck instead, so
-    # the post went up with nothing on it. The left post going up within 1.5 s
-    # of that shot puts the ball in Kpiste, the head of JP's center return wire
-    # (Ramp053, down to the left inlane), and kicks it down the wire
+    # middle lane (Target2) carries the ball up onto the upper deck instead.
+    # PAD-1425 (Mike): it "works the first time but then ... the center shot
+    # is triggering it but sending ball to upper playfield": PAD-1392 sent the
+    # ball back only on a fresh post edge within 1.5 s. Every ball going up the
+    # lane now goes to Kpiste, the head of JP's center return wire (Ramp053,
+    # down to the left inlane), as the machine's center ramp always returns
     m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
     assert m["switches"]["Target2"]["id"] == 94 and m["switches"]["Target2"]["also"] == "PadMidShot"
     assert m["retrofit_timers"]["PadMidTimer"]["interval_ms"] == 100
+    assert "PadMidReturn" not in m["extra_vbs"]
     show = "Sub Show(b) : Log = Log & Round(b.X) & \",\" & Round(b.Y) & \",\" & b.Z & \",\" & b.VelX & b.VelY & \" \" : End Sub"
     out = _cscript(tmp_path, "\n".join([
         _jaws_fakes(), m["extra_vbs"], show,
         "Log = Log & PadMidTimer.Enabled & \" \"",                     # off until wanted
-        # up the middle at 1.000 s, on the deck when the post comes up at 1.400 s
-        "Dim b1 : Set b1 = Ball(440, 192) : Set ActiveBall = b1 : GameTime = 1000 : PadMidShot",
-        "b1.X = 300 : b1.Y = 150 : GameTime = 1400 : PadPostL True : Show b1",
-        "Log = Log & lockpostG.IsDropped & \" \" & PadMidTimer.Enabled & \" \"",
+        # up the middle: straight onto the wire, kicked down it 100 ms later
+        "Dim b1 : Set b1 = Ball(440, 192) : b1.VelY = -14 : Set ActiveBall = b1 : GameTime = 1000 : PadMidShot",
+        "Show b1 : Log = Log & PadMidTimer.Enabled & \" \"",
         "PadMidTimer_Timer : Log = Log & PadMidTimer.Enabled & \" | \"",
-        "PadPostL False",
-        # the right post never takes it
-        "Dim b2 : Set b2 = Ball(440, 192) : Set ActiveBall = b2 : GameTime = 2000 : PadMidShot",
-        "GameTime = 2300 : PadPostR True : PadPostR False : Show b2",
-        # too late (1.6 s): another reason for the post
-        "GameTime = 4000 : PadMidShot : GameTime = 5600 : PadPostL True : PadPostL False : Show b2",
-        # already back down on the lower playfield: left alone
-        "Dim b3 : Set b3 = Ball(440, 192) : Set ActiveBall = b3 : GameTime = 7000 : PadMidShot",
-        "b3.Y = 1200 : GameTime = 7500 : PadPostL True : PadPostL False : Show b3",
+        # a second and a third time, whatever the post does (still up from the first, or never moving)
+        "PadPostL True",
+        "Dim b2 : Set b2 = Ball(440, 192) : b2.VelY = -14 : Set ActiveBall = b2 : GameTime = 9000 : PadMidShot",
+        "Show b2 : PadMidTimer_Timer",
+        "Dim b3 : Set b3 = Ball(440, 192) : b3.VelY = -14 : Set ActiveBall = b3 : GameTime = 30000 : PadMidShot",
+        "Show b3 : PadMidTimer_Timer : PadPostL False : Log = Log & \"| \"",
+        # the post going up moves no ball by itself now
+        "Dim b4 : Set b4 = Ball(300, 150) : Set ActiveBall = b4 : PadPostL True : PadPostL False : Show b4",
+        # a ball coming down the lane: left alone
+        "Dim b5 : Set b5 = Ball(440, 192) : Set ActiveBall = b5 : PadMidShot : Show b5",
         # JP's shark quickshot holds a ball in Kpiste: left alone
-        "Dim b4 : Set b4 = Ball(440, 192) : Set ActiveBall = b4 : GameTime = 8000 : PadMidShot",
-        "TimerQuick.Enabled = True : GameTime = 8200 : PadPostL True : PadPostL False : Show b4",
-        "TimerQuick.Enabled = False",
+        "Dim b6 : Set b6 = Ball(440, 192) : b6.VelY = -14 : Set ActiveBall = b6",
+        "TimerQuick.Enabled = True : PadMidShot : Show b6 : TimerQuick.Enabled = False",
         # the ball is gone: nothing, no error
-        "Dim b5 : Set b5 = New GoneBall : Set ActiveBall = b5 : GameTime = 9000 : PadMidShot",
-        "GameTime = 9100 : PadPostL True : PadPostL False : Log = Log & \"gone\"",
+        "Dim b7 : Set b7 = New GoneBall : Set ActiveBall = b7 : PadMidShot : Log = Log & \"gone \" & PadMidTimer.Enabled",
         "WScript.Echo Log"]))
     assert out == ["0",
-                   "380,339,80,00", "False", "1", "kick180,10", "0", "|",
-                   "440,192,,314", "440,192,,314", "440,1200,,314", "440,192,,314",
-                   "gone"], out
+                   "380,339,80,00", "1", "kick180,10", "0", "|",
+                   "380,339,80,00", "kick180,10", "380,339,80,00", "kick180,10", "|",
+                   "300,150,,314",
+                   "440,192,,314",
+                   "440,192,,3-14",
+                   "gone", "0"], out
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_jaws_beach_panic_goes_up_to_the_upper_deck_under_vbscript(tmp_path):
+    # PAD-1425 (Mike): "The beach panic shot should send the ball up the wave
+    # ramp to the upper playfield ... Right now the game is sending the beach
+    # panic around an orbit". The Marina lane is the machine's left ramp
+    # (PAD-1413); a ball going up over sw5 (LEFT RAMP MADE) comes out on JP's
+    # deck (WallHautJaw, 110 high) 50 units out from his lock along its own
+    # eject, lock.kick 230, 12, so it rolls down to the upper flipper. JP's
+    # lock kicker is not used: a ball in it is UP PF SHIP WHEEL MAG
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    sw5 = m["switches"]["sw5"]
+    assert sw5["id"] == 67 and sw5["up"] is True and sw5["also"] == "PadMarinaUp"
+    body = m["extra_vbs"].split("Sub PadMarinaUp")[1].split("End Sub")[0]
+    assert "lock." not in "\n".join(ln.split("'")[0] for ln in body.split("\n"))
+    show = ("Sub Show(b) : Log = Log & Round(b.X) & \",\" & Round(b.Y) & \",\" & b.Z & \",\" & Round(b.VelX, 2) & \",\""
+            " & Round(b.VelY, 2) & \",\" & b.VelZ & \" \" : End Sub")
+    out = _cscript(tmp_path, "\n".join([
+        _jaws_fakes(), m["extra_vbs"], show,
+        "Dim b1 : Set b1 = Ball(367, 165) : b1.VelY = -14 : Set ActiveBall = b1 : PadMarinaUp : Show b1",
+        # the plunge or a ball coming round the top rolls down over it: left alone
+        "Dim b2 : Set b2 = Ball(367, 165) : Set ActiveBall = b2 : PadMarinaUp : Show b2",
+        "Dim b3 : Set b3 = New GoneBall : Set ActiveBall = b3 : PadMarinaUp : Log = Log & \"gone\"",
+        "WScript.Echo Log"]))
+    assert out == ["237,206,135,-9.19,7.72,0", "367,165,,3,14,0", "gone"], out
+    mark = "' PAD-1425: the center ramp always comes back to the left inlane; Beach Panic goes up to the upper deck"
+    assert mark in m["extra_vbs"]
+    assert any(r.get("absent") == mark for r in m["repatch"])
+    # PAD-1392's rule looked for its center-ramp line, which a new patch no longer writes
+    assert not any("PAD-1392: the center ramp" in r.get("absent", "") for r in m["repatch"])
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
@@ -1406,18 +1442,17 @@ def test_jaws_copy_patched_before_pad1392_asks_for_a_new_patch(tmp_path):
     assert why[0] not in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
 
 
-def test_jaws_copy_patched_with_v1_505_2_asks_for_a_new_patch(tmp_path):
-    # a copy patched with the first PAD-1392 fix (posts, fin, far right ramp)
-    # but not the center ramp's return to the left post asks for a new patch
+def test_jaws_copy_patched_before_pad_1425_asks_for_a_new_patch(tmp_path):
+    # a copy patched while the center ramp's ball came back only on a fresh
+    # left post edge (PAD-1392, v1.505.5 on), and Beach Panic was an orbit,
+    # asks for a new patch; a copy patched now does not
     vsu = pytest.importorskip("vpxsetup")
     m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
-    why = [r["why"] for r in m["repatch"] if "shot up the middle" in r["why"]]
+    why = [r["why"] for r in m["repatch"] if "Beach Panic went round an orbit" in r["why"]]
     assert len(why) == 1
     name = "JAWS_50Th_Anniversary (PAD).vpx"
-    v = m["extra_vbs"]
-    i = v.index("' PAD-1392: the center ramp comes back to the left inlane.")
-    old = v[:i] + v[v.index("' ---- PAD-1311", i):]
-    assert "' PAD-1392: the inlane posts catch the ball, one fin" in old
+    mark = "' PAD-1425: the center ramp always comes back to the left inlane; Beach Panic goes up to the upper deck"
+    old = m["extra_vbs"].replace(mark, "")
     (tmp_path / (name[:-4] + ".script.vbs")).write_text(old, encoding="utf-8")
     assert why[0] in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
     (tmp_path / (name[:-4] + ".script.vbs")).write_text(m["extra_vbs"], encoding="utf-8")
@@ -1434,7 +1469,8 @@ def test_jaws_marina_lane_is_the_left_ramp():
     m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
     sw = m["switches"]
     assert sw["sw9"] == {"id": 73, "event": "hit", "up": True, "name": sw["sw9"]["name"]}
-    assert sw["sw5"] == {"id": 67, "event": "hit", "up": True, "name": sw["sw5"]["name"]}
+    # PAD-1425: and the ball going up it goes on up to the upper deck (PadMarinaUp)
+    assert sw["sw5"] == {"id": 67, "event": "hit", "up": True, "name": sw["sw5"]["name"], "also": "PadMarinaUp"}
     assert "LEFT RAMP ENTER" in sw["sw9"]["name"] and "LEFT RAMP MADE" in sw["sw5"]["name"]
     # the ids are the rig's switch_list.txt rows for jaws_le: 73 LEFT RAMP ENTER, 67 LEFT RAMP MADE OPTO
     assert not {"sw9_Hit", "sw5_Hit"} & set(m["quiet_subs"]) and not {"sw9", "sw5"} & set(m["orig_keep"])
@@ -1453,6 +1489,7 @@ def test_jaws_marina_lane_counts_a_ball_going_up_only_under_vbscript(tmp_path):
     m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
     tribute = MINI_TRIBUTE + ("Sub sw9_Hit : Log = Log & \"jp9 \" : End Sub\n"
                               "Sub sw5_Hit : Log = Log & \"jp5 \" : End Sub\n")
+    # PAD-1425: sw5's PadMarinaUp runs on every hit and itself moves only a ball going up (tested on its own)
     mini = json.loads(json.dumps(MINI_SHADOW))
     mini["switches"] = {k: m["switches"][k] for k in ("sw9", "sw5")}
     mini["orig_hits"] = False
@@ -1468,7 +1505,8 @@ def test_jaws_marina_lane_counts_a_ball_going_up_only_under_vbscript(tmp_path):
         "Class FakeTimer : Public Sub PulseSw(n) : Log = Log & n & \" \" : End Sub : End Class",
         "Class FakeBall : Public VelX, VelY : End Class",
         "Dim vpmTimer : Set vpmTimer = New FakeTimer",
-        "Dim ActiveBall : Set ActiveBall = New FakeBall"] + subs + [
+        "Dim ActiveBall : Set ActiveBall = New FakeBall",
+        "Sub PadMarinaUp : Log = Log & \"deck \" : End Sub"] + subs + [
         "ActiveBall.VelX = 6 : ActiveBall.VelY = -14 : sw9_Hit : sw5_Hit : Log = Log & \"| \"",   # up the lane
         "ActiveBall.VelX = -9 : ActiveBall.VelY = 11 : sw5_Hit : sw9_Hit : Log = Log & \"| \"",   # down it
         "ActiveBall.VelY = -3 : sw9_Hit : ActiveBall.VelY = 4 : sw9_Hit",                          # up, falls back
@@ -1476,7 +1514,7 @@ def test_jaws_marina_lane_counts_a_ball_going_up_only_under_vbscript(tmp_path):
     (tmp_path / "t.vbs").write_text(script, encoding="latin-1")
     r = subprocess.run(["cscript", "//nologo", str(tmp_path / "t.vbs")], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and not r.stderr, r.stdout + r.stderr
-    assert r.stdout.split() == ["1073", "1067", "|", "|", "1073"], r.stdout
+    assert r.stdout.split() == ["1073", "1067", "deck", "|", "deck", "|", "1073"], r.stdout
 
 
 @pytest.mark.skipif(not os.path.exists(r"C:\tmp\vpx_new\JAWS_50Th_Anniversary.3.2\JAWS_50Th_Anniversary.vpx"),

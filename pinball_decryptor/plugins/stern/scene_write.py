@@ -165,6 +165,8 @@ class SceneProfile:
                               # ``clips``) - a free class id and one past the library's highest key
     words_font: tuple = ()    # item 164: (Font class id, symbol key) for the card's full system font, carried
                               # in because this file's own fonts lack the words' glyphs (:func:`carried_font`)
+    font_gap: int = 0x800     # PAD-1405: where the carried font's ids start past first_free_id (add_screens sets it:
+                              # FONT_ID_GAP, or more when the screens' meters and fades need more ids)
 
 
 PROFILES = {
@@ -968,12 +970,22 @@ def check(data, p):
         raise SceneWriteError("%s: 0x%x is not the ptr id of %s" % (p.label, at, name))
 
 
+def screen_ids(layers=()):
+    """How many object ids :func:`screen` takes: seven, and three more for each of its ``layers`` (PAD-1405)."""
+    return 7 + 3 * len(layers or ())
+
+
 def screen(p, name, art_rgba, words, x, y, words_at=None, words_rgba=(1.0, 0.9, 0.0, 1.0),
-           art_name=None, words_name=None, scale=1.0, words_scale=1.0):
+           art_name=None, words_name=None, scale=1.0, words_scale=1.0, layers=()):
     """A root Sprite ``name`` holding an art Bitmap (our texture) and a words Text,
-    named ``<name>_Art`` / ``<name>_Words`` unless given. Returns (bytes, the seven
-    object ids it uses). PAD-323: ``scale`` sizes the whole screen (picture and words) about
-    its top-left corner at (x, y), ``words_scale`` the words alone about their own place."""
+    named ``<name>_Art`` / ``<name>_Words`` unless given. Returns (bytes, the
+    object ids it uses: seven, :func:`screen_ids`). PAD-323: ``scale`` sizes the whole screen (picture and words) about
+    its top-left corner at (x, y), ``words_scale`` the words alone about their own place.
+
+    PAD-1405: ``layers`` ([{"name", "rgba", "x", "y", "sx", "sy"}]) are more Bitmaps between the art and the words,
+    each its own child (``<name>.<layer name>``) a mode shows one at a time - a meter's fill at each level, a screen
+    fade's strength at each step. ``x``, ``y`` place one in the screen, ``sx``, ``sy`` stretch it (a few pixels of one
+    colour cover the whole glass)."""
     art_name = art_name or name + "_Art"
     words_name = words_name or name + "_Words"
     art = np.asarray(art_rgba, dtype=np.uint8)
@@ -983,15 +995,25 @@ def screen(p, name, art_rgba, words, x, y, words_at=None, words_rgba=(1.0, 0.9, 
     if w % 4 or h % 4:
         raise SceneWriteError("art is %dx%d; BC3 wants both sides a multiple of 4" % (w, h))
     blob = _dds.encode_bc3(art)
-    ids = list(range(p.first_free_id, p.first_free_id + 7))
+    ids = list(range(p.first_free_id, p.first_free_id + screen_ids(layers)))
     names = {"sprite": "Sprite", "bitmap": "Bitmap", "text": "Text"}
     poly = {k: (u32(FLAG | v) + string(names[k]) if k in p.new_poly else v) for k, v in p.poly.items()}
-    p_group, o_group, p_art, o_art, tex, p_txt, o_txt = ids
+    p_group, o_group, p_art, o_art, tex, p_txt, o_txt = ids[:7]
     wx, wy = words_at if words_at is not None else (20.0, h + 50.0)
     art_node = node(FLAG | p_art, art_name, 1, [(1, 1)], [(1, matrix())],
                     [(1, poly["bitmap"], FLAG | o_art,
                       bitmap_body(p.symbol["bitmap"], w, h, texture_new(tex, w, h, blob)))])
     kids = [art_node]
+    for k, lay in enumerate(layers or ()):
+        la = np.asarray(lay["rgba"], dtype=np.uint8)
+        lh, lw = la.shape[:2]
+        if la.ndim != 3 or la.shape[2] != 4 or lw % 4 or lh % 4:
+            raise SceneWriteError("%s: a layer must be (h, w, 4) RGBA with both sides a multiple of 4" % lay["name"])
+        lp, lo, lt = ids[7 + 3 * k:10 + 3 * k]
+        kids.append(node(FLAG | lp, lay["name"], 1, [(1, 1)],
+                         [(1, matrix(lay.get("sx", 1.0), lay.get("sy", 1.0), tx=lay.get("x", 0.0), ty=lay.get("y", 0.0)))],
+                         [(1, poly["bitmap"], FLAG | lo,
+                           bitmap_body(p.symbol["bitmap"], lw, lh, texture_new(lt, lw, lh, _dds.encode_bc3(la))))]))
     if p.font:          # item 164: a scene with no Text of its own (Bond 60th's frame) has no font to use
         kids.append(node(FLAG | p_txt, words_name, 1, [(1, 1)],
                          [(1, matrix(words_scale, words_scale, tx=wx, ty=wy))],
@@ -1334,7 +1356,7 @@ def _free_block(data, start, n, p):
     kept below the carried font's ids (``FONT_ID_GAP`` past the profile's first free id)."""
     while any(struct.pack("<I", FLAG | i) in data for i in range(start, start + n)):
         start += n
-    if start + n > p.first_free_id + FONT_ID_GAP:
+    if start + n > p.first_free_id + p.font_gap:
         raise SceneWriteError("%s: no free object ids left for the modes' screens" % p.label)
     return start
 
@@ -1379,9 +1401,17 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
     if len(set(names)) != len(names):
         raise SceneWriteError("two screens share a name: %r" % names)
     libs, font = [], {}
+    # PAD-1405: a mode's meters and screen fades are a picture a level, three ids each; the carried font's ids start
+    # past every screen's (FONT_ID_GAP unless they need more; never into the HUD's, which start FONT_BASE_GAP past)
+    need = sum(screen_ids(s.get("layers")) for s in screens)
+    font_gap = FONT_ID_GAP if need <= FONT_ID_GAP // 2 else -(-(need * 2 + 0x100) // 0x100) * 0x100
+    if huds and font_gap > FONT_ID_GAP:
+        raise SceneWriteError("%s: the modes' meters and screen fades take too many object ids beside a HUD (%d); "
+                              "give them fewer" % (p.label, need))
+    p = SceneProfile(**{**p.__dict__, "font_gap": font_gap})
     if p.words_font and font_source and screens:
         entry, size_id, variant = carried_font(font_source, p.words_font[0], p.words_font[1],
-                                               p.first_free_id + FONT_ID_GAP)
+                                               p.first_free_id + font_gap)
         libs.append(entry)
         font = {"font": (size_id, variant)}
     groups, infos = [], []
@@ -1393,15 +1423,16 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
         # PAD-414: the file's own ids are all below first_free_id, but a byte search for FLAG|id also meets
         # its data (Godzilla's slide-outs scene holds the bytes of 0x141, so a 10th screen was refused): a
         # block whose words are found is passed over and the screen takes the next one
-        next_id = _free_block(data, next_id, 7, p)
+        n_ids = screen_ids(s.get("layers"))
+        next_id = _free_block(data, next_id, n_ids, p)
         sub = SceneProfile(**{**p.__dict__, "first_free_id": next_id, **font,
                               "new_poly": p.new_poly if i == 0 else ()})       # registered once, by the first
         group, ids = screen(sub, s["name"], s["art_rgba"], s["words"], s.get("x", 360.0),
                             s.get("y", 200.0), s.get("words_at"), art_name=s.get("art_name"),
                             words_name=words_name, scale=s.get("scale", 1.0),
                             words_scale=s.get("words_scale", 1.0),
-                            words_rgba=s.get("words_rgba", (1.0, 0.9, 0.0, 1.0)))
-        next_id += 7
+                            words_rgba=s.get("words_rgba", (1.0, 0.9, 0.0, 1.0)), layers=s.get("layers", ()))
+        next_id += n_ids
         for nid in ids:
             if struct.pack("<I", FLAG | nid) in data:
                 raise SceneWriteError("%s: object id 0x%x is already used" % (p.label, nid))

@@ -851,7 +851,8 @@ class WebWindow:
             self._borrowed_row = None
             self.ctx.store.set("shell", running=False, run_mode=None,
                                cancelling=False, back_enabled=True)
-            self._set_footer(busy=False, started=None, task=False)
+            # run_label: what the run chip says for a run that isn't the mode's own (PAD-1433: a Send is "Sending")
+            self._set_footer(busy=False, started=None, task=False, run_label=None)
             self._show_row_for_tab()
         for svc in self.tabs:
             try:

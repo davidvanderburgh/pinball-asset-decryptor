@@ -142,7 +142,12 @@ class _ChunkFile(io.RawIOBase):
     """A file of the build image, read in order, for an upload."""
 
     def __init__(self, tree, node):
-        self._it = iter(tree.chunks(node))
+        self._tree, self._node = tree, node
+        self.rewind()
+
+    def rewind(self):
+        """PAD-1436: from the first byte again (an upload cut off by a dropped connection is sent again whole)."""
+        self._it = iter(self._tree.chunks(self._node))
         self._buf, self._at = b"", 0
 
     def readable(self):
@@ -449,6 +454,11 @@ def _open_spike3(build, rec, log):
 class Machine:
     """What a Send asks of the machine.  :class:`SshMachine` over remote access; tests use a stand-in."""
 
+    #: PAD-1436: where a machine says it lost the connection and got it back, and what it asks whether to stop
+    #: trying; the Send sets them
+    log = staticmethod(lambda *a, **k: None)
+    cancel = staticmethod(lambda: False)
+
     def state(self, paths):
         """``{path: None | ("file", sha1) | ("link", target) | ("dir",) | ("other",)}``."""
         raise NotImplementedError
@@ -496,6 +506,10 @@ class Machine:
 
     def close(self):
         pass
+
+    def widen(self, log=None):
+        """Make the connection fast for a Send's bulk (PAD-1434, :meth:`SshMachine.widen`); False when not."""
+        return False
 
     # the full Send (an image that isn't a build of the card the machine runs)
     def layout(self):
@@ -751,14 +765,114 @@ done
 """
 
 
+#: PAD-1436: a connection that drops part way through a Send (a remote machine's internet link, its Wi-Fi) is dialled
+#: again for this long before the Send gives up; the step it cut off is then done again
+RECONNECT_FOR = 300
+#: the waits between tries, seconds (the last one repeats)
+RECONNECT_WAITS = (2, 5, 10, 15, 30)
+#: PAD-1436: a keepalive this often keeps a router's or a tunnel's idle timer from dropping the connection while
+#: the machine works on a long command (hashing a big file) and nothing else crosses it
+KEEPALIVE = 15
+
+#: PAD-1436: after a reconnect, the game hold as it was: the watchdog that gave up on PAD started again (the game
+#: still held), or the game it had put back held again (nothing had changed yet)
+REHOLD_SCRIPT = r"""
+W=@W@
+[ -f $W/fns ] || { echo PAD_SEND_GONE; exit 0; }
+. $W/fns
+date +%s > $W/alive
+if [ ! -f $W/done ]; then echo PAD_SEND_HELD; exit 0; fi
+if [ -f $W/monitor ]; then
+  rm -f $W/done
+  (trap '' HUP; exec /bin/sh $W/watch) </dev/null >/dev/null 2>&1 &
+  echo PAD_SEND_WATCHING
+else
+  echo PAD_SEND_RESUMED
+fi
+"""
+
+
+def _again(fn):
+    """PAD-1436: a step of a Send that can be done twice to the same end: when the connection drops under it, the
+    machine is dialled again and the step done again from its start."""
+    def step(self, *a, **kw):
+        tries = 0
+        while True:
+            try:
+                return fn(self, *a, **kw)
+            except SendError:
+                raise
+            except Exception as e:                      # noqa: BLE001 - only a dead connection is retried
+                if self._alive():
+                    raise
+                tries += 1
+                if tries > 5:
+                    raise SendError("The connection to the machine kept dropping; send again.") from None
+                self.reconnect(e)
+                for arg in list(a) + list(kw.values()):
+                    if hasattr(arg, "rewind"):          # a file being sent goes again from its start
+                        arg.rewind()
+    step.__name__, step.__doc__ = fn.__name__, fn.__doc__
+    return step
+
+
+# PAD-1434: the Send's faster connection (SshMachine.widen)
+LISTENER_PIDFILE = "/var/run/pad-sshd.pid"  # the machine's own listener (resources/ssh/sshd, Spike 2 and 3)
+WIDE_PIDFILE = "/var/run/pad-sshd-send.pid"
+WIDE_WINDOW = 4194304
+WIDE_PORTS = (2222, 22222, 42222)
+LANES = 2  # connections at once: one per core of the machine (a third added 4% over Wi-Fi)
+SPREAD_MIN = 2 << 20  # a file smaller than this goes over one connection
+# stop a temporary listener, only when the pid in its file is still one (a stale file's pid may be reused)
+WIDE_STOP = ("p=$(cat {f} 2>/dev/null); if [ -n \"$p\" ] && tr '\\000' ' ' < /proc/$p/cmdline 2>/dev/null "
+             "| grep -q {f}; then kill \"$p\"; fi; rm -f {f}").format(f=WIDE_PIDFILE)
+
+
+def _window(args):
+    """The receive window a dropbear command line asks for (its default when none)."""
+    for i, a in enumerate(args):
+        v = args[i + 1] if a == "-W" and i + 1 < len(args) else a[2:] if a.startswith("-W") and len(a) > 2 else None
+        if v is not None:
+            with contextlib.suppress(ValueError):
+                return int(v)
+    return 24576
+
+
+def _connect_lane(host, port, identity):
+    return SshMachine(host, port, expect=identity)
+
+
+def _pieces(fileobj, size, piece=1 << 20):
+    off = 0
+    while off < size:
+        data = fileobj.read(min(piece, size - off))
+        if not data:
+            break
+        yield off, data
+        off += len(data)
+
+
 class SshMachine(Machine):
     """A machine over remote access, logged in as root with this computer's key."""
 
-    def __init__(self, host, port=22, timeout=15):
+    def __init__(self, host, port=22, timeout=15, expect=None):
+        """*expect* (PAD-1434): the identity this must be, ``(kind, base64)``, for a second connection to a
+        machine already logged in to; it is never remembered for this port."""
+        self.host, self.port, self._timeout, self._expect = host, int(port), timeout, expect
+        # PAD-1434 (widen): the connections big files are spread over, the usual connection while a wide one
+        # stands in for it, that wide one, and the temporary listener's port
+        self._lanes, self._parked, self._wide, self._wide_port = [], None, None, None
+        self._widened, self._boot = False, ""
+        self._dial()
+        if expect is None:                              # a lane (PAD-1434) never reconnects on its own
+            _rc, out = self.sh("cat /proc/sys/kernel/random/boot_id 2>/dev/null", check=False)
+            self._boot = out.strip()
+
+    def _dial(self):
         import socket
         import paramiko
         from . import pad_ssh_key
-        self.host, self.port = host, int(port)
+        host, timeout, expect = self.host, self._timeout, self._expect
         try:
             # a machine on the home network answers in milliseconds: an address nothing answers at is said soon
             # (PAD-1427: and a remembered machine is then looked for at another one)
@@ -769,8 +883,10 @@ class SshMachine(Machine):
         try:
             t.start_client(timeout=timeout)
             key = t.get_remote_server_key()
-            known = pad_ssh_key.host_key(host, self.port)
-            mine = (key.get_name(), key.get_base64())
+            known = pad_ssh_key.host_key(host, self.port) if expect is None else expect
+            mine = self.identity = (key.get_name(), key.get_base64())
+            if expect is not None and tuple(expect) != mine:
+                raise SendError("%s:%d is not the machine this computer is sending to." % (host, self.port))
             if known is not None and tuple(known) != mine:
                 raise SendError("%s answered with a different identity from the last time, so this computer "
                                 "won't log in to it. If the machine's card was rewritten from scratch, use "
@@ -782,17 +898,249 @@ class SshMachine(Machine):
                                 "Remote access on, from this computer, and Send works after that." % host) from None
             if known is None:
                 pad_ssh_key.remember_host(host, self.port, *mine)
+            t.set_keepalive(KEEPALIVE)
             self.t = t
             self.sftp = paramiko.SFTPClient.from_transport(t)
         except BaseException:
             t.close()
             raise
 
+    def _alive(self):
+        t = getattr(self, "t", None)
+        if t is None or not t.is_active():
+            return False
+        # PAD-1434/1436: a widened Send writes over its lanes too: one of them gone is a dropped connection
+        return all(lane is self or lane.t.is_active() for lane in getattr(self, "_lanes", ()))
+
+    def reconnect(self, why=None):
+        """PAD-1436: the connection dropped under a Send: dial the machine again (for :data:`RECONNECT_FOR`
+        seconds), check it is the same run of it (not restarted), and put the game hold back as it was."""
+        self.close()
+        self.log("The connection to the machine dropped%s; connecting again..."
+                 % ((" (%s)" % str(why).strip().rstrip(":")) if why is not None and str(why).strip() else ""),
+                 "warning")
+        until = time.monotonic() + RECONNECT_FOR
+        n = 0
+        while True:
+            if self.cancel():
+                raise SendError("Send canceled.")
+            try:
+                self._dial()
+                break
+            except SendError as e:
+                if not isinstance(e, Unreachable):
+                    raise                               # a different identity, a refused key: never retried
+                last = e
+            except Exception as e:                      # noqa: BLE001 - the link half up: tried again
+                last = e
+            wait = RECONNECT_WAITS[min(n, len(RECONNECT_WAITS) - 1)]
+            n += 1
+            if time.monotonic() + wait > until:
+                raise SendError("The connection to the machine dropped and it didn't answer again for %d minutes "
+                                "(%s). Send again once it can be reached: the next Send picks up where this one "
+                                "stopped." % (RECONNECT_FOR // 60, str(last).strip() or type(last).__name__)) from None
+            for _ in range(int(wait * 10)):
+                if self.cancel():
+                    raise SendError("Send canceled.")
+                time.sleep(0.1)
+        _rc, out = self.sh("cat /proc/sys/kernel/random/boot_id 2>/dev/null", check=False)
+        if self._boot and out.strip() and out.strip() != self._boot:
+            self._paused = False
+            raise SendError("The machine restarted while the Send was running. Send again: the next Send picks up "
+                            "where this one stopped.")
+        if getattr(self, "_paused", False):
+            _rc, out = self.sh(self._fns(REHOLD_SCRIPT), check=False, timeout=60)
+            if "PAD_SEND_GONE" in out:
+                self._paused = False
+                raise SendError("The machine restarted while the Send was running. Send again: the next Send "
+                                "picks up where this one stopped.")
+            if "PAD_SEND_RESUMED" in out:
+                # its watchdog gave the game back (nothing had changed yet): held again before going on
+                self._beat_stop.set()
+                self._paused = False
+                self.pause_game()
+        if self._widened:
+            # PAD-1434: the faster connection went with the old one (close() stopped its listener when it could):
+            # started again, or the Send carries on over the usual one
+            self._widened = False
+            self.widen(self.log)
+        self.log("Connected again; the Send carries on.", "info")
+
     def close(self):
+        lanes, self._lanes = self._lanes, []
+        for lane in lanes:
+            if lane is not self and lane is not self._wide:
+                lane.close()
+        if self._wide_port is not None:
+            # the temporary listener goes with the Send: over the wide connection, or the usual one if that died
+            # (a session is a process of its own, so the one asking outlives the kill)
+            for t, sftp in ((self.t, self.sftp), self._parked):
+                self.t, self.sftp = t, sftp
+                try:
+                    self.sh(WIDE_STOP, timeout=20)
+                    break
+                except Exception:  # noqa: BLE001 - a dead connection; the next Send stops a stale one first
+                    continue
+            self._wide_port = None
+        if self._parked is not None:
+            self._wide.close()
+            (self.t, self.sftp), self._parked, self._wide = self._parked, None, None
         with contextlib.suppress(Exception):
             self.sftp.close()
         with contextlib.suppress(Exception):
             self.t.close()
+
+    # ---- PAD-1434: a faster connection for the Send
+    def _listener_args(self):
+        """The arguments the machine's own listener runs with, or ``None`` when it isn't the one PAD set up."""
+        _rc, out = self.sh("p=$(cat %s 2>/dev/null) && [ -n \"$p\" ] && tr '\\000' '\\n' < /proc/$p/cmdline"
+                           % LISTENER_PIDFILE, timeout=20, check=False)
+        args = [a for a in out.split("\n") if a]
+        return args if args and posixpath.basename(args[0]) == "dropbear" else None
+
+    def widen(self, log=None):
+        """Make this connection a fast one for a Send, and open a second beside it (PAD-1434).
+
+        Dropbear's own receive window (24 KB) holds one connection to ~1.4 MB/s over a machine's Wi-Fi, whatever
+        the radio could carry.  A card set up since this starts its listener with ``-W 4194304``; one set up
+        before runs the old start script until it is rewritten, so a temporary listener is started beside it:
+        the machine's own listener's arguments with another port and the wider window.  It must answer with this
+        machine's identity, and is stopped by :meth:`close`.  Then big files go over two connections at once (one
+        per core of the machine).  Measured on a Godzilla (Wi-Fi, 72 Mb/s link): 1.4 MB/s before, 3.6 with the
+        window, 4.2 with both.  Anything failing leaves the Send on the connection it has.  True when widened."""
+        say = log or (lambda *_a: None)
+        lanes, port = [], self.port
+        try:
+            args = self._listener_args()
+            if args is None:
+                return False
+            if _window(args) < WIDE_WINDOW:
+                port = self._start_wide(args)
+            for _n in range(LANES if port != self.port else LANES - 1):
+                try:
+                    lanes.append(_connect_lane(self.host, port, self.identity))
+                except Exception:  # noqa: BLE001 - one wide connection is still the most of it
+                    if not lanes and port != self.port:
+                        raise
+                    break
+        except Exception as e:  # noqa: BLE001 - never stops a Send: the usual connection carries it
+            for lane in lanes:
+                lane.close()
+            if self._wide_port is not None:
+                with contextlib.suppress(Exception):
+                    self.sh(WIDE_STOP, timeout=20)
+                self._wide_port = None
+            say("A faster connection didn't start (%s); sending over the usual one."
+                % (str(e)[:120] or type(e).__name__), "info")
+            return False
+        if port != self.port:
+            # the wide connection does all of it; the usual one waits to stop the temporary listener if need be
+            self._parked = (self.t, self.sftp)
+            self.t, self.sftp = lanes[0].t, lanes[0].sftp
+            self._wide = lanes[0]
+            self._lanes = lanes if len(lanes) > 1 else []
+        elif lanes:
+            self._lanes = [self] + lanes
+        if port != self.port or self._lanes:
+            say("Sending over %s%s." % ("two connections at once" if self._lanes else "a faster connection",
+                                        " with a wider window" if port != self.port else ""), "info")
+        self._widened = True
+        return True
+
+    def _start_wide(self, args):
+        keep, skip = [args[0]], False
+        for a in args[1:]:
+            if skip:
+                skip = False
+                continue
+            if a in ("-p", "-P", "-W"):
+                skip = True
+                continue
+            if a[:2] in ("-p", "-P", "-W") or a in ("-F", "-E"):
+                continue  # an attached value, or the foreground (a temporary listener must let the step return)
+            keep.append(a)
+        self.sh(WIDE_STOP, timeout=20)
+        last = ""
+        for port in WIDE_PORTS:
+            if port == self.port:
+                continue
+            cmd = " ".join(_q(a) for a in keep + ["-p", str(port), "-P", WIDE_PIDFILE, "-W", str(WIDE_WINDOW)])
+            rc, out = self.sh(cmd + " 2>&1", timeout=20, check=False)
+            if rc == 0:
+                self._wide_port = port
+                return port
+            last = out.strip()[-120:]
+        raise SendError(last or "no free port")
+
+    def _put(self, path, fileobj, size, callback=None):
+        """A whole file: over every lane at once when it is big enough to gain (PAD-1434)."""
+        if len(self._lanes) > 1 and size >= SPREAD_MIN:
+            self._spread(path, _pieces(fileobj, size), create=True,
+                         progress=None if callback is None else (lambda done: callback(done, size)))
+            got = self.sftp.stat(path).st_size
+            if got != size:
+                raise SendError("%s arrived %d bytes long, not %d; send again." % (path, got, size))
+        else:
+            self.sftp.putfo(fileobj, path, file_size=size, callback=callback, confirm=True)
+
+    def _spread(self, path, pieces, create=False, progress=None):
+        """``(offset, bytes)`` pieces of one file, dealt in turn to each lane's connection, all writing at once
+        (pipelined, PAD-1433).  A write the machine refuses raises once every lane has stopped."""
+        import queue
+        if create:
+            with self.sftp.open(path, "wb"):
+                pass
+        lanes = [lane.sftp for lane in self._lanes]
+        qs = [queue.Queue(maxsize=3) for _ in lanes]
+        done, errors = [0] * len(lanes), []
+
+        def work(i, sftp, q):
+            f = None
+            try:
+                f = sftp.open(path, "r+b")
+                f.set_pipelined(True)
+                while True:
+                    item = q.get()
+                    if item is None:
+                        break
+                    f.seek(item[0])
+                    f.write(item[1])
+                    done[i] += len(item[1])
+                f.close()
+                f = None
+            except BaseException as e:  # noqa: BLE001 - raised on the Send's own thread
+                errors.append(e)
+                while q.get() is not None:  # keep taking pieces, so the dealer never waits on a dead lane
+                    pass
+            finally:
+                if f is not None:
+                    with contextlib.suppress(Exception):
+                        f.close()
+
+        threads = [threading.Thread(target=work, args=(i, s, q), daemon=True, name="pad-send-lane-%d" % i)
+                   for i, (s, q) in enumerate(zip(lanes, qs))]
+        for th in threads:
+            th.start()
+        try:
+            for n, piece in enumerate(pieces):
+                if errors:
+                    break
+                qs[n % len(qs)].put(piece)
+                if progress is not None:
+                    progress(sum(done))
+        finally:
+            for q in qs:
+                q.put(None)
+            for th in threads:
+                th.join()
+        if errors:
+            e = errors[0]
+            if not isinstance(e, SendError) and not self._alive():
+                raise e  # PAD-1436: a dropped connection: the step is done again once connected again
+            raise e if isinstance(e, SendError) else SendError(
+                "The machine stopped taking %s (%s); send again." % (path, str(e)[:120] or type(e).__name__))
+        if progress is not None:
+            progress(sum(done))
 
     def sh(self, script, stdin=b"", timeout=600, check=True):
         # the server gives a session a short PATH (/usr/bin:/bin): the card's own tools are in sbin too
@@ -807,7 +1155,8 @@ class SshMachine(Machine):
             cmd = "/bin/sh %s; r=$?; rm -f %s; exit $r" % (name, name)
         else:
             cmd = "/bin/sh -c " + _q(full)
-        chan = self.t.open_session()
+        t = self.t
+        chan = t.open_session()
         chan.settimeout(timeout)
         chan.exec_command(cmd)
         if stdin:
@@ -826,12 +1175,24 @@ class SshMachine(Machine):
             if not got:
                 if chan.exit_status_ready() and not chan.recv_ready() and not chan.recv_stderr_ready():
                     break
+                if not t.is_active():
+                    # PAD-1436: the connection dropped under the command: said now, not at its timeout (hours for
+                    # a big file's hashes), so the Send connects again and does the step again
+                    raise EOFError("Server connection dropped")
                 if time.monotonic() > until:
                     chan.close()
                     raise SendError("The machine stopped answering; check it and Send again.")
                 time.sleep(0.005)
         rc = chan.recv_exit_status()
         chan.close()
+        if rc == -1:
+            # PAD-1436: no exit status: the session went with the connection (paramiko closes the channel as if
+            # the command ended).  Said as the dropped connection it is - never as a step the machine refused, nor
+            # as a half answer - once the connection's end is seen (a moment after the channel's)
+            for _ in range(30):
+                if not t.is_active():
+                    raise EOFError("Server connection dropped")
+                time.sleep(0.1)
         text = out.getvalue().decode("utf-8", "replace")
         if check and rc != 0:
             raise SendError("The machine refused a step (%s): %s" % (
@@ -893,14 +1254,15 @@ class SshMachine(Machine):
         self.sh("mkdir -p %s && chown %d:%d %s && chmod %o %s" % (_q(path), uid, gid, _q(path), mode, _q(path)))
 
     def upload(self, path, fileobj, size, mode, uid, gid, callback=None):
-        self.sftp.putfo(fileobj, path, file_size=size, callback=callback, confirm=True)
+        self._put(path, fileobj, size, callback)
         self.sftp.chown(path, uid, gid)
         self.sftp.chmod(path, mode)
 
     def commit(self, renames, links, deletes):
         lines = ["set -e"]
         for tmp, final in renames:
-            lines.append("mv -f %s %s" % (_q(tmp), _q(final)))
+            # PAD-1436: done again after a dropped connection: a copy already renamed into place is not missed
+            lines.append("{ [ ! -e %s ] && [ -e %s ]; } || mv -f %s %s" % (_q(tmp), _q(final), _q(tmp), _q(final)))
         for path, target, uid, gid in links:
             tmp = posixpath.join(posixpath.dirname(path), "." + posixpath.basename(path) + TMP_TAG)
             # mv -T where it exists: a plain mv onto a link to a folder would move the new link INTO it
@@ -914,7 +1276,13 @@ class SshMachine(Machine):
             self.sh("\n".join(lines))
 
     def write_ranges(self, path, ranges):
+        if len(self._lanes) > 1 and sum(len(d) for _o, d in ranges) >= SPREAD_MIN:
+            self._spread(path, ranges)
+            return
         with self.sftp.open(path, "r+b") as f:
+            # PAD-1433: pipelined, as putfo is: each 32 KB packet no longer waits for the last one's answer (+25%
+            # measured over a machine's Wi-Fi).  A write the machine refuses still raises, at the close
+            f.set_pipelined(True)
             for off, data in ranges:
                 f.seek(off)
                 f.write(data)
@@ -997,7 +1365,9 @@ class SshMachine(Machine):
 
     def mount_part(self, num, path):
         # read-only: compared first; made writable only when the Send changes it (PAD-1427)
-        self.sh("mkdir -p %s && mount -t ext4 -o ro /dev/mmcblk0p%d %s" % (_q(path), int(num), _q(path)))
+        # PAD-1436: done again after a dropped connection, so a partition it already mounted is left as it is
+        self.sh("mkdir -p %s && { awk -v p=%s '$2 == p {f = 1} END {exit !f}' /proc/mounts || "
+                "mount -t ext4 -o ro /dev/mmcblk0p%d %s; }" % (_q(path), _q(path), int(num), _q(path)))
 
     def umount_part(self, path):
         self.sh("sync; umount %s && rmdir %s" % (_q(path), _q(path)), check=False)
@@ -1011,7 +1381,7 @@ class SshMachine(Machine):
         tmp = posixpath.join(posixpath.dirname(LEDGER), "p%d.img" % int(num))
         self.sh("mkdir -p %s" % _q(posixpath.dirname(tmp)))
         try:
-            self.sftp.putfo(fileobj, tmp, file_size=size, confirm=True)
+            self._put(tmp, fileobj, size)
             if self.state([tmp]).get(tmp) != ("file", sha1):
                 raise SendError("The boot partition didn't arrive whole on the machine; nothing was written.")
             dev = "/dev/mmcblk0p%d" % int(num)
@@ -1132,8 +1502,8 @@ class SshMachine(Machine):
         if not getattr(self, "_paused", False):
             return
         self._screen["pct"] = max(0, min(100, int(done * 100 / total))) if total else 0
-        self._screen["what"] = {"Uploading": "RECEIVING", "Updating": "UPDATING",
-                                "Comparing": "CHECKING"}.get(what, "WORKING")
+        self._screen["what"] = {"Uploading": "RECEIVING", "Updating": "UPDATING", "Comparing": "CHECKING",
+                                "Finishing": "FINISHING"}.get((what or "").split(" ")[0], "WORKING")
 
     def screen_changing(self):
         if getattr(self, "_paused", False):
@@ -1160,6 +1530,14 @@ class SshMachine(Machine):
         self.sh(self._fns(". @W@/fns\npad_resume"), check=False, timeout=90)
         self._paused = False
 
+
+# PAD-1436: the steps a dropped connection is reconnected under and done again (each comes to the same end twice)
+for _name in ("state", "sizes", "read_ranges", "free", "remount", "mkdir", "upload", "commit", "write_ranges", "remove",
+              "sync", "read_ledger", "write_ledger", "layout", "mounts", "walk", "mount_part", "umount_part",
+              "raw_sha1", "raw_write", "set_mtime", "block_hashes", "file_sha1s", "truncate", "set_attrs", "copy",
+              "in_use", "describe"):
+    setattr(SshMachine, _name, _again(getattr(SshMachine, _name)))
+del _name
 
 def connect(address, log=None):
     """An :class:`SshMachine` for ``host`` or ``host:port``.
@@ -1368,7 +1746,8 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
                     machine.screen_changing()
                     changed = True
                 log("Updating %s in place (only the parts that differ)..." % op.path, "info")
-                delta_put(machine, plan.trees[op.mount][0], op, cancel)
+                delta_put(machine, plan.trees[op.mount][0], op, cancel,
+                          progress=lambda done, base=sent: progress(base + done, total, "Updating"))
                 sent += op.size
                 progress(sent, total, "Updating")
                 continue
@@ -1392,6 +1771,7 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
                 raise SendError("%s didn't arrive whole on the machine (its check failed); nothing was changed. "
                                 "Send again." % ", ".join(bad[:3]))
         log("Every file arrived whole; putting them in place.", "info")
+        progress(1, 1, "Finishing")
         check()
         links = [(op.path, op.target, op.uid, op.gid) for op in needed if op.kind == "link"]
         deletes = [(op.path, getattr(op, "cur", None) == ("dir",))
@@ -1496,7 +1876,15 @@ class Target:
 
 class _RawFile(io.RawIOBase):
     def __init__(self, chunks):
-        self._it, self._buf, self._at = iter(chunks), b"", 0
+        # *chunks*: the chunks, or (PAD-1436) what makes them afresh, so a send cut off by a dropped connection
+        # starts again from the first
+        self._make = chunks if callable(chunks) else None
+        self._it, self._buf, self._at = iter(chunks() if callable(chunks) else chunks), b"", 0
+
+    def rewind(self):
+        if self._make is None:
+            raise SendError("This copy can't be sent again; send again.")
+        self._it, self._buf, self._at = iter(self._make()), b"", 0
 
     def readable(self):
         return True
@@ -1517,6 +1905,11 @@ class _RawFile(io.RawIOBase):
 #: block at a time and only the blocks that differ are written, in place - no second copy needs room, and only the
 #: changes cross the network
 DELTA_BLOCK = 1 << 20
+#: the machine hashes the same-size files a full Send compares in batches this big, the bar moving after each
+COMPARE_BATCH_FILES = 200
+#: differing blocks written per SFTP open: the bar moves after each batch (4 MB: a few seconds over Wi-Fi)
+DELTA_BATCH = 4
+COMPARE_BATCH_BYTES = 128 << 20
 
 
 def _blocks(tree, node, bs=None):
@@ -1532,10 +1925,11 @@ def _blocks(tree, node, bs=None):
         yield at, buf
 
 
-def delta_put(machine, tree, op, cancel=None, at=None):
+def delta_put(machine, tree, op, cancel=None, at=None, progress=None):
     """Make the machine's existing copy of ``op.path`` (or the copy of it at *at*) the build's file by writing
     only the blocks that differ, in place.  Only with the game stopped (it would read a half-changed file), and
-    never on the system partition itself (:func:`delta_replace`).  Returns the bytes written."""
+    never on the system partition itself (:func:`delta_replace`).  Returns the bytes written.  *progress(done)*
+    (PAD-1433) is told how far through the file it is after each batch written, so a big file moves the bar."""
     path = at or op.path
     size, theirs = machine.block_hashes(path)
     sent, batch = 0, []
@@ -1545,9 +1939,11 @@ def delta_put(machine, tree, op, cancel=None, at=None):
             continue
         batch.append((off, block))
         sent += len(block)
-        if len(batch) >= 16:
+        if len(batch) >= DELTA_BATCH:
             machine.write_ranges(path, batch)
             batch = []
+            if progress is not None:
+                progress(min(off + len(block), op.size))
         if cancel is not None and cancel():
             raise SendError("Send canceled.")
     if batch:
@@ -1562,7 +1958,7 @@ def delta_put(machine, tree, op, cancel=None, at=None):
     return sent
 
 
-def delta_replace(machine, tree, op, cancel=None):
+def delta_replace(machine, tree, op, cancel=None, progress=None):
     """:func:`delta_put` for a system-partition file: the remote access session runs on those (busybox is the
     shell and every tool a Send uses; the server and libc too), and a program changed under its running copy
     breaks, as a file cut off half-written would on the next boot.  So the machine copies the file beside
@@ -1572,7 +1968,7 @@ def delta_replace(machine, tree, op, cancel=None):
     tmp = posixpath.join(posixpath.dirname(op.path), "." + posixpath.basename(op.path) + TMP_TAG)
     machine.copy(op.path, tmp)
     try:
-        sent = delta_put(machine, tree, op, cancel, at=tmp)
+        sent = delta_put(machine, tree, op, cancel, at=tmp, progress=progress)
         machine.commit([(tmp, op.path)], [], [])
     except BaseException:
         with contextlib.suppress(Exception):
@@ -1780,10 +2176,23 @@ def sync_ops(tree, mine, prefix, protected, own_mounts, hashes_on_machine, log=N
     if same_size:
         if log:
             log("Comparing %d file(s) the same size on the machine and the image..." % len(same_size), "info")
-        theirs = hashes_on_machine([p for p, _n, _o in same_size])
-        for i, (path, node, own) in enumerate(same_size):
-            if progress:
-                progress(i, len(same_size), "Comparing")
+        # PAD-1433: the machine hashes its copies in batches, and the bar moves by the bytes hashed.  One call for
+        # every file sat the bar at the last partition's 99% for the minutes the machine read gigabytes
+        what = "Comparing the %s files" % ("system" if prefix == ROOT else "game" if prefix == GAMES else prefix)
+        total_b = sum(n["size"] for _p, n, _o in same_size) or 1
+        theirs, done_b, batch, batch_b = {}, 0, [], 0
+        if progress:
+            progress(0, total_b, what)
+        for i, (path, n, _own) in enumerate(same_size):
+            batch.append(path)
+            batch_b += n["size"]
+            if len(batch) >= COMPARE_BATCH_FILES or batch_b >= COMPARE_BATCH_BYTES or i == len(same_size) - 1:
+                theirs.update(hashes_on_machine(batch))
+                done_b += batch_b
+                batch, batch_b = [], 0
+                if progress:
+                    progress(min(done_b, total_b), total_b, what)
+        for path, node, own in same_size:
             digest = tree.sha1(node)
             m_mode, m_uid, m_gid = mine[path][3:6]
             # the card's SFTP server doesn't say who owns a file (None): an owner it doesn't name isn't a difference
@@ -1900,7 +2309,9 @@ def sync(target, machine, log=None, progress=None, cancel=None):
                     # system files in a copy renamed over them (delta_replace: the session runs on those)
                     log("Updating %s (%s; only the parts that differ are sent)..." % (op.path, _human(op.size)),
                         "info")
-                    delta_bytes += (delta_replace if mount == ROOT else delta_put)(machine, tree, op, cancel)
+                    delta_bytes += (delta_replace if mount == ROOT else delta_put)(
+                        machine, tree, op, cancel,
+                        progress=lambda done, base=sent: progress(base + done, total, "Updating"))
                     sent += op.size
                     progress(sent, total, "Updating")
                     continue
@@ -1935,7 +2346,7 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         for num, want in raws.items():
             check()
             log("Writing the boot partition (%s)..." % _human(target.raw[num][1]), "info")
-            machine.raw_write(num, _RawFile(target.raw_chunks(num)), target.raw[num][1], want)
+            machine.raw_write(num, _RawFile(lambda num=num: target.raw_chunks(num)), target.raw[num][1], want)
         machine.sync()
         rec = target.plan.record() if target.plan is not None else {"paths": [], "ranges": {}}
         machine.write_ledger(dict(rec, card=target.card_id, pending=False))
@@ -1954,6 +2365,7 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             with contextlib.suppress(Exception):
                 machine.umount_part(mount)
     n = sum(len(v) for v in all_ops.values())
+    progress(1, 1, "Finishing")
     if reboot:
         log("Restarting the machine on the new card...", "info")
         machine.reboot()
@@ -2013,6 +2425,12 @@ def send_image(image, machine, log=None, progress=None, cancel=None):
 from .pipeline_base import BasePipeline, PipelineError  # noqa: E402
 
 
+#: PAD-1433: a Send's own chips in the status bar (it used to borrow the Write build's, and never moved them)
+SEND_PHASES = ("Connect", "Compare", "Send", "Finish")
+#: the word a Send's progress starts with -> its chip
+_PHASE_OF = (("Comparing", 1), ("Updating", 2), ("Uploading", 2), ("Writing", 2), ("Finishing", 3))
+
+
 class SendPipeline(BasePipeline):
     """A Send as one of the app's runs: its log, its progress bar, its Cancel (the Write tab's)."""
 
@@ -2020,18 +2438,39 @@ class SendPipeline(BasePipeline):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image, self.address = image, address
         self._connect = connect_fn or connect
+        self._phase_now = -1
+        self._rate = []
+
+    def _to_phase(self, index):
+        if index != self._phase_now:
+            self._phase_now = index
+            self._rate = []
+            self._set_phase(index)
+
+    def _send_progress(self, done, total, what=""):
+        """The bar, its chip, and (PAD-1433) for the bytes going to the machine the rate and the time left: over a
+        machine's Wi-Fi a big Send takes hours, and the user should see that, not a crawling bar."""
+        for word, index in _PHASE_OF:
+            if what.startswith(word):
+                self._to_phase(index)
+                break
+        if self._phase_now == 2 and total:
+            from .rawdevice import _rate_note
+            what = "Sending %s of %s%s" % (_human(done), _human(total), _rate_note(self._rate, done, total))
+        self._progress(int(done * 100 / total) if total else 0, 100, what)
 
     def _run(self):
+        self._to_phase(0)
         self._log("Sending %s to the machine at %s..." % (os.path.basename(self.image), self.address), "info")
         try:
             machine = self._connect(self.address)
         except SendError as e:
             raise PipelineError("Connect", str(e)) from None
+        machine.log, machine.cancel = self._log, (lambda: self._cancelled)    # PAD-1436: a reconnect says so
         try:
-            summary = send_image(self.image, machine, self._log,
-                                 lambda done, total, what="": self._progress(
-                                     int(done * 100 / total) if total else 0, 100, what),
-                                 lambda: self._cancelled)
+            if hasattr(machine, "widen"):
+                machine.widen(self._log)
+            summary = send_image(self.image, machine, self._log, self._send_progress, lambda: self._cancelled)
         except SendError as e:
             raise PipelineError("Send", str(e)) from None
         finally:

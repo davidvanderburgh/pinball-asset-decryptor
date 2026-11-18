@@ -49,6 +49,10 @@ THE PROGRAM (``blocks.json``)::
                                   under its name while it runs, its words and the value as it changes ("SUPER
                                   JACKPOT = 53,200,000"), where the title's port puts one (James Bond: under the
                                   status bar, as the game's own mini-wizards show theirs); on every title with screens
+      "meters": [{"label": "CYCLOPS", "color": "#e02020", "value": {"k": "var", "name": "hp"},   PAD-1405: up to
+                  "max": {"k": "num", "v": 5}, "numbers": true}],   four bars while it runs, each filled with its value
+                                  out of its most (100 unless said), its label over it ("numbers": "CYCLOPS 3/5"), down
+                                  the right edge ("at": [x, y] to place one); on every title with screens
       "scripts": [
         {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"},
          "do": [{"op": "if", "cond": {...}, "then": [...], "else": [...]}, ...]}
@@ -346,6 +350,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "drain_to_one",                                            # PAD-733: the extra balls taken away
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
+              "fade",                                                    # PAD-1405: the whole screen to a colour
               "gi",                                                      # PAD-767: the GI dark for the rest of the mode
               "light_mode", "unlight_mode", "set_hits",
               "spare_drive")                                             # PAD-826: a driver output the game never fires
@@ -639,6 +644,7 @@ def normalize(data):
     out["hud"] = _norm_hud(out.get("hud"))
     out["bar"] = _norm_bar(out.get("bar"))
     out["info"] = _norm_info(out.get("info"))
+    out["meters"] = _norm_meters(out.get("meters"))       # PAD-1405
     for s in out["scripts"]:
         for b in _walk(s.get("do")):
             # PAD-372: Add seconds takes a value; one saved before held a plain number
@@ -726,6 +732,75 @@ def info_line_c(text, with_value):
     return (text + " = %s") if text else "%s"
 
 
+#: PAD-1405: a mode's bar meters (mode_meters.py: up to four, a picture a level) and its screen fades (up to three
+#: colours and looks, a picture a step)
+METERS_MAX = 4
+METER_LABEL_MAX = 24
+METER_COLOR = "#e02020"
+METER_MOST = 100
+FADES_MAX = 3
+FADE_STYLES = ("flat", "glow")
+
+
+def _norm_meters(ms):
+    """PAD-1405: its bar meters, each ``{"label", "color", "value", "max", "numbers", "at"}``: the bar filled with
+    the value out of the max (100 unless said; an emptied slot stays empty, problems names it), its label over it
+    (``numbers``: with "value/max" after it), at ``at`` (glass pixels, its top-left) or down the right edge."""
+    out = []
+    for m in (ms if isinstance(ms, list) else [])[:METERS_MAX]:
+        if not isinstance(m, dict):
+            continue
+        at = m.get("at")
+        try:
+            at = [float(at[0]), float(at[1])] if isinstance(at, (list, tuple)) and len(at) == 2 else None
+        except (TypeError, ValueError):
+            at = None
+        out.append({"label": str(m.get("label") or "").strip()[:METER_LABEL_MAX],
+                    "color": m.get("color") if COLOR_RE.match(str(m.get("color") or "")) else METER_COLOR,
+                    "value": m.get("value") if isinstance(m.get("value"), dict) else None,
+                    "max": (m.get("max") if isinstance(m.get("max"), dict) else None) if "max" in m
+                    else {"k": "num", "v": METER_MOST},
+                    "numbers": bool(m.get("numbers", False)), "at": at})
+    return out
+
+
+def fade_style(b):
+    return b.get("style") if b.get("style") in FADE_STYLES else "flat"
+
+
+def fade_color(b):
+    return str(b.get("color")).lower() if COLOR_RE.match(str(b.get("color") or "")) else "#000000"
+
+
+def fade_layers(program):
+    """PAD-1405: the screen fades its Fade the screen blocks need, ``[{"color", "style"}]`` in first-use order: one
+    built layer per colour and look (mode_meters.fade_screens), each block fading its own."""
+    out = []
+    for s in program.get("scripts") or []:
+        for b in _walk((s or {}).get("do")):
+            if b.get("op") == "fade":
+                key = {"color": fade_color(b), "style": fade_style(b)}
+                if key not in out:
+                    out.append(key)
+    return out
+
+
+def uses_kit(program):
+    """Whether its C includes the examples' kit (intricate_kit.h, copied beside it): its HUD, its meters or a fade
+    (PAD-1405) are the kit's."""
+    return bool(program["hud"]["on"] or program.get("meters") or fade_layers(program))
+
+
+def meters_of(program):
+    """PAD-1405: what the build needs of its meters (their values are the mode's, at run time)."""
+    return [{"label": m["label"], "color": m["color"], "at": m["at"]} for m in program.get("meters") or []]
+
+
+def meter_stem(slug):
+    """The meters' and fades' node names' stem, as mode_meters.stem (and mode_project.asset_names) make it."""
+    return "PadMode_" + re.sub(r"[^A-Za-z0-9]", "_", slug)
+
+
 def _norm_hud(h):
     """The HUD's settings with every key there: off, three empty counters, a timer badge and no
     gauge unless said. A value a counter or the gauge follows is kept as it is (problems names a
@@ -805,7 +880,7 @@ def save(project, slug, program):
     folder = MP.mode_folder(project, slug)
     os.makedirs(folder, exist_ok=True)
     src = os.path.join(folder, slug + ".c")
-    if program["hud"]["on"]:
+    if uses_kit(program):
         _copy_kit(folder)
     _write(src, to_c(program, slug))
     text = json.dumps(program, indent=2) + "\n"
@@ -838,7 +913,7 @@ def refresh(project):
             pass
         folder = MP.mode_folder(project, slug)
         src = os.path.join(folder, slug + ".c")
-        if program["hud"]["on"]:
+        if uses_kit(program):
             _copy_kit(folder)                           # PAD-680: a fix in the kit alone reaches the mode too
         try:
             with open(src, "r", encoding="utf-8") as f:
@@ -893,6 +968,8 @@ def _sync_assets(project, slug, program):
                or (spec.music or "") != program["music"] or dict(spec.hud or {}) != hud
                or (getattr(spec, "screen_style", "") or "panel") != program["screen_style"]
                or bool(getattr(spec, "info_line", False)) != program["info"]["on"]
+               or list(getattr(spec, "meters", None) or []) != meters_of(program)
+               or list(getattr(spec, "fades", None) or []) != fade_layers(program)[:FADES_MAX]
                or dict(getattr(spec, "more", None) or {}) != more_of(program))
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
@@ -905,6 +982,8 @@ def _sync_assets(project, slug, program):
         spec.beds = beds
         spec.screen_style = "words" if program["screen_style"] == "words" else ""
         spec.info_line = program["info"]["on"]          # PAD-547: the build adds PadMode_<slug>_Info
+        spec.meters = meters_of(program)                # PAD-1405: the build adds PadMode_<slug>_Meter<k>
+        spec.fades = fade_layers(program)[:FADES_MAX]   # ...and PadMode_<slug>_Fade<k>
         spec.more = more_of(program)                    # PAD-707: the build puts its tile on the selection screen
         CM.save(project, slug, spec)
 
@@ -1295,6 +1374,11 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
         _check_num(info["value"], "The info line", ctx)
     elif info["on"] and not info["text"]:
         out.append("The info line has no words and no value: give it one or untick it.")
+    for k, m in enumerate(program["meters"]):                 # PAD-1405
+        _check_num(m["value"], "Meter %d (%s)" % (k + 1, m["label"] or "no label"), ctx)
+        _check_num(m["max"], "Meter %d's most" % (k + 1), ctx)
+    if len(fade_layers(program)) > FADES_MAX:
+        out.append("Its Fade the screen blocks use more than %d colours and looks: use %d at most." % (FADES_MAX, FADES_MAX))
     for i, s in enumerate(program["scripts"]):
         _check_hat(s.get("hat") or {}, i + 1, ctx)
         _check_stack(s.get("do") or [], 1, "Script %d" % (i + 1), ctx)
@@ -1783,6 +1867,9 @@ def _check_stack(stack, depth, where, ctx):
                 ctx["out"].append("%s has a counter's words of more than %d letters." % (where, COUNTER_MAX))
         elif op == "hud_gauge":
             _check_num(b.get("value"), where, ctx)
+        elif op == "fade":                                                          # PAD-1405
+            _check_num(b.get("to"), where, ctx)
+            _check_num(b.get("ms"), where, ctx)
         elif op == "hud_progress":
             _check_num(b.get("value"), where, ctx)
         elif op == "roster_progress":                                               # PAD-733
@@ -2175,6 +2262,7 @@ class _Gen:
     def __init__(self, program, slug):
         self.p = program
         self.slug = slug
+        self.fades = fade_layers(program)       # PAD-1405: FADE <n> per colour and look
         self.shots = []                 # shot names, in first-use order
         self.lamps = []                 # PAD-598: the game's lights the blocks light by name, in first-use order
         self.events = []
@@ -2495,6 +2583,14 @@ class _Gen:
                     "0" if not label else _c_str(str(label)[:COUNTER_MAX])))
             elif op == "hud_gauge":
                 out.append(pad + "hud_level = %s;" % self.num(b.get("value")))
+            elif op == "fade":                           # PAD-1405: the whole screen to its colour, over its time
+                k = {"color": fade_color(b), "style": fade_style(b)}
+                i = self.fades.index(k) if k in self.fades else -1
+                if 0 <= i < FADES_MAX:
+                    out.append(pad + "kit_fade_to(&fade[%d], (int)(%s), (int)(%s));" % (
+                        i, self.num(b.get("to")), self.num(b.get("ms"))))
+                else:
+                    out.append(pad + "/* fade: more colours than a mode has */")
             elif op == "hud_progress":
                 out.append(pad + "hud_progress(%s);" % self.num(b.get("value")))
             elif op == "roster_progress":                # PAD-733: its new monster's tile on the selection screen
@@ -2837,6 +2933,8 @@ def to_c(program, slug):
     info = program["info"]                  # PAD-547: a line of words and a value under its name
     has_info = info["on"]
     info_live = g.num(info["value"]) if has_info and info["value"] is not None else None
+    meter_live = [(g.num(m["value"]) if m["value"] is not None else "0", g.num(m["max"]) if m["max"] is not None else "0")
+                  for m in program["meters"]]                  # PAD-1405: each meter's value and most, C
     live = []                           # (counter 0-2, C of its value): counters that follow a value
     gauge_live = None
     if has_hud:
@@ -2861,8 +2959,8 @@ def to_c(program, slug):
     L.append(" * " + _comment(summary(program)) + ".")
     L.append(" */")
     L.append('#include "pad_mode.h"')
-    if has_hud:
-        L.append('#include "%s"   /* the examples\' kit: the HUD (copied here at every save) */' % KIT_FILE)
+    if uses_kit(program):
+        L.append('#include "%s"   /* the examples\' kit: the HUD, meters, fades (copied here at every save) */' % KIT_FILE)
     if media:
         L.append('#include "pad_mode_assets.h"     /* its own clips and sounds, as Write carried them */')
     L.append("")
@@ -2942,6 +3040,18 @@ def to_c(program, slug):
         L.append('#define INFO_NODE    "PadMode_%s_Info"' % slug)
         L.append('#define INFO_TEXT    "PadMode_%s_Info.PadMode_%s_Info_Words"' % (slug, slug))
         L.append("#define INFO_FORMAT  %s" % _c_str(info_line_c(info["text"].replace("%", "%%"), info_live is not None)))
+    meters = program["meters"]                       # PAD-1405: its bar meters and screen fades
+    fades = g.fades[:FADES_MAX]
+    if meters or fades:
+        L.append("/* PAD-1405: its bar meters and its screen fades, screens of its own the build put in the HUD scene")
+        L.append(" * (mode_meters.py); the kit finds, hides and steps them. Not there = nothing shows. */")
+        st = meter_stem(slug)
+    if meters:
+        L.append("static struct kit_meter meter[%d] = {%s};" % (len(meters), ", ".join(
+            '{ .scene = "hud", .node = "%s_Meter%d" }' % (st, k + 1) for k in range(len(meters)))))
+    if fades:
+        L.append("static struct kit_fade fade[%d] = {%s};" % (len(fades), ", ".join(
+            '{ .scene = "hud", .node = "%s_Fade%d" }' % (st, k + 1) for k in range(len(fades)))))
     L.append("")
     L.append("/* ---- the shots, events and variables the blocks name ---- */")
     nshots, nevents, nvars, nhits = max(1, len(g.shots)), max(1, len(g.events)), max(1, len(g.var_names)), max(1, len(g.hits))
@@ -3138,6 +3248,39 @@ def to_c(program, slug):
                             "of": bar_fill[1] if bar_fill else "1LL"}).split("\n"))
     if has_info:
         L.extend((_INFO_C % {"value": info_live or "0"}).split("\n"))
+    if meters:                                                  # PAD-1405
+        L.append("/* PAD-1405: its meters while it runs, each its value out of its most; hidden under a display of the")
+        L.append(" * game's, aside, and at its end */")
+        L.append("static void meters_show(int on)")
+        L.append("{")
+        L.append("    long long v, most;")
+        L.append("    int k;")
+        if any(m["numbers"] for m in meters):
+            L.append("    char a[32], b[32], w[48];")
+        L.append("    if (!on) {")
+        L.append("        for (k = 0; k < %d; k++) kit_meter_hide(&meter[k]);" % len(meters))
+        L.append("        return;")
+        L.append("    }")
+        for k, (m, (val, most)) in enumerate(zip(meters, meter_live)):
+            L.append("    v = %s;" % val)
+            L.append("    most = %s;" % most)
+            if m["numbers"]:
+                L.append("    pm_commas(a, sizeof a, v < 0 ? 0 : (uint64_t)v);")
+                L.append("    pm_commas(b, sizeof b, most < 0 ? 0 : (uint64_t)most);")
+                L.append("    pm_snprintf(w, sizeof w, %s, a, b);" % _c_str(
+                    (m["label"].replace("%", "%%") + " " if m["label"] else "") + "%s/%s"))
+                L.append("    kit_meter_set(&meter[%d], v, most, w);" % k)
+            else:
+                L.append("    kit_meter_set(&meter[%d], v, most, 0);" % k)
+        L.append("}")
+        L.append("")
+    if fades:
+        L.append("static void fades_off(void)             /* PAD-1405: its screen fades clear, at once */")
+        L.append("{")
+        L.append("    int k;")
+        L.append("    for (k = 0; k < %d; k++) kit_fade_off(&fade[k]);" % len(fades))
+        L.append("}")
+        L.append("")
     if saved:
         L.extend(_SAVED_C.split("\n"))
     for when in ("ball", "mode"):
@@ -3623,6 +3766,8 @@ def to_c(program, slug):
     L.append("    on_mode_start();")
     if has_info:
         L.append("    if (run.on) info_show(1);          /* PAD-547: what the start's blocks set, on the first frame */")
+    if meters:
+        L.append("    if (run.on) meters_show(!under_layer);   /* PAD-1405 */")
     if has_hud:
         L.append("    if (run.on) hud_show();            /* what the start's blocks set, on the first frame */")
     L.append("}")
@@ -3659,6 +3804,10 @@ def to_c(program, slug):
     L.append("    unlight_all();                    /* a show it ends with paints on, then hands back */")
     if has_info:
         L.append("    info_show(0);                     /* PAD-547: its line goes with it */")
+    if meters:
+        L.append("    meters_show(0);                   /* PAD-1405: its meters go with it */")
+    if fades:
+        L.append("    fades_off();                      /* PAD-1405: and its fades clear */")
     if words_only:
         L.append("    if (!points_award) points_hide();   /* PAD-709: a scored number goes; an Award's stays its moment */")
     L.append("    total_due = screen && screen_words ? award_ticks%s : 0;   /* PAD-574: an Award it ended on, then its TOTAL */"
@@ -3732,6 +3881,10 @@ def to_c(program, slug):
     L.append("    if (screen) pm_show(screen, 0);")
     if has_info:
         L.append("    info_show(0);")
+    if meters:
+        L.append("    meters_show(0);                   /* PAD-1405 */")
+    if fades:
+        L.append("    fades_off();")
     L.append("    if (DISPLAY_PRIORITY) pm_display_priority(0);")
     if has_hud:
         L.append("    kit_hud_drop_now();")
@@ -4015,6 +4168,8 @@ def to_c(program, slug):
         L.append("        hud_back = !under;")
     if has_info:
         L.append("        if (under) info_show(0);")
+    if meters:
+        L.append("        if (under) meters_show(0);    /* PAD-1405 */")
     L.append("    }")
     if has_hud:
         L.append("    if (hud_back && (!kit_hud_up || kit_hud_up == &hud)) {")
@@ -4038,6 +4193,10 @@ def to_c(program, slug):
         L.append("    find_total();")
     if has_info:
         L.append("    find_info();")
+    for k in range(len(meters)):
+        L.append("    kit_meter_tick(&meter[%d]);         /* PAD-1405: finds it, writes what changed */" % k)
+    for k in range(len(fades)):
+        L.append("    kit_fade_tick(&fade[%d]);           /* PAD-1405: and steps each fade */" % k)
     if has_hud:
         L.append("    kit_hud_tick(&hud);                /* finds it, expires an award, writes what changed */")
     if note_cue:
@@ -4300,6 +4459,8 @@ def to_c(program, slug):
     if has_info:
         L.append("    if (run.on) info_show(!under_layer && !pm_display_covered() && !pm_aside() && !pm_game_words()%s);   /* PAD-547, PAD-662 */"
                  % (" && !points_ticks" if words_only else ""))
+    if meters:
+        L.append("    if (run.on) meters_show(!under_layer && !pm_display_covered() && !pm_aside());   /* PAD-1405 */")
     L.append("}")
     L.append("")
     L.append("/* PAD-622: a drain while it runs ends it as its clock would - an Award it ended on, then its TOTAL - and the")

@@ -762,8 +762,68 @@ def test_a_send_holds_the_game_and_shows_how_far_it_is_on_the_machine():
     assert m.events[0] == ("pause",)                                  # held before anything is touched
     assert m.events.index(("sync",)) < m.events.index(("resume",))    # back only on the new files
     assert ("changing",) not in m.events and ("stopped", False) not in m.events
-    assert m.screen and all(what in ("Uploading", "Updating") for _d, _t, what in m.screen)
-    assert m.screen[-1][0] == m.screen[-1][1]                         # it reached 100%
+    assert m.screen and all(what in ("Uploading", "Updating", "Finishing") for _d, _t, what in m.screen)
+    assert m.screen[-1] == (1, 1, "Finishing")                        # PAD-1433: it reached 100%, then Finish
+
+
+def test_a_send_shows_its_own_chips_and_the_time_left():
+    """PAD-1433: David: "we need a separate chip for each of the phases in the progress bars"; and a Send over a
+    machine's Wi-Fi takes hours, so the bar says how fast it is going and how long is left."""
+    phases, bars = [], []
+    p = R.SendPipeline("x.raw", "192.168.4.130", lambda *a: None, phases.append,
+                       lambda cur, total, desc="": bars.append((cur, desc)), lambda *a: None)
+    p._to_phase(0)
+    p._send_progress(0, 100, "Comparing the game files")
+    p._send_progress(50, 100, "Comparing the game files")
+    p._send_progress(10 << 20, 100 << 20, "Uploading")
+    p._rate[0] = (p._rate[0][0] - 10, 0)                     # ten seconds ago, so 2.1 MB/s
+    p._send_progress(20 << 20, 100 << 20, "Updating")
+    assert bars[-1][1] == "Sending 20.0 MB of 100.0 MB - 2.1 MB/s, less than a minute left"
+    p._send_progress(1, 1, "Finishing")
+    assert R.SEND_PHASES == ("Connect", "Compare", "Send", "Finish") and phases == [0, 1, 2, 3]
+    assert bars[1] == (50, "Comparing the game files")
+    assert bars[-1] == (100, "Finishing")
+
+
+def test_the_compare_bar_moves_while_the_machine_hashes():
+    """PAD-1433: the machine hashed every same-size file in one call, and the bar sat at the last partition's 99%
+    for the minutes that took.  It hashes in batches now and the bar moves by the bytes hashed."""
+    tree = R._Tree(FakeReader(STOCK_GAMES), R.GAMES)
+    files = {p: e for p, e in tree.entries.items() if e[0] == "file"}
+    mine = {p: ("file", e[1]["size"], None, e[1]["mode"], e[1]["uid"], e[1]["gid"], None)
+            for p, e in tree.entries.items() if e[0] == "file"}
+    calls, bars = [], []
+
+    def hashes(paths):
+        calls.append(list(paths))
+        return {p: ("file", tree.sha1(files[p][1])) for p in paths}
+    old = R.COMPARE_BATCH_FILES
+    R.COMPARE_BATCH_FILES = 1
+    try:
+        R.sync_ops(tree, mine, R.GAMES, set(), [], hashes, progress=lambda d, t, w: bars.append((d, t, w)))
+    finally:
+        R.COMPARE_BATCH_FILES = old
+    assert len(calls) == len(files) > 1 and sorted(sum(calls, [])) == sorted(files)
+    assert all(w == "Comparing the game files" for _d, _t, w in bars)
+    assert [d for d, _t, _w in bars] == sorted(d for d, _t, _w in bars) and bars[-1][0] == bars[-1][1]
+
+
+def test_a_big_in_place_update_moves_the_bar_as_it_goes():
+    m = FullMachine()
+    out = build_games()
+    seen = []
+    tree = R._Tree(FakeReader(out), R.GAMES)
+    path = "/games/kingkong/video.mp4"
+    op = R.Op("put", path, node=tree.get(path)[1], size=tree.get(path)[1]["size"], sha1=tree.sha1(tree.get(path)[1]),
+              mode=tree.get(path)[1]["mode"], uid=0, gid=0)
+    old = R.DELTA_BLOCK, R.DELTA_BATCH
+    R.DELTA_BLOCK, R.DELTA_BATCH = 4, 1
+    m.remount(R.GAMES, True)
+    try:
+        R.delta_put(m, tree, op, progress=seen.append)
+    finally:
+        R.DELTA_BLOCK, R.DELTA_BATCH = old
+    assert len(seen) > 1 and seen == sorted(seen) and seen[-1] <= op.size
 
 
 def test_a_send_with_nothing_to_send_leaves_the_game_alone():

@@ -15872,6 +15872,13 @@ static const char *const AIT_FILES[] = { "/usr/local/padmode/attract.cfg", "/dum
 struct ait_item { unsigned entry, ms; unsigned char after, anchor; char clip[64]; };
 static struct ait_item ait_items[AIT_ITEMS];
 static unsigned ait_n, ait_anchors, ait_bad, ait_said;
+/* PAD-1407: the game's screens taken off (`hide <entry>`), and the census (below, "the game's own screens taken off") */
+#define AIT_WRAP 192
+static unsigned char ait_hidden[(AIT_WRAP + 7) / 8], ait_seen[(AIT_WRAP + 7) / 8];
+static unsigned ait_hide_n, ait_census, ait_count, ait_wrapped;
+static volatile unsigned ait_noes;               /* the tests that said no since a screen last came up */
+static pm_reg (*ait_entry_game_test[AIT_WRAP])(pm_reg, pm_reg, pm_reg, pm_reg);
+static unsigned ait_bit(const unsigned char *b, unsigned k) { return k < AIT_WRAP && (b[k >> 3] >> (k & 7)) & 1; }
 static unsigned ait_anchor_entry[AIT_ANCHORS];
 /* PAD-1328: a page and a test take and give whole registers (8 bytes on Spike 3, where the table's words are 8-byte
  * pointers the loader moved by the PIE's load address) */
@@ -15913,6 +15920,16 @@ static void ait_line(char *s)
         if (*s) *s++ = 0;
     }
     if (n >= 2 && str_eq(f[0], "champions")) { ait_champions_off = str_eq(f[1], "off"); return; }
+    if (n >= 2 && str_eq(f[0], "census")) { ait_census = str_eq(f[1], "on"); return; }     /* PAD-1407 */
+    if (n >= 2 && str_eq(f[0], "hide")) {                                                   /* PAD-1407 */
+        unsigned e;
+        p = f[1];
+        e = (unsigned)number(&p, &ok);
+        if (!ok || e >= AIT_WRAP) { ait_bad++; return; }
+        if (!ait_bit(ait_hidden, e)) ait_hide_n++;
+        ait_hidden[e >> 3] |= (unsigned char)(1u << (e & 7));
+        return;
+    }
     if (n < 5 || !str_eq(f[0], "item")) return;
     if (ait_n >= AIT_ITEMS) { ait_bad++; return; }
     it = &ait_items[ait_n];
@@ -15976,12 +15993,66 @@ static void ait_play(unsigned i)
     ait_want = -1;
 }
 
+/* ---- PAD-1407: the game's own screens taken off (a whole new game's own attract and title) ---------------------
+ * attract.cfg `hide <entry>`: the game's page at that entry of the table is not shown. Every entry's test (bar the
+ * ones carrying items, which have their own) is then ours, one wrapper per entry (it knows its entry): a hidden
+ * entry says no, the others ask the game's own test (0: always shown) as before. A hidden entry with items shows its
+ * items and not the game's page (ait_page_run). The wrappers also say each screen the first time it comes up
+ * (`census on` asks for that alone, nothing hidden), so a run names what each entry shows.
+ * A whole round of the table saying no would have the sequencer walk it for ever without a frame's sleep, so after
+ * one (every screen the owner kept said no this time) the hidden screens are let through until one shows. */
+
+static void ait_up(unsigned k)
+{
+    ait_noes = 0;
+    if (k < AIT_WRAP && !ait_bit(ait_seen, k)) {
+        ait_seen[k >> 3] |= (unsigned char)(1u << (k & 7));
+        say("attract items: the game's screen %u (entry %u) comes up", k + 1, k);
+    }
+}
+
+static pm_reg ait_entry_test(unsigned k, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3)
+{
+    static unsigned said;
+    int yes;
+    if (ait_bit(ait_hidden, k) && ait_noes < ait_count) yes = 0;
+    else yes = ait_entry_game_test[k] ? ait_entry_game_test[k](a0, a1, a2, a3) != 0 : 1;
+    if (yes) {
+        if (ait_bit(ait_hidden, k) && said < 8) {
+            said++;
+            say("attract items: every screen kept said no this time round - the game's hidden screen %u is shown "
+                "rather than the attract mode turning with nothing on the glass", k + 1);
+        }
+        ait_up(k);
+    } else if (ait_noes < 0x7fffffff) ait_noes++;
+    return yes;
+}
+
+#define AIT_W(b, i) static pm_reg ait_w_##b##_##i(pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3) \
+    { return ait_entry_test((b) * 8 + (i), a0, a1, a2, a3); }
+#define AIT_W8(b) AIT_W(b, 0) AIT_W(b, 1) AIT_W(b, 2) AIT_W(b, 3) AIT_W(b, 4) AIT_W(b, 5) AIT_W(b, 6) AIT_W(b, 7)
+#define AIT_P8(b) (void *)ait_w_##b##_0, (void *)ait_w_##b##_1, (void *)ait_w_##b##_2, (void *)ait_w_##b##_3, \
+    (void *)ait_w_##b##_4, (void *)ait_w_##b##_5, (void *)ait_w_##b##_6, (void *)ait_w_##b##_7,
+AIT_W8(0) AIT_W8(1) AIT_W8(2) AIT_W8(3) AIT_W8(4) AIT_W8(5) AIT_W8(6) AIT_W8(7) AIT_W8(8) AIT_W8(9) AIT_W8(10)
+AIT_W8(11) AIT_W8(12) AIT_W8(13) AIT_W8(14) AIT_W8(15) AIT_W8(16) AIT_W8(17) AIT_W8(18) AIT_W8(19) AIT_W8(20)
+AIT_W8(21) AIT_W8(22) AIT_W8(23)
+static void *const ait_wraps[AIT_WRAP] = {
+    AIT_P8(0) AIT_P8(1) AIT_P8(2) AIT_P8(3) AIT_P8(4) AIT_P8(5) AIT_P8(6) AIT_P8(7) AIT_P8(8) AIT_P8(9) AIT_P8(10)
+    AIT_P8(11) AIT_P8(12) AIT_P8(13) AIT_P8(14) AIT_P8(15) AIT_P8(16) AIT_P8(17) AIT_P8(18) AIT_P8(19) AIT_P8(20)
+    AIT_P8(21) AIT_P8(22) AIT_P8(23)
+};
+
 static pm_reg ait_page_run(unsigned a, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3)
 {
     unsigned i;
     pm_reg r;
+    if (ait_wrapped) {                    /* a screen taken off whose place items take: only they come up */
+        if (ait_bit(ait_hidden, ait_anchor_entry[a])) ait_noes = 0;
+        else ait_up(ait_anchor_entry[a]);
+    }
     for (i = 0; i < ait_n; i++) if (ait_items[i].anchor == a && !ait_items[i].after) ait_play(i);
-    r = ait_game_says[a] ? ait_game_page[a](a0, a1, a2, a3) : 0;   /* the game's own page, as it was */
+    /* the game's own page, as it was - unless the owner took it off (PAD-1407): then only the items show */
+    r = ait_game_says[a] && !ait_bit(ait_hidden, ait_anchor_entry[a]) ? ait_game_page[a](a0, a1, a2, a3) : 0;
     ait_game_says[a] = 1;
     for (i = 0; i < ait_n; i++) if (ait_items[i].anchor == a && ait_items[i].after) ait_play(i);
     return r;
@@ -16057,9 +16128,58 @@ static int attract_wanted(void)
     if (n <= 0) return 0;
     raw[n] = 0;
     for (i = 0; i < n; i++)
-        if ((!i || raw[i - 1] == '\n') && (str_starts(raw + i, "item ") || str_starts(raw + i, "champions off")))
+        if ((!i || raw[i - 1] == '\n') && (str_starts(raw + i, "item ") || str_starts(raw + i, "champions off")
+                                     || str_starts(raw + i, "hide ") || str_starts(raw + i, "census on")))
             return 1;
     return 0;
+}
+
+/* PAD-1407: every entry's test made ours (the ones carrying items have theirs already), so a hidden screen says no and
+ * each screen is said the first time it comes up */
+static void attract_hide_arm(pm_addr table, unsigned size, unsigned at, unsigned count)
+{
+    unsigned k, a, kept = 0, off = 0, wrapped = 0;
+    if (!ait_hide_n && !ait_census) return;
+    ait_count = count;
+    for (k = AIT_WRAP; k-- > 0; )
+        if (ait_bit(ait_hidden, k) && k >= count) {
+            say("attract items: \"hide %u\" names an entry past the game's %u - nothing to take off", k, count);
+            ait_hidden[k >> 3] &= (unsigned char)~(1u << (k & 7));
+        }
+    if (count > AIT_WRAP) say("attract items: the game's screens past %u cannot be taken off or named", AIT_WRAP);
+    for (k = 0; k < count && k < AIT_WRAP; k++) if (!ait_bit(ait_hidden, k)) kept++;
+    for (a = 0; a < ait_anchors; a++) if (ait_bit(ait_hidden, ait_anchor_entry[a])) kept++;   /* items in its place */
+    if (!kept) {     /* nothing of the game's and nothing of the owner's left: the attract mode would show nothing */
+        say("attract items: every screen of the game's would be taken off and no item of yours shown in their place - "
+            "the game's screens are all shown");
+        for (k = 0; k < sizeof ait_hidden; k++) ait_hidden[k] = 0;
+        if (!ait_census) return;
+    }
+    for (k = 0; k < count && k < AIT_WRAP; k++) {
+        pm_addr *test = (pm_addr *)(unsigned long)(table + size * k);
+        pm_addr page = *(pm_addr *)(unsigned long)(table + size * k + at);
+        for (a = 0; a < ait_anchors && ait_anchor_entry[a] != k; a++) ;
+        if (a < ait_anchors) {                    /* its items' own wrap; a hidden one shows them alone */
+            if (ait_bit(ait_hidden, k)) off++;
+            continue;
+        }
+        if (!page || !maps_has(page, 4, MAP_R | MAP_X | MAP_GAME)
+            || (*test && !maps_has(*test, 4, MAP_R | MAP_X | MAP_GAME))) {
+            if (ait_bit(ait_hidden, k)) {
+                say("attract items: the game's screen %u cannot be taken off (its entry is not a page and test of "
+                    "the game's)", k + 1);
+                ait_hidden[k >> 3] &= (unsigned char)~(1u << (k & 7));
+            }
+            continue;
+        }
+        ait_entry_game_test[k] = *test ? (pm_reg (*)(pm_reg, pm_reg, pm_reg, pm_reg))(unsigned long)*test : 0;
+        *(volatile pm_addr *)test = (pm_addr)(unsigned long)ait_wraps[k];
+        wrapped++;
+        if (ait_bit(ait_hidden, k)) off++;
+    }
+    ait_wrapped = 1;
+    say("attract items: %u of the game's %u attract screens taken off%s (%u entries' tests wrapped)", off, count,
+        ait_census ? ", each screen said as it first comes up" : "", wrapped);
 }
 
 static void attract_arm(void)
@@ -16080,8 +16200,8 @@ static void attract_arm(void)
         }
     if (ait_bad) say("attract items: %u line(s) of attract.cfg not read", ait_bad);
     if (ait_champions_off) say("attract items: the modes' challenge champions are not shown in attract (attract.cfg)");
-    if (!ait_n) return;
-    {   /* clip v2: the attract video element, when the port names it */
+    if (!ait_n && !ait_hide_n && !ait_census) return;
+    if (ait_n) {   /* clip v2: the attract video element, when the port names it */
         static const char *const v_s[] = { "attract_video_play", "attract_video_playing", "attract_video_update",
                                            "attract_video_draw", "attract_video_yield", 0 };
         pm_addr at = data("attract_video");
@@ -16098,10 +16218,9 @@ static void attract_arm(void)
     ait_show_fn = fn("attract_show") ? fn("attract_show") : fn("scene_show");
     if (!ait_video && !clip_layer && !frame_hooked && ait_show_fn && fn("player_advance") && pm_scene_id("video_bank"))
         ait_show = 1;
-    if (!ait_video && !(can & PM_CAN_CLIPS)) {
+    if (ait_n && !ait_video && !(can & PM_CAN_CLIPS)) {
         say("attract items: off - this build has no full-screen clip route");
         ait_n = 0;
-        return;
     }
 #if PM_A64
     /* PAD-1328 / PAD-1371: a Spike 3 game's attract mode never draws the video bank's scene by itself, so an item is
@@ -16109,12 +16228,12 @@ static void attract_arm(void)
      * or through the attract video element. The show "stalled" Star Wars ELG 1.10 in PAD-1328 only because the
      * scene show's address was kept in 32 bits (ait_show_fn): the page jumped into nothing and the game's dispatch
      * watchdog ended it (exit 5). docs/plans/spike3_modes.md "Attract items". */
-    if (!ait_video && !ait_show) {
+    if (ait_n && !ait_video && !ait_show) {
         say("attract items: off - this Spike 3 game's port has no way to show its video bank's scene from a page");
         ait_n = 0;
-        return;
     }
 #endif
+    if (!ait_n && !ait_hide_n && !ait_census) return;
     table = data("attract_table");
     size = (unsigned)pm_port_value("attract_entry_size", 0);
     at = (unsigned)pm_port_value("attract_page_at", 4);
@@ -16122,10 +16241,12 @@ static void attract_arm(void)
     ait_sleep = (void (*)(unsigned))(unsigned long)fn("attract_sleep");
     /* PAD-1328: Spike 3's entries are 16 bytes {test, page} or 24 {test, page, float seconds} (Pokemon LE) */
     if (!table || (size != 8 && size != 12 && size != 16 && size != 24 && size != 32) || at + sizeof(pm_addr) > size
-        || !count || count > 256 || !ait_sleep
+        || !count || count > 256 || (ait_n && !ait_sleep)
         || !maps_has(table, size * count, MAP_R)) {
-        say("attract items: off - the port has no attract page table this runtime can use");
+        say("attract items: off - the port has no attract page table this runtime can use%s",
+            ait_hide_n ? " (the game's own screens are all shown)" : "");
         ait_n = 0;
+        ait_hide_n = 0;
         return;
     }
     for (i = 0; i < (long)ait_n; i++) {
@@ -16162,11 +16283,13 @@ static void attract_arm(void)
         }
         it->anchor = (unsigned char)a;
     }
-    say("attract items: %u item(s) between the game's attract pages (table 0x%08lx, %u entries of %u bytes, %u page(s) "
-        "taking items; the process sleep 0x%08lx); played %s", ait_n, (unsigned long)table, count, size, ait_anchors,
-        (unsigned long)ait_sleep, ait_video ? "through the attract video element (its pages' own way)"
-        : ait_show ? "on the video bank's surface, its scene shown by the page as the game's own clip pages do"
-        : "full screen (the clip route)");
+    if (ait_n)
+        say("attract items: %u item(s) between the game's attract pages (table 0x%08lx, %u entries of %u bytes, %u "
+            "page(s) taking items; the process sleep 0x%08lx); played %s", ait_n, (unsigned long)table, count, size,
+            ait_anchors, (unsigned long)ait_sleep, ait_video ? "through the attract video element (its pages' own way)"
+            : ait_show ? "on the video bank's surface, its scene shown by the page as the game's own clip pages do"
+            : "full screen (the clip route)");
+    attract_hide_arm(table, size, at, count);
 }
 
 /* ---- round 2: the game's own start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract; Bond LE/Pro 1.06)

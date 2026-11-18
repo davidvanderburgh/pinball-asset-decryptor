@@ -46,6 +46,7 @@ EVERY_BLOCK = [
     {"op": "sound", "sound": "roar", "fallback": None}, {"op": "music", "bed": "swamp"},   # PAD-658: a music bed
     {"op": "hud_text", "which": "line", "text": "SHOOT THE LIT SHOT", "value": None},
     {"op": "hud_counter", "counter": 1, "value": num(0), "sub": None}, {"op": "hud_gauge", "value": num(1)},
+    {"op": "fade", "color": "#000000", "style": "glow", "to": num(80), "ms": num(500)},
     {"op": "hud_progress", "value": num(7)},
     {"op": "roster_progress", "done": num(2), "of": num(5)},                       # PAD-733
     {"op": "hud_award", "text": "JACKPOT", "value": None, "sub": "", "seconds": 2},

@@ -2859,7 +2859,8 @@ static unsigned cx_blend(const struct cx_step *st, const struct cx_step *prev, i
  *
  * IN STEP WITH THE SONG, NOT THE CLOCK: the show's time is where its song IS. A voice of the channel playing the
  * request counts the samples it has played (voice + `sound_voice_played`, 44,100 a second; the channels and voices are
- * the framework's, one layout on every port). Read every tick, it holds while the game holds the song, starts again when
+ * the framework's, one layout on every port: +12 on Spike 2, +24 on Spike 3, PAD-1379 - its +28 is the decoder's
+ * cursor, 1,200-frame chunks behind). Read every tick, it holds while the game holds the song, starts again when
  * the game starts it again or loops it, and starts where the song does when the game resumes it part-way (a player's
  * turn, a mode handing the music back). A voice the game re-uses still shows its last sound's count for a tick or two,
  * so the show takes the count only once it has moved off its first reading and advances with the game's clock (until
@@ -2897,7 +2898,8 @@ static struct {
 static long cab_voice_count(unsigned request)
 {
     long o_req = pm_port_value("sound_channel_request", -1), o_voices = pm_port_value("sound_channel_voices", -1),
-         o_vp = pm_port_value("sound_channel_voice_ptrs", -1), o_pos = pm_port_value("sound_voice_played", 12),
+         o_vp = pm_port_value("sound_channel_voice_ptrs", -1),
+         o_pos = pm_port_value("sound_voice_played", PM_PTR == 8 ? 24 : 12),
          n_ch = pm_port_value("sound_channel_count", 8);
     int i, b;
     if (!sound_channel(0) || o_req < 0 || o_voices < 0 || o_vp < 0 || o_pos < 0) return -2;

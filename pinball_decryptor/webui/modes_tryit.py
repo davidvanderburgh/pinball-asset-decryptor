@@ -70,6 +70,32 @@ class _TryItPrepare:
         return "<Try it preparation of the web Modes tab>"
 
 
+def run_spike3_project(window, project):
+    """PAD-1379: "Run in emulator" for a page whose changes ride the mode runtime (Expression lights, Attract) on a
+    Spike 3 card's *project*: the Emulate tab started through the Modes tab's Try it preparation, which builds what
+    :func:`.spike3_modes.plan` carries (the shows, the items, any modes) into the rig's /dump - a plain Start runs a
+    Spike 3 card as it is. True when the run was handed over, False when it was refused (the Emulate tab says why),
+    None when *project* is not a Spike 3 card's (the caller starts the run its own way)."""
+    from .tabs.lights import project_is_spike3
+    if not project_is_spike3(project):
+        return None
+    emu, modes = window.service("emulate"), window.service("modes")
+    if emu is None or modes is None or not hasattr(modes, "tryit_prepare"):
+        return False
+    var = getattr(emu, "emulate_overrides_var", None)
+    if var is not None and var.get():
+        var.set(False)                  # launch_with refuses it beside a Try it set: this set carries the edits
+    modes._tryit_project = project
+    modes._tryit_cancel = False
+    window.select_tab("emulate")
+    if getattr(emu, "_last_up", False) or emu._launched():
+        return True
+    try:
+        return bool(emu.launch_with(modes.tryit_prepare))
+    except Exception:                                   # noqa: BLE001 - the Emulate tab says why
+        return False
+
+
 class TryItMixin:
     """Try it, Start mode now, End mode, the live push after an autosave, code modes and
     the SDK. Mixed into :class:`.tabs.modes.ModesTab`."""
@@ -782,7 +808,9 @@ class TryItMixin:
                 shutil.copyfile(src, os.path.join(files, name))
         self._tryit_live = None            # no hot reload on the Spike 3 rig: Try it again
         note = ("%d mode(s) ready (%s). Start a game, then play the starting shots."
-                % (len(mplan.names), ", ".join(mplan.names)))
+                % (len(mplan.names), ", ".join(mplan.names)) if mplan.names else
+                # PAD-1379: no modes - the rest of what the card carries (light shows, attract items, ...)
+                " ".join(l.rstrip(".") + "." for l in mplan.lines))
         # PAD-1295: the code modes are compiled into this run's mode.so for the card's 64-bit ARM
         note += self._tryit_code_note([(s, None) for s, _c in (getattr(mplan.result, "code", None) or ())])
         if own:

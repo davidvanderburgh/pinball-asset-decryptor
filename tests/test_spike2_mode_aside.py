@@ -265,7 +265,7 @@ def test_game_modes_block_is_what_a_mode_file_without_the_key_does(harness_block
 @pytest.mark.parametrize("value", ["sideways", ""])
 def test_a_game_modes_that_is_not_known_is_block(harness_block, tmp_path, value):
     out = _run(harness_block, tmp_path, RUSH_PLAIN + "game_modes %s\n" % value, "shot", "0x08000000", "tick", "5")
-    assert "game_modes needs stack, give_way or block" in out and "read as block" in out
+    assert "game_modes needs stack, give_way, block or own_game" in out and "read as block" in out
     assert "RUSH START" in out and "BLOCK 1" in out
 
 

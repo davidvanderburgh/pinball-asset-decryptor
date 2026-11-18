@@ -657,6 +657,9 @@ def run_helper_main(argv):
         state["phase"] = "verify"
         state["last_write"] = 0.0        # force the next progress write through
 
+    if mode == "remote_access":
+        # PAD-1427: remote access put on a plugged-in card (core/remote_setup.py)
+        return _remote_access_helper(job, _log, _progress, _cancel, result_path)
     try:
         if mode == "read_menu":
             written = read_device_menu_to_image(
@@ -684,6 +687,21 @@ def run_helper_main(argv):
                      % ("read" if reading else "flash",
                         traceback.format_exc()),
             "exc": repr(e)})
+    return 0
+
+
+def _remote_access_helper(job, log, progress, cancel, result_path):
+    from .card_extras import ExtrasError
+    from . import remote_setup
+    try:
+        text = remote_setup.run_in_helper(job, log, progress, cancel)
+        _write_json_atomic(result_path, {"ok": True, "written": 0, "text": text})
+    except ExtrasError as e:
+        cancelled = str(e).startswith("Canceled")
+        _write_json_atomic(result_path, {"ok": False, "cancelled": cancelled, "error": str(e)})
+    except BaseException as e:                      # noqa: BLE001 - report all
+        _write_json_atomic(result_path, {"ok": False, "error": "Setting up remote access hit an unexpected "
+                                         "error: %s" % (str(e) or repr(e))})
     return 0
 
 

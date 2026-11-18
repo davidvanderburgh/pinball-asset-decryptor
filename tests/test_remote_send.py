@@ -686,3 +686,149 @@ def test_quick_send_short_of_room_changes_game_files_in_place_but_never_system_f
     assert ("/games/kingkong/video.mp4", len(b"video stock but longer now")) in written     # game file: delta
     assert "/etc/.fstab" + R.TMP_TAG in uploads                                             # system: beside
     assert m.view(R.ROOT)["/etc/fstab"] == ("file", out_root["etc/fstab"][1])
+
+
+# ------------------------------------------------------------------ PAD-1427: what the machine shows during a Send
+class _Screen:
+    """Records the Send's calls to the machine's screen (SshMachine draws them with the card's own tools)."""
+
+    def _screen_init(self):
+        self.screen = []
+
+    def pause_game(self):
+        self.events.append(("pause",))
+
+    def resume_game(self, text=None):
+        self.restarts += 1
+        self.events.append(("resume",))
+        return "PAD_SEND_RESTARTED 4242"
+
+    def screen_progress(self, done, total, what=""):
+        self.screen.append((done, total, what))
+
+    def screen_changing(self):
+        self.events.append(("changing",))
+
+    def screen_stopped(self, changed):
+        self.events.append(("stopped", changed))
+
+
+class ScreenMachine(_Screen, FakeMachine):
+    def __init__(self, *a, **k):
+        FakeMachine.__init__(self, *a, **k)
+        self._screen_init()
+
+
+class FullScreenMachine(_Screen, FullMachine):
+    def __init__(self, *a, **k):
+        FullMachine.__init__(self, *a, **k)
+        self._screen_init()
+
+
+def test_a_send_holds_the_game_and_shows_how_far_it_is_on_the_machine():
+    """David: "what happens if we try to copy files over in the middle of a game on the machine? ... we need some way
+    on the machine to see feedback that the update is happening (and the connection is live)"."""
+    m = ScreenMachine()
+    R.send(make_plan(STOCK_GAMES, build_games(), BUILD_RANGES), m)
+    assert m.view() == as_machine(build_games())
+    assert m.events[0] == ("pause",)                                  # held before anything is touched
+    assert m.events.index(("sync",)) < m.events.index(("resume",))    # back only on the new files
+    assert ("changing",) not in m.events and ("stopped", False) not in m.events
+    assert m.screen and all(what in ("Uploading", "Updating") for _d, _t, what in m.screen)
+    assert m.screen[-1][0] == m.screen[-1][1]                         # it reached 100%
+
+
+def test_a_send_with_nothing_to_send_leaves_the_game_alone():
+    m = ScreenMachine()
+    R.send(make_plan(STOCK_GAMES, build_games(), BUILD_RANGES), m)
+    m.events.clear()
+    R.send(make_plan(STOCK_GAMES, build_games(), BUILD_RANGES), m)
+    assert m.events == []
+
+
+def test_a_send_stopped_short_puts_the_game_back_and_says_so():
+    m = ScreenMachine()
+    with pytest.raises(R.SendError, match="canceled"):
+        R.send(make_plan(STOCK_GAMES, build_games(), BUILD_RANGES), m, cancel=lambda: ("pause",) in m.events)
+    # nothing of the build was put in place: the machine's screen says so and the game comes back
+    assert m.view()["/games/kingkong/video.mp4"] == as_machine(STOCK_GAMES)["/games/kingkong/video.mp4"]
+    assert ("stopped", False) in m.events and ("resume",) not in m.events
+
+
+def test_full_send_says_when_the_machine_starts_changing_and_when_it_stopped_part_way():
+    m = FullScreenMachine(root=SSH_ROOT)
+    R.sync(FakeTarget(NEW_VERSION, NEW_ROOT, boot=b"boot v2"), m)
+    assert m.events.index(("stop",)) < m.events.index(("changing",)) < m.events.index(("reboot",))
+    assert m.screen and ("stopped", True) not in m.events
+
+    broken = FullScreenMachine(root=SSH_ROOT)
+
+    def fail(*a, **k):
+        raise R.SendError("the machine stopped answering")
+    broken.upload = fail
+    with pytest.raises(R.SendError):
+        R.sync(FakeTarget(NEW_VERSION, NEW_ROOT, boot=b"boot v2"), broken)
+    assert ("stopped", True) in broken.events and not broken.rebooted
+
+
+def test_screen_text_is_four_centred_lines_of_sixteen():
+    t = R.screen_text("PAD IS UPDATING", "RECEIVING 42%", "LINK OK *", "KEEP POWER ON")
+    assert len(t) <= 64 and t[:16] == "PAD IS UPDATING " and t[16:32] == " RECEIVING 42%  "
+    assert R.screen_text("A" * 20) == "A" * 16
+
+
+# ------------------------------------------------------------------ PAD-1427: a clean, isolated update path
+def _through_send_image(monkeypatch, target):
+    import contextlib
+    monkeypatch.setattr(R, "open_target", lambda image, log: contextlib.nullcontext(target))
+    monkeypatch.setattr(R, "check_layout", lambda target, layout: None)
+
+
+class HeldFull(FullScreenMachine):
+    """Says whether the game was held when each read of the machine's files happened."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.reads = []
+
+    def game_held(self):
+        return ("pause",) in self.events and ("resume",) not in self.events
+
+    def walk(self, root, skip=()):
+        self.reads.append(("walk", root, self.game_held()))
+        return super().walk(root, skip)
+
+    def file_sha1s(self, paths):
+        self.reads.append(("sha1", len(paths), self.game_held()))
+        return super().file_sha1s(paths)
+
+
+def test_every_send_holds_the_game_before_it_reads_or_changes_the_card(monkeypatch):
+    """David: "I'm concerned about letting the game run while we are doing updates and I want to make sure we have
+    a clean isolated update path"."""
+    m = HeldFull(root=SSH_ROOT)
+    _through_send_image(monkeypatch, FakeTarget(NEW_VERSION, NEW_ROOT, boot=b"boot v2"))
+    R.send_image("deadpool_le-1_17_0.raw", m)
+    assert m.events[0] == ("pause",)
+    assert m.reads and all(held for *_x, held in m.reads)
+    assert m.events.index(("pause",)) < m.events.index(("changing",)) < m.events.index(("reboot",))
+
+
+def test_a_send_with_nothing_to_change_gives_the_game_back(monkeypatch):
+    m = HeldFull(root=SSH_ROOT)
+    _through_send_image(monkeypatch, FakeTarget(STOCK_GAMES, SSH_ROOT))
+    assert R.send_image("deadpool_le-1_16_0.raw", m) == "The machine already has this image."
+    assert m.events[0] == ("pause",) and m.events[-1] == ("resume",)
+    assert ("changing",) not in m.events and not m.rebooted
+
+
+def test_a_send_refused_before_any_change_gives_the_game_back(monkeypatch):
+    m = HeldFull(root=SSH_ROOT)
+
+    def unreadable(root, skip=()):
+        raise R.SendError("The machine stopped answering; check it and Send again.")
+    m.walk = unreadable
+    _through_send_image(monkeypatch, FakeTarget(NEW_VERSION, NEW_ROOT, boot=b"boot v2"))
+    with pytest.raises(R.SendError):
+        R.send_image("deadpool_le-1_17_0.raw", m)
+    assert ("stopped", False) in m.events and ("changing",) not in m.events and not m.rebooted

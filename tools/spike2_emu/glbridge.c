@@ -651,26 +651,60 @@ static unsigned int pixel_bytes(unsigned int fmt, unsigned int type, int w, int 
     return c * (unsigned)w * (unsigned)h;
 }
 
+/* PAD-1427: GL_UNPACK_ALIGNMENT.  The game never sets it (its textures are RGBA, every row a multiple of 4
+ * bytes), but the card's own boot_display - the message screen a Send to machine shows - uploads its font's
+ * one-byte glyphs at alignment 1.  The host replays every upload at GL's default alignment 4, so a row the
+ * guest packed tighter is repacked here to 4-byte rows before it goes; an aligned upload goes as it always did. */
+static int unpack_align = 4;
+static unsigned char repack_buf[256 * 1024];
+
+void glPixelStorei(unsigned int pname, int param)
+{
+    if (pname == 0x0CF5 && (param == 1 || param == 2 || param == 4 || param == 8))
+        unpack_align = param;
+}
+
+/* *px* as the host reads it (rows of a multiple of 4 bytes); *bytes* is set to its length */
+static const void *host_rows(unsigned int fmt, unsigned int type, int w, int h, const void *px,
+                             unsigned int *bytes)
+{
+    unsigned int row = pixel_bytes(fmt, type, w, 1), src, dst, y;
+    src = (row + (unsigned)unpack_align - 1) & ~((unsigned)unpack_align - 1);
+    dst = (row + 3u) & ~3u;
+    *bytes = dst * (unsigned)h;
+    if (!px || src == dst)
+        return px;
+    if (*bytes > sizeof repack_buf) {         /* too big to repack: sent as before */
+        *bytes = pixel_bytes(fmt, type, w, h);
+        return px;
+    }
+    for (y = 0; y < (unsigned)h; y++)
+        memcpy(repack_buf + y * dst, (const unsigned char *)px + y * src, row);
+    return repack_buf;
+}
+
 int glTexImage2D(unsigned int target, int level, int ifmt, int w, int h,
                  int border, unsigned int fmt, unsigned int type, const void *px)
 {
-    unsigned int a[7];
+    unsigned int a[7], n = 0;
+    const void *data = px ? host_rows(fmt, type, w, h, px, &n) : 0;
     (void)target; (void)border;
     a[0] = (unsigned)level; a[1] = (unsigned)ifmt; a[2] = (unsigned)w; a[3] = (unsigned)h;
-    a[4] = fmt; a[5] = type; a[6] = px ? pixel_bytes(fmt, type, w, h) : 0;
-    emit(PADGL_TEXIMAGE, a, sizeof a, px, a[6]);
+    a[4] = fmt; a[5] = type; a[6] = px ? n : 0;
+    emit(PADGL_TEXIMAGE, a, sizeof a, data, a[6]);
     return 0;
 }
 
 int glTexSubImage2D(unsigned int target, int level, int x, int y, int w, int h,
                     unsigned int fmt, unsigned int type, const void *px)
 {
-    unsigned int a[8];
+    unsigned int a[8], n = 0;
+    const void *data = px ? host_rows(fmt, type, w, h, px, &n) : 0;
     (void)target;
     a[0] = (unsigned)level; a[1] = (unsigned)x; a[2] = (unsigned)y;
     a[3] = (unsigned)w; a[4] = (unsigned)h; a[5] = fmt; a[6] = type;
-    a[7] = px ? pixel_bytes(fmt, type, w, h) : 0;
-    emit(PADGL_TEXSUBIMAGE, a, sizeof a, px, a[7]);
+    a[7] = px ? n : 0;
+    emit(PADGL_TEXSUBIMAGE, a, sizeof a, data, a[7]);
     return 0;
 }
 

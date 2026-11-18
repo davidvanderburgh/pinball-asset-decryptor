@@ -104,8 +104,9 @@ def validate_output(original, output):
         raise ExtrasError('SSH preparation must not write the original image or an alias of it.')
 
 
-def _partitions(stream):
-    size = os.fstat(stream.fileno()).st_size
+def _partitions(stream, size=None):
+    if size is None:
+        size = os.fstat(stream.fileno()).st_size
     stream.seek(0)
     mbr = stream.read(512)
     if len(mbr) != 512 or mbr[510:] != b'\x55\xaa':
@@ -163,16 +164,33 @@ def _inspect(path, allow_pending=False, key_source=None):
         if f.read(6) == b'LUKS\xba\xbe':
             from . import ssh_spike3
             return ssh_spike3.inspect_image(path, key_source=key_source)
-        r = Ext4Reader(f, p2[2], p2[3])
-        passwd = _read(r, '/etc/passwd')
-        game = _read(r, '/etc/init.d/game', 1024 * 1024)
-        fstab = _read(r, '/etc/fstab')
-        init = _read(r, '/etc/inittab')
-        if (b':/home/root:/bin/sh' not in passwd or b'/usr/local/spike' not in game
-                or b'spike2' not in game or b'/dev/mmcblk0p5' not in fstab
-                or b'/etc/init.d/rc 5' not in init):
-            raise ExtrasError('SSH has not been qualified for this card platform.')
-        return inspect_root(r, 'stern-spike2', p2)
+        return inspect_spike2(f, p2)
+
+
+def system_partition(f, size):
+    """``(partition, encrypted)``: the card's system partition (p2) in the open stream *f* of *size* bytes, and
+    whether it is a Spike 3 LUKS volume (PAD-1427: an SD card is read as a stream, not an image path)."""
+    parts = _partitions(f, size)
+    p2 = next((p for p in parts if p[0] == 2 and p[1] == 0x83), None)
+    if p2 is None:
+        raise ExtrasError('SSH has not been qualified for this card platform.')
+    f.seek(p2[2])
+    return p2, f.read(6) == b'LUKS\xba\xbe'
+
+
+def inspect_spike2(f, p2):
+    """The remote access state of the Spike 2 system partition *p2* in the open stream *f*, or ExtrasError when
+    it is not the qualified Spike 2 layout."""
+    r = Ext4Reader(f, p2[2], p2[3])
+    passwd = _read(r, '/etc/passwd')
+    game = _read(r, '/etc/init.d/game', 1024 * 1024)
+    fstab = _read(r, '/etc/fstab')
+    init = _read(r, '/etc/inittab')
+    if (b':/home/root:/bin/sh' not in passwd or b'/usr/local/spike' not in game
+            or b'spike2' not in game or b'/dev/mmcblk0p5' not in fstab
+            or b'/etc/init.d/rc 5' not in init):
+        raise ExtrasError('SSH has not been qualified for this card platform.')
+    return inspect_root(r, 'stern-spike2', p2)
 
 
 

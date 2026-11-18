@@ -62,9 +62,33 @@ def validate_partitions(parts, size):
         raise ExtrasError('The Spike 3 filesystems overlap.')
 
 
+def open_stream(path, writable=False):
+    """``(stream, size)`` over an image file or, PAD-1427, a plugged-in SD card (a raw device)."""
+    from .rawdevice import RawDeviceFile, is_device_path
+    if is_device_path(str(path)):
+        dev = RawDeviceFile(path, writable=writable)
+        if not dev.size:
+            dev.close()
+            raise ExtrasError("Couldn't tell how big the card is.")
+        return dev, dev.size
+    f = open(path, 'r+b' if writable else 'rb')
+    return f, os.fstat(f.fileno()).st_size
+
+
+def sync_stream(f):
+    """Everything written to *f* on the card or file."""
+    f.flush()
+    if not hasattr(f, 'reopen'):                       # RawDeviceFile.flush already syncs
+        os.fsync(f.fileno())
+
+
 def key_for(path, key_source=None):
+    from .rawdevice import is_device_path
     try:
         keys = key_source
+        if keys is None and is_device_path(str(path)):
+            # a plugged-in card has no file name to find a per-card key by: the user's own board key opens it
+            keys = Spike3KeySource.discover(None, None)
         if keys is None:
             from ..plugins.stern import engine
             rec = engine.read_build_manifest(path)
@@ -88,11 +112,11 @@ def open_rootfs(path, writable=False, key_source=None):
     """A plaintext rootfs stream; never write headers or another partition."""
     from . import ssh_card as S
     keys = key_for(path, key_source)
-    f = open(path, 'r+b' if writable else 'rb')
+    f, size = open_stream(path, writable)
     try:
-        S._partitions(f)  # file bounds and non-overlapping primary partitions
+        S._partitions(f, size)  # file bounds and non-overlapping primary partitions
         parts = spike3.parse_partitions(f)
-        validate_partitions(parts, os.fstat(f.fileno()).st_size)
+        validate_partitions(parts, size)
         if not spike3.is_spike3_card_parts(parts):
             raise ExtrasError('Not a recognized Spike 3 encrypted card layout.')
         part = spike3.partition_for_role(parts, 'rootfs')
@@ -180,8 +204,7 @@ def apply_to_build(original, output, config, log=None, cancel=None, key_source=N
                     raise ExtrasError('The staged Spike 3 filesystem is truncated.')
                 vol.write(chunk)
                 left -= len(chunk)
-            vol._f.flush()
-            os.fsync(vol._f.fileno())
+            sync_stream(vol._f)
         # Reopen: cached plaintext must not substitute for encrypted read-back.
         got = hashlib.sha256()
         with open_rootfs(output, key_source=keys) as vol:

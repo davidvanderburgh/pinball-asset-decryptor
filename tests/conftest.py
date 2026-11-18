@@ -224,6 +224,18 @@ def _isolate_pad_ssh_key(tmp_path_factory):
     pad_ssh_key.KEY_DIR = str(tmp_path_factory.mktemp("remote_access"))
 
 
+@pytest.fixture(autouse=True)
+def _forget_machines():
+    """PAD-1427: the machines this computer remembers (a list now) and their identities start empty in every
+    test, whichever test ran before it on the same worker; the key itself stays for the session."""
+    from pinball_decryptor.core import pad_ssh_key
+    for name in ("machines.json", "known_hosts.json"):
+        try:
+            os.remove(os.path.join(pad_ssh_key.KEY_DIR, name))
+        except OSError:
+            pass
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_audio_ctl(tmp_path_factory):
     """Point the Emulate tabs' volume/mute file (item 56) at a temp path for

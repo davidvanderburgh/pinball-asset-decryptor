@@ -591,11 +591,39 @@ def test_full_send_of_the_image_the_machine_already_has_changes_nothing():
 
 
 def test_an_image_laid_out_differently_is_refused():
-    target = FakeTarget(NEW_VERSION, NEW_ROOT, layout={1: (8192, 16384), 2: (24576, 688128), 3: (712704, 2000000)})
-    with pytest.raises(R.SendError, match="partition 3 is placed or sized differently"):
-        R.check_layout(target, FullMachine().layout())
     with pytest.raises(R.SendError, match="the machine has partition 4"):
         R.check_layout(FakeTarget(NEW_VERSION, NEW_ROOT), {**FullMachine().layout(), 4: (9, 2)})
+    with pytest.raises(R.SendError, match="partition 3 is missing"):
+        R.check_layout(FakeTarget(NEW_VERSION, NEW_ROOT), {1: (8192, 16384), 2: (24576, 688128)})
+    # the boot partition is copied whole: it must be the same size
+    with pytest.raises(R.SendError, match=r"partition 1 \(the boot partition, copied whole\) is 0\.0 GB"):
+        R.check_layout(FakeTarget(NEW_VERSION, NEW_ROOT), {**FullMachine().layout(), 1: (8192, 8)})
+    # other platforms keep the exact layout
+    other = FakeTarget(NEW_VERSION, NEW_ROOT, platform="stern-spike3",
+                       layout={1: (8192, 16384), 2: (24576, 688128), 3: (712704, 2000000)})
+    with pytest.raises(R.SendError, match="partition 3 is placed or sized differently"):
+        R.check_layout(other, FullMachine().layout())
+
+
+def test_a_card_with_a_bigger_game_partition_takes_a_send():
+    """PAD-1432: David's Godzilla card was written with a grown /games (p3 14.5 GB, p4-p6 after it); the Heisei
+    image he sent was not (p3 11.7 GB).  The game and system partitions are synced file by file with their free
+    space checked, and /data, /dump and the extended partition aren't touched, so where they sit doesn't matter."""
+    image = {1: (8192, 16384, 0x0C), 2: (24576, 688128, 0x83), 3: (712704, 22847486, 0x83),
+             4: (23560192, 1239038, 0x0F), 5: (23562240, 147454, 0x83), 6: (23709696, 1089534, 0x83)}
+    machine = {1: (8192, 16384), 2: (24576, 688128), 3: (712704, 28311550), 4: (29024256, 2),
+               5: (29026304, 147454), 6: (29173760, 1089534)}
+    target = FakeTarget(NEW_VERSION, NEW_ROOT)
+    target.layout = image
+    R.check_layout(target, machine)
+    # the other way round (an image with the bigger game partition, a card without) goes too: the Send checks room
+    R.check_layout(FakeTarget(NEW_VERSION, NEW_ROOT, layout={1: (8192, 16384), 2: (24576, 688128),
+                                                             3: (712704, 28311550)}),
+                   {1: (8192, 16384), 2: (24576, 688128), 3: (712704, 22847486)})
+    # a multi-boot game image partition the Send syncs must fit on the machine's
+    target.parts = {R.TEMP_MOUNT + "/p6": 6}
+    with pytest.raises(R.SendError, match=r"partition 6 is 0\.0 GB on the machine, smaller than the image's 0\.6 GB"):
+        R.check_layout(target, {**machine, 6: (29173760, 10)})
 
 
 def test_full_send_with_no_room_for_both_copies_replaces_in_place_with_the_game_stopped():

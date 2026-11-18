@@ -208,6 +208,11 @@ class _FdIO:
         return os.write(self.fd, data)
 
     def size(self):
+        if sys.platform == "win32" and is_device_path(self.path):
+            # SEEK_END reports 0 on a \\.\PHYSICALDRIVEn fd, so a read-only
+            # card open (Remote access setup, PAD-1429) never learnt the card's
+            # size; ask the drive itself, as the writable backend does.
+            return _win_fd_length(self.fd)
         try:
             end = os.lseek(self.fd, 0, os.SEEK_END)
             os.lseek(self.fd, 0, os.SEEK_SET)
@@ -280,6 +285,21 @@ if sys.platform == "win32":
         ptr = ctypes.byref(arg) if arg is not None else None
         return bool(_DeviceIoControl(handle, code, ptr, size, None, 0,
                                      ctypes.byref(ret), None))
+
+    def _win_fd_length(fd):
+        """A raw drive's byte length through its fd's OS handle, or None."""
+        try:
+            import msvcrt
+            handle = wintypes.HANDLE(msvcrt.get_osfhandle(fd))
+        except (OSError, ValueError):
+            return None
+        buf = ctypes.create_string_buffer(8)
+        ret = wintypes.DWORD(0)
+        if _DeviceIoControl(handle, _IOCTL_DISK_GET_LENGTH_INFO, None, 0,
+                            buf, 8, ctypes.byref(ret), None):
+            (length,) = struct.unpack("<q", buf.raw[:8])
+            return length if length > 0 else None
+        return None
 
     _CreateFileW = _kernel32.CreateFileW
     _CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,

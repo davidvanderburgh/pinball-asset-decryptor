@@ -792,7 +792,7 @@ static void stime_line(char **f, unsigned n) { (void)f; (void)n; }
 @FUNCS@
 int main(int argc, char **argv)
 {
-    unsigned i, k, n = (unsigned)atoi(argv[2]);
+    unsigned i, k, n = (unsigned)atoi(argv[2]), game = argc > 3 ? (unsigned)atoi(argv[3]) : 0;
     CLIPV_FILES_0 = argv[1];
     if (!clipv_read()) { printf("none\n"); return 0; }
     printf("only=%d slots=%u dropped=%d\n", clipv_only, n_clipv, clipv_dropped);
@@ -805,7 +805,10 @@ int main(int argc, char **argv)
     if (n_clipv && n) {
         struct clipv *v = clipv_find(clipv[0].name[0]);
         printf("picks");
-        for (i = 0; i < n; i++) { k = clipv_pick(v); v->last = k; printf(" %u", k); }
+        for (i = 0; i < n; i++) {
+            if (game && i && !(i % game)) v->played = 0;       /* PAD-1428: a new game every `game` picks */
+            k = clipv_pick(v); v->last = k; printf(" %u", k);
+        }
         printf("\n");
     }
     return 0;
@@ -843,6 +846,7 @@ def clipv_reader(tmp_path_factory):
     funcs = [_c_function(src, r) for r in (r"static void clipv_line\(", r"static int clipv_read\(void\)",
                                             r"static struct clipv \*clipv_find\(",
                                             r"static unsigned clipv_rand\(void\)",
+                                            r"static unsigned bag_pick\(",
                                             r"static unsigned clipv_pick\(")]
     funcs[1] = funcs[1].replace("sizeof CLIPV_FILES / sizeof CLIPV_FILES[0]", "1") \
                        .replace("CLIPV_FILES[k]", "CLIPV_FILES_0")
@@ -857,10 +861,10 @@ def clipv_reader(tmp_path_factory):
                         str(d / "h.c")], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 
-    def run(text, picks=0):
+    def run(text, picks=0, game=0):
         p = d / "clips.cfg"
         p.write_bytes(text.encode())
-        return subprocess.run([str(exe), str(p), str(picks)], capture_output=True, text=True,
+        return subprocess.run([str(exe), str(p), str(picks), str(game)], capture_output=True, text=True,
                               check=True).stdout.splitlines()
     return run
 
@@ -893,6 +897,41 @@ def test_the_runtime_never_plays_the_same_clip_twice_in_a_row(clipv_reader):
     assert all(a != b for a, b in zip(picks, picks[1:]))
     two = [int(x) for x in clipv_reader("clip\tA\tA__PadVar2\n", picks=50)[-1].split()[1:]]
     assert all(a != b for a, b in zip(two, two[1:]))
+
+
+def test_a_clip_does_not_come_again_in_a_game_until_all_have_played(clipv_reader):
+    """PAD-1428 (DoomWalrus666): "never play the same variant unless all the variants have been played this
+    game" - not only never twice running"""
+    picks = [int(x) for x in clipv_reader("clip\tA\tA__PadVar2\tA__PadVar3\tA__PadVar4\n",
+                                          picks=800)[-1].split()[1:]]
+    assert len(picks) == 800 and set(picks) == {0, 1, 2, 3}
+    for r in range(0, 800, 4):                            # each round of four is all four, in a random order
+        assert sorted(picks[r:r + 4]) == [0, 1, 2, 3], picks[r:r + 4]
+    assert all(a != b for a, b in zip(picks, picks[1:]))  # and a round never starts with the last one
+    assert len({tuple(picks[r:r + 4]) for r in range(0, 800, 4)}) > 6     # at random, not one order
+    # a new game deals them all again: games of 6 asks, 3 clips - the first three of each game are all three
+    picks = [int(x) for x in clipv_reader("clip\tA\tA__PadVar2\tA__PadVar3\n", picks=600,
+                                          game=6)[-1].split()[1:]]
+    for g in range(0, 600, 6):
+        assert sorted(picks[g:g + 3]) == [0, 1, 2] and sorted(picks[g + 3:g + 6]) == [0, 1, 2], picks[g:g + 6]
+    assert all(a != b for a, b in zip(picks, picks[1:]))  # not even across a game's start
+    # a game of 2 asks with 3 clips: the one left out is not owed to the next game, which deals all three again
+    picks = [int(x) for x in clipv_reader("clip\tA\tA__PadVar2\tA__PadVar3\n", picks=300,
+                                          game=2)[-1].split()[1:]]
+    assert all(picks[g] != picks[g + 1] for g in range(0, 300, 2))
+    assert set(picks) == {0, 1, 2}
+
+
+def test_the_runtime_empties_the_bag_at_a_new_game():
+    with open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8") as f:
+        c = f.read()
+    ch = _c_function(c, r"static unsigned clipv_choose\(")
+    assert "rand_game_now() != v->game" in ch and "v->played = 0" in ch
+    assert ch.index("v->played = 0") < ch.index("k = clipv_pick(v);")
+    g = _c_function(c, r"static unsigned rand_game_now\(void\)")
+    assert 'pm_event("game_start")' in g and "hand_new_game(" in g and 'data("coop_player")' in g
+    arm = _c_function(c, r"static void clipv_arm\(void\)")
+    assert "events_arm();" in arm                         # a card of variants only counts the game's starts too
 
 
 def test_the_runtime_takes_no_more_than_its_table_holds(clipv_reader):

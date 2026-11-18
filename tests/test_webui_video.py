@@ -939,9 +939,9 @@ def test_a_slot_the_game_plays_by_name_takes_random_clips(tmp_path, monkeypatch)
         w.call("video.set_change_filter", "Changed")
         assert _rels(w.state("video")) == [rel]
         w.call("video.set_change_filter", "All")
-        assert r["var_tip"] == ("Plays one of 3 clips at random each time, never "
-                                "the same one twice in a row: the game's own "
-                                "clip, b.mp4, c.mp4.")
+        assert r["var_tip"] == ("Plays one of 3 clips at random each time, and none of "
+                                "them again in the same game until all have played: "
+                                "the game's own clip, b.mp4, c.mp4.")
         side = json.loads((proj / ".staged_changes.json").read_text(encoding="utf-8"))
         assert side["video_variants"] == {rel: [str(one), str(two)]}
         assert any(l["text"].startswith("Replace Video: video/intro.mp4 ← b.mp4, "

@@ -198,8 +198,8 @@ Right-click a sound > **Play in turn** > **Add sounds to play in turn…**
 - Under **Music modes**, picking several files for a mode makes the first its song and the
   rest its sounds in turn.
 
-- **At random** in the same menu picks one at random instead, never the
-  same twice in a row.
+- **At random** in the same menu picks one at random instead, and none of
+  them again in the same game until all have played.
 - Each file plays for as long as the sound it stands in for.
 - Needs an image build, not a direct SD write.
 
@@ -343,8 +343,8 @@ The **Convert** column says it before you build:
 ### Random clips (Stern Spike 2)
 
 Right-click a slot > **Random clips** > **Add clips to play at random…**.
-Each time the game plays the slot, one of its clips plays at random, never
-the same twice in a row.
+Each time the game plays the slot, one of its clips plays at random, and
+none of them again in the same game until all have played.
 
 - The slot's own clip is one of them, and the row shows a shuffle badge.
 - Only clips the game plays by name (modes, battles, awards). A clip a

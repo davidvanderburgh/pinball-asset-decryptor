@@ -12,7 +12,8 @@ project's ``.staged_changes.json``: ``{slot rel: [file, ...]}``), and a Write do
 2. ``clips.cfg`` lists, one TAB-separated line per slot, the game's name and the added ones;
 3. the mode runtime (``mode.so``, preloaded into the game by ``/etc/init.d/game_monitor``) reads
    it and, every time the game asks for that clip by name, plays one of the line's clips at
-   random, never the same one twice in a row (pad_mode_runtime.c "clip variants").
+   random, none of them again in the same game until all have played (PAD-1428; pad_mode_runtime.c
+   "clip variants").
 
 It rides the modes' delivery (:mod:`.mode_write`: the rewritten bank and the new clips are whole
 files, the ``.sidx`` manifest gains a record per clip, p2 gets ``mode.so``, the port and

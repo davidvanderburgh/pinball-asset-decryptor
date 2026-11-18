@@ -89,14 +89,48 @@ The 53-build library sweep (C:/tmp/PAD-1400 mklist.py, sweepjob.sh, run5.sh) did
 was not mounted (mounted now), so boots took up to 6 minutes and crashed or hit the game's watchdog before the mode
 ever ran. Rig 2 still has its stale `ballfeed.off`.
 
+## The rules on every build (run 2)
+
+Three more hold-backs, so the game's rules hear nothing on builds without one `shot_dispatch`:
+
+- `rule_dispatch` (Foo Fighters LE, Venom LE / Pro): Foo Fighters Pro's dispatcher, located strict in each program,
+  named apart because those builds' modes take their shots from `switch` lines. Refused, nothing handed on.
+- `switch_spawn` (19 newest builds: the framework switch drain's `ldr r1,[sl]; cmp r1,#0; beq; ldrh r2,[sl,#24];
+  ldrh r0,[sl,#32]; bl <start>`, once in every program): wrapped where it is made; a handler whose descriptor flags
+  have none of the low 10 bits (a rule's: it runs in play only) is not started. Device, cabinet and service handlers
+  start as always. The rule handlers are read from the switch records at arm time (a `maps_read()` first: the
+  records are the game's heap). Rush LE: 21 rule handlers of 105 switches.
+- `drain_rule_call` (all 53 newest builds): the trough's drain asks the game's own callback (event 10, `mov rN, #10;
+  blx reg`) whether to serve the drained ball back; the call is skipped with r0 = 0, the framework's own no-callback
+  answer, so the drain ends the ball. Star Wars LE served every drained ball back for ever (probe: serve reason 5,
+  its video-mode branch); the framework's ball saver and playfield validation stay the game's.
+- The game's points are no longer refused: `score_add` runs with 0 points (Star Wars LE validates its playfield
+  through a score), from the bus's `ball_start` (Elvira's launch award came before any rule handler).
+
+## Library sweep (53 newest builds, the shipped prebuilt object, hidden, muted, 4x)
+
+C:/tmp/PAD-1400 mklist.py, sweepjob.sh (one player: each ball the safe playfield switches, then a drain, to game
+over). PASS = the mode had the whole game from the game's start, ball 1's score was exactly the mode's awards, and
+the game ended with the mode. 50 of 53 pass:
+
+- 47 in the plain sweep (batch21/batch23).
+- Star Wars LE, Star Wars Pro and The Beatles pass with a quiet spell after the switches (sweepjob_bs.sh: 30 game
+  seconds before the drain). The job presses their Right Eject / Top Magnet switches, a ball "goes in", and under the
+  whole game no rule kicks it back; the game's own ball search frees it in the quiet, as on a machine. Star Wars LE's
+  ball-start ball save also covers about three drains (its saver's countdown pauses while none of its own modes
+  runs; a stock game ends it at once).
+- Not passing: Dungeons & Dragons LE 1.10 (the job's stock comparison, an ordinary mode, also logged no ball end:
+  the job cannot end a ball there - the dragon hold), TMNT LE and Pro 1.59 (the stock comparison ends its balls;
+  under the whole game the first launch already finds no ball in the lane and the rig's drain writes do not take:
+  its turtle select / van at game start, not yet looked at).
+
 ## Left for the next run
 
-1. The game's rules on the 27 ports with neither `shot_dispatch` nor `block_rule` sites (aerosmith, batman,
-   elvira3, guardians, iron_maiden, james_bond_60th, jurassic_park, metallica, rush, star_wars, stranger_things
-   builds) still hear shots under a whole-game mode (their points, calls, screens, shows, serves and mode starts are
-   held back): find each title's switch-to-rule dispatch (or its rules' shot handlers) in its program and add the
-   sites, with recipes recompiled.
-2. After a WSL restart (`wsl --shutdown`, David's call: it stops every other ticket's rigs), the sweep over the 53
-   newest builds: `python C:/tmp/PAD-1400/mklist.py` (copies stage_own/pad_mode.so: rebuild it from the branch
-   first), then `wsl -u root -e bash /mnt/c/tmp/PAD-1400/run5.sh <new batch dir>` (parks rig 2, -n 3). D&D LE's balls
-   never ended in the one run it had (six balls out of the trough): check it against a stock run.
+1. TMNT LE / Pro 1.59 under the whole game: why the first ball never reaches the lane (probe the turtle select and
+   the van at game start, compare the game's calls refused in the fresh window with a stock run).
+2. D&D LE 1.10: a job that ends a ball on the stock game (the PAD-713 dragon-hold recipe,
+   memory dnd-le-rig-no-game-start), then the whole game on it.
+3. Older-version ports (no archival cards read): `show_start` on 11 of them, and the 8 older ports with neither
+   `shot_dispatch` nor `switch_spawn` (aerosmith_le-1.15, batman-1.13, guardians_le-1.14, iron_maiden_le-1.16,
+   rush_le-1.18, star_wars_le-1.30, stranger_things_le-1.12, sword_of_rage_le-1.18 ...): only through a port
+   derived on the user's machine from their own card.

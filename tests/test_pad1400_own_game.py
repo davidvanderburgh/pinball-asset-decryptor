@@ -250,3 +250,19 @@ def test_the_drain_question_is_answered_no_on_every_newest_build():
         m = re.search(r"^site drain_rule_call\s+\S+\s+(0x\w+)\s+(0x\w+)", p.read_text(encoding="utf-8"), re.M)
         if m:
             assert int(m.group(1), 16) & 0xFFFF0FFF == 0xE3A0000A and int(m.group(2), 16) & 0xFFFFFFF0 == 0xE12FFF30
+
+
+def test_award_screens_and_shows_pass_at_callers_that_use_the_result():
+    """TMNT Pro's show_start(178) at 0x147cf0 stores into the show it gets back: a refused 0 crashed the game. Those
+    callers are listed per port and never refused; a port whose callers were not scanned only counts the two."""
+    text = RUNTIME.read_text(encoding="utf-8")
+    veto = text[text.index("static int og_veto(pm_reg *r, unsigned n)\n{"):]
+    veto = veto[:veto.index("\n}\n")]
+    assert "og_pass_caller(n, (unsigned)r[PM_REG_LR])" in veto
+    caller = text[text.index("static int og_pass_caller(unsigned n, unsigned lr)\n{"):]
+    assert "if (!og_ret_scanned) return 1;" in caller[:600] and "lr -= 4u;" in caller[:600]
+    tp = (SDK / "ports" / "turtles_pro-1.59.port").read_text(encoding="utf-8")
+    assert "value own_ret_scanned      1" in tp
+    assert re.search(r"^value own_pass_\d+\s+0x00147cf0$", tp, re.M)
+    scanned = [p for p in (SDK / "ports").glob("*.port") if "\nvalue own_ret_scanned " in p.read_text(encoding="utf-8")]
+    assert len(scanned) == 53

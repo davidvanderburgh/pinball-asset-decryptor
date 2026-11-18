@@ -1169,9 +1169,12 @@ every Spike 2 port names: `shot_dispatch` (the rules hear no shot; the veto hand
 bookkeeping still happens - Star Wars LE serves back any ball that drains before something has scored),
 `callout` / `callout_nth` (on Uncanny X-Men the game's every sound request: its `sound_play` is the same function), `multiball_serve` (its multiballs and rule ball saves), `award_screen` (its award
 screens and videos) and `show_start` (its light shows; one of ours, `pm_game_show`, still plays: its process is the
-game's code, so `show_start` passes while it runs). A refused call answers 0, as each function's own failures do:
-disassembled on Uncanny X-Men LE 0.98, the callers of the award screens and shows that still came once the shots were
-held back throw that value away. Three more sites hold the RULES back on builds whose rules do not hear one
+game's code, so `show_start` passes while it runs). A refused call answers 0, as each function's own failures do - but
+only from a caller that throws that value away. Every build has callers that store into the show or screen they get
+back (TMNT Pro's show_start(178) at 0x147cf0 writes [r5,#168]: a refused 0 crashed the game in the library sweep), so
+each scanned port lists them (`value own_ret_scanned 1`, `value own_pass_<k> <bl address>`: scan_ret_use.py follows
+r0 after every call - used as a base, stored, passed on or returned = listed) and those calls are never refused; a
+port whose callers were not scanned (the older versions) only counts the two. Three more sites hold the RULES back on builds whose rules do not hear one
 `shot_dispatch`: `rule_dispatch` (Foo Fighters LE, Venom LE / Pro: Foo Fighters Pro's dispatcher, named apart because
 their modes take shots from `switch` lines; refused, nothing handed on); `switch_spawn` (19 builds: Rush, Batman,
 Star Wars, Stranger Things, Guardians, Iron Maiden, Jurassic Park, Metallica, Elvira, Aerosmith, Bond 60th), the

@@ -28,6 +28,40 @@ site award_screen     0x00405908 0xe92d4070 0xe24dd008
 # PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
 # (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
 site drain_rule_call  0x00389414 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x00042500
+value own_pass_1          0x00047c4c
+value own_pass_2          0x0008c0b0
+value own_pass_3          0x00092454
+value own_pass_4          0x00097e7c
+value own_pass_5          0x0009ec40
+value own_pass_6          0x000a368c
+value own_pass_7          0x000aa190
+value own_pass_8          0x000b64ec
+value own_pass_9          0x000c40c0
+value own_pass_10         0x000ecea4
+value own_pass_11         0x00103d0c
+value own_pass_12         0x0013447c
+value own_pass_13         0x00148588
+value own_pass_14         0x0014ba1c
+value own_pass_15         0x0015242c
+value own_pass_16         0x00162d0c
+value own_pass_17         0x0016f6b0
+value own_pass_18         0x00191258
+value own_pass_19         0x00199954
+value own_pass_20         0x001a449c
+value own_pass_21         0x001a7c8c
+value own_pass_22         0x001c9cd4
+value own_pass_23         0x001ca00c
+value own_pass_24         0x00228f14
+value own_pass_25         0x002e5374
+value own_pass_26         0x00394158
+value own_pass_27         0x003bbd00
+value own_pass_28         0x003e4214
+value own_pass_29         0x003fd67c
+value own_pass_30         0x004da83c
 site string_new       0x00016954 0xe28fc606 0xe28ccaf3
 site dynamic_cast     0x00016348 0xe28fc606 0xe28ccaf3
 site resource_get     0x00538484 0xe92d43f0 0xe1a04000

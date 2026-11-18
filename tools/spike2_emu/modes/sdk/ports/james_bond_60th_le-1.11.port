@@ -34,6 +34,42 @@ site award_screen     0x003505f4 0xe92d4070 0xe24dd008
 # PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
 # (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
 site drain_rule_call  0x0016c074 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x0001be8c
+value own_pass_1          0x0002fa18
+value own_pass_2          0x0003c0b0
+value own_pass_3          0x00041dd4
+value own_pass_4          0x000421f4
+value own_pass_5          0x00045bfc
+value own_pass_6          0x0004b350
+value own_pass_7          0x00054d2c
+value own_pass_8          0x000602b4
+value own_pass_9          0x00061ef8
+value own_pass_10         0x000823d4
+value own_pass_11         0x00086684
+value own_pass_12         0x0008c9a0
+value own_pass_13         0x0008cc38
+value own_pass_14         0x0008f310
+value own_pass_15         0x0008f350
+value own_pass_16         0x0008f384
+value own_pass_17         0x000a3e50
+value own_pass_18         0x000a5508
+value own_pass_19         0x000a7760
+value own_pass_20         0x000a866c
+value own_pass_21         0x000a97cc
+value own_pass_22         0x000aaba8
+value own_pass_23         0x000bd36c
+value own_pass_24         0x000c090c
+value own_pass_25         0x000d61a0
+value own_pass_26         0x0011f20c
+value own_pass_27         0x001684a4
+value own_pass_28         0x00188adc
+value own_pass_29         0x00192d0c
+value own_pass_30         0x002aef7c
+value own_pass_31         0x002c17c4
+value own_pass_32         0x0034f1a8
 #   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02, TMNT Pro 1.59]
 site string_new       0x00016784 0xe28fc605 0xe28cca7c
 #   dynamic_cast: PLT stub for __dynamic_cast [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Deadpool LE 1.14, Deadpool Pro 1.16, Jaws LE 1.02, TMNT Pro 1.59]

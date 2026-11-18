@@ -11556,6 +11556,10 @@ static void on_ball_end(pm_reg *r)
  * search, the node bus, display and audio are the game's throughout: none of them is one of these sites. */
 static void events_arm(void);
 static int event_bus_id(const char *name);
+#define OG_PASS_MAX 256
+static unsigned og_pass[OG_PASS_MAX];            /* PAD-1400: callers (bl addresses) whose award_screen / show_start
+                                                  * result is used - those calls are never refused (sorted) */
+static int og_pass_n, og_ret_scanned;
 static volatile unsigned og_drain_hold;          /* PAD-1400: read by the drain_rule_call trampoline: 1 = skip the call */
 static int og_drain_patch(pm_addr at);
 #define OG_RULE_H 192
@@ -11567,6 +11571,7 @@ static unsigned (*og_spawn_target)(unsigned, unsigned, unsigned, unsigned);
 #endif
 #define OG_SHOT   0
 #define OG_SHOW   7                              /* og_sites[] index of show_start */
+#define OG_AWARD  6                              /* og_sites[] index of award_screen */
 #define OG_COUNT  0x80u                          /* og_sites[].how: counted, never refused */
 #define OG_ZERO   0x40u                          /* og_sites[].how: not refused - it runs with 0 points (score) */
 #define OG_N      13
@@ -11633,12 +11638,18 @@ static void og_shot_seen(void)
     og.fresh = 0;
 }
 
+static int og_pass_caller(unsigned n, unsigned lr);   /* below */
 static int og_veto(pm_reg *r, unsigned n)
 {
     int ours, refuse;
     if (!og.owner || n >= OG_N) return 0;
     if ((n == OG_SHOT || n == OG_RULE) && og.fresh) og_shot_seen();
     ours = og_ours((pm_addr)r[PM_REG_LR]) || (n == OG_SHOW && show_now.n);   /* a show of ours runs as the game's */
+    if ((n == OG_SHOW || n == OG_AWARD) && !ours && og_pass_caller(n, (unsigned)r[PM_REG_LR])) {
+        if (!og.fresh && !og.tilted && pm_in_game() && !og_self)
+            if (__sync_fetch_and_add(&og.passed[n], 1u) == 0 && !og.refused[n]) og.first[n] = (unsigned)r[PM_REG_LR];
+        return 0;                                /* this caller writes into what it gets back: never refused */
+    }
     refuse = og_refuses(1, pm_in_game(), og.fresh && !((og_sites[n].how & OG_ZERO) && og.ball_on), og.tilted, pm_ms(),
                         og.pass_until, ours, og_self, og_sites[n].how);
     if (!refuse) {
@@ -11776,6 +11787,41 @@ static int og_drain_patch(pm_addr at)
 #endif
 }
 
+/* PAD-1400: is this award_screen / show_start call one that must not be refused? Every one, on a port whose callers
+ * were not scanned (`value own_ret_scanned 1`): there the two are counted only. Else the callers the scan found using
+ * the result (`value own_pass_<k> <bl address>`: TMNT Pro's show_start(178) at 0x147cf0 stores into the show it gets,
+ * and a refused 0 crashed the game) */
+static int og_pass_caller(unsigned n, unsigned lr)
+{
+    int lo = 0, hi = og_pass_n - 1;
+    (void)n;
+    if (!og_ret_scanned) return 1;
+    lr -= 4u;                                    /* the bl itself */
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (og_pass[mid] == lr) return 1;
+        if (og_pass[mid] < lr) lo = mid + 1; else hi = mid - 1;
+    }
+    return 0;
+}
+
+static void og_pass_read(void)
+{
+    char key[24];
+    int k, j;
+    og_ret_scanned = pm_port_value("own_ret_scanned", 0) == 1;
+    for (og_pass_n = 0, k = 0; k < OG_PASS_MAX; k++) {
+        long v;
+        unsigned a;
+        pm_snprintf(key, sizeof key, "own_pass_%d", k);
+        if ((v = pm_port_value(key, -1)) <= 0) break;
+        a = (unsigned)v;
+        for (j = og_pass_n; j > 0 && og_pass[j - 1] > a; j--) og_pass[j] = og_pass[j - 1];
+        og_pass[j] = a;
+        og_pass_n++;
+    }
+}
+
 /* the bus, on the game's own call (on_event_dispatch) */
 static void og_event(unsigned id)
 {
@@ -11829,6 +11875,9 @@ static int og_arm(void)
     og.tilt_id = event_bus_id("tilt");
     og.game_id = event_bus_id("game_start");
     og.ball_id = event_bus_id("ball_start");
+    og_pass_read();
+    say("own game: award screens and light shows %s", og_ret_scanned ? "refused but from the callers that use them"
+        : "counted only (this port's callers were not scanned)");
     for (i = 0; i < OG_N; i++) {
         pm_addr a = fn(og_sites[i].site);
         if (!a) continue;

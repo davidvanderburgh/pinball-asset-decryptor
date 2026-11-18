@@ -21,6 +21,20 @@ site award_screen     0x002f412c 0xe92d4070 0xe24dd008
 # PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
 # (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
 site drain_rule_call  0x00112a58 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x00028f94
+value own_pass_1          0x0005f6d8
+value own_pass_2          0x00084f6c
+value own_pass_3          0x000c050c
+value own_pass_4          0x001e3074
+value own_pass_5          0x0022f2a8
+value own_pass_6          0x002fd440
+value own_pass_7          0x003c2174
+value own_pass_8          0x003e21c4
+value own_pass_9          0x003e5e3c
+value own_pass_10         0x003e6920
 # PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
 # program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
 site show_start       0x001eeaf4 0xe92d47f0 0xe2508000

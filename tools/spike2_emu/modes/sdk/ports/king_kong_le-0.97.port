@@ -38,6 +38,66 @@ site award_screen     0x0051720c 0xe92d4070 0xe24dd008
 # PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
 # (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
 site drain_rule_call  0x0059a5a8 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x00025a88
+value own_pass_1          0x00025a98
+value own_pass_2          0x00025aa8
+value own_pass_3          0x00025c9c
+value own_pass_4          0x00025ce0
+value own_pass_5          0x00025d24
+value own_pass_6          0x00025f50
+value own_pass_7          0x00025f60
+value own_pass_8          0x00025f70
+value own_pass_9          0x00046cb8
+value own_pass_10         0x0004a52c
+value own_pass_11         0x0004f91c
+value own_pass_12         0x00052a68
+value own_pass_13         0x00052c04
+value own_pass_14         0x00052f04
+value own_pass_15         0x000530cc
+value own_pass_16         0x000532a0
+value own_pass_17         0x00053460
+value own_pass_18         0x00053620
+value own_pass_19         0x000537c4
+value own_pass_20         0x00053968
+value own_pass_21         0x00053b20
+value own_pass_22         0x00053cc4
+value own_pass_23         0x00053e7c
+value own_pass_24         0x00054028
+value own_pass_25         0x000541cc
+value own_pass_26         0x0005438c
+value own_pass_27         0x000e0a14
+value own_pass_28         0x00152d18
+value own_pass_29         0x0015bfb0
+value own_pass_30         0x00164a9c
+value own_pass_31         0x00164bdc
+value own_pass_32         0x001bf2ec
+value own_pass_33         0x001c87a0
+value own_pass_34         0x001c8ad8
+value own_pass_35         0x001c9794
+value own_pass_36         0x001d3d08
+value own_pass_37         0x001d4c5c
+value own_pass_38         0x001e9f8c
+value own_pass_39         0x001fcf04
+value own_pass_40         0x00210f9c
+value own_pass_41         0x0021e74c
+value own_pass_42         0x0022e140
+value own_pass_43         0x0022e1c4
+value own_pass_44         0x0022e1f4
+value own_pass_45         0x002577ec
+value own_pass_46         0x00257dd8
+value own_pass_47         0x00273374
+value own_pass_48         0x0028bf74
+value own_pass_49         0x0028c068
+value own_pass_50         0x0036264c
+value own_pass_51         0x0046f554
+value own_pass_52         0x004702b0
+value own_pass_53         0x004d223c
+value own_pass_54         0x004daff8
+value own_pass_55         0x00561774
+value own_pass_56         0x00566cc0
 #   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
 site string_new       0x000169c8 0xe28fc607 0xe28ccaf6
 #   dynamic_cast: PLT stub for __dynamic_cast [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]

@@ -22,6 +22,44 @@ site award_screen     0x002a54d4 0xe92d4070 0xe24dd008
 # PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
 # (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
 site drain_rule_call  0x0030c2b8 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x0001c500
+value own_pass_1          0x0004d2f0
+value own_pass_2          0x00071d34
+value own_pass_3          0x00072bd4
+value own_pass_4          0x00073f10
+value own_pass_5          0x0007467c
+value own_pass_6          0x0007cca8
+value own_pass_7          0x0008e778
+value own_pass_8          0x000b5b9c
+value own_pass_9          0x000b7784
+value own_pass_10         0x000be9e0
+value own_pass_11         0x000beb9c
+value own_pass_12         0x000bed08
+value own_pass_13         0x000bef44
+value own_pass_14         0x000bf00c
+value own_pass_15         0x00101158
+value own_pass_16         0x001317a8
+value own_pass_17         0x0014a478
+value own_pass_18         0x0015a764
+value own_pass_19         0x001643fc
+value own_pass_20         0x00164844
+value own_pass_21         0x00164c54
+value own_pass_22         0x001739b8
+value own_pass_23         0x00173ccc
+value own_pass_24         0x001a47d0
+value own_pass_25         0x001a55cc
+value own_pass_26         0x001b7670
+value own_pass_27         0x001bb06c
+value own_pass_28         0x001e070c
+value own_pass_29         0x002d892c
+value own_pass_30         0x0033981c
+value own_pass_31         0x0035a938
+value own_pass_32         0x0042365c
+value own_pass_33         0x0042cac0
+value own_pass_34         0x004470d8
 # PAD-1400: the game's start-a-light-show, held back by pm_own_game - located (strict) in this build's own
 # program from elvira3-1.13, foo_fighters_le-1.04, godzilla_le-1.16 and 14 more (every reference agreed)
 site show_start       0x004015e0 0xe92d47f0 0xe2508000

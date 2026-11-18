@@ -34,6 +34,32 @@ site award_screen     0x002ea924 0xe92d4070 0xe24dd008
 # PAD-1400: the trough's drain asking the game's own callback (event 10) whether to serve the ball back
 # (framework code, one per build); a whole-game mode answers 0 for it: the drain ends the ball
 site drain_rule_call  0x002f42e0 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# scan_ret_use.py); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0          0x0005849c
+value own_pass_1          0x00064e14
+value own_pass_2          0x00065364
+value own_pass_3          0x000681e0
+value own_pass_4          0x00072f98
+value own_pass_5          0x00073b10
+value own_pass_6          0x000792d8
+value own_pass_7          0x0007ab70
+value own_pass_8          0x00087658
+value own_pass_9          0x00087928
+value own_pass_10         0x0008798c
+value own_pass_11         0x00087f38
+value own_pass_12         0x00090c88
+value own_pass_13         0x00092ab0
+value own_pass_14         0x000a5008
+value own_pass_15         0x000a6468
+value own_pass_16         0x0017b1a0
+value own_pass_17         0x001f3fb0
+value own_pass_18         0x00207838
+value own_pass_19         0x002874e8
+value own_pass_20         0x0028767c
+value own_pass_21         0x0035d020
+value own_pass_22         0x0037b130
 #   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]
 site string_new       0x00016784 0xe28fc605 0xe28cca3f
 #   dynamic_cast: PLT stub for __dynamic_cast [Godzilla Premium/LE 1.16, Godzilla Pro 1.15, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.14, Deadpool Pro 1.16, TMNT Pro 1.59]

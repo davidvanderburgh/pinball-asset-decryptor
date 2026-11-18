@@ -101,7 +101,9 @@ def test_the_walking_dead_port_carries_the_core_and_none_of_star_wars_content():
     assert sum(1 for k in e if k[0] == "switch") == 32
     assert re.search(r"^text example_start_shot\s+Tower target$", text, re.M)
     body = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
-    assert not [l for l in body if l.split()[0] in ("lamp", "scene", "callout")]
+    # PAD-1380: its own video bank (71e39c43, its play clips), never Star Wars ELG's scenes
+    assert not [l for l in body if l.split()[0] in ("lamp", "callout")]
+    assert [l for l in body if l.split()[0] == "scene"] == ["scene video_bank           71e39c438cff72938ff0dd6dddecd582fb133415"]
     assert not [l for l in body if re.match(r"(site|value|text)\s+(show_(\d|name|kind|secs|proc)|block_|right_gate|mode_flag|held_coils)", l)]
     assert "NOT RUN" not in text and "Emulator-proven 2026-11-15 (PAD-1287)" in text
 
@@ -144,8 +146,9 @@ def test_redrafting_walking_dead_gives_the_proven_port():
     assert not core
     # (PAD-1326's co-op lines are portcoop's, not the draft's: the message table and its BALL line)
     # (and PAD-1327's start menu, measured by hand on this program)
+    # (and the challenge game's ball launch, read off each program: ae44e7916)
     def own(entries):
-        return {k: v for k, v in entries.items() if not k[1].startswith(("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add"))}
+        return {k: v for k, v in entries.items() if not k[1].startswith(("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add", "ball_launch"))}
     assert own(_entries(text)) == own(_entries(WD_PORT.read_text(encoding="utf-8")))
     # a layout that moved is read off this program, not copied: the process's exit hooks (Star Wars ELG's at 312)
     assert re.search(r"^value proc_exit_hooks\s+392\b", text, re.M)

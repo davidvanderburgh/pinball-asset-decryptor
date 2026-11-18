@@ -42,11 +42,11 @@ site callout_nth      0x008a7960 0x9002f528 0x913cc108
 site lamp_group       0x006b4800 0xa9be53f3 0x92403c14
 #   show_priority: the same instructions, found once on each (100% alike)
 site show_priority    0x006d5970 0xb0009241 0xf941c821
-# not carried - the screen and clip features name this title's hud / video bank scenes: site dynamic_cast     0x003e0680 0xb000a9f0 0xf944fa11
-# not carried - the screen and clip features name this title's hud / video bank scenes: site resource_get     0x0086b290 0xf0008583 0xf9474463
-# not carried - the screen and clip features name this title's hud / video bank scenes: site find_node        0x009cb300 0xf0007a82 0xf9474442
-# not carried - the screen and clip features name this title's hud / video bank scenes: site set_text         0x009b0a00 0xa9bc7bfd 0x910003fd
-# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_state    0x009bc8a0 0xf9465800 0x91002000
+site dynamic_cast     0x003e0680 0xb000a9f0 0xf944fa11
+site resource_get     0x0086b290 0xf0008583 0xf9474463
+# not carried - the screen feature needs this title's hud scene measured: site find_node        0x009cb300 0xf0007a82 0xf9474442
+# not carried - the screen feature needs this title's hud scene measured: site set_text         0x009b0a00 0xa9bc7bfd 0x910003fd
+site surface_state    0x009bc8a0 0xf9465800 0x91002000
 #   switch_hit: the call that lines up in a paired function (2 places) (95% alike)
 site switch_hit       0x008bcd00 0xd0008301 0xf9474421
 #   switch_hit2: the call that lines up in a paired function (2 places) (94% alike)
@@ -69,15 +69,17 @@ site show_start       0x006d5700 0xa9bc53f3 0x72003c14
 site event_post_replacing 0x007f57b0 0xa9be53f3 0x12003c14
 #   event_cancel: the same instructions, found once on each (100% alike)
 site event_cancel     0x007f56b0 0xa9bc53f3 0xa9015bf5
-# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_find     0x009cb5c0 0xf0007a82 0xf9474442
-# site surface_set_video NOT PLACED: its pair 0x9c3440 is not alike (0.41 of the instructions line up)
-# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_play     0x009bfc40 0xf0007ae3 0xf9474463
-# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_stop     0x009be4f0 0x90007b01 0xf9474421
-# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_duration 0x009beda0 0x90007b01 0xf9474421
-# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_position 0x009be6c0 0x90007b01 0xf9474421
+site surface_find     0x009cb5c0 0xf0007a82 0xf9474442
+#   surface_set_video: PAD-1380, read off this program's own code: the call before each surface_play that tests the
+#   surface's own 'set up' byte (+340) as its other methods do, 8 of 13 plays (the matcher's pair, 0.41 alike ELG's)
+site surface_set_video 0x009c3440 0xf0007ac3 0xf9474463
+site surface_play     0x009bfc40 0xf0007ae3 0xf9474463
+site surface_stop     0x009be4f0 0x90007b01 0xf9474421
+site surface_duration 0x009beda0 0x90007b01 0xf9474421
+site surface_position 0x009be6c0 0x90007b01 0xf9474421
 #   balls_in_play: the same instructions, found once on each (100% alike)
 site balls_in_play    0x00932870 0xa9be53f3 0xb002f0f3
-# not carried - the screen and clip features name this title's hud / video bank scenes: site find_text        0x009cadf0 0x90007aa2 0xf9474442
+# not carried - the screen feature needs this title's hud scene measured: site find_text        0x009cadf0 0x90007aa2 0xf9474442
 #   agent_header: the same instructions, found once on each (100% alike)
 site agent_header     0x00a2f140 0xb40002a0 0x4f000400
 #   agent_begin: its calls and callers (score 37.0) (100% alike)
@@ -115,9 +117,9 @@ data score_mult             0x065c0206   # 4 of 4 lined-up instructions
 data mode_mask              0x06749ed8   # 277 of 277 lined-up instructions
 data event_head             0x06748d68   # read off the engine's own code
 data event_current          0x06748d70   # read off the engine's own code
-# not carried (screens/clips): data resource_manager       0x067275f8   # 11 of 11 lined-up instructions
-# not carried (screens/clips): data typeinfo_resource      0x018f54c8   # 18 of 18 lined-up instructions
-# not carried (screens/clips): data typeinfo_scene_player  0x01917100   # 14 of 14 lined-up instructions
+data resource_manager       0x067275f8   # 11 of 11 lined-up instructions
+data typeinfo_resource      0x018f54c8   # 18 of 18 lined-up instructions
+data typeinfo_scene_player  0x01917100   # 14 of 14 lined-up instructions
 data sound_channels         0x0674af50   # read off the engine's own code
 data sound_requests         0x06664d00   # read off the engine's own code
 data sound_request_count    0x00ad1780   # read off the engine's own code
@@ -161,9 +163,9 @@ value proc_exit_slots           4    # read off this program's own code, 40 of 4
 value event_flags               2    # read off this program's own code, 29 of 30 lined-up instructions
 value event_show_flag           0x20    # read off this program's own code, 158 of 158 lined-up instructions
 value event_show_id             258    # read off this program's own code, 7 of 7 lined-up instructions
-# not carried (screens/clips): value scene_player_scene        0x38    # 20 of 20 lined-up instructions of the placed sites
-# not carried (screens/clips): value node_visible_vfn          0x150    # 5 of 5 lined-up instructions of the placed sites
-# not carried (screens/clips): value surface_playing           0x2    # 29 of 30 lined-up instructions of the placed sites
+value scene_player_scene        0x38    # 20 of 20 lined-up instructions of the placed sites
+# not carried - the screen feature needs this title's hud scene measured: value node_visible_vfn          0x150    # 5 of 5 lined-up instructions of the placed sites
+value surface_playing           0x2    # 29 of 30 lined-up instructions of the placed sites
 
 # ---- events: the framework's bus ids (each one the constant the lined-up code passes here) ----
 event game_start   0x4d   # 1 of 1 lined-up places
@@ -501,3 +503,7 @@ value challenge_menu_frame_caption_msg  1915   # STANDARD, lettered CHALLENGE wh
 value challenge_menu_frame_name_msg     1916   # NORMAL PLAY, lettered the mode's name
 value challenge_menu_caption   1922   # CHALLENGE
 value challenge_menu_sets_on   1    # the pick is a challenge game of the mode's (no flag of the game's)
+
+# ---- scenes (PAD-1380): a mode's clip and a random clip play on video_bank's surface - the framework's
+# in_game_videos scene 60ed7e50, this card's only clip bank (a mode clip on it filled 64% of the glass on the rig) ----
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97

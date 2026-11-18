@@ -721,7 +721,8 @@ def write_card(original_path, assets_dir, output_path, log=None,
                     "sector_size": out._sector,
                     "cipher": out.header.segment("0")["encryption"]}
             poff, psize = out.part_offset, out.part["sectors"] * 512
-            send_ranges = written_by_file(Ext4Reader(out, 0, out.size), out.written)
+            written = getattr(out, "written", None) or []
+            send_ranges = written_by_file(Ext4Reader(out, 0, out.size), written) if written else {}
         finally:
             out.close()
         if jobs:

@@ -42,6 +42,8 @@ LEDGER = "/data/pad/remote_send.json"
 TMP_TAG = ".pad-send"
 #: room kept free on a partition beyond the files a Send puts on it
 SPARE = 8 << 20
+#: the longest command sent on the command line itself; longer goes as a script file (dropbear's MAX_CMD_LEN 9000)
+SCRIPT_INLINE_MAX = 4000
 
 
 class SendError(Exception):
@@ -485,6 +487,10 @@ class Machine:
     def set_mtime(self, path, mtime):
         pass
 
+    def file_sha1s(self, paths):
+        """``{path: ("file", sha1)}`` for regular files (the full Send's compare); :meth:`state` by default."""
+        return self.state(paths)
+
     # the delta
     def block_hashes(self, path):
         """``(size, [sha1 of each DELTA_BLOCK])`` of the machine's file."""
@@ -612,11 +618,21 @@ class SshMachine(Machine):
             self.t.close()
 
     def sh(self, script, stdin=b"", timeout=600, check=True):
+        # the server gives a session a short PATH (/usr/bin:/bin): the card's own tools are in sbin too
+        full = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nexport PATH\n" + script
+        if len(full) > SCRIPT_INLINE_MAX:
+            # dropbear drops the connection on a command line past ~9000 bytes (MAX_CMD_LEN): a long one (a
+            # hundred files' names) goes as a script file in the machine's /run tmpfs
+            self._n = getattr(self, "_n", 0) + 1
+            name = "/run/pad-send-%d-%d.sh" % (os.getpid(), self._n)
+            with self.sftp.open(name, "wb") as f:
+                f.write(full.encode("utf-8", "surrogateescape"))
+            cmd = "/bin/sh %s; r=$?; rm -f %s; exit $r" % (name, name)
+        else:
+            cmd = "/bin/sh -c " + _q(full)
         chan = self.t.open_session()
         chan.settimeout(timeout)
-        # the server gives a session a short PATH (/usr/bin:/bin): the card's own tools are in sbin too
-        chan.exec_command("/bin/sh -c " + _q("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
-                                             "export PATH\n" + script))
+        chan.exec_command(cmd)
         if stdin:
             chan.sendall(stdin)
         chan.shutdown_write()
@@ -841,6 +857,24 @@ class SshMachine(Machine):
         except (IndexError, ValueError):
             raise SendError("Couldn't read %s on the machine." % path) from None
         return size, [ln.split()[0] for ln in lines[1:] if ln.strip()]
+
+    def file_sha1s(self, paths):
+        """One sha1sum for many files (a command per file costs more than the hashing on the card)."""
+        out = {}
+        paths = list(paths)
+        for i in range(0, len(paths), 200):
+            chunk = paths[i:i + 200]
+            _rc, text = self.sh("sha1sum " + " ".join(_q(p) for p in chunk) + " 2>/dev/null; true", check=False,
+                                timeout=7200)
+            for line in text.splitlines():
+                esc = line.startswith("\\")     # a name with a backslash or newline comes back escaped
+                if esc:
+                    line = line[1:]
+                digest, _, p = line.partition("  ")
+                if esc:
+                    p = p.replace("\\n", "\n").replace("\\\\", "\\")
+                out[p] = ("file", digest)
+        return out
 
     def truncate(self, path, size):
         self.sftp.truncate(path, size)
@@ -1228,11 +1262,13 @@ def open_target(image, log=None):
         parts = spike3.parse_partitions(f)
     layout = {p["index"]: (p["start_lba"], p["sectors"], p["ptype"]) for p in parts}
     plan = None
-    try:
-        plan = open_plan(image, log)
-    except SendError as e:
-        log("Not a build this computer can send quickly (%s); everything on the machine is compared with it."
-            % e, "info")
+    from ..plugins.stern import engine
+    if engine.read_build_manifest(image):
+        try:
+            plan = open_plan(image, log)
+        except SendError as e:
+            log("This build can't be sent the quick way (%s); everything on the machine is compared with it."
+                % e, "info")
     closers, trees, raw = [], {}, {}
     try:
         if platform == "stern-spike3":
@@ -1366,8 +1402,11 @@ def sync_ops(tree, mine, prefix, protected, own_mounts, hashes_on_machine, log=N
             if progress:
                 progress(i, len(same_size), "Comparing")
             digest = tree.sha1(node)
-            if theirs.get(path) != ("file", digest) or (mine[path][3], mine[path][4], mine[path][5]) != (
-                    own["mode"], own["uid"], own["gid"]):
+            m_mode, m_uid, m_gid = mine[path][3:6]
+            # the card's SFTP server doesn't say who owns a file (None): an owner it doesn't name isn't a difference
+            other_owner = ((m_uid is not None and m_uid != own["uid"])
+                           or (m_gid is not None and m_gid != own["gid"]))
+            if theirs.get(path) != ("file", digest) or m_mode != own["mode"] or other_owner:
                 ops.append(Op("put", path, node=node, size=node["size"], sha1=digest, **own))
     for path in sorted(set(mine) - set(tree.entries), key=lambda p: -p.count("/")):
         if path in protected:          # exact paths: a protected folder keeps itself, not what else is in it
@@ -1415,7 +1454,7 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             protected = _protected(target.platform, tree) if mount == ROOT else set()
             skip = [m for m in on if m != mount and (m.startswith(mount.rstrip("/") + "/") or mount == ROOT)]
             mine = walks[mount] = machine.walk(mount, skip)
-            ops = sync_ops(tree, mine, mount, protected, skip, machine.state, log, progress)
+            ops = sync_ops(tree, mine, mount, protected, skip, machine.file_sha1s, log, progress)
             if ops:
                 all_ops[mount] = ops
         raws = {}

@@ -443,7 +443,8 @@ class FullMachine(FakeMachine):
             elif not p.startswith(root.rstrip("/") + "/"):
                 continue
             kind = {"file": "file", "link": "symlink", "dir": "dir"}[e[0]]
-            out[p] = (kind, len(e[1]) if kind == "file" else 0, 0, e[2] if kind != "symlink" else 0o777, 0, 0,
+            # owners None: the card's file server doesn't say who owns a file (seen on the stand-in)
+            out[p] = (kind, len(e[1]) if kind == "file" else 0, 0, e[2] if kind != "symlink" else 0o777, None, None,
                       e[1] if kind == "symlink" else None)
         return out
 

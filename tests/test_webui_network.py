@@ -172,3 +172,71 @@ def test_no_card_picked_says_so(tmp_path, monkeypatch):
         w.run(svc.publish)
         st = w.state('network')
         assert not st['supported'] and st['reason'] == 'Select the card image first (Select card tab).'
+
+
+def _settle(w):
+    import time
+    for _ in range(200):
+        w.drain()
+        if not w.state('network')['checking']:
+            return
+        time.sleep(0.02)
+
+
+def test_send_to_machine_card_remembers_the_address_and_says_what_a_check_found(tmp_path, monkeypatch):
+    """PAD-1397: the Network tab's Send to machine card - the address is kept for this computer, Check connection
+    says what the machine runs (or why it couldn't log in), and Forget drops a remembered machine identity."""
+    from pinball_decryptor.core import pad_ssh_key, remote_send
+    with web_app(tmp_path, mfr='stern') as w:
+        _project, _svc = ready(w, tmp_path, monkeypatch)
+        assert w.state('network')['offered']
+        w.call('network.set_address', ' 192.168.1.40 ')
+        assert w.state('network')['address'] == '192.168.1.40'
+        assert pad_ssh_key.last_address() == '192.168.1.40'
+
+        class M:
+            def describe(self):
+                return '/games/deadpool_le/game\nstern\n/dev/mmcblk0p3 3000 1000 2000 33% /games\n'
+
+            def close(self):
+                pass
+        monkeypatch.setattr(remote_send, 'connect', lambda a: M())
+        w.call('network.check_connection')
+        _settle(w)
+        assert w.state('network')['check'] == 'Connected: the machine runs deadpool_le, and lets this computer in.'
+
+        def refused(a):
+            raise remote_send.SendError("192.168.1.40 didn't let this computer in.")
+        monkeypatch.setattr(remote_send, 'connect', refused)
+        w.call('network.check_connection')
+        _settle(w)
+        assert w.state('network')['check_kind'] == 'err' and "didn't let" in w.state('network')['check']
+
+        pad_ssh_key.remember_host('192.168.1.40', 22, 'ssh-ed25519', 'AAAA')
+        w.call('network.set_address', '192.168.1.40')
+        assert w.state('network')['known']
+        w.call('network.forget_machine')
+        assert not w.state('network')['known'] and pad_ssh_key.host_key('192.168.1.40') is None
+
+
+def test_send_pipeline_reports_its_summary_or_why_not(monkeypatch):
+    from pinball_decryptor.core import remote_send
+    done, logs = [], []
+
+    class M:
+        closed = False
+
+        def close(self):
+            M.closed = True
+    monkeypatch.setattr(remote_send, 'send_image', lambda image, m, log, progress, cancel: 'Sent 2 change(s).')
+    p = remote_send.SendPipeline('card.raw', '10.0.0.5', lambda t, l='info': logs.append(t), lambda *a: None,
+                                 lambda *a: None, lambda ok, m: done.append((ok, m)), connect_fn=lambda a: M())
+    p.run()
+    assert done == [(True, 'Sent 2 change(s).')] and M.closed
+
+    def no(a):
+        raise remote_send.SendError("Couldn't reach 10.0.0.5")
+    done.clear()
+    remote_send.SendPipeline('card.raw', '10.0.0.5', lambda *a, **k: None, lambda *a: None, lambda *a: None,
+                             lambda ok, m: done.append((ok, m)), connect_fn=no).run()
+    assert done == [(False, "Couldn't reach 10.0.0.5")]

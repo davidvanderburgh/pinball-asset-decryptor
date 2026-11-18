@@ -203,7 +203,9 @@ def test_send_to_machine_card_remembers_the_address_and_says_what_a_check_found(
         monkeypatch.setattr(remote_send, 'connect', lambda a: M())
         w.call('network.check_connection')
         _settle(w)
-        assert w.state('network')['check'] == 'Connected: the machine runs deadpool_le, and lets this computer in.'
+        assert w.state('network')['check'] == 'Connected: the machine runs Deadpool LE, and lets this computer in.'
+        # PAD-1427: the machine is remembered with the game it runs, said as a title
+        assert pad_ssh_key.machine()['game'] == 'deadpool_le' and w.state('network')['machine_game'] == 'Deadpool LE'
 
         def refused(a):
             raise remote_send.SendError("192.168.1.40 didn't let this computer in.")

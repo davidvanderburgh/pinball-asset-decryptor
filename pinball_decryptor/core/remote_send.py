@@ -56,6 +56,10 @@ class SendError(Exception):
     """A Send that must not (or could not) go ahead; the message is for the user."""
 
 
+class Unreachable(SendError):
+    """Nothing answered at the machine's address (PAD-1427: a remembered machine is looked for again)."""
+
+
 class NotThisCard(SendError):
     """The machine isn't running the card a build was made from: the quick Send can't be used, the full one can."""
 
@@ -609,9 +613,11 @@ class SshMachine(Machine):
         from . import pad_ssh_key
         self.host, self.port = host, int(port)
         try:
-            sock = socket.create_connection((host, self.port), timeout=timeout)
+            # a machine on the home network answers in milliseconds: an address nothing answers at is said soon
+            # (PAD-1427: and a remembered machine is then looked for at another one)
+            sock = socket.create_connection((host, self.port), timeout=min(timeout, 5))
         except OSError as e:
-            raise SendError("Couldn't reach %s on port %d (%s). Is the machine on, on your network, and running "
+            raise Unreachable("Couldn't reach %s on port %d (%s). Is the machine on, on your network, and running "
                             "a card built with remote access on?" % (host, self.port, e.strerror or e)) from None
         t = paramiko.Transport(sock)
         try:
@@ -925,10 +931,31 @@ class SshMachine(Machine):
         self.sh("sync; (sleep 2; reboot) </dev/null >/dev/null 2>&1 &", check=False, timeout=30)
 
 
-def connect(address):
-    """An :class:`SshMachine` for ``host`` or ``host:port``."""
+def connect(address, log=None):
+    """An :class:`SshMachine` for ``host`` or ``host:port``.
+
+    PAD-1427: when nothing answers there and it is the machine this computer remembers (a scan found it, so its
+    identity is known), the home network is looked over for that same machine at another address (the router
+    hands out addresses afresh), and it is remembered there."""
     host, port = parse_address(address)
-    return SshMachine(host, port)
+    try:
+        return SshMachine(host, port)
+    except Unreachable:
+        from . import machine_scan, pad_ssh_key
+        rec = pad_ssh_key.machine()
+        if not rec["host_key"] or parse_address(rec["address"] or address) != (host, port):
+            raise
+        if log is not None:
+            log("The machine didn't answer at %s: looking for it on your network..." % host, "info")
+        moved = machine_scan.find_moved(rec["host_key"], port)
+        if not moved:
+            raise
+        pad_ssh_key.remember_host(moved, port, *rec["host_key"])
+        new = machine_scan.address_of({"address": moved}, port)
+        pad_ssh_key.remember_machine(new, rec["host_key"], rec["game"])
+        if log is not None:
+            log("Found it at %s." % moved, "info")
+        return SshMachine(moved, port)
 
 
 def parse_address(address):

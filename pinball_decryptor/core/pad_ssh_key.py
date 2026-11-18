@@ -115,17 +115,44 @@ def _machines_file():
     return os.path.join(KEY_DIR, "machines.json")
 
 
-def last_address():
-    """The machine address Send to machine last used on this computer, or ``""``."""
+def machine():
+    """The machine Send to machine uses from this computer: ``{'address', 'host_key', 'game'}`` (PAD-1427: found
+    by a scan and remembered with its identity, so it can be found again when its address changes)."""
     try:
         with open(_machines_file(), encoding="utf-8") as fh:
             data = json.load(fh)
-        return str(data.get("address") or "") if isinstance(data, dict) else ""
     except (OSError, ValueError):
-        return ""
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    hk = data.get("host_key")
+    return {"address": str(data.get("address") or ""),
+            "host_key": tuple(hk) if isinstance(hk, list) and len(hk) == 2 else None,
+            "game": str(data.get("game") or "")}
+
+
+def last_address():
+    """The machine address Send to machine last used on this computer, or ``""``."""
+    return machine()["address"]
 
 
 def remember_address(address):
+    """An address typed in by hand: the identity found with the old one goes unless it is the same address."""
+    address = (address or "").strip()
+    with _lock:
+        old = machine()
+        rec = {"address": address}
+        if old["address"] == address and old["host_key"]:
+            rec.update(host_key=list(old["host_key"]), game=old["game"])
+        os.makedirs(KEY_DIR, exist_ok=True)
+        write_json_atomic(_machines_file(), rec)
+
+
+def remember_machine(address, host_key=None, game=""):
+    """The machine found (a scan, or a connection that let this computer in), with its identity and game."""
+    rec = {"address": (address or "").strip(), "game": game or ""}
+    if host_key:
+        rec["host_key"] = list(host_key)
     with _lock:
         os.makedirs(KEY_DIR, exist_ok=True)
-        write_json_atomic(_machines_file(), {"address": (address or "").strip()})
+        write_json_atomic(_machines_file(), rec)

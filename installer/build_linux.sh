@@ -145,6 +145,8 @@ pyinstaller \
     --hidden-import "paramiko" \
     --hidden-import "pinball_decryptor.core.remote_send" \
     --hidden-import "pinball_decryptor.core.pad_ssh_key" \
+    --hidden-import "pinball_decryptor.core.remote_setup" \
+    --hidden-import "pinball_decryptor.core.machine_scan" \
     --collect-all "UnityPy" \
     --collect-all "fsb5" \
     --collect-all "pyogg" \

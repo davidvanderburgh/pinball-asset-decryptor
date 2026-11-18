@@ -17,3 +17,9 @@ html.bp-1100 .net-grid { grid-template-columns: 1fr; }
 .net-fields { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .net-fields th, .net-fields td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .net-fields th { color: var(--ink-3); font-weight: 600; }
+/* PAD-1427: the machine found, a scan's list, and the project's setting under the card setup */
+.net-machine { font-size: 14px; }
+.net-found { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.net-found li { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 4px 8px;
+  border: 1px solid var(--line); border-radius: 6px; }
+.net-sub { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 10px; }

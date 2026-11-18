@@ -927,6 +927,63 @@ these lines from "How often it can start"; a mode written in C keeps its own cou
   cooldown cleared by a new game while it still had time left (the clear is desk-tested
   only).
 
+## Several of your modes at once: layers (PAD-1401)
+
+`pm_begin` keeps your modes to one at a time; that one is the **base**. A mode that begins with
+`pm_begin_layer(priority, flags)` runs **over** it as a **layer**, beside up to seven more, ranked by its
+priority (0-255; at the same priority the one that began later is on top; every layer is over the base).
+The shape a whole new game needs: a game-long base (a mode that is the whole game, `own_game`), modes
+stacking on it, and a multiball or wizard over those.
+
+```c
+static void start(void)
+{
+    if (!pm_begin_layer(50, PM_LAYER_PAUSE_BELOW)) return;   /* a wizard: the ones under it wait */
+    pm_running_name("PHOENIX");
+}
+static void on_shot(uint64_t shot)
+{
+    if (!pm_running()) return;
+    if (pm_paused() || pm_shot_taken()) return;   /* a layer over this one has the shot, or stands it still */
+    pm_shot_claim();                              /* and none of ours under this one sees it */
+    pm_score_add(pm_player(), 3);
+}
+```
+
+What the layers share, by rank:
+
+- **Shots.** A shot reaches your running modes top-down first, then every other mode (their start counts).
+  A mode that calls `pm_shot_claim()` in `.shot` keeps it: the running modes under it see `pm_shot_taken()`.
+- **Pausing.** While a layer begun with `PM_LAYER_PAUSE_BELOW` runs, every mode of yours under it reads
+  `pm_paused()`: it holds its clock and scores nothing, and carries on where it was when the layer ends.
+- **Lights.** An insert a higher layer holds stays its while a lower one lights it: the lower one's light
+  waits under it and is handed back when the higher one lets go (PAD-601's hand-down, in layer order).
+- **The screen.** `pm_layer_top()` is 1 for the top one of yours: its own screen, HUD, info line and the
+  game's bar show; the ones under it wait hidden and come back when they are on top again. Display priority
+  goes back to the one under when a layer ends.
+- **What stays the base's.** The game's modes held off (`pm_block_game_modes`: a layer asking never takes
+  that hold or its list), the whole game (`pm_own_game`) and the backdrop.
+- **Ending.** `pm_end` ends a layer as it ends the base. Ending the base does not end the layers: a mode that
+  lives inside another checks `pm_mode_running_named(parent)` and ends itself (Blocks and mode files do).
+  The held mechanisms (magnet, coils, scoop, building, shield, shaker, spare outputs) are let go when no mode
+  of yours runs any more.
+
+With no layer running nothing here changes anything: every order, owner and check is what it was.
+
+**Mode files**: `layer <priority> [pause] [shots]` and `inside <name>` (MODE_PARAMETERS.md). `mode_file.c`
+runs one file as the base and up to seven layered ones at once, each on a runner of its own: a `pm_mode` of
+the object's, unregistered, that the calls are made as (`pm_as`). **Blocks**: Mode > With my other modes
+(one at a time, or over them as a layer at a priority, inside one of your modes, the ones under it waiting,
+the shots its alone). The runtime's lines: `layers: <name> begins as a layer at priority <n> over <the one
+under it>` / `ends`; a mode under a layer says `a layer of mine is over it` / `on top again`.
+
+**Proven** in the emulator on Uncanny X-Men LE and Pro 0.98 (hidden, muted, 4x; C:/tmp/PAD-1401
+layerjob.sh): FUTURE the whole game (a mode file, the base), STORM a file layer inside it keeping the shots,
+PHOENIX a file layer that pauses the ones under it, WOLVERINE a Blocks layer, in one object. Over 3 and 5
+balls: 0 of the base's 42 and 70 awards came while STORM held the shots, nothing under PHOENIX was paid
+while it ran (STORM's clock stood still for PHOENIX's 6 s), and each mode's screen and HUD waited under a
+layer and came back. Desk: tests/test_pad1401_layers.py.
+
 ## The game's own modes (stacking)
 
 A mode of yours runs beside whatever the game is doing, including its own battles and

@@ -558,6 +558,11 @@ COMBO_LIT = "lit"                # any shot the mode has lit (a Light block's, n
 COMBO_STEPS_MAX = 6
 COMBO_ALTS_MAX = 4               # a step may be one of several shots (["Pop bumper", "Mecha exit bottom"])
 MAX_COMBOS = 8
+#: PAD-1401: several of a maker's modes at once. A mode runs ALONE (one at a time with the others that do: the base,
+#: as a whole-game mode is) or as a LAYER over them, ranked by its priority; at most LAYERS_MAX layers at once (the
+#: runtime's), the priority 0..PRIORITY_MAX, LAYER_PRIORITY by default
+LAYERS_MAX = 8
+LAYER_PRIORITY = 10
 COMBO_SECONDS_MIN, COMBO_SECONDS_MAX = 0.5, 60
 
 
@@ -604,6 +609,15 @@ def normalize(data):
     out["screen_style"] = out.get("screen_style") if out.get("screen_style") in SCREEN_STYLES else "panel"   # PAD-521
     if out.get("game_modes") not in GAME_MODES:          # PAD-373; PAD-398: our modes run alone by default
         out["game_modes"] = "block"
+    # PAD-1401: with my other modes - alone (the base, one at a time) or over them as a layer, and inside which
+    out["inside"] = str(out.get("inside") or "").strip()[:40]
+    out["layer"] = bool(out.get("layer", False)) or bool(out["inside"])   # a mode inside another runs over it
+    try:
+        out["layer_priority"] = max(0, min(PRIORITY_MAX, int(out.get("layer_priority", LAYER_PRIORITY))))
+    except (TypeError, ValueError):
+        out["layer_priority"] = LAYER_PRIORITY
+    out["layer_pause"] = bool(out.get("layer_pause", False))
+    out["layer_takes_shots"] = bool(out.get("layer_takes_shots", False))
     keep = out.get("keep_rules") if isinstance(out.get("keep_rules"), list) else []      # PAD-398
     out["keep_rules"] = [r.strip() for r in keep if isinstance(r, str) and r.strip() and "," not in r][:32]
     ids = out.get("block_modes") if isinstance(out.get("block_modes"), list) else []
@@ -1292,6 +1306,12 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
         out.append("Two combos are called %s." % n.upper())
     if ctx["count"] > MAX_BLOCKS:
         out.append("%d blocks: %d at most." % (ctx["count"], MAX_BLOCKS))
+    if program.get("layer") and program.get("game_modes") == "own_game":   # PAD-1401
+        out.append("A mode that is the whole game is the one the others run over: it cannot run over them too. "
+                   "Set With my other modes to one at a time.")
+    inside = str(program.get("inside") or "").strip()
+    if inside and inside.lower() == str(program.get("name") or "").strip().lower():
+        out.append("It cannot run inside itself: pick another of your modes, or none.")
     turns = [b for s in program["scripts"] for b in _walk(s.get("do") or [])
              if b.get("op") == "shield" and b.get("where") in ("toward", "away")]
     if turns and shield not in (None, False):          # PAD-392: the game's own shield feature turns them back
@@ -2880,6 +2900,24 @@ def to_c(program, slug):
     L.append("UNUSED static const unsigned char BLOCK_IDS[%d] = {%s};   /* the game's mode ids; none = the port's defaults */"
              % (max(1, len(ids)), ", ".join(str(i) for i in ids) or "0"))
     L.append("#define BLOCK_N          %d" % len(ids))
+    layer = bool(program.get("layer")) and gm != "own_game"   # PAD-1401: the whole game is the base
+    inside = (program.get("inside") or "") if layer else ""
+    L.append("/* PAD-1401: with my other modes: %s */" % (
+        "over them, as a layer at priority %d%s%s%s" % (
+            program.get("layer_priority", LAYER_PRIORITY),
+            ", inside " + _comment(inside) if inside else "",
+            "; the ones under it wait while it runs" if program.get("layer_pause") else "",
+            "; the shots made while it runs are its alone" if program.get("layer_takes_shots") else "")
+        if layer else "one at a time (the base the layers run over)"))
+    L.append("#define LAYER            %d" % (1 if layer else 0))
+    L.append("#define LAYER_PRIORITY   %du" % int(program.get("layer_priority", LAYER_PRIORITY)))
+    L.append("#define LAYER_FLAGS      %s" % ("PM_LAYER_PAUSE_BELOW" if layer and program.get("layer_pause") else "0u"))
+    L.append("#define TAKES_SHOTS      %d" % (1 if layer and program.get("layer_takes_shots") else 0))
+    L.append("#define INSIDE           %s   /* the mode of mine it runs inside (\"\" = none) */" % _c_str(inside))
+    L.append("/* another of mine runs as the base: in this one's way, unless this one is a layer over it */")
+    L.append("UNUSED static int others_run(void) { return !LAYER && pm_other_running(); }")
+    L.append("static int under_layer;               /* PAD-1401: a layer of mine is over it: the glass is the top one's */")
+    L.append("static int hud_back;                  /* ...on top again: its HUD comes back once nothing else's is up */")
     L.append("/* PAD-398: the game's features (its rules, by the port's names) that keep counting while it blocks;")
     L.append(" * every other one sees no shots. */")
     L.append("#define KEEP_RULES       %s" % _c_str(", ".join(program.get("keep_rules") or [])))
@@ -3422,7 +3460,7 @@ def to_c(program, slug):
     L.append(" * game's own count only for a mode that waits them out: one that stacks with them plays on beside them */")
     L.append("UNUSED static int out_of_play(void)")
     L.append("{")
-    L.append("    return !run.on && (pm_other_running() || ((WAITS_OUT_MULTIBALL || GAME_MODES) && game_busy() != 0));")
+    L.append("    return !run.on && (others_run() || ((WAITS_OUT_MULTIBALL || GAME_MODES) && game_busy() != 0));")
     L.append("}")
     L.append("")
     L.append("/* PAD-680: its idle scripts count, note and show their meter through the game's battles - on Godzilla one runs")
@@ -3430,7 +3468,7 @@ def to_c(program, slug):
     L.append(" * stops them */")
     L.append("UNUSED static int counting(void)")
     L.append("{")
-    L.append("    return !run.on && !pm_other_running();")
+    L.append("    return !run.on && !others_run();")
     L.append("}")
     L.append("")
     L.append("static void start(const char *why, int counted);")
@@ -3482,8 +3520,18 @@ def to_c(program, slug):
     L.append("            return;")
     L.append("        }")
     L.append("    }")
-    L.append("    if (!pm_begin()) return;          /* another of our modes is running */")
+    L.append("    if (INSIDE[0] && !pm_mode_running_named(INSIDE)) {   /* PAD-1401: it runs inside that mode only */")
+    L.append("        static unsigned long said_in;")
+    L.append("        if (!said_in || pm_ms() - said_in >= 10000)")
+    L.append('            pm_log("not started (%s): it runs inside %s, which is not running", why, INSIDE);')
+    L.append("        said_in = pm_ms() ? pm_ms() : 1;")
+    L.append("        return;")
+    L.append("    }")
+    L.append("    if (!(LAYER ? pm_begin_layer(LAYER_PRIORITY, LAYER_FLAGS) : pm_begin()))")
+    L.append("        return;                       /* another of our modes is running (or LAYERS_MAX layers are) */")
     L.append("    pm_running_name(MODE_NAME);")
+    L.append("    under_layer = pm_layers() && !pm_layer_top();   /* PAD-1401: begun under a layer of mine: its glass waits */")
+    L.append("    hud_back = 0;")
     L.append("    if (DISPLAY_PRIORITY) pm_display_priority(DISPLAY_PRIORITY);   /* first: before the screen */")
     L.append("    if (GAME_MODES >= 2) {            /* the game's modes it holds off cannot start while it runs */")
     L.append("        pm_block_list(BLOCK_IDS, BLOCK_N);")
@@ -3539,7 +3587,7 @@ def to_c(program, slug):
         L.append("    screen_away = 0;")
     L.append("    if (screen) {")
     L.append("        words(MODE_NAME, 0, 0);")
-    L.append("        pm_show(screen, 1);")
+    L.append("        pm_show(screen, !under_layer);")
     L.append("        if (WORDS_ONLY) flash_ticks = %d * TICKS_PER_SECOND / 1000;   /* PAD-521: its name over the intro */"
              % WORDS_NAME_MS)
     L.append("    }")
@@ -3554,7 +3602,15 @@ def to_c(program, slug):
         L.append("    }")
         L.append("    hud_level = 0;")
         L.append("    kit_hud_pips(&hud, HUD_GAUGE);      /* the build's count: any more are hidden */")
-        L.append("    kit_hud_begin(&hud, MODE_NAME, HUD_LINE);")
+        L.append("    {")
+        L.append("        struct kit_hud *was_up = kit_hud_up;")
+        L.append("        kit_hud_begin(&hud, MODE_NAME, HUD_LINE);")
+        L.append("        if (under_layer) {            /* PAD-1401: the layer over it keeps the glass */")
+        L.append("            kit_hud_show(&hud, 0);")
+        L.append("            if (was_up && was_up != &hud) kit_hud_show(was_up, 1);")
+        L.append("            hud_back = 0;")
+        L.append("        }")
+        L.append("    }")
     if media:
         L.append("    pa_load(&own);                    /* its own sounds' priorities, and its music */")
         L.append("    own.running = 1;")
@@ -3907,6 +3963,9 @@ def to_c(program, slug):
     L.append("     * through the game's battles too (PAD-680); while another of ours runs nothing counts, notes or shows */")
     L.append("    idle = !was_on && counting();")
     L.append("    (void)idle;")
+    L.append("    /* PAD-1401: a layer of mine over it stands it still, or has this shot to itself */")
+    L.append("    if (was_on && (pm_paused() || pm_shot_taken())) return;")
+    L.append("    if (was_on && TAKES_SHOTS && (shot & named)) pm_shot_claim();   /* none of mine under it sees it */")
     switch_scripts = scripts_of("switch")
     if switch_scripts:
         L.append("    if (shot & 1ull) {                /* PAD-675: a playfield switch was hit (its 0x1 dispatch) */")
@@ -3940,6 +3999,28 @@ def to_c(program, slug):
     L.append("    if (!pm_in_game()) return;")
     L.append("    (void)was_on; (void)id;")
     L.extend(scripts_of("event"))
+    L.append("}")
+    L.append("")
+    # PAD-1401: the glass is the top layer's: its own screen, HUD, info line and the game's bar
+    L.append("/* PAD-1401: while a layer of mine is over it, its screen, HUD, info line and the game's bar are the top one's;")
+    L.append(" * on top again they are back - its HUD once nothing else's is up (a layer's TOTAL shows out first) */")
+    L.append("static void layer_glass(void)")
+    L.append("{")
+    L.append("    int under = pm_layers() && !pm_layer_top();")
+    L.append("    if (under != under_layer) {")
+    L.append("        under_layer = under;")
+    L.append('        pm_log(under ? "a layer of mine is over it: its screen and HUD wait" : "on top again: its screen and HUD are back");')
+    L.append("        if (screen && !WORDS_ONLY) pm_show(screen, !under%s);" % (" && !screen_away" if watch else ""))
+    if has_hud:
+        L.append("        hud_back = !under;")
+    if has_info:
+        L.append("        if (under) info_show(0);")
+    L.append("    }")
+    if has_hud:
+        L.append("    if (hud_back && (!kit_hud_up || kit_hud_up == &hud)) {")
+        L.append("        hud_back = 0;")
+        L.append("        kit_hud_show(&hud, 1);")
+        L.append("    }")
     L.append("}")
     L.append("")
     L.append("static void on_tick(void)")
@@ -4062,7 +4143,7 @@ def to_c(program, slug):
         L.append("        if (!in_game || pm_player() != battle_player) {")
         L.append('            pm_log("the battle pick lapsed - the player changed or the game ended");')
         L.append("            pm_roster_done();             /* the runtime gives it back to that player, or drops it */")
-        L.append("        } else if (!run.on && pm_other_running()) {")
+        L.append("        } else if (!run.on && others_run()) {")
         L.append("            battle_picked = picked;       /* another of ours runs: it starts when that one ends */")
         L.append("            battle_at = pm_ms() + 500;")
         L.append("        } else {")
@@ -4097,7 +4178,7 @@ def to_c(program, slug):
         L.append("            }")
         L.append("            /* met: it runs the moment nothing is in its way (the mode just completed is often still")
         L.append("             * finishing) - another mode of ours, or one of the game's it gives way to */")
-        L.append("            if (done_pend[k][p] && !run.on && !pm_other_running() && !(GAME_MODES && pm_aside())) {")
+        L.append("            if (done_pend[k][p] && !run.on && !others_run() && !(GAME_MODES && pm_aside())) {")
         L.append("                done_pend[k][p] = 0;")
         L.append("                done_fired |= 1u << k;")
         L.append("            }")
@@ -4174,6 +4255,12 @@ def to_c(program, slug):
     L.append("        end_now(\"the game's own mode began\");   /* its screen and HUD go at once, as a tilt's */")
     L.append("        return;")
     L.append("    }")
+    L.append("    if (INSIDE[0] && !pm_mode_running_named(INSIDE)) {   /* PAD-1401: the mode it runs inside ended */")
+    L.append('        end("the mode it runs inside ended");')
+    L.append("        return;")
+    L.append("    }")
+    L.append("    layer_glass();")
+    L.append("    if (pm_paused()) return;          /* PAD-1401: a layer of mine over it stands it still: its clock too */")
     L.append("    run.elapsed++;")
     L.append("    if (RUN_SECONDS%s) {" % (" && !clock_held()" if g.mech else ""))   # PAD-621: a hold_wait stops it
     L.append("        if (run.ticks_left) run.ticks_left--;")
@@ -4190,7 +4277,7 @@ def to_c(program, slug):
         L.append("    if (points_ticks && --points_ticks == 0) points_hide();   /* PAD-709 */")
         L.append("    else if (points_ticks) points_place();")
     if has_bar:
-        L.append("    bar_show(1);                      /* PAD-521: the clock along the bar */")
+        L.append("    if (!under_layer) bar_show(1);    /* PAD-521: the clock along the bar (PAD-1401: the top one's) */")
     L.append("    lamps_tick();")
     if g.mech:
         L.append("    scoop_tick();")
@@ -4204,14 +4291,14 @@ def to_c(program, slug):
         L.append("    if (run.on && screen) {           /* its screen out of the way of the game's (PAD-375) */")
         L.append("        int away = pm_display_covered() || pm_aside() || pm_game_words();   /* PAD-662: any screen of the game's */")
         L.append("        if (away != screen_away) {")
-        L.append("            pm_show(screen, !away && (!WORDS_ONLY || flash_ticks));")
+        L.append("            pm_show(screen, !away && !under_layer && (!WORDS_ONLY || flash_ticks));")
         L.append("            screen_away = away;")
         L.append("        }")
         L.append("    }")
     if has_hud:
         L.append("    if (run.on) hud_show();")
     if has_info:
-        L.append("    if (run.on) info_show(!pm_display_covered() && !pm_aside() && !pm_game_words()%s);   /* PAD-547, PAD-662 */"
+        L.append("    if (run.on) info_show(!under_layer && !pm_display_covered() && !pm_aside() && !pm_game_words()%s);   /* PAD-547, PAD-662 */"
                  % (" && !points_ticks" if words_only else ""))
     L.append("}")
     L.append("")

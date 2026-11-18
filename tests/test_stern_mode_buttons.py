@@ -127,7 +127,7 @@ def test_the_interpreter_takes_multiball_on_and_lights_its_shot():
     body = body[:body.index("\n}\n")]
     assert set(re.findall(r'key_is\(line, "([a-z_]+)"\)', body)) == {"multiball", "add_ball", "multiball_on"}
     # the start does not serve the balls while it waits; the shot does, and stops the clock
-    start = src[src.index("static void mode_start("):]
+    start = src[src.index("static void mode_start_in(struct slot *M, const char *why)\n{"):]   # PAD-1401
     start = start[:start.index("\n}\n")]
     assert "run.mball_wait = 1;" in start
     on = src[src.index("static void multiball_on_shot("):]

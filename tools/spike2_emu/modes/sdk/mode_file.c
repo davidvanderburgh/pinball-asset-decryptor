@@ -15,6 +15,12 @@
  *     found and hidden;
  *   - /dump/mode.start starts slot 0, /dump/modeK.start slot K, /dump/mode.stop ends
  *     whichever is running, /dump/mode.clip "<name>" plays any clip.
+ *   - PAD-1401: a file with a `layer <priority> [pause] [shots]` line (or `inside <name>`) runs
+ *     OVER the others, beside them: the runtime's layers. One file runs as the base (one at a
+ *     time, as ever) on runner 0, which is this object itself; up to RUNNERS-1 layered ones run
+ *     at once, each on a runner of its own - a pm_mode of this object's, unregistered, that the
+ *     calls are made as (pm_as) and whose .shot the runtime calls in its layer's place. Every
+ *     runner keeps its own `run`; the trigger counting, the files and the rest stay runner 0's.
  * Its log lines are `[mode] ...`, as before, because the SDK prefixes them with this
  * mode's name - "mode".
  *
@@ -58,6 +64,9 @@ struct mode_cfg {
     int stack_no;                   /* item 140: `stack no` - never beside the game's battle or multiball */
     int aside_keep;                 /* PAD-347: `aside keep` - its screen stays up beside a game mode */
     int game_modes;                 /* PAD-363: GM_STACK, GM_GIVE_WAY or GM_BLOCK (PAD-398: the default) */
+    unsigned layer_1;               /* PAD-1401 `layer <priority> [pause] [shots]`: the priority + 1; 0 = one at a time */
+    int layer_pause, layer_shots;   /* ... the ones under it wait while it runs; the shots made are its alone */
+    char inside[64];                /* PAD-1401 `inside <name>`: it starts only while that mode of mine runs, ends with it */
     unsigned char block_ids[BLOCK_LIST_MAX];   /* PAD-363: `block_modes` - the game's mode ids it holds off */
     int block_n;                    /* ... how many (0 = every one the port names) */
     unsigned char keep_rules[32];   /* PAD-398: `keep_rules` - the game's rules that go on counting while it blocks */
@@ -154,7 +163,8 @@ static struct slot slots[MODES_MAX];
 static unsigned poll_n = 1;         /* slots re-read each poll: up to one past the last file */
 #define cfg (M->c)
 
-static struct {
+#define RUNNERS 8                   /* PAD-1401: the base (runner 0) and up to 7 layered form modes at once */
+static struct run_state {
     int active;
     struct slot *slot;
     unsigned player, ticks_left, secs_shown, hits;
@@ -179,9 +189,77 @@ static struct {
     unsigned clock_wait;              /* PAD-621: coil line + 1 whose hold the clock waits for; 0 = it runs */
     int at_ball_start;                /* PAD-621: it started as the ball starts (a challenge pick): the ball is in
                                        * the shooter lane, so no `wait` hold as it starts */
-} run;
+    struct slot *end_pending_;        /* the slot whose end shot was hit, until the next tick (end_pending) */
+    int starts_uncounted_;            /* the running mode was started by a trigger file (starts_uncounted) */
+    int under;                        /* PAD-1401: a layer of mine is over it: its screen waits */
+} runners[RUNNERS];
+static int R_;                        /* PAD-1401: the runner the code is on (0: the base, and everything else) */
+#define run (runners[R_])
+#define end_pending (run.end_pending_)
+#define starts_uncounted (run.starts_uncounted_)
 
-static int running(const struct slot *M) { return run.active && run.slot == M; }
+/* M runs, on any runner */
+static int running(const struct slot *M)
+{
+    int r;
+    for (r = 0; r < RUNNERS; r++)
+        if (runners[r].active && runners[r].slot == M) return 1;
+    return 0;
+}
+
+static int layered(const struct slot *M);   /* PAD-1401: below, with the GM_ values */
+
+/* PAD-1401: a runner no layer is on (0 = none free) */
+static int free_layer_runner(void)
+{
+    int r;
+    for (r = 1; r < RUNNERS; r++)
+        if (!runners[r].active) return r;
+    return 0;
+}
+
+/* PAD-1401: the runner M runs on, -1 = none; a layer of mine is over the one M runs on */
+static int runner_of(const struct slot *M)
+{
+    int r;
+    for (r = 0; r < RUNNERS; r++)
+        if (runners[r].active && runners[r].slot == M) return r;
+    return -1;
+}
+static int node_running(const void *node)       /* a running slot's screen is this one */
+{
+    int r;
+    for (r = 0; r < RUNNERS; r++)
+        if (runners[r].active && runners[r].slot && runners[r].slot->node == node) return 1;
+    return 0;
+}
+static int slot_under(const struct slot *M)
+{
+    int r = runner_of(M);
+    return r >= 0 && runners[r].under;
+}
+
+/* PAD-1401: each layered runner is a pm_mode of this object's own, unregistered: the calls a layer makes are made as
+ * it (pm_as), and the runtime calls its .shot in its layer's place, top-down, before the ones under it */
+static void layer_shot(int r, uint64_t mask);
+static void shot_r1(uint64_t m) { layer_shot(1, m); }
+static void shot_r2(uint64_t m) { layer_shot(2, m); }
+static void shot_r3(uint64_t m) { layer_shot(3, m); }
+static void shot_r4(uint64_t m) { layer_shot(4, m); }
+static void shot_r5(uint64_t m) { layer_shot(5, m); }
+static void shot_r6(uint64_t m) { layer_shot(6, m); }
+static void shot_r7(uint64_t m) { layer_shot(7, m); }
+static const struct pm_mode runner_ids[RUNNERS] = {
+    { 0 }, { .name = "mode", .shot = shot_r1 }, { .name = "mode", .shot = shot_r2 }, { .name = "mode", .shot = shot_r3 },
+    { .name = "mode", .shot = shot_r4 }, { .name = "mode", .shot = shot_r5 }, { .name = "mode", .shot = shot_r6 },
+    { .name = "mode", .shot = shot_r7 },
+};
+static const struct pm_mode mode_files;      /* this object, registered (at the end): runner 0 */
+static void as_runner(int r)
+{
+    R_ = r;
+    pm_as(r ? &runner_ids[r] : &mode_files);
+}
 
 /* ---- parsing: key per line, no allocator -------------------------------------------- */
 static int is_space(int c) { return c == ' ' || c == '\t' || c == '\r'; }
@@ -522,6 +600,13 @@ static int stack_line(struct slot *M, const char *line)
  * end it) and ends with the game. While it runs, as block, and the game's own rules are switched off underneath it
  * (pm_own_game): they hear no shot, add no points, make no call and serve no ball. Its clock (`seconds`) is not used. */
 #define GM_OWN      3
+
+/* PAD-1401: M runs over the others, as a layer - not the whole game, nor a pick the game's own screens hand out */
+static int layered(const struct slot *M)
+{
+    return M->c.layer_1 && M->c.game_modes != GM_OWN && !M->c.roster_slot_1 && !M->c.challenge_1 && !M->c.place_1
+        && !M->c.wizard[0];
+}
 static struct { unsigned hits; uint64_t total, lost; int seen; } own_p[5];   /* per player, this game */
 static int own_done;                         /* the whole-game mode ended in this game: not again until the next */
 /* 1 when the line's value is exactly `w` (any case), followed by nothing but spaces or a comment */
@@ -544,6 +629,36 @@ static int game_modes_line(struct slot *M, const char *line)
     else {
         cfg.game_modes = GM_BLOCK;           /* PAD-398: what a file that says nothing does */
         pm_log("game_modes needs stack, give_way, block or own_game - \"%.40s\" read as block", a);
+    }
+    return 1;
+}
+
+/* PAD-1401: `layer <priority> [pause] [shots]` - it runs over my other modes, as a layer at that priority (0-255);
+ * `pause`: the ones under it stand still while it runs; `shots`: the shots made while it runs are its alone.
+ * `inside <name>`: it runs inside that mode of mine - starts only while it runs, ends with it (and is a layer) */
+#define LAYER_PRIORITY 10
+static int layer_line(struct slot *M, const char *line)
+{
+    const char *a, *b;
+    uint64_t n;
+    if ((a = key_is(line, "inside")) != 0) {
+        rest_of_line(cfg.inside, sizeof cfg.inside, a);
+        if (cfg.inside[0] && !cfg.layer_1) cfg.layer_1 = LAYER_PRIORITY + 1;
+        return 1;
+    }
+    if (!(a = key_is(line, "layer"))) return 0;
+    if (a[0] < '0' || a[0] > '9') {
+        pm_log("layer needs a priority 0-255 - \"%.40s\" ignored (it runs one at a time)", a);
+        return 1;
+    }
+    n = num(&a);
+    if (n > 255) n = 255;
+    cfg.layer_1 = (unsigned)n + 1;
+    for (;;) {
+        while (is_space(*a)) a++;
+        if ((b = key_is(a, "pause")) != 0) cfg.layer_pause = 1, a = b;
+        else if ((b = key_is(a, "shots")) != 0) cfg.layer_shots = 1, a = b;
+        else break;
     }
     return 1;
 }
@@ -1280,7 +1395,7 @@ static struct {
     unsigned game[STARTS_PLAYERS], ball[STARTS_PLAYERS], ended[STARTS_PLAYERS];
     unsigned long ended_ms[STARTS_PLAYERS];
 } starts_n[MODES_MAX];
-static int starts_uncounted;        /* the running mode was started by a trigger file */
+/* starts_uncounted: the running mode was started by a trigger file (per runner: struct run_state) */
 
 static int starts_policy(const struct slot *M)
 {
@@ -1644,7 +1759,7 @@ static void starts_watch_game(void)
  *                                  runs (pm_score_sub: flat, never below 0; repeatable, 16). A
  *                                  shot that also scores pays and takes nothing
  * An older mode.so logs "unknown key, skipped" for each and pays as before. */
-static struct slot *end_pending;    /* the slot whose end shot was hit, until the next tick */
+/* end_pending: the slot whose end shot was hit, until the next tick (per runner: struct run_state) */
 static uint64_t scoring_bits(struct slot *M);   /* below; PAD-314's load-time note needs it */
 
 static int params_line(struct slot *M, const char *line)
@@ -1953,7 +2068,7 @@ static void ending_gives_way(int starting)
         if (!M->hide_ticks || running(M) || M->ended_begun == now) continue;
         M->hide_ticks = 0;
         M->aside = 0;
-        if (M->node && !(run.active && run.slot && run.slot->node == M->node)) pm_show(M->node, 0);
+        if (M->node && !node_running(M->node)) pm_show(M->node, 0);
         pm_log("%s: its total gives way - another mode began", cfg.name);
     }
 }
@@ -2198,6 +2313,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (stack_line(M, line)) return;
     if (aside_line(M, line)) return;         /* PAD-347 */
     if (game_modes_line(M, line)) return;    /* PAD-363 */
+    if (layer_line(M, line)) return;         /* PAD-1401 */
     if (block_modes_line(M, line)) return;   /* PAD-363 */
     if (keep_rules_line(M, line)) return;    /* PAD-398 */
     if (multiball_line(M, line)) return;     /* item 167 */
@@ -2478,7 +2594,29 @@ static int challenge_force;                /* PAD-619: mode_start past the game'
 static int place_force;                    /* PAD-710: the game was starting its own mode: past its other modes too */
 static int roster_force;                   /* PAD-768: a battle picked on the selection screen: it wins over the game's */
 
+static void mode_start_in(struct slot *M, const char *why);
+/* PAD-1401: a layered mode starts on a runner of its own, beside the others; any other on the base runner */
 static void mode_start(struct slot *M, const char *why)
+{
+    int was = R_, r = 0;
+    if (!cfg.valid || !pm_in_game() || running(M)) return;
+    if (layered(M)) {
+        if (cfg.inside[0] && !pm_mode_running_named(cfg.inside)) {
+            pm_log("%s not started (%s): it runs inside %s, which is not running", cfg.name, why, cfg.inside);
+            return;
+        }
+        if (!(r = free_layer_runner())) {
+            pm_log("%s not started (%s): %d of the form modes already run as layers - the most at once", cfg.name, why,
+                   RUNNERS - 1);
+            return;
+        }
+    }
+    as_runner(r);
+    mode_start_in(M, why);
+    as_runner(was);
+}
+
+static void mode_start_in(struct slot *M, const char *why)
 {
     int k;
     if (!cfg.valid || !pm_in_game()) return;
@@ -2500,8 +2638,11 @@ static void mode_start(struct slot *M, const char *why)
                pm_stock_mode_what((unsigned)k));
         return;
     }
-    if (!pm_begin()) return;                 /* a mode written in C is running */
+    if (R_) pm_running_name(cfg.name);       /* PAD-1401: its name in the runtime's line as it begins */
+    if (!(R_ ? pm_begin_layer(cfg.layer_1 - 1, cfg.layer_pause ? PM_LAYER_PAUSE_BELOW : 0u) : pm_begin()))
+        return;                              /* a mode written in C is running (or every layer is taken) */
     pm_running_name(cfg.name);               /* PAD-363: the runtime's lines say this mode, not "mode" */
+    run.under = pm_layers() && !pm_layer_top();   /* PAD-1401: begun under a layer of mine: its screen waits */
     ending_gives_way(1);                     /* PAD-413: before its own screen and clip */
     if (cfg.game_modes == GM_BLOCK || cfg.game_modes == GM_OWN) {   /* PAD-363: the listed game's modes cannot start */
         pm_block_list(cfg.block_ids, cfg.block_n);
@@ -2563,7 +2704,7 @@ static void mode_start(struct slot *M, const char *why)
         screen_resolve(M);
         if (M->node) {
             words(M, "", cfg.award, " A SHOT");
-            pm_show(M->node, 1);
+            pm_show(M->node, !run.under);
             M->aside = 0;                    /* PAD-347: on_tick steps it aside if a game mode runs */
             M->hide_ticks = 0;
         } else {
@@ -3125,13 +3266,12 @@ static void multiball_shot(struct slot *M, uint64_t mask)
  * shots, events and end of ball this game really sends. Off, nothing here runs. */
 static int check_on;
 
-static void on_shot(uint64_t mask)
+/* the running mode's part of a shot, on the runner R_ is on */
+static void run_shot(uint64_t mask, unsigned p)
 {
-    unsigned p = pm_player(), k;
     struct slot *M;
-    if (check_on)
-        pm_log("check shot 0x%llx in_game %d", (unsigned long long)mask, pm_in_game());
-    if (!pm_in_game()) return;
+    if (run.active && (pm_paused() || pm_shot_taken())) return;   /* PAD-1401: a layer of mine over it has it */
+    if (run.active && run.slot && run.slot->c.layer_shots && (mask & ~1ull)) pm_shot_claim();   /* none under it sees it */
     if (run.active && (M = run.slot) != 0 && p == run.player && (mask & scoring_bits(M))
         && end_pending != M) {                   /* item 141: nothing pays once its end shot was hit */
         uint64_t asked = shot_value(M, mask, ++run.hits), got = pm_score_add(p, asked);
@@ -3164,6 +3304,26 @@ static void on_shot(uint64_t mask)
     if (run.active && (M = run.slot) != 0 && p == run.player && end_pending != M)
         magnet_shot(M, mask);                /* PAD-381 */
     end_shot_seen(mask, p);
+}
+
+/* PAD-1401: a layer's runner's shot, called by the runtime as it (top-down) */
+static void layer_shot(int r, uint64_t mask)
+{
+    if (!pm_in_game()) return;
+    R_ = r;
+    run_shot(mask, pm_player());
+    R_ = 0;
+}
+
+static void on_shot(uint64_t mask)
+{
+    unsigned p = pm_player(), k;
+    struct slot *M;
+    if (check_on)
+        pm_log("check shot 0x%llx in_game %d", (unsigned long long)mask, pm_in_game());
+    if (!pm_in_game()) return;
+    R_ = 0;
+    run_shot(mask, p);
     if (p < 1 || p > 4) return;
     for (k = 0; k < MODES_MAX; k++) {
         int hit;
@@ -3222,16 +3382,21 @@ static void event_start(struct slot *M)
 static void on_event(unsigned id)
 {
     unsigned k, p = pm_player();
+    int r;
     struct slot *M;
     if (check_on) {
         const char *name = pm_event_name(id);
         pm_log("check event %s (0x%02x) in_game %d", name ? name : "?", id, pm_in_game());
     }
-    if (run.active && (M = run.slot) != 0 && cfg.end_on == END_EVENT && (int)id == cfg.end_event) {
-        char why[64];
-        pm_snprintf(why, sizeof why, "event %s", cfg.end_event_name);
-        mode_end(why);
+    for (r = RUNNERS - 1; r >= 0; r--) {        /* PAD-1401: every runner's */
+        as_runner(r);
+        if (run.active && (M = run.slot) != 0 && cfg.end_on == END_EVENT && (int)id == cfg.end_event) {
+            char why[64];
+            pm_snprintf(why, sizeof why, "event %s", cfg.end_event_name);
+            mode_end(why);
+        }
     }
+    as_runner(0);
     if (p > 4) p = 0;
     if ((int)id == pm_event("game_start"))
         for (k = 0; k < MODES_MAX; k++) {
@@ -3291,7 +3456,10 @@ static void events_tick(void)
 static const char *done_in_way(struct slot *M)
 {
     int k;
-    if (run.active) return run.slot ? run.slot->c.name : "another mode";
+    if (layered(M)) {                                /* PAD-1401: it runs over whatever of mine runs */
+        if (cfg.inside[0] && !pm_mode_running_named(cfg.inside)) return cfg.inside;
+        if (!free_layer_runner()) return "every layer of yours";
+    } else if (run.active) return run.slot ? run.slot->c.name : "another mode";
     if (cfg.wizard[0]) return 0;                     /* PAD-436: the game's mini-wizard waits its own way */
     if (cfg.game_modes != GM_STACK && (k = pm_stock_mode_running(PM_STOCK_ANY)) > 0) return pm_stock_mode_what((unsigned)k);
     if (cfg.stack_no && (k = pm_stock_mode_running(PM_STOCK_BATTLE | PM_STOCK_MULTIBALL)) > 0)
@@ -3366,8 +3534,13 @@ static int keeps_through_ball_end(void)
 static void on_ball_end(void)
 {
     unsigned k, p;
+    int r;
     if (check_on) pm_log("check ball end");
-    if (!keeps_through_ball_end()) mode_end("ball ended");
+    for (r = RUNNERS - 1; r >= 0; r--) {        /* PAD-1401: the layers first, then the base */
+        as_runner(r);
+        if (run.active && !keeps_through_ball_end()) mode_end("ball ended");
+    }
+    as_runner(0);
     for (k = 0; k < MODES_MAX; k++)
         for (p = 0; p < 5; p++) {
             slots[k].trig[p] = 0;
@@ -3406,7 +3579,7 @@ static void screen_aside_tick(struct slot *M)
     w = !a && pm_game_words();           /* PAD-662: a screen of the game's own, listed or not, has its words up */
     if (!(a || w) == !M->aside) return;
     M->aside = a || w;
-    pm_show(M->node, !M->aside);
+    pm_show(M->node, !M->aside && !slot_under(M));   /* PAD-1401: under a layer of mine, it waits */
     if (M->aside && w) pm_log("%s: its screen steps aside - a screen of the game's has its words up", cfg.name);
     else if (M->aside) pm_log("%s: its screen steps aside - %s has the middle of the screen", cfg.name, pm_stock_mode_what((unsigned)a));
     else pm_log("%s: its screen is back - the game's mode is over", cfg.name);
@@ -3450,12 +3623,15 @@ static void own_tick(void)
     }
 }
 
+static void run_tick(unsigned ticks);
 static void on_tick(void)
 {
     static unsigned ticks;
-    unsigned secs, i, k;
+    unsigned i, k;
+    int r;
     char name[24], clip[100];
     struct slot *M;
+    R_ = 0;
     if (check_on && pm_trigger_text("census.mark", name, sizeof name))
         pm_log("check mark %s", name);
     starts_watch_game();                     /* item 139: what marks a new game */
@@ -3486,13 +3662,44 @@ static void on_tick(void)
     }
     if (ticks % POLL_TICKS == 0) {
         poll_bound();
-        if (pm_trigger("mode.stop")) mode_end("trigger file");
+        if (pm_trigger("mode.stop")) {           /* PAD-1401: whichever run, the layers first */
+            int r;
+            for (r = RUNNERS - 1; r >= 0; r--) {
+                as_runner(r);
+                mode_end("trigger file");
+            }
+            as_runner(0);
+        }
         if (pm_trigger_text("mode.clip", clip, sizeof clip) && clip[0]) {
             for (i = 0; clip[i] && clip[i] != ' '; i++) ;
             clip[i] = 0;                               /* a layer after the name is ignored */
             pm_log("clip \"%.80s\" %s (trigger file)", clip, pm_clip(clip) ? "played" : "NOT played");
         }
     }
+    own_sounds_stops_tick();                 /* item 150: a call's own length */
+    own_tick();                              /* PAD-1400 */
+    for (r = 0; r < RUNNERS; r++) {          /* PAD-1401: each runner's mode */
+        as_runner(r);
+        run_tick(ticks);
+    }
+    as_runner(0);
+}
+
+/* PAD-1401: while a layer of mine is over it, its own screen is the top one's; back on top, it is shown again */
+static void layer_glass(struct slot *M)
+{
+    int under = pm_layers() && !pm_layer_top();
+    if (under == run.under) return;
+    run.under = under;
+    pm_log("%s: %s", cfg.name, under ? "a layer of mine is over it - its screen waits" : "on top again - its screen is back");
+    if (own_screen(M) && M->node) pm_show(M->node, !under && !M->aside);
+}
+
+/* the running mode's tick, on the runner R_ is on */
+static void run_tick(unsigned ticks)
+{
+    unsigned secs, i;
+    struct slot *M;
     if (run.restore_ticks && --run.restore_ticks == 0 && !run.active) {
         struct slot *last = run.slot;
         if (last) {
@@ -3501,9 +3708,11 @@ static void on_tick(void)
         }
         pm_log("borrowed messages restored");
     }
-    own_sounds_stops_tick();                 /* item 150: a call's own length */
-    own_tick();                              /* PAD-1400 */
     if (!run.active || !(M = run.slot)) return;
+    if (cfg.inside[0] && R_ && !pm_mode_running_named(cfg.inside)) {   /* PAD-1401: the mode it runs inside ended */
+        mode_end("the mode it runs inside ended");
+        return;
+    }
     if (cfg.game_modes == GM_OWN && !pm_in_game()) {    /* PAD-1400 */
         mode_end("the game is over");
         return;
@@ -3527,6 +3736,8 @@ static void on_tick(void)
         mode_end("end shot");
         return;
     }
+    layer_glass(M);                          /* PAD-1401 */
+    if (pm_paused()) return;                 /* PAD-1401: a layer of mine over it stands it still: its clock too */
     own_sounds_tick(M, ticks);
     if (run.shield_due && pm_ms() >= run.shield_due) {      /* PAD-392: the runtime keeps it and turns it back */
         run.shield_due = 0;

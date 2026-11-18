@@ -259,6 +259,10 @@ static void on_shot(uint64_t m) { printf("SHOT %llx\n", (unsigned long long)m); 
 static const struct pm_mode mode = { .name = "m", .shot = on_shot };
 static const struct pm_mode *const list[] = { &mode };
 #define EACH_MODE(m) for (const struct pm_mode *const *pp_ = list; pp_ < list + 1 && ((m) = *pp_, 1); pp_++)
+static void og_shot_seen(void) { }              /* PAD-1400: the whole game's - no mode of ours has it here */
+static void og_event(unsigned id) { }
+static void deliver_shot(uint64_t mask)        /* PAD-1401: the runtime's, with no layer running */
+{ const struct pm_mode *m; EACH_MODE(m) if (m->shot) { current = m; m->shot(mask); } current = 0; }
 static void on_ball_end(unsigned *r) { printf("BALL_END\n"); }
 static volatile unsigned event_fired[N_BUS_IDS];
 static void lit_hold_check(unsigned id) {}           /* PAD-503's, not under test here */

@@ -131,7 +131,10 @@ def test_the_interpreter_only_ever_asks_the_runtime():
     # the running mode's hits, and the hit that starts it (both starting paths)
     on_shot = src[src.index("static void on_shot(uint64_t mask)"):]
     on_shot = on_shot[:on_shot.index("\n}\n")]
-    assert on_shot.count("magnet_shot(M, mask)") == 3
+    run_shot = src[src.index("static void run_shot(uint64_t mask, unsigned p)"):]   # PAD-1401: each runner's part
+    run_shot = run_shot[:run_shot.index("\n}\n")]
+    assert on_shot.count("magnet_shot(M, mask)") + run_shot.count("magnet_shot(M, mask)") == 3
+    assert "run_shot(mask, p);" in on_shot
     assert on_shot.count("if (running(M)) magnet_shot(M, mask);") == 2
     # the shot defaults to the port's
     assert 'pm_port_value("magnet_shot", 0)' in src[src.index("static int magnet_line("):]

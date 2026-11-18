@@ -257,11 +257,12 @@ def test_only_the_games_own_shake_drives_the_motor_and_never_forced():
 
 def test_the_ball_the_game_and_a_tilt_stop_it_and_the_modes_end_lets_it_run_out():
     src = _rt()
-    assert "if (!running) shake_mode_ended();" in _lift(src, "void pm_end(void)")
+    assert "layers_end_lets_go();" in _lift(src, "void pm_end(void)")   # PAD-1401: once none of ours runs
+    assert "shake_mode_ended();" in _lift(src, "static void layers_end_lets_go(void)")
     assert 'shake_let_go("the ball ended");' in _lift(src, "static void on_ball_end(")
     tick = _lift(src, "static void shake_tick(")
     assert 'shake_let_go("the game ended or tilted")' in tick           # a tilt or game end: always
-    assert "!running && !shk.outlast" in tick                            # no mode, and not one run out
+    assert "!any_ours() && !shk.outlast" in tick                         # no mode (PAD-1401: nor a layer), and not one run out
     ended = _lift(src, "static void shake_mode_ended(")
     assert "shk.outlast = 1;" in ended and "shake_let_go" not in ended  # PAD-658: the mode's end lets it run out
     # a step sent again while the motor still runs the one before (a take-over's stop not yet on the board)

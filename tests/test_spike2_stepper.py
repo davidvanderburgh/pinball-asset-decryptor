@@ -415,7 +415,8 @@ def test_the_move_is_the_games_own_and_put_back_on_every_end():
     assert move.count("building_send(") == 1 and "coil_virtual(obj, 2)" in move and "coil_virtual(obj, 0)" in move
     assert len(re.findall(r"\bbuilding_send\(", src)) == 4, \
         "its definition, the move, the put-back and (PAD-684) the lock closed while ours runs - nothing else"
-    assert 'building_let_go("the mode ended")' in _lift(src, "void pm_end(void)")
+    assert "layers_end_lets_go();" in _lift(src, "void pm_end(void)")   # PAD-1401: once none of ours runs
+    assert 'building_let_go("the mode ended")' in _lift(src, "static void layers_end_lets_go(void)")
     assert 'building_let_go("the ball ended")' in _lift(src, "static void on_ball_end(")
     assert "building_tick();" in _lift(src, "static void on_tick(")
     tick = _lift(src, "static void building_tick(")

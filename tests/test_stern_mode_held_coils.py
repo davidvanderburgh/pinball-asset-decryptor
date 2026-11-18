@@ -149,7 +149,7 @@ def test_the_interpreter_holds_on_its_shot_or_as_it_starts():
     assert "if (coil_line(M, line)) return;" in src
     at = _lift(src, "static void coils_at(")
     assert "pm_coil_hold(cfg.coil_name[i], cfg.coil_ms[i])" in at
-    assert "coils_at(M, 0);" in _lift(src, "static void mode_start(")
+    assert "coils_at(M, 0);" in _lift(src, "static void mode_start_in(")   # PAD-1401: on its runner
     assert "coils_at(M, mask);" in _lift(src, "static void magnet_shot(")
 
 

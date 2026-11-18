@@ -63,6 +63,8 @@ static char ck_game_last[96];
 static long long ck_ms(const char *which, void *surf) { return 1000; }   /* the game's loop is 1 s long */
 struct pm_mode { const char *name; };
 static const struct pm_mode *running, *current;                 /* PAD-658: whose the backdrop is */
+static int n_layers;                                            /* PAD-1401: no layer of ours here */
+int pm_layer_top(void) { return 1; }
 """
 
 MAIN = r"""

@@ -129,6 +129,7 @@ def test_the_runtime_stops_another_modes_full_screen_clip_when_a_mode_begins(tmp
 #include <stdarg.h>
 struct pm_mode { const char *name; };
 static const struct pm_mode *current, *running;
+static int layer_of(const struct pm_mode *m) { return -1; }   /* PAD-1401: no layer of ours here */
 static char running_as[40];
 static unsigned begun;
 static struct { int on, seen; unsigned long started, last; } clip;

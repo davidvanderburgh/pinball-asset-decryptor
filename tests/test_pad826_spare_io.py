@@ -140,10 +140,11 @@ def test_what_is_spare_is_the_games_own_tables():
 
 def test_every_end_turns_a_spare_output_off():
     src = _src()
-    assert 'spare_outs_off("the mode ended")' in _lift(src, "void pm_end(void)")
+    assert "layers_end_lets_go();" in _lift(src, "void pm_end(void)")   # PAD-1401: once none of ours runs
+    assert 'spare_outs_off("the mode ended")' in _lift(src, "static void layers_end_lets_go(void)")
     assert 'spare_outs_off("the ball ended")' in src
     tick = _lift(src, "static void spare_tick(")
-    assert "!pm_in_game()" in tick and "!running" in tick
+    assert "!pm_in_game()" in tick and "!any_ours()" in tick   # PAD-1401: no mode of ours, base or layer
     assert "spare_tick();" in _lift(src, "static void on_tick(pm_reg *r)")
     assert 'fn("coil_off")' in _lift(src, "static void spare_out_off(")
 

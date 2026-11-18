@@ -56,7 +56,7 @@ def test_every_hit_that_counts_answers():
     assert "pm_lamp_flash(shot, KIT_WHITE, KIT_HIT_FLASH_MS)" in hit and "pm_hit_sound(" in hit
     assert "kit_hit_reset();" in _fn(kit, "static KIT_UNUSED int kit_begin(")
     form = (SDK / "mode_file.c").read_text(encoding="utf-8")
-    shot = _fn(form, "static void on_shot(uint64_t mask)")
+    shot = _fn(form, "static void run_shot(uint64_t mask, unsigned p)")   # PAD-1401: each runner's part
     assert "pm_lamp_flash(mask & scoring_bits(M)" in shot and "pm_hit_sound(" in shot
 
 

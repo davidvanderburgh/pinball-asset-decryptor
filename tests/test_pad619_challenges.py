@@ -193,7 +193,7 @@ def test_a_challenge_pick_waits_for_the_games_mode_running_as_the_ball_starts():
     assert "the challenge pick waits - %s is running" in tick
     # ... but only for CHALLENGE_GRACE_MS: Godzilla's own "any mode running" says yes through a whole challenge game
     assert "pm_ms() - challenge_wait_ms < CHALLENGE_GRACE_MS" in tick and "challenge_force = 1;" in tick
-    assert "!challenge_force &&" in src[src.index("static void mode_start(struct slot *M, const char *why)"):][:1200]
+    assert "!challenge_force &&" in src[src.index("static void mode_start_in(struct slot *M, const char *why)\n{"):][:1200]   # PAD-1401: on its runner
     end = src[src.index("static void challenge_ball_end(void)"):]
     assert "challenge_said_wait = 0;" in end[:end.index("\n}\n")]
     assert "%s not started (%s): %s is running - its trigger count is kept" in src

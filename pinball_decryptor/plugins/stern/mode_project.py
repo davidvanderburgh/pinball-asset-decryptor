@@ -2380,6 +2380,15 @@ TITLE_SCENES = {
     # one texture block (scene_write.PROFILES carries it as its own)
     "star_wars_elg-1.10/spike3": dict(hud="be374b87996e190f23897bd33dffbf23", screen_proven=True,
                                       bank="895f74e53622cf5acfa55a1df89a8fc8", clip_proven=True),
+    # PAD-1380: the drafted Spike 3 ports' video bank (the file as each card carries it); the screens wait on each
+    # title's HUD measured. Proofs: Spike 3 rig, hidden, muted, a Try it set (spike3_modes.plan) with CLIP TEST, its
+    # magenta title clip at the mode's start, on one trigger shot; the share of the glass it covered
+    "walking_dead_remastered_le-0.92/spike3": dict(bank="537bf7815a04a655b5388f11c4762664", clip_proven=True),   # its in-play bank 71e39c43; 2026-11-18: 38-40% of the glass at 0-8 s, 0% before; on 60ed7e50 the same clip played unseen
+    "star_wars_2025_le-0.96/spike3": dict(bank="f4eba4baa564300f00bd2a6c0b484ce7", clip_proven=True),   # its in-play bank 3a9d7db5; 2026-11-18: 49% at 1 s (the game's skill-shot video back by 3 s), 0% before; an attract item 47%; on 60ed7e50 the clip played unseen
+    "star_wars_2025_pro-0.84/spike3": dict(bank="4b0834ccf5aac497528a805d5f6b35a4", clip_proven=True),   # its in-play bank 3a9d7db5, as the LE; 2026-11-18: 49% at 0-3 s, 0% before and at 8 s; an attract item 47%
+    "pokemon_le-0.82/spike3": dict(bank="8b0ceb32002a4c661217be7019bdbb11", clip_proven=True),   # 60ed7e50, its only bank; 2026-11-18: 72% at 0-3 s of the 6 s clip, 0% before and at 8 s
+    "fallout_le-0.82/spike3": dict(bank="4ccd1a8c8814e7db01666271105f6cc7", clip_proven=True),   # 60ed7e50, its only bank; 2026-11-18: 64% at 1-3 s, 0% before and at 8 s
+    "transformers_mtmte_le-0.96/spike3": dict(bank="26d398bdc2be14090caf149bb4d34210", clip_proven=True),   # 60ed7e50, its only bank; 2026-11-18: 33-35% at 0-3 s (the play screen's video), 0% before and at 8 s
     "star_wars_le-1.31": dict(screen_proven=True, hud="9183de0da4e6ed603f16064ec7a8493b", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=True),   # PAD-420 2026-10-08 media proof (stock card, hidden, muted; the ball-start hero / path choice confirmed with the Action Button first): our screen and clip seen on the glass (magenta 44% clip, 45% screen, 0.0% before)
     "star_wars_pro-1.31": dict(screen_proven=True, hud="101c344663e5acdcf0e9e5d42ef0f2ae", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 4: two playfield switches first, its ball-start path/hero choice off the glass) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 44% clip, 45.1% screen, 0.0% before)
     "stranger_things-1.13": dict(screen_proven=True, hud="e3bb429535838471027451e9f6f86950", bank="e3bb429535838471027451e9f6f86950", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet; PAD-420 2026-10-08 media proof (round 7, no census): the clip seen on the glass (magenta 75%) in a Video grafted into the HUD - its HUD draws no video bank in play

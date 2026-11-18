@@ -7108,7 +7108,7 @@ Up to 32 shows, 128 steps a lane, 8 sound ids a show. A lane with no steps leave
 steps ran out holds them dark.
 
 **In step with the song, not a clock.** A show's time is where its song IS: the played-sample count of the voice of
-the channel playing its request (voice `+12`, `value sound_voice_played`, 44,100 a second; the channel and voice layout
+the channel playing its request (voice `+12`, `+24` on Spike 3, `value sound_voice_played`, 44,100 a second; the channel and voice layout
 is the framework's, the same on all 68 ports; measured on Led Zeppelin LE 1.22 and Rush LE 1.19). A re-used voice shows
 its last sound's count for a tick or two, so the show takes the count once it has moved off its first reading and
 advances with the game's clock; until then (and on a port without the channel lines) it runs on its own clock from the

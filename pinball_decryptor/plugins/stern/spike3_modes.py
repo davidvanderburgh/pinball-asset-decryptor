@@ -95,10 +95,10 @@ MULTIBOOT_WORDS = ("this is a multi-boot card; modes go on a card of the one gam
 #: modes (:mod:`.spike3_music`, PAD-1324), EDITION (:mod:`.spike3_menu`, PAD-1325), and co-op play
 #: and the handicaps (:func:`coop_wanted`, :func:`hand_wanted`, PAD-1326), and
 #: Prolonged Competition (:func:`comp_wanted`, PAD-1327: on a title whose Spike 3 port knows its
-#: start menu; the engine's `_comp_for_build` says why another is left out).
+#: start menu; the engine's `_comp_for_build` says why another is left out), and the expression
+#: light shows (:func:`cabs_wanted`, PAD-1379: on a title whose port names its cabinet's lights).
 FAMILY_LEFT_OUT = {
     "picture settings": "they cannot be added to a Spike 3 game yet",
-    "expression light shows": "the 64-bit runtime cannot light a Spike 3 cabinet's expression lights yet",
     "image sets": "the 64-bit runtime cannot swap a Spike 3 game's scene files yet",   # PAD-1390
 }
 
@@ -449,6 +449,63 @@ def records_wanted(project, real_card=True):
     return recs, prof
 
 
+def cabs_wanted(project, real_card=True):
+    """PAD-1379: ``(shows, profile)`` of the expression light shows (:mod:`.cab_shows`) this Spike 3 build carries,
+    else ``([], None)``: ``cabshow.cfg`` beside the 64-bit runtime, each show started by the sound ids that start its
+    song (:func:`cab_sids`), over the cabinet lights of the title's port (its ``cablamp`` lines). Quiet: the engine's
+    Write (``_cabs_for_build``) has already said why they are left out."""
+    from . import cab_shows as CS
+    shows = CS.load(project)
+    if not shows or MW.host_refusal():
+        return [], None
+    if real_card:
+        from ...core import ext4_grow
+        if not ext4_grow.available()[0]:
+            return [], None
+    prof = CS.project_title(project, probe=True)
+    if prof is None or CS.title_refusal(prof):
+        return [], None
+    return shows, prof
+
+
+def cab_sids(reader, game_dir, game_raw, shows, log=None):
+    """PAD-1379: ``{slot: [sid, ...]}`` - the sound ids of this card's game that START each show's song: an idx
+    song's by ``image.bin``'s own descriptors, a music bank's song (``music_catNN_NNNN``) by its bank's
+    (:func:`.spike3_requests.song_plays`), only the ids the game's request lists name. Read off the games volume
+    *reader* (headers, descriptors and directories: never the sound bodies)."""
+    from . import cab_shows as CS, sound_modes as SMo, spike3_requests as S3R
+    slots = sorted({s["slot"] for s in shows if s.get("slot") is not None})
+    if not slots:
+        return {}
+
+    def node(name):
+        return MW.lookup(reader, "%s/%s" % (game_dir, name) if game_dir else name)
+    try:
+        img = node("image.bin")
+        banks = {}
+        for slot in slots:
+            if slot < 0:
+                nn = (-slot - 1) >> 16
+                bn = node("image-sc%02d.bin" % nn)
+                if bn is not None:
+                    banks[nn] = _NodeFile(reader, bn)
+        plays = S3R.song_plays(_NodeFile(reader, img) if img is not None else None, banks)
+        from .info import container_counts
+        named = set()
+        if img is not None:
+            fragments = container_counts(_NodeFile(reader, img).read(0x100))[0]
+            for sids in S3R.request_table(S3R.Program(game_raw), fragments) or ():
+                named.update(sids)
+    except Exception as e:                              # noqa: BLE001 - no show starts with its song; said
+        if log:
+            log("Expression lights: the game's sound tables could not be read (%s): no show starts with its song."
+                % e, "warning")
+        return {}
+    if named:
+        plays = {sid: p for sid, p in plays.items() if sid in named}
+    return {slot: CS.sids_for_slot(plays, slot) for slot in slots}
+
+
 def attract_wanted(project, real_card=True):
     """PAD-1328: the profile of the title the owner's attract items (:mod:`.attract_items`) go on in this Spike 3
     build, else None: their clips in the title's video bank, ``attract.cfg`` beside the 64-bit runtime (the port's
@@ -546,6 +603,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     comp_prof = comp_wanted(project, real_card=real_card)
     recs, recs_prof = records_wanted(project, real_card=real_card)       # PAD-1327
     att_prof = attract_wanted(project, real_card=real_card)              # PAD-1328
+    cabs, cabs_prof = cabs_wanted(project, real_card=real_card)          # PAD-1379
     from . import screen_time as ST
     stime_maybe = ST.enabled() and bool(_changed_videos(project))
     modes, code = [], []
@@ -557,7 +615,8 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         modes = MW.project_modes(project)
         code = MW.code_mode_list(project)        # PAD-1295: compiled for the card's 64-bit ARM
     if (not modes and not code and not feed and not slots and not stime_maybe and music is None and coop_prof is None
-            and hand_prof is None and comp_prof is None and not recs and att_prof is None):
+            and hand_prof is None and comp_prof is None and not recs and att_prof is None
+            and not cabs):
         return None
 
     def left(why):
@@ -573,7 +632,8 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         if why:
             modes, code = left(why)
     if (not modes and not code and not feed and not slots and not stime_maybe and music is None and coop_prof is None
-            and hand_prof is None and comp_prof is None and not recs and att_prof is None):
+            and hand_prof is None and comp_prof is None and not recs and att_prof is None
+            and not cabs):
         return None
     state, target = card_state(reader)
     if state == "multiboot":
@@ -603,6 +663,9 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         if att_prof is not None:                    # PAD-1328
             log("Attract items: left out of this build: %s." % MULTIBOOT_WORDS.replace(
                 "modes go on", "attract items go on"), "warning")
+        if cabs:                                    # PAD-1379
+            log("Expression lights: left out of this build: %s." % MULTIBOOT_WORDS.replace(
+                "modes go on", "the light shows go on"), "warning")
         return None
     fw = game_program(reader, target) if target else None
     if fw is None:
@@ -612,7 +675,8 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     stime, stime_prof = (screen_times_wanted(project, game_raw, log, real_card=real_card) if stime_maybe
                          else ([], None))
     if (not modes and not code and not feed and not slots and not stime and music is None and coop_prof is None
-            and hand_prof is None and comp_prof is None and not recs and att_prof is None):
+            and hand_prof is None and comp_prof is None and not recs and att_prof is None
+            and not cabs):
         return None
     used, adds = [], {}
     hud, bank = b"", b""
@@ -677,7 +741,8 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
             for cp, news in mus.news.items():
                 adds[cp] = list(adds.get(cp) or ()) + list(news)
     if (not modes and not code and not feed and not slots and not stime and mus is None and coop_prof is None
-            and hand_prof is None and comp_prof is None and not recs and att_prof is None):   # PAD-1326: co-op or handicaps alone; PAD-1327: or Competition
+            and hand_prof is None and comp_prof is None and not recs and att_prof is None
+            and not cabs):   # PAD-1326: co-op or handicaps alone; PAD-1327: or Competition
         return None
 
     def read_card(rel):
@@ -698,6 +763,8 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                      comp=comp_prof is not None, comp_prof=comp_prof,
                      records=recs or None, records_prof=recs_prof,                   # PAD-1327
                      attract=att_prof is not None, attract_prof=att_prof,             # PAD-1328
+                     cabs=cabs or None, cabs_prof=cabs_prof,                          # PAD-1379
+                     cabs_sids=cab_sids(reader, os.path.dirname(target), game_raw, cabs, log) if cabs else None,
                      read_card=read_card, scan_card=scan_card)
     if result is None:
         return None
@@ -714,7 +781,8 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     for low, cap in (("random clips: ", "Random clips: "), ("screen times: ", "Screen times: "),
                      ("prolonged competition: ", "Prolonged Competition: "),   # PAD-1327
                      ("records: ", "Records on the high scores: "),
-                     ("attract items: ", "Attract items: ")):                            # PAD-1328
+                     ("attract items: ", "Attract items: "),                            # PAD-1328
+                     ("expression lights: ", "Expression lights: ")):                   # PAD-1379
         lines = [(cap + l[len(low):]) if l.startswith(low) else l for l in lines]
     if mus is not None:                      # PAD-1324
         lines.append("Music modes: MUSIC MODE (%d modes: %s) goes on the operator menu's %s; %d file(s) "

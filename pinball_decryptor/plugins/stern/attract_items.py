@@ -204,7 +204,11 @@ def port_table(prof):
 
 #: games whose attract pages play their clips on a scene of their own (4a3b5738...) that has no Video library, so
 #: neither the bank's scene shown nor that scene takes an item onto the glass (emulator sweep, PAD-782)
-NOT_ON_GLASS = ("avengers_infinity_le", "avengers_infinity_pro", "jurassic_park_le", "jurassic_park_pro")
+#: PAD-1380: Walking Dead Remastered LE (Spike 3) plays its attract clips from the framework bank 60ed7e50 and its play
+#: clips from 71e39c43 (its port's video_bank): an item on the play bank drew in that bank's mid-screen box (16% of
+#: the glass, on the rig), on 60ed7e50 full screen (86%) - it waits on an attract bank of its own in the port
+NOT_ON_GLASS = ("avengers_infinity_le", "avengers_infinity_pro", "jurassic_park_le", "jurassic_park_pro",
+                "walking_dead_remastered_le")
 
 
 def title_refusal(prof):

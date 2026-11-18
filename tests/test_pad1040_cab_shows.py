@@ -308,7 +308,8 @@ def test_a_show_keeps_time_by_where_its_song_is_not_by_a_clock():
     tick = tick[:tick.index("\n}\n")]
     assert "if ((at = cab_song_ms()) < 0) {" in tick and "el = (unsigned long)at;" in tick
     count = rt[rt.index("static long cab_voice_count(unsigned request)"):]
-    assert 'pm_port_value("sound_voice_played", 12)' in count[:count.index("\n}\n")]
+    # PAD-1379: +12 on Spike 2, +24 on Spike 3's 64-bit voice
+    assert 'pm_port_value("sound_voice_played", PM_PTR == 8 ? 24 : 12)' in count[:count.index("\n}\n")]
     song = rt[rt.index("static long cab_song_ms(void)"):]
     song = song[:song.index("\n}\n")]
     assert "cab_run.first" in song and "ds * 2 >= dt" in song and "CAB_GONE_MS" in song

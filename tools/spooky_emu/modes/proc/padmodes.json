@@ -1,0 +1,8 @@
+{
+  "modes": [
+    {"title": "RMGame", "name": "probe", "switch": "slingRight", "points": 4321,
+     "sound": "hs_forward", "text": "PAD MODE HIT %(hits)d", "font": "neo_128"},
+    {"title": "ACGame", "name": "probe", "switch": "slingr", "points": 4321,
+     "sound": "sling", "text": "PAD MODE HIT %(hits)d"}
+  ]
+}

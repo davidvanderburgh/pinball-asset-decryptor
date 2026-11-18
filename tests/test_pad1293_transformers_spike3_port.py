@@ -72,7 +72,8 @@ def test_the_port_carries_the_census_ids_the_core_and_none_of_star_wars_elg_cont
     assert switches["Megatron target left"] == 41 and switches["Right orbit"] == 40
     assert switches["Center loop"] == 82 and switches["Left orbit"] == 90
     body = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
-    assert not [l for l in body if l.split()[0] in ("lamp", "scene", "callout")]
+    # PAD-1380: the title's own video bank, named and proven on the rig, is its own scene
+    assert not [l for l in body if l.split()[0] in ("lamp", "callout") or l.split()[:2] == ["scene", "hud"]]
     assert not [l for l in body if re.match(
         r"(site|value|text)\s+(show_(\d|name|kind|secs|proc)|block_|right_gate|mode_flag|held_coils|place_flag|"
         r"done_flag|coil_take|coil_give)", l)]
@@ -142,8 +143,9 @@ def test_redrafting_with_the_census_gives_the_shipped_port():
     text, M, core, missing = S.draft_spike3(ref, str(ELG_PORT), tgt, "transformers_mtmte_le", "0.96",
                                             S.read_switch_ids(str(CENSUS)))
     assert not core
-    # (the lines the port has from elsewhere: PAD-1326's co-op (portcoop) and PAD-1327's start menu, measured by hand)
+    # (the lines the port has from elsewhere: PAD-1326's co-op (portcoop) and PAD-1327's start menu, measured by hand;
+    # the challenge game's ball launch (ae44e7916) and the spare outputs' coil_off (ec3294b5e), measured by hand too)
     def own(entries):
-        return {k: v for k, v in entries.items() if not k[1].startswith(("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add"))}
+        return {k: v for k, v in entries.items() if not k[1].startswith(("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add", "ball_launch", "coil_off", "video_bank"))}
     assert own(_entries(text)) == own(_entries(PORT.read_text(encoding="utf-8")))
     assert re.search(r"^value proc_exit_hooks\s+392\b", text, re.M)

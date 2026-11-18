@@ -24,7 +24,9 @@ import { PlayButton } from "./modes_dialogs.js";
 
 const WHEN = [["any", "any time"], ["idle", "while it is not running"], ["running", "while it runs"]];
 const SPARE_CLOSED = [["low", "reads low when closed"], ["high", "reads high when closed"]];   // PAD-826
-const RESETS = [["ball", "each ball"], ["mode", "each time it starts"], ["game", "each game"]];
+// PAD-1402: "saved" keeps it on the card between games (each player's; "saved_all": one for everyone)
+const RESETS = [["ball", "each ball"], ["mode", "each time it starts"], ["game", "each game"],
+  ["saved", "never: saved, each player's"], ["saved_all", "never: saved, for everyone"]];
 const SHARED_RESETS = RESETS.filter(([r]) => r !== "mode");
 // MODE_SDK.md "Display priority": a mode's 180 lets jackpots, starts and the tilt warning through
 const DISPLAY_PRIORITIES = [[0, "none"], [180, "a mode's (180)"], [190, "a wizard mode's (190)"]];
@@ -52,7 +54,7 @@ const MERGE_MS = 1000;        // the same box changed again within this is the s
 const TIP = {
   palette: "Drag a block into a script, or press it to add it to the script you picked last (the one with the lit edge).",
   hat: "A script: what sets it off, and the blocks it runs, top to bottom.",
-  vars: "A variable holds a number for each player. Reset says when it goes back to 0.",
+  vars: "A variable holds a number for each player. Reset says when it goes back to 0. A saved one never does: the card keeps it between games and over a power-off (a story's chapter, a character unlocked), each player's by their Insider login while they are logged in, else by their player number; \"for everyone\" is one number for the whole machine. The service menu's SAVED PROGRESS (Clear) and a factory reset clear them.",
   screen: "The build makes the mode a screen of its own: a panel with its name, and a line the Show words block writes. It costs a little build time.",
   seconds: "How long the mode runs once it starts. 0 = no clock: it runs until a block ends it (or the ball drains, if ticked).",
   drain: "The ball draining ends the mode.",

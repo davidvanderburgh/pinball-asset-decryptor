@@ -9773,16 +9773,21 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         hand_menu = _HandicapMenu(log) if _hand_on else None
         # PAD-1390: IMAGE SET, which of the project's image sets the screens show (a row of its own, or shared)
         image_menu = _ImageSetMenu(scenes_sets["names"], log) if scenes_sets else None
+        # PAD-1402: SAVED PROGRESS, when one of the card's modes keeps progress between games (Keep / Clear)
+        from . import saved_progress as _SP
+        _saved_modes = _SP.wanted(assets_dir, list(mode_list) + list(code_list))
+        saved_menu = _SavedProgressMenu(log) if _saved_modes else None
         # PAD-1382: the owner's own settings (Service menu tab) beside them, all in the owner's order
         from . import service_menu as _SvM
         _menu_list = _SvM.arrange(assets_dir, [music_menu, edition_menu, *picture_menus, coop_menu, hand_menu,
-                                              image_menu], log)
+                                              image_menu, saved_menu], log)
         menu_job = _MenuJobs(*_menu_list) if _menu_list else None
         picture_cfg = ""
         settings_cfg = ""
         coop_setting = 0
         hand_setting = 0
         image_setting = 0
+        saved_setting = 0
         if (text_edits or shader_prof is not None or clip_job is not None
                 or menu_job is not None):
             if progress:
@@ -9813,6 +9818,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if hand_menu is not None and hand_menu.ok:
                 # PAD-1033: no HANDICAP row (no spare setting left): the handicaps are always on
                 hand_setting = hand_menu.setting.live
+            if saved_menu is not None and saved_menu.ok:
+                # PAD-1402: no SAVED PROGRESS row (no spare setting left): the progress is kept, but nothing clears it
+                saved_setting = saved_menu.setting.live
             # PAD-1382: settings sharing the MORE SETTINGS rows - the runtime's table of them, and MUSIC MODE's
             # cfg (written before the menu was planned) pointed at the value the menu gave it
             settings_cfg = _shared_settings_cfg(menu_job, grow_work, log)
@@ -10225,6 +10233,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     screen_times=stime_lines, screen_prof=stime_prof,  # PAD-1115
                     score_feed=feed_url, score_feed_prof=feed_prof,   # PAD-1204
                     records=rec_list, records_prof=rec_prof,          # PAD-1280
+                    saved=bool(_saved_modes), saved_setting=saved_setting,   # PAD-1402
                     scenes=scenes_staged, scenes_prof=scenes_prof,    # image sets
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
@@ -12143,6 +12152,37 @@ class _ImageSetMenu(_MusicModeMenu):
         self.why = str(why).rstrip(".") or "unknown"
         self.log("Image sets: IMAGE SET could not be added to the operator menu (%s), so the scenes' variants are "
                  "left out of this card." % self.why, "warning")
+
+
+class _SavedProgressMenu(_MusicModeMenu):
+    """PAD-1402: SAVED PROGRESS in the game's own service menu (:mod:`.saved_progress`): 1 Keep, 2 Clear. Its default is
+    Clear, so a factory reset clears the modes' saved progress along with the game's own settings; the mode runtime
+    clears it whenever the row reads Clear and puts the row back to Keep. A row of its own, or one of the settings on
+    the MORE SETTINGS rows (PAD-1382: there a factory reset does not reach it, only the row clears it). Without it the
+    progress is still kept; only the operator cannot clear it."""
+
+    KEY = "saved_progress"
+
+    def __init__(self, log):
+        from . import saved_progress as _SP
+        super().__init__(len(_SP.MENU_NAMES), _SP.MENU_NAMES, log)
+
+    def wanted(self):
+        from . import saved_progress as _SP
+        return self.KEY, self.count, self.names, {"default": _SP.MENU_DEFAULT}
+
+    def done(self):
+        self.ok = True
+        self.log("Saved progress: SAVED PROGRESS is in the operator menu (%s), its help line \"%s\". Set it to Clear to "
+                 "clear what the modes saved; a factory reset clears it too." % (self.setting.where, self.setting.help),
+                 "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Saved progress: SAVED PROGRESS could not be added to the operator menu (%s), so the modes' saved "
+                 "progress is kept but nothing on the machine clears it." % self.why, "warning")
 
 
 class _CoopMenu(_MusicModeMenu):

@@ -154,7 +154,7 @@ def _cc():
 
 
 _ATTRIBUTE = re.compile(r"__attribute__\s*\(\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)\)")
-_PROTOTYPE = re.compile(r"(?:^|[;}])\s*(?P<ret>(?:const\s+)?(?:unsigned\s+|signed\s+)?\w+[\s\*]+?)"
+_PROTOTYPE = re.compile(r"(?:^|[;}])\s*(?P<ret>(?:const\s+)?(?:unsigned\s+|signed\s+)?(?:long\s+)*\w+[\s\*]+?)"
                         r"(?P<name>pm_\w+)\s*\((?P<args>[^;{]*)\)\s*;", re.M)
 
 

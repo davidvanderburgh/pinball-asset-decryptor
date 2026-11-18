@@ -621,6 +621,8 @@ class ModePlan:
     scorefeed_file: str = ""
     #: PAD-1280: ``records.cfg`` beside the mode files, the owner's records on the high scores ("" = none)
     records_file: str = ""
+    #: PAD-1402: ``saved.cfg`` beside the mode files, the modes' saved progress ("" = none)
+    saved_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -840,7 +842,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
          cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
          score_feed_prof=None, records=None, records_prof=None, code_ok=True, arch="arm", scenes=None,
-         scenes_prof=None):
+         scenes_prof=None, saved=False, saved_setting=0):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -1076,6 +1078,33 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         feed_into(result, game_elf, scratch, score_feed, only=False)
     if records:                                      # PAD-1280
         records_into(result, game_elf, scratch, records)
+    if saved:                                        # PAD-1402
+        saved_into(result, game_elf, scratch, saved_setting)
+    return result
+
+
+# ---- PAD-1402: saved progress ------------------------------------------------------------------------------------
+def saved_into(result, game_elf, scratch, setting=0):
+    """``saved.cfg`` for *result*'s card: the store on, the service menu's SAVED PROGRESS value *setting* (0: none),
+    and where *game_elf* keeps its players' Insider logins (a logged-in player's progress is their own)."""
+    from . import coop_play as CP
+    from . import saved_progress as SP
+    try:
+        users = CP.insider_users(game_elf)
+    except Exception:                                   # noqa: BLE001 - then each player's is their slot's
+        users = None
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, SP.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(SP.cfg_text(setting, users))
+    result.saved_file = path
+    result.lines.append("saved progress: %s" % SP.HOW)
+    result.lines.append("saved progress: %s" % ("cleared by the service menu's SAVED PROGRESS (Clear) and by a factory "
+                                                "reset" if setting else "no SAVED PROGRESS row in the service menu: "
+                                                "nothing on the machine clears it"))
+    if not users:
+        result.lines.append("saved progress: this game program's Insider logins were not found - each player's "
+                            "progress is their player number's")
     return result
 
 
@@ -2464,6 +2493,11 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             from . import mode_records as MRec
             dst = os.path.join(out_dir, MRec.CFG_NAME)
             shutil.copyfile(result.records_file, dst)
+            extras.append(dst)
+        if getattr(result, "saved_file", ""):          # PAD-1402: saved.cfg, the modes' saved progress
+            from . import saved_progress as SP
+            dst = os.path.join(out_dir, SP.CFG_NAME)
+            shutil.copyfile(result.saved_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

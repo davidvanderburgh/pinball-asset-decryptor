@@ -7022,6 +7022,52 @@ back):
 - mode.log: `records: <NAME> - player 1 <n>, ...` at each game's end, then `... beats ...: the game's initials entry`
   or `... record stands`.
 
+## Saved progress: what a mode keeps between games (PAD-1402)
+
+A mode's variables last a ball, a mode or a game, `pm_read_file` only reads, and a record (above) is a high-score
+entry no mode can read back. Saved progress is the place for what must outlive the game and the power-off: a Story
+mode's chapter, New Game Plus, a character unlocked for good. The runtime keeps a small store of numbers by name
+(`pad_mode_runtime.c` "SAVED PROGRESS") on the card's data partition, beside the challenge scores:
+
+    long long pm_saved_get(const char *key, unsigned player, long long dflt);   /* the value, or dflt */
+    int       pm_saved_put(const char *key, unsigned player, long long value);  /* 1 kept */
+    unsigned  pm_saved_stamp(unsigned player);   /* changes when player's owner does, or the store is cleared */
+
+- **Whose.** Player 0 is the machine's: one value for everyone. Players 1-4 are that player's: their Stern Insider
+  Connected login while they are logged in (the 16-byte user id the game keeps per player, read where co-op reads it:
+  `coop_play.insider_users`), else the game's player slot. So a logged-in player's story follows them to whatever
+  player number they start as; a guest's belongs to the slot. Read your values again whenever `pm_saved_stamp(p)`
+  changes (a login, a logout, a clear).
+- **Keys** are letters, digits and `_ . : -`, up to 47. Values are `long long`.
+- **The file**: `/dump/pad_saved_progress`, one `<owner> <key> <value>` line each (owner `m`, `p1`..`p4` or
+  `u<32 hex>`), 16 KB at most. A put changes memory; the file is written whole (a new file renamed over the old) about
+  two seconds after a change, never on every change. A changed value moves to the end, and when the file would pass its
+  size the lines at the front (the values longest unchanged) make room.
+- **Clearing it**: the service menu's **SAVED PROGRESS** row (Custom Code page; `menu_settings.SAVED_PROGRESS`),
+  `1 = Keep, 2 = Clear`. Whenever it reads Clear the runtime clears every value and puts the row back to Keep. Its
+  default is Clear, so a factory reset (every row back to its default) clears the progress with the game's own
+  settings, and so does the row's first boot. On the shared MORE SETTINGS rows (PAD-1382) the value is the runtime's
+  word, which a factory reset does not reach: there only the row clears it.
+- **On a card** only when one of its modes uses it: the Write looks for `pm_saved_` in each mode's C (a blocks mode's
+  is written from its blocks) and puts `saved.cfg` beside the runtime (`saved_progress.cfg_text`):
+
+      on
+      clear <the SAVED PROGRESS row's value: an address, or MSET_BASE + 4k on the shared rows>
+      users <manager> <A> <B>          where the game keeps its players' Insider logins
+
+  With the store off, `pm_saved_get` answers `dflt` and `pm_saved_put` does nothing (0).
+
+**Blocks**: a variable's reset **never: saved, each player's** (`"saved"`) or **never: saved, for everyone**
+(`"saved_all"`) keeps it between games. It is read when the game starts (and again when a player logs in, or the
+store is cleared) and each change is kept; a game's start, a ball's end and the mode's start never zero it. A shared
+variable may be saved too (key `shared:<name>`: every mode naming it keeps the same value); a mode's own is
+`<slug>:<name>`. New Game Plus is a Set block putting the chapter back to 0.
+
+Proof (emulator, X-Men LE and Pro 0.98; `docs/plans/pad1402_saved_progress.md`): a 2-player game and a 1-player game
+counted each player's balls and everyone's total on from the store, a power cycle kept them and the row at Keep, and
+a factory reset (the title's NVRAM wiped) put the row back at Clear: the runtime cleared the store and the next game
+counted from 1.
+
 ## Expression light shows (PAD-1040)
 
 BEN (Led Zeppelin): "if songs are swapped out, the expression lighting is no longer in sync with the replaced audio

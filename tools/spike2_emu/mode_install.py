@@ -97,7 +97,10 @@ EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 
                ("picture.cfg", 0o100644), ("attract.cfg", 0o100644), ("coop.cfg", 0o100644),
                ("idle.cfg", 0o100644), ("handicap.cfg", 0o100644), ("cabshow.cfg", 0o100644),
                ("comp.cfg", 0o100644), ("scorefeed.cfg", 0o100644),
-               ("records.cfg", 0o100644), ("settings.cfg", 0o100644), ("scenes.cfg", 0o100644))
+               ("records.cfg", 0o100644), ("settings.cfg", 0o100644), ("scenes.cfg", 0o100644),
+               ("saved.cfg", 0o100644))
+#: PAD-1402: saved.cfg, the modes' saved progress (pad_mode_runtime.c "SAVED PROGRESS") - never alone: it comes with
+#: the modes that keep it. The progress itself (/dump/pad_saved_progress) is the machine's and no install touches it.
 #: the extra file that is enough for an install without a mode (PAD-446)
 CLIPS_FILE = "clips.cfg"
 #: the extra files that are each enough for an install without a mode (PAD-446, PAD-494, PAD-537)

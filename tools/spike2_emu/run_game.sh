@@ -834,6 +834,13 @@ fi
 # while its game came up the right way round. PAD_DISPLAY_INVERT=1 keeps the
 # machine's behaviour for the game, so then the selector is left to auto-detect
 # and the two agree either way.
+# PAD-1427 PROOF HOOK: PAD_PREGAME=<a script's path inside the rootfs> runs here, in the chroot, before the
+# game: it draws through the same GL ring as the game and the selector. Made to photograph the card's own
+# boot_display + dprint (the message screen a Send to machine shows) with glshot.sh. The app never sets it.
+if [ -n "${PAD_PREGAME:-}" ]; then
+    echo "[run] PAD_PREGAME: running $PAD_PREGAME before the game"
+    chroot "$R" /bin/sh "$PAD_PREGAME" </dev/null
+fi
 if [ -n "$SEL_DIRS" ]; then
     rm -f "$R/dump/vidroot"
     rm -f "$R$PAD_SELECT_CHOICE"

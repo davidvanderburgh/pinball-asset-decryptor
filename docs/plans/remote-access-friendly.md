@@ -90,6 +90,15 @@ loggers, since the LCD can't draw there), driving the real `SshMachine` calls (`
 log in the ticket's artifacts as `machine_screen_proof.txt`): a Send held the game (game_monitor in state T, the
 game gone), the screen counted 0 to 100 % with the mark moving every ~3 s, then the game came back through the
 card's own loop; with the PC gone before any change the machine said CONNECTION LOST / NOTHING CHANGED and the game
-was back 48 s later; with files changing it said SEND AGAIN FROM PAD and kept the game held. Not proven: the pixels
-on a real LCD. The emulator never runs `boot_display` (it starts the game directly), so the messages are proven
-as handed to Stern's own tool in Stern's own format, not as drawn.
+was back 48 s later; with files changing it said SEND AGAIN FROM PAD and kept the game held.
+
+**On the glass, in the emulator** (David: "show screenshots of what the game will show"): the Spike 2 rig now runs
+the card's own `boot_display` and `dprint` before the game (`run_game.sh` PAD_PREGAME proof hook, never set by the
+app) and `glshot.sh` photographed every message PAD sends (screen_text, exactly as sent): the Stern logo with
+PAD IS UPDATING / RECEIVING 42% / LINK OK * / KEEP POWER ON and the other seven, all centred and legible
+(artifacts: `machine_screen_sheet.png`, `machine_screen/`). Two rig gaps found and handled on the way, neither on
+the machine: boot_display needs libpthread's symbol versions, which the machine's own Vivante libEGL brings in and
+the rig's shim does not (the proof ran a copy with that one DT_NEEDED added); and the bridge had no
+glPixelStorei, which boot_display calls for its one-byte font glyphs - glbridge.c now takes the unpack alignment
+and sends rows at the host's 4-byte layout (the game's RGBA uploads go byte for byte as before). dprint reaches
+boot_display through the FIFO /dev/boot_display.

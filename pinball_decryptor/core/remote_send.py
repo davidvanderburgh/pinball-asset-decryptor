@@ -1646,7 +1646,7 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         log("Restarting the machine on the new card...", "info")
         machine.reboot()
     if delta_bytes:
-        log("Files the machine already had were changed in place: %s of blocks written." % _human(delta_bytes),
+        log("Of the files the machine already had, only the parts that differ were sent: %s." % _human(delta_bytes),
             "info")
     return "Sent %d change(s)%s to the machine%s." % (
         n, " and its boot partition" if raws else "", "; it is restarting" if reboot else "")

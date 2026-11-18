@@ -49,6 +49,10 @@ THE PROGRAM (``blocks.json``)::
                                   under its name while it runs, its words and the value as it changes ("SUPER
                                   JACKPOT = 53,200,000"), where the title's port puts one (James Bond: under the
                                   status bar, as the game's own mini-wizards show theirs); on every title with screens
+      "meters": [{"label": "CYCLOPS", "color": "#e02020", "value": {"k": "var", "name": "hp"},   PAD-1405: up to
+                  "max": {"k": "num", "v": 5}, "numbers": true}],   four bars while it runs, each filled with its value
+                                  out of its most (100 unless said), its label over it ("numbers": "CYCLOPS 3/5"), down
+                                  the right edge ("at": [x, y] to place one); on every title with screens
       "scripts": [
         {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"},
          "do": [{"op": "if", "cond": {...}, "then": [...], "else": [...]}, ...]}

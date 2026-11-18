@@ -971,8 +971,8 @@ def check(data, p):
 
 
 def screen_ids(layers=()):
-    """How many object ids :func:`screen` takes: seven, and three more for each of its ``layers`` (PAD-1405)."""
-    return 7 + 3 * len(layers or ())
+    """How many object ids :func:`screen` takes: seven, and five more for each of its ``layers`` (PAD-1405)."""
+    return 7 + 5 * len(layers or ())
 
 
 def screen(p, name, art_rgba, words, x, y, words_at=None, words_rgba=(1.0, 0.9, 0.0, 1.0),
@@ -983,7 +983,8 @@ def screen(p, name, art_rgba, words, x, y, words_at=None, words_rgba=(1.0, 0.9, 
     its top-left corner at (x, y), ``words_scale`` the words alone about their own place.
 
     PAD-1405: ``layers`` ([{"name", "rgba", "x", "y", "sx", "sy"}]) are more Bitmaps between the art and the words,
-    each its own child (``<name>.<layer name>``) a mode shows one at a time - a meter's fill at each level, a screen
+    each a Sprite of its own (``<name>.<layer name>``, only a Sprite can be shown and hidden) holding the picture
+    (``<layer name>_Pic``), that a mode shows one at a time - a meter's fill at each level, a screen
     fade's strength at each step. ``x``, ``y`` place one in the screen, ``sx``, ``sy`` stretch it (a few pixels of one
     colour cover the whole glass)."""
     art_name = art_name or name + "_Art"
@@ -1009,11 +1010,13 @@ def screen(p, name, art_rgba, words, x, y, words_at=None, words_rgba=(1.0, 0.9, 
         lh, lw = la.shape[:2]
         if la.ndim != 3 or la.shape[2] != 4 or lw % 4 or lh % 4:
             raise SceneWriteError("%s: a layer must be (h, w, 4) RGBA with both sides a multiple of 4" % lay["name"])
-        lp, lo, lt = ids[7 + 3 * k:10 + 3 * k]
-        kids.append(node(FLAG | lp, lay["name"], 1, [(1, 1)],
+        sp, so, lp, lo, lt = ids[7 + 5 * k:12 + 5 * k]
+        pic = node(FLAG | lp, lay["name"] + "_Pic", 1, [(1, 1)], [(1, matrix())],
+                   [(1, p.poly["bitmap"], FLAG | lo,
+                     bitmap_body(p.symbol["bitmap"], lw, lh, texture_new(lt, lw, lh, _dds.encode_bc3(la))))])
+        kids.append(node(FLAG | sp, lay["name"], 1, [(1, 1)],
                          [(1, matrix(lay.get("sx", 1.0), lay.get("sy", 1.0), tx=lay.get("x", 0.0), ty=lay.get("y", 0.0)))],
-                         [(1, poly["bitmap"], FLAG | lo,
-                           bitmap_body(p.symbol["bitmap"], lw, lh, texture_new(lt, lw, lh, _dds.encode_bc3(la))))]))
+                         [(1, p.poly["sprite"], FLAG | so, sprite_body(p.symbol["sprite"], [pic]))]))
     if p.font:          # item 164: a scene with no Text of its own (Bond 60th's frame) has no font to use
         kids.append(node(FLAG | p_txt, words_name, 1, [(1, 1)],
                          [(1, matrix(words_scale, words_scale, tx=wx, ty=wy))],
@@ -1401,7 +1404,7 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
     if len(set(names)) != len(names):
         raise SceneWriteError("two screens share a name: %r" % names)
     libs, font = [], {}
-    # PAD-1405: a mode's meters and screen fades are a picture a level, three ids each; the carried font's ids start
+    # PAD-1405: a mode's meters and screen fades are a picture a level, five ids each; the carried font's ids start
     # past every screen's (FONT_ID_GAP unless they need more; never into the HUD's, which start FONT_BASE_GAP past)
     need = sum(screen_ids(s.get("layers")) for s in screens)
     font_gap = FONT_ID_GAP if need <= FONT_ID_GAP // 2 else -(-(need * 2 + 0x100) // 0x100) * 0x100

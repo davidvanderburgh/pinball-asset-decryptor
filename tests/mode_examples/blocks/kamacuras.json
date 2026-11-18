@@ -7033,7 +7033,8 @@
   "layer_takes_shots": false,
   "keep_rules": [],
   "block_modes": [],
-  "beds": []
+  "beds": [],
+  "meters": []
  },
  "recipe": {
   "clips": {

@@ -13,13 +13,14 @@ SCREENS (:func:`.scene_write.screen`), so they go wherever a mode's own screen g
   whole glass (``flat``: even; ``glow``: strongest at the edges, clear in the middle), of which the mode shows one.
 
 The runtime only shows, hides and words a node (pad_mode.h ``pm_show``/``pm_set_text``), so a level is a picture of its
-own. Every screen is authored visible: the mode hides them all as soon as it finds them (intricate_kit.h
+own, PREMULTIPLIED as the game blends them (PAD-416: a colour under a clear pixel is otherwise added to the glass
+- a red glow came out a solid red screen). Every screen is authored visible: the mode hides them all as soon as it finds them (intricate_kit.h
 ``kit_meter_find`` / ``kit_fade_find``)."""
 import re
 
 import numpy as np
 
-from .mode_hud import GLASS_W, GLASS_H
+from .mode_hud import GLASS_W, GLASS_H, premultiplied
 
 METERS_MAX = 4
 METER_LEVELS = 20                    # 5 % a step
@@ -81,7 +82,7 @@ def meter_frame():
     alpha = inner * 0.78 + rim * 0.95
     a[BAR_TOP:BAR_TOP + BAR_H, :, :3] = col
     a[BAR_TOP:BAR_TOP + BAR_H, :, 3] = alpha * 255
-    return np.clip(a, 0, 255).astype(np.uint8)
+    return premultiplied(np.clip(a, 0, 255).astype(np.uint8))
 
 
 def meter_fill(color, j, n=METER_LEVELS):
@@ -100,7 +101,7 @@ def meter_fill(color, j, n=METER_LEVELS):
     for c, v in enumerate((r, g, b)):
         out[..., c] = np.clip(v * lum + 255 * shine, 0, 255)
     out[..., 3] = inside * cut * 255
-    return np.clip(out, 0, 255).astype(np.uint8)
+    return premultiplied(np.clip(out, 0, 255).astype(np.uint8))
 
 
 def fade_picture(color, style, j, n=FADE_LEVELS):
@@ -118,7 +119,7 @@ def fade_picture(color, style, j, n=FADE_LEVELS):
     out = np.zeros(alpha.shape + (4,), dtype=np.uint8)
     out[..., 0], out[..., 1], out[..., 2] = r, g, b
     out[..., 3] = np.clip(alpha * 255 + 0.5, 0, 255).astype(np.uint8)
-    return out
+    return premultiplied(out)
 
 
 # ---- the screens ----------------------------------------------------------------------------------------------------

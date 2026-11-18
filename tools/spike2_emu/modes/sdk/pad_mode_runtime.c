@@ -27344,7 +27344,8 @@ static void mset_arm(void)
  * saved.cfg (/usr/local/padmode on a card, /games/pad/padmode on Spike 3, /dump in the rig; saved_progress.cfg_text):
  *   on                          the card's modes keep saved progress
  *   clear <the row's value>     the SAVED PROGRESS row (an address, or MSET_BASE + 4k on the shared rows)
- *   users <manager> <A> <B>     where the game keeps its players' Insider logins (coop_play.insider_users) */
+ *   users <manager> <A> <B>     where the game keeps its players' Insider logins (coop_play.insider_users)
+ *   nvm <dir>                   the game's settings generations (/data/nv/<title>/NVM): see "the row put back to Keep" */
 #define SAVED_MAX      16384
 #define SAVED_KEY_MAX  48
 #define SAVED_OWNER_MAX 40
@@ -27352,6 +27353,8 @@ static void mset_arm(void)
 #define SAVED_KEEP     1u
 #define SAVED_CLEAR    2u
 #define SAVED_SETTLE_MS 5000u                     /* the row read the same this long before it counts */
+#define SAVED_MARK_OWNER "!"                      /* the store's own line: the runtime put the row back to Keep */
+#define SAVED_MARK_KEY   "row"
 static const char SAVED_FILE[] = "/dump/pad_saved_progress";
 #if PM_A64
 static const char *const SAVED_CFGS[] = { "/games/pad/padmode/saved.cfg", "/dump/saved.cfg" };
@@ -27367,6 +27370,8 @@ static pm_addr sv_clear_at;                       /* the SAVED PROGRESS row's va
 static unsigned sv_clear_seen;                    /* what it read last */
 static unsigned long sv_clear_since;              /* ... since when */
 static int sv_clear_acted;                        /* ... and whether that value was acted on */
+static int sv_clear_boot;                         /* a value has settled since boot */
+static int sv_clear_own;                          /* the row reads the runtime's own Keep */
 static pm_addr sv_mgr;                            /* saved.cfg `users` */
 static unsigned sv_off;
 
@@ -27567,6 +27572,118 @@ static void sv_clear(const char *why)
     sv_flush("cleared");
 }
 
+/* THE ROW PUT BACK TO KEEP. The runtime writes Keep into the row's record, but that is the game's memory: the game
+ * stores its settings (/data/nv/<title>/NVM, a ring of numbered generation files) only when it saves them - its menu
+ * on a change, Guided Setup's Save & Exit, a factory reset - and a power-off before that boots on the old Clear again.
+ * So the store keeps its own line SAVED_MARK: 0, or the stamp of the game's newest settings generation (its number and
+ * a hash of its bytes, sv_nvm_stamp) when the runtime put the row back to Keep. A boot that reads Clear with that same
+ * generation still the newest is the old Clear: not cleared again. A newer one means the game saved its settings since,
+ * with Keep in them unless it was a factory reset (or the operator's Clear): cleared. While it is pending the tick
+ * looks for a new generation; one saved while the row shows the runtime's Keep has stored it, and the mark goes. */
+static char sv_nvm[96];                                  /* saved.cfg `nvm`: the game's settings generations */
+static unsigned sv_nvm_gen;                              /* the newest generation last found */
+static unsigned long sv_nvm_at;                          /* when the tick last looked for a new one */
+
+static long long sv_pending(void)
+{
+    long long v;
+    return sv_get_in(sv_buf, sv_len, SAVED_MARK_OWNER, SAVED_MARK_KEY, &v) ? v : 0;
+}
+
+/* the newest generation's stamp ((number << 32) | hash | 1), 0 when none is found. From the one last found (at boot:
+ * the one the mark names), up while the next exists; that one gone (the ring restarted), the first found from 0 on.
+ * None at all: the look is off for this run (said once) */
+static unsigned long long sv_nvm_stamp(void)
+{
+    static char b[4096];                             /* the generation's head: its audits differ after a reset */
+    char path[128];
+    unsigned g, h = 2166136261u;
+    long n, i;
+    int found = 0;
+    if (!sv_nvm[0]) return 0;
+    g = sv_nvm_gen ? sv_nvm_gen : (unsigned)((unsigned long long)sv_pending() >> 32);
+    pm_snprintf(path, sizeof path, "%s/%08u", sv_nvm, g);
+    if (pm_read_file(path, b, 1) < 0) {
+        for (g = 0; g < 100000u; g++) {
+            pm_snprintf(path, sizeof path, "%s/%08u", sv_nvm, g);
+            if (pm_read_file(path, b, 1) >= 0) { found = 1; break; }
+        }
+        if (!found) {
+            say("saved progress: no settings generation in %s - a Clear at boot always clears", sv_nvm);
+            sv_nvm[0] = 0;
+            return 0;
+        }
+    }
+    for (;;) {
+        pm_snprintf(path, sizeof path, "%s/%08u", sv_nvm, g + 1);
+        if (pm_read_file(path, b, 1) < 0) break;
+        g++;
+    }
+    sv_nvm_gen = g;
+    pm_snprintf(path, sizeof path, "%s/%08u", sv_nvm, g);
+    n = pm_read_file(path, b, sizeof b);
+    for (i = 0; i < n; i++) h = (h ^ (unsigned char)b[i]) * 16777619u;
+    return (unsigned long long)g << 32 | h | 1u;
+}
+
+static void sv_mark(long long stamp)
+{
+    long n = sv_put_in(sv_buf, sv_len, SAVED_MAX, SAVED_MARK_OWNER, SAVED_MARK_KEY, stamp);
+    if (n < 0) return;
+    sv_len = n;
+    sv_buf[sv_len] = 0;
+    sv_flush(stamp ? "the row put back to Keep" : "the game's settings hold Keep");
+}
+
+/* the row has read v for SAVED_SETTLE_MS (first: the first time this boot). Every Clear the operator picks, and the
+ * row's default after a factory reset or on its first boot, clears the progress, and the runtime puts the row back to
+ * Keep (above: when that Keep is the game's) */
+static void sv_settled(unsigned v, int first)
+{
+    long long pending = sv_pending();
+    if (sv_clear_own) {                                   /* the runtime's own Keep, just put */
+        sv_clear_own = 0;
+        if (v == SAVED_KEEP) return;
+    }
+    if (v == SAVED_CLEAR) {
+        unsigned long long now = sv_nvm_stamp();
+        if (first && pending && (now == 0 || (long long)now == pending)) {
+            say("saved progress: SAVED PROGRESS reads Clear as the game last saved it, before the runtime put it back "
+                "to Keep after the last clear (settings generation %u) - not cleared again; Keep again", sv_nvm_gen);
+        } else {
+            sv_clear(!first ? "the service menu's SAVED PROGRESS was set to Clear"
+                     : pending ? "the service menu's SAVED PROGRESS reads Clear at boot, and the game has saved its "
+                                 "settings since the runtime put it back to Keep (a factory reset, or Clear picked)"
+                     : "the service menu's SAVED PROGRESS reads Clear at boot (its default: a factory reset, or a new "
+                       "row)");
+            sv_mark(now ? (long long)now : 1);
+        }
+        sv_setting_put(sv_clear_at, SAVED_KEEP);
+        sv_clear_own = 1;
+        return;
+    }
+    if (v == SAVED_KEEP && first && pending) sv_mark(0);
+}
+
+/* while a Keep is pending: a new settings generation saved while the row shows the runtime's Keep has stored it */
+static void sv_nvm_tick(unsigned long now)
+{
+    long long pending;
+    unsigned long long st;
+    if (!sv_nvm[0] || now - sv_nvm_at < 2000u) return;
+    sv_nvm_at = now;
+    pending = sv_pending();
+    if (!pending || !sv_clear_boot) return;
+    st = sv_nvm_stamp();
+    if (!st || (long long)st == pending) return;
+    if (sv_clear_seen == SAVED_KEEP) {
+        say("saved progress: the game saved its settings (generation %u) with SAVED PROGRESS at Keep", sv_nvm_gen);
+        sv_mark(0);
+    } else {
+        sv_mark((long long)st);
+    }
+}
+
 /* on the game's tick: the SAVED PROGRESS row, and the file written a while after a change. The row is acted on only
  * once it has read the same for SAVED_SETTLE_MS: while the game boots its records may read a moment's value before
  * its store is read (each value it shows is said in mode.log) */
@@ -27583,13 +27700,13 @@ static void saved_tick(void)
             sv_clear_acted = 0;
         } else if (!sv_clear_acted && now - sv_clear_since >= SAVED_SETTLE_MS) {
             sv_clear_acted = 1;
-            if (v == SAVED_CLEAR) {
-                sv_clear("the service menu's SAVED PROGRESS reads Clear (the operator's pick, a factory reset, or the "
-                         "row's first boot) - put back to Keep");
-                sv_setting_put(sv_clear_at, SAVED_KEEP);
+            if (v == SAVED_KEEP || v == SAVED_CLEAR) {
+                sv_settled(v, !sv_clear_boot);
+                sv_clear_boot = 1;
             }
         }
     }
+    sv_nvm_tick(now);
     if (sv_dirty && now - sv_dirty_at >= SAVED_FLUSH_MS) sv_flush("changed");
 }
 
@@ -27603,6 +27720,10 @@ static void saved_line(char *s)
         sv_clear_at = (pm_addr)number(&p, &ok);
         if (!ok) sv_clear_at = 0;
         else sv_clear_at = setting_addr(sv_clear_at);
+        return;
+    }
+    if (str_starts(s, "nvm ")) {
+        str_copy(sv_nvm, sizeof sv_nvm, s + 4, sizeof sv_nvm);
         return;
     }
     if (str_starts(s, "users ")) {

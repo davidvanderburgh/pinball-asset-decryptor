@@ -42,6 +42,14 @@ cycle. This adds that store and the blocks' way into it.
   "player N" on that machine. A login made during the first ball takes effect as soon as the game reports it (the
   stamp changes): the values already counted under the slot stay the slot's.
 - **Default Clear** so a factory reset clears it (the ticket's ask) with no game-specific factory-reset hook.
+- **The runtime's Keep is not the game's until the game saves its settings.** Writing the row's record changes the
+  game's memory only; the game stores its settings (`/data/nv/<title>/NVM`) when its menu saves them. The first
+  emulator runs showed a power cycle reading Clear again and clearing the progress. Calling the game's own adjustment
+  setter would need a site found on every build; instead the store keeps the stamp of the game's newest settings
+  generation from when it put the row back, and a Clear read at boot with that generation still newest is not
+  cleared again (pad_mode_runtime.c "the row put back to Keep"); a factory reset writes a new generation, so it still
+  clears. This rests on the game saving its rows from memory (Guided Setup's Save & Exit stored the runtime's Keep in
+  the emulator).
 - **16 KB, oldest dropped** rather than refusing a write when full: a machine that sees many Insider players forgets
   the least recently changed values first.
 

@@ -75,12 +75,20 @@ def project_wants(project):
     return bool(wanted(project, found))
 
 
-def cfg_text(setting=0, users=None):
+#: where the game keeps its settings' generations (nvm.h; mkmulticard.MACHINE_VOLUME_STORE), by its title's folder
+NVM_DIR = "/data/nv/%s/NVM"
+
+
+def cfg_text(setting=0, users=None, title=""):
     """``saved.cfg``: on; the SAVED PROGRESS row's value *setting* (0: no row - nothing clears it); *users*
-    ``(manager, A, B)`` where the game keeps its players' Insider logins (coop_play.insider_users), or None."""
+    ``(manager, A, B)`` where the game keeps its players' Insider logins (coop_play.insider_users), or None; *title*
+    the game's folder (``uncanny_xmen_le``): where its settings are saved, so the runtime can tell a Clear it already
+    answered from a new one (pad_mode_runtime.c "the row put back to Keep")."""
     lines = ["# PAD-1402: saved progress (pad_mode_runtime.c \"SAVED PROGRESS\")", "on"]
     if setting:
         lines.append("clear 0x%x" % int(setting))
+        if title:
+            lines.append("nvm " + NVM_DIR % title)
     if users:
         mgr, a, _b = users
         lines.append("users 0x%x 0x%x 0x%x" % (int(mgr), int(a), int(_b)))

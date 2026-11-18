@@ -1096,7 +1096,7 @@ def saved_into(result, game_elf, scratch, setting=0):
     os.makedirs(scratch, exist_ok=True)
     path = os.path.join(scratch, SP.CFG_NAME)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(SP.cfg_text(setting, users))
+        f.write(SP.cfg_text(setting, users, getattr(getattr(result, "profile", None), "game_dir", "") or ""))
     result.saved_file = path
     result.lines.append("saved progress: %s" % SP.HOW)
     result.lines.append("saved progress: %s" % ("cleared by the service menu's SAVED PROGRESS (Clear) and by a factory "

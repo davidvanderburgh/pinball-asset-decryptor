@@ -7044,15 +7044,24 @@ mode's chapter, New Game Plus, a character unlocked for good. The runtime keeps 
   two seconds after a change, never on every change. A changed value moves to the end, and when the file would pass its
   size the lines at the front (the values longest unchanged) make room.
 - **Clearing it**: the service menu's **SAVED PROGRESS** row (Custom Code page; `menu_settings.SAVED_PROGRESS`),
-  `1 = Keep, 2 = Clear`. Whenever it reads Clear the runtime clears every value and puts the row back to Keep. Its
-  default is Clear, so a factory reset (every row back to its default) clears the progress with the game's own
-  settings, and so does the row's first boot. On the shared MORE SETTINGS rows (PAD-1382) the value is the runtime's
-  word, which a factory reset does not reach: there only the row clears it.
+  `1 = Keep, 2 = Clear`. Whenever it reads Clear (for 5 s: a booting game's records may read a moment's value first)
+  the runtime clears every value and puts the row back to Keep. Its default is Clear, so a factory reset (every row
+  back to its default) clears the progress with the game's own settings, and so does the row's first boot.
+  The Keep the runtime puts back is the game's memory only: the game stores its settings (`/data/nv/<title>/NVM`, a
+  ring of numbered generations) only when it saves them - its menu on a change, Guided Setup's Save & Exit, a factory
+  reset. Measured on X-Men LE 0.98: two games and a power cycle later the stored row still said Clear. So the store
+  keeps a line of its own (`! row <stamp>`): the newest settings generation (number and a hash of its head) when the
+  Keep was put back. A boot that reads Clear with that generation still the newest is the old Clear: not cleared
+  again. A newer one means the game saved its settings since - with the Keep in them, unless it was a factory reset or
+  the operator's Clear - so it clears. A boot that reads Keep, or a new generation saved while the row shows Keep,
+  drops the line. On the shared MORE SETTINGS rows (PAD-1382) the value is the runtime's word, which a factory reset
+  does not reach: there only the row clears it.
 - **On a card** only when one of its modes uses it: the Write looks for `pm_saved_` in each mode's C (a blocks mode's
   is written from its blocks) and puts `saved.cfg` beside the runtime (`saved_progress.cfg_text`):
 
       on
       clear <the SAVED PROGRESS row's value: an address, or MSET_BASE + 4k on the shared rows>
+      nvm /data/nv/<title>/NVM         where the game saves its settings' generations
       users <manager> <A> <B>          where the game keeps its players' Insider logins
 
   With the store off, `pm_saved_get` answers `dflt` and `pm_saved_put` does nothing (0).

@@ -63,8 +63,9 @@ int main(void)
     char owner[SAVED_OWNER_MAX];
     unsigned char login[16] = { 0 };
     unsigned i;
-    printf("ok %d %d %d %d %d\n", sv_key_ok("story:chapter"), sv_key_ok("shared:maser_won"), sv_key_ok(""),
-           sv_key_ok("has space"), sv_key_ok("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstu"));
+    printf("ok %d %d %d %d %d %d\n", sv_key_ok("story:chapter"), sv_key_ok("shared:maser_won"), sv_key_ok(""),
+           sv_key_ok("has space"), sv_key_ok("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv"),
+           sv_key_ok("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstu"));
     put("p1", "story:chapter", 3);
     put("p2", "story:chapter", 1);
     put("m", "story:unlocked", 1);
@@ -102,13 +103,15 @@ def test_the_store_keeps_finds_and_makes_room(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
     code = MAIN.replace("@FNS@", "\n".join(R._lift(src, sig + "\n{") for sig in FNS))
     out = R._host_run(tmp_path, code).splitlines()
-    assert out[0] == "ok 1 1 0 0 0"
+    assert out[0] == "ok 1 1 0 0 0 1"
     # a changed value moves to the end; every owner's own
-    assert out[1] == "text [p2 story:chapter 1\nm story:unlocked 1\np1 story:chapter -4\n]"
-    assert out[2:7] == ["get p1 story:chapter -4", "get p2 story:chapter 1", "get p3 story:chapter none",
-                        "get m story:unlocked 1", "get p1 story:chap none"]
-    full = next(l for l in out if l.startswith("full ["))
-    assert int(full.rsplit(" ", 1)[1]) <= 160           # never past the cap: the oldest lines made room
+    whole = "\n".join(out)
+    assert "text [p2 story:chapter 1\nm story:unlocked 1\np1 story:chapter -4\n]" in whole
+    k = out.index("get p1 story:chapter -4")
+    assert out[k:k + 5] == ["get p1 story:chapter -4", "get p2 story:chapter 1", "get p3 story:chapter none",
+                            "get m story:unlocked 1", "get p1 story:chap none"]
+    full = next(l for l in out if l.startswith("]") and l[1:].strip().isdigit())
+    assert int(full[1:]) <= 160                         # never past the cap: the oldest lines made room
     assert "get p1 story:chapter none" in out and "get p4 k7 1000000000007" in out
     assert "owner0 m" in out and "owner2 p2" in out and "owner3none p3" in out
     assert "owner3 ua0a1a2a3a4a5a6a7a8a9aaabacadaeaf" in out
@@ -124,12 +127,79 @@ def test_the_runtime_arms_ticks_and_names_its_files():
     boot = R._lift(src, "static void pad_mode_start(void)\n{")
     assert boot.index("mset_arm();") < boot.index("saved_arm();")              # its row may be a shared one
     st = R._lift(src, "static void saved_tick(void)\n{")
-    assert "SAVED_CLEAR" in st and "sv_setting_put(sv_clear_at, SAVED_KEEP)" in st
+    assert "SAVED_SETTLE_MS" in st and "sv_settled(v, !sv_clear_boot)" in st and "sv_nvm_tick(now)" in st
     hdr = (SDK / "pad_mode.h").read_text(encoding="utf-8")
     for name in ("pm_saved_get", "pm_saved_put", "pm_saved_stamp"):
         assert name in hdr and re.search(r"\b%s\(" % name, src)
     stubs, names = R.weak_stubs(hdr)
     assert {"pm_saved_get", "pm_saved_put", "pm_saved_stamp"} <= names     # a long long return parses too
+
+
+ROW = r"""
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+#define pm_snprintf snprintf
+#define SAVED_MAX 4096
+#define SAVED_KEY_MAX 48
+#define SAVED_OWNER_MAX 40
+#define SAVED_KEEP 1u
+#define SAVED_CLEAR 2u
+#define SAVED_MARK_OWNER "!"
+#define SAVED_MARK_KEY "row"
+static void say(const char *f, ...) { va_list a; va_start(a, f); printf("say: "); vprintf(f, a); va_end(a); printf("\n"); }
+static char sv_buf[SAVED_MAX + 1];
+static long sv_len;
+static int sv_clear_own;
+static unsigned sv_nvm_gen = 7, row = 2, clears;
+static unsigned long long nvm_now = (7ull << 32) | 0x1234;        /* the game's newest settings generation */
+static unsigned long long sv_nvm_stamp(void) { return nvm_now; }
+static void sv_flush(const char *why) { (void)why; }
+static void sv_clear(const char *why) { sv_len = 0; sv_buf[0] = 0; clears++; printf("clear: %s\n", why); }
+static unsigned long long sv_clear_at = 1;
+static void sv_setting_put(unsigned long long a, unsigned v) { (void)a; row = v; }
+@FNS@
+static void boot_reads(unsigned v)
+{
+    row = v;
+    sv_clear_own = 0;
+    sv_settled(v, 1);
+    if (sv_clear_own) sv_settled(row, 0);              /* the runtime's own Keep settles in turn */
+    printf("boot %u -> clears %u, row %u, mark %lld\n", v, clears, row, sv_pending());
+}
+int main(void)
+{
+    boot_reads(SAVED_CLEAR);                       /* the row's first boot: its default */
+    boot_reads(SAVED_CLEAR);                       /* power cycle, the game never saved the Keep: the old Clear */
+    nvm_now = (8ull << 32) | 0x99;                 /* a factory reset: the game saved its settings (defaults) */
+    boot_reads(SAVED_CLEAR);
+    boot_reads(SAVED_KEEP);                        /* Guided Setup's Save & Exit stored the Keep */
+    boot_reads(SAVED_KEEP);
+    sv_settled(SAVED_CLEAR, 0);                    /* the operator picks Clear while the game runs */
+    printf("live -> clears %u, row %u\n", clears, row);
+    return 0;
+}
+"""
+ROW_FNS = ("static int sv_line_is(const char *b, long i, long e, const char *owner, const char *key)",
+           "static int sv_get_in(const char *b, long n, const char *owner, const char *key, long long *v)",
+           "static long sv_put_in(char *b, long n, long cap, const char *owner, const char *key, long long v)",
+           "static long long sv_pending(void)", "static void sv_mark(long long stamp)",
+           "static void sv_settled(unsigned v, int first)")
+
+
+def test_a_clear_is_answered_once_and_a_factory_reset_again(tmp_path):
+    """The runtime's Keep is only the game's memory until the game saves its settings: a boot that reads the same
+    Clear with the same settings generation newest is not cleared again; a newer generation (a factory reset) is."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    code = ROW.replace("@FNS@", "\n".join(R._lift(src, sig + "\n{") for sig in ROW_FNS))
+    out = [l for l in R._host_run(tmp_path, code).splitlines() if not l.startswith(("say:", "clear:"))]
+    stamp7, stamp8 = (7 << 32) | 0x1234, (8 << 32) | 0x99
+    assert out == ["boot 2 -> clears 1, row 1, mark %d" % stamp7,
+                   "boot 2 -> clears 1, row 1, mark %d" % stamp7,
+                   "boot 2 -> clears 2, row 1, mark %d" % stamp8,
+                   "boot 1 -> clears 2, row 1, mark 0",
+                   "boot 1 -> clears 2, row 1, mark 0",
+                   "live -> clears 3, row 1"]
 
 
 # ---- the blocks ------------------------------------------------------------------------------------------------
@@ -190,8 +260,10 @@ def test_the_service_menu_row():
 
 def test_saved_cfg():
     assert SP.cfg_text() == "# PAD-1402: saved progress (pad_mode_runtime.c \"SAVED PROGRESS\")\non\n"
-    t = SP.cfg_text(0x63f7a0, (0x649ea8, 0x160, 0x164))
-    assert t.splitlines()[1:] == ["on", "clear 0x63f7a0", "users 0x649ea8 0x160 0x164"]
+    t = SP.cfg_text(0x63f7a0, (0x649ea8, 0x160, 0x164), "uncanny_xmen_le")
+    assert t.splitlines()[1:] == ["on", "clear 0x63f7a0", "nvm /data/nv/uncanny_xmen_le/NVM",
+                                  "users 0x649ea8 0x160 0x164"]
+    assert "nvm" not in SP.cfg_text(0, None, "uncanny_xmen_le")          # no row: nothing to tell apart
 
 
 def test_saved_into_and_the_card(tmp_path):

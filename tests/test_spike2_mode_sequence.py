@@ -154,7 +154,8 @@ def test_a_sequence_start_replaces_the_trigger_line():
     spec.sequence_reset_any = True
     keys = _keys(MP.runtime_cfg(spec, "sniper"))
     p = MP.GODZILLA_PRO_1_15
-    others = [n for n, _m in p.shots if n not in p.switch_shots and n not in spec.start_sequence]
+    others = [n for n, _m in p.shots if n not in p.switch_shots and n not in p.button_shots   # PAD-1403
+              and n not in spec.start_sequence]
     assert keys["trigger_seq_reset"] == ["0x%08x" % p.mask(others)]
     assert p.mask(others) & p.mask(["Action button"]) == 0
 
@@ -199,14 +200,15 @@ def test_any_shot_that_does_not_score_ends_it():
     assert MP.validate(spec) == []
     p = MP.GODZILLA_PRO_1_15
     keys = _keys(MP.runtime_cfg(spec, "x"))
-    others = [n for n, _m in p.shots if n not in p.switch_shots and n not in spec.scoring_shots]
+    others = [n for n, _m in p.shots if n not in p.switch_shots and n not in p.button_shots   # PAD-1403
+              and n not in spec.scoring_shots]
     assert keys["end_shot"] == ["0x%08x" % p.mask(others)]
     # the mode's own shots are not "other": a shot that adds a ball, the shot the balls come on
     spec.multiball, spec.add_ball_shot, spec.multiball_on_shot = True, "Maser target", "Action button"
     keys = _keys(MP.runtime_cfg(spec, "x"))
     assert keys["end_shot"] == ["0x%08x" % p.mask([n for n in others if n != "Maser target"])]
     # every shot scoring leaves nothing to end it on
-    spec = MP.ModeSpec(name="X", scoring_shots=[n for n, _m in p.shots if n not in p.switch_shots],
+    spec = MP.ModeSpec(name="X", scoring_shots=[n for n, _m in p.shots if n not in p.switch_shots and n not in p.button_shots],
                        end_shot=MP.END_SHOT_OTHERS)
     assert "Every shot scores, so no shot is left to end the mode." in MP.validate(spec)
     # a retarget keeps the choice: it names no shot

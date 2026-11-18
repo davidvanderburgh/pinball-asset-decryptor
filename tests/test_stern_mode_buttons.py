@@ -113,8 +113,9 @@ def test_the_field_round_trips_and_retarget_drops_a_shot_the_title_lacks(tmp_pat
     back = MP.load(str(project / "modes" / slug / "mode.json"))
     assert back.multiball_on_shot == "Action button"
     assert MP.ModeSpec.from_json({"format": 1, "name": "OLD", "seconds": 30}).multiball_on_shot == ""
-    jaws = MP.profile_for_card("jaws_le", "1.02.0")
-    out, dropped = MP.retarget(spec, jaws)
+    # PAD-1403: every title has the cabinet buttons' shots now; The Beatles has no Action button
+    beatles = MP.profile_for_card("beatles", "1.29.0")
+    out, dropped = MP.retarget(spec, beatles)
     assert out.multiball_on_shot == "" and "Action button" in dropped
     le = MP.profile_for_card("godzilla_le", "1.16.0")
     out, dropped = MP.retarget(spec, le)

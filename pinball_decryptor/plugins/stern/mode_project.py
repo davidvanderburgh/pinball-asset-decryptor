@@ -25,6 +25,8 @@ import re
 import shutil
 from dataclasses import dataclass, field, fields, replace
 
+from . import cabinet_buttons as _CB
+
 FORMAT = 1
 MODES_DIRNAME = "modes"
 MODE_FILE = "mode.json"
@@ -79,6 +81,7 @@ class TitleProfile:
     #                              keeps every score report off Insider Connected (a must for a card)
     switch_shots: tuple = ()     # names in ``shots`` that come from the port's `switch` lines
     switch_shots_note: str = ""  # why those are not proven yet; "" when they are (or there are none)
+    button_shots: tuple = ()     # PAD-1403: names in ``shots`` that are the cabinet buttons' (cabinet_buttons.py)
     drain_shot: str = ""         # PAD-690: the port's code-only switch shot a drain closes ("Trough"), or ""
     stack_note: str = ""         # item 164: what ``stack no`` waits for when it is less than every mode
     game_modes: tuple = ()       # PAD-363: ((id, name, held off by default), ...) the game's own modes a
@@ -244,6 +247,10 @@ EVENT_LABELS = {
 GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, events=(
     "ball_start", "game_start", "ball_end", "bonus_start", "bonus_end", "tilt_warning",
     "tilt", "game_over", "skill_shot", "multiball_start", "multiball_end"))
+
+#: PAD-1403: the cabinet buttons' shots, as its port gives them (profile_from_port)
+GODZILLA_PRO_1_15 = replace(GODZILLA_PRO_1_15, **dict(zip(("shots", "button_shots"), _CB.with_button_shots(
+    GODZILLA_PRO_1_15.shots, GODZILLA_PRO_1_15.game_dir))))
 
 PROFILES = {p.key: p for p in (GODZILLA_PRO_1_15,)}
 
@@ -2267,6 +2274,36 @@ SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.
                                 "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3",
                                 "transformers_mtmte_le-0.96/spike3"})
 
+#: PAD-1403: builds whose cabinet button shots (cabinet_buttons.py: presses, releases, holds, combos, from buttons.cfg)
+#: were seen reaching a mode in the emulator, as ``<game>-<version>``. 2026-11-18 (C:/tmp/PAD-1403: mkset.py built each
+#: card through engine.write_overrides with a blocks mode logging every button shot and starting on Left flipper +
+#: Action; job.sh at speed 1 pressed, held and combined the buttons; verify_all.py re-read every log): every newest
+#: library build, 53 of 53, gave each button shot its card carries exactly as often as pressed, in the runtime's log
+#: and the mode's, none in attract, and Left flipper + Action started the mode on every title with an Action button.
+BUTTON_SHOTS_PROVEN = frozenset({
+    "aerosmith-1.16", "aerosmith_le-1.16", "avengers_infinity_le-1.10", "avengers_infinity_pro-1.10", "batman-1.14",
+    "beatles-1.29", "deadpool_le-1.16", "deadpool_pro-1.16", "dungeons_and_dragons_le-1.10",
+    "dungeons_and_dragons_pro-1.10", "elvira3-1.13", "foo_fighters_le-1.04", "foo_fighters_pro-1.04",
+    "godzilla_le-1.16", "godzilla_pro-1.16", "guardians-1.15", "guardians_le-1.15", "iron_maiden_le-1.18",
+    "iron_maiden_pro-1.18", "james_bond_60th_le-1.11", "james_bond_le-1.06", "james_bond_pro-1.06", "jaws_le-1.02",
+    "jaws_pro-1.02", "john_wick_le-1.02", "john_wick_pro-1.02", "jurassic_park_le-1.16", "jurassic_park_pro-1.16",
+    "jurassic_park_the_pin-1.05", "king_kong_le-0.97", "king_kong_pro-0.97", "led_zeppelin_le-1.22",
+    "led_zeppelin_pro-1.22", "mando_le-1.45", "mando_pro-1.45", "metallica_spike-1.04", "munsters_le-1.28",
+    "munsters_pro-1.28", "rush_le-1.19", "rush_pro-1.19", "star_wars_elg-1.10", "star_wars_le-1.31",
+    "star_wars_pro-1.31", "stranger_things-1.13", "stranger_things_le-1.13", "sword_of_rage_le-1.19",
+    "sword_of_rage_pro-1.19", "turtles_le-1.59", "turtles_pro-1.59", "uncanny_xmen_le-0.98", "uncanny_xmen_pro-0.98",
+    "venom_le-1.07", "venom_pro-1.07"})
+
+
+def button_shots_proven(tkey):
+    """PAD-1403: True when build *tkey*'s button shots are proven: it, or another build of its title (the same game
+    folder: an older build the sweeps never boot runs the same drain on the same buttons, its ids read off its own
+    program), is in :data:`BUTTON_SHOTS_PROVEN`."""
+    if tkey in BUTTON_SHOTS_PROVEN:
+        return True
+    game = tkey.rsplit("-", 1)[0]
+    return "/" not in tkey and any(k.rsplit("-", 1)[0] == game for k in BUTTON_SHOTS_PROVEN)
+
 
 def _core_names(port):
     """The core sites and data one port uses, as pad_mode_runtime.c's core_of_port picks them."""
@@ -2669,6 +2706,8 @@ def profile_from_port(path):
         raise ModeProjectError("%s lacks what every mode needs (%s): the runtime would hook "
                                "nothing" % (base, ", ".join(missing)))
     shots, switch_shots = _shots_with_switches(port)
+    shots, button_shots = _CB.with_button_shots(                       # PAD-1403
+        shots, game, arch, reserved=sum({int(m) for _sw, m, _n in port.get("switch", ())}))
     if not shots:
         raise ModeProjectError("%s names no shots" % base)
     # PAD-1284: the 64-bit runtime builds its std::strings itself (the program's are the C++11 ABI and it
@@ -2816,6 +2855,10 @@ def profile_from_port(path):
     if switch_shots and tkey not in seen:
         switch_note = ("%s's shots from switches (%s) have not been seen reaching a mode in the "
                        "emulator yet." % (label, ", ".join(switch_shots)))
+    if button_shots and not button_shots_proven(tkey):                 # PAD-1403
+        switch_note = (switch_note + " " if switch_note else "") + (
+            "%s's cabinet button shots (presses, releases, holds and combos) have not been seen reaching a mode in "
+            "the emulator yet." % label)
     return TitleProfile(
         key=profile_key(game, version, arch),
         label=label,
@@ -2847,6 +2890,7 @@ def profile_from_port(path):
         sound_note=TITLE_SOUND_UNHEARD.get(tkey, ""),
         score_bits=32 if RUNTIME_CORE_32[0] in sites else 64,
         switch_shots=switch_shots,
+        button_shots=button_shots,
         switch_shots_note=switch_note,
         drain_shot=DRAIN_SHOT if DRAIN_SHOT in _internal_shots(port) else "",
         stack_note=stack_note,
@@ -5695,7 +5739,7 @@ def starts_on_sequence(spec):
 def playfield_shots(p):
     """The title's shot names that are shots on the playfield: the cabinet buttons the port's
     `switch` lines add (``switch_shots``) are left out."""
-    buttons = set(getattr(p, "switch_shots", ()) or ())
+    buttons = set(getattr(p, "switch_shots", ()) or ()) | set(getattr(p, "button_shots", ()) or ())   # PAD-1403
     return [n for n, _m in p.shots if n not in buttons]
 
 

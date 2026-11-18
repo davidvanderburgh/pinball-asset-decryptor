@@ -779,7 +779,8 @@ def test_the_real_cards_give_a_run_through_writes_code(tmp_path, monkeypatch, ke
         name="RUSH", title=prof.key, start_shot=prof.example_start_shot,
         scoring_shots=[n for n, _m in prof.shots][:2], screen=False, clip="none"))
     ts = MT.build_set(project, card, base=str(tmp_path / "try"))
-    assert sorted(os.listdir(ts.stage_dir)) == ["game.port", "mode.cfg", "pad_mode.so"]
+    # PAD-1403: buttons.cfg, the cabinet buttons as shots, on the switch ids the card's own program names
+    assert sorted(os.listdir(ts.stage_dir)) == ["buttons.cfg", "game.port", "mode.cfg", "pad_mode.so"]
     with open(os.path.join(ts.stage_dir, "game.port"), "rb") as a, open(MP.port_path(prof), "rb") as b:
         assert a.read() == b.read()
     with open(os.path.join(ts.stage_dir, "pad_mode.so"), "rb") as a, \

@@ -447,10 +447,10 @@ def test_jaws_greys_what_its_port_cannot_do(tmp_path, preview_on):
         _project(w, proj)
         st = w.state("modes")
         assert st["title_text"].startswith("Card: jaws_le-1_02_0.raw, Jaws LE 1.02 (from ")
-        assert "Modes of your own use its 27 shots." in st["title_text"]
+        assert "Modes of your own use its 45 shots." in st["title_text"]     # PAD-1403: 27 + 18 buttons
         assert "port" not in st["title_text"] and st["title_port"] == "jaws_le-1.02.port"
         assert st["profile"]["label"] == "Jaws LE 1.02"
-        assert len(st["profile"]["shots"]) == 27 and st["profile"]["cols"] == 3
+        assert len(st["profile"]["shots"]) == 27 + 18 and st["profile"]["cols"] == 3   # PAD-1403
         names = [e["name"] for e in st["examples"]]
         assert names == ["TARGET RUSH"]                   # not Godzilla's four, no code examples
         w.call("modes.new")
@@ -512,7 +512,7 @@ def test_beatles_switch_shots_are_proven_and_its_countdown_heard(tmp_path, previ
         _project(w, proj)
         st = w.state("modes")
         # PAD-420: 36 with the Top magnet opto's switch line (Mode > Magnet's shot; its hit started the proof mode)
-        assert st["profile"]["label"] == "The Beatles 1.29" and len(st["profile"]["shots"]) == 36
+        assert st["profile"]["label"] == "The Beatles 1.29" and len(st["profile"]["shots"]) == 36 + 12   # PAD-1403: no Action
         assert "shots from switches" not in st["title_note"]      # beatles-1.29 is in SWITCH_SHOTS_PROVEN
         w.call("modes.new")
         st = w.state("modes")
@@ -526,7 +526,7 @@ def test_tmnt_shots_and_greying(tmp_path, preview_on):
         _project(w, proj)
         w.call("modes.new")
         st = w.state("modes")
-        assert st["profile"]["label"] == "TMNT Pro 1.59" and len(st["profile"]["shots"]) == 17
+        assert st["profile"]["label"] == "TMNT Pro 1.59" and len(st["profile"]["shots"]) == 17 + 18   # PAD-1403
         # item 163: its countdown is heard (441); item 164: with no time-up call, a mode's own
         # end sound rides a carrier (heard at time-up in the emulator), so nothing is greyed
         assert not st["dis"]["countdown"] and not st["dis"]["own_sound"]

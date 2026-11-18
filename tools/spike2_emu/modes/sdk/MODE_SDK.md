@@ -6244,6 +6244,45 @@ game's default line, "SHOOT POP BUMPER FOR FINAL BLOW!" after the third stage); 
 screens, which name the spinner completed, read well over a ramp. A rewrite's own words would need
 the rule's display layer, which this item does not touch.
 
+## The cabinet buttons as shots (PAD-1403)
+
+Every Spike 2 title's modes can use the cabinet buttons as shots, picked like any other shot on the Mode page (start
+on, score on, add a ball on, the blocks' "When a shot is made"):
+
+| Shot | When it comes |
+|---|---|
+| Action button, Left flipper button, Right flipper button, Start button | the press |
+| ... released | the release of a press made in a game |
+| ... held 1 s, ... held 3 s | once, when the button has been held that long since its press |
+| Left flipper + Action button, Right flipper + Action button, Both flipper buttons | the press that makes both held, either order (Cyclops' visor in Uncanny X-Men 2.0) |
+
+Only while a game is played: a press in attract, the press of Start that begins a game, a tilt or the bonus give
+none. The Beatles, Jurassic Park The Pin and Star Wars ELG have no Action button, so they offer no Action shots. Each
+button shot takes a shot bit the title's port does not use, highest first, in the table's order; a port short of
+bits (King Kong: 9) offers the first ones (the presses, the flipper + Action combos, the 1 s holds). Godzilla's
+ports already name the Action and flipper buttons' presses as `switch` lines (PAD-228); those stay, the rest are
+added. A code mode asks for one by name (`pm_shot_mask("Action button held 1 s")`).
+
+The card carries `buttons.cfg` beside the runtime (`/usr/local/padmode`, or `/dump` on a rig), written from the
+card's OWN game program's switch table (LEFT/RIGHT FLIPPER BUTTON, LOCKDOWN/ACTION BUTTON, START BUTTON), so an
+older or derived build gets its own ids:
+
+    button <mask> press <id> <name>
+    button <mask> release <id> <name>
+    button <mask> hold <id> <ms> <name>
+    button <mask> combo <id> <id2> <name>
+
+The runtime counts each button's edges from the framework's switch drain (`site switch_edge`, which every Spike 2
+port names), whatever the switch's handler bits or the game's mode mask say, and reads a hold's or a combo's level
+from the switch's level byte. Its log says `button shots: 18 from buttons.cfg on 4 switch(es) ...` at the gate and
+`button shot: <name> (<mask>, press|release|held|both held)` for the first 64 each boot. A write refuses a mode that
+uses a button shot whose button the card's program does not name.
+
+Proven in the emulator (C:/tmp/PAD-1403, a blocks mode logging every button shot, started by Left flipper + Action):
+every newest library build, 53 of 53 (Uncanny X-Men LE and Pro 0.98 first), gave each button shot its card carries
+exactly as often as pressed, none in attract, and the visor combo started the mode on every title with an Action button
+(`mode_project.BUTTON_SHOTS_PROVEN`; an older build of a proven title counts as proven: the same drain, its own ids).
+
 ## Co-op play (PAD-1017)
 
 2 to 4 players play one game as a team, on a game without co-op of its own. TMNT, Venom, The Mandalorian, D&D,

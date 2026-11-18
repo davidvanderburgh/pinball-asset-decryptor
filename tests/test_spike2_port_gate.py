@@ -374,7 +374,7 @@ def test_the_beatles_profile():
     assert p.proven and not p.proven_note
     assert p.score_bits == 32 and p.shot_mask_bits == 32
     rule = [n for n, m in p.shots if m < (1 << 32)]
-    assert len(rule) == 27 and len(p.shots) == 36          # PAD-420: the magnet switch a shot too
+    assert len(rule) == 27 and len(p.shots) - len(p.button_shots) == 36          # PAD-420: the magnet switch a shot too
     assert p.switch_shots == ("Target 1", "Target 2", "Target 3", "Target 4", "Left outlane",
                               "Left return lane", "Right return lane", "Right outlane",
                               "Top magnet opto")                    # PAD-420: the magnet's own opto
@@ -500,4 +500,4 @@ def test_a_port_without_a_switch_hit_site_offers_no_switch_shots(tmp_path):
                    if not l.startswith(("site switch_hit", "site switch_edge")))
     (tmp_path / "beatles-1.29.port").write_text(text, encoding="utf-8")
     p = MP.profile_from_port(str(tmp_path / "beatles-1.29.port"))
-    assert len(p.shots) == 27 and p.switch_shots == () and p.switch_shots_note == ""
+    assert len(p.shots) - len(p.button_shots) == 27 and p.switch_shots == ()   # PAD-1403: + the buttons' shots

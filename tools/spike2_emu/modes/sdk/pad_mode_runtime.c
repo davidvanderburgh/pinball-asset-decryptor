@@ -127,11 +127,13 @@ static void log_raw(const char *who, const char *fmt, va_list ap)
     write(log_fd, b, (unsigned long)n);
 }
 
+static const char *layer_log_name(const struct pm_mode *m);   /* PAD-1401: the layers section */
 void pm_log(const char *fmt, ...)
 {
     va_list ap;
+    const char *ln = layer_log_name(current);
     va_start(ap, fmt);
-    log_raw(current && current->name ? current->name : "mode", fmt, ap);
+    log_raw(ln ? ln : current && current->name ? current->name : "mode", fmt, ap);
     va_end(ap);
 }
 
@@ -1114,9 +1116,16 @@ unsigned pm_begun(void) { return begun; }
 
 /* PAD-363: one mode object that runs several modes (mode_file.c: every mode file) names the one it began, so
  * the runtime's own lines ("block: ... - BLOCKTEST is running") say which. Only while it runs; pm_end forgets. */
+static const struct pm_mode *name_for;  /* PAD-1401: named before it began (a form layer): its name as it begins */
+static char name_next[40];
 void pm_running_name(const char *name)
 {
     int li = layer_of(current);
+    if (li < 0 && current && current != running) {
+        name_for = current;
+        pm_snprintf(name_next, sizeof name_next, "%s", name ? name : "");
+        return;
+    }
     if (li >= 0) {                                  /* PAD-1401: a layer's name */
         pm_snprintf(layers[li].as, sizeof layers[li].as, "%s", name ? name : "");
         return;
@@ -1216,22 +1225,29 @@ int pm_begin_layer(unsigned priority, unsigned flags)
             pm_log("not started: %d modes of ours already run over the base mode - the most at once", LAYERS_MAX);
         return 0;
     }
-    over = running;                          /* its parent: the top one of ours running now */
-    for (i = 0; i < n_layers; i++)
-        if (!over || layer_rank(layers[i].m) > layer_rank(over)) over = layers[i].m;
     i = n_layers++;
     layers[i].m = current;
     layers[i].prio = priority;
     layers[i].flags = flags;
     layers[i].seq = ++layer_seq;
-    layers[i].parent = over;
     layers[i].as[0] = 0;
+    if (name_for == current) pm_snprintf(layers[i].as, sizeof layers[i].as, "%s", name_next);
+    name_for = 0;
+    {                                        /* the one right under it: the highest of ours running below its rank */
+        long me = layer_rank(current);
+        int j;
+        over = running;
+        for (j = 0; j < n_layers; j++)
+            if (layers[j].m != current && layer_rank(layers[j].m) < me && (!over || layer_rank(layers[j].m) > layer_rank(over)))
+                over = layers[j].m;
+    }
+    layers[i].parent = over;
     refused_forget();
     begun++;                                 /* PAD-413: an ending on the glass gives way to it */
     lit_hold_until = 0;                      /* PAD-503 */
     disp_linger_other_began();
     clip_other_began();                      /* the newest has the screen; the base's backdrop stays (bd_) */
-    say("layers: %s begins as a layer at priority %u over %s%s - %d of ours run now", current->name ? current->name : "a mode",
+    say("layers: %s begins as a layer at priority %u over %s%s - %d of ours run now", mode_name(current, "a mode"),
         priority, over ? mode_name(over, "a mode") : "nothing of ours",
         flags & PM_LAYER_PAUSE_BELOW ? ", the ones under it paused" : "", (running ? 1 : 0) + n_layers);
     return 1;
@@ -1258,6 +1274,18 @@ int pm_paused(void)
 }
 
 int pm_layers(void) { return n_layers; }
+
+/* a layer's own lines say its name (pm_running_name's): a form mode's runner is otherwise one more "mode" */
+static const char *layer_log_name(const struct pm_mode *m)
+{
+    int i = layer_of(m);
+    return i >= 0 && layers[i].as[0] ? layers[i].as : 0;
+}
+
+/* one mode object running several of its modes at once (mode_file.c: a layered form mode on a runner of its own) makes
+ * the calls that follow as another pm_mode of its own - registered or not - until its callback returns or it says
+ * pm_as again; 0 changes nothing */
+void pm_as(const struct pm_mode *m) { if (m) current = m; }
 
 static int name_same(const char *a, const char *b)   /* the same mode name, case aside */
 {
@@ -2419,6 +2447,8 @@ static void lamp_under_drop(int k, const struct pm_mode *m)
 
 /* PAD-1401: where a hold sits in insert k's list under the top: a layer's by its rank, every other one level with
  * the rest (so with no layer running the list is what it was: the latest last, next back). The slot it goes in */
+static long layer_rank(const struct pm_mode *m);   /* the layers section (pm_begin's) */
+static int runs_now(const struct pm_mode *m);
 static long lamp_under_key(const struct pm_mode *m) { long r = layer_rank(m); return r > 0 ? r : 0; }
 static struct lamp_under *lamp_under_slot(int k, const struct pm_mode *m)
 {
@@ -2451,7 +2481,7 @@ static int lamp_goes_under(int k, const struct pm_mode *me, unsigned rgb, int pa
 {
     struct lamp_held *h = &lamp_held[k];
     struct lamp_under *u;
-    if (!n_layers || !h->owner || h->owner == me || h->flash_only || !runs_now(me) || !runs_now(h->owner)
+    if (!pm_layers() || !h->owner || h->owner == me || h->flash_only || !runs_now(me) || !runs_now(h->owner)
         || layer_rank(h->owner) <= layer_rank(me)) return 0;
     u = lamp_under_slot(k, me);
     u->owner = me; u->rgb = rgb; u->period = period; u->chase_i = chase_i;

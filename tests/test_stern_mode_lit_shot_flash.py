@@ -115,7 +115,7 @@ def test_the_runtime_makes_the_call_with_a_shows_limits():
 def test_the_mode_file_plays_it_on_each_scoring_hit():
     src = (SDK / "mode_file.c").read_text(encoding="utf-8")
     assert 'TEXT("show_hit", show_hit)' in src and "char show_hit[40];" in src
-    shot = _fn(src, "static void on_shot(uint64_t mask)")
+    shot = _fn(src, "static void run_shot(uint64_t mask, unsigned p)")   # PAD-1401: each runner's part
     pay = shot[:shot.index("penalty_bits(M)")]                  # in the scoring hit's own block
     assert 'if (!game_show(M, cfg.show_hit, "a shot"))\n            pm_lamp_flash(' in pay
     assert "static int game_show(" in src

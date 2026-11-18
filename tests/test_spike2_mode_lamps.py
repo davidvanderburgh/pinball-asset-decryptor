@@ -317,6 +317,10 @@ def runtime(tmp_path_factory):
     end = src.index("/* ---- LAMPS END */")
     helpers = "\n".join(_function(src, r) for r in (
         r"static int str_eq\(", r"static int hexval\(", r"static uint64_t number\(", r"static void rest\("))
+    # PAD-1401: the layers the section asks about live outside it - here none of ours ever runs as a layer
+    helpers += ("\nstatic long layer_rank(const struct pm_mode *m) { return m ? 0 : -1; }"
+                "\nstatic int runs_now(const struct pm_mode *m) { return 0; }"
+                "\nint pm_layers(void) { return 0; }\n")
     # PAD-1282 / PAD-1283: the runtime's PM_PTR and lamp_group_fn, which the section uses but sit outside it
     types = "\n".join(ln for ln in src.splitlines()
                       if ln.startswith(("#define PM_PTR ", "typedef pm_addr (*lamp_group_fn)")))

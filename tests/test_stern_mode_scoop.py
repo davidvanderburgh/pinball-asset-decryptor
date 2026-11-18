@@ -111,7 +111,9 @@ def test_the_handlers_calls_are_logged_only_when_the_port_asks():
 
 def test_every_end_lets_go_and_the_swap_is_checked():
     src = RUNTIME.read_text(encoding="utf-8")
-    assert "scoop_let_go();" in _lift(src, "void pm_end(void)")
+    # PAD-1401: once no mode of ours runs (a layer ending leaves the base's hold be)
+    assert "layers_end_lets_go();" in _lift(src, "void pm_end(void)")
+    assert "scoop_let_go();" in _lift(src, "static void layers_end_lets_go(void)")
     assert "scoop.hold_ms = 0;" in _lift(src, "static void scoop_let_go(void)")
     tick = _lift(src, "static void scoop_tick(void)")
     assert '*slot != fn("scoop_handler")' in tick and "can &= ~PM_CAN_SCOOP;" in tick
@@ -231,7 +233,7 @@ def test_every_shipped_build_gets_a_verdict_with_the_game_named():
 def test_the_interpreter_sets_the_hold_when_the_mode_starts():
     src = (SDK / "mode_file.c").read_text(encoding="utf-8")
     assert "if (scoop_line(M, line)) return;" in src
-    start = _lift(src, "static void mode_start(")
+    start = _lift(src, "static void mode_start_in(")   # PAD-1401: on its runner
     assert "if (cfg.scoop_ms) pm_scoop_hold(cfg.scoop_ms);" in start
 
 

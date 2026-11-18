@@ -78,9 +78,9 @@ def test_the_interpreter_waits_its_clock_for_a_wait_hold():
     assert at.index("run.at_ball_start") < at.index("pm_coil_hold(")       # a challenge's ball: no hold at all
     waits = _lift(src, "static int clock_waits(")
     assert "pm_coil_holding(cfg.coil_name[run.clock_wait - 1])" in waits
-    tick = _lift(src, "static void on_tick(")
+    tick = _lift(src, "static void run_tick(")   # PAD-1401: each runner's mode
     assert tick.index("if (clock_waits(M)) return;") < tick.index("if (run.ticks_left) run.ticks_left--;")
-    start = _lift(src, "static void mode_start(")
+    start = _lift(src, "static void mode_start_in(")   # PAD-1401: on its runner
     assert start.index("run.clock_wait = 0;") < start.index('run.at_ball_start = name_is(why, "challenge pick");') \
         < start.index("coils_at(M, 0);")
 

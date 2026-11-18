@@ -56,7 +56,8 @@ _BOOL_FIELDS = ("screen", "countdown", "lights", "advanced", "stack", "light_sho
                 "coil_wait_0", "coil_wait_1", "coil_wait_2",                       # PAD-621
                 "shield",                                                          # PAD-392
                 "shake_on_start", "shake_on_shot", "shake_on_end",                 # PAD-414
-                "seq_reset_any")                                                   # PAD-314
+                "seq_reset_any",                                                   # PAD-314
+                "layer", "layer_pause", "layer_shots")                             # PAD-1401
 _STR_FIELDS = (
     "name", "start_shot", "start_count", "seconds", "award", "screen_title", "panel_color",
     "title_color", "clip", "clip_title", "clip_when", "light_color", "light_on_raw",
@@ -76,6 +77,7 @@ _STR_FIELDS = (
     "seq_shot_0", "seq_shot_1", "seq_shot_2", "seq_shot_3",                           # PAD-314
     "seq_shot_4", "seq_shot_5", "seq_shot_6", "seq_shot_7",
     "game_modes",                                                                     # PAD-363
+    "layer_priority", "inside",                                                       # PAD-1401
     "shake_what_start", "shake_what_shot", "shake_what_end",                          # PAD-414
     "shake_s_start", "shake_s_shot", "shake_s_end", "shake_shot",
     "show_start", "show_end", "show_hit",                                             # PAD-418; PAD-642
@@ -120,6 +122,7 @@ _DEFAULTS = {
     "start_or_0": "(no other shot)", "start_or_1": "(no other shot)",              # PAD-518
     "seq_reset_any": False,                                                        # PAD-314
     "game_modes": "block",                                                         # PAD-363; PAD-398
+    "layer": False, "layer_priority": "10", "layer_pause": False, "layer_shots": False, "inside": "",   # PAD-1401
     "show_start": "(none)", "show_end": "(none)", "show_hit": "(none)",            # PAD-418; PAD-642
     "game_wizard": "(none)", "wizard_how": "light",                                # PAD-436
     **{"seq_shot_%d" % i: "(no more shots)" for i in range(8)},
@@ -2059,6 +2062,11 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
             self._open_starts(spec)
             f["stack"] = bool(getattr(spec, "stack", True))
             self._open_game_modes(spec)                     # PAD-363
+            f["layer"] = bool(getattr(spec, "layer", False))   # PAD-1401
+            f["layer_priority"] = str(getattr(spec, "layer_priority", MP.LAYER_PRIORITY))
+            f["layer_pause"] = bool(getattr(spec, "layer_pause", False))
+            f["layer_shots"] = bool(getattr(spec, "layer_shots", False))
+            f["inside"] = str(getattr(spec, "inside", "") or "")
             self._open_multiball(spec)
             self._open_advanced(spec)
             self._open_trigger(spec)
@@ -2104,6 +2112,14 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
         spec.starts, spec.cooldown = self._form_starts()
         spec.stack = bool(self.f["stack"])
         self._collect_game_modes(spec)                      # PAD-363
+        spec.layer = bool(self.f["layer"]) and spec.game_modes != "own_game"   # PAD-1401
+        try:
+            spec.layer_priority = max(0, min(255, int(str(self.f["layer_priority"]).strip())))
+        except ValueError:
+            spec.layer_priority = MP.LAYER_PRIORITY
+        spec.layer_pause = bool(self.f["layer_pause"]) and spec.layer
+        spec.layer_shots = bool(self.f["layer_shots"]) and spec.layer
+        spec.inside = str(self.f["inside"] or "").strip() if spec.layer else ""
         self._collect_multiball(spec)
         self._collect_advanced(spec)
         self._collect_trigger(spec)
@@ -2694,6 +2710,9 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
         f["after_when"] = spec.after_when if spec.after_when in MP.AFTER_WHEN else "game"
         self.set(other_modes=sorted({s.name.strip() for sl, s in self._found.items()
                                      if sl != slug and s.name.strip()}))
+        # PAD-1401: a layer may run inside any of my other modes, form or blocks, by the name it runs under
+        self.set(my_modes=sorted({s.name.strip() for sl, s in self._found.items() if sl != slug and s.name.strip()}
+                                 | set(self._my_mode_names()), key=str.lower))
 
     def _collect_more_to_start(self, spec):
         rows = []

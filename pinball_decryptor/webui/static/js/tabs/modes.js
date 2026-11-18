@@ -46,6 +46,12 @@ const T = {
   clipTitle: "The title card's words, over the panel color with a sweep in the title color. Empty uses the mode's name.",
   cooldown: "0 = no wait. The wait runs from the moment the mode ends, and carries on through the end of a ball.",
   starts: "Counted for each player. Once a ball starts again on the player's next ball; once a game, and up to N times, start again in the next game.",
+  // PAD-1401: several of my modes at once
+  layer: "One at a time (the usual): while it runs no other mode of yours starts. Over them, as a layer: it starts while your other modes run and runs on top of them - a mode that is the whole game, the modes stacking on it, and a multiball or wizard over those. The top one's screen shows; an insert it lights stays its while one under it lights the same one.",
+  layerPriority: "Which layer is on top when several run: the higher number is over the lower (0-255). At the same number the one that began last is on top. Every layer is over a mode that runs one at a time.",
+  inside: "A mode it lives inside: it starts only while that one runs, and ends when that one ends. Any: it starts whenever its start is met, over whatever of yours runs.",
+  layerPause: "While it runs, your modes under it stand still: their clocks stop and their shots pay nothing, and they carry on where they were when it ends.",
+  layerShots: "While it runs, the shots made are its alone: your modes under it don't see them.",
   stack: "On: the mode starts whenever its shot is made, even during one of the game's own battles or multiballs. Off: it waits until the game's own battle or multiball ends, and the next start shot after that starts it.",
   gameModes: "Cannot start (the usual): while this mode runs it is the only thing going - the modes ticked below cannot start, and none of the game's features lights, locks, counts or awards unless you tick it under Keep counting. Switched off: this mode is the whole game - it starts with every game, lasts every ball and player, and the game's own scoring, calls, multiballs and ball saves are off underneath it. May start: the game's modes start as usual while this one runs, and its screen moves to the edges so their words stay readable. End this one: it starts only while none of the game's modes runs, and one of them starting ends it.",
   keepRule: "Ticked: this feature of the game's goes on counting its shots while this mode runs (its progress, its jackpots, its locks and the multiball it leads to). Not ticked: it sees none of them until this mode ends.",
@@ -618,6 +624,32 @@ function ModePage({ s, f, off, dis, rs, lim }) {
           <div class="small muted">${keepOn.size ? "The ones ticked go on counting; every other feature of the game's waits until this mode ends." : "None ticked: only this mode counts while it runs."}</div>` : null}
         <${Check} label="Can run during the game's own modes" checked=${f.stack} disabled=${off || dis.stack || (f.game_modes || "block") !== "stack"} title=${T.stack} ns="modes" k="f:stack" />
       <//>
+      ${(() => {      /* PAD-1401: several of my modes at once - one at a time, or over them as a layer */
+        const own = f.game_modes === "own_game";
+        const layer = !!f.layer && !own;
+        const names = (s.my_modes || []).filter((n) => n !== f.name);
+        const inOpts = withValue([{ value: "", label: "any of them" }, ...names.map((n) => ({ value: n, label: n }))], f.inside || "");
+        return html`<${Sec} title="My other modes">
+          <div class="row wrap">
+            <span class="dim nw" title=${T.layer}>With my other modes, it runs</span>
+            <${Select} value=${layer ? "layer" : "alone"} disabled=${off} width=${200} title=${T.layer}
+              options=${[{ value: "alone", label: "one at a time" }, { value: "layer", label: "over them, as a layer", disabled: own }]}
+              onChange=${(v) => setField("modes", "f:layer", v === "layer", { flush: true })} />
+            ${layer ? html`
+              <span class="dim nw" title=${T.layerPriority}>at priority</span>
+              <${Field} ns="modes" k="f:layer_priority" value=${f.layer_priority} disabled=${off} width=${50} title=${T.layerPriority} />
+              <span class="dim nw" title=${T.inside}>inside</span>
+              <${Select} value=${f.inside || ""} options=${inOpts} ns="modes" k="f:inside" disabled=${off} width=${200} title=${T.inside} />` : null}
+          </div>
+          ${layer ? html`<div class="row wrap">
+            <${Check} label="The ones under it wait while it runs" checked=${f.layer_pause} disabled=${off} title=${T.layerPause} ns="modes" k="f:layer_pause" />
+            <${Check} label="The shots are its alone while it runs" checked=${f.layer_shots} disabled=${off} title=${T.layerShots} ns="modes" k="f:layer_shots" />
+          </div>` : null}
+          <div class="small muted wrap">${own ? "This mode is the whole game: your other modes run over it, as layers."
+            : layer ? (f.inside ? `It starts only while ${f.inside} runs, and ends with it.` : "It starts while your other modes run, on top of them.")
+            : "While it runs, no other mode of yours starts (unless that one runs over it, as a layer)."}</div>
+        <//>`;
+      })()}
       <${Sec} title="Ball save" reason=${rs.ball_save}>
         <div class="row wrap">
           <${Check} label="A ball save when it starts, for" checked=${f.start_save} disabled=${bsOff} title=${T.startSave} ns="modes" k="f:start_save" />

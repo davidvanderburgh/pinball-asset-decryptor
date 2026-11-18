@@ -96,7 +96,8 @@ def test_the_move_is_the_games_own_and_put_back_on_every_end():
     calls = re.findall(r'fn\("shield_move"\)\)\(obj, ', src)
     assert len(calls) == 2, "the move and the put-back - nothing else drives the motor"
     assert "shield_go(obj, where)" in _lift(src, "int pm_shield(int where)")
-    assert 'shield_let_go("the mode ended")' in _lift(src, "void pm_end(void)")
+    assert "layers_end_lets_go();" in _lift(src, "void pm_end(void)")   # PAD-1401: once none of ours runs
+    assert 'shield_let_go("the mode ended")' in _lift(src, "static void layers_end_lets_go(void)")
     assert 'shield_let_go("the ball ended")' in _lift(src, "static void on_ball_end(")
     assert "shield_tick();" in _lift(src, "static void on_tick(")
     tick = _lift(src, "static void shield_tick(")
@@ -121,7 +122,7 @@ def test_the_games_return_to_rest_waits_only_while_the_mode_has_the_shield():
     modes or multiballs has the stage; letting go ends the hold at once, before the put-back."""
     src = _rt()
     veto = _lift(src, "static int shield_update_veto(")
-    for need in ("shd.hold", "r[0] != obj", "!running", "pm_aside()"):
+    for need in ("shd.hold", "r[0] != obj", "!any_ours()", "pm_aside()"):   # PAD-1401: or a layer
         assert need in veto, need
     assert "hook_veto(fn(\"shield_update\"), shield_update_veto)" in _lift(src, "static void shield_arm(")
     assert "shd.hold = 1;" in _lift(src, "static unsigned shield_go(")

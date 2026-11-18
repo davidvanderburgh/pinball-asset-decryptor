@@ -24,6 +24,7 @@ static int pm_in_game(void);
 struct pm_mode { const char *name; };
 static const struct pm_mode mode_a = { "A" }, mode_b = { "B" };
 static const struct pm_mode *current, *running, *clip_owner;
+static int runs_now(const struct pm_mode *m) { return m && m == running; }   /* PAD-1401: no layer here */
 static unsigned begun;
 static unsigned can = PM_CAN_CLIPS;
 static int clip_v2 = 1, clip_layer, clip_layer_in;

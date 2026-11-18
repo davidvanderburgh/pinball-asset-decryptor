@@ -181,3 +181,181 @@ def test_two_modes_that_run_alone_are_still_one_at_a_time(tmp_path):
     assert "[FUTURE] START" in out and "[OTHER] START" not in out   # its shot waits while FUTURE runs
     assert scores(out) == [1000]
     assert "LAYER" not in out
+
+
+# ---- form modes: mode_file.c's runners --------------------------------------------------------------------------
+# The mode files' harness (tests/test_spike2_mode_roster.py) with the runtime's layers as the runtime keeps them: the
+# base on pm_begin, layers on pm_begin_layer, the calls made as a runner after pm_as, and a shot delivered to the
+# running layers' runners top-down before the object itself.
+
+FORM_LAYERS = r'''
+static const struct pm_mode *cur;
+void pm_as(const struct pm_mode *m) { if (m) cur = m; }
+static struct { const struct pm_mode *m; unsigned prio, flags; char as[40]; } lay[8];
+static int n_lay;
+static char base_as[40];
+static int lay_of(const struct pm_mode *m) { int i; for (i = 0; i < n_lay; i++) if (lay[i].m == m) return i; return -1; }
+static long rank_of(const struct pm_mode *m) { int i = lay_of(m); return i < 0 ? 0 : 1 + (long)lay[i].prio; }
+static const struct pm_mode *base_m, *name_for;
+static char name_next[40];
+int pm_begin(void) { if (lay_of(cur) >= 0) return 1; if (running_mode || c_mode) return 0; running_mode = 1; base_m = cur; return 1; }
+void pm_end(void)
+{
+    int i = lay_of(cur), j;
+    if (i < 0) { running_mode = 0; base_as[0] = 0; return; }
+    printf("LAYER END %s\n", lay[i].as);
+    for (j = i + 1; j < n_lay; j++) lay[j - 1] = lay[j];
+    n_lay--;
+}
+int pm_begin_layer(unsigned prio, unsigned flags)
+{
+    if (lay_of(cur) >= 0) return 1;
+    lay[n_lay].m = cur, lay[n_lay].prio = prio, lay[n_lay].flags = flags, lay[n_lay].as[0] = 0;
+    if (name_for == cur) snprintf(lay[n_lay].as, 40, "%s", name_next);
+    name_for = 0;
+    n_lay++;
+    printf("LAYER BEGIN %s %u%s\n", lay[n_lay - 1].as, prio, flags & PM_LAYER_PAUSE_BELOW ? " pause" : "");
+    return 1;
+}
+void pm_running_name(const char *n)
+{
+    int i = lay_of(cur);
+    if (i < 0 && !(running_mode && cur == base_m)) { name_for = cur; snprintf(name_next, 40, "%s", n); return; }
+    snprintf(i >= 0 ? lay[i].as : base_as, 40, "%s", n);
+}
+int pm_layers(void) { return n_lay; }
+int pm_layer_top(void) { int i; long r = rank_of(cur); for (i = 0; i < n_lay; i++) if (rank_of(lay[i].m) > r) return 0; return 1; }
+int pm_paused(void)
+{
+    int i; long r = rank_of(cur);
+    for (i = 0; i < n_lay; i++) if ((lay[i].flags & PM_LAYER_PAUSE_BELOW) && rank_of(lay[i].m) > r) return 1;
+    return 0;
+}
+int pm_mode_running_named(const char *n)
+{
+    int i;
+    if (running_mode && !strcasecmp(base_as, n)) return 1;
+    for (i = 0; i < n_lay; i++) if (!strcasecmp(lay[i].as, n)) return 1;
+    return 0;
+}
+static long claim = -1;
+static int delivering;
+void pm_shot_claim(void) { long r = rank_of(cur); if (delivering && r > claim) claim = r; }
+int pm_shot_taken(void) { return delivering && claim > rank_of(cur); }
+static void deliver(const struct pm_mode *m, uint64_t mask)
+{
+    const struct pm_mode *o[8];
+    int n = 0, i, j;
+    for (i = 0; i < n_lay; i++) o[n++] = lay[i].m;
+    for (i = 1; i < n; i++)
+        for (j = i; j > 0 && rank_of(o[j]) > rank_of(o[j - 1]); j--) { const struct pm_mode *t = o[j]; o[j] = o[j - 1]; o[j - 1] = t; }
+    claim = -1;
+    delivering = 1;
+    for (i = 0; i < n; i++) if (o[i]->shot) { cur = o[i]; o[i]->shot(mask); }
+    cur = m;
+    m->shot(mask);
+    delivering = 0;
+}
+int main(int argc, char **argv)'''
+
+
+def _form_harness(tmp_path):
+    from tests import test_spike2_mode_roster as R
+    cc = R._cc()
+    src = R.HARNESS.replace(
+        '''int pm_begin(void) { if (running_mode || c_mode) return 0; running_mode = 1; return 1; }
+void pm_end(void) { running_mode = 0; }''', "").replace(
+        "int main(int argc, char **argv)", FORM_LAYERS, 1).replace(
+        "m->shot(strtoull(argv[++k], 0, 0));", "deliver(m, strtoull(argv[++k], 0, 0));").replace(
+        "m->tick();", "cur = m, m->tick();").replace("m->ball_end();", "cur = m, m->ball_end();").replace(
+        "m->init();", "cur = m, m->init();")
+    assert "deliver(m," in src and "int pm_begin_layer" in src
+    (tmp_path / "harness.c").write_text("#include <strings.h>\n" + src)
+    stubs, _names = R.weak_stubs(open(os.path.join(SDK, "pad_mode.h"), encoding="utf-8").read())
+    (tmp_path / "weak_stubs.c").write_text(stubs)
+    for std in ("-std=gnu2x", "-std=gnu17"):
+        r = subprocess.run([cc, std, "-w", "-I", SDK, "-c", "-o", str(tmp_path / "weak_stubs.o"),
+                            str(tmp_path / "weak_stubs.c")], capture_output=True, text=True)
+        if r.returncode == 0:
+            break
+    assert r.returncode == 0, r.stderr
+    exe = tmp_path / "harness"
+    r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wno-unused-parameter", "-I", SDK, "-o", str(exe),
+                        str(tmp_path / "harness.c"), os.path.join(SDK, "mode_file.c"), str(tmp_path / "weak_stubs.o")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return exe, R
+
+
+FUTURE = "name FUTURE\ngame_modes stack\ntrigger 0x2 1\nseconds 60\nshots 0x6\naward 1000\naward_ladder fixed\n"
+STORM = ("name STORM\ngame_modes stack\ntrigger 0x4 1\nseconds 10\nshots 0x6\naward 7\naward_ladder fixed\n"
+         "layer 20 shots\ninside FUTURE\n")
+
+
+def test_a_form_mode_runs_as_a_layer_over_the_base(tmp_path):
+    exe, R = _form_harness(tmp_path)
+    out = R._run(exe, tmp_path, FUTURE, "tick", "3",
+                 "shot", "0x4",                 # STORM lives inside FUTURE: not yet
+                 "shot", "0x2",                 # FUTURE starts
+                 "shot", "0x4",                 # FUTURE pays; STORM starts over it
+                 "shot", "0x2",                 # STORM alone: it keeps the shots
+                 "tick", "620",                 # STORM's 10 s
+                 "shot", "0x2",                 # FUTURE's again
+                 mode1=STORM)
+    assert "STORM not started (trigger shot): it runs inside FUTURE, which is not running" in out
+    assert "LAYER BEGIN STORM 20" in out
+    pays = re.findall(r"shot 00000000_0000000[24]: \+(\d+)", out)
+    assert pays == ["1000", "7", "1000"], out
+    assert "LAYER END STORM" in out
+    assert re.search(r"STORM END \(time ran out\)", out)
+    assert out.index("LAYER END STORM") < out.rindex("+1000")
+
+
+def test_a_form_layer_ends_with_the_mode_it_runs_inside(tmp_path):
+    exe, R = _form_harness(tmp_path)
+    short = FUTURE.replace("seconds 60", "seconds 3")
+    out = R._run(exe, tmp_path, short, "tick", "3", "shot", "0x2", "shot", "0x4", "tick", "240", mode1=STORM)
+    assert "LAYER BEGIN STORM 20" in out
+    assert re.search(r"FUTURE END \(time ran out\)", out)
+    assert re.search(r"STORM END \(the mode it runs inside ended\)", out)
+
+
+def test_a_form_wizard_stands_the_base_still(tmp_path):
+    exe, R = _form_harness(tmp_path)
+    wizard = "name PHOENIX\ngame_modes stack\ntrigger 0x4 1\nseconds 5\nshots 0x6\naward 3\naward_ladder fixed\nlayer 50 pause\n"
+    out = R._run(exe, tmp_path, FUTURE.replace("seconds 60", "seconds 10"), "tick", "3",
+                 "shot", "0x2", "shot", "0x4", "shot", "0x2", "tick", "620", mode1=wizard)
+    assert "LAYER BEGIN PHOENIX 50 pause" in out
+    pays = re.findall(r"shot 00000000_0000000[24]: \+(\d+)", out)
+    assert pays == ["1000", "3"], out             # FUTURE stood still: the 0x2 is PHOENIX's alone
+    assert "PHOENIX END (time ran out)" in out
+    assert not re.search(r"FUTURE END", out)       # 10 s, of which 5 stood still: not over after 10.3 s
+
+
+# ---- the form: its fields, the mode file's lines, the checks -----------------------------------------------------
+
+def test_a_form_mode_writes_its_layer_and_inside_lines():
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    p = MP.profile("uncanny_xmen_le_0_98")
+    s = MP.blank_spec(p, "STORM")
+    assert MP.layer_lines(s) == [] and not any(l.startswith(("layer", "inside")) for l in MP.runtime_cfg(s, "storm").splitlines())
+    s.layer, s.layer_priority, s.layer_pause, s.layer_shots, s.inside = True, 20, True, True, "FUTURE"
+    assert MP.layer_lines(s) == ["layer          20 pause shots", "inside         FUTURE"]
+    lines = MP.runtime_cfg(s, "storm").splitlines()
+    assert "layer          20 pause shots" in lines and "inside         FUTURE" in lines
+    assert MP.validate_layer(s) == []
+    s.inside = "storm"
+    assert MP.validate_layer(s) == ["It cannot run inside itself."]
+    s.inside, s.layer_priority = "", 300
+    assert MP.validate_layer(s) == ["Its layer's priority is a whole number from 0 to 255."]
+    w = MP.blank_spec(p, "UNCANNY")
+    w.game_modes, w.layer = "own_game", True
+    assert MP.layer_lines(w) == []                 # the whole game is the base
+    assert "cannot run over them too" in MP.validate_layer(w)[0]
+
+
+def test_the_layer_lines_parse_in_mode_file_c():
+    src = open(os.path.join(SDK, "mode_file.c"), encoding="utf-8").read()
+    assert 'key_is(line, "layer")' in src and 'key_is(line, "inside")' in src
+    assert 'key_is(a, "pause")' in src and 'key_is(a, "shots")' in src
+    assert "pm_begin_layer(cfg.layer_1 - 1" in src

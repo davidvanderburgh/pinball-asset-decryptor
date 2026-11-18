@@ -131,6 +131,10 @@ int pm_mode_running_named(const char *name);   /* one of yours by that name runs
 void pm_shot_claim(void);     /* in .shot, while yours runs: the shot is yours - the modes of yours running
                                  under it see pm_shot_taken() */
 int pm_shot_taken(void);      /* in .shot: a mode of yours running over yours claimed this shot */
+void pm_as(const struct pm_mode *m);   /* one object running several modes at once (mode_file.c): the calls that
+                                          follow are made as m, another pm_mode of the same object (registered or
+                                          not), until the callback returns; its .shot, while m runs as a layer, is
+                                          called in m's place */
 
 /* ---- scoring ------------------------------------------------------------------------
  * Through the game's own scoring, so its playfield multiplier and its rules about when a

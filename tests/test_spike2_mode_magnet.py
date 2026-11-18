@@ -199,7 +199,8 @@ def test_the_game_can_end_the_grab_without_aborting():
 
 def test_the_runtime_lets_go_on_every_end():
     src = _src()
-    assert 'magnet_let_go("the mode ended")' in _lift(src, "void pm_end(void)")
+    assert "layers_end_lets_go();" in _lift(src, "void pm_end(void)")   # PAD-1401: once none of ours runs
+    assert 'magnet_let_go("the mode ended")' in _lift(src, "static void layers_end_lets_go(void)")
     assert 'magnet_let_go("the ball ended")' in _lift(src, "static void on_ball_end(")
     assert "magnet_tick();" in _lift(src, "static void on_tick(")
     tick = _lift(src, "static void magnet_tick(")

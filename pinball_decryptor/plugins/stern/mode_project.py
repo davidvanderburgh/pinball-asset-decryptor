@@ -3819,6 +3819,14 @@ class ModeSpec:
     # mode IS the game - it starts with each game, runs through every ball and player and ends with the game,
     # holding off the game's modes as "block" does, and the game's own rules are switched off underneath it
     game_modes: str = "block"
+    # PAD-1401: with my other modes - one at a time (False: the base), or over them as a layer at layer_priority
+    # (0-255), the ones under it waiting (layer_pause), the shots its alone (layer_shots), inside one of my modes
+    # (inside: its name; it starts only while that one runs and ends with it)
+    layer: bool = False
+    layer_priority: int = 10
+    layer_pause: bool = False
+    layer_shots: bool = False
+    inside: str = ""
     block_modes: list = field(default_factory=list)
     keep_rules: list = field(default_factory=list)   # PAD-398: names from the title's game_rules
     # item 141, the Advanced section: every other parameter the runtime has
@@ -5155,6 +5163,7 @@ def validate(spec, folder=None):
     out += validate_shows(spec, p)                     # PAD-418
     out += validate_more_to_start(spec, p)
     out += validate_game_modes(spec, p)
+    out += validate_layer(spec)              # PAD-1401
     return out
 
 
@@ -5209,6 +5218,48 @@ def keep_rule_ids(spec, p):
     by = {name: n for n, name in getattr(p, "game_rules", ())}
     keep = spec.keep_rules if isinstance(spec.keep_rules, list) else []
     return sorted({by[r] for r in keep if r in by})
+
+
+LAYER_PRIORITY = 10
+
+
+def layered(spec):
+    """PAD-1401: the mode runs over my other modes, as a layer (a mode inside another does; the whole game never)."""
+    return bool(getattr(spec, "layer", False) or str(getattr(spec, "inside", "") or "").strip()) \
+        and getattr(spec, "game_modes", "block") != "own_game"
+
+
+def layer_lines(spec):
+    """PAD-1401: its ``layer`` and ``inside`` lines (none: one at a time, as every mode before)."""
+    if not layered(spec):
+        return []
+    try:
+        prio = max(0, min(255, int(getattr(spec, "layer_priority", LAYER_PRIORITY))))
+    except (TypeError, ValueError):
+        prio = LAYER_PRIORITY
+    words = (" pause" if getattr(spec, "layer_pause", False) else "") + (" shots" if getattr(spec, "layer_shots", False) else "")
+    out = ["layer          %d%s" % (prio, words)]
+    inside = str(getattr(spec, "inside", "") or "").strip()
+    if inside:
+        out.append("inside         " + inside)
+    return out
+
+
+def validate_layer(spec):
+    """PAD-1401: what is wrong with its With my other modes choice."""
+    out = []
+    if getattr(spec, "game_modes", "block") == "own_game" and getattr(spec, "layer", False):
+        out.append("A mode that is the whole game is the one your other modes run over: it cannot run over them too.")
+    try:
+        prio = int(getattr(spec, "layer_priority", LAYER_PRIORITY))
+    except (TypeError, ValueError):
+        prio = -1
+    if layered(spec) and not 0 <= prio <= 255:
+        out.append("Its layer's priority is a whole number from 0 to 255.")
+    inside = str(getattr(spec, "inside", "") or "").strip()
+    if inside and inside.lower() == str(getattr(spec, "name", "") or "").strip().lower():
+        out.append("It cannot run inside itself.")
+    return out
 
 
 def game_modes_lines(spec, p=None):
@@ -5846,6 +5897,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     if not spec.stack:                      # item 140: only when off, so older files are unchanged
         lines.append("stack          no")
     lines += game_modes_lines(spec, p)       # PAD-363 / PAD-398
+    lines += layer_lines(spec)               # PAD-1401
     lines += parameter_lines(spec, slug, p)
     lines += display_light_lines(spec)
     lines += more_to_start_lines(spec, p)    # PAD-227: nothing unless the mode has them

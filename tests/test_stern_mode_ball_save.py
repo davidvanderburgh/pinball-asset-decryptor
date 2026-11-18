@@ -96,7 +96,7 @@ def test_every_shipped_build_gets_a_verdict_with_the_game_named():
 def test_the_interpreter_takes_the_key_and_the_runtime_asks_for_no_more_balls():
     src = (SDK / "mode_file.c").read_text(encoding="utf-8")
     assert "if (ball_save_line(M, line)) return;" in src
-    start = src[src.index("static void mode_start("):]
+    start = src[src.index("static void mode_start_in(struct slot *M, const char *why)\n{"):]   # PAD-1401
     start = start[:start.index("\n}\n")]
     # taken only without a multiball, and a refusal does not stop the mode
     assert "run.saving = !cfg.mball_balls && cfg.ball_save_s && pm_ball_save(cfg.ball_save_s);" in start

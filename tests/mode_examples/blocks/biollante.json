@@ -5828,6 +5828,11 @@
   ],
   "format": 1,
   "screen_style": "panel",
+  "inside": "",
+  "layer": false,
+  "layer_priority": 10,
+  "layer_pause": false,
+  "layer_takes_shots": false,
   "keep_rules": [],
   "block_modes": []
  },

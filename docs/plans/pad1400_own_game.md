@@ -124,13 +124,33 @@ the game ended with the mode. 50 of 53 pass:
   under the whole game the first launch already finds no ball in the lane and the rig's drain writes do not take:
   its turtle select / van at game start, not yet looked at).
 
-## Left for the next run
+## Award screens and light shows: only from callers that throw the result away (run 3)
 
-1. TMNT LE / Pro 1.59 under the whole game: why the first ball never reaches the lane (probe the turtle select and
-   the van at game start, compare the game's calls refused in the fresh window with a stock run).
-2. D&D LE 1.10: a job that ends a ball on the stock game (the PAD-713 dragon-hold recipe,
-   memory dnd-le-rig-no-game-start), then the whole game on it.
-3. Older-version ports (no archival cards read): `show_start` on 11 of them, and the 8 older ports with neither
-   `shot_dispatch` nor `switch_spawn` (aerosmith_le-1.15, batman-1.13, guardians_le-1.14, iron_maiden_le-1.16,
-   rush_le-1.18, star_wars_le-1.30, stranger_things_le-1.12, sword_of_rage_le-1.18 ...): only through a port
-   derived on the user's machine from their own card.
+TMNT Pro crashed in the sweep (segv at 0x147d20): its `show_start(178)` caller at 0x147cf0 keeps the show in r5 and
+stores into it (`str r2,[r5,#168]`), and a refused 0 is a null pointer. Every build has such callers.
+C:/tmp/PAD-1400/scan_ret_use.py follows r0 after every call to `show_start` and `award_screen` in each program: used
+as a base, stored, passed on or returned = the caller uses it. Each of the 53 newest ports lists those callers
+(`value own_ret_scanned 1`, `value own_pass_<k> <bl address>`, 7-57 a build) and pm_own_game never refuses them (they
+are counted); a port that was not scanned (the older versions) only counts the two.
+
+## Final sweep (run 3: the committed prebuilt object, all 53 newest builds, a 30 s quiet spell after the switches)
+
+52 of 53 pass (C:/tmp/PAD-1400 batch34-36): the mode had the whole game from the game's start, ball 1's score was
+exactly the mode's awards, and the game ended with the mode.
+
+- In batch34 four more failed and passed on a rerun. Metallica and Mando Pro died in boot before any mode ran (rig
+  instability). Led Zeppelin Pro did not reach game over in the job's time. King Kong Pro crashed once at a game's
+  start: a virtual call through a corrupt listener in a broadcast loop at 0x79cb8. Six more King Kong Pro runs were
+  clean, so it is one crash in seven, not reproduced.
+- TMNT LE passes (its locks hold balls until the game's ball search frees them, as on a machine). TMNT Pro passes
+  since the per-caller rule above.
+- Dungeons & Dragons LE 1.10 is not proven: the stock game, an ordinary mode through the same job, never ends a ball
+  on this rig either (a ball always back in the shooter lane, even with the upper shooter switch passed). D&D Pro 1.10
+  passes.
+
+## What is not covered
+
+- The older-version ports (archival cards, not read): 11 without `show_start`, and the older ports with neither
+  `shot_dispatch` nor `switch_spawn`. On them award screens and light shows are counted only, and their rules may
+  still count shots silently. A port derived on the user's machine from their own card gets the newest build's sites
+  only where the derivation places them.

@@ -11339,6 +11339,7 @@ static void chg_pages_tick(void);         /* PAD-663 */
 static void coop_tick(void);                /* PAD-1017, below */
 static void hand_tick(void);                /* PAD-1033, below */
 static void rec_tick(void);                    /* PAD-1280: the records section */
+static void saved_tick(void);                  /* PAD-1402: saved progress, below */
 static void on_tick(pm_reg *r)
 {
     static int started, said;
@@ -11369,6 +11370,7 @@ static void on_tick(pm_reg *r)
     coop_tick();                              /* PAD-1017: the game's own "BALL %d" back after a co-op game */
     hand_tick();                              /* PAD-1033: a player's handicap pick */
     rec_tick();                               /* PAD-1280: the owner's records' counts */
+    saved_tick();                             /* PAD-1402: SAVED PROGRESS cleared, the file written */
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
@@ -27801,6 +27803,456 @@ static void mset_arm(void)
             mset_opt[k].min, mset_opt[k].max);
 }
 
+/* ---- PAD-1402: SAVED PROGRESS - what a mode remembers between games -------------------------------------------------
+ * A mode's variables last a ball, a mode or a game, pm_read_file only reads, and PAD-1280's records are high-score
+ * entries no mode can read back - so a Story mode, New Game Plus or a character unlocked for good had nowhere to keep
+ * what the player did. This is that place: a small store of numbers by name that a mode reads and writes
+ * (pm_saved_get / pm_saved_put, pad_mode.h), kept on the card's data partition beside the challenge scores
+ * (SAVED_FILE), over power cycles, until the operator clears it or the machine is factory reset.
+ *
+ * WHOSE A VALUE IS. Player 0 is the machine's (one value for everyone); players 1-4 are that player's: their Stern
+ * Insider Connected login while they are logged in (the 16-byte user id the game keeps per player: the user manager's
+ * table, saved.cfg `users`, read as co-op reads it - PAD-1108), else the game's player slot ("player 2's"). So a
+ * logged-in player's story follows them to whatever player they start as, and a guest's belongs to the slot.
+ * pm_saved_stamp(p) changes whenever player p's owner does (a login, a logout) or the store is cleared: a mode reads
+ * its values again then (the blocks' saved variables do, block_modes.py).
+ *
+ * THE FILE. One line a value, `<owner> <key> <value>`: owner m, p1..p4 or u<32 hex>; key letters, digits and
+ * _ . : - (SAVED_KEY_MAX), value a signed decimal. Kept whole in memory (sv_buf) and written whole to a new file,
+ * renamed over the old one, at most every SAVED_FLUSH_MS while something changed (never on each change: a mode can
+ * change a value every tick). A changed value moves to the end; when the file would pass SAVED_MAX the lines at the
+ * front - the values longest unchanged - make room (a machine that saw many Insider players forgets the oldest).
+ *
+ * CLEARING IT. The service menu's SAVED PROGRESS row (menu_settings.SAVED_PROGRESS: 1 = Keep, 2 = Clear, saved.cfg
+ * `clear`) clears every value when it reads Clear, and the runtime puts it back to Keep. Its default is CLEAR, so a
+ * factory reset (every row back to its default) clears the progress with the game's own settings, and so does the
+ * row's first boot (a store left by another card). The game's records read 0 until it has read its store: 0 is no
+ * value. On the shared MORE SETTINGS rows (PAD-1382) the value is the runtime's word, which a factory reset does not
+ * reach: there only the row clears it.
+ *
+ * saved.cfg (/usr/local/padmode on a card, /games/pad/padmode on Spike 3, /dump in the rig; saved_progress.cfg_text):
+ *   on                          the card's modes keep saved progress
+ *   clear <the row's value>     the SAVED PROGRESS row (an address, or MSET_BASE + 4k on the shared rows)
+ *   users <manager> <A> <B>     where the game keeps its players' Insider logins (coop_play.insider_users)
+ *   nvm <dir>                   the game's settings generations (/data/nv/<title>/NVM): see "the row put back to Keep" */
+#define SAVED_MAX      16384
+#define SAVED_KEY_MAX  48
+#define SAVED_OWNER_MAX 40
+#define SAVED_FLUSH_MS 2000u
+#define SAVED_KEEP     1u
+#define SAVED_CLEAR    2u
+#define SAVED_SETTLE_MS 5000u                     /* the row read the same this long before it counts */
+#define SAVED_MARK_OWNER "!"                      /* the store's own line: the runtime put the row back to Keep */
+#define SAVED_MARK_KEY   "row"
+static const char SAVED_FILE[] = "/dump/pad_saved_progress";
+#if PM_A64
+static const char *const SAVED_CFGS[] = { "/games/pad/padmode/saved.cfg", "/dump/saved.cfg" };
+#else
+static const char *const SAVED_CFGS[] = { "/usr/local/padmode/saved.cfg", "/dump/saved.cfg" };
+#endif
+static char sv_buf[SAVED_MAX + 1];
+static long sv_len;
+static int sv_on, sv_dirty;
+static unsigned long sv_dirty_at;
+static unsigned sv_gen = 1;                       /* a clear's count: part of every stamp */
+static pm_addr sv_clear_at;                       /* the SAVED PROGRESS row's value (0: none) */
+static unsigned sv_clear_seen;                    /* what it read last */
+static unsigned long sv_clear_since;              /* ... since when */
+static int sv_clear_acted;                        /* ... and whether that value was acted on */
+static int sv_clear_boot;                         /* a value has settled since boot */
+static int sv_clear_own;                          /* the row reads the runtime's own Keep */
+static pm_addr sv_mgr;                            /* saved.cfg `users` */
+static unsigned sv_off;
+
+/* key: 1..SAVED_KEY_MAX-1 of letters, digits and _ . : - (tests lift it verbatim) */
+static int sv_key_ok(const char *k)
+{
+    unsigned i;
+    if (!k || !k[0]) return 0;
+    for (i = 0; k[i]; i++) {
+        char c = k[i];
+        if (i >= SAVED_KEY_MAX - 1) return 0;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.'
+              || c == ':' || c == '-')) return 0;
+    }
+    return 1;
+}
+
+/* the line [i, e) is owner's key's: `owner key value` (tests lift it verbatim) */
+static int sv_line_is(const char *b, long i, long e, const char *owner, const char *key)
+{
+    long j = i;
+    unsigned k;
+    for (k = 0; owner[k]; k++, j++) if (j >= e || b[j] != owner[k]) return 0;
+    if (j >= e || b[j++] != ' ') return 0;
+    for (k = 0; key[k]; k++, j++) if (j >= e || b[j] != key[k]) return 0;
+    return j < e && b[j] == ' ';
+}
+
+/* owner's key's value from the text b (n bytes) into *v: 1 when it is there (tests lift it verbatim) */
+static int sv_get_in(const char *b, long n, const char *owner, const char *key, long long *v)
+{
+    long i = 0;
+    while (i < n) {
+        long e = i, j;
+        while (e < n && b[e] != '\n') e++;
+        if (sv_line_is(b, i, e, owner, key)) {
+            long long x = 0;
+            int neg = 0, digits = 0;
+            for (j = e - 1; j > i && b[j] != ' '; j--) ;
+            j++;
+            if (j < e && b[j] == '-') { neg = 1; j++; }
+            for (; j < e && b[j] >= '0' && b[j] <= '9'; j++, digits++) x = x * 10 + (b[j] - '0');
+            if (digits && j == e) {
+                *v = neg ? -x : x;
+                return 1;
+            }
+        }
+        i = e + 1;
+    }
+    return 0;
+}
+
+/* the text b (n bytes, room for cap) with owner's key's line taken out and `owner key v` put at the end; the lines at
+ * the front go while it would not fit. The new length, or -1 when the one line cannot fit at all (tests lift it) */
+static long sv_put_in(char *b, long n, long cap, const char *owner, const char *key, long long v)
+{
+    char line[SAVED_OWNER_MAX + SAVED_KEY_MAX + 32];
+    long i = 0, o = 0, len;
+    while (i < n) {                                          /* every other line, in its order */
+        long e = i, k;
+        while (e < n && b[e] != '\n') e++;
+        if (e > i && !sv_line_is(b, i, e, owner, key)) {
+            for (k = i; k < e; k++) b[o++] = b[k];
+            b[o++] = '\n';
+        }
+        i = e + 1;
+    }
+    len = pm_snprintf(line, sizeof line, "%s %s %lld\n", owner, key, v);
+    if (len <= 0 || len >= (long)sizeof line || len > cap) return -1;
+    if (o + len > cap) {                                     /* the oldest lines make room */
+        long cut = 0;
+        while (cut < o && o - cut + len > cap) {
+            while (cut < o && b[cut] != '\n') cut++;
+            cut++;
+        }
+        for (i = cut; i < o; i++) b[i - cut] = b[i];
+        o -= cut;
+    }
+    for (i = 0; i < len; i++) b[o++] = line[i];
+    return o;
+}
+
+/* player p's owner: m (p 0), u<their Insider login> while they are logged in, else p<n> (tests lift it) */
+static void sv_owner_of(unsigned p, const unsigned char *login, char *out, unsigned cap)
+{
+    static const char hex[] = "0123456789abcdef";
+    unsigned k, any = 0;
+    if (!p) { pm_snprintf(out, cap, "m"); return; }
+    for (k = 0; login && k < 16; k++) any |= login[k];
+    if (!any || cap < 34) { pm_snprintf(out, cap, "p%u", p); return; }
+    out[0] = 'u';
+    for (k = 0; k < 16; k++) { out[1 + 2 * k] = hex[login[k] >> 4]; out[2 + 2 * k] = hex[login[k] & 15]; }
+    out[33] = 0;
+}
+
+/* player p's Insider login (16 bytes; zeros: not logged in, or no table) - in a co-op turn the game's player holds the
+ * teammate's entry (coop_users_put), so the entry read is the one the player made */
+static void sv_login(unsigned p, unsigned char *login)
+{
+    unsigned k, q = p;
+    pm_addr t;
+    for (k = 0; k < 16; k++) login[k] = 0;
+    if (!sv_mgr || p < 1 || p > 4) return;
+    if (cu_g && p == cu_g) q = cu_p;
+    else if (cu_g && p == cu_p) q = cu_g;
+    t = coop_user_table(sv_mgr, sv_off);
+    if (!coop_user_table_ok(t)) return;
+    for (k = 0; k < 16; k++) login[k] = *(volatile const unsigned char *)(unsigned long)(coop_user_entry(t, q) + k);
+}
+
+static void sv_owner(unsigned p, char *out, unsigned cap)
+{
+    unsigned char login[16];
+    sv_login(p, login);
+    sv_owner_of(p, login, out, cap);
+}
+
+static void sv_flush(const char *why)
+{
+    static const char tmp[] = "/dump/pad_saved_progress.new";
+    int fd, ok;
+    sv_dirty = 0;
+    unlink(tmp);
+    fd = open(tmp, O_WRONLY | O_CREAT, 0644);
+    ok = fd >= 0 && (sv_len == 0 || write(fd, sv_buf, (unsigned long)sv_len) == sv_len);
+    if (fd >= 0) ok = close(fd) == 0 && ok;
+    if (!(ok && rename(tmp, SAVED_FILE) == 0)) {
+        say("saved progress: %s cannot be written - the changes are lost at power-off", SAVED_FILE);
+        return;
+    }
+    say("saved progress: %s written (%ld bytes, %s)", SAVED_FILE, sv_len, why);
+}
+
+long long pm_saved_get(const char *key, unsigned player, long long dflt)
+{
+    char owner[SAVED_OWNER_MAX];
+    long long v;
+    if (!sv_on || player > 4 || !sv_key_ok(key)) return dflt;
+    sv_owner(player, owner, sizeof owner);
+    return sv_get_in(sv_buf, sv_len, owner, key, &v) ? v : dflt;
+}
+
+int pm_saved_put(const char *key, unsigned player, long long value)
+{
+    char owner[SAVED_OWNER_MAX];
+    long long had;
+    long n;
+    if (!sv_on || player > 4 || !sv_key_ok(key)) return 0;
+    sv_owner(player, owner, sizeof owner);
+    if (sv_get_in(sv_buf, sv_len, owner, key, &had) && had == value) return 1;
+    n = sv_put_in(sv_buf, sv_len, SAVED_MAX, owner, key, value);
+    if (n < 0) {
+        say("saved progress: %s's %s cannot be kept", owner, key);
+        return 0;
+    }
+    sv_len = n;
+    sv_buf[sv_len] = 0;
+    if (!sv_dirty) sv_dirty_at = pm_ms();
+    sv_dirty = 1;
+    say("saved progress: %s %s = %lld", owner, key, value);
+    return 1;
+}
+
+unsigned pm_saved_stamp(unsigned player)
+{
+    char owner[SAVED_OWNER_MAX];
+    unsigned h = 2166136261u, k;
+    if (!sv_on || player > 4) return 0;
+    sv_owner(player, owner, sizeof owner);
+    for (k = 0; owner[k]; k++) h = (h ^ (unsigned char)owner[k]) * 16777619u;
+    h ^= sv_gen * 0x9e3779b9u;
+    return h ? h : 1;
+}
+
+/* a setting's value put back: a row of the game's store (its record), or a shared one's word (PAD-1382) */
+static void sv_setting_put(pm_addr a, unsigned v)
+{
+    pm_addr w0 = (pm_addr)(unsigned long)&mset_word[0];
+    if (a > w0 && a <= (pm_addr)(unsigned long)&mset_word[MSET_N]) {
+        unsigned k = (unsigned)((a - w0) / sizeof mset_word[0]);
+        mset_word[k] = v;
+        mset_state_write();
+        if (mset_cur == k && mset_val) {
+            mset_put(mset_val, v);
+            mset_seen = v;
+        }
+        return;
+    }
+    mset_put(a, v);
+}
+
+static void sv_clear(const char *why)
+{
+    sv_len = 0;
+    sv_buf[0] = 0;
+    sv_gen++;
+    say("saved progress: cleared - %s", why);
+    sv_flush("cleared");
+}
+
+/* THE ROW PUT BACK TO KEEP. The runtime writes Keep into the row's record, but that is the game's memory: the game
+ * stores its settings (/data/nv/<title>/NVM, a ring of numbered generation files) only when it saves them - its menu
+ * on a change, Guided Setup's Save & Exit, a factory reset - and a power-off before that boots on the old Clear again.
+ * So the store keeps its own line SAVED_MARK: 0, or the stamp of the game's newest settings generation (its number and
+ * a hash of its bytes, sv_nvm_stamp) when the runtime put the row back to Keep. A boot that reads Clear with that same
+ * generation still the newest is the old Clear: not cleared again. A newer one means the game saved its settings since,
+ * with Keep in them unless it was a factory reset (or the operator's Clear): cleared. While it is pending the tick
+ * looks for a new generation; one saved while the row shows the runtime's Keep has stored it, and the mark goes. */
+static char sv_nvm[96];                                  /* saved.cfg `nvm`: the game's settings generations */
+static unsigned sv_nvm_gen;                              /* the newest generation last found */
+static unsigned long sv_nvm_at;                          /* when the tick last looked for a new one */
+
+static long long sv_pending(void)
+{
+    long long v;
+    return sv_get_in(sv_buf, sv_len, SAVED_MARK_OWNER, SAVED_MARK_KEY, &v) ? v : 0;
+}
+
+/* the newest generation's stamp ((number << 32) | hash | 1), 0 when none is found. From the one last found (at boot:
+ * the one the mark names), up while the next exists; that one gone (the ring restarted), the first found from 0 on.
+ * None at all: the look is off for this run (said once) */
+static unsigned long long sv_nvm_stamp(void)
+{
+    static char b[4096];                             /* the generation's head: its audits differ after a reset */
+    char path[128];
+    unsigned g, h = 2166136261u;
+    long n, i;
+    int found = 0;
+    if (!sv_nvm[0]) return 0;
+    g = sv_nvm_gen ? sv_nvm_gen : (unsigned)((unsigned long long)sv_pending() >> 32);
+    pm_snprintf(path, sizeof path, "%s/%08u", sv_nvm, g);
+    if (pm_read_file(path, b, 1) < 0) {
+        for (g = 0; g < 100000u; g++) {
+            pm_snprintf(path, sizeof path, "%s/%08u", sv_nvm, g);
+            if (pm_read_file(path, b, 1) >= 0) { found = 1; break; }
+        }
+        if (!found) {
+            say("saved progress: no settings generation in %s - a Clear at boot always clears", sv_nvm);
+            sv_nvm[0] = 0;
+            return 0;
+        }
+    }
+    for (;;) {
+        pm_snprintf(path, sizeof path, "%s/%08u", sv_nvm, g + 1);
+        if (pm_read_file(path, b, 1) < 0) break;
+        g++;
+    }
+    sv_nvm_gen = g;
+    pm_snprintf(path, sizeof path, "%s/%08u", sv_nvm, g);
+    n = pm_read_file(path, b, sizeof b);
+    for (i = 0; i < n; i++) h = (h ^ (unsigned char)b[i]) * 16777619u;
+    return (unsigned long long)g << 32 | h | 1u;
+}
+
+static void sv_mark(long long stamp)
+{
+    long n = sv_put_in(sv_buf, sv_len, SAVED_MAX, SAVED_MARK_OWNER, SAVED_MARK_KEY, stamp);
+    if (n < 0) return;
+    sv_len = n;
+    sv_buf[sv_len] = 0;
+    sv_flush(stamp ? "the row put back to Keep" : "the game's settings hold Keep");
+}
+
+/* the row has read v for SAVED_SETTLE_MS (first: the first time this boot). Every Clear the operator picks, and the
+ * row's default after a factory reset or on its first boot, clears the progress, and the runtime puts the row back to
+ * Keep (above: when that Keep is the game's) */
+static void sv_settled(unsigned v, int first)
+{
+    long long pending = sv_pending();
+    if (sv_clear_own) {                                   /* the runtime's own Keep, just put */
+        sv_clear_own = 0;
+        if (v == SAVED_KEEP) return;
+    }
+    if (v == SAVED_CLEAR) {
+        unsigned long long now = sv_nvm_stamp();
+        if (first && pending && (now == 0 || (long long)now == pending)) {
+            say("saved progress: SAVED PROGRESS reads Clear as the game last saved it, before the runtime put it back "
+                "to Keep after the last clear (settings generation %u) - not cleared again; Keep again", sv_nvm_gen);
+        } else {
+            sv_clear(!first ? "the service menu's SAVED PROGRESS was set to Clear"
+                     : pending ? "the service menu's SAVED PROGRESS reads Clear at boot, and the game has saved its "
+                                 "settings since the runtime put it back to Keep (a factory reset, or Clear picked)"
+                     : "the service menu's SAVED PROGRESS reads Clear at boot (its default: a factory reset, or a new "
+                       "row)");
+            sv_mark(now ? (long long)now : 1);
+        }
+        sv_setting_put(sv_clear_at, SAVED_KEEP);
+        sv_clear_own = 1;
+        return;
+    }
+    if (v == SAVED_KEEP && first && pending) sv_mark(0);
+}
+
+/* while a Keep is pending: a new settings generation saved while the row shows the runtime's Keep has stored it */
+static void sv_nvm_tick(unsigned long now)
+{
+    long long pending;
+    unsigned long long st;
+    if (!sv_nvm[0] || now - sv_nvm_at < 2000u) return;
+    sv_nvm_at = now;
+    pending = sv_pending();
+    if (!pending || !sv_clear_boot) return;
+    st = sv_nvm_stamp();
+    if (!st || (long long)st == pending) return;
+    if (sv_clear_seen == SAVED_KEEP) {
+        say("saved progress: the game saved its settings (generation %u) with SAVED PROGRESS at Keep", sv_nvm_gen);
+        sv_mark(0);
+    } else {
+        sv_mark((long long)st);
+    }
+}
+
+/* on the game's tick: the SAVED PROGRESS row, and the file written a while after a change. The row is acted on only
+ * once it has read the same for SAVED_SETTLE_MS: while the game boots its records may read a moment's value before
+ * its store is read (each value it shows is said in mode.log) */
+static void saved_tick(void)
+{
+    unsigned long now = pm_ms();
+    if (!sv_on) return;
+    if (sv_clear_at) {
+        unsigned v = *(volatile const unsigned *)(unsigned long)sv_clear_at;
+        if (v != sv_clear_seen) {
+            say("saved progress: SAVED PROGRESS reads %u", v);
+            sv_clear_seen = v;
+            sv_clear_since = now;
+            sv_clear_acted = 0;
+        } else if (!sv_clear_acted && now - sv_clear_since >= SAVED_SETTLE_MS) {
+            sv_clear_acted = 1;
+            if (v == SAVED_KEEP || v == SAVED_CLEAR) {
+                sv_settled(v, !sv_clear_boot);
+                sv_clear_boot = 1;
+            }
+        }
+    }
+    sv_nvm_tick(now);
+    if (sv_dirty && now - sv_dirty_at >= SAVED_FLUSH_MS) sv_flush("changed");
+}
+
+static void saved_line(char *s)
+{
+    const char *p;
+    int ok;
+    if (str_eq(s, "on")) { sv_on = 1; return; }
+    if (str_starts(s, "clear ")) {
+        p = s + 6;
+        sv_clear_at = (pm_addr)number(&p, &ok);
+        if (!ok) sv_clear_at = 0;
+        else sv_clear_at = setting_addr(sv_clear_at);
+        return;
+    }
+    if (str_starts(s, "nvm ")) {
+        str_copy(sv_nvm, sizeof sv_nvm, s + 4, sizeof sv_nvm);
+        return;
+    }
+    if (str_starts(s, "users ")) {
+        p = s + 6;
+        sv_mgr = (pm_addr)number(&p, &ok);
+        if (ok) sv_off = (unsigned)number(&p, &ok);
+        if (!ok || !sv_mgr || sv_off > 0x1000u) sv_mgr = sv_off = 0;
+        if (sv_mgr) sv_mgr += (pm_addr)game_base;
+    }
+}
+
+static void saved_arm(void)
+{
+    static char raw[1024];
+    long n = -1, i, start = 0;
+    unsigned k;
+    for (k = 0; k < sizeof SAVED_CFGS / sizeof SAVED_CFGS[0] && n < 0; k++) n = pm_read_file(SAVED_CFGS[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    for (i = 0; i <= n; i++)
+        if (i == n || raw[i] == '\n' || raw[i] == '\r') {
+            raw[i] = 0;
+            saved_line(raw + start);
+            start = i + 1;
+        }
+    if (!sv_on) return;
+    if (sv_mgr && !maps_has(sv_mgr + sv_off, sizeof(pm_addr), MAP_R)) {
+        say("saved progress: the user manager 0x%08" PMA " is not mapped - every player's progress is their slot's",
+            sv_mgr);
+        sv_mgr = 0;
+    }
+    sv_len = pm_read_file(SAVED_FILE, sv_buf, SAVED_MAX);
+    if (sv_len < 0) sv_len = 0;
+    while (sv_len > 0 && sv_buf[sv_len - 1] != '\n') sv_len--;   /* a line cut off (a full disk) is not a value */
+    sv_buf[sv_len] = 0;
+    for (i = 0, k = 0; i < sv_len; i++) if (sv_buf[i] == '\n') k++;
+    say("saved progress: armed - %u value(s) in %s (%ld of %u bytes); %s; %s", k, SAVED_FILE, sv_len, SAVED_MAX,
+        sv_clear_at ? "the service menu's SAVED PROGRESS clears it" : "no SAVED PROGRESS row: nothing clears it",
+        sv_mgr ? "an Insider-logged-in player's is their own" : "each player's is their slot's");
+}
+
 /* ---- IMAGE SETS: a scene of the game's, one of several, by a setting of the operator's -------------------------
  * An owner (the Kaiju Battle Select screen of a Godzilla retheme, drawn dark) asked for "a dark or light or perhaps
  * even multiple versions" of a screen, picked in the service menu and kept over a power cycle. The Scenes tab gives a
@@ -28185,6 +28637,7 @@ static void pad_mode_start(void)
         return;
     }
     if (!insider_arm()) return;               /* no score gate, no modes: see insider_arm */
+    saved_arm();                              /* PAD-1402: the modes' saved progress (after mset_arm: its row may be shared) */
     {
         static const char *const callout_s[] = { "callout", "callout_nth", 0 };
         static const char *const light_s[] = { "light_run", "lamp_group", "show_priority", 0 };

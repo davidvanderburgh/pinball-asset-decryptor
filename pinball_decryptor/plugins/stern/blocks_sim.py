@@ -69,8 +69,9 @@ class Sim:
         return out
 
     def new_game(self):
-        for name in self.var_reset:
-            self.vars[name] = 0
+        for name, reset in self.var_reset.items():
+            if reset not in ("saved", "saved_all"):     # PAD-1402: kept between games
+                self.vars[name] = 0
         self.new_ball()
 
     def new_ball(self):

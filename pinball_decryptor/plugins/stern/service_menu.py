@@ -66,6 +66,9 @@ def wanted(project, honour_off=True):
     sets = SV.load(project)                             # PAD-1390: IMAGE SET, when the project has image sets
     if sets:
         jobs.append(E._ImageSetMenu(sets["names"], log))
+    from . import saved_progress as SP
+    if SP.project_wants(project):                       # PAD-1402: SAVED PROGRESS, when a mode keeps progress
+        jobs.append(E._SavedProgressMenu(log))
     if honour_off:
         off = off_keys(project)
         jobs = [j for j in jobs if j.KEY not in off]

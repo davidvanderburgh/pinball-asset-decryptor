@@ -58,6 +58,17 @@ def _hand_row():
     return (MS.HANDICAP, HC.MENU_VALUES, (), {"default": 1, "help_text": HC.MENU_HELP, "onoff": True})
 
 
+def saved_row_asked(project):
+    """PAD-1402: whether one of the project's modes keeps saved progress, so SAVED PROGRESS goes in the operator menu."""
+    from . import saved_progress as SP
+    return SP.project_wants(project)
+
+
+def _saved_row():
+    from . import saved_progress as SP
+    return (MS.SAVED_PROGRESS, len(SP.MENU_NAMES), SP.MENU_NAMES, {"default": SP.MENU_DEFAULT})
+
+
 def _coop_row():
     from . import coop_play as CP
     return (MS.COOP_PLAY, CP.MENU_VALUES_A64, (), {"default": 1, "help_text": CP.MENU_HELP_A64, "from_zero": True})
@@ -92,6 +103,8 @@ def rows_wanted(project):
         rows.append(_coop_row())
     if hand_row_asked(project):
         rows.append(_hand_row())
+    if saved_row_asked(project):                        # PAD-1402
+        rows.append(_saved_row())
     return rows
 
 

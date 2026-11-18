@@ -32,6 +32,8 @@ SETTINGS = (
     ("image_set", "Image Set", "Set by the project's image sets (scene variants): the operator picks which one the "
                                "screens show."),
     ("brightness", "Picture settings", "Brightness, Contrast and Saturation (Write tab)."),
+    ("saved_progress", "Saved Progress", "On the card when the project keeps progress between games (a variable "
+                                         "saved between games). Clear clears it; so does a factory reset."),
 )
 
 #: PAD-1393 round 2: what an unticked row of :data:`.service_menu.OFF_KEYS` means for the card
@@ -134,6 +136,10 @@ class ServiceMenuTab(TabService):
             elif key == "handicap":
                 on = HC.load(project)
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")
+            elif key == "saved_progress":               # PAD-1402: follows the modes, not switched here
+                on = key in has
+                row.update(on=on, note="" if on else "Not on the card: nothing in the project is saved between "
+                                                     "games.")
             out.append(row)
         mine = SM.load(project)
         rank = {k: n for n, k in enumerate(mine["order"])}

@@ -929,4 +929,20 @@ int pm_spare_pulse(unsigned node, unsigned output, unsigned power, unsigned ms);
 void pm_spare_off(unsigned node, unsigned output);
 int pm_spare_output(unsigned node, unsigned output);
 
+/* ---- PAD-1402: saved progress - numbers a mode keeps between games ------------------------------------------------
+ * A small store on the card (/dump/pad_saved_progress, 16 KB) that outlives the game, the power-off and a new game:
+ * a Story mode's chapter, New Game Plus, a character unlocked for good. Values are long longs by `key` (letters,
+ * digits and _ . : -, up to 47), per OWNER: player 0 is the machine's (one for everyone), players 1-4 that player's -
+ * their Stern Insider Connected login while they are logged in, else the game's player slot. The service menu's SAVED
+ * PROGRESS row (Keep / Clear) clears every value, and so does a factory reset. The store is on only when the card's
+ * modes use it (the Write looks for `pm_saved_` in their C); otherwise get answers dflt and put does nothing.
+ *
+ * pm_saved_get: the value, or dflt when there is none (or the store is off).
+ * pm_saved_put: 1 kept (written to the card within two seconds), 0 not (store off, a bad key). Cheap when unchanged.
+ * pm_saved_stamp: changes whenever player p's owner changes (they log in or out) or the store is cleared - read your
+ *   values again then. 0 when the store is off. */
+long long pm_saved_get(const char *key, unsigned player, long long dflt);
+int pm_saved_put(const char *key, unsigned player, long long value);
+unsigned pm_saved_stamp(unsigned player);
+
 #endif

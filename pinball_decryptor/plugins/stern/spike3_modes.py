@@ -40,6 +40,7 @@ import struct
 
 from . import mode_project as MP
 from . import mode_write as MW
+from . import saved_progress as SP
 
 #: on the games partition (relative to /games)
 MODE_DIR = "pad/padmode"
@@ -566,7 +567,7 @@ def screen_times_wanted(project, game_raw, log, real_card=True):
 
 
 def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, ""), coop_setting=0, coop_ok=True,
-         hand_setting=0):
+         hand_setting=0, saved_setting=0):
     """The project's modes for the Spike 3 games volume *reader*, built into *scratch*, or
     None when it has none this card can carry (each reason said in the log, as a Spike 2
     Write leaves modes out: the rest of the project is still written). Raises
@@ -737,6 +738,8 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                         coop_prof = None
                 if hand_prof is not None and hand_setting:
                     hand_setting = live.get(MS.HANDICAP, 0)    # none: the handicaps always on, as on Spike 2
+                if saved_setting:
+                    saved_setting = live.get(MS.SAVED_PROGRESS, 0)   # PAD-1402: the same grow's row
             adds = dict(adds)
             for cp, news in mus.news.items():
                 adds[cp] = list(adds.get(cp) or ()) + list(news)
@@ -762,6 +765,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                      handicap=hand_prof is not None, handicap_prof=hand_prof, handicap_setting=hand_setting,
                      comp=comp_prof is not None, comp_prof=comp_prof,
                      records=recs or None, records_prof=recs_prof,                   # PAD-1327
+                     saved=bool(SP.wanted(project, list(modes) + list(code))), saved_setting=saved_setting,   # PAD-1402
                      attract=att_prof is not None, attract_prof=att_prof,             # PAD-1328
                      cabs=cabs or None, cabs_prof=cabs_prof,                          # PAD-1379
                      cabs_sids=cab_sids(reader, os.path.dirname(target), game_raw, cabs, log) if cabs else None,

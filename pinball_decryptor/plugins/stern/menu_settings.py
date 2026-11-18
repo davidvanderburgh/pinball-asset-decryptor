@@ -81,6 +81,9 @@ COOP_PLAY = "coop_play"
 HANDICAP = "handicap"
 #: PAD-1390: which of the project's image sets (:mod:`.scene_variants`, scene variants) the screens show: 1..n by name
 IMAGE_SET = "image_set"
+#: PAD-1402: SAVED PROGRESS (:mod:`.saved_progress`): 1 Keep, 2 Clear - Clear the default, so a factory reset clears the
+#: modes' saved progress with the game's settings; the mode runtime clears it and puts the row back to Keep
+SAVED_PROGRESS = "saved_progress"
 #: each setting of ours: the adjustment it takes over, its descriptor caption, its row caption and
 #: the menu category whose page lists it. EDITION sits on Attract Mode (16), beside the game's own
 #: BOOT SCREEN and 70TH BOOT SCREEN, which is where an operator already picks how the game looks.
@@ -95,6 +98,7 @@ SETTINGS = {
     COOP_PLAY: (None, "CO-OP PLAY", "Co-op Play", 16),
     HANDICAP: (None, "HANDICAP", "Handicap", 16),
     IMAGE_SET: (None, "IMAGE SET", "Image Set", 16),
+    SAVED_PROGRESS: (None, "SAVED PROGRESS", "Saved Progress", 16),
 }
 #: PAD-1382: when a card wants more settings of ours than the game has spare rows, they all SHARE two: MORE SETTINGS
 #: picks one (its help names them) and the row under it is that one's value. The mode runtime keeps every value in a

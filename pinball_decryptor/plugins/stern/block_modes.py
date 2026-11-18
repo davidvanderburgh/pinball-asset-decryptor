@@ -22,6 +22,9 @@ THE PROGRAM (``blocks.json``)::
       "block_modes": [21, 23],    the title's mode ids it holds off ([] = every one the port names)
       "keep_rules": ["Bridge"],   PAD-398: the game's features (rules, by name) that keep counting
       "vars": [{"name": "combo", "reset": "ball"}],   per player; reset "ball" | "mode" | "game"
+                                  | "saved" (PAD-1402: never - kept on the card between games, each player's:
+                                  their Insider login's while logged in, else their player number's) | "saved_all"
+                                  (the same, one value for everyone); the service menu's SAVED PROGRESS clears them
                                   ("shared": true = the same value in every mode that names it)
       "timers": [{"name": "window"}],  counts down in milliseconds (PAD-377)
       "wait_multiball": true,     a Start the mode while a multiball runs waits for the next one
@@ -329,8 +332,11 @@ def done_hat_ids(hat):
 
 #: a shot / event hat's "when": the mode's state it runs in
 WHEN = {"any": "any time", "idle": "while the mode is not running", "running": "while the mode runs"}
-RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "each game"}
-SHARED_RESETS = ("ball", "game")
+RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "each game",
+          "saved": "never: saved between games, each player's", "saved_all": "never: saved between games, for everyone"}
+#: PAD-1402: the variables a mode keeps between games (the card's saved progress, pm_saved_get / pm_saved_put)
+SAVED_RESETS = ("saved", "saved_all")
+SHARED_RESETS = ("ball", "game") + SAVED_RESETS
 STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
@@ -1215,8 +1221,8 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
         if v.get("shared"):
             seen.add(shared_ident(n))       # "maser won" and "maser_won" are one shared value
             if v.get("reset", "ball") not in SHARED_RESETS:
-                out.append("%s is shared with the other modes, so it resets each ball or each game, "
-                           "not each time this mode starts." % n)
+                out.append("%s is shared with the other modes, so it resets each ball or each game (or is saved "
+                           "between games), not each time this mode starts." % n)
     if len(names) > MAX_VARS:
         out.append("%d variables: %d at most." % (len(names), MAX_VARS))
     timers = [str(t.get("name") or "") for t in program["timers"]]
@@ -2627,6 +2633,51 @@ def lit_ident(slug):
     return "pad_lit_" + re.sub(r"[^a-z0-9]", "_", str(slug or "").lower())
 
 
+def uses_saved(program):
+    """PAD-1402: whether *program* keeps a variable between games (the card's saved progress)."""
+    return any(isinstance(v, dict) and v.get("reset") in SAVED_RESETS for v in (program or {}).get("vars") or [])
+
+
+def saved_key(slug, name, shared=False):
+    """PAD-1402: a saved variable's key in the card's store: ``<slug>:<name>``, or ``shared:<name>`` for a shared one
+    (every mode naming it keeps the same value); letters, digits and _ only, 47 at most (the runtime's SAVED_KEY_MAX)."""
+    clean = lambda s: re.sub(r"[^a-z0-9]", "_", str(s or "").lower())          # noqa: E731
+    return ("shared:%s" % clean(name) if shared else "%s:%s" % (clean(slug)[:22], clean(name)))[:47]
+
+
+def saved_vars(g):
+    """PAD-1402: ``[(index, key, for everyone)]`` of the translator *g*'s saved variables."""
+    return [(i, saved_key(g.slug, n, i in g.shared), reset == "saved_all")
+            for i, (n, reset) in enumerate(g.var_names) if reset in SAVED_RESETS]
+
+
+#: PAD-1402: a mode's saved variables, read again whenever a player's owner changes (an Insider login, a new game, the
+#: store cleared: pm_saved_stamp) and each change kept; one for everyone goes to every player's copy
+_SAVED_C = r"""/* PAD-1402: each player's saved variables read when their owner changes, and a change kept */
+static void saved_tick(void)
+{
+    unsigned p, q, k;
+    for (p = 1; p <= 4; p++) {
+        unsigned s = pm_saved_stamp(p);
+        if (s != saved_stamp[p]) {
+            saved_stamp[p] = s;
+            for (k = 0; k < N_SAVED; k++)
+                SAVED_AT[k][p] = saved_kept[k][p] = pm_saved_get(SAVED_KEYS[k], SAVED_ALL[k] ? 0 : p, 0);
+            continue;
+        }
+        for (k = 0; k < N_SAVED; k++) {
+            long long v = SAVED_AT[k][p];
+            if (v == saved_kept[k][p]) continue;
+            pm_saved_put(SAVED_KEYS[k], SAVED_ALL[k] ? 0 : p, v);
+            saved_kept[k][p] = v;
+            if (SAVED_ALL[k])
+                for (q = 1; q <= 4; q++) SAVED_AT[k][q] = saved_kept[k][q] = v;
+        }
+    }
+}
+"""
+
+
 def shared_ident(name):
     """The C global a shared variable is in every mode that names it: case, spaces and _ aside,
     the same name is the same value (``"Maser won"`` -> ``pad_shared_maser_won``)."""
@@ -2873,6 +2924,17 @@ def to_c(program, slug):
         L.append(" * keeps one of these weak lines for all the modes built in; a mode in C shares it by"
                  " declaring the same. */")
         L.append('__attribute__((weak, visibility("hidden"))) long long %s[5];' % shared_ident(n))
+    saved = saved_vars(g)
+    if saved:
+        L.append("/* PAD-1402: the variables saved between games - the card's saved progress (pm_saved_get / pm_saved_put),")
+        L.append(" * each by its key; SAVED_ALL: one value for everyone (player 0's) */")
+        L.append("#define N_SAVED %d" % len(saved))
+        L.append("static const char *const SAVED_KEYS[N_SAVED] = {%s};" % ", ".join(_c_str(k) for _i, k, _a in saved))
+        L.append("static long long *const SAVED_AT[N_SAVED] = {%s};"
+                 % ", ".join(g.var(i, "0").replace("[0]", "") if i in g.shared else "V[%d]" % i for i, _k, _a in saved))
+        L.append("static const unsigned char SAVED_ALL[N_SAVED] = {%s};" % ", ".join("1" if a else "0" for _i, _k, a in saved))
+        L.append("static unsigned saved_stamp[5];             /* each player's owner as their values were read */")
+        L.append("static long long saved_kept[N_SAVED][5];     /* each value as last read or kept */")
     ntimers = max(1, len(g.timer_names))
     for i, n in enumerate(g.timer_names):
         L.append("/* T[%d] = the timer %s */" % (i, _comment(n)))
@@ -3038,6 +3100,8 @@ def to_c(program, slug):
                             "of": bar_fill[1] if bar_fill else "1LL"}).split("\n"))
     if has_info:
         L.extend((_INFO_C % {"value": info_live or "0"}).split("\n"))
+    if saved:
+        L.extend(_SAVED_C.split("\n"))
     for when in ("ball", "mode"):
         L.append("static void reset_%s(void)          /* the variables reset %s */" % (when, RESETS[when]))
         L.append("{")
@@ -3910,7 +3974,10 @@ def to_c(program, slug):
     for hm in hit_moves:
         L.append("            %s[p] = 0;" % hm)
     for i, (_n, reset) in enumerate(g.var_names):
-        L.append("            %s = 0;" % g.var(i, "p"))
+        if reset not in SAVED_RESETS:                # PAD-1402: a saved one is read again below
+            L.append("            %s = 0;" % g.var(i, "p"))
+    if saved:
+        L.append("            saved_stamp[p] = 0;       /* PAD-1402: each player's saved values read again */")
     if g.lit:
         L.append("            if (lit_as[p]) pm_log(\"a new game: player %u's light is out\", p);")
         L.append("            lit_as[p] = 0;            /* PAD-503: no one is lit at the start of a game */")
@@ -3924,6 +3991,8 @@ def to_c(program, slug):
         L.append("        for (v = 0; v < %d; v++)" % len(done_hats))
         L.append("            for (p = 0; p < 5; p++) done_last[v][p] = 0, done_pend[v][p] = 0;")
     L.append("    }")
+    if saved:
+        L.append("    saved_tick();                     /* PAD-1402: saved values read for a new owner, a change kept */")
     if g.combos:
         L.append("    if (combo_chain_at && pm_ms() - combo_chain_at > combo_chain_ms)   /* PAD-708: its window lapsed */")
         L.append("        combo_chain_end();")

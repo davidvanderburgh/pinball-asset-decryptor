@@ -4132,18 +4132,32 @@ class _WriteCounts(tuple):
     and ``restored``, True when a Write with nothing staged put this
     project's build back to the original.  The completion dialog reads both
     (``pipeline._write_summary``), so a Write whose only change was a timer
-    or an award no longer reports "no changes"."""
+    or an award no longer reports "no changes".
+    ``menu``: the service menu settings of ours the Write put on the card (Simon: a Write whose only change was the
+    Service menu tab's rows said "Wrote no changes"), each ``(name, placeholder)``."""
 
     stock_modes = 0
     restored = False
+    menu = ()
 
 
-def _with_stock_modes(counts, n=0, restored=False):
-    """*counts* as a :class:`_WriteCounts` carrying *n* and *restored*."""
+def _with_stock_modes(counts, n=0, restored=False, menu=None):
+    """*counts* as a :class:`_WriteCounts` carrying *n*, *restored* and *menu* (when ``None``, the menu settings
+    *counts* already carries)."""
     out = _WriteCounts(tuple(counts))
     out.stock_modes = int(n or 0)
     out.restored = bool(restored)
+    out.menu = tuple(getattr(counts, "menu", ()) if menu is None else menu)
     return out
+
+
+def _menu_done(menu_job):
+    """The settings of *menu_job* (:class:`_MenuJobs`) that went on the card, ``[(name, placeholder)]`` in the
+    menu's order, for :attr:`_WriteCounts.menu`."""
+    if menu_job is None:
+        return []
+    from .menu_settings import caption_of
+    return [(caption_of(j.KEY), bool(getattr(j, "placeholder", False))) for j in menu_job.jobs if j.ok]
 
 
 def _compute_patches_or_restore(restore_ok, log, *args, allow_empty=False, **kwargs):
@@ -10786,7 +10800,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                   + n_boot,
                   n_text + n_color + n_layout)
         # the game's own modes ride along without changing the tuple's shape
-        counts = _with_stock_modes(counts, n_stock_mode_numbers)
+        counts = _with_stock_modes(counts, n_stock_mode_numbers, menu=_menu_done(menu_job))
         return writes, counts, grow_plan, audio_mode, valpatch_mode
     finally:
         _rmtree(work)
@@ -14474,6 +14488,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         # are rebuilt as plain tuples when a copy fails
         n_stock_mode_numbers = getattr(counts, "stock_modes", 0)
         restored_to_original = getattr(counts, "restored", False)
+        menu_rows = getattr(counts, "menu", ())          # and the service menu settings this Write adds (Simon)
         wlist = _as_write_list(writes)
 
         # What this build puts on the card whole, digested BEFORE any copy
@@ -14666,7 +14681,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         # when the card will fail Stern's SD-card validation on the machine.
         # The game's own modes ride on the counts (item 145, _WriteCounts).
         counts = _with_stock_modes(counts, n_stock_mode_numbers,
-                                   restored_to_original)
+                                   restored_to_original, menu_rows)
         return counts, audio_mode, valpatch_mode
     finally:
         disk_f.close()

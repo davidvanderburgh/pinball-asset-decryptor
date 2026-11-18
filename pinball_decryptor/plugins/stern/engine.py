@@ -9782,6 +9782,16 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         saved_menu = _SavedProgressMenu(log) if _saved_modes else None
         # PAD-1382: the owner's own settings (Service menu tab) beside them, all in the owner's order
         from . import service_menu as _SvM
+        if not _is_spike3(disk_f):
+            # a row the owner ticked with nothing behind it yet still goes on, with placeholder values (NULL1, NULL2)
+            for _ph in _SvM.placeholder_jobs(assets_dir, {j.KEY for j in (music_menu, edition_menu, image_menu)
+                                                          if j is not None}, log):
+                if _ph.KEY == "music_mode":
+                    music_menu = _ph
+                elif _ph.KEY == "edition":
+                    edition_menu = _ph
+                else:
+                    image_menu = _ph
         _menu_list = _SvM.arrange(assets_dir, [music_menu, edition_menu, *picture_menus, coop_menu, hand_menu,
                                               image_menu, saved_menu], log)
         menu_job = _MenuJobs(*_menu_list) if _menu_list else None
@@ -11657,13 +11667,39 @@ class _MusicModeMenu:
     def wanted(self):
         return self.KEY, self.count, self.names
 
+    #: a row the owner ticked with nothing behind it yet (:func:`.service_menu.placeholder_jobs`)
+    placeholder = False
+
+    def _placeholder_done(self):
+        """The log line for a placeholder row that went on; ``True`` when this job is one."""
+        if not self.placeholder:
+            return False
+        self.ok = True
+        self.log("Operator menu: %s is on the card (%s) as a placeholder, values %s - nothing on this card uses it "
+                 "yet." % (self.KEY.replace("_", " ").upper(), self.setting.where, ", ".join(self.names)), "info")
+        return True
+
+    def _placeholder_fail(self, why):
+        """The log line for a placeholder row that could not go on; ``True`` when this job is one."""
+        if not self.placeholder:
+            return False
+        if not (self.why or self.ok):
+            self.why = str(why).rstrip(".") or "unknown"
+            self.log("Operator menu: the placeholder %s row could not be added (%s)."
+                     % (self.KEY.replace("_", " ").upper(), self.why), "warning")
+        return True
+
     def done(self):
+        if self._placeholder_done():
+            return
         self.ok = True
         self.log("Music modes: MUSIC MODE is in the operator menu (%s), values 1 "
                  "to %d, its help line \"%s\"." % (self.setting.where, self.count,
                                                    self.setting.help), "info")
 
     def fail(self, why):
+        if self._placeholder_fail(why):
+            return
         if self.why or self.ok:
             return
         self.why = str(why).rstrip(".") or "unknown"
@@ -11679,6 +11715,8 @@ class _EditionMenu(_MusicModeMenu):
     KEY = "edition"
 
     def done(self):
+        if self._placeholder_done():
+            return
         self.ok = True
         self.log("Editions: EDITION is in the operator menu (%s), values 1 to %d, "
                  "its help line \"%s\". Put this card on a "
@@ -11688,6 +11726,8 @@ class _EditionMenu(_MusicModeMenu):
                  "info")
 
     def fail(self, why):
+        if self._placeholder_fail(why):
+            return
         if self.why or self.ok:
             return
         self.why = str(why).rstrip(".") or "unknown"
@@ -12173,12 +12213,16 @@ class _ImageSetMenu(_MusicModeMenu):
         super().__init__(len(names), names, log)
 
     def done(self):
+        if self._placeholder_done():
+            return
         self.ok = True
         self.log("Image sets: IMAGE SET is in the operator menu (%s), values 1 to %d, its help line \"%s\". A change "
                  "shows from the next start of the game." % (self.setting.where, self.count, self.setting.help),
                  "info")
 
     def fail(self, why):
+        if self._placeholder_fail(why):
+            return
         if self.why or self.ok:
             return
         self.why = str(why).rstrip(".") or "unknown"

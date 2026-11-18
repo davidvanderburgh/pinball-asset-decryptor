@@ -28,12 +28,15 @@ SETTINGS = (
     ("edition", "Edition", "Only for a card that holds several editions of the game (Write tab, Editions...): a "
                            "card of one edition has none to pick."),
     ("handicap", "Handicap", ""),
-    ("image_set", "Image Set", "Set by the project's image sets (scene variants): the operator picks which one the "
-                               "screens show."),
+    ("image_set", "Image Set", "Made on the Images tab (Themes, under Advanced): the operator picks which theme "
+                               "the screens show."),
     ("brightness", "Picture settings", "Brightness, Contrast and Saturation (Write tab)."),
     ("saved_progress", "Saved Progress", "On the card when the project keeps progress between games (a variable "
                                          "saved between games). Clear clears it; so does a factory reset."),
 )
+
+#: a ticked row with nothing behind it yet goes on the card with placeholder values
+PLACEHOLDER_NOTE = "On the card as a placeholder (values %s): nothing uses it yet. %s"
 
 #: PAD-1393 round 2: what an unticked row of :data:`.service_menu.OFF_KEYS` means for the card
 OFF_NOTES = {
@@ -113,10 +116,15 @@ class ServiceMenuTab(TabService):
             if key == "brightness" and not PS.OFFERED:
                 continue
             row = {"key": key, "name": name, "where": where, "can": False, "on": False, "note": ""}
-            if key in SM.OFF_KEYS:                      # PAD-1393 round 2: ticked/unticked here, once the project has it
-                can = key in has                        # round 3: unticked until the owner ticks it
-                on = can and key in ticked
-                row.update(can=can, on=on, note=OFF_NOTES[key] if can and not on else "")
+            if key in SM.OFF_KEYS:                      # PAD-1393 round 2: ticked/unticked here
+                on = key in ticked                      # round 3: unticked until the owner ticks it
+                if on and key not in has:               # Simon: a row can go on before there is anything behind it
+                    note = PLACEHOLDER_NOTE % (", ".join(SM.PLACEHOLDER_NAMES), where)
+                elif on:
+                    note = ""
+                else:
+                    note = OFF_NOTES[key] + ("" if key in has else " " + where)
+                row.update(can=True, on=on, note=note)
             elif key == "handicap":
                 on = HC.load(project)
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")

@@ -2013,6 +2013,21 @@ def retrofit_items(table, m):
         k, look = by_name.get(v["look"].lower(), ("", None))
         assert k == "HitTarget", "%s: no drop target named %s to take the look of" % (name, v["look"])
         items.append(target_primitive(src, look, name))
+    # PAD-1431: a ramp the table has none of: a copy of one of its own
+    # (`clone`, which must be there: its wires, material and look) along drag
+    # points of its own (`shape`, as many as the clone has; the first is the
+    # ramp's foot at HTBT, the last its head at HTTP), given `fields` as
+    # item_fields does. JAWS 50th's center ramp turnaround is a wire form,
+    # as the machine's is, where JP's middle lane ran on to his wave ramp.
+    for name, v in m.get("retrofit_ramps", {}).items():
+        if name == "_":
+            continue
+        k, src = by_name.get(v["clone"].lower(), ("", None))
+        assert k == "Ramp", "%s: the table has no ramp named %s to copy" % (name, v["clone"])
+        item = vpxfile.reshape_item(vpxfile.clone_item(src, name, 0, 0), v["shape"])
+        if v.get("fields"):
+            item = vpxfile.set_fields(item, {tag: _field_bytes(x) for tag, x in v["fields"].items()})
+        items.append(item)
     for name, v in m.get("retrofit_timers", {}).items():
         if name == "_":
             continue

@@ -4449,8 +4449,9 @@ SPOOKY_MODES_HELP = [
         "**Seconds** how long it runs (0: until the ball ends); **Shots to complete** and "
         "**Completion bonus** when it is done early. A mode ends when its time runs out, "
         "when it is completed, and when the ball ends.",
-        "Scooby-Doo rounds every award to 100 points, so the check asks for points that are "
-        "a multiple of 100.",
+        "Each game rounds its awards: Scooby-Doo to 100 points, Looney Tunes to 10, so the "
+        "check asks for points that are a multiple of that. On Looney Tunes the game's "
+        "playfield multiplier counts for a mode's points, as for its own awards.",
         "**Check** runs after every change and lists anything the game would not take.",
     ]),
     ("Trying and installing", [
@@ -4458,8 +4459,9 @@ SPOOKY_MODES_HELP = [
         "update, without building anything. Start a game there and make a mode's start shots.",
         "**Build** writes the stock update again with your modes in it, under the same name "
         "(the machine reads an update by its name). Install it as you would a stock update. "
-        "On its first start after the update the game restarts once by itself, to take up the "
-        "modes. The Write tab carries your modes too, with any pictures or sounds you changed.",
+        "Scooby-Doo restarts once by itself on its first start after the update, to take up "
+        "the modes; Looney Tunes has them at once. The Write tab carries your modes too, with "
+        "any pictures or sounds you changed.",
         "To take the modes out, install the stock update again.",
     ]),
 ]

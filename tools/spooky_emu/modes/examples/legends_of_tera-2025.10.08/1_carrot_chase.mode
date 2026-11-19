@@ -1,0 +1,15 @@
+# Carrot Chase - a starter mode: both inlanes start it, the slings score it
+name = Carrot Chase
+title = CARROT CHASE
+start = inlane_left inlane_right
+start_count = 2
+shots = sling_left sling_right
+points = 250000
+seconds = 30
+complete = 3
+complete_points = 2000000
+sound_start = bugs_hurry1
+sound_shot = jab_jackpot
+sound_complete = anvil_super_jackpot
+title_color = ff8c00
+value_color = ffffff

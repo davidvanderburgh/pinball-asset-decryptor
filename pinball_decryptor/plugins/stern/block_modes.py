@@ -1378,7 +1378,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
         _check_num(m["value"], "Meter %d (%s)" % (k + 1, m["label"] or "no label"), ctx)
         _check_num(m["max"], "Meter %d's most" % (k + 1), ctx)
     if len(fade_layers(program)) > FADES_MAX:
-        out.append("Its Fade the screen blocks use more than %d colours and looks: use %d at most." % (FADES_MAX, FADES_MAX))
+        out.append("Its Fade the screen blocks use more than %d colors and looks: use %d at most." % (FADES_MAX, FADES_MAX))
     for i, s in enumerate(program["scripts"]):
         _check_hat(s.get("hat") or {}, i + 1, ctx)
         _check_stack(s.get("do") or [], 1, "Script %d" % (i + 1), ctx)

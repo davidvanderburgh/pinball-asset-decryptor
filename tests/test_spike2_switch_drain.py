@@ -56,6 +56,7 @@ static void lit_hold_check(unsigned id) { (void)id; }    /* PAD-503's, not under
 static volatile int att_live;                            /* PAD-641's, not under test here */
 static volatile int gms_live;                            /* PAD-945's, not under test here */
 @EDGE@
+static void btn_edge(unsigned id, unsigned level, unsigned polarity) {}   /* PAD-1403's, not under test here */
 static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask) {}
 static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity) {}
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity) {}   /* PAD-1031's */

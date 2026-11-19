@@ -19180,6 +19180,10 @@ static int coop_scr_found, coop_scr_shown = -1;
 static void *coop_scr_classic[COOP_CHARS];  /* PAD-1065: PadCoopClassic_1..: NO SPECIAL ABILITY over each card */
 static int coop_scr_classic_shown = -1;
 static unsigned long coop_scr_try;
+/* PAD-1450: each character's view card (PadCoopView_1..) and the hint (PadCoopPeek); cv: this turn's window */
+static void *coop_view[COOP_CHARS], *coop_view_words[COOP_CHARS], *coop_peek;
+static int coop_view_shown = -1, coop_peek_shown;
+static struct { int ok, waited, out; unsigned long at, waited_ms; volatile int hide, moved; } cv;
 /* PAD-1107: the game's own logo at a game's start (port `text start_logo_scene` / `start_logo_path`: Godzilla's
  * Logo_Instance, a scene of its own drawn OVER the HUD) - kept hidden while a pick card is on the glass */
 static void *coop_logo;
@@ -19851,6 +19855,7 @@ static int coop_hides(unsigned id)
         return 1;                         /* PAD-1114 round 2: in the film the flippers choose the language */
     if (coop_live && ci.holding && pk.open && id && (id == coop_left || id == coop.button || id == coop_action))
         return 1;                         /* ... and the pick has them while ball 1 is not served yet */
+    if (coop_live && cv.hide && id && id == coop_left) return 1;   /* PAD-1450: a later ball's card, in the plunger */
     if (!coop_live || !pk.open || pk.moved || !id || (id != coop_left && id != coop.button && id != coop_action))
         return 0;
     w = coop_ball_waits();
@@ -19909,6 +19914,8 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
     if (coop_lane && id == coop_lane) {                       /* PAD-1045: a ball arrives in the lane, or leaves it */
         if (pk.open && pk.waited && pm_ms() - pk.waited_ms >= COOP_SETTLE_MS)   /* PAD-1051: either way - its sense */
             pk.moved = 1;                                     /* varies by switch; not the ball landing */
+        if (cv.ok && cv.waited && pm_ms() - cv.waited_ms >= COOP_SETTLE_MS)
+            cv.moved = 1, cv.hide = 0;                        /* PAD-1450: the ball left the lane, flags or not */
         coop_lane_in = (level & 1u) == closed;
         if (!coop_lane_in) {
             coop_lane_left_ms = pm_ms();
@@ -20328,6 +20335,77 @@ static void coop_logo_hold(int card_up)
     }
 }
 
+/* ---- PAD-1450: the character card on a held left flipper at a later ball ----------------------------------------
+ * DoomWalrus666: "a small text is shown above the scoreboard in the bottom right of the screen 'hold left flipper to
+ * see character card' ... for as long as the ball has not left the shooter lane. If the player holds left flipper,
+ * bring up the character selection card showing their selected character ... When the left flipper is released, the
+ * character card will disappear ... the beginning of each player's ball for Ball 2 and Ball 3. It should not happen on
+ * ball 1 as character selection happens." A turn that begins with its teammate's character already taken (so never
+ * the ball they pick on) opens the window; it shuts when the ball leaves the shooter lane: the game's plunger flags
+ * (PAD-1051) went from waiting to not, or with none the lane switch (`lane`) let it go, or with neither
+ * COOP_VIEW_BLIND_MS after the turn began. In it the hint (PadCoopPeek) shows, and while the left flipper is held the
+ * teammate's own view card (PadCoopView_<n>, the pick card with only them on it) in its place, its words line saying
+ * whose it is. Godzilla's own left flipper hold opens its CITY CONTROL status pages over the whole glass, the card
+ * under them (emulator, LE 1.16), so while the ball sits in the plunger (the flags say it waits) the left flipper is
+ * the card's alone, kept from the game as the pick keeps its flippers (coop_hides, PAD-1051's edge hiding); with the
+ * ball out, or no flags, the game has it as always. */
+#define COOP_VIEW_BLIND_MS 20000ul        /* no plunger flags and no lane switch: the window's length */
+#define COOP_VIEW_SERVE_MS 30000ul        /* flags known but the ball never waited in the plunger: shut by then */
+static void coop_view_turn(void)
+{
+    int c = coop.turn >= 1 && coop.turn <= 4 ? coop_pick_of[coop.turn] : -1;
+    cv.ok = c >= 0 && c < coop_ch_n && (coop_view[c] || coop_peek || !coop_scr_found);
+    cv.waited = cv.out = cv.moved = cv.hide = 0;
+    cv.at = pm_ms();
+    if (cv.ok) say("co-op characters: teammate %u's ball begins as %s - the left flipper shows their card until the "
+                   "ball leaves the shooter lane", coop.turn, coop_ch[c].name);
+}
+
+static void coop_view_tick(void)
+{
+    int c, up, show, w;
+    char words[24];
+    if (cv.ok && !cv.out) {
+        w = coop_ball_waits();
+        if (w == 1 && !cv.waited) {
+            cv.waited = 1;
+            cv.waited_ms = pm_ms();
+            if (cv.ok) say("co-op characters: teammate %u's ball waits in the plunger - the left flipper is the card's",
+                           coop.turn);
+        }
+        if ((w == 0 && cv.waited) || cv.moved) cv.out = 1;
+        else if (w < 0 && (coop_lane ? coop_ball_out : pm_ms() - cv.at >= COOP_VIEW_BLIND_MS)) cv.out = 1;
+        else if (w >= 0 && !cv.waited && pm_ms() - cv.at >= COOP_VIEW_SERVE_MS) cv.out = 1;
+        if (cv.out) say("co-op characters: teammate %u's ball left the shooter lane - no more card on the left flipper",
+                        coop.turn);
+    }
+    c = coop.turn >= 1 && coop.turn <= 4 ? coop_pick_of[coop.turn] : -1;
+    up = cv.ok && !cv.out && c >= 0 && c < coop_ch_n && coop_left && coop_teammates() && pm_in_game() && !pk.open
+         && !coop_done.on && !coop_cer_on && !ci.phase;
+    cv.hide = up && coop_view[c] && coop_ball_waits() == 1;     /* only with the ball still in the plunger */
+    if (cv.hide) edge_take_held(coop_left);                      /* held as the ball came to wait: taken mid-press */
+    show = up && coop_view[c] && switch_held(coop_left) ? c : -1;
+    if (show != coop_view_shown) {
+        if (coop_view_shown >= 0 && coop_view[coop_view_shown]) pm_show(coop_view[coop_view_shown], 0);
+        if (show >= 0) {
+            if (coop.teams) pm_snprintf(words, sizeof words, "TEAM %u P%u", coop_team_of_in(coop.team_kind, coop.turn),
+                                        coop.turn);
+            else pm_snprintf(words, sizeof words, "PLAYER %u", coop.turn);
+            if (coop_view_words[show]) pm_set_text(coop_view_words[show], words);
+            pm_show(coop_view[show], 1);
+            say("co-op characters: left flipper held - %s's card up (%s)", coop_ch[show].name, words);
+        } else if (coop_view_shown >= 0) {
+            say("co-op characters: left flipper let go - the card is down");
+        }
+        coop_view_shown = show;
+    }
+    up = up && show < 0 && coop_peek;                             /* the hint, under no card */
+    if (up != coop_peek_shown) {
+        pm_show(coop_peek, up);
+        coop_peek_shown = up;
+    }
+}
+
 /* the pick's own screens: found once the scene is up (tried each second), all hidden, the pick's one shown - with
  * the seconds left on its words line, and PAD-1044's PICKED on the one taken */
 static void coop_screens_tick(void)
@@ -20353,6 +20431,20 @@ static void coop_screens_tick(void)
             if (!coop_scr_classic[i]) coop_scr_classic[i] = pm_node(coop_scr_scene, name);
             if (coop_scr_classic[i]) pm_show(coop_scr_classic[i], 0), k++;
         }
+        for (i = 0, k = 0; i < coop_ch_n; i++) {              /* PAD-1450: the view cards, where the card has them */
+            pm_snprintf(name, sizeof name, "PadCoopView_%d", i + 1);
+            if (!coop_view[i]) coop_view[i] = pm_node(coop_scr_scene, name);
+            pm_snprintf(key, sizeof key, "%s.%s_Words", name, name);
+            if (!coop_view_words[i]) coop_view_words[i] = pm_text(coop_scr_scene, key);
+            if (coop_view[i]) pm_show(coop_view[i], 0), k++;
+        }
+        if (!coop_peek) coop_peek = pm_node(coop_scr_scene, "PadCoopPeek");
+        if (coop_peek) pm_show(coop_peek, 0);
+        coop_view_shown = -1;
+        coop_peek_shown = 0;
+        if (k || coop_peek)
+            say("co-op characters: %d view cards and %s for a later ball's held left flipper", k,
+                coop_peek ? "its hint" : "no hint");
         coop_scr_found = 1;
         coop_scr_shown = coop_scr_classic_shown = -1;
         coop_cards_find();                                    /* PAD-1028 round 2: the award cards, hidden with them */
@@ -20386,6 +20478,7 @@ static void coop_screens_tick(void)
         if (want_classic >= 0 && coop_scr_classic[want_classic]) pm_show(coop_scr_classic[want_classic], 1);
         coop_scr_classic_shown = want_classic;
     }
+    coop_view_tick();
 }
 
 /* a rule of the game's that runs now (v[active] says 1), from the mask: its id + 1, or 0 */
@@ -20594,6 +20687,7 @@ static void coop_chars_begin(void)
     coop_turn_waited = 1;                    /* PAD-1051: ... as the flags say, once it is out */
     coop_waited_ms = 0;
     coop_adj_said = 0;
+    cv.ok = 0;                               /* PAD-1450 */
 }
 
 /* the turn up changed (or the same teammate shoots again): a ball's save again; a first ball's pick */
@@ -20604,6 +20698,7 @@ static void coop_chars_turn(void)
     coop_ball_out = 0;                       /* PAD-1045: the next ball is not served yet: it counts once out */
     coop_turn_waited = 0;                    /* PAD-1051: the same, from the game's plunger flags */
     if (pk.open && pk.who != coop.turn) coop_pick_close("their turn ended");
+    coop_view_turn();                        /* PAD-1450: before a first ball's pick opens: theirs is not taken yet */
     coop_pick_open(coop.turn);
     coop_cache_hold();
     coop_dbl_armed = 0;

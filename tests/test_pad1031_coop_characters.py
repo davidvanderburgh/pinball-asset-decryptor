@@ -207,7 +207,9 @@ def _decl(src):
     """The character section's declarations, verbatim: from its #defines to the last of its globals."""
     start = src.index("#define COOP_CHARS 16")
     end = src.index("static int coop_dbl_armed;", start)
-    return src[start:src.index("\n", end) + 1]
+    # PAD-1450: the later ball's view card (coop_view_turn / coop_view_tick) is emulator-proven; here they do nothing
+    return src[start:src.index("\n", end) + 1] + ("static void coop_view_turn(void) {}\n"
+                                                    "static void coop_view_tick(void) {}\n")
 
 
 def _run(tmp_path, main=MAIN):
@@ -577,8 +579,9 @@ def test_the_pick_has_a_screen_for_each_character_and_random(tmp_path):
     CP.save_picture(project, 1, str(pic))
     assert CP.load_characters(project)["list"][1]["picture"] == "coop/character_2.png"
     screens = CP.pick_screens(project, words_for=CP.words_for())
-    assert [s["name"] for s in screens] == ["PadCoop_1", "PadCoop_2", "PadCoop_Random"]
-    for sc in screens:                                                 # one finished card each, all words on it
+    assert [s["name"] for s in screens] == ["PadCoop_1", "PadCoop_2", "PadCoop_Random",
+                                            "PadCoopView_1", "PadCoopView_2", "PadCoopPeek"]   # PAD-1450
+    for sc in screens[:3]:                                             # one finished card each, all words on it
         assert sc["art_rgba"].shape == (CP.CARD_SIZE[1], CP.CARD_SIZE[0], 4) and sc["words"] == " "
         assert (sc["x"], sc["y"]) == CP.CARD_AT
     px, py = 40 + 190, 84 + 150                                        # the portrait's middle on card 2: the picture
@@ -615,7 +618,9 @@ def test_co_op_alone_puts_the_pick_screens_in_the_hud_and_names_the_scene(tmp_pa
     result = MW.ModePlan(project=project, profile=Prof(), port="", build=None)
     MW.coop_into(result, b"", str(tmp_path / "scratch"), stock_hud=b"HUD", stock_font=b"")
     # PAD-1028: + the award card; PAD-1219: + the final score's band
-    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopAward_1", "PadCoopFinal"]
+    # PAD-1450: + the view card and the hint
+    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopView_1", "PadCoopPeek", "PadCoopAward_1",
+                            "PadCoopFinal"]
     (card, src), = result.replaced
     assert card == "godzilla_le/godzilla_le/assets/lcd/auto_loaded/32e6ae28/scene.radium"
     assert open(src, "rb").read() == b"HUD+screens"

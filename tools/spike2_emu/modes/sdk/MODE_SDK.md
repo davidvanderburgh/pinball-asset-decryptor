@@ -6946,6 +6946,17 @@ the name, and `<NAME> - <WHAT IT DOES>` under it. coop.cfg `screens <scene>` nam
 once the scene is up, keeps them hidden, shows the one the pick is on, and the top line then says only `PLAYER 2
 PICK`. With modes they go in the modes' own HUD pass (mode_assets.build); co-op alone, Write rewrites the HUD itself.
 
+**The card on a held left flipper at a later ball (PAD-1450).** Beside the pick's screens each character gets a view
+card `PadCoopView_<n>` (the pick card's look with only that character: no roster strip, no count, no how to choose,
+the title without its CHOOSE, a header box whose words line `PadCoopView_<n>_Words` the runtime fills with `PLAYER 2`
+or `TEAM 1 P2`), and the HUD gets a hint pill `PadCoopPeek` ("HOLD LEFT FLIPPER TO SEE CHARACTER CARD") above the
+bottom-right score panel. A turn that begins with its teammate's character already taken (never the ball they pick
+on) shows the hint until the ball leaves the shooter lane (the plunger flags going from waiting to not, the lane
+switch moving after it waited, or with neither 20 s); while the left flipper is held the view card replaces it.
+Godzilla's own left flipper hold opens its CITY CONTROL pages over everything, so while the ball sits in the plunger
+the left flipper is kept from the game (the pick's edge hiding, `coop_hides`); once the ball is out it is the game's.
+Cards built before this have neither node and show nothing.
+
 **The game's start logo stays off the pick (PAD-1107).** A game whose start-of-game logo is a scene of its own, drawn
 over the HUD, would cover the card when the pick opens at the game's start (Godzilla: the GODZILLA logo reveal, at a
 CO-OP PLAY start with a teammate's Start, or a team start). The port names it:

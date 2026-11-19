@@ -67,7 +67,8 @@ def test_hook_callee_hands_the_logger_x19_to_x28_and_loads_them_back():
 # ---- the runtime ------------------------------------------------------------------------------------------------
 def test_every_drain_feature_hooks_through_edge_hook():
     c = _src()
-    assert c.count("edge_hook(e)") == 6                     # PAD-1326: co-op's button and the handicaps' flippers
+    assert c.count("edge_hook(e)") == 7                     # PAD-1326: co-op's button and the handicaps' flippers;
+                                                            # PAD-1403: the button shots
     assert c.count("hook(e->addr, on_switch_edge)") == 1           # edge_hook's Spike 2 branch
     hook = _lift(c, "static int edge_hook(")
     assert "hook_callee(e->addr, on_switch_edge64)" in hook and "#if PM_A64" in hook
@@ -100,6 +101,8 @@ static unsigned att_n;
 static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask) { att_n++; }
 static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity) {}
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity) {}
+static int n_btn;                                  /* PAD-1403's button shots, not under test here */
+static void btn_edge(unsigned id, unsigned level, unsigned polarity) { (void)id; (void)level; (void)polarity; }
 static long edge_log_left;
 static struct { unsigned mode_mask; } edge;
 static unsigned short mask_word;

@@ -42,7 +42,8 @@ def test_each_pick_card_has_the_box_the_runtime_counts_down_in(tmp_path):
     project = str(tmp_path)
     CP.save(project, True)
     CP.save_characters(project, {"pick": True, "time": 30, "list": CHARS})
-    screens = CP.pick_screens(project, words_for=CP.words_for())
+    screens = [sc for sc in CP.pick_screens(project, words_for=CP.words_for())
+               if sc["name"].startswith("PadCoop_")]                  # PAD-1450: not the view cards / hint
     x0, y0, x1, y1 = CP.TIMER_BOX
     for sc in screens:
         wx, wy = sc["words_at"]

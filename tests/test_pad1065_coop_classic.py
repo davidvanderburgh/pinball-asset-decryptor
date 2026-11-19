@@ -100,7 +100,8 @@ def test_each_classic_patch_turns_its_card_into_no_special_ability():
     n = len(chars["list"])
     names = [s["name"] for s in scr]
     assert names[:n + 1] == ["PadCoop_%d" % (i + 1) for i in range(n)] + ["PadCoop_Random"]   # the cards first
-    assert names[n + 1:] == ["PadCoopClassic_%d" % (i + 1) for i in range(n)]               # then drawn over them
+    assert names[n + 1:2 * n + 1] == ["PadCoopClassic_%d" % (i + 1) for i in range(n)]      # then drawn over them
+    assert names[2 * n + 1:] == ["PadCoopView_%d" % (i + 1) for i in range(n)] + ["PadCoopPeek"]   # PAD-1450
     for i in (0, 5, n - 1):
         patch = scr[n + 1 + i]
         h, w = patch["art_rgba"].shape[:2]

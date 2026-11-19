@@ -131,7 +131,9 @@ def test_the_disk_is_sized_from_the_cache_limit_or_what_the_old_cache_holds():
 
 
 def test_manage_disk_space_lists_and_keeps_it_off_a_hard_disk(monkeypatch, tmp_path):
-    path = _user(monkeypatch, tmp_path)
+    monkeypatch.setenv("PAD_CARDS_DISK", str(tmp_path / "pad-cards.vhdx"))
+    path = str(tmp_path / "pad-cardcache.vhdx")
+    monkeypatch.setenv("PAD_CACHE_DISK", path)
     open(path, "wb").close()
     monkeypatch.setenv("PAD_DATA_DISK", str(tmp_path / "none.vhdx"))
     items = {i["key"]: i for i in wsl_place.items() if i["key"] != "distro"}

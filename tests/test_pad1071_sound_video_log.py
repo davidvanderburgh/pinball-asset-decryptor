@@ -255,7 +255,8 @@ def test_the_windows_card_offers_the_log_and_the_page_reads_the_rows():
 def test_the_runtime_arms_the_sound_log_right_after_the_port_gate_and_stops_there_for_a_stock_card():
     src = _text("modes", "sdk", "pad_mode_runtime.c")
     start = src[src.index("static void pad_mode_start(void)"):]
-    assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*if \(soundlog_arm\(\)\) return;", start)
+    # PAD-1448: the added cabinet lights arm between them (before the game's static initialisers read its tables)
+    assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*(addcab_arm\(\);[^\n]*\n\s*)?if \(soundlog_arm\(\)\) return;", start)
     arm = src[src.index("static int soundlog_arm(void)"):src.index("static void pad_mode_start(void)")]
     assert 'pm_trigger("soundlog.only")' in arm and 'pm_trigger("soundlog.on")' in arm
     # its own allowance: mode.log's 40000 lines would end a long session's list

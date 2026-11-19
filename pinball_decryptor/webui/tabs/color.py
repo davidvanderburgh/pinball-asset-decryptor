@@ -391,6 +391,8 @@ class ColorTab(TabService):
         #                              (PAD-462: "more", the other files selected with it)
         self._switched = {}          # PAD-462: switches the last change to them attached
         self._lines = _TextLines(self)   # PAD-471: Apply to all lines of text
+        self._targets_rev = 0        # a tab has read the project's files: the page counts the Copy again
+        self.set(targets_rev=0)
         self.set(sample="card", sample_url="", sample_path="", samples=[],
                  problems=[], rev=0, active=False, project="",
                  has_project=False, try_note="", mode="display",
@@ -1177,6 +1179,28 @@ class ColorTab(TabService):
             log.exception("color profile switches %s", kind)
             return {}
 
+    def _targets_pending(self, kind):
+        """Simon (2026-11-19): the Copy count said "0 ASSETS" on Scenes and Video until the Images tab had been
+        opened - a tab knows no files until it has scanned the project. True while *kind*'s tab has not read the
+        project yet (it starts its scan, and tells :meth:`targets_ready` when it is done)."""
+        fn = getattr(self._all_service(kind), "targets_pending", None)
+        try:
+            return bool(fn()) if fn is not None else False
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile targets pending %s", kind)
+            return False
+
+    def targets_ready(self):
+        """The Images or Video tab has read the project's files: the page asks the Copy count again."""
+        self._targets_rev += 1
+        self.set(targets_rev=self._targets_rev)
+
+    def _still_reading(self, kind):
+        """APPLY pressed while the count still reads "...": nothing is copied to a list not read yet."""
+        self.toast("Still reading the project's %s - press APPLY again when the count beside it shows."
+                   % self._ALL_WORDS[kind][1], "info")
+        return False
+
     #: PAD-462: what each Apply to all reaches, in the question it asks
     _ALL_SCOPES = {
         "profiled": "with a color profile attached",
@@ -1199,6 +1223,8 @@ class ColorTab(TabService):
             if source == "shared":
                 if kind not in self._ALL_WORDS:
                     return {"n": 0, "text": ""}
+                if self._targets_pending(kind):     # n None: the page shows "..." until targets_ready
+                    return {"n": None, "text": "Reading the project's %s…" % self._ALL_WORDS[kind][1]}
                 fn = getattr(self._all_service(kind), "color_targets", None)
                 targets = dict(fn("all") or {}) if fn is not None else {}
                 name = (self._asset or cp.recommended(self._project, files=True)).label()
@@ -1213,6 +1239,8 @@ class ColorTab(TabService):
             if fm is None:
                 return {"n": 0, "text": ""}
             kind, rel = fm
+            if self._targets_pending(kind):
+                return {"n": None, "text": "Reading the project's %s…" % self._ALL_WORDS[kind][1]}
             svc = self._all_service(kind)
             fn = getattr(svc, "color_targets", None)
             themes = "all" if themes == "all" else "this"
@@ -1316,6 +1344,8 @@ class ColorTab(TabService):
         if scope not in self._ALL_SCOPES:
             scope = "profiled"
         kind, rel = fm
+        if self._targets_pending(kind):
+            return self._still_reading(kind)
         one, many = self._ALL_WORDS[kind]
         svc = self._all_service(kind)
         fn = getattr(svc, "color_targets", None)
@@ -1418,6 +1448,8 @@ class ColorTab(TabService):
         profile on show, and is attached; after an "Are you sure?", one Undo
         step on that profile (switches too)."""
         one, many = self._ALL_WORDS[kind]
+        if self._targets_pending(kind):
+            return self._still_reading(kind)
         fn = getattr(self._all_service(kind), "color_targets", None)
         try:
             targets = dict(fn("all") or {}) if fn is not None else {}

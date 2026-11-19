@@ -265,12 +265,14 @@ function FileLine({ s, host, tools }) {
     setSummary((was) => ({ ...was, n: null }));
     const timer = setTimeout(() => {
       call("color.copy_preview", source, to, scope, themes).then((r) => {
-        if (mine === seq.current) setSummary({ n: (r && typeof r.n === "number") ? r.n : -1, text: (r && r.text) || "" });
+        // n null: the tab has not read the project's files yet - "..." until it has (s.targets_rev asks again)
+        if (mine === seq.current) setSummary({ n: (r && typeof r.n === "number") ? r.n : (r && r.n === null) ? null : -1,
+          text: (r && r.text) || "" });
       }, () => { if (mine === seq.current) setSummary({ n: -1, text: "" }); });
     }, 200);
     return () => clearTimeout(timer);
   }, [source, to, scope, themes, f && f.rel, f && f.own, s.name, s.asset_name, canCopy,
-    JSON.stringify(sets.unlock || {}), sets.current, (sets.names || []).length, JSON.stringify(s.asset_counts || {})]);
+    JSON.stringify(sets.unlock || {}), sets.current, (sets.names || []).length, JSON.stringify(s.asset_counts || {}), s.targets_rev]);
   const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(toWords[2], toWords[1]);
   const copyTip = !canCopy ? "Copying is not offered for this file here"
     : source === "shared" ? { head: `Give every ${toWords[2]} the shared files profile`, lines: [{ profile: s.asset_name || "Recommended" },

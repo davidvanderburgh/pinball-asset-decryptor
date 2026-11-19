@@ -689,6 +689,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
             self._select_first_row()
         self._start_change_scan()
         self._probe_image_metadata_async(scan_id)
+        self._targets_read()                # the Colors bar's Copy count, asked before this tab had opened
 
     # ------------------------------------------------------------------
     # metadata probe (Tk _run_probe_pass + _apply_image_meta)
@@ -1472,6 +1473,28 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
                     if on or scope == "all":
                         out[SV.theme_key(t, rel)] = on
         return out
+
+    def targets_pending(self):
+        """Simon (2026-11-19): "0 ASSETS" in the Colors bar's Copy on Scenes and Video until this tab had been
+        opened - it knows no pictures until it has scanned the project. True while it has not read the project
+        yet; the scan is started here (once), and the Colors bar told when it lands (color.targets_ready)."""
+        mfr = self.mfr
+        if not (self._per_file_colour() and getattr(mfr.capabilities, "replace_image", False)):
+            return False
+        path = self._assets_dir()
+        if not path or not os.path.isdir(path) or path == self._scan_dir:
+            return False
+        if self._scan_t0 is None:
+            self._scan_image_slots_async()
+        return True
+
+    def _targets_read(self):
+        fn = getattr(self.window.service("color"), "targets_ready", None)
+        if fn is not None:
+            try:
+                fn()
+            except Exception:                           # noqa: BLE001
+                log.exception("images color targets_ready")
 
     # ---- Save with color profile (PAD-604) -----------------------------
     _cs_kind = "images"

@@ -53,7 +53,8 @@ def test_king_kong_gets_the_first_nine_and_x_men_all_eighteen():
     assert "Left flipper + Action button" in xm.button_shots
 
 
-@pytest.mark.parametrize("name", ["beatles-1.29", "jurassic_park_the_pin-1.05", "star_wars_elg-1.10"])
+@pytest.mark.parametrize("name", ["beatles-1.29", "jurassic_park_the_pin-1.05", "star_wars_elg-1.10",
+                                  "iron_maiden_le-1.16", "iron_maiden_le-1.18", "iron_maiden_pro-1.18"])
 def test_titles_without_an_action_button_offer_none_of_its_shots(name):
     p = MP.profile_from_port(str(SDK / "ports" / (name + ".port")))
     assert not any("action" in CB.buttons_of(n) for n in p.button_shots)
@@ -170,3 +171,12 @@ def test_the_runtime_counts_only_presses_in_a_game_and_their_releases():
     assert src.count("if (n_btn) btn_edge(id, level, pol);") == 2          # both drain hooks (Spike 2, Spike 3)
     assert "    switches_deliver();\n    btn_tick();" in src and "    switches_arm();" in src and "    buttons_arm();" in src
     assert '"/usr/local/padmode/buttons.cfg", "/dump/buttons.cfg"' in src
+
+
+def test_iron_maiden_program_names_no_action_button_for_coop_or_buttons_cfg():
+    # PAD-1447: Iron Maiden's switch table names LOCKDOWN BUTTON (OPTIONAL); its cabinet has none
+    from pinball_decryptor.plugins.stern import coop_play as CP
+    assert CB.program_lacks_action(b"/games/iron_maiden_pro/")
+    assert not CB.program_lacks_action(b"/games/turtles_le/")
+    assert CP.action_button(b"..iron_maiden..") is None
+    assert {"iron_maiden_le", "iron_maiden_pro"} <= CB.NO_ACTION and "turtles_le" not in CB.NO_ACTION

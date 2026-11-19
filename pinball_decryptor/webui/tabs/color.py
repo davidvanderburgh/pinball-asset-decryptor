@@ -1104,6 +1104,16 @@ class ColorTab(TabService):
         f = {"kind": kind, "rel": str(rel), "label": str(label or "")[:120]
              or os.path.basename(str(rel)), "on": on,
              "attach": attach if isinstance(attach, dict) else None}
+        if kind == "images" and f["rel"].startswith("@"):
+            # a theme's picture: the theme's own switch, read here (Simon, 2026-11-19: the Scenes bar edits the theme
+            # Scenes shows, and Scenes' layers carry theme 1's switch)
+            try:
+                from ...plugins.stern import scene_variants as SV
+                n, base = SV.split_theme_key(f["rel"])
+                if n > 1 and self._project:
+                    f["on"] = bool(SV.theme_colour(self._project, n, base)[0])
+            except Exception:                           # noqa: BLE001
+                log.exception("color profile theme switch")
         f["more"] = [r for r in dict.fromkeys(
             str(r) for r in (more if isinstance(more, (list, tuple)) else ())
             if r) if r != f["rel"]]
@@ -1240,7 +1250,8 @@ class ColorTab(TabService):
             return ""
         if themes == "this":
             from ...plugins.stern import scene_variants as SV
-            n = SV.split_theme_key(rel)[0] if rel and SV.split_theme_key(rel)[0] > 1 else self._theme_now()
+            # (a file on show names its theme by its key - plain is theme 1, as the Scenes bar may show it)
+            n = SV.split_theme_key(rel)[0] if rel else self._theme_now()
             return " in theme %d (%s)" % (n, names[n - 1] if n - 1 < len(names) else "")
         if len(themes) == len(names):
             return " in every theme"
@@ -1273,11 +1284,16 @@ class ColorTab(TabService):
         if which == "selected" and fm is None:
             return {"error": "Nothing is selected."}
         themes, names = self._theme_list(kind, themes)
+        from ...plugins.stern import scene_variants as SV
         svc = self._all_service(kind)
         fn = getattr(svc, "color_targets", None)
         try:
             if svc is not None:
-                svc._targets_themes = "this" if which == "selected" else themes
+                # the files selected: in the theme(s) their keys name (the Scenes bar's theme need not be the Images
+                # tab's)
+                svc._targets_themes = (sorted({SV.split_theme_key(r)[0] for r in self._file_rels()})
+                                       if which == "selected" and kind == "images" else
+                                       "this" if which == "selected" else themes)
             states = dict(fn("profiled" if which == "profiled" else "all") or {}) if fn is not None else {}
         except Exception:                               # noqa: BLE001
             log.exception("color profile targets %s", kind)

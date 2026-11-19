@@ -1150,6 +1150,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         if n > 1:
             state = getattr(self, "_set_state", None)
             rows = state()[2] if state is not None else {}
+            # (Simon, 2026-11-19: the Scenes Colors bar edits the theme Scenes shows, which need not be the one picked
+            # here - this tab's rows are read only while it has a theme picked)
+            rows = rows or SV.picture_rows(self._scan_dir or "")
         return n, base, bool(rows.get(base))
 
     def _theme_color_state(self, n, rel):

@@ -19,7 +19,7 @@ function ThemeView({ s }) {
   if (!sets.on || !sets.enabled || names.length < 2) return null;
   const options = names.map((n, i) => ({ value: String(i + 1), label: `Show theme ${i + 1}: ${n}` }));
   return html`<${Select} sm value=${String(s.preview_theme || 1)} options=${options}
-    title="Draw the scenes as each theme will show them on the machine (its pictures and colour profiles). A preview: what you change here is theme 1's."
+    title="Draw the scenes as each theme will show them on the machine (its pictures and color profiles). The Colors bar then changes that theme's colors; layout changes are theme 1's."
     onChange=${(v) => call("text_scenes.set_preview_theme", Number(v))} />`;
 }
 
@@ -30,8 +30,8 @@ function ThemeStrip({ s }) {
   const name = (sets.names || [])[t - 1] || "";
   return html`<div class="imgsets-strip"><${Note} kind="warn" action=${html`<${Button} size="sm"
       onClick=${() => call("text_scenes.set_preview_theme", 1)}>Show theme 1<//>`}>
-    <b>Showing theme ${t}: ${name}</b> - its pictures and colour profiles, as the machine will show them. A preview
-    only: anything you change in Scenes changes theme 1.<//></div>`;
+    <b>Showing theme ${t}: ${name}</b> - its pictures and color profiles, as the machine will show them. Color
+    changes in the Colors bar go to this theme; moving, resizing or hiding layers changes theme 1.<//></div>`;
 }
 
 export default function ScenesTab() {
@@ -70,10 +70,21 @@ export default function ScenesTab() {
   const usable = (l) => l.color && !l.color.locked && l.color.rel;
   const head = c && usable(lay) ? lay : chosen.find(usable) || null;
   const hc = head && head.color;
-  const file = hc ? { kind: hc.kind || "images", rel: hc.rel, label: head.name, on: !!hc.on,
+  let file = hc ? { kind: hc.kind || "images", rel: hc.rel, label: head.name, on: !!hc.on,
     attach: { ns: "scenes", node: head.id },
     more: [...new Set(chosen.filter((l) => l !== head && usable(l) && (l.color.kind || "images") === (hc.kind || "images"))
       .map((l) => l.color.rel))].filter((r) => r !== hc.rel) } : null;
+  // Simon (2026-11-19): with "Show theme 2" picked the Colors bar still changed theme 1, and its Copy went to the Images
+  // tab's theme - he copied into theme 1 while looking at theme 2. A picture's color is now the theme shown: its theme
+  // key ("@<n>:<rel>", as the Images tab sends with a theme picked), switched through the Images tab (the layer's own
+  // switch is theme 1's; the bar reads the theme's). Layout stays theme 1's.
+  const sets = useNs("imgsets");
+  const shownTheme = sets.on && sets.enabled && (sets.names || []).length > 1 ? (s.preview_theme || 1) : 1;
+  if (file && shownTheme > 1 && file.kind === "images") {
+    const key = (r) => `@${shownTheme}:${r}`;
+    file = { ...file, rel: key(file.rel), label: `${file.label} (theme ${shownTheme})`, attach: { ns: "images" },
+      more: file.more.map(key) };
+  }
   const picked = { n: chosen.length, locked: chosen.filter((l) => l.color && l.color.locked).length,
     ok: hc ? chosen.filter((l) => usable(l) && (l.color.kind || "images") === (hc.kind || "images")).length : 0 };
   // PAD-514: a line of text's own color (set in the Font bar), shown in the Colors bar too

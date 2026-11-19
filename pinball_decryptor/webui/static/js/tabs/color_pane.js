@@ -214,7 +214,11 @@ function FileLine({ s, host, tools }) {
   const themesOn = !!(sets.on && sets.enabled && names.length > 1);
   const themeHost = host === "images" || host === "scenes";
   const m = f ? /^@(\d+):/.exec(f.rel || "") : null;
-  const t = m ? Number(m[1]) : 1;
+  // the theme the bar works on (Simon, 2026-11-19: on Scenes, the theme Scenes shows - he copied into theme 1 while
+  // looking at theme 2): the file's own key names it (plain = theme 1); with no file, the theme on show
+  const scn = useNs("text_scenes");
+  const nowTheme = !themesOn ? 1 : host === "scenes" ? (scn.preview_theme || 1) : (sets.current || 1);
+  const t = m ? Number(m[1]) : f ? 1 : nowTheme;
   const themeLive = themeHost && themesOn && kind === "images";
   const themeValue = !themeHost ? "not on this tab" : !themesOn ? "off" : kind !== "images" ? "pictures only"
     : `${t}: ${names[t - 1] || ""}`;
@@ -264,7 +268,8 @@ function FileLine({ s, host, tools }) {
   const themesOk = themeAvail && !multi;
   const allThemes = names.map((_, i) => i + 1);
   const picks = (chosen || allThemes).filter((x) => x <= names.length);
-  const themes = !themesOk || where === "this" ? "this" : picks;
+  // ("This theme" is sent as the theme in the THEME box, so the copy goes where the box says)
+  const themes = !themesOk ? "this" : where === "this" ? [t] : picks;
   const themesKey = Array.isArray(themes) ? themes.join(",") : themes;
   // the count (Simon: "it doesn't work at all now. Just says 0"): asked a moment after the last change, only the newest
   // answer shown - a slow one (every picture, unlocked) is never dropped for a change made while it was counted - "..."
@@ -322,7 +327,7 @@ function FileLine({ s, host, tools }) {
         f ? `${label}${n > 1 ? ` (first of ${n} selected)` : ""}\n${String(f.rel || "").replace(/^@\d+:/, "")}` : "Nothing selected",
         { none: !f })}
       ${tag("THEME", !themeLive)}
-      ${value(themeValue, themeLive ? `Theme ${themeValue}\nThe theme picked on the Images tab: what you change here is this theme's`
+      ${value(themeValue, themeLive ? `Theme ${themeValue}\n${host === "scenes" ? "The theme Scenes shows" : "The theme picked on this tab"}: color changes here are this theme's`
         : "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)", { off: !themeLive })}
     </div>
     <div class="small muted cpd-status-line">${status}</div>
@@ -352,9 +357,9 @@ function FileLine({ s, host, tools }) {
           title: whichOk ? `Only unlocked ${toWords[1]} with a profile attached (color switch on): theirs is replaced; nothing new is switched on`
             : `Copying to the ${toWords[1]} you selected` })}
         ${tag("THEMES", !themesOk)}
-        ${opt("this", "This theme", { on: themes === "this", disabled: !themesOk, span: 3, onClick: () => setWhere("this"),
+        ${opt("this", "This theme", { on: !themesOk || where === "this", disabled: !themesOk, span: 3, onClick: () => setWhere("this"),
           title: themesOk ? `Theme ${t} (${names[t - 1] || ""}) only` : themeTip })}
-        ${opt("pick", `Choose themes ${where === "pick" && themesOk ? "▴" : "▾"}`, { on: Array.isArray(themes), disabled: !themesOk, span: 3,
+        ${opt("pick", `Choose themes ${where === "pick" && themesOk ? "▴" : "▾"}`, { on: themesOk && where === "pick", disabled: !themesOk, span: 3,
           onClick: () => setWhere(where === "pick" ? "this" : "pick"),
           title: themesOk ? "Tick the themes to copy into: All themes, or any of them" : themeTip })}
       </div>

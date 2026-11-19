@@ -687,6 +687,16 @@ class App:
             pass
         if getattr(self, "_restart_wsl_on_close", False):
             self._restart_wsl_for_update()
+        else:
+            # PAD-1458: the space freed inside the app's WSL disks goes back
+            # to Windows once this process is gone (a hidden helper decides:
+            # weekly, 20 GB spare, nothing running).  Never on an update's
+            # close: the installer is about to replace the helper's files.
+            try:
+                from .core import disk_giveback
+                disk_giveback.start_after_close()
+            except Exception:
+                pass
         # A question still open on the page must not hold the loop.
         self.ctx.dialogs.cancel_all()
 

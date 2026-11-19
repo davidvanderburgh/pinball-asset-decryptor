@@ -71,6 +71,10 @@ FLOOR_BYTES = 15 * 1024 ** 3
 CHECK_EVERY_SECS = 30 * 60
 #: A full run at most this often - unless the room left is under the floor.
 MIN_INTERVAL_SECS = 6 * 3600
+#: PAD-1458: the app's WSL disks are compacted at close when one holds this
+#: much more than it uses, at most this often (padcompact.ps1's rules)
+GIVEBACK_SLACK_BYTES = 20 * 1024 ** 3
+GIVEBACK_EVERY_SECS = 7 * 24 * 3600
 #: Under this a leftover is noise, and the small ones in /var/tmp are often
 #: a rig's live logs or settings (jjp_devices.json, jjp_ui.log).
 _MIN_LEFTOVER = 1 << 20
@@ -564,10 +568,51 @@ def _tidy(force, cards, now, dry_run, wsl):
     return rec
 
 
-def summary(st=None, now=None):
-    """One sentence for the window: what the automatic clean-up last did."""
+def record_giveback(rec=None, checked=None):
+    """What the close-time give-back (core/disk_giveback.py, PAD-1458) did.
+    *rec* ``{"at", "freed", "disks": [{"name", "before", "after"}]}`` when it
+    compacted; *checked* alone when it looked and found nothing due, so the
+    week starts again.  A run that found something busy saves neither."""
+    st = load_state()
+    if checked is not None:
+        st["giveback_checked"] = checked
+    if rec is not None:
+        st["giveback"] = rec
+        st["giveback_checked"] = rec["at"]
+        st["giveback_total"] = (int(st.get("giveback_total") or 0)
+                                + int(rec.get("freed") or 0))
+    _save_state(st)
+
+
+def giveback_sentence(st=None, now=None):
+    """'Gave back 23.4 GiB to Windows 2 hours ago.', or '' before the first."""
     st = load_state() if st is None else st
     now = time.time() if now is None else now
+    g = st.get("giveback")
+    if not g or not g.get("freed"):
+        return ""
+    s = "Gave back %s to Windows %s" % (_fmt(g["freed"]), _when(g["at"], now))
+    total = int(st.get("giveback_total") or 0)
+    if total > g["freed"]:
+        s += " (%s in all)" % _fmt(total)
+    return s + "."
+
+
+def summary(st=None, now=None):
+    """One sentence for the window: what the automatic clean-up last did,
+    and what the last give-back to Windows returned (PAD-1458)."""
+    st = load_state() if st is None else st
+    now = time.time() if now is None else now
+    g = giveback_sentence(st, now)
+    if g and not st.get("checked"):
+        # "It has not run on this PC yet." beside a give-back reads wrong
+        return (g + ("" if auto_enabled(st) else
+                     " It is turned off on this PC."))
+    s = _summary(st, now)
+    return (s + " " + g).strip() if g else s
+
+
+def _summary(st, now):
     last = st.get("last")
     off = "" if auto_enabled(st) else " It is turned off on this PC."
     if not st.get("checked"):
@@ -610,5 +655,6 @@ def _when(t, now):
 
 __all__ = ["tidy", "plan_wsl", "plan_host", "plan_cards", "parse_scan",
            "room_left", "summary", "load_state", "due", "disabled",
-           "auto_enabled", "set_auto",
+           "auto_enabled", "set_auto", "record_giveback", "giveback_sentence",
+           "GIVEBACK_SLACK_BYTES", "GIVEBACK_EVERY_SECS",
            "FLOOR_BYTES", "STALE_SECS", "UNUSED_SECS"]

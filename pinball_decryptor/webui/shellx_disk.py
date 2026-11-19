@@ -56,9 +56,14 @@ AUTO_NOTE = (
     "for a day. An emulator's unpacked game, and a cached Spike 2 card, go "
     "after %d days unplayed — and the least recently played go first "
     "whenever the app's Linux has under %d GB of room left. Nothing in use "
-    "is touched, nor settings, high scores or save states."
+    "is touched, nor settings, high scores or save states. When you close "
+    "the app, the space freed inside its Linux disks goes back to Windows "
+    "once they hold %d GB more than they use (at most every %d days, and "
+    "only when nothing is running in Linux)."
     % (space_keeper.UNUSED_SECS // 86400,
-       space_keeper.FLOOR_BYTES // 1024 ** 3))
+       space_keeper.FLOOR_BYTES // 1024 ** 3,
+       space_keeper.GIVEBACK_SLACK_BYTES // 1024 ** 3,
+       space_keeper.GIVEBACK_EVERY_SECS // 86400))
 RESIZE_NOTE = ("Set how large the WSL virtual disk may grow. Increase it when "
                "an extract needs more room than WSL has (the biggest titles "
                "can need 20+ GiB); the disk only uses real space as it fills. "
@@ -414,8 +419,9 @@ class DiskMixin:
             extra = "  About %s could be returned to Windows." % _fmt(
                 v["reclaimable"])
         return ("The WSL virtual disk occupies %s on your Windows drive.%s\n"
-                "Compacting shuts WSL down and needs Administrator; it takes "
-                "a few minutes." % (_fmt(v.get("size")), extra))
+                "Compacting shuts WSL down and takes a few minutes; no "
+                "Administrator needed. The app also does it by itself when "
+                "you close it, once a week at most." % (_fmt(v.get("size")), extra))
 
     def _disk_apply_scan(self, my_id, data):
         d = self._disk
@@ -610,15 +616,6 @@ class DiskMixin:
     def disk_reclaim(self):
         d = self._disk
         if d is None or d["busy"]:
-            return False
-        from ..core.admin import is_admin
-        if not is_admin():
-            _mb().showwarning(
-                "Administrator required",
-                "Reclaiming space compacts the WSL virtual disk, which needs "
-                "Administrator rights.\n\nClose the app, right-click it and "
-                "choose “Run as administrator”, then reopen this window. "
-                "(Cleaning up staging above does NOT need admin.)")
             return False
         if not _mb().askyesno(
                 "Reclaim space to Windows",

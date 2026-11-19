@@ -847,6 +847,15 @@ int pm_game_wizard_way(void);
  * and not, on James Bond's Right ramp, one of the game's henchman or villain modes. A claim not renewed for 250 ms is
  * gone; one of your modes beginning ends a hold. Shots from switches only (the port's switch lines). 1 = claimed. */
 int pm_lit_claim(uint64_t shots);
+/* PAD-1404: a menu's buttons to itself (MODE_SDK.md "A menu picked with the flippers"). The switches behind the button
+ * shots in `shots` (pm_shot("Left flipper button") ...: the card's buttons.cfg, PAD-1403, or the port's own `switch`
+ * lines for them, Godzilla's) are held back from the game
+ * while you ask - Start adds no player, Action launches no ball, a flipper press changes no lanes - and your button
+ * shots still come for every press. Ask again every tick while you want them: an ask not renewed for 500 ms lapses,
+ * and pm_button_hide(0) ends it at once; each switch is the game's again from its next press or release. The flippers
+ * themselves still flip (the node boards fire them). The number of switches held back; 0 = none (no button shot in
+ * `shots`, not in a game, or a build whose switch drain the runtime cannot hide from: the game sees them too). */
+int pm_button_hide(uint64_t shots);
 
 /* ---- the game's own status bar (PAD-521; MODE_SDK.md "The game's status bar") ------------------------------------
  * James Bond LE shows each of its own modes in a coloured bar under the TV: the mode's name, the bar in the mode's

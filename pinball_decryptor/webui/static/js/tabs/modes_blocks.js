@@ -58,6 +58,12 @@ const TIP = {
   meterNumbers: "Show the value and its most after the label: CYCLOPS 3/5.",
   metersOff: "This card's game cannot take a mode's screens, so its meters would not show: the mode runs the same without them.",
   fade: "The whole screen fades to a color, over the time given (0 = at once): 100% is the color full, 0% clear again. \"edge glow\" is the color at the screen's edges only. Its meters and words stay over it; it clears at its end. Up to three colors and looks a mode.",
+  menus: "A list the player picks from with the flippers, as the game's own choose screens: the left flipper button moves up, the right one down, Action or Start takes the one highlighted, and when its seconds run out the one highlighted is taken (it opens on the default). Open it with Open the menu; When the player picks from it runs on the pick, and \"the item picked\" is its number (1 = the first). While it is open its buttons are its own (the game sees no Start, no launch, no lane change from them) and the mode's clock waits. Up to two menus, twelve items each; five show at once and the rest scroll.",
+  menuHold: "How the ball waits while it is open. In the shooter lane: for a menu at a ball's start, the launch button is the menu's and a plunge takes the one highlighted. In the scoop: the ball is held there (a title with a scoop, while the mode runs; 9 seconds at most). Not held: the ball plays on.",
+  menusOff: "This card's game cannot take a mode's screens, so its menus would not show: they still run and pick, unseen.",
+  menuOpen: "Shows the menu in the middle of the screen until the player picks or its time runs out. The mode's clock waits meanwhile. Its end or the ball's closes it with nothing picked.",
+  menuClose: "Takes the menu away with nothing picked.",
+  menuPick: "The number of the item the player picked from the menu (1 = the first), the player up's last pick this game; 0 before they pick.",
   palette: "Drag a block into a script, or press it to add it to the script you picked last (the one with the lit edge).",
   hat: "A script: what sets it off, and the blocks it runs, top to bottom.",
   vars: "A variable holds a number for each player. Reset says when it goes back to 0. A saved one never does: the card keeps it between games and over a power-off (a story's chapter, a character unlocked), each player's by their Insider login while they are logged in, else by their player number; \"for everyone\" is one number for the whole machine. The service menu's SAVED PROGRESS (Clear) and a factory reset clear them.",
@@ -191,7 +197,7 @@ function jjpStmts(ch, vars) {
   ];
 }
 
-export function hatTemplates(ch, timers) {
+export function hatTemplates(ch, timers, menus = []) {
   if (isJjp(ch)) return jjpHats(ch);
   const shot = (ch.shots || [])[0] || "";
   const ev = ((ch.events || [])[0] || {}).name || "";
@@ -202,6 +208,7 @@ export function hatTemplates(ch, timers) {
     { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 },
     { kind: "ball_end" }, { kind: "drain", when: "running" }, { kind: "event", event: ev, when: "any" },
     { kind: "timer_done", timer: (timers[0] || {}).name || "" },
+    { kind: "menu_pick", menu: (menus[0] || {}).name || "" },          // PAD-1404
     // PAD-708: a combo of two shots (an ordered one: add shots to it), and a chain of lit shots
     { kind: "combo", shots: [shot, (ch.shots || [])[1] || shot], seconds: 3, when: "running" },
     { kind: "combo", shots: ["lit", "lit"], seconds: 3, when: "running" },
@@ -265,6 +272,8 @@ export function stmtTemplates(ch, vars, prog = {}) {
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
       { op: "change", var: v, by: num(1) }, { op: "set_hits", shot, value: num(0) }]],
     ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
+    ["Menus", [{ op: "menu_open", menu: ((prog.menus || [])[0] || {}).name || "" },          // PAD-1404
+      { op: "menu_close", menu: ((prog.menus || [])[0] || {}).name || "" }]],
     ["Control", [{ op: "if", cond: null, then: [], else: null }, { op: "if", cond: null, then: [], else: [] }]],
     ["Show and sound", [{ op: "callout", role: "ten_seconds" }, { op: "words", text: "JACKPOT", value: null },
       { op: "light_shot", shot, color: "#ffd000", pattern: "blink", rate: null }, { op: "lights_off", shot: "*" }, { op: "gi", gi: "dark" },
@@ -286,6 +295,7 @@ function valueTemplates(ch, vars, timers, prog = {}) {
   return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" }, { k: "mode_hits", shot: (ch.shots || [])[0] || "" },
     { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "timer_left", timer: ((timers || [])[0] || {}).name || "" },
     { k: "combo_chain" }, { k: "combo_steps", combo: comboNames(prog)[0] || "" },          // PAD-708
+    { k: "menu_pick", menu: ((prog.menus || [])[0] || {}).name || "" },                     // PAD-1404
     { k: "balls" }, { k: "player" },
     ...(ch.bond_women ? [{ k: "women_mult" }] : []),                                      // PAD-889: Bond LE / Pro only
     { k: "op", op: "+", a: null, b: null }];
@@ -305,7 +315,7 @@ const condTemplates = (ch) => isJjp(ch) ? [{ k: "cmp", op: ">=", a: null, b: nul
 const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot this ball", mode_hits: "hits of a shot since it started", scored: "times it has scored",
   total: "points so far", secs_left: "seconds left", timer_left: "ms left on a timer", balls: "balls in play",
   player: "the player up", op: "a sum", combo_chain: "combos in a row", combo_steps: "shots made of a combo",
-  women_mult: "the Bond Women multiplier" };
+  women_mult: "the Bond Women multiplier", menu_pick: "the item picked from a menu" };
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
@@ -314,6 +324,7 @@ export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
   shake: "mech", shake_game: "mech", spare_drive: "mech", flippers: "mech", pulse: "mech", device: "mech", kickback: "mech", toy: "mech",
+  menu_open: "show", menu_close: "show",
   jjp_sound: "show", jjp_lamp: "show", jjp_lamp_off: "show", jjp_coil: "mech", jjp_title: "show" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
@@ -382,6 +393,11 @@ function LightPick({ b, path, ed, every }) {
     ? html`<${P} value=${b.insert ? LAMP + b.insert : b.shot} ed=${ed} lamps=${LAMP} onPick=${pick} />` : null}`;
 }
 
+// PAD-1404: one of the mode's menus, by its name
+function MenuPick({ value, ed, onChange }) {
+  return html`<${Pick} value=${value} options=${(ed.prog.menus || []).map((m) => m.name)} missing="(no such menu)" onChange=${onChange} />`;
+}
+
 function TimerPick({ value, ed, onChange }) {
   return html`<${Pick} value=${value} options=${ed.timers.map((t) => t.name)} missing="(no such timer)" onChange=${onChange} />`;
 }
@@ -435,6 +451,7 @@ function Val({ e, path, ed }) {
       : html`<span class="bk-w" ...${tip(TIP.hits)}>hits of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
     case "mode_hits": return html`<span class="bk-w" ...${tip(TIP.modeHits)}>hits since it started of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
     case "timer_left": return html`<span class="bk-w" ...${tip(TIP.timerLeft)}>ms left on</span><${TimerPick} value=${e.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
+    case "menu_pick": return html`<span class="bk-w" ...${tip(TIP.menuPick)}>the item picked from</span><${MenuPick} value=${e.menu} ed=${ed} onChange=${(v) => set("menu", v)} />`;
     case "combo_steps": return html`<span class="bk-w" ...${tip(TIP.comboSteps)}>shots made of</span><${Pick} value=${e.combo} options=${comboNames(ed.prog)} missing="(no combo has that name)" onChange=${(v) => set("combo", v)} />`;
     case "op": return html`<span class="bk-w">(</span><${Slot} kind="num" value=${e.a} path=${[...path, "a"]} ed=${ed} />
       <${Pick} value=${e.op} options=${OPS} width=${54} onChange=${(v) => set("op", v)} />
@@ -560,6 +577,8 @@ function StmtBody({ b, path, ed }) {
       ${b.sub != null ? html`<${Text} value=${b.sub} max=${16} width=${120} onChange=${(v) => set("sub", v)} placeholder="words" />` : null}
       <${Check} checked=${b.label != null} label="and its label to" onChange=${(on) => set("label", on ? "" : null)} />
       ${b.label != null ? html`<${Text} value=${b.label} max=${16} width=${110} onChange=${(v) => set("label", v)} placeholder="label" />` : null}`;
+    case "menu_open": return html`<span class="bk-w" ...${tip(TIP.menuOpen)}>Open the menu</span><${MenuPick} value=${b.menu} ed=${ed} onChange=${(v) => set("menu", v)} />`;
+    case "menu_close": return html`<span class="bk-w" ...${tip(TIP.menuClose)}>Close the menu</span><${MenuPick} value=${b.menu} ed=${ed} onChange=${(v) => set("menu", v)} />`;
     case "fade": return html`<span class="bk-w" ...${tip(TIP.fade)}>Fade the screen to</span>
       <input type="color" class="bk-color" value=${b.color || "#000000"} onInput=${(e) => set("color", e.target.value)} ...${tip("The color it fades to")} />
       <${Pick} value=${b.style || "flat"} options=${FADE_STYLES} onChange=${(v) => set("style", v)} />
@@ -799,6 +818,7 @@ export function HatBody({ h, path, ed }) {
     case "seconds_left": return html`<span class="bk-w b">When</span><${Num} value=${h.seconds} width=${48} onChange=${(v) => set("seconds", v)} /><span class="bk-w b">seconds are left</span>`;
     case "event": return html`<span class="bk-w b">When</span><${Pick} value=${h.event} options=${(ed.ch.events || []).map((x) => [x.name, x.label])} onChange=${(v) => set("event", v)} />${when}`;
     case "timer_done": return html`<span class="bk-w b">When timer</span><${TimerPick} value=${h.timer} ed=${ed} onChange=${(v) => set("timer", v)} /><span class="bk-w b">runs out</span>`;
+    case "menu_pick": return html`<span class="bk-w b" ...${tip(TIP.menus)}>When the player picks from</span><${MenuPick} value=${h.menu} ed=${ed} onChange=${(v) => set("menu", v)} />`;
     case "combo": return html`<span class="bk-w b" ...${tip(TIP.combo)}>When</span><${ComboSteps} h=${h} path=${path} ed=${ed} />
       <span class="bk-w b">${(h.shots || []).length > 2 ? "each within" : "within"}</span><${Secs} value=${h.seconds} title="Seconds from one shot to the next (0.5 to 60)" onChange=${(v) => set("seconds", v)} /><span class="bk-w b">s</span>${when}
       <span class="bk-w" ...${tip(TIP.comboName)}>called</span><${Text} value=${h.name} max=${24} width=${110} placeholder="(no name)" title=${TIP.comboName} onChange=${(v) => set("name", v)} />`;
@@ -877,6 +897,7 @@ export function hatLabel(h) {
   return { mode_start: "When the mode starts", mode_end: "When the mode ends", shot: "When a shot is made",
     any_shot: "When any shot is made", switch: "When any playfield switch is hit", every: "Every N seconds", seconds_left: "When N seconds are left",
     ball_end: "When the ball drains", drain: "When a ball goes into the trough", event: "When the game does…", timer_done: "When a timer runs out",
+    menu_pick: "When the player picks from a menu",
     challenge: "When the player picks a challenge", battle: "When the player picks a battle",
     game_mode: "When the game starts one of its modes",
     completed: "When the player has completed some of the game's modes",
@@ -900,7 +921,7 @@ export function stmtLabel(b) {
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", flippers: b.to === "on" ? "Flippers back on" : "Flippers off", pulse: "Fire a device", device: b.keep === "let_go" ? "Let go of the balls in" : "Hold the balls in", kickback: b.to === "off" ? "Kickbacks off" : "Kickbacks on", toy: "Move a toy", building: "Move the building to",
     shake: "Shake the cabinet for", shake_game: "Shake it the game's way", game_wizard: "The game's mini-wizard",
-    spare_drive: "Drive a spare output",
+    spare_drive: "Drive a spare output", menu_open: "Open the menu", menu_close: "Close the menu",
     jjp_sound: "Play a game sound", jjp_lamp: "Light a lamp", jjp_lamp_off: "Hand back a lamp", jjp_coil: "Fire a coil", jjp_title: "Title the panel",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
@@ -942,7 +963,7 @@ export function Palette({ ed }) {
   const vals = valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog);
   return html`<div class="bk-palette" aria-label="Blocks">
     <div class="bk-pal-h">When</div>
-    ${hatTemplates(ed.ch, ed.timers).map((h) => piece("bk-hat", isJjp(ed.ch) ? jjpHatLabel(h) : hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
+    ${hatTemplates(ed.ch, ed.timers, ed.prog.menus || []).map((h) => piece("bk-hat", isJjp(ed.ch) ? jjpHatLabel(h) : hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
     ${stmtTemplates(ed.ch, ed.vars, ed.prog).filter(([_g, items]) => items.length).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
       ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t)), null, whyOff(t, ed.ch)))}`)}
     <div class="bk-pal-h">Values</div>
@@ -1081,6 +1102,47 @@ export function Variables({ prog, ed }) {
       <${X} title="Take this variable out" onClick=${() => ed.edit((d) => { d.vars.splice(i, 1); })} />
     </span>`)}
     <${Button} size="sm" kind="ghost" icon="plus" onClick=${add}>Variable<//>
+  </div>`;
+}
+
+// PAD-1404: its menus - a name the blocks pick it by, its title, its items (one per line), the one it opens on,
+// its seconds, how the ball waits, its colour
+const MENU_HOLDS = [{ value: "lane", label: "in the shooter lane" }, { value: "scoop", label: "in the scoop" },
+  { value: "none", label: "not held" }];
+function Menus({ prog, ed }) {
+  const ms = prog.menus || [];
+  const add = () => ed.edit((d) => {
+    let n = 1;
+    while ((d.menus || []).some((m) => (m.name || "").toLowerCase() === ("menu " + n))) n++;
+    d.menus = [...(d.menus || []), { name: "menu " + n, title: "CHOOSE ONE", items: ["FIRST", "SECOND", "THIRD"],
+      default: 1, seconds: 10, hold: "lane", color: "#ffb000" }];
+  });
+  return html`<div class="bk-vars bk-menus">
+    <span class="lbl" ...${tip(TIP.menus)}>Menus</span>
+    ${ed.ch.info_line === false && ms.length ? html`<span class="bk-w small" ...${tip(TIP.menusOff)}>(not shown on this card's game)</span>` : null}
+    ${ms.map((m, i) => html`<div class="bk bk-hud bk-hudset" key=${i}>
+      <div class="bk-line">
+        <${Field} sm width=${110} value=${m.name} maxLength=${24} onChange=${(name) => ed.renameMenu(i, name)} title="Its name: the blocks pick it by this" />
+        <${Text} value=${m.title} max=${32} width=${220} onChange=${(v) => ed.set(["menus", i, "title"], v)} placeholder="CHOOSE YOUR EPISODE" title="Its title, over the list" />
+        <input type="color" class="bk-color" value=${m.color || "#ffb000"} onInput=${(e) => ed.set(["menus", i, "color"], e.target.value)} ...${tip("Its color: the title, the frame and the bar on the one highlighted")} />
+        <${X} title="Take this menu out" onClick=${() => ed.edit((d) => { d.menus.splice(i, 1); })} />
+      </div>
+      <div class="bk-line">
+        <span class="bk-w">items, one a line</span>
+        <textarea class="bk-menu-items" rows=${Math.min(6, Math.max(3, (m.items || []).length))} maxlength=${12 * 29}
+          value=${(m.items || []).join("\n")} ...${tip("What the player picks from, one a line: 12 at most, 28 letters each")}
+          onChange=${(e) => ed.set(["menus", i, "items"], e.target.value.split("\n").map((x) => x.trim()).filter((x) => x).slice(0, 12))} />
+      </div>
+      <div class="bk-line">
+        <span class="bk-w">opens on</span>
+        <${Pick} value=${String(m.default || 1)} width=${170} options=${(m.items || []).map((x, k) => [String(k + 1), (k + 1) + ". " + x])}
+          onChange=${(v) => ed.set(["menus", i, "default"], parseInt(v, 10) || 1)} />
+        <span class="bk-w">for</span><${Num} value=${m.seconds} width=${48} onChange=${(v) => ed.set(["menus", i, "seconds"], v)} />
+        <span class="bk-w">s, the ball</span>
+        <${Pick} value=${m.hold || "lane"} options=${MENU_HOLDS} title=${TIP.menuHold} onChange=${(v) => ed.set(["menus", i, "hold"], v)} />
+      </div>
+    </div>`)}
+    ${ms.length < 2 ? html`<${Button} size="sm" kind="ghost" icon="plus" onClick=${add}>Menu<//>` : null}
   </div>`;
 }
 
@@ -1374,6 +1436,22 @@ export function useEd(pg, ch) {
       walk(d.info);
       walk(d.bar);                                                // PAD-721
     }, "timers/" + i + "/name"),
+    // PAD-1404: a menu renamed: every block, hat and value naming it follows it
+    renameMenu: (i, name) => edit((d) => {
+      const old = (d.menus[i] || {}).name;
+      d.menus[i].name = name;
+      const walk = (o) => {
+        if (Array.isArray(o)) { o.forEach(walk); return; }
+        if (!o || typeof o !== "object") return;
+        if (o.menu === old) o.menu = name;
+        Object.values(o).forEach(walk);
+      };
+      walk(d.scripts);
+      walk(d.hud);
+      walk(d.info);
+      walk(d.bar);
+      walk(d.meters);
+    }, "menus/" + i + "/name"),
     // a clip or sound renamed: every block playing it follows it
     renameMedia: (kind, i, name) => edit((d) => {
       const old = (d[kind][i] || {}).name;
@@ -1459,6 +1537,7 @@ export function BlocksEditor({ s, c, pg }) {
       <${WithMyModes} prog=${prog} ed=${ed} />
       <${Variables} prog=${prog} ed=${ed} />
       <${Timers} prog=${prog} ed=${ed} />
+      <${Menus} prog=${prog} ed=${ed} />
       ${(prog.hud || {}).on ? html`<${Hud} prog=${prog} ed=${ed} />` : null}
       <${OwnMedia} prog=${prog} ed=${ed} s=${s} folder=${c.folder} />
       ${(b.notes || []).map((t) => html`<${Note} key=${t}>${t}<//>`)}

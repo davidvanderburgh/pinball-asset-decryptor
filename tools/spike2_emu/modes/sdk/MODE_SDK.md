@@ -6369,6 +6369,60 @@ every newest library build, 53 of 53 (Uncanny X-Men LE and Pro 0.98 first), gave
 exactly as often as pressed, none in attract, and the visor combo started the mode on every title with an Action button
 (`mode_project.BUTTON_SHOTS_PROVEN`; an older build of a proven title counts as proven: the same drain, its own ids).
 
+## A menu picked with the flippers (PAD-1404)
+
+A list on the screen the player picks from, as Stern's own choose screens do: Uncanny X-Men 2.0's episode through the
+portal, a mutant or a roster at the game's start, any "choose your mode". X-Men has no challenge route and the team start
+menu skips it, so this is the mode's own, on every title that takes a mode's screens.
+
+- **Moving and picking.** The left flipper button moves up, the right one down (both wrap round); Action or Start takes
+  the one highlighted. When its seconds run out the one highlighted is taken: it opens on the default, so a player who
+  does nothing gets the default. A title with no Action button (The Beatles, Jurassic Park The Pin, Star Wars ELG) picks
+  with Start.
+- **Its buttons are its own.** While it is open the runtime holds the menu's switches back from the game
+  (`pm_button_hide`, PAD-1051's hider: the level byte reads released, the handler bits are held back), so Start adds no
+  player on ball 1, Action launches no ball, a flipper press changes no lanes; the button shots (PAD-1403) still come.
+  The flippers still flip: the node boards fire them. The ask lapses 500 ms after the mode stops renewing it. On the
+  framework generation the hider does not know (10 of the 69 ports: older builds of Aerosmith, Avengers, Batman,
+  Guardians, Iron Maiden, Mandalorian, Rush, Stranger Things, Sword of Rage and TMNT) the game sees the presses too;
+  the menu works the same.
+- **The ball.** `lane`: a menu at a ball's start, the ball in the shooter lane; the launch button is the menu's, and a
+  plunge (any named playfield shot) takes the one highlighted, the game moving on. `scoop`: the ball held in the scoop
+  (`pm_scoop_hold`: the running mode, on a title with a scoop; the kick-out comes at most 10 s after it settled, so the
+  menu's time is cut to 9 s). `none`: nothing is held. In every case the mode's clock waits while the menu is open.
+- **On the glass.** The build (`mode_menus.py`) adds, per menu, `PadMode_<folder>_Menu<k>` (a dark panel in the middle of
+  the glass, its words the title in the menu's colour), five rows `..._Menu<k>_R<j>` (an item's words over a highlight bar
+  `..._R<j>.<row>_Hi`) and `..._Menu<k>_Foot` ("FLIPPERS MOVE   ACTION PICKS   7"). Twelve items at most; five show and
+  the rest scroll. Drawn over every other screen of the modes'.
+
+A blocks mode names its menus in its settings (Menus: a name, its title, its items one a line, the one it opens on, its
+seconds, how the ball waits, its colour; up to two), opens one with **Open the menu** (Close the menu takes it away with
+nothing picked), runs **When the player picks from a menu** on the pick, and reads **the item picked** (1 = the first; the
+player up's last pick this game, 0 before they pick). The mode's end and the ball's close an open menu with nothing
+picked; a When the mode ends script may open another. While it is open the menu's buttons reach none of the mode's
+scripts.
+
+In C, `intricate_kit.h`:
+
+```c
+static struct kit_menu menu = { .scene = "hud", .node = "PadMode_episode_Menu1" };
+static const char *const EPISODES[] = { "DAYS OF FUTURE PAST", "DARK PHOENIX", "SENTINELS" };
+
+kit_menu_open(&menu, "CHOOSE YOUR EPISODE", EPISODES, 3, 0 /* the default */, 10000, KIT_MENU_HOLD_LANE);
+/* .shot */  if (kit_menu_shot(&menu, shot)) return;      /* one of its buttons: not the mode's */
+/* .tick */  int got = kit_menu_tick(&menu);              /* 0..n-1 on the tick it is picked, else -1 */
+```
+
+`kit_menu_close` takes it away with nothing picked, `kit_menu_is_open` and `kit_menu_taken` (the last pick, -1 none)
+say where it is. The assets.json of a C mode names its menus for the build: `"menus": [{"title": "CHOOSE YOUR EPISODE",
+"color": "#ffb000"}]`.
+
+**Proven in the emulator**, each card built by the app's own Write: on Uncanny X-Men LE and Pro 0.98 every way of
+picking (the flippers wrapping and scrolling, Action, Start - no player added - its time, and the launched ball's first
+hit) with the ball waiting in the shooter lane meanwhile; and on all 53 newest Spike 2 builds the menu drawn, a flipper
+move and Action (Start on the three with no Action button) and its time each taking the one highlighted
+(`docs/plans/pad1404_flipper_menus.md`).
+
 ## Co-op play (PAD-1017)
 
 2 to 4 players play one game as a team, on a game without co-op of its own. TMNT, Venom, The Mandalorian, D&D,

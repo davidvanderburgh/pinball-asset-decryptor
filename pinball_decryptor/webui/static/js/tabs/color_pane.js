@@ -197,6 +197,21 @@ function Tagged({ tag, value, off, title, none, full }) {
     <span class=${cx("cpd-val mono", none && "cpd-none")} title=${full || value}>${value}</span></div>`;
 }
 
+// Simon (2026-11-19): "use the little palette icons but with spectrum over it" - the Images tab's palette, its board
+// filled with a spectrum, marking a color profile in the Copy's words and the bar's title (not everywhere: "I think
+// that would look bad")
+let palSeq = 0;
+export function SpectrumPal() {
+  const id = useRef(`cpd-spec-${++palSeq}`).current;
+  return html`<svg class="i cpd-pal" viewBox="0 0 24 24" aria-hidden="true">
+    <defs><linearGradient id=${id} x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4d4d" /><stop offset=".2" stop-color="#ffb13b" /><stop offset=".4" stop-color="#f4e542" />
+      <stop offset=".6" stop-color="#4fd36a" /><stop offset=".8" stop-color="#3fa3ff" /><stop offset="1" stop-color="#b061ff" />
+    </linearGradient></defs>
+    <path class="cpd-pal-body" fill=${`url(#${id})`} d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z" />
+    <path class="cpd-pal-dots" d="M7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01M17 11h.01" /></svg>`;
+}
+
 function FileLine({ s, host, tools }) {
   const f = s.file;
   const sets = useNs("imgsets");
@@ -337,24 +352,24 @@ function FileLine({ s, host, tools }) {
   <div class="cpd-file cpd-copy">
       <div class="eyebrow">Copy a profile to other files</div>
       <div class="cpd-grid">
-        ${tag("COPY FROM")}
+        ${tag(html`COPY <${SpectrumPal} /> FROM`)}
         ${opt("file", "Selected file", { on: source === "file", disabled: !f, span: 3, onClick: () => setSrcPick("file"),
           title: f ? "The profile of the file selected above" : "Select a file first" })}
         ${opt("shared", "Shared profile", { on: source === "shared", span: 3, onClick: () => setSrcPick("shared"),
           title: `The individual files profile every switched-on file without one of its own gets (${shared})` })}
-        ${tag("TO KIND")}
+        ${tag("TO WHAT?")}
         ${["images", "videos", "text"].map((k) => opt(k, kindLabel[k], { on: to === k, disabled: !kinds.includes(k), span: 2,
           onClick: () => setToKind(k),
           title: kinds.includes(k) ? "" : multi ? `Copying to the ${words[1]} you selected` : `A ${words[2]}'s profile is copied to other ${words[1]}` }))}
-        ${tag("WHICH", !whichOk)}
-        ${opt("all", "All", { on: scope === "all", disabled: !whichOk, span: 2, onClick: () => setWhich("all"),
+        ${tag("WHICH?", !whichOk)}
+        ${opt("all", html`ALL <${SpectrumPal} />`, { on: scope === "all", disabled: !whichOk, span: 2, onClick: () => setWhich("all"),
           title: whichOk ? `Every ${toWords[2]} that is not locked: switched on, and any profile of its own replaced. With Unlock extracted ticked (Advanced) that is every one, otherwise the ones replaced or added`
             : `Copying to the ${toWords[1]} you selected` })}
-        ${opt("off", "Without a profile", { on: scope === "off", disabled: !whichOk, span: 2, onClick: () => setWhich("off"),
-          title: whichOk ? `Only unlocked ${toWords[1]} with no profile attached (color switch off): each is switched on and gets it`
-            : `Copying to the ${toWords[1]} you selected` })}
-        ${opt("profiled", "With a profile", { on: scope === "profiled", disabled: !whichOk, span: 2, onClick: () => setWhich("profiled"),
+        ${opt("profiled", html`WITH <${SpectrumPal} />`, { on: scope === "profiled", disabled: !whichOk, span: 2, onClick: () => setWhich("profiled"),
           title: whichOk ? `Only unlocked ${toWords[1]} with a profile attached (color switch on): theirs is replaced; nothing new is switched on`
+            : `Copying to the ${toWords[1]} you selected` })}
+        ${opt("off", html`WITHOUT <${SpectrumPal} />`, { on: scope === "off", disabled: !whichOk, span: 2, onClick: () => setWhich("off"),
+          title: whichOk ? `Only unlocked ${toWords[1]} with no profile attached (color switch off): each is switched on and gets it`
             : `Copying to the ${toWords[1]} you selected` })}
         ${tag("THEMES", !themesOk)}
         ${opt("this", "This theme", { on: !themesOk || where === "this", disabled: !themesOk, span: 3, onClick: () => setWhere("this"),
@@ -474,7 +489,7 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
         onKeyDown=${(e) => undoKey(e, flush)}>
       ${open ? html`<${Grip} barRef=${barRef} width=${width} setWidth=${setWidth} />` : null}
       <div class="cpd-hd">
-        <span class="cpd-title">Color profiles</span>
+        <span class="cpd-title">Color profiles <${SpectrumPal} /></span>
         <span class="sp"></span>
         <${Button} size="xs" kind="ghost" icon="palette" onClick=${() => call("ui.select_tab", "color")}
           title="The Color profile tab: the same profiles with a test card, a before/after wipe and what each one does" />

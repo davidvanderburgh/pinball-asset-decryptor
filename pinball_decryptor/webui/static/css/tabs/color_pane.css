@@ -169,3 +169,13 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-sel + .cpd-tools { margin-top: 8px; }
 /* Simon (2026-11-19): each reset on a full line of its own */
 .cpd-resets { grid-template-columns: 1fr; }
+
+/* Simon (2026-11-19): the spectrum palette - a color profile, in the Copy's words and the bar's title */
+svg.i.cpd-pal { width: 14px; height: 14px; vertical-align: -2px; stroke-width: 1.4; }
+.cpd-pal-body { stroke: rgba(0, 0, 0, .55); }
+.cpd-pal-dots { stroke: #15171a; stroke-width: 2.6; fill: none; }
+.cpd-title svg.i.cpd-pal { width: 17px; height: 17px; vertical-align: -3px; margin-left: 4px; }
+.cpd-grid .cpd-tag { gap: 4px; }
+/* (only a choice with the palette is a flex row: a plain one keeps its "..." where it is cut) */
+.cpd-opt:has(svg.cpd-pal) { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.cpd-opt:disabled svg.i.cpd-pal { filter: grayscale(1); }

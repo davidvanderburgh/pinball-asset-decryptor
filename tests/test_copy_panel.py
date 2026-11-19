@@ -17,7 +17,9 @@ def test_every_old_way_is_still_there():
     # the shared profile to every image / video / line of text (the Which files card, PAD-463 / PAD-471) = "shared" +
     # "all"; this theme / every theme = "this" / every theme ticked
     assert 'call("color.copy_profile", source, to, scope, themes)' in pane
-    for which in ('opt("all", "All"', 'opt("off", "Without a profile"', 'opt("profiled", "With a profile"'):
+    # (Simon, 2026-11-19: "ALL (P) WITH (P) WITHOUT (P)", the spectrum palette marking a profile)
+    for which in ('opt("all", html`ALL <${SpectrumPal} />`', 'opt("profiled", html`WITH <${SpectrumPal} />`',
+                  'opt("off", html`WITHOUT <${SpectrumPal} />`'):
         assert which in pane, which
     assert 'EVERY_KINDS().map((e) => e.k)' in pane
     assert 'label="All themes"' in pane
@@ -43,8 +45,10 @@ def test_the_panel_says_what_copy_will_do_first():
     pane = _src("color_pane.js")
     assert 'call("color.copy_preview", source, to, scope, themes)' in pane
     # one grid (Simon: "as columnized as possible, box sizes the same"): the tags and every row's choices
-    for word in ("SELECTED", "THEME", "COPY FROM", "TO KIND", "WHICH", "THEMES"):
+    for word in ("SELECTED", "THEME", "TO WHAT?", "WHICH?", "THEMES"):
         assert 'tag("%s"' % word in pane, word
+    assert 'tag(html`COPY <${SpectrumPal} /> FROM`)' in pane
+    assert '<span class="cpd-title">Color profiles <${SpectrumPal} /></span>' in pane
     assert "span: 2, onClick: () => setWhich(" in pane       # WHICH: three choices, two columns each
 
 

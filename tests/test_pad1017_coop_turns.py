@@ -20,7 +20,7 @@ static unsigned chg_game_now(void) { return game_no; }
 static int coop_button_held(void) { return button; }
 static struct { int on; unsigned button, game, n, turn; unsigned teams_always; unsigned teams, team_n[3], team_max, round;
                 int filling; unsigned join_n, join_step; unsigned long join_at;
-                unsigned team_kind; int standard; } coop;   /* PAD-1052: the fill; PAD-1224: 3v1, Enhanced Standard */
+                unsigned team_kind; int standard, plain; } coop;   /* PAD-1052: the fill; PAD-1224: 3v1, Enhanced Standard */
 static struct { int armed; } tm;                      /* PAD-1052: TEAM PLAY on the start menu (0: the second Start) */
 static unsigned long pm_ms(void) { return 0; }
 #define pm_snprintf snprintf

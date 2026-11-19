@@ -33,7 +33,8 @@ def test_the_owners_order_comes_first_then_the_engines(tmp_path):
     p = _project(tmp_path, {"coop_play": {"on": True, "menu": True}, "handicap": {"on": True},
                             "service_menu": {"order": ["handicap"],
                                              "custom": [{"name": "Old", "values": ["x", "y"]}]}})
-    assert [r[0] for r in SM.wanted(p)] == ["handicap", "coop_play"]   # a round 3 project's own settings are gone
+    assert [r[0] for r in SM.wanted(p)] == ["handicap"]   # a round 3 project's own settings are gone; PAD-1443:
+    # and co-op play's row (its games are always on the start menu)
 
 
 def test_there_are_no_settings_of_ones_own():
@@ -67,7 +68,7 @@ def test_the_tab_orders_and_switches(tmp_path):
         w.call("ui.select_tab", "svcmenu")
         w.drain()
         keys = [r["key"] for r in w.state("svcmenu")["settings"]]
-        assert "handicap" in keys and "coop_play" in keys
+        assert "handicap" in keys and "coop_play" not in keys                 # PAD-1443: no co-op row
         w.call("svcmenu.move", "handicap", -1)
         w.drain()
         keys2 = [r["key"] for r in w.state("svcmenu")["settings"]]

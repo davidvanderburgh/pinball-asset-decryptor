@@ -68,11 +68,16 @@ MENU_VALUES = 3
 MENU_OFF, MENU_CLASSIC, MENU_ENHANCED = 0, 1, 2
 #: the help names the values and says what they cost (63 characters: the spare help lines' room)
 MENU_HELP = "0 Off. 1 Classic. 2 Enhanced. Games on start menu. Insider off"
-#: how a teammate joins, for the tab and the log
-HOW = ("pick CO-OP PLAY on the start menu (both flipper buttons in attract) and each Start in the first ball adds "
-       "a teammate, or hold the right flipper button and press Start to add one (2-4 players share one game); "
-       "a plain Start adds a competing player as always; with characters, a player starting a game alone with the "
-       "right flipper button held picks one")
+#: how a teammate joins, for the tab and the log. PAD-1443: the games are always on the start menu, no service row
+HOW = ("hold both flipper buttons in attract for the start menu: CO-OP PLAY (each Start in the first ball adds a "
+       "teammate, 2-4 players share one game), with characters ENHANCED CO-OP (the same, each teammate picking a "
+       "character whose ability holds while they are up) and ENHANCED STANDARD (a normal game of competing players, "
+       "each picking a character), and TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1; or hold the right flipper button and "
+       "press Start to add a teammate; a plain Start is the game's own game as always")
+#: PAD-1443: what the card reports, for the tab (daveyvandy: "if you select it then you don't send anything to insider
+#: connect")
+INSIDER_HOW = ("A game played as one of these stays off Insider Connected (its scores, high scores and achievements "
+               "stay on the machine); a Standard game reports as it always has.")
 #: PAD-1042: how a team game is played, for the tab and the log
 TEAMS_HOW = ("pick TEAM PLAY 2 VS 2 on the start menu (both flipper buttons in attract) and one Start adds all "
              "four players: players 1 and 3 against players 2 and 4, each team with its own score and progress, the "
@@ -119,15 +124,12 @@ def load(project):
 
 
 def menu_asked(project):
-    """Round 2: whether co-op is switched in the service menu (CO-OP PLAY) rather than always on."""
-    if not load(project):
-        return False
-    from ...core import staged_changes
-    try:
-        raw = staged_changes.load(project).get(STAGED_KEY)
-    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: no
-        return False
-    return bool(isinstance(raw, dict) and raw.get("menu"))
+    """Round 2: whether co-op is switched in the service menu (CO-OP PLAY) rather than always on. PAD-1443
+    (daveyvandy: "I don't think we need to make it a setting in the service menu"): never now - the games are always
+    on the start menu, the co-op styles picked there, and a game played as one of them stays off Insider Connected
+    (the runtime's per-game gate, coop.cfg ``only``). A project that asked for the row (``menu``) gets none."""
+    del project
+    return False
 
 
 def save(project, on, menu=None):
@@ -177,7 +179,8 @@ def project_title(project, probe=False):
 def cfg_text(game_elf, awards=None, characters=None, sites=(), values=None, setting=0, only=False):
     """``coop.cfg`` for the card whose game program is *game_elf* (bytes): co-op on, the right flipper button,
     (round 2) *setting*, the CO-OP PLAY row's live value, when the service menu switches it; *only* when the card
-    carries no modes (then the Insider Connected gate holds back only while CO-OP PLAY says On); (PAD-1028) an
+    carries no modes (then the Insider Connected gate holds back only while CO-OP PLAY says On; PAD-1443: with no
+    setting, only for a game played as co-op, a team game or ENHANCED); (PAD-1028) an
     ``award`` line for each award ticked (*awards*: the project's choices, :func:`load_awards`); and (PAD-1031) the
     characters' lines (*characters*: :func:`load_characters`; *sites* / *values*: the port's site names and value
     lines)."""
@@ -186,7 +189,7 @@ def cfg_text(game_elf, awards=None, characters=None, sites=(), values=None, sett
     if len(buttons) != 2:
         raise CoopError(NO_BUTTON)
     head = ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
-            + ("only\n" if setting and only else "")
+            + ("only\n" if only else "")                 # PAD-1443: no setting - the gate holds per game
             + "".join(line + "\n" for line in insider_lines(game_elf)))
     if is_wide(bytes(game_elf[:0x40])):
         # PAD-1326: a Spike 3 program - co-op and the team games with the logins swapped; the awards and the

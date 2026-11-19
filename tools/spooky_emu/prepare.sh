@@ -36,13 +36,27 @@ esac
 
 size=$(stat -c %s "$UPD")
 SOURCE="$NAME $size $(stat -c %Y "$UPD")"
-for d in "$SPK_CACHE"/*/; do
-    d=${d%/}
-    [ -f "$d/.pad_source" ] && [ "$(cat "$d/.pad_source")" = "$SOURCE" ] || continue
-    touch "$d"
-    echo "build=$(basename "$d")"
-    exit 0
-done
+cached() {
+    for d in "$SPK_CACHE"/*/; do
+        d=${d%/}
+        [ -f "$d/.pad_source" ] && [ "$(cat "$d/.pad_source")" = "$SOURCE" ] || continue
+        touch "$d"
+        echo "build=$(basename "$d")"
+        exit 0
+    done
+}
+cached
+# One unpack at a time (PAD-1419): every slot shares the cache and its unpack.partial, and the
+# clean-up below removes any *.partial - two rigs preparing at once wiped each other's unpack
+# ("could not unpack").  The one that waited finds the other's build in the cache if it is
+# the same update.
+mkdir -p "$SPK_CACHE"
+exec 9>"$SPK_CACHE/.prepare.lock"
+if ! flock -n 9; then
+    echo "prepare.sh: another rig is unpacking an update into the cache; waiting for it" >&2
+    flock -w 3600 9 || { echo "prepare.sh: the cache stayed busy for an hour" >&2; exit 3; }
+fi
+cached
 
 live=$(cat "$SPK_ROOT"/rig*/build 2>/dev/null)
 ls -1dt "$SPK_CACHE"/*/ 2>/dev/null | sed 's:/$::' | grep -v '\.partial$' |

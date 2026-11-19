@@ -1,0 +1,11 @@
+# Spinner Frenzy - a starter mode: the drop target starts it, the spinner scores for 10 seconds
+name = Spinner Frenzy
+title = SPINNER FRENZY
+start = drop_target
+shots = spinner
+points = 50000
+seconds = 10
+sound_start = daffy_hurry1
+sound_end = times_up1
+panel = top
+panel_color = 1a3a8ad0

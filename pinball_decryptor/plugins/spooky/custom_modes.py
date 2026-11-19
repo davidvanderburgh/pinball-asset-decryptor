@@ -453,6 +453,16 @@ def write_pad_modes(label):
     return files, rewrite, m.PAD_DIR, m.top_files(port)
 
 
+def install_note(label):
+    """What installing the update PAD built does on the machine, for the Build card."""
+    head = "Install it the way a stock update installs: on a USB stick, under its own name. "
+    if mk().engine(load_port(label)) == "godot":
+        return head + ("The machine puts it in place when it next powers up, and the modes are in "
+                       "the game from that start. To take them out, install the stock update again.")
+    return head + ("The game restarts once by itself on its first start after the update, to take up "
+                   "the modes.")
+
+
 def loads_how(label):
     """How the update PAD writes loads the runtime, for the Write log."""
     if mk().engine(load_port(label)) == "godot":

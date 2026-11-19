@@ -268,6 +268,7 @@ def test_looney_tunes_is_a_game_the_tab_makes_modes_for(tmp_path, monkeypatch):
         assert s["check"]["ok"] and s["points_scale"] == 1 and s["points_round"] == 10
         assert "inlane_left" in s["names"]["switches"] and "bugs_hurry1" in s["names"]["sound"]
         assert "CCHeroSandwichMeat" in s["names"]["font"]
+        assert s["game_name"] == "Looney Tunes" and "next powers up" in s["build"]["install_note"]
         # Try it: pad_modes.gd and the modes, handed to the Emulate tab with the stock update
         emu = w.window.service("emulate_spooky")
         seen = []

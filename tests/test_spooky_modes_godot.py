@@ -227,3 +227,17 @@ def test_the_write_tab_carries_the_modes(tmp_path, folder):
     plain = tmp_path / "plain.looney"
     formats.create_tar(str(ex), str(plain))
     assert "override.cfg" in _read(str(plain)) and "pad/pad_modes.gd" not in _read(str(plain))
+
+
+def test_both_looney_tunes_builds_have_a_port_and_starters(mk):
+    """The library holds 2025.03.01 and 2025.10.08: each has its own port report (the older one
+    lacks a font and some callouts) and a starter folder its check passes."""
+    old = SM.load_port("legends_of_tera-2025.03.01")
+    new = SM.load_port(LABEL)
+    assert old["engine"] == "godot" and old["game_version"] == "2025.03.01" and old["points_scale"] == 1
+    assert old["switches"] == new["switches"] and len(old["sounds"]) == 1019
+    assert "bugs_count_one" not in old["sounds"] and "digital-7 (mono)" not in old["fonts"]
+    for label in ("legends_of_tera-2025.03.01", LABEL):
+        _modes, problems = mk.check_modes(os.path.join(MODES, "examples", label), SM.load_port(label))
+        assert problems == [], (label, problems)
+    assert {t["label"] for t in SM.titles() if t["can_run"]} >= {"legends_of_tera-2025.03.01", LABEL}

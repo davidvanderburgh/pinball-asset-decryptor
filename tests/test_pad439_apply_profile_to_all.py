@@ -157,10 +157,11 @@ def test_apply_to_all_images_and_the_lone_file(tmp_path):
 
 def test_the_button_is_on_the_images_and_video_bars_only():
     pane = open(os.path.join(_TABS, "color_pane.js"), encoding="utf-8").read()
-    assert 'call("color.apply_to_all", "all", null, themes)' in pane    # themes: this one or all (Simon)
-    assert 'call("color.apply_to_all", "profiled", null, themes)' in pane
-    assert "Apply to all ${all[1]}…" in pane
-    assert "Apply to all profiled ${all[1]}…" in pane
+    # Simon (2026-11-19): one "Copy profile…" with its choices - which files (with a profile attached / all), which
+    # themes - in place of the two Apply to all buttons
+    assert 'call("color.apply_to_all", which, null, themes)' in pane
+    assert ">Copy profile…<//>" in pane
+    assert 'COPY_WHICH = { profiled: "With a profile attached", all: "All" }' in pane
     # (PAD-471: and the Scenes bar on a line of text; PAD-566: and on a picture in Scenes)
     assert 'ALL_HOSTS = { images: ["images"], video: ["videos"], scenes: ["text", "images"] }' in pane
     assert "<${FileLine} s=${s} host=${host} />" in pane

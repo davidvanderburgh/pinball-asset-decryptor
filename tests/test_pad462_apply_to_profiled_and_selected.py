@@ -235,8 +235,7 @@ def test_the_page_sends_the_selected_clips_and_both_buttons():
     assert "more: selOpen.filter((x) => x.rel !== barRow.rel).map((x) => x.rel)" in video
     pane = open(os.path.join(_TABS, "color_pane.js"), encoding="utf-8").read()
     assert "file.attach || null, file.more || [])" in pane
-    assert "Apply to all profiled ${all[1]}…" in pane
-    assert "Apply to all ${all[1]}…" in pane
+    assert ">Copy profile…<//>" in pane                   # (Simon: one copy action, which files / which themes)
     assert ">Same as the other files<//>" in pane
 
 
@@ -281,5 +280,5 @@ def test_apply_to_all_videos_tooltip_is_dragonrrs_own_words():
              "will be affected. You can undo this function")
     tip_js = pane.split("const ALL_TIP = (one, many) => `", 1)[1].split("`;", 1)[0]
     assert tip_js.replace("${many}", "videos").replace("${one}", "video") == words
-    assert ('title=${f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(all[2], all[1])}>Apply to '
-            'all ${all[1]}…<//>') in pane                # (PAD-471: lines of text's own)
+    # (PAD-471: lines of text's own; Simon: the tooltip of Copy profile… with All picked)
+    assert 'const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(words[2], words[1]);' in pane

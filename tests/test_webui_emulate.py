@@ -1293,6 +1293,83 @@ def test_card_cache_window_pad739(tmp_path, monkeypatch):
         assert [x for x in rec.calls if "--cache-limit" in x][-1][-1] == "32"
 
 
+def test_card_cache_window_on_its_own_disk_pad1459(tmp_path, monkeypatch):
+    # a user's cache on its own XFS disk: the cards share identical blocks, so
+    # what they hold is the disk's real use, not their sizes added up
+    now = int(time.time())
+    text = _cache_739(now).replace(b"limit	64	34474368	/home/u/cardcache	distro",
+                                   b"limit	64	16766020	/mnt/wsl/padcache/cardcache	disk")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        _patch(svc, monkeypatch, answers={"--cache-list": _Done(text)})
+        assert w.call(NS + ".open_cache") is True
+        _wait(w, lambda: (w.state(NS)["cache"] or {}).get("busy") is False)
+        head = w.state(NS)["cache"]["head"]
+        assert head.startswith("5 cached cards — 16.0 GB on disk (32.9 GB of cards: "
+                               "identical blocks are stored once)"), head
+        assert "kept under 64 GB" in head
+
+
+def test_card_cache_disk_made_on_start_and_moved_after_stop_pad1459(tmp_path, monkeypatch):
+    # a user (no card store): Start makes the cache's own disk, sized from the
+    # old cache, and moves the old cache in the background; a move that finds
+    # the old cache in use is tried again after Stop, and once it has moved it
+    # is never asked again
+    from pinball_decryptor.core import rigdata
+    from pinball_decryptor.webui import emulate_rig
+    from pinball_decryptor.webui.tabs import emulate as tab_mod
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        logs = []
+        monkeypatch.setattr(svc, "_log", logs.append)
+        monkeypatch.setattr(tab_mod.sys, "platform", "win32")
+        monkeypatch.setattr(rigdata, "cards_exists", lambda: False)
+        state = {"exists": False}
+        monkeypatch.setattr(rigdata, "cache_disk_exists", lambda: state["exists"])
+        made = []
+
+        def ensure(d, mkfs, size_gb=0, log=None, runner=None):
+            made.append((d, list(mkfs), size_gb))
+            state["exists"] = True
+            return "/mnt/wsl/padcache"
+        monkeypatch.setattr(rigdata, "ensure_cache_disk", ensure)
+        moves = [b"busy the old cache is in use; copied, switching at the next run\n",
+                 b"[cachedisk] moving the card cache (12G) onto its own disk, sharing identical blocks\n"
+                 b"moved 2 12575016\n"]
+        calls = []
+
+        def run(cmd, **kw):
+            j = " ".join(map(str, cmd))
+            calls.append(j)
+            if "--cache-list" in j:
+                return _Done(b"limit\t64\t30000000\t/home/pad/cardcache\tdistro\n")
+            if "cachedisk.sh move" in j:
+                return _Done(moves.pop(0))
+            return _Done(b"")
+        monkeypatch.setattr(svc, "_run", run)
+        monkeypatch.setattr(emulate_rig, "rig_cmd_root", lambda s, *a: ["wsl-root", s] + list(a))
+        svc._ensure_cache_disk("PAD-Runtime")
+        assert made and made[0][0] == "PAD-Runtime" and made[0][2] == 64 + 32
+        assert made[0][1][0] == "bash" and made[0][1][1].endswith("/cachedisk.sh") and made[0][1][2] == "mkfs"
+        _wait(w, lambda: len(moves) == 1 and not svc._cache_moving)   # Start's move ran
+        assert not getattr(svc, "_cache_moved", False)             # in use: nothing switched yet
+        svc._cache_move_later()                                     # what Stop runs
+        _wait(w, lambda: getattr(svc, "_cache_moved", False) and not svc._cache_moving)
+        assert any("(2 cards, 12.0 GB) is on its own disk now" in l for l in logs), logs
+        assert any(l.startswith("[emulate] moving the card cache") for l in logs), logs
+        n = len(calls)
+        svc._cache_move_later()
+        svc._ensure_cache_disk("PAD-Runtime")
+        assert [c for c in calls[n:] if "cachedisk.sh" in c] == []   # moved: never asked again
+        # the card store's machine: none of it
+        monkeypatch.setattr(rigdata, "cards_exists", lambda: True)
+        made.clear()
+        svc._cache_moved = False
+        svc._ensure_cache_disk("PAD-Runtime")
+        svc._cache_move_later()
+        assert made == [] and [c for c in calls[n:] if "cachedisk.sh" in c] == []
+
+
 # ------------------------------------------------- setup, runtime, Docker
 def test_check_setup_without_a_rig_says_so(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:

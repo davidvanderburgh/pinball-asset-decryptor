@@ -78,7 +78,7 @@ ls "$CACHE" | sed -n 's/\.raw$//p' | tr '\n' ' '; echo
 def test_the_library_is_never_evicted_and_dead_entries_go_first():
     script = _funcs("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
                     "cache_readers", "cache_in_use", "src_is_scratch", "src_drive_present", "cache_source_state", "cache_limit_gb", "cache_used_kb",
-                    "cache_make_room") + DRIVER
+                    "cache_settle", "cache_kind", "cache_make_room") + DRIVER
     out = subprocess.run(["bash", "-s"], input=script.encode(), stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, timeout=60).stdout.decode("utf-8", "replace")
     lines = out.splitlines()
@@ -102,7 +102,7 @@ def test_the_store_keeps_a_margin_and_a_distro_disk_its_floor():
     assert "    LIBRARY=$STORE_LIBRARY\nelse\n    LIBRARY=$INTAKE\nfi" in cm
     # precache.sh fills exactly the folder cardmount.sh pins
     assert "LIB=${1:-/mnt/d/Pinball/images/Stern/spike2}" in _text("precache.sh")
-    assert 'if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then\n    CACHE_KEEP_GB=${PAD_STORE_KEEP_FREE_GB:-2}' in cm
+    assert 'if [ "$CACHE" = /mnt/wsl/cards/cardcache ] || [ "$CACHE" = "$CACHE_DISK/cardcache" ]; then\n    CACHE_KEEP_GB=${PAD_STORE_KEEP_FREE_GB:-2}' in cm
     assert "CACHE_KEEP_GB=${PAD_CACHE_KEEP_FREE_GB:-8}" in cm
     room = cm[cm.index("cache_make_room() {"):cm.index("cache_wait() {")]
     assert "keep=$(( CACHE_KEEP_GB * 1048576 ))" in room

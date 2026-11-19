@@ -103,7 +103,7 @@ DRY=1; cache_make_room "" ""; echo "room rc=$? evict=$ROOM_EVICT_N"
 def test_prune_keeps_the_last_copy_and_evicts_down_to_the_cap_least_recently_booted_first():
     script = _funcs("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
                     "cache_readers", "cache_in_use", "src_drive_present", "cache_source_state", "cache_limit_gb",
-                    "card_label", "cache_need_kb", "room_say", "cache_make_room", "cache_prune") + PRUNE
+                    "card_label", "cache_need_kb", "room_say", "cache_settle", "cache_kind", "cache_make_room", "cache_prune") + PRUNE
     out = _bash(script)
     lines = out.splitlines()
     assert "v36=lost tkt=gone" in lines, out
@@ -260,4 +260,4 @@ def test_the_store_script_moves_the_store_by_verify_then_swap():
     assert "storexfs.sh' mkfs" in migrate and "'xfs' | Set-Content \"$NewPath.fstype\"" in migrate
     assert "ingest --host $hostMnt $MountPoint $NewMount" in migrate
     sx = _text("storexfs.sh")
-    assert "-m reflink=1,crc=1 -L cards" in sx and "apt-get download" in sx and "dpkg-deb -x" in sx
+    assert '-m reflink=1,crc=1 -L "${3:-cards}"' in sx and "apt-get download" in sx and "dpkg-deb -x" in sx

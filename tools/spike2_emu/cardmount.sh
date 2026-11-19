@@ -44,10 +44,18 @@ CARDS=$PAD_CARDS          # per rig slot (padpath.sh): a slot unmounts only its 
 # Ubuntu, the app's runtime and the app's data disk, sized for the newest build of every title. Without it (a
 # machine without the store, a reboot before the logon task ran) the cache is $PAD_HOME/cardcache as it always was.
 # PAD_CARD_CACHE_DIR names another.
+# THE USER'S CACHE DISK (PAD-1459). A user has no store, and their cache lived inside a Linux disk that only ever
+# grows on C:. The app now gives it a disk of its own (rigdata.ensure_cache_disk: pad-cardcache.vhdx, XFS with
+# reflink, attached by name at /mnt/wsl/padcache in every distro), moves the old cache into it once (cachedisk.sh
+# move), and the copier below shares each new copy's identical blocks with what is there (storededupe.py): a custom
+# build is the stock card with a few files changed, an LE card shares 73-80% with its Pro. cache_kind `disk`.
+CACHE_DISK=${PAD_CACHE_DISK_MOUNT:-/mnt/wsl/padcache}
 if [ -n "${PAD_CARD_CACHE_DIR:-}" ]; then
     CACHE=$PAD_CARD_CACHE_DIR
 elif [ -d /mnt/wsl/cards/cardcache ] && mountpoint -q /mnt/wsl/cards 2>/dev/null; then
     CACHE=/mnt/wsl/cards/cardcache
+elif [ -d "$CACHE_DISK/cardcache" ] && mountpoint -q "$CACHE_DISK" 2>/dev/null; then
+    CACHE=$CACHE_DISK/cardcache
 else
     CACHE=$PAD_HOME/cardcache
 fi
@@ -80,7 +88,7 @@ fi
 # The space the copier leaves free. On a distro's own disk that space is the distro's (cardstage.sh asks 30 GB);
 # the store holds nothing but the cache, so it keeps only a margin - with the library pinned in it, that margin is
 # the difference between an older version cached and one booted where it lies.
-if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then
+if [ "$CACHE" = /mnt/wsl/cards/cardcache ] || [ "$CACHE" = "$CACHE_DISK/cardcache" ]; then
     CACHE_KEEP_GB=${PAD_STORE_KEEP_FREE_GB:-2}
 else
     CACHE_KEEP_GB=${PAD_CACHE_KEEP_FREE_GB:-8}
@@ -297,8 +305,23 @@ cache_limit_gb() {
     if [ -n "$v" ]; then echo $((10#$v)); return; fi
     if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then echo "${PAD_STORE_CACHE_MAX_GB:-25}"; else echo "${PAD_CACHE_MAX_GB:-64}"; fi
 }
+# ON THE USER'S CACHE DISK (PAD-1459) the limit counts what the disk really holds: `du` counts every file's blocks
+# in full, shared or not, so five custom builds of one title holding 1.3 builds' worth of unique data read as five -
+# and the 64 GB would have held exactly as many builds as before. The disk holds nothing but the cache (and the
+# dedupe's hash index, a few MB), so its own used blocks, less what the empty filesystem takes (.base_kb, written
+# when it was made), are the cache's size. XFS finishes its pending frees before it answers statfs, so a measure
+# right after an eviction already sees it gone.
 cache_used_kb() {
-    local u
+    local u b
+    local d=${CACHE_DISK:-/mnt/wsl/padcache}
+    if [ "$CACHE" = "$d/cardcache" ] && mountpoint -q "$d" 2>/dev/null; then
+        u=$(df -k --output=used "$d" 2>/dev/null | tail -1 | tr -d " ")
+        b=$(tr -dc 0-9 2>/dev/null < "$d/.base_kb")
+        if [ -n "$u" ]; then
+            u=$(( u - ${b:-0} )); [ "$u" -lt 0 ] && u=0
+            echo "$u"; return
+        fi
+    fi
     u=$(du -ck "$CACHE"/*.raw "$CACHE"/*.raw.partial 2>/dev/null | tail -1 | cut -f1)
     echo "${u:-0}"
 }
@@ -481,6 +504,31 @@ cache_make_room() {   # <img> <own-copy-path>
         rm -f "$CACHE/$victim.raw" "$CACHE/$victim.raw.partial" \
               "$CACHE/$victim.src" "$CACHE/$victim.log" \
               "$CACHE/$victim.boot" "$CACHE/$victim.pid"
+        cache_settle
+    done
+}
+
+# XFS GIVES AN EVICTED CARD'S BLOCKS BACK IN THE BACKGROUND (PAD-1459). On the user's cache disk a card that shares
+# blocks is thousands of extents, and XFS frees a deleted file's extents after the unlink returns: measured, six
+# Godzilla builds deleted, the disk read 9.7 GB used for a minute before it read its empty 1.96. Measured straight
+# after a delete, the limit (cache_used_kb, the disk's own use there) still saw the card and evicted the next - and
+# the next, until the cache was empty. So after a delete on that disk, wait until its use stops falling: two
+# readings 2 s apart with nothing more freed, at most PAD_CACHE_SETTLE_S (90). Nothing on the other kinds, whose
+# du-based count sees a delete at once.
+cache_settle() {
+    [ "$(cache_kind)" = disk ] && [ "${DRY:-0}" != 1 ] || return 0
+    local a b same=0 t0
+    t0=$(date +%s)
+    sync -f "$CACHE" 2>/dev/null
+    a=$(df -k --output=used "$CACHE" 2>/dev/null | tail -1 | tr -d " ")
+    [ -n "$a" ] || return 0
+    while [ $(( $(date +%s) - t0 )) -lt "${PAD_CACHE_SETTLE_S:-90}" ]; do
+        sleep 2
+        b=$(df -k --output=used "$CACHE" 2>/dev/null | tail -1 | tr -d " ")
+        [ -n "$b" ] || return 0
+        if [ "$b" -lt "$a" ]; then same=0; else same=$((same + 1)); fi
+        [ "$same" -ge 2 ] && return 0
+        a=$b
     done
 }
 
@@ -493,7 +541,7 @@ card_label() {   # <img>
 }
 
 # WHAT A CARD WILL COST THE DISK (PAD-964), without copying or evicting anything: one tab-separated line
-#   check <TAB> state <TAB> need_kb <TAB> free_kb <TAB> keep_kb <TAB> evict_n <TAB> evict_kb <TAB> store|distro
+#   check <TAB> state <TAB> need_kb <TAB> free_kb <TAB> keep_kb <TAB> evict_n <TAB> evict_kb <TAB> store|disk|distro
 #         <TAB> host <TAB> label <TAB> image
 # state: off (PAD_CARD_CACHE=0: the game reads the image where it lies), cached (a valid copy is there), copying
 # (a copier is on it now), room (the copy fits as the cache stands), evict (it fits once evict_n older entries,
@@ -529,7 +577,11 @@ cache_check() {   # <img>
     printf 'check\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$state" "${need:-$(cache_need_kb "$img")}" "$ROOM_FREE_KB" \
         $(( CACHE_KEEP_GB * 1048576 )) "$ROOM_EVICT_N" "$ROOM_EVICT_KB" "$(cache_kind)" "$host" "$label" "$img"
 }
-cache_kind() { if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then echo store; else echo distro; fi; }
+cache_kind() {
+    if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then echo store
+    elif [ "$CACHE" = "${CACHE_DISK:-/mnt/wsl/padcache}/cardcache" ]; then echo disk
+    else echo distro; fi
+}
 
 # AN IMAGE THAT ALREADY LIVES ON THE CACHE'S DISK IS BOOTED WHERE IT LIES (PAD-966): a copy of it would be the same
 # bytes on the same disk at the same speed. Two cases. A file inside the cache itself: ~/cardcache has been a symlink
@@ -544,7 +596,7 @@ on_cache_disk() {   # <img>
     local r c
     r=$(readlink -f "$1" 2>/dev/null) && c=$(readlink -f "$CACHE" 2>/dev/null) && [ -n "$r" ] || return 1
     case $r in "$c"/*) return 0 ;; esac
-    [ "$(cache_kind)" = store ] || return 1
+    case $(cache_kind) in store|disk) ;; *) return 1 ;; esac
     [ -e "$r" ] && [ "$(stat -c %d "$r" 2>/dev/null)" = "$(stat -c %d "$c" 2>/dev/null)" ]
 }
 
@@ -621,7 +673,7 @@ cache_prune() {   # <keep-days>
             take "over the cache's $(( limit / 1048576 )) GB limit, least recently booted" "$l" "$kb"
             # measured again after a real delete: on the XFS store (PAD-1453) a file's du counts blocks it shares
             # with others, so what a delete frees can be less than its du
-            if [ "${DRY:-0}" = 1 ]; then used=$(( used - kb )); else used=$(cache_used_kb); fi
+            if [ "${DRY:-0}" = 1 ]; then used=$(( used - kb )); else cache_settle; used=$(cache_used_kb); fi
         else
             hold "booted $(( (now - last) / 86400 )) days ago" "$l" "$kb"
         fi
@@ -821,7 +873,17 @@ cache_pick() {
                 echo "[card] local cache copy FAILED (disk full?); runs still work off D:"
             fi
             rm -f "$pidf"
-        ' _ "$img" "$copy" "$stamp" "$pidf" "$SELF" \
+            # SHARE ITS BLOCKS (PAD-1459): on the cache disk, the finished copy shares every block it has in common
+            # with what is cached already - the stock card a custom build was made from, the LE beside a Pro. Off
+            # the boot path: the copy is published and its pid file gone before this starts, at the lowest CPU and
+            # disk priority, one at a time (flock) - a card booting now reads the same bytes either way, and an
+            # interrupted pass resumes at the next copy (the hashes it finished are kept).
+            if [ -n "$6" ] && [ -f "$copy" ] && command -v flock >/dev/null 2>&1; then
+                echo "[card] sharing identical blocks with the rest of the cache"
+                nice -n 19 ionice -c3 flock -w 3600 "$6/.dedupe.lock" \
+                    python3 "$self/storededupe.py" dedupe --quiet-s 0 "$6" 2>&1 | tail -3
+            fi
+        ' _ "$img" "$copy" "$stamp" "$pidf" "$SELF" "$( [ "$(cache_kind)" = disk ] && echo "$CACHE_DISK" )" \
             </dev/null >> "$CACHE/$label.log" 2>&1 &
         echo $! > "$pidf"
         give_back "$pidf" "$CACHE/$label.log"
@@ -1061,7 +1123,7 @@ if [ "${1:-}" = "--cache-list" ]; then
     #                        own mtime, the last-used stand-in for a card never booted
     # leftover <TAB> label <TAB> real_kb <TAB> mtime <TAB> use   (PAD-739) a copy that never finished, or sidecars
     #                        whose card is gone: no .raw. use: copying|-
-    # limit <TAB> limit_gb <TAB> used_kb <TAB> dir <TAB> store|distro   (PAD-739)
+    # limit <TAB> limit_gb <TAB> used_kb <TAB> dir <TAB> store|disk|distro   (PAD-739; disk: PAD-1459)
     CACHE_READERS=$(cache_readers)
     for f in "$CACHE"/*.raw; do
         [ -e "$f" ] || break
@@ -1090,7 +1152,7 @@ if [ "${1:-}" = "--cache-list" ]; then
         if copier_alive "$CACHE/$l.pid" "$CACHE/$l.raw" || cache_in_use "$l"; then u=copying; else u=-; fi
         printf 'leftover\t%s\t%s\t%s\t%s\n' "$l" "${rk:-0}" "${m:-0}" "$u"
     done
-    if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then k=store; else k=distro; fi
+    k=$(cache_kind)
     printf 'limit\t%s\t%s\t%s\t%s\n' "$(cache_limit_gb)" "$(cache_used_kb)" "$CACHE" "$k"
     df -k --output=avail,size "$CACHE" 2>/dev/null | tail -1 \
         | awk '{printf "disk\t%s\t%s\n", $1, $2}'

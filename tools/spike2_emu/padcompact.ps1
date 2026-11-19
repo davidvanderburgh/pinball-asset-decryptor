@@ -92,6 +92,8 @@ function UsedGB($distro, $path) {
 $disks = @()
 $disks += @{ name = 'card store'; vhdx = (Join-Path $DataRoot 'data\pad-cards.vhdx'); distro = $probe; path = '/mnt/wsl/cards' }
 $disks += @{ name = 'rigs'' data disk'; vhdx = (Join-Path $DataRoot 'data\pad-data.vhdx'); distro = $probe; path = '/mnt/wsl/paddata' }
+# a user's card cache on its own XFS disk (PAD-1459): evicted cards free blocks inside it, compacting gives them to C:
+$disks += @{ name = 'card cache'; vhdx = (Join-Path $DataRoot 'data\pad-cardcache.vhdx'); distro = $probe; path = '/mnt/wsl/padcache' }
 $disks += @{ name = 'PAD-Runtime'; vhdx = (Join-Path $DataRoot 'runtime\ext4.vhdx'); distro = 'PAD-Runtime'; path = '/' }
 if ($default -and $default -ne 'PAD-Runtime') { $disks += @{ name = $default; vhdx = $defaultVhdx; distro = $default; path = '/' } }
 $todo = @()

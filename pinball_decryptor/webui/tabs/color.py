@@ -1190,9 +1190,12 @@ class ColorTab(TabService):
                 targets = dict(fn("all") or {}) if fn is not None else {}
                 name = (self._asset or cp.recommended(self._project, files=True)).label()
                 many = self._ALL_WORDS[kind][1]
+                one = self._ALL_WORDS[kind][0]
                 return {"n": len(targets), "text": (
-                    "Will give “%s”, the shared files profile, to all %d %s that are not locked." % (
-                        name, len(targets), many) if targets else "There are no %s to give it to." % many)}
+                    ("Will give “%s”, the shared files profile, to the one %s that is not locked." % (name, one)
+                     if len(targets) == 1 else
+                     "Will give “%s”, the shared files profile, to all %d %s that are not locked." % (
+                         name, len(targets), many)) if targets else "There are no %s to give it to." % many)}
             fm = self._file_mode()
             if fm is None:
                 return {"n": 0, "text": ""}
@@ -1213,6 +1216,10 @@ class ColorTab(TabService):
             if not others:
                 return {"n": 0, "text": "No other %s %s%s." % (
                     many, "with a profile attached" if scope != "all" else "that are not locked", words)}
+            if len(others) == 1:
+                one = self._ALL_WORDS[kind][0]
+                return {"n": 1, "text": "Will copy “%s” to 1 %s%s%s." % (
+                    self._shown().label(), "profiled " if scope != "all" else "", one, words)}
             return {"n": len(others), "text": "Will copy “%s” to %d %s%s%s." % (
                 self._shown().label(), len(others), "profiled " if scope != "all" else "", many, words)}
         except Exception:                               # noqa: BLE001

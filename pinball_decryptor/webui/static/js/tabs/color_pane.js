@@ -321,8 +321,8 @@ function FileLine({ s, host }) {
         <span class="cpd-applywrap" style="grid-column: span 4" ...${tip(copyTip)}><button type="button"
           class="cpd-apply" disabled=${!canCopy} onClick=${doCopy}>APPLY NOW</button></span>
         <span class="cpd-count" style="grid-column: span 3"
-          title="How many files it changes. You are asked first, with a WARNING, and Undo puts them all back.">${canCopy
-          ? `${summary.n} ${summary.n === 1 ? toWords[2] : toWords[1]} · asked first` : "nothing to apply"}</span>
+          title=${`${canCopy ? `${summary.n} ${summary.n === 1 ? toWords[2] : toWords[1]}` : "Nothing to apply"}. You are asked first, with a WARNING, and Undo puts them all back.`}>${canCopy
+          ? `${summary.n} ${summary.n === 1 ? "asset" : "assets"} · asked first` : "nothing to apply"}</span>
       </div>
     ${!f ? html`<${WhichFilesNotes} s=${s} />` : null}
   </div>`;

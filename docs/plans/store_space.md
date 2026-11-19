@@ -43,6 +43,24 @@ floor (cardcopy.py), so zeroing free space inside them wins nothing.
 7. The rig's attach (`rigdata.attach_cards`, `cardstore.ps1`) mounts the store as its own type (`<vhdx>.fstype`),
    trying the other when a moved file lost it; Manage disk space > Move carries `.fstype` along.
 
+## Measured after (2026-11-19, David's PC)
+
+| What | Before | After |
+|---|---|---|
+| **C: free** | **161.6 GB** | **582.3 GB** |
+| card store file | 549.7 GB (580 at peak), ext4, 600 GB max | 283.7 GB, XFS, 400 GB max, holding 231 GB |
+| Ubuntu `ext4.vhdx` | 242 GB (98% full) | 171.6 GB |
+| PAD-Runtime `ext4.vhdx` | 88.9 GB | 65.5 GB |
+| `%TEMP%\pytest-of-david` | 41 GB | 0 |
+
+Swap verify: 155,089 files byte-identical, 16,941 links identical. Boot to attract from the shared-block store:
+Jaws LE, Jaws Pro, Godzilla LE, Godzilla Pro, 20 s each (PAD-966: 20-23 s on the ext4 store).
+
+Found on the way, fixed: XFS speculative preallocation stranded 4.25 GiB inside Jaws Pro's holes (the copy now sets
+the size first, and `punch_zeros` returns them); `os.walk` hid 191 links to folders from the copy (verify now
+compares links); an fsync per small file and a full index re-sort per file made Spike 3's 170,000 files take hours;
+the installed app polls `wsl.exe` every few seconds, so a compact must shut WSL down right before each disk.
+
 Items 7 (archive superseded library cards) and 8 (keep only the newest Spike 3 versions) were decided against: with
 shared blocks those copies cost almost nothing (Spike 3: 41.7 GiB of data, 11.8 unique), and keeping them keeps old
 versions bootable. Item 9 (zero free space inside cards) wins nothing: cards are already copied used-blocks-only.

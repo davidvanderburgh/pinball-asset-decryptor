@@ -54,9 +54,11 @@ if ($Register) {
         Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Register')
         exit 0
     }
-    # the main checkout's copy, which outlives a ticket's worktree (as cardstore.ps1 task does)
-    $main = Join-Path $env:USERPROFILE 'Documents\development\pinball-asset-decryptor\tools\spike2_emu\padcompact.ps1'
-    $script = if (Test-Path $main) { $main } else { $PSCommandPath }
+    # the main checkout's copy, which outlives a ticket's worktree (pad-triage removes a closed ticket's): ALWAYS that
+    # path when the checkout is there, even before this script reaches main - the task finds it once it lands
+    $repo = Join-Path $env:USERPROFILE 'Documents\development\pinball-asset-decryptor'
+    $main = Join-Path $repo 'tools\spike2_emu\padcompact.ps1'
+    $script = if (Test-Path $repo) { $main } else { $PSCommandPath }
     $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
     $trg = New-ScheduledTaskTrigger -Daily -At 4am
     $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 3)

@@ -11618,6 +11618,7 @@ static void dto_tick(void);               /* PAD-733 */
 static void dto_ball_end(void);           /* PAD-733 */
 static void fl_tick(void);                /* PAD-1406 */
 static void fl_done(const char *why, int back);   /* PAD-1406 */
+static void bd_give_back(const char *why);        /* PAD-1406 */
 static void more_tick(void);              /* PAD-707 */
 static void place_tick(void);             /* PAD-710 */
 static void done_tick(void);              /* PAD-747 */
@@ -12270,6 +12271,7 @@ int pm_own_game(int on)
             og.blocked = 0;
             say("own game: %s gives the game its rules back", og.who);
             fl_done("the mode gave the game its rules back", 1);   /* PAD-1406 */
+            bd_give_back("the mode gave the game its rules back");
             og.owner = 0;
             og_drain_sync();
         }
@@ -12299,6 +12301,7 @@ static void og_mode_ended(const struct pm_mode *m)
     if (og.owner && og.owner == m) {
         say("own game: %s ended - the game has its rules back", og.who);
         fl_done("the mode ended", 1);                /* PAD-1406 */
+        bd_give_back("the mode ended");
         if (og.blocked) pm_block_game_modes(0);   /* (a mode file's end lifted its own block already) */
         og.owner = 0;
         og_drain_sync();
@@ -17931,6 +17934,150 @@ int pm_coil_pulse(const char *name)
     say("pulse: %s fired %s through the game's own 0x%08" PMA " (%u so far)",
         current && current->name ? current->name : "a mode", name, fn(key), pulses[i].fired);
     return 1;
+}
+
+/* ---- PAD-1406: the game's ball devices - locks, scoops, VUKs - for the mode that has the whole game ---------------
+ * Every Spike 2 framework keeps its ball devices in one table (`data ball_devices`: 40-byte entries, `data
+ * ball_device_count` of them; the balls-in-play count walks it): +0 the device's object (+0x19 the balls it KEEPS,
+ * +0x1a the balls in it), +8 its ball switches (a zero-ended u16 list), +0x1c its NAME ("UPPER LOCK", "LEFT SCOOP"),
+ * +0x24 its kind, +0x25 its capacity (0 = one per ball switch). The game holds and releases its locks through ONE
+ * framework call, keep(device, n, 1) (`site ball_device_keep`, Turtles Pro 1.59 0x16b044, placed on every newest build):
+ * it sets how many balls the device keeps and asks the framework to eject the rest - at the device's own power, with
+ * its own retries (the Turtles rules release both locks with keep(3, 0, 1) and keep(4, 0, 1)). With the game's rules
+ * off a ball stays in a lock until ball search (emulator: Turtles Pro's upper and lower locks) while a scoop kicks at
+ * once (Godzilla Pro's right scoop). So pm_device_keep(name, n): the device keeps n (0 = let every ball go; its
+ * capacity = hold whatever lands). Only the mode that has the whole game; never the trough or the auto plunger, nor a
+ * kind the call refuses (the call's own jump table says which: on every newest build kinds 2, 3, 6 and 8); n at most
+ * the capacity. The game's own keep is put back when the mode ends or gives the rules back. */
+#define BD_ENT 40u
+#define BD_MAX 16
+static struct { int dev; unsigned char saved; } bd_touched[BD_MAX];
+static int bd_n_touched;
+
+static pm_addr bd_entry(int dev)
+{
+    pm_addr t = data("ball_devices"), c = data("ball_device_count");
+    if (!t || !c || dev <= 0 || !maps_has(c, 4, MAP_R) || (unsigned)dev >= *(const unsigned *)(unsigned long)c) return 0;
+    if (!maps_has(t + (pm_addr)dev * BD_ENT, BD_ENT, MAP_R)) return 0;
+    return t + (pm_addr)dev * BD_ENT;
+}
+
+static const char *bd_name(pm_addr e)
+{
+    pm_addr s = e ? *(const unsigned *)(unsigned long)(e + 0x1c) : 0;
+    return s && maps_has(s, 1, MAP_R) ? (const char *)(unsigned long)s : 0;
+}
+
+/* the same name, any case, a space or an underscore alike ("left_scoop" is "LEFT SCOOP") */
+static int bd_same(const char *a, const char *b)
+{
+    for (;; a++, b++) {
+        char x = *a >= 'a' && *a <= 'z' ? (char)(*a - 32) : *a == '_' ? ' ' : *a;
+        char y = *b >= 'a' && *b <= 'z' ? (char)(*b - 32) : *b == '_' ? ' ' : *b;
+        if (x != y) return 0;
+        if (!x) return 1;
+    }
+}
+
+static int bd_find(const char *name)
+{
+    int dev;
+    for (dev = 1; name && dev < 32; dev++) {
+        pm_addr e = bd_entry(dev);
+        const char *nm;
+        if (!e) break;
+        if ((nm = bd_name(e)) && bd_same(nm, name)) return dev;
+    }
+    return -1;
+}
+
+/* the decision (tests lift it): 0 = may, else why not (1 no such device, 2 not the whole game's mode, 3 no game,
+ * 4 tilted, 5 the trough or the plunger, 6 a kind the game's call refuses) */
+static int bd_refuses(int found, int owner, int in_game, int tilted, int ball_handling, int kind_ok)
+{
+    if (!found) return 1;
+    if (!owner) return 2;
+    if (!in_game) return 3;
+    if (tilted) return 4;
+    if (ball_handling) return 5;
+    if (!kind_ok) return 6;
+    return 0;
+}
+
+static int bd_kind_ok(pm_addr e)
+{
+    pm_addr f = fn("ball_device_keep");
+    unsigned kind = *(const unsigned char *)(unsigned long)(e + 0x24);
+    if (!f || kind < 2 || kind > 8 || !maps_has(f + 0x50u, 28, MAP_R)) return 0;
+    return *(const unsigned *)(unsigned long)(f + 0x50u + 4u * (kind - 2u)) == (unsigned)(f + 0x6cu);
+}
+
+static unsigned bd_capacity(pm_addr e)
+{
+    unsigned cap = *(const unsigned char *)(unsigned long)(e + 0x25), n = 0;
+    pm_addr l = *(const unsigned *)(unsigned long)(e + 8);
+    if (cap) return cap;
+    while (l && n < 16 && maps_has(l + 2u * n, 2, MAP_R) && *(const unsigned short *)(unsigned long)(l + 2u * n)) n++;
+    return n;
+}
+
+static void bd_call(int dev, unsigned n)
+{
+    ((void (*)(unsigned, unsigned, unsigned))(unsigned long)fn("ball_device_keep"))((unsigned)dev, n, 1u);
+}
+
+int pm_device_keep(const char *name, unsigned n)
+{
+    static const char *const why[] = { "", "this game has no ball device by that name", "only the mode that has the "
+        "whole game (pm_own_game) may", "no game in play", "the ball is tilted", "the trough and the plunger are the "
+        "game's", "the game's own call does not take that kind of device" };
+    int dev = fn("ball_device_keep") ? bd_find(name) : -1, r, i;
+    pm_addr e = dev > 0 ? bd_entry(dev) : 0, obj;
+    const char *nm = e ? bd_name(e) : 0;
+    unsigned cap;
+    r = bd_refuses(e != 0, og_has_it(), pm_in_game(), og.tilted || ball_tilted(),
+                   nm && (bd_same(nm, "TROUGH") || bd_same(nm, "AUTO PLUNGER")), e && bd_kind_ok(e));
+    if (r) {
+        say("ball device: %s asked %s to keep %u - refused (%s)", current && current->name ? current->name : "a mode",
+            name ? name : "?", n, why[r]);
+        return 0;
+    }
+    cap = bd_capacity(e);
+    if (n > cap) n = cap;
+    obj = *(const unsigned *)(unsigned long)e;
+    for (i = 0; i < bd_n_touched && bd_touched[i].dev != dev; i++) ;
+    if (i == bd_n_touched && i < BD_MAX && obj && maps_has(obj + 0x19u, 2, MAP_R)) {
+        bd_touched[i].dev = dev;
+        bd_touched[i].saved = *(const unsigned char *)(unsigned long)(obj + 0x19u);
+        bd_n_touched++;
+    }
+    bd_call(dev, n);
+    say("ball device: %s - %s (device %d) keeps %u of its %u (it holds %u now)%s", current && current->name ?
+        current->name : "a mode", nm, dev, n, cap, obj ? *(const unsigned char *)(unsigned long)(obj + 0x1au) : 0u,
+        n ? "" : ": the rest go, the game's own eject");
+    return 1;
+}
+
+int pm_device_balls(const char *name)
+{
+    int dev = bd_find(name);
+    pm_addr e = dev > 0 ? bd_entry(dev) : 0, obj = e ? *(const unsigned *)(unsigned long)e : 0;
+    return obj && maps_has(obj + 0x1au, 1, MAP_R) ? *(const unsigned char *)(unsigned long)(obj + 0x1au) : -1;
+}
+
+int pm_device_known(const char *name) { return fn("ball_device_keep") && bd_find(name) > 0; }
+
+/* the mode gives the game its rules back (or ends): each device it touched keeps what the game had it keep */
+static void bd_give_back(const char *why)
+{
+    int i;
+    for (i = 0; i < bd_n_touched; i++)
+        if (fn("ball_device_keep") && bd_entry(bd_touched[i].dev)) {
+            bd_call(bd_touched[i].dev, bd_touched[i].saved);
+            say("ball device: %s (device %d) keeps %u again, the game's own (%s)", bd_name(bd_entry(bd_touched[i].dev)),
+                bd_touched[i].dev, bd_touched[i].saved, why);
+        }
+    bd_n_touched = 0;
 }
 
 /* the route lets go: back = the ball goes on (turn them on), else the game's own next ball brings them back */

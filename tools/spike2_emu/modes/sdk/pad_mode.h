@@ -424,6 +424,16 @@ int pm_flippers_off(void);
  * post and Sentinel jaw (and on the LE its hand and finger) - are likewise the whole game's mode's alone. */
 int pm_coil_pulse(const char *name);
 int pm_coil_pulse_known(const char *name);
+/* PAD-1406: THE GAME'S BALL DEVICES - locks, scoops, VUKs - for the mode that has the whole game, by the game's own name
+ * for them ("UPPER LOCK", "left_scoop": any case, _ for a space). pm_device_keep(name, n): the device keeps n balls and
+ * the framework ejects the rest, its own way (the device's power, its retries) - the call the game's own lock rules
+ * make. 0 = let every ball go; a large n = hold whatever lands (n is cut to the device's capacity). The game's own keep
+ * comes back when the mode ends. 1 = done; 0 = refused, the reason in mode.log: not the whole game's mode, no game, a
+ * tilt, the trough or the auto plunger, a kind of device the game's call does not take, or no such device here.
+ * pm_device_balls: the balls in it now (-1 = no such device). pm_device_known: 1 when this game has it. */
+int pm_device_keep(const char *name, unsigned n);
+int pm_device_balls(const char *name);
+int pm_device_known(const char *name);
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

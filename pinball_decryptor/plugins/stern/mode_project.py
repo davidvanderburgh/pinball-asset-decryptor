@@ -106,6 +106,8 @@ class TitleProfile:
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
     own_game_coils: tuple = ()       # PAD-1406: ((name, label), ...) held coils only the mode that IS the whole game may
     #                                  hold (`value <name>_own_game 1`: toys and posts the game's rules drive), proven
+    ball_devices: tuple = ()         # PAD-1406: ((name, label), ...) the game's ball devices a whole-game mode may keep balls
+    #                                  in or let go of (pm_device_keep): `text ball_device_names` with `site ball_device_keep`
     pulse_coils: tuple = ()          # PAD-1406: ((name, label), ...) the game's own one-shot devices (pm_coil_pulse), the
     #                                  whole game's mode's alone, proven
     coil_caps: tuple = ()            # PAD-420: ((name, ms), ...) a held coil's longest hold where the game's own
@@ -1831,6 +1833,18 @@ def _own_game_coils(port, key):
                  if port["value"].get("%s_own_game" % n) and (key, n) in OWN_GAME_COILS_PROVEN)
 
 
+#: PAD-1406: virtual ball devices (the game's own bookkeeping: vapor, a jam) a mode is never offered
+_VIRTUAL_DEVICE = re.compile(r"VAPOR|JAM|REMOVED|LOADER")
+
+
+def _ball_devices(port):
+    """PAD-1406: ``((name, label), ...)``: the port's `text ball_device_names` where it names the framework's keep call."""
+    if not port or "ball_device_keep" not in port["site"] or not port["data"].get("ball_devices"):
+        return ()
+    return tuple((n, n.replace("_", " ").title()) for n in port["text"].get("ball_device_names", "").split()
+                 if not _VIRTUAL_DEVICE.search(n.upper()))
+
+
 def _pulse_coils(port, key):
     """PAD-1406: ``((name, label), ...)``: the port's `text pulse_coils` with their `site <name>_fire`, proven ones only."""
     if not port:
@@ -2951,6 +2965,7 @@ def profile_from_port(path):
                              + [n for n, _l in _own_game_coils(port, key)]),   # PAD-420; PAD-1406
         own_game_coils=_own_game_coils(port, key),                           # PAD-1406
         pulse_coils=_pulse_coils(port, key),                                 # PAD-1406
+        ball_devices=_ball_devices(port),                                    # PAD-1406
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589

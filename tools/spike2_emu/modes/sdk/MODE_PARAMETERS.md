@@ -285,7 +285,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 203 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 206 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -356,6 +356,9 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_flippers_off()` | PAD-1406: 1 while a mode has the flippers off (`pm_flippers(0)`) | - | PAD-1406 |
 | `pm_coil_pulse(name)` | PAD-1406: one of the game's own one-shot devices fired once, through the game's own function for it (`text pulse_coils`, `site <name>_fire`; Uncanny X-Men: `sentinel_kick`, the Sentinel's kicking target), at the operator's power and time; only the mode that has the whole game, in a game, not tilted, not when the operator disabled it (`value <name>_off_adj`), 1 s apart, 20 a minute. 1 fired, 0 refused | (the blocks: Fire the ...) | PAD-1406: emulator, Uncanny X-Men LE and Pro 0.98 ([coildrive] node 9 coil 3) |
 | `pm_coil_pulse_known(name)` | PAD-1406: 1 when this game's port has that one-shot device | - | PAD-1406 |
+| `pm_device_keep(name, n)` | PAD-1406: one of the game's ball devices (a lock, scoop or eject, by the game's own name for it: "UPPER LOCK", "left_scoop") keeps n balls and the framework ejects the rest its own way - the call the game's own lock rules make (`site ball_device_keep`, `data ball_devices`, `data ball_device_count`: every newest build). 0 = let every ball go; n is cut to the device's capacity. Only the mode that has the whole game; never the trough or the auto plunger, nor a kind of device the call does not take; the game's own keep comes back when the mode ends. 1 done, 0 refused | (the blocks: The ... keeps every ball / lets its balls go) | PAD-1406: emulator, Godzilla Pro's scoop held 22 s and kicked on release, Turtles Pro's upper lock released; every device of every newest build held and let go |
+| `pm_device_balls(name)` | PAD-1406: the balls in that device now; -1 = no such device | - | PAD-1406 |
+| `pm_device_known(name)` | PAD-1406: 1 when this game has that ball device and the keep call | - | PAD-1406 |
 | `pm_multiball_start(balls, ballsave_s)` | the game serves balls until `balls` (2-6) are in play, with a ball save of that many seconds, through the framework's own start-a-multiball (`site multiball_serve`, its words read off every build's own multiballs); 1 serving, 0 refused (no game in play, a tilt) or no `PM_CAN_MULTIBALL` | F | item 167, emulator-proven 2026-09-26 on all 36 shipped builds (a mode file's `multiball` line; the item 164 provers had called the same function by hand on eleven builds) |
 | `pm_multiball_add(n, ballsave_s)` | `n` more balls than are in play now, the same way | F | item 167, emulator-proven 2026-09-26 on all 36 shipped builds (the add-a-ball shot) |
 | `pm_ball_save(seconds)` | a ball save with no multiball: the same call as `pm_multiball_start`, asking for the balls in play now (at least 1), with `seconds` (1-120) of ball save, as the game's own one-ball saves do (Godzilla Pro 1.15 `0xf49d0`, `0xd6a90`); 1 saving, 0 refused or no `PM_CAN_MULTIBALL` | F | PAD-225 (a mode file's `ball_save` line) |

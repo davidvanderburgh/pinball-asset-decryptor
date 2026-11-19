@@ -106,7 +106,7 @@ export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "m
   if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show",
   log: "show", clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", fade: "show", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
-  shake: "mech", shake_game: "mech", spare_drive: "mech", flippers: "mech", pulse: "mech" };
+  shake: "mech", shake_game: "mech", spare_drive: "mech", flippers: "mech", pulse: "mech", device: "mech" };
 const COLOR_NAMES = { "#ffd000": "yellow", "#00a0ff": "blue", "#ff0000": "red", "#00c040": "green", "#ffffff": "white",
   "#ff7800": "orange", "#a040ff": "purple", "#00ff00": "green" };
 const PATTERN_WORDS = { solid: "solid", blink: "blinking", pulse: "pulsing", chase: "chasing",
@@ -174,6 +174,7 @@ export function stmtWords(b, ch = {}) {
     case "multiball": return `Multiball of ${b.balls} balls, ball save ${b.save || 0} s`;
     case "ball_save": return `Ball save for ${b.seconds} s`;
     case "drain_to_one": return "Take the extra balls away: the flippers off until they drain, one ball back to the plunger";
+    case "device": return b.keep === "let_go" ? `The ${b.what || "device"} lets its balls go` : `The ${b.what || "device"} keeps every ball that lands`;   // PAD-1406
     case "pulse": return `Fire the ${b.what || "device"} once (the game's own)`;   // PAD-1406
     case "flippers": return b.to === "on" ? "Flippers back on" : "Flippers off for the rest of the ball";   // PAD-1406
     case "game_wizard": return `${b.how === "start" ? "Start" : "Light"} the game's ${b.name || "mini-wizard"}`;

@@ -362,3 +362,74 @@ int main(void)
 """
     out = _host_run(tmp_path, host + body + main, flags=("-Wno-unused-function",))
     assert out.split() == ["2", "3", "4", "-1", "-1"]
+
+
+# ---- the game's ball devices (run 4) -----------------------------------------------------------------------------------
+
+def test_ball_device_decision_and_names(tmp_path):
+    src = RUNTIME.read_text(encoding="utf-8")
+    body = ""
+    for head in ("static int bd_same(const char *a, const char *b)", "static int bd_refuses("):
+        a = src.index(head)
+        body += src[a:src.index("\n}\n", a) + 3]
+    main = r"""
+int main(void)
+{
+    printf("%d %d %d %d %d %d %d|", bd_refuses(1, 1, 1, 0, 0, 1), bd_refuses(0, 1, 1, 0, 0, 1), bd_refuses(1, 0, 1, 0, 0, 1),
+           bd_refuses(1, 1, 0, 0, 0, 1), bd_refuses(1, 1, 1, 1, 0, 1), bd_refuses(1, 1, 1, 0, 1, 1), bd_refuses(1, 1, 1, 0, 0, 0));
+    printf("%d %d %d %d", bd_same("LEFT SCOOP", "left_scoop"), bd_same("UPPER LOCK", "UPPER_LOCK"), bd_same("TROUGH", "TROUGH 1"),
+           bd_same("T.Rex Head", "T.REX_HEAD"));
+    return 0;
+}
+"""
+    out = _host_run(tmp_path, "#include <stdio.h>\n" + body + main)
+    assert out == "0 1 2 3 4 5 6|1 1 0 1"
+
+
+def test_ball_device_lines_on_every_newest_build():
+    for key in NEWEST:
+        text = (SDK / "ports" / (key + ".port")).read_text(encoding="utf-8")
+        m = re.search(r"^site ball_device_keep\s+(0x[0-9a-f]{8}) (0x[0-9a-f]{8}) (0x[0-9a-f]{8})$", text, re.M)
+        cnt = re.search(r"^data ball_device_count\s+(0x[0-9a-f]+)", text, re.M)
+        assert m and cnt and re.search(r"^data ball_devices\s+0x[0-9a-f]+", text, re.M), key
+        w0, w1 = int(m.group(2), 16), int(m.group(3), 16)
+        # movw/movt of the device count, the same address the port names
+        lo = (w0 >> 4) & 0xf000 | w0 & 0xfff
+        hi = (w1 >> 4) & 0xf000 | w1 & 0xfff
+        assert (hi << 16 | lo) == int(cnt.group(1), 16), key
+        names = re.search(r"^text ball_device_names\s+(.*)$", text, re.M)
+        if names:
+            assert not {"TROUGH", "AUTO_PLUNGER"} & set(names.group(1).split()), key
+
+
+@pytest.mark.parametrize("key", ["turtles_pro-1.59", "godzilla_pro-1.16", "uncanny_xmen_pro-0.98"])
+def test_ball_device_keep_is_the_framework_call(key):
+    elf = _elf(key)
+    if not elf:
+        pytest.skip("no %s game program here" % key)
+    text = (SDK / "ports" / (key + ".port")).read_text(encoding="utf-8")
+    va = int(re.search(r"^site ball_device_keep\s+(0x[0-9a-f]{8})", text, re.M).group(1), 16)
+    from elftools.elf.elffile import ELFFile
+    with open(elf, "rb") as f:
+        e = ELFFile(f)
+        v, o, _n = next((s["p_vaddr"], s["p_offset"], s["p_filesz"]) for s in e.iter_segments()
+                        if s["p_type"] == "PT_LOAD" and s["p_vaddr"] <= va < s["p_vaddr"] + s["p_filesz"])
+        f.seek(o + va - v)
+        body = struct.unpack("<28I", f.read(112))
+    assert body[0x48 // 4] == 0x979ff100                                  # ldrls pc, [pc, r0, lsl #2]: the kinds' table
+    assert sorted(i + 2 for i in range(7) if body[0x50 // 4 + i] == va + 0x6c) == [2, 3, 6, 8]
+
+
+def test_profiles_and_blocks_know_the_ball_devices():
+    from pinball_decryptor.plugins.stern import mode_project as MP, block_modes as BM
+    P = MP.profiles()
+    assert dict(P["turtles_pro_1_59"].ball_devices).keys() == {"UPPER_LOCK", "LOWER_LOCK"}
+    assert dict(P["godzilla_le_1_16"].ball_devices).keys() == {"RIGHT_SCOOP"}           # its vapor device left out
+    assert P["uncanny_xmen_le_0_98"].ball_devices == ()
+    for gm, ok in (("own_game", True), ("block", False)):
+        prog = BM.normalize({"name": "X", "game_modes": gm, "scripts": [{"hat": {"kind": "mode_start"}, "do": [
+            {"op": "device", "what": "UPPER_LOCK", "keep": "hold"}, {"op": "device", "what": "UPPER_LOCK", "keep": "let_go"}]}]})
+        probs = [x for x in BM.problems(prog, **BM.card_checks(P["turtles_pro_1_59"])) if "UPPER_LOCK" in x]
+        assert (probs == []) == ok, probs
+    c = BM.to_c(prog, "x")
+    assert 'pm_device_keep("UPPER_LOCK", 99u)' in c and 'pm_device_keep("UPPER_LOCK", 0u)' in c

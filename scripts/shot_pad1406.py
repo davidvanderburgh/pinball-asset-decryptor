@@ -92,6 +92,39 @@ def main():
         S._shoot(url, blocks, height=1100)
     finally:
         proc.terminate()
+    # PAD-1406 run 4: a whole-game mode on Turtles Pro 1.59 that holds the balls in its upper lock and lets them go
+    scratch2 = tempfile.mkdtemp(prefix="pad1406t-")
+    project2 = os.path.join(scratch2, "TMNT Pro 1.59 Extract")
+    os.makedirs(project2)
+    card = "turtles_pro-1_59_0.Release.16G.sdcard.raw"
+    with open(os.path.join(project2, ".extract_source.json"), "w", encoding="utf-8") as f:
+        json.dump({"input_path": os.path.join(project2, card), "input_name": card}, f)
+    slug3, _path = BM.new_blocks_mode(project2, "LOCKS", example="ramps")
+    r = BM.load(project2, slug3)
+    r["game_modes"] = "own_game"
+    dev = "device" in BM.STATEMENTS
+    hold = ([{"op": "device", "what": "UPPER_LOCK", "keep": "hold"}] if dev
+            else [{"op": "log", "text": "the upper lock: no way to hold its balls"}])
+    go = ([{"op": "device", "what": "UPPER_LOCK", "keep": "let_go"}] if dev
+          else [{"op": "log", "text": "the upper lock: no way to let its balls go"}])
+    r["scripts"] = [{"hat": {"kind": "mode_start"}, "do": hold},
+                    {"hat": {"kind": "every", "seconds": 30}, "do": [{"op": "score", "points": num(1000000)}] + go}]
+    BM.save(project2, slug3, r)
+    proc, url = S._serve(repo, scratch2, project2)
+    try:
+        def locks(page):
+            webui_shot.api(url, "modes.select", slug3, "code")
+            time.sleep(3)
+            page.evaluate("""() => { const pal = document.querySelector('.bk-palette'); if (pal) {
+                  const h = [...pal.querySelectorAll('*')].find((e) => /^Mechanisms/.test(e.textContent || '')
+                    && e.children.length === 0); if (h) h.scrollIntoView(); } }""")
+            time.sleep(1)
+            out = os.path.join(out_dir, "%s_blocks_locks.png" % prefix)
+            page.screenshot(path=out)
+            print("shot", out, flush=True)
+        S._shoot(url, locks, height=1100)
+    finally:
+        proc.terminate()
 
 
 if __name__ == "__main__":

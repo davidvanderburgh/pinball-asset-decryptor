@@ -1226,3 +1226,11 @@ value coop_keep_perks_at      0x44
 # ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
 site  coop_start_game        0x0045a08c 0xe92d47f0 0xe3024f6c
 site  coop_lobby_add         0x0045a1b4 0xebfffea3 0xe2506000
+
+# PAD-1406: the framework's ball devices (the table the balls-in-play count walks: 40-byte entries, +0x1c each
+# one's name) and its keep(device, n, 1) - how many balls a lock or scoop keeps, the rest ejected the device's
+# own way (placed from Turtles Pro 1.59 by code; its count address checked against this table's): pm_device_keep
+site ball_device_keep     0x00370b1c 0xe3023250 0xe340305f
+data ball_devices         0x0074b3fc
+text ball_device_names  SCOOP
+data ball_device_count    0x005f2250

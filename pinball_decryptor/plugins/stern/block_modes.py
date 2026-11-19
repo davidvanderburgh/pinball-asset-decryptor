@@ -350,6 +350,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "drain_to_one",                                            # PAD-733: the extra balls taken away
               "flippers",                                                # PAD-1406: the whole game's flippers off / on
               "pulse",                                                   # PAD-1406: one of the game's one-shot devices
+              "device",                                                  # PAD-1406: a lock or scoop keeps its balls / lets go
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
               "fade",                                                    # PAD-1405: the whole screen to a colour
@@ -447,6 +448,8 @@ XY_MAX = 2000                    # a point of a step's own: within the picture's
 GI = {"keep": "GI: the game's", "dark": "GI: dark", "flash": "GI: flashing"}
 #: PAD-767: a GI block: the playfield's GI held dark until the mode ends (a show's GI steps still play over it), or the
 #: game's again (David, MELTDOWN: "it would be cooler if the lights stayed off for the whole mode")
+#: PAD-1406: the ball device block's choices (pm_device_keep: hold = keep whatever lands, let go = keep none)
+DEVICE_KEEP = {"hold": "keeps every ball that lands", "let_go": "lets its balls go"}
 #: PAD-1406: the flippers block's choices (pm_flippers): only in a mode that is the whole game
 FLIPPERS_TO = {"off": "off", "on": "back on"}
 GI_HOLD = {"dark": "dark until the mode ends", "game": "the game's again"}
@@ -559,6 +562,7 @@ MAX_BEDS = 6                     # PAD-658: pad_mode_assets.h PA_BEDS_MAX
 VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm", ".gif")   # PAD-693: an animated GIF too
 VAR_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _]{0,23}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+DEVICE_RE = re.compile(r"^[A-Za-z0-9_.]{1,39}$")   # PAD-1406: a ball device's name ("LEFT_SCOOP", "T.Rex_Head")
 HOLD_RE = re.compile(r"^[a-z][a-z0-9_]{0,23}$")   # a held coil's name in the port (`text held_coils`)
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")  # PAD-600: another mode a Put out the light of block names
 #: PAD-708: a combo hat's shots (a step is a shot of the card's, COMBO_ANY or COMBO_LIT), its window and how many
@@ -1280,6 +1284,7 @@ def card_checks(p):
         "flippers": bool(getattr(p, "flippers", False)),   # PAD-1406: pm_flippers on this card's game
         "own_mechs": dict(getattr(p, "own_game_coils", ()) or ()) if p.can("coils") else {},   # PAD-1406
         "pulses": dict(getattr(p, "pulse_coils", ()) or ()),                                   # PAD-1406
+        "devices": dict(getattr(p, "ball_devices", ()) or ()),                                 # PAD-1406
         "done": [list(x) for x in getattr(p, "done_modes", ()) or ()] if p.can("done") else [],   # PAD-747: [[id, name]]
         "spare": list(getattr(p, "spare", ()) or ()),       # PAD-826: "in" / "out" ([] = neither)
     }
@@ -1289,7 +1294,7 @@ def card_checks(p):
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
              game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None,
              drain=None, roster=None, places=None, done=None, spare=None, flippers=None, own_mechs=None,
-             pulses=None):
+             pulses=None, devices=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -1367,6 +1372,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "flippers": flippers,                      # PAD-1406: False where the card's game cannot switch them
            "own_mechs": dict(own_mechs) if own_mechs is not None else None,   # PAD-1406: the whole game's coils
            "pulses": dict(pulses) if pulses is not None else None,            # PAD-1406: its one-shot devices
+           "devices": dict(devices) if devices is not None else None,         # PAD-1406: its ball devices
            "program": program}                        # PAD-646: a Light show block names one of its shows
     _check_shows(program, ctx)                        # PAD-646
     hud = program["hud"]
@@ -1961,6 +1967,17 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["shield"] is False:
                 ctx["out"].append("%s turns the shield targets, which a mode cannot do on this card's game."
                                   % where)
+        elif op == "device":                                                         # PAD-1406
+            what = b.get("what")
+            if not what or not DEVICE_RE.match(str(what)):
+                ctx["out"].append("%s holds or lets go of a ball device with none chosen." % where)
+            elif b.get("keep") not in DEVICE_KEEP:
+                ctx["out"].append("%s: the device keeps every ball, or lets them go." % where)
+            elif ctx["program"].get("game_modes") != "own_game":
+                ctx["out"].append("%s uses the %s, which only a mode that is the whole game may do (The game's own "
+                                  "modes: are off: this is the whole game)." % (where, what))
+            elif ctx["devices"] is not None and what not in ctx["devices"]:
+                ctx["out"].append("%s uses the %s, which this card's game has not got." % (where, what))
         elif op == "pulse":                                                          # PAD-1406
             what = b.get("what")
             if not what or not HOLD_RE.match(str(what)):
@@ -2582,6 +2599,11 @@ class _Gen:
                 except (TypeError, ValueError):
                     secs = 10
                 out.append(pad + "if (run.on && !pm_ball_save(%du)) pm_log(\"ball save refused\");" % secs)
+            elif op == "device":                   # PAD-1406: a lock or scoop keeps its balls, or lets them go
+                what = str(b.get("what") or "")
+                if DEVICE_RE.match(what) and b.get("keep") in DEVICE_KEEP:
+                    out.append(pad + "if (run.on && !pm_device_keep(%s, %du)) pm_log(\"%s: not done\");"
+                               % (_c_str(what), 99 if b["keep"] == "hold" else 0, what))
             elif op == "pulse":                    # PAD-1406: one of the game's own one-shot devices, its own way
                 what = str(b.get("what") or "")
                 if HOLD_RE.match(what):

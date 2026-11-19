@@ -1661,6 +1661,15 @@ too. Two routes, both the game's own commands at the operator's adjustments, nev
   `0x337dc`, Pro `0x30148`: coil_fire(12, SENTINEL KICK TARGET DRAW POWER, DRAW TIME)). At most once a second, 20 a
   minute, never when the operator disabled it.
 
+**The game's ball devices (PAD-1406).** With the game's rules off, a ball in a scoop is kicked out at once, but one in a
+lock stays there until ball search (emulator: Godzilla Pro's scoop, Turtles Pro's locks). The framework holds and lets go
+of every lock, scoop and eject through one call, keep(device, n): how many balls the device keeps, the rest ejected its own
+way (its power adjustment, its retries) - the call the game's own lock rules make (Turtles Pro: keep(3, 0) and keep(4, 0)
+release both locks). `pm_device_keep(name, n)` makes it for the whole game's mode (the blocks: *The ... keeps every ball*
+/ *lets its balls go*), by the game's own name for the device; the port lists them (`text ball_device_names`). The
+trough and the auto plunger are the game's alone, and so are the device kinds the call does not take (a VUK that cannot
+hold a ball). When the mode ends each device it touched keeps what the game had it keep.
+
 The magnet's limit stays the game's own: X-Men's longest magnet command is its grab, 2.5 s on the LE (1.2 s on the
 Pro), and a hold is never longer; a mode grabs again after the runtime's 3 s.
 

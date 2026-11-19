@@ -842,3 +842,11 @@ site flippers_on          0x003204ac 0xe92d4070 0xe3005434
 # be on, and switches it as answered (flippers_on + 0x78; this call at +0x44): while a whole-game mode has the flippers
 # off the runtime answers 1 here, as a rule of the game's would - Metallica's own listener re-enabled them every pass
 site flipper_query_call  0x00320568 0xeb033aa3 0xe3500000
+
+# PAD-1406: the framework's ball devices (the table the balls-in-play count walks: 40-byte entries, +0x1c each
+# one's name) and its keep(device, n, 1) - how many balls a lock or scoop keeps, the rest ejected the device's
+# own way (placed from Turtles Pro 1.59 by code; its count address checked against this table's): pm_device_keep
+site ball_device_keep     0x003c3ab0 0xe3053f74 0xe3403050
+data ball_devices         0x0b6034dc
+text ball_device_names  MAIN_SCOOP
+data ball_device_count    0x00505f74

@@ -85,13 +85,31 @@ kick 255 for 60 ms on 9.3 twice, a second one at once refused; both refused once
   cap brought the flippers back there. D&D Pro, the same code, passes. King Kong LE crashed once in boot again and
   passed on its rerun.
 
-## Next (runs 4+), in this order
+## Done (run 4): the game's ball devices - locks, scoops, ejects
+
+- Every build's framework ball-device table (the balls-in-play count's: `data ball_devices`, 40-byte entries; `data
+  ball_device_count`) is static data: each entry +0 the device object (+0x19 the balls it keeps, +0x1a the balls in
+  it), +8 its ball switches, +0x1c its name, +0x24 its kind, +0x25 its capacity. Survey (C:/tmp/PAD-1406 devnames.py):
+  92 lockable devices across the 53 newest builds; X-Men, Jaws, Beatles, Avengers Pro, Iron Maiden Pro, Jurassic Park
+  Pro, Sword of Rage Pro and Foo Fighters have none the call takes.
+- The game holds and lets go of them through ONE framework call, keep(device, n, 1) (`site ball_device_keep`,
+  Turtles Pro 0x16b044, placed on the other 52 by code, its device-count address checked against each build's table):
+  keep n, the rest ejected the device's own way. Its own jump table takes kinds 2, 3, 6, 8 on every build (VUKs that
+  cannot hold are other kinds).
+- `pm_device_keep(name, n)` / `pm_device_balls` / `pm_device_known`; whole game only, never the trough or the plunger;
+  the game's keep put back at the mode's end. Ports name the devices (`text ball_device_names`); Profile.ball_devices
+  (virtual vapor/jam devices left out); Blocks *Hold the balls in* / *Let go of the balls in*.
+- Proof: Godzilla Pro's scoop held 22 s under keep 1 (no kick), then kicked at the game's power on keep 0; Turtles
+  Pro's upper lock: keep 0 fired its release (coil 8.8) that never fired while held; every allowed device of all 53
+  newest builds held and let go with the game running on (lockall.sh, 53/53).
+
+## Next (runs 5+), in this order
 
 1. ~~**Switch names at run time.**~~ Done in run 3. The game builds its switch table on the heap (mktables.py); the shim already reads
    names from it. A runtime reader of the switch descriptors' names (per framework generation, as the switch-edge
    lines are) gives each build its SHOOTER LANE, TROUGH n and lock/kickback switches with no per-port value: lifts
    the drain-to-one gate on every title and feeds 2 and 3.
-2. **Ball devices: hold, release, eject** (titles whose framework ball-device table has scoops and locks: Godzilla's
+2. ~~**Ball devices: hold, release, eject**~~ Done in run 4 (titles whose framework ball-device table has scoops and locks: Godzilla's
    scoop, King Kong, Jaws...; X-Men has none). MODE_LIMITS today: in a whole-game mode a ball in a scoop or lock stays
    until ball search frees it. The framework's ball devices call the game's handler with events (21 switch closed,
    2 settled, 16/17 kick, 18 left: the scoop hold, mode_coils.md); the eject is the device's own (its retries, its

@@ -1,6 +1,6 @@
 // The themes picker (Simon, 2026-11-18; "image sets" in the code): "a drop down ... which would let the user switch
 // between ... sets. The first option would be the main set, then SET 2 and so on". Simplified with him: a theme is the
-// project's PICTURES, each picture chosen and colour profiled per theme; nothing else (no scene layout, no clips). On
+// project's PICTURES, each picture chosen and color profiled per theme; nothing else (no scene layout, no clips). On
 // the Images tab only (Python: webui/tabs/image_sets.py, namespace "imgsets"). Theme 1 is the project as it is; each
 // other theme starts the same as theme 1 and holds only what differs. Behind an Advanced switch (ThemesSwitch: "hide
 // ... behind an advanced curtain because to a new user it will be very hard to understand"), so a project that never
@@ -14,7 +14,7 @@ const PICK_TIP = "Which theme you are looking at and changing. Theme 1 is the pr
   + "starts the same as theme 1 and keeps only the pictures you change while it is picked. The operator chooses the "
   + "theme in the game's service menu (Image Set); it takes effect on the next power up.";
 const SWITCH_TIP = "Themes: other versions of the game's pictures (a dark and a light Battle Select, say), each picture "
-  + "chosen and colour profiled per theme. The operator picks one in the service menu. Off, none of it shows.";
+  + "chosen and color profiled per theme. The operator picks one in the service menu. Off, none of it shows.";
 
 // the Advanced switch (Images tab): themes on for this project
 export function ThemesSwitch() {
@@ -44,7 +44,7 @@ export function SetPicker({ cls = "" }) {
 
 // Above the Images tab's list while a theme other than theme 1 is picked: what this theme keeps, and what still
 // changes theme 1
-const STRIP_NOTE = " Choose…, Clear and colour profiles (the Color column and the Colors bar) work on this theme's "
+const STRIP_NOTE = " Choose…, Clear and color profiles (the Color column and the Colors bar) work on this theme's "
   + "pictures (pictures in scenes only). Replace from folder, groups and Keep size still change theme 1.";
 
 export function SetStrip() {

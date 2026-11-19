@@ -259,7 +259,7 @@ function FileLine({ s, host, tools }) {
         : t > 1 ? `Drop this theme's own profile for it: it uses theme 1's (“${(f && f.base_name) || sharedName}”) again`
           : `Drop its own profile: it gets the shared files profile (“${sharedName}”), as every other file without one of its own does`}>${hereLabel}<//>
     <${Button} size="xs" disabled=${!canEvery} cls=${!(themeHost && themesOn) || (f && !themeLive) ? "cpd-never" : ""} onClick=${() => call("color.file_shared", "all")}
-      title=${canEvery ? `Drop its own profile in every theme, theme 1 too: it uses the shared files profile (“${sharedName}”) everywhere. Its colour switch is not changed: off, nothing is baked in.`
+      title=${canEvery ? `Drop its own profile in every theme, theme 1 too: it uses the shared files profile (“${sharedName}”) everywhere. Its color switch is not changed: off, nothing is baked in.`
         : "Only for a picture, with themes on"}>Reset in every theme (“${sharedName}”)<//>
   </div>`;
 
@@ -470,7 +470,7 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
   }, [open, fileKey, s.per_file]);
   useEffect(() => () => { call("color.set_file"); }, []);
   const mode = s.per_file ? (s.mode || "display") : "display";
-  const tools = html`<div class="cpd-file cpd-tools"><div class="eyebrow">File Colour Profile Tools</div>
+  const tools = html`<div class="cpd-file cpd-tools"><div class="eyebrow">File Color Profile Tools</div>
     <div class="cpd-four"><${UndoRedo} s=${s} flush=${flush} size="xs" kind="" />
       <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div></div>`;
   // the dots: the host's Preview colors row where it has one, else the profiles' own word

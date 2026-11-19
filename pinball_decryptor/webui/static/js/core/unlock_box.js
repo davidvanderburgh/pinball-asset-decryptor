@@ -10,12 +10,12 @@ import { ThemesSwitch } from "./image_sets.js";
 
 const TIPS = {
   images: "Off: the original extracted pictures are locked (blue lock), and only pictures you replace can have the "
-    + "individual files colour profile baked in. On: every picture gets a palette, on the Images tab and in Scenes. "
+    + "individual files color profile baked in. On: every picture gets a palette, on the Images tab and in Scenes. "
     + "It is staged from its original extracted copy when you build, so building again never corrects it twice. "
     + "Turning it off puts the extracted pictures back as they were.",
-  videos: "Off: the game's own clips are locked, and only clips you replace can have the individual files colour "
+  videos: "Off: the game's own clips are locked, and only clips you replace can have the individual files color "
     + "profile baked in. On: every clip gets a palette on the Video tab. Turning it off puts them back as they were.",
-  text: "Off: the game's own lines of text are locked, and only lines you add in Scenes can have a colour profile. "
+  text: "Off: the game's own lines of text are locked, and only lines you add in Scenes can have a color profile. "
     + "On: every line of text in Scenes gets a palette. Turning it off locks them again; their switches come back "
     + "when it is ticked.",
 };

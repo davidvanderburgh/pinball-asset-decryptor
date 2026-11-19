@@ -58,18 +58,15 @@ PUBLIC_KEYS = (
 )
 
 #: The preview features this version of the app has, by id, with the name people see.
-FEATURES = {
-    # Stern Spike 3 (Pi-4 secure-boot era): decrypt a secure SD image or a
-    # .spk package and extract its assets.  Behind a code while it is new.
-    "spike3": "Stern Spike 3",
-}
+FEATURES = {}
 #: Features that WERE previews and are now in every copy, switched on with no code
 #: (the mode maker, PAD-763). :func:`enabled` answers yes for them; a code that names
 #: one says it is no longer needed. The Visual Pinball tab (PAD-802) joined them in
-#: PAD-1136.
+#: PAD-1136, and Stern Spike 3 (a secure SD image or a .spk package) in PAD-1440.
 RELEASED = {
     "modes": "Mode maker",
     "vpx": "Visual Pinball",
+    "spike3": "Stern Spike 3",
 }
 
 _NAME_MAX = 64

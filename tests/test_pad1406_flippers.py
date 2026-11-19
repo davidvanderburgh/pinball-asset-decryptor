@@ -335,3 +335,30 @@ def test_profiles_and_blocks_know_the_devices():
     prog = BM.normalize({"name": "X", "game_modes": "own_game", "scripts": [{"hat": {"kind": "mode_start"}, "do": [
         {"op": "pulse", "what": "sentinel_kick"}]}]})
     assert 'if (run.on && !pm_coil_pulse("sentinel_kick")) pm_log("sentinel_kick: not fired");' in BM.to_c(prog, "x")
+
+
+def test_a_switch_is_found_by_the_game_s_own_name(tmp_path):
+    """Drain to one finds the shooter lane and the trough by name on any build (Uncanny X-Men: "Shooter Lane",
+    "Trough 1" - mixed case), where the port names no shooter_lane_switch and no Trough shot."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    a = src.index("static long sw_by_name(const char *name)")
+    body = src[a:src.index("\n}\n", a) + 3]
+    host = r"""#include <stdio.h>
+#define SW_ENT 32u
+#define SWN_MAX 1024u
+#define MAP_R 1u
+static const char *names[] = { 0, "QR SCANNER", "Shooter Lane", "Upper Shooter Lane", "Trough 1 ", "Trough 10" };
+static pm_addr swn_entries(void) { return 0x1000u; }
+static const char *swn_name(pm_addr e) { unsigned id = (e - 0x1000u) / SW_ENT; return id < 6 ? names[id] : 0; }
+static int maps_has(pm_addr a, unsigned long n, unsigned how) { return (a - 0x1000u) / SW_ENT < 6; }
+"""
+    main = r"""
+int main(void)
+{
+    printf("%ld %ld %ld %ld %ld\n", sw_by_name("SHOOTER LANE"), sw_by_name("UPPER SHOOTER LANE"), sw_by_name("TROUGH 1"),
+           sw_by_name("TROUGH"), sw_by_name("TILT"));
+    return 0;
+}
+"""
+    out = _host_run(tmp_path, host + body + main, flags=("-Wno-unused-function",))
+    assert out.split() == ["2", "3", "4", "-1", "-1"]

@@ -1664,8 +1664,11 @@ too. Two routes, both the game's own commands at the operator's adjustments, nev
 The magnet's limit stays the game's own: X-Men's longest magnet command is its grab, 2.5 s on the LE (1.2 s on the
 Pro), and a hold is never longer; a mode grabs again after the runtime's 3 s.
 
-`pm_drain_to_one` (below) uses the same pair, and still waits on a port that names the shooter lane switch too
-(Godzilla 1.16): with the flippers dead, the served ball must bring them back as it lands in the lane.
+`pm_drain_to_one` (below) uses the same pair, on every build now. With the flippers dead the served ball must bring
+them back, so it needs the shooter lane: the port's `value shooter_lane_switch` (Godzilla 1.16), else the switch the
+game itself names "Shooter Lane" (or "Shooter Lane Opto"), and the trough's "Trough 1".."Trough 6", found by name in
+the game's own switch entries (`data sw_struct`; any case) and read as levels where the switch-edge hook counts no hits
+(Uncanny X-Men: the last ball home 10 s after the drain to one began, the flippers back then).
 
 ## Drain to one ball (PAD-733)
 

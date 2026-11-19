@@ -65,6 +65,9 @@ static int multiball_ok(void) { return 1; }
 static int pm_balls_in_play(void) { return balls; }
 static int pm_ball_save(unsigned s) { printf("SAVE %u\n", s); return save_ok; }
 static uint64_t pm_shot(const char *n) { return n[0] == 'T' ? 0x8000000000000000ull : 0; }
+static long dto_shooter_id(void) { return 62; }           /* PAD-1406: the runtime's switch by name, stubbed */
+static int dto_trough_level(void) { return -1; }
+static int sw_level(long id) { return -1; }
 static void g_off(void) { printf("FLIPPERS OFF\n"); }
 static void g_on(void) { printf("FLIPPERS ON\n"); }
 static void g_delay(unsigned s) { printf("SEARCH DELAY %u\n", s); }

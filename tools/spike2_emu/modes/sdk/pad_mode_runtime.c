@@ -17462,6 +17462,96 @@ static int is_switch_hit(const char *name)
     return 1;
 }
 
+/* ---- PAD-1406: a switch by its NAME, and its level now -------------------------------------------------------------
+ * The game builds its switch entries on the heap (the array `data sw_struct` points at, SW_ENT bytes each, indexed by
+ * switch id); each names itself through its device pointer (SW_ENT_P2): +16 the name's language row, whose first word
+ * is the English name - the same read as hwshim's [sw] dump. SW_ENT_LEVEL is the switch's logical level (1 = active).
+ * So any build whose port names sw_struct finds "SHOOTER LANE" or "TROUGH 3" with no port value of its own (in any case:
+ * Uncanny X-Men names them "Shooter Lane", "Trough 1"). */
+#define SWN_MAX 1024u
+static pm_addr swn_entries(void)
+{
+    pm_addr st = data("sw_struct"), ents;
+    if (!st || !maps_has(st, sizeof(pm_addr), MAP_R)) return 0;
+    ents = *(const pm_addr *)(unsigned long)st;
+    return ents;
+}
+
+static const char *swn_name(pm_addr e)
+{
+    pm_addr dev, row, s;
+    if (!maps_has(e, SW_ENT, MAP_R)) maps_read();
+    if (!maps_has(e, SW_ENT, MAP_R)) return 0;
+    dev = *(const pm_addr *)(unsigned long)(e + SW_ENT_P2);
+    if (!dev || !maps_has(dev + 16u, sizeof(pm_addr), MAP_R)) return 0;
+    row = *(const pm_addr *)(unsigned long)(dev + 16u);
+    if (!row || !maps_has(row, sizeof(pm_addr), MAP_R)) return 0;
+    s = *(const pm_addr *)(unsigned long)row;
+    if (!s || !maps_has(s, 1, MAP_R)) return 0;
+    return (const char *)(unsigned long)s;
+}
+
+/* the id of the switch the game names `name` (upper case, whole, trailing spaces ignored); -1 = none */
+static long sw_by_name(const char *name)
+{
+    pm_addr ents = swn_entries();
+    unsigned id, k;
+    if (!ents || !name) return -1;
+    for (id = 1; id < SWN_MAX; id++) {
+        const char *nm = swn_name(ents + (pm_addr)id * SW_ENT);
+        if (!nm) {
+            if (!maps_has(ents + (pm_addr)id * SW_ENT, SW_ENT, MAP_R)) break;
+            continue;
+        }
+        for (k = 0; name[k] && (nm[k] >= 'a' && nm[k] <= 'z' ? nm[k] - 32 : nm[k]) == name[k]; k++) ;
+        if (!name[k]) {
+            while (nm[k] == ' ') k++;
+            if (!nm[k]) return (long)id;
+        }
+    }
+    return -1;
+}
+
+/* 1 = the switch is active now, 0 = not, -1 = not readable */
+static int sw_level(long id)
+{
+    pm_addr ents = swn_entries(), e;
+    if (!ents || id <= 0 || (unsigned long)id >= SWN_MAX) return -1;
+    e = ents + (pm_addr)id * SW_ENT;
+    if (!maps_has(e, SW_ENT, MAP_R)) return -1;
+    return *(const unsigned char *)(unsigned long)(e + SW_ENT_LEVEL) ? 1 : 0;
+}
+
+/* the trough's switches active now, by name (TROUGH 1..6): -1 = this game names none */
+static int dto_trough_level(void)
+{
+    static long ids[6] = { -2 };
+    static const char *const names[6] = { "TROUGH 1", "TROUGH 2", "TROUGH 3", "TROUGH 4", "TROUGH 5", "TROUGH 6" };
+    int i, n = 0, any = 0;
+    if (ids[0] == -2)
+        for (i = 0; i < 6; i++) ids[i] = sw_by_name(names[i]);
+    for (i = 0; i < 6; i++) {
+        int l = ids[i] > 0 ? sw_level(ids[i]) : -1;
+        if (l >= 0) any = 1;
+        if (l > 0) n++;
+    }
+    return any ? n : -1;
+}
+
+static long dto_shooter_id(void)
+{
+    static long cached = -2;
+    long sw = pm_port_value("shooter_lane_switch", -1);
+    if (sw > 0) return sw;
+    if (cached == -2 || cached < 0) {
+        cached = sw_by_name("SHOOTER LANE");
+        if (cached < 0) cached = sw_by_name("SHOOTER LANE OPTO");
+        say("drain to one: the shooter lane is switch %ld, by the game's own name (trough switches active: %d)", cached,
+            dto_trough_level());
+    }
+    return cached;
+}
+
 /* ---- PAD-733: drain to one ball (pm_drain_to_one) ---------------------------------------------------------------
  * David (MINILLA's 2-ball multiball ending with both balls up): "just kill the flippers and show that the mode is
  * ended, then instead of ending the ball, give a ball back in the plunger lane". The framework's all-flippers off and
@@ -17507,15 +17597,28 @@ static unsigned dto_trough_hits(void)
     uint64_t t = pm_shot("Trough");
     unsigned n = 0;
     int i;
+    if (!t) {                                     /* PAD-1406: no Trough shot - the trough's switches by name, as levels */
+        int l = dto_trough_level();
+        return l < 0 ? 0u : 1000u + (unsigned)l;  /* a change = a ball came home (or the game served one) */
+    }
     for (i = 0; t && i < port.n_switch; i++)
         if (port.sw[i].mask & t) n += switch_fired[port.sw[i].id];
     return n;
 }
 
+/* the served ball in the shooter lane: its hits, and (PAD-1406: where the edge hook counts no hits, Uncanny X-Men) a
+ * rise of its level counted by the tick */
+static unsigned dto_shooter_rises;
+static int dto_shooter_was;
 static unsigned dto_shooter_hits(void)
 {
-    long sw = pm_port_value("shooter_lane_switch", -1);
-    return sw > 0 && sw < N_SWITCH_IDS ? switch_fired[sw] : 0;
+    long sw = dto_shooter_id();
+    int l = sw_level(sw);
+    if (l >= 0) {
+        if (l && !dto_shooter_was) dto_shooter_rises++;
+        dto_shooter_was = l;
+    }
+    return (sw > 0 && sw < N_SWITCH_IDS ? switch_fired[sw] : 0) + dto_shooter_rises;
 }
 
 static void dto_flippers(int on)
@@ -17553,10 +17656,10 @@ static void dto_done(const char *why, int back)
 int pm_drain_to_one(void)
 {
     int n;
-    /* PAD-1406: every newest build names the flippers off/on now, but the flippers come back as the served ball lands
-     * in the shooter lane only where the port names that switch (Godzilla 1.16): elsewhere the player would plunge
-     * into dead flippers until the 30 s are up (emulator, Uncanny X-Men Pro 0.98), so it waits for that line */
-    if (!fn("flippers_off") || !fn("flippers_on") || !multiball_ok() || pm_port_value("shooter_lane_switch", -1) <= 0) {
+    /* PAD-1406: the flippers come back as the served ball lands in the shooter lane, so the game must have one this
+     * runtime can see: the port's `value shooter_lane_switch` (Godzilla 1.16), else the switch the game itself names
+     * SHOOTER LANE (sw_by_name) - without either the player would plunge into dead flippers until the 30 s are up */
+    if (!fn("flippers_off") || !fn("flippers_on") || !multiball_ok() || dto_shooter_id() <= 0) {
         say("drain to one: %s asked - this game's port has no flippers off/on, no shooter lane switch or no serve: "
             "the balls play on", current && current->name ? current->name : "a mode");
         return 0;

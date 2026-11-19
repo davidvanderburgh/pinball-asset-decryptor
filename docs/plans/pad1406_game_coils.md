@@ -69,9 +69,25 @@ Proof (coiljob.sh, PAD_COIL_PROBE): LE and Pro, each hold ONE command at the gam
 ([coildrive] 9.6 128/82 ms then 82 for 3410 ms; 9.2 192/60 then 56; LE 9.7, 9.8), capped at the game's longest; the
 kick 255 for 60 ms on 9.3 twice, a second one at once refused; both refused once the mode gave the rules back.
 
-## Next (runs 3+), in this order
+## Done (run 3): switches by the game's own name; drain to one on every build
 
-1. **Switch names at run time.** The game builds its switch table on the heap (mktables.py); the shim already reads
+- `sw_by_name(name)` / `sw_level(id)` (pad_mode_runtime.c, before the PAD-733 section): the game's own switch entries
+  (`data sw_struct` -> the entries, SW_ENT bytes each by id) name themselves - device pointer (SW_ENT_P2) +16 the name's
+  language row, its first word the English name, as hwshim's [sw] dump reads it; compared upper-cased (X-Men: "Shooter
+  Lane", "Trough 1"). SW_ENT_LEVEL is the logical level.
+- Drain to one: the shooter lane is the port's `value shooter_lane_switch`, else the game's "Shooter Lane" / "Shooter
+  Lane Opto"; with no Trough shot the trough is "Trough 1".."Trough 6" read as levels (a change = a ball home), and the
+  shooter lane's rises are counted from its level where the edge hook counts no hits. The run-1 gate is gone.
+- Sweep (flipjob.sh: flippers + a 2-ball multiball drained to one, drained a ball at a time): 52 of 53 newest builds
+  pass with the drain to one over by the last ball home or the served ball, never the 30 s cap. Dungeons & Dragons LE:
+  its flippers pass, the drain to one starts with dead flippers, but the rig's ball feed cannot finish it (plunge.py
+  says a ball is in play, drain says one sits in the shooter lane - its dragon lock in the rig's ball model); the 30 s
+  cap brought the flippers back there. D&D Pro, the same code, passes. King Kong LE crashed once in boot again and
+  passed on its rerun.
+
+## Next (runs 4+), in this order
+
+1. ~~**Switch names at run time.**~~ Done in run 3. The game builds its switch table on the heap (mktables.py); the shim already reads
    names from it. A runtime reader of the switch descriptors' names (per framework generation, as the switch-edge
    lines are) gives each build its SHOOTER LANE, TROUGH n and lock/kickback switches with no per-port value: lifts
    the drain-to-one gate on every title and feeds 2 and 3.

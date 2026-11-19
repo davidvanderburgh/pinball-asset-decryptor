@@ -54,6 +54,7 @@ from pinball_decryptor.webui import rig as _rig
 # every rig, so the level is the same whichever tab starts a game (item 118).
 from .emulate_core import (  # noqa: F401  (re-exported)
     AUDIO_CTL_FILE, _load_audio_ctl, _write_audio_ctl)
+from ..core import wsl_up as _wsl_up
 
 #: The rig ships in the repo next to this package, so it survives a reboot and
 #: there is exactly one copy of it.  Resolved from this file so a checkout
@@ -341,6 +342,8 @@ def state_text(info):
     """
     if not info:
         return "Checking…", ""
+    if info.get(_wsl_up.ASLEEP_KEY):
+        return _wsl_up.ASLEEP_STATE
     if info.get("wsl") != "1":
         return "WSL not answering", "The rig is a Linux program and runs inside WSL."
     procs = int(info.get("game_procs") or 0)

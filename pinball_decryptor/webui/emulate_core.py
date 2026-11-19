@@ -88,6 +88,7 @@ from ..core import config, pkgnames, prereqs, rigdata, rigslot, runtime
 from ..plugins.stern.cards import _title_label, override_base_card  # noqa: F401
 from . import rig as _rig
 from . import runtime_prompt as _runtime_ui
+from ..core import wsl_up as _wsl_up
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
@@ -1231,6 +1232,8 @@ def state_text(info):
     on, "finished the job" and "gave up" both showed as the same unchanging
     "Waiting at Tech Alerts", and the two want opposite things from the human.
     """
+    if info.get(_wsl_up.ASLEEP_KEY):
+        return _wsl_up.ASLEEP_STATE
     label, hint = _STATE_TEXT.get(info.get("state", "off"),
                                   (info.get("state", ""), ""))
     if info.get("state") == "techalerts":

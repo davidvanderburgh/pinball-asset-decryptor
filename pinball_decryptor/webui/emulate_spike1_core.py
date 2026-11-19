@@ -54,6 +54,7 @@ from ..plugins.stern.spike1_emulate import HardwareState, StateBlock, SwitchInpu
 # read by the one padplay.py speaker implementation both rigs launch.
 from .emulate_core import (  # noqa: F401  (re-exported)
     AUDIO_CTL_FILE, _load_audio_ctl, _write_audio_ctl, windows_python)
+from ..core import wsl_up as _wsl_up
 
 #: The rig ships in the repo next to this package.  ``PAD_SPIKE1_EMU_DIR`` moves
 #: it (parity with the JJP tab's ``PAD_JJP_EMU_DIR``).
@@ -146,6 +147,8 @@ def state_text(info):
     """
     if not info:
         return "Checking…", ""
+    if info.get(_wsl_up.ASLEEP_KEY):
+        return _wsl_up.ASLEEP_STATE
     if info.get("wsl") != "1":
         return ("WSL not answering",
                 "The emulator is a Linux program and runs inside WSL.")

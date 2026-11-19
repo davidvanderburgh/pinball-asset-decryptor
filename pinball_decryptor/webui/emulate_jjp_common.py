@@ -22,6 +22,7 @@ import time
 
 from pinball_decryptor.webui import rig as _rig
 from . import emulate_core as _stern_emulate
+from ..core import wsl_up as _wsl_up
 
 #: The footer ladder the web window starts with (the Stern rig's); a JJP or
 #: Spike 1 tab puts it back when its own manufacturer goes away, so the
@@ -80,6 +81,11 @@ class RigTabMixin:
 
     POLL_MS = 2000
     POLL_IDLE_MS = 10000
+    #: idle and off screen (PAD-1457): nothing shows the reading, and the
+    #: app quit only stops a run this session started (which is "up" or
+    #: busy, and keeps its pace), so an idle hidden tab stops polling and
+    #: takes a fresh reading the moment it is shown (``_poll_on_show``)
+    POLL_HIDDEN_MS = None
     POLL_FIRST_MS = 700
     LOG_PREFIX = ""
     PHASES = ()
@@ -177,13 +183,13 @@ class RigTabMixin:
 
     # -- polling -----------------------------------------------------------
     def _poll_wanted(self):
-        """Poll whenever this machine has the rig, from app start and for
-        every manufacturer, as the Tk panels did (both were built for every
-        manufacturer and polled from ``build()``): so an app quit takes down
-        a game this session never showed (a terminal-started run, one left by
-        an earlier session), and a JJP key plugged in is handed to WSL
-        whichever manufacturer is on screen.  Idle, that is one status call
-        every ``POLL_IDLE_MS``."""
+        """Poll whenever this machine has the rig.  The first reading comes
+        at app start for every manufacturer; after that an idle tab polls
+        only while it is on screen, and never wakes WSL to do it (PAD-1457:
+        ``_run_status`` answers "WSL is not running" for a distro that is
+        down).  A run this session started keeps its pace hidden or not, so
+        the app quit still takes it down; a JJP key is handed to WSL when the
+        JJP tab sees it, or at Start."""
         return not rig_off() and not self._stopped and self._rig_ready()
 
     def _start_polling(self):
@@ -215,8 +221,15 @@ class RigTabMixin:
         if ms is None:
             if not self._polled_once:
                 ms = self.POLL_FIRST_MS
+            elif self._last_up:
+                ms = self.POLL_MS
+            elif (not self._tab_visible() and not self._busy
+                  and not getattr(self, "_started_here", False)):
+                ms = self.POLL_HIDDEN_MS
             else:
-                ms = self.POLL_MS if self._last_up else self.POLL_IDLE_MS
+                ms = self.POLL_IDLE_MS
+        if ms is None:
+            return
         try:
             self._poll_job = self.ctx.loop.after(ms, self._poll)
         except Exception:                              # noqa: BLE001
@@ -245,6 +258,10 @@ class RigTabMixin:
             info = {}
             try:
                 info = self._read_status()
+            except _wsl_up.Asleep:
+                # the rig's distro is down, so no game is up in it: said
+                # without the status call that would have booted it
+                info = _wsl_up.asleep_info()
             except Exception:                          # noqa: BLE001
                 info = {}
             if self._stopped:
@@ -266,8 +283,20 @@ class RigTabMixin:
         threading.Thread(target=run, daemon=True,
                          name="pad-%s-poll" % self.ns).start()
 
+    def _tab_visible(self):
+        """Is this tab the one on screen?"""
+        try:
+            return self.window.current_tab_key() == self.key
+        except Exception:                              # noqa: BLE001
+            return True
+
     def _run_status(self, cmd, timeout=25):
-        """One status.sh round trip -> the parsed key=value dict."""
+        """One status.sh round trip -> the parsed key=value dict.
+
+        Raises :class:`wsl_up.Asleep` instead when the command would START
+        WSL or its distro (PAD-1457): a status question never wakes it."""
+        if _wsl_up.cmd_would_boot(cmd):
+            raise _wsl_up.Asleep()
         try:
             out = subprocess.run(cmd, stdout=subprocess.PIPE,
                                  stderr=subprocess.DEVNULL, timeout=timeout,

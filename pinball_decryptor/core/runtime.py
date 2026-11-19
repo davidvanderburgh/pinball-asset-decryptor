@@ -50,6 +50,7 @@ import sys
 import threading
 import time
 from typing import Optional, Tuple
+from . import wsl_up as _wsl_up
 
 from .payloads import (Payload, cache_path, ensure_cached,  # noqa: F401
                        is_published, verify)
@@ -172,6 +173,12 @@ def _listed(runner=None) -> Optional[bool]:
     may well have had it: no install can help a WSL that does not answer."""
     if sys.platform != "win32":
         return False
+    if runner is None:
+        # PAD-1457: the registry WSL keeps its list in answers without a
+        # wsl.exe launch (the list is asked on every rig command's build)
+        reg = _wsl_up.registered_distros()
+        if reg is not None:
+            return DISTRO.casefold() in reg
     run = runner or _run
     try:
         out = run(["wsl.exe", "-l", "-q"], timeout=20)
@@ -199,8 +206,58 @@ def _read_manifest(runner=None) -> Optional[dict]:
 
     Split out because the caller that matters has just asked: `_status` was
     paying for THREE wsl.exe launches per refresh - list, list again, then the
-    read - and the second list told it nothing the first had not."""
-    run = runner or _run
+    read - and the second list told it nothing the first had not.
+
+    NEVER BOOTS THE RUNTIME TO ANSWER (PAD-1457).  The read starts the distro
+    when it is down, and this is asked every minute while the app is open, so
+    WSL never got to stop.  The answer is remembered against the distro's
+    registry GUID, which a re-install or an upgrade (unregister + import)
+    changes, so it is read live once per install; that first read is the
+    only time the app starts the runtime just to ask about it."""
+    if runner is None:
+        guid = (_wsl_up.registered_distros() or {}).get(DISTRO.casefold())
+        if guid:
+            # the file lives in the image; only a re-import changes it, and
+            # that is a new GUID
+            kept = _kept_manifest(guid)
+            if kept is not None:
+                return kept
+        info = _read_manifest_live(_run)
+        if guid and info is not None:
+            _keep_manifest(guid, info)
+        return info
+    return _read_manifest_live(runner)
+
+
+def _manifest_file():
+    from . import config
+    return os.path.join(config._settings_root(), "runtime_manifest.json")
+
+
+def _kept_manifest(guid):
+    try:
+        with open(_manifest_file(), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and data.get("guid") == guid and             isinstance(data.get("manifest"), dict):
+        return data["manifest"]
+    return None
+
+
+def _keep_manifest(guid, info):
+    path = _manifest_file()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"guid": guid, "manifest": info}, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def _read_manifest_live(run):
     try:
         out = run(["wsl.exe", "-d", DISTRO, "-e", "cat", "/etc/pad-runtime.json"],
                   timeout=30)
@@ -226,6 +283,7 @@ STATUS_TTL = 60.0
 
 def invalidate() -> None:
     _STATUS_CACHE.update(when=0.0, value=None)
+    _wsl_up.forget()
 
 
 def known_state() -> Optional[str]:

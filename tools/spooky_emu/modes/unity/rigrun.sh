@@ -10,6 +10,7 @@
 #                   (padunity.so, PadModes.dll, modes/) - SPK_PAD_OVERLAY; without it the
 #                   update's own launch line must preload the runtime (a PAD-written update)
 #   --port          have the runtime write the title's port report (padmodes_port.json)
+#   --no-runtime    a stock update (no runtime to wait for): go on once the game is in attract
 #   --shots "<n>:<when> ..."  take a picture <when> s after switch <n> was pulsed (once)
 #
 # Out: padunity.log, padmodes_port.json (--port), shot.png, shot_<n>.png, run.out.  As root in
@@ -17,11 +18,12 @@
 set -u
 T=$(cd "$(dirname "$0")/../.." && pwd)
 UPD=${1:?usage: rigrun.sh <update> <out dir> [...]}; OUT=${2:?out dir}; shift 2
-PAD=""; PORT=0; SWS=""; HOLD=6; SHOTS=""
+PAD=""; PORT=0; SWS=""; HOLD=6; SHOTS=""; NORT=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --pad) PAD=$2; shift ;;
         --port) PORT=1 ;;
+        --no-runtime) NORT=1 ;;
         --switches) SWS=$2; shift ;;
         --hold) HOLD=$2; shift ;;
         --shots) SHOTS=$2; shift ;;
@@ -52,6 +54,7 @@ LOG=$SPK_RIG/logs/padunity.log
 ok=0
 for i in $(seq 1 200); do
     grep -q 'PadRuntime added' "$LOG" 2>/dev/null && { ok=1; break; }
+    [ $NORT = 1 ] && grep -q '^attract=1' "$OUT/run.out" 2>/dev/null && { ok=1; break; }
     kill -0 $W 2>/dev/null || [ -f "$LOG" ] || { [ $i -gt 40 ] && break; }
     sleep 3
 done

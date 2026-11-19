@@ -231,8 +231,8 @@ class ImageSetsService(TabService):
         names = self.get("names") or []
         name = names[int(n) - 1] if 1 <= int(n) <= len(names) else ""
         if not compat.messagebox.askyesno(
-                "Remove image set",
-                "Remove set %s (%s) and everything made for it? The sets after it move up one." % (n, name)):
+                "Remove theme",
+                "Remove theme %s (%s) and everything made for it? The themes after it move up one." % (n, name)):
             return {"ok": False, "cancelled": True}
         cur = self.current()
         got = self._do(SV.remove_set, int(n))

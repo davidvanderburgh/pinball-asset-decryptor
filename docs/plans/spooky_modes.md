@@ -286,12 +286,16 @@ and its default cache keeps 6 builds (1-2 GB each), not 2, which another ticket'
 evict a build a queued run was about to boot. `gpg._find_gpg` prefers GnuPG's own `gpg.exe` on
 Windows: Git for Windows' MSYS gpg on the PATH fails on Windows paths.
 
-**Proven so far** (rig, hidden, muted): on all five, the runtime (Try it overlay) joined the game's
-mode list, saw the game start and the first ball, scored through the game's own call and wrote the
-port. Built (from the library's stock updates, as the app's Build does): all five modes updates.
-**Still to run:** each built update booted with no overlay and both starter modes played (start,
-shots, completion bonus, timer, callouts, the panel), and Scooby-Doo again on the refactored
-runtime. Those runs stopped when C: filled (the rig distro's disk file grows on C:).
+**Proven** (rig, hidden, muted): on all five, the runtime (Try it overlay) joined the game's mode
+list, saw the game start and the first ball, scored through the game's own call and wrote the port.
+Then every title's modes update, built from the library's stock update as the app's Build does
+(Scooby-Doo's on the refactored runtime too), booted with no overlay: the runtime loaded from the
+update itself (`preload` on Scooby-Doo, `dllmap` on the five), mode 1 started on its start switches,
+scored each shot and paid its completion bonus, mode 2 started and ended when its time ran out,
+callouts went to the game's voice channel, and the panel (title, total, timer in the title's fonts
+and colors) showed over the game's screen (`artifacts/PAD-1418/after_rig_panels_six.png`). An
+unpack from D: in the Ubuntu rig takes 4-7 minutes, longer than rigrun's wait for the runtime:
+run `prepare.sh` first.
 
 ## Rig fix made on the way
 

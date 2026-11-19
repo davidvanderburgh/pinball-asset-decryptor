@@ -68,7 +68,7 @@ _RECORD_FILES = frozenset({"text/strings.tsv"})
 def _colour_keys():
     from . import colour_profile as cp
     return (cp.KEY, cp.ASSET_KEY, cp.ALL_IMAGES_KEY, cp.ALL_VIDEOS_KEY, cp.IMAGE_SLOTS_KEY,
-            cp.VIDEO_SLOTS_KEY, cp.STOCK_IMAGES_KEY, cp.STOCK_VIDEOS_KEY, cp.TEXT_SLOTS_KEY,
+            cp.VIDEO_SLOTS_KEY, cp.STOCK_IMAGES_KEY, cp.STOCK_VIDEOS_KEY, cp.STOCK_TEXT_KEY, cp.TEXT_SLOTS_KEY,
             cp.LOCKED_SWITCHES_KEY) + tuple(cp.FILE_PROFILES_KEY.values())
 
 

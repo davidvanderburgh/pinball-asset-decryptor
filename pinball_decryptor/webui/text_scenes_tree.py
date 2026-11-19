@@ -2491,7 +2491,7 @@ class TreeEditMixin:
     def _tree_lines_unlocked(self):
         from ..core import colour_profile as cp, staged_changes
         try:
-            return bool(staged_changes.peek(self.assets_dir).get(cp.STOCK_IMAGES_KEY))
+            return cp.text_unlocked(staged_changes.peek(self.assets_dir))   # their own box (Simon), else images
         except Exception:                            # noqa: BLE001
             return False
 

@@ -64,6 +64,89 @@ class ImageSetsService(TabService):
         self.set(on=bool(project), enabled=enabled, can_off=len(names) <= 1, project=project, names=names,
                  most=SV.MAX_SETS, why=why)
         self._use(current)
+        self.publish_unlocks()
+
+    # -- the Advanced box's three unlocks (Simon, 2026-11-19: "images and video AND text are separate unlocks", the
+    #    same box on Scenes, Images and Video - static/js/core/unlock_box.js) ---------------------------------------
+    def publish_unlocks(self):
+        from ...core import colour_profile as cp, staged_changes
+        project = self._project() if self._stern() else ""
+        images = self.window.service("images")
+        video = self.window.service("video")
+        try:
+            offered_img = bool(images is not None and images._per_file_colour())
+        except Exception:                               # noqa: BLE001
+            offered_img = False
+        data = staged_changes.peek(project) if project else {}
+        self.set(unlock={
+            "offered": bool(project) and offered_img,
+            "images": bool(data.get(cp.STOCK_IMAGES_KEY)),
+            "videos": bool(video is not None and video.get("color_stock")),
+            "videos_offered": bool(video is not None and video.get("color_offered")),
+            "text": cp.text_unlocked(data),
+        })
+
+    @rpc
+    def set_unlock(self, kind, on):
+        """One of the Advanced box's ticks: "images" (the Images tab's own unlock), "videos" (the Video tab's
+        Advanced) or "text" (the game's own lines of text, a box of their own now)."""
+        from ...core import colour_profile as cp, staged_changes
+        project = self._project()
+        if not project:
+            return False
+        on = bool(on)
+        if kind in ("images", "text"):
+            # the first use of the box: the lines get a box of their own, as they are now, so images no longer
+            # move them
+            data = staged_changes.load(project)
+            if not cp.text_unlock_separate(data):
+                data[cp.STOCK_TEXT_KEY] = cp.text_unlocked(data)
+                staged_changes.save(project, data)
+        try:
+            if kind == "images":
+                svc = self.window.service("images")
+                if svc is not None:
+                    svc.set_color_unlocked(on)
+                # the Images tab keeps it only for a folder it has scanned: else the Scenes editor's way, else here
+                if bool(staged_changes.peek(project).get(cp.STOCK_IMAGES_KEY)) != on:
+                    text = self.window.service("text")
+                    scenes = getattr(text, "scenes", None)
+                    if scenes is not None and getattr(scenes, "assets_dir", "") and scenes.is_open():
+                        scenes.tree_color_unlocked(on)
+                if bool(staged_changes.peek(project).get(cp.STOCK_IMAGES_KEY)) != on:
+                    data = staged_changes.load(project)
+                    if on:
+                        data[cp.STOCK_IMAGES_KEY] = True
+                        cp.unlock_switches(data)
+                    else:
+                        data.pop(cp.STOCK_IMAGES_KEY, None)
+                        cp.lock_switches(data, {})
+                    staged_changes.save(project, data)
+            elif kind == "videos":
+                svc = self.window.service("video")
+                if svc is not None:
+                    svc.set_color_stock(on)
+            elif kind == "text":
+                data = staged_changes.load(project)
+                if cp.text_unlocked(data) != on:
+                    cp.set_text_unlocked(data, on)
+                    staged_changes.save(project, data)
+                    self.log("Scenes: the game's own lines of text are %s." % (
+                        "unlocked: each can have the individual files color profile baked in when you build"
+                        if on else "locked again (their color switches come back when the box is ticked)"), "info")
+            else:
+                return False
+        finally:
+            for ns, name in (("text", "scenes_pictures_changed"), ("text", "scenes_lines_changed"),
+                             ("color", "asset_switches_changed")):
+                fn = getattr(self.window.service(ns), name, None)
+                if fn is not None:
+                    try:
+                        fn()
+                    except Exception:                   # noqa: BLE001
+                        pass
+            self.publish_unlocks()
+        return True
 
     @rpc
     def set_enabled(self, on):

@@ -7,6 +7,7 @@ import { html, useState, useEffect, useLayoutEffect, useRef, Button, Field, Sele
 import { useNs } from "../core/store.js";
 import { LookRow } from "../core/look.js";
 import { testCol } from "../core/testtick.js";
+import { UnlockBox } from "../core/unlock_box.js";
 
 // Load its own sheet once.
 const CSS_HREF = "/static/css/tabs/text_scenes.css";
@@ -439,10 +440,7 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
         </div>
         <div class="scenes-lookbar">
           <${LookRow} look=${s.look} ns="text_scenes" note=${false} onOpen=${openColors} />
-          ${unlock && unlock.offered ? html`<div class=${cx("scenes-unlock", unlock.on && "on")} ...${tip(UNLOCK_TIP)}>
-            <span class="look-head">Advanced</span>
-            <${Check} checked=${!!unlock.on} onChange=${(v) => call("text_scenes.tree_color_unlocked", v)}
-              label="Unlock extracted images and text" cls="small" /></div>` : null}
+          ${unlock && unlock.offered ? html`<${UnlockBox} />` : null}
         </div>
         ${layout ? html`<${LayoutEditor} key=${layout.kind + "\u0000" + layout.text} d=${layout} />` : null}
         ${editor || s.preparing ? null : html`<div class="row scenes-bottom">

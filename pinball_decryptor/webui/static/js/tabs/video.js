@@ -11,6 +11,7 @@ import { LookRow } from "../core/look.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 import { LookGL } from "./video_gl.js";
 import { testCol } from "../core/testtick.js";
+import { UnlockBox } from "../core/unlock_box.js";
 
 export const css = true;
 
@@ -710,8 +711,7 @@ function CompareView({ cmp, byRel, cs, look, active, setActive, stopSeq, onOpenC
           <${Button} icon=${anyPlaying ? "pause" : "play"} onClick=${playAll}>${anyPlaying ? "Pause all" : "Play all"}<//>
           <${Button} icon="refresh" onClick=${fromStart} title="Play every clip from its first frame at once, so they keep in step">From the start<//>
           <${Check} checked=${loop} label="Loop" cls="small" title="Play each clip over and over" onChange=${setLoop} />
-          ${colorOffered ? html`<span class="vcm-adv" ...${tip(ADV_TIP)}><${Check} checked=${colorStock} label="Advanced" cls="small"
-            onChange=${(v) => call("video.set_color_stock", v)} /></span>` : null}
+          ${colorOffered ? html`<${UnlockBox} />` : null}
           <${Button} kind="ghost" icon="x" onClick=${close} title="Back to the list (Esc)">Close<//>
         </div>
         <div class="small muted">${look.offered
@@ -1380,9 +1380,8 @@ export default function VideoTab() {
             onChange=${(v) => call("video.set_trim", v)} />
           ${s.best_supported ? html`<${Check} checked=${s.best_quality} label="Best quality" title=${s.best_tip} cls="small"
             onChange=${(v) => call("video.set_best_quality", v)} />` : null}
-          ${s.color_offered ? html`<span ...${tip(ADV_TIP)}><${Check} checked=${s.color_stock} label="Advanced" cls="small"
-            onChange=${(v) => call("video.set_color_stock", v)} /></span>` : null}
         </span>
+        <${UnlockBox} />
       </div>
       <div class="vid-tblwrap" onMouseDownCapture=${onGripDown}>
         <${Table} cls="vid-tbl" columns=${columns} rows=${rows} rowKey=${(r) => r.rel} rowHeight=${ROW_H}

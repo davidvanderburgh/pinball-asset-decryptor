@@ -48,7 +48,15 @@ Godzilla configures its speaker board. Nothing lights them yet, so no 86 colour 
 - Guard: a preloaded constructor also runs in the game's `system()` children (busybox `rm`): the probe segv'd there
   (3 x `rm -> 139`). The runtime must act only in the game process.
 
-## The build (next runs)
+## Status (2026-11-19): built and emulator-proven
+
+All five steps below are in (commit ad0eb5a63 and after). On all 21 latest shipped builds that take them (Star Wars ELG
+cannot: no RGB light to copy) the runtime added 69 channels on node 2, the game configured all 69, and a show's red,
+green and blue reached every one of the 23 speaker pixels in the game's own frames (C:/tmp/PAD-1448 modejob.sh,
+verify.py). Older shipped builds: not done (David: latest builds only). Rig slot 2's stale ballfeed.off stopped three
+runs there; they passed on other rigs.
+
+## The build
 
 1. **portgen**: per build, `data light_tab_ptr`, `data dev_tab_ptr`, `data light_count_const`, `data
    dev_count_const`, and a clone device / light (an LED on a ws2812 board), found by pattern (the accessors and the

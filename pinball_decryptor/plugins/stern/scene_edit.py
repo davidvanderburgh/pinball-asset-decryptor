@@ -2468,10 +2468,30 @@ def on_top_of(man, mine, theirs, states):
     # PAD-1301: the card it was saved from gave the nodes mine adds ids of its own
     theirs, states = _as_mine(man, mine, theirs, states)
     st = _states_for(states, theirs)
-    if st is not None and st.get("pics"):
-        # PAD-1320 (round 3): a picture kept at its own size has its fit in the card's scene
-        states = dict(states, fits=_card_fits(_Base.of_manifest(man), theirs, st))
-        st = _states_for(states, theirs)
+    if st is None:
+        return None
+    tries = [states]
+    if st.get("pics"):
+        # PAD-1320 (round 3): a picture kept at its own size has its fit in the card's scene.
+        # PAD-1439 (DoomWalrus666): on a project of the stock card there is no such fit (the
+        # scene draws the game's own pictures, smaller than the file's), and a fit guessed
+        # from the sizes put his Battle Select cards 0.88x and 2x off: Simon's file, made on
+        # top of his edits, replaced all 190 of them.  So where no picture here is bigger
+        # than the file's (a Write keeps one at twice its box), the scene as it reads too
+        base = _Base.of_manifest(man)
+        fitted = dict(states, fits=_card_fits(base, theirs, st))
+        tries = [fitted] + ([states] if not _kept_here(base, theirs, st) else [])
+    for states in tries:
+        rest = _on_top_with(man, mine, theirs, states)
+        if rest is not None:
+            return rest
+    return None
+
+
+def _on_top_with(man, mine, theirs, states):
+    """:func:`on_top_of` with the file's node ids already *mine*'s and its *states* read as
+    they are (fits worked out or not)."""
+    st = _states_for(states, theirs)
     for k in range(len(mine) + 1):
         # the same file loaded before: mine ends with (some of) its edits, applied after mine[:k]
         head, tail = list(mine[:k]), list(mine[k:])
@@ -2491,6 +2511,27 @@ def on_top_of(man, mine, theirs, states):
             break
     return _renumbered(theirs[k:], mine)
 
+
+
+def _kept_here(base, ops, st):
+    """PAD-1439: whether a node *ops* edit draws, on the scene *base*, a picture bigger than
+    the size *st* (a file's states, ``pics``) has for it: one a Write kept at its own size
+    (twice its box), so the node may hold a fit (:func:`_fit_of`).  A scene drawing only
+    pictures the file's size or smaller (the stock card's, where the file's were replaced
+    with bigger ones) holds none."""
+    sizes = st.get("pics") if isinstance(st, dict) else None
+    if not isinstance(sizes, dict):
+        return False
+    slack = 6.0 if st.get("pics_named") else 1.0
+    for nid in {op["node"] for op in ops if isinstance(op.get("node"), int)}:
+        got = base.pic(nid)
+        want = sizes.get(str(got[0])) if got is not None else None
+        try:
+            if want and (got[1] > float(want[0]) + slack or got[2] > float(want[1]) + slack):
+                return True
+        except (TypeError, ValueError, IndexError):
+            continue
+    return False
 
 #: the fields of an op that name a node
 _NODE_KEYS = ("node", "parent", "like", "follow")

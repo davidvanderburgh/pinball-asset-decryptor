@@ -212,3 +212,39 @@ def test_the_page_loads_it_after_mine_with_their_logo(tmp_path):
     assert ops[3]["image"] == "scene_textures/added/Logo1_1.png"
     picks = (staged_changes.load(proj_b) or {}).get("image") or {}
     assert not any("/added/" in r for r in picks), picks
+
+
+def test_a_file_from_a_card_with_other_pictures_still_goes_after_mine(tmp_path):
+    """PAD-1439 (DoomWalrus666): the card Simon's file was saved from has the Battle Select
+    pictures replaced at other sizes (``pics``).  PAD-1320's fit for a picture kept at its own
+    size was worked out on the stock scene here, where there is none, so the file's start
+    read as elsewhere and it replaced his edits: his added logo gone, 11 edits on nodes "not
+    in this scene", the rest in other places."""
+    proj = _project(tmp_path)
+    stock = E.manifest(T.parse(scene()))
+    card = _written(proj, _mine())
+    ids = _card_ids(card)
+    theirs = _theirs(ids)
+    st = json.loads(json.dumps(X.states_of(card, theirs)))
+    sizes = X._pic_sizes(X._Base.of_manifest(card), [50, 53])
+    assert sizes
+    st["pics"] = {k: [w * 3 // 2 + 7, h * 3 // 2 + 7] for k, (w, h) in sizes.items()}
+    rest = X.on_top_of(stock, _mine(), theirs, st)
+    assert rest is not None and len(rest) == len(theirs)
+    got = X._Base.of_manifest(X.apply_manifest(stock, _mine() + rest)[0])
+    want = X._Base.of_manifest(X.apply_manifest(card, theirs)[0])
+    for here, there in ((50, 50), (53, 53), (A + 1, ids[0]), (A + 3, ids[1])):
+        assert X._close(got.fp(here), want.fp(there)), (here, there)
+    assert X.apply_manifest(stock, _mine() + rest)[1] == []
+
+
+def test_their_picture_for_an_add_no_longer_mine_is_left_out(tmp_path):
+    # PAD-1439: the file's edits replaced mine, so no add shows the picture any more: a pick
+    # of it would warn "its slot isn't in this folder" at every open and show nothing
+    proj = _project(tmp_path)
+    X.save(proj, {CARD: [op for op in _mine() if op["op"] != "add_picture"]})
+    rel = "images/scene_textures/added/Logo0_1.png"
+    zp = _zip(tmp_path, _png((60, 16), (1, 2, 250, 255)))
+    loaded, gone = S.import_extras(proj, zp, _extras(rel), cards_here=[CARD])
+    assert gone == [rel] and loaded == []
+    assert rel not in ((staged_changes.load(proj) or {}).get("image") or {})

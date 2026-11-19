@@ -68,7 +68,8 @@ def test_the_plan_puts_coop_cfg_beside_the_runtime(tmp_path, monkeypatch):
                      coop=True, coop_prof=prof)
     assert result is not None and result.build is None
     assert _read(result.coop_file) == "coop on\nbutton 59\n"
-    assert any(line.startswith("co-op play: pick CO-OP PLAY on the start menu") for line in result.lines)   # PAD-1052
+    assert any(line.startswith("co-op play: hold both flipper buttons in attract for the start menu")   # PAD-1443
+               for line in result.lines)
 
 
 def test_the_card_install_and_the_emulator_carry_coop_cfg():
@@ -100,9 +101,11 @@ def test_the_modes_tab_tick_saves_the_choice_and_says_how_teammates_join(tmp_pat
     data = staged_changes.load(str(tmp_path))
     assert data[CP.STAGED_KEY] == {"on": True} and data["audio"] == {"x": "y"}
     assert state["coop_shown"] is True and state["coop_on"] is True
-    assert state["coop_note"].startswith("On the card: Pick CO-OP PLAY on the start menu")   # PAD-1052
-    assert "or hold the right flipper button and press Start to add one" in state["coop_note"]
-    assert state["coop_note"].endswith("Its scores stay off Insider Connected.")
+    assert state["coop_note"].startswith("On the card: Hold both flipper buttons in attract for the start menu")
+    assert "ENHANCED CO-OP" in state["coop_note"] and "ENHANCED STANDARD" in state["coop_note"]   # PAD-1443
+    assert "or hold the right flipper button and press Start to add a teammate" in state["coop_note"]
+    assert state["coop_note"].endswith("a Standard game reports as it always has.")
+    assert "coop_menu" not in state
     monkeypatch.setattr(CP, "title_refusal", lambda prof: "Venom LE 1.07 has co-op play of its own.")
     svc._publish_coop(str(tmp_path))
     assert state["coop_note_kind"] == "err"
@@ -211,15 +214,14 @@ def test_the_service_menu_row_and_the_cfg_name_its_live_value():
     assert head(CP.cfg_text(elf, setting=s.live)) == "coop on\nbutton 59\nsetting 0x%08x\n" % s.live
     assert head(CP.cfg_text(elf, setting=s.live, only=True)) == "coop on\nbutton 59\nsetting 0x%08x\nonly\n" % s.live
     assert head(CP.cfg_text(elf)) == "coop on\nbutton 59\n"                    # always on: no setting line
+    assert head(CP.cfg_text(elf, only=True)) == "coop on\nbutton 59\nonly\n"    # PAD-1443: the per-game gate
 
 
-def test_the_menu_choice_is_kept_in_the_sidecar(tmp_path):
+def test_the_service_menu_row_is_never_asked_for(tmp_path):
+    """PAD-1443 (daveyvandy: "I don't think we need to make it a setting in the service menu"): a project that asked
+    for the CO-OP PLAY row (round 2's ``menu``) gets none; its games are always on the start menu."""
     assert not CP.menu_asked(str(tmp_path))
     CP.save(str(tmp_path), True, menu=True)
-    assert CP.load(str(tmp_path)) and CP.menu_asked(str(tmp_path))
-    CP.save(str(tmp_path), True)                                               # None keeps it
-    assert CP.menu_asked(str(tmp_path))
-    CP.save(str(tmp_path), True, menu=False)
     assert CP.load(str(tmp_path)) and not CP.menu_asked(str(tmp_path))
     CP.save(str(tmp_path), False)
     assert not CP.load(str(tmp_path)) and not CP.menu_asked(str(tmp_path))
@@ -238,27 +240,12 @@ def test_a_spare_the_program_cannot_give_is_passed_over():
     assert not refused and settings[0].key == M.COOP_PLAY
 
 
-def test_the_modes_tab_sub_tick_switches_it_in_the_service_menu(tmp_path, monkeypatch):
+def test_the_modes_tab_has_no_service_menu_sub_tick():
+    """PAD-1443: no "Switch it on and off in the service menu" under the Co-op play tick."""
     from pinball_decryptor.webui.tabs import modes as M
-    svc = M.ModesTab.__new__(M.ModesTab)
-    state = {}
-    monkeypatch.setattr(svc, "set", lambda **kw: state.update(kw), raising=False)
-    monkeypatch.setattr(svc, "project", lambda: str(tmp_path), raising=False)
-    monkeypatch.setattr(svc, "_say", lambda *a, **k: None, raising=False)
-    monkeypatch.setattr(CP, "project_title", lambda project, probe=False: object())
-    monkeypatch.setattr(CP, "title_refusal", lambda prof: "")
-    assert svc.set_coop_menu(True) is False                                    # co-op first
-    assert svc.set_coop(True) is True and state["coop_menu"] is False
-    assert svc.set_coop_menu(True) is True
-    assert state["coop_on"] is True and state["coop_menu"] is True
-    assert "CO-OP PLAY in the game's service menu" in state["coop_note"]
-    assert "TEAM PLAY 2 VS 2 (players 1 and 3 a team against players 2 and 4, one Start adding all four)" in state["coop_note"]
-    assert "At 1 (Classic) or 2 (Enhanced) the game's start menu" in state["coop_note"]          # PAD-1073
-    assert "at 0 the game plays and reports as it always has" in state["coop_note"]
-    assert svc.set_coop_menu(False) is True and state["coop_menu"] is False
-    assert state["coop_note"].endswith("Its scores stay off Insider Connected.")
+    assert not hasattr(M.ModesTab, "set_coop_menu") and not hasattr(M.ModesTab, "COOP_MENU_TIP")
     js = _read(os.path.join(REPO, "pinball_decryptor", "webui", "static", "js", "tabs", "modes.js"))
-    assert 'call("modes.set_coop_menu", v)' in js
+    assert "set_coop_menu" not in js and "Switch it on and off in the service menu" not in js
 
 
 def test_the_build_takes_the_row_and_leaves_co_op_out_without_it():
@@ -274,9 +261,10 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     body = R._lift(src, "static int insider_holding(unsigned while_at, unsigned value)")
     assert "return !while_at || coop_row_mode(value) != 0u;" in body          # no row: always; a row: not Off
     gate = R._lift(src, "static int on_agent_begin(pm_reg *r)")
-    assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
+    assert gate.index("insider_holding_now()") < gate.index("insider_achq >= 0")   # Off: nothing held, the query too
     arm = R._lift(src, "static int insider_arm(void)")
     assert "if (at && !attract_wanted() && maps_has(at, 4, MAP_R))" in arm   # only a card of co-op alone
+    assert "} else if (!at && coop_cfg_only && !attract_wanted()) {" in arm and "insider_per_game = 1;" in arm   # PAD-1443
     assert "return only && v ? setting_addr(v) : 0;" in R._lift(      # ... the build says (PAD-1326: moved; PAD-1382)
         src, "static pm_addr coop_setting_wanted(void)\n{")
     add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
@@ -298,6 +286,11 @@ static unsigned insider_dropped[4];
 static int insider_achq = 28;
 static unsigned insider_achq_held;
 static unsigned coop_value = 0;                       /* the CO-OP PLAY row's live value (0 Off, 1 Co-op, 2 Team 2v2) */
+static int game_now, mates;                           /* PAD-1443: a game of ours starting; its teammates */
+static int coop_game_now(void) { return game_now; }
+static unsigned coop_teammates(void) { return (unsigned)mates; }
+static int insider_per_game, insider_game_held;
+#define INSIDER_SESSION_START "/api/v3/game/session_start"
 @BLOCKED@
 @FNS@
 static int ask(const char *endpoint, unsigned type)
@@ -305,6 +298,14 @@ static int ask(const char *endpoint, unsigned type)
     unsigned r[8] = {0};
     strcpy(insider_endpoint, endpoint);
     r[2] = type;
+    return on_agent_begin(r);
+}
+static int sent(const char *endpoint)                /* PAD-1443: through the header, as the game sends it */
+{
+    unsigned r[8] = {0};
+    r[1] = (unsigned)(unsigned long)endpoint;
+    on_agent_header(r);
+    r[2] = 5;
     return on_agent_begin(r);
 }
 int main(void)
@@ -322,6 +323,28 @@ int main(void)
     insider_while = 0;                                   /* a card with modes: the whole gate */
     coop_value = 0;
     printf("modes %d %d\n", ask("/api/v3/game/session_start", 5), ask("", 28));
+    insider_per_game = 1;                                /* PAD-1443: no row - per game */
+    printf("boot %d\n", ask("", 28));                    /* the achievement list loads: the game's own */
+    printf("std");                                       /* one call a statement: arguments run in no set order */
+    printf(" %d", sent("/api/v3/game/session_start"));
+    printf(" %d", sent("/api/v3/game/session_update"));
+    printf(" %d", sent("/api/v1/game/high_score_events"));
+    printf(" %d\n", sent("/ingest/v1/game/game_events"));
+    game_now = 1;                                        /* the start menu's cursor on CO-OP PLAY, then Start */
+    printf("ours");
+    printf(" %d", sent("/api/v3/game/session_start"));
+    game_now = 0;                                        /* the pick is spent at ball 1: the game stays held */
+    printf(" %d", sent("/api/v3/game/session_update"));
+    printf(" %d", sent("/api/v1/game/high_score_events"));
+    printf(" %d", sent("/api/v1/player/properties"));
+    printf(" %d\n", ask("", 28));
+    printf("next %d\n", sent("/api/v3/game/session_start"));
+    mates = 2;                                           /* a teammate joins mid-game: the rest is held */
+    printf("join");
+    printf(" %d", sent("/api/v3/game/session_end"));
+    printf(" %d\n", sent("/api/v1/game/high_score_events"));
+    mates = 0;
+    printf("after %d\n", sent("/ingest/v1/game/game_events"));   /* still that game */
     return 0;
 }
 """
@@ -336,10 +359,18 @@ def test_the_gate_holds_back_only_while_co_op_play_is_on(tmp_path):
         "static int str_starts(const char *s, const char *prefix)",
         "static int insider_blocked(const char *endpoint)", "static unsigned coop_row_mode(unsigned v)",
         "static int insider_holding(unsigned while_at, unsigned value)")) + "\nstatic unsigned insider_while;\n" + \
+        R._lift(src, "static int insider_holding_now(void)") + "\n" + \
+        R._lift(src, "static void on_agent_header(pm_reg *r)") + "\n" + \
         R._lift(src, "static int on_agent_begin(pm_reg *r)")
     out = R._host_run(tmp_path, GATE_MAIN.replace("@BLOCKED@", blocked).replace("@FNS@", fns),
                       flags=("-no-pie",)).splitlines()
     assert out == ["off 0 0 0 0",            # CO-OP PLAY Off: the session, high scores, events and query all go out
                    "on 1 1 1 1 0",           # On: all held back; the rest of Insider Connected still goes
                    "teams 1 1 1 1",          # PAD-1042: Team 2v2 holds back the same
-                   "modes 1 1"]              # a card with modes: always held back
+                   "modes 1 1",              # a card with modes: always held back
+                   "boot 0",                 # PAD-1443: no row - the achievement list is the game's own
+                   "std 0 0 0 0",            # ... a Standard game reports as always
+                   "ours 1 1 1 0 1",         # ... a game of ours: all held, the rest of Insider Connected goes
+                   "next 0",                 # ... the next Standard game reports again
+                   "join 1 1",               # ... a teammate joined: the rest of that game held
+                   "after 1"]

@@ -18330,6 +18330,8 @@ static struct {
     unsigned team_max;                   /* PAD-1042: the most players this team game takes (4: 2v2, 3: 2v1) */
     unsigned team_kind;                  /* PAD-1224: which team game it is (4 2v2, 3 2v1, 5 3v1) */
     int standard;                        /* PAD-1224: ENHANCED STANDARD - the game's own players, a character each */
+    int plain;                           /* PAD-1443: the start menu's CO-OP PLAY on a card with no CO-OP PLAY row: no
+                                          * character pick (ENHANCED CO-OP is the one with the pick) */
     unsigned round;                      /* PAD-1042: the round of turns on this ball (1..the larger team) */
     unsigned started;                    /* PAD-1054: the game_start count last seen */
     int solo_ask;                        /* PAD-1054: that game began with the button held: a team of one, once it plays */
@@ -18347,7 +18349,7 @@ static struct {
 #define TEAM_KIND 0x300u                 /* PAD-1052: the TEAM PLAY entry's kind until a pick makes it Standard;
                                           * PAD-1073: plus what it makes (0x301 CO-OP PLAY, 0x304, 0x303; PAD-1224:
                                           * 0x302 ENHANCED STANDARD, 0x305 3 VS 1) */
-#define TEAM_KIND_LAST 5u                /* PAD-1224: the highest of ours */
+#define TEAM_KIND_LAST 6u                /* PAD-1224: the highest of ours (PAD-1443: 0x306 ENHANCED CO-OP) */
 static struct {
     int armed, frame;                    /* on the start menu; by the index menus (else the entry lists) */
     unsigned ball_id;                    /* the event bus's ball_start */
@@ -18359,6 +18361,7 @@ static struct {
 } tm;
 static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";
 static char team_name_3v1[] = "TEAM PLAY 3 VS 1", team_name_std[] = "ENHANCED STANDARD";   /* PAD-1224 */
+static char team_name_ecoop[] = "ENHANCED CO-OP";                                           /* PAD-1443 */
 static unsigned team_menu_kinds(unsigned *kinds);
 static const char *team_kind_name(unsigned k);
 static void team_frame_restore(void);
@@ -19734,7 +19737,7 @@ static int ci_film_due(void);
 static void coop_picked_begin(int c);           /* PAD-1123, below */
 static void coop_pick_open(unsigned t)
 {
-    if (!coop_pick_on || !coop_ch_n || t < 1 || t > 4 || coop_pick_of[t] >= 0) return;
+    if (coop.plain || !coop_pick_on || !coop_ch_n || t < 1 || t > 4 || coop_pick_of[t] >= 0) return;
     if (!ci.phase) coop_intro_begin("a co-op or team game begins");   /* PAD-1114 */
     if (ci.phase) {                                           /* PAD-1114: after the intro and the language */
         if (!ci.pick_who) say("co-op: teammate %u's pick waits for the intro and the language", t);
@@ -21858,6 +21861,7 @@ static void coop_solo_check(void)
     coop.game = g + 1;
     coop.teams = 0;
     coop.standard = 0;                                        /* PAD-1224 */
+    coop.plain = 0;                                           /* PAD-1443 */
     coop.n = 1;
     coop.turn = 1;
     coop.round = 1;
@@ -22316,6 +22320,7 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.game = chg_game_now() + 1;
         coop.teams = 1;
         coop.standard = 0;                                    /* PAD-1224 */
+        coop.plain = 0;                                       /* PAD-1443 */
         coop.team_max = most;
         coop.team_kind = kind;
         coop.team_n[1] = 1;
@@ -22403,17 +22408,20 @@ static void on_team_dispatch(pm_reg *r)
     team_frame_restore();                                     /* the menu's words back as it ends in a game */
     if (!want) return;
     say("teams: the game began as the start menu's %s", team_kind_name(kind));
-    if (kind == 1u) {                                         /* CO-OP PLAY: a co-op game, each Start a teammate */
+    if (kind == 1u || kind == 6u) {                           /* CO-OP PLAY (PAD-1443: or ENHANCED CO-OP): a co-op
+                                                               * game, each Start a teammate */
         if (coop_teammates()) return;                         /* PAD-1054's team of one is one already */
         coop.game = chg_game_now() + 1;
         coop.teams = 0;
         coop.standard = 0;                                    /* PAD-1224 */
+        coop.plain = kind == 1u && !coop.setting;             /* PAD-1443: no row - CO-OP PLAY picks no character */
         coop.n = 1;
         coop.turn = 1;
         coop.round = 1;
         coop_awards_begin();                                  /* PAD-1028 */
         coop_chars_begin();                                   /* PAD-1031 */
-        say("co-op: CO-OP PLAY from the start menu - each Start in ball 1 adds a teammate, no button held");
+        say("co-op: %s from the start menu - each Start in ball 1 adds a teammate, no button held%s",
+            team_kind_name(kind), coop.plain ? ", no character pick" : "");
         coop.join_n = 1;                                      /* the top line says so, then player 1's pick */
         coop.join_step = 0;
         coop.join_at = pm_ms();
@@ -22429,6 +22437,7 @@ static void on_team_dispatch(pm_reg *r)
         coop.game = chg_game_now() + 1;
         coop.teams = 0;
         coop.standard = 1;
+        coop.plain = 0;                                       /* PAD-1443 */
         coop.n = *coop_players_byte;
         coop.turn = 1;
         coop.round = 1;
@@ -22505,6 +22514,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.game = chg_game_now() + 1;
         coop.teams = 0;                                       /* PAD-1042: a co-op game, not a team one */
         coop.standard = 0;                                    /* PAD-1224 */
+        coop.plain = 0;                                       /* PAD-1443 */
         coop.turn = 1;
         n = 1;
         coop_awards_begin();                                  /* PAD-1028 */
@@ -22824,7 +22834,8 @@ static void coop_pick_hold(void)
     unsigned t = coop.turn;
     int said = 0;
     const char *why = "";
-    if (!fn("proc_sleep") || !coop_pick_due(coop_pick_on, coop_ch_n, t, t >= 1 && t <= 4 ? coop_pick_of[t] : 0,
+    /* PAD-1443: the start menu's plain CO-OP PLAY opens no pick, so its balls are served as the game serves them */
+    if (!fn("proc_sleep") || !coop_pick_due(coop_pick_on && !coop.plain, coop_ch_n, t, t >= 1 && t <= 4 ? coop_pick_of[t] : 0,
                                             coop_teammates(), ci.phase != CI_OFF))
         return;
     ci.holding = 1;
@@ -23003,6 +23014,7 @@ static void coop_line(const char *s)
 
 /* round 2: the CO-OP PLAY row's live value from coop.cfg when the card carries no modes ("only"), read before the gate
  * is armed (0: none - a card with modes keeps the whole gate) */
+static int coop_cfg_only;                        /* PAD-1443: coop.cfg says `only` (the card carries no modes) */
 static pm_addr coop_setting_wanted(void)
 {
     static char raw[1024];
@@ -23024,6 +23036,7 @@ static pm_addr coop_setting_wanted(void)
             if (!ok) v = 0;
         }
     }
+    coop_cfg_only = only;
     return only && v ? setting_addr(v) : 0;                 /* PAD-1326: a PIE's (0 on Spike 2); PAD-1382: or a shared one */
 }
 
@@ -23496,7 +23509,7 @@ static void hand_close(const char *why)
  * handicap's pick waits for it */
 static int hand_waits_for_coop(void)
 {
-    if (!coop.on || !coop_teammates() || !coop_pick_on || !coop_ch_n) return 0;
+    if (!coop.on || !coop_teammates() || !coop_pick_on || !coop_ch_n || coop.plain) return 0;   /* PAD-1443 */
     return pk.open || (coop.turn >= 1 && coop.turn <= 4 && coop_pick_of[coop.turn] < 0);
 }
 
@@ -24987,8 +25000,11 @@ static void feed_arm(void)
 /* PAD-1052 (DoomWalrus666: "Can we please make Co-op mode work the same way?"); PAD-1073 (DoomWalrus666: "If Classic:
  * co-op, 2v2, 3v1 all appear in the game menu"): the entries of ours, in the menu's order, into kinds[] - each what it
  * makes: 1 CO-OP PLAY, 4 TEAM PLAY 2 VS 2, 3 TEAM PLAY 2 VS 1. CO-OP PLAY Classic or Enhanced: all three; coop.cfg
- * `teams` its one team game; a card of co-op with no such row CO-OP PLAY; Off none. Returns how many (tests lift it
- * verbatim) */
+ * `teams` its one team game; Off none.
+ * PAD-1443 (daveyvandy: "I don't think we need to make it a setting in the service menu. I think we can just always
+ * have it available"): a card with no CO-OP PLAY row has every game on the menu, the co-op styles picked there - CO-OP
+ * PLAY (no character pick), and with characters ENHANCED CO-OP (each teammate picks one, its ability holds) and
+ * ENHANCED STANDARD, then the team games (their picks with the abilities). Returns how many (tests lift it verbatim) */
 static unsigned team_menu_kinds(unsigned *kinds)
 {
     unsigned n;
@@ -24998,9 +25014,13 @@ static unsigned team_menu_kinds(unsigned *kinds)
     }
     if (!coop_switched_on()) return 0;
     kinds[0] = 1u;
-    if (!coop.setting) return 1;
     n = 1;
-    if (!coop_classic()) kinds[n++] = 2u;                    /* PAD-1224: ENHANCED STANDARD (Enhanced only) */
+    if (!coop.setting) {                                     /* PAD-1443: no row - both co-op styles */
+        if (coop_ch_n && coop_pick_on) {
+            kinds[n++] = 6u;                                 /* ENHANCED CO-OP */
+            kinds[n++] = 2u;                                 /* ENHANCED STANDARD */
+        }
+    } else if (!coop_classic()) kinds[n++] = 2u;             /* PAD-1224: ENHANCED STANDARD (Enhanced only) */
     kinds[n++] = 4u;
     kinds[n++] = 3u;
     kinds[n++] = 5u;                                         /* PAD-1224: TEAM PLAY 3 VS 1 */
@@ -25010,7 +25030,7 @@ static unsigned team_menu_kinds(unsigned *kinds)
 static const char *team_kind_name(unsigned k)
 {
     return k == 1u ? team_name_coop : k == 2u ? team_name_std : k == 3u ? team_name_2v1 : k == 4u ? team_name_2v2
-        : k == 5u ? team_name_3v1 : "TEAM PLAY";
+        : k == 5u ? team_name_3v1 : k == 6u ? team_name_ecoop : "TEAM PLAY";
 }
 
 /* the kind (1-5) of a menu kind when it is ours, else 0 */
@@ -25026,7 +25046,8 @@ static unsigned team_entry_at(const unsigned char *ent, unsigned kat, unsigned n
     if (team_kind_of(kind)) return team_kind_of(kind);
     return name == (unsigned)(unsigned long)team_name_2v2 ? 4u : name == (unsigned)(unsigned long)team_name_2v1 ? 3u
         : name == (unsigned)(unsigned long)team_name_coop ? 1u : name == (unsigned)(unsigned long)team_name_std ? 2u
-        : name == (unsigned)(unsigned long)team_name_3v1 ? 5u : 0u;
+        : name == (unsigned)(unsigned long)team_name_3v1 ? 5u : name == (unsigned)(unsigned long)team_name_ecoop ? 6u
+        : 0u;
 }
 
 static void team_menu_built(pm_reg *r)
@@ -25496,17 +25517,17 @@ static int achq_find(pm_addr begin)
     return -1;
 }
 
-static void on_agent_header(pm_reg *r)
-{
-    const char *s = (const char *)(unsigned long)r[1];
-    if (s && s[0] == '/') str_copy(insider_endpoint, sizeof insider_endpoint, s, INSIDER_ENDPOINT_MAX - 1);
-    else insider_endpoint[0] = 0;
-}
-
 /* round 2 (PAD-1017, DoomWalrus666): on a card of co-op and nothing else, the gate holds back only while the service
  * menu's CO-OP PLAY is not Off (PAD-1073: Classic or Enhanced, the word at insider_while): Off, the card's Insider Connected is the game's own -
  * the game plays stock then. 0: the whole gate, always (a card with modes). */
 static pm_addr insider_while;                     /* PAD-1326: an address */
+/* PAD-1443 (daveyvandy: "always have it available and if you select it then you don't send anything to insider
+ * connect"): a card of co-op and nothing else with no CO-OP PLAY row holds back per GAME - a game played as one of
+ * ours (a co-op, team or ENHANCED game, or the start menu's cursor on one of our entries as its session begins) keeps
+ * its session, high scores, events and achievement awards on the machine; a Standard game is the game's own */
+static int insider_per_game;
+static int insider_game_held;                     /* this game's session began as one of ours, or became one */
+#define INSIDER_SESSION_START "/api/v3/game/session_start"
 
 /* 1 when the gate holds back now (tests lift it verbatim) */
 static int insider_holding(unsigned while_at, unsigned value)
@@ -25514,12 +25535,46 @@ static int insider_holding(unsigned while_at, unsigned value)
     return !while_at || coop_row_mode(value) != 0u;          /* PAD-1073: Classic or Enhanced */
 }
 
+/* PAD-1443: a game of ours is on, or its Start is coming: co-op teammates (a team, ENHANCED STANDARD, a team of one),
+ * or the start menu's cursor on one of our entries within TEAM_PICK_MS */
+static int coop_game_now(void)
+{
+    if (!coop.on) return 0;
+    return coop_teammates() != 0u || (tm.kind && team_pick_live(tm.pending, tm.seen_ms, pm_ms()));
+}
+
+/* PAD-1443: the gate holds back now - a card with modes always; a co-op card with the row while it is not Off; a co-op
+ * card without it while this game is one of ours (a teammate joining mid-game holds the rest of it back) */
+static int insider_holding_now(void)
+{
+    if (insider_while)
+        return insider_holding(1, *(volatile const unsigned *)(unsigned long)insider_while);
+    if (!insider_per_game) return 1;
+    if (!insider_game_held && coop_teammates()) {
+        insider_game_held = 1;
+        say("insider: this game became one of ours - the rest of it stays off Insider Connected");
+    }
+    return insider_game_held;
+}
+
+static void on_agent_header(pm_reg *r)
+{
+    const char *s = (const char *)(unsigned long)r[1];
+    if (s && s[0] == '/') str_copy(insider_endpoint, sizeof insider_endpoint, s, INSIDER_ENDPOINT_MAX - 1);
+    else insider_endpoint[0] = 0;
+    if (insider_per_game && str_starts(insider_endpoint, INSIDER_SESSION_START)) {   /* PAD-1443: a game begins */
+        insider_game_held = coop_game_now();
+        say("insider: a game's session begins - %s", insider_game_held
+            ? "one of ours (co-op, team or ENHANCED): it stays off Insider Connected"
+            : "a Standard game: Insider Connected as the game always has");
+    }
+}
+
 static int on_agent_begin(pm_reg *r)
 {
     int i;
     unsigned n;
-    if (!insider_holding(insider_while != 0, insider_while ? *(volatile const unsigned *)(unsigned long)insider_while : 0u))
-        return 0;                                                   /* CO-OP PLAY Off: the game's own */
+    if (!insider_holding_now()) return 0;                           /* CO-OP PLAY Off, or a Standard game */
     if (insider_achq >= 0 && r[2] == (unsigned)insider_achq) {      /* PAD-698: the achievement list */
         n = ++insider_achq_held;
         if (n == 1)
@@ -25550,8 +25605,7 @@ static int on_coop_award(pm_reg *r)
 {
     unsigned n;
     (void)r;
-    if (!insider_holding(insider_while != 0, insider_while ? *(volatile const unsigned *)(unsigned long)insider_while : 0u))
-        return 0;                                                   /* CO-OP PLAY Off: the game's own */
+    if (!insider_holding_now()) return 0;                           /* CO-OP PLAY Off, or a Standard game */
     n = ++cu_awards_held;
     if (n == 1 || !(n & (n - 1)))
         say("co-op insider: an achievement award refused while Insider Connected is held back (%u so far)", n);
@@ -25592,6 +25646,11 @@ static int insider_arm(void)
             say("insider: a card of co-op and nothing else - all of that only while the service menu's CO-OP PLAY "
                 "says On (value at 0x%08" PMA ", now %s); Off, Insider Connected is the game's own",
                 at, insider_holding(at != 0, *(volatile const unsigned *)(unsigned long)at) ? "On" : "Off");
+        } else if (!at && coop_cfg_only && !attract_wanted()) {   /* PAD-1443: no row - per game */
+            insider_per_game = 1;
+            say("insider: a card of co-op and nothing else - all of that only for a game played as one of ours "
+                "(co-op, team or ENHANCED, picked on the start menu or joined); a Standard game is the game's own on "
+                "Insider Connected");
         }
     }
     return 1;

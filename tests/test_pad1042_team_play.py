@@ -186,7 +186,7 @@ def test_the_service_menu_row_has_team_2v2_and_the_tab_says_how_to_play_it(tmp_p
     assert "- **TEAM PLAY 2 VS 2:** players 1 and 3 play against players 2 and 4" in text
     assert "step to it and press **Start** once. The game starts with all four players" in text
     from pinball_decryptor.webui.tabs import modes as M
-    assert "TEAM PLAY 2 VS 2: players 1 and 3 play as a team against players 2 and 4" in M.ModesTab.COOP_MENU_TIP
+    assert "TEAM PLAY game" in M.ModesTab.COOP_TIP                     # PAD-1443: no row, the start menu's games
 
 
 def test_the_second_start_adds_all_four_and_says_the_teams(tmp_path):
@@ -285,9 +285,9 @@ int main(void)
 """
     assert R._host_run(tmp_path, main).strip() == "CO-OP PLAY|START ADDS PLAYERS|UP TO 4 PLAYERS|"   # 19 fit
     kind = R._lift(src, "static unsigned team_menu_kinds(unsigned *kinds)\n{")
-    assert "kinds[0] = 1u;\n    if (!coop.setting) return 1;" in kind             # PAD-1073: CO-OP PLAY first
+    assert "kinds[0] = 1u;\n    n = 1;" in kind                                   # PAD-1073: CO-OP PLAY first
     disp = R._lift(src, "static void on_team_dispatch(pm_reg *r)\n{")
-    assert "if (kind == 1u) {" in disp and "coop.n = 1;" in disp and "coop.teams = 0;" in disp
+    assert "if (kind == 1u || kind == 6u) {" in disp and "coop.n = 1;" in disp and "coop.teams = 0;" in disp
     assert "coop.join_n = 1;" in disp
     wrap = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "coop.join_n = 0;" in wrap                                  # a teammate's join ends the menu's lines

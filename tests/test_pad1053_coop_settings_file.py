@@ -60,7 +60,7 @@ def test_a_zip_carries_every_setting_and_the_pictures_into_another_project(tmp_p
     CP.save_characters(dest, {"pick": True, "list": [{"name": "OLD ONE", "ability": "heat_ray"}]})
     got = CP.import_settings(dest, out)
     assert got == {"made_for": GZ.label, "characters": 3, "pictures": 2, "awards": 1, "preset": False}
-    assert CP.load(dest) and CP.menu_asked(dest)
+    assert CP.load(dest)                                             # PAD-1443: no service menu row to carry
     assert CP.load_awards(dest) == CP.load_awards(src)
     chars = CP.load_characters(dest)
     assert chars["pick"] and chars["time"] == 45 and chars["theme"] == CP.load_characters(src)["theme"]
@@ -102,7 +102,7 @@ def test_a_characters_file_replaces_the_characters_only(tmp_path, monkeypatch):
     src = _source(tmp_path, monkeypatch)
     got = CP.import_settings(src, CP.presets()["godzilla"])
     assert got["preset"] and got["characters"] == 11 and got["made_for"] == "Godzilla"
-    assert CP.load(src) and CP.menu_asked(src) and CP.load_awards(src)       # the rest as it was
+    assert CP.load(src) and CP.load_awards(src)                              # the rest as it was
     assert len(CP.load_characters(src)["list"]) == 11
     assert CP.file_about(CP.presets()["godzilla"]) is None                   # not a settings file to the other tabs
 
@@ -163,7 +163,7 @@ def test_the_modes_tab_saves_and_loads_them(tmp_path, monkeypatch):
     assert svc.coop_settings_save(str(tmp_path / "nothing.zip")) is None    # nothing to save here
     answer = [True]
     assert svc.coop_settings_load(out)["characters"] == 3 and not asked     # nothing here to replace: no question
-    assert state["coop_on"] and state["coop_menu"] and state["coop_awards_ok"]
+    assert state["coop_on"] and state["coop_awards_ok"]
     assert "co-op play on, 3 character(s) with 2 picture(s), and the awards" in shown[-1]
     answer = [False]
     CP.save_characters(dest, {"pick": True, "list": [{"name": "MINE", "ability": ""}]})

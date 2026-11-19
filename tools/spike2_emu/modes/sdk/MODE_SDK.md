@@ -6581,6 +6581,22 @@ read PLAYER 2 and box 2 PLAYER 1, after PLAYER 1 and PLAYER 2. The emulator has 
 never draws there (its draw gates on the session's state and a feature check); the drawer call's hook arms and full
 co-op games run with it.
 
+### Always on the start menu, Insider Connected per game (PAD-1443)
+
+daveyvandy: "I don't think we need to make it a setting in the service menu. I think we can just always have it available
+and if you select it then you don't send anything to insider connect." The app no longer puts a CO-OP PLAY row on the
+card (`coop_play.menu_asked` is always False), so coop.cfg has no `setting`, and a card of co-op and nothing else says
+`only` on its own. With no row the runtime's start menu always has CO-OP PLAY, and with characters ENHANCED CO-OP (kind 6,
+each teammate picks a character, its ability holds) and ENHANCED STANDARD, then TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1
+(`team_menu_kinds`). CO-OP PLAY there is the plain style: `coop.plain`, no pick and no ability. The team games pick with
+the abilities. A card with the old row keeps the old behaviour (Off / Classic / Enhanced).
+
+Insider Connected on such a card is held back per GAME (`insider_per_game`): at the header of
+`/api/v3/game/session_start` the runtime latches `insider_game_held` from `coop_game_now()` (co-op teammates, or the
+start menu's cursor on one of our entries within TEAM_PICK_MS), and a teammate joining mid-game latches it for the rest
+of the game. While it is latched the session, high scores, events, the achievement query and (PAD-1108) the award are
+held as before; a Standard game is the game's own. A card with modes still holds everything always.
+
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

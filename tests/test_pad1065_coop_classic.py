@@ -128,5 +128,7 @@ def test_the_menu_and_the_app_name_classic():
     from pinball_decryptor.webui.tabs import modes as M
     assert CP.MENU_VALUES == 3 and CP.MENU_CLASSIC == 1                                     # PAD-1073
     assert len(CP.MENU_HELP) <= 63 and "1 Classic. 2 Enhanced" in CP.MENU_HELP
-    assert "- **1 (Classic):** each player still picks a character" in str(help_content.__dict__)
-    assert "1 Classic (characters picked, no special abilities)" in M.ModesTab.COOP_MENU_TIP
+    # PAD-1443: no row is written now (an older card's row still reads 1 as Classic); the start menu's CO-OP PLAY
+    # picks no character and ENHANCED CO-OP picks one with its ability
+    assert "- **ENHANCED CO-OP:** the same co-op game" in str(help_content.__dict__)
+    assert "ENHANCED CO-OP" in M.ModesTab.COOP_TIP

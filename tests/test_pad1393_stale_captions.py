@@ -181,46 +181,12 @@ def test_round3_every_row_starts_unticked(tmp_path):
         assert r["music_mode"]["note"].startswith("Off the card")
 
 
-def test_round3_coop_row_ticks_coop_on_and_off(tmp_path, monkeypatch):
-    """Round 3 (DragonRR: "Coop play can't check it"): the Co-op Play row can be ticked with co-op play off; it
-    switches co-op play on with its row, and unticking it switches co-op play off again. Co-op switched on at the
-    Modes tab stays on (always on) when the row is unticked."""
-    from pinball_decryptor.plugins.stern import coop_play as CP, service_menu as SM
-    from tests.webui_harness import web_app
-    monkeypatch.setattr(CP, "title_refusal", lambda prof: "")
-    monkeypatch.setattr(CP, "project_title", lambda project, probe=False: None)
-    p = str(tmp_path / "proj")
-    os.makedirs(p)
-    with web_app(tmp_path / "app") as w:
-        modes = w.window.service("modes")
-        var = modes._project_var() if modes is not None else None
-        if var is None:
-            pytest.skip("no project folder variable in this window")
-        w.run(lambda: var.set(p))
-        w.drain()
-        w.call("ui.select_tab", "svcmenu")
-        w.drain()
-
-        def row():
-            return {x["key"]: x for x in w.state("svcmenu")["settings"]}["coop_play"]
-        assert row()["can"] and not row()["on"]
-        assert w.call("svcmenu.set_row", "coop_play", True)
-        w.drain()
-        assert row()["on"] and CP.load(p) and CP.menu_asked(p) and SM.load(p)["coop"]
-        assert w.call("svcmenu.set_row", "coop_play", False)
-        w.drain()
-        assert not row()["on"] and not CP.load(p) and not SM.load(p)["coop"]
-        CP.save(p, True)                                    # co-op ticked on the Modes tab: always on
-        assert w.call("svcmenu.set_row", "coop_play", True)
-        assert w.call("svcmenu.set_row", "coop_play", False)
-        assert CP.load(p) and not CP.menu_asked(p)
-        w.drain()
-        assert row()["note"].startswith("Not on the card: co-op play is always on")
-        monkeypatch.setattr(CP, "title_refusal", lambda prof: "Godzilla has co-op play of its own.")
-        CP.save(p, False)
-        w.run(lambda: w.window.service("svcmenu").publish())
-        w.drain()
-        assert not row()["can"] and row()["note"].startswith("Godzilla has")
+def test_round3_coop_row_is_gone_from_the_service_menu_tab():
+    """PAD-1443 (daveyvandy: "too confusing to have it buried in the service menu"): co-op play has no service menu
+    row; its games are always on the game's start menu, so the Service menu tab lists none to tick."""
+    from pinball_decryptor.webui.tabs import svcmenu
+    assert "coop_play" not in [k for k, _n, _w in svcmenu.SETTINGS]
+    assert not hasattr(svcmenu.ServiceMenuTab, "_set_coop")
 
 
 def test_an_unticked_music_mode_leaves_the_music_modes_and_keeps_the_other_sounds(tmp_path, monkeypatch):

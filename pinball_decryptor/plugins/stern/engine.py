@@ -10319,6 +10319,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     log("Handicaps: %s." % (_line[len("handicaps: "):] if _line.startswith("handicaps: ")
                                             else _line[len("handicap "):]).rstrip("."), "info")
                     continue
+                if _line.startswith("expression lights: "):   # PAD-1414: theirs, not "Random clips"
+                    log("Expression lights: %s." % _line[len("expression lights: "):].rstrip("."), "info")
+                    continue
                 log("%s: %s." % ("Modes" if _modes_on else "Random clips",
                                  _line[len("random clips: "):]
                                  if _line.startswith("random clips: ") and not _modes_on
@@ -11861,12 +11864,13 @@ def _cab_sids_for_build(disk_f, parts, work, log, gr_path, img_path, shows):
     """PAD-1040: ``{slot: [sound id, ...]}`` - the game's sound ids that start each show's song on this card, off its
     play tables (read here when this build read no sound: a card whose only change is its light shows)."""
     from . import cab_shows as _CS
+    from . import sound_modes as _SMo
     slots = sorted({s["slot"] for s in shows if s.get("slot") is not None})
     if not slots:
         return {}
+    cwork = os.path.join(work, "cabs")
     try:
         if gr_path is None or img_path is None:
-            cwork = os.path.join(work, "cabs")
             os.makedirs(cwork, exist_ok=True)
             gr_path, img_path, _r, _fw, _img = _extract_inputs_kept(disk_f, parts, cwork, log)
         params = _params_for(gr_path, img_path, log, None)
@@ -11876,6 +11880,23 @@ def _cab_sids_for_build(disk_f, parts, work, log, gr_path, img_path, shows):
         log("Expression lights: the game's play tables could not be read (%s): no show starts with its song." % e,
             "warning")
         return {}
+    # PAD-1414: a show of a song of the game's own sound banks (Rush, Foo Fighters, Metallica...): the bank's sound
+    # ids that start it, read through the game's own bank loader on the emulator, as the music modes' are (a bank the
+    # music modes of this build read already is not read again)
+    cats = sorted({_SMo.bank_of_key(s)[0] for s in slots if _SMo.bank_of_key(s) is not None})
+    if cats:
+        plays = dict(plays)
+        try:
+            os.makedirs(cwork, exist_ok=True)
+            readers = _open_readers(disk_f, parts)
+            banks = _game_banks_read(gr_path, img_path, readers[0][1] if readers else None, cats, cwork, log,
+                                     who="Expression lights", left="the shows of its songs are left out")
+        except Exception as e:                          # noqa: BLE001 - those shows are left out; said
+            log("Expression lights: the game's sound banks could not be read (%s); the shows of their songs are "
+                "left out." % e, "warning")
+            banks = {}
+        for bk in banks.values():
+            plays.update(bk.keyed_plays())
     return {slot: _CS.sids_for_slot(plays, slot) for slot in slots}
 
 
@@ -12666,25 +12687,37 @@ _BANK_SONGS_ONCE = [None, {}]
 
 def _game_bank_songs(gr_path, img_path, reader, modes, work, log, cancel=None):
     """PAD-1378: ``{cat: .bank_songs.BankSongs}`` for the game's own sound banks whose songs
-    (``music_catNN_NNNN``) have music modes' files in *modes*: each bank copied off the card
-    (*reader*) into *work* and read through the game's own loader and resolver
-    (:func:`.bank_songs.read_banks`). Kept for the later steps of the same build
-    (:func:`_bank_songs_read`)."""
-    from . import bank_songs as _BS
+    (``music_catNN_NNNN``) have music modes' files in *modes* (:func:`_game_banks_read`). The
+    first read of a build: what an earlier build read is forgotten."""
     from . import sound_modes as _SMo
-    from .spike2 import soundbank as SB
-    from .spike2.category import read_category_id
     _BANK_SONGS_ONCE[:] = [None, {}]
     cats = sorted({b[0] for b in (_SMo.bank_slot(r) for r in modes.slots
                                   if _SMo.slot_idx(r) is None) if b is not None})
-    if not cats or reader is None:
-        return {}
+    return _game_banks_read(gr_path, img_path, reader, cats, work, log, cancel=cancel)
+
+
+def _game_banks_read(gr_path, img_path, reader, cats, work, log, cancel=None, who="Music modes",
+                     left="the files for their songs are left out"):
+    """PAD-1378: ``{cat: .bank_songs.BankSongs}`` for the game's own sound banks *cats*
+    (``image-scNN.bin``): each bank copied off the card (*reader*) into *work* and read through
+    the game's own loader and resolver (:func:`.bank_songs.read_banks`). Kept for the later steps
+    of the same build (:func:`_bank_songs_read`); PAD-1414: a later step reads only the banks not
+    read yet (the expression light shows' songs after the music modes'). *who* names the step in
+    the log, *left* what it leaves out when a bank cannot be read."""
+    from . import bank_songs as _BS
+    from .spike2 import soundbank as SB
+    from .spike2.category import read_category_id
+    have = dict(_bank_songs_read(gr_path))
+    cats = sorted(set(int(c) for c in cats))
+    need = [c for c in cats if c not in have]
+    if not need or reader is None:
+        return {c: have[c] for c in cats if c in have}
     local = {}
     try:
         for path, _ino, node in reader.iter_regular_files(min_size=1):
             base = path.rsplit("/", 1)[-1]
             cid = read_category_id(base)
-            if cid not in cats or cid in local:
+            if cid not in need or cid in local:
                 continue
             size = int(node["size"])
             if SB.is_pad_bank_at(lambda off, k, _n=node: reader.read_range(_n, off, k), size):
@@ -12693,20 +12726,20 @@ def _game_bank_songs(gr_path, img_path, reader, modes, work, log, cancel=None):
             reader.extract_file(node, dst)
             local[cid] = dst
     except Exception as e:  # noqa: BLE001 - the bank songs' files are then left out
-        log("Music modes: the game's sound banks could not be read off the card (%s); the files "
-            "for their songs are left out." % e, "warning")
-        return {}
-    for cid in cats:
+        log("%s: the game's sound banks could not be read off the card (%s); %s." % (who, e, left),
+            "warning")
+        return {c: have[c] for c in cats if c in have}
+    for cid in need:
         if cid not in local:
-            log("Music modes: this card has no sound bank image-sc%02d.bin; the files for its "
-                "songs are left out." % cid, "warning")
-    got = _BS.read_banks(gr_path, img_path, local, log, cancel=cancel)
+            log("%s: this card has no sound bank image-sc%02d.bin; %s." % (who, cid, left), "warning")
+    got = _BS.read_banks(gr_path, img_path, local, log, cancel=cancel, who=who, left=left)
     if got:
-        log("Music modes: read %d of the game's own sound bank(s) (%s): which of their sound ids "
-            "play each song." % (len(got), ", ".join("image-sc%02d.bin" % c for c in sorted(got))),
+        log("%s: read %d of the game's own sound bank(s) (%s): which of their sound ids "
+            "play each song." % (who, len(got), ", ".join("image-sc%02d.bin" % c for c in sorted(got))),
             "info")
-    _BANK_SONGS_ONCE[:] = [os.path.abspath(gr_path), got]
-    return got
+    have.update(got)
+    _BANK_SONGS_ONCE[:] = [os.path.abspath(gr_path), have]
+    return {c: have[c] for c in cats if c in have}
 
 
 def _bank_songs_read(gr_path):

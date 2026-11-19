@@ -8441,3 +8441,55 @@ def test_tmnt_copy_patched_before_a_fix_is_asked_to_patch_again(tmp_path):
             lines = [ln for ln in out.split("\n") if k["absent"] not in ln]
             (tmp_path / "T (PAD).script.vbs").write_text("\n".join(lines), encoding="utf-8")
             assert vsu.missed_fixes(str(tmp_path), name, marks) == [k["why"]], (title, k["since"])
+
+
+def test_jaws_map_has_no_center_post():
+    # PAD-1445: the machine has no center post between the flippers; JP's is a
+    # red rubber and a metal post (drawn only) round an unseen collision sleeve
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    f = m["item_fields"]
+    assert f["Rubber007"] == {"RVIS": 0}
+    assert f["Primitive034"] == {"TVIS": 0}
+    assert f["zCol_Rubber_Sleeve010"] == {"CLDR": 0}
+
+
+@pytest.mark.skipif(not os.path.exists(JAWS_TABLE), reason="JP's JAWS 50th 3.2 is not on this machine")
+def test_jaws_real_table_flipper_gap_is_open():
+    # PAD-1445 on the real table: between the flippers (the gap round 436, 1900)
+    # nothing is drawn or hit any more but the shoot-again insert and the
+    # lights and triggers that were always there
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    t = vf.VpxTable(JAWS_TABLE)
+    items = list(t.items)
+    for k, data in vs.item_fields(t, m).items():
+        items[int(k[len("GameItem"):])] = data
+
+    def gap(data):
+        top, pts, depth = {}, [], 0
+        for tag, p, _ in vf.item_records(data, 4):
+            if tag == "DPNT":
+                depth += 1
+            elif tag == "ENDB" and depth:
+                depth -= 1
+            elif depth and tag == "VCEN":
+                pts.append(struct.unpack_from("<ff", p))
+            elif not depth:
+                top.setdefault(tag, p)
+        if "VPOS" in top and not pts:
+            pts = [struct.unpack_from("<ff", top["VPOS"])]
+        return top, any(395 < x < 480 and 1860 < y < 1950 for x, y in pts)
+
+    def flag(top, tag):
+        return struct.unpack_from("<i", top[tag])[0] if len(top.get(tag, b"")) == 4 else 0
+
+    post = []
+    for data in items:
+        kind, name, pos = vf.VpxTable.item_info(data)
+        top, inside = gap(data)
+        if not inside or kind in ("Light", "Trigger"):
+            continue
+        if flag(top, "CLDR") or flag(top, "RVIS") or flag(top, "TVIS") or flag(top, "ISBV"):
+            post.append(name)
+    assert post == []

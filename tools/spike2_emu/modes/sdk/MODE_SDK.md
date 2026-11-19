@@ -25,21 +25,18 @@ with the loop below. Everything you need is in these files.
 | `census_mode.c`, `shot_census.py` | Measure which shot each switch makes, and turn that into a port's `shot` lines. |
 | `lamp_map.py`, `lamp_probe.c` | Read a game's playfield inserts into a port's `lamp` lines; hold and read inserts by hand in the emulator ("Lights: named inserts"). |
 
-## The mode maker is a preview feature (in the app)
+## The mode maker is in every copy of the app
 
-In the app the mode maker ships DARK: the Modes tab, its example (TARGET RUSH) and film cutter, Try it,
-the Write tab's "Pending (Modes)" rows, a Write carrying a project's modes and code modes,
-and the game's own modes' numbers (item 145) reaching a card all ride on one preview
-switch, and it is off in every copy until a personal code turns it on (Settings, the gear,
-> Preview features: paste the code, Unlock). A code names the person, the features and the
-last day it works, and is signed with David's Ed25519 key (`tools/preview_code.py issue
---name "..." --days 90`; the app checks it in pure Python, `pinball_decryptor/core/preview.py`,
-once at start-up). With the switch off, a Write of a project that holds modes builds
-everything else exactly as a build without the mode editor does, leaves the modes and the
-game's own modes' numbers off the card, and says so in one log line. What ships to everyone
-is the emulator side: a card's own modes run in the Emulate tab either way. Nothing in this
-folder needs the switch: a mode built here with `build_mode.sh` and tried with the loop below
-runs in the emulator as it always did.
+Anyone can use it: no code, no sign-up, nothing to unlock. The Modes tab, its example (TARGET
+RUSH) and film cutter, Try it, the Write tab's "Pending (Modes)" rows, a Write carrying a
+project's modes and code modes, and the game's own modes' numbers (item 145) reaching a card
+are on in every copy (PAD-763; `pinball_decryptor/core/preview.py` lists the mode maker under
+`RELEASED`, and an old preview code that names it says it is no longer needed). That includes
+the whole-game route: a mode that switches Stern's rules off and is the game (PAD-1400), your
+modes layered over it (PAD-1401), progress saved between games (PAD-1402), the Action and
+flipper buttons as shots (PAD-1403), bar meters and a screen fade (PAD-1405) and your own
+attract in place of the game's (PAD-1407). Nothing in this folder needs the app either: a mode
+built here with `build_mode.sh` and tried with the loop below runs in the emulator.
 
 ## What a mode is
 
@@ -1622,6 +1619,75 @@ what was asked); Venom LE 1.07 (its control's first drain never ended the ball);
 own multiball; two players.
 
 `mode_project.BALL_SAVE_PROVEN` lists the proven builds, and the tab greys Ball save on any other build.
+
+## The flippers, in a mode that is the whole game (PAD-1406)
+
+A mode that is the whole game (`pm_own_game`, above) has switched off the rules that would kill the flippers - a
+"dead flippers" feature, the end of a wizard mode - so it may do it itself: `pm_flippers(0)` switches them off and
+`pm_flippers(1)` back on (the blocks: Mechanisms, *Flippers off* / *Flippers back on*). It goes through the game's own
+code, the framework's all-flippers off and on that PAD-733 found on Godzilla (`site flippers_off` / `flippers_on`, placed
+on every newest build by code: Uncanny X-Men LE 0.98 `0x38a114` / `0x38a1e8`, Pro `0x3ca20c` / `0x3ca2e0`). Emulator-proven on all 53 newest builds:
+each one's 2 to 4 flipper rules (padled v7) go dead with them off and come back on, and nothing else changes. They set
+or clear each flipper record's enable bit and nothing else; the node board's own flipper rule follows it, so the coils
+fire, when they fire, at the game's own powers, from the board, as they always do. The flippers alone: slingshots, pop
+bumpers, kickbacks and the ball devices play on.
+
+The runtime's limits, not the mode's to change:
+
+- Off: only the mode that has the whole game, in a game, not on a tilted ball, not while a drain to one ball runs.
+  It lasts the ball. The framework re-decides each flipper now and then by asking its listeners (bus hook `0x40`:
+  1 = off, 2 = on, then the single flipper's off or on), and a listener of the game's may answer on - Metallica 1.04's
+  did on every pass, so switching them off again each tick fought it (about 950 rule frames a second to its flipper
+  board, the flippers live). The runtime wraps that one call (`site flipper_query_call`, `flippers_on + 0xbc` on every
+  newest build) and answers 1 while a mode has them off, as a rule of the game's would.
+- Back on: only flippers a mode switched off. A tilt, the game's end of a ball (its bonus) and the game's own dead
+  flippers are the game's, never undone from here.
+- They come back by themselves when the mode ends or gives the game its rules back mid-ball, and at the next ball
+  (the game's own ball start turns them on, as after any ball). A tilt leaves them to the game.
+
+**The game's own devices (PAD-1406).** The coils the game's rules drive - toys, posts - are the whole game's mode's
+too. Two routes, both the game's own commands at the operator's adjustments, never a power or time of the mode's:
+
+- Held coils marked `value <name>_own_game 1` in the port: `pm_coil_hold` (the blocks' *Hold the ...*, marked "whole
+  game") refuses them to any other mode. Uncanny X-Men LE and Pro 0.98: the Cerebro post (node 9 coil 6, up to the
+  game's own 3.5 s) and the Sentinel jaw (9.2, 5 s); the LE also the Sentinel hand ramp (9.7) and finger (9.8), 3 s.
+  Each board address was read off the game's own coil records in the emulator, each command off the game's own
+  coil_fire calls that read those adjustments.
+- One-shot devices: `pm_coil_pulse(name)` (the blocks' *Fire the ...*) calls the game's own function that fires the
+  device (`site <name>_fire`, `text pulse_coils`): X-Men's Sentinel kicking target, the Sentinel's bash toy (LE
+  `0x337dc`, Pro `0x30148`: coil_fire(12, SENTINEL KICK TARGET DRAW POWER, DRAW TIME)). At most once a second, 20 a
+  minute, never when the operator disabled it.
+
+**The game's ball devices (PAD-1406).** With the game's rules off, a ball in a scoop is kicked out at once, but one in a
+lock stays there until ball search (emulator: Godzilla Pro's scoop, Turtles Pro's locks). The framework holds and lets go
+of every lock, scoop and eject through one call, keep(device, n): how many balls the device keeps, the rest ejected its own
+way (its power adjustment, its retries) - the call the game's own lock rules make (Turtles Pro: keep(3, 0) and keep(4, 0)
+release both locks). `pm_device_keep(name, n)` makes it for the whole game's mode (the blocks: *The ... keeps every ball*
+/ *lets its balls go*), by the game's own name for the device; the port lists them (`text ball_device_names`). The
+trough and the auto plunger are the game's alone, and so are the device kinds the call does not take (a VUK that cannot
+hold a ball). When the mode ends each device it touched keeps what the game had it keep.
+
+**A toy's own moves (PAD-1406).** A toy the game drives with a motor to its own switches is moved by the game's own
+command for each move: Uncanny X-Men LE's Sentinel head, `pm_toy("sentinel_head", "up")` / `"down"` (the blocks: *Move
+the Sentinel head up*), the two commands its service menu's test page gives (0x32f34, 0x32f78). The game ignores one
+while the head moves, while one of its own head processes runs, or unless the head sits at the other end; its motor
+(node 9 coil 5, the game's 86/255) runs it to the switch and the game stops it there. The X-Men Pro has no head motor.
+
+**Kickbacks (PAD-1406).** The framework keeps its kickbacks as a list beside the pop bumpers and slingshots (the three
+its tilt switches off together). Only Guardians of the Galaxy (Pro and LE 1.15) has any among the newest builds: the
+kickback on input 12 (off until the game's rules light it) and on input 23. `pm_kickback(on)` switches them all through
+the framework's own set(index, on) for each, which the node board's kickback rule follows - the board fires them, at
+the game's power; each is put back as the game had it when the mode ends. Sword of Rage's "kickback" is its own rule's,
+not the framework's, and stays the game's.
+
+The magnet's limit stays the game's own: X-Men's longest magnet command is its grab, 2.5 s on the LE (1.2 s on the
+Pro), and a hold is never longer; a mode grabs again after the runtime's 3 s.
+
+`pm_drain_to_one` (below) uses the same pair, on every build now. With the flippers dead the served ball must bring
+them back, so it needs the shooter lane: the port's `value shooter_lane_switch` (Godzilla 1.16), else the switch the
+game itself names "Shooter Lane" (or "Shooter Lane Opto"), and the trough's "Trough 1".."Trough 6", found by name in
+the game's own switch entries (`data sw_struct`; any case) and read as levels where the switch-edge hook counts no hits
+(Uncanny X-Men: the last ball home 10 s after the drain to one began, the flippers back then).
 
 ## Drain to one ball (PAD-733)
 
@@ -6277,7 +6343,7 @@ on, score on, add a ball on, the blocks' "When a shot is made"):
 | Left flipper + Action button, Right flipper + Action button, Both flipper buttons | the press that makes both held, either order (Cyclops' visor in Uncanny X-Men 2.0) |
 
 Only while a game is played: a press in attract, the press of Start that begins a game, a tilt or the bonus give
-none. The Beatles, Jurassic Park The Pin and Star Wars ELG have no Action button, so they offer no Action shots. Each
+none. The Beatles, Iron Maiden, Jurassic Park The Pin and Star Wars ELG have no Action button, so they offer no Action shots (Iron Maiden's program names a LOCKDOWN BUTTON (OPTIONAL) its cabinet lacks, PAD-1447). Each
 button shot takes a shot bit the title's port does not use, highest first, in the table's order; a port short of
 bits (King Kong: 9) offers the first ones (the presses, the flipper + Action combos, the 1 s holds). Godzilla's
 ports already name the Action and flipper buttons' presses as `switch` lines (PAD-228); those stay, the rest are
@@ -6302,6 +6368,60 @@ Proven in the emulator (C:/tmp/PAD-1403, a blocks mode logging every button shot
 every newest library build, 53 of 53 (Uncanny X-Men LE and Pro 0.98 first), gave each button shot its card carries
 exactly as often as pressed, none in attract, and the visor combo started the mode on every title with an Action button
 (`mode_project.BUTTON_SHOTS_PROVEN`; an older build of a proven title counts as proven: the same drain, its own ids).
+
+## A menu picked with the flippers (PAD-1404)
+
+A list on the screen the player picks from, as Stern's own choose screens do: Uncanny X-Men 2.0's episode through the
+portal, a mutant or a roster at the game's start, any "choose your mode". X-Men has no challenge route and the team start
+menu skips it, so this is the mode's own, on every title that takes a mode's screens.
+
+- **Moving and picking.** The left flipper button moves up, the right one down (both wrap round); Action or Start takes
+  the one highlighted. When its seconds run out the one highlighted is taken: it opens on the default, so a player who
+  does nothing gets the default. A title with no Action button (The Beatles, Jurassic Park The Pin, Star Wars ELG) picks
+  with Start.
+- **Its buttons are its own.** While it is open the runtime holds the menu's switches back from the game
+  (`pm_button_hide`, PAD-1051's hider: the level byte reads released, the handler bits are held back), so Start adds no
+  player on ball 1, Action launches no ball, a flipper press changes no lanes; the button shots (PAD-1403) still come.
+  The flippers still flip: the node boards fire them. The ask lapses 500 ms after the mode stops renewing it. On the
+  framework generation the hider does not know (10 of the 69 ports: older builds of Aerosmith, Avengers, Batman,
+  Guardians, Iron Maiden, Mandalorian, Rush, Stranger Things, Sword of Rage and TMNT) the game sees the presses too;
+  the menu works the same.
+- **The ball.** `lane`: a menu at a ball's start, the ball in the shooter lane; the launch button is the menu's, and a
+  plunge (any named playfield shot) takes the one highlighted, the game moving on. `scoop`: the ball held in the scoop
+  (`pm_scoop_hold`: the running mode, on a title with a scoop; the kick-out comes at most 10 s after it settled, so the
+  menu's time is cut to 9 s). `none`: nothing is held. In every case the mode's clock waits while the menu is open.
+- **On the glass.** The build (`mode_menus.py`) adds, per menu, `PadMode_<folder>_Menu<k>` (a dark panel in the middle of
+  the glass, its words the title in the menu's colour), five rows `..._Menu<k>_R<j>` (an item's words over a highlight bar
+  `..._R<j>.<row>_Hi`) and `..._Menu<k>_Foot` ("FLIPPERS MOVE   ACTION PICKS   7"). Twelve items at most; five show and
+  the rest scroll. Drawn over every other screen of the modes'.
+
+A blocks mode names its menus in its settings (Menus: a name, its title, its items one a line, the one it opens on, its
+seconds, how the ball waits, its colour; up to two), opens one with **Open the menu** (Close the menu takes it away with
+nothing picked), runs **When the player picks from a menu** on the pick, and reads **the item picked** (1 = the first; the
+player up's last pick this game, 0 before they pick). The mode's end and the ball's close an open menu with nothing
+picked; a When the mode ends script may open another. While it is open the menu's buttons reach none of the mode's
+scripts.
+
+In C, `intricate_kit.h`:
+
+```c
+static struct kit_menu menu = { .scene = "hud", .node = "PadMode_episode_Menu1" };
+static const char *const EPISODES[] = { "DAYS OF FUTURE PAST", "DARK PHOENIX", "SENTINELS" };
+
+kit_menu_open(&menu, "CHOOSE YOUR EPISODE", EPISODES, 3, 0 /* the default */, 10000, KIT_MENU_HOLD_LANE);
+/* .shot */  if (kit_menu_shot(&menu, shot)) return;      /* one of its buttons: not the mode's */
+/* .tick */  int got = kit_menu_tick(&menu);              /* 0..n-1 on the tick it is picked, else -1 */
+```
+
+`kit_menu_close` takes it away with nothing picked, `kit_menu_is_open` and `kit_menu_taken` (the last pick, -1 none)
+say where it is. The assets.json of a C mode names its menus for the build: `"menus": [{"title": "CHOOSE YOUR EPISODE",
+"color": "#ffb000"}]`.
+
+**Proven in the emulator**, each card built by the app's own Write: on Uncanny X-Men LE and Pro 0.98 every way of
+picking (the flippers wrapping and scrolling, Action, Start - no player added - its time, and the launched ball's first
+hit) with the ball waiting in the shooter lane meanwhile; and on all 53 newest Spike 2 builds the menu drawn, a flipper
+move and Action (Start on the three with no Action button) and its time each taking the one highlighted
+(`docs/plans/pad1404_flipper_menus.md`).
 
 ## Co-op play (PAD-1017)
 
@@ -6597,6 +6717,32 @@ start menu's cursor on one of our entries within TEAM_PICK_MS), and a teammate j
 of the game. While it is latched the session, high scores, events, the achievement query and (PAD-1108) the award are
 held as before; a Standard game is the game's own. A card with modes still holds everything always.
 
+
+### The start menu's play styles (PAD-1449)
+
+DoomWalrus666: "whenever a mode is selected from the start menu ... a dialog box ... would pop up and ask if player wants
+to continue in Normal, Normal with Character Selection, or Enhanced ... This would reduce the amount of options needed to
+scroll on the start menu." On a card with characters to pick and no CO-OP PLAY row (`sty_wanted`) the start menu has one
+entry per game of ours: CO-OP PLAY and TEAM PLAY 2 VS 2, 2 VS 1, 3 VS 1 (ENHANCED CO-OP and ENHANCED STANDARD are off
+it). A game begun from the menu holds ball 1's serve (`sty_hold`, first in `ci_serve_wrap`) for a chooser:
+**NORMAL** (co-op/team: `coop.plain`, no pick; Standard/challenge: the game's own game), **CHARACTERS** (a pick with no
+abilities: `coop.style` 2, which `coop_classic()` reads on a no-row card) or **ENHANCED** (`coop.style` 3). It follows our
+entries, the game's STANDARD and its challenges (`tm.own`: `sty_own_of_kind` on the entry lists, kind 0 and the port's
+`challenge_menu_kind`; `sty_own_of_index` on the index menus, Standard's index and `value comp_menu_challenge_<k>`, the
+game-mode table's entries with FG_PLAYER_CHALLENGE_MODE_ACTIVE, from `prolonged_comp.challenge_indices`) - never
+Competition or the DJ MIXER, and never a plain Start.
+
+- A Standard or challenge pick forms an Enhanced Standard game at ball 1 (so a Start in the chooser adds a player through
+  the game's own add) and dissolves it at NORMAL.
+- The chooser comes up once the game's start film (Godzilla's, with its language bar: `ci_film_up`) is down 0.5 s and no
+  co-op intro runs before its ball (`sty_may_show`); until then the flippers are the game's. Its flippers walk it, Action
+  takes one (no Action button: the one shown after 20 s).
+- It shows `PadCoopStyle_1..3` (`coop_play.style_card`, added with the pick's screens, the Classic patches always with
+  them now) and says `<GAME> <STYLE>`, what it is and how to pick on the top line.
+- After it the pick opens at once (the team games say their teams' lines once first); the co-op intro, where there is
+  one, plays after the chooser for a Standard or challenge game (`ci_film_due` leaves the game's film alone until then).
+- Insider Connected: Standard or a challenge stays the game's own while choosing and at CHARACTERS
+  (`coop_insider_free`); ENHANCED latches the rest of the game held, as a joining teammate does.
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

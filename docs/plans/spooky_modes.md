@@ -87,7 +87,7 @@ How our code gets in: `override.cfg` beside `main.x86_64` adds one autoload
 Our autoload adds its modes to `Modes.all_modes`. No game file changes, and
 the update is a plain tar PAD writes anyway.
 
-Proof (`tools/spooky_emu/modes/godot/probe.sh`, slot 3, hidden, muted):
+Proof (the PAD-1387 probe, slot 3, hidden, muted; PAD-1419 made it the runtime and `unity/rigrun.sh` drives it):
 
 ```
 loaded: /game/code/uptest/pad/pad_modes.gd, engine 4.1.2-rc (custom_build), game LOONEY TUNES 2025.10.08
@@ -165,6 +165,133 @@ Proof (`python -m tools.pinheck_emu.modes.pinheck_poc build|prove`): switch
 then our 1,000,000, our video `EB0` and sound `EB0`; the game plays on
 (second hit: its own SDA/SKF video and sound); final score 2,000,300 against
 300 stock; the DMD frame at 27.3 s shows EB0.
+
+## Ticket 1 done: the Unity runtime and Scooby-Doo (PAD-1417)
+
+What there is now, and the facts the other tickets build on.
+
+**The runtime** (`tools/spooky_emu/modes/unity`): `padunity.so` (preloads only into
+`main.x86_64`, never the topper) loads `PadModes.dll`, which adds one Mode of ours
+(`PadRuntime`, mode 9001) with the game's `Modes.add_mode` and runs every `pad/modes/*.mode`
+beside it: start switches and hit count, scoring shots, points, seconds (0: until the ball
+ends), completion and its bonus, the four sounds, and a panel (title, the mode's total, its
+time left) on a canvas of ours above the game's, in the game's TextMeshPro fonts. A mode ends
+on time, on completion, at the end of the ball, on tilt and when the game goes back to attract;
+start counts reset at every new game. `pad/modes/off` turns them all off. Prebuilt in
+`unity/prebuilt/` (`padunity.so`, `scooby_doo/PadModes.dll`, built against the title's own
+`Managed/` by `build.sh`); `rigrun.sh` drives a proof.
+
+Scooby-Doo's facts, read from its code (IL) and proven in the game:
+
+- **Switches**: `Switches.name` holds labels ("RIGHT INLANE"); `Switches.get_switch_name(n)` the
+  symbols the game uses itself ("right_inlane"). Mode files and the port use the symbols.
+- **Points**: `Game.score_points` multiplies by `score_multiplier`, by balls in play unless the
+  tags hold `bonus`, by tag bonuses (character, clue, trap), then by 10, and rounds to 100. It
+  logs an error unless exactly one *mode* tag is given (`base` is one, `bonus` is not). The
+  runtime asks for points / 10 tagged `base` + `bonus`: 250,000 asked, 250,000 scored. The check
+  refuses points that are not a multiple of 100 (Mathf.Round: half to even).
+- **Sounds**: `Callouts` holds 1,437 static string fields (name -> `Resources` path);
+  `Callouts.get(path)` is `Resources.Load<AudioClip>`, `Machine.enqueue_callout` queues it and
+  the queue sets `voice_channel.clip` and plays it when the channel is free. The runtime logs
+  each of ours the voice channel takes.
+- **Launch line**: `sway_config` (6.1 kernels) and `i3_config` (5.10) both end with
+  `exec --no-startup-id /game/code/uptest/main.x86_64`. A PAD build makes it
+  `exec --no-startup-id env LD_PRELOAD=/game/code/uptest/pad/padunity.so /game/code/uptest/main.x86_64`.
+  The game md5-compares these files with the installed copies at every start, copies a changed
+  one in and reboots once: so the machine takes up the modes on its second start after the
+  update, and the stock update takes them out again the same way.
+
+**The port report** (`modes/ports/scooby_doo-2025.12.01.09.json`) is the runtime's own read of
+the running game (`PADMODES_PORT`, `rigrun.sh --port`): 80 switches (symbols, labels, numbers),
+119 lights, 1,437 callouts with their paths, 58 game modes, 10 fonts, the score tags and the
+points scale measured with one 1,000-point award (10,000 scored), plus the title's starter picks.
+
+**mkspkmodes.py**: the checker (JJP's grammar and value checks, Spooky's own key list; every
+other JJP key refused by name, "not on Spooky games yet"), `stage` (the `pad/` folder) and
+`build` (the stock `.scooby` streamed into a new one with `pad/` added and both launch lines
+patched; 23 s for Scooby-Doo's 1.8 GB). A rebuilt modes update keeps one preload.
+
+**The rig**: `run_game.sh` preloads whatever the update's own launch line preloads, and takes
+`SPK_PAD_OVERLAY=<folder>` (Try it: the folder becomes the run's `uptest/pad`, preloaded the same
+way, no new update); `prepare.sh` keeps a modes update's build beside the stock one
+(`<title>_<version>_padmodes`), never in its place.
+
+**The app**: the Modes tab on a Spooky update is the JJP page's form with Spooky's keys
+(`webui/modes_spooky.py`, `plugins/spooky/custom_modes.py`; the page's calls go to
+`modes.spk_*`), Try it (the Emulate tab on the stock update with the staged folder), Build (in
+the app, no Linux needed), and Write carries the modes for that title with any asset changes
+(modes with problems stay out and the log says so).
+
+Proof (slot 1/4, hidden, muted): the starter modes staged as Try it does, and the same modes in
+a `.scooby` PAD built, booted as an update with no overlay. Snack Attack: two inlane hits start
+it, three slings score 250,000 each, the third completes it with the 2,000,000 bonus. Target
+Rush: a standing target starts it, it ends after 8 s. Every callout found and played on the
+game's voice channel; the panel on the screen in the game's Ghoul font.
+
+What the next tickets take from here: the other Unity titles need their own `PadModes.dll`
+(built against their `Managed/`), a port report each (`rigrun.sh --port`), and their own
+scoring facts (their `score_points` may differ); `mkspkmodes.py` and the Modes tab are ready
+for any port report with `engine` and `runtime_dll`.
+
+## Ticket 3 done: the Godot runtime and Looney Tunes (PAD-1419)
+
+**The runtime** (`tools/spooky_emu/modes/godot/pad_modes.gd`, GDScript, no build step): one
+more autoload, named by an `override.cfg` beside `main.x86_64`
+(`[autoload] PadModes="*/game/code/uptest/pad/pad_modes.gd"`), which Godot reads at start. It
+runs every `pad/modes/*.mode` with the same keys and rules as the Unity runtime (start switches
+and hit count, shots, points, seconds, completion and bonus, the four sounds, the panel; ends on
+time, completion, the end of the ball, tilt and the end of the game; start counts reset at a new
+game; `pad/modes/off` turns them off). No game file changes. Log: `/game/tmp/pad_modes.log`.
+
+Looney Tunes' facts, read from its GDScript (the PCK) and proven in the game:
+
+- **Switches**: `Switches.items[n].name` ("inlane_left"), `display_name` the label. The runtime
+  hears `Warden.sw_active(n)`, which Warden emits for every switch after the game's own
+  `sw_<name>_active` events, and counts a switch only while a ball is in play
+  (`Game.gameplay_active`, not tilted, not the switch test). The game's mode manager finds a
+  mode's handlers by method name, so a mode of ours cannot take switches named in a file that
+  way; the signal needs nothing from the game.
+- **Points**: `Game.score(points)` multiplies by the playfield multiplier (`Game.multiplier`)
+  and a shot's special multiplier and rounds to 10 (`snapped(..., 10)`): scale 1, measured
+  (1,000 asked, 1,000 scored). The check refuses points that are not a multiple of 10. The
+  multiplier counts for a mode's points as for the game's own awards (the Unity runtime keeps
+  Scooby-Doo's `score_multiplier` too).
+- **Sounds**: `Audio.voice_lines` (key -> `res://` path, played with `Audio.play_voice(key,
+  PLAY_QUEUED)`: the voice channel, queued behind whatever it is saying) and `Audio.sfx` (key ->
+  preloaded stream, `Audio.play_sfx`). The port lists both, voice first. The runtime logs each
+  callout of ours when the voice channel starts it.
+- **Panel**: a `CanvasLayer` (layer 128) over the game's screen, a `Panel` and three `Label`s in
+  the game's fonts (`res://assets/fonts/*.ttf|otf`, by file name), each shrunk to its row (Godot
+  4.1's Label has no auto-size). Mode timers stand still while `Game.timers_paused`.
+- **Install**: the in-game updater untars the `.looney` (a plain tar) into `/game/update`; at
+  the next power-up the profile empties `/game/code/uptest/*` and copies the update in
+  (`docs/plans/pad980_research/research_looney_proc.md`), so the modes are in from that start,
+  and a stock update takes `override.cfg` and `pad/` out again.
+
+**Port reports**: `rigrun.sh --port` has the runtime write the game's own read
+(`PADMODES_PORT`); `mkspkmodes.py port` makes it the shipped file. Both Looney Tunes builds
+in the library have one: 2025.10.08 (96 switches, 107 lights, 1,101 sounds of which 918 voice,
+68 game modes, 12 fonts) and 2025.03.01 (the same switches and lights, 1,019 sounds, 66 game
+modes, 11 fonts: no `digital-7 (mono)`, no `bugs_count_one`, so its starter folder ends Spinner
+Frenzy on `times_up1`).
+
+**mkspkmodes.py** follows the port's `engine`: Godot ships `pad/pad_modes.gd` and the top-level
+`override.cfg`, rewrites no launch line, and `build` writes a plain-tar stock update as a plain
+tar (a gzip one as gzip); a rebuilt modes update keeps one `override.cfg` and one `pad/`.
+**Write** packs the modes into plain-tar updates too (`formats.create_tar(pad_modes=...)`, an
+extract's own `pad/` and `override.cfg` replaced). **The rig**: `run_game.sh` takes a Godot Try
+it folder (`pad_modes.gd` in it) as `uptest/pad` and writes the same `override.cfg`;
+`prepare.sh` keeps a Godot modes update beside the stock one, and now unpacks one update at a
+time (a lock on the cache: two rigs preparing at once wiped each other's `unpack.partial`).
+**The app**: the Modes tab knows Looney Tunes (both builds), its Build card says how a Looney
+Tunes update installs, and the help gives each game's rounding.
+
+Proof (hidden, muted, slots 1/2/5): Try it on 2025.10.08 and 2025.03.01, and PAD-built updates
+of both booted with no overlay. Carrot Chase: both inlanes start it, three slings score 250,000
+each and complete it with the 2,000,000 bonus (the game's score panel agrees); started again, it
+ends when the ball drains, and on tilt. Spinner Frenzy: the drop target starts it, the spinner
+scores 50,000 a hit, it ends after 10 s. Every callout found and played on the game's voice
+channel; the panel on the screen in CCHeroSandwichMeat / Truculenta-Bold.
 
 ## Rig fix made on the way
 

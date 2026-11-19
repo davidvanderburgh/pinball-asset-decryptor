@@ -3444,6 +3444,16 @@ def _keep_object(key, built):
         pass
 
 
+def _shared_object(sources, key):
+    """PAD-1408: the compiled object a loaded shared game brought the project of *sources*
+    (``modes/<slug>/<slug>.c``) for *key*, or None (:func:`.game_file.shared_object`)."""
+    if not sources:
+        return None
+    from ...core import game_file
+    project = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(sources[0]))))
+    return game_file.shared_object(project, key)
+
+
 def compile_code_object(sources, out, log=None, executor=None, timeout=600, arch="arm"):
     """Build the object a card with code modes carries: the runtime, every code mode and the
     mode-file interpreter (so the project's form modes run beside them). Returns *out*. Raises
@@ -3468,6 +3478,13 @@ def compile_code_object(sources, out, log=None, executor=None, timeout=600, arch
             key = None
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     if key:
+        shared = _shared_object(sources, key)
+        if shared:
+            # PAD-1408: the very object the maker of a shared game built from these sources
+            shutil.copyfile(shared, out)
+            say("Modes: the code mode(s) %s are as the shared game's maker built them, so the "
+                "maker's own mode.so is used (%d bytes)." % (names, os.path.getsize(out)), "info")
+            return out
         kept = _cached_object(key, wait=timeout)
         if kept:
             shutil.copyfile(kept, out)
@@ -3519,6 +3536,8 @@ def prefetch_code_object(sources, timeout=600, arch="arm"):
     try:
         key = code_object_key(sources, arch)
     except OSError:
+        return None
+    if _shared_object(sources, key):           # PAD-1408: the maker's object, nothing to compile
         return None
     with _PENDING_LOCK:
         if key in _PENDING or os.path.isfile(os.path.join(code_cache_dir(), key + ".so")):

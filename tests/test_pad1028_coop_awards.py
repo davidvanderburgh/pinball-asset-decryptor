@@ -30,7 +30,7 @@ static unsigned long now_ms;
 static unsigned long pm_ms(void) { return now_ms; }
 static unsigned game_no = 7;
 static unsigned chg_game_now(void) { return game_no; }
-static struct { int on; unsigned button, game, n, turn; int plain; } coop;   /* plain: PAD-1443 */
+static struct { int on; unsigned button, game, n, turn; int plain; unsigned style; } coop;   /* plain: PAD-1443 */
 static unsigned coop_teammates(void) { return coop.n; }
 static int str_starts(const char *s, const char *p) { return !strncmp(s, p, strlen(p)); }
 static uint64_t number(const char **p, int *ok)

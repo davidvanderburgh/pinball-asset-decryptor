@@ -220,6 +220,39 @@ if [ -n "${SPK_MENU_SO:-}" ] && [ -f "$SPK_MENU_SO" ]; then
     echo "run_game.sh: holding BACK ($SPK_MENU_PROTO switch $SPK_MENU_SWITCH) 5 s asks for a restart"
 fi
 
+# PAD-1417: custom modes.  The update's own launch line (sway_config, i3_config: the line
+# that starts main.x86_64) is what a machine runs, so an LD_PRELOAD on it (a PAD-written
+# update: env LD_PRELOAD=/game/code/uptest/pad/padunity.so) is preloaded here too - the run
+# is the update's.  SPK_PAD_OVERLAY=<folder> (the Modes tab's Try it) puts that folder at
+# the run's uptest/pad and preloads its padunity.so the same way, without a new update.
+# SPK_PADMODES_PORT=1 has the runtime write the title's port report to logs/padmodes_port.json.
+LAUNCH_PRE=""
+for cfg in "$UPTEST/sway_config" "$UPTEST/i3_config"; do
+    [ -f "$cfg" ] || continue
+    line=$(grep -E '^[[:space:]]*exec[[:space:]].*main\.x86_64' "$cfg" | head -1)
+    [ -n "$line" ] || continue
+    LAUNCH_PRE=$(printf '%s\n' "$line" | tr ' ' '\n' | sed -n 's/^LD_PRELOAD=//p' | head -1)
+    break
+done
+if [ -n "${SPK_PAD_OVERLAY:-}" ] && [ -f "$SPK_PAD_OVERLAY/padunity.so" ]; then
+    rm -rf "$UPTEST/pad"          # a modes build's pad/ is hard-linked to the cache: unlink, never write through
+    cp -r "$SPK_PAD_OVERLAY" "$UPTEST/pad" && chmod -R a+rX "$UPTEST/pad"
+    LAUNCH_PRE=/game/code/uptest/pad/padunity.so
+    echo "run_game.sh: Try it: $SPK_PAD_OVERLAY as uptest/pad"
+elif [ -n "${SPK_PAD_OVERLAY:-}" ] && [ -f "$SPK_PAD_OVERLAY/pad_modes.gd" ]; then
+    # PAD-1419: the Godot title (Looney Tunes).  Its runtime is one more autoload that
+    # override.cfg beside main.x86_64 names, as an update PAD wrote carries it.
+    rm -rf "$UPTEST/pad" "$UPTEST/override.cfg"
+    cp -r "$SPK_PAD_OVERLAY" "$UPTEST/pad" && chmod -R a+rX "$UPTEST/pad"
+    printf '[autoload]\n\nPadModes="*/game/code/uptest/pad/pad_modes.gd"\n' > "$UPTEST/override.cfg"
+    chmod a+r "$UPTEST/override.cfg"
+    echo "run_game.sh: Try it: $SPK_PAD_OVERLAY as uptest/pad, override.cfg loads pad_modes.gd"
+fi
+[ -f "$UPTEST/override.cfg" ] && grep -q 'pad_modes.gd' "$UPTEST/override.cfg"     && echo "run_game.sh: override.cfg adds PAD's mode runtime (pad/pad_modes.gd)"
+[ -n "$LAUNCH_PRE" ] && echo "run_game.sh: the launch line preloads $LAUNCH_PRE" && LAUNCH_PRE="$LAUNCH_PRE:"
+PADMODES_ENV=""
+[ "${SPK_PADMODES_PORT:-0}" = 1 ] && PADMODES_ENV="PADMODES_PORT=/game/logs/padmodes_port.json"
+
 cat > "$SPK_RIG/ns.sh" <<EOF
 hostname pad-rig-$SPK_SLOT
 mkdir -p /game && mount --bind "$NV/game" /game || exit 1
@@ -235,7 +268,7 @@ cd /game/code/uptest || exit 1
 exec runuser -u $SPK_USER -- env -i PATH=$SPK_RIG/bin:/usr/local/bin:/usr/bin:/bin \\
     HOME=$NV/home USER=$SPK_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV \\
     SPK_MARK=$SPK_RIG LP_NUM_THREADS=${SPK_LP_THREADS:-4} $GL_ENV \\
-    SPK_WARDEN=$TTY LD_PRELOAD=$MENU_PRE$SPK_RIG/spkshim.so $MENU_ENV $LIBS \\
+    SPK_WARDEN=$TTY LD_PRELOAD=$MENU_PRE$LAUNCH_PRE$SPK_RIG/spkshim.so $MENU_ENV $PADMODES_ENV $LIBS \\
     $RUN
 EOF
 # Detached whole (setsid -f, stdin closed): a child of runuser dies with the

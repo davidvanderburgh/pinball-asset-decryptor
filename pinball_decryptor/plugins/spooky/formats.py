@@ -1,5 +1,6 @@
 """File-format detection + archive helpers for Spooky game files."""
 
+import io
 import os
 import struct
 import tarfile
@@ -220,18 +221,36 @@ def create_zip(source_dir, out_path, progress_cb=None):
                 progress_cb(i + 1, total, rel)
 
 
-def create_tar_gz(source_dir, out_path, progress_cb=None):
-    """Create a tar.gz archive from *source_dir*."""
-    all_files, all_dirs = _scan_for_tar(source_dir)
+def create_tar_gz(source_dir, out_path, progress_cb=None, pad_modes=None):
+    """Create a tar.gz archive from *source_dir*.  *pad_modes* (PAD-1417): ``(files, rewrite,
+    folder[, top])`` - the custom modes' ``pad/`` files (``[(rel, bytes or path, mode)]``) added
+    under *folder*, any ``pad/`` the source has left out, and ``rewrite(rel, data) -> data`` run
+    on every file (the launch lines); ``top`` (PAD-1419) files added at the archive's top in
+    place of the source's own (Looney Tunes' override.cfg)."""
+    all_files, all_dirs = _scan_for_modes(source_dir, pad_modes)
     total = len(all_files) + len(all_dirs)
-    _create_tar_impl(out_path, "w:gz", all_files, all_dirs, total, progress_cb)
+    _create_tar_impl(out_path, "w:gz", all_files, all_dirs, total, progress_cb, pad_modes)
 
 
-def create_tar(source_dir, out_path, progress_cb=None):
-    """Create a plain (uncompressed) tar archive from *source_dir*."""
-    all_files, all_dirs = _scan_for_tar(source_dir)
+def create_tar(source_dir, out_path, progress_cb=None, pad_modes=None):
+    """Create a plain (uncompressed) tar archive from *source_dir*; *pad_modes* as
+    :func:`create_tar_gz` (Looney Tunes' update is a plain tar, PAD-1419)."""
+    all_files, all_dirs = _scan_for_modes(source_dir, pad_modes)
     total = len(all_files) + len(all_dirs)
-    _create_tar_impl(out_path, "w:", all_files, all_dirs, total, progress_cb)
+    _create_tar_impl(out_path, "w:", all_files, all_dirs, total, progress_cb, pad_modes)
+
+
+def _scan_for_modes(source_dir, pad_modes):
+    """:func:`_scan_for_tar` without what the custom modes replace: the source's ``pad/`` folder
+    and, at its top, the files the modes put there."""
+    all_files, all_dirs = _scan_for_tar(source_dir)
+    if pad_modes:
+        folder = pad_modes[2]
+        tops = {t[0] for t in (pad_modes[3] if len(pad_modes) > 3 else ())}
+        top = lambda rel: rel.replace("\\", "/").split("/")[0]
+        all_files = [x for x in all_files if top(x[1]) != folder and x[1].replace("\\", "/") not in tops]
+        all_dirs = [x for x in all_dirs if top(x[1]) != folder]
+    return all_files, all_dirs
 
 
 def _scan_for_tar(source_dir):
@@ -260,9 +279,11 @@ def _scan_for_tar(source_dir):
     return all_files, all_dirs
 
 
-def _create_tar_impl(out_path, mode, all_files, all_dirs, total, progress_cb):
+def _create_tar_impl(out_path, mode, all_files, all_dirs, total, progress_cb, pad_modes=None):
     count = 0
     with tarfile.open(out_path, mode) as tf:
+        if pad_modes:
+            _add_pad_modes(tf, pad_modes)
         for full, rel in all_dirs:
             # recursive=False: the directory entry only.  tarfile.add()
             # recurses by default, so leaving it on wrote every file once per
@@ -275,7 +296,43 @@ def _create_tar_impl(out_path, mode, all_files, all_dirs, total, progress_cb):
             if progress_cb:
                 progress_cb(count, total, rel + "/")
         for full, rel in all_files:
+            if pad_modes and os.path.basename(rel) in getattr(pad_modes[1], "names", ()):
+                with open(full, "rb") as fh:
+                    data = fh.read()
+                new = pad_modes[1](rel.replace("\\", "/"), data)
+                if new != data:
+                    ti = tf.gettarinfo(full, arcname=rel)
+                    ti.size = len(new)
+                    tf.addfile(ti, io.BytesIO(new))
+                    count += 1
+                    if progress_cb:
+                        progress_cb(count, total, rel)
+                    continue
             tf.add(full, arcname=rel)
             count += 1
             if progress_cb:
                 progress_cb(count, total, rel)
+
+
+def _add_pad_modes(tf, pad_modes):
+    """The custom modes' folder, first in the archive (PAD-1417), and their top files."""
+    import time
+    files, _rewrite, folder = pad_modes[:3]
+    now = int(time.time())
+    for d in (folder, folder + "/modes"):
+        ti = tarfile.TarInfo(d)
+        ti.type, ti.mode, ti.mtime = tarfile.DIRTYPE, 0o755, now
+        tf.addfile(ti)
+    for rel, src, fmode in files:
+        if isinstance(src, bytes):
+            data = src
+        else:
+            with open(src, "rb") as fh:
+                data = fh.read()
+        ti = tarfile.TarInfo(folder + "/" + rel)
+        ti.size, ti.mode, ti.mtime = len(data), fmode, now
+        tf.addfile(ti, io.BytesIO(data))
+    for rel, data, fmode in (pad_modes[3] if len(pad_modes) > 3 else ()):
+        ti = tarfile.TarInfo(rel)
+        ti.size, ti.mode, ti.mtime = len(data), fmode, now
+        tf.addfile(ti, io.BytesIO(data))

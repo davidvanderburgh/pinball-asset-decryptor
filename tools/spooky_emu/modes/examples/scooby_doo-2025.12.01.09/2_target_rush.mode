@@ -1,0 +1,11 @@
+# Target Rush - a starter mode: a standing target starts it, the others score for 8 seconds
+name = Target Rush
+title = TARGET RUSH
+start = standing_target_1
+shots = standing_target_2 standing_target_3 standing_target_4
+points = 500000
+seconds = 8
+sound_start = fred_jackpot
+sound_end = daphne_mystery_award
+panel = top
+panel_color = 3a0a5ad0

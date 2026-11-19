@@ -80,6 +80,10 @@ static const struct { const char *name; uint64_t mask; } SHOTS[] = {    /* godzi
     { "Right scoop", 0x0100000000000000ull },           /* PAD-658: `switch` lines of the port, the scoop */
     { "Mecha exit top", 0x0200000000000000ull },        /* and the top of the Mecha lane */
     { "Action button", 0x1000000000000000ull },         /* a `switch` line of the port (PAD-228) */
+    { "Left flipper button", 0x2000000000000000ull },   /* PAD-1404: the flippers and Start as button shots */
+    { "Right flipper button", 0x4000000000000000ull },  /* (PAD-228's bits; Start one of PAD-1403's) */
+    { "Start button", 0x0400000000000000ull },
+    { "Right flipper button released", 0x0800000000000000ull },
     { "Trough", 0x8000000000000000ull },                /* the trough's switches (PAD-416): a drain */
 };
 #define N_SHOTS (int)(sizeof SHOTS / sizeof SHOTS[0])
@@ -898,6 +902,15 @@ int pm_status_bar(const char *words, unsigned rgb, int percent)
     had_rgb = rgb;
     had_pct = percent;
     return 1;
+}
+/* PAD-1404: a menu's buttons held back from the game - "BTNHIDE <shots> <mode>" each time the ask changes */
+int pm_button_hide(uint64_t shots)
+{
+    static uint64_t had;
+    if (had != shots)
+        printf("%6lu BTNHIDE %llx %s\n", now_ms, (unsigned long long)shots, current && current->name ? current->name : "?");
+    had = shots;
+    return shots ? 4 : 0;
 }
 /* PAD-503: a lit mode's claim on its shot - "LITCLAIM <shots> <mode>" each time a mode's claim changes */
 int pm_lit_claim(uint64_t shots)

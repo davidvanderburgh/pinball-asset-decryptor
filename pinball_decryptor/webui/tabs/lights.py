@@ -41,9 +41,10 @@ def _songs(audio, keep=(), seen=None, banks=False):
     """The project's songs, from the Audio tab's scan: ``[{slot, rel, name, seconds, path, replaced}]`` - every sound
     of a sound-bank record at least :data:`SONG_MIN_SECONDS` long (its replacement's length and file when it has
     one), and the records in *keep* however long (PAD-1068: the songs of the game's own shows). *seen*, a set, gets
-    every record the scan has a file for. PAD-1379: *banks* (a Spike 3 card's project) takes the songs of the
-    game's music banks too (``music_catNN_NNNN``, :func:`.sound_modes.bank_slot_key` below zero): a Spike 3 Write
-    reads the sound ids that start them off the banks themselves (most of Fallout's music is in them)."""
+    every record the scan has a file for. PAD-1379: *banks* takes the songs of the game's music banks too
+    (``music_catNN_NNNN``, :func:`.sound_modes.bank_slot_key` below zero): a Spike 3 Write reads the sound ids that
+    start them off the banks themselves (most of Fallout's music is in them), and PAD-1414 a Spike 2 Write through
+    the game's own bank loader on the emulator (Rush, Foo Fighters, Metallica and the others' licensed songs)."""
     from ...core import audio as _A
     from ...plugins.stern import sound_modes as SM
     if audio is None:
@@ -121,7 +122,6 @@ class LightsTab(TabService):
         self._project = ""
         self._shows = []
         self._read_id = 0
-        self._spike3 = False                            # PAD-1379: the project is a Spike 3 card's
         self._songs_id = 0
         from ...plugins.stern import cab_shows as CS
         self.set(project="", available=False, why="", reading=False, lights=[], songs=[], shows=[], intro=INTRO,
@@ -183,7 +183,7 @@ class LightsTab(TabService):
         def work():
             seen = set()
             try:
-                songs = _songs(audio, keep, seen, banks=self._spike3)
+                songs = _songs(audio, keep, seen, banks=True)     # PAD-1414: Spike 2 cards' too
             except Exception:                           # noqa: BLE001 - a scan replaced under it: the next one's
                 return
             # PAD-1068: why a game's show has no song here, said on the page (not a bare "not one of its songs")
@@ -221,7 +221,6 @@ class LightsTab(TabService):
 
         def work():
             why, lights, addable = "", [], False
-            self._spike3 = project_is_spike3(folder)
             try:
                 why, lights = project_layout(folder)
                 addable = project_added(folder)[0]        # PAD-1448: a cabinet with lights the owner adds
@@ -559,7 +558,7 @@ def project_stock(project):
 
 
 def project_is_spike3(project):
-    """PAD-1379: whether *project* was made from a Spike 3 card (its songs then include the music banks')."""
+    """PAD-1379: whether *project* was made from a Spike 3 card (its Run in emulator goes through Try it)."""
     from ...plugins.stern import mode_project as MP
     try:
         got = MP.project_card(project) if project else None

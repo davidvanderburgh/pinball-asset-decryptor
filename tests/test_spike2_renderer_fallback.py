@@ -792,9 +792,9 @@ exit 0
 """
 
 
-def _wait(tmp_path, mode, tenths="50"):
+def _wait(tmp_path, mode, tenths="50", pause="1.2"):
     driver = _WAIT_DRIVER.replace('"$1"', '"%s"' % mode).replace(
-        '"${2:-50}"', tenths)
+        '"${2:-50}"', tenths).replace("sleep 1.2", "sleep " + pause)
     return _drive(tmp_path, LATE_DEATH_LOG, driver)
 
 
@@ -823,10 +823,12 @@ def test_a_slow_live_renderer_is_left_to_the_callers_check(tmp_path):
     """Bounded: a renderer still alive and still not ready when the bound
     runs out is not called dead here; pad_gl_try's own liveness check is
     still what judges it."""
-    facts = _wait(tmp_path, "ready", tenths="5")
+    # PAD-1411: ready only at 3 s, so a release at the 0.5 s bound is told from one on the ready line with room to
+    # spare - at 1.2 s a slow macOS runner's bash start-up alone (1164 ms) crossed the old 1100 ms line
+    facts = _wait(tmp_path, "ready", tenths="5", pause="3")
     assert facts["RC"] == "0"
     assert facts["ALIVE"] == "1"
-    assert int(facts["MS"]) < 1100
+    assert int(facts["MS"]) < 2500
 
 
 def test_each_attempt_waits_for_the_driver_not_just_the_ring():

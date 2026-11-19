@@ -555,6 +555,8 @@ class WritePipeline(_BasePipeline):
         self.output_path = output_path
         self.keep_audio_length = keep_audio_length
         self.audio_actions = {}
+        #: PAD-1417: the Modes tab's custom modes for this title, packed with the update
+        self.pad_modes = None
 
     def _run_phases(self):
         # Phase 0: Detect
@@ -586,7 +588,10 @@ class WritePipeline(_BasePipeline):
         self.phase(1)
         changed, added, removed = self._scan_changes()
         total_changes = len(changed) + len(added) + len(removed)
-        if total_changes == 0:
+        self.pad_modes = self._custom_modes(meta, format_type)
+        if total_changes == 0 and self.pad_modes:
+            self.log("No asset changes: the update carries your custom modes alone.")
+        elif total_changes == 0:
             self.done(False,
                 "No changes detected. Modify some files in the assets "
                 "folder and try again.")
@@ -659,14 +664,16 @@ class WritePipeline(_BasePipeline):
         if format_type == "tar_gz":
             self.log("Creating tar.gz archive...")
             create_tar_gz(self.assets_dir, out,
-                          progress_cb=lambda d, t, n: self.progress(d, t, n))
+                          progress_cb=lambda d, t, n: self.progress(d, t, n),
+                          pad_modes=self.pad_modes)
             self.log(f"Archive created: "
                      f"{os.path.getsize(out) / (1024**3):.2f} GB", "success")
             return True
         if format_type == "plain_tar":
             self.log("Creating tar archive...")
             create_tar(self.assets_dir, out,
-                       progress_cb=lambda d, t, n: self.progress(d, t, n))
+                       progress_cb=lambda d, t, n: self.progress(d, t, n),
+                       pad_modes=self.pad_modes)
             self.log(f"Archive created: "
                      f"{os.path.getsize(out) / (1024**3):.2f} GB", "success")
             return True
@@ -760,6 +767,30 @@ class WritePipeline(_BasePipeline):
     # ------------------------------------------------------------------
     # Change scanner + audio fixup
     # ------------------------------------------------------------------
+
+    def _custom_modes(self, meta, format_type):
+        """PAD-1417: the person's custom modes for this title (Modes tab) as Write packs them,
+        or None.  Modes with problems stay out, and the log says so, loudly."""
+        if format_type not in ("tar_gz", "plain_tar"):
+            return None
+        try:
+            from . import custom_modes as SM
+            label = SM.label_for_extract(self.assets_dir, meta)
+            if not label:
+                return None
+            pm = SM.write_pad_modes(label)
+        except ValueError as e:
+            self.log("Your custom modes for this game are NOT in this update - the Modes "
+                     "tab's check found problems: %s" % e, "warning")
+            return None
+        except Exception as e:                              # noqa: BLE001 - assets still go
+            self.log("Custom modes skipped: %s" % e, "warning")
+            return None
+        if pm:
+            n = sum(1 for rel, _s, _m in pm[0] if rel.endswith(".mode"))
+            self.log("Custom modes: %d mode(s) from the Modes tab go in, with the runtime; %s"
+                     % (n, SM.loads_how(label)), "success")
+        return pm
 
     def _scan_changes(self):
         from ...core.checksums import read_checksums

@@ -651,3 +651,21 @@ value coop_ball_msg          1255
 # ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
 site  coop_start_game        0x002a94a4 0xe92d47f0 0xe3064b9a
 site  coop_lobby_add         0x002a95cc 0xebfffea3 0xe2506000
+
+# PAD-1406: the framework's all-flippers off and on (each flipper record's enable bit at +6, the node board's rule
+# follows), placed from Godzilla LE/Pro 1.16 by code (strict: only branch and literal offsets masked; the pair 0xd4
+# apart on every build): pm_flippers for the mode that has the whole game, and pm_drain_to_one
+site flippers_off         0x00293668 0xe92d4070 0xe30655d0
+site flippers_on          0x0029373c 0xe92d4070 0xe30655d0
+# PAD-1406: the framework's flipper policy asks its listeners (bus hook 0x40: 1 = off, 2 = on) whether each flipper may
+# be on, and switches it as answered (flippers_on + 0x78; this call at +0x44): while a whole-game mode has the flippers
+# off the runtime answers 1 here, as a rule of the game's would - Metallica's own listener re-enabled them every pass
+site flipper_query_call  0x002937f8 0xebfbea5c 0xe3500000
+
+# PAD-1406: the framework's ball devices (the table the balls-in-play count walks: 40-byte entries, +0x1c each
+# one's name) and its keep(device, n, 1) - how many balls a lock or scoop keeps, the rest ejected the device's
+# own way (placed from Turtles Pro 1.59 by code; its count address checked against this table's): pm_device_keep
+site ball_device_keep     0x002bb288 0xe3003d5c 0xe340305a
+data ball_devices         0x0076987c
+text ball_device_names  LEFT_EJECT LEFT_DOWN_POST
+data ball_device_count    0x005a0d5c

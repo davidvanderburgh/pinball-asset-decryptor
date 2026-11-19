@@ -80,6 +80,52 @@ def _data_ranges(fd, size):
         off = h
 
 
+def punch_zeros(path):
+    """Turn every all-zero 4 KiB block of *path* back into a hole, keeping the
+    file's size and timestamps. The copy wrote the zeros inside a card's data
+    ranges as real blocks: Jaws Pro took 12.0 GiB on the new store against
+    7.8 on the old (2026-11-19). A hole reads as zeros, so the file's bytes
+    are unchanged. Returns the bytes punched."""
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.fallocate.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_long, ctypes.c_long]
+    st = os.stat(path)
+    fd = os.open(path, os.O_RDWR)
+    punched = 0
+    try:
+        ranges = list(_data_ranges(fd, st.st_size))
+        # the holes too: preallocated (unwritten) extents read as holes to SEEK_DATA yet hold blocks - XFS left
+        # 4.25 GiB of them in Jaws Pro's copy. Punching a hole that holds nothing is free.
+        prev = 0
+        for d, _h in ranges + [(st.st_size, st.st_size)]:
+            if d > prev:
+                libc.fallocate(fd, 3, prev, d - prev)
+            prev = max(prev, _h)
+        for d, h in ranges:
+            p = d
+            while p < h:
+                b = os.pread(fd, min(CHUNK, h - p), p)
+                n = len(b) - len(b) % BLK
+                if n <= 0:
+                    break
+                a = np.frombuffer(b, dtype=np.uint64, count=n // 8).reshape(-1, BLK // 8)
+                z = np.flatnonzero(~a.any(axis=1))
+                if z.size:
+                    brk = np.flatnonzero(np.diff(z) != 1)
+                    starts = np.r_[z[0], z[brk + 1]]
+                    ends = np.r_[z[brk], z[-1]] + 1
+                    for s, e in zip(starts.tolist(), ends.tolist()):
+                        # FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE
+                        if libc.fallocate(fd, 3, p + s * BLK, (e - s) * BLK) == 0:
+                            punched += (e - s) * BLK
+                p += n
+    finally:
+        os.close(fd)
+    # a punch moves mtime, which the resume and the hash cache key on: put it back
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+    return punched
+
+
 def hash_file(path):
     """(hashes uint64[n], blocks uint64[n]) of the file's non-zero whole blocks.
     The hash only proposes a pair; the kernel's byte compare decides."""
@@ -358,6 +404,8 @@ def cmd_dedupe(roots, dry):
     try:
         for i, (p, st) in enumerate(files, 1):
             total += st.st_blocks * 512
+            if not dry and not cache.is_done(st):
+                punch_zeros(p)                 # a new card's zeros are holes before it is shared
             got = d.take(p)
             if got:
                 say("%s: %.2f GiB shared" % (p, got / 2 ** 30))
@@ -388,6 +436,10 @@ def _copy_sparse(src, dst):
     dfd = os.open(dst + ".ingest", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     try:
         size = os.fstat(sfd).st_size
+        # the full size FIRST: XFS preallocates speculatively past end-of-file on a write that extends the file, and
+        # a sparse copy extends it at every data range - Jaws Pro landed with 7.40 GiB written and 4.25 GiB of
+        # those preallocated (unwritten) extents stranded inside its holes (2026-11-19)
+        os.ftruncate(dfd, size)
         for d, h in _data_ranges(sfd, size):
             p = d
             while p < min(h, size):
@@ -490,6 +542,8 @@ def cmd_ingest(src, dst, delete=False, host=None, host_min_gb=20):
                     _copy_sparse(s, t)
                 except FileNotFoundError:
                     continue
+                if st.st_size >= MIN_FILE:
+                    punch_zeros(t)
                 _copy_meta(s, t, st)
                 copied += st.st_blocks * 512
             if st.st_size >= MIN_FILE and not t.endswith((".partial", ".part")):
@@ -505,6 +559,20 @@ def cmd_ingest(src, dst, delete=False, host=None, host_min_gb=20):
     print("ingest\t%d\t%d\t%d\t%d" % (len(order), copied, d.shared, d.differs + d.failed), flush=True)
     say("%d files, %.1f GiB copied, %.1f GiB shared, %.0f s; %d ranges refused"
         % (len(order), copied / 2 ** 30, d.shared / 2 ** 30, time.time() - t0, d.differs + d.failed))
+    return 0
+
+
+def cmd_dezero(roots):
+    """Punch the all-zero blocks out of every big file under the roots."""
+    total = 0
+    for r in roots:
+        for p, _st in big_files(r, now=0):
+            got = punch_zeros(p)
+            total += got
+            if got:
+                say("%s: %.2f GiB of zeros made holes" % (os.path.relpath(p, r), got / 2 ** 30))
+    print("dezero\t%d" % total, flush=True)
+    say("%.1f GiB of zero blocks made holes" % (total / 2 ** 30))
     return 0
 
 
@@ -553,6 +621,8 @@ def main(argv=None):
     a2.add_argument("--host-min-gb", type=int, default=20)
     a2.add_argument("src")
     a2.add_argument("dst")
+    a4 = sub.add_parser("dezero")
+    a4.add_argument("roots", nargs="+")
     a3 = sub.add_parser("verify")
     a3.add_argument("src")
     a3.add_argument("dst")
@@ -561,6 +631,8 @@ def main(argv=None):
         return cmd_dedupe(a.roots, a.dry)
     if a.cmd == "ingest":
         return cmd_ingest(a.src, a.dst, a.delete, a.host, a.host_min_gb)
+    if a.cmd == "dezero":
+        return cmd_dezero(a.roots)
     return cmd_verify(a.src, a.dst)
 
 

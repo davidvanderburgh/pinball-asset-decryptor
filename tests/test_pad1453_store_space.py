@@ -183,6 +183,35 @@ def test_a_dry_pass_finds_a_pro_inside_its_le_and_skips_holes_and_zeros(tmp_path
     assert d.take(str(tmp_path / "pro.raw")) == (64 - 2 - 4) * sd.BLK
 
 
+@pytest.mark.skipif(not hasattr(os, "SEEK_DATA"), reason="SEEK_DATA/SEEK_HOLE + fallocate: Linux")
+def test_zero_blocks_become_holes_and_the_file_reads_and_dates_the_same(tmp_path):
+    # the copy wrote a card's zero runs as real blocks and XFS preallocated past every write (Jaws Pro: 7.4 GiB of
+    # data in 11.6 GiB of blocks); punch_zeros gives them back without changing a byte or the mtime
+    rng = np.random.default_rng(2)
+    data = rng.integers(1, 255, size=(32, sd.BLK), dtype=np.uint8)
+    data[8:20] = 0
+    f = tmp_path / "card.raw"
+    f.write_bytes(data.tobytes())
+    os.utime(f, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+    before = f.stat()
+    punched = sd.punch_zeros(str(f))
+    after = f.stat()
+    assert f.read_bytes() == data.tobytes()
+    assert after.st_mtime_ns == before.st_mtime_ns and after.st_size == before.st_size
+    if punched:                     # a filesystem without hole punching (some CI tmp) punches nothing, harmlessly
+        assert punched == 12 * sd.BLK
+        assert after.st_blocks < before.st_blocks
+
+
+def test_the_copy_sets_the_size_before_writing():
+    src = _text("storededupe.py")
+    body = src[src.index("def _copy_sparse"):src.index("def cmd_ingest")]
+    assert body.index("os.ftruncate(dfd, size)") < body.index("os.pwrite")
+    ingest = src[src.index("def cmd_ingest"):src.index("def cmd_dezero")]
+    after = ingest[ingest.index("_copy_sparse(s, t)"):]
+    assert after.index("punch_zeros(t)") < after.index("_copy_meta(s, t, st)")
+
+
 def test_the_weekly_compaction_only_runs_idle_and_fails_closed():
     ps = _text("padcompact.ps1")
     # due weekly, only disks holding 20 GB more than they use

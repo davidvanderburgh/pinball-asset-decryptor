@@ -88,7 +88,8 @@ def test_the_example_is_the_whole_game_with_layers_and_saved_progress():
     for call in ("pm_own_game(1)", "pm_begin_layer(50, 0)", "pm_begin_layer(80, 0)", "pm_shot_claim()",
                  "pm_saved_put(\"xstory:chapter\"", "pm_saved_get(\"xstory:chapter\"", "pm_saved_stamp(",
                  "pm_ball_save(10)", "pm_multiball_start(2, 10)", "kit_menu_open(", "kit_menu_shot(",
-                 "kit_new_game(", "#include \"intricate_kit.h\""):
+                 "kit_new_game(", "#include \"intricate_kit.h\"",
+                 "#define INTRO_S 17", "intro_over &&"):   # the roster waits out the game's start-of-game video
         assert call in c, call
     api = _api()
     used = set(re.findall(r"\b((?:pm|kit|pa)_[a-z0-9_]+)\(", c))

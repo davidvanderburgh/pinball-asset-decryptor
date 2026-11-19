@@ -6425,6 +6425,14 @@ hit) with the ball waiting in the shooter lane meanwhile; and on all 53 newest S
 move and Action (Start on the three with no Action button) and its time each taking the one highlighted
 (`docs/plans/pad1404_flipper_menus.md`).
 
+**A menu at the game's start (PAD-1410).** A game plays its own start-of-game video when Start is pressed, over the
+whole glass and over every screen of the modes'; a menu opened as the game starts (a whole-game mode's, the first
+thing it does) is drawn under it, and with a time shorter than the video it is picked by its time unseen. Uncanny X-Men
+0.98's runs about 15 s, no flipper press skips it, and no call sees it (`pm_display_covered` and `pm_game_words` read 0
+all through it, emulator, LE). Open such a menu after it: the PAD-1410 port's roster waits 17 s from the game's start on
+player 1's first ball (later players have no such video), and a ball launched before then keeps the player's last
+pick instead of a menu over a ball in play. A menu opened later in a game (a mode's start, a scoop) is not affected.
+
 ## Co-op play (PAD-1017)
 
 2 to 4 players play one game as a team, on a game without co-op of its own. TMNT, Venom, The Mandalorian, D&D,

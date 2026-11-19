@@ -21,6 +21,8 @@
 #define SENTINEL_HP 6         /* sentinel.yaml: sentinel_health starting_count */
 #define PHOENIX_HP 4          /* phoenix.yaml: phoenix_health starting_count */
 #define PHOENIX_S 30          /* phoenix.yaml: phoenix_clock start_value */
+#define INTRO_S 17            /* the game's own start-of-game video (X-Men 0.98: about 15 s, no flipper skips it) covers
+                               * the glass, and no call of the SDK sees it: the roster opens after it */
 
 static const char *const MUTANTS[] = { "CYCLOPS", "STORM", "WOLVERINE" };
 static const int DAMAGE[] = { 3, 2, 2 };     /* an ability's hit; a ramp is 1 */
@@ -43,6 +45,8 @@ static struct kit_meter m_sentinel, m_phoenix, m_mutant;
 static struct kit_fade f_black, f_red;
 static struct kit_menu roster;
 static uint64_t S_LEFT, S_RIGHT, S_XJET, S_DR, S_ACTION;
+static unsigned long intro_ticks;   /* the game's first ball: ticks since FUTURE began, for the roster's wait */
+static int intro_over;
 
 static int fut_on, fut_done;
 static int want_sentinel, want_phoenix;    /* MPF's start_mode_* events: the layer begins in its own tick */
@@ -125,6 +129,8 @@ static void fut_start(void)
     pm_running_name("FUTURE");
     if (!pm_own_game(1)) pm_log("xstory: this port cannot switch the game's own rules off - they run beside it");
     fut_on = 1;
+    intro_ticks = 0;
+    intro_over = 0;
     pm_log("xstory: FUTURE began: the whole game");
     player_up(pm_player());
 }
@@ -171,6 +177,12 @@ static void fut_shot(uint64_t s)
 {
     if (!fut_on) return;
     if (kit_menu_shot(&roster, s)) return;                    /* the menu's buttons are the menu's */
+    if (!P[up].asked && (s & (S_LEFT | S_RIGHT | S_XJET | S_DR))) {
+        P[up].asked = 1;                                      /* launched before the roster opened: no menu over a
+                                                               * live ball, the last pick plays */
+        pm_log("xstory: the ball was in play before the roster opened - player %u plays as %s", up,
+               MUTANTS[P[up].mutant]);
+    }
     if (pm_paused() || pm_shot_taken()) return;               /* a layer over FUTURE kept this shot */
     if (S_ACTION && (s & S_ACTION)) {
         ability();
@@ -211,9 +223,10 @@ static void fut_tick(void)
             pm_log("xstory: player %u's saved progress changed hands - read again", up);
             load(up);
         }
-        if (!P[up].asked && kit_menu_open(&roster, "CHOOSE YOUR MUTANT", MUTANTS, 3, P[up].mutant, 10000,
-                                          KIT_MENU_HOLD_LANE))
-            P[up].asked = 1;                                  /* roster: ball_started{ball==1} */
+        if (!intro_over && (up != 1 || ++intro_ticks >= INTRO_S * TPS)) intro_over = 1;   /* only player 1's */
+        if (!P[up].asked && intro_over &&
+            kit_menu_open(&roster, "CHOOSE YOUR MUTANT", MUTANTS, 3, P[up].mutant, 10000, KIT_MENU_HOLD_LANE))
+            P[up].asked = 1;                                  /* roster: ball_started{ball==1}, after the intro */
     }
     got = kit_menu_tick(&roster);
     if (got >= 0 && fut_on) {

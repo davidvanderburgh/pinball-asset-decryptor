@@ -3749,6 +3749,12 @@ static void clip_layer_out(void)
     clip_layer_in = 0;
 }
 
+/* PAD-1415: while an attract item plays on a title whose attract pages play their clips from a bank of their own
+ * (`scene attract_bank`: Walking Dead Remastered LE 0.92's 60ed7e50, its play clips on 71e39c43), the clip calls
+ * (pm_clip, its watch, pm_clip_stop) use that bank's surface: an item on the play bank drew in its mid-screen box */
+static volatile int clip2_attract;
+static void *clip2_att_surf;
+static void *clipv_scene_surface(const char *id);
 static void *clip2_surface(void)
 {
 #if PM_A64
@@ -3757,6 +3763,10 @@ static void *clip2_surface(void)
     unsigned str, out[2] = { 0, 0 };
 #endif
     void *root;
+    if (clip2_attract) {
+        if (!clip2_att_surf) clip2_att_surf = clipv_scene_surface("attract_bank");
+        return clip2_att_surf;
+    }
     if (site("video_surface"))                /* the game's own getter: it loads a demand_loaded bank */
         return ((void *(*)(void))(unsigned long)fn("video_surface"))();   /* (JP LE); never cached */
     if (clip2_surf) return clip2_surf;
@@ -16032,6 +16042,7 @@ static int ait_video;
  * advancing its player and showing it (Aerosmith's OilProjectorLoop page 0x286a4: player_advance, scene_show(player, 3),
  * the frame yield). An item does the same from its page while its clip plays on the bank's surface. */
 static int ait_show;
+static const char *ait_bank = "video_bank";  /* PAD-1415: the scene an item plays on: the port's attract_bank, if any */
 static pm_addr ait_show_fn;                 /* `site attract_show` (portattract.show_lines), else the port's scene_show:
                                              * an address (PAD-1371: 32 bits cut a Spike 3 one to a jump into nothing) */
 
@@ -16109,7 +16120,7 @@ static void ait_play(unsigned i)
         while (pm_ms() - ait_began < it->ms && !pm_in_game()) {
             ait_beat = pm_ms();
             if (ait_show && ait_on == (int)i) {           /* the tick has put the clip on the bank's surface */
-                void *pl = scene_player_of("video_bank");
+                void *pl = scene_player_of(ait_bank);
                 unsigned long now = pm_ms();
                 if (pl) {
                     ((void (*)(void *, float))(unsigned long)fn("player_advance"))(pl, (float)(now - last));
@@ -16223,6 +16234,7 @@ static void ait_tick(void)
     if (!ait_n) return;
     if (ait_on >= 0 && (want != ait_on || now - ait_beat > AIT_BEAT_MS || pm_in_game())) {
         if (!ait_video) pm_clip_stop();         /* the element's clip is the game's to stop, as its own pages' are */
+        clip2_attract = 0;
         if (ait_said < 400) {
             ait_said++;
             say("attract items: item %d (\"%s\") %s after %lu ms", ait_on + 1, ait_items[ait_on].clip,
@@ -16232,7 +16244,9 @@ static void ait_tick(void)
         ait_on = -1;
     }
     if (want >= 0 && ait_on < 0 && now - ait_beat <= AIT_BEAT_MS && !pm_in_game()) {
-        int ok = ait_video ? 1 : pm_clip(ait_items[want].clip);
+        int ok;
+        clip2_attract = !ait_video && ait_bank[0] == 'a';
+        ok = ait_video ? 1 : pm_clip(ait_items[want].clip);
         ait_on = want;
         ait_on_ms = now;
         if (ait_said < 400) {
@@ -16346,7 +16360,8 @@ static void attract_arm(void)
     /* the scene show: clip v2 titles, and the clip call's titles whose full-screen clip is not drawn at the frame
      * hand-over (Godzilla's is, and needs nothing more) */
     ait_show_fn = fn("attract_show") ? fn("attract_show") : fn("scene_show");
-    if (!ait_video && !clip_layer && !frame_hooked && ait_show_fn && fn("player_advance") && pm_scene_id("video_bank"))
+    if (pm_scene_id("attract_bank") && !ait_video) ait_bank = "attract_bank";      /* PAD-1415 */
+    if (!ait_video && !clip_layer && !frame_hooked && ait_show_fn && fn("player_advance") && pm_scene_id(ait_bank))
         ait_show = 1;
     if (ait_n && !ait_video && !(can & PM_CAN_CLIPS)) {
         say("attract items: off - this build has no full-screen clip route");
@@ -16417,6 +16432,8 @@ static void attract_arm(void)
         say("attract items: %u item(s) between the game's attract pages (table 0x%08lx, %u entries of %u bytes, %u "
             "page(s) taking items; the process sleep 0x%08lx); played %s", ait_n, (unsigned long)table, count, size,
             ait_anchors, (unsigned long)ait_sleep, ait_video ? "through the attract video element (its pages' own way)"
+            : ait_show && ait_bank[0] == 'a' ? "on the attract bank's surface (the port's attract_bank), its scene shown by the "
+              "page as the game's own clip pages do"
             : ait_show ? "on the video bank's surface, its scene shown by the page as the game's own clip pages do"
             : "full screen (the clip route)");
     attract_hide_arm(table, size, at, count);

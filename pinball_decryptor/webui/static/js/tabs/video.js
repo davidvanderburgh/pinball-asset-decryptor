@@ -711,14 +711,14 @@ function CompareView({ cmp, byRel, cs, look, active, setActive, stopSeq, onOpenC
           <${Button} icon=${anyPlaying ? "pause" : "play"} onClick=${playAll}>${anyPlaying ? "Pause all" : "Play all"}<//>
           <${Button} icon="refresh" onClick=${fromStart} title="Play every clip from its first frame at once, so they keep in step">From the start<//>
           <${Check} checked=${loop} label="Loop" cls="small" title="Play each clip over and over" onChange=${setLoop} />
-          ${colorOffered ? html`<${UnlockBox} />` : null}
           <${Button} kind="ghost" icon="x" onClick=${close} title="Back to the list (Esc)">Close<//>
         </div>
         <div class="small muted">${look.offered
           ? "Click a clip: the Color profiles bar changes its colors while you watch the others. It is the one you hear."
           : "Click a clip to hear it."}</div>
       </div>
-      ${look.offered ? html`<div class="vcm-look"><${LookRow} look=${look} ns="video" onOpen=${onOpenColors} /></div>` : null}
+      <div class="vcm-look lookbar-row">${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${onOpenColors} />` : null}
+        ${colorOffered ? html`<${UnlockBox} />` : null}</div>
       <div class=${cx("vcm-grid", "n" + Math.min(n, 4))}>
         ${tiles.map((t) => html`<${CmpTile} key=${t.id} t=${t} row=${byRel.get(t.rel)} cs=${cs} offered=${!!look.offered} active=${t.id === active}
           onPick=${() => setActive(t.id)} stopSeq=${stopSeq} loop=${loop} canRemove=${n > 1} onState=${onState} />`)}
@@ -1381,7 +1381,6 @@ export default function VideoTab() {
           ${s.best_supported ? html`<${Check} checked=${s.best_quality} label="Best quality" title=${s.best_tip} cls="small"
             onChange=${(v) => call("video.set_best_quality", v)} />` : null}
         </span>
-        <${UnlockBox} />
       </div>
       <div class="vid-tblwrap" onMouseDownCapture=${onGripDown}>
         <${Table} cls="vid-tbl" columns=${columns} rows=${rows} rowKey=${(r) => r.rel} rowHeight=${ROW_H}
@@ -1426,7 +1425,8 @@ export default function VideoTab() {
             ${pv.seen.prog_head ? html`<span>${pv.seen.prog_head}</span>
             <ul class="vid-sound-list">${pv.seen.prog_lines.map((t) => html`<li key=${t}>${t}</li>`)}</ul>` : null}</div><//>
         </div>` : null}
-        ${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
+        <div class="lookbar-row">${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
+          <${UnlockBox} /></div>
         <div class="vid-panes">
           <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />
           <span class="vid-vsep"></span>

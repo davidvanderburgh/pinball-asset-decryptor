@@ -249,14 +249,14 @@ function CompareView({ cmp, byRel, cs, look, active, setActive, onOpenColors, un
           <${Icon} name="compare" cls="lg" />
           <span class="h2">Compare</span>
           <span class="grow"></span>
-          ${unlock && unlock.offered ? html`<${UnlockBox} />` : null}
           <${Button} kind="ghost" icon="x" onClick=${close} title="Back to the list (Esc)">Close<//>
         </div>
         <div class="small muted">${look.offered
           ? "Click a picture: the Color profiles bar changes its colors while you see the others."
           : "Each picture as it is."}</div>
       </div>
-      ${look.offered ? html`<div class="icm-look"><${LookRow} look=${look} ns="images" onOpen=${onOpenColors} /></div>` : null}
+      <div class="icm-look lookbar-row">${look.offered ? html`<${LookRow} look=${look} ns="images" onOpen=${onOpenColors} />` : null}
+        ${unlock && unlock.offered ? html`<${UnlockBox} />` : null}</div>
       <div class=${cx("icm-grid", "n" + Math.min(n, 4))}>
         ${tiles.map((t) => html`<${CmpTile} key=${t.id} t=${t} row=${byRel.get(t.rel)} cs=${cs} active=${t.id === active}
           onPick=${() => setActive(t.id)} canRemove=${n > 1} />`)}
@@ -711,7 +711,6 @@ export default function ImagesTab() {
         ${s.shades_only ? null : html`<${Check} checked=${!!s.grouped} onChange=${(v) => call("images.set_grouped", v)} label="Group by scene" title=${GROUP_TIP} />`}
         <${SetPicker} />
         <span class="sp"></span>
-        <${UnlockBox} themes />
       </div>
       <${Table} cls="img-tbl" columns=${columns} rows=${view} rowKey=${idOf} selected=${cur}
         onSelect=${onSelect} onActivate=${onActivate} onContext=${onContext} rowClass=${rowClass}
@@ -719,8 +718,8 @@ export default function ImagesTab() {
         resizable widths=${widths} onResize=${onResize}
         fileDropOk=${(e) => typeof e === "number"} onFileDrop=${onFileDrop} />
       <div class=${cx("ft img-prev", look.offered && "img-looks")}>
-        ${look.offered ? html`<div class="img-lk"><${LookRow} look=${look} ns="images" note=${false}
-          onOpen=${colorsOn ? openColors : undefined} /></div>` : null}
+        <div class=${cx(look.offered && "img-lk", "lookbar-row")}>${look.offered ? html`<${LookRow} look=${look} ns="images" note=${false}
+          onOpen=${colorsOn ? openColors : undefined} />` : null}<${UnlockBox} themes /></div>
         <div class="row img-panehd img-oh">
           <span class="eyebrow nw">${p.hdr_main || "Original"}</span>
           ${prevRel ? html`<span class="mono small muted ellip" title=${prevRel}>— ${base(prevRel)}</span>` : null}

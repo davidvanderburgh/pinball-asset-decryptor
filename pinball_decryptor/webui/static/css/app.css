@@ -493,3 +493,7 @@ html.h-short .page { padding-top: 12px; gap: 10px; }
 /* the Advanced box (core/unlock_box.js, Simon 2026-11-19): the Scenes tab's look, on Scenes, Images and Video */
 .unlock-box { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 8px 12px; border-radius: 8px;
   border: 1px solid var(--err); background: var(--err-soft); flex: 0 0 auto; }
+/* the Advanced box beside Preview colours, as Scenes has it (Simon, 2026-11-19) */
+.lookbar-row { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.lookbar-row .look-row { flex: 1 1 300px; min-width: 0; }
+.lookbar-row:empty { display: none; }

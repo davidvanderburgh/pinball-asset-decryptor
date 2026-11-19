@@ -197,7 +197,7 @@ function Tagged({ tag, value, off, title, none, full }) {
     <span class=${cx("cpd-val mono", none && "cpd-none")} title=${full || value}>${value}</span></div>`;
 }
 
-function FileLine({ s, host }) {
+function FileLine({ s, host, tools }) {
   const f = s.file;
   const sets = useNs("imgsets");
   const [which, setWhich] = useState("profiled");
@@ -296,6 +296,7 @@ function FileLine({ s, host }) {
     </div>
     <div class="small muted cpd-status-line">${status}</div>
   </div>
+  ${tools}
   <div class="cpd-file cpd-resetpanel">${reset}</div>
   <div class="cpd-file cpd-copy">
       <div class="eyebrow">Copy a profile to other files</div>
@@ -389,6 +390,9 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
   }, [open, fileKey, s.per_file]);
   useEffect(() => () => { call("color.set_file"); }, []);
   const mode = s.per_file ? (s.mode || "display") : "display";
+  const tools = html`<div class="cpd-file cpd-tools"><div class="eyebrow">File Colour Profile Tools</div>
+    <div class="cpd-four"><${UndoRedo} s=${s} flush=${flush} size="xs" kind="" />
+      <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div></div>`;
   // the dots: the host's Preview colors row where it has one, else the profiles' own word
   const parts = (look && look.parts) || s.parts || {};
   return html`<div class=${cx("cpd", open && "open", cls)} ref=${barRef}
@@ -426,11 +430,9 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
       <div class="cpd-body" role="tabpanel">
         <p class="small muted cpd-words">${s.per_file ? MODE_WORDS[mode] || MODE_WORDS.display
           : "Corrects your replaced pictures and videos when you build."}</p>
-        ${/* Simon (2026-11-19): the profile's own tools in a panel of their own, four equal boxes */""}
-        <div class="cpd-file cpd-tools"><div class="eyebrow">File Colour Profile Tools</div>
-          <div class="cpd-four"><${UndoRedo} s=${s} flush=${flush} size="xs" kind="" />
-            <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div></div>
-        ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} host=${host} />` : null}
+        ${/* Simon (2026-11-19): the profile's own tools in a panel of their own, four equal boxes - under the Selected
+             panel in Files, where the bar has one; first in the other modes */""}
+        ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} host=${host} tools=${tools} />` : tools}
         ${line ? html`<${TextColorLine} line=${line} openFont=${openFont} />` : null}
         <div class="cpd-status">${statusNote(s, line && line.own && !line.game ? line.hex : null)}</div>
         ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}

@@ -152,3 +152,4 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-resets > .btn { white-space: normal; line-height: 1.2; height: auto; min-height: 26px; padding-top: 3px; padding-bottom: 3px;
   text-overflow: clip; text-align: center; }
 .cpd-tools + .cpd-file, .cpd-sel + .cpd-resetpanel, .cpd-resetpanel + .cpd-copy { margin-top: 8px; }
+.cpd-sel + .cpd-tools { margin-top: 8px; }

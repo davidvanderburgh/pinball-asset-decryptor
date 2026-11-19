@@ -60,3 +60,9 @@
 .xl-swatches { display: inline-flex; gap: 3px; flex-wrap: wrap; }
 .xl-swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(255,255,255,.25); padding: 0; cursor: pointer; }
 .xl-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* PAD-1448: the lights the owner's Cabinet Lights board adds, on a game with none of its own */
+.xl-add { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; }
+.xl-add-on { justify-content: flex-start; margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel-2); }
+.xl-add-fields { gap: 8px; align-items: center; }

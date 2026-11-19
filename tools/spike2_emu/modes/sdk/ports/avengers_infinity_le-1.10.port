@@ -403,6 +403,17 @@ lamp 79           0              OPEN PORTAL  # lamp 52, I/O group 7 index 88, a
 lamp 163          0              DISC FLASH  # lamp 106, I/O group 7 index 89, at 101,228
 lamp 58,59,60     0              (S)TRANGE  # lamp 45, I/O group 7 index 93, at 90,290
 
+# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
+data addcab_light_tab  0x006ae040  # the light table's pointer (24-byte records)
+data addcab_dev_tab    0x006ae3c0  # the device table's pointer (48-byte records)
+data addcab_light_n    0x005aee2c  # the light count the game copies at start-up
+data addcab_dev_n      0x005aefb8  # the device count it copies
+value addcab_lights    185
+value addcab_devices   315
+value addcab_clone     167  # the LED light the added ones copy: DR STRANGE HANDS-LEFT
+value addcab_slot      250  # the first free light slot
+value addcab_group     1
+
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
 site block_start_8      0x000c74fc 0xe92d4ff0 0xe24dd00c

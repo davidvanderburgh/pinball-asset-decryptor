@@ -325,6 +325,17 @@ lamp 143          0              TOPPER RAPHAEL  # lamp 106, I/O group 8 index 1
 lamp 144          0              TOPPER TECHNODOME RIGHT  # lamp 107, I/O group 8 index 12, at 0,0
 lamp 145          0              TOPPER DONATELLO  # lamp 108, I/O group 8 index 13, at 0,0
 
+# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
+data addcab_light_tab  0x005f2974  # the light table's pointer (24-byte records)
+data addcab_dev_tab    0x005f4514  # the device table's pointer (48-byte records)
+data addcab_light_n    0x00526e24  # the light count the game copies at start-up
+data addcab_dev_n      0x00526ef8  # the device count it copies
+value addcab_lights    146
+value addcab_devices   261
+value addcab_clone     6  # the LED light the added ones copy: LOCKDOWN BUTTON-R
+value addcab_slot      213  # the first free light slot
+value addcab_group     1
+
 # ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
 # modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, found
 # by its body), START (active - 6), the typeinfos that tell a cmode and a multiball (cmode_mball) apart

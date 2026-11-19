@@ -414,6 +414,17 @@ lamp 144          0              RIGHT SIDE 1  # lamp 88, I/O group 8 index 13, 
 lamp 145          0              RIGHT SIDE 2  # lamp 89, I/O group 8 index 14, at 0,0
 lamp 146          0              RIGHT SIDE 3  # lamp 90, I/O group 8 index 15, at 0,0
 
+# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
+data addcab_light_tab  0x005e9ecc  # the light table's pointer (24-byte records)
+data addcab_dev_tab    0x005ea160  # the device table's pointer (48-byte records)
+data addcab_light_n    0x00488784  # the light count the game copies at start-up
+data addcab_dev_n      0x004888dc  # the device count it copies
+value addcab_lights    149
+value addcab_devices   271
+value addcab_clone     6  # the LED light the added ones copy: LOCKDOWN BUTTON-R
+value addcab_slot      216  # the first free light slot
+value addcab_group     1
+
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
 site block_start_0      0x00086d10 0xe92d4ff0 0xe1a04000

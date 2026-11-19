@@ -615,6 +615,8 @@ class ModePlan:
     idle_file: str = ""
     #: PAD-1040: ``cabshow.cfg`` beside the mode files, the card's expression light shows ("" = none)
     cabshow_file: str = ""
+    #: PAD-1448: ``addcab.cfg`` beside it, the cabinet lights the owner's cabinet adds ("" = none)
+    addcab_file: str = ""
     #: PAD-1041: ``comp.cfg`` beside the mode files, Prolonged Competition on the start menu ("" = none)
     comp_file: str = ""
     #: PAD-1204: ``scorefeed.cfg`` beside the mode files, each game's final scores posted to the owner's server ("" = none)
@@ -1353,7 +1355,7 @@ def cabs_plan(project, game_elf, prof):
     """A plan carrying only the expression light shows: no mode, no scene; the runtime and the title's port on p2
     with ``cabshow.cfg`` (:func:`cabs_into`)."""
     from . import cab_shows as CS
-    why = CS.title_refusal(prof)
+    why = CS.title_refusal(prof, CS.load_added(project))
     if why:
         raise ModeWriteError(why)
     try:
@@ -1369,7 +1371,8 @@ def cabs_into(result, scratch, shows, sids_of, only, log=None, game_elf=None):
     alone, before the score gate: the card stays on Insider Connected). PAD-1063: a show with a step of the game's own
     show needs *game_elf*'s show table (:func:`.cab_stock.read`); without it that show is left out."""
     from . import cab_shows as CS
-    why = CS.title_refusal(result.profile)
+    added = CS.load_added(getattr(result, "project", "") or "")
+    why = CS.title_refusal(result.profile, added)
     if why:
         raise ModeWriteError(why)
     stock = None
@@ -1393,6 +1396,31 @@ def cabs_into(result, scratch, shows, sids_of, only, log=None, game_elf=None):
         f.write(text)
     result.cabshow_file = path
     result.lines.append("expression lights: %d show(s), each played with its song" % (len(shows) - len(skipped)))
+    addcab_into(result, scratch, added)
+    return result
+
+
+def addcab_into(result, scratch, added):
+    """PAD-1448: ``addcab.cfg`` beside ``cabshow.cfg`` when the owner's cabinet adds lights the game has none of
+    (cab_shows.norm_added): the runtime adds them to the game's own lights before it starts."""
+    from . import cab_shows as CS
+    from . import mode_project as MP
+    if not added or not added.get("on"):
+        return result
+    try:
+        port = MP.read_port(MP.port_path(result.profile))
+    except (OSError, MP.ModeProjectError):
+        return result
+    text = CS.added_cfg_text(port, added)
+    if not text:
+        return result
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, CS.ADD_CFG)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.addcab_file = path
+    result.lines.append("added cabinet lights: %d speaker light(s), %d blade pixel(s) a side, on the Cabinet Lights "
+                        "board" % (added["speakers"], added["blades"]))
     return result
 
 
@@ -2528,6 +2556,11 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             from . import cab_shows as CS
             dst = os.path.join(out_dir, CS.CFG_NAME)
             shutil.copyfile(result.cabshow_file, dst)
+            extras.append(dst)
+        if getattr(result, "addcab_file", ""):         # PAD-1448: addcab.cfg, the cabinet lights the owner adds
+            from . import cab_shows as CS
+            dst = os.path.join(out_dir, CS.ADD_CFG)
+            shutil.copyfile(result.addcab_file, dst)
             extras.append(dst)
         if getattr(result, "comp_file", ""):           # PAD-1041: comp.cfg, Prolonged Competition
             from . import prolonged_comp as PCo

@@ -94,7 +94,7 @@ def test_the_page_says_when_a_game_step_has_no_show_to_play():
 def test_the_build_reads_the_table_off_the_cards_own_program(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from pinball_decryptor.plugins.stern import mode_write as MW
-    monkeypatch.setattr(CS, "title_refusal", lambda prof: "")
+    monkeypatch.setattr(CS, "title_refusal", lambda prof, added=None: "")
     monkeypatch.setattr(ST, "read", lambda elf: STOCK if elf == b"ELF" else None)
     shows = [CS.norm_show({"name": "Mine", "slot": 291, "blades": [CS.game_step(63, 9000)]})]
     said = []

@@ -321,6 +321,17 @@ lamp 84           0              IT'S A TRAP!  # lamp 97, I/O group 7 index 61, 
 lamp 83           0              JUNK YARD  # lamp 98, I/O group 7 index 62, at 143,440
 lamp 82           0              BREAK OUT!  # lamp 99, I/O group 7 index 63, at 148,421
 
+# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
+data addcab_light_tab  0x007c7994  # the light table's pointer (24-byte records)
+data addcab_dev_tab    0x007c74dc  # the device table's pointer (48-byte records)
+data addcab_light_n    0x005dc620  # the light count the game copies at start-up
+data addcab_dev_n      0x005dc75c  # the device count it copies
+value addcab_lights    340
+value addcab_devices   459
+value addcab_clone     122  # the LED light the added ones copy: TOPPER 1-R
+value addcab_slot      396  # the first free light slot
+value addcab_group     1
+
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
 # plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)

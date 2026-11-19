@@ -499,6 +499,17 @@ lamp 46           0              HAT TOP RIGHT  # lamp 94, I/O group 9 index 50,
 lamp 47           0              HAT RIGHT  # lamp 95, I/O group 9 index 51, at 122,182
 lamp 49           0              HAT ARROW  # lamp 96, I/O group 9 index 31, at 61,201
 
+# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
+data addcab_light_tab  0x0059fa94  # the light table's pointer (24-byte records)
+data addcab_dev_tab    0x005a0134  # the device table's pointer (48-byte records)
+data addcab_light_n    0x0050bf30  # the light count the game copies at start-up
+data addcab_dev_n      0x0050c028  # the device count it copies
+value addcab_lights    440
+value addcab_devices   577
+value addcab_clone     125  # the LED light the added ones copy: TOPPER 1-R
+value addcab_slot      495  # the first free light slot
+value addcab_group     1
+
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball
 site balls_in_play         0x0016ba6c 0xe92d4010 0xe30d4e08

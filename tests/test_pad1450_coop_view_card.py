@@ -98,5 +98,12 @@ def test_runtime_names_match_the_builder():
     turn = src[src.index("static void coop_view_turn(void)"):]
     turn = turn[:turn.index("\n}\n")]
     assert "coop_pick_of[coop.turn]" in turn and "c >= 0" in turn
+    # David: the card is the FIRST card of the hold - the game's own pages follow, handed the press mid-hold
+    tick = src[src.index("static void coop_view_tick(void)"):]
+    tick = tick[:tick.index("\n}\n")]
+    assert "edge_give_held(coop_left);" in tick and "COOP_VIEW_CARD_MS" in tick and "!cv.handed" in tick
+    give = src[src.index("static void edge_give_held(unsigned id)"):]
+    give = give[:give.index("\n}\n")]
+    assert "| active)" in give and "edge_give_back(k," in give
     chars_turn = src[src.index("static void coop_chars_turn(void)"):]
     assert chars_turn.index("coop_view_turn();") < chars_turn.index("coop_pick_open(coop.turn);")

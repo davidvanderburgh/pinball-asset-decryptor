@@ -6953,8 +6953,10 @@ or `TEAM 1 P2`), and the HUD gets a hint pill `PadCoopPeek` ("HOLD LEFT FLIPPER 
 bottom-right score panel. A turn that begins with its teammate's character already taken (never the ball they pick
 on) shows the hint until the ball leaves the shooter lane (the plunger flags going from waiting to not, the lane
 switch moving after it waited, or with neither 20 s); while the left flipper is held the view card replaces it.
-Godzilla's own left flipper hold opens its CITY CONTROL pages over everything, so while the ball sits in the plunger
-the left flipper is kept from the game (the pick's edge hiding, `coop_hides`); once the ball is out it is the game's.
+Godzilla's own left flipper hold opens its CITY CONTROL pages over everything, and the card comes first: while the
+ball sits in the plunger a left flipper press is kept from the game (the pick's edge hiding, `coop_hides`) with the
+card up, and after 4 s of holding the press is handed to the game mid-hold (`edge_give_held`: its level byte reads
+pressed again), the card goes and the game's own pages follow. Once the ball is out the flipper is the game's.
 Cards built before this have neither node and show nothing.
 
 **The game's start logo stays off the pick (PAD-1107).** A game whose start-of-game logo is a scene of its own, drawn

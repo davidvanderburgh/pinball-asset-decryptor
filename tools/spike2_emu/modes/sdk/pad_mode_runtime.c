@@ -17737,6 +17737,26 @@ static void edge_hide_edge(unsigned id, unsigned base, unsigned desc, volatile u
     else if (!want) edge_give_back(k, "released");
 }
 
+/* PAD-1450: from the tick - switch `id`, hidden and still held, is the game's again mid-press: its level byte reads
+ * pressed (the game polls it: its own hold starts from here) and its handler bits are back; its release is the game's */
+static void edge_give_held(unsigned id)
+{
+    unsigned base, rec, st, desc, active;
+    volatile unsigned char *lv;
+    int k;
+    if (!id || !edge.records || id >= N_SWITCH_IDS || edge.desc_via < 0 || (k = edge_hidden(id)) < 0) return;
+    base = *(const unsigned *)(unsigned long)edge.records;
+    if (!base) return;
+    rec = base + id * (unsigned)edge.size;
+    st = edge.level_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.level_via) : rec;
+    desc = *(const unsigned *)(unsigned long)(rec + (unsigned)edge.desc_via);
+    if (st < 0x10000u || desc < 0x10000u || !edge_hid[k].held) return;
+    lv = (volatile unsigned char *)(unsigned long)(st + (unsigned)edge.level_at);
+    active = (*(const unsigned short *)(unsigned long)(desc + (unsigned)edge.polarity_at) & 4u) ? 1u : 0u;
+    *lv = (unsigned char)((*lv & ~1u) | active);
+    edge_give_back(k, "mid-press (the game's own hold from here)");
+}
+
 /* PAD-1078: from the tick - switch `id`, held now and wanted by a hider, is taken from the game mid-press (above) */
 static void edge_take_held(unsigned id)
 {
@@ -19183,7 +19203,7 @@ static unsigned long coop_scr_try;
 /* PAD-1450: each character's view card (PadCoopView_1..) and the hint (PadCoopPeek); cv: this turn's window */
 static void *coop_view[COOP_CHARS], *coop_view_words[COOP_CHARS], *coop_peek;
 static int coop_view_shown = -1, coop_peek_shown;
-static struct { int ok, waited, out; unsigned long at, waited_ms; volatile int hide, moved; } cv;
+static struct { int ok, waited, out, handed; unsigned long at, waited_ms, held_ms; volatile int hide, moved; } cv;
 /* PAD-1107: the game's own logo at a game's start (port `text start_logo_scene` / `start_logo_path`: Godzilla's
  * Logo_Instance, a scene of its own drawn OVER the HUD) - kept hidden while a pick card is on the glass */
 static void *coop_logo;
@@ -20346,16 +20366,19 @@ static void coop_logo_hold(int card_up)
  * COOP_VIEW_BLIND_MS after the turn began. In it the hint (PadCoopPeek) shows, and while the left flipper is held the
  * teammate's own view card (PadCoopView_<n>, the pick card with only them on it) in its place, its words line saying
  * whose it is. Godzilla's own left flipper hold opens its CITY CONTROL status pages over the whole glass, the card
- * under them (emulator, LE 1.16), so while the ball sits in the plunger (the flags say it waits) the left flipper is
- * the card's alone, kept from the game as the pick keeps its flippers (coop_hides, PAD-1051's edge hiding); with the
- * ball out, or no flags, the game has it as always. */
+ * under them (emulator, LE 1.16). David: "It should be the first card that shows up when holding" - so while the ball
+ * sits in the plunger (the flags say it waits) a left flipper press is kept from the game (coop_hides, PAD-1051's edge
+ * hiding) and the card is up; held COOP_VIEW_CARD_MS, the press is handed to the game (edge_give_held), the card goes
+ * and the game's own pages follow as stock, until the release. With the ball out, or no flags, the game has the
+ * flipper as always. */
+#define COOP_VIEW_CARD_MS 4000ul          /* the card's time at the front of a hold, then the game's own pages */
 #define COOP_VIEW_BLIND_MS 20000ul        /* no plunger flags and no lane switch: the window's length */
 #define COOP_VIEW_SERVE_MS 30000ul        /* flags known but the ball never waited in the plunger: shut by then */
 static void coop_view_turn(void)
 {
     int c = coop.turn >= 1 && coop.turn <= 4 ? coop_pick_of[coop.turn] : -1;
     cv.ok = c >= 0 && c < coop_ch_n && (coop_view[c] || coop_peek || !coop_scr_found);
-    cv.waited = cv.out = cv.moved = cv.hide = 0;
+    cv.waited = cv.out = cv.moved = cv.hide = cv.handed = 0;
     cv.at = pm_ms();
     if (cv.ok) say("co-op characters: teammate %u's ball begins as %s - the left flipper shows their card until the "
                    "ball leaves the shooter lane", coop.turn, coop_ch[c].name);
@@ -20363,7 +20386,7 @@ static void coop_view_turn(void)
 
 static void coop_view_tick(void)
 {
-    int c, up, show, w;
+    int c, up, show, w, held;
     char words[24];
     if (cv.ok && !cv.out) {
         w = coop_ball_waits();
@@ -20382,9 +20405,19 @@ static void coop_view_tick(void)
     c = coop.turn >= 1 && coop.turn <= 4 ? coop_pick_of[coop.turn] : -1;
     up = cv.ok && !cv.out && c >= 0 && c < coop_ch_n && coop_left && coop_teammates() && pm_in_game() && !pk.open
          && !coop_done.on && !coop_cer_on && !ci.phase;
-    cv.hide = up && coop_view[c] && coop_ball_waits() == 1;     /* only with the ball still in the plunger */
+    held = coop_left && switch_held(coop_left);
+    if (!held) cv.handed = 0, cv.held_ms = 0;
+    else if (!cv.held_ms) cv.held_ms = pm_ms() | 1ul;
+    cv.hide = up && coop_view[c] && !cv.handed && coop_ball_waits() == 1;   /* only with the ball still in the plunger */
     if (cv.hide) edge_take_held(coop_left);                      /* held as the ball came to wait: taken mid-press */
-    show = up && coop_view[c] && switch_held(coop_left) ? c : -1;
+    if (held && !cv.handed && cv.held_ms && pm_ms() - cv.held_ms >= COOP_VIEW_CARD_MS && coop_view_shown >= 0) {
+        cv.handed = 1;                                           /* the card was first: the game's own pages now */
+        cv.hide = 0;
+        edge_give_held(coop_left);
+        say("co-op characters: the card was up %lu ms - the hold is the game's now (its own pages follow)",
+            COOP_VIEW_CARD_MS);
+    }
+    show = up && coop_view[c] && held && !cv.handed ? c : -1;
     if (show != coop_view_shown) {
         if (coop_view_shown >= 0 && coop_view[coop_view_shown]) pm_show(coop_view[coop_view_shown], 0);
         if (show >= 0) {
@@ -20395,11 +20428,12 @@ static void coop_view_tick(void)
             pm_show(coop_view[show], 1);
             say("co-op characters: left flipper held - %s's card up (%s)", coop_ch[show].name, words);
         } else if (coop_view_shown >= 0) {
-            say("co-op characters: left flipper let go - the card is down");
+            say("co-op characters: %s", cv.handed ? "the card is down - the game's pages have the hold"
+                                                  : "left flipper let go - the card is down");
         }
         coop_view_shown = show;
     }
-    up = up && show < 0 && coop_peek;                             /* the hint, under no card */
+    up = up && show < 0 && !held && coop_peek;                    /* the hint, under no card and no held flipper */
     if (up != coop_peek_shown) {
         pm_show(coop_peek, up);
         coop_peek_shown = up;

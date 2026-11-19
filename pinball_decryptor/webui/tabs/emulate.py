@@ -620,6 +620,8 @@ class EmulateTab(EmulateLogMixin, TabService):
             # the user came to the emulator: the setup notice is worth the
             # boot now (PAD-1457 put it off at app start)
             self._setup_check()
+        if self._spike3_probed is None:
+            self._spike3_kick()
         # the Stern ladder, then what the last poll said (Tk showed idle
         # here and let the next poll repaint; this is that repaint, early)
         try:
@@ -731,7 +733,15 @@ class EmulateTab(EmulateLogMixin, TabService):
                 and os.path.isfile(os.path.join(rig.rig_dir(), "parts.py"))):
             return
 
+        # off screen (the card the app opened with), the question waits
+        # for WSL to be up rather than booting it (PAD-1457); a card picked
+        # on this tab is answered at once
+        visible = self._tab_visible()
+
         def run():
+            if not visible and self._rig_asleep():
+                self._spike3_probed = None
+                return
             try:
                 cmd = rig.spike3_cmd(path)
             except Exception:                            # noqa: BLE001
@@ -4233,6 +4243,8 @@ class EmulateTab(EmulateLogMixin, TabService):
             from ...core import wsl_up
             if not wsl_up.vm_running():
                 return True
+            if wsl_up.running_distros() is None:
+                return False            # WSL could not say: ask as before
             return not wsl_up.distro_running(runtime.distro_for("spike2"))
         except Exception:                                # noqa: BLE001
             return False
@@ -4302,9 +4314,12 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._polled_once = True
                 self._runtime_apply(rt)
                 self._apply(info)
-                if (getattr(self, "_setup_deferred", False)
-                        and not info.get("_wsl_asleep")):
-                    self._setup_check()     # WSL is up now: the probe is free
+                if not info.get("_wsl_asleep"):
+                    # WSL is up now: what app start put off is free
+                    if getattr(self, "_setup_deferred", False):
+                        self._setup_check()
+                    if self._spike3_probed is None:
+                        self._spike3_kick()
                 self._follow_audio_ctl()
                 self._follow_restart_req()
                 self._follow_stop_req()

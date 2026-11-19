@@ -1254,6 +1254,11 @@ class App:
             # first reply.
             if any(probes_wsl(p) for p in prereqs):
                 try:
+                    from .core import wsl_up
+                    if not wsl_up.vm_running():
+                        # the probes answered from memory (PAD-1457): the
+                        # line would cost the cold boot this rule avoids
+                        raise RuntimeError("WSL is not running")
                     from .core.prereqs import wsl_release_lines
                     for i, line in enumerate(wsl_release_lines()):
                         self.msg_queue.put(

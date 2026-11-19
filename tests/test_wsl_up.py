@@ -184,3 +184,56 @@ def test_an_idle_hidden_tab_stops_polling_and_a_run_of_ours_does_not(
     monkeypatch.setattr(cls, "_tab_visible", lambda self: True)
     obj._schedule_poll()
     assert scheduled[-1] == cls.POLL_IDLE_MS
+
+
+# ------------------------------------- the prerequisite strip's WSL probes --
+
+def _probe_world(monkeypatch, tmp_path, vm_up, guid="{g1}", rc=0):
+    from pinball_decryptor.core import prereqs
+    ran = []
+
+    class R:
+        returncode = rc
+        stdout = "debugfs 1.47.0\n" if rc == 0 else ""
+        stderr = "" if rc == 0 else "bash: debugfs: command not found"
+
+    def run(cmd, timeout):
+        ran.append(cmd)
+        return R()
+    monkeypatch.setattr(prereqs, "_run_in_wsl", run)
+    monkeypatch.setattr(prereqs, "_pass_file",
+                        lambda: str(tmp_path / "passes.json"))
+    monkeypatch.setattr(prereqs.shutil, "which", lambda n: "wsl.exe")
+    monkeypatch.setattr(prereqs.sys, "platform", "win32")
+    monkeypatch.setattr(prereqs.runtime, "wsl_distro", lambda: "PAD-Runtime")
+    monkeypatch.setattr(wsl_up, "registered_distros",
+                        lambda: {"pad-runtime": guid})
+    monkeypatch.setattr(wsl_up, "vm_running", lambda: vm_up)
+    return prereqs, ran
+
+
+def test_a_passing_probe_is_remembered_and_answers_while_wsl_sleeps(
+        monkeypatch, tmp_path):
+    """PAD-1457: the strip is checked at app start and on every manufacturer
+    switch, and each WSL probe booted WSL to do it."""
+    prereqs, ran = _probe_world(monkeypatch, tmp_path, vm_up=True)
+    assert prereqs._probe_wsl("command -v debugfs")[0] is True
+    assert len(ran) == 1
+    prereqs, ran = _probe_world(monkeypatch, tmp_path, vm_up=False)
+    ok, said, _hint = prereqs._probe_wsl("command -v debugfs")
+    assert ok and said == "debugfs 1.47.0"
+    assert ran == [], "a remembered pass must not boot WSL"
+
+
+def test_a_failure_or_a_reinstall_is_always_probed_for_real(
+        monkeypatch, tmp_path):
+    prereqs, ran = _probe_world(monkeypatch, tmp_path, vm_up=False, rc=1)
+    assert prereqs._probe_wsl("command -v debugfs")[0] is False
+    assert prereqs._probe_wsl("command -v debugfs")[0] is False
+    assert ran.count("command -v debugfs") == 2,         "a red probe is never answered from memory"
+    prereqs, ran = _probe_world(monkeypatch, tmp_path, vm_up=True)
+    prereqs._probe_wsl("command -v debugfs")
+    prereqs, ran = _probe_world(monkeypatch, tmp_path, vm_up=False,
+                                guid="{reinstalled}")
+    prereqs._probe_wsl("command -v debugfs")
+    assert ran == ["command -v debugfs"],         "a new install is a new GUID: probed again"

@@ -205,6 +205,23 @@ def _isolate_card_edits(tmp_path_factory):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolate_wsl_memory(tmp_path_factory):
+    """PAD-1457: the runtime's remembered manifest and the remembered WSL
+    prerequisite passes live beside the settings; a test must never write
+    the developer's.  And "is WSL running?" reads as yes for the suite, so
+    every poll and probe test drives the path it was written for (the
+    PAD-1457 tests set PAD_WSL_UP, or patch core.wsl_up, themselves).""" 
+    from pinball_decryptor.core import prereqs, runtime, wsl_up
+    d = tmp_path_factory.mktemp("wsl_memory")
+    # the registry is the real machine's: read as unavailable, so the list
+    # comes from the wsl.exe a test fakes (runtime._run), as it always did
+    wsl_up.registered_distros = lambda: None
+    runtime._manifest_file = lambda: str(d / "runtime_manifest.json")
+    prereqs._pass_file = lambda: str(d / "wsl_probe_passes.json")
+    os.environ.setdefault("PAD_WSL_UP", "1")
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _isolate_card_prints(tmp_path_factory):
     """Same for the card fingerprint cache (PAD-427, core.lineage): an
     extract or build driven by a test would fingerprint pytest's throwaway

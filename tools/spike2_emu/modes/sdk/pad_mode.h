@@ -440,6 +440,13 @@ int pm_device_known(const char *name);
  * game, a tilt, or no kickback here: of the newest builds only Guardians of the Galaxy has any). */
 int pm_kickback(int on);
 int pm_kickback_known(void);
+/* PAD-1406: A TOY'S OWN MOVES, for the mode that has the whole game: pm_toy(name, action) gives the game's own command
+ * for that move (Uncanny X-Men LE: pm_toy("sentinel_head", "up") / "down" - the Sentinel head, driven by its motor to
+ * its own switch the way the service menu's test page does; the game itself ignores it while the head moves or unless
+ * it sits at the other end). 1 = given; 0 = refused, the reason in mode.log (not the whole game's mode, no game, a
+ * tilt, under 1 s since the last move, or no such toy or move here). pm_toy_known: 1 when this game has that move. */
+int pm_toy(const char *name, const char *action);
+int pm_toy_known(const char *name, const char *action);
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

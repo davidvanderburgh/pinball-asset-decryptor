@@ -18067,6 +18067,75 @@ int pm_device_balls(const char *name)
 
 int pm_device_known(const char *name) { return fn("ball_device_keep") && bd_find(name) > 0; }
 
+/* ---- PAD-1406: a toy's own moves, for the mode that has the whole game (pm_toy) --------------------------------------
+ * A toy the game moves with a motor to its own switches (Uncanny X-Men LE's Sentinel head: up to SENTINEL HEAD UP, down
+ * to SENTINEL HEAD DOWN) is moved through the game's OWN command for each move - the one its service menu's test page
+ * gives (LE 0.98 0x32f34 up, 0x32f78 down: each refuses while the head moves, while a head process of the game's runs,
+ * or unless the head sits at the other end; the motor stops at its switch the game's own way). The port names them:
+ * `text toys <name> ...`, `text <name>_actions <a> <b> ...`, `site <name>_<a>` (a function of the toy's object),
+ * `data <name>_obj` (the object) and `value <name>_vtable` (its class, checked before every call). pm_toy(name,
+ * action): only the mode that has the whole game, in a game, not tilted, 1 s from one move to the next. */
+#define TOY_GAP_MS 1000ul
+static unsigned long toy_last;
+
+static int toy_known_action(const char *name, const char *action)
+{
+    char key[48];
+    const char *t, *a;
+    unsigned k;
+    if (!name || !action || !(t = pm_port_text("toys"))) return 0;
+    for (;;) {                                         /* the name among `toys` */
+        while (*t == ' ') t++;
+        if (!*t) return 0;
+        for (k = 0; name[k] && t[k] == name[k]; k++) ;
+        if (!name[k] && (t[k] == ' ' || !t[k])) break;
+        while (*t && *t != ' ') t++;
+    }
+    pm_snprintf(key, sizeof key, "%s_actions", name);
+    if (!(a = pm_port_text(key))) return 0;
+    for (;;) {
+        while (*a == ' ') a++;
+        if (!*a) return 0;
+        for (k = 0; action[k] && a[k] == action[k]; k++) ;
+        if (!action[k] && (a[k] == ' ' || !a[k])) break;
+        while (*a && *a != ' ') a++;
+    }
+    pm_snprintf(key, sizeof key, "%s_%s", name, action);
+    return fn(key) != 0;
+}
+
+int pm_toy_known(const char *name, const char *action) { return toy_known_action(name, action); }
+
+int pm_toy(const char *name, const char *action)
+{
+    const char *who = current && current->name ? current->name : "a mode", *why = 0;
+    char key[48];
+    pm_addr obj = 0;
+    unsigned long now = pm_ms();
+    if (!toy_known_action(name, action)) why = "this game has no such toy or move";
+    else if (!og_has_it()) why = "only the mode that has the whole game (pm_own_game) may";
+    else if (!pm_in_game()) why = "no game in play";
+    else if (og.tilted || ball_tilted()) why = "the ball is tilted";
+    else if (toy_last && now - toy_last < TOY_GAP_MS) why = "too soon after the last move (1 s apart)";
+    if (!why) {
+        pm_snprintf(key, sizeof key, "%s_obj", name);
+        obj = data(key);
+        pm_snprintf(key, sizeof key, "%s_vtable", name);
+        if (!obj || !maps_has(obj, 4, MAP_R)
+            || *(const unsigned *)(unsigned long)obj != (unsigned)pm_port_value(key, -1))
+            why = "the toy's object is not built or not the toy's class";
+    }
+    if (why) {
+        say("toy: %s asked %s %s - refused (%s)", who, name ? name : "?", action ? action : "?", why);
+        return 0;
+    }
+    pm_snprintf(key, sizeof key, "%s_%s", name, action);
+    ((void (*)(pm_addr))(unsigned long)fn(key))(obj);
+    toy_last = now | 1;
+    say("toy: %s - %s %s, the game's own command (0x%08" PMA ")", who, name, action, fn(key));
+    return 1;
+}
+
 /* ---- PAD-1406: the game's kickbacks, for the mode that has the whole game (pm_kickback) ------------------------------
  * The framework keeps its kickbacks as a list beside its pop bumpers and slingshots (the three the game's dead-flipper
  * and tilt code switch off together); only Guardians of the Galaxy (Pro and LE 1.15) has any among the newest builds.

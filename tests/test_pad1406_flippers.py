@@ -460,3 +460,26 @@ def test_kickback_lines(key, setf, cnt):
     text = (SDK / "ports" / (key + ".port")).read_text(encoding="utf-8")
     assert re.search(r"^site kickback_set\s+0x%08x 0xe92d4038 0xe1a04001$" % setf, text, re.M)
     assert re.search(r"^data kickback_count\s+0x%08x$" % cnt, text, re.M)
+
+
+# ---- a toy's own moves (run 6) -----------------------------------------------------------------------------------------
+
+def test_the_sentinel_head_is_the_game_s_own_command():
+    from pinball_decryptor.plugins.stern import mode_project as MP, block_modes as BM
+    P = MP.profiles()
+    assert P["uncanny_xmen_le_0_98"].toys == (("sentinel_head", "Sentinel head", ("up", "down")),)
+    assert P["uncanny_xmen_pro_0_98"].toys == ()                         # the Pro has no head motor
+    text = (SDK / "ports" / "uncanny_xmen_le-0.98.port").read_text(encoding="utf-8")
+    assert re.search(r"^site sentinel_head_up\s+0x00032f34 ", text, re.M)
+    assert re.search(r"^site sentinel_head_down\s+0x00032f78 ", text, re.M)
+    assert re.search(r"^value sentinel_head_vtable 0x555d18$", text, re.M)
+    src = RUNTIME.read_text(encoding="utf-8")
+    sec = src[src.index("/* ---- PAD-1406: a toy's own moves"):src.index("/* ---- PAD-1406: the game's kickbacks")]
+    assert "og_has_it()" in sec and '"%s_vtable", name' in sec and "coil_fire" not in sec
+    for gm, ok in (("own_game", True), ("block", False)):
+        prog = BM.normalize({"name": "X", "game_modes": gm, "scripts": [{"hat": {"kind": "mode_start"}, "do": [
+            {"op": "toy", "what": "sentinel_head", "action": "up"}]}]})
+        probs = [x for x in BM.problems(prog, **BM.card_checks(P["uncanny_xmen_le_0_98"])) if "sentinel_head" in x]
+        assert (probs == []) == ok, probs
+    assert [x for x in BM.problems(prog, **BM.card_checks(P["uncanny_xmen_pro_0_98"])) if "sentinel_head" in x]
+    assert 'if (run.on && !pm_toy("sentinel_head", "up")) pm_log("sentinel_head up: not moved");' in BM.to_c(prog, "x")

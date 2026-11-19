@@ -151,6 +151,7 @@ const TIP = {
   wordsPlace: "The Scenes editor on the game's screen with its words, its scored number (and the line under its name, if it has one) where they will show: drag or size any of them there, and it is saved into the mode. Untouched, the number goes where the game pops up its own (James Bond: large under the status bar).",
   gameWizard: "Hands the player one of the game's own mini-wizards, the game's mode itself with its own shots, lights, screens, sounds and award. Light it (where the game lights that one for a start shot): it waits for the game's own start shot, as when the game lights one. Start it: it begins at once, or the moment none of the game's own modes is in its way (nor this mode holding the game's modes off), that ball. On James Bond 007, until it starts it is the only one lit, so the game's own choosing cannot swap it for another, and the game no longer lights one named here by itself; on the other games the game's own rules still light and start their mini-wizards too. Works whether this mode runs or not: in When the game does an event it is a mini-wizard for that event. One the player has played this game plays again.",
   building: "Moves Godzilla Premium/LE's building to one of the game's own floors (floor 3 is the furthest it ever goes), at the speed the operator set; back where the game keeps it puts it on floor 0. When the mode ends, the ball drains or the game tilts, it goes back where it was, unless the game has moved it since. Only while the mode runs, never while the building is already moving or the game is using it, 3 s between moves, 6 a minute at most, and only while the game's modes cannot start and its own building locks do not keep counting.",
+  toy: "Only in a mode that is the whole game (The game's own modes: are off). Gives the game's own command for a move of one of its toys (X-Men LE: the Sentinel head up or down - its motor runs it to its own switch, as the service menu's test does). The game ignores it while the toy is moving or unless it is at the other end. At most one move a second.",   // PAD-1406
   kickback: "Only in a mode that is the whole game (The game's own modes: are off). Switches every kickback the game has on or off, through the game's own switch for them (its board then fires each from its own switch, at the game's power). Each is put back as the game had it when the mode ends.",   // PAD-1406
   device: "Only in a mode that is the whole game (The game's own modes: are off). A lock, scoop or eject of the game's: keeps every ball that lands in it, or lets them go - kicked out the game's own way, at its own power, with its own retries (the call the game's own lock rules make). The game keeps what it kept before when the mode ends.",   // PAD-1406
   pulse: "Only in a mode that is the whole game (The game's own modes: are off). Fires one of the game's own devices once, through the game's own code for it, at the power and time the operator set for it (X-Men: the Sentinel's kicking target). At most once a second.",   // PAD-1406
@@ -253,6 +254,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
       { op: "scoop_hold", ms: num(3000), which: "next" }, { op: "let_go", what: "*" },
       { op: "flippers", to: "off" }, { op: "flippers", to: "on" },   // PAD-1406
       ...((ch.pulses || []).length ? [{ op: "pulse", what: ch.pulses[0].name }] : []),   // PAD-1406: the game's one-shot devices
+      ...((ch.toys || []).length ? ch.toys[0].actions.map((a) => ({ op: "toy", what: ch.toys[0].name, action: a })) : []),   // PAD-1406
       ...(ch.kickbacks ? [{ op: "kickback", to: "on" }, { op: "kickback", to: "off" }] : []),   // PAD-1406: Guardians
       ...((ch.devices || []).length ? [{ op: "device", what: ch.devices[0].name, keep: "hold" }, { op: "device", what: ch.devices[0].name, keep: "let_go" }] : []),   // PAD-1406
       { op: "shield", where: "toward" }, { op: "building", floor: "3" }, { op: "shake", ms: num(500), strength: "hard" },
@@ -311,7 +313,7 @@ export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode
   set: "var", change: "var", if: "flow", callout: "show", words: "show", fade: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
-  shake: "mech", shake_game: "mech", spare_drive: "mech", flippers: "mech", pulse: "mech", device: "mech", kickback: "mech",
+  shake: "mech", shake_game: "mech", spare_drive: "mech", flippers: "mech", pulse: "mech", device: "mech", kickback: "mech", toy: "mech",
   jjp_sound: "show", jjp_lamp: "show", jjp_lamp_off: "show", jjp_coil: "mech", jjp_title: "show" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
@@ -614,6 +616,9 @@ function StmtBody({ b, path, ed }) {
         onChange=${(v) => set("name", v)} />${how === "light" ? html`<span class="bk-w">: ${shotWord}</span>` : null}`;
     }
     case "building": return html`<span class="bk-w" ...${tip(TIP.building)}>Move the building to</span><${Pick} value=${String(b.floor ?? "3")} options=${BUILDING_FLOOR} onChange=${(v) => set("floor", v)} />`;
+    case "toy": return html`<span class="bk-w" ...${tip(TIP.toy)}>Move the</span><${Pick} value=${b.what}
+        options=${(ed.ch.toys || []).map((m) => [m.name, m.label])} missing="(not on this game)" onChange=${(v) => set("what", v)} />
+      <${Pick} value=${b.action} options=${(((ed.ch.toys || []).find((m) => m.name === b.what) || {}).actions || []).map((a) => [a, a])} missing="(?)" onChange=${(v) => set("action", v)} />`;   // PAD-1406
     case "kickback": return html`<span class="bk-w" ...${tip(TIP.kickback)}>Kickbacks</span><${Pick} value=${b.to || "on"} options=${[["on", "on"], ["off", "off"]]} onChange=${(v) => set("to", v)} />`;   // PAD-1406
     case "device": return html`<span class="bk-w" ...${tip(TIP.device)}>The</span><${Pick} value=${b.what}
         options=${(ed.ch.devices || []).map((m) => [m.name, m.label])} missing="(not on this game)" onChange=${(v) => set("what", v)} />
@@ -893,7 +898,7 @@ export function stmtLabel(b) {
     hud_text: "Show on the HUD", hud_counter: "Set a counter", hud_gauge: "Fill the gauge", hud_award: "Award line",
     hud_progress: "Progress panel number", roster_progress: "Selection screen count",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
-    hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", flippers: b.to === "on" ? "Flippers back on" : "Flippers off", pulse: "Fire a device", device: b.keep === "let_go" ? "Let go of the balls in" : "Hold the balls in", kickback: b.to === "off" ? "Kickbacks off" : "Kickbacks on", building: "Move the building to",
+    hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", flippers: b.to === "on" ? "Flippers back on" : "Flippers off", pulse: "Fire a device", device: b.keep === "let_go" ? "Let go of the balls in" : "Hold the balls in", kickback: b.to === "off" ? "Kickbacks off" : "Kickbacks on", toy: "Move a toy", building: "Move the building to",
     shake: "Shake the cabinet for", shake_game: "Shake it the game's way", game_wizard: "The game's mini-wizard",
     spare_drive: "Drive a spare output",
     jjp_sound: "Play a game sound", jjp_lamp: "Light a lamp", jjp_lamp_off: "Hand back a lamp", jjp_coil: "Fire a coil", jjp_title: "Title the panel",

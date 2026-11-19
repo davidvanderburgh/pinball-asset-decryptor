@@ -106,6 +106,7 @@ class TitleProfile:
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
     own_game_coils: tuple = ()       # PAD-1406: ((name, label), ...) held coils only the mode that IS the whole game may
     #                                  hold (`value <name>_own_game 1`: toys and posts the game's rules drive), proven
+    toys: tuple = ()                 # PAD-1406: ((name, label, (action, ...)), ...) a toy's own moves (pm_toy): `text toys`
     kickbacks: bool = False          # PAD-1406: the whole game's mode can switch the game's kickbacks (pm_kickback):
     #                                  the port names `site kickback_set` and `data kickback_count` (Guardians)
     ball_devices: tuple = ()         # PAD-1406: ((name, label), ...) the game's ball devices a whole-game mode may keep balls
@@ -1847,6 +1848,23 @@ def _ball_devices(port):
                  if not _VIRTUAL_DEVICE.search(n.upper()))
 
 
+#: PAD-1406: toys whose moves were proven in the emulator: Uncanny X-Men LE 0.98's Sentinel head (2026-11-19 toyjob.sh:
+#: the game's own up command ran its head motor, node 9 coil 5 at 86/255, stopped by the game's own logic)
+TOYS_PROVEN = frozenset({("uncanny_xmen_le-0.98", "sentinel_head")})
+
+
+def _toys(port, key):
+    """PAD-1406: ``((name, label, actions), ...)``: the port's `text toys` with every move's `site <name>_<move>`."""
+    if not port:
+        return ()
+    out = []
+    for n in port["text"].get("toys", "").split():
+        acts = tuple(a for a in port["text"].get("%s_actions" % n, "").split() if ("%s_%s" % (n, a)) in port["site"])
+        if acts and port["data"].get("%s_obj" % n) and (key, n) in TOYS_PROVEN:
+            out.append((n, port["text"].get("%s_label" % n, n), acts))
+    return tuple(out)
+
+
 def _pulse_coils(port, key):
     """PAD-1406: ``((name, label), ...)``: the port's `text pulse_coils` with their `site <name>_fire`, proven ones only."""
     if not port:
@@ -2968,6 +2986,7 @@ def profile_from_port(path):
         own_game_coils=_own_game_coils(port, key),                           # PAD-1406
         pulse_coils=_pulse_coils(port, key),                                 # PAD-1406
         ball_devices=_ball_devices(port),                                    # PAD-1406
+        toys=_toys(port, key),                                               # PAD-1406
         kickbacks="kickback_set" in sites and bool(port["data"].get("kickback_count")),   # PAD-1406
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589

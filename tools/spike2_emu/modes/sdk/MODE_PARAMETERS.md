@@ -285,7 +285,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 208 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 210 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -358,6 +358,8 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_coil_pulse_known(name)` | PAD-1406: 1 when this game's port has that one-shot device | - | PAD-1406 |
 | `pm_device_keep(name, n)` | PAD-1406: one of the game's ball devices (a lock, scoop or eject, by the game's own name for it: "UPPER LOCK", "left_scoop") keeps n balls and the framework ejects the rest its own way - the call the game's own lock rules make (`site ball_device_keep`, `data ball_devices`, `data ball_device_count`: every newest build). 0 = let every ball go; n is cut to the device's capacity. Only the mode that has the whole game; never the trough or the auto plunger, nor a kind of device the call does not take; the game's own keep comes back when the mode ends. 1 done, 0 refused | (the blocks: The ... keeps every ball / lets its balls go) | PAD-1406: emulator, Godzilla Pro's scoop held 22 s and kicked on release, Turtles Pro's upper lock released; every device of every newest build held and let go |
 | `pm_kickback(on)` | PAD-1406: every kickback the game has switched on (1) or off (0) through the framework's own switch for each (`site kickback_set`: set(index, on, 0), answering what it was; `data kickback_count`), for the mode that has the whole game; each put back as the game had it when the mode ends. Of the newest builds only Guardians of the Galaxy has framework kickbacks. 1 done, 0 refused | (the blocks: Kickbacks on / off) | PAD-1406: emulator, Guardians Pro and LE 1.15 (both kickback rules on, off, back as the game had them) |
+| `pm_toy(name, action)` | PAD-1406: the game's own command for one move of a toy (`text toys`, `text <name>_actions`, `site <name>_<action>` on `data <name>_obj`, checked by `value <name>_vtable`); Uncanny X-Men LE: `sentinel_head` `up` / `down`, the service menu test page's own commands (0x32f34 / 0x32f78) that run the head motor to its switch. Only the mode that has the whole game, in a game, not tilted, 1 s apart. 1 given, 0 refused | (the blocks: Move the ...) | PAD-1406: emulator, X-Men LE 0.98 (the head motor, node 9 coil 5, run at the game's 86/255) |
+| `pm_toy_known(name, action)` | PAD-1406: 1 when this game has that toy and move | - | PAD-1406 |
 | `pm_kickback_known()` | PAD-1406: 1 when this game has kickbacks of the framework's | - | PAD-1406 |
 | `pm_device_balls(name)` | PAD-1406: the balls in that device now; -1 = no such device | - | PAD-1406 |
 | `pm_device_known(name)` | PAD-1406: 1 when this game has that ball device and the keep call | - | PAD-1406 |

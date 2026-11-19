@@ -114,7 +114,27 @@ kick 255 for 60 ms on 9.3 twice, a second one at once refused; both refused once
 - Proof (kbjob.sh): Guardians LE and Pro - rule 8.6 (input 12, off as the game had it) and 9.8 (input 23, on) both on,
   both off, both on, then back as the game had them when the rules were given back; Sword of Rage LE refused cleanly.
 
-## Next (runs 6+), in this order
+## Done (run 6): the Sentinel head, and the final sweep
+
+- `pm_toy(name, action)` / `pm_toy_known`: a toy's own moves through the game's own command for each (`text toys`,
+  `text <name>_actions`, `site <name>_<action>` on `data <name>_obj`, checked by `value <name>_vtable`). X-Men LE 0.98:
+  `sentinel_head` up / down = the service menu test page's own 0x32f34 / 0x32f78 on Sentinel_Head_Motor (0x644cb8,
+  vtable 0x555d18), found from TestMenuPageDiagGameSentinelHead's vtable. The game refuses a move while the head moves,
+  while a head process runs, unless it sits at the other end, and while its kick target check says no (switch 91).
+  The X-Men Pro has no head motor. Profile.toys (TOYS_PROVEN); Blocks *Move the ...*.
+- Proof (toyjob.sh, the end switch and switch 91 held): the move started the game's own head motor run - node 9 coil 5
+  at the game's 86/255, stopped and retried by the game (the rig cannot carry the head onto its switch); a second
+  move inside 1 s and any move after the rules were given back refused.
+- Final regression (flipjob.sh, the finished runtime): 52 of 53 newest builds pass flippers and drain to one; D&D LE
+  again only its drain to one, the rig's ball feed (its flippers pass; D&D Pro passes).
+
+## What stays as it was
+
+- The magnet past 5 s: X-Men's own longest magnet command is 2.5 s (LE) / 1.2 s (Pro); a hold is never longer.
+- Other titles' own motor toys: the pm_toy route takes any title's toy by port lines; X-Men's are wired and proven. Their
+  posts, diverters and magnets were already held through the held-coil route (PAD-381/420) where proven.
+
+## Earlier plan (runs 1-5)
 
 1. ~~**Switch names at run time.**~~ Done in run 3. The game builds its switch table on the heap (mktables.py); the shim already reads
    names from it. A runtime reader of the switch descriptors' names (per framework generation, as the switch-edge

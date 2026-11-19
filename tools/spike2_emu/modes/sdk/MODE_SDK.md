@@ -1670,6 +1670,12 @@ release both locks). `pm_device_keep(name, n)` makes it for the whole game's mod
 trough and the auto plunger are the game's alone, and so are the device kinds the call does not take (a VUK that cannot
 hold a ball). When the mode ends each device it touched keeps what the game had it keep.
 
+**A toy's own moves (PAD-1406).** A toy the game drives with a motor to its own switches is moved by the game's own
+command for each move: Uncanny X-Men LE's Sentinel head, `pm_toy("sentinel_head", "up")` / `"down"` (the blocks: *Move
+the Sentinel head up*), the two commands its service menu's test page gives (0x32f34, 0x32f78). The game ignores one
+while the head moves, while one of its own head processes runs, or unless the head sits at the other end; its motor
+(node 9 coil 5, the game's 86/255) runs it to the switch and the game stops it there. The X-Men Pro has no head motor.
+
 **Kickbacks (PAD-1406).** The framework keeps its kickbacks as a list beside the pop bumpers and slingshots (the three
 its tilt switches off together). Only Guardians of the Galaxy (Pro and LE 1.15) has any among the newest builds: the
 kickback on input 12 (off until the game's rules light it) and on input 23. `pm_kickback(on)` switches them all through

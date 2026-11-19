@@ -626,6 +626,15 @@ text sentinel_finger_drive 9 8 a180 a181 a182 3000
 value sentinel_finger_off_adj 186
 value sentinel_finger_own_game 1
 text pulse_coils sentinel_kick
+# PAD-1406: the Sentinel head's motor moves, the service menu test page's own commands (0x32f34 up: only from Sentinel
+# Head Down; 0x32f78 down: only from Sentinel Head Up) on the Sentinel_Head_Motor object, checked by its vtable - pm_toy
+text toys sentinel_head
+text sentinel_head_label Sentinel head
+text sentinel_head_actions up down
+site sentinel_head_up      0x00032f34 0xe92d4010 0xe1a04000
+site sentinel_head_down    0x00032f78 0xe92d4010 0xe1a04000
+data sentinel_head_obj     0x00644cb8
+value sentinel_head_vtable 0x555d18
 text sentinel_kick_label Sentinel kicking target
 site sentinel_kick_fire 0x000337dc 0xe92d4010 0xe3a000c0
 value sentinel_kick_off_adj 194

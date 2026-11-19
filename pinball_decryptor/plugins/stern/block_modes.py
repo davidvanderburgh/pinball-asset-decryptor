@@ -352,6 +352,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "pulse",                                                   # PAD-1406: one of the game's one-shot devices
               "device",                                                  # PAD-1406: a lock or scoop keeps its balls / lets go
               "kickback",                                                # PAD-1406: the game's kickbacks on / off
+              "toy",                                                     # PAD-1406: a toy's own move (the Sentinel head)
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
               "fade",                                                    # PAD-1405: the whole screen to a colour
@@ -1287,6 +1288,7 @@ def card_checks(p):
         "pulses": dict(getattr(p, "pulse_coils", ()) or ()),                                   # PAD-1406
         "devices": dict(getattr(p, "ball_devices", ()) or ()),                                 # PAD-1406
         "kickbacks": bool(getattr(p, "kickbacks", False)),                                     # PAD-1406
+        "toys": list(getattr(p, "toys", ()) or ()),                                            # PAD-1406
         "done": [list(x) for x in getattr(p, "done_modes", ()) or ()] if p.can("done") else [],   # PAD-747: [[id, name]]
         "spare": list(getattr(p, "spare", ()) or ()),       # PAD-826: "in" / "out" ([] = neither)
     }
@@ -1296,7 +1298,7 @@ def card_checks(p):
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
              game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None,
              drain=None, roster=None, places=None, done=None, spare=None, flippers=None, own_mechs=None,
-             pulses=None, devices=None, kickbacks=None):
+             pulses=None, devices=None, kickbacks=None, toys=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -1376,6 +1378,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "pulses": dict(pulses) if pulses is not None else None,            # PAD-1406: its one-shot devices
            "devices": dict(devices) if devices is not None else None,         # PAD-1406: its ball devices
            "kickbacks": kickbacks,                                            # PAD-1406: False where it has none
+           "toys": {t[0]: list(t[2]) for t in toys} if toys is not None else None,   # PAD-1406: {name: moves}
            "program": program}                        # PAD-646: a Light show block names one of its shows
     _check_shows(program, ctx)                        # PAD-646
     hud = program["hud"]
@@ -1970,6 +1973,15 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["shield"] is False:
                 ctx["out"].append("%s turns the shield targets, which a mode cannot do on this card's game."
                                   % where)
+        elif op == "toy":                                                            # PAD-1406
+            what, act = b.get("what"), b.get("action")
+            if not what or not HOLD_RE.match(str(what)) or not act or not HOLD_RE.match(str(act)):
+                ctx["out"].append("%s moves a toy with none chosen." % where)
+            elif ctx["program"].get("game_modes") != "own_game":
+                ctx["out"].append("%s moves the %s, which only a mode that is the whole game may do (The game's own "
+                                  "modes: are off: this is the whole game)." % (where, what))
+            elif ctx["toys"] is not None and act not in ctx["toys"].get(what, ()):
+                ctx["out"].append("%s moves the %s %s, which this card's game cannot." % (where, what, act))
         elif op == "kickback":                                                       # PAD-1406
             if b.get("to") not in FLIPPERS_TO:
                 ctx["out"].append("%s switches the kickbacks: on, or off." % where)
@@ -2610,6 +2622,11 @@ class _Gen:
                 except (TypeError, ValueError):
                     secs = 10
                 out.append(pad + "if (run.on && !pm_ball_save(%du)) pm_log(\"ball save refused\");" % secs)
+            elif op == "toy":                      # PAD-1406: a toy's own move, the game's own command for it
+                what, act = str(b.get("what") or ""), str(b.get("action") or "")
+                if HOLD_RE.match(what) and HOLD_RE.match(act):
+                    out.append(pad + "if (run.on && !pm_toy(%s, %s)) pm_log(\"%s %s: not moved\");"
+                               % (_c_str(what), _c_str(act), what, act))
             elif op == "kickback":                 # PAD-1406: the game's kickbacks on / off, its own switch for them
                 if b.get("to") in FLIPPERS_TO:
                     out.append(pad + "if (run.on && !pm_kickback(%d)) pm_log(\"the kickbacks stay as they are\");"

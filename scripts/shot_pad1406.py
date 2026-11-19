@@ -60,6 +60,8 @@ def main():
     dev = "pulse" in BM.STATEMENTS
     jaw = ([{"op": "hold", "what": "sentinel_jaw", "ms": num(4000)}] if dev
            else [{"op": "log", "text": "the Sentinel jaw: no way to hold it"}])
+    if "toy" in BM.STATEMENTS:                                     # PAD-1406 run 6: the Sentinel head's own move
+        jaw = jaw + [{"op": "toy", "what": "sentinel_head", "action": "up"}]
     kick = ([{"op": "pulse", "what": "sentinel_kick"}] if dev
             else [{"op": "log", "text": "the kicking target: no way to fire it"}])
     q["scripts"] = [

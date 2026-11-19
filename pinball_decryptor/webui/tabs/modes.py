@@ -4131,6 +4131,8 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
                                  "Not on this game yet: the app has not found where %s adds its own points, makes "
                                  "its calls and starts its modes, so a mode cannot switch them off." % p.label),
                 "kickbacks": bool(p is not None and getattr(p, "kickbacks", False)),    # PAD-1406: the Kickbacks block
+                "toys": [{"name": n, "label": lab, "actions": list(acts)}                  # PAD-1406: the Move block
+                         for n, lab, acts in (getattr(p, "toys", ()) or ())] if p else [],
                 # PAD-1406: the ball device block: the game's locks and scoops, for a mode that is the whole game
                 "devices": [{"name": n, "label": lab} for n, lab in (getattr(p, "ball_devices", ()) or ())] if p else [],
                 # PAD-1406: the Fire block: the game's own one-shot devices, for a mode that is the whole game

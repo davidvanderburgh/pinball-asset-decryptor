@@ -26,6 +26,7 @@ import sys
 
 from pinball_decryptor.core import runtime
 from pinball_decryptor.webui import rig as _rig
+from ..core import wsl_up as _wsl_up
 
 #: The rig ships next to this package.  ``PAD_AP_EMU_DIR`` moves it.
 DEFAULT_RIG_DIR = str(
@@ -135,6 +136,8 @@ def state_text(info):
     """(label, hint) for the headline."""
     if not info:
         return "Checking…", ""
+    if info.get(_wsl_up.ASLEEP_KEY):
+        return _wsl_up.ASLEEP_STATE
     if info.get("wsl") != "1":
         return ("WSL not answering",
                 "The game runs inside WSL, the app's Linux.")

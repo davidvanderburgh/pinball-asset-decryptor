@@ -11,6 +11,10 @@ GPG = Prerequisite(name="gpg", where="native", probe="command -v gpg",
 
 
 def test_native_goes_to_wsl_on_windows(monkeypatch):
+    # the static hint is the one for a PC whose runtime is not in use; a
+    # runtime answer warmed by an earlier test on this worker must not
+    # swap in the runtime's own hint
+    monkeypatch.setattr(prereqs.runtime, "wsl_distro", lambda *a, **k: None)
     monkeypatch.setattr(prereqs, "_native_location", lambda: "wsl")
     seen = []
     monkeypatch.setattr(prereqs, "_probe_wsl",

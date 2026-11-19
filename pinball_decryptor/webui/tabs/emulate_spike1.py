@@ -26,6 +26,7 @@ import threading
 import time
 
 from ...core import payloads, rigdata, rigslot, runtime
+from ...core import wsl_up as _wsl_up
 from pinball_decryptor.webui import rig as _rig
 from pinball_decryptor.webui import runtime_prompt as _runtime_ui
 from .. import emulate_spike1_core as s1
@@ -1288,7 +1289,8 @@ class EmulateSpike1Tab(RigTabMixin, TabService):
         # re-list the save slots when their directory changed, and once on
         # the first poll so the manager fills without a button press
         sm = info.get("saves_mtime")
-        if sm != self._slots_mtime:
+        # not while WSL is down: listing them would boot it (PAD-1457)
+        if sm != self._slots_mtime and not info.get(_wsl_up.ASLEEP_KEY):
             self._slots_mtime = sm
             self.slots_refresh()
 

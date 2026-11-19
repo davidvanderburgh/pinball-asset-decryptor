@@ -58,6 +58,10 @@ def _windows_and_published(monkeypatch):
     monkeypatch.setattr(runtime.sys, "platform", "win32")
     monkeypatch.setattr(runtime, "IMAGE",
                         replace(runtime.IMAGE, sha256="ab" * 32, size=123))
+    # the registry answer (PAD-1457) is the real machine's: these tests are
+    # about wsl.exe's, so the registry reads as unreadable, which is the
+    # path that still asks wsl.exe; the PAD-1457 tests set it themselves
+    monkeypatch.setattr(runtime._wsl_up, "registered_distros", lambda: None)
     runtime.invalidate()
     yield
     runtime.invalidate()
@@ -666,3 +670,58 @@ def test_a_failed_import_says_what_wsl_said_and_how_full_the_drive_is(
     msg = str(exc.value)
     assert "There is not enough space on the disk." in msg
     assert "50.0 GB free" in msg and "wsl --install" in msg
+
+
+# ------------------------------------------- never boots to answer (1457) --
+
+def _registry(monkeypatch, tmp_path, running, guid="{guid-1}"):
+    monkeypatch.setattr(runtime._wsl_up, "registered_distros",
+                        lambda: {runtime.DISTRO.casefold(): guid} if guid
+                        else {"ubuntu": "{u}"})
+    monkeypatch.setattr(runtime._wsl_up, "distro_running",
+                        lambda name=None: running)
+    monkeypatch.setattr(runtime, "_manifest_file",
+                        lambda: str(tmp_path / "runtime_manifest.json"))
+
+
+def test_the_list_comes_from_the_registry_with_no_wsl_launch(
+        monkeypatch, tmp_path):
+    """PAD-1457: registration is read where wsl -l reads it, so asking
+    costs no process at all."""
+    calls = []
+    monkeypatch.setattr(runtime, "_run", _runner(listed=[], calls=calls))
+    _registry(monkeypatch, tmp_path, running=False, guid=None)
+    assert runtime.status(refresh=True)[0] == "absent"
+    assert calls == []
+
+
+def test_the_manifest_is_read_once_per_install_then_remembered(
+        monkeypatch, tmp_path):
+    """PAD-1457: reading /etc/pad-runtime.json boots the distro, and the
+    status is asked every minute, so WSL never stopped while the app was
+    open.  Read once, kept against the distro's GUID, and never again."""
+    calls = []
+    monkeypatch.setattr(runtime, "_run", _runner(calls=calls))
+    _registry(monkeypatch, tmp_path, running=True)
+    assert runtime.status(refresh=True)[0] == "ready"
+    assert [c for c in calls if "cat" in c]          # the one live read
+    calls.clear()
+    _registry(monkeypatch, tmp_path, running=False)
+    for _ in range(3):
+        assert runtime.status(refresh=True)[0] == "ready"
+    assert calls == [], "a status question must not boot the runtime"
+
+
+def test_a_reinstall_is_a_new_guid_so_the_kept_manifest_is_not_used(
+        monkeypatch, tmp_path):
+    """An upgrade is unregister + import, which gives the distro a new GUID:
+    the old version's manifest must not answer for the new one."""
+    monkeypatch.setattr(runtime, "_run", _runner(
+        manifest_json=dict(MANIFEST, runtime_version="old")))
+    _registry(monkeypatch, tmp_path, running=True, guid="{old}")
+    assert runtime.status(refresh=True)[0] == "stale"
+    calls = []
+    monkeypatch.setattr(runtime, "_run", _runner(calls=calls))
+    _registry(monkeypatch, tmp_path, running=True, guid="{new}")
+    assert runtime.status(refresh=True)[0] == "ready"
+    assert [c for c in calls if "cat" in c]

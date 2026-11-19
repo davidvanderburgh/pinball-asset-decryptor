@@ -260,6 +260,7 @@ class EmulateTab(EmulateLogMixin, TabService):
     BACKSTOP_MIN = rig.BACKSTOP_MIN
     POLL_MS = rig.POLL_MS
     POLL_IDLE_MS = rig.POLL_IDLE_MS
+    POLL_HIDDEN_MS = 60000
     COUNTRIES = rig.COUNTRIES
     COUNTRY_GAME = rig.COUNTRY_GAME
     POWER_CHOICES = rig.POWER_CHOICES
@@ -363,6 +364,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._docker_engine = None
         self._docker_report_next = False
         self._setup = None
+        self._setup_deferred = False   # the startup probe waits for WSL (PAD-1457)
         self._rt_last = None         # the last runtime.status() the poll read
         self._setup_busy = False
         self._setup_fixing = False
@@ -581,7 +583,10 @@ class EmulateTab(EmulateLogMixin, TabService):
         if sys.platform == "darwin":
             self._docker_check()
         else:
-            self._setup_check()
+            # not at app start while WSL is down: the probe would boot it
+            # (PAD-1457); the poll that first sees the rig up runs it, or
+            # this tab's first showing does
+            self._setup_check(unless_asleep=True)
         self._schedule_poll()
 
     def _bind_assets(self):
@@ -611,6 +616,12 @@ class EmulateTab(EmulateLogMixin, TabService):
 
     def on_show(self):
         self._bind_assets()
+        if getattr(self, "_setup_deferred", False):
+            # the user came to the emulator: the setup notice is worth the
+            # boot now (PAD-1457 put it off at app start)
+            self._setup_check()
+        if self._spike3_probed is None:
+            self._spike3_kick()
         # the Stern ladder, then what the last poll said (Tk showed idle
         # here and let the next poll repaint; this is that repaint, early)
         try:
@@ -722,7 +733,15 @@ class EmulateTab(EmulateLogMixin, TabService):
                 and os.path.isfile(os.path.join(rig.rig_dir(), "parts.py"))):
             return
 
+        # off screen (the card the app opened with), the question waits
+        # for WSL to be up rather than booting it (PAD-1457); a card picked
+        # on this tab is answered at once
+        visible = self._tab_visible()
+
         def run():
+            if not visible and self._rig_asleep():
+                self._spike3_probed = None
+                return
             try:
                 cmd = rig.spike3_cmd(path)
             except Exception:                            # noqa: BLE001
@@ -1425,15 +1444,19 @@ class EmulateTab(EmulateLogMixin, TabService):
     # ------------------------------------------------------------------
     # setup probe (Windows / Linux)
     # ------------------------------------------------------------------
-    def _setup_check(self):
+    def _setup_check(self, unless_asleep=False):
         if self._setup_busy or sys.platform == "darwin" or no_rig():
             return
         self._setup_busy = True
         self._setup_ticks = 0
+        self._setup_deferred = False
 
         def run():
             facts = None
             try:
+                if unless_asleep and self._rig_asleep():
+                    self._setup_deferred = True
+                    return
                 facts = rig.setup_state()
                 if sys.platform == "win32":
                     # warm the launch's account answer here, off the UI
@@ -4283,9 +4306,39 @@ class EmulateTab(EmulateLogMixin, TabService):
         if ms is None:
             if not self._polled_once:
                 ms = 700
+            elif self._last_up:
+                ms = self.POLL_MS
+            elif not self._tab_visible():
+                # idle and off screen (PAD-1457): nobody sees the reading
+                ms = self.POLL_HIDDEN_MS
             else:
-                ms = self.POLL_MS if self._last_up else self.POLL_IDLE_MS
+                ms = self.POLL_IDLE_MS
         self._poll_job = self._after(ms, self._poll)
+
+    def _tab_visible(self):
+        try:
+            return self.window.current_tab_key() == self.key
+        except Exception:                                # noqa: BLE001
+            return True
+
+    def _rig_asleep(self):
+        """True when the rig's distro is certainly not running, so no game
+        is either: answered WITHOUT wsl.exe while the WSL VM is down, and
+        with a list that never starts anything while it is up (PAD-1457).
+        The status call it saves would have booted WSL every poll."""
+        if sys.platform != "win32":
+            return False
+        try:
+            from ...core import wsl_up
+            if not wsl_up.vm_running():
+                return True
+            if self._last_up:
+                return False            # its game is running: so is WSL
+            if wsl_up.running_distros() is None:
+                return False            # WSL could not say: ask as before
+            return not wsl_up.distro_running(runtime.distro_for("spike2"))
+        except Exception:                                # noqa: BLE001
+            return False
 
     def _poll(self):
         self._poll_job = None
@@ -4312,20 +4365,24 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._poll_busy = True
 
         def run():
-            try:
-                # as root: the rig is told apart from the others by a read
-                # only root can make (rig.status_cmd, PAD-496)
-                out = self._run(rig.status_cmd(),
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, timeout=20)
-                text = out.stdout.decode("utf-8", "replace")
-            except Exception:                            # noqa: BLE001
-                text = ""
-            info = rig.parse_status(text)
-            try:
-                rt = runtime.status()
-            except Exception:                            # noqa: BLE001
-                rt = None
+            if self._rig_asleep():
+                from ...core import wsl_up
+                info, rt = wsl_up.asleep_info(), None
+            else:
+                try:
+                    # as root: the rig is told apart from the others by a
+                    # read only root can make (rig.status_cmd, PAD-496)
+                    out = self._run(rig.status_cmd(),
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, timeout=20)
+                    text = out.stdout.decode("utf-8", "replace")
+                except Exception:                        # noqa: BLE001
+                    text = ""
+                info = rig.parse_status(text)
+                try:
+                    rt = runtime.status()
+                except Exception:                        # noqa: BLE001
+                    rt = None
             # WHO HOLDS THE OTHER RIGS (core/rigslot.py): file reads on the
             # Windows side, no WSL call, so it rides this poll for free.
             try:
@@ -4348,6 +4405,12 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._polled_once = True
                 self._runtime_apply(rt)
                 self._apply(info)
+                if not info.get("_wsl_asleep"):
+                    # WSL is up now: what app start put off is free
+                    if getattr(self, "_setup_deferred", False):
+                        self._setup_check()
+                    if self._spike3_probed is None:
+                        self._spike3_kick()
                 self._follow_audio_ctl()
                 self._follow_restart_req()
                 self._follow_stop_req()

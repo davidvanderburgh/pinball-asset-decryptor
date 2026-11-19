@@ -163,6 +163,9 @@ def is_running():
     """
     if not is_supported():
         return False
+    from . import wsl_up
+    if not wsl_up.vm_running():
+        return False            # the VM is down: asked of nothing (PAD-1457)
     try:
         proc = subprocess.run(
             ["wsl", "-l", "--running", "-q"],

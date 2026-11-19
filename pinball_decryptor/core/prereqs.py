@@ -10,10 +10,12 @@ short timeout and capture nothing — the only thing that matters is the
 exit code.
 """
 
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
@@ -393,6 +395,10 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
         msg, hint = _diagnose_wsl_unusable()
         return False, msg, hint
 
+    remembered = _remembered_pass(cmd)
+    if remembered is not None:
+        return True, remembered, ""
+
     try:
         result = _run_in_wsl(cmd, PROBE_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -429,7 +435,9 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
         _wsl_boot_wait_failed = False
         _wsl_silent = None
         out = (result.stdout or "").strip().splitlines()
-        return True, out[0] if out else "available", ""
+        said = out[0] if out else "available"
+        _remember_pass(cmd, said)
+        return True, said, ""
 
     # Non-zero exit with a registered distro: the distro answered and the
     # tool inside it is missing/broken — the static hint (an apt install)
@@ -460,6 +468,82 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
         msg, hint = _diagnose_wsl_loop_failure(err)
         return False, msg, hint
     return False, err, ""
+
+
+# -- passes remembered while WSL sleeps (PAD-1457) --------------------------
+#
+# Every probe above runs inside the distro, and wsl.exe boots it to do so: the
+# strip, checked at app start and on every manufacturer switch, kept WSL from
+# ever stopping while the app was open.  A tool that was there is still there
+# (the distro only changes when someone changes it), so a PASS is remembered
+# against the distro's registry GUID - new on every re-install - and answers
+# while that distro is not running.  A failure is never remembered: the red
+# one is always checked for real, and so is anything once a month.
+
+PASS_TTL = 30 * 24 * 3600
+
+
+def _probe_distro_guid():
+    from . import wsl_up
+    reg = wsl_up.registered_distros()
+    if not reg:
+        return None, None
+    name = runtime.wsl_distro() or wsl_up.default_distro()
+    if not name:
+        return None, None
+    return name, reg.get(name.casefold())
+
+
+def _pass_file():
+    from . import config
+    return os.path.join(config._settings_root(), "wsl_probe_passes.json")
+
+
+def _load_passes():
+    try:
+        with open(_pass_file(), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _remembered_pass(cmd):
+    """The remembered pass for *cmd* while its distro is not running (so the
+    probe would boot it), else None (probe for real).  The distro, not the
+    VM: the VM lingers for a minute after its last distro stops."""
+    try:
+        from . import wsl_up
+        names = wsl_up.running_distros()
+        if names is None:
+            return None                 # WSL could not say: probe
+        name, guid = _probe_distro_guid()
+        if not guid or name.casefold() in names:
+            return None
+        rec = (_load_passes().get(guid) or {}).get(cmd)
+        if not rec or time.time() - float(rec.get("t", 0)) > PASS_TTL:
+            return None
+        return str(rec.get("said") or "available")
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def _remember_pass(cmd, said):
+    try:
+        name, guid = _probe_distro_guid()
+        if not guid:
+            return
+        data = _load_passes()
+        data = {guid: data.get(guid) or {}}       # only the live install's
+        data[guid][cmd] = {"said": said, "t": time.time()}
+        path = _pass_file()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 def _run_in_wsl(cmd: str, timeout: float) -> subprocess.CompletedProcess:

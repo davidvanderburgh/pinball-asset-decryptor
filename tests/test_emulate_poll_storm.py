@@ -39,7 +39,12 @@ class PollHarness:
 
     POLL_MS = EmulateTab.POLL_MS
     POLL_IDLE_MS = EmulateTab.POLL_IDLE_MS
+    POLL_HIDDEN_MS = EmulateTab.POLL_HIDDEN_MS
     _schedule_poll = EmulateTab._schedule_poll
+    visible = True
+
+    def _tab_visible(self):
+        return self.visible
     _poll = EmulateTab._poll
 
     def __init__(self):
@@ -140,5 +145,24 @@ def test_the_first_poll_is_fast_then_settles(harness):
     # One answered poll drops it to the slow idle cadence.
     harness._setup_busy = False
     harness._polled_once = True
+    harness._schedule_poll()
+    assert harness.timer.scheduled[-1][0] == EmulateTab.POLL_IDLE_MS
+
+
+def test_an_idle_hidden_tab_backs_off(harness):
+    """PAD-1457: idle and off screen, the Spike 2 tab polls once a minute
+    (its reading also carries the rig board); on screen, as before; a
+    running game keeps the fast pace either way."""
+    harness.visible = False
+    harness._schedule_poll()
+    assert harness.timer.scheduled[-1][0] == EmulateTab.POLL_HIDDEN_MS
+    assert EmulateTab.POLL_HIDDEN_MS > EmulateTab.POLL_IDLE_MS
+    harness._poll_job = None
+    harness._last_up = True
+    harness._schedule_poll()
+    assert harness.timer.scheduled[-1][0] == EmulateTab.POLL_MS
+    harness._poll_job = None
+    harness._last_up = False
+    harness.visible = True
     harness._schedule_poll()
     assert harness.timer.scheduled[-1][0] == EmulateTab.POLL_IDLE_MS

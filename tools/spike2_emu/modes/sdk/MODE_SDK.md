@@ -6277,7 +6277,7 @@ on, score on, add a ball on, the blocks' "When a shot is made"):
 | Left flipper + Action button, Right flipper + Action button, Both flipper buttons | the press that makes both held, either order (Cyclops' visor in Uncanny X-Men 2.0) |
 
 Only while a game is played: a press in attract, the press of Start that begins a game, a tilt or the bonus give
-none. The Beatles, Jurassic Park The Pin and Star Wars ELG have no Action button, so they offer no Action shots. Each
+none. The Beatles, Iron Maiden, Jurassic Park The Pin and Star Wars ELG have no Action button, so they offer no Action shots (Iron Maiden's program names a LOCKDOWN BUTTON (OPTIONAL) its cabinet lacks, PAD-1447). Each
 button shot takes a shot bit the title's port does not use, highest first, in the table's order; a port short of
 bits (King Kong: 9) offers the first ones (the presses, the flipper + Action combos, the 1 s holds). Godzilla's
 ports already name the Action and flipper buttons' presses as `switch` lines (PAD-228); those stay, the rest are

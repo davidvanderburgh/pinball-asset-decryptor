@@ -18,7 +18,7 @@ Stern's own modes are compiled into the game program, and the app doesn't rewrit
 |---|---|
 | Make a new mode with its own name, screen, clip, music and callouts | Yes. [Example 2](#2-a-mothra-mode-of-my-own) |
 | Start it on shots, a timer or a game event (ball start, skill shot, multiball...) | Yes. Events vary by game. |
-| Start it on a flipper, Action or Start button: a press, a release, a hold of 1 s or 3 s, or a flipper + Action combo | Yes, every title (no Action button on The Beatles, Jurassic Park The Pin, Star Wars ELG). [The cabinet buttons as shots](MODE_SDK.md#the-cabinet-buttons-as-shots-pad-1403) |
+| Start it on a flipper, Action or Start button: a press, a release, a hold of 1 s or 3 s, or a flipper + Action combo | Yes, every title (no Action button on The Beatles, Iron Maiden, Jurassic Park The Pin, Star Wars ELG). [The cabinet buttons as shots](MODE_SDK.md#the-cabinet-buttons-as-shots-pad-1403) |
 | Start it after another of my modes | Yes, with "Only after" |
 | Start it when the player picks one of the game's battles | Godzilla: yes, in that battle's place. [Example 1](#1-add-mothra-to-godzillas-battle-selection) |
 | Start it when the player beats one of the game's battles | No. No game reports a win. |

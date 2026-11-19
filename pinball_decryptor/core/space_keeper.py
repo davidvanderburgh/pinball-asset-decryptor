@@ -425,7 +425,11 @@ def plan_cards(rows, now):
         itself (``copied``) rather than staying for ever.  That is when it was
         copied, not used: but nothing has used it since either.
     An image deleted or on a drive not attached (gone / unreachable) is left
-    to the 30-day rule: the cached copy may be the only one left."""
+    to the 30-day rule: the cached copy may be the only one left.
+
+    PAD-1453: an image deleted from a folder of the user's own (``lost``:
+    not a ticket's or a staging folder) is never taken at all - the cached
+    copy of a custom build was found to be the last one left."""
     out = []
 
     def take(r, why, what):
@@ -433,7 +437,7 @@ def plan_cards(rows, now):
                     "why": why, "what": "Stern Spike 2: " + what, "extra": []})
 
     for r in rows:
-        if r.get("pinned") or r.get("use"):
+        if r.get("pinned") or r.get("use") or r.get("source") == "lost":
             continue
         if r.get("leftover"):
             last = int(r.get("copied") or 0)

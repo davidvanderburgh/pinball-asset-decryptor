@@ -251,9 +251,32 @@ def test_the_card_store_is_attached_when_it_exists_and_is_not_mounted(monkeypatc
         raise AssertionError(args)
     said = []
     assert rigdata.ensure_cards("PAD-Runtime", log=said.append, runner=runner) == "/mnt/wsl/cards"
-    assert ["wsl.exe", "--mount", "--vhd", str(f), "--name", "cards"] in calls
+    assert ["wsl.exe", "--mount", "--vhd", str(f), "--name", "cards", "--type", "ext4"] in calls
     assert said and "card store" in said[0]
     # already mounted: nothing more is run
     n = len(calls)
     assert rigdata.ensure_cards("PAD-Runtime", runner=runner) == "/mnt/wsl/cards"
     assert calls[n:] == [["bash", "-c", rigdata._CARDS_IS_MOUNTED]]
+
+
+def test_an_xfs_card_store_mounts_as_xfs_and_a_moved_one_finds_its_type(monkeypatch, tmp_path):
+    # PAD-1453: the store moved to XFS (shared blocks); wsl --mount assumes ext4 unless told
+    f = tmp_path / "pad-cards.vhdx"
+    f.write_bytes(b"x")
+    monkeypatch.setenv("PAD_CARDS_DISK", str(f))
+    calls = []
+
+    def runner(args, timeout=None, distro=None):
+        calls.append(args)
+        ok = args[:2] == ["wsl.exe", "--unmount"] or args[-1] == "xfs"
+        return subprocess.CompletedProcess(args, 0 if ok else 1, stdout=b"", stderr=b"")
+    (tmp_path / "pad-cards.vhdx.fstype").write_text("xfs")
+    rigdata.attach_cards("PAD-Runtime", runner=runner)
+    assert calls == [["wsl.exe", "--mount", "--vhd", str(f), "--name", "cards", "--type", "xfs"]]
+    # moved without its .fstype: ext4 is refused, the disk let go, xfs tried
+    (tmp_path / "pad-cards.vhdx.fstype").unlink()
+    calls.clear()
+    rigdata.attach_cards("PAD-Runtime", runner=runner)
+    assert calls == [["wsl.exe", "--mount", "--vhd", str(f), "--name", "cards", "--type", "ext4"],
+                     ["wsl.exe", "--unmount", str(f)],
+                     ["wsl.exe", "--mount", "--vhd", str(f), "--name", "cards", "--type", "xfs"]]

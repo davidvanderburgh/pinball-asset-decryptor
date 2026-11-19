@@ -77,7 +77,7 @@ ls "$CACHE" | sed -n 's/\.raw$//p' | tr '\n' ' '; echo
                     reason="cardmount.sh is the rig's (WSL/Linux) and speaks GNU stat/touch; macOS has BSD ones")
 def test_the_library_is_never_evicted_and_dead_entries_go_first():
     script = _funcs("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
-                    "cache_readers", "cache_in_use", "cache_source_state", "cache_limit_gb", "cache_used_kb",
+                    "cache_readers", "cache_in_use", "src_is_scratch", "src_drive_present", "cache_source_state", "cache_limit_gb", "cache_used_kb",
                     "cache_make_room") + DRIVER
     out = subprocess.run(["bash", "-s"], input=script.encode(), stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, timeout=60).stdout.decode("utf-8", "replace")
@@ -91,7 +91,7 @@ def test_the_library_is_never_evicted_and_dead_entries_go_first():
                   "[card] evicting cached swapped (its image is gone or changed) to make room",
                   "[card] evicting cached old_le (least recently booted) to make room"], out
     assert lines[lines.index(ev[-1]) + 1] == "rc=0", out
-    assert any("nothing evictable (2 library cards kept) - running off the original" in l for l in lines), out
+    assert any("nothing evictable (2 library cards or last copies kept) - running off the original" in l for l in lines), out
     assert lines[-2] == "rc=1" and lines[-1].split() == ["new_le", "new_pro"], out
 
 
@@ -127,11 +127,13 @@ def test_cache_list_names_the_library_and_the_clean_up_leaves_it():
 
 def test_every_attach_at_logon_tops_the_library_up():
     ps = _text("cardstore.ps1")
-    assert "[ValidateSet('create', 'mount', 'fill', 'status', 'task', 'prune')]" in ps
+    assert "[ValidateSet('create', 'mount', 'fill', 'status', 'task', 'prune', 'migrate', 'swap', 'dedupe')]" in ps
     mount = ps[ps.index("    'mount' {"):ps.index("    'fill' {")]
     # only after a real attach (an already-mounted store returns first), and never with -NoFill
     assert mount.index('exit 0') < mount.index("if (-not $NoFill) { & $PSCommandPath fill")
-    fill = ps[ps.index("    'fill' {"):ps.index("    'task' {")]
+    fill = ps[ps.index("    'fill' {"):ps.index("    'prune' {")]
+    # PAD-1453: then the new cards' blocks are shared, on an XFS store only
+    assert "storededupe.py' dedupe $MountPoint/library" in fill and "stat -f -c %T $MountPoint) = xfs" in fill
     assert "Start-Process -WindowStyle Hidden -FilePath 'wsl.exe'" in fill and "'-u', 'root'" in fill
     assert "/precache.sh' > $log 2>&1" in fill
     # status says how much of the library is held

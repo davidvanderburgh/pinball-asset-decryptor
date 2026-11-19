@@ -127,14 +127,38 @@ def cards_attached(distro: str, runner=None) -> bool:
     return out.returncode == 0 and "mounted" in _text(out.stdout)
 
 
+#: The store's filesystem. ext4 as made by `cardstore.ps1 create`; XFS since
+#: PAD-1453 (`cardstore.ps1 migrate`), whose reflinks let the library's LE and
+#: Pro cards share their identical blocks - 431 GiB of cards in 189 GiB.
+#: `wsl --mount` assumes ext4 unless told, so the type is written beside the
+#: disk (``<vhdx>.fstype``) and, the file being moved without it (Manage disk
+#: space > Move), the other type is tried when the first will not mount.
+CARDS_FSTYPES = ("ext4", "xfs")
+
+
+def cards_fstype() -> str:
+    try:
+        with open(cards_disk_path() + ".fstype", encoding="ascii") as f:
+            t = f.read().strip()
+        return t if t in CARDS_FSTYPES else "ext4"
+    except OSError:
+        return "ext4"
+
+
 def attach_cards(distro: str, runner=None) -> None:
     run = runner or _run
-    out = run(["wsl.exe", "--mount", "--vhd", cards_disk_path(),
-               "--name", CARDS_MOUNT_NAME])
-    if out.returncode != 0:
-        raise RuntimeError(
-            "could not attach the card store: %s"
-            % (_text(out.stdout).strip() or "exit %d" % out.returncode))
+    first = cards_fstype()
+    tried = []
+    for fs in [first] + [t for t in CARDS_FSTYPES if t != first]:
+        out = run(["wsl.exe", "--mount", "--vhd", cards_disk_path(),
+                   "--name", CARDS_MOUNT_NAME, "--type", fs])
+        if out.returncode == 0:
+            return
+        tried.append("%s: %s" % (fs, _text(out.stdout).strip()
+                                 or "exit %d" % out.returncode))
+        # a failed mount leaves the disk attached: let it go before the next try
+        run(["wsl.exe", "--unmount", cards_disk_path()])
+    raise RuntimeError("could not attach the card store: %s" % "; ".join(tried))
 
 
 def ensure_cards(distro: str, log=None, runner=None) -> Optional[str]:

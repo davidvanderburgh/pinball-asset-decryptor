@@ -82,7 +82,7 @@ CACHE=/mnt/wsl/cards/cardcache; echo "store $(cache_limit_gb)"
                     reason="cardmount.sh is the rig's (WSL/Linux) and speaks GNU stat/touch; macOS has BSD ones")
 def test_the_cache_keeps_under_its_limit_dead_first_never_one_in_use():
     script = _funcs("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
-                    "cache_readers", "cache_in_use", "cache_source_state", "cache_limit_gb",
+                    "cache_readers", "cache_in_use", "src_is_scratch", "src_drive_present", "cache_source_state", "cache_limit_gb",
                     "cache_need_kb", "room_say", "cache_make_room") + DRIVER
     out = subprocess.run(["bash", "-s"], input=script.encode(), stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, timeout=120).stdout.decode("utf-8", "replace")
@@ -101,7 +101,7 @@ def test_the_cache_keeps_under_its_limit_dead_first_never_one_in_use():
     ], out
     assert "rc=0" in lines, out
     assert "inuse recent " in lines, out            # the mounted one stays though it was booted longest ago
-    assert "default 64" in lines and "store 0" in lines, out
+    assert "default 64" in lines and "store 25" in lines, out          # PAD-1453: the store has a cap too
 
 
 def test_the_limit_and_the_drop_guard_in_the_script():

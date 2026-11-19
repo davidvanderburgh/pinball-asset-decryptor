@@ -2144,6 +2144,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         "ok": "Image found",
         "changed": "Image rebuilt since: copy never used again",
         "gone": "Image deleted or renamed",
+        "lost": "Image deleted: this may be the only copy left",
         "unreachable": "Image's drive not attached",
         "": "",
     }

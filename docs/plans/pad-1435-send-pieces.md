@@ -36,9 +36,25 @@ Probes: `C:/tmp/PAD-1435/probe2.py`, `probe4k.py`.
 - The full Send uses this on every game mount. The quick Send uses it only short of room, for the files it
   changes in place (the files it uploads beside never read their old copies, so indexing them would be extra).
 
-## Proof still to do (next run)
+## Stand-in proof (2026-11-19, Ubuntu, the card's own dropbear under qemu-arm, `C:/tmp/PAD-1435/run_one.sh`)
 
-1. Stand-in Send of the real case, V2.3 onto a v38 card with remote access set up: run it twice, with pieces and
+Each run: a fresh sparse copy of the old card, remote access set up with PAD's own code, the full Send by
+`send.py` (the app's `send_image`), then every /games file's sha1, owner, mode and size against the new image.
+
+| | before (`PAD_NO_PIECES=1`, 1 MiB delta) | after (64 KB pieces) |
+|---|---|---|
+| v36 -> v38 (David's real update, 406 files, 4.0 GB changed): sent | 2.65 GB | **2.05 GB** |
+| Compare phase | 122 s | 166 s (index under qemu) |
+| whole Send | 475 s | **380 s** |
+| card after the Send | matches v38, every file | matches v38, every file |
+| v38 -> V2.3: sent | 8.02 GB (= 9.49 - 1.47, as the probe said) | not run: the V2.3 image was deleted mid-proof |
+
+The stand-in's network is the WSL bridge (~7.5 MB/s through qemu'd dropbear); over the machine's Wi-Fi
+(~3.6 MB/s) every 0.6 GB less is ~170 s, so the gain there is larger than the 95 s here.
+
+## Still to do
+
+1. (Done for v36 -> v38, above.) Stand-in Send of the real case, V2.3 onto a v38 card with remote access set up: run it twice, with pieces and
    without (`PAD_NO_PIECES=1`). Compare the network bytes, the wall time, and the machine's card file by file
    against V2.3. The driver is `C:/tmp/PAD-1435/send.py` (scratch key dir `C:\tmp\PAD-1435\keys`; the KEY_DIR
    line there lost its backslashes to sed: fix it). The stand-in is `standin.sh`; `setup_cards.sh` sets up

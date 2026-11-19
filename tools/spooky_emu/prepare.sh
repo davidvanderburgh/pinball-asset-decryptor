@@ -117,6 +117,9 @@ v=$(head -1 "$TMP/version.txt" 2>/dev/null | tr -d '\r' | tr -cs 'A-Za-z0-9._-' 
 # the name is the version.
 [ -z "$v" ] && v=$(cd "$TMP/uptest" 2>/dev/null && ls version_*.txt 2>/dev/null | head -1 | sed 's/^version_/v/; s/\.txt$//')
 DEST=$SPK_CACHE/${key}_${v:-unknown}
+# PAD-1417: an update with PAD's custom modes in it (pad/padunity.so) is the same version as
+# the stock one: kept beside it, never in its place.
+[ -f "$TMP/pad/padunity.so" ] || [ -f "$TMP/uptest/pad/padunity.so" ] && DEST=${DEST}_padmodes
 echo "$key" > "$TMP/.pad_title"
 echo "$SOURCE" > "$TMP/.pad_source"
 rm -rf "$DEST"

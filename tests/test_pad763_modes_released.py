@@ -34,7 +34,7 @@ def test_the_modes_tab_shows_for_stern_without_a_code(tmp_path):
         w.call("ui.pick_manufacturer", "spooky")
         w.drain()
         tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}
-        assert not tabs["modes"]["visible"]
+        assert tabs["modes"]["visible"]          # PAD-1417: Spooky's custom modes editor
 
 
 def test_the_write_scan_lists_the_modes_without_a_code(manufacturers_by_key, tmp_path):

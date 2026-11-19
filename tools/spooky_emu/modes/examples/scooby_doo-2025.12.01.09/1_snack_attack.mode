@@ -1,0 +1,15 @@
+# Snack Attack - a starter mode: both inlanes start it, the slings score it
+name = Snack Attack
+title = SNACK ATTACK
+start = right_inlane left_inlane
+start_count = 2
+shots = right_sling left_sling middle_sling
+points = 250000
+seconds = 30
+complete = 3
+complete_points = 2000000
+sound_start = daphne_scooby_doo_where_are_you
+sound_shot = daphne_jackpot
+sound_complete = fred_great_work_gang
+title_color = ffdc00
+value_color = ffffff

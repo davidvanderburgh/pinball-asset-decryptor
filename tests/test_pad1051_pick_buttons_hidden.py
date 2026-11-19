@@ -157,7 +157,10 @@ int main(void)
 
 def test_the_pick_hides_its_buttons_only_while_its_ball_waits_and_a_launch_takes_the_one_shown(tmp_path):
     src = C.RUNTIME.read_text(encoding="utf-8")
-    main = C.MAIN[:C.MAIN.index("@DECL@")] + "static int coop_live;\n@DECL@" + C.MAIN[C.MAIN.index("@DECL@") + 6:]
+    # PAD-1404: a mode menu's held-back buttons, none here
+    main = C.MAIN[:C.MAIN.index("@DECL@")] + ("static int coop_live;\nstatic int btn_hide_n;\n"
+                                              "static int btn_hides(unsigned id) { return 0; }\n@DECL@") \
+        + C.MAIN[C.MAIN.index("@DECL@") + 6:]
     main = main[:main.index("int main(void)")] + LANE_MAIN
     fns = C.FNS[:C.FNS.index("static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)")] \
         + ("static int coop_unserved(void)", "static int coop_hides(unsigned id)") \
@@ -245,7 +248,10 @@ def test_a_launch_press_is_told_from_the_games_plunger_flags(tmp_path):
     whose level on Godzilla LE says "out" while the ball waits (emulator: its press at the lane counted toward x2);
     with the port's plunger flags it reads the game's own word. Without them it reads the lane as before (test_pad1031)."""
     src = C.RUNTIME.read_text(encoding="utf-8")
-    main = C.MAIN[:C.MAIN.index("@DECL@")] + "static int coop_live;\n@DECL@" + C.MAIN[C.MAIN.index("@DECL@") + 6:]
+    # PAD-1404: a mode menu's held-back buttons, none here
+    main = C.MAIN[:C.MAIN.index("@DECL@")] + ("static int coop_live;\nstatic int btn_hide_n;\n"
+                                              "static int btn_hides(unsigned id) { return 0; }\n@DECL@") \
+        + C.MAIN[C.MAIN.index("@DECL@") + 6:]
     main = main[:main.index("int main(void)")] + SAVE_MAIN
     lifted = "\n".join(C.R._lift(src, sig + "\n{") for sig in C.FNS)
     number = "\n".join(C.R._lift(src, sig + "\n{") for sig in ("static int hexval(int c)",

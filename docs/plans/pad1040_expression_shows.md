@@ -57,3 +57,12 @@ David (2026-11-07): "We should have an expression light show creator just like t
       recorded but READ - Led Zeppelin and Rush keep each song's show as frames in the program (cab_stock.py); the
       tab lists them, plays them and makes one a show of the project's, whose `game` steps the runtime plays from the
       game's memory (MODE_SDK.md "The game's own shows")
+- [x] a song of the game's own music banks (PAD-1414; Rush, Foo Fighters, Metallica, Deadpool, D&D, John Wick, Bond
+      1.06 keep their licensed songs in `image-scNN.bin`): the tab lists `music_catNN_NNNN` on every card (a show's
+      slot `sound_modes.bank_slot_key`, below zero), and `_cab_sids_for_build` reads the bank's sound ids that start
+      the song (`NN << 16 | n`) through the game's own bank loader on the emulator (`engine._game_banks_read`, shared
+      with the music modes: a bank read once per build, ~24 s). The runtime needed nothing: it matches whole 32-bit
+      ids in the request lists. Proof (2026-11-19, rig 1, hidden, muted, 4x): the real Write of a Rush LE 1.19 project
+      tied show B01R0 to bank 01's song as sound 65536 (0x10000); on the rig the runtime hooked 1 request, request 89
+      started the show, it followed the song's voice from 0.01 s in, and stopping the song ended it and gave the 119
+      cabinet lights back (C:\tmp\PAD-1414: write_rush.py, job_cab.sh). Tests: tests/test_pad1414_spike2_bank_song_shows.py.

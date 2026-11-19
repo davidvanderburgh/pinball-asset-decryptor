@@ -72,7 +72,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
 | Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
 | records on the high scores | records.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | points records (the whole game or a mode of the owner's); the champion in attract on ELG and WDR (round 5); counts wait on 64-bit readers |
-| attract items | attract.cfg, clips | **goes on (PAD-1371) on Star Wars ELG 1.10, (PAD-1380) Star Wars 2025 LE / Pro** | tables read (PAD-1328) on four titles; the item's page shows the bank's scene as the game's own clip pages do. The 'stall' was the runtime's 32-bit hold of the scene show's address (below). PAD-1380: Walking Dead Remastered's items wait on an attract bank of their own (NO_GLASS); Pokemon's table was not its attract (a director starts its pages, as Fallout's and Transformers'), so it is refused with them; Star Wars 2025 Pro's go on with its clip route (below) |
+| attract items | attract.cfg, clips | **goes on (PAD-1371) on Star Wars ELG 1.10, (PAD-1380) Star Wars 2025 LE / Pro, (PAD-1415) Pokemon, Fallout, Transformers and Walking Dead Remastered: every Spike 3 title** | tables read (PAD-1328) on four titles; the item's page shows the bank's scene as the game's own clip pages do. The 'stall' was the runtime's 32-bit hold of the scene show's address (below). PAD-1380: Walking Dead Remastered's items wait on an attract bank of their own (NO_GLASS); Pokemon's table was not its attract (a director starts its pages, as Fallout's and Transformers'), so it is refused with them; Star Wars 2025 Pro's go on with its clip route (below) |
 | inactivity pausing | idle.cfg | **no Spike 3 game needs it (PAD-1328)** | census of the 64-bit adjustment tables: Fallout LE (176), Star Wars 2025 LE (182) and Transformers LE (174) read AD_INACTIVE_TIMER once, in an `adjustment(id) == 1` check before their timer test; ELG, Pokemon, WDR and Star Wars 2025 Pro have no such setting. `idle_pause.title_refusal` says which (NO_NEED / NO_SETTING) |
 | expression light shows | cabshow.cfg | **goes on (PAD-1379)** on the six titles whose port names its cabinet lights | `spike3_modes.cabs_wanted`; a show starts by the sound ids that start its song, image.bin's or a music bank's own (`spike3_requests.song_plays`), and follows the song's voice (+24 on 64-bit). ELG has no cabinet lights; the game's own shows (a step of `game`) are Led Zeppelin's and Rush's only |
 
@@ -152,14 +152,14 @@ clip site but wrote them as comments and named no video bank, so mode clips, ran
 
 | title | video_bank | mode clip on the glass | attract items |
 |---|---|---|---|
-| Walking Dead Remastered LE 0.92 | 71e39c43 (Arena, Blood Bath, Walkers) | 38-40% at 0-8 s | NO_GLASS: on 71e39c43 an item drew in that bank's mid-screen box (16%); 60ed7e50 is its attract bank |
+| Walking Dead Remastered LE 0.92 | 71e39c43 (Arena, Blood Bath, Walkers) | 38-40% at 0-8 s | on 71e39c43 an item drew in that bank's mid-screen box (16%); 60ed7e50 is its attract bank: **on** there (PAD-1415, `scene attract_bank`) |
 | Star Wars 2025 LE 0.96 | 3a9d7db5 (the play screen's middle video) | 49% at 1 s; the game's skill-shot video back by 3 s (the port cannot hold its modes off) | **on**: 47% of the glass for its 8 s |
 | Star Wars 2025 Pro 0.84 | 3a9d7db5, as the LE | 49% at 0-3 s | **on**: 47% |
-| Pokemon LE 0.82 | 60ed7e50 (its only bank) | 72% at 0-3 s of the 6 s clip | refused: no attract table (below) |
-| Fallout LE 0.82 | 60ed7e50 (its only bank) | 64% at 1-3 s | refused: a director, no table (PAD-1328) |
-| Transformers LE 0.96 | 60ed7e50 (its only bank) | 33-35% at 0-3 s (the play screen's video) | refused: a director, no table (PAD-1328) |
+| Pokemon LE 0.82 | 60ed7e50 (its only bank) | 72% at 0-3 s of the 6 s clip | **on** (PAD-1415: its 51-entry table) |
+| Fallout LE 0.82 | 60ed7e50 (its only bank) | 64% at 1-3 s | **on** (PAD-1415: its 65-entry table) |
+| Transformers LE 0.96 | 60ed7e50 (its only bank) | 33-35% at 0-3 s (the play screen's video) | **on** (PAD-1415: its 59-entry table) |
 
-- **Pokemon's attract.** Its 10-entry {test, page, float seconds} table (0x3198290, sequencer 0x4c7190, each page's
+- **Pokemon's attract.** (Wrong - see PAD-1415 below: the director is a lamp show; its attract is a 51-entry table.) Its 10-entry {test, page, float seconds} table (0x3198290, sequencer 0x4c7190, each page's
   seconds x 62 at the child's +0x110) never ran in attract: no item before or after any entry played in 150 s. gdb on
   the child create (0x691ea0, the patched qemu's stub) saw the attract pages - high scores, champions, the website,
   the coin-door clip - started inline by a director (0x4dbca0..0x4dc3a4), as on Fallout and Transformers. s3port's
@@ -173,6 +173,42 @@ clip site but wrote them as comments and named no video bank, so mode clips, ran
   guard back the runs went through while the old stuck sync was still in the kernel.
 
 Tests: tests/test_pad1380_spike3_clip_route.py.
+
+## Attract items on Pokemon, Fallout, Transformers and Walking Dead Remastered (PAD-1415)
+
+**The tables were there.** gdb on the child create (s3run.sh `PAD_S3_GDB`, the patched qemu; rig, hidden, muted;
+C:/tmp/PAD-1415 run_gdb.sh + gdb_cc.py: every child create's page and caller, every kill-children's caller) on
+Fallout and Transformers, and PAD-1380's own trace on Pokemon read again: each title's attract pages are started from
+ONE call site in a table walk (Transformers 0x24fe98 in 0x24fda0, Fallout 0x43f454 in 0x43f370, Pokemon 0x49fdb4 in
+0x49fcd0 - the 23 pages PAD-1380's trace saw from caller 0x49fdb8), the kill-children call (proc_sleep + 0x40) after
+each page's process is over. The "director" 0x4dbc10 on Pokemon (Transformers 0x2e8590) is a lamp-show process: its
+inline child creates are the cabinet's light shows. The walk is the 24-byte {test, page, float seconds, byte, byte}
+shape Pokemon's slideshow has; s3port missed it because the page is loaded into x1 and moved after a test:
+`ldr x1, [x21, #8] ; cbz x1 ; mov x0, x1 ; mov w1, #0 ; bl <child create>`; the child is stamped at +0x108/+0x110 and
+its seconds x 62 at +0x118; the index is compared after the call (`cmp w20, #0x3a` / `#0x40` / `#0x32`: past it the
+walk starts again at entry 0), so the count is read from there when the body has none.
+
+| title | sequencer | table | entries | its show pair (player_advance, attract_show) |
+|---|---|---|---|---|
+| Pokemon LE 0.82 | 0x49fcd0 | 0x3197b38 | 51 | 0x7bf750, 0x7bf780 |
+| Fallout LE 0.82 | 0x43f370 | 0x19288b0 | 65 | 0x7b62f0, 0x7b6320 |
+| Transformers LE 0.96 | 0x24fda0 | 0x9a7dd8 | 59 | 0x413f90, 0x413fc0 |
+
+Pokemon has both walks; `attract_sequencer` takes the longer table (51 against the slideshow's 10). The Attract tab
+names their screens off the pages (Game Title 1, Credits Press Start, Grand Champ n, High Score n...). The runtime
+needed nothing new for them: 24-byte entries were already armed (PAD-1328), and the page wrap plays an item in the
+page's process before or after the game's page, which the walk waits on.
+
+**Walking Dead Remastered's attract bank.** Its port says `scene attract_bank 60ed7e50...` beside `scene video_bank
+71e39c43...`: `clip_variants.attract_scene` makes the build add the items' clips to 60ed7e50 (attract_items.build,
+mode_write.attract_into), and the runtime, while an item plays (`clip2_attract`), takes the clip surface from that scene
+and shows that scene's player from the page (`ait_bank`). Modes and random clips stay on 71e39c43.
+
+An item is made in the shape of that scene's own clips (`attract_items.reference_slot`): made like WDR's play-bank clips (a mid-screen box) it was squeezed into a pillar on the full-screen attract bank (39% of the glass on the rig); made like its attract clips (1920x1080) it fills it.
+
+Proof (2026-11-19, Spike 3 rig slots 1-5, hidden and MUTED, the library cards, attract-only Try it sets from `spike3_modes.plan` with one magenta photo item 8 s after screen 4 (entry 3; WDR entry 4), the rebuilt prebuilt mode64.so; C:/tmp/PAD-1415 plan_s3.py + run_att.sh): every title armed on its table (`51 entries of 24 bytes` ..., WDR `played on the attract bank's surface`), and the item was on the glass at 2 s and 5 s: Pokemon 88%, Fallout 92%, Transformers 88%, WDR 88% (39% in a pillar before the clip was sized from its attract clips; its play-bank clip in a mid-screen box before PAD-1415). Each ran its 8 s (`is over after 8000-8176 ms`) and the game's attract went on to the run's cap with no DISPATCH TIMEOUT. A first pass in the first ~20 s of a fresh card can be cut (`its page was ended`): the new machine's Guided Setup restarts the attract, as it does the game's own pages.
+
+Tests: tests/test_pad1415_spike3_attract_tables.py (and PAD-1328's / PAD-1380's / PAD-1287's, updated).
 
 ## Prolonged Competition on Spike 3 (PAD-1327)
 
@@ -1360,7 +1396,8 @@ first drops whatever the matcher carried of a reference's attract lines):
 | Star Wars 2025 Pro 0.84 | 0x754a50 | 126 | 16 |
 | Pokemon LE 0.82 | 0x3198290 | 10 (to the first empty entry) | 24 {test, page, float seconds} |
 
-Fallout LE 0.82 and Transformers LE 0.96 run attract from a director with its pages coded inline (Transformers
+Fallout LE 0.82 and Transformers LE 0.96 run attract from a director with its pages coded inline (PAD-1415: not so - a
+24-byte table walk the reader missed, below; the director is a lamp show) (Transformers
 0x2e8590): no table, `title_refusal` says so. ELG's pages read on the Attract tab (`attract_items._read_pages_a64`,
 names from the strings each page makes by adrp/add): Credits, the two Insider overlays, Attract Background Loop 1-6,
 Star Wars Logo, twelve high-score / champion pages (stubs into 0x13cee0), two clip pages (0x138330). Every table is

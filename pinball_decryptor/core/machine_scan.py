@@ -13,7 +13,14 @@ machine again after the router hands it another address.
 PAD-1430: a mesh network (eero and the like) is often bigger than a /24 (192.168.4.0/22 on David's), so the network
 the computer's default route is on is scanned at its real size, down to a /22; and an address that did not answer
 the first pass is asked once more, slower, because one pass missed a machine that was there (three back-to-back
-passes found three different sets of devices on David's mesh)."""
+passes found three different sets of devices on David's mesh).
+
+PAD-1456: that second pass only asks again what the sweep showed is there (it is in the neighbour table now), and a
+device this computer has not talked to yet is exactly what the sweep misses: its hundreds of ARP broadcasts at once
+lose replies (on David's mesh the sweep found 42 of 64 devices; a gentle pass over the rest found the other 22).  A
+machine just switched on is always such a device, so Find my machine missed David's Godzilla at its new address.  So
+when the sweep finds no machine that lets this computer in, every address that did not answer is asked once more,
+:data:`CAREFUL_WORKERS` at a time (the pace that found all 22), this computer's own /24 first."""
 
 import concurrent.futures
 import ipaddress
@@ -35,6 +42,10 @@ MAX_HOSTS = 2048
 WIDEST_PREFIX = 22
 #: how long a device this computer already knows is there gets to answer (asked before the sweep, unhurried)
 NEAR_TIMEOUT = 3.0
+#: PAD-1456: the careful pass, over every address that did not answer when nothing was found: few at a time, so
+#: the ARP broadcasts that find a device this computer has not talked to yet are not lost in a burst
+CAREFUL_WORKERS = 16
+CAREFUL_TIMEOUT = 1.5
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -236,15 +247,31 @@ def probe(host, port=PORT, timeout=8):
     return res
 
 
+def careful_seconds(count):
+    """About how long the careful pass over *count* addresses takes when nothing answers."""
+    return -(-count // CAREFUL_WORKERS) * CAREFUL_TIMEOUT
+
+
+def _own_first(hosts, own):
+    """*hosts* with those on this computer's own /24s first (where the router most likely put the machine)."""
+    near = [ipaddress.IPv4Network("%s/24" % a, strict=False) for a in own]
+    return sorted(hosts, key=lambda h: not any(h in n for n in near))
+
+
 def scan(nets=None, *, port=PORT, timeout=CONNECT_TIMEOUT, progress=None, cancel=None, log_in=True,
-         retry_timeout=RETRY_TIMEOUT, report=None, near_first=True, remembered=None):
+         retry_timeout=RETRY_TIMEOUT, report=None, near_first=True, remembered=None, careful=None, note=None):
     """Every SSH server on the home networks: a list of ``{'address', 'banner', 'lets_in', 'game', 'host_key',
     'note'}``, the machines that let this computer in first.  *progress(done, total)* is called as it goes.
 
     The addresses this computer already knows a device at (:func:`neighbours`, plus *remembered*, by default the
     machines it remembers) are asked first with a long timeout; the rest are swept, and what did not answer is asked
     once more with *retry_timeout* (``None``: no second pass).  *report*, a dict, is filled with what was looked
-    at: ``networks`` (their names), ``addresses`` (how many), ``known`` (asked first) and ``passes`` (sweeps)."""
+    at: ``networks`` (their names), ``addresses`` (how many), ``known`` (asked first), ``passes`` (sweeps) and
+    ``careful`` (how many addresses the careful pass asked again).
+
+    PAD-1456: *careful* says whether every address that still did not answer is asked once more, slowly: ``None``
+    (when logging in and no machine let this computer in), True, False, or a function of the records found so far
+    that says whether to.  *note(count)* is told when that pass starts, with how many addresses it asks."""
     nets = networks() if nets is None else nets
     if remembered is None:
         try:
@@ -252,7 +279,8 @@ def scan(nets=None, *, port=PORT, timeout=CONNECT_TIMEOUT, progress=None, cancel
             remembered = [m["address"].split(":")[0] for m in pad_ssh_key.machines()]
         except Exception:                               # noqa: BLE001 - only a head start
             remembered = []
-    own = {str(a) for a in local_addresses()}
+    own_ips = local_addresses()
+    own = {str(a) for a in own_ips}
     hosts = []
     seen = set()
     for net in nets:
@@ -269,7 +297,8 @@ def scan(nets=None, *, port=PORT, timeout=CONNECT_TIMEOUT, progress=None, cancel
     first = [h for h in hosts if str(h) in near] if near_first else []
     rest = [h for h in hosts if str(h) not in near] if near_first else hosts
     if report is not None:
-        report.update(networks=[str(n) for n in nets], addresses=len(hosts), passes=0, known=len(first))
+        report.update(networks=[str(n) for n in nets], addresses=len(hosts), passes=0, known=len(first),
+                      careful=0)
     stages = [(first, NEAR_TIMEOUT, False), (rest, timeout, bool(retry_timeout))]
     total = len(hosts) + (len(rest) if retry_timeout else 0)
     found = []
@@ -303,10 +332,53 @@ def scan(nets=None, *, port=PORT, timeout=CONNECT_TIMEOUT, progress=None, cancel
             missed = [h for h in missed if str(h) in alive]
             total = done + len(missed)
             todo, stage_timeout, retry = missed, retry_timeout, False
-    if log_in and found:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-            for rec, res in zip(found, ex.map(lambda r: probe(r["address"], port), found)):
-                rec.update(res)
+
+    def log_in_to(recs):
+        if log_in and recs:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                for rec, res in zip(recs, ex.map(lambda r: probe(r["address"], port), recs)):
+                    rec.update(res)
+
+    log_in_to(found)
+
+    def wanted(recs):
+        """Whether the careful pass is (still) wanted, given the records found so far."""
+        if callable(careful):
+            return bool(careful(list(recs)))
+        if careful is None:
+            return log_in and not any(r["lets_in"] for r in recs)
+        return bool(careful)
+
+    if wanted(found) and not (cancel is not None and cancel()):
+        answered = {r["address"] for r in found}
+        todo = _own_first([h for h in hosts if str(h) not in answered], own_ips)
+        if report is not None:
+            report["careful"] = len(todo)
+        if todo and note is not None:
+            note(len(todo))
+        total = done + len(todo)
+        more = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=CAREFUL_WORKERS) as ex:
+            futs = {ex.submit(_banner, h, port, CAREFUL_TIMEOUT): h for h in todo}
+            for fut in concurrent.futures.as_completed(futs):
+                done += 1
+                banner = fut.result()
+                if banner:
+                    rec = dict(address=str(futs[fut]), banner=banner, lets_in=False, game="", host_key=None,
+                               note="")
+                    log_in_to([rec])
+                    more.append(rec)
+                if progress is not None and (done % 16 == 0 or done == total):
+                    progress(done, total)
+                # what it was asked to find is found (the machine, this computer's own /24 first): no need to
+                # wait out the rest of the network
+                if (cancel is not None and cancel()) or (banner and not wanted(found + more)):
+                    for f in futs:
+                        f.cancel()
+                    if progress is not None:
+                        progress(total, total)
+                    break
+        found += more
     found.sort(key=lambda r: (not r["lets_in"], ipaddress.IPv4Address(r["address"])))
     return found
 
@@ -320,18 +392,29 @@ def find_moved(host_key, port=PORT, nets=None):
     the router has given another address since."""
     if not host_key:
         return None
-    for rec in scan(nets, port=port, log_in=False):
-        try:
-            import paramiko
-            sock = socket.create_connection((rec["address"], int(port)), timeout=5)
-            t = paramiko.Transport(sock)
+    keys = {}
+
+    def key_at(address):
+        if address not in keys:
+            keys[address] = None
             try:
-                t.start_client(timeout=5)
-                key = t.get_remote_server_key()
-                if (key.get_name(), key.get_base64()) == tuple(host_key):
-                    return rec["address"]
-            finally:
-                t.close()
-        except Exception:                               # noqa: BLE001 - not this one
-            continue
+                import paramiko
+                sock = socket.create_connection((address, int(port)), timeout=5)
+                t = paramiko.Transport(sock)
+                try:
+                    t.start_client(timeout=5)
+                    key = t.get_remote_server_key()
+                    keys[address] = (key.get_name(), key.get_base64())
+                finally:
+                    t.close()
+            except Exception:                           # noqa: BLE001 - not this one
+                pass
+        return keys[address]
+
+    want = tuple(host_key)
+    # PAD-1456: the careful pass too when the quick one didn't find it (a machine just switched on is missed)
+    for rec in scan(nets, port=port, log_in=False,
+                    careful=lambda recs: not any(key_at(r["address"]) == want for r in recs)):
+        if key_at(rec["address"]) == want:
+            return rec["address"]
     return None

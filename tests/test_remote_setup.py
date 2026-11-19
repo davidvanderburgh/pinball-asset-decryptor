@@ -18,6 +18,7 @@ import threading
 
 import pytest
 
+from pinball_decryptor.webui.tabs import network as network_tab
 from pinball_decryptor.core import card_extras, machine_scan, pad_ssh_key, rawdevice, remote_send, remote_setup
 from pinball_decryptor.core import ssh_card as S
 from pinball_decryptor.core.card_extras import ExtrasError
@@ -377,6 +378,39 @@ def test_check_connection_finds_the_machine_at_another_address(tmp_path, monkeyp
     assert st['address'] == '192.168.4.130' and pad_ssh_key.last_address() == '192.168.4.130'
 
 
+def test_check_connection_says_it_is_looking_and_looking_again(tmp_path, monkeypatch):
+    """PAD-1456: the "Looking over your network" line read the exception after Python had dropped it (a NameError
+    on the UI loop), and the careful pass a check's scan can take now says so too."""
+    import time
+    from tests.webui_harness import web_app
+    seen = []
+
+    def unreachable(address, log=None):
+        raise remote_send.Unreachable('Nothing answered at 192.168.4.130 on port 22 in 5 seconds.')
+
+    def wait_for(svc, text):
+        for _ in range(100):
+            if text in (svc.get('check') or ''):
+                return svc.get('check')
+            time.sleep(0.02)
+        return svc.get('check')
+    monkeypatch.setattr(remote_send, 'connect', unreachable)
+    with web_app(tmp_path, mfr='stern') as w:
+        svc = w.window.service('network')
+
+        def scan(**k):
+            seen.append(wait_for(svc, 'Looking over your network'))
+            k['note'](1273)
+            seen.append(wait_for(svc, 'Looking again'))
+            return []
+        monkeypatch.setattr(machine_scan, 'scan', scan)
+        w.call('network.set_address', '192.168.4.130')
+        w.call('network.check_connection')
+        _settle(w, 'checking')
+    assert seen[0] == 'Nothing answered at 192.168.4.130 on port 22 in 5 seconds. Looking over your network for it...'
+    assert seen[1].startswith('Nothing answered at 192.168.4.130') and 'Looking again, more slowly' in seen[1]
+
+
 def test_networks_scan_the_home_network_at_its_real_size():
     """PAD-1430: a mesh network is a /22 (192.168.4.0 - 192.168.7.255 on David's); only the default route's
     network is widened, and never past a /22."""
@@ -455,6 +489,95 @@ def test_a_known_device_is_asked_unhurried_before_the_sweep(slow_ssh_server, mon
     found = machine_scan.scan(net, port=slow_ssh_server, timeout=0.1, retry_timeout=None, log_in=False,
                               remembered=['127.0.0.1'], report=report)
     assert [f['address'] for f in found] == ['127.0.0.1'] and report['known'] == 1
+
+
+def _lossy_sweep(monkeypatch, machine, own='10.0.0.1'):
+    """PAD-1456: David's mesh, faked: the sweep's ARP burst loses the answer of a device this computer hadn't
+    talked to yet (*machine*), which only a careful-pass ask gets; nothing is in the neighbour table."""
+    import time
+    asked = []
+
+    def banner(host, port, timeout):
+        asked.append((str(host), timeout))
+        if timeout == machine_scan.CAREFUL_TIMEOUT:
+            time.sleep(0.01)                            # a careful ask waits, as on the network
+        if str(host) == machine and timeout == machine_scan.CAREFUL_TIMEOUT:
+            return 'SSH-2.0-dropbear_2025.88'
+        return None
+    monkeypatch.setattr(machine_scan, '_banner', banner)
+    monkeypatch.setattr(machine_scan, 'neighbours', lambda: [])
+    monkeypatch.setattr(machine_scan, 'local_addresses', lambda: [ipaddress.IPv4Address(own)])
+    monkeypatch.setattr(machine_scan, 'probe', lambda host, port=22, timeout=8: dict(
+        lets_in=host == machine, game='godzilla_le' if host == machine else '', host_key=None, note=''))
+    return asked
+
+
+def test_a_machine_the_sweep_missed_is_found_by_the_careful_pass(monkeypatch):
+    """PAD-1456: Find my machine looked at 192.168.4.0/22 and listed only a Raspberry Pi, with David's Godzilla on
+    at .135: just switched on, this computer had not talked to it, and the sweep's burst of ARP lost its answer
+    (22 of 64 such devices on his mesh).  With no machine found, every address that didn't answer is asked once
+    more, slowly."""
+    machine = '10.0.0.135'
+    nets = [ipaddress.IPv4Network('10.0.0.0/24')]
+    _lossy_sweep(monkeypatch, machine)
+    assert machine_scan.scan(nets, retry_timeout=None, remembered=[], careful=False) == []     # David's miss
+    report, notes, pct = {}, [], []
+    found = machine_scan.scan(nets, retry_timeout=None, remembered=[], report=report, note=notes.append,
+                              progress=lambda d, t: pct.append((d, t)))
+    assert [(f['address'], f['lets_in'], f['game']) for f in found] == [(machine, True, 'godzilla_le')]
+    assert report['careful'] == 253 and notes == [253] and pct[-1][0] == pct[-1][1]
+
+
+def test_the_careful_pass_asks_this_computers_own_24_first_and_stops_at_the_machine(monkeypatch):
+    machine = '10.0.1.9'
+    asked = _lossy_sweep(monkeypatch, machine, own='10.0.1.200')
+    found = machine_scan.scan([ipaddress.IPv4Network('10.0.0.0/22')], retry_timeout=None, remembered=[])
+    assert [f['address'] for f in found] == [machine]
+    careful = [h for h, t in asked if t == machine_scan.CAREFUL_TIMEOUT]
+    assert all(h.startswith('10.0.1.') for h in careful[:machine_scan.CAREFUL_WORKERS])
+    assert len(careful) < 254                           # not the other 768 addresses of the /22
+
+
+def test_no_careful_pass_when_the_sweep_found_a_machine(monkeypatch):
+    asked = _lossy_sweep(monkeypatch, '10.0.0.135')
+    monkeypatch.setattr(machine_scan, '_banner', lambda h, port, timeout: asked.append(timeout) or (
+        'SSH-2.0-dropbear' if str(h) == '10.0.0.135' else None))
+    report = {}
+    found = machine_scan.scan([ipaddress.IPv4Network('10.0.0.0/24')], retry_timeout=None, remembered=[],
+                              report=report)
+    assert [f['address'] for f in found] == ['10.0.0.135'] and report['careful'] == 0
+    assert machine_scan.CAREFUL_TIMEOUT not in asked
+
+
+def test_find_moved_asks_carefully_until_it_finds_that_machine(monkeypatch):
+    seen = {}
+
+    def scan(nets=None, **k):
+        seen.update(k)
+        return []
+    monkeypatch.setattr(machine_scan, 'scan', scan)
+    assert machine_scan.find_moved(('ssh-ed25519', 'AAAA')) is None
+    assert seen['log_in'] is False and callable(seen['careful']) and seen['careful']([]) is True
+
+
+def test_network_tab_says_it_is_looking_again_slowly(tmp_path, monkeypatch):
+    from tests.webui_harness import web_app
+    notes = []
+    with web_app(tmp_path, mfr='stern') as w:
+        def scan(**k):
+            k['note'](1273)
+            notes.append(w.window.service('network').get('scan_note'))
+            k['report'].update(networks=['192.168.4.0/22'], addresses=1274, passes=2, known=58, careful=1273)
+            return []
+        monkeypatch.setattr(machine_scan, 'scan', scan)
+        w.call('network.scan')
+        _settle(w, 'scanning')
+        note = w.state('network')['scan_note']
+        assert ('the 58 devices this computer knew of first, unhurried, then the 1273 that didn\'t answer once '
+                'more, slowly' in note)
+    assert network_tab._careful_note(1273).startswith('No machine on the quick look')
+    assert 'about 2 minutes' in network_tab._careful_note(1273)
+    assert 'up to a minute' in network_tab._careful_note(254)
 
 
 def _short_banner(real):

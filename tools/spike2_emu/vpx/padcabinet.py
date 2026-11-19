@@ -41,10 +41,10 @@ LIGHTS = {
     "lockdown": re.compile(r"^(LOCKDOWN|ACTION) BUTTON\b", re.I),
 }
 
-#: DOF events for the buttons: off (0) until the person picks numbers, so a
-#: table's DOF config never hears an event it uses for something else.
-#: E190 / E191 are the numbers the tab suggests.
-SUGGESTED_DOF = {"start": 190, "lockdown": 191}
+#: DOF events for the buttons and the shaker motor (PAD-1460): off (0) until
+#: the person picks numbers, so a table's DOF config never hears an event it
+#: uses for something else. E190 / E191 / E192 are the numbers the tab suggests.
+SUGGESTED_DOF = {"start": 190, "lockdown": 191, "shaker": 192}
 
 RES_KEYS = ("pf_w", "pf_h", "bg_w", "bg_h", "bg_screen", "bg_x", "bg_y",
             "dmd_w", "dmd_h", "dmd_x", "dmd_y", "dmd_flip")
@@ -60,6 +60,8 @@ def settings(kit):
     hide_dmd    hide B2S's own DMD window (the game's screen is the DMD)
     dof_start, dof_lockdown   the DOF E event each button's LED is sent as,
                 0 = not sent
+    dof_shaker  the DOF E event the machine's SHAKER MOTOR is sent as, on
+                while the game drives it (PAD-1460), 0 = not sent
     gi_bulbs    {title: [bulb name, ...]} that follow BACKBOX GI
     """
     c = kit.get("cabinet") if isinstance(kit.get("cabinet"), dict) else {}
@@ -73,6 +75,7 @@ def settings(kit):
     bulbs = c.get("gi_bulbs") if isinstance(c.get("gi_bulbs"), dict) else {}
     return {"backglass": num("backglass"), "hide_dmd": bool(c.get("hide_dmd")),
             "dof_start": num("dof_start"), "dof_lockdown": num("dof_lockdown"),
+            "dof_shaker": num("dof_shaker"),
             "gi_bulbs": {str(t): [str(b) for b in v if str(b)]
                          for t, v in bulbs.items() if isinstance(v, list)}}
 

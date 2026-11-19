@@ -2003,6 +2003,7 @@ class Bridge:
         # LOCKDOWN buttons) where the title's tables put them, the kit's
         # cabinet settings, and the backglass handed over for BACKBOX GI
         self.cab_leds = {}
+        self.cab_shaker = None             # PAD-1460: (node, idx) of the SHAKER MOTOR, None = none
         self.cab = padcabinet.settings({})
         self.b2s = None
         self._b2s_state = {}
@@ -2133,6 +2134,11 @@ class Bridge:
             if n and leds:
                 level = max(self._led_level(data, nd, ix) for nd, ix in leds)
                 self._dof_set("E", n, level if level >= LAMP_ON else 0)
+        # PAD-1460: the machine's shaker motor as the kit's DOF shaker event,
+        # on while the game drives it (the board stops a timed shake itself)
+        n = self.cab["dof_shaker"]
+        if n and self.cab_shaker:
+            self._dof_set("E", n, 1 if self.sol_state.get(self._sol_num(self.cab_shaker)) else 0)
 
     def b2s_attach(self, obj, direct=False):
         """PADSPIKE2.vbs's B2S.Server, once it runs (PAD-1304). A second
@@ -2502,10 +2508,15 @@ class Bridge:
             tables_dir = os.path.join(self.rig.dump, "tables", self.native_title or "")
         self.cab_leds = padcabinet.cabinet_leds(tables_dir)
         self.cab = padcabinet.settings(padlaunch.kit_load() if kit is None else kit)
+        try:                                # PAD-1460: the shaker, for DOF
+            self.cab_shaker = coilmap.shaker_address(os.path.join(tables_dir, "device_xy.txt"))
+        except Exception:                                   # noqa: BLE001
+            self.cab_shaker = None
         bulbs = self.cab["gi_bulbs"].get(self.title, [])
-        log("cabinet lights: %s; DOF start E%s, lockdown E%s; BACKBOX GI bulbs: %s"
+        log("cabinet lights: %s; DOF start E%s, lockdown E%s, shaker E%s (%s); BACKBOX GI bulbs: %s"
             % (", ".join("%s %s" % (k, v) for k, v in sorted(self.cab_leds.items())) or "none named",
-               self.cab["dof_start"] or "-", self.cab["dof_lockdown"] or "-",
+               self.cab["dof_start"] or "-", self.cab["dof_lockdown"] or "-", self.cab["dof_shaker"] or "-",
+               ("node %d coil %d" % self.cab_shaker) if self.cab_shaker else "no shaker",
                ", ".join(bulbs) or "none"))
 
     #: how long a run started for a table may take to come up (a card copied

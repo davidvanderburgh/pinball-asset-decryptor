@@ -14706,7 +14706,8 @@ typedef unsigned (*chg_fn4)(pm_reg, pm_reg, pm_reg, pm_reg);
 static const char CHG_SCORES[] = "/dump/pad_challenge_scores";
 /* on: a mode took this game's pick; slot: the game's challenge it plays as (~0u, PAD-663: none - a menu entry of a
  * mode's own on a build with no challenge of the game's behind it) */
-static struct { int on; unsigned slot; unsigned game; char name[40]; } chg_hs = { 0, 0, 0, "" };
+/* team (PAD-1441): the pick is a co-op or team game's board - every player with the top score is asked for initials */
+static struct { int on; unsigned slot; unsigned game; char name[40]; int team; } chg_hs = { 0, 0, 0, "", 0 };
 static unsigned char chg_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
 static const char *chg_rec_titles[8];
 static chg_fn4 chg_scores_game;
@@ -14852,6 +14853,7 @@ static void chg_scores_picked(unsigned slot, const char *name, const struct pm_m
     if (!chg_hs.name[0]) return;
     chg_hs.slot = slot;
     chg_hs.on = 1;
+    chg_hs.team = 0;
     chg_hs.game = chg_game_now();
     say("challenge scores: %s's game goes in as its own high score (category %ld's place)", chg_hs.name,
         chg_scores_cat(slot));
@@ -14872,6 +14874,7 @@ static void chg_scores_picked(unsigned slot, const char *name, const struct pm_m
  * replaced. Outside such a game the call is the game's, untouched. */
 static chg_fn4 chg_gate_game;
 static volatile int chg_gate_cat = -1;               /* the category whose first entry is the mode's, while it runs */
+static volatile int chg_gate_n = 1;                  /* PAD-1441: its first n entries are (one per co-op name) */
 static volatile int chg_scores_running;              /* the game's end-of-game high scores run (any game's) */
 
 /* the gate's answer for {category, entry} while a mode's challenge game is filed: 1 only for its entry (tests lift it) */
@@ -14894,7 +14897,7 @@ static unsigned chg_gate_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)
         return chg_gate_game(r0, r1, r2, r3);
     cat = *(const unsigned short *)(unsigned long)(r1 + cat_at);
     entry = *(const int *)(unsigned long)(r1 + ent_at);
-    if (!chg_gate_lets(cat, host, entry)) {
+    if (!chg_gate_lets(cat, host, entry) && !(cat == host && entry > 0 && entry < chg_gate_n)) {
         if (said < 8) { said++; say("challenge scores: category %d entry %d is the game's - not in a mode's challenge game", cat, entry); }
         return 0;
     }
@@ -14929,16 +14932,76 @@ static pm_addr *chg_scores_one_entry(long cat, pm_addr *was)
     return &desc[7];
 }
 
+/* PAD-1441 (DoomWalrus666: "In Godzilla co-op, the high score is attributed only to player 1. Could we please allow
+ * all players to have their initials to the high score"): the end-of-game function walks a category's entry list and,
+ * for each entry, files the best player not filed in it yet who beats it - asking that player for initials first (its
+ * own screen, PLAYER n, once a game), then the insert moves the entries below down one (Godzilla LE 1.16 0x300d20). A
+ * co-op team's players all hold the team's score, so with the one entry only player 1 was asked. For a co-op or team
+ * board the list is the category's first n entries (n: the players with the top score), each pointed at a copy of the
+ * board's record: a team that beats it beats them all, each player is filed in one in turn and asked, and their
+ * initials are joined in the board's one record after (chg_names_join). Returns the list's word to put back, as
+ * chg_scores_one_entry; *got: the entries the list holds. */
+static pm_addr *chg_scores_first_entries(long cat, unsigned n, pm_addr *was, unsigned *got)
+{
+    static unsigned short first[5];
+    pm_addr table = data("challenge_scores_table"), *desc;
+    const unsigned short *l;
+    unsigned k;
+    *got = 1;
+    if (!table || cat <= 0 || cat > 63 || n < 1) return 0;
+    desc = (pm_addr *)(unsigned long)(table + CHG_DESC_SIZE * (unsigned)cat);
+    if (!maps_has((unsigned long)desc, CHG_DESC_SIZE, MAP_R) || !maps_has(desc[7], 4, MAP_R)) return 0;
+    l = (const unsigned short *)(unsigned long)desc[7];
+    if (n > 4) n = 4;
+    for (k = 0; k < n && l[k]; k++) first[k] = l[k];
+    *got = k ? k : 1;
+    if (!k || !l[k]) return 0;                                   /* the list is those entries already */
+    first[k] = 0;
+    *was = desc[7];
+    mprotect((void *)((unsigned long)&desc[7] & ~0xfffUL), 0x1000, 7);
+    desc[7] = (pm_addr)(unsigned long)first;
+    return &desc[7];
+}
+
+/* PAD-1441: n players' initials (the game's, 20 letters at most each) in one record: in turn, a '+' between, blank
+ * ones left out, 15 letters in all - the champion page spaces its letters out, and four teammates' three (AAA+BBB+
+ * CCC+DDD) already fill it edge to edge (emulator, Godzilla LE 1.16); when they do not all fit (the game's 10-letter
+ * names), each is cut to an even share (tests lift it verbatim) */
+static void chg_names_join(char *out, const char *const *names, unsigned n)
+{
+    unsigned k, j, m = 0, total = 0, share = 15, o = 0, len[4];
+    if (n > 4) n = 4;
+    for (k = 0; k < n; k++) {
+        const char *w = names[k] ? names[k] : "";
+        for (len[k] = 0; len[k] < 20 && w[len[k]]; len[k]++) ;
+        while (len[k] && w[len[k] - 1] == ' ') len[k]--;
+        if (len[k]) { m++; total += len[k]; }
+    }
+    if (m && total + m - 1 > 15) share = (15 - (m - 1)) / m;
+    for (k = 0; k < n; k++) {
+        unsigned l = len[k] < share ? len[k] : share;
+        while (l && names[k][l - 1] == ' ') l--;
+        if (!l) continue;
+        if (o) out[o++] = '+';
+        for (j = 0; j < l; j++) out[o++] = names[k][j];
+    }
+    out[o] = 0;
+}
+
+static unsigned coop_hs_names(void);                             /* PAD-1441, below */
+static void coop_hs_back(void);
+
 /* the end-of-game high scores, wrapped: in a mode's challenge game its challenge's entry is the mode's for the call */
 static unsigned chg_scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)
 {
     static char b[CHG_SCORES_MAX];
-    pm_addr *ent = 0, was[3], *list, list_was = 0;
-    unsigned ret, k;
-    unsigned short award = 0;
+    static unsigned char more[3][CHG_REC_SIZE] __attribute__((aligned(8)));   /* PAD-1441: teammates 2-4's entries */
+    pm_addr *ent = 0, was[3], *list, list_was = 0, *ents[4], mwas[4][3];
+    unsigned ret, k, names = 1, e;
+    unsigned short award = 0, mawards[4];
     unsigned char before[CHG_REC_SIZE];
     long n, cat = 0;
-    int on = chg_hs.on, changed = 0;
+    int on = chg_hs.on, changed = 0, team = chg_hs.team;
     unsigned slot = chg_hs.slot;
     chg_hs.on = 0;                                               /* one game's, once */
     chg_scores_running = 1;
@@ -14975,17 +15038,62 @@ static unsigned chg_scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)
         chg_hs.name, chg_rec_score(chg_rec), (const char *)chg_rec + 32, cat,
         chg_gate_game ? " - the game's own records are shut for it" : "");
     if (chg_gate_game) chg_gate_cat = (int)cat;                  /* PAD-663: only that entry takes this game */
-    list = chg_scores_one_entry(cat, &list_was);
+    if (team) names = coop_hs_names();                           /* PAD-1441: one entry for each top scorer */
+    e = 1;
+    if (names > 1) {
+        list = chg_scores_first_entries(cat, names, &list_was, &names);
+        for (e = 1; e < names; e++) {                            /* each a copy of the board's record */
+            ents[e] = ((pm_addr *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))((unsigned)cat, e);
+            if (!ents[e] || !maps_has((unsigned long)ents[e], CHG_ENT_SIZE, MAP_R)) break;
+            for (k = 0; k < CHG_REC_SIZE; k++) more[e - 1][k] = chg_rec[k];
+            mwas[e][0] = ents[e][0]; mwas[e][1] = ents[e][5]; mwas[e][2] = ents[e][6];
+            mawards[e] = CHG_ENT_AWARD(ents[e]);
+            ents[e][0] = (pm_addr)(unsigned long)more[e - 1];
+            ents[e][5] = (pm_addr)(unsigned long)chg_hs.name;
+            ents[e][6] = (pm_addr)(unsigned long)chg_rec_titles;
+            CHG_ENT_AWARD(ents[e]) = 0;
+        }
+        if (e < names) {                                         /* an entry the game has not: the ones before it */
+            if (list) *list = list_was;
+            list = chg_scores_first_entries(cat, e, &list_was, &names);
+        }
+        chg_gate_n = (int)names;
+        say("co-op: %u players hold the team's score - each is asked for initials (%s's first %u entries)", names,
+            chg_hs.name, names);
+    } else
+        list = chg_scores_one_entry(cat, &list_was);
     ret = chg_scores_game(r0, r1, r2, r3);
     if (list) *list = list_was;
     chg_gate_cat = -1;
+    chg_gate_n = 1;
+    if (team) coop_hs_back();
     ent[0] = was[0]; ent[5] = was[1]; ent[6] = was[2];
     CHG_ENT_AWARD(ent) = award;
+    for (k = 1; k < names; k++) {                                /* PAD-1441: the teammates' entries back */
+        ents[k][0] = mwas[k][0]; ents[k][5] = mwas[k][1]; ents[k][6] = mwas[k][2];
+        CHG_ENT_AWARD(ents[k]) = mawards[k];
+    }
     for (k = 0; k < CHG_REC_SIZE; k++) changed |= chg_rec[k] != before[k];
     chg_scores_running = 0;
     if (!changed) {
         say("challenge scores: %s's high score stands", chg_hs.name);
         return ret;
+    }
+    if (names > 1) {                                             /* PAD-1441: the team's initials, all of them */
+        const char *who[4];
+        char joined[16];
+        unsigned short c;
+        who[0] = (const char *)chg_rec + 32;
+        for (e = 1; e < names; e++)                              /* a teammate filed: the team's score in the entry */
+            who[e] = chg_rec_score(more[e - 1]) == chg_rec_score(chg_rec) ? (const char *)more[e - 1] + 32 : "";
+        for (e = 0; e < names; e++)
+            say("co-op: entry %u - %.20s, %llu", e, who[e], e ? chg_rec_score(more[e - 1]) : chg_rec_score(chg_rec));
+        chg_names_join(joined, who, names);
+        for (k = 32; k <= 52; k++) chg_rec[k] = 0;
+        for (k = 0; joined[k]; k++) chg_rec[32 + k] = (unsigned char)joined[k];
+        c = chg_rec_check(chg_rec);
+        chg_rec[chg_rec_check_at] = (unsigned char)c;
+        chg_rec[chg_rec_check_at + 1] = (unsigned char)(c >> 8);
     }
     say("challenge scores: %s's new high score %llu, %s", chg_hs.name,
         chg_rec_score(chg_rec), (const char *)chg_rec + 32);
@@ -18611,6 +18719,7 @@ static void coop_scores_mark(unsigned n)
     challenge_words(chg_hs.name, words);
     chg_hs.slot = ~0u;                                        /* no challenge of the game's behind it */
     chg_hs.on = 1;
+    chg_hs.team = 1;                                          /* PAD-1441: every top scorer's initials */
     chg_hs.game = chg_game_now();
     say("co-op: this game's score goes on the %s board, not on the game's own", chg_hs.name);
 }
@@ -22215,6 +22324,66 @@ static void coop_scores_same(unsigned n)
         volatile uint64_t *v = (volatile uint64_t *)(unsigned long)s64;
         for (k = 1; k < n; k++) if (v[k] != v[0]) v[k] = v[0];
     }
+}
+
+/* PAD-1441: the scores' slot k (the game's player k + 1) */
+static uint64_t coop_score_at(unsigned k)
+{
+    pm_addr s32 = data("scores32"), s64 = data("scores");
+    if (s32) return ((volatile unsigned *)(unsigned long)s32)[k];
+    return s64 ? ((volatile uint64_t *)(unsigned long)s64)[k] : 0;
+}
+
+static void coop_score_put(unsigned k, uint64_t v)
+{
+    pm_addr s32 = data("scores32"), s64 = data("scores");
+    if (s32) ((volatile unsigned *)(unsigned long)s32)[k] = (unsigned)v;
+    else if (s64) ((volatile uint64_t *)(unsigned long)s64)[k] = v;
+}
+
+/* PAD-1441: the game's end-of-game high scores in a co-op or team game (chg_scores_wrap): how many of its players hold
+ * the top score - each gets a board entry, so each is asked for initials (1: the one entry, as before). The game's end
+ * counts fewer players than there are: a co-op game's end one (coop_change_wrap: one match draw), a team game's one a
+ * team (Team 1 player 1, Team 2 player 2). For this call the players past its count are counted in, each with the
+ * team's score (a team game: their own team's), the game's own initials screen asking PLAYER 2 as it asks PLAYER 1;
+ * coop_hs_back puts the count and the scores back. The board still takes the team's score once: the entries are the
+ * runtime's own records, joined in the board's one after. */
+static struct { int on; unsigned char players; uint64_t was[4]; } coop_hs;
+
+static unsigned coop_hs_names(void)
+{
+    unsigned n = coop_teammates(), g, k, top = 0;
+    uint64_t best = 0, v;
+    coop_hs.on = 0;
+    if (n < 2 || n > 4 || coop.standard || !coop_players_byte) return 1;
+    if (!data("scores32") && !data("scores")) return 1;
+    g = *coop_players_byte;
+    if (g >= 1 && g < n) {
+        coop_hs.players = (unsigned char)g;
+        for (k = g; k < n; k++) {
+            coop_hs.was[k] = coop_score_at(k);
+            coop_score_put(k, coop_score_at(coop.teams ? coop_team_of_in(coop.team_kind, k + 1) - 1 : 0));
+        }
+        *coop_players_byte = (unsigned char)n;
+        coop_hs.on = 1;
+        say("co-op: the end-of-game high scores count all %u players (the game has %u), each with %s score", n, g,
+            coop.teams ? "their team's" : "the team's");
+    }
+    for (k = 0; k < n; k++) {
+        v = coop_score_at(k);
+        if (!top || v > best) { best = v; top = 1; }
+        else if (v == best) top++;
+    }
+    return top ? top : 1;
+}
+
+static void coop_hs_back(void)
+{
+    unsigned k;
+    if (!coop_hs.on) return;
+    coop_hs.on = 0;
+    for (k = coop_hs.players; k < coop.n && k < 4; k++) coop_score_put(k, coop_hs.was[k]);
+    *coop_players_byte = coop_hs.players;
 }
 
 /* PAD-1042: Start in a team game's first ball (or the second Start that makes one): the next player joins */

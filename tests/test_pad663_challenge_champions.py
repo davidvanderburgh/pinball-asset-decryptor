@@ -245,7 +245,8 @@ def test_the_host_category_is_its_first_entry_alone_for_the_call():
     assert "one[0] = l[0];" in one and "one[1] = 0;" in one and "desc[7] = (pm_addr)(unsigned long)one;" in one
     wrap = R._lift(src, "static unsigned chg_scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)")
     call = wrap.index("list = chg_scores_one_entry(cat, &list_was);")
-    assert call < wrap.index("ret = chg_scores_game(r0, r1, r2, r3);", call) < wrap.index("if (list) *list = list_was;")
+    game = wrap.index("ret = chg_scores_game(r0, r1, r2, r3);", call)
+    assert call < game < wrap.index("if (list) *list = list_was;", game)     # PAD-1441: a co-op board's list too
 
 
 @pytest.mark.parametrize("key", ["avengers_infinity_le-1.10", "deadpool_le-1.16", "batman-1.14", "godzilla_le-1.16",

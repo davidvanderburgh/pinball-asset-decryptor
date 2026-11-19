@@ -40,6 +40,10 @@ MAX_MODES = 64
 OWN_GAME_SITES = (("score_add", "score_add32"), ("callout",))
 
 
+#: PAD-1406: the framework's all-flippers off and on (pm_flippers, pm_drain_to_one)
+FLIPPER_SITES = ("flippers_off", "flippers_on")
+
+
 def own_game_sites(sites):
     """PAD-1400: True when a port with these sites can switch the game's own rules off (pm_own_game)."""
     return all(any(s in sites for s in group) for group in OWN_GAME_SITES)
@@ -90,6 +94,8 @@ class TitleProfile:
     #                              shots while a mode blocks, unless it keeps them (block_rule_<n> lines)
     own_game: bool = False       # PAD-1400: a mode can be the whole game (game_modes own_game): the port names
     #                              the game's score and callout sites the runtime holds back, and its mode starts
+    flippers: bool = False       # PAD-1406: the mode that has the whole game can switch the flippers off and on
+    #                              (pm_flippers): the port names the framework's flippers_off and flippers_on
     lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
     #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
     light_route: str = ""        # item 164: how a mode's Lights run - "language" (the game's own light
@@ -2884,6 +2890,7 @@ def profile_from_port(path):
         cannot=tuple(cannot),
         insider_gate=all(n in sites for n in INSIDER_GATE_SITES),
         own_game=own_game_sites(sites) and bool(_game_modes(port)),            # PAD-1400
+        flippers=all(n in sites for n in FLIPPER_SITES),                       # PAD-1406
         # item 147's events, as pad_mode_runtime.c's events_arm would arm them: a bus event
         # needs hook_dispatch, a site event its site. What each run measured is in the port.
         events=events,
@@ -3270,6 +3277,7 @@ try:
     GODZILLA_PRO_1_15 = replace(
         GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), game_rules=_game_rules(_port_115),
         own_game=own_game_sites(_port_115["site"]) and bool(_game_modes(_port_115)),   # PAD-1400
+        flippers=all(n in _port_115["site"] for n in FLIPPER_SITES),                  # PAD-1406
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),

@@ -26,7 +26,7 @@ SITES = {"godzilla_le-1.16": ("0x003f1898", "0x003f196c"), "godzilla_pro-1.16": 
 
 def _section(src):
     a = src.index("/* ---- PAD-733: drain to one ball (pm_drain_to_one)")
-    return src[a:src.index("/* ---- shots from the switch drain (optional; any build)", a)]
+    return src[a:src.index("/* ---- PAD-1406: the flippers, for a mode that is the whole game", a)]
 
 
 def test_it_kills_the_flippers_alone_and_is_wired_in():

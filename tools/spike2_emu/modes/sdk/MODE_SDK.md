@@ -1623,6 +1623,29 @@ own multiball; two players.
 
 `mode_project.BALL_SAVE_PROVEN` lists the proven builds, and the tab greys Ball save on any other build.
 
+## The flippers, in a mode that is the whole game (PAD-1406)
+
+A mode that is the whole game (`pm_own_game`, above) has switched off the rules that would kill the flippers - a
+"dead flippers" feature, the end of a wizard mode - so it may do it itself: `pm_flippers(0)` switches them off and
+`pm_flippers(1)` back on (the blocks: Mechanisms, *Flippers off* / *Flippers back on*). It goes through the game's own
+code, the framework's all-flippers off and on that PAD-733 found on Godzilla (`site flippers_off` / `flippers_on`, placed
+on every newest build by code: Uncanny X-Men LE 0.98 `0x38a114` / `0x38a1e8`, Pro `0x3ca20c` / `0x3ca2e0`). They set
+or clear each flipper record's enable bit and nothing else; the node board's own flipper rule follows it, so the coils
+fire, when they fire, at the game's own powers, from the board, as they always do. The flippers alone: slingshots, pop
+bumpers, kickbacks and the ball devices play on.
+
+The runtime's limits, not the mode's to change:
+
+- Off: only the mode that has the whole game, in a game, not on a tilted ball, not while a drain to one ball runs.
+  It lasts the ball: the runtime asks again every tick (the game's own status updates would bring them back).
+- Back on: only flippers a mode switched off. A tilt, the game's end of a ball (its bonus) and the game's own dead
+  flippers are the game's, never undone from here.
+- They come back by themselves when the mode ends or gives the game its rules back mid-ball, and at the next ball
+  (the game's own ball start turns them on, as after any ball). A tilt leaves them to the game.
+
+`pm_drain_to_one` (below) uses the same pair, and still waits on a port that names the shooter lane switch too
+(Godzilla 1.16): with the flippers dead, the served ball must bring them back as it lands in the lane.
+
 ## Drain to one ball (PAD-733)
 
 A multiball of the mode's own that ends with two or more balls still up (MINILLA's dad-and-baby multiball won with

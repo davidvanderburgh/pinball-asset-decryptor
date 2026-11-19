@@ -405,6 +405,17 @@ int pm_block_rules_keep_names(const char *names);   /* the same by name: "Destru
  * calls were held back. */
 int pm_own_game(int on);
 int pm_own_game_on(void);    /* 1 while a mode of ours has the whole game */
+/* PAD-1406: THE FLIPPERS, for the mode that has the whole game (its rules are the ones that would kill them). Off and
+ * back on through the game's own all-flippers off and on (each flipper's enable, which the node board's rule follows:
+ * the coils fire at the game's own powers, from the board, as ever). The flippers alone: slingshots, pop bumpers,
+ * kickbacks and the ball devices play on. pm_flippers(0): off, while the ball lasts; pm_flippers(1): back on - only
+ * flippers a mode switched off (a tilt, the game's end of a ball and its own dead flippers are never undone). They
+ * come back by themselves when the mode ends or gives the game its rules back mid-ball, and at the next ball (the
+ * game's own ball start). 1 = done (or already off); 0 = refused, the reason in mode.log: not the mode that has the
+ * whole game, no game in play, a tilt, a drain to one running (pm_drain_to_one), or the port names no flippers off/on
+ * (`site flippers_off` / `flippers_on`: every newest Spike 2 build). pm_flippers_off: 1 while a mode has them off. */
+int pm_flippers(int on);
+int pm_flippers_off(void);
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

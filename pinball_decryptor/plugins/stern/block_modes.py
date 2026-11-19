@@ -348,6 +348,7 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "roster_progress",                                         # PAD-733: a new monster's count on its tile
               "ball_save",                                               # PAD-690: a ball save of its own
               "drain_to_one",                                            # PAD-733: the extra balls taken away
+              "flippers",                                                # PAD-1406: the whole game's flippers off / on
               "hold", "scoop_hold", "let_go", "shield", "building", "game_show", "shake", "shake_game", "game_wizard",
               "music",                                                   # PAD-658: switch to another music bed
               "fade",                                                    # PAD-1405: the whole screen to a colour
@@ -445,6 +446,8 @@ XY_MAX = 2000                    # a point of a step's own: within the picture's
 GI = {"keep": "GI: the game's", "dark": "GI: dark", "flash": "GI: flashing"}
 #: PAD-767: a GI block: the playfield's GI held dark until the mode ends (a show's GI steps still play over it), or the
 #: game's again (David, MELTDOWN: "it would be cooler if the lights stayed off for the whole mode")
+#: PAD-1406: the flippers block's choices (pm_flippers): only in a mode that is the whole game
+FLIPPERS_TO = {"off": "off", "on": "back on"}
 GI_HOLD = {"dark": "dark until the mode ends", "game": "the game's again"}
 SHOW_STEPS = 32                  # PAD-646: was the kit's KIT_SHOW_STEPS (10); the blocks' engine reads a table
 STEP_MS_MIN, STEP_MS_MAX = 50, 10000
@@ -1273,6 +1276,7 @@ def card_checks(p):
         "hold_caps": {n: ms for n, ms in getattr(p, "coil_caps", ()) or ()},
         "roster": list(getattr(p, "roster", ()) or ()),     # PAD-706: the battle slots a mode may take ([] = none)
         "places": [list(x) for x in getattr(p, "places", ()) or ()],   # PAD-710: [[id, name, counts]] ([] = none)
+        "flippers": bool(getattr(p, "flippers", False)),   # PAD-1406: pm_flippers on this card's game
         "done": [list(x) for x in getattr(p, "done_modes", ()) or ()] if p.can("done") else [],   # PAD-747: [[id, name]]
         "spare": list(getattr(p, "spare", ()) or ()),       # PAD-826: "in" / "out" ([] = neither)
     }
@@ -1281,7 +1285,7 @@ def card_checks(p):
 # ---- what is wrong with a program ----------------------------------------------------------------
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
              game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None,
-             drain=None, roster=None, places=None, done=None, spare=None):
+             drain=None, roster=None, places=None, done=None, spare=None, flippers=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -1356,6 +1360,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "places": {int(x[0]): x for x in places} if places is not None else None, "placed": set(),   # PAD-710
            "done": {int(x[0]): x for x in done} if done is not None else None, "done_hats": 0,   # PAD-747
            "spare": list(spare) if spare is not None else None,       # PAD-826: "in" / "out" this card's game has
+           "flippers": flippers,                      # PAD-1406: False where the card's game cannot switch them
            "program": program}                        # PAD-646: a Light show block names one of its shows
     _check_shows(program, ctx)                        # PAD-646
     hud = program["hud"]
@@ -1945,6 +1950,14 @@ def _check_stack(stack, depth, where, ctx):
             elif ctx["shield"] is False:
                 ctx["out"].append("%s turns the shield targets, which a mode cannot do on this card's game."
                                   % where)
+        elif op == "flippers":                                                       # PAD-1406
+            if b.get("to") not in FLIPPERS_TO:
+                ctx["out"].append("%s switches the flippers: off, or back on." % where)
+            elif ctx["program"].get("game_modes") != "own_game":
+                ctx["out"].append("%s switches the flippers, which only a mode that is the whole game may do (The "
+                                  "game's own modes: are off: this is the whole game)." % where)
+            elif ctx["flippers"] is False:
+                ctx["out"].append("%s switches the flippers, which a mode cannot do on this card's game." % where)
         elif op == "gi":                                                             # PAD-767
             if b.get("gi") not in GI_HOLD:
                 ctx["out"].append("%s sets the GI: dark until the mode ends, or the game's again." % where)
@@ -2549,6 +2562,10 @@ class _Gen:
                 except (TypeError, ValueError):
                     secs = 10
                 out.append(pad + "if (run.on && !pm_ball_save(%du)) pm_log(\"ball save refused\");" % secs)
+            elif op == "flippers":                 # PAD-1406: the whole game's flippers off / back on
+                if b.get("to") in FLIPPERS_TO:
+                    out.append(pad + "if (run.on && !pm_flippers(%d)) pm_log(\"the flippers stay as they are\");"
+                               % (b["to"] == "on"))
             elif op == "drain_to_one":             # PAD-733: the flippers off until the extra balls drain, one back
                 out.append(pad + "if (run.on && pm_balls_in_play() > 1 && !pm_drain_to_one()) "
                            "pm_log(\"the extra balls stay: this game cannot take them away\");")

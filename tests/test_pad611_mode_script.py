@@ -28,7 +28,7 @@ EVERY_BLOCK = [
     {"op": "start_mode"}, {"op": "end_mode"},
     {"op": "light_mode", "shot": "Right ramp", "insert": "MR. HENDERSON", "color": "#ffd000", "pattern": "blink"},
     {"op": "unlight_mode", "mode": ""}, {"op": "add_time", "seconds": num(5)}, {"op": "set_time", "seconds": num(10)},
-    {"op": "multiball", "balls": 2, "save": 10}, {"op": "ball_save", "seconds": 15}, {"op": "drain_to_one"},
+    {"op": "multiball", "balls": 2, "save": 10}, {"op": "ball_save", "seconds": 15}, {"op": "drain_to_one"}, {"op": "flippers", "to": "off"},
     {"op": "game_wizard", "name": "Spectre", "how": "light"},
     {"op": "hold", "what": "magnet", "ms": num(2000)}, {"op": "scoop_hold", "ms": num(3000), "which": "next"},
     {"op": "let_go", "what": "*"}, {"op": "shield", "where": "toward"}, {"op": "gi", "gi": "dark"}, {"op": "building", "floor": "3"},

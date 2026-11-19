@@ -855,3 +855,9 @@ value comp_menu_index            2   # COMPETITION
 value comp_menu_index_msg        1920
 value comp_menu_end_index        1   # STANDARD
 value comp_menu_end_msg          1915
+
+# PAD-1406: the framework's all-flippers off and on (each flipper record's enable bit at +6, the node board's rule
+# follows), placed from Godzilla LE/Pro 1.16 by code (strict: only branch and literal offsets masked; the pair 0xd4
+# apart on every build): pm_flippers for the mode that has the whole game, and pm_drain_to_one
+site flippers_off         0x00462e64 0xe92d4070 0xe3025408
+site flippers_on          0x00462f38 0xe92d4070 0xe3025408

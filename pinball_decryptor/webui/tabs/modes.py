@@ -4130,6 +4130,10 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
                 "own_game_off": ("" if p is None or getattr(p, "own_game", False) else    # PAD-1400
                                  "Not on this game yet: the app has not found where %s adds its own points, makes "
                                  "its calls and starts its modes, so a mode cannot switch them off." % p.label),
+                # PAD-1406: the Flippers block, for a mode that is the whole game (pm_flippers)
+                "flippers_off": ("" if p is None or getattr(p, "flippers", False) else
+                                 "Not on this game yet: the app has not found where %s switches its flippers off "
+                                 "and on." % p.label),
                 # PAD-395: the mechanisms its blocks may hold here, and why the blocks are greyed if not
                 "mechs": [{"name": n, "label": lab} for n, lab in self._blocks_mechs(p).items()],
                 "mechs_off": self._blocks_mechs_off(p),

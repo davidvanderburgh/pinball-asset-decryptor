@@ -11603,6 +11603,8 @@ static void roster_deferred_tick(void);   /* item 146 */
 static void roster_late_tick(void);       /* PAD-707 */
 static void dto_tick(void);               /* PAD-733 */
 static void dto_ball_end(void);           /* PAD-733 */
+static void fl_tick(void);                /* PAD-1406 */
+static void fl_done(const char *why, int back);   /* PAD-1406 */
 static void more_tick(void);              /* PAD-707 */
 static void place_tick(void);             /* PAD-710 */
 static void done_tick(void);              /* PAD-747 */
@@ -11644,6 +11646,7 @@ static void on_tick(pm_reg *r)
     spare_tick();                             /* PAD-826: spare inputs' closes as shots; spare outputs' ends */
     stock_balls_tick();                      /* PAD-687: how long two balls have been in play */
     dto_tick();                               /* PAD-733: dead flippers until the balls drain to one */
+    fl_tick();                                /* PAD-1406: a whole-game mode's flippers off */
     coop_tick();                              /* PAD-1017: the game's own "BALL %d" back after a co-op game */
     hand_tick();                              /* PAD-1033: a player's handicap pick */
     rec_tick();                               /* PAD-1280: the owner's records' counts */
@@ -11808,6 +11811,7 @@ static void on_ball_end(pm_reg *r)
     shield_let_go("the ball ended");          /* PAD-392 */
     shake_let_go("the ball ended");           /* PAD-414 */
     dto_ball_end();                           /* PAD-733 */
+    fl_done("the ball ended", 0);             /* PAD-1406: the game's next ball brings them back */
     ball_end_hold_run();                      /* PAD-622: a mode's total first, as the game's own mini-wizards */
     beh.holding = 0;
     beh.tilts = pm_event("tilt") >= 0 ? event_count(pm_event("tilt")) : 0;
@@ -12252,6 +12256,7 @@ int pm_own_game(int on)
             if (og.blocked) pm_block_game_modes(0);
             og.blocked = 0;
             say("own game: %s gives the game its rules back", og.who);
+            fl_done("the mode gave the game its rules back", 1);   /* PAD-1406 */
             og.owner = 0;
             og_drain_sync();
         }
@@ -12280,6 +12285,7 @@ static void og_mode_ended(const struct pm_mode *m)
 {
     if (og.owner && og.owner == m) {
         say("own game: %s ended - the game has its rules back", og.who);
+        fl_done("the mode ended", 1);                /* PAD-1406 */
         if (og.blocked) pm_block_game_modes(0);   /* (a mode file's end lifted its own block already) */
         og.owner = 0;
         og_drain_sync();
@@ -17534,9 +17540,12 @@ static void dto_done(const char *why, int back)
 int pm_drain_to_one(void)
 {
     int n;
-    if (!fn("flippers_off") || !fn("flippers_on") || !multiball_ok()) {
-        say("drain to one: %s asked - this game's port has no flippers off/on or no serve: the balls play on",
-            current && current->name ? current->name : "a mode");
+    /* PAD-1406: every newest build names the flippers off/on now, but the flippers come back as the served ball lands
+     * in the shooter lane only where the port names that switch (Godzilla 1.16): elsewhere the player would plunge
+     * into dead flippers until the 30 s are up (emulator, Uncanny X-Men Pro 0.98), so it waits for that line */
+    if (!fn("flippers_off") || !fn("flippers_on") || !multiball_ok() || pm_port_value("shooter_lane_switch", -1) <= 0) {
+        say("drain to one: %s asked - this game's port has no flippers off/on, no shooter lane switch or no serve: "
+            "the balls play on", current && current->name ? current->name : "a mode");
         return 0;
     }
     if (!pm_in_game() || ball_tilted()) return 0;
@@ -17596,6 +17605,92 @@ static void dto_tick(void)
 static void dto_ball_end(void)
 {
     dto_done("the ball ended", 0);
+}
+
+/* ---- PAD-1406: the flippers, for a mode that is the whole game (pm_flippers) ------------------------------------
+ * A mode that is the whole game (pm_own_game) replaces the rules that would kill the flippers (a "dead flippers"
+ * feature, the end of a mode) - so it may switch them off and back on, through the framework's own all-flippers off
+ * and on (`site flippers_off` / `site flippers_on`, PAD-733's pair, placed on every newest build from Godzilla's by
+ * code: Uncanny X-Men LE 0.98 0x38a114 / 0x38a1e8). They touch nothing but each flipper record's enable bit (bit 2,
+ * with bit 4 "changed" for the node board's rule), and the board's own rule fires the coil at the game's powers, so
+ * nothing here powers a coil. The limits, the runtime's:
+ *   - off: only the mode that has the whole game, in a game, not on a tilted ball.
+ *   - on: only flippers this route switched off. A tilt, the game's end of a ball (its bonus) and the game's own
+ *     drain to one are the game's dead flippers, never turned back on here.
+ *   - while off they are switched off again each tick (the game's own status updates bring them back, PAD-733).
+ *   - they come back on when the mode gives the game its rules back or ends mid-ball (not tilted); at the ball's end
+ *     the game's own next ball brings them back, as after any ball; a tilt leaves them to the game. */
+static struct {
+    int off;                            /* 1 = this route switched them off */
+    unsigned long since;
+    char by[40];
+} fl;
+
+static int fl_sites(void)
+{
+    return fn("flippers_off") && fn("flippers_on");
+}
+
+/* the decision, from the state alone (tests lift it): 0 = may, else why not (1 no sites, 2 not the whole game's
+ * mode, 3 no game, 4 tilted, 5 the game's own drain to one has them, 6 on: not switched off here) */
+static int fl_refuses(int sites, int owner, int in_game, int tilted, int dto_on, int on, int ours_off)
+{
+    if (!sites) return 1;
+    if (!owner) return 2;
+    if (!in_game) return 3;
+    if (tilted) return 4;
+    if (dto_on) return 5;
+    if (on && !ours_off) return 6;
+    return 0;
+}
+
+int pm_flippers(int on)
+{
+    static const char *const why[] = { "", "this game's port names no flippers off/on", "only the mode that has the "
+        "whole game (pm_own_game) may", "no game in play", "the ball is tilted", "the game's own drain to one ball "
+        "has them", "they were not switched off by a mode" };
+    const char *who = current && current->name ? current->name : "a mode";
+    int r = fl_refuses(fl_sites(), og.owner && og.owner == current, pm_in_game(), og.tilted || ball_tilted(),
+                       dto.state != 0, on != 0, fl.off);
+    if (!on && !r && fl.off) return 1;
+    if (r) {
+        say("flippers: %s asked them %s - refused (%s)", who, on ? "on" : "off", why[r]);
+        return 0;
+    }
+    ((void (*)(void))(unsigned long)fn(on ? "flippers_on" : "flippers_off"))();
+    if (on) {
+        say("flippers: %s - back on after %lu ms", who, pm_ms() - fl.since);
+        fl.off = 0;
+    } else {
+        pm_snprintf(fl.by, sizeof fl.by, "%s", who);
+        fl.off = 1;
+        fl.since = pm_ms();
+        say("flippers: %s - off (the flippers alone: slings, pops and the ball devices play on)", who);
+    }
+    return 1;
+}
+
+int pm_flippers_off(void) { return fl.off; }
+
+/* the route lets go: back = the ball goes on (turn them on), else the game's own next ball brings them back */
+static void fl_done(const char *why, int back)
+{
+    if (!fl.off) return;
+    fl.off = 0;
+    if (back && fl_sites() && pm_in_game() && !og.tilted && !ball_tilted() && !dto.state)
+        ((void (*)(void))(unsigned long)fn("flippers_on"))();
+    else
+        back = 0;
+    say("flippers: %s switched them off %lu ms ago - %s%s", fl.by, pm_ms() - fl.since, why,
+        back ? ": back on" : ": the game brings them back");
+}
+
+static void fl_tick(void)
+{
+    if (!fl.off) return;
+    if (!pm_in_game()) { fl_done("the game ended", 0); return; }
+    if (og.tilted || ball_tilted()) { fl_done("the ball was tilted", 0); return; }
+    ((void (*)(void))(unsigned long)fn("flippers_off"))();
 }
 
 /* ---- shots from the switch drain (optional; any build) ----------------------------------------------

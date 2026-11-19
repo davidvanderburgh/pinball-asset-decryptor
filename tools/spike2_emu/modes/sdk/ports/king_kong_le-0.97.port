@@ -1041,3 +1041,9 @@ data  game_flag_count     0x006cd738
 data message_count          0x006cefe8
 data message_remap          0x009334bc
 data message_table          0x00856c6c
+
+# PAD-1406: the framework's all-flippers off and on (each flipper record's enable bit at +6, the node board's rule
+# follows), placed from Godzilla LE/Pro 1.16 by code (strict: only branch and literal offsets masked; the pair 0xd4
+# apart on every build): pm_flippers for the mode that has the whole game, and pm_drain_to_one
+site flippers_off         0x005dac1c 0xe92d4070 0xe3035d20
+site flippers_on          0x005dacf0 0xe92d4070 0xe3035d20

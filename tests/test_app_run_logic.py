@@ -294,9 +294,10 @@ def test_the_mode_maker_is_hidden_until_a_preview_code_unlocks_it(tmp_path,
         assert r["ok"] is True
         assert not preview.enabled("modes") and not _modes_visible()
         assert preview.SETTINGS_KEY not in app._settings
-        # another manufacturer never shows it, code or not
+        # a manufacturer without custom modes never shows it, code or not (Spooky has them
+        # since PAD-1417)
         w.call("shellx.preview_unlock", code)
-        w.call("ui.pick_manufacturer", "spooky")
+        w.call("ui.pick_manufacturer", "bof")
         w.drain()
         assert not _modes_visible()
 

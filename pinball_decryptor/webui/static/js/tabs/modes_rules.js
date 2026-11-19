@@ -311,7 +311,7 @@ export function NodeGraphView({ c, pg }) {
   const litThing = lit && tNodes.find((t) => t.key === lit);
   const litRules = new Set(litThing ? litThing.uses.map((u) => u.si) : []);
   const fade = (si) => litThing && !litRules.has(si);
-  const KIND = { var: "variable", timer: "timer", hits: "hits of a shot" };
+  const KIND = { var: "variable", timer: "timer", hits: "hits of a shot", menu: "menu" };
   return html`<div class="rv-split">
     <div class="rv-scroll ng-view">
       <div class="rv-bar row"><span class="small muted grow">Each rule, wired to what it shares with the others: solid where it sets a variable or timer, dashed where it reads one, dotted where a timer running out sets it off. Press a variable to light up its rules, or a rule to change its blocks.</span></div>

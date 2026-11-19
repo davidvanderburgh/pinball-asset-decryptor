@@ -149,6 +149,10 @@ class Capabilities:
     # flag, never ``modes``: that one also gates the Stern-only Attract, Play
     # Options and Expression Lights tabs.  Used by JJP.  See webui/modes_jjp.py.
     jjp_modes: bool = False
+    # PAD-1417: the Modes tab on a Spooky game - the JJP editor's mode files, run inside
+    # Spooky's Unity titles by PAD's runtime (tools/spooky_emu/modes), built into the
+    # title's update.  Its own flag, as jjp_modes.  See webui/modes_spooky.py.
+    spooky_modes: bool = False
     # Auto-transcribe path: run faster-whisper across the extracted
     # audio files and emit a ``callouts.csv`` mapping each WAV to its
     # spoken text (non-speech samples are skipped via VAD).  Used by

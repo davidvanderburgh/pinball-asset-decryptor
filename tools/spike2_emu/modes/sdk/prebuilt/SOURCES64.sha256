@@ -1,10 +1,10 @@
 # prebuilt/mode64.so was built by build_prebuilt.sh from these files (CRs stripped before
 # hashing and compiling). tests/test_stern_mode_runtime.py compares them with the SDK.
-43f32ccfa3f258d40f53cec5ec378d7978a76ba8e7d8dd964b65bcd73fdacd8e  pad_mode.h
+96ce76dc708271c9c7a7d5921a2e6f8f2687f21fa46591931912bd18e06908c5  pad_mode.h
 9dd3264a8dab132e2879b224678c78e66536320a78d7f55606bb55f2eed9806e  pad_stock.h
 8df44be28aacf5d4d6c939319eb4f8d1d086e4ade93bb4bee220031fd5933f61  hook_a64.h
-a2a8d8785b956e98a731841a717f48a88db915a5257734593efa59ec21ea93db  pad_mode_runtime.c
+47bbc7e054fc10deb636352bad41e36ddf736c94e91a899fc57459ecb5b128cb  pad_mode_runtime.c
 4934ae042fd712fab3331a22dbae2bff0f03c8db05c8af0035e1dec0d7cf4a44  mode_file.c
 217ec41dc6f22d03c9ead76e2940e5ecc2e8360ac60a6aef9451d955aaff74ae  build_mode.sh
-50a5d44bcd5a7baaa200c3e599b965240e34bbef3bf03fdbc6a8a3982cdaf5fb  mode64.so
+72d473f35a1b8ecf899535632e8a63758948e73f67f981822277c196ef5110b9  mode64.so
 compiler aarch64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0

@@ -2255,7 +2255,7 @@ def open_target(image, log=None):
     platform = info.get("platform")
     if platform not in ("stern-spike2", "stern-spike3"):
         raise SendError("This isn't a Stern Spike 2 or Spike 3 card image PAD can send: %s"
-                        % (info.get("reason") or "not recognised"))
+                        % (info.get("reason") or "not recognized"))
     with open(image, "rb") as f:
         parts = spike3.parse_partitions(f)
     layout = {p["index"]: (p["start_lba"], p["sectors"], p["ptype"]) for p in parts}

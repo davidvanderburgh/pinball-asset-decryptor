@@ -45,6 +45,7 @@ from ..modes_sheet import RulesSheetMixin     # PAD-664
 from ..modes_how import HowItWorksMixin       # PAD-1064
 from ..modes_tryit import TryItMixin
 from ..modes_jjp import JjpModesMixin         # PAD-1350: the tab on a JJP game
+from ..modes_spooky import SpookyModesMixin   # PAD-1417: the tab on a Spooky game
 from .base import TabService, rpc
 
 SAVE_DELAY_MS = 500
@@ -206,7 +207,7 @@ def fix_chip(problems):
     return dict(PAGES)[pages[0]] + (" •" if len(pages) == 1 else " +%d •" % (len(pages) - 1))
 
 
-class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin,
+class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin,
                RulesSheetMixin, HowItWorksMixin, TabService):
     ns = "modes"
     key = "Modes"
@@ -547,6 +548,10 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
             self.ctx.loop.post(fn, *args)
 
     def _on_project_changed(self):
+        if self._spk_on():
+            if getattr(self, "_visible", False):
+                self._post(self.spk_refresh)        # the sound folder may follow the project
+            return
         if self._jjp_on():
             if getattr(self, "_visible", False):
                 self._post(self.jjp_refresh)        # the sound folder may follow the project
@@ -564,9 +569,15 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
     # -- hooks ------------------------------------------------------------
     def rail_needs(self):
         # PAD-1350: a JJP title's modes need no project (they are the person's own folder)
-        return "none" if self._jjp_on() else None
+        return "none" if self._jjp_on() or self._spk_on() else None
 
     def on_manufacturer(self, mfr):
+        if self._spk_on():
+            self.set(jjp={"on": False})
+            if getattr(self, "_visible", False):
+                self.spk_refresh()
+            return
+        self.set(spk={"on": False})
         if self._jjp_on():
             if getattr(self, "_visible", False):
                 self.jjp_refresh()
@@ -582,6 +593,9 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
         (another tab or the person may have changed the modes folder); the open mode is
         reopened only when the project changed or it is gone, or the card the modes are for
         changed (PAD-434: a card saved into the same folder)."""
+        if self._spk_on():
+            self.spk_refresh()
+            return
         if self._jjp_on():
             self.jjp_refresh()
             return
@@ -4130,6 +4144,17 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
                 "own_game_off": ("" if p is None or getattr(p, "own_game", False) else    # PAD-1400
                                  "Not on this game yet: the app has not found where %s adds its own points, makes "
                                  "its calls and starts its modes, so a mode cannot switch them off." % p.label),
+                "kickbacks": bool(p is not None and getattr(p, "kickbacks", False)),    # PAD-1406: the Kickbacks block
+                "toys": [{"name": n, "label": lab, "actions": list(acts)}                  # PAD-1406: the Move block
+                         for n, lab, acts in (getattr(p, "toys", ()) or ())] if p else [],
+                # PAD-1406: the ball device block: the game's locks and scoops, for a mode that is the whole game
+                "devices": [{"name": n, "label": lab} for n, lab in (getattr(p, "ball_devices", ()) or ())] if p else [],
+                # PAD-1406: the Fire block: the game's own one-shot devices, for a mode that is the whole game
+                "pulses": [{"name": n, "label": lab} for n, lab in (getattr(p, "pulse_coils", ()) or ())] if p else [],
+                # PAD-1406: the Flippers block, for a mode that is the whole game (pm_flippers)
+                "flippers_off": ("" if p is None or getattr(p, "flippers", False) else
+                                 "Not on this game yet: the app has not found where %s switches its flippers off "
+                                 "and on." % p.label),
                 # PAD-395: the mechanisms its blocks may hold here, and why the blocks are greyed if not
                 "mechs": [{"name": n, "label": lab} for n, lab in self._blocks_mechs(p).items()],
                 "mechs_off": self._blocks_mechs_off(p),
@@ -4231,6 +4256,8 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
             out["magnet"] = "magnet"
         if p.can("coils"):
             out.update(p.held_coils)
+            # PAD-1406: the coils only a mode that is the whole game may hold (the checks say so elsewhere)
+            out.update((n, lab + " (whole game)") for n, lab in getattr(p, "own_game_coils", ()) or ())
         return out
 
     @staticmethod

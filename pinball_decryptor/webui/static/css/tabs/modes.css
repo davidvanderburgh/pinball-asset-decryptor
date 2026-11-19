@@ -290,6 +290,11 @@ html.bph-760 .modes-list-bd { max-height: 300px; }
 .bk.bk-var, .bk-pal.bk-var { background: #c8553a; color: #fff; }
 .bk.bk-timer, .bk-pal.bk-timer { background: #b0457e; color: #fff; }
 .bk-varbox.timer { background: #b0457e22; border-color: #b0457e66; }
+/* PAD-1404: a menu's settings - its items one a line */
+.bk-menus { flex-wrap: wrap; align-items: flex-start; }
+.bk-menus > .bk { flex: 1 1 100%; }
+.bk-menu-items { width: 300px; font: inherit; font-size: 12px; background: var(--bg-input, #1b1f27); color: inherit;
+  border: 1px solid var(--line, #3a3f4a); border-radius: 6px; padding: 4px 6px; resize: vertical; }
 .bk-flow { background: #d77a21; }
 .bk-show { background: #3a78c9; }
 .bk-hud { background: #a8457a; }                 /* PAD-375: the HUD blocks and its settings */

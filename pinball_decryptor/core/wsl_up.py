@@ -201,12 +201,18 @@ def distro_of(cmd):
     return None
 
 
-def cmd_would_boot(cmd):
+def cmd_would_boot(cmd, known_up=False):
     """True when running ``cmd`` would start WSL or its distro (it is a
-    wsl.exe command and its distro is certainly not running)."""
+    wsl.exe command and its distro is certainly not running).
+
+    ``known_up``: the caller's last reading saw its game running there, so
+    the distro is up as long as the VM is: only the free VM check is made
+    (a running game is polled every couple of seconds)."""
     d = distro_of(cmd)
     if d is False:
         return False
+    if known_up:
+        return not vm_running()
     return not distro_running(d)
 
 
@@ -219,12 +225,13 @@ def forget():
 
 #: The status reading a poll stands in for its rig's status script when the
 #: rig's distro is not running: every Emulate tab's ``state_text`` reads it as
-#: :data:`ASLEEP_STATE`, and nothing in it says a game, a key or a board is
+#: its own idle word ("Stopped", or "Not running" on the Stern tabs) with
+#: :data:`ASLEEP_HINT`, and nothing in it says a game, a key or a board is
 #: there (none can be, with WSL down).
 ASLEEP_KEY = "_wsl_asleep"
-ASLEEP_STATE = ("Stopped",
-                "WSL is not running, so no game is. Start wakes it up; the "
-                "app does not keep WSL awake just to watch it.")
+ASLEEP_HINT = ("WSL is not running, so no game is. Start wakes it up; the "
+               "app does not keep WSL awake just to watch it.")
+ASLEEP_STATE = ("Stopped", ASLEEP_HINT)
 
 
 def asleep_info():

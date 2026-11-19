@@ -4231,8 +4231,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         except Exception:                                # noqa: BLE001
             return True
 
-    @staticmethod
-    def _rig_asleep():
+    def _rig_asleep(self):
         """True when the rig's distro is certainly not running, so no game
         is either: answered WITHOUT wsl.exe while the WSL VM is down, and
         with a list that never starts anything while it is up (PAD-1457).
@@ -4243,6 +4242,8 @@ class EmulateTab(EmulateLogMixin, TabService):
             from ...core import wsl_up
             if not wsl_up.vm_running():
                 return True
+            if self._last_up:
+                return False            # its game is running: so is WSL
             if wsl_up.running_distros() is None:
                 return False            # WSL could not say: ask as before
             return not wsl_up.distro_running(runtime.distro_for("spike2"))

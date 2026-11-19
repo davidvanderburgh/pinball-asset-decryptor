@@ -102,6 +102,17 @@ def test_cmd_would_boot(monkeypatch):
     assert not wsl_up.cmd_would_boot(["ssh", "rig", "status.sh"])
 
 
+def test_a_running_game_needs_only_the_free_vm_check(monkeypatch):
+    """Polled every 2 s while a game runs: no running-list per poll."""
+    _no_wsl(monkeypatch)
+    monkeypatch.setattr(wsl_up, "_process_names", lambda: {"vmmemwsl"})
+    cmd = ["wsl.exe", "-d", "PAD-Runtime", "-e", "bash", "status.sh"]
+    assert not wsl_up.cmd_would_boot(cmd, known_up=True)
+    wsl_up.forget()
+    monkeypatch.setattr(wsl_up, "_process_names", lambda: set())
+    assert wsl_up.cmd_would_boot(cmd, known_up=True)
+
+
 def test_list_running_parses_utf16_and_the_none_message(monkeypatch):
     class P:
         def __init__(self, out):
@@ -130,7 +141,10 @@ def test_every_tab_reads_a_skipped_poll_as_stopped(core):
     mod = importlib.import_module(
         "pinball_decryptor.webui.emulate_%s_core" % core if core
         else "pinball_decryptor.webui.emulate_core")
-    assert mod.state_text(wsl_up.asleep_info()) == wsl_up.ASLEEP_STATE
+    label, hint = mod.state_text(wsl_up.asleep_info())
+    assert hint == wsl_up.ASLEEP_HINT
+    # the tab's own idle word, so the pill keeps its idle look
+    assert label == ("Not running" if core in (None, "spike1") else "Stopped")
 
 
 # ------------------------------------------------------ the shared poll gate --
@@ -145,6 +159,7 @@ def test_the_shared_poll_never_runs_a_status_call_that_would_boot(
     cls = next(v for v in vars(common).values()
                if isinstance(v, type) and hasattr(v, "_run_status"))
     obj = cls.__new__(cls)
+    obj._last_up = False
     with pytest.raises(wsl_up.Asleep):
         obj._run_status(["wsl.exe", "-d", "PAD-Runtime", "-e", "bash",
                          "status.sh"])

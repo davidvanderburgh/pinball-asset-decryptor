@@ -295,7 +295,7 @@ class RigTabMixin:
 
         Raises :class:`wsl_up.Asleep` instead when the command would START
         WSL or its distro (PAD-1457): a status question never wakes it."""
-        if _wsl_up.cmd_would_boot(cmd):
+        if _wsl_up.cmd_would_boot(cmd, known_up=self._last_up):
             raise _wsl_up.Asleep()
         try:
             out = subprocess.run(cmd, stdout=subprocess.PIPE,

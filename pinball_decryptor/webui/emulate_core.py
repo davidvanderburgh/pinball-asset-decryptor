@@ -1233,7 +1233,7 @@ def state_text(info):
     "Waiting at Tech Alerts", and the two want opposite things from the human.
     """
     if info.get(_wsl_up.ASLEEP_KEY):
-        return _wsl_up.ASLEEP_STATE
+        return "Not running", _wsl_up.ASLEEP_HINT
     label, hint = _STATE_TEXT.get(info.get("state", "off"),
                                   (info.get("state", ""), ""))
     if info.get("state") == "techalerts":

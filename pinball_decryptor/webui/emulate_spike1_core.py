@@ -148,7 +148,7 @@ def state_text(info):
     if not info:
         return "Checking…", ""
     if info.get(_wsl_up.ASLEEP_KEY):
-        return _wsl_up.ASLEEP_STATE
+        return "Not running", _wsl_up.ASLEEP_HINT
     if info.get("wsl") != "1":
         return ("WSL not answering",
                 "The emulator is a Linux program and runs inside WSL.")

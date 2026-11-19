@@ -611,7 +611,8 @@ def test_sweep_off_jumps_end_to_end(cbin):
 # one SLOW move (speed 20, to POSITION 7) - crossed the track in 0.6 s and was
 # gone before the post let the ball go. A cmd 55 names its speed (byte 6) and
 # the game's time limit (LE16, 10 ms units); the full stop-to-stop run takes
-# 120000 / speed ms, never past 85% of the limit, a shorter move its share.
+# 150000 / speed ms (PAD-1460: 120000 until Mike found the harpoon fin still
+# too quick to hit), never past 85% of the limit, a shorter move its share.
 # The frames jaws_le 1.02 sent (rig 2, PAD_NB_TRACE=1, 2026-11-17):
 FIN_SELFTEST_TO_7 = "8909550060000fd00702d100"   # speed 15, limit 20 s
 FIN_NORMAL_TO_4 = "890955006300538f0206cc00"     # speed 83, limit 6.55 s
@@ -630,27 +631,27 @@ def _ticks(start, stop, step=50, node=9):
 
 
 def test_harpoon_fin_crosses_the_track_in_seconds(cbin):
-    """SLOW (20): six seconds from POSITION 1 to 7, each position on the way
-    made in turn - time for a second shot, as on the machine."""
-    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 8000)
+    """SLOW (20): 7.5 seconds from POSITION 1 to 7 (PAD-1460, 6 s before),
+    each position on the way made in turn - time for a second shot."""
+    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 9500)
     edges = _run(cbin, steps)
-    assert _arrive(edges, 32) == 7000
+    assert _arrive(edges, 32) == 8500
     made = [(ms, b) for ms, _n, b, m in edges if m and b != 38]
     assert [b for _ms, b in made] == [37, 36, 35, 34, 33, 32]
-    assert made[0][0] >= 1500 and made[-2][0] <= 6500        # spread over the run
+    assert made[0][0] >= 1500 and made[-2][0] <= 8000        # spread over the run
 
 
 def test_self_test_move_is_slower_still(cbin):
-    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SELFTEST_TO_7] + _ticks(1050, 10000)
-    assert _arrive(_run(cbin, steps), 32) == 9000
+    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SELFTEST_TO_7] + _ticks(1050, 12000)
+    assert _arrive(_run(cbin, steps), 32) == 11000
 
 
 def test_a_shorter_move_takes_its_share(cbin):
-    """NORMAL (83) from POSITION 7 to 4: half the track, half of 1445 ms."""
-    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SELFTEST_TO_7] + _ticks(1050, 9000)
-    steps += ["f" + FIN_NORMAL_TO_4] + _ticks(9010, 10000, 10)
+    """NORMAL (83) from POSITION 7 to 4: half the track, half of 1807 ms."""
+    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SELFTEST_TO_7] + _ticks(1050, 11000)
+    steps += ["f" + FIN_NORMAL_TO_4] + _ticks(11010, 12500, 10)
     edges = _run(cbin, steps)
-    assert 9700 <= _arrive(edges, 35) <= 9740
+    assert 11900 <= _arrive(edges, 35) <= 11940
 
 
 def test_never_past_the_games_own_limit(cbin):
@@ -660,12 +661,12 @@ def test_never_past_the_games_own_limit(cbin):
 
 
 def test_turned_back_mid_track_starts_where_the_fin_is(cbin):
-    """Half way to 7 (input 35 at 3 s) and sent home: three stretches back,
-    three seconds, not a whole track's run."""
-    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 4000)
-    steps += ["f" + FIN_SLOW_TO_1] + _ticks(4050, 9000)
+    """Half way to 7 (input 35 at 3.75 s) and sent home: three stretches back,
+    3.75 seconds, not a whole track's run."""
+    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 4750)
+    steps += ["f" + FIN_SLOW_TO_1] + _ticks(4800, 10000)
     edges = _run(cbin, steps)
-    assert _arrive(edges, 38) == 7000
+    assert _arrive(edges, 38) == 8500
     assert 32 not in [b for _ms, _n, b, m in edges if m]
 
 
@@ -675,9 +676,9 @@ def test_motor_ms_in_the_environment_still_times_every_move(cbin):
 
 
 def test_batman_turntable_at_full_speed(cbin):
-    """Speed 128, one stretch of two: 120000/128/2 = 468 ms."""
+    """Speed 128, one stretch of two: 150000/128/2 = 585 ms."""
     steps = ["t0:9", "f" + BAT_TT, "t1000:9", "f" + BAT_TT_POS2] + _ticks(1010, 2000, 2)
-    assert _arrive(_run(cbin, steps), 3) == 1468
+    assert _arrive(_run(cbin, steps), 3) == 1586
 
 
 # ---- PAD-1392: the fin glides ----------------------------------------------
@@ -706,24 +707,24 @@ def _places(cbin, steps, **env):
 
 def test_fin_place_glides_along_the_track(cbin):
     """SLOW to POSITION 7 (input 32) from POSITION 1 (input 38): the place
-    runs evenly from 38000 to 32000 over the six seconds, then rests."""
-    steps = ["t0:9", "f" + FIN, "t500:9", "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 9000)
+    runs evenly from 38000 to 32000 over the 7.5 seconds, then rests."""
+    steps = ["t0:9", "f" + FIN, "t500:9", "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 9500)
     p = _places(cbin, steps)
     assert 0 not in p and 500 not in p           # nothing until the game runs it (cmd 55)
-    assert p[1050] == 38000 - 6000 * 50 // 6000
-    assert p[4000] == 35000                      # half way: POSITION 4
-    assert p[7000] == p[9000] == 32000           # arrived, and stays
-    run = [p[t] for t in sorted(p) if 1050 <= t <= 7000]
+    assert p[1050] == 38000 - 6000 * 50 // 7500
+    assert p[4750] == 35000                      # half way: POSITION 4
+    assert p[8500] == p[9500] == 32000           # arrived, and stays
+    run = [p[t] for t in sorted(p) if 1050 <= t <= 8500]
     assert all(b < a for a, b in zip(run, run[1:]))          # never stands still or backs up
     assert max(a - b for a, b in zip(run, run[1:])) <= 60    # no hop: 50 ms is 50 thousandths
 
 
 def test_fin_place_turned_back_starts_where_the_car_is(cbin):
     """Sent home half way: the place turns at 35000, it does not jump."""
-    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 4000)
-    steps += ["f" + FIN_SLOW_TO_1] + _ticks(4050, 8000)
+    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_SLOW_TO_7] + _ticks(1050, 4750)
+    steps += ["f" + FIN_SLOW_TO_1] + _ticks(4800, 9000)
     p = _places(cbin, steps)
-    assert p[4000] == 35000
-    assert abs(p[4050] - 35000) <= 60 and p[4050] > 35000
-    assert p[8000] == 38000
+    assert p[4750] == 35000
+    assert abs(p[4800] - 35000) <= 60 and p[4800] > 35000
+    assert p[8500] == p[9000] == 38000
 

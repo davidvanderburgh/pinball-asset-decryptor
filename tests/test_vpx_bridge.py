@@ -1415,8 +1415,9 @@ def test_jaws_one_fin_glides_under_vbscript(tmp_path):
     # One fin, PadFin, slid to where the emulated motor says its car is
     # (GetMech(0): 38000 = POSITION 1 .. 32000 = POSITION 7), rising and
     # sinking with SHARK FIN UP/DOWN; the chum line's seven targets are unseen,
-    # the nearest standing as its physics; with no motor place it falls back
-    # to the position switches
+    # its physics: PAD-1460, each within 3/4 of a position of the fin stands, so
+    # mid move both neighbours do and the fin seen is always covered; with no
+    # motor place it falls back to the position switches
     m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
     assert m["mechs"]["0"]["stepper"] == [9, 0]
     assert m["retrofit_targets"]["PadFin"] == {"clone": "BallShadow1", "look": "Tbeachfinal"}
@@ -1436,7 +1437,10 @@ def test_jaws_one_fin_glides_under_vbscript(tmp_path):
         "MechVal = 38000 : Ticks 1 : Show",                          # POSITION 1, down out of sight
         "PadFinUpDown True : Ticks 5 : Show : Ticks 6 : Show",       # rising 5 a tick, then up
         "MechVal = 35500 : Ticks 1 : Show",                          # half way from 3 to 4
-        "MechVal = 35400 : PadMechTimer_Timer : Standing",           # 3.6: the target at 4 stands
+        "MechVal = 35400 : PadMechTimer_Timer : Standing",           # 3.6: the targets at 3 and 4 stand
+        "MechVal = 35200 : PadMechTimer_Timer : Standing",           # 3.8: only the one at 4
+        "MechVal = 35000 : PadMechTimer_Timer : Standing",           # at POSITION 4: only it
+        "MechVal = 34500 : PadMechTimer_Timer : Standing",           # 4.5: 4 and 5
         "MechVal = 32000 : Ticks 1 : Show",                          # POSITION 7
         "MechVal = 0 : Sw(1103) = 1 : PadMechTimer_Timer : Ticks 1 : Show : Standing",   # no motor place: the switch
         "PadFinUpDown False : Ticks 11 : Show : PadMechTimer_Timer : Standing",
@@ -1444,10 +1448,49 @@ def test_jaws_one_fin_glides_under_vbscript(tmp_path):
     assert out == ["0,700,0,-62,False",
                    "0,700,0,-37,True", "0,700,0,-10,True",
                    "250,725,25,-10,True",
-                   "dddUddd",
+                   "ddUUddd", "dddUddd", "dddUddd", "dddUUdd",
                    "600,760,60,-10,True",
                    "100,710,10,-10,True", "dUddddd",
                    "100,710,10,-62,False", "ddddddd"], out
+
+
+def test_every_absent_repatch_mark_is_a_line_the_patcher_writes():
+    # PAD-1460: a map's `absent` mark is a line every newer patched script has;
+    # one no patcher writes any more marks every table, the freshest included,
+    # as missing that fix (jaws_le's PAD-1356 line, gone from its script since
+    # PAD-1362, asked for Patch again on every Jaws table)
+    import glob
+    import re
+    squash = lambda t: re.sub(r"\s+", " ", t).lower().strip()      # noqa: E731
+    src = squash("".join(open(f, encoding="utf-8").read()
+                         for f in glob.glob(os.path.join(VPX, "*.py"))))
+    orphans = []
+    for f in sorted(glob.glob(os.path.join(VPX, "*.json"))):
+        m = json.load(open(f, encoding="utf-8"))
+        if not isinstance(m, dict):
+            continue
+        extra = m.get("extra_vbs") if isinstance(m.get("extra_vbs"), str) else ""
+        # a retrofit trigger's own Sub, written for it by the patcher
+        extra += "".join(" Sub %s_Hit " % n for n in (m.get("retrofit_triggers") or {}) if n != "_")
+        for k in m.get("repatch") or []:
+            a = k.get("absent")
+            if a and squash(a) not in squash(extra) and squash(a) not in src:
+                orphans.append((os.path.basename(f), a))
+    assert orphans == []
+
+
+@pytest.mark.skipif(not os.path.exists(JAWS_TABLE), reason="JP's JAWS 50th 3.2 is not on this machine")
+def test_jaws_fresh_patch_misses_no_fix(tmp_path):
+    # PAD-1460: a table patched now is not told to patch again
+    pv = pytest.importorskip("padvpx")
+    vs = pytest.importorskip("vpxsetup")
+    pv.patch(JAWS_TABLE, str(tmp_path), None, None)
+    out = [n for n in os.listdir(tmp_path) if n.endswith(" (PAD).vpx")]
+    assert len(out) == 1
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    assert vs.missed_fixes(str(tmp_path), out[0], m["repatch"]) == []
+    script = open(os.path.join(tmp_path, out[0][:-4] + ".script.vbs"), encoding="utf-8").read()
+    assert "PadFinUp And Abs(p - (i + 1)) < 0.75" in script
 
 
 @pytest.mark.skipif(not os.path.exists(JAWS_TABLE), reason="JP's JAWS 50th 3.2 is not on this machine")

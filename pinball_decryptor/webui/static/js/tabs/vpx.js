@@ -122,15 +122,16 @@ function Sheet({ d, onClose }) {
 
 // PAD-1304: the Cabinet row. The backglass: where B2S puts it, or filling a
 // screen (each patched table gets a <name>.res saying so). B2S's own DMD
-// hidden: the game's screen is the DMD. The two buttons' LEDs as DOF E
-// events, blank = not sent (E190 / E191 suggested).
+// hidden: the game's screen is the DMD. The two buttons' LEDs and (PAD-1460)
+// the machine's shaker motor as DOF E events, blank = not sent (E190 / E191 /
+// E192 suggested).
 function CabinetRow({ c, disabled }) {
   const screens = c.screens || [];
   const opts = [{ value: "0", label: "Where B2S puts it" }].concat(screens.map((m) => ({
     value: String(m.n), label: "Screen " + m.n + (m.primary ? " (main)" : "") + ", " + m.w + "×" + m.h })));
-  const dof = (k, label, suggested) => html`<span class="vpx-dof small">${label} E<${Field} sm type="number" width="66px" min="0" max="999"
+  const dof = (k, label, suggested, tipText) => html`<span class="vpx-dof small">${label} E<${Field} sm type="number" width="66px" min="0" max="999"
       value=${c[k] ? String(c[k]) : ""} placeholder=${String(suggested)} disabled=${disabled}
-      title=${{ head: label + " button light to DOF", lines: ["The DOF event (E number) the button's LED is sent as while a table plays; blank: not sent.",
+      title=${tipText || { head: label + " button light to DOF", lines: ["The DOF event (E number) the button's LED is sent as while a table plays; blank: not sent.",
         "Give it the same number in your DOF config's line for this button (" + suggested + " is free on most)."] }}
       onChange=${() => {}}
       onCommit=${(v) => { const n = parseInt(v, 10) || 0; if (n !== (c[k] || 0)) call("vpx.set_cabinet", { [k]: n }); }} /></span>`;
@@ -138,7 +139,7 @@ function CabinetRow({ c, disabled }) {
     <span class="h2">Cabinet</span>
     <span class="small muted" ...${tip({ head: "A cabinet with the game's screen on the backglass monitor.",
       lines: ["The backglass (B2S) goes to a screen of its own: each patched table gets a <name>.res beside it.",
-        "The start and lockdown button lights go to DOF, and each table's backbox light (BACKBOX GI) to the backglass bulbs you pick on its row."] })}>Backglass on</span>
+        "The start and lockdown button lights and the machine's shaker motor go to DOF, and each table's backbox light (BACKBOX GI) to the backglass bulbs you pick on its row."] })}>Backglass on</span>
     <${Select} sm value=${String(c.backglass || 0)} options=${opts} disabled=${disabled}
       title="The screen the table's backglass fills. Where B2S puts it: its own ScreenRes.txt, as before."
       onChange=${(v) => call("vpx.set_cabinet", { backglass: parseInt(v, 10) || 0 })} />
@@ -148,6 +149,10 @@ function CabinetRow({ c, disabled }) {
     <span class="sp"></span>
     ${dof("dof_start", "Start", (c.suggested || {}).start || 190)}
     ${dof("dof_lockdown", "Lockdown", (c.suggested || {}).lockdown || 191)}
+    ${dof("dof_shaker", "Shaker", (c.suggested || {}).shaker || 192, { head: "The machine's shaker motor to DOF",
+      lines: ["The DOF event (E number) sent while the game runs its shaker motor; blank: not sent.",
+        "Give your shaker the same number in your DOF config's line for the table (" + ((c.suggested || {}).shaker || 192) + " is free on most).",
+        "The game shakes only while its own SHAKER MOTOR setting has the motor fitted (Jaws LE has it on as it comes)."] })}
   </div>`;
 }
 

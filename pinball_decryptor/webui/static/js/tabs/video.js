@@ -11,6 +11,7 @@ import { LookRow } from "../core/look.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 import { LookGL } from "./video_gl.js";
 import { testCol } from "../core/testtick.js";
+import { UnlockBox } from "../core/unlock_box.js";
 
 export const css = true;
 
@@ -710,15 +711,14 @@ function CompareView({ cmp, byRel, cs, look, active, setActive, stopSeq, onOpenC
           <${Button} icon=${anyPlaying ? "pause" : "play"} onClick=${playAll}>${anyPlaying ? "Pause all" : "Play all"}<//>
           <${Button} icon="refresh" onClick=${fromStart} title="Play every clip from its first frame at once, so they keep in step">From the start<//>
           <${Check} checked=${loop} label="Loop" cls="small" title="Play each clip over and over" onChange=${setLoop} />
-          ${colorOffered ? html`<span class="vcm-adv" ...${tip(ADV_TIP)}><${Check} checked=${colorStock} label="Advanced" cls="small"
-            onChange=${(v) => call("video.set_color_stock", v)} /></span>` : null}
           <${Button} kind="ghost" icon="x" onClick=${close} title="Back to the list (Esc)">Close<//>
         </div>
         <div class="small muted">${look.offered
           ? "Click a clip: the Color profiles bar changes its colors while you watch the others. It is the one you hear."
           : "Click a clip to hear it."}</div>
       </div>
-      ${look.offered ? html`<div class="vcm-look"><${LookRow} look=${look} ns="video" onOpen=${onOpenColors} /></div>` : null}
+      <div class="vcm-look lookbar-row">${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${onOpenColors} />` : null}
+        ${colorOffered ? html`<${UnlockBox} />` : null}</div>
       <div class=${cx("vcm-grid", "n" + Math.min(n, 4))}>
         ${tiles.map((t) => html`<${CmpTile} key=${t.id} t=${t} row=${byRel.get(t.rel)} cs=${cs} offered=${!!look.offered} active=${t.id === active}
           onPick=${() => setActive(t.id)} stopSeq=${stopSeq} loop=${loop} canRemove=${n > 1} onState=${onState} />`)}
@@ -972,6 +972,9 @@ export default function VideoTab() {
   const colorFile = barRow
     ? { kind: "videos", rel: barRow.rel, label: barRow.name, on: !!barRow.col, attach: { ns: "video" },
         more: selOpen.filter((x) => x.rel !== barRow.rel).map((x) => x.rel) } : null;
+  // Simon (2026-11-19): "X Assets selected" in the Colors bar - the rows selected, and the locked ones among them
+  const picked = cmpOpen ? null : { n: sel.size,
+    locked: rows.filter((x) => sel.has(x.rel) && x.col == null).length };
 
   const loadRow = (rel, delay = 200) => {
     clearTimeout(selectJob.current);
@@ -1310,7 +1313,7 @@ export default function VideoTab() {
   const emptyPlay = (side) => { if (currentRel) call("video.activate_pane", currentRel, side); };
 
   const withBar = (page) => html`<div class="cpd-shell" ref=${shellRef}>${page}${colorNs.has_project ? html`<${ColorBar} host="video" startMode="assets"
-    open=${colors} setOpen=${setColors} file=${colorFile} />` : null}</div>`;
+    open=${colors} setOpen=${setColors} file=${colorFile} picked=${picked} />` : null}</div>`;
   if (cmpOpen) {
     return withBar(html`<${CompareView} cmp=${cmp} byRel=${byRel} cs=${colorNs} look=${look}
       active=${activeTile ? activeTile.id : null} setActive=${setCmpActive} stopSeq=${s.stop_seq}
@@ -1380,8 +1383,6 @@ export default function VideoTab() {
             onChange=${(v) => call("video.set_trim", v)} />
           ${s.best_supported ? html`<${Check} checked=${s.best_quality} label="Best quality" title=${s.best_tip} cls="small"
             onChange=${(v) => call("video.set_best_quality", v)} />` : null}
-          ${s.color_offered ? html`<span ...${tip(ADV_TIP)}><${Check} checked=${s.color_stock} label="Advanced" cls="small"
-            onChange=${(v) => call("video.set_color_stock", v)} /></span>` : null}
         </span>
       </div>
       <div class="vid-tblwrap" onMouseDownCapture=${onGripDown}>
@@ -1427,7 +1428,8 @@ export default function VideoTab() {
             ${pv.seen.prog_head ? html`<span>${pv.seen.prog_head}</span>
             <ul class="vid-sound-list">${pv.seen.prog_lines.map((t) => html`<li key=${t}>${t}</li>`)}</ul>` : null}</div><//>
         </div>` : null}
-        ${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
+        <div class="lookbar-row">${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
+          <${UnlockBox} /></div>
         <div class="vid-panes">
           <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />
           <span class="vid-vsep"></span>

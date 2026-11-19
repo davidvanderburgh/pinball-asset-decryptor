@@ -325,7 +325,7 @@ def test_a_compare_player_turns_to_the_profile_attached_to_it(tmp_path):
 
 
 @pytest.mark.parametrize("needle", [
-    'class="vcm-adv"',                                    # Advanced in Compare's head
+    '${colorOffered ? html`<${UnlockBox} />` : null}',  # the Advanced box in Compare's head (Simon)
     "<${CmpBadge} row=${row} cs=${cs} />",               # a mark on each clip
     '<${Icon} name="lock" />Locked',
     "lut=${t.lut || null} onLive=${setGlLive}",          # Compare's players drawn exactly
@@ -337,7 +337,8 @@ def test_the_page_wires_it(needle):
 
 
 def test_compare_and_the_list_both_have_the_advanced_box():
-    assert _src("video.js").count('call("video.set_color_stock", v)') == 2
+    # Simon (2026-11-19): the shared Advanced box (core/unlock_box.js) in both, where the Advanced tick was
+    assert _src("video.js").count("<${UnlockBox}") == 2
 
 
 @pytest.mark.parametrize("needle", [

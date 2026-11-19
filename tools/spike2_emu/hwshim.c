@@ -9482,16 +9482,18 @@ static unsigned long motor_ms(void)
  * was gone before the post let the ball go (Mike St P, PAD-1383); on the real
  * machine there is time for a second shot.
  *
- * So the full stop-to-stop run takes MOTOR_SPEED_K (120000) / speed ms (the drive
+ * So the full stop-to-stop run takes MOTOR_SPEED_K (150000) / speed ms (the drive
  * speed is the car's speed), never more than 85% of the game's limit, and a
- * shorter move its share of it: SLOW 6 s across the track, the self-test 8 s,
- * NORMAL (83) 1.4 s, batman's speed 128 0.9 s. cmd 53/54 and a 55 with no
+ * shorter move its share of it: SLOW 7.5 s across the track, the self-test 10 s,
+ * NORMAL (83) 1.8 s, batman's speed 128 1.2 s. PAD-1460: it was 120000 (SLOW
+ * 6 s), a guess, never timed on a machine; Mike still found the harpoon fin
+ * very hard to hit, so a quarter slower, well inside the game's 13 s limit. cmd 53/54 and a 55 with no
  * speed keep PAD_MOTOR_MS (john_wick_le's car is re-sent after ~0.9 s), and a
  * PAD_MOTOR_MS set in the environment still times every move. */
 static unsigned long motor_travel(const struct nb_motor *m, const unsigned char *p,
                                   int n, int from_bit, int to_bit)
 {
-    const unsigned long MOTOR_SPEED_K = 120000;   /* ms x speed, stop to stop */
+    const unsigned long MOTOR_SPEED_K = 150000;   /* ms x speed, stop to stop (PAD-1460) */
     unsigned long full, limit, span, dist;
     unsigned speed;
     if (motor_ms_env() >= 0 || p[2] != 0x55 || n < 10 || !p[6]) return motor_ms();

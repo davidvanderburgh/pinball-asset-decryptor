@@ -73,6 +73,8 @@ TABS = (
     # Not a tab: the app-wide menus, windows and banners (settings, help,
     # projects, updates).  Its key is empty, so the rail never shows it.
     ("shell_extras", "shellx", "", "", "", ""),
+    # Not a tab either: the image sets picker the Images, Video and Scenes tabs share (Simon, 2026-11-18)
+    ("image_sets", "imgsets", "", "", "", ""),
 )
 
 

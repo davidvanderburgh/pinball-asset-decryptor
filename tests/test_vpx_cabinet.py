@@ -74,7 +74,8 @@ def test_cabinet_lights_from_led_io_and_the_platform_places(tmp_path):
 
 def test_settings_defaults_and_updates():
     c = padcabinet.settings({})
-    assert c == {"backglass": 0, "hide_dmd": False, "dof_start": 0, "dof_lockdown": 0, "gi_bulbs": {}}
+    assert c == {"backglass": 0, "hide_dmd": False, "dof_start": 0, "dof_lockdown": 0, "dof_shaker": 0,
+                 "gi_bulbs": {}}
     kit = padcabinet.update({"library": "x"}, backglass=2, hide_dmd=True, dof_start=190)
     assert kit["library"] == "x"
     kit = padcabinet.set_bulbs(kit, "jaws_le", ["g1", "g2", ""])
@@ -239,6 +240,60 @@ def test_bridge_sends_the_buttons_to_dof_as_e_events(tmp_path):
     assert not [g for g in dof.got if g[0] == "E"]
 
 
+def _coil_data(pc, fires):
+    """A padled block with coil (node, idx) fired `fires[(node, idx)]` times."""
+    import coilmap
+    data = bytearray(pc.READ_N)
+    for (node, idx), n in fires.items():
+        data[coilmap.COIL_OFF + node * 16 + idx] = n
+    return bytes(data)
+
+
+def test_bridge_sends_the_shaker_motor_to_dof(tmp_path):
+    """PAD-1460 (Mike St P: "integrate the stern shaker motor activity with the
+    DOF shaker motor"): the machine's SHAKER MOTOR - group 5 index 0, node 1
+    coil 0 here - goes to DOF as the kit's shaker E event while it runs."""
+    kit = padcabinet.update({}, dof_shaker=192)
+    pc, b = _bridge(tmp_path, kit)
+    assert b.cab_shaker == (1, 0)
+    dof = FakeDOF()
+    assert b.dof_init("mtl_180h", "x.vpx", factory=lambda: dof)
+    t = 100.0
+    b._poll_coils(_coil_data(pc, {}), t)                    # first look: nothing fired
+    b._poll_dof(_data(pc, {}))
+    b._poll_coils(_coil_data(pc, {(1, 0): 1}), t + 0.01)    # the game shakes
+    b._poll_dof(_data(pc, {}))
+    b._poll_dof(_data(pc, {}))                              # still on: nothing again
+    b._poll_coils(_coil_data(pc, {(1, 0): 1}), t + 5)       # the board ended it
+    b._poll_dof(_data(pc, {}))
+    b.dof_finish()
+    assert [g for g in dof.got if g[0] == "E"] == [("E", 192, 0), ("E", 192, 1), ("E", 192, 0)]
+    # another coil firing is no shake
+    pc, b = _bridge(tmp_path / "2", kit)
+    dof = FakeDOF()
+    b.dof_init("mtl_180h", "x.vpx", factory=lambda: dof)
+    b._poll_coils(_coil_data(pc, {}), t)
+    b._poll_coils(_coil_data(pc, {(1, 1): 1}), t + 0.01)
+    b._poll_dof(_data(pc, {}))
+    b.dof_finish()
+    assert [g for g in dof.got if g[0] == "E"] == [("E", 192, 0)]
+    # no shaker number set: nothing sent; a title with no shaker: nothing to send
+    pc, b = _bridge(tmp_path / "3", {})
+    dof = FakeDOF()
+    b.dof_init("mtl_180h", "x.vpx", factory=lambda: dof)
+    b._poll_coils(_coil_data(pc, {}), t)
+    b._poll_coils(_coil_data(pc, {(1, 0): 1}), t + 0.01)
+    b._poll_dof(_data(pc, {}))
+    b.dof_finish()
+    assert not [g for g in dof.got if g[0] == "E"]
+    pc = pytest.importorskip("padcontroller")
+    b = pc.Bridge()
+    b.set_game("metallica_spike")
+    coil5 = DEVICE_XY + "coil      KNOCKER                                0     0   30   30    5     0  -      x\n"
+    b._read_cabinet(_tables(tmp_path / "4", device=coil5), kit=kit)
+    assert b.cab_shaker is None
+
+
 def test_bridge_lights_the_backglass_bulbs_with_backbox_gi(tmp_path):
     kit = padcabinet.set_bulbs({}, "metallica_spike", ["g1", "g2"])
     pc, b = _bridge(tmp_path, kit)
@@ -289,7 +344,7 @@ def test_patch_and_setup_write_the_res(tmp_path, monkeypatch):
     got = vpxsetup.set_cabinet({"backglass": 2, "dof_start": 190}, tables_dir=str(tables), mons=MONS)
     assert got["cabinet"]["backglass"] == 2 and got["cabinet"]["dof_start"] == 190
     assert [m["n"] for m in got["cabinet"]["screens"]] == [1, 2, 3]
-    assert got["cabinet"]["suggested"] == {"start": 190, "lockdown": 191}
+    assert got["cabinet"]["suggested"] == {"start": 190, "lockdown": 191, "shaker": 192}
     # only the table with a backglass beside it gets a .res
     assert (tables / "Jaws (PAD).res").exists() and not (tables / "Godzilla (PAD).res").exists()
     assert json.load(open(kit_path))["cabinet"]["backglass"] == 2

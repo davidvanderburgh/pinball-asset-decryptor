@@ -20,7 +20,7 @@ process:
     vpxsetup.py ontop on|off              whether the game's screen stays on top of every other
                                           window (PAD-1231); an open game's window at once
     vpxsetup.py cabinet '<json>'          PAD-1304: backglass screen, hide_dmd, dof_start,
-                                          dof_lockdown; rewrites each patched table's .res
+                                          dof_lockdown, dof_shaker (PAD-1460); rewrites each patched table's .res
     vpxsetup.py bulbs <output> <title>    a patched table's backglass bulbs, and those
                                           chosen to follow BACKBOX GI
     vpxsetup.py gi <title> '<json list>'  the bulbs that follow BACKBOX GI

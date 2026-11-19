@@ -326,6 +326,8 @@ input[type=range] { accent-color: var(--accent); }
 .tip .tip-row { display: grid; grid-template-columns: max-content 1fr; gap: 10px; margin-top: 3px; }
 /* PAD-369: "Color profile: <name>" stands out the same way in every tooltip that has it */
 .tip .tip-cp { color: var(--cp-ink); }
+.tip .tip-tone-accent { color: var(--accent); }
+.tip .tip-tone-info { color: var(--info); }
 .tip .tip-cp b { font-weight: 600; }
 .tip .tip-k { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--accent); padding-top: 1px; }
 /* PAD-1005: {sec} a small heading, {li} a bulleted line, {bar} parts of a whole with a key */
@@ -479,3 +481,25 @@ html.h-short .page { padding-top: 12px; gap: 10px; }
 .sx-gs-probs dl > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
 .sx-gs-probs dt { font-weight: 600; margin-bottom: 4px; }
 .sx-gs-probs dd { margin: 0; color: var(--ink-2); line-height: 1.45; }
+
+/* the image sets picker (core/image_sets.js, Simon 2026-11-18) */
+.imgsets-pick { display: inline-flex; align-items: center; }
+.imgsets-pick .field select { min-width: 150px; }
+.imgsets-strip { margin: 0 0 8px; }
+.imgsets-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.imgsets-row { display: flex; align-items: center; gap: 8px; }
+.imgsets-num { width: 18px; text-align: right; color: var(--ink-2); }
+.imgsets-acts { display: inline-flex; gap: 2px; }
+.imgsets-add { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* the Advanced box (core/unlock_box.js, Simon 2026-11-19): the Scenes tab's look, on Scenes, Images and Video */
+.unlock-box { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--err); background: var(--err-soft); flex: 0 0 auto; }
+/* the Advanced box beside Preview colours, as Scenes has it (Simon, 2026-11-19) */
+.lookbar-row { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.lookbar-row .look-row { flex: 1 1 300px; min-width: 0; }
+.lookbar-row:empty { display: none; }
+/* Adjust's Start from buttons (Simon, 2026-11-19): equal widths across the card; the "In use" chip on its own line */
+.cp-presets { display: grid; gap: 6px; }
+.cp-presets > .btn { width: 100%; min-width: 0; justify-content: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-presets > :not(.btn) { grid-column: 1 / -1; justify-self: start; }

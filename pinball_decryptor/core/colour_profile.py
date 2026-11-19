@@ -1456,16 +1456,64 @@ def drop_text_slots(assets_dir):
 LOCKED_SWITCHES_KEY = "color_locked_switches"
 
 
+#: Simon (2026-11-18): "two check boxes ... so that images and video AND text are separate unlocks" - the game's own
+#: lines of text unlocked on their own. Absent, they follow the images unlock (:data:`STOCK_IMAGES_KEY`), as they did
+#: when one box ("Unlock extracted images and text") was both; the Advanced box records it the first time it is used.
+STOCK_TEXT_KEY = "text_color_unlocked"
+
+
+def text_unlocked(data):
+    """Are the game's own lines of text unlocked in sidecar *data*: their own box, else the images one."""
+    if not isinstance(data, dict):
+        return False
+    v = data.get(STOCK_TEXT_KEY)
+    return bool(v) if v is not None else bool(data.get(STOCK_IMAGES_KEY))
+
+
+def text_unlock_separate(data):
+    """Has the project its own text unlock (so the images box no longer moves the lines)?"""
+    return isinstance(data, dict) and data.get(STOCK_TEXT_KEY) is not None
+
+
+def set_text_unlocked(data, on):
+    """The text unlock, in sidecar *data* (changed in place): off puts the game lines' switches aside (as
+    :func:`lock_switches` did with the images box), on brings them back."""
+    on = bool(on)
+    data[STOCK_TEXT_KEY] = on
+    kept = data.get(LOCKED_SWITCHES_KEY)
+    kept = dict(kept) if isinstance(kept, dict) else {}
+    if not on:
+        lines = data.pop(TEXT_SLOTS_KEY, None)
+        if isinstance(lines, dict) and lines:
+            kept["text"] = {str(r): bool(v) for r, v in lines.items()}
+    else:
+        lines = kept.pop("text", None)
+        if isinstance(lines, dict) and lines:
+            m = data.get(TEXT_SLOTS_KEY)
+            m = dict(m) if isinstance(m, dict) else {}
+            for r, v in lines.items():
+                m.setdefault(str(r), bool(v))
+            data[TEXT_SLOTS_KEY] = m
+    if kept:
+        data[LOCKED_SWITCHES_KEY] = kept
+    else:
+        data.pop(LOCKED_SWITCHES_KEY, None)
+
+
 def lock_switches(data, images):
     """The unlock box went off: in sidecar *data* (changed in place), the
     game's own pictures' switches *images* (``{rel: bool}``, taken out of
     their slots by the caller) and the game lines' switches are put aside for
-    the next time it is ticked.  Locked, none of them counts."""
+    the next time it is ticked.  Locked, none of them counts.  (Simon: with a
+    text unlock of its own the lines stay as they are.)"""
     kept = {}
+    old = data.get(LOCKED_SWITCHES_KEY)
+    if text_unlock_separate(data) and isinstance(old, dict) and isinstance(old.get("text"), dict):
+        kept["text"] = old["text"]                      # the text box's, kept
     images = {str(r): bool(v) for r, v in (images or {}).items()}
     if images:
         kept["images"] = images
-    lines = data.pop(TEXT_SLOTS_KEY, None)
+    lines = None if text_unlock_separate(data) else data.pop(TEXT_SLOTS_KEY, None)
     if isinstance(lines, dict) and lines:
         kept["text"] = {str(r): bool(v) for r, v in lines.items()}
     if kept:
@@ -1482,6 +1530,13 @@ def unlock_switches(data):
     kept = data.pop(LOCKED_SWITCHES_KEY, None)
     if not isinstance(kept, dict):
         return {}
+    if text_unlock_separate(data):
+        # the lines have a box of their own: theirs stay put aside until it is ticked
+        if isinstance(kept.get("text"), dict) and kept["text"]:
+            data[LOCKED_SWITCHES_KEY] = {"text": kept["text"]}
+        images = kept.get("images")
+        return ({str(r): bool(v) for r, v in images.items()}
+                if isinstance(images, dict) else {})
     lines = kept.get("text")
     if isinstance(lines, dict) and lines:
         m = data.get(TEXT_SLOTS_KEY)
@@ -1502,7 +1557,7 @@ def text_lines_on(assets_dir, data=None):
     if data is None:
         from . import staged_changes
         data = staged_changes.peek(assets_dir)
-    if not data.get(STOCK_IMAGES_KEY):
+    if not text_unlocked(data):
         return set()
     m = data.get(TEXT_SLOTS_KEY)
     return {str(r) for r, on in m.items() if on} if isinstance(m, dict) else set()

@@ -63,8 +63,15 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-clipbtns { gap: 4px; }
 /* PAD-354: the note under the profile keeps one size as starting points are clicked, so the
    controls under it stay put (room for the longest of its messages at the bar's width) */
-.cpd-status { display: flex; min-height: 104px; }
+/* Simon (2026-11-19): the status on one line, the same height in every state (the rest in its tooltip), then the
+   game's own assets and the selection count, each a one-line panel that is always there - nothing below them moves */
+.cpd-status { display: flex; }
 .cpd-status > .note { flex: 1 1 auto; }
+.cpd-statusline { height: 34px; padding-top: 0; padding-bottom: 0; align-items: center; min-width: 0; }
+.cpd-statusline > .body-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cpd-oneline { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cp-which-now, .cpd-selcount { justify-content: center; height: 30px; padding-top: 0; padding-bottom: 0; }
+.cpd-status + .cp-which-now, .cp-which-now + .cpd-selcount { margin-top: 8px; }
 /* PAD-368: the file clicked, whose own profile the Files mode is on */
 .cpd-file { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border: 1px solid var(--line);
   border-radius: 6px; background: var(--panel-2, transparent); }
@@ -100,3 +107,89 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-textcol .sp { flex: 1 1 auto; }
 .cpd-textcol-sw { display: inline-block; width: 26px; height: 16px; border-radius: 4px; border: 1px solid var(--line-2); }
 .cpd-textcol-def { padding: 1px 8px; border: 1px dashed var(--line-2); border-radius: 4px; color: var(--ink-2); }
+
+/* themes (Simon, 2026-11-18): the picture's theme, and one clear copy action */
+.cpd-theme-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--warn-soft);
+  color: var(--ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.cpd-copy { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--line); }
+.cpd-copy-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+
+/* the Selected panel (Simon, 2026-11-19): "SELECTED" / "THEME" in boxes, the file and the theme in boxes of their own */
+.cpd-tagrow { gap: 6px; align-items: center; min-width: 0; }
+.cpd-tag { flex: 0 0 78px; box-sizing: border-box; text-align: center; padding: 2px 8px; border-radius: 4px; background: var(--ink); color: var(--panel, #111);
+  font-size: 11px; font-weight: 700; letter-spacing: .06em; }
+.cpd-val { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--accent, #e3a33b);
+  background: var(--warn-soft); color: var(--ink); font-size: 12px; font-weight: 600; }
+.cpd-val.cpd-none { border-style: dashed; background: transparent; color: var(--ink-2); }
+.cpd-off { opacity: .45; }
+.cpd-off .cpd-off { opacity: 1; }
+.cpd-summary { padding: 4px 8px; border-radius: 4px; background: var(--panel-2, transparent); border-left: 3px solid var(--accent, #e3a33b); }
+
+/* Simon (2026-11-19): SELECTED / THEME and the Copy rows in one grid - a tag column, then six equal columns */
+.cpd-grid { display: grid; grid-template-columns: 92px repeat(12, minmax(0, 1fr)); gap: 5px 6px; align-items: stretch; }
+.cpd-grid .cpd-tag { flex: none; width: auto; display: flex; align-items: center; justify-content: center; }
+.cpd-grid .cpd-val { display: block; }
+.cpd-opt { min-width: 0; padding: 3px 6px; border-radius: 4px; border: 1px solid var(--line-2, var(--line));
+  background: var(--panel-2, transparent); color: var(--ink); font-size: 12px; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpd-opt.on { border-color: var(--accent, #e3a33b); background: var(--warn-soft); font-weight: 600; }
+.cpd-opt:disabled { opacity: .45; cursor: default; }
+/* Simon (2026-11-19): Choose themes - All themes on top, then a tick for each theme by name (long names cut, whole on
+   hover) */
+.cpd-themepick { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 8px; margin-top: 5px;
+  border: 1px solid var(--line); border-radius: 4px; }
+.cpd-themepick > .chk:first-child { flex-basis: 100%; font-weight: 600; }
+.cpd-themepick .chk > span { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-block; vertical-align: bottom; }
+
+/* Simon (2026-11-19): the Copy panel's action - APPLY NOW in a red box like the Advanced one, the count beside it */
+.cpd-actions { margin-top: 4px; }
+.cpd-applywrap { display: flex; min-width: 0; }
+.cpd-apply { flex: 1 1 auto; min-width: 0; padding: 3px 6px; border-radius: 4px; border: 1px solid var(--err);
+  background: var(--err-soft); color: var(--ink); font-size: 12px; font-weight: 700; letter-spacing: .04em; cursor: pointer; }
+.cpd-apply:hover:not(:disabled) { background: var(--err); color: #fff; }
+.cpd-apply:disabled { opacity: .45; cursor: default; }
+.cpd-count { display: flex; align-items: center; justify-content: center; min-width: 0; padding: 3px 6px; border-radius: 4px;
+  border: 1px solid var(--line-2, var(--line)); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpd-sel + .cpd-copy { margin-top: 8px; }
+.cpd-counttag { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cpd-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.cpd-actions .cpd-tag { width: auto; display: flex; align-items: center; justify-content: center; }
+/* Simon (2026-11-19): the reset buttons across the panel, equal widths; the status line under them, full width */
+.cpd-resets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.cpd-resets > .btn { width: 100%; min-width: 0; justify-content: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpd-status-line { width: 100%; }
+/* Simon (2026-11-19): Undo / Redo / Copy / Paste across their panel; the reset buttons' words wrap, never cut */
+.cpd-four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.cpd-four > .btn { width: 100%; min-width: 0; justify-content: center; }
+.cpd-resets > .btn { white-space: normal; line-height: 1.2; height: auto; min-height: 26px; padding-top: 3px; padding-bottom: 3px;
+  text-overflow: clip; text-align: center; }
+.cpd-tools + .cpd-file, .cpd-sel + .cpd-resetpanel, .cpd-resetpanel + .cpd-copy { margin-top: 8px; }
+.cpd-sel + .cpd-tools { margin-top: 8px; }
+/* Simon (2026-11-19): each reset on a full line of its own */
+.cpd-resets { grid-template-columns: 1fr; }
+
+/* Simon (2026-11-19): the spectrum palette - a color profile, in the Copy's words and the bar's title */
+svg.i.cpd-pal { width: 14px; height: 14px; vertical-align: -2px; stroke-width: 1.4; }
+.cpd-pal-body { stroke: rgba(0, 0, 0, .55); }
+.cpd-pal-dots { stroke: #15171a; stroke-width: 2.6; fill: none; }
+.cpd-title svg.i.cpd-pal { width: 17px; height: 17px; vertical-align: -3px; margin-left: 4px; }
+.cpd-grid .cpd-tag { gap: 4px; }
+/* (only a choice with the palette is a flex row: a plain one keeps its "..." where it is cut) */
+.cpd-opt:has(svg.cpd-pal) { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.cpd-opt:disabled svg.i.cpd-pal { filter: grayscale(1); }
+
+/* Simon (2026-11-19): three looks for the buttons in the Tools, Reset and Copy panels (APPLY keeps its own):
+   red dashes, dark inside - NOT AVAILABLE (cannot be clicked; its inside as faded as a greyed button always was);
+   orange dashes, dark inside - NOT SELECTED (a Copy choice that can be picked);
+   orange line, orange inside - SELECTED (the Copy choice picked, and a Tools / Reset button that can be clicked:
+   "The COPY button should have the Orange border and internal orange hue"). */
+.cpd-tools .btn:not(:disabled), .cpd-resetpanel .btn:not(:disabled) {
+  border: 1px solid var(--accent, #e3a33b); background: var(--warn-soft); }
+.cpd-copy .cpd-opt:not(.on):not(:disabled) { border: 1px dashed var(--accent, #e3a33b); background: transparent; }
+.cpd-tools button:disabled, .cpd-resetpanel button:disabled, .cpd-copy .cpd-opt:disabled {
+  border: 1px dashed var(--err); background: transparent; opacity: 1;
+  color: color-mix(in srgb, currentColor 45%, transparent); }
+/* (text and icons fade through currentColor; the spectrum palette has colours of its own) */
+.cpd-copy button:disabled svg.cpd-pal { opacity: .45; }

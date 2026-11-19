@@ -15,6 +15,8 @@ import { LookRow } from "../core/look.js";
 import { ColorBar, barOpenAtStart, rememberBarOpen } from "./color_pane.js";
 import { OriginalsWindow } from "./originals.js";
 import { testCol } from "../core/testtick.js";
+import { SetPicker, SetStrip } from "../core/image_sets.js";
+import { UnlockBox } from "../core/unlock_box.js";
 
 export const css = true;
 
@@ -247,18 +249,14 @@ function CompareView({ cmp, byRel, cs, look, active, setActive, onOpenColors, un
           <${Icon} name="compare" cls="lg" />
           <span class="h2">Compare</span>
           <span class="grow"></span>
-          ${unlock && unlock.offered ? html`<span class="img-unlock">
-            <span class="eyebrow">Advanced</span>
-            <${Check} checked=${!!unlock.on} onChange=${(v) => call("images.set_color_unlocked", v)} disabled=${running}
-              label="Unlock extracted images" cls="small" title=${UNLOCK_TIP} />
-          </span>` : null}
           <${Button} kind="ghost" icon="x" onClick=${close} title="Back to the list (Esc)">Close<//>
         </div>
         <div class="small muted">${look.offered
           ? "Click a picture: the Color profiles bar changes its colors while you see the others."
           : "Each picture as it is."}</div>
       </div>
-      ${look.offered ? html`<div class="icm-look"><${LookRow} look=${look} ns="images" onOpen=${onOpenColors} /></div>` : null}
+      <div class="icm-look lookbar-row">${look.offered ? html`<${LookRow} look=${look} ns="images" onOpen=${onOpenColors} />` : null}
+        ${unlock && unlock.offered ? html`<${UnlockBox} />` : null}</div>
       <div class=${cx("icm-grid", "n" + Math.min(n, 4))}>
         ${tiles.map((t) => html`<${CmpTile} key=${t.id} t=${t} row=${byRel.get(t.rel)} cs=${cs} active=${t.id === active}
           onPick=${() => setActive(t.id)} canRemove=${n > 1} />`)}
@@ -288,6 +286,8 @@ function RenameModal({ spec, onClose }) {
 
 export default function ImagesTab() {
   const s = useNs("images");
+  const sets = useNs("imgsets");
+  const themeNow = sets.on && sets.enabled ? (sets.current || 1) : 1;
   const shell = useNs("shell");
   // PAD-364 (DragonRR): the Color profiles bar on the right edge, as on the Scenes tab,
   // so a profile is picked from the Saved profiles list with each picture's Color switch
@@ -544,8 +544,14 @@ export default function ImagesTab() {
       if (!row) return "";
       // PAD-369 (DragonRR): the chosen file's name tells its color profile too
       const pl = row.p === "Choose…" ? null : profileLine(row, colorNs);
+      // Simon (2026-11-19): "I didn't know what it meant and therefore it needs explaining" - what the name's colour
+      // says (theme 1's list only: a theme's own picture goes into its variant scene at the Write, never the project)
+      const fontLine = themeNow > 1 ? null
+        : row.t === "assigned" ? { text: "Orange name = new, not yet written to the project (it goes in at the next Write)", tone: "accent" }
+          : row.t === "changed" ? { text: "Blue name = already written to the project (by an earlier Write)", tone: "info" } : null;
+      const repLines = [pl, fontLine].filter(Boolean);
       return html`<button type="button" class=${cx("img-rep ellip", TAG_CLS[row.t] || "muted")}
-        ...${tip(pl ? { head: row.p, lines: [pl] } : row.p === "Choose…" ? REP_TIP : row.p)}
+        ...${tip(repLines.length ? { head: row.p, lines: repLines } : row.p === "Choose…" ? REP_TIP : row.p)}
         onDblClick=${(ev) => ev.stopPropagation()}
         onClick=${(ev) => {
           ev.stopPropagation();
@@ -636,6 +642,13 @@ export default function ImagesTab() {
         more: selOpen.filter((r) => r.r !== one.rel).map((r) => r.r) };
     }
   }
+  // themes (Simon: "every single image can be colour profiled", per theme): with theme 2 or up picked, the Colours bar
+  // is on the theme's own key for the picture ("@<n>:<rel>", scene_variants.theme_key), so theme 1's is never touched
+  if (colorFile && themeNow > 1) {
+    const key = (r) => `@${themeNow}:${r}`;
+    colorFile = { ...colorFile, rel: key(colorFile.rel), label: `${colorFile.label} (theme ${themeNow})`,
+      more: (colorFile.more || []).map(key) };
+  }
   // the selected pictures, in list order, side by side; the Colors bar opens beside them
   async function openCompare(rels) {
     const n = await call("images.compare_open", rels);
@@ -647,8 +660,13 @@ export default function ImagesTab() {
     const pics = picked();
     return pics.length ? pics : prevRel ? [prevRel] : [];
   };
+  // Simon (2026-11-19): "X Assets selected" in the Colors bar - the pictures selected, and the locked ones among them
+  const selRels = cmpOpen ? [] : picked();
+  const selCount = cmpOpen ? null : selRels.length ? { n: selRels.length,
+    locked: selRels.filter((r) => { const row = byRel.get(r); return row && row.c == null; }).length }
+    : { n: prevRel ? 1 : 0, locked: prevRel && !colorFile ? 1 : 0 };
   const bar = colorsOn ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors}
-    file=${colorFile} />` : null;
+    file=${colorFile} picked=${selCount} />` : null;
   if (cmpOpen) {
     return html`<div class="cpd-shell"><${CompareView} cmp=${cmp} byRel=${byRel} cs=${colorNs} look=${look}
       active=${activeTile ? activeTile.id : null} setActive=${setCmpActive}
@@ -691,6 +709,7 @@ export default function ImagesTab() {
 
     ${s.pil_ok === false ? html`<${Note} kind="err">${PILLOW}<//>` : null}
 
+    <${SetStrip} />
     <section class="card img-card" onMouseDownCapture=${onCardMouseDown} onKeyDown=${onTreeKey}>
       <div class="toolbar">
         <${Field} ns="images" k="search" value=${s.search} placeholder="Search" cls="search"
@@ -701,12 +720,8 @@ export default function ImagesTab() {
           <${Seg} value=${s.show || "All"} options=${s.shows || []} onChange=${(v) => call("images.set_show", v)} />
         </span>
         ${s.shades_only ? null : html`<${Check} checked=${!!s.grouped} onChange=${(v) => call("images.set_grouped", v)} label="Group by scene" title=${GROUP_TIP} />`}
+        <${SetPicker} />
         <span class="sp"></span>
-        ${s.color_unlock && s.color_unlock.offered ? html`<span class="img-unlock">
-          <span class="eyebrow">Advanced</span>
-          <${Check} checked=${!!s.color_unlock.on} onChange=${(v) => call("images.set_color_unlocked", v)} disabled=${running}
-            label="Unlock extracted images" title=${UNLOCK_TIP} />
-        </span>` : null}
       </div>
       <${Table} cls="img-tbl" columns=${columns} rows=${view} rowKey=${idOf} selected=${cur}
         onSelect=${onSelect} onActivate=${onActivate} onContext=${onContext} rowClass=${rowClass}
@@ -714,8 +729,8 @@ export default function ImagesTab() {
         resizable widths=${widths} onResize=${onResize}
         fileDropOk=${(e) => typeof e === "number"} onFileDrop=${onFileDrop} />
       <div class=${cx("ft img-prev", look.offered && "img-looks")}>
-        ${look.offered ? html`<div class="img-lk"><${LookRow} look=${look} ns="images" note=${false}
-          onOpen=${colorsOn ? openColors : undefined} /></div>` : null}
+        <div class=${cx(look.offered && "img-lk", "lookbar-row")}>${look.offered ? html`<${LookRow} look=${look} ns="images" note=${false}
+          onOpen=${colorsOn ? openColors : undefined} />` : null}<${UnlockBox} themes /></div>
         <div class="row img-panehd img-oh">
           <span class="eyebrow nw">${p.hdr_main || "Original"}</span>
           ${prevRel ? html`<span class="mono small muted ellip" title=${prevRel}>— ${base(prevRel)}</span>` : null}

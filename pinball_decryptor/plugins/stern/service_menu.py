@@ -232,6 +232,10 @@ def pages(raw, rows):
     if any(s.category == MS.OWN_CATEGORY for s in own) and not wide:
         names[MS.OWN_CATEGORY] = MS.OWN_PAGE
     out["own"] = MS.OWN_PAGE if any(s.category == MS.OWN_CATEGORY for s in own) else ""
+    # the page's help on the Machine Settings list, as menu_settings.own_page writes it (Simon and David: an asterisk
+    # on a setting that takes effect on the next power-up, and the help line saying so)
+    out["own_help"] = (MS.OWN_HELP_POWER_UP[0] if any(s.key in MS.POWER_UP for s in own) else MS.OWN_HELP) \
+        if out["own"] else ""
     out["machine_list"] = [names.get(c, "Page %d" % c) for c in machine]
     cats = machine + sorted({s.category for s in own} - set(machine))
     for category in cats:

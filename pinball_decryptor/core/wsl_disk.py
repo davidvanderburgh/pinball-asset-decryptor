@@ -942,10 +942,10 @@ def reclaim(progress=None):
     """Shut WSL down and compact the app distro's ``.vhdx``.
 
     Returns ``bytes_reclaimed`` (the drop in the ``.vhdx`` file size).  Raises
-    :class:`WslDiskError` with a user-facing message on any failure -- the most
-    common being "not running as Administrator" (``diskpart``'s ``compact
-    vdisk`` needs elevation).  This terminates *all* WSL activity, so the GUI
-    must confirm before calling and must not have a pipeline running.
+    :class:`WslDiskError` with a user-facing message on any failure.  No
+    Administrator needed since PAD-1458 (:func:`virtdisk_compact`).  This
+    terminates *all* WSL activity, so the GUI must confirm before calling and
+    must not have a pipeline running.
 
     PAD-739: WSL is held down for the whole compact (:func:`wsl_paused`), the
     disk file is waited for until WSL has really let go of it, and a compact
@@ -956,14 +956,6 @@ def reclaim(progress=None):
     """
     if not is_supported():
         raise WslDiskError("Reclaim is only available on Windows.")
-
-    from .admin import is_admin
-    if not is_admin():
-        raise WslDiskError(
-            "Reclaiming space compacts the WSL virtual disk, which needs "
-            "Administrator rights.\n\nClose the app, right-click it and choose "
-            "\"Run as administrator\", then try again. (Cleaning up staging "
-            "above does NOT need admin.)")
 
     name, vhdx = _default_distro_vhdx()
     if not vhdx or not os.path.isfile(vhdx):
@@ -990,8 +982,88 @@ def reclaim(progress=None):
     return max(0, before - after)
 
 
+class VirtDiskError(OSError):
+    """CompactVirtualDisk refused; ``winerror`` 32 means WSL still holds the
+    file."""
+
+
+def virtdisk_compact(vhdx):
+    """Compact *vhdx* through Windows' own virtual-disk API, NOT ATTACHED and
+    WITHOUT ADMINISTRATOR (PAD-1458).
+
+    Measured 2026-11-19: a WSL disk file of 3084 MB holding 2 MB after a
+    delete + fstrim came down to 55 MB, compacted by an ordinary user, and
+    booted and wrote afterwards.  Unattached, the compaction is
+    "file-system-unaware": it drops the blocks the VHDX itself marks as
+    unused - which is what fstrim inside WSL leaves - and touches nothing
+    else, so it cannot damage the filesystem.  The file must be free (WSL
+    shut down): a held one fails with ``winerror`` 32.
+    """
+    if sys.platform != "win32":
+        raise VirtDiskError("virtual disks are compacted on Windows only")
+    import ctypes
+    from ctypes import wintypes
+
+    class _GUID(ctypes.Structure):
+        _fields_ = [("d1", ctypes.c_uint32), ("d2", ctypes.c_uint16),
+                    ("d3", ctypes.c_uint16), ("d4", ctypes.c_ubyte * 8)]
+
+    class _StorageType(ctypes.Structure):
+        _fields_ = [("DeviceId", ctypes.c_uint32), ("VendorId", _GUID)]
+
+    class _Open2(ctypes.Structure):          # OPEN_VIRTUAL_DISK_PARAMETERS v2
+        _fields_ = [("Version", ctypes.c_uint32),
+                    ("GetInfoOnly", wintypes.BOOL),
+                    ("ReadOnly", wintypes.BOOL),
+                    ("ResiliencyGuid", _GUID)]
+
+    class _Compact1(ctypes.Structure):       # COMPACT_VIRTUAL_DISK_PARAMETERS
+        _fields_ = [("Version", ctypes.c_uint32),
+                    ("Reserved", ctypes.c_uint32)]
+
+    vd = ctypes.WinDLL("virtdisk")
+    k32 = ctypes.WinDLL("kernel32")
+    st = _StorageType()                      # UNKNOWN: read from the file
+    op = _Open2(Version=2)
+    h = wintypes.HANDLE()
+    # access NONE and flags NONE: what v2 parameters require
+    rc = vd.OpenVirtualDisk(ctypes.byref(st), ctypes.c_wchar_p(vhdx), 0, 0,
+                            ctypes.byref(op), ctypes.byref(h))
+    if rc:
+        raise VirtDiskError(rc, "could not open the virtual disk "
+                                "(Windows error %d)" % rc)
+    try:
+        cp = _Compact1(Version=1)
+        rc = vd.CompactVirtualDisk(h, 0, ctypes.byref(cp), None)
+    finally:
+        k32.CloseHandle(h)
+    if rc:
+        raise VirtDiskError(rc, "could not compact the virtual disk "
+                                "(Windows error %d)" % rc)
+
+
 def _compact(vhdx, progress=None):
-    """Compact one disk file, WSL held down by the caller."""
+    """Compact one disk file, WSL held down by the caller.
+
+    Not elevated (the usual case) it goes through :func:`virtdisk_compact`,
+    which needs no Administrator (PAD-1458); elevated, through diskpart as
+    before, whose read-only attach also finds free blocks fstrim missed."""
+    from .admin import is_admin
+    if not is_admin():
+        err = None
+        for attempt in (1, 2, 3):
+            _shutdown_until_free(vhdx, progress)
+            if progress:
+                progress("Compacting the virtual disk (this can take a "
+                         "few minutes)…")
+            try:
+                virtdisk_compact(vhdx)
+                return
+            except VirtDiskError as e:
+                err = e
+                if e.errno != 32:
+                    raise WslDiskError(str(e))
+        raise WslDiskError(_IN_USE_HELP + "\n\nWindows said: %s" % err)
 
     # diskpart compacts an attached-read-only vdisk in place.  It's present on
     # every Windows install (unlike the Hyper-V Optimize-VHD cmdlet), and

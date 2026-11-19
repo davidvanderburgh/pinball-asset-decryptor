@@ -52,9 +52,10 @@ last started.
 
 ## Not automatic
 
-Compacting the .vhdx (handing freed space back to Windows) needs
-Administrator and a WSL shutdown, so it stays a button. The clean-up stops
-the disk growing further; WSL reuses the freed space inside it.
+~~Compacting the .vhdx (handing freed space back to Windows) needs
+Administrator and a WSL shutdown, so it stays a button.~~ Since PAD-1458 the
+app hands the freed space back to Windows itself when it closes, with no
+Administrator: see `docs/plans/disk_giveback.md`.
 
 ## Proof
 

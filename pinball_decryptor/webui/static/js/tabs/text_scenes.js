@@ -440,7 +440,7 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
         </div>
         <div class="scenes-lookbar">
           <${LookRow} look=${s.look} ns="text_scenes" note=${false} onOpen=${openColors} />
-          ${unlock && unlock.offered ? html`<${UnlockBox} />` : null}
+          ${unlock && unlock.offered ? html`<${UnlockBox} themes />` : null}
         </div>
         ${layout ? html`<${LayoutEditor} key=${layout.kind + "\u0000" + layout.text} d=${layout} />` : null}
         ${editor || s.preparing ? null : html`<div class="row scenes-bottom">

@@ -81,8 +81,9 @@ class ImageSetsService(TabService):
         self.set(unlock={
             "offered": bool(project) and offered_img,
             "images": bool(data.get(cp.STOCK_IMAGES_KEY)),
-            "videos": bool(video is not None and video.get("color_stock")),
-            "videos_offered": bool(video is not None and video.get("color_offered")),
+            # (Simon: the Scenes box had no Videos tick until the Video tab had been opened - both from the project)
+            "videos": cp.stock_videos_unlocked(data),
+            "videos_offered": bool(project) and (offered_img or bool(video is not None and video.get("color_offered"))),
             "text": cp.text_unlocked(data),
         })
 
@@ -126,6 +127,14 @@ class ImageSetsService(TabService):
                 svc = self.window.service("video")
                 if svc is not None:
                     svc.set_color_stock(on)
+                if cp.stock_videos_unlocked(staged_changes.peek(project)) != on:
+                    # the Video tab not loaded for this project yet: its setting set here, as it would set it
+                    data = staged_changes.load(project)
+                    if on:
+                        data[cp.STOCK_VIDEOS_KEY] = True
+                    else:
+                        data.pop(cp.STOCK_VIDEOS_KEY, None)
+                    staged_changes.save(project, data)
             elif kind == "text":
                 data = staged_changes.load(project)
                 if cp.text_unlocked(data) != on:

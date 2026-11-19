@@ -1,0 +1,29 @@
+#config_version=6
+# Pick a mutant at each player's first ball, the ball waiting in the shooter lane; the last pick is the default.
+mode:
+  start_events: ball_started{ball==1}
+  priority: 500
+  use_wait_queue: true
+
+carousel:
+  roster:
+    selectable_items: cyclops, storm, wolverine
+    next_item_events: s_flipper_right_active
+    previous_item_events: s_flipper_left_active
+    select_item_events: s_action_active, s_start_active
+    title: CHOOSE YOUR MUTANT
+
+timers:
+  roster_clock:
+    start_value: 10
+    end_value: 0
+    direction: down
+    control_events:
+      - event: mode_roster_started
+        action: start
+    events_when_complete: carousel_roster_select     # time up takes the one highlighted
+
+variable_player:
+  carousel_roster_cyclops_selected:   {mutant: {action: set, int: 0}}
+  carousel_roster_storm_selected:     {mutant: {action: set, int: 1}}
+  carousel_roster_wolverine_selected: {mutant: {action: set, int: 2}}

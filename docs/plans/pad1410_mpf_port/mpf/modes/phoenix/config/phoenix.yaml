@@ -1,0 +1,50 @@
+#config_version=6
+# The Phoenix: stacked over the Sentinel, a two-ball multiball on a 30 s clock. Its shots block the ones under it.
+mode:
+  start_events: start_mode_phoenix
+  priority: 300
+  stop_on_ball_end: true
+
+multiballs:
+  phoenix_mb:
+    ball_count: 2
+    ball_count_type: total
+    shoot_again: 10s
+    start_events: mode_phoenix_started
+
+timers:
+  phoenix_clock:
+    start_value: 30
+    end_value: 0
+    direction: down
+    control_events:
+      - event: mode_phoenix_started
+        action: start
+    events_when_complete: phoenix_escaped
+
+counters:
+  phoenix_health:
+    starting_count: 4
+    count_complete_value: 0
+    direction: down
+    count_events: right_ramp_hit
+    events_when_complete: phoenix_defeated
+
+shots:
+  right_ramp:
+    switch: s_right_ramp
+    block: true              # the Sentinel under it does not see this ramp while the Phoenix runs
+
+variable_player:
+  right_ramp_hit:   {score: 20000}
+  phoenix_defeated: {score: 100000}
+
+mode_stop_events: phoenix_defeated, phoenix_escaped
+
+widgets:
+  phoenix_bar:
+    - type: bar
+      value: (device.counters.phoenix_health.value)
+      max: 4
+      label: PHOENIX
+      color: ffb000

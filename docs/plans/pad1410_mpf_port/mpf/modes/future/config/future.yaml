@@ -1,0 +1,50 @@
+#config_version=6
+# The game-long base: every point of the game is this mode's and its children's (Stern's rules off underneath).
+mode:
+  start_events: game_started
+  stop_events: game_ending
+  priority: 100
+  game_mode: true
+  stop_on_ball_end: false
+
+shots:
+  left_ramp:  {switch: s_left_ramp}
+  right_ramp: {switch: s_right_ramp}
+  xjet:       {switch: s_xjet}
+  dr_ramp:    {switch: s_dr_ramp}
+
+variable_player:
+  left_ramp_hit:  {score: 1000, mutant_meter: 1}
+  right_ramp_hit: {score: 1000, mutant_meter: 1}
+  xjet_hit:       {score: 1000, mutant_meter: 1}
+  dr_ramp_hit:    {score: 1000, mutant_meter: 1}
+  ability_fired:  {mutant_meter: {action: set, int: 0}}
+
+# three left ramps in a ball light and start the Sentinel
+counters:
+  sentinel_lit:
+    count_events: left_ramp_hit
+    count_complete_value: 3
+    reset_on_complete: true
+    reset_events: ball_will_end
+    events_when_complete: start_mode_sentinel
+
+# the Action button spends a full Mutant Meter (3) on the mutant's ability: the topmost enemy takes the damage
+event_player:
+  s_action_active{current_player.mutant_meter>=3}: ability_fired
+
+# Cyclops' Optic Blast: the glass fades to black with a red glow and back
+show_player:
+  ability_fired{current_player.mutant==0}: optic_blast_fade
+
+widgets:
+  mutant_meter_bar:
+    - type: bar             # (a custom widget: MPF has no bar meter of its own)
+      value: (current_player.mutant_meter)
+      max: 3
+      label: MUTANT METER
+      color: 20b0ff
+
+slide_player:
+  mode_future_started:
+    widgets: mutant_meter_bar

@@ -108,12 +108,14 @@ async function copyText(text) {
 }
 
 // What an AI agent is told: the mode's file, the SDK's guide, and what the mode is to do.
-export function agentBrief({ game, file, sdkDoc, brief }) {
+// PAD-1410: mpfDoc, when the maker says the game was written in MPF: the porting guide beside the SDK's.
+export function agentBrief({ game, file, sdkDoc, brief, mpfDoc }) {
   return [
     `Write a game mode in C for ${game || "this Stern Spike 2 game"}.`,
     brief && brief.trim() ? `What it does: ${brief.trim()}` : "What it does: (describe the mode here)",
     `Its file is ${file}: a copy of the Mode SDK's template, already in the card project. Change only that mode's folder.`,
     `Read ${sdkDoc} top to bottom first, then pad_mode.h and template_mode.c beside it. MODE_SDK.md says how to build the mode and test it in the emulator.`,
+    ...(mpfDoc ? [`It ports a game written in the Mission Pinball Framework (MPF: YAML config and Python). Read ${mpfDoc} next: it maps MPF's modes, shots, counters, timers, player and machine variables, ball saves, multiballs, carousels and widgets onto the SDK, with a whole game ported as the worked example.`] : []),
   ].join("\n");
 }
 
@@ -152,7 +154,7 @@ function BlocksStep({ s, name, setName, onExample }) {
   </div>`;
 }
 
-function CStep({ s, name, setName, brief, setBrief }) {
+function CStep({ s, name, setName, brief, setBrief, mpf, setMpf }) {
   return html`<div class="nmw-step">
     <div class="nmw-cols">
       <div class="stack nmw-col">
@@ -164,6 +166,9 @@ function CStep({ s, name, setName, brief, setBrief }) {
           <div class="small muted wrap">Say what the mode should do. Make it and copy for an agent makes the mode, then copies what to tell the agent: its file, the SDK's guide, and this.</div>
           <textarea class="nmw-brief" rows="3" placeholder="A two-minute hurry-up: the ramps light one by one, each pays more than the last…"
             value=${brief} onInput=${(e) => setBrief(e.currentTarget.value)}></textarea>
+          <label class="row small nmw-mpf" ...${tip({ head: "A game written in MPF", lines: ["The agent is told to read MPF_PORTING.md too: how MPF's modes, shots, counters, timers, variables, ball saves, multiballs and widgets become the SDK's calls."] })}>
+            <input type="checkbox" checked=${mpf} onChange=${(e) => setMpf(e.currentTarget.checked)} />
+            It ports a game I wrote in MPF (YAML and Python)</label>
         </div>
       </div>
       <div class="stack nmw-col">
@@ -171,6 +176,10 @@ function CStep({ s, name, setName, brief, setBrief }) {
         <div class="small muted wrap">Every call a mode can make, what each does on the machine, and how to build and try it.</div>
         <button type="button" class="modes-doc-link small nmw-sdk" ...${tip(s.sdk_doc || "")} onClick=${() => call("modes.open_sdk_doc")}>
           <${Icon} name="file" /> Open MODE_SDK.md, the SDK's guide</button>
+        <div class="nmw-sub">From the Mission Pinball Framework</div>
+        <div class="small muted wrap">A game written in MPF: its modes, shots, counters, timers, variables and widgets, and the SDK's call for each.</div>
+        <button type="button" class="modes-doc-link small nmw-sdk" ...${tip(s.mpf_doc || "")} onClick=${() => call("modes.open_mpf_doc")}>
+          <${Icon} name="file" /> Open MPF_PORTING.md, the porting guide</button>
       </div>
     </div>
   </div>`;
@@ -196,6 +205,7 @@ export function NewModeWizard({ s, start = "", onClose }) {
   const [kind, setKind] = useState(start || "");
   const [name, setName] = useState("");
   const [brief, setBrief] = useState("");
+  const [mpf, setMpf] = useState(false);
   const [copied, setCopied] = useState("");
   const k = KIND[kind];
   const named = !!name.trim();
@@ -204,7 +214,7 @@ export function NewModeWizard({ s, start = "", onClose }) {
     if (kind !== "c" || !named) return;
     const file = await call("modes.new_code_mode", name.trim());
     if (agent && file) {
-      const ok = await copyText(agentBrief({ game: s.title_label || s.card_label, file, sdkDoc: s.sdk_doc, brief }));
+      const ok = await copyText(agentBrief({ game: s.title_label || s.card_label, file, sdkDoc: s.sdk_doc, brief, mpfDoc: mpf ? s.mpf_doc : "" }));
       if (!ok) { setCopied("Could not copy: the mode is made, its file is " + file); return; }
     }
     onClose();
@@ -234,7 +244,7 @@ export function NewModeWizard({ s, start = "", onClose }) {
         <span class="nmw-pitch">${k.pitch}</span></div>
       ${kind === "blocks" ? html`<${BlocksStep} s=${s} name=${name} setName=${setName}
             onExample=${(n) => { call("modes.blocks_example", n); onClose(); }} />`
-        : kind === "c" ? html`<${CStep} s=${s} name=${name} setName=${setName} brief=${brief} setBrief=${setBrief} />`
+        : kind === "c" ? html`<${CStep} s=${s} name=${name} setName=${setName} brief=${brief} setBrief=${setBrief} mpf=${mpf} setMpf=${setMpf} />`
         : html`<${FormStep} s=${s} onBlank=${() => { call("modes.new"); onClose(); }}
             onExample=${(n) => { call("modes.example", n); onClose(); }} />`}`}
     ${k && kind !== "form" ? html`<${EnterKey} onEnter=${() => make(false)} />` : null}

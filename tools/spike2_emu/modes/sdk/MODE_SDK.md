@@ -15,6 +15,7 @@ with the loop below. Everything you need is in these files.
 | `examples/README.md` | The kit every code and blocks mode can build with, `examples/intricate_kit.h` (a shot debounce, the HUD at the glass's edges, the playfield's inserts, light shows, the display priority, a countdown, a pack ledger), and `examples/desk_harness.c`, which plays any mode at the desk against a fake game. No example modes: the app ships none written for one title (PAD-691). |
 | `pad_mode_assets.h` | A code mode's OWN clip, screen, music and calls, as the build carried them (see "A code mode's own clip, screen, music and calls"). |
 | `mode_file.c` | The mode that runs the Modes tab's mode files. It is an ordinary mode on this API. |
+| `MPF_PORTING.md` | A game already written in the Mission Pinball Framework (YAML + Python): each MPF part and the SDK call it becomes, with a whole game ported and played (PAD-1410). |
 | `MODE_PARAMETERS.md` | Every key a mode file takes, every field the Modes tab saves, every call above, and what is measured about each. |
 | `pad_mode_runtime.c` | The runtime, compiled into every mode. You do not edit it. |
 | `ports/<game>-<version>.port` | One per game build: where the game's functions are, plus its shot names, scenes and callouts. |
@@ -35,7 +36,8 @@ are on in every copy (PAD-763; `pinball_decryptor/core/preview.py` lists the mod
 the whole-game route: a mode that switches Stern's rules off and is the game (PAD-1400), your
 modes layered over it (PAD-1401), progress saved between games (PAD-1402), the Action and
 flipper buttons as shots (PAD-1403), bar meters and a screen fade (PAD-1405) and your own
-attract in place of the game's (PAD-1407). Nothing in this folder needs the app either: a mode
+attract in place of the game's (PAD-1407). A game already written in MPF ports onto them by `MPF_PORTING.md`
+(PAD-1410). Nothing in this folder needs the app either: a mode
 built here with `build_mode.sh` and tried with the loop below runs in the emulator.
 
 ## What a mode is

@@ -158,6 +158,7 @@ html.bp-1280 .nmw-tiles.compact { grid-template-columns: minmax(0, 1fr); }
 .nmw-brief { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; color: var(--ink); background: var(--bg-2);
   border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; }
 .nmw-brief:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.nmw-mpf { gap: 6px; align-items: center; color: var(--ink); cursor: pointer; }   /* PAD-1410 */
 .nmw-exlist { display: flex; flex-direction: column; gap: 6px; }
 .nmw-exgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .nmw-ex { display: flex; align-items: center; gap: 10px; text-align: left; min-width: 0; padding: 9px 12px; cursor: pointer; font: inherit; font-size: 13px;

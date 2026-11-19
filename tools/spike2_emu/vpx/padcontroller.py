@@ -770,12 +770,134 @@ class Rig:
         table's own trough does, this file (in the run's dump dir) stops it."""
         return os.path.join(self.dump, "ballfeed.off")
 
+    # -- PAD-1437: a PC whose Windows cannot open the run's files at all.
+    # Mike St P, v1.512.5: every table, every start, across WSL restarts -
+    # the game up on its LCD, WSL reading padled with its mark, Windows
+    # unable to open it over \\wsl.localhost. The run was stopped as "WSL's
+    # link is stuck" (PAD-1247) and no table played. With `share` False the
+    # run goes through wsl.exe instead: padlink.py pushes the blocks
+    # (RigLink), and the few files the controller reads or writes beside
+    # them are fetched and put through WSL here.
+
+    #: False once Windows has been seen unable to open the run's block
+    share = True
+    #: how long a fetched copy of a folder is good for
+    FETCH_FRESH_S = 1.5
+
+    def wsl_dump(self, *parts):
+        """A path in the run's dump directory as WSL names it."""
+        return "/".join([(self.root or "").rstrip("/") + "/dump"] + [p for p in parts if p])
+
+    def _wsl(self, args, data=None, timeout=20, runner=None):
+        """One command inside the run's distro, as the default user: its
+        CompletedProcess, or None when WSL did not answer."""
+        run = runner or subprocess.run
+        try:
+            return run(self.wsl_head() + ["-e"] + list(args), input=data,
+                       stdin=None if data is not None else subprocess.DEVNULL,
+                       capture_output=True, timeout=timeout,
+                       creationflags=_CREATE_NO_WINDOW)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+
+    def wsl_read(self, name, n, runner=None):
+        """The first `n` bytes of dump/<name> as WSL reads it, or None."""
+        r = self._wsl(["head", "-c", str(int(n)), self.wsl_dump(name)], runner=runner)
+        return r.stdout if r is not None and r.returncode == 0 else None
+
+    def local_dir(self):
+        """Where this run's fetched files are kept on the Windows side."""
+        import tempfile
+        return os.path.join(tempfile.gettempdir(), "pad-vpx-fetched",
+                            "%s-slot%s" % (self.distro or "wsl", self.slot or 0))
+
+    def fetch(self, src, names, dest, runner=None):
+        """Copy `names` (files or folders) in WSL folder `src` into Windows
+        folder `dest` through one tar over wsl.exe; True when it answered."""
+        import io
+        import tarfile
+        r = self._wsl(["sh", "-c", 'cd "$1" 2>/dev/null || exit 0; shift; '
+                       'for f; do [ -e "$f" ] && printf "%s\\n" "$f"; done | tar -cf - -T -',
+                       "sh", src] + list(names), timeout=30, runner=runner)
+        if r is None or r.returncode != 0:
+            return False
+        os.makedirs(dest, exist_ok=True)
+        try:
+            with tarfile.open(fileobj=io.BytesIO(r.stdout or b"")) as tf:
+                members = [m for m in tf.getmembers() if m.isfile() or m.isdir()]
+                try:
+                    tf.extractall(dest, members=members, filter="data")
+                except TypeError:                           # a Python without filters
+                    tf.extractall(dest, members=[m for m in members
+                                                 if not (m.name.startswith(("/", "\\")) or ".." in m.name)])
+        except (tarfile.TarError, OSError) as exc:
+            log("fetch from WSL failed: %s" % exc)
+            return False
+        return True
+
+    def tables_dir(self, title, runner=None):
+        """dump/tables/<title> as Windows can read it: over the share, or a
+        fresh copy fetched through WSL when the share cannot be opened."""
+        if self.share:
+            return os.path.join(self.dump, "tables", title or "")
+        local = os.path.join(self.local_dir(), "tables")
+        got = getattr(self, "_fetched", None)
+        if got is None:
+            got = self._fetched = {}
+        now = time.monotonic()
+        if title and now - got.get(title, -1e9) > self.FETCH_FRESH_S:
+            got[title] = now
+            self.fetch(self.wsl_dump("tables"), [title], local, runner=runner)
+        return os.path.join(local, title or "")
+
+    def boot_log_dir(self, runner=None):
+        """The slot's boot logs (gzwatch.log, padauto.log) as Windows can
+        read them; through WSL when the share cannot be opened."""
+        if self.share:
+            return os.path.dirname(os.path.dirname(self.dump))
+        local = os.path.join(self.local_dir(), "logs")
+        self.fetch(os.path.dirname((self.root or "").rstrip("/")) or "/",
+                   ["gzwatch.log", "padauto.log"], local, runner=runner)
+        return local
+
+    def ballfeed_off(self, on, runner=None):
+        """Stand ballfeed.py aside for the table (on) or hand the trough back."""
+        if self.share:
+            try:
+                if on:
+                    open(self.ballfeed_off_path(), "w").write("PAD.Controller\n")
+                else:
+                    os.remove(self.ballfeed_off_path())
+                return True
+            except OSError as exc:
+                if on:
+                    log("ballfeed.off not written: %s" % exc)
+                return False
+        path = self.wsl_dump("ballfeed.off")
+        r = self._wsl(["sh", "-c", 'echo PAD.Controller > "$1"' if on else 'rm -f "$1"', "sh", path],
+                      runner=runner)
+        ok = r is not None and r.returncode == 0
+        if on and not ok:
+            log("ballfeed.off not written through WSL")
+        return ok
+
+    def seed_switch_list_wsl(self, title, runner=None):
+        """seed_switch_list inside WSL, for a run the share cannot reach."""
+        slots = (self.root or "").rstrip("/").rsplit("/", 2)[0]          # .../padslots
+        self._wsl(["sh", "-c",
+                   'dst="$1/dump/tables/$3/switch_list.txt"; [ -e "$dst" ] && exit 0; '
+                   'src=$(ls -t "$2"/*/root/dump/tables/"$3"/switch_list.txt 2>/dev/null | head -n 1); '
+                   '[ -n "$src" ] || exit 0; mkdir -p "$(dirname "$dst")" && cp "$src" "$dst" '
+                   '&& echo "$src"', "sh", self.root.rstrip("/"), slots, title], runner=runner)
+
     def switch_ids(self, title):
         """{(node, bit): id} from the title's switch_list.txt, the rig's own
         reading of the game's switch table (empty when the run has none)."""
         out = {}
-        path = os.path.join(self.dump, "tables", title or "", "switch_list.txt")
-        if title and not os.path.exists(path):
+        if not self.share and title and self.root:
+            self.seed_switch_list_wsl(title)
+        path = os.path.join(self.tables_dir(title), "switch_list.txt")
+        if self.share and title and not os.path.exists(path):
             self.seed_switch_list(title, path)
         try:
             for line in open(path, encoding="utf-8", errors="replace"):
@@ -961,6 +1083,11 @@ class SwitchPipe:
 
 #: PAD-1306: PAD_VPX_LINK=0 keeps the old way (9p reads + swkeys) for a session
 LINK_ON = os.environ.get("PAD_VPX_LINK", "1") != "0"
+
+#: PAD-1437: PAD_VPX_SHARE=0 takes a run through WSL from the start, as if
+#: Windows could not open its files over \\wsl.localhost (a PC where it
+#: cannot, without waiting to find out; and how that path is proven live)
+SHARE_ON = os.environ.get("PAD_VPX_SHARE", "1") != "0"
 
 
 class RigLink:
@@ -2074,9 +2201,11 @@ class Bridge:
         self.player_placed = False
         self._player_client = self._player_unfill = self._player_filled = None
         log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
-        data = read_block(self.rig.led_path(), READ_N)
+        data = read_block(self.rig.led_path(), READ_N) if SHARE_ON else None
         if self._rig_up(data):
             self._attach(data)
+        elif self._attach_unshared(data):
+            pass
         else:
             card = padlaunch.card_for(self.title, self.map.platform)
             if not card:
@@ -2107,9 +2236,12 @@ class Bridge:
                 log("player grips not started: %s" % exc)
         log("run")
 
-    def _attach(self, data):
-        """The run is up: read its tables, open the switch pipe, own the balls."""
-        if self.slots:
+    def _attach(self, data, pipe=None):
+        """The run is up: read its tables, open the switch pipe, own the balls.
+        `pipe`: the link a run the share cannot reach came up on (PAD-1437)."""
+        if pipe is not None:
+            pass
+        elif self.slots:
             pipe = self.rigmod.Pipe(self.rig)
         elif LINK_ON and sys.platform == "win32" and isinstance(self.rig, Rig):
             pipe = RigLink(self.rig)       # PAD-1306: pushed from WSL, not read over 9p
@@ -2143,10 +2275,13 @@ class Bridge:
             self._fake[name] = {"open": 0}
             self.pipe.set(f["closed"], 1)
             self.pipe.set(f["open"], 0)
-        try:
-            open(self.rig.ballfeed_off_path(), "w").write("PAD.Controller\n")
-        except OSError as exc:
-            log("ballfeed.off not written: %s" % exc)
+        if hasattr(self.rig, "ballfeed_off"):
+            self.rig.ballfeed_off(True)
+        else:
+            try:
+                open(self.rig.ballfeed_off_path(), "w").write("PAD.Controller\n")
+            except OSError as exc:
+                log("ballfeed.off not written: %s" % exc)
         self.attached = True
         self.attached_t = time.monotonic()
         log("attached to %s after %.0f s" % (self.rig.how, time.monotonic() - self.start_t))
@@ -2176,7 +2311,8 @@ class Bridge:
         logdir = ""
         if not self.slots and self.rig is not None and getattr(self.rig, "slot", None):
             # a slot's logs are beside its root: padslots/<n>/root/dump
-            logdir = os.path.dirname(os.path.dirname(self.rig.dump))
+            logdir = (self.rig.boot_log_dir() if hasattr(self.rig, "boot_log_dir")
+                      else os.path.dirname(os.path.dirname(self.rig.dump)))
         if not logdir:
             self._ready()
             return
@@ -2189,6 +2325,8 @@ class Bridge:
         if self.boot is None:
             return
         now = time.monotonic()
+        if self.rig is not None and not getattr(self.rig, "share", True):
+            self.rig.boot_log_dir()                 # PAD-1437: a fresh copy through WSL
         got = self.boot.poll()
         if got is None:
             if now - self._boot_seen > self.BOOT_LOG_S:
@@ -2358,6 +2496,8 @@ class Bridge:
     def _read_cabinet(self, tables_dir=None, kit=None):
         """The cabinet's lights on this title's boards and the kit's cabinet
         settings (PAD-1304), read with the run's tables."""
+        if tables_dir is None and hasattr(self.rig, "tables_dir"):
+            tables_dir = self.rig.tables_dir(self.native_title)
         if tables_dir is None:
             tables_dir = os.path.join(self.rig.dump, "tables", self.native_title or "")
         self.cab_leds = padcabinet.cabinet_leds(tables_dir)
@@ -2372,6 +2512,122 @@ class Bridge:
     #: into the cache first, then the boot)
     START_TIMEOUT_S = 420
 
+    # -- PAD-1437: a run whose files Windows cannot open over \\wsl.localhost
+    #: from its board record, how long Windows may fail to open the block
+    #: before WSL is asked whether the game has it (a game opens it ~20 s in)
+    SHARE_PROBE_S = 12
+    #: and how often WSL is asked after that
+    SHARE_PROBE_EVERY_S = 5
+
+    def _attach_unshared(self, data, wait_s=None):
+        """A run already up that Windows cannot read over the share but WSL
+        can (PAD-1437): attached through its link. False when that is not
+        the case, or the link would not come up."""
+        if data is not None and SHARE_ON:
+            return False
+        if not self._can_go_unshared() or not self.rig.root:
+            return False
+        if not block_in_wsl(self.rig):
+            return False
+        self._go_unshared()
+        link = self._unshared
+        end = time.monotonic() + (RigLink.HELLO_S + 1 if wait_s is None else wait_s)
+        while time.monotonic() < end:
+            got = link.blocks()
+            if got and self._rig_up(got[0]):
+                self._unshared = None
+                log("the run came up through WSL")
+                self._attach(got[0], pipe=link)
+                return True
+            if link.state == "down":
+                break
+            link.news.wait(0.2)
+        self._unshared = None
+        link.close()
+        self.rig.share = SHARE_ON
+        log("the run's link did not come up (%s)" % (link.why or "no blocks"))
+        return False
+
+    def _can_go_unshared(self):
+        return (LINK_ON and sys.platform == "win32" and not self.slots
+                and isinstance(self.rig, Rig) and bool(self.rig.root) and bool(self.rig.distro))
+
+    def _stop_stuck(self, why="the game is up, Windows cannot read it"):
+        log("WSL's link to Windows is stuck: %s; stopping the run (Restart WSL clears it)" % why)
+        self._loading_end("failed " + WSL_STUCK)
+        failed, self.launch, self.rig = self.launch, None, None
+        link, self._unshared = getattr(self, "_unshared", None), None
+        if link is not None:
+            link.close()
+        failed.stop()
+
+    def _go_unshared(self):
+        """Windows cannot open the block, WSL has it with its mark: run the
+        table through wsl.exe (padlink.py and fetched files) instead of
+        stopping it (PAD-1437)."""
+        self.rig.share = False
+        log("Windows cannot open the run's files over \\wsl.localhost, but the game is "
+            "up inside WSL: the table takes its lights, coils and switches through WSL "
+            "instead (PAD-1437)")
+        self._unshared = RigLink(self.rig)
+
+    def _poll_unshared(self, data):
+        """True when this poll was a run going through WSL: attached once its
+        link brought the block, or stopped when the link could not come up."""
+        link = getattr(self, "_unshared", None)
+        if link is not None:
+            got = link.blocks()
+            if got and self._rig_up(got[0]):
+                self._unshared = None
+                log("the run came up through WSL")
+                self._attach(got[0], pipe=link)
+                return True
+            if link.state == "down":
+                self._stop_stuck("the game is up inside WSL, and neither Windows' share "
+                                 "nor wsl.exe can reach it (%s)" % link.why)
+                return True
+            return False
+        if (data is not None and SHARE_ON) or not self._can_go_unshared():
+            return False
+        now = time.monotonic()
+        t0 = getattr(self, "_board_t", None)
+        if t0 is None:
+            self._board_t = t0 = now
+        if SHARE_ON and now - t0 < self.SHARE_PROBE_S:
+            return False
+        if now - getattr(self, "_share_probe_t", -1e9) < self.SHARE_PROBE_EVERY_S:
+            return False
+        self._share_probe_t = now
+        if not block_in_wsl(self.rig):
+            return False
+        again = read_block(self.rig.led_path(), READ_N) if SHARE_ON else None
+        if self._rig_up(again):                               # the share caught up after all
+            self._attach(again)
+            return True
+        self._go_unshared()
+        return True
+
+    #: how often a run through WSL starts its link again once it dropped
+    RELINK_S = 5.0
+
+    def _relink(self, link):
+        """A run the share cannot reach has nothing to fall back on: its link
+        is started again, every held switch handed over (PAD-1437)."""
+        now = time.monotonic()
+        if now - getattr(self, "_relink_t", -1e9) < self.RELINK_S:
+            return
+        self._relink_t = now
+        new = RigLink(self.rig)
+        for sw, level in sorted(link.held.items()):
+            new.set(sw, level)
+        with self.lock:
+            if self.pipe is not link:
+                new.close()
+                return
+            self.pipe = new
+        link.close()
+        log("link started again (the run's files cannot be read over the share)")
+
     def _poll_starting(self):
         """Once a second until the run this bridge started is up."""
         if self.launch is None:
@@ -2384,9 +2640,11 @@ class Bridge:
                             else Rig(self.native_title, record=rec))
                 log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         if self.rig is not None:
-            data = read_block(self.rig.led_path(), READ_N)
+            data = read_block(self.rig.led_path(), READ_N) if SHARE_ON else None
             if self._rig_up(data):
                 self._attach(data)
+                return
+            if self._poll_unshared(data):
                 return
             # PAD-1208: a game is up ~20 s after its board record; one whose
             # block never came said nothing here, and the table sat idle
@@ -2405,19 +2663,20 @@ class Bridge:
                        {True: "it has its mark", False: "it has none either",
                         None: "WSL did not say"}[seen],
                        run_log_said(self.launch.logfile)))
-                if seen:
-                    log("WSL's link to Windows is stuck: the game is up, Windows cannot "
-                        "read it; stopping the run (Restart WSL clears it)")
-                    self._loading_end("failed " + WSL_STUCK)
-                    failed, self.launch, self.rig = self.launch, None, None
-                    failed.stop()
+                if seen and not self._can_go_unshared():
+                    self._stop_stuck()
                     return
+                if seen and getattr(self, "_unshared", None) is None:
+                    self._go_unshared()
         if not self.launch.alive():
             # A board record can appear before the game is ready. It does
             # not make an exited launcher alive: clean the run we owned,
             # including its slot, before reporting failure or trying again.
             failed = self.launch
             logfile = failed.logfile
+            link, self._unshared = getattr(self, "_unshared", None), None
+            if link is not None:
+                link.close()
             self.launch, self.rig = None, None
             failed.stop()
             retry_titles = padlaunch.kit_load().get("startup_retry_titles", [])
@@ -2470,11 +2729,17 @@ class Bridge:
             self._grips = None
         if self.pipe:
             self.pipe.close()
+        link, self._unshared = getattr(self, "_unshared", None), None
+        if link is not None:
+            link.close()
         if self.rig:
-            try:
-                os.remove(self.rig.ballfeed_off_path())
-            except OSError:
-                pass
+            if hasattr(self.rig, "ballfeed_off"):
+                self.rig.ballfeed_off(False)
+            else:
+                try:
+                    os.remove(self.rig.ballfeed_off_path())
+                except OSError:
+                    pass
         log("stop after %d polls (%d off the link, %d of them idle, %d failed)"
             % (self.polls, self.link_polls, self.link_idle, self.poll_fail))
         self._split_end()                        # a BoF game's cabinet screens close with it
@@ -2509,7 +2774,10 @@ class Bridge:
             return
 
         def rig_flag():
-            sw = read_block(self.rig.sw_path(), padsw.OFF_PAUSED + 4)
+            if not getattr(self.rig, "share", True):          # PAD-1437
+                sw = self.rig.wsl_read("padsw", padsw.OFF_PAUSED + 4)
+            else:
+                sw = read_block(self.rig.sw_path(), padsw.OFF_PAUSED + 4)
             return struct.unpack_from("<I", sw, padsw.OFF_PAUSED)[0] if sw and len(sw) > padsw.OFF_PAUSED else -1
 
         now = rig_flag()
@@ -2519,7 +2787,7 @@ class Bridge:
             # rig takes ~10 ms to act on a toggle, so wait for the flag to
             # follow before the next call reads it - or the second call sees
             # the old value, sends nothing, and the game stays frozen.
-            for _ in range(30):
+            for _ in range(30 if getattr(self.rig, "share", True) else 3):
                 time.sleep(0.01)
                 now = rig_flag()
                 if now == want:
@@ -3053,6 +3321,10 @@ class Bridge:
             return self._poll_once_s1()
         link = self.pipe if hasattr(self.pipe, "blocks") else None
         pushed = None
+        if (link is not None and not getattr(self.rig, "share", True)
+                and getattr(link, "state", "up") == "down"):
+            self._relink(link)
+            return
         if link is not None and link.alive():
             # PAD-1306: the link's copy, no 9p read - and when the link sent
             # nothing and the table no switch since the last look, nothing

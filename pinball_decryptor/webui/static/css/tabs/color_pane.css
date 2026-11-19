@@ -140,3 +140,5 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
   border: 1px solid var(--line-2, var(--line)); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cpd-sel + .cpd-copy { margin-top: 8px; }
 .cpd-counttag { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cpd-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.cpd-actions .cpd-tag { width: auto; display: flex; align-items: center; justify-content: center; }

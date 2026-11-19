@@ -317,13 +317,13 @@ function FileLine({ s, host }) {
           title: "Theme 1 and every other theme too" })}
       </div>
       ${summary.text ? html`<div class="small cpd-summary">${summary.text}</div>` : null}
-      <div class="cpd-grid cpd-actions">
-        ${/* Simon: the count "like the COPY FROM" box - in the tag column, capitals - and APPLY NOW half the width */""}
+      <div class="cpd-actions">
+        ${/* Simon: APPLY NOW on the left, the count on the right, equal halves; the count in the tags' colour and font */""}
+        <span class="cpd-applywrap" ...${tip(copyTip)}><button type="button"
+          class="cpd-apply" disabled=${!canCopy} onClick=${doCopy}>APPLY NOW</button></span>
         <span class="cpd-tag cpd-counttag"
           title=${`${canCopy ? `${summary.n} ${summary.n === 1 ? toWords[2] : toWords[1]}` : "Nothing to apply"}. You are asked first, with a WARNING, and Undo puts them all back.`}>${canCopy
           ? `${summary.n} ${summary.n === 1 ? "ASSET" : "ASSETS"}` : "NONE"}</span>
-        <span class="cpd-applywrap" style="grid-column: span 3" ...${tip(copyTip)}><button type="button"
-          class="cpd-apply" disabled=${!canCopy} onClick=${doCopy}>APPLY NOW</button></span>
       </div>
     ${!f ? html`<${WhichFilesNotes} s=${s} />` : null}
   </div>`;

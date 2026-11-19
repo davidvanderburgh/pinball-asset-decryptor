@@ -235,8 +235,21 @@ cache_in_use() {   # <label>
 # Where the entry's image stands (PAD-739), for the Cache window and the clean-ups:
 #   ok           the image is there with the entry's stamp - the copy is what a boot of it uses
 #   changed      the image is there but rebuilt or replaced since (or the entry has no stamp): never used again
-#   gone         its folder is there but the file is not (deleted or renamed): never used again unless it comes back
+#   gone         its folder is there but the file is not (deleted or renamed), and the folder was scratch (a ticket's
+#                C:\tmp\PAD-n, /tmp, /var/tmp, %TEMP%, a staging folder): never used again unless it comes back
+#   lost         the same, but the folder was somebody's own (a Desktop, Documents, OneDrive, a games drive): the
+#                cached copy may be the LAST copy of a custom build (PAD-1453: "Godzilla ... daveyvandy modes v36",
+#                whose OneDrive Desktop source was deleted, sat in the cache as the only copy left). Nothing
+#                automatic takes it - not the copier making room, not --cache-prune, not the app's clean-up; only
+#                a delete someone asks for (--cache-drop, the Cache window)
 #   unreachable  its folder is not there either (a drive not attached, a share offline): may be used again
+# A folder is scratch when its path says so; anything else counts as somebody's own.
+src_is_scratch() {   # <image path>
+    case $1 in
+        /tmp/*|/var/tmp/*|*/tmp/*|*/Temp/*|*/temp/*|*/pytest-of-*|*/pad_cardstage*|*/PAD-[0-9]*/*|*/pad[0-9]*/*) return 0 ;;
+    esac
+    return 1
+}
 cache_source_state() {   # <label>
     local s img
     s=$(cat "$CACHE/$1.src" 2>/dev/null) || { echo changed; return; }
@@ -246,11 +259,25 @@ cache_source_state() {   # <label>
     case $(readlink -f "$img" 2>/dev/null) in "$(readlink -f "$CACHE" 2>/dev/null)"/*) echo changed; return ;; esac
     if [ -f "$img" ]; then
         cache_valid "$img" "$CACHE/$1.raw" "$CACHE/$1.src" && echo ok || echo changed
-    elif [ -d "$(dirname "$img")" ]; then
-        echo gone
+    elif [ -d "$(dirname "$img")" ] || src_drive_present "$img"; then
+        # (a whole folder deleted from a drive that IS attached is as gone as a file deleted from it: PAD-1453 found
+        # Heisei v36's build folder removed from the Desktop and its copy read as a drive merely offline)
+        if src_is_scratch "$img"; then echo gone; else echo lost; fi
     else
         echo unreachable
     fi
+}
+# Is the drive (or share) the image was on attached right now? /mnt/<letter> with something in it; any other path
+# is on a Linux disk that is always there.
+src_drive_present() {   # <image path>
+    local root
+    case $1 in
+        /mnt/wsl/*) return 1 ;;
+        /mnt/?/*) root=${1:0:6} ;;
+        /mnt/*) return 1 ;;
+        *) return 0 ;;
+    esac
+    [ -d "$root" ] && [ -n "$(ls -A "$root" 2>/dev/null | head -1)" ]
 }
 
 # THE CACHE'S OWN SIZE LIMIT (PAD-739). cache_make_room evicted only when `df` said the disk was nearly full - and on
@@ -258,12 +285,17 @@ cache_source_state() {   # <label>
 # it. So on a machine without the store nothing was ever evicted: a user's ~/cardcache reached 150 GB over a month of
 # custom Godzilla builds, the distro disk 226 GB on C:. A limit on what the cache itself holds is the bound df cannot
 # give. `cardmount.sh --cache-limit N` saves it beside the cache (.limit_gb, 0 = none); without one it is 64 GB on a
-# distro disk (PAD_CACHE_MAX_GB) and none on the store, which is its own sized disk holding nothing else.
+# distro disk (PAD_CACHE_MAX_GB).
+# THE STORE HAS ONE TOO (PAD-1453). It had none ("its own sized disk holding nothing else"), so cardcache grew until
+# the store's 600 GB maximum was in sight: 103 GB on 2026-11-19, nearly all of it ticket scratch (C:\tmp\PAD-n
+# builds booted once) - and the store's file never shrinks, so C: paid for every byte. The library lives beside the
+# cache now (PAD-966: /mnt/wsl/cards/library, outside this count), so the cache holds only what is NOT the library:
+# 25 GB (PAD_STORE_CACHE_MAX_GB) is three or four custom builds in flight.
 cache_limit_gb() {
     local v
     v=$(tr -dc 0-9 2>/dev/null < "$CACHE/.limit_gb")
     if [ -n "$v" ]; then echo $((10#$v)); return; fi
-    if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then echo 0; else echo "${PAD_CACHE_MAX_GB:-64}"; fi
+    if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then echo "${PAD_STORE_CACHE_MAX_GB:-25}"; else echo "${PAD_CACHE_MAX_GB:-64}"; fi
 }
 cache_used_kb() {
     local u
@@ -401,6 +433,7 @@ cache_make_room() {   # <img> <own-copy-path>
             if cache_pinned "$vlabel"; then pinned=$((pinned + 1)); continue; fi
             case $(cache_source_state "$vlabel") in
                 changed|gone) vboot=0 ;;       # its image is gone or changed: dead weight, first out
+                lost) pinned=$((pinned + 1)); continue ;;   # maybe the last copy (PAD-1453): never taken to make room
                 # ok, or unreachable (a drive not attached: it may boot again once it is) - by its last boot
                 *) vboot=$(stat -c %Y "$CACHE/$vlabel.boot" 2>/dev/null \
                            || stat -c %Y "$f" 2>/dev/null) || continue ;;
@@ -413,7 +446,7 @@ cache_make_room() {   # <img> <own-copy-path>
             if [ $(( free - need )) -ge "$keep" ]; then
                 # only the limit is unmet, by cards in use or the library's: the disk has the room, so cache anyway
                 if [ "$over" = 1 ]; then
-                    room_say "[card] the cache is over its $(( limit / 1048576 )) GB limit and nothing else can go - in use, or the library's ($pinned)${1:+ - caching anyway}"
+                    room_say "[card] the cache is over its $(( limit / 1048576 )) GB limit and nothing else can go - in use, the library's, or the last copy of a deleted build ($pinned)${1:+ - caching anyway}"
                 fi
                 return 0
             fi
@@ -423,7 +456,7 @@ cache_make_room() {   # <img> <own-copy-path>
                 return 1
             fi
             ROOM_WHY=disk
-            room_say "[card] disk too full to cache ($(( free / 1048576 )) GB free, want $(( (need + keep) / 1048576 )) GB) and nothing evictable ($pinned library cards kept) - running off the original"
+            room_say "[card] disk too full to cache ($(( free / 1048576 )) GB free, want $(( (need + keep) / 1048576 )) GB) and nothing evictable ($pinned library cards or last copies kept) - running off the original"
             return 1
         fi
         if [ -n "${why:-}" ]; then
@@ -535,12 +568,16 @@ library_copy() {   # <img>
 # come off D: again. This takes, in one pass: an unfinished copy with no copier on it; an entry whose image state is
 # `changed` (a rebuilt image, or a stamp naming the copy itself); and every other entry that is not the library's and
 # was last booted (never booted: copied) more than KEEP days ago - KEEP 0 leaves the library alone in the cache.
-# Never one in use or being copied. With DRY=1 it says what it would take and takes nothing. Tab-separated:
+# Never one in use or being copied, and never the last copy of a deleted build (source state `lost`, PAD-1453).
+# THEN THE LIMIT (PAD-1453): what is left, least recently booted first, until the cache is under cache_limit_gb -
+# the copier enforced the limit only when a NEW copy came in, so a cache nothing new went into stayed over it.
+# With DRY=1 it says what it would take and takes nothing. Tab-separated:
 #   prune  <TAB> why <TAB> label <TAB> real_kb            taken (with DRY=1: would be)
-#   kept   <TAB> why <TAB> label <TAB> real_kb            why: pinned | in use | copying | booted N days ago
+#   kept   <TAB> why <TAB> label <TAB> real_kb            why: pinned | in use | copying | last copy ... | booted N days ago
 #   pruned <TAB> taken_n <TAB> taken_kb <TAB> kept_n <TAB> kept_kb     the sum, last
 cache_prune() {   # <keep-days>
     local keep=${1:-30} keep_s now f l why last kb st seen="" n=0 nkb=0 kn=0 kkb=0
+    local limit used=0 lru=""
     keep_s=$(( keep * 86400 )); now=$(date +%s)
     CACHE_READERS=$(cache_readers)
     take() {   # <why> <label> <kb>
@@ -563,14 +600,32 @@ cache_prune() {   # <keep-days>
         if cache_pinned "$l"; then hold pinned "$l" "$kb"; continue; fi
         st=$(cache_source_state "$l")
         if [ "$st" = changed ]; then take "dead: its image changed, or the stamp names the copy itself" "$l" "$kb"; continue; fi
+        if [ "$st" = lost ]; then hold "last copy: its image was deleted from a folder of your own - save it out, or delete it by hand" "$l" "$kb"; continue; fi
         last=$(stat -c %Y "$CACHE/$l.boot" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
         if [ $(( now - last )) -ge "$keep_s" ]; then
             if [ "$keep" = 0 ]; then why="not the library's ($st)"; else why="not booted in $keep days ($st)"; fi
             take "$why" "$l" "$kb"
         else
-            hold "booted $(( (now - last) / 86400 )) days ago" "$l" "$kb"
+            # a candidate for the limit pass below; held for now
+            lru="$lru$last"$'\t'"$kb"$'\t'"$l"$'\n'
         fi
     done
+    limit=$(( $(cache_limit_gb) * 1048576 ))
+    if [ "$limit" -gt 0 ]; then
+        used=$(cache_used_kb)
+        [ "${DRY:-0}" = 1 ] && used=$(( used - nkb ))
+    fi
+    while IFS=$'\t' read -r last kb l; do
+        [ -n "$l" ] || continue
+        if [ "$limit" -gt 0 ] && [ "$used" -gt "$limit" ]; then
+            take "over the cache's $(( limit / 1048576 )) GB limit, least recently booted" "$l" "$kb"
+            # measured again after a real delete: on the XFS store (PAD-1453) a file's du counts blocks it shares
+            # with others, so what a delete frees can be less than its du
+            if [ "${DRY:-0}" = 1 ]; then used=$(( used - kb )); else used=$(cache_used_kb); fi
+        else
+            hold "booted $(( (now - last) / 86400 )) days ago" "$l" "$kb"
+        fi
+    done < <(printf '%s' "$lru" | sort -n)
     # a copy that never finished with no copier on it, and sidecars whose card is gone (as --cache-list's leftovers)
     for f in "$CACHE"/*.raw.partial "$CACHE"/*.src "$CACHE"/*.log "$CACHE"/*.boot "$CACHE"/*.pid "$CACHE"/*.need; do
         [ -e "$f" ] || continue

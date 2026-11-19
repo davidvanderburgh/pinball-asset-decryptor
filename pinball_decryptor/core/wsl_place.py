@@ -468,12 +468,17 @@ def move(drive, progress=None, *, all_items=None, all_drives=None,
                 raise
             for i, part, dst in parts:
                 os.replace(part, dst)
+                # the card store's filesystem type travels with it (PAD-1453:
+                # rigdata.cards_fstype; an XFS store mounted as ext4 fails)
+                if os.path.isfile(i["path"] + ".fstype"):
+                    shutil.copyfile(i["path"] + ".fstype", dst + ".fstype")
             save_root(dest_root)
             for i, _part, dst in parts:
-                try:
-                    os.remove(i["path"])
-                except OSError:
-                    pass
+                for p in (i["path"], i["path"] + ".fstype"):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
                 done.append((i["label"], dst))
         if distro:
             dest = target_of(distro, dest_root)

@@ -31,7 +31,9 @@ def test_the_stager_and_the_multicard_builder_know_the_store():
 
 def test_the_store_script_attaches_by_name_unelevated_and_registers_the_logon_task():
     ps = _text("cardstore.ps1")
-    assert "$Name = 'cards'" in ps and "'--vhd', '--bare'" in ps and "'--vhd', '--name', $Name" in ps
+    assert "$Name = 'cards'" in ps and "'--vhd', '--bare'" in ps
+    # by name, as its own filesystem type (PAD-1453: an XFS store; wsl --mount assumes ext4 unless told)
+    assert "'--vhd', '--name', $as, '--type', $t" in ps and "function AttachByName() { AttachAs $Path $Name }" in ps
     # the app's own recipe (core/rigdata.py): diskpart and wsl --mount need no administrator, and the ext4 is
     # sized for thousands of big files, not millions of small ones
     assert "RunAs" not in ps and "/RL HIGHEST" not in ps

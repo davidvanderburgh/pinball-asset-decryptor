@@ -78,7 +78,7 @@ run nodrive 6000
 @pytest.mark.skipif(sys.platform == "darwin", reason="the rig's scripts speak GNU stat/du")
 def test_the_copier_counts_the_windows_drive():
     script = _funcs("cardmount.sh", "cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned",
-                    "label_mounted", "cache_readers", "cache_in_use", "cache_source_state", "cache_limit_gb",
+                    "label_mounted", "cache_readers", "cache_in_use", "src_is_scratch", "src_drive_present", "cache_source_state", "cache_limit_gb",
                     "cache_used_kb", "card_label", "host_free_kb", "cache_need_kb", "cache_make_room") + DRIVER
     out = _bash(script)
     lines = out.splitlines()

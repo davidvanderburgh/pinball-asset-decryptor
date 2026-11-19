@@ -8,6 +8,9 @@ distro sees it at /mnt/wsl/cards, where cardmount.sh keeps its card cache (PAD-6
     powershell -ExecutionPolicy Bypass -File cardstore.ps1 task                  (register / repoint the logon task)
     powershell -ExecutionPolicy Bypass -File cardstore.ps1 status
     powershell -ExecutionPolicy Bypass -File cardstore.ps1 prune [-KeepDays 30] [-DryRun]   (PAD-966, below)
+    powershell -ExecutionPolicy Bypass -File cardstore.ps1 migrate [-SizeGB 400]  (PAD-1453: a new XFS store, filled while the old one works)
+    powershell -ExecutionPolicy Bypass -File cardstore.ps1 swap                   (PAD-1453: catch up, verify, put the XFS store in its place)
+    powershell -ExecutionPolicy Bypass -File cardstore.ps1 dedupe [-DryRun]       (PAD-1453: share identical blocks; `fill` runs it after)
 
 The file is %LOCALAPPDATA%\pinball_decryptor\data\pad-cards.vhdx, beside the app's work disk (pad-data.vhdx,
 core/rigdata.py) and made the same way: diskpart makes an expandable VHDX and `wsl --mount --vhd` attaches it, both
@@ -44,9 +47,23 @@ the intake folder (D:\Pinball\images\Stern\spike2) is served from the library fi
 archive, not a working copy. `fill` is the intake (precache.sh): a new raw in the folder is taken in once, in the
 background. Not on D: itself: a SATA hard disk gives five rigs 95 random reads a second between them, and a
 330 GB sweep is 39+ minutes of its time against nothing from the NVMe (measured 2026-11-03).
+
+SHARED BLOCKS (PAD-1453). David, 2026-11-19: "our pad storage on disk c has gotten way out of control". The store's
+file was 550 GB on C: and held 431 GiB of data - of which only 189 GiB was unique, 4 KiB block by block: an LE card
+and its Pro are the same OS, videos and sounds; a custom build or a ticket's scratch build is a library card with a
+few files changed. zstd found 16% (H.264 and compressed audio); sharing finds 56%. So the store is XFS with reflink,
+and storededupe.py has the kernel share every identical block (FIDEDUPERANGE: the kernel byte-compares under a lock,
+so nothing that differs is ever merged; a write to a shared block is copied first, so no file can change another).
+Files read exactly as before - boots, the copier and the clean-ups see no difference.
+  `migrate` makes the XFS store beside the old one (pad-cards.xfs.vhdx, attached as /mnt/wsl/cards-new) and copies
+  everything in, sharing as each file lands, so the new file grows only to the unique data. The old store keeps
+  working meanwhile. `swap` (with no rig on the store) copies what changed since, byte-verifies every file, and
+  puts the new file in the old one's place (the old one stays as pad-cards.ext4-old.vhdx until you delete it).
+  `dedupe` shares what new cards brought; `fill` runs it after every intake, and it reads only files it has not seen.
+The filesystem type is written beside the disk (<vhdx>.fstype), because `wsl --mount` assumes ext4 unless told.
 #>
 param(
-    [Parameter(Position = 0)] [ValidateSet('create', 'mount', 'fill', 'status', 'task', 'prune')] [string] $Cmd = 'status',
+    [Parameter(Position = 0)] [ValidateSet('create', 'mount', 'fill', 'status', 'task', 'prune', 'migrate', 'swap', 'dedupe')] [string] $Cmd = 'status',
     [int] $SizeGB = 400,
     # prune: entries not the library's and not booted this many days stay (0 = only the library stays)
     [int] $KeepDays = 30,
@@ -73,7 +90,9 @@ $MountPoint = "/mnt/wsl/$Name"
 
 function Say($t) { Write-Host $t }
 function Wsl([string[]] $a) { $o = & wsl.exe @a 2>&1 | ForEach-Object { "$_" -replace "`0", '' }; return ($o -join "`n").Trim() }
-function WslRoot($d, $cmd) { & wsl.exe -d $d -u root -- bash -c $cmd 2>&1 | ForEach-Object { "$_" -replace "`0", '' } }
+# (stderr is folded into stdout INSIDE bash: Windows PowerShell 5.1 under 'Stop' turns any stderr line of a native
+# command into a terminating NativeCommandError - storexfs.sh's "fetching" line ended `migrate` that way)
+function WslRoot($d, $cmd) { & wsl.exe -d $d -u root -- bash -c "{ $cmd ; } 2>&1" | ForEach-Object { "$_" -replace "`0", '' } }
 function Mounted($d) { return ((WslRoot $d "mountpoint -q $MountPoint && echo yes || echo no") -join '') -match 'yes' }
 # The rig scripts beside this one, as the distro spells them, and the commands that run them as root for the
 # desktop user (padpath.sh finds the rig's home from $HOME). One definition for `fill` and `status`.
@@ -81,10 +100,29 @@ function Mounted($d) { return ((WslRoot $d "mountpoint -q $MountPoint && echo ye
 function RigDir() { return (Wsl @('-d', $Distro, '--', 'wslpath', '-u', ($PSScriptRoot -replace '\\', '/'))) }
 $AsUser = 'export HOME=$(getent passwd 1000 | cut -d: -f6);'
 $Intake = '/mnt/d/Pinball/images/Stern/spike2'          # where downloads land; precache.sh takes them into the library
-function AttachByName() {
-    $o = Wsl @('--mount', $Path, '--vhd', '--name', $Name)
-    if ($LASTEXITCODE -ne 0) { throw "wsl --mount --name $Name failed: $o" }
+function FsType($vhdx) {
+    $f = "$vhdx.fstype"
+    if (Test-Path $f) { $t = (Get-Content $f -Raw).Trim(); if ($t -in @('ext4', 'xfs')) { return $t } }
+    return 'ext4'
 }
+# Attach <vhdx> by name, as its own filesystem type (PAD-1453); a file moved without its .fstype gets the other type
+# tried, the failed attach let go first (core/rigdata.attach_cards does the same).
+function AttachAs($vhdx, $as) {
+    $first = FsType $vhdx
+    $errs = @()
+    foreach ($t in @($first) + @(@('ext4', 'xfs') | Where-Object { $_ -ne $first })) {
+        $o = Wsl @('--mount', $vhdx, '--vhd', '--name', $as, '--type', $t)
+        if ($LASTEXITCODE -eq 0) { return }
+        $errs += "${t}: $o"
+        Wsl @('--unmount', $vhdx) | Out-Null
+    }
+    throw "wsl --mount --name $as failed: $($errs -join ' | ')"
+}
+function AttachByName() { AttachAs $Path $Name }
+$NewPath = Join-Path (Split-Path $Path) 'pad-cards.xfs.vhdx'
+$OldPath = Join-Path (Split-Path $Path) 'pad-cards.ext4-old.vhdx'
+$NewMount = "/mnt/wsl/$Name-new"
+function Py($d, $args_) { WslRoot $d "python3 -I '$(RigDir)/storededupe.py' $args_" }
 
 switch ($Cmd) {
     'status' {
@@ -129,8 +167,10 @@ switch ($Cmd) {
         # Detached and hidden: a new image is a copy of minutes, under the machine's one copy lock, so a sweep that
         # starts meanwhile waits its turn for D: rather than seeking against it. The log is on the store itself.
         $log = "$MountPoint/precache.log"
+        # then, on an XFS store, share what the new cards brought (PAD-1453; reads only files it has not seen)
+        $dd = "[ `$(stat -f -c %T $MountPoint) = xfs ] && nice -n 10 python3 -I '$(RigDir)/storededupe.py' dedupe $MountPoint/library $MountPoint/cardcache $MountPoint/spike3 >> $log 2>&1"
         Start-Process -WindowStyle Hidden -FilePath 'wsl.exe' -ArgumentList @('-d', $Distro, '-u', 'root', '--',
-            'bash', '-c', "`"$AsUser bash '$(RigDir)/precache.sh' > $log 2>&1`"")
+            'bash', '-c', "`"$AsUser bash '$(RigDir)/precache.sh' > $log 2>&1; $dd`"")
         Say "topping the library up in the background ($Distro`:$log)"
     }
     'prune' {
@@ -148,6 +188,85 @@ switch ($Cmd) {
             }
         }
         if (-not $DryRun) { & $PSCommandPath fill -Path $Path -Distro $Distro }
+    }
+    'dedupe' {
+        if (-not (Mounted $Distro)) { throw "$MountPoint is not mounted: cardstore.ps1 mount" }
+        if (((WslRoot $Distro "stat -f -c %T $MountPoint") -join '') -notmatch 'xfs') { throw "the store is not XFS yet: cardstore.ps1 migrate" }
+        $opts = if ($DryRun) { 'dedupe --dry' } else { 'dedupe' }
+        Py $Distro "$opts $MountPoint/library $MountPoint/cardcache $MountPoint/spike3" | ForEach-Object { Say $_ }
+    }
+    'migrate' {
+        # A new XFS store beside the old one, filled while the old one keeps working (PAD-1453). Safe to run again:
+        # it picks up where it stopped (files already there with their size and mtime are only indexed).
+        if (-not (Mounted $Distro)) { throw "$MountPoint is not mounted: cardstore.ps1 mount" }
+        if (((WslRoot $Distro "stat -f -c %T $MountPoint") -join '') -match 'xfs') { Say "the store is XFS already"; exit 0 }
+        $rig = RigDir
+        if (-not ((WslRoot $Distro "mountpoint -q $NewMount && echo yes") -join '' -match 'yes')) {
+            # a file with no .fstype was never formatted (a run that stopped between diskpart and mkfs): make it again
+            if ((Test-Path $NewPath) -and -not (Test-Path "$NewPath.fstype")) { Remove-Item $NewPath }
+            if (-not (Test-Path $NewPath)) {
+                # room: the unique data (44% of what David's store held, measured 2026-11-19) and a margin; the
+                # copy itself also stops before the drive gets under 20 GB (storededupe.py --host-min-gb)
+                $usedKB = [double]((WslRoot $Distro "df -k --output=used $MountPoint | tail -1") -join '').Trim()
+                $want = [math]::Ceiling($usedKB * 1KB * 0.5 / 1GB) + 20
+                $free = [math]::Floor((Get-PSDrive ((Split-Path $NewPath -Qualifier).TrimEnd(':'))).Free / 1GB)
+                if ($free -lt $want) { throw "the new store may need up to $want GB and $(Split-Path $NewPath -Qualifier) has $free GB free" }
+                Say "creating $NewPath ($SizeGB GB maximum, grows as used)"
+                $s = Join-Path $env:TEMP 'cardstore_diskpart.txt'
+                "create vdisk file=`"$NewPath`" maximum=$($SizeGB * 1024) type=expandable" | Set-Content $s -Encoding ascii
+                $out = diskpart /s $s 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "diskpart: $($out -join ' | ')" }
+                # diskpart can return (exit 0, no output) before the file is there: on 2026-11-19 the attach right
+                # after it answered ERROR_FILE_NOT_FOUND. Wait for it.
+                for ($i = 0; $i -lt 30 -and -not (Test-Path $NewPath); $i++) { Start-Sleep 1 }
+                if (-not (Test-Path $NewPath)) { throw "diskpart did not make $NewPath ($($out -join ' | '))" }
+                WslRoot $Distro "bash '$rig/storexfs.sh' tools" | ForEach-Object { Say "  $_" }
+                $before = @((WslRoot $Distro "lsblk -dno NAME") | Where-Object { $_ })
+                $o = Wsl @('--mount', $NewPath, '--vhd', '--bare')
+                if ($LASTEXITCODE -ne 0) { throw "wsl --mount --bare failed: $o" }
+                try {
+                    Start-Sleep 2
+                    $new = @(@((WslRoot $Distro "lsblk -dno NAME") | Where-Object { $_ }) | Where-Object { $before -notcontains $_ })
+                    if ($new.Count -ne 1) { throw "could not tell the new block device apart - nothing formatted" }
+                    WslRoot $Distro "bash '$rig/storexfs.sh' mkfs /dev/$($new[0])" | ForEach-Object { Say "  $_" }
+                } finally {
+                    Wsl @('--unmount', $NewPath) | Out-Null
+                }
+                'xfs' | Set-Content "$NewPath.fstype" -Encoding ascii
+            }
+            AttachAs $NewPath "$Name-new"
+            Start-Sleep 2
+            WslRoot $Distro "chmod 1777 $NewMount" | Out-Null
+        }
+        Say "copying $MountPoint into $NewMount, sharing blocks as each file lands (the old store keeps working)"
+        $hostMnt = '/mnt/' + (Split-Path $NewPath -Qualifier).TrimEnd(':').ToLower()
+        Py $Distro "ingest --host $hostMnt $MountPoint $NewMount" | ForEach-Object { Say $_ }
+        WslRoot $Distro "df -h $MountPoint $NewMount" | ForEach-Object { Say "  $_" }
+        Say "next: cardstore.ps1 swap (with no rig on the store)"
+    }
+    'swap' {
+        if (-not ((WslRoot $Distro "mountpoint -q $NewMount && echo yes") -join '' -match 'yes')) { throw "$NewMount is not attached: cardstore.ps1 migrate first" }
+        $busy = @(WslRoot $Distro "STORE=$MountPoint bash '$(RigDir)/storexfs.sh' busy" | Where-Object { $_ })
+        if ($busy.Count) { throw "the store is in use - stop these first: $($busy -join '; ')" }
+        Say "catching up what changed since migrate"
+        $hostMnt = '/mnt/' + (Split-Path $Path -Qualifier).TrimEnd(':').ToLower()
+        Py $Distro "ingest --delete --host $hostMnt $MountPoint $NewMount" | ForEach-Object { Say $_ }
+        Say "byte-comparing every file"
+        $v = @(Py $Distro "verify $MountPoint $NewMount")
+        $v | ForEach-Object { Say $_ }
+        if (-not ($v | Where-Object { $_ -match "^verify`t\d+`t0$" })) { throw "verify failed: the old store stays in place" }
+        Wsl @('--unmount', $NewPath) | Out-Null
+        Wsl @('--unmount', $Path) | Out-Null
+        if (Test-Path $OldPath) { throw "$OldPath is there already: delete it first" }
+        Move-Item $Path $OldPath
+        if (Test-Path "$Path.fstype") { Move-Item "$Path.fstype" "$OldPath.fstype" }
+        Move-Item $NewPath $Path
+        Move-Item "$NewPath.fstype" "$Path.fstype"
+        AttachByName
+        Start-Sleep 2
+        if (-not (Mounted $Distro)) { throw "$MountPoint is not a mount after the swap" }
+        WslRoot $Distro "stat -f -c %T $MountPoint; df -h $MountPoint | tail -1" | ForEach-Object { Say "  $_" }
+        Say "swapped: the XFS store is $Path. The old one is $OldPath ($([math]::Round((Get-Item $OldPath).Length / 1GB)) GB) - delete it once a boot works."
     }
     'task' {
         if (-not $TaskScript) {

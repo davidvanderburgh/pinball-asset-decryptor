@@ -37,7 +37,8 @@ def _funcs(*names):
 
 
 FUNCS = ("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
-         "cache_readers", "cache_in_use", "cache_source_state", "on_cache_disk", "cache_prune")
+         "cache_readers", "cache_in_use", "src_is_scratch", "src_drive_present", "cache_source_state", "on_cache_disk", "cache_limit_gb",
+         "cache_used_kb", "cache_prune")
 
 # One bash (WSL's on this machine), its own scratch folder: a cache with a library entry, one stamped against
 # itself, an older version, a fresh custom build, one a run holds, and a copy that never finished.

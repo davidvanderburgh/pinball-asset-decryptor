@@ -442,7 +442,7 @@ def parse_cache_list(text):
             continue
         e["leftover"] = False
         src, use, copied = state.get(e["label"], ("", "-", 0))
-        e["source"] = src if src in ("ok", "changed", "gone",
+        e["source"] = src if src in ("ok", "changed", "gone", "lost",
                                      "unreachable") else ""
         e["use"] = use if use in ("mounted", "copying") else ""
         e["copied"] = copied
@@ -479,8 +479,10 @@ def cache_last_used(e):
 
 def cache_unused(e, now, days=CACHE_UNUSED_DAYS):
     """Why the entry is safe to delete without being missed, or "".  Never one
-    in use, being copied, or the library's (PAD-727)."""
-    if e.get("use") or e.get("pinned"):
+    in use, being copied, or the library's (PAD-727), and never the last copy
+    of a build whose image was deleted from a folder of the user's own
+    (``lost``, PAD-1453): that one goes only when someone picks it."""
+    if e.get("use") or e.get("pinned") or e.get("source") == "lost":
         return ""
     if e.get("leftover"):
         return "a copy that never finished"

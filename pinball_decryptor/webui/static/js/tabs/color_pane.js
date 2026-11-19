@@ -262,7 +262,11 @@ function FileLine({ s, host, tools }) {
       if (live) setSummary({ n: (r && r.n) || 0, text: (r && r.text) || "" });
     });
     return () => { live = false; };
-  }, [source, to, scope, themes, f && f.rel, f && f.own, s.name, s.asset_name, canCopy]);
+    // (Simon: "I have just clicked ... unlock the extracted images - asset count is not updated": it is counted again
+    // whenever what it counts can change - an unlock, the theme, the files switched on or given a profile)
+  }, [source, to, scope, themes, f && f.rel, f && f.own, s.name, s.asset_name, canCopy,
+    JSON.stringify(sets.unlock || {}), sets.current, (sets.names || []).length, JSON.stringify(s.asset_counts || {}),
+    s.all_images, s.all_videos, s.rev]);
   const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(toWords[2], toWords[1]);
   const copyTip = !canCopy ? "Copying is not offered for this file here"
     : source === "shared" ? { head: `Give every ${toWords[2]} the shared files profile`, lines: [{ profile: s.asset_name || "Recommended" },

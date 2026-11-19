@@ -33,6 +33,9 @@ def rewrite(text, block):
         if skip and (line.startswith("data addcab_") or line.startswith("value addcab_")
                      or line.startswith("# not on this build:")):
             continue
+        if skip and line == "":                         # the block's own separator after it: written again below
+            skip = False
+            continue
         skip = False
         out.append(line)
     while out and out[-1] == "":

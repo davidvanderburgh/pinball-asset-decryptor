@@ -183,7 +183,7 @@ def test_a_dry_pass_finds_a_pro_inside_its_le_and_skips_holes_and_zeros(tmp_path
     assert d.take(str(tmp_path / "pro.raw")) == (64 - 2 - 4) * sd.BLK
 
 
-@pytest.mark.skipif(not hasattr(os, "SEEK_DATA"), reason="SEEK_DATA/SEEK_HOLE + fallocate: Linux")
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="SEEK_DATA/SEEK_HOLE + fallocate: Linux (the store is in WSL)")
 def test_zero_blocks_become_holes_and_the_file_reads_and_dates_the_same(tmp_path):
     # the copy wrote a card's zero runs as real blocks and XFS preallocated past every write (Jaws Pro: 7.4 GiB of
     # data in 11.6 GiB of blocks); punch_zeros gives them back without changing a byte or the mtime
@@ -203,7 +203,7 @@ def test_zero_blocks_become_holes_and_the_file_reads_and_dates_the_same(tmp_path
         assert after.st_blocks < before.st_blocks
 
 
-@pytest.mark.skipif(not hasattr(os, "SEEK_DATA") or not hasattr(os, "symlink"), reason="Linux")
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="syncfs: Linux (the store is in WSL)")
 def test_links_to_folders_are_copied_and_verified_as_links(tmp_path, monkeypatch):
     # os.walk lists a link to a folder among the folders: the first copy left out 191 of Spike 3's
     src, dst = tmp_path / "src", tmp_path / "dst"

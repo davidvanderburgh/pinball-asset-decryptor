@@ -29,5 +29,5 @@ def test_a_sound_at_a_start_press_in_the_intro_is_cut_not_faded(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
     fn = "#define CI_JOIN_CUT_MS 3000ul\n" + R._lift(src, "static int ci_join_cut(unsigned bus, unsigned long join_at, unsigned long now)")
     assert R._host_run(tmp_path, JOIN_MAIN.replace("@FN@", fn)).split() == ["0", "1", "0", "1", "0"]
-    assert "ci.join_at = pm_ms() | 1ul;" in R._lift(src, "static void ci_start_poll(int formed)")
+    assert "ci.join_at = pm_ms() | 1ul;" in R._lift(src, "static void ci_start_poll(int formed)\n{")       # PAD-1449 declares it earlier
     assert "ci_join_cut(buses[i], ci.join_at, pm_ms())" in R._lift(src, "static void ci_quiet(void)")

@@ -235,7 +235,7 @@ def test_the_page_sends_the_selected_clips_and_both_buttons():
     assert "more: selOpen.filter((x) => x.rel !== barRow.rel).map((x) => x.rel)" in video
     pane = open(os.path.join(_TABS, "color_pane.js"), encoding="utf-8").read()
     assert "file.attach || null, file.more || [])" in pane
-    assert ">Copy profile…<//>" in pane                   # (Simon: one copy action, which files / which themes)
+    assert ">APPLY NOW</button>" in pane                 # (Simon: one copy action, APPLY NOW)
     assert ">Same as the other files<//>" in pane
 
 

@@ -128,3 +128,14 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cpd-opt.on { border-color: var(--accent, #e3a33b); background: var(--warn-soft); font-weight: 600; }
 .cpd-opt:disabled { opacity: .45; cursor: default; }
+
+/* Simon (2026-11-19): the Copy panel's action - APPLY NOW in a red box like the Advanced one, the count beside it */
+.cpd-actions { margin-top: 4px; }
+.cpd-applywrap { display: flex; min-width: 0; }
+.cpd-apply { flex: 1 1 auto; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--err); background: var(--err-soft);
+  color: var(--ink); font-weight: 700; letter-spacing: .06em; cursor: pointer; }
+.cpd-apply:hover:not(:disabled) { background: var(--err); color: #fff; }
+.cpd-apply:disabled { opacity: .45; cursor: default; }
+.cpd-count { display: flex; align-items: center; justify-content: center; min-width: 0; padding: 4px 8px; border-radius: 6px;
+  border: 1px solid var(--line-2, var(--line)); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpd-sel + .cpd-copy { margin-top: 8px; }

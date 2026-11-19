@@ -160,7 +160,7 @@ def test_the_button_is_on_the_images_and_video_bars_only():
     # Simon (2026-11-19): one "Copy profile…" with its choices - which files (with a profile attached / all), which
     # themes - in place of the two Apply to all buttons
     assert 'call("color.apply_to_all", which, null, themes)' in pane
-    assert ">Copy profile…<//>" in pane
+    assert ">APPLY NOW</button>" in pane                 # (Simon: the action in a red box, APPLY NOW)
     assert 'COPY_WHICH = { profiled: "With a profile attached", all: "All" }' in pane
     # (PAD-471: and the Scenes bar on a line of text; PAD-566: and on a picture in Scenes)
     assert 'ALL_HOSTS = { images: ["images"], video: ["videos"], scenes: ["text", "images"] }' in pane

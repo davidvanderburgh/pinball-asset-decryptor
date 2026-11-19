@@ -205,7 +205,7 @@ function FileLine({ s, host }) {
   const [which, setWhich] = useState("profiled");
   const [where, setWhere] = useState("this");
   const [toKind, setToKind] = useState(host === "video" ? "videos" : "images");
-  const [summary, setSummary] = useState("");
+  const [summary, setSummary] = useState({ n: 0, text: "" });
   const n = f ? (f.count || 1) : 0;
   const kind = f ? f.kind : (host === "video" ? "videos" : "images");
   const words = ALL_WORDS[kind] || ALL_WORDS.images;
@@ -249,8 +249,10 @@ function FileLine({ s, host }) {
   const themes = themesOk ? where : "this";
   useEffect(() => {
     let live = true;
-    if (!canCopy) { setSummary(""); return undefined; }
-    call("color.copy_preview", source, to, scope, themes).then((r) => { if (live) setSummary((r && r.text) || ""); });
+    if (!canCopy) { setSummary({ n: 0, text: "" }); return undefined; }
+    call("color.copy_preview", source, to, scope, themes).then((r) => {
+      if (live) setSummary({ n: (r && r.n) || 0, text: (r && r.text) || "" });
+    });
     return () => { live = false; };
   }, [source, to, scope, themes, f && f.rel, f && f.own, s.name, s.asset_name, canCopy]);
   const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(toWords[2], toWords[1]);
@@ -274,6 +276,7 @@ function FileLine({ s, host }) {
   const tag = (word, off) => html`<span class=${cx("cpd-tag", off && "cpd-off")}>${word}</span>`;
   const value = (text, full, { none, off } = {}) => html`<span class=${cx("cpd-val mono", none && "cpd-none",
       off && "cpd-off")} style="grid-column: span 6" title=${full || text}>${text}</span>`;
+  // Simon: "Lets make the profile area its own panel ... and the same with selected and theme (one panel for those)"
   return html`<div class="cpd-file cpd-sel">
     <div class="cpd-grid">
       ${tag("SELECTED")}
@@ -287,7 +290,8 @@ function FileLine({ s, host }) {
     <div class="row cpd-file-own"><span class="small muted grow">${status}</span>${reset}
       ${f && themeLive ? html`<${Button} size="xs" onClick=${() => call("color.file_shared", "all")}
         title=${`Drop its own profile in every theme, theme 1 too: it gets the individual files profile (${shared}) everywhere`}>Reset in every theme<//>` : null}</div>
-    <div class="cpd-copy">
+  </div>
+  <div class="cpd-file cpd-copy">
       <div class="eyebrow">Copy a profile to other files</div>
       <div class="cpd-grid">
         ${tag("COPY FROM")}
@@ -312,11 +316,14 @@ function FileLine({ s, host }) {
         ${opt("every", "Every theme", { on: themes === "all", disabled: !themesOk, span: 3, onClick: () => setWhere("all"),
           title: "Theme 1 and every other theme too" })}
       </div>
-      ${summary ? html`<div class="small cpd-summary">${summary}</div>` : null}
-      <div class="row"><span ...${tip(copyTip)}><${Button} size="sm" icon="copy" disabled=${!canCopy}
-          onClick=${doCopy}>Copy profile…<//></span>
-        <span class="small muted">You are asked first.</span></div>
-    </div>
+      ${summary.text ? html`<div class="small cpd-summary">${summary.text}</div>` : null}
+      <div class="cpd-grid cpd-actions">
+        <span class="cpd-applywrap" style="grid-column: span 4" ...${tip(copyTip)}><button type="button"
+          class="cpd-apply" disabled=${!canCopy} onClick=${doCopy}>APPLY NOW</button></span>
+        <span class="cpd-count" style="grid-column: span 3"
+          title="How many files it changes. You are asked first, with a WARNING, and Undo puts them all back.">${canCopy
+          ? `${summary.n} ${summary.n === 1 ? toWords[2] : toWords[1]} · asked first` : "nothing to apply"}</span>
+      </div>
     ${!f ? html`<${WhichFilesNotes} s=${s} />` : null}
   </div>`;
 }

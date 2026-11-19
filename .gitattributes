@@ -18,6 +18,7 @@ Dockerfile text eol=lf
 # The rule that takes effect is in tools/spike2_emu/.gitattributes (a deeper file
 # wins, and that one says `* text eol=lf`); this line alone did nothing.
 tools/spike2_emu/modes/sdk/prebuilt/mode.so binary
+tools/spooky_emu/modes/unity/prebuilt/** binary
 # git hooks run under sh: LF, like every other shell script here
 .githooks/* text eol=lf
 

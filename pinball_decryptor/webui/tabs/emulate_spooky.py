@@ -233,11 +233,14 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                          name="pad-spooky-switches").start()
         return True
 
-    def launch_file(self, path):
-        """Start the rig on *path*, exactly as the Start button."""
+    def launch_file(self, path, pad_overlay=""):
+        """Start the rig on *path*, exactly as the Start button.  *pad_overlay* (PAD-1417: the
+        Modes tab's Try it) is a folder of PAD's mode runtime and modes the run puts at the
+        game's uptest/pad and preloads, as an update PAD wrote would (run_game.sh)."""
         path = (path or "").strip()
         if not path or self._busy:
             return False
+        self._pad_overlay = pad_overlay or ""
         self.spooky_emulate_file_var.set(path)
         self._start_async()
         return True
@@ -534,8 +537,15 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         self._started_here = True
         self._set_go("Cancel", True)
 
+        # PAD-1417: a Try it from the Modes tab, for this start only
+        pad = getattr(self, "_pad_overlay", "") or ""
+        self._pad_overlay = ""
+        overlay = ["SPK_PAD_OVERLAY=%s" % _rig.wsl_path(pad)] if pad else []
+
         def work():
             try:
+                if pad:
+                    self._log("Spooky: with your custom modes (Modes tab, Try it): %s" % pad)
                 self._log("Spooky: starting %s (a first start unpacks the "
                           "update - a few minutes; then the game loads for "
                           "a minute or two)." % os.path.basename(path))
@@ -555,6 +565,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                         env=["PAD_VISIBLE=1", "PAD_AUDIO=1",
                              "PAD_AUDIO_CTL=%s" % _rig.wsl_path(audio_ctl_file()),
                              "PAD_TITLE=%s" % spk.title_of(path)]
+                        + overlay
                         + rigslot.board_env() + rigslot.quiet_env()),
                     timeout=1800, on_line=self._footer_line)
                 if self._cancelling:

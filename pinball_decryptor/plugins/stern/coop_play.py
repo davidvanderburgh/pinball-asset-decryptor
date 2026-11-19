@@ -70,14 +70,15 @@ MENU_OFF, MENU_CLASSIC, MENU_ENHANCED = 0, 1, 2
 MENU_HELP = "0 Off. 1 Classic. 2 Enhanced. Games on start menu. Insider off"
 #: how a teammate joins, for the tab and the log. PAD-1443: the games are always on the start menu, no service row
 HOW = ("hold both flipper buttons in attract for the start menu: CO-OP PLAY (each Start in the first ball adds a "
-       "teammate, 2-4 players share one game), with characters ENHANCED CO-OP (the same, each teammate picking a "
-       "character whose ability holds while they are up) and ENHANCED STANDARD (a normal game of competing players, "
-       "each picking a character), and TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1; or hold the right flipper button and "
-       "press Start to add a teammate; a plain Start is the game's own game as always")
+       "teammate, 2-4 players share one game) and TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1. With characters, a game "
+       "picked there (one of these, STANDARD or a challenge) first asks NORMAL, CHARACTERS (each player picks one, "
+       "no special abilities) or ENHANCED (each character's ability holds while its player is up); or hold the right "
+       "flipper button and press Start to add a teammate; a plain Start is the game's own game as always")
 #: PAD-1443: what the card reports, for the tab (daveyvandy: "if you select it then you don't send anything to insider
 #: connect")
 INSIDER_HOW = ("A game played as one of these stays off Insider Connected (its scores, high scores and achievements "
-               "stay on the machine); a Standard game reports as it always has.")
+               "stay on the machine); a Standard game reports as it always has, and so do STANDARD and a challenge "
+               "played NORMAL or CHARACTERS.")
 #: PAD-1042: how a team game is played, for the tab and the log
 TEAMS_HOW = ("pick TEAM PLAY 2 VS 2 on the start menu (both flipper buttons in attract) and one Start adds all "
              "four players: players 1 and 3 against players 2 and 4, each team with its own score and progress, the "
@@ -1580,6 +1581,16 @@ PICTURE_DIR = "coop"
 SCREEN_NODE = "PadCoop_%s"
 #: PAD-1065: a character's Classic patch over its card
 CLASSIC_NODE = "PadCoopClassic_%d"
+#: PAD-1449: the start menu's style chooser's cards, 1 NORMAL, 2 CHARACTERS, 3 ENHANCED
+STYLE_NODE = "PadCoopStyle_%d"
+#: PAD-1449: the chooser's styles: (name, badge, what it is); ``{team}`` is the title's team ("your Godzilla team")
+STYLES = (("NORMAL", "THE GAME AS IT IS", "Plays as the game always does. No characters to pick."),
+          ("CHARACTERS", "NO SPECIAL ABILITIES", "Each player picks a character, with no special abilities: the game "
+                                                 "plays as it always does."),
+          ("ENHANCED", "SPECIAL ABILITIES", "Enhanced powers up {team}: each character's special ability holds while "
+                                            "its player is up."))
+#: PAD-1449: the chooser card's heading
+STYLE_TITLE = "CHOOSE HOW TO PLAY"
 #: the generated panel's colours when a character has no picture of its own
 PANEL_COLOR, TITLE_COLOR = "#3a0a0a", "#ffb400"
 
@@ -1634,14 +1645,156 @@ def pick_screens(project, characters=None, words_for=None, classic=None, videos=
                         words=" ", words_name=(SCREEN_NODE % ("Random" if i == n else i + 1)) + "_Words",
                         x=float(CARD_AT[0]), y=float(CARD_AT[1]), words_at=TIMER_WORDS_AT,
                         words_scale=TIMER_WORDS_SCALE))
-    if classic is None:
-        classic = menu_asked(project)
+    if classic is None:                       # PAD-1449: the start menu's chooser plays CHARACTERS: always wanted now
+        classic = True
     for i in range(n if classic else 0):
         got = classic_patch(project, chars, i, words_for, chars.get("theme"), window=videos)
         if got is not None:
             (x, y), art = got
             out.append(dict(name=CLASSIC_NODE % (i + 1), art_rgba=art, words=" ", x=float(CARD_AT[0] + x),
                             y=float(CARD_AT[1] + y)))
+    team = team_words(project)
+    for i in range(len(STYLES)):              # PAD-1449: the style chooser's cards, after the characters' (over them)
+        out.append(dict(name=STYLE_NODE % (i + 1), art_rgba=style_card(project, chars, i, chars.get("theme"), team=team),
+                        words=" ", x=float(CARD_AT[0]), y=float(CARD_AT[1])))
+    return out
+
+
+def team_words(project):
+    """PAD-1449 (DoomWalrus666: "Enhanced powers up your Godzilla team"): the team the ENHANCED card names - the
+    title's own on Godzilla, else just "your team"."""
+    try:
+        prof = project_title(project)
+        key = _SMo.title_key(prof) if prof is not None else ""
+    except Exception:                                       # noqa: BLE001 - a card that cannot be read: the plain words
+        key = ""
+    return "your Godzilla team" if str(key).lower().startswith("godzilla") else "your team"
+
+
+def style_card(project, characters, index, theme=None, team="your team", scale=2):
+    """PAD-1449: the start menu's style chooser card for style *index* (0 NORMAL, 1 CHARACTERS, 2 ENHANCED) as an RGBA
+    array of :data:`CARD_SIZE`, in the pick card's look: the theme's frame, the characters' portraits (none for
+    NORMAL), the style's name, badge and words, how to choose, and the three styles along the foot, this one lit."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    chars = [dict(c) for c in _characters(characters)["list"]]
+    for c_ in chars:
+        c_["tag"] = tag_of(c_["name"], [x["name"] for x in chars])
+    th = theme_of(theme)
+    S = scale
+    W, H = CARD_SIZE[0] * S, CARD_SIZE[1] * S
+    A, A2 = _hex(th["accent"]), _hex(th["accent2"])
+    ink = {k: _hex(th[k] or th["accent"]) for k in ("heading", "count", "name", "badge", "badge_text", "does")}
+    name, badge, does = STYLES[index]
+    does = does.format(team=team)
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    body = _body(project, th, W, H, S)
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=26 * S, fill=255)
+    img.paste(body, (0, 0), mask)
+    img = _glow(img, (4 * S, 4 * S, W - 5 * S, H - 5 * S), 24 * S, A[:3] + (200,), 6 * S, 4 * S)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((3 * S, 3 * S, W - 4 * S, H - 4 * S), radius=25 * S, outline=A[:3] + (255,), width=3 * S)
+    d.rounded_rectangle((12 * S, 12 * S, W - 13 * S, H - 13 * S), radius=18 * S, outline=(255, 255, 255, 40), width=S)
+    L = 46 * S
+    for (x, y, dx, dy) in ((14, 14, 1, 1), (W // S - 15, 14, -1, 1), (14, H // S - 15, 1, -1),
+                           (W // S - 15, H // S - 15, -1, -1)):
+        x, y = x * S, y * S
+        d.line([(x, y), (x + dx * L, y)], fill=A2[:3] + (255,), width=5 * S)
+        d.line([(x, y), (x, y + dy * L)], fill=A2[:3] + (255,), width=5 * S)
+    hf = _fit(d, STYLE_TITLE, _DISPLAY_FONTS, W * 0.62, 46 * S)
+    d.text((40 * S, 44 * S), STYLE_TITLE, font=hf, fill=ink["heading"], anchor="lm")
+    tw = d.textlength(STYLE_TITLE, font=hf)
+    if W - 190 * S > 40 * S + tw + 18 * S:
+        d.line([(40 * S + tw + 18 * S, 44 * S), (W - 190 * S, 44 * S)], fill=A[:3] + (150,), width=2 * S)
+    count = "%02d / %02d" % (index + 1, len(STYLES))
+    d.text((W - 40 * S, 44 * S), count, font=_face(_DISPLAY_FONTS, 34 * S), fill=ink["count"], anchor="rm")
+    # the picture: no one for NORMAL, the characters (up to four, two by two) for the others
+    px, py, pw, ph = 40 * S, 84 * S, 380 * S, 306 * S
+    img = _glow(img, (px - 4 * S, py - 4 * S, px + pw + 4 * S, py + ph + 4 * S), 16 * S, A[:3] + (230,), 10 * S, 6 * S)
+    pic = Image.new("RGBA", (pw, ph), (10, 12, 20, 255))
+    shown = chars[:4] if index else []
+    if shown:
+        cols = 1 if len(shown) == 1 else 2
+        rows = (len(shown) + cols - 1) // cols
+        gw, gh = (pw - (cols - 1) * 6 * S) // cols, (ph - (rows - 1) * 6 * S) // rows
+        for k, c in enumerate(shown):
+            tile = _portrait(project, c, gw, gh, c.get("colour") or th["accent"], th["accent2"])
+            if index == 1:                                  # CHARACTERS: the faces, a little quieter
+                tile = Image.blend(tile, Image.new("RGBA", tile.size, (8, 10, 16, 255)), 0.25)
+            pic.paste(tile, ((k % cols) * (gw + 6 * S), (k // cols) * (gh + 6 * S)))
+        if index == 2:                                      # ENHANCED: lit up
+            glow = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+            ImageDraw.Draw(glow).rounded_rectangle((6 * S, 6 * S, pw - 7 * S, ph - 7 * S), radius=14 * S,
+                                                   outline=A2[:3] + (255,), width=8 * S)
+            pic = Image.alpha_composite(pic, glow.filter(ImageFilter.GaussianBlur(6 * S)))
+    else:
+        pd = ImageDraw.Draw(pic)
+        for x in range(-ph, pw, 18 * S):
+            pd.line([(x, ph), (x + ph, 0)], fill=(255, 255, 255, 10), width=2 * S)
+        r = min(pw, ph) * 0.3                               # a ball: the game itself, no one in it
+        cx, cy = pw / 2, ph / 2
+        pd.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(150, 156, 170, 255), outline=A[:3] + (255,), width=3 * S)
+        pd.ellipse((cx - r * 0.55, cy - r * 0.6, cx - r * 0.05, cy - r * 0.15), fill=(235, 238, 245, 230))
+    pm = Image.new("L", (pw, ph), 0)
+    ImageDraw.Draw(pm).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=14 * S, fill=255)
+    img.paste(pic, (px, py), pm)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((px, py, px + pw - 1, py + ph - 1), radius=14 * S, outline=A[:3] + (255,), width=3 * S)
+    ix, iw = px + pw + 44 * S, W - (px + pw + 44 * S) - 44 * S
+    ny = 166 * S
+    nf = _fit(d, name, _DISPLAY_FONTS, iw, 92 * S, 30 * S)
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).text((ix + 4 * S, ny + 5 * S), name, font=nf, fill=(0, 0, 0, 220), anchor="ls")
+    img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(4 * S)))
+    d = ImageDraw.Draw(img)
+    d.text((ix, ny), name, font=nf, fill=ink["name"], anchor="ls", stroke_width=max(1, S), stroke_fill=(0, 0, 0, 255))
+    nw = min(iw - 40 * S, d.textlength(name, font=nf))
+    d.rectangle((ix, ny + 14 * S, ix + nw, ny + 20 * S), fill=A[:3] + (255,))
+    d.rectangle((ix + nw + 8 * S, ny + 14 * S, ix + nw + 40 * S, ny + 20 * S), fill=A2[:3] + (255,))
+    bf = _fit(d, badge, _TEXT_FONTS, iw - 40 * S, 24 * S, BADGE_LEAST * S)
+    bw = d.textlength(badge, font=bf) + 40 * S
+    by = 208 * S
+    d.rounded_rectangle((ix, by, ix + bw, by + 46 * S), radius=23 * S, fill=ink["badge"])
+    d.text((ix + bw / 2, by + 23 * S), badge, font=bf, fill=ink["badge_text"], anchor="mm")
+    tf, lines, step = _card_lines(d, does, iw, S)
+    for k, line in enumerate(lines):
+        d.text((ix, by + (88 - (27 * S - tf.size) // S) * S + k * step), line, font=tf, fill=ink["does"], anchor="ls")
+    hy = 372 * S
+    hf2 = _face(_TEXT_FONTS, 20 * S)
+    x = ix
+    for kind, words in (("lr", "FLIPPERS TO CHOOSE"), ("dot", "ACTION BUTTON TO SELECT")):
+        if kind == "lr":
+            d.polygon([(x, hy), (x + 16 * S, hy - 11 * S), (x + 16 * S, hy + 11 * S)], fill=A2[:3] + (255,))
+            d.polygon([(x + 40 * S, hy), (x + 24 * S, hy - 11 * S), (x + 24 * S, hy + 11 * S)], fill=A2[:3] + (255,))
+            x += 52 * S
+        else:
+            d.ellipse((x, hy - 11 * S, x + 22 * S, hy + 11 * S), fill=A2[:3] + (255,))
+            x += 34 * S
+        d.text((x, hy), words, font=hf2, fill=_hex(th["help"], 220), anchor="lm")
+        x += d.textlength(words, font=hf2) + 36 * S
+    gap, sy, sh = 14 * S, 414 * S, 80 * S
+    tw_ = (W - 80 * S - gap * (len(STYLES) - 1)) // len(STYLES)
+    for k, (word, _b, _d) in enumerate(STYLES):
+        x0 = 40 * S + k * (tw_ + gap)
+        on = k == index
+        d.rounded_rectangle((x0, sy, x0 + tw_ - 1, sy + sh - 1), radius=10 * S,
+                            fill=(22, 26, 38, 255) if on else (12, 14, 22, 255))
+        tf2 = _fit(d, word, _DISPLAY_FONTS, tw_ - 30 * S, 40 * S)
+        d.text((x0 + tw_ / 2, sy + sh / 2), word, font=tf2, fill=(255, 255, 255, 255) if on else (120, 124, 136, 255),
+               anchor="mm")
+        if on:
+            img = _glow(img, (x0 - 3 * S, sy - 3 * S, x0 + tw_ + 3 * S, sy + sh + 3 * S), 12 * S, A[:3] + (255,),
+                        6 * S, 5 * S)
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle((x0 - 2 * S, sy - 2 * S, x0 + tw_ + 2 * S, sy + sh + 2 * S), radius=11 * S,
+                                outline=A[:3] + (255,), width=3 * S)
+        else:
+            d.rounded_rectangle((x0, sy, x0 + tw_ - 1, sy + sh - 1), radius=10 * S, outline=(255, 255, 255, 50),
+                                width=S)
+    out = np.asarray(img.resize(CARD_SIZE, Image.LANCZOS), dtype=np.uint8).copy()
+    a = out[..., 3:4].astype(np.uint16)                     # premultiplied, as the pick card's (the game's blend)
+    out[..., :3] = (out[..., :3].astype(np.uint16) * a // 255).astype(np.uint8)
     return out
 
 

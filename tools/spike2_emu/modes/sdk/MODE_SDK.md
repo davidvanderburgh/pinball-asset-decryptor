@@ -6717,6 +6717,32 @@ start menu's cursor on one of our entries within TEAM_PICK_MS), and a teammate j
 of the game. While it is latched the session, high scores, events, the achievement query and (PAD-1108) the award are
 held as before; a Standard game is the game's own. A card with modes still holds everything always.
 
+
+### The start menu's play styles (PAD-1449)
+
+DoomWalrus666: "whenever a mode is selected from the start menu ... a dialog box ... would pop up and ask if player wants
+to continue in Normal, Normal with Character Selection, or Enhanced ... This would reduce the amount of options needed to
+scroll on the start menu." On a card with characters to pick and no CO-OP PLAY row (`sty_wanted`) the start menu has one
+entry per game of ours: CO-OP PLAY and TEAM PLAY 2 VS 2, 2 VS 1, 3 VS 1 (ENHANCED CO-OP and ENHANCED STANDARD are off
+it). A game begun from the menu holds ball 1's serve (`sty_hold`, first in `ci_serve_wrap`) for a chooser:
+**NORMAL** (co-op/team: `coop.plain`, no pick; Standard/challenge: the game's own game), **CHARACTERS** (a pick with no
+abilities: `coop.style` 2, which `coop_classic()` reads on a no-row card) or **ENHANCED** (`coop.style` 3). It follows our
+entries, the game's STANDARD and its challenges (`tm.own`: `sty_own_of_kind` on the entry lists, kind 0 and the port's
+`challenge_menu_kind`; `sty_own_of_index` on the index menus, Standard's index and `value comp_menu_challenge_<k>`, the
+game-mode table's entries with FG_PLAYER_CHALLENGE_MODE_ACTIVE, from `prolonged_comp.challenge_indices`) - never
+Competition or the DJ MIXER, and never a plain Start.
+
+- A Standard or challenge pick forms an Enhanced Standard game at ball 1 (so a Start in the chooser adds a player through
+  the game's own add) and dissolves it at NORMAL.
+- The chooser comes up once the game's start film (Godzilla's, with its language bar: `ci_film_up`) is down 0.5 s and no
+  co-op intro runs before its ball (`sty_may_show`); until then the flippers are the game's. Its flippers walk it, Action
+  takes one (no Action button: the one shown after 20 s).
+- It shows `PadCoopStyle_1..3` (`coop_play.style_card`, added with the pick's screens, the Classic patches always with
+  them now) and says `<GAME> <STYLE>`, what it is and how to pick on the top line.
+- After it the pick opens at once (the team games say their teams' lines once first); the co-op intro, where there is
+  one, plays after the chooser for a Standard or challenge game (`ci_film_due` leaves the game's film alone until then).
+- Insider Connected: Standard or a challenge stays the game's own while choosing and at CHARACTERS
+  (`coop_insider_free`); ENHANCED latches the rest of the game held, as a joining teammate does.
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

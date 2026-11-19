@@ -760,12 +760,13 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
     #: mode runtime, and a card with it keeps its scores off Insider Connected as a card with modes does
     COOP_TIP = (
         "Lets 2 to 4 players play one game together on a game that has no co-op of its own. On the machine, hold "
-        "both flipper buttons in attract and pick a game on the start menu: CO-OP PLAY, ENHANCED CO-OP (each "
-        "teammate picks a character with its ability), ENHANCED STANDARD (a normal game, each player with a "
-        "character) or a TEAM PLAY game; or hold the right flipper button and press Start to add a teammate. The "
+        "both flipper buttons in attract and pick a game on the start menu: CO-OP PLAY or a TEAM PLAY game. With "
+        "characters, a game picked there (one of these, STANDARD or a challenge) asks NORMAL, CHARACTERS (a "
+        "character each, no special abilities) or ENHANCED (each character's ability holds). Or hold the right "
+        "flipper button and press Start to add a teammate. The "
         "team shares one score and all of the game's progress, and takes turns ball by ball. Each team size has its "
         "own high score board. A game played as one of these stays off Insider Connected; a Standard game reports "
-        "as it always has. Write puts it on the card.")
+        "as it always has, as do STANDARD and a challenge played NORMAL or CHARACTERS. Write puts it on the card.")
 
     def _publish_coop(self, project):
         """PAD-1017: the Co-op play tick, and under it how a teammate joins, or in red why this game cannot have it.

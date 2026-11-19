@@ -807,6 +807,11 @@ value comp_menu_index            3   # COMPETITION
 value comp_menu_index_msg        1920
 value comp_menu_end_index        1   # STANDARD
 value comp_menu_end_msg          1915
+value comp_menu_challenge_0      8   # PAD-1449: a challenge's index (the style chooser follows it)
+value comp_menu_challenge_1      9   # PAD-1449: a challenge's index (the style chooser follows it)
+value comp_menu_challenge_2      10   # PAD-1449: a challenge's index (the style chooser follows it)
+value comp_menu_challenge_3      11   # PAD-1449: a challenge's index (the style chooser follows it)
+value comp_menu_challenge_4      12   # PAD-1449: a challenge's index (the style chooser follows it)
 
 # PAD-1406: the framework's all-flippers off and on (each flipper record's enable bit at +6, the node board's rule
 # follows), placed from Godzilla LE/Pro 1.16 by code (strict: only branch and literal offsets masked; the pair 0xd4

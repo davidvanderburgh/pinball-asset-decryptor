@@ -36,7 +36,7 @@ int main(void)
 CHAR_UP_MAIN = r"""
 #include <stdio.h>
 struct coop_char { const char *name; };
-static struct { unsigned setting, turn, teams_always; } coop;
+static struct { unsigned setting, turn, teams_always, style; } coop;   /* style: PAD-1449 */
 static unsigned row;
 static int coop_pick_of[5];
 static struct coop_char coop_ch[2] = { { "GODZILLA 1954" }, { "MECHAGODZILLA" } };
@@ -100,7 +100,8 @@ def test_each_classic_patch_turns_its_card_into_no_special_ability():
     n = len(chars["list"])
     names = [s["name"] for s in scr]
     assert names[:n + 1] == ["PadCoop_%d" % (i + 1) for i in range(n)] + ["PadCoop_Random"]   # the cards first
-    assert names[n + 1:] == ["PadCoopClassic_%d" % (i + 1) for i in range(n)]               # then drawn over them
+    assert names[n + 1:-3] == ["PadCoopClassic_%d" % (i + 1) for i in range(n)]            # then drawn over them
+    assert names[-3:] == ["PadCoopStyle_1", "PadCoopStyle_2", "PadCoopStyle_3"]     # PAD-1449: the style chooser's
     for i in (0, 5, n - 1):
         patch = scr[n + 1 + i]
         h, w = patch["art_rgba"].shape[:2]
@@ -112,12 +113,12 @@ def test_each_classic_patch_turns_its_card_into_no_special_ability():
         assert np.array_equal(laid, CP.pick_card(None, plain, i, words, chars.get("theme")))   # exactly that card
 
 
-def test_no_patches_without_the_service_menu_row_or_an_ability():
+def test_no_patches_when_not_asked_or_without_an_ability():
     CP, chars = _godzilla()
     assert not [s for s in CP.pick_screens(None, chars, CP.words_for(), classic=False)
                 if s["name"].startswith("PadCoopClassic_")]
-    assert not [s for s in CP.pick_screens(None, chars, CP.words_for())                # no project: no menu row
-                if s["name"].startswith("PadCoopClassic_")]
+    # PAD-1449: by default they are there - the start menu's style chooser plays CHARACTERS (Classic) on any card
+    assert [s for s in CP.pick_screens(None, chars, CP.words_for()) if s["name"].startswith("PadCoopClassic_")]
     none = dict(chars, list=[dict(c, powers=[], header="") for c in chars["list"]])
     assert CP.classic_patch(None, none, 0) is None                                    # its card says so already
 
@@ -128,7 +129,7 @@ def test_the_menu_and_the_app_name_classic():
     from pinball_decryptor.webui.tabs import modes as M
     assert CP.MENU_VALUES == 3 and CP.MENU_CLASSIC == 1                                     # PAD-1073
     assert len(CP.MENU_HELP) <= 63 and "1 Classic. 2 Enhanced" in CP.MENU_HELP
-    # PAD-1443: no row is written now (an older card's row still reads 1 as Classic); the start menu's CO-OP PLAY
-    # picks no character and ENHANCED CO-OP picks one with its ability
-    assert "- **ENHANCED CO-OP:** the same co-op game" in str(help_content.__dict__)
-    assert "ENHANCED CO-OP" in M.ModesTab.COOP_TIP
+    # PAD-1443: no row is written now (an older card's row still reads 1 as Classic); PAD-1449: a game picked on the
+    # start menu asks NORMAL, CHARACTERS (Classic: a character, no ability) or ENHANCED
+    assert "**CHARACTERS** (each player picks a character at their first ball, with no special abilities)" in         str(help_content.__dict__)
+    assert "CHARACTERS (a character each, no special abilities)" in M.ModesTab.COOP_TIP

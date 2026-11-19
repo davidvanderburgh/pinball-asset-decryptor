@@ -23,7 +23,7 @@ ROW_FNS = ("static unsigned coop_row_mode(unsigned v)", "static int coop_switche
 PRELUDE = r"""
 #include <stdio.h>
 #include <string.h>
-static struct { unsigned teams_always, setting; } coop;
+static struct { unsigned teams_always, setting, style; } coop;
 static unsigned row;
 static int coop_ch_n, coop_pick_on;                   /* PAD-1443: characters to pick */
 static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";
@@ -53,7 +53,8 @@ int main(void)
     }
     coop.setting = 0;                                   /* PAD-1443: no row - every game on the start menu */
     kinds("none");
-    coop_ch_n = 3;                                      /* ... and with characters both co-op styles */
+    coop_ch_n = 3;                                      /* ... and with characters the same (PAD-1449: the style is
+                                                         * asked once a game is picked) */
     coop_pick_on = 1;
     kinds("chars");
     coop.teams_always = 3;                              /* coop.cfg `teams 2v1`: its one team game */
@@ -68,8 +69,9 @@ def test_off_classic_enhanced_and_what_the_menu_offers(tmp_path):
     out = R._host_run(tmp_path, ROW_MAIN.replace("@FNS@", _fns(_src(), *ROW_FNS)), flags=("-no-pie",)).strip()
     # an older row's store: 3 reads Enhanced, 4-6 Classic, past that Off; at 1 or 2 all three games, CO-OP PLAY first
     # PAD-1224: Enhanced adds ENHANCED STANDARD (2) after CO-OP PLAY, and every row TEAM PLAY 3 VS 1 (5) last
-    # PAD-1443: no row - CO-OP PLAY and the team games; with characters ENHANCED CO-OP (6) and ENHANCED STANDARD too
-    assert out == "01221110 0:,00 1:1435,11 2:12435,10 3:12435,10 4:1435,11 none:1435 chars:162435 teams:3"
+    # PAD-1443: no row - CO-OP PLAY and the team games; PAD-1449: with characters too - ENHANCED CO-OP (6) and
+    # ENHANCED STANDARD (2) are off the menu, the chooser asks NORMAL, CHARACTERS or ENHANCED once a game is picked
+    assert out == "01221110 0:,00 1:1435,11 2:12435,10 3:12435,10 4:1435,11 none:1435 chars:1435 teams:3"
 
 
 MENU_PRELUDE = PRELUDE + r"""
@@ -78,7 +80,11 @@ MENU_PRELUDE = PRELUDE + r"""
 #define MENU_KIND_AT 0u
 #define MENU_CAPTION_AT 4u
 #define MENU_NAME_AT 8u
-static struct { volatile int pending; volatile unsigned long seen_ms; volatile unsigned kind; } tm;
+static struct { volatile int pending; volatile unsigned long seen_ms; volatile unsigned kind, own; } tm;
+static unsigned sty_own_of_kind(unsigned k, unsigned f) { (void)k; (void)f; return 0; }   /* PAD-1449 */
+static unsigned sty_own_of_index(unsigned i, unsigned s, const unsigned *c, unsigned n) { (void)i; (void)s; (void)c; (void)n; return 0; }
+static unsigned sty_challenge_indices(unsigned *ch) { (void)ch; return 0; }
+static void sty_menu_own(unsigned own) { tm.own = own; }
 static unsigned long pm_ms(void) { return 7; }
 static void say(const char *f, ...) { (void)f; }
 static const char *lettered = "-";
@@ -201,8 +207,9 @@ def test_the_app_says_off_classic_enhanced():
     assert (CP.MENU_OFF, CP.MENU_CLASSIC, CP.MENU_ENHANCED) == (0, 1, 2)
     assert len(CP.MENU_HELP) <= 63 and CP.MENU_HELP.startswith("0 Off. 1 Classic. 2 Enhanced.")
     text = str(help_content.__dict__)                  # PAD-1443: no row - the start menu's games, named
-    for entry in ("CO-OP PLAY", "ENHANCED CO-OP", "TEAM PLAY 2 VS 2", "TEAM PLAY 2 VS 1"):
+    for entry in ("CO-OP PLAY", "TEAM PLAY 2 VS 2", "TEAM PLAY 2 VS 1"):
         assert "- **%s:**" % entry in text
-    for entry in ("CO-OP PLAY", "ENHANCED CO-OP", "ENHANCED STANDARD", "TEAM PLAY"):
+    for entry in ("CO-OP PLAY", "TEAM PLAY", "NORMAL", "CHARACTERS", "ENHANCED"):   # PAD-1449: the styles asked
         assert entry in M.ModesTab.COOP_TIP
+    assert "ENHANCED CO-OP" not in M.ModesTab.COOP_TIP and "- **ENHANCED CO-OP:**" not in text
     assert "- **1 (Classic):**" not in text and "Switch it on and off in the service menu" not in text

@@ -519,7 +519,7 @@ def _any_attached(data, built):
         return True
     if any(clips.get(r) or data.get(cp.STOCK_VIDEOS_KEY) for r in on(cp.VIDEO_SLOTS_KEY)):
         return True
-    return bool(data.get(cp.STOCK_IMAGES_KEY) and on(cp.TEXT_SLOTS_KEY))
+    return bool(cp.text_unlocked(data) and on(cp.TEXT_SLOTS_KEY))
 
 
 def _ops_words(ops):
@@ -975,6 +975,8 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
                 del slots_on[r]
         tslots = {r: v for r, v in tslots.items() if r in lines_on}
         data[cp.STOCK_IMAGES_KEY] = True
+        if tslots and cp.text_unlock_separate(data):
+            data[cp.STOCK_TEXT_KEY] = True           # the lines brought in count too (their own box, Simon)
     if counts is not None:
         counts.update(colored=len(colored) + len(replaced), lines=lines_n,
                       colored_missing=len(colored_missing))

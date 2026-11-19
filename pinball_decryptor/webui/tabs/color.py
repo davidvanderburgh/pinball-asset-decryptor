@@ -391,6 +391,8 @@ class ColorTab(TabService):
         #                              (PAD-462: "more", the other files selected with it)
         self._switched = {}          # PAD-462: switches the last change to them attached
         self._lines = _TextLines(self)   # PAD-471: Apply to all lines of text
+        self._targets_rev = 0        # a tab has read the project's files: the page counts the Copy again
+        self.set(targets_rev=0)
         self.set(sample="card", sample_url="", sample_path="", samples=[],
                  problems=[], rev=0, active=False, project="",
                  has_project=False, try_note="", mode="display",
@@ -459,7 +461,15 @@ class ColorTab(TabService):
         if fm is None:
             return None
         try:
-            return cp.own_profile(self._project, *fm)
+            own = cp.own_profile(self._project, *fm)
+            if own is None and fm[0] == "images":
+                # a theme's picture with no profile of its own has theme 1's (Simon: themes, scene_variants)
+                from ...plugins.stern import scene_variants as SV
+                n, base = SV.split_theme_key(fm[1])
+                # (Simon, 2026-11-19: not a picture the theme picked itself - that one is new, so raw)
+                if n > 1 and SV.theme_falls_back(self._project, n, base):
+                    own = cp.own_profile(self._project, "images", base)
+            return own
         except Exception:                               # noqa: BLE001
             log.exception("color profile own")
             return None
@@ -584,14 +594,36 @@ class ColorTab(TabService):
         if not f or self._file_mode() is None:
             return None
         rels = self._file_rels()
-        own_n = int(self._own() is not None)
+        # its OWN profile, not the one shown: a theme's picture shows theme 1's until it has one of its own
+        try:
+            mine = cp.own_profile(self._project, f["kind"], f["rel"]) is not None
+        except Exception:                               # noqa: BLE001
+            mine = self._own() is not None
+        own_n = int(mine)
         if len(rels) > 1:
             m = self._raw(staged_changes.peek(self._project),
                           "files\n" + f["kind"])
             own_n = sum(1 for r in rels if isinstance(m, dict) and r in m)
-        return {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
-                "on": f.get("on"), "own": self._own() is not None,
+        # a theme's picture: the profile theme 1 gives it - what "Same as theme 1" lands on (Simon)
+        # - but a picture the theme chose itself is a new picture and falls back to the shared files profile instead
+        # (scene_variants.theme_falls_back), so the bar must not say "theme 1's" for it (PR #39 review)
+        base_name, falls_back = "", True
+        try:
+            from ...plugins.stern import scene_variants as SV
+            n_t, base = SV.split_theme_key(f["rel"])
+            if n_t > 1:
+                falls_back = bool(self._project) and SV.theme_falls_back(self._project, n_t, base)
+                own1 = cp.own_profile(self._project, f["kind"], base) if falls_back else None
+                base_name = (own1 or self._asset or cp.recommended(self._project, files=True)).label()
+        except Exception:                               # noqa: BLE001
+            base_name, falls_back = "", True
+        out = {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
+               "on": f.get("on"), "own": mine,
                 "count": len(rels), "own_n": own_n}
+        if base_name:
+            out["base_name"] = base_name                # (only a theme's picture has one)
+            out["falls_back"] = falls_back
+        return out
 
     def _skips_plain(self):
         """Files with no color profile attached skip the Machine screen in
@@ -1076,6 +1108,16 @@ class ColorTab(TabService):
         f = {"kind": kind, "rel": str(rel), "label": str(label or "")[:120]
              or os.path.basename(str(rel)), "on": on,
              "attach": attach if isinstance(attach, dict) else None}
+        if kind == "images" and f["rel"].startswith("@"):
+            # a theme's picture: the theme's own switch, read here (Simon, 2026-11-19: the Scenes bar edits the theme
+            # Scenes shows, and Scenes' layers carry theme 1's switch)
+            try:
+                from ...plugins.stern import scene_variants as SV
+                n, base = SV.split_theme_key(f["rel"])
+                if n > 1 and self._project:
+                    f["on"] = bool(SV.theme_colour(self._project, n, base)[0])
+            except Exception:                           # noqa: BLE001
+                log.exception("color profile theme switch")
         f["more"] = [r for r in dict.fromkeys(
             str(r) for r in (more if isinstance(more, (list, tuple)) else ())
             if r) if r != f["rel"]]
@@ -1089,7 +1131,7 @@ class ColorTab(TabService):
         return True
 
     @rpc
-    def file_shared(self):
+    def file_shared(self, themes="this"):
         """"Same as the other files": the file on show drops its own profile
         and gets the project's individual files profile again (PAD-368)."""
         fm = self._file_mode()
@@ -1098,6 +1140,13 @@ class ColorTab(TabService):
         key = self._mode_key()
         rels = self._file_rels()
         mkey = "files\n" + fm[0]
+        if themes == "all" and fm[0] == "images":
+            # every theme: theme 1's own profile and each theme's go, for the picture(s) on show
+            from ...plugins.stern import scene_variants as SV
+            bases = {SV.split_theme_key(r)[1] for r in rels}
+            svc = self.window.service("imgsets")
+            names = (svc.get("names") or []) if svc is not None else []
+            rels = sorted({SV.theme_key(t, b) for b in bases for t in range(1, max(2, len(names)) + 1)})
         before = (self._files_raw(mkey, rels) if len(rels) > 1
                   else self._stored_raw(key))
         try:
@@ -1145,6 +1194,28 @@ class ColorTab(TabService):
             log.exception("color profile switches %s", kind)
             return {}
 
+    def _targets_pending(self, kind):
+        """Simon (2026-11-19): the Copy count said "0 ASSETS" on Scenes and Video until the Images tab had been
+        opened - a tab knows no files until it has scanned the project. True while *kind*'s tab has not read the
+        project yet (it starts its scan, and tells :meth:`targets_ready` when it is done)."""
+        fn = getattr(self._all_service(kind), "targets_pending", None)
+        try:
+            return bool(fn()) if fn is not None else False
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile targets pending %s", kind)
+            return False
+
+    def targets_ready(self):
+        """The Images or Video tab has read the project's files: the page asks the Copy count again."""
+        self._targets_rev += 1
+        self.set(targets_rev=self._targets_rev)
+
+    def _still_reading(self, kind):
+        """APPLY pressed while the count still reads "...": nothing is copied to a list not read yet."""
+        self.toast("Still reading the project's %s - press APPLY again when the count beside it shows."
+                   % self._ALL_WORDS[kind][1], "info")
+        return False
+
     #: PAD-462: what each Apply to all reaches, in the question it asks
     _ALL_SCOPES = {
         "profiled": "with a color profile attached",
@@ -1156,6 +1227,243 @@ class ColorTab(TabService):
     #: the files of a kind that are never locked
     _ALL_EACH = {"images": "each replaced one", "videos": "each replaced one",
                  "text": "each one added in Scenes"}
+
+    # -- the Colors bar's one Copy (Simon, 2026-11-19, his design) ------------------------------------------------------
+    # COPY FROM: the selected file's profile, or the shared files profile (the one every switched-on file without a
+    # profile of its own gets - "Recommended" unless picked). WHICH: "all" every file not locked (switched on, own
+    # profile replaced), "off" only the ones with no profile attached ("Put the recommended setting only on files that
+    # don't have a profile AND are unlocked" - each switched on), "profiled" only the ones switched on (own profile
+    # replaced, nothing new switched on); several files selected, "selected": just those ("it must override WHICH").
+    # THEMES: "this", or a list of theme numbers ("Choose themes", every one ticked = every theme).
+    _WHICH = ("all", "off", "profiled", "selected")
+    _WHICH_WORDS = {"all": "that are not locked", "off": "with no profile attached",
+                    "profiled": "with a profile attached", "selected": "selected"}
+
+    def _theme_list(self, kind, themes):
+        """*themes* as the copy takes it: "this", or the sorted theme numbers (pictures, themes on)."""
+        svc = self.window.service("imgsets")
+        names = (svc.get("names") or []) if svc is not None and svc.get("enabled") else []
+        if kind != "images" or len(names) < 2 or not isinstance(themes, (list, tuple)):
+            return "this", names
+        # (none ticked: nothing to copy into)
+        return sorted({int(t) for t in themes if str(t).isdigit() and 1 <= int(t) <= len(names)}), names
+
+    def _themes_said(self, kind, themes, names, rel=None):
+        """" in theme 2 (Dark)" / " in themes 1 and 3" / " in every theme"; "" with no themes."""
+        if kind != "images" or len(names) < 2:
+            return ""
+        if themes == "this":
+            from ...plugins.stern import scene_variants as SV
+            # (a file on show names its theme by its key - plain is theme 1, as the Scenes bar may show it)
+            n = SV.split_theme_key(rel)[0] if rel else self._theme_now()
+            return " in theme %d (%s)" % (n, names[n - 1] if n - 1 < len(names) else "")
+        if len(themes) == len(names):
+            return " in every theme"
+        if len(themes) == 1:
+            return " in theme %d (%s)" % (themes[0], names[themes[0] - 1])
+        return " in themes %s and %d" % (", ".join(str(t) for t in themes[:-1]), themes[-1])
+
+    def _theme_now(self):
+        try:
+            return int(self.window.service("images")._image_set())
+        except Exception:                               # noqa: BLE001
+            return 1
+
+    def _copy_plan(self, source, kind, which, themes):
+        """What one Copy would do, read and nothing changed: ``{"kind", "targets": {key: on}, "value": {key: raw or
+        None}, "attach": [keys], "name", "themes", "names", "rel"}``, or ``{"pending": True}`` while the tab has not read
+        the project, or ``{"error": text}``."""
+        which = which if which in self._WHICH else "profiled"
+        fm = self._file_mode()
+        if source == "file":
+            if fm is None:
+                return {"error": "Select a file first: its profile is the one copied."}
+            kind, rel = fm
+        else:
+            if kind not in self._ALL_WORDS:
+                return {"error": ""}
+            rel = fm[1] if fm is not None else None
+        if self._targets_pending(kind):
+            return {"pending": True, "kind": kind}
+        if which == "selected" and fm is None:
+            return {"error": "Nothing is selected."}
+        themes, names = self._theme_list(kind, themes)
+        from ...plugins.stern import scene_variants as SV
+        svc = self._all_service(kind)
+        fn = getattr(svc, "color_targets", None)
+        try:
+            if svc is not None:
+                # the files selected: in the theme(s) their keys name (the Scenes bar's theme need not be the Images
+                # tab's)
+                svc._targets_themes = (sorted({SV.split_theme_key(r)[0] for r in self._file_rels()})
+                                       if which == "selected" and kind == "images" else
+                                       "this" if which == "selected" else themes)
+            states = dict(fn("profiled" if which == "profiled" else "all") or {}) if fn is not None else {}
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile targets %s", kind)
+            states = {}
+        finally:
+            if svc is not None:
+                svc._targets_themes = "this"
+        if which == "selected":
+            # the files selected that are not locked (locked ones are not in the list), as they are selected
+            states = {r: states[r] for r in self._file_rels() if r in states and fm[0] == kind}
+        elif which == "off":
+            states = {r: on for r, on in states.items() if not on}
+        if source == "file":
+            states.pop(rel, None)
+        from ...plugins.stern import scene_variants as SV
+        mkey = "files\n" + kind
+        owns = self._raw(staged_changes.peek(self._project), mkey)
+        owns = dict(owns) if isinstance(owns, dict) else {}
+        if source == "file":
+            mine = owns.get(rel)
+            value = {r: mine for r in states}
+            name = self._shown().label()
+        else:
+            # the shared profile: no own profile - except a theme's picture that would fall back to theme 1's, which
+            # gets the shared one stored as its own (Simon: a tuned theme really goes back to "Recommended")
+            shared = self._asset or cp.asset_profile(self._project)
+            stored = ({"recommended": True} if not cp.asset_stored(self._project)
+                      else json.loads(json.dumps(cp._profile_dict(shared))))
+            value = {}
+            for r in states:
+                n, base = SV.split_theme_key(r)
+                value[r] = stored if (n > 1 and SV.theme_falls_back(self._project, n, base)) else None
+            name = shared.label()
+        attach = sorted(r for r, on in states.items() if not on) if which != "profiled" else []
+        change = [r for r in states if owns.get(r) != value[r]]
+        # the ones whose own profile is replaced (a theme's picture given the shared one stored as its own had none)
+        lose = [r for r in change if owns.get(r) is not None]
+        return {"kind": kind, "targets": states, "value": value, "attach": attach, "change": change, "lose": lose,
+                "name": name,
+                "themes": themes, "names": names, "rel": rel, "which": which, "source": source}
+
+    def _copy_words(self, plan):
+        """The summary line under the Copy choices."""
+        kind = plan["kind"]
+        one, many = self._ALL_WORDS[kind]
+        n = len(plan["targets"])
+        where = self._themes_said(kind, plan["themes"], plan["names"], plan["rel"])
+        which = self._WHICH_WORDS[plan["which"]]
+        what = "the shared profile “%s”" % plan["name"] if plan["source"] == "shared" else "“%s”" % plan["name"]
+        if not n:
+            return "No %s%s%s%s." % ("other " if plan["source"] == "file" and plan["which"] != "selected" else "",
+                                     many if plan["which"] != "selected" else many + " to give it to",
+                                     "" if plan["which"] == "selected" else " " + which, where)
+        noun = one if n == 1 else many
+        return "Will give %s to %d %s %s%s%s." % (
+            what, n, noun, which if plan["which"] != "selected" else "(the ones selected)", where,
+            " - %d switched on" % len(plan["attach"]) if plan["attach"] else "")
+
+    @rpc
+    def copy_profile(self, source="file", kind=None, which="profiled", themes="this"):
+        """APPLY in the Colors bar's Copy: :meth:`_copy_plan`, after a WARNING; one Undo step puts it all back."""
+        plan = self._copy_plan(source, kind, which, themes)
+        if plan.get("pending"):
+            return self._still_reading(plan["kind"])
+        if "error" in plan:
+            if plan["error"]:
+                self.toast(plan["error"], "info")
+            return False
+        kind, targets = plan["kind"], plan["targets"]
+        one, many = self._ALL_WORDS[kind]
+        if not targets:
+            self.toast(self._copy_words(plan), "info")
+            return False
+        if not (plan["change"] or plan["attach"]):
+            self.toast("All %d %s already have “%s”." % (len(targets), many if len(targets) > 1 else one,
+                                                         plan["name"]), "info")
+            return False
+        where = self._themes_said(kind, plan["themes"], plan["names"], plan["rel"])
+        msg = "WARNING: THIS WILL GIVE THE PROFILE “%s” TO %d %s %s%s.\n\n" % (
+            plan["name"], len(targets), (many if len(targets) > 1 else one).upper(),
+            self._WHICH_WORDS[plan["which"]].upper(), where.upper())
+        if plan["lose"]:
+            msg += ("%d of them lose the profile they have now. " % len(plan["lose"]) if len(plan["lose"]) > 1
+                    else "One of them loses the profile it has now. ")
+        if plan["attach"]:
+            msg += ("%d with no profile attached are switched on. " % len(plan["attach"]) if len(plan["attach"]) > 1
+                    else "One with no profile attached is switched on. ")
+        msg += self._left_out_words(kind) + self._theme_cost(kind, targets)
+        msg += "\n\nUndo in the Colors bar puts them all back."
+        if not compat.messagebox.askyesno("Copy a profile to other files", msg.replace(" \n", "\n")):
+            return False
+        plan = self._copy_plan(source, kind, which, themes)     # read again: the page went on while it was asked
+        targets = plan.get("targets") or {}
+        if not targets:
+            return False
+        key = self._mode_key()
+        mkey = "files\n" + kind
+        before = self._files_raw(mkey, targets)
+        try:
+            data = staged_changes.load(self._project)
+            self._put_raw(data, mkey, {r: json.loads(json.dumps(v)) if v is not None else None
+                                       for r, v in plan["value"].items()})
+            staged_changes.save(self._project, data)
+        except Exception as e:                          # noqa: BLE001
+            self.set(problems=["could not save the files' profiles (%s)" % e])
+            return False
+        switched = self._put_switches(kind, {r: True for r in plan["attach"]}) if plan["attach"] else {}
+        if self._file and self._file.get("rel") in switched:
+            self._file["on"] = True
+        self._last_move.pop(key, None)
+        self._remember_files(key, mkey, targets, before, switched)
+        self.log("Color profile: “%s” given to %d %s %s%s%s." % (
+            plan["name"], len(targets), many if len(targets) > 1 else one, self._WHICH_WORDS[plan["which"]], where,
+            " (attached to %d)" % len(switched) if switched else ""), "info")
+        self._files_preview_on()
+        self._show_on_players(kind, targets)
+        self._publish(problems=[])
+        self._changed(display=False)
+        self._tell_tabs()
+        return True
+
+    @rpc
+    def copy_preview(self, source="file", kind=None, scope="profiled", themes="this"):
+        """The Colors bar's Copy summary (Simon, 2026-11-19: one copy action, its choices spelled out): what Copy
+        would change, asked of the same plan the copy itself takes (:meth:`_copy_plan`), nothing changed.
+        ``{"n", "text"}``; n 0 when nothing would change, None while the tab has not read the project."""
+        try:
+            plan = self._copy_plan(source, kind, scope, themes)
+            if plan.get("pending"):
+                return {"n": None, "text": "Reading the project's %s…" % self._ALL_WORDS[plan["kind"]][1]}
+            if "error" in plan:
+                return {"n": 0, "text": plan["error"]}
+            return {"n": len(plan["targets"]), "text": self._copy_words(plan)}
+        except Exception:                               # noqa: BLE001
+            log.exception("color copy preview")
+            return {"n": 0, "text": ""}
+
+    def _theme_words(self, kind, rel, themes):
+        """" in theme 2 (Dark)" / " in every theme" for Apply to all's warning; "" with no themes (images only)."""
+        svc = self.window.service("imgsets")
+        names = (svc.get("names") or []) if svc is not None and svc.get("enabled") else []
+        if kind != "images" or len(names) < 2:
+            return ""
+        if themes == "all":
+            return " in every theme"
+        from ...plugins.stern import scene_variants as SV
+        n = SV.split_theme_key(rel)[0]
+        return " in theme %d (%s)" % (n, names[n - 1] if n - 1 < len(names) else "")
+
+    def _theme_cost(self, kind, targets):
+        """What Apply to all costs the card in the themes: each theme's own copy of every scene holding one of its
+        pictures (scene_variants.picture_variants)."""
+        if kind != "images":
+            return ""
+        from ...plugins.stern import scene_variants as SV
+        themed = {}
+        for key in targets:
+            n, base = SV.split_theme_key(key)
+            if n > 1:
+                themed.setdefault(n, set()).add(base)
+        if not themed:
+            return ""
+        rows = SV.picture_rows(self._project or "")
+        scenes = sum(len({row[0] for b in rels for row in rows.get(b, ())}) for rels in themed.values())
+        return ("\n\nOn the card: each theme gets its own copy of every scene holding one of these pictures - %d "
+                "scene file(s) in all, made at the next Write." % scenes)
 
     def _none_left(self, kind, prefix):
         """The toast for no file of *kind* to give a profile to."""
@@ -1178,7 +1486,7 @@ class ColorTab(TabService):
                    else ("One line", "is", "it is", "it is")))
 
     @rpc
-    def apply_to_all(self, scope="profiled", kind=None):
+    def apply_to_all(self, scope="profiled", kind=None, themes="this"):
         """The file on show's color profile for other files of its kind,
         after an "Are you sure?".  *scope* (PAD-462, DragonRR): "profiled",
         every file with a color profile attached (``color_targets``), which
@@ -1204,13 +1512,24 @@ class ColorTab(TabService):
         if scope not in self._ALL_SCOPES:
             scope = "profiled"
         kind, rel = fm
+        if self._targets_pending(kind):
+            return self._still_reading(kind)
         one, many = self._ALL_WORDS[kind]
-        fn = getattr(self._all_service(kind), "color_targets", None)
+        svc = self._all_service(kind)
+        fn = getattr(svc, "color_targets", None)
+        # Simon (themes): "apply to all in this set ... ALL, SET 1...N" - this theme, or every theme (images)
+        themes = "all" if themes == "all" else "this"
         try:
+            if svc is not None:
+                svc._targets_themes = themes
             targets = dict(fn(scope) or {}) if fn is not None else {}
         except Exception:                               # noqa: BLE001
             log.exception("color profile targets %s", kind)
             targets = {}
+        finally:
+            if svc is not None:
+                svc._targets_themes = "this"
+        theme_words = self._theme_words(kind, rel, themes)
         if not set(targets) - {rel}:
             if scope == "profiled":
                 self.toast("No other %s has a color profile attached: attach "
@@ -1236,14 +1555,17 @@ class ColorTab(TabService):
                 len(targets), many, self._ALL_SCOPES[scope].replace(
                     "is not", "are not"), name), "info")
             return False
+        # Simon: "make sure it is very clear - WARNING THIS WILL APPLY THE PROFILE TO ALL ..."
+        warn = "WARNING: THIS WILL APPLY THE PROFILE “%s” TO ALL %d %s%s%s.\n\n" % (
+            name, len(targets), "PROFILED " if scope == "profiled" else "", many.upper(), theme_words.upper())
         if scope == "profiled":
-            msg = ("Are you sure?\n\nAll %d %s with a color profile attached "
+            msg = (warn + "All %d %s with a color profile attached "
                    "get “%s”, this %s's color profile, in place of the one "
                    "each has now. %s without a color profile attached are "
                    "left as they are." % (len(targets), many, name, one,
                                           many.capitalize()))
         else:
-            msg = ("Are you sure?\n\nEvery %s that is not locked (%s, and "
+            msg = (warn + "Every %s that is not locked (%s, and "
                    "%s), all %d of them, gets “%s”, this %s's color profile, "
                    "in place of the one each has now."
                    % (one, self._ALL_EACH[kind], self._ALL_UNLOCK[kind],
@@ -1254,6 +1576,7 @@ class ColorTab(TabService):
                         else " It is attached to the one that has none "
                         "attached.")
             msg += self._left_out_words(kind)
+        msg += self._theme_cost(kind, targets)
         msg += "\n\nUndo in the Colors bar puts them all back."
         key = self._mode_key()
         title = ("Apply to all profiled %s" if scope == "profiled"
@@ -1293,6 +1616,8 @@ class ColorTab(TabService):
         profile on show, and is attached; after an "Are you sure?", one Undo
         step on that profile (switches too)."""
         one, many = self._ALL_WORDS[kind]
+        if self._targets_pending(kind):
+            return self._still_reading(kind)
         fn = getattr(self._all_service(kind), "color_targets", None)
         try:
             targets = dict(fn("all") or {}) if fn is not None else {}

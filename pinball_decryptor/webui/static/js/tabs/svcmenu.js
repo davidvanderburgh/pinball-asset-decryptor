@@ -172,8 +172,11 @@ function WayThere({ menu, page }) {
       : "The app's rows are on the page below."}</p>
     ${!dmd && own && list.length ? html`<div class="sm-screen sm-list-screen" aria-label="Machine Settings">
         <div class="sm-title">Machine Settings</div>
-        <div class="sm-rows sm-list-rows">${list.map((n) => html`<div key=${n} class=${cx("sm-row", n === own && "on ours")}>
-          <span class="sm-cap">${n}</span></div>`)}</div>
+        <div class="sm-body">
+          <div class="sm-rows sm-list-rows">${list.map((n) => html`<div key=${n} class=${cx("sm-row", n === own && "on ours")}>
+            <span class="sm-cap">${n}</span></div>`)}</div>
+          ${menu.own_help ? html`<div class="sm-help"><div class="sm-help-text">${menu.own_help}</div></div>` : null}
+        </div>
       </div>` : null}
   </div>`;
 }

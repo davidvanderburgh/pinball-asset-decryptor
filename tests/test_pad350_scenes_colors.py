@@ -122,7 +122,7 @@ def test_the_bar_loads_on_the_scenes_page(tmp_path):
                          capture_output=True, text=True, timeout=60, cwd=str(tmp_path))
     assert run.returncode == 0, run.stderr
     got = json.loads(run.stdout)
-    assert got["bar"] == ["ColorBar", "barOpenAtStart", "rememberBarOpen"]
+    assert got["bar"] == ["ColorBar", "SpectrumPal", "barOpenAtStart", "rememberBarOpen"]   # (PR #39: the Colors bar exports its spectrum palette icon too)
     assert "default" in got["scenes"]
     src = open(os.path.join(_TABS, "text_scenes.js"), encoding="utf-8").read()
     assert "color_pane" not in src and 'value: "colors"' not in src

@@ -441,7 +441,7 @@ export function Controls({ s, p, update }) {
   return html`<${Card} title="Adjust" cls="cp-controls" extra=${extra} footer=${footer}>
     <div class="cp-row">
       <span class="lbl">Start from</span>
-      <div class="row wrap">
+      <div class="cp-presets" style=${`grid-template-columns: repeat(${presets.length || 1}, 1fr)`}>
         ${presets.map((pr) => html`<${Button} size="sm" cls=${pr.key === s.preset_on ? "on" : ""}
           title=${pr.tip + (pr.key === s.preset_on ? (s.in_use === "" ? " (Picked, but not on any file yet.)" : " (In use now.)") : "")} onClick=${() => call("color.preset", pr.key)}>${pr.label}<//>`)}
         ${inUseChip(s)}
@@ -772,14 +772,29 @@ export function WhichFiles({ s }) {
           `A ${one} with a color profile of its own loses it.`,
           "You are asked first. Undo puts them all back."] }}>${label}<//>`)}
     </div>
-    ${old.map(([k, , , word]) => html`<div key=${k} class="row cp-which-old">
+    <${WhichFilesNotes} s=${s} />
+  <//>`;
+}
+
+// The Which files card's notes - an old Every replaced box still ticked, and what the profile is on now - also under
+// the Colors bar's Copy section (Simon, 2026-11-19: one copy action there, nothing of the card's lost)
+export function WhichFilesNotes({ s }) {
+  const sets = useNs("imgsets");
+  const own = gameOwnWords(sets.unlock);
+  const old = EVERY.filter(([k]) => s["all_" + k]);
+  return html`${old.map(([k, , , word]) => html`<div key=${k} class="row cp-which-old">
       <span class="small muted grow">${`Every replaced ${word} you pick is attached as you pick it: this project still has the old Every replaced ${word} box ticked.`}</span>
       <${Button} size="xs" onClick=${() => call("color.set_all", k, false)}
         title=${`Untick the old Every replaced ${word} box: a ${word} you pick from now on is not attached until you attach it. The ones attached now stay as they are.`}>Turn off<//>
     </div>`)}
-    <p class="small muted cp-which-now">${words ? `Now: ${words}.` : "It is not attached to any file yet."} One file at a time: its palette in the Color column of the Images or Video tab, or in the Scenes layers. Several at once: select them there and pick a profile in the Colors bar. The game's own pictures and clips are locked until Advanced unlocks them.</p>
-  <//>`;
+    ${/* Simon (2026-11-19): the "Now: ..." words in a panel of their own reading only "Game's own assets are unlocked
+         using the advanced panel" (and whether they are now); the rest is in the tooltip */""}
+    <div class=${cx("cpd-file cp-which-now small", own.locked && "muted")} ...${tip(own.long)}>
+      <span class="cpd-oneline">${own.short}</span></div>`;
 }
+
+// the kinds the shared files profile can be given to, for the Colors bar's Copy (EVERY: [kind, button label, one])
+export const EVERY_KINDS = () => EVERY.map(([k, label, one]) => ({ k, label, one }));
 
 function Explainer({ s }) {
   const assets = s.per_file && s.mode === "assets";
@@ -866,10 +881,11 @@ export function undoColor(flush, redo = false) {
   return Promise.resolve(flush && flush()).then(() => call("color.undo", redo));
 }
 
-export function UndoRedo({ s, flush, size = "sm" }) {
-  return html`<${Button} size=${size} kind="ghost" icon="undo" disabled=${!s.can_undo} onClick=${() => undoColor(flush)}
+export function UndoRedo({ s, flush, size = "sm", kind = "ghost" }) {
+  // (kind: the Colors bar's tools panel has them as ordinary buttons, greyed like the others when unavailable - Simon)
+  return html`<${Button} size=${size} kind=${kind} icon="undo" disabled=${!s.can_undo} onClick=${() => undoColor(flush)}
       title="Undo the last change to this profile (Ctrl+Z)">Undo<//>
-    <${Button} size=${size} kind="ghost" icon="redo" disabled=${!s.can_redo} onClick=${() => undoColor(flush, true)}
+    <${Button} size=${size} kind=${kind} icon="redo" disabled=${!s.can_redo} onClick=${() => undoColor(flush, true)}
       title="Redo the change just undone (Ctrl+Y or Ctrl+Shift+Z)">Redo<//>`;
 }
 
@@ -905,34 +921,97 @@ export function inUseChip(s) {
     : html`<span class="chip sm cp-in-use" title="No color profile is applied here yet: pick a starting point or a saved profile, or move a slider">None set</span>`;
 }
 
-export function statusNote(s, ownColor = null) {
+// Simon (2026-11-19): "The tick boxes have too much information that is better off in a tool tip" - each state's
+// words twice: short, the Colors bar's one-line status (the same height in every state, so nothing below it moves),
+// and long, its tooltip and the Color profile tab's note. {kind: "ok" | "info" | "warn", short, long}
+export function statusWords(s, ownColor = null) {
   const assets = s.per_file && s.mode === "assets";
   const screen = s.per_file && s.mode === "screen";
-  return !s.has_project
-    ? html`<${Note} kind="warn">There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.<//>`
-    : screen
-      ? (s.screen_stored ? html`<${Note} kind="ok">${"The preview draws every picture through “" + (s.name || "My screen") + "” when its Machine screen switch is on. Nothing is written to the card."}<//>`
-        : s.screen_follow
-          ? html`<${Note} kind="info">${"Scenes uses the individual files profile, undone (“" + (s.name || "") + "”). Move a slider or pick a starting point to set this machine's own screen."}<//>`
-          : html`<${Note} kind="info">${"Scenes uses the Recommended screen, tuned on a real Spike 2. Move a slider or pick a starting point to set this machine's own screen."}<//>`)
-    : assets && s.file && s.file.kind === "text" && ownColor
-      ? html`<${Note} kind="info">${"This line has its own color (" + ownColor + ", set in the Font bar), so “" + (s.name || "My profile") + "” does not change it. Default in the Font bar puts the profile back."}<//>`
-    : assets && s.file
-      ? (s.file.on === false
-          ? html`<${Note} kind="info">${"No color profile is attached to " + thisFile(s.file) + ". Pick a starting point or a saved profile, or move a slider, and " + (s.file.count > 1 ? "each is attached." : "it is attached.")}<//>`
-          : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + thisFile(s.file) + " when you build; the other files keep their own."}<//>`
-          : html`<${Note} kind="info">${"“" + (s.name || "No change") + "” changes nothing: " + thisFile(s.file) + (s.file.count > 1 ? " go" : " goes") + " onto the card as you made " + (s.file.count > 1 ? "them." : "it.")}<//>`)
-    : assets
-      ? (s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is baked into " + countWords(s.asset_counts || {})
-            + " when you build; the game's own art is not touched. Pick No change to send the files as they are."}<//>`
-        : !s.asset_active ? html`<${Note} kind="info">No change on the individual files: they go onto the card as you made them. Pick a starting point or move a slider to correct them.<//>`
-        : html`<${Note} kind="info">${"“" + (s.name || "My profile") + "” is ready, but no file is switched on yet: tick a box under Which files, or switch on pictures on the Images tab, videos on the Video tab, or layers in Scenes."}<//>`)
-      : s.active ? html`<${Note} kind="ok">${"“" + (s.name || "My profile") + "” is staged for this project: the next build "
-          + (s.on_display ? "corrects everything the game draws." : "corrects your replaced pictures and videos.")
-          + " Pick No change to take it off."}<//>`
-      : html`<${Note} kind="info">${s.on_display
-          ? "No whole screen overlay on this project: the game draws in its own colors. Pick a starting point or move a slider to stage one."
-          : "No color profile on this project: your pictures and videos go onto the card as they are. Pick a starting point or move a slider to stage one."}<//>`;
+  const name = (fallback) => "“" + (s.name || fallback) + "”";
+  const w = (kind, short, long) => ({ kind, short, long });
+  const many = s.file && s.file.count > 1;
+  const these = many ? `these ${s.file.count} files` : "this file";
+  if (!s.has_project) {
+    return w("warn", "No project folder yet",
+      "There is no project folder yet: choose or extract one on the Extract tab, and the profile you set here is saved with it.");
+  }
+  if (screen) {
+    return s.screen_stored
+      ? w("ok", `${name("My screen")} on the preview`, "The preview draws every picture through " + name("My screen")
+        + " when its Machine screen switch is on. Nothing is written to the card.")
+      : s.screen_follow
+        ? w("info", `Scenes uses ${name("")}, undone`, "Scenes uses the individual files profile, undone (" + name("")
+          + "). Move a slider or pick a starting point to set this machine's own screen.")
+        : w("info", "Scenes uses the Recommended screen", "Scenes uses the Recommended screen, tuned on a real Spike 2. "
+          + "Move a slider or pick a starting point to set this machine's own screen.");
+  }
+  if (assets && s.file && s.file.kind === "text" && ownColor) {
+    return w("info", `Own color ${ownColor}: the profile is not used`, "This line has its own color (" + ownColor
+      + ", set in the Font bar), so " + name("My profile") + " does not change it. Default in the Font bar puts the profile back.");
+  }
+  if (assets && s.file) {
+    return s.file.on === false
+      ? w("info", `No color profile attached to ${these}`, "No color profile is attached to " + thisFile(s.file)
+        + ". Pick a starting point or a saved profile, or move a slider, and " + (many ? "each is attached." : "it is attached."))
+      : s.active
+        ? w("ok", `${name("My profile")} baked into ${these} at build`, name("My profile") + " is baked into "
+          + thisFile(s.file) + " when you build; the other files keep their own.")
+        : w("info", `${name("No change")} changes nothing`, name("No change") + " changes nothing: " + thisFile(s.file)
+          + (many ? " go" : " goes") + " onto the card as you made " + (many ? "them." : "it."));
+  }
+  if (assets) {
+    const total = Object.values(s.asset_counts || {}).reduce((a, b) => a + (b || 0), 0);
+    return s.active
+      ? w("ok", `${name("My profile")} baked into ${total} ${total === 1 ? "asset" : "assets"} at build`, name("My profile")
+        + " is baked into " + countWords(s.asset_counts || {}) + " when you build; the game's own art is not touched. "
+        + "Pick No change to send the files as they are.")
+      : !s.asset_active
+        ? w("info", "No change: files go on as you made them", "No change on the individual files: they go onto the card "
+          + "as you made them. Pick a starting point or move a slider to correct them.")
+        : w("info", `${name("My profile")} is ready: no file switched on`, name("My profile") + " is ready, but no file is "
+          + "switched on yet: tick a box under Which files, or switch on pictures on the Images tab, videos on the Video "
+          + "tab, or layers in Scenes.");
+  }
+  return s.active
+    ? w("ok", `${name("My profile")} staged for this project`, name("My profile") + " is staged for this project: the next build "
+      + (s.on_display ? "corrects everything the game draws." : "corrects your replaced pictures and videos.")
+      + " Pick No change to take it off.")
+    : s.on_display
+      ? w("info", "No overlay: the game's own colors", "No whole screen overlay on this project: the game draws in its own "
+        + "colors. Pick a starting point or move a slider to stage one.")
+      : w("info", "No color profile on this project", "No color profile on this project: your pictures and videos go onto "
+        + "the card as they are. Pick a starting point or move a slider to stage one.");
+}
+
+export function statusNote(s, ownColor = null) {
+  const sw = statusWords(s, ownColor);
+  return html`<${Note} kind=${sw.kind}>${sw.long}<//>`;
+}
+
+// Simon (2026-11-19): the Colors bar's status on one line, always the same height and place, the rest in its tooltip
+export function StatusLine({ s, ownColor = null }) {
+  const sw = statusWords(s, ownColor);
+  return html`<div class=${cx("note cpd-statusline", sw.kind)} ...${tip(sw.long)}>
+    <${Icon} name=${sw.kind === "ok" ? "check" : sw.kind === "warn" ? "warn" : "info"} />
+    <div class="body-text">${sw.short}</div></div>`;
+}
+
+// Simon (2026-11-19): "Game's own assets are unlocked using the advanced panel" - and whether they are now
+export function gameOwnWords(u) {
+  u = u || {};
+  const kinds = [["images", "images", true], ["videos", "videos", u.videos_offered !== false], ["text", "text", true]]
+    .filter(([, , offered]) => offered);
+  const on = kinds.filter(([k]) => u[k]).map(([, word]) => word);
+  const off = kinds.filter(([k]) => !u[k]).map(([, word]) => word);
+  const list = (a) => a.length > 1 ? a.slice(0, -1).join(", ") + " and " + a[a.length - 1] : a[0];
+  const short = !on.length ? "Game's own assets: locked. Unlock them in the Advanced panel"
+    : !off.length ? "Game's own assets: unlocked (Advanced panel)"
+      : `Game's own ${list(on)} unlocked, ${list(off)} locked (Advanced panel)`;
+  const long = "The game's own pictures, clips and lines of text are left as they are until the Advanced panel "
+    + "(beside Preview colors on Scenes, Images and Video) unlocks them; your replaced and added files can always have "
+    + "a color profile."
+    + (on.length ? ` Unlocked now: ${list(on)} - each can have a color profile baked in when you build.` : "");
+  return { short, long, locked: !on.length };
 }
 
 export default function ColorTab() {

@@ -930,6 +930,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._start_change_scan()
         self._probe_metadata_async(scan_id)
         self._screens_async(scan_id, scan_dir)
+        self._targets_read()                # the Colors bar's Copy count, asked before this tab had opened
 
     def _load_staged(self, assets_dir):
         """MainWindow._load_staged_changes (plus the replacement-name
@@ -1703,6 +1704,27 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             if on is not None and (on or scope == "all"):
                 out[rel] = on
         return out
+
+    def targets_pending(self):
+        """Simon (2026-11-19): the Colors bar's Copy count read 0 until a tab had been opened - this one knows no
+        clips until it has scanned the project. True while it has not read the project yet; the scan is started
+        here (once), and the Colors bar told when it lands (color.targets_ready)."""
+        if not (self._per_file_colour() and self._tab_present()):
+            return False
+        path = self._assets_path()
+        if not path or not os.path.isdir(path) or path == self._scan_dir:
+            return False
+        if self._scan_t0 is None:
+            self._scan_async()
+        return True
+
+    def _targets_read(self):
+        fn = getattr(self.window.service("color"), "targets_ready", None)
+        if fn is not None:
+            try:
+                fn()
+            except Exception:                           # noqa: BLE001
+                log.exception("video color targets_ready")
 
     # ---- Save with color profile (PAD-604) -----------------------------
     _cs_kind = "videos"

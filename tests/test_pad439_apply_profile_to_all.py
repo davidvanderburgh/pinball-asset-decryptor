@@ -53,7 +53,7 @@ def test_apply_to_all_videos_asks_first_and_undoes_as_one_step(tmp_path):
         assert w.call("color.apply_to_all", "all") is False
         q = w.asked[-1]
         assert q["title"] == "Apply to all videos"
-        assert q["message"].startswith("Are you sure?")
+        assert q["message"].startswith("WARNING: THIS WILL APPLY THE PROFILE")   # Simon: "very clear - WARNING ..."
         assert "all 3 of them" in q["message"] and "“Custom red”" in q["message"]
         assert "attached to the 2 that have none" in q["message"]
         assert set(cp.own_profile_names(assets)["videos"]) == {CLIPS[0]}
@@ -157,10 +157,11 @@ def test_apply_to_all_images_and_the_lone_file(tmp_path):
 
 def test_the_button_is_on_the_images_and_video_bars_only():
     pane = open(os.path.join(_TABS, "color_pane.js"), encoding="utf-8").read()
-    assert 'call("color.apply_to_all", "all")' in pane
-    assert 'call("color.apply_to_all", "profiled")' in pane
-    assert "Apply to all ${all[1]}…" in pane
-    assert "Apply to all profiled ${all[1]}…" in pane
+    # Simon (2026-11-19): one "Copy profile…" with its choices - which files (with a profile attached / all), which
+    # themes - in place of the two Apply to all buttons
+    assert 'call("color.copy_profile", source, to, scope, themes)' in pane   # Simon 2026-11-19: one copy
+    assert ">APPLY</button>" in pane                 # (Simon: the action in a red box, APPLY NOW)
+    assert 'COPY_WHICH = { profiled: "With a profile attached", all: "All" }' in pane
     # (PAD-471: and the Scenes bar on a line of text; PAD-566: and on a picture in Scenes)
     assert 'ALL_HOSTS = { images: ["images"], video: ["videos"], scenes: ["text", "images"] }' in pane
-    assert "<${FileLine} s=${s} host=${host} />" in pane
+    assert "<${FileLine} s=${s} host=${host} tools=${tools} />" in pane   # (Simon: the tools panel under Selected)

@@ -111,7 +111,7 @@ def test_the_bar_loads_on_the_images_and_video_pages(tmp_path):
                          capture_output=True, text=True, timeout=60, cwd=str(tmp_path))
     assert run.returncode == 0, run.stderr
     got = json.loads(run.stdout)
-    assert got["bar"] == ["ColorBar", "barOpenAtStart", "rememberBarOpen"]
+    assert got["bar"] == ["ColorBar", "SpectrumPal", "barOpenAtStart", "rememberBarOpen"]   # (PR #39: the Colors bar exports its spectrum palette icon too)
     assert "default" in got["images"] and "default" in got["video"]
     for name, host in (("images.js", "images"), ("video.js", "video")):
         src = _src(name)

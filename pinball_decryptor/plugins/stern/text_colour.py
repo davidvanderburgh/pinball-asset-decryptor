@@ -447,7 +447,7 @@ def line_switch(assets_dir, card, man, n, ops=(), data=None, fonts=None):
     if data is None:
         from ...core import staged_changes
         data = staged_changes.peek(assets_dir)
-    if not data.get(cp.STOCK_IMAGES_KEY):
+    if not cp.text_unlocked(data):
         return dict({"locked": True, "line": True}, **art)
     # (cp.text_lines_on's test, looked up: Apply to all asks it of every line, PAD-471)
     slots = data.get(cp.TEXT_SLOTS_KEY)
@@ -563,7 +563,7 @@ def put_line_switches(assets_dir, switches):
         scene_edit.save(assets_dir, edits)
     if stock:
         data = staged_changes.load(assets_dir)
-        if data.get(cp.STOCK_IMAGES_KEY):
+        if cp.text_unlocked(data):
             m = data.get(cp.TEXT_SLOTS_KEY)
             m = dict(m) if isinstance(m, dict) else {}
             for rel, value in stock.items():

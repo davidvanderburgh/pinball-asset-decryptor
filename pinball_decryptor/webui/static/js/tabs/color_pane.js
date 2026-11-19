@@ -35,9 +35,9 @@
 // color the Font bar gave the line (drawn in exactly it, the profile no longer changing it),
 // and a word that lines of text can be colored directly there.
 
-import { html, useEffect, useRef, useState, Button, Check, Icon, tip, call, cx } from "../core/ui.js";
+import { html, useEffect, useRef, useState, Button, Check, Icon, Seg, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { Controls, Ranges, CurveEditor, WhichFiles, MODES, MODE_WORDS, useProfile, statusNote,
+import { Controls, Ranges, CurveEditor, WhichFiles, WhichFilesNotes, EVERY_KINDS, MODES, MODE_WORDS, useProfile, StatusLine,
   UndoRedo, undoKey } from "./color.js";
 
 for (const href of ["/static/css/tabs/color.css", "/static/css/tabs/color_pane.css"]) {
@@ -149,21 +149,8 @@ function loadClip() {
   try { return JSON.parse(localStorage.getItem(CLIP_KEY) || "null"); } catch (e) { return null; }
 }
 
-// The scene (or the Video tab's players) shows the profile on show only while its Preview
-// colors switch is on: the same switch, here, so a change is never made blind.
-function ShowHere({ mode, look, host }) {
-  const h = HOSTS[host] || HOSTS.scenes;
-  if (!h.lookNs || !look || !look.parts) return null;
-  const k = PART[mode];
-  const part = look.parts[k] || {};
-  const on = !!(look.sw || {})[k];
-  const what = h.what;
-  return html`<${Check} cls="small" checked=${!!(part.set && on)} disabled=${!part.set}
-    label="Show it in this preview"
-    title=${part.set ? `The same switch as under Preview colors: untick to see ${what} without it. The card is not changed.`
-      : k === "files" ? PART_OFF.files + h.files : PART_OFF[k]}
-    onChange=${(v) => call(h.lookNs + ".set_look_part", k, v)} />`;
-}
+// Simon (2026-11-19): the bar's own "Show it in this preview" is gone - the same switch is in the Preview colours
+// bar beside every preview (js/core/look.js), so the bar no longer repeats it.
 
 // Copy this profile's numbers; Paste them into the one on show (its name stays)
 function CopyPaste({ p, update, mode, name }) {
@@ -174,13 +161,11 @@ function CopyPaste({ p, update, mode, name }) {
     try { localStorage.setItem(CLIP_KEY, JSON.stringify(c)); } catch (e) { /* kept for this page only */ }
     setClip(c);
   };
-  return html`<div class="row cpd-clipbtns">
-    <${Button} size="xs" icon="copy" onClick=${copy}
+  return html`<${Button} size="xs" icon="copy" onClick=${copy}
       title=${`Copy every number of this profile (${SHORT[mode]}), its color ranges and curves too, to paste into another profile`}>Copy<//>
     <${Button} size="xs" disabled=${!clip} onClick=${() => clip && update(JSON.parse(JSON.stringify(clip.values)))}
       title=${clip ? `Paste ${clip.from} into this profile (${SHORT[mode]}). Its name stays.`
-        : "Copy a profile first"}>Paste<//>
-  </div>`;
+        : "Copy a profile first"}>Paste<//>`;
 }
 
 // PAD-439: the words of Apply to all, by the kind of file, on the hosts that list them
@@ -198,42 +183,224 @@ const ALL_TIP = (one, many) => `This will change all of your unlocked ${many} to
 // PAD-471: lines of text, in the same words; a line is the game's own or added, not replaced
 const TEXT_ALL_TIP = "This will change all of your unlocked lines of text to the profile you have selected below in this tab. This may mean that every single line of text, the game's own and the ones you added, in every scene will be affected. You can undo this function";
 
-// The file the bar is on (PAD-368): its name, and whether it has a profile of its own.
-// PAD-462: or the files selected together, the one on show named first.
-function FileLine({ s, host }) {
+// The file the bar is on (PAD-368), whether it has a profile of its own, and copying its profile to other files
+// (PAD-439 / PAD-462). Simon (2026-11-19): one panel, the same on the Images, Video and Scenes tabs, with what does
+// not apply greyed out rather than missing - "SELECTED" and the file (or NONE) in boxes, "THEME" and the theme in
+// boxes (Images and Scenes only), and one copy action with its choices spelled out, asked first with a WARNING.
+const COPY_WHICH = { profiled: "With a profile attached", all: "All" };
+
+// (Simon: "if a filename is really long then truncate but pop out the full name if mouse over ... Ditto with the
+// Theme name": the value box ends in "..." where it is cut, and its tooltip is the whole of it)
+function Tagged({ tag, value, off, title, none, full }) {
+  return html`<div class=${cx("row cpd-tagrow", off && "cpd-off")} title=${title || ""}>
+    <span class="cpd-tag">${tag}</span>
+    <span class=${cx("cpd-val mono", none && "cpd-none")} title=${full || value}>${value}</span></div>`;
+}
+
+// Simon (2026-11-19): "use the little palette icons but with spectrum over it" - the Images tab's palette, its board
+// filled with a spectrum, marking a color profile in the Copy's words and the bar's title (not everywhere: "I think
+// that would look bad")
+let palSeq = 0;
+export function SpectrumPal() {
+  const id = useRef(`cpd-spec-${++palSeq}`).current;
+  return html`<svg class="i cpd-pal" viewBox="0 0 24 24" aria-hidden="true">
+    <defs><linearGradient id=${id} x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4d4d" /><stop offset=".2" stop-color="#ffb13b" /><stop offset=".4" stop-color="#f4e542" />
+      <stop offset=".6" stop-color="#4fd36a" /><stop offset=".8" stop-color="#3fa3ff" /><stop offset="1" stop-color="#b061ff" />
+    </linearGradient></defs>
+    <path class="cpd-pal-body" fill=${`url(#${id})`} d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z" />
+    <path class="cpd-pal-dots" d="M7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01M17 11h.01" /></svg>`;
+}
+
+function FileLine({ s, host, tools }) {
   const f = s.file;
-  if (!f) return null;
-  const n = f.count || 1;
-  const all = (ALL_HOSTS[host] || []).includes(f.kind) ? ALL_WORDS[f.kind] : null;
-  const many = f.kind === "images" ? "images" : "videos";
-  // PAD-438: a line of text in Scenes has one too (PAD-471: and Apply to all, of lines)
-  const what = f.kind === "text" ? "This line of text" : n > 1 ? `These ${n} ${many}` : "This file";
+  const sets = useNs("imgsets");
+  const [which, setWhich] = useState("profiled");
+  const [where, setWhere] = useState("this");           // "this" | "pick" (Choose themes)
+  const [chosen, setChosen] = useState(null);           // the themes ticked; null: every one
+  const [srcPick, setSrcPick] = useState("file");       // COPY FROM with a file selected
+  const [toKind, setToKind] = useState(host === "video" ? "videos" : "images");
+  const [summary, setSummary] = useState({ n: 0, text: "" });
+  const n = f ? (f.count || 1) : 0;
+  const kind = f ? f.kind : (host === "video" ? "videos" : "images");
+  const words = ALL_WORDS[kind] || ALL_WORDS.images;
+  // themes: pictures on the Images and Scenes tabs (Simon: "Theme applies in scenes and images only")
+  const names = sets.names || [];
+  const themesOn = !!(sets.on && sets.enabled && names.length > 1);
+  const themeHost = host === "images" || host === "scenes";
+  const m = f ? /^@(\d+):/.exec(f.rel || "") : null;
+  // the theme the bar works on (Simon, 2026-11-19: on Scenes, the theme Scenes shows - he copied into theme 1 while
+  // looking at theme 2): the file's own key names it (plain = theme 1); with no file, the theme on show
+  const scn = useNs("text_scenes");
+  const nowTheme = !themesOn ? 1 : host === "scenes" ? (scn.preview_theme || 1) : (sets.current || 1);
+  const t = m ? Number(m[1]) : f ? 1 : nowTheme;
+  const themeLive = themeHost && themesOn && kind === "images";
+  const themeValue = !themeHost ? "not on this tab" : !themesOn ? "off" : kind !== "images" ? "pictures only"
+    : `${t}: ${names[t - 1] || ""}`;
+  const label = f ? String(f.label || "").replace(/ \(theme \d+\)$/, "") : "NONE";
   const shared = `“${s.asset_name || "Recommended"}”`;
-  const sameBtn = (head) => html`<${Button} size="xs" onClick=${() => call("color.file_shared")}
-    title=${head}>Same as the other files<//>`;
-  const own = n > 1
-    ? (f.own_n ? html`<span class="small muted grow">${f.own_n === n ? "Each has a color profile of its own."
-        : `${f.own_n} of them have a color profile of their own.`}</span>
-        ${sameBtn(`Drop their own profiles: they get the individual files profile every other file gets (${shared})`)}`
-      : html`<span class="small muted">${`Same as the other files (${shared}). A change here gives all ${n} a profile of their own and attaches it.`}</span>`)
-    : f.own
-      ? html`<span class="small muted grow">It has a color profile of its own.</span>
-        ${sameBtn(`Drop this file's own profile: it gets the individual files profile every other file gets (${shared})`)}`
-      : html`<span class="small muted">${`Same as the other files (${shared}). A change here gives it a profile of its own.`}</span>`;
-  const profile = { profile: s.name || "Recommended" };
-  return html`<div class="cpd-file">
-    <div class="row cpd-file-hd"><span class="eyebrow nw">${what}</span>
-      <span class="mono small ellip" title=${f.rel}>${n > 1 ? `${f.label} and ${n - 1} more` : f.label}</span></div>
-    <div class="row cpd-file-own">${own}</div>
-    ${all ? html`<div class="row cpd-file-all">
-      <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "profiled")}
-        title=${{ head: `Apply this ${all[0]} color profile to all profiled ${all[1]}`, lines: [profile,
-          `Every ${all[2]} ${f.kind === "text" ? "in every scene" : host === "scenes" ? "on the Images tab" : "on this tab"} with a color profile attached gets this one, in place of the one it has now.`,
-          `A ${all[2]} with no color profile attached is left as it is.`,
-          "You are asked first. Undo puts them all back."] }}>Apply to all profiled ${all[1]}…<//>
-      <${Button} size="xs" icon="copy" onClick=${() => call("color.apply_to_all", "all")}
-        title=${f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(all[2], all[1])}>Apply to all ${all[1]}…<//>
-    </div>` : null}
+  const own = f ? (n > 1 ? (f.own_n || 0) > 0 : !!f.own) : false;
+  // a picture the theme chose itself is new: it falls back to the shared files profile, never theme 1's
+  // (scene_variants.theme_falls_back; PR #39 review)
+  const picked1 = !!(f && t > 1 && f.falls_back === false);
+  const status = !f ? "Nothing selected: click a file to give it a profile of its own, or copy the shared files profile below."
+    : t > 1 ? (own ? `It has a profile of its own in this theme (“${s.name || ""}”).`
+      : picked1 ? `This theme's own picture: like any new picture it uses the individual files profile (${shared}). Change anything below and it gets a profile of its own in this theme only.`
+      : "It uses theme 1's profile. Change anything below and it gets a profile of its own in this theme only.")
+    : own ? (n > 1 ? `${f.own_n === n ? "Each has" : `${f.own_n} of them have`} a profile of their own.`
+      : `It has a profile of its own (“${s.name || ""}”).`)
+    : `It uses the individual files profile (${shared}), like the other files. A change here gives it one of its own.`;
+  // Simon: the resets, one full line each, always there, greyed where they do not apply. "Reset to theme 1" and
+  // "Same as the other files" were one action (drop the file's own profile in the theme on show) landing in two
+  // places, so they are one button that says where it lands; each names the profile it lands on
+  const canHere = !!(f && own);
+  const canEvery = !!(f && themeLive);
+  const sharedName = s.asset_name || "Recommended";
+  const hereLabel = t > 1 && !picked1 ? `Same as theme 1 (“${(f && f.base_name) || sharedName}”)` : `Same as the other files (“${sharedName}”)`;
+  const reset = html`<div class="cpd-resets">
+    <${Button} size="xs" disabled=${!canHere} onClick=${() => call("color.file_shared", "this")}
+      title=${!canHere ? "Only for a file with a profile of its own (in the theme on show)"
+        : picked1 ? `Drop this theme's own profile for it: as the theme's own picture it gets the shared files profile (“${sharedName}”) again`
+        : t > 1 ? `Drop this theme's own profile for it: it uses theme 1's (“${(f && f.base_name) || sharedName}”) again`
+          : `Drop its own profile: it gets the shared files profile (“${sharedName}”), as every other file without one of its own does`}>${hereLabel}<//>
+    <${Button} size="xs" disabled=${!canEvery} cls=${!(themeHost && themesOn) || (f && !themeLive) ? "cpd-never" : ""} onClick=${() => call("color.file_shared", "all")}
+      title=${canEvery ? `Drop its own profile in every theme, theme 1 too: it uses the shared files profile (“${sharedName}”) everywhere. Its color switch is not changed: off, nothing is baked in.`
+        : "Only for a picture, with themes on"}>Reset in every theme (“${sharedName}”)<//>
+  </div>`;
+
+  // ---- Copy (Simon: one copy action, the same every time, what cannot be done greyed with the reason) ----
+  // Simon (2026-11-19, his design): COPY FROM the selected file's profile or the shared files profile, selected or
+  // not; WHICH All / Without a profile / With a profile - or, several files selected, just those ("it must override
+  // WHICH", so WHICH and the themes grey out); THEMES this theme, or Choose themes (a checklist, All themes on top).
+  // Every old copy is one of these: Apply to all profiled = file + With a profile, Apply to all = file + All, All
+  // images / videos / text = shared + All (color.copy_profile; the old calls stay in color.py)
+  const multi = n > 1;
+  const source = f ? srcPick : "shared";
+  const fileKinds = f && (ALL_HOSTS[host] || []).includes(f.kind) ? [f.kind] : [];
+  const fixedKind = source === "file" || multi;         // the file's own kind: its profile, or the files selected
+  const kinds = fixedKind ? fileKinds : EVERY_KINDS().map((e) => e.k);
+  const to = fixedKind ? (fileKinds[0] || kind) : toKind;
+  const toWords = ALL_WORDS[to] || ALL_WORDS.images;
+  const canCopy = fixedKind ? fileKinds.length > 0 : true;
+  const whichOk = !multi;
+  const scope = multi ? "selected" : which;
+  const themeAvail = themeHost && themesOn && to === "images";
+  const themesOk = themeAvail && !multi;
+  const allThemes = names.map((_, i) => i + 1);
+  const picks = (chosen || allThemes).filter((x) => x <= names.length);
+  // ("This theme" is sent as the theme in the THEME box, so the copy goes where the box says)
+  const themes = !themesOk ? "this" : where === "this" ? [t] : picks;
+  const themesKey = Array.isArray(themes) ? themes.join(",") : themes;
+  // the count (Simon: "it doesn't work at all now. Just says 0"): asked a moment after the last change, only the newest
+  // answer shown - a slow one (every picture, unlocked) is never dropped for a change made while it was counted - "..."
+  // while it counts and "?" when it cannot be counted, so a real 0 is never a count that did not come back
+  const seq = useRef(0);
+  useEffect(() => {
+    if (!canCopy) { seq.current += 1; setSummary({ n: 0, text: "" }); return undefined; }
+    const mine = ++seq.current;
+    setSummary((was) => ({ ...was, n: null }));
+    const timer = setTimeout(() => {
+      call("color.copy_preview", source, to, scope, themes).then((r) => {
+        // n null: the tab has not read the project's files yet - "..." until it has (s.targets_rev asks again)
+        if (mine === seq.current) setSummary({ n: (r && typeof r.n === "number") ? r.n : (r && r.n === null) ? null : -1,
+          text: (r && r.text) || "" });
+      }, () => { if (mine === seq.current) setSummary({ n: -1, text: "" }); });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [source, to, scope, themesKey, f && f.rel, f && f.own, f && f.on, n, s.name, s.asset_name, canCopy,
+    JSON.stringify(sets.unlock || {}), sets.current, (sets.names || []).length, JSON.stringify(s.asset_counts || {}), s.targets_rev]);
+  const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(toWords[2], toWords[1]);
+  const onTab = to === "text" ? "in every scene" : host === "scenes" ? "on the Images tab" : "on this tab";
+  const given = source === "shared" ? `the shared files profile (${shared})` : `this ${toWords[0]} profile (“${s.name || "Recommended"}”)`;
+  const copyTip = !canCopy ? "Copying is not offered for this file here"
+    : scope === "selected" ? { head: `Give the ${n} ${toWords[1]} selected ${given}`, lines: [
+      "Each one not locked gets it, attached.", "You are asked first. Undo puts them all back."] }
+    : scope === "all" ? (source === "file" ? tipAll : { head: `Give every ${toWords[2]} ${given}`, lines: [
+      `Every ${toWords[2]} that is not locked gets it, attached. One with a color profile of its own loses it.`,
+      "You are asked first. Undo puts them all back."] })
+    : scope === "off" ? { head: `Give ${given} to every ${toWords[2]} with no profile attached`, lines: [
+      `Each unlocked ${toWords[2]} ${onTab} with its color switch off is switched on and gets it. The ones with a profile are left as they are.`,
+      "You are asked first. Undo puts them all back."] }
+    : { head: `Give ${given} to every ${toWords[2]} with a profile attached`, lines: [
+      `Each unlocked ${toWords[2]} ${onTab} with its color switch on gets it, in place of the one it has now. Nothing new is switched on.`,
+      "You are asked first. Undo puts them all back."] };
+  const doCopy = () => call("color.copy_profile", source, to, scope, themes);
+  const themeTip = !themeAvail ? "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)"
+    : multi ? "Copying to the files you selected: in the theme on show" : "";
+  const tick = (x, on) => setChosen(on ? [...new Set([...picks, x])].sort((a, b) => a - b) : picks.filter((y) => y !== x));
+  const kindLabel = { images: "Images", videos: "Videos", text: "Text" };
+  // Simon: "match up the look and feel of the SELECTED and THEME with the Copy from, to which kind and so on ...
+  // as columnized as possible, box sizes the same" - one grid: a tag column, then six equal columns; three choices
+  // take two each, two choices three each, "With profile attached" four and "All" two
+  // (never: not here at all - a red dashed border; otherwise a disabled one is orange: not now)
+  const opt = (key, label, { on, disabled, never, title, span, onClick }) => html`<button type="button" key=${key}
+      class=${cx("cpd-opt", on && "on", never && "cpd-never")} style=${`grid-column: span ${span}`} disabled=${!!disabled}
+      onClick=${onClick} ...${tip(title || "")}>${label}</button>`;
+  const tag = (word, off) => html`<span class=${cx("cpd-tag", off && "cpd-off")}>${word}</span>`;
+  const value = (text, full, { none, off } = {}) => html`<span class=${cx("cpd-val mono", none && "cpd-none",
+      off && "cpd-off")} style="grid-column: span 12" title=${full || text}>${text}</span>`;
+  // Simon: "Lets make the profile area its own panel ... and the same with selected and theme (one panel for those)"
+  return html`<div class="cpd-file cpd-sel">
+    <div class="cpd-grid">
+      ${tag("SELECTED")}
+      ${/* Simon (2026-11-19): the count has its own panel ("X assets selected"), so the box names the first file */""}
+      ${value(label,
+        f ? `${label}${n > 1 ? ` (first of ${n} selected)` : ""}\n${String(f.rel || "").replace(/^@\d+:/, "")}` : "Nothing selected",
+        { none: !f })}
+      ${tag("THEME", !themeLive)}
+      ${value(themeValue, themeLive ? `Theme ${themeValue}\n${host === "scenes" ? "The theme Scenes shows" : "The theme picked on this tab"}: color changes here are this theme's`
+        : "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)", { off: !themeLive })}
+    </div>
+    <div class="small muted cpd-status-line">${status}</div>
+  </div>
+  ${tools}
+  <div class="cpd-file cpd-resetpanel"><div class="eyebrow">Reset this file's profile</div>${reset}</div>
+  <div class="cpd-file cpd-copy">
+      <div class="eyebrow">Copy a profile to other files</div>
+      <div class="cpd-grid">
+        ${tag(html`COPY <${SpectrumPal} /> FROM`)}
+        ${opt("file", "Selected file", { on: source === "file", disabled: !f, span: 6, onClick: () => setSrcPick("file"),
+          title: f ? "The profile of the file selected above" : "Select a file first" })}
+        ${opt("shared", "Shared profile", { on: source === "shared", span: 6, onClick: () => setSrcPick("shared"),
+          title: `The individual files profile every switched-on file without one of its own gets (${shared})` })}
+        ${tag("TO WHAT?")}
+        ${["images", "videos", "text"].map((k) => opt(k, kindLabel[k], { on: to === k, disabled: !kinds.includes(k), never: !multi, span: 4,
+          onClick: () => setToKind(k),
+          title: kinds.includes(k) ? "" : multi ? `Copying to the ${words[1]} you selected` : `A ${words[2]}'s profile is copied to other ${words[1]}` }))}
+        ${tag("WHICH?", !whichOk)}
+        ${opt("all", html`ALL <${SpectrumPal} />`, { on: scope === "all", disabled: !whichOk, span: 3, onClick: () => setWhich("all"),
+          title: whichOk ? `Every ${toWords[2]} that is not locked: switched on, and any profile of its own replaced. With Unlock extracted ticked (Advanced) that is every one, otherwise the ones replaced or added`
+            : `Copying to the ${toWords[1]} you selected` })}
+        ${opt("profiled", html`WITH <${SpectrumPal} />`, { on: scope === "profiled", disabled: !whichOk, span: 4, onClick: () => setWhich("profiled"),
+          title: whichOk ? `Only unlocked ${toWords[1]} with a profile attached (color switch on): theirs is replaced; nothing new is switched on`
+            : `Copying to the ${toWords[1]} you selected` })}
+        ${opt("off", html`WITHOUT <${SpectrumPal} />`, { on: scope === "off", disabled: !whichOk, span: 5, onClick: () => setWhich("off"),
+          title: whichOk ? `Only unlocked ${toWords[1]} with no profile attached (color switch off): each is switched on and gets it`
+            : `Copying to the ${toWords[1]} you selected` })}
+        ${tag("THEMES", !themesOk)}
+        ${opt("this", "This theme", { on: !themesOk || where === "this", disabled: !themesOk, never: !themeAvail, span: 6, onClick: () => setWhere("this"),
+          title: themesOk ? `Theme ${t} (${names[t - 1] || ""}) only` : themeTip })}
+        ${opt("pick", `Choose themes ${where === "pick" && themesOk ? "▴" : "▾"}`, { on: themesOk && where === "pick", disabled: !themesOk, never: !themeAvail, span: 6,
+          onClick: () => setWhere(where === "pick" ? "this" : "pick"),
+          title: themesOk ? "Tick the themes to copy into: All themes, or any of them" : themeTip })}
+      </div>
+      ${themesOk && where === "pick" ? html`<div class="cpd-themepick">
+        <${Check} checked=${picks.length === names.length} label="All themes"
+          onChange=${(v) => setChosen(v ? allThemes : [])} />
+        ${names.map((nm, i) => html`<${Check} key=${i} checked=${picks.includes(i + 1)} label=${`${i + 1}: ${nm}`}
+          title=${`${i + 1}: ${nm}`} onChange=${(v) => tick(i + 1, v)} />`)}
+      </div>` : null}
+      ${summary.text ? html`<div class="small cpd-summary">${summary.text}</div>` : null}
+      <div class="cpd-actions">
+        ${/* Simon: APPLY NOW on the left, the count on the right, equal halves; the count in the tags' colour and font */""}
+        <span class="cpd-applywrap" ...${tip(copyTip)}><button type="button"
+          class=${cx("cpd-apply", !canCopy && "cpd-never")} disabled=${!canCopy} onClick=${doCopy}>APPLY</button></span>
+        <span class="cpd-tag cpd-counttag"
+          title=${`${!canCopy ? "Nothing to apply" : summary.n === null ? "Counting" : summary.n < 0 ? "Could not be counted"
+            : `${summary.n} ${summary.n === 1 ? toWords[2] : toWords[1]}`}. You are asked first, with a WARNING, and Undo puts them all back.`}>${canCopy
+          ? (summary.n === null ? "…" : summary.n < 0 ? "? ASSETS" : `${summary.n} ${summary.n === 1 ? "ASSET" : "ASSETS"}`)
+          : "NONE"}</span>
+      </div>
   </div>`;
 }
 
@@ -265,8 +432,25 @@ function TextColorLine({ line, openFont }) {
 // files selected with it that are not locked).  cls: more classes for the bar
 // (Scenes: "cpd-beside" while its Font bar is open, PAD-452, so this tab hangs from that one).
 // line, openFont (Scenes, PAD-514): the line of text selected, its own color, and the Font bar.
+// picked (Simon, 2026-11-19: "X Assets selected"): what is selected on the host, {n, locked, ok} - n in all, locked
+// the game's own ones not unlocked, ok (optional) the ones the profile reaches (else the file's count); the rest draw
+// no picture of their own (a group in Scenes...). null: the file's count
+function SelectedCount({ picked, file }) {
+  const n = picked ? picked.n : file ? (file.count || 1) : 0;
+  const ok = picked && typeof picked.ok === "number" ? picked.ok : file ? (file.count || 1) : 0;
+  const locked = picked ? picked.locked || 0 : 0;
+  const left = n - ok;
+  const short = `${n} ${n === 1 ? "asset" : "assets"} selected` + (n && left > 0 ? `: ${ok} take${ok === 1 ? "s" : ""} a profile`
+    + (locked ? ` (${locked} locked)` : "") : "");
+  const long = !n ? "Nothing selected. Click a file to give it a profile of its own; Shift-click or Ctrl-click for several."
+    : `${n} selected. ${ok === n ? (n === 1 ? "It takes" : "Each takes") + " the profile on show here."
+      : `${ok} can take a color profile; ${locked ? `${locked} ${locked === 1 ? "is" : "are"} the game's own, locked until the Advanced panel unlocks ${locked === 1 ? "it" : "them"}` : ""}${locked && left - locked > 0 ? ", and " : ""}${left - locked > 0 ? `${left - locked} draw${left - locked === 1 ? "s" : ""} no picture of ${left - locked === 1 ? "its" : "their"} own` : ""}.`}`;
+  return html`<div class=${cx("cpd-file cpd-selcount small", !n && "muted")} ...${tip(long)}>
+    <span class="cpd-oneline">${short}</span></div>`;
+}
+
 export function ColorBar({ open, setOpen, host = "scenes", startMode = null, file = null, cls = "",
-  line = null, openFont = null }) {
+  line = null, openFont = null, picked = null }) {
   const s = useNs("color");
   const h = HOSTS[host] || HOSTS.scenes;
   const lookState = useNs(h.lookNs || "color");
@@ -282,8 +466,10 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
       call("color.set_mode", startMode).then(() => call("color.panel_open"));
     } else call("color.panel_open");
   }, [open]);
-  // the file clicked: the bar's Files mode is its profile while the bar is open here
-  const fileKey = file ? `${file.kind}\n${file.rel}\n${file.on}\n${(file.more || []).join("\n")}` : "";
+  // the file clicked: the bar's Files mode is its profile while the bar is open here (its label too: a picture given
+  // another replacement under the same row - a theme's Choose..., or a theme picked before its preview came back -
+  // kept the old file's name in SELECTED)
+  const fileKey = file ? `${file.kind}\n${file.rel}\n${file.on}\n${file.label || ""}\n${(file.more || []).join("\n")}` : "";
   useEffect(() => {
     if (!open || !s.per_file) return;
     if (file) call("color.set_file", file.kind, file.rel, file.label || "", file.on, file.attach || null, file.more || []);
@@ -291,6 +477,9 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
   }, [open, fileKey, s.per_file]);
   useEffect(() => () => { call("color.set_file"); }, []);
   const mode = s.per_file ? (s.mode || "display") : "display";
+  const tools = html`<div class="cpd-file cpd-tools"><div class="eyebrow">File Color Profile Tools</div>
+    <div class="cpd-four"><${UndoRedo} s=${s} flush=${flush} size="xs" kind="" />
+      <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div></div>`;
   // the dots: the host's Preview colors row where it has one, else the profiles' own word
   const parts = (look && look.parts) || s.parts || {};
   return html`<div class=${cx("cpd", open && "open", cls)} ref=${barRef}
@@ -308,7 +497,7 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
         onKeyDown=${(e) => undoKey(e, flush)}>
       ${open ? html`<${Grip} barRef=${barRef} width=${width} setWidth=${setWidth} />` : null}
       <div class="cpd-hd">
-        <span class="cpd-title">Color profiles</span>
+        <span class="cpd-title">Color profiles <${SpectrumPal} /></span>
         <span class="sp"></span>
         <${Button} size="xs" kind="ghost" icon="palette" onClick=${() => call("ui.select_tab", "color")}
           title="The Color profile tab: the same profiles with a test card, a before/after wipe and what each one does" />
@@ -328,14 +517,16 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
       <div class="cpd-body" role="tabpanel">
         <p class="small muted cpd-words">${s.per_file ? MODE_WORDS[mode] || MODE_WORDS.display
           : "Corrects your replaced pictures and videos when you build."}</p>
-        <div class="row cpd-show"><${ShowHere} mode=${mode} look=${look} host=${host} /><span class="sp"></span>
-          <${UndoRedo} s=${s} flush=${flush} size="xs" />
-          <${CopyPaste} p=${p} update=${update} mode=${mode} name=${s.name} /></div>
-        ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} host=${host} />` : null}
+        ${/* Simon (2026-11-19): the profile's own tools in a panel of their own, four equal boxes - under the Selected
+             panel in Files, where the bar has one; first in the other modes */""}
+        ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} host=${host} tools=${tools} />` : tools}
         ${line ? html`<${TextColorLine} line=${line} openFont=${openFont} />` : null}
-        <div class="cpd-status">${statusNote(s, line && line.own && !line.game ? line.hex : null)}</div>
+        ${/* Simon (2026-11-19): "stop panels moving that can stay where they are" - the status on one line, then the
+             game's own assets and the selection count, each always there at the same height */""}
+        <div class="cpd-status"><${StatusLine} s=${s} ownColor=${line && line.own && !line.game ? line.hex : null} /></div>
+        ${s.per_file && mode === "assets" ? html`<${WhichFilesNotes} s=${s} />
+          <${SelectedCount} picked=${picked} file=${s.file} />` : null}
         ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
-        ${s.per_file && mode === "assets" && !s.file ? html`<${WhichFiles} s=${s} />` : null}
         <${Controls} s=${s} p=${p} update=${update} />
         <${Ranges} s=${s} p=${p} update=${update} />
         <${CurveEditor} s=${s} p=${p} update=${update} />

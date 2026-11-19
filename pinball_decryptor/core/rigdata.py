@@ -175,6 +175,124 @@ def ensure_cards(distro: str, log=None, runner=None) -> Optional[str]:
     return CARDS_MOUNT
 
 
+# ---- a user's card cache, on a disk of its own (PAD-1459) ---------------------
+#: A user has no store (`cardstore.ps1` is a developer's script), so their
+#: Spike 2 cards were cached inside a Linux disk - and a WSL disk never gives
+#: space back to C:. The cache is mostly the same blocks over and over: a
+#: custom build is the stock card with a few files changed, an LE card shares
+#: 73-80% with its Pro (PAD-1453: David's 101 GiB of cache held 28.8 GiB of
+#: unique blocks). So the app gives it a THIRD disk, made the way the work disk
+#: is (diskpart, `wsl --mount --vhd`, no administrator), but XFS with reflink:
+#: cardmount.sh caches into it, shares each new copy's identical blocks with
+#: what is there (storededupe.py, after the copy, off the boot path), and
+#: counts its limit by the disk's real use - so the same 64 GB holds about
+#: twice the builds. Never made where the store exists: that one holds the
+#: cache already.
+CACHE_DISK_MOUNT_NAME = "padcache"
+CACHE_DISK_MOUNT = "/mnt/wsl/" + CACHE_DISK_MOUNT_NAME
+
+#: The disk's maximum: the cache's limit plus the room one more card's copy
+#: needs before its blocks are shared (a compact copy is 6-10 GB; 32 GB covers
+#: the largest card's whole image). Expandable, so the maximum costs nothing
+#: until it is used; XFS writes only a few MB of metadata when it is made
+#: (measured: an empty 96 GB volume is a 138 MB file), not ext4's 4%.
+CACHE_DISK_ROOM_GB = 32
+#: cardmount.sh's own default limit on a disk of its own (PAD_CACHE_MAX_GB).
+CACHE_LIMIT_GB = 64
+
+_CACHE_DISK_IS_MOUNTED = ('mountpoint -q "%s" && echo mounted || echo no'
+                          % CACHE_DISK_MOUNT)
+
+
+def cache_disk_path() -> str:
+    override = os.environ.get("PAD_CACHE_DISK")
+    if override:
+        return override
+    from . import wsl_place
+    return os.path.join(wsl_place.data_dir(), "pad-cardcache.vhdx")
+
+
+def cache_disk_exists() -> bool:
+    return os.path.isfile(cache_disk_path())
+
+
+def cache_disk_size_gb(limit_gb: int = 0, used_gb: int = 0) -> int:
+    """The maximum to make the disk with: room for the cache's limit (or
+    for what the old cache already holds, if that is more) and one more
+    card's copy."""
+    return max(int(limit_gb or CACHE_LIMIT_GB), int(used_gb or 0)) \
+        + CACHE_DISK_ROOM_GB
+
+
+def cache_disk_attached(distro: str, runner=None) -> bool:
+    run = runner or _run
+    try:
+        out = run(["bash", "-c", _CACHE_DISK_IS_MOUNTED], timeout=60,
+                  distro=distro)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return out.returncode == 0 and "mounted" in _text(out.stdout)
+
+
+def attach_cache_disk(runner=None) -> None:
+    run = runner or _run
+    out = run(["wsl.exe", "--mount", "--vhd", cache_disk_path(),
+               "--name", CACHE_DISK_MOUNT_NAME, "--type", "xfs"])
+    if out.returncode != 0:
+        # a failed mount leaves the disk attached: let it go
+        run(["wsl.exe", "--unmount", cache_disk_path()])
+        raise RuntimeError(
+            "could not attach the card cache disk: %s"
+            % (_text(out.stdout).strip() or "exit %d" % out.returncode))
+
+
+def ensure_cache_disk(distro: str, mkfs_argv, size_gb: int = 0, log=None,
+                      runner=None) -> Optional[str]:
+    """Make the card cache disk if it does not exist, and attach it.
+
+    *mkfs_argv* is how to run ``cachedisk.sh mkfs`` as root in *distro*
+    (the rig's own folder is the caller's to know); the device is appended.
+    Returns the mountpoint, or None where it does not apply: not Windows, or
+    the card store exists (it is the cache there). Raises with a sentence if
+    a step fails, and a disk that was never formatted is deleted again, so
+    the next Start tries afresh rather than mounting an empty file."""
+    if sys.platform != "win32" or cards_exists():
+        return None
+    say = log or (lambda _m: None)
+    run = runner or _run
+    path = cache_disk_path()
+    if not cache_disk_exists():
+        gb = size_gb or cache_disk_size_gb()
+        say("Giving the Spike 2 card cache a disk of its own (up to %d GB; "
+            "identical blocks are stored once)…" % gb)
+        _create_vhdx(path, gb * 1024, run)
+        try:
+            _format_new_disk(distro, runner=runner, path=path,
+                             mkfs=lambda dev: list(mkfs_argv) + [dev],
+                             what="the card cache disk")
+        except Exception:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            raise
+    if not cache_disk_attached(distro, runner=runner):
+        attach_cache_disk(runner=runner)
+    return CACHE_DISK_MOUNT
+
+
+def cache_disk_delete(runner=None) -> bool:
+    run = runner or _run
+    run(["wsl.exe", "--unmount", cache_disk_path()])
+    try:
+        os.remove(cache_disk_path())
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def size_on_disk() -> int:
     """Bytes the disk is actually costing, which is what a user deciding
     whether to delete it needs to know."""
@@ -203,13 +321,15 @@ def _text(raw) -> str:
 def create(runner=None) -> None:
     """Make the VHDX with diskpart, which needs no administrator and no
     Hyper-V - the two things a Windows Home machine does not have."""
-    run = runner or _run
-    path = disk_path()
+    _create_vhdx(disk_path(), MAX_MB, runner or _run)
+
+
+def _create_vhdx(path, max_mb, run) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     script = os.path.join(os.path.dirname(path), "create.dpt")
     with open(script, "w", encoding="ascii") as f:
         f.write('create vdisk file="%s" maximum=%d type=expandable\nexit\n'
-                % (path, MAX_MB))
+                % (path, max_mb))
     try:
         out = run(["cmd", "/c", "diskpart", "/s", script])
     finally:
@@ -275,7 +395,8 @@ def _devices(distro: str, runner) -> set:
     return {n.strip() for n in _text(out.stdout).splitlines() if n.strip()}
 
 
-def _format_new_disk(distro: str, runner=None) -> None:
+def _format_new_disk(distro: str, runner=None, path=None, mkfs=None,
+                     what="the data disk") -> None:
     """A freshly created VHDX has no filesystem, and `wsl --mount` without
     --bare would refuse to mount it.  So it goes on BARE first, gets an ext4
     on it, and comes back properly the second time.
@@ -285,11 +406,12 @@ def _format_new_disk(distro: str, runner=None) -> None:
     and formatting the wrong one is not a mistake worth risking to save a
     round trip."""
     run = runner or _run
+    path = path or disk_path()
     before = _devices(distro, run)
-    out = run(["wsl.exe", "--mount", "--vhd", disk_path(), "--bare"])
+    out = run(["wsl.exe", "--mount", "--vhd", path, "--bare"])
     if out.returncode != 0:
-        raise RuntimeError("could not attach the data disk: %s"
-                           % (_text(out.stdout).strip() or "exit %d" % out.returncode))
+        raise RuntimeError("could not attach %s: %s"
+                           % (what, _text(out.stdout).strip() or "exit %d" % out.returncode))
     try:
         new = _devices(distro, run) - before
         if len(new) != 1:
@@ -297,6 +419,14 @@ def _format_new_disk(distro: str, runner=None) -> None:
                 "could not tell which disk was just attached (%s) - nothing "
                 "was formatted" % (", ".join(sorted(new)) or "none appeared"))
         dev = "/dev/" + new.pop()
+        if mkfs is not None:
+            # the card cache disk (PAD-1459): XFS, through the rig's own
+            # cachedisk.sh, which brings the pinned mkfs.xfs
+            out = run(mkfs(dev), timeout=900, distro=distro)
+            if out.returncode != 0:
+                raise RuntimeError("could not put a filesystem on %s: %s"
+                                   % (what, (_text(out.stderr) or _text(out.stdout)).strip()))
+            return
         # THROUGH bash, WITH AN EXPLICIT PATH.  `wsl -e <prog>` execs
         # directly with a minimal PATH, and mkfs.ext4 lives in /usr/sbin - so
         # the direct form fails with "execvpe(mkfs.ext4) failed: No such file
@@ -321,7 +451,7 @@ def _format_new_disk(distro: str, runner=None) -> None:
             raise RuntimeError("could not put a filesystem on the data disk: %s"
                                % _text(out.stderr).strip())
     finally:
-        run(["wsl.exe", "--unmount", disk_path()])
+        run(["wsl.exe", "--unmount", path])
 
 
 def attach(distro: str, runner=None) -> None:

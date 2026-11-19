@@ -393,9 +393,10 @@ class Deduper:
 _SKIP_DIRS = {".dedupe", "lost+found"}
 
 
-def big_files(root, now=None):
+def big_files(root, now=None, quiet_s=QUIET_S):
     """Regular files >= MIN_FILE under root, one filesystem, nothing being
-    written right now (a .partial, or touched in the last QUIET_S)."""
+    written right now (a .partial, or touched in the last *quiet_s*: the card
+    cache's copier passes 0, having just renamed a finished copy into place)."""
     now = now or time.time()
     dev = os.stat(root).st_dev
     out = []
@@ -410,7 +411,7 @@ def big_files(root, now=None):
                 continue
             if not stat.S_ISREG(st.st_mode) or st.st_size < MIN_FILE:
                 continue
-            if n.endswith((".partial", ".part")) or now - st.st_mtime < QUIET_S:
+            if n.endswith((".partial", ".part")) or now - st.st_mtime < quiet_s:
                 continue
             out.append((p, st))
     return out
@@ -423,10 +424,10 @@ def _cache_dir(root):
     return os.path.join(m, ".dedupe")
 
 
-def cmd_dedupe(roots, dry):
+def cmd_dedupe(roots, dry, quiet_s=QUIET_S):
     cache = HashCache(_cache_dir(roots[0]))
     d = Deduper(cache, dry=dry)
-    files = [x for r in roots for x in big_files(r)]
+    files = [x for r in roots for x in big_files(r, quiet_s=quiet_s)]
     t0 = time.time()
     total = 0
     try:
@@ -669,6 +670,8 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     a1 = sub.add_parser("dedupe")
     a1.add_argument("--dry", action="store_true")
+    a1.add_argument("--quiet-s", type=int, default=QUIET_S,
+                    help="skip files written in the last N seconds (default %d)" % QUIET_S)
     a1.add_argument("roots", nargs="+")
     a2 = sub.add_parser("ingest")
     a2.add_argument("--delete", action="store_true", help="remove what src no longer has")
@@ -683,7 +686,7 @@ def main(argv=None):
     a3.add_argument("dst")
     a = ap.parse_args(argv)
     if a.cmd == "dedupe":
-        return cmd_dedupe(a.roots, a.dry)
+        return cmd_dedupe(a.roots, a.dry, a.quiet_s)
     if a.cmd == "ingest":
         return cmd_ingest(a.src, a.dst, a.delete, a.host, a.host_min_gb)
     if a.cmd == "dezero":

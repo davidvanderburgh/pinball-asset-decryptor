@@ -29,7 +29,18 @@ drivers set. Every Spike 2 game and version, LE/Pro parity, proven in the emulat
 mode takes the whole game; trigger files switch the flippers; every coil's board rule (padled v7, cmd 41) is read
 before, off, on, off again and after `pm_own_game(0)`. X-Men LE and Pro 0.98: coils 8.0, 8.5, 8.6 (inputs 24, 25, 27:
 the flipper buttons) go to power 0 with the flippers off and come back on; no other rule changes; an on before any
-off is refused. Library sweep: below.
+off is refused. **Library sweep: all 53 newest builds pass** (2 to 4 flipper rules each: 21 builds 8.0/8.5, 12
+8.0/8.5/8.7, 11 8.0/8.5/8.6, 9 all four; King Kong LE crashed once in boot, before any game, and passed on its rerun;
+the first sweep's King Kong Pro start-of-game crash did not repeat either). Two findings on the way:
+
+- **D&D LE/Pro 1.10 and Metallica 1.04 clear a rule with the short frame** `41 <coil>` (`88 03 41 05 2f 00`), where
+  X-Men sends the whole rule with power 0 (PAD_NB_TRACE). hwshim's rule table (padled v7, which the VPX bridge reads
+  for live coils too) never saw those clears: `coil_rule_note` takes the short form now.
+- **Metallica's own flipper policy turned them back on.** The framework re-decides each flipper by asking its listeners
+  (bus hook 0x40; answer 1 off, 2 on; X-Men LE 0x38a260 = flippers_on + 0x78), and Metallica's listener says on: with
+  the runtime switching them off each tick, its flipper board got ~950 off/on rule pairs a second and the flippers
+  stayed live. `site flipper_query_call` (that policy's call, flippers_on + 0xbc, on all 53) is wrapped by the runtime,
+  which answers 1 while a mode has them off - the game's own decision route, no fight.
 
 ## Next (runs 2+), in this order
 

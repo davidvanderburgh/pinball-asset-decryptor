@@ -707,6 +707,10 @@ site multiball_serve       0x00388f88 0xe92d41f0 0xe301e16a
 # and slings off too; the runtime kills the flippers alone
 site flippers_off         0x003f1898 0xe92d4070 0xe3065244
 site flippers_on          0x003f196c 0xe92d4070 0xe3065244
+# PAD-1406: the framework's flipper policy asks its listeners (bus hook 0x40: 1 = off, 2 = on) whether each flipper may
+# be on, and switches it as answered (flippers_on + 0x78; this call at +0x44): while a whole-game mode has the flippers
+# off the runtime answers 1 here, as a rule of the game's would - Metallica's own listener re-enabled them every pass
+site flipper_query_call  0x003f1a28 0xeb002cf2 0xe3500000
 value shooter_lane_switch 62  # the served ball lands here (plunge.py: SHOOTER LANE); the flippers are back then
 data multiball_record      0x007d3930  # the framework's multiball record (the serve's r5): +0 its ball save's ticks, +4 the grace after it - drain to one ends the save
 

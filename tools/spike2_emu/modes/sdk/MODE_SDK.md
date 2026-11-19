@@ -1629,7 +1629,8 @@ A mode that is the whole game (`pm_own_game`, above) has switched off the rules 
 "dead flippers" feature, the end of a wizard mode - so it may do it itself: `pm_flippers(0)` switches them off and
 `pm_flippers(1)` back on (the blocks: Mechanisms, *Flippers off* / *Flippers back on*). It goes through the game's own
 code, the framework's all-flippers off and on that PAD-733 found on Godzilla (`site flippers_off` / `flippers_on`, placed
-on every newest build by code: Uncanny X-Men LE 0.98 `0x38a114` / `0x38a1e8`, Pro `0x3ca20c` / `0x3ca2e0`). They set
+on every newest build by code: Uncanny X-Men LE 0.98 `0x38a114` / `0x38a1e8`, Pro `0x3ca20c` / `0x3ca2e0`). Emulator-proven on all 53 newest builds:
+each one's 2 to 4 flipper rules (padled v7) go dead with them off and come back on, and nothing else changes. They set
 or clear each flipper record's enable bit and nothing else; the node board's own flipper rule follows it, so the coils
 fire, when they fire, at the game's own powers, from the board, as they always do. The flippers alone: slingshots, pop
 bumpers, kickbacks and the ball devices play on.
@@ -1637,7 +1638,11 @@ bumpers, kickbacks and the ball devices play on.
 The runtime's limits, not the mode's to change:
 
 - Off: only the mode that has the whole game, in a game, not on a tilted ball, not while a drain to one ball runs.
-  It lasts the ball: the runtime asks again every tick (the game's own status updates would bring them back).
+  It lasts the ball. The framework re-decides each flipper now and then by asking its listeners (bus hook `0x40`:
+  1 = off, 2 = on, then the single flipper's off or on), and a listener of the game's may answer on - Metallica 1.04's
+  did on every pass, so switching them off again each tick fought it (about 950 rule frames a second to its flipper
+  board, the flippers live). The runtime wraps that one call (`site flipper_query_call`, `flippers_on + 0xbc` on every
+  newest build) and answers 1 while a mode has them off, as a rule of the game's would.
 - Back on: only flippers a mode switched off. A tilt, the game's end of a ball (its bonus) and the game's own dead
   flippers are the game's, never undone from here.
 - They come back by themselves when the mode ends or gives the game its rules back mid-ball, and at the next ball

@@ -665,3 +665,7 @@ site  coop_lobby_add         0x00101a58 0xebfffe98 0xe2506000
 # apart on every build): pm_flippers for the mode that has the whole game, and pm_drain_to_one
 site flippers_off         0x0017d068 0xe92d4070 0xe30f5d50
 site flippers_on          0x0017d13c 0xe92d4070 0xe30f5d50
+# PAD-1406: the framework's flipper policy asks its listeners (bus hook 0x40: 1 = off, 2 = on) whether each flipper may
+# be on, and switches it as answered (flippers_on + 0x78; this call at +0x44): while a whole-game mode has the flippers
+# off the runtime answers 1 here, as a rule of the game's would - Metallica's own listener re-enabled them every pass
+site flipper_query_call  0x0017d1f8 0xebfd3e8b 0xe3500000

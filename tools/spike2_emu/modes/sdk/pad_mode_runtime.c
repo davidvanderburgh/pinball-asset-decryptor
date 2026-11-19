@@ -17617,7 +17617,12 @@ static void dto_ball_end(void)
  *   - off: only the mode that has the whole game, in a game, not on a tilted ball.
  *   - on: only flippers this route switched off. A tilt, the game's end of a ball (its bonus) and the game's own
  *     drain to one are the game's dead flippers, never turned back on here.
- *   - while off they are switched off again each tick (the game's own status updates bring them back, PAD-733).
+ *   - while off, the game's own flipper policy is answered "off": the framework re-decides each flipper by asking its
+ *     listeners (bus hook 0x40, from the call `site flipper_query_call`, flippers_on + 0xbc on every newest build: 1 =
+ *     off, 2 = on) and a listener of the game's may say on - Metallica 1.04's did on every pass, and the runtime's
+ *     re-off each tick fought it: ~950 rule frames a second to its flipper board (emulator, PAD_NB_TRACE), the
+ *     flippers live. So the runtime wraps that one call and answers 1 while a mode has them off, as a rule of the
+ *     game's would; it still switches them off again each tick (a no-op unless something else turned them on).
  *   - they come back on when the mode gives the game its rules back or ends mid-ball (not tilted); at the ball's end
  *     the game's own next ball brings them back, as after any ball; a tilt leaves them to the game. */
 static struct {
@@ -17625,6 +17630,37 @@ static struct {
     unsigned long since;
     char by[40];
 } fl;
+
+static pm_addr fl_query_target;         /* the policy's query, called through by fl_query */
+static int fl_query_armed;               /* 0 not yet, 1 the call wrapped, -1 not on this port */
+
+static unsigned long fl_query(unsigned long id, unsigned long args, unsigned long a2, unsigned long a3)
+{
+    if (id == 0x40u && fl.off && args) {
+        ((volatile unsigned *)args)[1] = 1u;         /* off: the policy switches this flipper off */
+        return 1u;
+    }
+    return ((unsigned long (*)(unsigned long, unsigned long, unsigned long, unsigned long))(unsigned long)fl_query_target)
+        (id, args, a2, a3);
+}
+
+static void fl_query_arm(void)
+{
+    pm_addr a;
+    if (fl_query_armed) return;
+    fl_query_armed = -1;
+    a = fn("flipper_query_call");
+    if (!a) {
+        say("flippers: this port names no flipper_query_call - the game's own flipper policy may switch them back on");
+        return;
+    }
+    if (!(fl_query_target = (pm_addr)hook_call(a, (void *)fl_query))) {
+        say("flippers: the flipper policy's call at 0x%08" PMA " could not be wrapped", a);
+        return;
+    }
+    fl_query_armed = 1;
+    say("flippers: the game's flipper policy is answered at 0x%08" PMA " while a mode has them off", a);
+}
 
 static int fl_sites(void)
 {
@@ -17657,14 +17693,17 @@ int pm_flippers(int on)
         say("flippers: %s asked them %s - refused (%s)", who, on ? "on" : "off", why[r]);
         return 0;
     }
-    ((void (*)(void))(unsigned long)fn(on ? "flippers_on" : "flippers_off"))();
+    /* fl.off changes BEFORE the game's call: a policy pass inside it is answered by the new state */
     if (on) {
-        say("flippers: %s - back on after %lu ms", who, pm_ms() - fl.since);
         fl.off = 0;
+        ((void (*)(void))(unsigned long)fn("flippers_on"))();
+        say("flippers: %s - back on after %lu ms", who, pm_ms() - fl.since);
     } else {
+        fl_query_arm();
         pm_snprintf(fl.by, sizeof fl.by, "%s", who);
-        fl.off = 1;
         fl.since = pm_ms();
+        fl.off = 1;
+        ((void (*)(void))(unsigned long)fn("flippers_off"))();
         say("flippers: %s - off (the flippers alone: slings, pops and the ball devices play on)", who);
     }
     return 1;

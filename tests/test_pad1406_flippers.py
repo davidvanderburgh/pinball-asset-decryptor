@@ -64,13 +64,24 @@ static int pm_in_game(void) { return in_game; }
 static int ball_tilted(void) { return tilted; }
 static void g_off(void) { printf("FLIPPERS OFF\n"); }
 static void g_on(void) { printf("FLIPPERS ON\n"); }
+static int has_query = 1;
+static unsigned long (*wrapped)(unsigned long, unsigned long, unsigned long, unsigned long);
+static unsigned long q_game(unsigned long id, unsigned long args, unsigned long a2, unsigned long a3)
+{ ((unsigned *)args)[1] = 2; printf("GAME POLICY %lx\n", id); return 1; }   /* a listener of the game's: on */
+static unsigned hook_call(unsigned a, void *w)
+{ wrapped = (unsigned long (*)(unsigned long, unsigned long, unsigned long, unsigned long))w; printf("WRAP %x\n", a);
+  return (unsigned)(unsigned long)q_game; }
 static unsigned long fn(const char *n)
 {
     if (!has_sites) return 0;
     if (!__builtin_strcmp(n, "flippers_off")) return (unsigned long)g_off;
     if (!__builtin_strcmp(n, "flippers_on")) return (unsigned long)g_on;
+    if (!__builtin_strcmp(n, "flipper_query_call")) return has_query ? 0x3ca39cul : 0;
     return 0;
 }
+static unsigned args[2];
+static void policy(void)
+{ unsigned long r; args[0] = 0; args[1] = 1; r = wrapped(0x40, (unsigned long)args, 0, 0); printf("POLICY %lu %u\n", r, args[1]); }
 """
 
 MAIN = r"""
@@ -96,6 +107,8 @@ int main(void)
     in_game = 0; printf("R %d\n", pm_flippers(0)); in_game = 1;
     dto.state = 1; printf("R %d\n", pm_flippers(0)); dto.state = 0;
     has_sites = 0; printf("R %d\n", pm_flippers(0)); has_sites = 1;
+    puts("== H");                                         /* the game's policy: answered off while off, its own else */
+    pm_flippers(0); policy(); pm_flippers(1); policy();
     puts("== G");                                         /* the game ends while they are off */
     pm_flippers(0); in_game = 0; fl_tick(); in_game = 1; printf("OFF %d\n", pm_flippers_off());
     return 0;
@@ -120,6 +133,11 @@ def test_off_on_and_every_limit(tmp_path):
     f = p["F"]
     assert f.count("R 0") == 3 and "FLIPPERS" not in f
     assert "no game in play" in f and "drain to one" in f and "names no flippers off/on" in f
+    a2 = p["A"]
+    assert a2.count("WRAP 3ca39c") == 1                     # wrapped once, at the first off
+    h = p["H"]
+    assert "POLICY 1 1" in h and h.index("POLICY 1 1") < h.index("GAME POLICY 40")   # off: answered 1, not asked
+    assert h.rstrip().endswith("POLICY 1 2")                # on: the game's own listener answers
     assert "the game ended" in p["G"] and "FLIPPERS ON" not in p["G"] and "OFF 0" in p["G"]
 
 
@@ -144,6 +162,9 @@ def test_the_lines_are_the_framework_pair(key):
              for m in re.finditer(r"^site (flippers_off|flippers_on)\s+(0x[0-9a-f]{8}) (0x[0-9a-f]{8}) (0x[0-9a-f]{8})",
                                   text, re.M)}
     assert lines["flippers_on"][0] - lines["flippers_off"][0] == 0xd4          # the same framework file everywhere
+    q = re.search(r"^site flipper_query_call\s+(0x[0-9a-f]{8}) (0x[0-9a-f]{8}) (0x[0-9a-f]{8})", text, re.M)
+    assert q and int(q.group(1), 16) == lines["flippers_on"][0] + 0xbc          # the flipper policy's hook 0x40 call
+    assert int(q.group(2), 16) >> 24 == 0xeb and int(q.group(3), 16) == 0xe3500000   # bl, then cmp r0, #0
     elf = _elf(key)
     if not elf:
         pytest.skip("no %s game program here" % key)
@@ -196,3 +217,38 @@ def test_the_editor_knows_the_block():
     assert '{ op: "flippers", to: "off" }' in js and 'case "flippers":' in js and "ch.flippers_off" in js
     views = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes_views.js").read_text(encoding="utf-8")
     assert 'flippers: "mech"' in views and 'case "flippers":' in views
+
+
+SHIM = ROOT / "tools" / "spike2_emu" / "hwshim.c"
+SHIM_HOST = r"""#include <stdio.h>
+static struct { unsigned char rule_pwr[16][16], rule_in[16][16]; unsigned rule_sets; } shm, *led_shm = &shm;
+static unsigned led_shm_len = 16384;
+static void led_map(void) {}
+"""
+SHIM_MAIN = r"""
+static void put(unsigned char *f, int n) { unsigned s = 0; int i; for (i = 0; i < n - 2; i++) s += f[i]; f[n - 2] = (unsigned char)(0x100 - (s & 0xff)); }
+int main(void)
+{
+    unsigned char full[52] = { 0x88, 0x31, 0x41, 0x05, 0xf5, 0x04 }, shrt[6] = { 0x88, 0x03, 0x41, 0x05, 0, 0 };
+    full[26] = 0x40 | 25;
+    put(full, 52); coil_rule_note(full, 52);
+    printf("SET %u %u %u\n", shm.rule_pwr[8][5], shm.rule_in[8][5], shm.rule_sets);
+    put(shrt, 6); coil_rule_note(shrt, 6);
+    printf("SHORT %u %u %u\n", shm.rule_pwr[8][5], shm.rule_in[8][5], shm.rule_sets);
+    coil_rule_note(full, 52); shrt[4] ^= 1; coil_rule_note(shrt, 6);      /* a bad checksum changes nothing */
+    printf("BAD %u %u\n", shm.rule_pwr[8][5], shm.rule_sets);
+    return 0;
+}
+"""
+
+
+def test_the_shim_reads_a_short_rule_clear(tmp_path):
+    """D&D LE/Pro 1.10 and Metallica 1.04 clear a coil's rule with `41 <coil>` alone (`88 03 41 05 2f 00`, PAD_NB_TRACE):
+    the rig's rule table (padled v7, the VPX bridge's live-coil list) must show the flipper dead then too."""
+    src = SHIM.read_text(encoding="utf-8")
+    a = src.index("static void coil_rule_note(const unsigned char *p, int n)")
+    body = src[a:src.index("\n}\n", a) + 3]
+    out = _host_run(tmp_path, SHIM_HOST + body + SHIM_MAIN, flags=("-Wno-unused-function",))
+    assert "SET 245 89 1" in out                    # 0x40 | 25 kept as the shim stores it
+    assert "SHORT 0 0 2" in out
+    assert "BAD 245 3" in out

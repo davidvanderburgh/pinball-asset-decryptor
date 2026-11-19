@@ -841,6 +841,14 @@ def bank_slot_key(bank, record):
     return -(((int(bank) << 16) | int(record)) + 1)
 
 
+def bank_of_key(key):
+    """PAD-1414: ``(bank, record)`` of a :func:`bank_slot_key` (below zero), or None for an idx."""
+    if not isinstance(key, int) or isinstance(key, bool) or key >= 0:
+        return None
+    k = -int(key) - 1
+    return k >> 16, k & 0xFFFF
+
+
 def slot_key(rel):
     """The slot number of *rel*: its idx (``idx2095`` -> 2095), or PAD-1378 a music bank's song's
     :func:`bank_slot_key`; None for neither."""

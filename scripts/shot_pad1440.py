@@ -1,13 +1,14 @@
 """PAD-1440 proof shot: Stern's era switcher, with and without a preview code.
 
-    python scripts/shot_pad1440.py <repo> <out_png> <project> [--codes]
+    python scripts/shot_pad1440.py <repo> <out_png> <project> [--codes] [--gear]
 
 Serves <repo> on <project> (a scratch folder: the capture server rewrites caches in it), picks
 Stern and opens Extract. With no ``--codes`` the settings hold no preview code (every user's
 copy); with ``--codes`` they hold this PC's own (David's). Before (main): no code = no SPIKE 3
 pill at all; a code = SPIKE 3 with a BETA badge. After: SPIKE 3 is there for everyone, no badge.
 Opens the header's era menu and writes <out_png> (the window) and <out_png minus .png>_header.png
-(that menu, cropped).
+(that menu, cropped). ``--gear`` opens the Settings menu instead: with a code, main lists
+"Preview features..."; with Spike 3 released there is no preview left to unlock, so it goes.
 Needs Playwright (the user site-packages one) and the installed Edge.
 """
 import json
@@ -69,11 +70,16 @@ def main():
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             time.sleep(4)
-            page.get_by_text("Stern Pinball").first.click()     # the era + manufacturer menu
+            gear = "--gear" in sys.argv[4:]
+            if gear:                                            # the Settings menu
+                page.get_by_role("button", name="Settings", exact=True).first.click()
+            else:                                               # the era + manufacturer menu
+                page.get_by_text("Stern Pinball").first.click()
             time.sleep(1)
             page.screenshot(path=out)
             page.screenshot(path=out[:-4] + "_header.png",
-                            clip={"x": 0, "y": 0, "width": 700, "height": 520})
+                            clip={"x": 900, "y": 0, "width": 600, "height": 700} if gear else
+                            {"x": 0, "y": 0, "width": 700, "height": 520})
             print("shot", out, flush=True)
             browser.close()
     finally:

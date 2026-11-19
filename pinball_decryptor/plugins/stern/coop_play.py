@@ -1653,6 +1653,20 @@ def pick_screens(project, characters=None, words_for=None, classic=None, videos=
             (x, y), art = got
             out.append(dict(name=CLASSIC_NODE % (i + 1), art_rgba=art, words=" ", x=float(CARD_AT[0] + x),
                             y=float(CARD_AT[1] + y)))
+    for i in range(n):                        # PAD-1450: each one's view card for a later ball, and the hint
+        out.append(dict(name=VIEW_NODE % (i + 1),
+                        art_rgba=pick_card(project, chars, i, words_for, chars.get("theme"), view=True),
+                        words=" ", words_name=VIEW_NODE % (i + 1) + "_Words",
+                        x=float(VIEW_AT[0]), y=float(VIEW_AT[1]), words_at=VIEW_WORDS_AT,
+                        words_scale=VIEW_WORDS_SCALE))
+    for i in range(n if classic else 0):      # PAD-1450 x PAD-1449: a CHARACTERS game has no abilities: its patch
+        got = classic_patch(project, chars, i, words_for, chars.get("theme"), view=True)
+        if got is not None:
+            (x, y), art = got
+            out.append(dict(name=VIEW_CLASSIC_NODE % (i + 1), art_rgba=art, words=" ", x=float(VIEW_AT[0] + x),
+                            y=float(VIEW_AT[1] + y)))
+    out.append(dict(name=PEEK_NODE, art_rgba=peek_hint(chars.get("theme")), words=" ",
+                    x=float(PEEK_AT[0]), y=float(PEEK_AT[1])))
     team = team_words(project)
     for i in range(len(STYLES)):              # PAD-1449: the style chooser's cards, after the characters' (over them)
         out.append(dict(name=STYLE_NODE % (i + 1), art_rgba=style_card(project, chars, i, chars.get("theme"), team=team),
@@ -1798,19 +1812,20 @@ def style_card(project, characters, index, theme=None, team="your team", scale=2
     return out
 
 
-def classic_patch(project, characters, index, words_for=None, theme=None, window=False):
+def classic_patch(project, characters, index, words_for=None, theme=None, window=False, view=False):
     """PAD-1065: the part of character *index*'s pick card that Classic (CO-OP PLAY 4-6) draws differently: the
     card as a character without an ability draws it (NO SPECIAL ABILITY, "Plays as the game always does."), cut to
     the box where it differs from the card with its ability, out to multiples of 4. ``((x, y) in the card, RGBA)``,
-    or None when the character has no ability (its card says so already)."""
+    or None when the character has no ability (its card says so already). PAD-1450: with *view*, the same for its
+    view card (:func:`pick_card`'s *view*)."""
     import numpy as np
     chars = _characters(characters)
     if not chars["list"][index]["powers"]:                  # round 6: a list of powers (none: the card says so)
         return None
-    full = pick_card(project, chars, index, words_for, theme, window=window)
+    full = pick_card(project, chars, index, words_for, theme, window=window, view=view)
     plain = pick_card(project, dict(chars, list=[dict(c, powers=[], header="", text="") if k == index else c
                                                  for k, c in enumerate(chars["list"])]), index, words_for, theme,
-                      window=window)
+                      window=window, view=view)
     ys, xs = np.nonzero(np.any(full != plain, axis=2))
     if not len(xs):
         return None
@@ -2677,6 +2692,52 @@ TIMER_TEXT_X = 1025
 TIMER_WORDS_SCALE = 0.8
 TIMER_WORDS_AT = (round(TIMER_TEXT_X - CARD_SIZE[0] / 2 * TIMER_WORDS_SCALE, 1),
                   float((TIMER_BOX[1] + TIMER_BOX[3]) // 2))
+# PAD-1450 (DoomWalrus666): "hold left flipper to see character card" at the start of each later ball. The card a
+# teammate sees is the pick card's look with only their own character: shorter (no roster strip), the title without
+# its CHOOSE, and a box in the header where the runtime says whose it is (PLAYER 2, TEAM 1 P2). It sits where the pick
+# card's middle is. The hint is a small pill above the bottom-right score panel.
+VIEW_NODE = "PadCoopView_%d"
+VIEW_CLASSIC_NODE = "PadCoopViewClassic_%d"   # its Classic patch (a CHARACTERS game)
+VIEW_SIZE = (CARD_SIZE[0], 420)
+VIEW_AT = (CARD_AT[0], CARD_AT[1] + (CARD_SIZE[1] - VIEW_SIZE[1]) // 2)
+VIEW_BOX = (900, 20, 1240, 68)
+VIEW_WORDS_SCALE = 0.8
+VIEW_WORDS_AT = (round((VIEW_BOX[0] + VIEW_BOX[2]) / 2 - VIEW_SIZE[0] / 2 * VIEW_WORDS_SCALE, 1),
+                 float((VIEW_BOX[1] + VIEW_BOX[3]) // 2))
+PEEK_NODE = "PadCoopPeek"
+PEEK_TEXT = "HOLD LEFT FLIPPER TO SEE CHARACTER CARD"
+PEEK_SIZE = (460, 36)
+#: right-aligned above Godzilla's bottom-right score panel (its PLAYER 4 plate starts about y 606 on the glass)
+PEEK_AT = (1360 - 14 - PEEK_SIZE[0], 564)
+
+
+def view_title(title):
+    """PAD-1450: the view card's title, the pick's without its CHOOSE ("CHOOSE YOUR GODZILLA" -> "YOUR GODZILLA");
+    a title that does not start so gives "YOUR CHARACTER"."""
+    t = " ".join(str(title or "").split())
+    return t[7:] if t.upper().startswith("CHOOSE ") and len(t) > 7 else "YOUR CHARACTER"
+
+
+def peek_hint(theme=None, text=PEEK_TEXT):
+    """PAD-1450: the hint pill as a premultiplied RGBA array of :data:`PEEK_SIZE`: dark glass, an accent edge, the
+    words in white."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    th = theme_of(theme)
+    S = 2
+    W, H = PEEK_SIZE[0] * S, PEEK_SIZE[1] * S
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((0, 0, W - 1, H - 1), radius=H // 2, fill=(6, 8, 14, 215), outline=_hex(th["accent"])[:3] + (255,),
+                        width=2 * S)
+    f = _fit(d, text, _TEXT_FONTS, W - 36 * S, 19 * S, 10 * S)
+    d.text((W / 2, H / 2), text, font=f, fill=(255, 255, 255, 255), anchor="mm")
+    out = np.asarray(img.resize(PEEK_SIZE, Image.LANCZOS), dtype=np.uint8).copy()
+    a = out[..., 3:4].astype(np.uint16)
+    out[..., :3] = (out[..., :3].astype(np.uint16) * a // 255).astype(np.uint8)
+    return out
+
+
 #: the default look; a preset may give its own ("theme": {"title", "accent", "accent2"}). PAD-1079 (DoomWalrus666: "change
 #: the colors of certain text ... other alterations"): the owner's Look in the Characters dialog, a colour for each
 #: text and the panel ("" for sub/badge/count: the frame's colour, for panel: the stock wash), a background picture
@@ -2896,10 +2957,12 @@ def _card_lines(draw, text, width, S):
             return f, got, int(size * 1.4) * S
 
 
-def pick_card(project, characters, index, words_for=None, theme=None, scale=2, window=False):
+def pick_card(project, characters, index, words_for=None, theme=None, scale=2, window=False, view=False):
     """The pick's card for character *index* (``len(list)`` = RANDOM) as an RGBA array of :data:`CARD_SIZE`. PAD-1079:
     with *window*, a character with a video has its portrait frame see-through inside its lit edge (its clip plays
-    behind the HUD there)."""
+    behind the HUD there). PAD-1450: with *view*, the card a teammate holds the left flipper for at a later ball:
+    :data:`VIEW_SIZE`, the title without its CHOOSE (:func:`view_title`), a box for the runtime's PLAYER n where the
+    countdown is, and no count, no how to choose, no roster strip (only their own character)."""
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
     timed = bool(_characters(characters)["time"])
@@ -2908,7 +2971,7 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
         c_["tag"] = tag_of(c_["name"], [x["name"] for x in chars])
     th = theme_of(theme)
     S = scale
-    W, H = CARD_SIZE[0] * S, CARD_SIZE[1] * S
+    W, H = CARD_SIZE[0] * S, (VIEW_SIZE if view else CARD_SIZE)[1] * S
     n = len(chars)
     rnd = index >= n
     c = None if rnd else chars[index]
@@ -2932,13 +2995,18 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
         d.line([(x, y), (x + dx * L, y)], fill=A2[:3] + (255,), width=5 * S)
         d.line([(x, y), (x, y + dy * L)], fill=A2[:3] + (255,), width=5 * S)
     # the header: the title, a rule, and where in the roster this one is
-    hf = _fit(d, th["title"], _DISPLAY_FONTS, W * 0.62, 46 * S)
-    d.text((40 * S, 44 * S), th["title"], font=hf, fill=ink["heading"], anchor="lm")
-    tw = d.textlength(th["title"], font=hf)
-    rule_end = (TIMER_BOX[0] - 18) * S if timed else W - 190 * S
+    title = view_title(th["title"]) if view else th["title"]
+    hf = _fit(d, title, _DISPLAY_FONTS, W * 0.62, 46 * S)
+    d.text((40 * S, 44 * S), title, font=hf, fill=ink["heading"], anchor="lm")
+    tw = d.textlength(title, font=hf)
+    rule_end = (VIEW_BOX[0] - 18) * S if view else (TIMER_BOX[0] - 18) * S if timed else W - 190 * S
     if rule_end > 40 * S + tw + 18 * S:
         d.line([(40 * S + tw + 18 * S, 44 * S), (rule_end, 44 * S)], fill=A[:3] + (150,), width=2 * S)
-    if timed:                       # PAD-1044: the box the runtime counts the seconds down in, a clock at its left
+    if view:                        # PAD-1450: the box the runtime says whose card it is in
+        x0, y0, x1, y1 = (v * S for v in VIEW_BOX)
+        d.rounded_rectangle((x0, y0, x1, y1), radius=(y1 - y0) // 2, fill=(6, 8, 14, 255), outline=A2[:3] + (255,),
+                            width=3 * S)
+    elif timed:                     # PAD-1044: the box the runtime counts the seconds down in, a clock at its left
         x0, y0, x1, y1 = (v * S for v in TIMER_BOX)
         d.rounded_rectangle((x0, y0, x1, y1), radius=(y1 - y0) // 2, fill=(6, 8, 14, 255), outline=A2[:3] + (255,),
                             width=3 * S)
@@ -2948,7 +3016,8 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
         d.line([(cx, cy), (cx + 6 * S, cy + 3 * S)], fill=(255, 255, 255, 230), width=3 * S)
     count = "?? / %02d" % n if rnd else "%02d / %02d" % (index + 1, n)
     cf = _face(_DISPLAY_FONTS, 34 * S)
-    d.text((W - 40 * S, 44 * S), count, font=cf, fill=ink["count"], anchor="rm")
+    if not view:
+        d.text((W - 40 * S, 44 * S), count, font=cf, fill=ink["count"], anchor="rm")
     # the portrait, in a lit frame
     px, py, pw, ph = 40 * S, 84 * S, 380 * S, 306 * S
     img = _glow(img, (px - 4 * S, py - 4 * S, px + pw + 4 * S, py + ph + 4 * S), 16 * S, A[:3] + (230,), 10 * S, 6 * S)
@@ -3002,7 +3071,7 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
     hy = 372 * S
     hf2 = _face(_TEXT_FONTS, 20 * S)
     x = ix
-    for kind, words in (("lr", "FLIPPERS TO CHOOSE"), ("dot", "ACTION BUTTON TO SELECT")):
+    for kind, words in () if view else (("lr", "FLIPPERS TO CHOOSE"), ("dot", "ACTION BUTTON TO SELECT")):
         if kind == "lr":
             d.polygon([(x, hy), (x + 16 * S, hy - 11 * S), (x + 16 * S, hy + 11 * S)], fill=A2[:3] + (255,))
             d.polygon([(x + 40 * S, hy), (x + 24 * S, hy - 11 * S), (x + 24 * S, hy + 11 * S)], fill=A2[:3] + (255,))
@@ -3013,7 +3082,7 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
         d.text((x, hy), words, font=hf2, fill=_hex(th["help"], 220), anchor="lm")
         x += d.textlength(words, font=hf2) + 36 * S
     # the roster strip: every character and RANDOM, this one lit
-    tiles = chars + [None]
+    tiles = [] if view else chars + [None]
     gap = 10 * S
     sy, sh = 414 * S, 80 * S
     tw_ = min(96 * S, (W - 80 * S - gap * (len(tiles) - 1)) // max(1, len(tiles)))
@@ -3047,11 +3116,11 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
     base = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     base.paste(Image.new("RGBA", (W, H), (12, 14, 22, 255)), (0, 0), mask)
     img = Image.alpha_composite(base, img)
-    if window and c is not None and video_path(project, c):     # PAD-1079: the video's window, inside the frame line
+    if window and not view and c is not None and video_path(project, c):     # PAD-1079: the video's window, inside the frame line
         hole = Image.new("L", (pw - 6 * S, ph - 6 * S), 0)
         ImageDraw.Draw(hole).rounded_rectangle((0, 0, pw - 6 * S - 1, ph - 6 * S - 1), radius=11 * S, fill=255)
         img.paste((0, 0, 0, 0), (px + 3 * S, py + 3 * S), hole)
-    out = np.asarray(img.resize(CARD_SIZE, Image.LANCZOS), dtype=np.uint8).copy()
+    out = np.asarray(img.resize(VIEW_SIZE if view else CARD_SIZE, Image.LANCZOS), dtype=np.uint8).copy()
     # the game blends its pictures PREMULTIPLIED (emulator: a white line at alpha 7 came out bright white, a body at
     # alpha 240 let the city through): the colour goes in already scaled by its alpha, so the glow and the rounded
     # corners fade as drawn

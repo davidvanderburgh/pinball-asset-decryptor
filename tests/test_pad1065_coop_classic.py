@@ -100,7 +100,10 @@ def test_each_classic_patch_turns_its_card_into_no_special_ability():
     n = len(chars["list"])
     names = [s["name"] for s in scr]
     assert names[:n + 1] == ["PadCoop_%d" % (i + 1) for i in range(n)] + ["PadCoop_Random"]   # the cards first
-    assert names[n + 1:-3] == ["PadCoopClassic_%d" % (i + 1) for i in range(n)]            # then drawn over them
+    assert names[n + 1:2 * n + 1] == ["PadCoopClassic_%d" % (i + 1) for i in range(n)]      # then drawn over them
+    views = names[2 * n + 1:-3]                                       # PAD-1450: the view cards, their Classic
+    assert views[:n] == ["PadCoopView_%d" % (i + 1) for i in range(n)] and views[-1] == "PadCoopPeek"
+    assert all(v.startswith("PadCoopViewClassic_") for v in views[n:-1])
     assert names[-3:] == ["PadCoopStyle_1", "PadCoopStyle_2", "PadCoopStyle_3"]     # PAD-1449: the style chooser's
     for i in (0, 5, n - 1):
         patch = scr[n + 1 + i]

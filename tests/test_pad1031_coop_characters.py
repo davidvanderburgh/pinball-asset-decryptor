@@ -208,7 +208,9 @@ def _decl(src):
     """The character section's declarations, verbatim: from its #defines to the last of its globals."""
     start = src.index("#define COOP_CHARS 16")
     end = src.index("static int coop_dbl_armed;", start)
-    return src[start:src.index("\n", end) + 1]
+    # PAD-1450: the later ball's view card (coop_view_turn / coop_view_tick) is emulator-proven; here they do nothing
+    return src[start:src.index("\n", end) + 1] + ("static void coop_view_turn(void) {}\n"
+                                                    "static void coop_view_tick(void) {}\n")
 
 
 def _run(tmp_path, main=MAIN):
@@ -580,10 +582,13 @@ def test_the_pick_has_a_screen_for_each_character_and_random(tmp_path):
     screens = CP.pick_screens(project, words_for=CP.words_for())
     names = [s["name"] for s in screens]
     assert names[:3] == ["PadCoop_1", "PadCoop_2", "PadCoop_Random"]
-    # PAD-1449: the Classic patches (the start menu's CHARACTERS) and the style chooser's three cards after them
+    # PAD-1449: the Classic patches (the start menu's CHARACTERS) and the style chooser's three cards after them;
+    # PAD-1450: each character's view card (with its Classic patch) and the hint before the chooser's
     assert names[-3:] == ["PadCoopStyle_1", "PadCoopStyle_2", "PadCoopStyle_3"]
-    assert all(n.startswith("PadCoopClassic_") for n in names[3:-3])
-    for sc in [s for s in screens if not s["name"].startswith("PadCoopClassic_")]:   # one finished card each
+    assert names[-4] == "PadCoopPeek" and "PadCoopView_1" in names and "PadCoopView_2" in names
+    assert all(n.startswith(("PadCoopClassic_", "PadCoopView_", "PadCoopViewClassic_")) or n == "PadCoopPeek"
+               for n in names[3:-3])
+    for sc in [s for s in screens if s["name"].startswith(("PadCoop_", "PadCoopStyle_"))]:   # one finished card each
         assert sc["art_rgba"].shape == (CP.CARD_SIZE[1], CP.CARD_SIZE[0], 4) and sc["words"] == " "
         assert (sc["x"], sc["y"]) == CP.CARD_AT
     px, py = 40 + 190, 84 + 150                                        # the portrait's middle on card 2: the picture
@@ -620,9 +625,9 @@ def test_co_op_alone_puts_the_pick_screens_in_the_hud_and_names_the_scene(tmp_pa
     result = MW.ModePlan(project=project, profile=Prof(), port="", build=None)
     MW.coop_into(result, b"", str(tmp_path / "scratch"), stock_hud=b"HUD", stock_font=b"")
     # PAD-1028: + the award card; PAD-1219: + the final score's band
-    # PAD-1449: + the style chooser's three cards
-    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopStyle_1", "PadCoopStyle_2", "PadCoopStyle_3",
-                            "PadCoopAward_1", "PadCoopFinal"]
+    # PAD-1450: + the view card and the hint; PAD-1449: + the style chooser's three cards
+    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopView_1", "PadCoopPeek", "PadCoopStyle_1",
+                            "PadCoopStyle_2", "PadCoopStyle_3", "PadCoopAward_1", "PadCoopFinal"]
     (card, src), = result.replaced
     assert card == "godzilla_le/godzilla_le/assets/lcd/auto_loaded/32e6ae28/scene.radium"
     assert open(src, "rb").read() == b"HUD+screens"

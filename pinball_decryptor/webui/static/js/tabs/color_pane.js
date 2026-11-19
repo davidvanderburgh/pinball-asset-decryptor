@@ -37,7 +37,7 @@
 
 import { html, useEffect, useRef, useState, Button, Check, Icon, Seg, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { Controls, Ranges, CurveEditor, WhichFiles, WhichFilesNotes, EVERY_KINDS, MODES, MODE_WORDS, useProfile, statusNote,
+import { Controls, Ranges, CurveEditor, WhichFiles, WhichFilesNotes, EVERY_KINDS, MODES, MODE_WORDS, useProfile, StatusLine,
   UndoRedo, undoKey } from "./color.js";
 
 for (const href of ["/static/css/tabs/color.css", "/static/css/tabs/color_pane.css"]) {
@@ -298,8 +298,9 @@ function FileLine({ s, host, tools }) {
   return html`<div class="cpd-file cpd-sel">
     <div class="cpd-grid">
       ${tag("SELECTED")}
-      ${value(f && n > 1 ? `${label} and ${n - 1} more` : label,
-        f ? `${label}${n > 1 ? ` and ${n - 1} more` : ""}\n${String(f.rel || "").replace(/^@\d+:/, "")}` : "Nothing selected",
+      ${/* Simon (2026-11-19): the count has its own panel ("X assets selected"), so the box names the first file */""}
+      ${value(label,
+        f ? `${label}${n > 1 ? ` (first of ${n} selected)` : ""}\n${String(f.rel || "").replace(/^@\d+:/, "")}` : "Nothing selected",
         { none: !f })}
       ${tag("THEME", !themeLive)}
       ${value(themeValue, themeLive ? `Theme ${themeValue}\nThe theme picked on the Images tab: what you change here is this theme's`
@@ -345,7 +346,6 @@ function FileLine({ s, host, tools }) {
           ? (summary.n === null ? "…" : summary.n < 0 ? "? ASSETS" : `${summary.n} ${summary.n === 1 ? "ASSET" : "ASSETS"}`)
           : "NONE"}</span>
       </div>
-    ${!f ? html`<${WhichFilesNotes} s=${s} />` : null}
   </div>`;
 }
 
@@ -377,8 +377,25 @@ function TextColorLine({ line, openFont }) {
 // files selected with it that are not locked).  cls: more classes for the bar
 // (Scenes: "cpd-beside" while its Font bar is open, PAD-452, so this tab hangs from that one).
 // line, openFont (Scenes, PAD-514): the line of text selected, its own color, and the Font bar.
+// picked (Simon, 2026-11-19: "X Assets selected"): what is selected on the host, {n, locked, ok} - n in all, locked
+// the game's own ones not unlocked, ok (optional) the ones the profile reaches (else the file's count); the rest draw
+// no picture of their own (a group in Scenes...). null: the file's count
+function SelectedCount({ picked, file }) {
+  const n = picked ? picked.n : file ? (file.count || 1) : 0;
+  const ok = picked && typeof picked.ok === "number" ? picked.ok : file ? (file.count || 1) : 0;
+  const locked = picked ? picked.locked || 0 : 0;
+  const left = n - ok;
+  const short = `${n} ${n === 1 ? "asset" : "assets"} selected` + (n && left > 0 ? `: ${ok} take${ok === 1 ? "s" : ""} a profile`
+    + (locked ? ` (${locked} locked)` : "") : "");
+  const long = !n ? "Nothing selected. Click a file to give it a profile of its own; Shift-click or Ctrl-click for several."
+    : `${n} selected. ${ok === n ? (n === 1 ? "It takes" : "Each takes") + " the profile on show here."
+      : `${ok} can take a color profile; ${locked ? `${locked} ${locked === 1 ? "is" : "are"} the game's own, locked until the Advanced panel unlocks ${locked === 1 ? "it" : "them"}` : ""}${locked && left - locked > 0 ? ", and " : ""}${left - locked > 0 ? `${left - locked} draw${left - locked === 1 ? "s" : ""} no picture of ${left - locked === 1 ? "its" : "their"} own` : ""}.`}`;
+  return html`<div class=${cx("cpd-file cpd-selcount small", !n && "muted")} ...${tip(long)}>
+    <span class="cpd-oneline">${short}</span></div>`;
+}
+
 export function ColorBar({ open, setOpen, host = "scenes", startMode = null, file = null, cls = "",
-  line = null, openFont = null }) {
+  line = null, openFont = null, picked = null }) {
   const s = useNs("color");
   const h = HOSTS[host] || HOSTS.scenes;
   const lookState = useNs(h.lookNs || "color");
@@ -447,7 +464,11 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
              panel in Files, where the bar has one; first in the other modes */""}
         ${s.per_file && mode === "assets" ? html`<${FileLine} s=${s} host=${host} tools=${tools} />` : tools}
         ${line ? html`<${TextColorLine} line=${line} openFont=${openFont} />` : null}
-        <div class="cpd-status">${statusNote(s, line && line.own && !line.game ? line.hex : null)}</div>
+        ${/* Simon (2026-11-19): "stop panels moving that can stay where they are" - the status on one line, then the
+             game's own assets and the selection count, each always there at the same height */""}
+        <div class="cpd-status"><${StatusLine} s=${s} ownColor=${line && line.own && !line.game ? line.hex : null} /></div>
+        ${s.per_file && mode === "assets" ? html`<${WhichFilesNotes} s=${s} />
+          <${SelectedCount} picked=${picked} file=${s.file} />` : null}
         ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
         <${Controls} s=${s} p=${p} update=${update} />
         <${Ranges} s=${s} p=${p} update=${update} />

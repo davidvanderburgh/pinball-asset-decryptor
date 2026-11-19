@@ -972,6 +972,9 @@ export default function VideoTab() {
   const colorFile = barRow
     ? { kind: "videos", rel: barRow.rel, label: barRow.name, on: !!barRow.col, attach: { ns: "video" },
         more: selOpen.filter((x) => x.rel !== barRow.rel).map((x) => x.rel) } : null;
+  // Simon (2026-11-19): "X Assets selected" in the Colors bar - the rows selected, and the locked ones among them
+  const picked = cmpOpen ? null : { n: sel.size,
+    locked: rows.filter((x) => sel.has(x.rel) && x.col == null).length };
 
   const loadRow = (rel, delay = 200) => {
     clearTimeout(selectJob.current);
@@ -1310,7 +1313,7 @@ export default function VideoTab() {
   const emptyPlay = (side) => { if (currentRel) call("video.activate_pane", currentRel, side); };
 
   const withBar = (page) => html`<div class="cpd-shell" ref=${shellRef}>${page}${colorNs.has_project ? html`<${ColorBar} host="video" startMode="assets"
-    open=${colors} setOpen=${setColors} file=${colorFile} />` : null}</div>`;
+    open=${colors} setOpen=${setColors} file=${colorFile} picked=${picked} />` : null}</div>`;
   if (cmpOpen) {
     return withBar(html`<${CompareView} cmp=${cmp} byRel=${byRel} cs=${colorNs} look=${look}
       active=${activeTile ? activeTile.id : null} setActive=${setCmpActive} stopSeq=${s.stop_seq}

@@ -61,8 +61,21 @@ export default function ScenesTab() {
   const c = lay && lay.color;
   // PAD-438: a line of text has one too (kind "text"); a line in a font with colors of its
   // own shows that font picture's (kind "images")
-  const file = c && !c.locked && c.rel ? { kind: c.kind || "images", rel: c.rel, label: lay.name, on: !!c.on,
-    attach: { ns: "scenes", node: lay.id } } : null;
+  // Simon (2026-11-19): several layers selected said "No color profile is attached to this file" - only the layer
+  // clicked reached the Colors bar. Now every selected layer's picture does (more, as the Images and Video tabs send
+  // theirs): the one clicked first, then the rest of its kind; a picture two layers share counts once
+  const sels = t && (t.sels || []).length > 1 ? t.sels : lay ? [lay.id] : [];
+  const byId = new Map(((t && t.layers) || []).map((l) => [l.id, l]));
+  const chosen = sels.map((id) => byId.get(id)).filter(Boolean);
+  const usable = (l) => l.color && !l.color.locked && l.color.rel;
+  const head = c && usable(lay) ? lay : chosen.find(usable) || null;
+  const hc = head && head.color;
+  const file = hc ? { kind: hc.kind || "images", rel: hc.rel, label: head.name, on: !!hc.on,
+    attach: { ns: "scenes", node: head.id },
+    more: [...new Set(chosen.filter((l) => l !== head && usable(l) && (l.color.kind || "images") === (hc.kind || "images"))
+      .map((l) => l.color.rel))].filter((r) => r !== hc.rel) } : null;
+  const picked = { n: chosen.length, locked: chosen.filter((l) => l.color && l.color.locked).length,
+    ok: hc ? chosen.filter((l) => usable(l) && (l.color.kind || "images") === (hc.kind || "images")).length : 0 };
   // PAD-514: a line of text's own color (set in the Font bar), shown in the Colors bar too
   const props = t && t.props && (t.sels || []).length < 2 ? t.props : null;
   const line = props && props.kind === "Text" && props.font && props.font.colour
@@ -83,6 +96,6 @@ export default function ScenesTab() {
     ${body}
   </div>${ready && s.tree ? html`<${FontBar} open=${fontOn} setOpen=${setFont} t=${t} />` : null}${ready
     ? html`<${ColorBar} host="scenes" open=${colors} setOpen=${setColors} file=${file} cls=${fontOn ? "cpd-beside" : ""}
-        line=${line} openFont=${() => setFont(true)} />`
+        line=${line} openFont=${() => setFont(true)} picked=${picked} />`
     : null}</div>`;
 }

@@ -654,8 +654,13 @@ export default function ImagesTab() {
     const pics = picked();
     return pics.length ? pics : prevRel ? [prevRel] : [];
   };
+  // Simon (2026-11-19): "X Assets selected" in the Colors bar - the pictures selected, and the locked ones among them
+  const selRels = cmpOpen ? [] : picked();
+  const selCount = cmpOpen ? null : selRels.length ? { n: selRels.length,
+    locked: selRels.filter((r) => { const row = byRel.get(r); return row && row.c == null; }).length }
+    : { n: prevRel ? 1 : 0, locked: prevRel && !colorFile ? 1 : 0 };
   const bar = colorsOn ? html`<${ColorBar} host="images" startMode="assets" open=${colors} setOpen=${setColors}
-    file=${colorFile} />` : null;
+    file=${colorFile} picked=${selCount} />` : null;
   if (cmpOpen) {
     return html`<div class="cpd-shell"><${CompareView} cmp=${cmp} byRel=${byRel} cs=${colorNs} look=${look}
       active=${activeTile ? activeTile.id : null} setActive=${setCmpActive}

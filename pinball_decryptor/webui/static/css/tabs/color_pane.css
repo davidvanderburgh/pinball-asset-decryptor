@@ -63,8 +63,15 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-clipbtns { gap: 4px; }
 /* PAD-354: the note under the profile keeps one size as starting points are clicked, so the
    controls under it stay put (room for the longest of its messages at the bar's width) */
-.cpd-status { display: flex; min-height: 104px; }
+/* Simon (2026-11-19): the status on one line, the same height in every state (the rest in its tooltip), then the
+   game's own assets and the selection count, each a one-line panel that is always there - nothing below them moves */
+.cpd-status { display: flex; }
 .cpd-status > .note { flex: 1 1 auto; }
+.cpd-statusline { height: 34px; padding-top: 0; padding-bottom: 0; align-items: center; min-width: 0; }
+.cpd-statusline > .body-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cpd-oneline { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cp-which-now, .cpd-selcount { justify-content: center; height: 30px; padding-top: 0; padding-bottom: 0; }
+.cpd-status + .cp-which-now, .cp-which-now + .cpd-selcount { margin-top: 8px; }
 /* PAD-368: the file clicked, whose own profile the Files mode is on */
 .cpd-file { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border: 1px solid var(--line);
   border-radius: 6px; background: var(--panel-2, transparent); }

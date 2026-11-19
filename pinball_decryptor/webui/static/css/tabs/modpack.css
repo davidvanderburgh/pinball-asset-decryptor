@@ -15,6 +15,7 @@
 
 /* export / import tiles */
 .mp-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.mp-actions.mp-game { margin-top: 12px; }
 .mp-action { flex: 1 1 360px; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px;
   padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .mp-action .ic { flex: 0 0 36px; height: 36px; border-radius: 8px; display: inline-flex; align-items: center;

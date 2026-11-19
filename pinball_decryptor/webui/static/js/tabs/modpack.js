@@ -17,6 +17,10 @@ const T = {
   noProject: "No project folder yet — set it on the Extract tab.",
   exportTip: "Create a zip holding only your modified files, small enough to share.",
   importTip: "Apply a mod pack zip from another user onto this project's extracted assets.",
+  // PAD-1408: a maker's whole game, for other owners of the same game
+  gameTitle: "Share a Whole Game",
+  shareTip: "One file holding everything this project changes: your files, your modes with their compiled code, their sounds and clips, saved progress and settings. No file of the manufacturer's goes in: an owner loads it into the project of their own card and writes it, or builds it as an Edition beside the original.",
+  loadTip: "Load a game another owner shared into this project of your own card. Then write it to your card, or build it as an Edition on the Multi-boot tab.",
   moveTitle: "Move Your Mods to Another Card",
   routeA: "New game version, or the other model (Pro ↔ Premium): pick the new card image and build",
   routeAsub: "No extracting by hand: each card is extracted for you (once, and reused), checked for what it adds, and built with your mods.",
@@ -83,6 +87,24 @@ function PackCard({ s }) {
           <span class="small muted">${T.importTip}</span>
         </div>
         <${Button} kind="primary" icon="download" title=${T.importTip} onClick=${() => call("modpack.import_pack")}>Import Mod Pack…<//>
+      </div>
+    </div>
+    <div class="mp-actions mp-game">
+      <div class="mp-action">
+        <span class="ic"><${Icon} name="play" /></span>
+        <div class="stack grow" style="gap:2px">
+          <span class="t">Share whole game</span>
+          <span class="small muted">Your files, modes, their compiled code and settings in one file other owners load.</span>
+        </div>
+        <${Button} kind="primary" icon="upload" title=${T.shareTip} onClick=${() => call("modpack.share_game")}>Share Whole Game…<//>
+      </div>
+      <div class="mp-action">
+        <span class="ic"><${Icon} name="play" /></span>
+        <div class="stack grow" style="gap:2px">
+          <span class="t">Load a shared game</span>
+          <span class="small muted">A game another owner shared, onto your own card's project.</span>
+        </div>
+        <${Button} kind="primary" icon="download" title=${T.loadTip} onClick=${() => call("modpack.load_game")}>Load a Shared Game…<//>
       </div>
     </div>
   <//>`;

@@ -501,6 +501,8 @@ class App:
             on_back=self._on_back_to_picker,
             on_export=self._start_export,
             on_import=self._start_import,
+            on_share_game=self._start_share_game,
+            on_load_game=self._start_load_game,
             on_transfer_mods=self._start_transfer_mods,
             on_port_mods=self._start_port_mods,
             on_whats_new=self._start_whats_new,
@@ -3448,6 +3450,13 @@ class App:
         # PAD-1050: a file of modes (the Modes tab's Save to a file...) is not a
         # mod pack: judged as one, none of its files "belong to this extract"
         # and the box blamed the card
+        # PAD-1408: a shared game holds a mod pack and more: load it whole
+        from .core import game_file
+        head = game_file.game_file_about(zip_path)
+        if head is not None:
+            self.root.after(0, lambda: self._confirm_load_game(
+                zip_path, assets_dir, head, "Import Mod Pack"))
+            return
         about = modpack.modes_file_about(zip_path)
         if about is not None:
             self.root.after(0, lambda: self._offer_modes_file(
@@ -3510,6 +3519,137 @@ class App:
                 return
         self.window.select_tab("modes")
         modes.load_file(src)
+
+    # -- PAD-1408: a whole game, shared with other owners ----------------
+    def _game_project(self, title):
+        """The project folder Share/Load a game works on, or None (said why)."""
+        assets_dir = self.window.write_assets_var.get().strip()
+        if not assets_dir or not os.path.isdir(assets_dir):
+            messagebox.showwarning(title, "Select a project folder on the Write tab first.")
+            return None
+        if not os.path.isfile(os.path.join(assets_dir, ".checksums.md5")):
+            messagebox.showerror(title, "This project has no extract of its card "
+                                 "(.checksums.md5 is missing). Extract your card into it first.")
+            return None
+        return assets_dir
+
+    def _start_share_game(self):
+        """Share whole game...: the project's changed files, modes, their compiled code
+        and settings in one file other owners load (core.game_file)."""
+        if not self._current_mfr.capabilities.modpack:
+            return
+        assets_dir = self._game_project("Share Whole Game")
+        if not assets_dir:
+            return
+        zip_path = filedialog.asksaveasfilename(
+            title="Share Whole Game As",
+            defaultextension=".zip",
+            initialdir=self.window.last_browse_dir("mod_pack"),
+            initialfile="%s_game.zip" % os.path.basename(os.path.normpath(assets_dir)),
+            filetypes=[("Zip files", "*.zip"), ("All files", "*.*")],
+        )
+        if not zip_path:
+            return
+        self.window.remember_browse_dir("mod_pack", zip_path)
+        self.window.append_log("Sharing the whole game...", "info")
+        threading.Thread(target=self._share_game_worker, args=(assets_dir, zip_path),
+                         daemon=True).start()
+
+    def _share_game_worker(self, assets_dir, zip_path):
+        from .core import game_file
+        try:
+            # as Export Mod Pack: Replace-tab picks reach the disk at build time
+            for stage in (self._stage_pending_audio, self._stage_pending_video,
+                          self._stage_pending_image):
+                stage(assets_dir)
+            name = os.path.splitext(os.path.basename(zip_path))[0]
+            head = game_file.export_game(
+                assets_dir, zip_path, name=name,
+                log_cb=lambda t, l="info": self.msg_queue.put(LogMsg(t, l)),
+                progress_cb=lambda c, t, d="": self.msg_queue.put(ProgressMsg(c, t, d)))
+            n_stock = len(head.get("stock") or ())
+            text = ("Saved to:\n%s\n\n%s\n\nNo file of the manufacturer's is in it%s: an owner "
+                    "loads it into the project of their own card (Load a shared game... on the Mod "
+                    "Pack tab) and writes it to their card, or builds it as an Edition beside the "
+                    "original on the Multi-boot tab."
+                    % (zip_path, game_file.game_file_words(head),
+                       " (%d file(s) that are the card's own are taken from the owner's card "
+                       "instead)" % n_stock if n_stock else ""))
+            self.msg_queue.put(LogMsg("Shared game saved: %s" % zip_path, "success"))
+            self.root.after(0, lambda: messagebox.showinfo("Game Shared", text))
+        except Exception as e:                                   # noqa: BLE001
+            self.msg_queue.put(LogMsg("Share failed: %s" % e, "error"))
+            self.root.after(0, lambda e=e: messagebox.showerror("Share Failed", str(e)))
+
+    def _start_load_game(self):
+        """Load a shared game...: pick the file another owner shared, then load it."""
+        if not self._current_mfr.capabilities.modpack:
+            return
+        assets_dir = self._game_project("Load a Shared Game")
+        if not assets_dir:
+            return
+        zip_path = filedialog.askopenfilename(
+            title="Select a Shared Game",
+            initialdir=self.window.last_browse_dir("mod_pack"),
+            filetypes=[("Zip files", "*.zip"), ("All files", "*.*")],
+        )
+        if not zip_path:
+            return
+        self.window.remember_browse_dir("mod_pack", zip_path)
+        from .core import game_file
+        head = game_file.game_file_about(zip_path)
+        if head is None:
+            messagebox.showerror("Load a Shared Game", "%s is not a shared game saved by PAD. A "
+                                 "mod pack loads with Import Mod Pack..., a file of modes on the "
+                                 "Modes tab." % os.path.basename(zip_path))
+            return
+        self._confirm_load_game(zip_path, assets_dir, head, "Load a Shared Game")
+
+    def _confirm_load_game(self, zip_path, assets_dir, head, title):
+        """Main thread: say what the shared game holds, then load it on a worker."""
+        from .core import game_file
+        if not messagebox.askyesno(title, "%s\n\nLoad it into this project?\n  %s\n\nA mode "
+                                   "an earlier load of this game brought is replaced; your own "
+                                   "modes stay." % (game_file.game_file_words(head), assets_dir)):
+            return
+        self.window.append_log("Loading the shared game %s..." % os.path.basename(zip_path), "info")
+
+        def _run():
+            try:
+                res = game_file.import_game(
+                    zip_path, assets_dir,
+                    log_cb=lambda t, l="info": self.msg_queue.put(LogMsg(t, l)),
+                    progress_cb=lambda c, t, d="": self.msg_queue.put(ProgressMsg(c, t, d)))
+                self.msg_queue.put(UiCallMsg(self.window.reload_assets_tabs))
+                modes = None
+                if hasattr(self.window, "service"):
+                    modes = self.window.service("modes")
+                if modes is not None and hasattr(modes, "refresh"):
+                    self.msg_queue.put(UiCallMsg(modes.refresh))
+                lines = []
+                if res["applied"]:
+                    lines.append("%d changed file(s) of the card came in." % len(res["applied"]))
+                if res["skipped"]:
+                    lines.append("%d file(s) were skipped: this card has nothing they match "
+                                 "(each is named in the log)." % len(res["skipped"]))
+                if res["report"] is not None:
+                    lines.append("Modes: %s" % res["report"].summary())
+                if res["objects"]:
+                    lines.append("The maker's compiled code modes came too: a Write uses them "
+                                 "while the code modes stay as they came.")
+                if res["missing"]:
+                    lines.append("%d file(s) the game takes from the card are not on this card "
+                                 "(named in the log)." % len(res["missing"]))
+                lines.append("Write it to your card on the Write tab, or build it as an Edition "
+                             "beside the original on the Multi-boot tab.")
+                self.msg_queue.put(LogMsg("Shared game loaded.", "success"))
+                self.root.after(0, lambda: messagebox.showinfo("Shared Game Loaded",
+                                                               "\n\n".join(lines)))
+            except Exception as e:                               # noqa: BLE001
+                self.msg_queue.put(LogMsg("Load failed: %s" % e, "error"))
+                self.root.after(0, lambda e=e: messagebox.showerror("Load Failed", str(e)))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _confirm_import(self, zip_path, assets_dir, plan):
         """Main thread: the import confirmation, spelling out the mismatch."""

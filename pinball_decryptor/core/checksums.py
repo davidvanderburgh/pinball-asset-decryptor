@@ -62,8 +62,11 @@ ATTRACT_FILES_DIR = "Attract files"
 # PAD-1236): the teammates' own picks for the card's slots, never slots of
 # their own.
 TEAM_FILES_DIR = "Team files"
+# ".pad_game" holds what a loaded shared game brought for the app itself (core.
+# game_file, PAD-1408): its record and the maker's compiled code modes.
+SHARED_GAME_DIR = ".pad_game"
 NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
-                            ".write_cache", SHARED_PICTURES_DIR,
+                            ".write_cache", SHARED_GAME_DIR, SHARED_PICTURES_DIR,
                             MUSIC_MODE_FILES_DIR, RANDOM_CLIP_FILES_DIR,
                             ATTRACT_FILES_DIR, TEAM_FILES_DIR})
 

@@ -461,6 +461,16 @@ class ModPackTab(TabService):
         return self._run_cb("on_import")
 
     @rpc
+    def share_game(self):
+        """PAD-1408: Share Whole Game... (app._start_share_game)."""
+        return self._run_cb("on_share_game")
+
+    @rpc
+    def load_game(self):
+        """PAD-1408: Load a Shared Game... (app._start_load_game)."""
+        return self._run_cb("on_load_game")
+
+    @rpc
     def port(self):
         """Port + build onto card image(s)... (app._start_port_mods)."""
         return self._run_cb("on_port_mods")

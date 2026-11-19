@@ -497,3 +497,7 @@ html.h-short .page { padding-top: 12px; gap: 10px; }
 .lookbar-row { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .lookbar-row .look-row { flex: 1 1 300px; min-width: 0; }
 .lookbar-row:empty { display: none; }
+/* Adjust's Start from buttons (Simon, 2026-11-19): equal widths across the card; the "In use" chip on its own line */
+.cp-presets { display: grid; gap: 6px; }
+.cp-presets > .btn { width: 100%; min-width: 0; justify-content: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-presets > :not(.btn) { grid-column: 1 / -1; justify-self: start; }

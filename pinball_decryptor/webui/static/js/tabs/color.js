@@ -441,7 +441,7 @@ export function Controls({ s, p, update }) {
   return html`<${Card} title="Adjust" cls="cp-controls" extra=${extra} footer=${footer}>
     <div class="cp-row">
       <span class="lbl">Start from</span>
-      <div class="row wrap">
+      <div class="cp-presets" style=${`grid-template-columns: repeat(${presets.length || 1}, 1fr)`}>
         ${presets.map((pr) => html`<${Button} size="sm" cls=${pr.key === s.preset_on ? "on" : ""}
           title=${pr.tip + (pr.key === s.preset_on ? (s.in_use === "" ? " (Picked, but not on any file yet.)" : " (In use now.)") : "")} onClick=${() => call("color.preset", pr.key)}>${pr.label}<//>`)}
         ${inUseChip(s)}

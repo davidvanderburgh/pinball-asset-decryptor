@@ -265,33 +265,53 @@ function FileLine({ s, host }) {
   const doCopy = () => (source === "shared" ? call("color.apply_to_all", "all", to)
     : call("color.apply_to_all", which, null, themes));
   const kindLabel = { images: "Images", videos: "Videos", text: "Text" };
+  // Simon: "match up the look and feel of the SELECTED and THEME with the Copy from, to which kind and so on ...
+  // as columnized as possible, box sizes the same" - one grid: a tag column, then six equal columns; three choices
+  // take two each, two choices three each, "With profile attached" four and "All" two
+  const opt = (key, label, { on, disabled, title, span, onClick }) => html`<button type="button" key=${key}
+      class=${cx("cpd-opt", on && "on")} style=${`grid-column: span ${span}`} disabled=${!!disabled}
+      onClick=${onClick} ...${tip(title || "")}>${label}</button>`;
+  const tag = (word, off) => html`<span class=${cx("cpd-tag", off && "cpd-off")}>${word}</span>`;
+  const value = (text, full, { none, off } = {}) => html`<span class=${cx("cpd-val mono", none && "cpd-none",
+      off && "cpd-off")} style="grid-column: span 6" title=${full || text}>${text}</span>`;
   return html`<div class="cpd-file cpd-sel">
-    <${Tagged} tag="SELECTED" value=${f && n > 1 ? `${label} and ${n - 1} more` : label} none=${!f}
-      full=${f ? `${label}${n > 1 ? ` and ${n - 1} more` : ""}\n${String(f.rel || "").replace(/^@\d+:/, "")}` : "Nothing selected"} />
-    <${Tagged} tag="THEME" value=${themeValue} off=${!themeLive}
-      full=${themeLive ? `Theme ${themeValue}\nThe theme picked on the Images tab: what you change here is this theme's`
-        : "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)"} />
+    <div class="cpd-grid">
+      ${tag("SELECTED")}
+      ${value(f && n > 1 ? `${label} and ${n - 1} more` : label,
+        f ? `${label}${n > 1 ? ` and ${n - 1} more` : ""}\n${String(f.rel || "").replace(/^@\d+:/, "")}` : "Nothing selected",
+        { none: !f })}
+      ${tag("THEME", !themeLive)}
+      ${value(themeValue, themeLive ? `Theme ${themeValue}\nThe theme picked on the Images tab: what you change here is this theme's`
+        : "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)", { off: !themeLive })}
+    </div>
     <div class="row cpd-file-own"><span class="small muted grow">${status}</span>${reset}
       ${f && themeLive ? html`<${Button} size="xs" onClick=${() => call("color.file_shared", "all")}
         title=${`Drop its own profile in every theme, theme 1 too: it gets the individual files profile (${shared}) everywhere`}>Reset in every theme<//>` : null}</div>
     <div class="cpd-copy">
       <div class="eyebrow">Copy a profile to other files</div>
-      <div class="cpd-copy-row"><span class="small">Copy from</span>
-        <${Seg} value=${source} onChange=${() => {}} options=${[
-          { value: "file", label: "Selected file", disabled: !f, title: f ? "The profile of the file selected above" : "Select a file first" },
-          { value: "shared", label: "Shared profile", disabled: !!f,
-            title: f ? "Click away from the file (nothing selected) to give the shared files profile to every file of a kind"
-              : `The individual files profile every file without one of its own gets (${shared})` }]} /></div>
-      <div class="cpd-copy-row"><span class="small">To which kind</span>
-        <${Seg} value=${to} onChange=${setToKind} options=${["images", "videos", "text"].map((k) => ({
-          value: k, label: kindLabel[k], disabled: !kinds.includes(k),
-          title: kinds.includes(k) ? "" : source === "file" ? `A ${words[2]}'s profile is copied to other ${words[1]}` : "" }))} /></div>
-      <div class=${cx("cpd-copy-row", !whichOk && "cpd-off")}><span class="small">Which ${toWords[1]}</span>
-        <${Seg} value=${COPY_WHICH[scope]} options=${[COPY_WHICH.profiled, COPY_WHICH.all]} disabled=${!whichOk}
-          onChange=${(v) => setWhich(v === COPY_WHICH.all ? "all" : "profiled")} /></div>
-      <div class=${cx("cpd-copy-row", !themesOk && "cpd-off")}><span class="small">Which themes</span>
-        <${Seg} value=${themes === "all" ? "Every theme" : "This theme"} options=${["This theme", "Every theme"]}
-          disabled=${!themesOk} onChange=${(v) => setWhere(v === "Every theme" ? "all" : "this")} /></div>
+      <div class="cpd-grid">
+        ${tag("COPY FROM")}
+        ${opt("file", "Selected file", { on: source === "file", disabled: !f, span: 3, onClick: () => {},
+          title: f ? "The profile of the file selected above" : "Select a file first" })}
+        ${opt("shared", "Shared profile", { on: source === "shared", disabled: !!f, span: 3, onClick: () => {},
+          title: f ? "Click away from the file (nothing selected) to give the shared files profile to every file of a kind"
+            : `The individual files profile every file without one of its own gets (${shared})` })}
+        ${tag("TO KIND")}
+        ${["images", "videos", "text"].map((k) => opt(k, kindLabel[k], { on: to === k, disabled: !kinds.includes(k), span: 2,
+          onClick: () => setToKind(k),
+          title: kinds.includes(k) ? "" : source === "file" ? `A ${words[2]}'s profile is copied to other ${words[1]}` : "" }))}
+        ${tag("WHICH", !whichOk)}
+        ${opt("profiled", "With profile attached", { on: scope === "profiled", disabled: !whichOk, span: 4,
+          onClick: () => setWhich("profiled"), title: whichOk ? `Only ${toWords[1]} whose colour switch is on`
+            : "The shared profile goes to every file that is not locked (All)" })}
+        ${opt("all", "All", { on: scope === "all", disabled: !whichOk, span: 2, onClick: () => setWhich("all"),
+          title: `Every ${toWords[2]} that is not locked: with Unlock extracted ticked (Advanced) that is every one, otherwise the ones replaced or added` })}
+        ${tag("THEMES", !themesOk)}
+        ${opt("this", "This theme", { on: themes !== "all", disabled: !themesOk, span: 3, onClick: () => setWhere("this"),
+          title: themesOk ? `Theme ${t} (${names[t - 1] || ""}) only` : "Themes are for a file's own profile, on pictures, with themes on" })}
+        ${opt("every", "Every theme", { on: themes === "all", disabled: !themesOk, span: 3, onClick: () => setWhere("all"),
+          title: "Theme 1 and every other theme too" })}
+      </div>
       ${summary ? html`<div class="small cpd-summary">${summary}</div>` : null}
       <div class="row"><span ...${tip(copyTip)}><${Button} size="sm" icon="copy" disabled=${!canCopy}
           onClick=${doCopy}>Copy profile…<//></span>

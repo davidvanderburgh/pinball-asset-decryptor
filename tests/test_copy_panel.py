@@ -32,7 +32,10 @@ def test_every_old_way_is_still_there():
 def test_the_panel_says_what_copy_will_do_first():
     pane = _src("color_pane.js")
     assert 'call("color.copy_preview", source, to, scope, themes)' in pane
-    assert "<${Tagged} tag=\"SELECTED\"" in pane and "<${Tagged} tag=\"THEME\"" in pane
+    # one grid (Simon: "as columnized as possible, box sizes the same"): the tags and every row's choices
+    for word in ("SELECTED", "THEME", "COPY FROM", "TO KIND", "WHICH", "THEMES"):
+        assert 'tag("%s"' % word in pane, word
+    assert '"With profile attached"' in pane and "span: 4" in pane
 
 
 def test_the_preview_asks_the_same_targets_as_the_copy():

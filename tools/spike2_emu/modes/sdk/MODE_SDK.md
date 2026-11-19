@@ -6353,6 +6353,16 @@ or the game's end). So the game ends after the last teammate's last ball.
   challenge game keeps its own (PAD-640/663: the record in `/dump/pad_challenge_scores`, HIGHEST SCORES' first entry
   pointed at it for the game's end, the game's own records shut for that game). The attract champion pages show
   each board that has a champion.
+- **Every teammate's initials (PAD-1441, DoomWalrus666: "the high score is attributed only to player 1"):** the
+  end-of-game function walks a category's entry list and, for each entry, files the best player not filed in it yet
+  who beats it, asking that player for initials first (its own screen, `PLAYER n - ENTER INITIALS`, once a game;
+  Godzilla LE 1.16 0x300d20). With the one entry only player 1 was asked. For a co-op or team board the runtime
+  counts every player back in for the call (the game's end counts one: one match draw), each with the team's score
+  (a team game: their own team's), and gives the list one entry per player holding the top score, each a copy of
+  the board's record: a team that beats it beats them all, and each player is asked in turn. Their initials are
+  joined in the board's one record after (`DWL+DAV`, at most 15 letters, what the champion page's width takes:
+  longer names get an even share each).
+  Emulator-proven on Godzilla LE 1.16: 2 and 4 teammates, and TEAM PLAY 2 VS 2.
 - **The lit score box (PAD-1043, DoomWalrus666):** the game lights and enlarges the player up's score box, so with
   the game playing player 1 it lit player 1's box all game. The score panel's own calls of the framework's player-up
   getter (`movw/movt ; ldrb r0, [<player>] ; bx lr`) are wrapped where they are made (`hook_call`) and answer the

@@ -4647,6 +4647,7 @@ static unsigned bd_held;                  /* PAD-658: the background the backdro
  * while the mode that asked keeps the game's modes from starting (a qualifying screen like the barrier, never a
  * running mode of the game's), and the one it already held through that mode's ending (its TOTAL) */
 static int coop_cer_on;                   /* PAD-1219 (below): the co-op awards ceremony is on the glass */
+static int coop_cer_up;                   /* PAD-1451 (below): the ceremony runs, from its begin to its end */
 
 static int bd_place_ok(unsigned e)
 {
@@ -20176,6 +20177,7 @@ static void coop_cer_begin(void)
     coop_final_words_of(words, sizeof words, coop.teams, pm_score(1), pm_score(2));
     if (coop_final_words) pm_set_text(coop_final_words, words);
     if (coop_final) pm_show(coop_final, 1);
+    coop_cer_up = 1;                                          /* PAD-1451: the bonus loop is the game's own now */
     coop_cer_gone_n = coop_cer_vetoes = 0;
     coop_cer_on = coop_cer_keep != 0 && (can & PM_CAN_BACKDROP);
     ccer_begin();                                             /* PAD-1317: the ceremony's own music */
@@ -20196,7 +20198,7 @@ static void coop_cer_end(void)
             coop_cer_vetoes, coop_cer_gone_n);
         for (k = 0; k < coop_cer_gone_n; k++) say("co-op awards:   kept off: scene 0x%08x", coop_cer_gone[k]);
     }
-    coop_cer_on = 0;
+    coop_cer_on = coop_cer_up = 0;
 }
 
 /* ---- PAD-1028 round 3: the cards over the bonus's own loop -----------------------------------------------------
@@ -21787,6 +21789,17 @@ static void on_coop_bonus_play(pm_reg *r)
         return;
     }
     attract_said = 0;
+    /* PAD-1451 (DoomWalrus666: "During the awards ceremony of a co-op game, the previous player portrait is showing
+     * over the end of ball bonus videos that play behind the awards"): the ceremony plays the same loop behind the
+     * cards (coop_cards_backdrop) while the game still counts as played, and coop.turn is the last teammate's. The
+     * ceremony is everyone's: the game's own loop, no character */
+    if (coop_cer_up) {
+        if (cb.says < 60) {
+            cb.says++;
+            say("co-op characters: the awards ceremony plays the bonus loop - its own loop, no character");
+        }
+        return;
+    }
     c = coop.turn >= 1 && coop.turn <= 4 ? coop_pick_of[coop.turn] : -1;
     ours = cb_pick(name, cb.loop, c < coop_ch_n ? c : -1, (const char (*)[32])cb.clip, CPK_CHARS);
     if (cb.says < 60) {

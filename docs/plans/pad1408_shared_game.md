@@ -36,9 +36,12 @@ kept, and the game's copy gets a name of its own beside it.
 
 ## UI
 
-Mod Pack tab, a second row under Export/Import: **Share Whole Game…** and **Load a Shared Game…**
-(`app._start_share_game` / `_start_load_game`). Import Mod Pack recognises a shared game and offers to load it
-whole. The Modes tab's Load from a file names a shared game and points to where it loads.
+No new buttons (David, 2026-11-19: two extra Share/Load buttons were confusing). The Mod Pack tab's Export has two
+boxes, both on: **Changed files and settings** and **Modes (with their compiled code)**; Modes shows only for Stern.
+With Modes ticked on a project that has modes, Export writes this file (`app._share_game_worker`). Otherwise it
+writes the plain Mod Pack it always did, so a pack with no modes still loads in an older PAD. Unticking Changed
+files carries the modes alone. **Import Mod Pack...** recognises the file and imports it whole. The Modes tab's
+Load from a file names such a file and points to Import Mod Pack.
 
 ## Proof (X-Men LE/Pro 0.98, the gap analysis's first target)
 

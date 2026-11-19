@@ -112,7 +112,7 @@ def test_a_whole_game_travels_without_the_cards_own_files(tmp_path, code_cache):
     words = game_file.game_file_words(about)
     assert "2 changed files" in words and "KAIJU RUSH" in words and "compiled" in words
     # a mod pack or a file of modes is not a shared game, and the Modes tab says where it loads
-    with pytest.raises(MP.ModeProjectError, match="Load a Shared Game"):
+    with pytest.raises(MP.ModeProjectError, match="Import Mod Pack"):
         MP.import_modes(game, _card_project(tmp_path, "modes_tab"))
     assert game_file.game_file_about(str(tmp_path / "nope.zip")) is None
 
@@ -211,21 +211,60 @@ def test_a_bad_object_or_path_in_a_file_is_never_written(tmp_path):
     assert not os.path.isdir(os.path.join(owner, game_file.PROJECT_DIR, "code"))
 
 
-def test_the_mod_pack_tab_offers_share_and_load(tmp_path):
+def test_export_with_changed_files_unticked_carries_the_modes_alone(tmp_path, code_cache):
+    maker, slug, key = _maker(tmp_path, code_cache)
+    game = str(tmp_path / "modes_only.zip")
+    head = game_file.export_game(maker, game, files=False)
+    with zipfile.ZipFile(game) as z:
+        names = z.namelist()
+    assert game_file.PACK_MEMBER not in names and game_file.MODES_MEMBER in names
+    assert head["files"] == 0 and head["modes"] == ["KAIJU RUSH", "LASER SHOW"]
+    owner = _card_project(tmp_path, "owner")
+    game_file.import_game(game, owner)
+    assert _read(os.path.join(owner, "audio", "a.wav")) == STOCK["audio/a.wav"]   # not carried
+    assert os.path.isfile(CM.source_path(owner, "laser_show"))
+
+
+def _includes(tmp_path, files, modes, mfr="stern", with_modes=True):
+    from pinball_decryptor import app as A
+
+    class Var:
+        def __init__(self, v):
+            self.v = v
+
+        def get(self):
+            return self.v
+
+    class Stub:
+        pass
+
+    st = Stub()
+    st.window = Stub()
+    st.window.pack_files_var, st.window.pack_modes_var = Var(files), Var(modes)
+    st._current_mfr = Stub()
+    st._current_mfr.key = mfr
+    project = str(tmp_path / ("p_%s_%s_%s_%s" % (files, modes, mfr, with_modes)))
+    os.makedirs(os.path.join(project, "modes", "story") if with_modes else project)
+    return A.App._pack_includes(st, project)
+
+
+def test_the_export_boxes_pick_what_goes_in_the_pack(tmp_path):
+    """Export Mod Pack... has two boxes, both on: with Modes ticked on a project that has modes
+    the pack is the whole game; otherwise the Mod Pack it always was."""
+    assert _includes(tmp_path, True, True) == (True, True)
+    assert _includes(tmp_path, True, False) == (True, False)
+    assert _includes(tmp_path, False, True) == (False, True)
+    assert _includes(tmp_path, False, False) == (False, False)          # asked to tick one
+    assert _includes(tmp_path, True, True, with_modes=False) == (True, False)
+    assert _includes(tmp_path, True, True, mfr="jjp") == (True, False)
+
     from pinball_decryptor.webui.tabs import modpack as tab
-    called = []
-
-    class Win:
-        cb = {"on_share_game": lambda: called.append("share"),
-              "on_load_game": lambda: called.append("load")}
-
-    t = tab.ModPackTab.__new__(tab.ModPackTab)
-    t.window = Win()
-    assert t.share_game() is True and t.load_game() is True
-    assert called == ["share", "load"]
+    assert {"pack_files_var", "pack_modes_var"} <= set(tab.ModPackTab.exports)
+    assert not hasattr(tab.ModPackTab, "share_game") and not hasattr(tab.ModPackTab, "load_game")
     js = open(os.path.join(os.path.dirname(tab.__file__), "..", "static", "js", "tabs",
                            "modpack.js"), encoding="utf-8").read()
-    assert 'call("modpack.share_game")' in js and 'call("modpack.load_game")' in js
+    assert 'k="pack_files"' in js and 'k="pack_modes"' in js
+    assert "share_game" not in js and "load_game" not in js
 
 
 def test_a_baseline_taken_after_the_modes_never_counts_them_as_the_cards(tmp_path, code_cache):

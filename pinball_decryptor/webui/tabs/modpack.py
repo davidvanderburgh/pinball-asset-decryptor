@@ -44,6 +44,8 @@ class ModPackTab(TabService):
         "_prefill_transfer_dst", "_transfer_refresh_meta",
         # PAD-1388: the one-click port's own fields and its What's new
         "port_imgs_var", "port_out_var", "_show_news",
+        # PAD-1408: what Export Mod Pack... puts in the pack
+        "pack_files_var", "pack_modes_var",
     )
 
     def __init__(self, window):
@@ -68,6 +70,9 @@ class ModPackTab(TabService):
 
         # PAD-1388: the one-click port's fields (app._port_targets reads
         # them): the new card image(s), "; "-separated, and the build folder.
+        # PAD-1408: what Export puts in the pack, both on until unticked
+        self.pack_files_var = self.var("pack_files", "bool", True)
+        self.pack_modes_var = self.var("pack_modes", "bool", True)
         self.port_imgs_var = self.var("port_imgs")
         self.port_out_var = self.var("port_out")
         self.port_imgs_var.trace_add("write",
@@ -120,7 +125,9 @@ class ModPackTab(TabService):
         caps = mfr.capabilities
         transfer = bool(getattr(caps, "mod_transfer", False))
         self.set(modpack_cap=bool(getattr(caps, "modpack", False)),
-                 transfer_cap=transfer)
+                 transfer_cap=transfer,
+                 # PAD-1408: only Stern projects have modes to put in a pack
+                 modes_cap=getattr(mfr, "key", "") == "stern")
         self._bind_project_var()
         # Tk apply_manufacturer: the transfer section shows only for
         # mod_transfer plugins, and pre-fills the destination when it does.
@@ -459,16 +466,6 @@ class ModPackTab(TabService):
     def import_pack(self):
         """Import Mod Pack... (app._start_import)."""
         return self._run_cb("on_import")
-
-    @rpc
-    def share_game(self):
-        """PAD-1408: Share Whole Game... (app._start_share_game)."""
-        return self._run_cb("on_share_game")
-
-    @rpc
-    def load_game(self):
-        """PAD-1408: Load a Shared Game... (app._start_load_game)."""
-        return self._run_cb("on_load_game")
 
     @rpc
     def port(self):

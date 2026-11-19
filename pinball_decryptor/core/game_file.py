@@ -206,7 +206,7 @@ def game_file_words(head):
     held = ", ".join(bits[:-1]) + " and " + bits[-1] if len(bits) > 1 else (bits[0] if bits else "nothing")
     made = head.get("made_for") or {}
     return "%s holds %s%s." % (
-        ("\"%s\"" % head["name"]) if head.get("name") else "This shared game", held,
+        ("\"%s\"" % head["name"]) if head.get("name") else "This mod pack", held,
         ", made on %s" % made["label"] if isinstance(made, dict) and made.get("label") else "")
 
 
@@ -274,11 +274,12 @@ def _code_objects(project, log):
     return []
 
 
-def export_game(project, zip_path, name="", log_cb=None, progress_cb=None):
+def export_game(project, zip_path, name="", log_cb=None, progress_cb=None, files=True):
     """Write the whole game of ``project`` to ``zip_path`` (see the module's words).
     Returns the manifest written. Raises :class:`GameFileError` when there is nothing to
-    share or the project has no extract baseline (without it no stock file can be told
-    from the maker's own, so none could be kept out)."""
+    share or the project has no extract baseline (without it no stock file can be told from
+    the maker's own, so none could be kept out). ``files`` False (Export's "Changed files and
+    settings" box unticked) leaves the Mod Pack part out: the modes alone."""
     log = _say(log_cb)
     stock = stock_index(project)
     if not os.path.isfile(os.path.join(project, modpack.CHECKSUMS_FILE)):
@@ -299,6 +300,8 @@ def export_game(project, zip_path, name="", log_cb=None, progress_cb=None):
         # the Mod Pack: every changed file, settings, music modes, clips, attract items
         raw = os.path.join(tmp, "pack_raw.zip")
         try:
+            if not files:
+                raise ValueError("left out: Changed files and settings is unticked")
             n, _p = modpack.export_mod_pack(project, raw, log_cb=log_cb, progress_cb=progress_cb)
         except (ValueError, FileNotFoundError) as e:       # nothing changed / an empty baseline
             log("Shared game: no changed file of the card to carry (%s)." % e, "info")

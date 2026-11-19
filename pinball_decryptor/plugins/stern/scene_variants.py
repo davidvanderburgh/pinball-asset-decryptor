@@ -556,7 +556,7 @@ def picture_variants(project, sets, base_scene, work, log=None):
                         prof.apply_image(Image.open(src)).save(coloured)
                         src = coloured
                 except Exception as e:                  # noqa: BLE001
-                    log("Themes: theme %d (%s)'s colour profile could not be baked into %s (%s); it goes in "
+                    log("Themes: theme %d (%s)'s color profile could not be baked into %s (%s); it goes in "
                         "without it." % (n, name, rel, e), "warning")
             picks[rel] = src
         for rel, src in sorted(picks.items()):
@@ -591,7 +591,7 @@ def picture_variants(project, sets, base_scene, work, log=None):
             scenes.setdefault(card, {})[n] = {"file": path}
             made += 1
         if made:
-            log("Themes: theme %d (%s): %d picture(s) of its own (chosen or colour profiled), in %d scene(s)."
+            log("Themes: theme %d (%s): %d picture(s) of its own (chosen or color profiled), in %d scene(s)."
                 % (n, name, len(picks), made), "info")
     out["scenes"] = scenes
     return out

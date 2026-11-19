@@ -98,7 +98,7 @@ def test_the_write_bakes_a_themes_profile_into_theme_1s_picture(tmp_path):
     src = got["scenes"][CARD][2]["file"]
     with open(src, "rb") as f:
         assert f.read() != data
-    assert any("colour profiled" in m for m in said)
+    assert any("color profiled" in m for m in said)
     # the picture baked: a darker copy of theme 1's, beside the scene
     from PIL import Image
     coloured = [f for f in os.listdir(str(tmp_path / "work")) if f.startswith("colour2_")]

@@ -255,18 +255,22 @@ function FileLine({ s, host, tools }) {
   const scope = whichOk ? which : "all";
   const themesOk = source === "file" && themeLive;
   const themes = themesOk ? where : "this";
+  // the count (Simon: "it doesn't work at all now. Just says 0"): asked a moment after the last change, only the newest
+  // answer shown - a slow one (every picture, unlocked) is never dropped for a change made while it was counted - "..."
+  // while it counts and "?" when it cannot be counted, so a real 0 is never a count that did not come back
+  const seq = useRef(0);
   useEffect(() => {
-    let live = true;
-    if (!canCopy) { setSummary({ n: 0, text: "" }); return undefined; }
-    call("color.copy_preview", source, to, scope, themes).then((r) => {
-      if (live) setSummary({ n: (r && r.n) || 0, text: (r && r.text) || "" });
-    });
-    return () => { live = false; };
-    // (Simon: "I have just clicked ... unlock the extracted images - asset count is not updated": it is counted again
-    // whenever what it counts can change - an unlock, the theme, the files switched on or given a profile)
+    if (!canCopy) { seq.current += 1; setSummary({ n: 0, text: "" }); return undefined; }
+    const mine = ++seq.current;
+    setSummary((was) => ({ ...was, n: null }));
+    const timer = setTimeout(() => {
+      call("color.copy_preview", source, to, scope, themes).then((r) => {
+        if (mine === seq.current) setSummary({ n: (r && typeof r.n === "number") ? r.n : -1, text: (r && r.text) || "" });
+      }, () => { if (mine === seq.current) setSummary({ n: -1, text: "" }); });
+    }, 200);
+    return () => clearTimeout(timer);
   }, [source, to, scope, themes, f && f.rel, f && f.own, s.name, s.asset_name, canCopy,
-    JSON.stringify(sets.unlock || {}), sets.current, (sets.names || []).length, JSON.stringify(s.asset_counts || {}),
-    s.all_images, s.all_videos, s.rev]);
+    JSON.stringify(sets.unlock || {}), sets.current, (sets.names || []).length, JSON.stringify(s.asset_counts || {})]);
   const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(toWords[2], toWords[1]);
   const copyTip = !canCopy ? "Copying is not offered for this file here"
     : source === "shared" ? { head: `Give every ${toWords[2]} the shared files profile`, lines: [{ profile: s.asset_name || "Recommended" },
@@ -334,8 +338,10 @@ function FileLine({ s, host, tools }) {
         <span class="cpd-applywrap" ...${tip(copyTip)}><button type="button"
           class="cpd-apply" disabled=${!canCopy} onClick=${doCopy}>APPLY</button></span>
         <span class="cpd-tag cpd-counttag"
-          title=${`${canCopy ? `${summary.n} ${summary.n === 1 ? toWords[2] : toWords[1]}` : "Nothing to apply"}. You are asked first, with a WARNING, and Undo puts them all back.`}>${canCopy
-          ? `${summary.n} ${summary.n === 1 ? "ASSET" : "ASSETS"}` : "NONE"}</span>
+          title=${`${!canCopy ? "Nothing to apply" : summary.n === null ? "Counting" : summary.n < 0 ? "Could not be counted"
+            : `${summary.n} ${summary.n === 1 ? toWords[2] : toWords[1]}`}. You are asked first, with a WARNING, and Undo puts them all back.`}>${canCopy
+          ? (summary.n === null ? "…" : summary.n < 0 ? "? ASSETS" : `${summary.n} ${summary.n === 1 ? "ASSET" : "ASSETS"}`)
+          : "NONE"}</span>
       </div>
     ${!f ? html`<${WhichFilesNotes} s=${s} />` : null}
   </div>`;

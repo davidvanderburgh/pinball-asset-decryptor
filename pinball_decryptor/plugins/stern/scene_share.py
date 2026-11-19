@@ -874,6 +874,11 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
                     _own(new, p)
                     loaded.append(new)
                     continue
+                # PAD-1439 (DoomWalrus666): no add of mine shows it any more (the file's
+                # edits replaced mine): a pick of it would never come back ("its slot isn't
+                # in this folder" at every open) and show nothing, so it is left out, as said
+                missing.append(rel)
+                continue
             name = os.path.basename(p.get("name") or p["file"]) or "picture.png"
             name = re.sub(r"[\\/:*?\"<>|]+", "_", name)
             base, ext = os.path.splitext(name)

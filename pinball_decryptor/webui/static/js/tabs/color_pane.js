@@ -240,8 +240,12 @@ function FileLine({ s, host, tools }) {
   const label = f ? String(f.label || "").replace(/ \(theme \d+\)$/, "") : "NONE";
   const shared = `“${s.asset_name || "Recommended"}”`;
   const own = f ? (n > 1 ? (f.own_n || 0) > 0 : !!f.own) : false;
+  // a picture the theme chose itself is new: it falls back to the shared files profile, never theme 1's
+  // (scene_variants.theme_falls_back; PR #39 review)
+  const picked1 = !!(f && t > 1 && f.falls_back === false);
   const status = !f ? "Nothing selected: click a file to give it a profile of its own, or copy the shared files profile below."
     : t > 1 ? (own ? `It has a profile of its own in this theme (“${s.name || ""}”).`
+      : picked1 ? `This theme's own picture: like any new picture it uses the individual files profile (${shared}). Change anything below and it gets a profile of its own in this theme only.`
       : "It uses theme 1's profile. Change anything below and it gets a profile of its own in this theme only.")
     : own ? (n > 1 ? `${f.own_n === n ? "Each has" : `${f.own_n} of them have`} a profile of their own.`
       : `It has a profile of its own (“${s.name || ""}”).`)
@@ -252,10 +256,11 @@ function FileLine({ s, host, tools }) {
   const canHere = !!(f && own);
   const canEvery = !!(f && themeLive);
   const sharedName = s.asset_name || "Recommended";
-  const hereLabel = t > 1 ? `Same as theme 1 (“${(f && f.base_name) || sharedName}”)` : `Same as the other files (“${sharedName}”)`;
+  const hereLabel = t > 1 && !picked1 ? `Same as theme 1 (“${(f && f.base_name) || sharedName}”)` : `Same as the other files (“${sharedName}”)`;
   const reset = html`<div class="cpd-resets">
     <${Button} size="xs" disabled=${!canHere} onClick=${() => call("color.file_shared", "this")}
       title=${!canHere ? "Only for a file with a profile of its own (in the theme on show)"
+        : picked1 ? `Drop this theme's own profile for it: as the theme's own picture it gets the shared files profile (“${sharedName}”) again`
         : t > 1 ? `Drop this theme's own profile for it: it uses theme 1's (“${(f && f.base_name) || sharedName}”) again`
           : `Drop its own profile: it gets the shared files profile (“${sharedName}”), as every other file without one of its own does`}>${hereLabel}<//>
     <${Button} size="xs" disabled=${!canEvery} cls=${!(themeHost && themesOn) || (f && !themeLive) ? "cpd-never" : ""} onClick=${() => call("color.file_shared", "all")}
@@ -461,8 +466,10 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
       call("color.set_mode", startMode).then(() => call("color.panel_open"));
     } else call("color.panel_open");
   }, [open]);
-  // the file clicked: the bar's Files mode is its profile while the bar is open here
-  const fileKey = file ? `${file.kind}\n${file.rel}\n${file.on}\n${(file.more || []).join("\n")}` : "";
+  // the file clicked: the bar's Files mode is its profile while the bar is open here (its label too: a picture given
+  // another replacement under the same row - a theme's Choose..., or a theme picked before its preview came back -
+  // kept the old file's name in SELECTED)
+  const fileKey = file ? `${file.kind}\n${file.rel}\n${file.on}\n${file.label || ""}\n${(file.more || []).join("\n")}` : "";
   useEffect(() => {
     if (!open || !s.per_file) return;
     if (file) call("color.set_file", file.kind, file.rel, file.label || "", file.on, file.attach || null, file.more || []);

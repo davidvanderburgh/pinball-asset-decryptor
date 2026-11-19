@@ -48,3 +48,28 @@ def test_this_theme_is_the_files_theme():
     assert said(bar, "images", "this", names, TREL) == " in theme 1 (Standard)"    # plain = theme 1, on show in Scenes
     assert said(bar, "images", "this", names, SV.theme_key(2, TREL)) == " in theme 2 (Dark)"
     assert said(bar, "images", "this", names, None) == " in theme 2 (Dark)"        # no file: the theme on show
+
+
+def test_the_bar_says_where_a_themes_picture_falls_back(tmp_path):
+    """PR #39 review: a picture the theme chose itself falls back to the shared files profile, not theme 1's
+    (SV.theme_falls_back), so the bar's file record says so and the page words its line and reset by it."""
+    from tests.test_image_sets_pictures import _png
+    p = str(tmp_path)
+    SV.set_themes_on(p, True)
+    SV.add_set(p, "Dark")
+    cp.store_own_profile(p, "images", TREL, cp.Profile(name="Red", gain=(1.0, 0.3, 0.3)))
+    key = SV.theme_key(2, TREL)
+
+    def state():
+        bar = types.SimpleNamespace(_project=p, _asset=None, _file={"kind": "images", "rel": key, "label": "x"},
+                                    _file_mode=lambda: ("images", key), _file_rels=lambda: [key],
+                                    _own=lambda: None, _raw=color.ColorTab._raw)
+        return color.ColorTab._file_state(bar)
+    got = state()
+    assert got["falls_back"] is True and got["base_name"] == "Red"     # unchanged in theme 2: theme 1's profile
+    SV.set_picture(p, 2, TREL, _png(tmp_path / "dark.png", (20, 20, 20, 255)))
+    got = state()
+    assert got["falls_back"] is False and got["base_name"] != "Red"    # its own picture: the shared one
+    pane = _src("color_pane.js")
+    assert "const picked1 = !!(f && t > 1 && f.falls_back === false);" in pane
+    assert "${file.label || \"\"}" in pane          # a new name under the same row reaches SELECTED

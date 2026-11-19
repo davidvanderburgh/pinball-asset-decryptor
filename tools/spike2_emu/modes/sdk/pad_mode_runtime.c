@@ -17542,6 +17542,7 @@ static int coop_live;                        /* PAD-1031: co-op characters watch
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
 static int coop_hides(unsigned id);
 static int n_btn;                            /* PAD-1403: button shots from buttons.cfg (btn_edge counts their edges) */
+static volatile int btn_hide_n;              /* PAD-1404: a menu's buttons held back from the game (pm_button_hide) */
 static void btn_edge(unsigned id, unsigned level, unsigned polarity);
 
 /* ---- PAD-1051: a switch the game does not see for a while ----------------------------------------------------------
@@ -17698,7 +17699,7 @@ static void on_switch_edge(pm_reg *r)
     if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
     if (coop_live) coop_edge(id, level, flags, pol);       /* PAD-1031: a co-op character's pick, its save */
     if (n_btn) btn_edge(id, level, pol);                   /* PAD-1403: a button shot's press or release */
-    if (coop_live || edge_hid_n)                           /* PAD-1051: a press the game is not to see, or sees again */
+    if (coop_live || edge_hid_n || btn_hide_n)             /* PAD-1051: a press the game is not to see, or sees again */
         edge_hide_edge(id, base, desc, (volatile unsigned char *)(unsigned long)(st + (unsigned)edge.level_at),
                        (pol & 4u) ? 1u : 0u, (level & 1u) == ((pol & 4u) ? 1u : 0u));
     playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
@@ -18016,6 +18017,91 @@ static void btn_tick(void)
             btn_fire(i, btn[i].kind == BTN_PRESS ? "press" : btn[i].kind == BTN_RELEASE ? "release"
                         : btn[i].kind == BTN_HOLD ? "held" : "both held");
     }
+}
+
+/* ---- PAD-1404: a menu's buttons, which the game does not see while it is open (pad_mode.h pm_button_hide) ---------
+ * A mode's menu (intricate_kit.h kit_menu: a list on the HUD, the flipper buttons move, Action or Start picks) wants
+ * its buttons to itself, as Stern's own choose screens have them: Start must not add a player on ball 1, Action must
+ * not launch the ball waiting in the shooter lane, a flipper press must not change the game's lanes. The switches
+ * behind the button shots asked for are held back from the game by PAD-1051's hider (the level byte reads released,
+ * the handler bits are held back; a press already held is taken mid-press), while the button shots still count each
+ * edge (btn_edge runs before the hider). The ask LAPSES: the mode renews it every tick while the menu is open, and
+ * BTN_HIDE_LAPSE_MS after the last ask (or at once on pm_button_hide(0), or out of a game) each switch is the game's
+ * again from its next press or release. Only the framework generation the hider knows (switch_desc_via, the level
+ * byte after the edge: 59 of the 69 ports); elsewhere it answers 0 and the game sees the presses too. */
+#define BTN_HIDE_LAPSE_MS 500u
+static volatile unsigned btn_hide_id[N_BUTTON_IDS];
+static volatile unsigned long btn_hide_at;
+
+static int btn_hides(unsigned id)
+{
+    int k, n = btn_hide_n;
+    if (!n || !id || pm_ms() - btn_hide_at > BTN_HIDE_LAPSE_MS || !pm_in_game()) return 0;
+    for (k = 0; k < n && k < N_BUTTON_IDS; k++)
+        if (btn_hide_id[k] == id) return 1;
+    return 0;
+}
+
+/* the switches of the button shots in `shots` (presses, releases and holds name one switch each; a combo's are
+ * those of its two presses), each once, in ids; how many. A button that is one of the port's own `switch` lines
+ * (PAD-228: Godzilla's Action and flipper buttons) is found there. */
+static int btn_hide_ids(uint64_t shots, unsigned *ids, int cap)
+{
+    int n = 0, i, k;
+    unsigned id;
+    for (i = 0; i < n_btn + port.n_switch; i++) {
+        if (i < n_btn) {
+            if (!(btn[i].mask & shots) || btn[i].kind == BTN_COMBO) continue;
+            id = btn[i].id;
+        } else {
+            if (!(port.sw[i - n_btn].mask & shots)) continue;
+            id = port.sw[i - n_btn].id;
+        }
+        for (k = 0; k < n && ids[k] != id; k++)
+            ;
+        if (k == n && n < cap) ids[n++] = id;
+    }
+    return n;
+}
+
+int pm_button_hide(uint64_t shots)
+{
+    static uint64_t said;
+    static int said_no;
+    unsigned ids[N_BUTTON_IDS];
+    int n, k, can;
+    if (!shots) {
+        if (btn_hide_n) say("button hide: off - the game sees the buttons again from their next press or release");
+        btn_hide_n = 0;
+        said = 0;
+        return 0;
+    }
+    n = btn_hide_ids(shots, ids, N_BUTTON_IDS);
+#if PM_A64
+    can = 0;
+#else
+    can = edge_hooked && edge.desc_via >= 0 && !edge.level_before;
+#endif
+    if (!n || !can || !pm_in_game()) {
+        btn_hide_n = 0;
+        if (!said_no++)
+            say("button hide: %s", !n ? "no button shot of this card's buttons.cfg in the mask"
+                : !can ? "this framework generation's switch drain is not traced - the game sees the buttons too"
+                : "not in a game");
+        return 0;
+    }
+    for (k = 0; k < n; k++) btn_hide_id[k] = ids[k];
+    btn_hide_at = pm_ms();
+    btn_hide_n = n;
+    if (shots != said) {
+        said = shots;
+        say("button hide: switches %u %u %u %u (of %d) held back from the game while the mode asks", ids[0],
+            n > 1 ? ids[1] : 0u, n > 2 ? ids[2] : 0u, n > 3 ? ids[3] : 0u, n);
+    }
+#if !PM_A64
+    for (k = 0; k < n; k++) edge_take_held(ids[k]);  /* one already held as the menu opened */
+#endif
+    return n;
 }
 
 /* one buttons.cfg line; 0 when it is not a button line the runtime can take */
@@ -19734,6 +19820,7 @@ static int coop_unserved(void)
 static int coop_hides(unsigned id)
 {
     int w;
+    if (btn_hide_n && btn_hides(id)) return 1;   /* PAD-1404: a mode's menu has the button */
     /* PAD-1114: from the intro to the end of the language window the flippers and Action are ours: a skip is not a
      * language flip (nor the game's skip of its film), and the ball waits in the lane for the language and the pick */
     if (coop_live && ci.phase >= CI_PLAY && id && (id == coop_left || id == coop.button || id == coop_action))

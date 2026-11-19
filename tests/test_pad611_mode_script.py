@@ -51,13 +51,14 @@ EVERY_BLOCK = [
     {"op": "roster_progress", "done": num(2), "of": num(5)},                       # PAD-733
     {"op": "hud_award", "text": "JACKPOT", "value": None, "sub": "", "seconds": 2},
     {"op": "spare_drive", "node": 9, "output": 0, "power": 255, "ms": 40, "hold_power": 0, "hold_ms": 0},  # PAD-826
+    {"op": "menu_open", "menu": "EPISODE"}, {"op": "menu_close", "menu": "EPISODE"},                    # PAD-1404
 ]
 #: one of every value and condition (modes_blocks.js valueTemplates / condTemplates), with the operators
 EVERY_VALUE = [num(1000), {"k": "var", "name": "combo"}, {"k": "hits", "shot": "Left ramp"}, {"k": "scored"},
                {"k": "mode_hits", "shot": "Left ramp"},                                                  # PAD-721
                {"k": "total"}, {"k": "secs_left"}, {"k": "timer_left", "timer": "window"}, {"k": "balls"},
                {"k": "player"}, {"k": "combo_chain"}, {"k": "combo_steps", "combo": "RAMPS"},       # PAD-708
-               {"k": "women_mult"}] + [                                                                 # PAD-889
+               {"k": "women_mult"}, {"k": "menu_pick", "menu": "EPISODE"}] + [                          # PAD-889, 1404
                 {"k": "op", "op": o, "a": num(2), "b": {"k": "var", "name": "combo"}} for o in "+-*/"]
 EVERY_COND = [{"k": "cmp", "op": o, "a": {"k": "secs_left"}, "b": num(3)} for o in BM.CMPS] + [
     {"k": "and", "a": {"k": "running"}, "b": {"k": "lit"}}, {"k": "or", "a": {"k": "stock"}, "b": {"k": "can_start"}},
@@ -75,7 +76,8 @@ EVERY_HAT = [{"kind": "mode_start"}, {"kind": "mode_end"}, {"kind": "shot", "sho
              {"kind": "battle", "slot": 2, "name": "Gigan"},                                          # PAD-706
              {"kind": "game_mode", "mode": 21, "name": "Jet Fighter Attack"},                         # PAD-710
              {"kind": "completed", "count": 4, "modes": [3, 4, 5, 6, 7, 8, 9, 10]},                   # PAD-747
-             {"kind": "spare_switch", "node": 9, "input": 0, "closed": "low", "when": "any"}]           # PAD-826
+             {"kind": "spare_switch", "node": 9, "input": 0, "closed": "low", "when": "any"},           # PAD-826
+             {"kind": "menu_pick", "menu": "EPISODE"}]                                                 # PAD-1404
 
 
 def every_program():
@@ -84,7 +86,8 @@ def every_program():
     scripts.append({"hat": {"kind": "mode_start"}, "do": [{"op": "score", "points": v} for v in EVERY_VALUE]
                     + [{"op": "if", "cond": c, "then": [{"op": "end_mode"}], "else": None} for c in EVERY_COND]})
     return BM.normalize({"name": "EVERY BLOCK", "vars": [{"name": "combo", "reset": "mode"}],
-                         "timers": [{"name": "window"}], "scripts": scripts})
+                         "timers": [{"name": "window"}], "scripts": scripts,
+                         "menus": [{"name": "EPISODE", "title": "CHOOSE", "items": ["A", "B"]}]})   # PAD-1404
 
 
 def test_every_block_hat_and_value_is_covered():

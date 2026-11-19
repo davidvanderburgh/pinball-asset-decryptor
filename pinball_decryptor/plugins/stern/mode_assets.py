@@ -960,10 +960,16 @@ def _code_screens(project, code, prof):
         # the fades first, so every screen of the modes' is drawn over them
         out[:0] = [f for slug, spec in code or () for f in MM.fade_screens(slug, getattr(spec, "fades", None) or [])]
     # PAD-574: a words-alone screen's TOTAL, where the game's own modes put theirs; PAD-709: and its scored shots
-    return out + [s for slug, spec in code or ()
-                  if spec.screen and getattr(spec, "screen_style", "") == "words" and prof.can("screen")
-                  for s in total_screens(MP.asset_names(slug), prof)
-                  + [with_layout(points_screen(MP.asset_names(slug), prof), getattr(spec, "points_layout", None))]]
+    out += [s for slug, spec in code or ()
+            if spec.screen and getattr(spec, "screen_style", "") == "words" and prof.can("screen")
+            for s in total_screens(MP.asset_names(slug), prof)
+            + [with_layout(points_screen(MP.asset_names(slug), prof), getattr(spec, "points_layout", None))]]
+    # PAD-1404: its menus, last: drawn over every other screen of the modes'
+    if prof.can("screen"):
+        from . import mode_menus as MN
+        for slug, spec in code or ():
+            out += MN.menu_screens(slug, getattr(spec, "menus", None) or [])
+    return out
 
 
 def _more_scene(project, forms, code, prof, stock):

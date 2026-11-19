@@ -98,6 +98,7 @@ class CodeAssets:
     info_layout: dict = field(default_factory=dict)     # PAD-547: where the Scenes editor put that line (LAYOUT_KEYS)
     meters: list = field(default_factory=list)    # PAD-1405: its bar meters [{"label", "color", "at"}] (PadMode_<slug>_Meter<k>)
     fades: list = field(default_factory=list)     # PAD-1405: its screen fades [{"color", "style"}] (PadMode_<slug>_Fade<k>)
+    menus: list = field(default_factory=list)     # PAD-1404: its menus [{"title", "color"}] (PadMode_<slug>_Menu<k>)
     points_layout: dict = field(default_factory=dict)   # PAD-709: where it put a words-alone mode's scored number
     more: dict = field(default_factory=dict)      # PAD-707: {"slot": n, "picture": file} - a monster on MORE KAIJU
     clip: str = ""
@@ -157,7 +158,10 @@ class CodeAssets:
 
     def has_assets(self):
         return bool(self.screen or self.clip or self.clips or self.hud or self.music or self.calls
-                    or self.more)      # PAD-707: a new monster on the selection screen is drawn there
+                    or self.more       # PAD-707: a new monster on the selection screen is drawn there
+                    # PAD-1404: screens of its own in the HUD scene - its info line, meters, fades (PAD-547, PAD-1405)
+                    # and menus - go through the set too (they were compiled in alone, so Try it showed none)
+                    or self.info_line or self.meters or self.fades or self.menus)
 
 
 # ---- the project -------------------------------------------------------------------------------

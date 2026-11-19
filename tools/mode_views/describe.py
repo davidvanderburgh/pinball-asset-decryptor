@@ -49,6 +49,8 @@ def val(e):
         return "the Bond Women multiplier"
     if k == "timer_left":
         return "ms left on %s" % (e.get("timer") or "?")
+    if k == "menu_pick":                                             # PAD-1404
+        return "the item picked from %s" % (e.get("menu") or "?")
     if k == "combo_chain":                                           # PAD-708
         return "combos in a row"
     if k == "combo_steps":
@@ -144,6 +146,8 @@ SAY = {
     "hud_progress": lambda b: "Progress panel shows %s" % val(b.get("value")),
     "roster_progress": lambda b: "Its selection screen tile shows %s of %s" % (val(b.get("done")), val(b.get("of"))),
     "hud_award": lambda b: "Award on the HUD: “%s”" % (b.get("text") or ""),
+    "menu_open": lambda b: "Open the menu %s" % (b.get("menu") or "?"),                  # PAD-1404
+    "menu_close": lambda b: "Close the menu %s" % (b.get("menu") or "?"),
 }
 #: the block's family, as the page colours it (modes_blocks.js STMT_CLASS)
 FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "set_hits": "var", "end_mode": "mode",
@@ -152,7 +156,8 @@ FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "s
           "lights_off": "show", "gi": "show", "show": "show", "game_show": "show", "log": "show", "clip": "own", "sound": "own", "music": "own",
           "timer_start": "timer", "timer_stop": "timer", "hud_text": "hud", "hud_counter": "hud", "hud_gauge": "hud", "hud_progress": "hud", "roster_progress": "hud",
           "hud_award": "hud", "hold": "mech", "scoop_hold": "mech", "let_go": "mech", "shield": "mech",
-          "building": "mech", "shake": "mech", "shake_game": "mech", "spare_drive": "mech"}
+          "building": "mech", "shake": "mech", "shake_game": "mech", "spare_drive": "mech",
+          "menu_open": "show", "menu_close": "show"}                                       # PAD-1404
 FAMILY_COLOUR = {"hat": "#c28a12", "mode": "#8b5bd6", "score": "#2f9a5b", "var": "#c8553a", "timer": "#b0457e",
                  "flow": "#d77a21", "show": "#3a78c9", "hud": "#a8457a", "own": "#b8458f", "mech": "#5d6b7e"}
 
@@ -190,6 +195,8 @@ def hat(h):
         return "When the game: %s%s" % (h.get("event") or "?", when)
     if k == "timer_done":
         return "When %s runs out" % (h.get("timer") or "a timer")
+    if k == "menu_pick":                                             # PAD-1404
+        return "When the player picks from %s" % (h.get("menu") or "a menu")
     if k == "challenge":
         return "When the player picks the challenge %s" % (h.get("challenge") or "?")
     if k == "combo":                                                 # PAD-708

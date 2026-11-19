@@ -80,7 +80,7 @@ def test_the_project_asks_for_what_its_tabs_switched(tmp_path):
     p = str(tmp_path)
     with open(os.path.join(p, ".staged_changes.json"), "w", encoding="utf-8") as f:
         json.dump({"coop_play": {"on": True, "menu": True}, "handicap": {"on": True}}, f)
-    assert [r[0] for r in SM.wanted(p)] == ["coop_play", "handicap"]
+    assert [r[0] for r in SM.wanted(p)] == ["handicap"]           # PAD-1443: co-op play has no row
     with open(os.path.join(p, ".staged_changes.json"), "w", encoding="utf-8") as f:
         json.dump({"coop_play": {"on": True}}, f)                 # co-op always on: no row
     assert SM.wanted(p) == []

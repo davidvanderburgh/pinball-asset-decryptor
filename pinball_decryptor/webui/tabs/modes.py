@@ -746,9 +746,12 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
     #: mode runtime, and a card with it keeps its scores off Insider Connected as a card with modes does
     COOP_TIP = (
         "Lets 2 to 4 players play one game together on a game that has no co-op of its own. On the machine, hold "
-        "the right flipper button and press Start to add a teammate. The team shares one score and all of the "
-        "game's progress, and takes turns ball by ball. Each team size has its own high score board. Like a card "
-        "with modes, its scores and achievements stay off Insider Connected. Write puts it on the card.")
+        "both flipper buttons in attract and pick a game on the start menu: CO-OP PLAY, ENHANCED CO-OP (each "
+        "teammate picks a character with its ability), ENHANCED STANDARD (a normal game, each player with a "
+        "character) or a TEAM PLAY game; or hold the right flipper button and press Start to add a teammate. The "
+        "team shares one score and all of the game's progress, and takes turns ball by ball. Each team size has its "
+        "own high score board. A game played as one of these stays off Insider Connected; a Standard game reports "
+        "as it always has. Write puts it on the card.")
 
     def _publish_coop(self, project):
         """PAD-1017: the Co-op play tick, and under it how a teammate joins, or in red why this game cannot have it.
@@ -756,7 +759,6 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
         unread title (NO_TITLE) leaves it as it was, as Write may still find the card."""
         from ...plugins.stern import coop_play as _CP
         on = bool(project) and _CP.load(project)
-        menu = on and _CP.menu_asked(project)
         prof = _CP.project_title(project) if project else None
         why = _CP.title_refusal(prof) if project else ""
         a64 = getattr(prof, "arch", "arm") == "a64"                      # PAD-1326: a Spike 3 game's co-op
@@ -766,32 +768,14 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
             if why:
                 note, kind = why, "err"
             elif a64:
-                note = (("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. At 1 (On) "
-                         % self.COOP_MENU_WHERE_A64 if menu else "On the card: ")
-                        + (_CP.HOW_A64 if menu else _CP.HOW_A64[0].upper() + _CP.HOW_A64[1:]) + ". "
-                        + ("At 1 most Insider Connected features are off; at 0 the game plays and reports as it "
-                           "always has. " if menu else "Its scores stay off Insider Connected. ")
-                        + _CP.A64_LEFT_OUT[0].upper() + _CP.A64_LEFT_OUT[1:] + ".")
-            elif menu:
-                note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. At 1 "
-                        "(Classic) or 2 (Enhanced) the game's start menu (both flipper buttons in attract) offers "
-                        "CO-OP PLAY (each Start then adds a teammate; or the right flipper button + Start adds one), "
-                        "TEAM PLAY 2 VS 2 (players 1 and 3 a team against players 2 and 4, one Start adding all four), "
-                        "TEAM PLAY 2 VS 1 (players 1 and 3 against player 2) and TEAM PLAY 3 VS 1 (players 1, 3 "
-                        "and 4 against player 2); at 2 also ENHANCED STANDARD (a normal game of competing players, "
-                        "each with their own score and progress and a character). Classic: the players pick "
-                        "characters, but none has a special ability; Enhanced: with the abilities. With characters, a "
-                        "player starting a game alone with the right flipper button held picks one too. 1 or 2 "
-                        "disables most "
-                        "Insider Connected features (scores, high scores and achievements stay on the machine); at 0 "
-                        "the game plays and reports as it always has%s."
-                        % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
-                           else " (this project's modes keep the card's scores off Insider Connected anyway)"))
+                note = ("On the card: " + _CP.HOW_A64[0].upper() + _CP.HOW_A64[1:] + ". Its scores stay off "
+                        "Insider Connected. " + _CP.A64_LEFT_OUT[0].upper() + _CP.A64_LEFT_OUT[1:] + ".")
             else:
-                note = "On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + ". Its scores stay off Insider Connected."
-        self.set(coop_shown=bool(project), coop_on=on, coop_locked=locked, coop_menu=menu, coop_note=note,
+                note = ("On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + ". " + _CP.INSIDER_HOW
+                        + ("" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
+                           else " This project's modes keep the card's scores off Insider Connected anyway."))
+        self.set(coop_shown=bool(project), coop_on=on, coop_locked=locked, coop_note=note,
                  coop_note_kind=kind,
-                 coop_menu_tip=self.COOP_MENU_TIP,
                  coop_awards_ok=on and kind != "err" and not a64,                               # PAD-1028/1326
                  coop_awards_tip=self.COOP_AWARDS_TIP,
                  coop_chars_tip=self.COOP_CHARS_TIP,                                            # PAD-1031
@@ -802,43 +786,6 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
         """PAD-1062: whether :func:`coop_play.title_refusal`'s *why* greys the Co-op play tick out."""
         from ...plugins.stern import coop_play as _CP
         return bool(why) and why != _CP.NO_TITLE
-
-    #: PAD-1326: where a Spike 3 game's CO-OP PLAY row goes (spike3_menu: beside the game's own attract settings)
-    COOP_MENU_WHERE_A64 = "Adjustments > Machine Settings > Attract Mode"
-    #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
-    COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
-    COOP_MENU_TIP = (
-        "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Classic (characters picked, no special "
-        "abilities), 2 Enhanced (with the abilities). At 1 or 2 the game's start menu (both flipper buttons in "
-        "attract) offers the games below. CO-OP PLAY: picked, each Start in the first ball adds a teammate; or teammates "
-        "join with the right flipper button and Start. TEAM PLAY 2 VS 2: players 1 and 3 play as a team against "
-        "players 2 and 4, each team with its own score and progress, taking turns; one Start "
-        "adds all four. TEAM PLAY 2 VS 1: players 1 and 3 against player 2, who plays both of team 2's turns. "
-        "TEAM PLAY 3 VS 1: players 1, 3 and 4 against player 2, who plays all three of team 2's turns. ENHANCED "
-        "STANDARD (at 2 only): the game's own game of competing players, each Start in the first ball adding one, "
-        "each with their own score and progress, and each picking a character at their first ball. A "
-        "plain Start stays a one-player game. 1 or 2 disables most Insider "
-        "Connected features (the "
-        "card's scores, high scores and achievements stay on the machine). At 0 the game plays and "
-        "reports to Insider Connected as it always has. A card that also carries modes keeps its scores off Insider "
-        "Connected either way.")
-
-    @rpc
-    def set_coop_menu(self, on):
-        """Round 2: co-op switched in the service menu (CO-OP PLAY), or always on."""
-        from ...core import history_log
-        from ...plugins.stern import coop_play as _CP
-        project = self.project()
-        if not project or not _CP.load(project):
-            return False
-        was = _CP.menu_asked(project)
-        _CP.save(project, True, menu=bool(on))
-        hist = history_log.diff_scalar("modes  co-op play in the service menu", "on" if was else "off",
-                                       "on" if on else "off")
-        history_log.record(project, [hist] if hist else [])
-        self._say("co-op play: %s" % ("switched in the game's service menu (CO-OP PLAY)" if on else "always on"))
-        self._publish_coop(project)
-        return True
 
     #: PAD-1028: the co-op game's awards (plugins/stern/coop_play.py "a co-op game's awards")
     COOP_AWARDS_TIP = (

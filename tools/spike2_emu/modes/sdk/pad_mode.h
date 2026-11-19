@@ -434,6 +434,12 @@ int pm_coil_pulse_known(const char *name);
 int pm_device_keep(const char *name, unsigned n);
 int pm_device_balls(const char *name);
 int pm_device_known(const char *name);
+/* PAD-1406: THE GAME'S KICKBACKS, for the mode that has the whole game: pm_kickback(1) switches every kickback the game
+ * has on (its node board rule fires it from its switch, at the game's power), pm_kickback(0) off, through the framework's
+ * own switch for each; what each was is put back when the mode ends. 1 = done; 0 = refused (not the whole game's mode, no
+ * game, a tilt, or no kickback here: of the newest builds only Guardians of the Galaxy has any). */
+int pm_kickback(int on);
+int pm_kickback_known(void);
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

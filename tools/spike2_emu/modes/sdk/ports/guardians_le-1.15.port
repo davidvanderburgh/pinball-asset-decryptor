@@ -609,3 +609,8 @@ site ball_device_keep     0x002faa14 0xe30a3e0c 0xe340304d
 data ball_devices         0x005beb70
 text ball_device_names  RIGHT_SCOOP GROOT_LOCKUP
 data ball_device_count    0x004dae0c
+
+# PAD-1406: the framework's kickbacks (the list its tilt code switches off with the pops and slings): set(index, on, 0)
+# switches one and answers what it was; the count (index 0 unused) - pm_kickback
+site kickback_set         0x0021c25c 0xe92d4038 0xe1a04001
+data kickback_count       0x004f27c8

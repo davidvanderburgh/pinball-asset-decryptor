@@ -103,7 +103,18 @@ kick 255 for 60 ms on 9.3 twice, a second one at once refused; both refused once
   Pro's upper lock: keep 0 fired its release (coil 8.8) that never fired while held; every allowed device of all 53
   newest builds held and let go with the game running on (lockall.sh, 53/53).
 
-## Next (runs 5+), in this order
+## Done (run 5): kickbacks
+
+- The framework's tilt/dead-flipper all-off switches three kinds (kinds.py): kickbacks, pops, slings, each a list with a
+  static count. Kickbacks exist only on Guardians of the Galaxy Pro and LE 1.15 (two each); Sword of Rage's is a rule of
+  its own, Bond's "kick back" names eject powers, Iron Maiden's is an up post.
+- `site kickback_set` (set(index, on, 0): the record's enable byte, answering the old one; LE 0x21c25c, Pro 0x39effc),
+  `data kickback_count`. pm_kickback(on) / pm_kickback_known; whole game only; each saved and put back at the mode's end.
+  Profile.kickbacks; Blocks Kickbacks on / off.
+- Proof (kbjob.sh): Guardians LE and Pro - rule 8.6 (input 12, off as the game had it) and 9.8 (input 23, on) both on,
+  both off, both on, then back as the game had them when the rules were given back; Sword of Rage LE refused cleanly.
+
+## Next (runs 6+), in this order
 
 1. ~~**Switch names at run time.**~~ Done in run 3. The game builds its switch table on the heap (mktables.py); the shim already reads
    names from it. A runtime reader of the switch descriptors' names (per framework generation, as the switch-edge
@@ -115,7 +126,7 @@ kick 255 for 60 ms on 9.3 twice, a second one at once refused; both refused once
    2 settled, 16/17 kick, 18 left: the scoop hold, mode_coils.md); the eject is the device's own (its retries, its
    power adjustment). Generalise the scoop wrap to every ball device record the framework lists, and add the device's
    own eject request: `pm_device_hold(name, on)`, `pm_device_eject(name, n)`.
-3. **Kickbacks**: the game's own enable/disable (Godzilla's dead-flipper feature turns kickbacks, pops and slings off
+3. ~~**Kickbacks**~~ Done in run 5: the game's own enable/disable (Godzilla's dead-flipper feature turns kickbacks, pops and slings off
    at 0x3f04cc beside the flipper pair: find the framework's per-kind switch and the kickback's own enable).
 4. **Diverters, posts, magnets beyond 5 s**: the held-coil route (PAD-381/420) with a whole-game mode's cap raised
    to the game's own longest command on that coil (`<name>_max_ms`, or the drive's last word), never past it.

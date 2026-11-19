@@ -125,6 +125,35 @@ def main():
         S._shoot(url, locks, height=1100)
     finally:
         proc.terminate()
+    # PAD-1406 run 5: a whole-game mode on Guardians of the Galaxy LE 1.15 that switches its kickbacks
+    scratch3 = tempfile.mkdtemp(prefix="pad1406g-")
+    project3 = os.path.join(scratch3, "Guardians LE 1.15 Extract")
+    os.makedirs(project3)
+    card = "guardians_le-1_15_0.Release.16G.sdcard.raw"
+    with open(os.path.join(project3, ".extract_source.json"), "w", encoding="utf-8") as f:
+        json.dump({"input_path": os.path.join(project3, card), "input_name": card}, f)
+    slug4, _path = BM.new_blocks_mode(project3, "ROCKET", example="ramps")
+    g = BM.load(project3, slug4)
+    g["game_modes"] = "own_game"
+    kb = "kickback" in BM.STATEMENTS
+    g["scripts"] = [{"hat": {"kind": "mode_start"},
+                     "do": [{"op": "kickback", "to": "on"}] if kb else [{"op": "log", "text": "the kickbacks: no way to switch them"}]}]
+    BM.save(project3, slug4, g)
+    proc, url = S._serve(repo, scratch3, project3)
+    try:
+        def kicks(page):
+            webui_shot.api(url, "modes.select", slug4, "code")
+            time.sleep(3)
+            page.evaluate("""() => { const pal = document.querySelector('.bk-palette'); if (pal) {
+                  const h = [...pal.querySelectorAll('*')].find((e) => /^Mechanisms/.test(e.textContent || '')
+                    && e.children.length === 0); if (h) h.scrollIntoView(); } }""")
+            time.sleep(1)
+            out = os.path.join(out_dir, "%s_blocks_kickbacks.png" % prefix)
+            page.screenshot(path=out)
+            print("shot", out, flush=True)
+        S._shoot(url, kicks, height=1100)
+    finally:
+        proc.terminate()
 
 
 if __name__ == "__main__":

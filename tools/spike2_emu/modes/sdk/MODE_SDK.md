@@ -1670,6 +1670,13 @@ release both locks). `pm_device_keep(name, n)` makes it for the whole game's mod
 trough and the auto plunger are the game's alone, and so are the device kinds the call does not take (a VUK that cannot
 hold a ball). When the mode ends each device it touched keeps what the game had it keep.
 
+**Kickbacks (PAD-1406).** The framework keeps its kickbacks as a list beside the pop bumpers and slingshots (the three
+its tilt switches off together). Only Guardians of the Galaxy (Pro and LE 1.15) has any among the newest builds: the
+kickback on input 12 (off until the game's rules light it) and on input 23. `pm_kickback(on)` switches them all through
+the framework's own set(index, on) for each, which the node board's kickback rule follows - the board fires them, at
+the game's power; each is put back as the game had it when the mode ends. Sword of Rage's "kickback" is its own rule's,
+not the framework's, and stays the game's.
+
 The magnet's limit stays the game's own: X-Men's longest magnet command is its grab, 2.5 s on the LE (1.2 s on the
 Pro), and a hold is never longer; a mode grabs again after the runtime's 3 s.
 

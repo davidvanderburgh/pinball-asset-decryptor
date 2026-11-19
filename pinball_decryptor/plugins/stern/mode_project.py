@@ -106,6 +106,8 @@ class TitleProfile:
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
     own_game_coils: tuple = ()       # PAD-1406: ((name, label), ...) held coils only the mode that IS the whole game may
     #                                  hold (`value <name>_own_game 1`: toys and posts the game's rules drive), proven
+    kickbacks: bool = False          # PAD-1406: the whole game's mode can switch the game's kickbacks (pm_kickback):
+    #                                  the port names `site kickback_set` and `data kickback_count` (Guardians)
     ball_devices: tuple = ()         # PAD-1406: ((name, label), ...) the game's ball devices a whole-game mode may keep balls
     #                                  in or let go of (pm_device_keep): `text ball_device_names` with `site ball_device_keep`
     pulse_coils: tuple = ()          # PAD-1406: ((name, label), ...) the game's own one-shot devices (pm_coil_pulse), the
@@ -2966,6 +2968,7 @@ def profile_from_port(path):
         own_game_coils=_own_game_coils(port, key),                           # PAD-1406
         pulse_coils=_pulse_coils(port, key),                                 # PAD-1406
         ball_devices=_ball_devices(port),                                    # PAD-1406
+        kickbacks="kickback_set" in sites and bool(port["data"].get("kickback_count")),   # PAD-1406
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589

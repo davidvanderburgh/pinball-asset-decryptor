@@ -108,6 +108,7 @@ SAY = {
     "drain_to_one": lambda b: "Take the extra balls away (flippers off until they drain, one ball back)",
     "flippers": lambda b: "Flippers back on" if b.get("to") == "on" else "Flippers off",   # PAD-1406
     "pulse": lambda b: "Fire the %s once" % (b.get("what") or "device"),                  # PAD-1406
+    "kickback": lambda b: "Kickbacks off" if b.get("to") == "off" else "Kickbacks on",     # PAD-1406
     "device": lambda b: ("The %s lets its balls go" if b.get("keep") == "let_go" else "The %s keeps every ball")
     % (b.get("what") or "device"),                                                         # PAD-1406
     "game_wizard": lambda b: "%s the game's %s" % ("Start" if b.get("how") == "start" else "Light", b.get("name") or "mini-wizard"),
@@ -152,7 +153,7 @@ SAY = {
 #: the block's family, as the page colours it (modes_blocks.js STMT_CLASS)
 FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "set_hits": "var", "end_mode": "mode",
           "add_time": "mode", "set_time": "mode", "multiball": "mode", "ball_save": "mode", "drain_to_one": "mode", "game_wizard": "mode", "score": "score",
-          "flippers": "mech", "pulse": "mech", "device": "mech",
+          "flippers": "mech", "pulse": "mech", "device": "mech", "kickback": "mech",
           "set": "var", "change": "var", "if": "flow", "callout": "show", "words": "show", "fade": "show", "light_shot": "show",
           "lights_off": "show", "gi": "show", "show": "show", "game_show": "show", "log": "show", "clip": "own", "sound": "own", "music": "own",
           "timer_start": "timer", "timer_stop": "timer", "hud_text": "hud", "hud_counter": "hud", "hud_gauge": "hud", "hud_progress": "hud", "roster_progress": "hud",

@@ -433,3 +433,30 @@ def test_profiles_and_blocks_know_the_ball_devices():
         assert (probs == []) == ok, probs
     c = BM.to_c(prog, "x")
     assert 'pm_device_keep("UPPER_LOCK", 99u)' in c and 'pm_device_keep("UPPER_LOCK", 0u)' in c
+
+
+# ---- the game's kickbacks (run 5) --------------------------------------------------------------------------------------
+
+def test_kickbacks_are_guardians_and_the_whole_game_s():
+    from pinball_decryptor.plugins.stern import mode_project as MP, block_modes as BM
+    P = MP.profiles()
+    have = sorted(k for k, p in P.items() if getattr(p, "kickbacks", False))
+    assert have == ["guardians_1_15", "guardians_le_1_15"], have
+    src = RUNTIME.read_text(encoding="utf-8")
+    sec = src[src.index("/* ---- PAD-1406: the game's kickbacks"):src.index("/* the mode gives the game its rules back (or ends)")]
+    assert "og_has_it()" in sec and "kb_saved[i] < 0" in sec            # the game's state saved once, put back at the end
+    assert "kb_give_back(why);" in src
+    for gm, ok in (("own_game", True), ("block", False)):
+        prog = BM.normalize({"name": "X", "game_modes": gm, "scripts": [{"hat": {"kind": "mode_start"}, "do": [
+            {"op": "kickback", "to": "off"}]}]})
+        probs = [x for x in BM.problems(prog, **BM.card_checks(P["guardians_le_1_15"])) if "kickback" in x]
+        assert (probs == []) == ok, probs
+    assert [x for x in BM.problems(prog, **BM.card_checks(P["turtles_pro_1_59"])) if "kickback" in x]
+    assert 'if (run.on && !pm_kickback(0)) pm_log("the kickbacks stay as they are");' in BM.to_c(prog, "x")
+
+
+@pytest.mark.parametrize("key,setf,cnt", [("guardians-1.15", 0x39effc, 0x4f3edc), ("guardians_le-1.15", 0x21c25c, 0x4f27c8)])
+def test_kickback_lines(key, setf, cnt):
+    text = (SDK / "ports" / (key + ".port")).read_text(encoding="utf-8")
+    assert re.search(r"^site kickback_set\s+0x%08x 0xe92d4038 0xe1a04001$" % setf, text, re.M)
+    assert re.search(r"^data kickback_count\s+0x%08x$" % cnt, text, re.M)

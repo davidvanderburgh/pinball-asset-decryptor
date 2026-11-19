@@ -18067,10 +18067,72 @@ int pm_device_balls(const char *name)
 
 int pm_device_known(const char *name) { return fn("ball_device_keep") && bd_find(name) > 0; }
 
+/* ---- PAD-1406: the game's kickbacks, for the mode that has the whole game (pm_kickback) ------------------------------
+ * The framework keeps its kickbacks as a list beside its pop bumpers and slingshots (the three the game's dead-flipper
+ * and tilt code switch off together); only Guardians of the Galaxy (Pro and LE 1.15) has any among the newest builds.
+ * Each one is switched by the framework's own set(index, on, 0) (`site kickback_set`, Guardians LE 0x21c25c: the
+ * kickback record's enable byte, which the node board's kickback rule follows), which answers what it was; `data
+ * kickback_count` is the list's length (index 0 unused). pm_kickback(on) switches every kickback the game has, for the
+ * mode that has the whole game; what each was before is put back when the mode ends or gives the rules back. */
+#define KB_MAX 8
+static signed char kb_saved[KB_MAX];      /* -1 = untouched */
+static int kb_touched;
+
+static unsigned kb_count(void)
+{
+    pm_addr c = data("kickback_count");
+    unsigned n;
+    if (!c || !fn("kickback_set") || !maps_has(c, 4, MAP_R)) return 0;
+    n = *(const unsigned *)(unsigned long)c;
+    return n > KB_MAX ? KB_MAX : n;
+}
+
+static unsigned kb_set(unsigned i, unsigned on)
+{
+    return ((unsigned (*)(unsigned, unsigned, unsigned))(unsigned long)fn("kickback_set"))(i, on, 0u) & 0xffu;
+}
+
+int pm_kickback(int on)
+{
+    unsigned n = kb_count(), i;
+    const char *who = current && current->name ? current->name : "a mode";
+    if (n < 2) {
+        say("kickback: %s asked them %s - refused (this game has no kickback of the framework's)", who, on ? "on" : "off");
+        return 0;
+    }
+    if (!og_has_it() || !pm_in_game() || og.tilted || ball_tilted()) {
+        say("kickback: %s asked them %s - refused (%s)", who, on ? "on" : "off", !og_has_it() ? "only the mode that has "
+            "the whole game (pm_own_game) may" : !pm_in_game() ? "no game in play" : "the ball is tilted");
+        return 0;
+    }
+    if (!kb_touched)
+        for (i = 0; i < KB_MAX; i++) kb_saved[i] = -1;
+    for (i = 1; i < n; i++) {
+        unsigned was = kb_set(i, on ? 1u : 0u);
+        if (kb_saved[i] < 0) kb_saved[i] = (signed char)(was ? 1 : 0);
+    }
+    kb_touched = 1;
+    say("kickback: %s - %u kickback(s) %s", who, n - 1, on ? "on" : "off");
+    return 1;
+}
+
+int pm_kickback_known(void) { return kb_count() > 1; }
+
+static void kb_give_back(const char *why)
+{
+    unsigned n = kb_count(), i;
+    if (!kb_touched) return;
+    for (i = 1; i < n; i++)
+        if (kb_saved[i] >= 0) kb_set(i, (unsigned)kb_saved[i]);
+    kb_touched = 0;
+    say("kickback: each back as the game had it (%s)", why);
+}
+
 /* the mode gives the game its rules back (or ends): each device it touched keeps what the game had it keep */
 static void bd_give_back(const char *why)
 {
     int i;
+    kb_give_back(why);                                 /* and the kickbacks as the game had them */
     for (i = 0; i < bd_n_touched; i++)
         if (fn("ball_device_keep") && bd_entry(bd_touched[i].dev)) {
             bd_call(bd_touched[i].dev, bd_touched[i].saved);

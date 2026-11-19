@@ -165,7 +165,6 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern" \
     --hidden-import "pinball_decryptor.plugins.stern.engine" \
     --hidden-import "pinball_decryptor.plugins.stern.emulator_log" \
-    --hidden-import "pinball_decryptor.plugins.stern.cabinet_buttons" \
     --hidden-import "pinball_decryptor.plugins.stern.cards" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1" \
     --hidden-import "pinball_decryptor.plugins.stern.sam_audio" \
@@ -215,6 +214,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.card_size" \
     --hidden-import "pinball_decryptor.plugins.stern.bank_build" \
     --hidden-import "pinball_decryptor.plugins.stern.bank_songs" \
+    --hidden-import "pinball_decryptor.plugins.stern.cabinet_buttons" \
+    --hidden-import "pinball_decryptor.plugins.stern.mode_meters" \
     --hidden-import "pinball_decryptor.plugins.stern.image_compact" \
     --hidden-import "pinball_decryptor.core.image_info" \
     --hidden-import "pinball_decryptor.core.hashcache" \
@@ -254,7 +255,9 @@ pyinstaller \
     --hidden-import "pinball_decryptor.core.pdf_sheet" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_assets" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_hud" \
+    --hidden-import "pinball_decryptor.plugins.stern.cabinet_buttons" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_meters" \
+    --hidden-import "pinball_decryptor.plugins.stern.mode_menus" \
     --hidden-import "pinball_decryptor.plugins.stern.more_kaiju" \
     --hidden-import "pinball_decryptor.plugins.stern.battle_select" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_variants" \

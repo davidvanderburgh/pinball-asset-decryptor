@@ -52,6 +52,9 @@ class SpookyManufacturer(Manufacturer):
         # (tools/spooky_emu/mkspkmulti.py, MULTIBOOT.md).  The Linux titles only:
         # the pinHeck games cannot run a menu (MULTIBOOT.md).
         multiboot=True,
+        # Custom modes (PAD-1417): the Modes tab's Spooky editor - mode files PAD's runtime
+        # runs inside the Unity titles (tools/spooky_emu/modes), built into the update.
+        spooky_modes=True,
     )
     input_spec = InputSpec(
         label="Spooky game files",

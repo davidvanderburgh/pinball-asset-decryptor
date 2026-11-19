@@ -1,5 +1,5 @@
 /* padunity.c - load PAD's managed mode runtime into a Spooky Unity (Mono)
- * game without touching the game's files (PAD-1387 proof of concept).
+ * game without touching the game's files (PAD-1387; the runtime since PAD-1417).
  *
  * LD_PRELOADed into main.x86_64.  A constructor starts one thread that waits
  * for the game's Mono (libmonobdwgc-2.0.so, dlopen'd by UnityPlayer) to have
@@ -153,7 +153,7 @@ __attribute__((constructor)) static void padunity_init(void)
     ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
     if (n <= 0) return;
     const char *base = strrchr(exe, '/'); base = base ? base + 1 : exe;
-    if (!strstr(base, ".x86_64")) return;          /* not the Unity player */
+    if (strcmp(base, "main.x86_64")) return;       /* not the game's player (topper...) */
     const char *l = getenv("PADUNITY_LOG");
     if (l && *l) snprintf(log_path, sizeof log_path, "%s", l);
     Dl_info di;

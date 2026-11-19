@@ -2,8 +2,8 @@
 
 s3port.attract_sequencer reads the sequencer the 64-bit way (the page loaded from a table entry, made a child process,
 stamped at +0x108 and a frame slept): Star Wars ELG 1.10 28 entries of 16 bytes {test, page} at 0x6a45c0, Walking Dead
-Remastered LE 0.92 48, Star Wars 2025 LE 0.96 183 and Pro 0.84 126, Pokemon LE 0.82 10 of 24 bytes {test, page, float
-seconds}; Fallout LE and Transformers LE run theirs from a director with no table. The ports carry the lines, the
+Remastered LE 0.92 48, Star Wars 2025 LE 0.96 183 and Pro 0.84 126; PAD-1415: Pokemon LE 0.82 51, Fallout LE 0.82 65
+and Transformers LE 0.96 59 of 24 bytes {test, page, float seconds} (their page loaded into x1, then moved to x0). The ports carry the lines, the
 runtime reads the table's words pointer-sized, and the Attract tab reads a 64-bit program's pages. Showing an item is
 gated off on Spike 3 (the scene show from an item's page stalls ELG in the emulator: docs/plans/spike3_modes.md).
 
@@ -31,10 +31,13 @@ TABLES = {
     "walking_dead_remastered_le": ("walking_dead_remastered_le_0_92_spike3", 0x7b5c38, 16, 48),
     "star_wars_2025_le": ("star_wars_2025_le_0_96_spike3", 0x8b7a98, 16, 183),
     "star_wars_2025_pro": ("star_wars_2025_pro_0_84_spike3", 0x754a50, 16, 126),
+    # PAD-1415: the tables the rig's gdb trace saw their attract pages started from (PAD-1328/1380 read none here, or
+    # Pokemon's 10-entry slideshow 0x3198290, and took a lamp-show process for a director)
+    "pokemon_le": ("pokemon_le_0_82_spike3", 0x3197b38, 24, 51),
+    "fallout_le": ("fallout_le_0_82_spike3", 0x19288b0, 24, 65),
+    "transformers_mtmte_le": ("transformers_mtmte_le_0_96_spike3", 0x9a7dd8, 24, 59),
 }
-#: PAD-1380: Pokemon LE's {test, page, float seconds} table never ran in attract on the rig; a director starts its pages
-NO_TABLE = {"fallout_le": "fallout_le_0_82_spike3", "transformers_mtmte_le": "transformers_mtmte_le_0_96_spike3",
-            "pokemon_le": "pokemon_le_0_82_spike3"}
+NO_TABLE = {}
 
 
 def _prog(game):
@@ -52,15 +55,8 @@ def test_port_carries_the_table(game):
     assert (t["table"], t["size"], t["page_at"], t["count"]) == (table, size, 8, count)
 
 
-@pytest.mark.parametrize("game", sorted(NO_TABLE))
-def test_director_titles_have_no_table(game):
-    prof = MP.profiles()[NO_TABLE[game]]
-    assert AI.port_table(prof) is None
-    assert "starts its attract screens in a way" in AI.title_refusal(prof)
-
-
 def test_show_pair_on_the_titles_whose_pages_have_it():
-    for game in ("star_wars_elg", "walking_dead_remastered_le", "star_wars_2025_le", "star_wars_2025_pro"):
+    for game in TABLES:
         port = MP.read_port(MP.port_path(MP.profiles()[TABLES[game][0]]))
         assert "attract_show" in port["site"] and "player_advance" in port["site"], game
         assert AI.port_table(MP.profiles()[TABLES[game][0]])["show"]
@@ -74,7 +70,7 @@ def test_spike3_items_go_on_where_the_bank_scene_can_be_shown():
     assert prof.arch == "a64"
     assert AI.title_refusal(prof) == ""
     wdr = MP.profiles()["walking_dead_remastered_le_0_92_spike3"]
-    assert AI.title_refusal(wdr) == AI.NO_GLASS % wdr.label
+    assert AI.title_refusal(wdr) == ""                          # PAD-1415: on its attract bank
     # PAD-1380: Star Wars 2025 LE's and Pro's clip route is proven (their in-play bank 3a9d7db5), and so their items
     # (47% of the glass on the rig)
     for key in ("star_wars_2025_le_0_96_spike3", "star_wars_2025_pro_0_84_spike3"):
@@ -93,7 +89,7 @@ def test_spike3_modes_carries_them_on_elg(tmp_path, monkeypatch):
     assert S3M.attract_wanted(str(tmp_path), real_card=False) is elg
     wdr = MP.profiles()["walking_dead_remastered_le_0_92_spike3"]
     monkeypatch.setattr(CV, "project_title", lambda p, probe=False: wdr)
-    assert S3M.attract_wanted(str(tmp_path), real_card=False) is None
+    assert S3M.attract_wanted(str(tmp_path), real_card=False) is wdr        # PAD-1415: its attract bank
     assert "attract items" not in S3M.FAMILY_LEFT_OUT          # the engine's own sentence says why
 
 
@@ -133,11 +129,6 @@ def test_finder_on_the_real_programs(game):
     sleep = port["site"]["proc_sleep"]
     sleep = sleep[0] if isinstance(sleep, (tuple, list)) else sleep
     s = S.attract_sequencer(t, sleep)
-    if game in NO_TABLE:
-        # PAD-1380: Pokemon's timed slideshow table is found, and left out: it is not the attract sequence
-        assert s is None or (game == "pokemon_le" and s["entry"] == 0x3198290 and s["seconds_at"] == 16)
-        assert S.attract_lines(t, {"proc_sleep": sleep}) == []
-        return
     _key, table, size, count = TABLES[game]
     assert (s["entry"], s["size"], s["page_at"], s["count"]) == (table, size, 8, count)
     assert s["stamp"] in (0x108, 0x110)

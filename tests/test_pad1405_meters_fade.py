@@ -70,7 +70,7 @@ def test_fade_layers_are_one_per_colour_and_look_in_first_use_order_and_three_at
     many["scripts"].append({"hat": {"kind": "mode_end"}, "do": [
         {"op": "fade", "color": c, "style": "flat", "to": num(10), "ms": num(0)} for c in ("#111111", "#222222")]})
     assert len(BM.fade_layers(many)) == 4
-    assert any("more than 3 colours" in s for s in BM.problems(many))
+    assert any("more than 3 colors" in s for s in BM.problems(many))
     bad = BM.normalize(_prog())
     bad["scripts"][1]["do"][1]["then"][0]["to"] = None
     assert BM.problems(bad)

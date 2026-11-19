@@ -258,7 +258,8 @@ def track_of(b):
         return "Light shows"
     if op in ("callout", "sound", "music"):
         return "Sound"
-    if op in ("words", "fade", "hud_text", "hud_counter", "hud_gauge", "hud_award", "hud_progress", "roster_progress", "clip"):
+    if op in ("words", "fade", "hud_text", "hud_counter", "hud_gauge", "hud_award", "hud_progress", "roster_progress", "clip",
+              "menu_open", "menu_close"):                                                 # PAD-1404
         return "Screen and HUD"
     if op in ("start_mode", "end_mode", "add_time", "set_time", "multiball", "ball_save", "drain_to_one"):
         return "Clock"

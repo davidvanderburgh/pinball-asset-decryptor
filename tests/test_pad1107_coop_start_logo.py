@@ -94,7 +94,7 @@ def test_a_port_without_the_lines_leaves_the_game_alone(tmp_path):
 
 def test_the_pick_screens_pass_whether_a_card_is_up():
     tick = R._lift(RUNTIME.read_text(encoding="utf-8"), "static void coop_screens_tick(void)")
-    assert "coop_logo_hold(want >= 0 && want <= coop_ch_n && coop_scr[want] != 0);" in tick
+    assert "coop_logo_hold((want >= 0 && want <= coop_ch_n && coop_scr[want] != 0) || want_sty >= 0);" in tick   # PAD-1449
 
 
 def test_the_godzilla_1_16_ports_name_the_start_logo():

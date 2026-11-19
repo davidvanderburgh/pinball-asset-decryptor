@@ -75,6 +75,28 @@ def test_pick_screens_carry_a_view_card_each_and_the_hint(tmp_path):
     assert abs(wx - (CP.VIEW_BOX[0] + CP.VIEW_BOX[2]) / 2) < 1
 
 
+def test_a_characters_game_patches_the_view_card_like_the_pick_card(tmp_path):
+    """PAD-1449's CHARACTERS style plays the characters with no abilities: the view card gets the Classic patch too."""
+    project = None
+    chars = CP.read_preset(CP.presets()["godzilla"])["characters"]          # the shipped set: every one has powers
+    assert chars["list"][0]["powers"]
+    got = CP.classic_patch(project, chars, 0, CP.words_for(), chars.get("theme"), view=True)
+    assert got is not None
+    (x, y), art = got
+    plain = CP.pick_card(project, dict(chars, list=[dict(c, powers=[], header="", text="") if k == 0 else c
+                                                    for k, c in enumerate(chars["list"])]), 0, CP.words_for(),
+                         chars.get("theme"), view=True)
+    h, w = art.shape[:2]
+    assert np.array_equal(art, plain[y:y + h, x:x + w]) and y + h <= CP.VIEW_SIZE[1]
+    names = [s["name"] for s in CP.pick_screens(project, chars, CP.words_for(), classic=True, videos=False)]
+    assert "PadCoopViewClassic_1" in names
+    assert names.index("PadCoopViewClassic_1") > names.index("PadCoopView_%d" % len(chars["list"]))   # over its card
+    src = RUNTIME.read_text(encoding="utf-8")
+    tick = src[src.index("static void coop_view_tick(void)"):]
+    tick = tick[:tick.index("\n}\n")]
+    assert "coop_classic() && coop_view_classic[show]" in tick and '"PadCoopViewClassic_%d"' in src
+
+
 def test_no_pick_no_view_cards(tmp_path):
     project = str(tmp_path / "p")
     os.makedirs(project)

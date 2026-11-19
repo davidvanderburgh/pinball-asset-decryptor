@@ -102,9 +102,10 @@ def test_the_modes_tab_tick_saves_the_choice_and_says_how_teammates_join(tmp_pat
     assert data[CP.STAGED_KEY] == {"on": True} and data["audio"] == {"x": "y"}
     assert state["coop_shown"] is True and state["coop_on"] is True
     assert state["coop_note"].startswith("On the card: Hold both flipper buttons in attract for the start menu")
-    assert "ENHANCED CO-OP" in state["coop_note"] and "ENHANCED STANDARD" in state["coop_note"]   # PAD-1443
+    assert "NORMAL, CHARACTERS" in state["coop_note"] and "ENHANCED (each character" in state["coop_note"]   # PAD-1449
     assert "or hold the right flipper button and press Start to add a teammate" in state["coop_note"]
-    assert state["coop_note"].endswith("a Standard game reports as it always has.")
+    assert state["coop_note"].endswith("a Standard game reports as it always has, and so do STANDARD and a challenge "
+                                       "played NORMAL or CHARACTERS.")   # PAD-1449
     assert "coop_menu" not in state
     monkeypatch.setattr(CP, "title_refusal", lambda prof: "Venom LE 1.07 has co-op play of its own.")
     svc._publish_coop(str(tmp_path))
@@ -289,6 +290,7 @@ static unsigned coop_value = 0;                       /* the CO-OP PLAY row's li
 static int game_now, mates;                           /* PAD-1443: a game of ours starting; its teammates */
 static int coop_game_now(void) { return game_now; }
 static unsigned coop_teammates(void) { return (unsigned)mates; }
+static int coop_insider_free(void) { return 0; }      /* PAD-1449: test_pad1449_start_menu_styles */
 static int insider_per_game, insider_game_held;
 #define INSIDER_SESSION_START "/api/v3/game/session_start"
 @BLOCKED@

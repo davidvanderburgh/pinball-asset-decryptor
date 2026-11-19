@@ -239,3 +239,52 @@ def test_a_refused_try_it_start_leaves_no_overlay_behind(tmp_path, monkeypatch):
         emu = w.window.service("emulate_spooky")
         emu.launch_file(str(tmp_path / "v2025.12.01.09.scooby"), pad_overlay=str(tmp_path))   # no such file
         assert getattr(emu, "_pad_overlay", "") == ""
+
+
+# ------------------------------------------------------------------ Looney Tunes (Godot, PAD-1419)
+LOONEY = "legends_of_tera-2025.10.08"
+
+
+def _looney(tmp_path):
+    """A stand-in Looney Tunes update: the plain tar the machine takes."""
+    d = tmp_path / "library"
+    d.mkdir(exist_ok=True)
+    p = d / "2025.10.08.looney"
+    with tarfile.open(str(p), "w") as t:
+        for name, data in (("main.x86_64", b"ELF"), ("version.txt", b"2025_10_08\n")):
+            ti = tarfile.TarInfo(name)
+            ti.size = len(data)
+            t.addfile(ti, io.BytesIO(data))
+    return str(p)
+
+
+def test_looney_tunes_is_a_game_the_tab_makes_modes_for(tmp_path, monkeypatch):
+    with web_app(tmp_path, mfr="spooky") as w:
+        _spooky(w)
+        stock = _looney(tmp_path)
+        s = _open(w, stock)
+        assert s["label"] == LOONEY and s["can_run"]
+        assert [m["name"] for m in s["modes"]] == ["Carrot Chase", "Spinner Frenzy"]
+        assert s["check"]["ok"] and s["points_scale"] == 1 and s["points_round"] == 10
+        assert "inlane_left" in s["names"]["switches"] and "bugs_hurry1" in s["names"]["sound"]
+        assert "CCHeroSandwichMeat" in s["names"]["font"]
+        assert s["game_name"] == "Looney Tunes" and "next powers up" in s["build"]["install_note"]
+        # Try it: pad_modes.gd and the modes, handed to the Emulate tab with the stock update
+        emu = w.window.service("emulate_spooky")
+        seen = []
+        monkeypatch.setattr(emu, "launch_file", lambda path, pad_overlay="": seen.append((path, pad_overlay)) or True)
+        assert w.run(_svc(w).spk_try) is True
+        path, pad = seen[0]
+        assert path == stock and os.path.isfile(os.path.join(pad, "pad_modes.gd"))
+        assert not os.path.exists(os.path.join(pad, "padunity.so"))
+        # Build: the plain tar again, with override.cfg and pad/
+        out = str(tmp_path / "out" / "2025.10.08.looney")
+        w.run(lambda: _svc(w).spk_set_out(out))
+        w.run(_svc(w).spk_build)
+        assert _wait(w, lambda: (_spk(w).get("build") or {}).get("done"))
+        assert _spk(w)["build"]["ok"], _spk(w)["build"]
+        with tarfile.open(out, "r:") as t:
+            names = t.getnames()
+            cfg = t.extractfile("override.cfg").read()
+        assert "pad/pad_modes.gd" in names and "pad/modes/1_carrot_chase.mode" in names
+        assert b'PadModes="*/game/code/uptest/pad/pad_modes.gd"' in cfg

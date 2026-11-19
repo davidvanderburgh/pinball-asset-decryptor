@@ -45,8 +45,8 @@ def test_each_pick_card_has_the_box_the_runtime_counts_down_in(tmp_path):
     screens = [sc for sc in CP.pick_screens(project, words_for=CP.words_for())
                if sc["name"].startswith("PadCoop_")]                  # PAD-1450: not the view cards / hint
     x0, y0, x1, y1 = CP.TIMER_BOX
-    for sc in screens:
-        wx, wy = sc["words_at"]
+    for sc in [s for s in screens if s["name"].startswith("PadCoop_")]:   # the characters' (PAD-1449: not the style
+        wx, wy = sc["words_at"]                                         # chooser's or the Classic patches)
         s = sc["words_scale"]
         # scene_write.screen: the words box is (0, -40)..(card width, 48) scaled about words_at; the game centres the
         # line on it, its middle on the box's y

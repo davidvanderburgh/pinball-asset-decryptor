@@ -224,9 +224,10 @@ def create_zip(source_dir, out_path, progress_cb=None):
 def create_tar_gz(source_dir, out_path, progress_cb=None, pad_modes=None):
     """Create a tar.gz archive from *source_dir*.  *pad_modes* (PAD-1417): ``(files, rewrite,
     folder[, top])`` - the custom modes' ``pad/`` files (``[(rel, bytes or path, mode)]``) added
-    under *folder*, any ``pad/`` the source has left out, and ``rewrite(rel, data) -> data`` run
-    on every file (the launch lines); ``top`` (PAD-1419) files added at the archive's top in
-    place of the source's own (Looney Tunes' override.cfg)."""
+    under *folder* (beside main.x86_64: ``pad`` or ``uptest/pad``), any ``pad/`` the source has
+    left out, and ``rewrite(rel, data) -> data`` run on every file (the launch lines, a Mono
+    config); ``top`` (PAD-1419) files added at the archive's top in place of the source's own
+    (Looney Tunes' override.cfg)."""
     all_files, all_dirs = _scan_for_modes(source_dir, pad_modes)
     total = len(all_files) + len(all_dirs)
     _create_tar_impl(out_path, "w:gz", all_files, all_dirs, total, progress_cb, pad_modes)
@@ -247,9 +248,11 @@ def _scan_for_modes(source_dir, pad_modes):
     if pad_modes:
         folder = pad_modes[2]
         tops = {t[0] for t in (pad_modes[3] if len(pad_modes) > 3 else ())}
-        top = lambda rel: rel.replace("\\", "/").split("/")[0]
-        all_files = [x for x in all_files if top(x[1]) != folder and x[1].replace("\\", "/") not in tops]
-        all_dirs = [x for x in all_dirs if top(x[1]) != folder]
+        def inside(rel):                            # folder may be nested (uptest/pad, PAD-1418)
+            rel = rel.replace("\\", "/")
+            return rel == folder or rel.startswith(folder + "/")
+        all_files = [x for x in all_files if not inside(x[1]) and x[1].replace("\\", "/") not in tops]
+        all_dirs = [x for x in all_dirs if not inside(x[1])]
     return all_files, all_dirs
 
 
@@ -319,7 +322,7 @@ def _add_pad_modes(tf, pad_modes):
     import time
     files, _rewrite, folder = pad_modes[:3]
     now = int(time.time())
-    for d in (folder, folder + "/modes"):
+    for d in (folder, folder + "/modes"):              # folder: "pad", or "uptest/pad"
         ti = tarfile.TarInfo(d)
         ti.type, ti.mode, ti.mtime = tarfile.DIRTYPE, 0o755, now
         tf.addfile(ti)

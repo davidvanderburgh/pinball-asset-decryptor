@@ -1,0 +1,11 @@
+# Camera Rush - a starter mode: the extra ball target starts it, the camera and Now Serving targets score for 8 seconds
+name = Camera Rush
+title = CAMERA RUSH
+start = extra_ball_target
+shots = camera_target_left camera_target_right now_serving_target_left now_serving_target_right
+points = 500000
+seconds = 8
+sound_start = voice_bj_oh_yeah_here_i_come_baby
+sound_end = voice_bj_sure_yeah_go_ahead
+panel = top
+panel_color = 1e3d12d0

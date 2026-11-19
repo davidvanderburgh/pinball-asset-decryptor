@@ -4453,8 +4453,10 @@ SPOOKY_MODES_HELP = [
         "**Completion bonus** when it is done early. A mode ends when its time runs out, "
         "when it is completed, and when the ball ends.",
         "Each game rounds its awards: Scooby-Doo to 100 points, Looney Tunes to 10, so the "
-        "check asks for points that are a multiple of that. On Looney Tunes the game's "
-        "playfield multiplier counts for a mode's points, as for its own awards.",
+        "check asks for points that are a multiple of that. The other games score what a mode "
+        "says (Texas Chainsaw Massacre doubles it while its 2X playfield runs, as it does its "
+        "own awards). On Looney Tunes the game's playfield multiplier counts for a mode's "
+        "points, as for its own awards.",
         "**Check** runs after every change and lists anything the game would not take.",
     ]),
     ("Trying and installing", [
@@ -4462,8 +4464,10 @@ SPOOKY_MODES_HELP = [
         "update, without building anything. Start a game there and make a mode's start shots.",
         "**Build** writes the stock update again with your modes in it, under the same name "
         "(the machine reads an update by its name). Install it as you would a stock update. "
-        "Scooby-Doo restarts once by itself on its first start after the update, to take up "
-        "the modes; Looney Tunes has them at once. The Write tab carries your modes too, with "
+        "Scooby-Doo restarts once by itself on its first start after the update, to take up the "
+        "modes; Looney Tunes has them from the next power-up, and the other games from their "
+        "first start. Beetlejuice asks before it installs an update the app built, as it does "
+        "for any update the Write tab makes for it. The Write tab carries your modes too, with "
         "any pictures or sounds you changed.",
         "To take the modes out, install the stock update again.",
     ]),

@@ -1,0 +1,16 @@
+# Showtime - a starter mode: both inlanes start it, the slings score it
+name = Showtime
+title = SHOWTIME
+start = left_inlane right_inlane
+start_count = 2
+shots = left_sling right_sling
+points = 250000
+seconds = 30
+complete = 3
+complete_points = 2000000
+sound_start = voice_bj_its_showtime
+sound_shot = voice_bj_yeah
+sound_complete = voice_bj_nice_work
+sound_end = voice_bj_hate_it_lets_go
+title_color = ffdc00
+value_color = ffffff

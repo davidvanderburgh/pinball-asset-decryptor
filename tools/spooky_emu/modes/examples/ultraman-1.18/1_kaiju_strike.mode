@@ -1,0 +1,16 @@
+# Kaiju Strike - a starter mode: both orbits start it, the slings score it
+name = Kaiju Strike
+title = KAIJU STRIKE
+start = left_orbit right_orbit
+start_count = 2
+shots = slingl slingr
+points = 250000
+seconds = 30
+complete = 3
+complete_points = 2000000
+sound_start = gamora_start_1
+sound_shot = jackpot_1
+sound_complete = 8_SuperJackpot
+sound_end = 11_ModeFail
+title_color = ffdc00
+value_color = ffffff

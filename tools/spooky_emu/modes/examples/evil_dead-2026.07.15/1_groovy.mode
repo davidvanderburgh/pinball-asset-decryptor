@@ -1,0 +1,16 @@
+# Groovy - a starter mode: both inlanes start it, the sling and the spinner score it
+name = Groovy
+title = GROOVY
+start = left_inlane right_inlane
+start_count = 2
+shots = left_sling spinner
+points = 250000
+seconds = 30
+complete = 3
+complete_points = 2000000
+sound_start = ash_evil_necklace_start_0
+sound_shot = ash_double_jackpot_prompt_0
+sound_complete = ash_evil_complete_0
+sound_end = adult_mode_on_0
+title_color = ffdc00
+value_color = ffffff

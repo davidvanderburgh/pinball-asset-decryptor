@@ -1,0 +1,11 @@
+# Standup Rush - a starter mode: the Q standup starts it, the other standups score for 8 seconds
+name = Standup Rush
+title = STANDUP RUSH
+start = standup_Q
+shots = standup_B back_left_standup back_right_standup
+points = 500000
+seconds = 8
+sound_start = dinner_start_0
+sound_end = ball_hit_hurry_0
+panel = top
+panel_color = 5a0a0ad0

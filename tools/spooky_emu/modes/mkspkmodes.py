@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mkspkmodes.py - custom modes on Spooky's Unity and Godot titles (PAD-1417, PAD-1419;
+"""mkspkmodes.py - custom modes on Spooky's Unity and Godot titles (PAD-1417, PAD-1418, PAD-1419;
 docs/plans/spooky_modes.md).
 
 A mode is the same ``key = value`` file as on JJP (tools/jjp_emu/MODES.md); a title's modes are
@@ -11,6 +11,21 @@ one folder of them (``title.cfg`` + ``*.mode``).  The runtime is the port report
   godot  ``pad_modes.gd`` (Looney Tunes): one more autoload, named by an ``override.cfg`` beside
          main.x86_64, running the modes through the game's own Game.score and Audio:
          tools/spooky_emu/modes/godot.
+
+How the runtime gets into the game is the port report's ``load``:
+
+  preload  (Scooby-Doo) the update's launch lines (sway_config, i3_config) start main.x86_64 with
+           LD_PRELOAD=pad/padunity.so; the game copies them into the system at its next start
+  dllmap   (Beetlejuice, Texas Chainsaw, Evil Dead, Halloween, Ultraman: their updates carry no
+           launch line) the update's own Mono config (main_Data/MonoBleedingEdge/etc/mono/config)
+           maps MonoPosixHelper, the library the game's serial port loads, to pad/padunity.so (the
+           dllmap build of the loader, which needs the real one beside it); Mono loads it when the
+           game opens its board, and its loader starts the runtime as the preload does
+
+and its ``update_container`` what the update file is around its tar.gz: ``tar.gz`` (Scooby-Doo,
+Texas Chainsaw, Evil Dead), ``gpg_signed`` (Beetlejuice: signed again with PAD's own key, as Write
+does, so the machine asks before it takes it) or ``gpg_symmetric`` (Halloween, Ultraman: encrypted
+again with the game's own passphrase, ``gpg_format``).
 
   check <mode dir> --port <port.json>            the folder as the runtime will read it
   stage <mode dir> <pad dir> --port <port.json>  the update's pad/ folder (the rig's Try it)
@@ -53,6 +68,9 @@ OVERRIDE_CFG = "override.cfg"
 OVERRIDE_TEXT = '[autoload]\n\nPadModes="*%s"\n' % RUNTIME_GD
 #: the files whose ``exec ... main.x86_64`` line starts the game (sway on 6.1 kernels, i3 on 5.10)
 LAUNCH_FILES = ("sway_config", "i3_config")
+#: the update's Mono config (under its uptest/ on the titles laid out that way); dllmap titles
+MONO_CONFIG = "main_Data/MonoBleedingEdge/etc/mono/config"
+_DLLMAP = re.compile(r'(<dllmap\s+dll="MonoPosixHelper"\s+target=")([^"]*)(")')
 _LAUNCH = re.compile(r"^(\s*exec\s+(?:--no-startup-id\s+)?)((?:env\s+(?:\S+=\S*\s+)*)?)(\S*main\.x86_64)(.*)$")
 MAX_MODES = 24
 
@@ -111,9 +129,15 @@ def engine(port):
     return (port or {}).get("engine") or "unity"
 
 
+def load_of(port):
+    """How the runtime gets into a Unity title's game: "preload" or "dllmap" (module doc)."""
+    return (port or {}).get("load") or "preload"
+
+
 def runtime_files(port):
-    """The runtime's files the title runs - (padunity.so, PadModes.dll) on Unity, (pad_modes.gd,)
-    on Godot - or Refused."""
+    """The runtime's files the title runs - (padunity.so, PadModes.dll) on Unity (a dllmap title's
+    padunity.so is the dllmap build of the loader, unity/build.sh), (pad_modes.gd,) on Godot - or
+    Refused."""
     if engine(port) == "godot":
         gd = os.path.join(GODOT, "pad_modes.gd")
         if not os.path.isfile(gd):
@@ -121,7 +145,7 @@ def runtime_files(port):
         return (gd,)
     if engine(port) != "unity":
         raise Refused("no mode runtime for %s's engine (%s) yet" % (port.get("title", "this title"), engine(port)))
-    so = os.path.join(PREBUILT, "padunity.so")
+    so = os.path.join(PREBUILT, "padunity_dllmap.so" if load_of(port) == "dllmap" else "padunity.so")
     dll = os.path.join(PREBUILT, port.get("runtime_dll") or "")
     for p in (so, dll):
         if not port.get("runtime_dll") or not os.path.isfile(p):
@@ -260,8 +284,9 @@ def top_files(port):
 
 
 def launch_files(port):
-    """The files whose game line build() rewrites: Unity's launch lines; none on Godot."""
-    return LAUNCH_FILES if engine(port) == "unity" else ()
+    """The launch files whose game line a modes build rewrites: a preload Unity title's; none on
+    a dllmap one (patched_names: its Mono config) or on Godot."""
+    return LAUNCH_FILES if engine(port) == "unity" and load_of(port) == "preload" else ()
 
 
 def stage(mode_dir, pad_dir, port):
@@ -303,8 +328,102 @@ def patch_launch(text):
     return "".join(out), n
 
 
+def patch_mono_config(text):
+    """The update's Mono config with MonoPosixHelper mapped to the runtime -> (text, changed
+    entries).  Already mapped (a modes update built again): left alone, and counted."""
+    n = [0]
+
+    def sub(m):
+        n[0] += 1
+        return m.group(1) + RUNTIME_SO + m.group(3)
+    return _DLLMAP.sub(sub, text), n[0]
+
+
+def _base(rel):
+    name = _norm(rel.replace("\\", "/"))
+    return name.split("/", 1)[1] if name.startswith("uptest/") else name
+
+
+def patch_file(rel, data, port):
+    """A file of the update as a modes build carries it -> (data, patched).  *rel* is its path in
+    the update; only the title's own way in (load_of) is touched."""
+    base = _base(rel)
+    load = load_of(port)
+    if load == "preload" and base in LAUNCH_FILES:
+        text, n = patch_launch(data.decode("utf-8", "surrogateescape"))
+        return text.encode("utf-8", "surrogateescape"), n
+    if load == "dllmap" and base == MONO_CONFIG:
+        text, n = patch_mono_config(data.decode("utf-8", "surrogateescape"))
+        return text.encode("utf-8", "surrogateescape"), n
+    return data, 0
+
+
+def patched_names(port):
+    """The base names of the files patch_file may change (for a scan by name)."""
+    if engine(port) != "unity":
+        return ()                                   # Godot: override.cfg, nothing patched
+    return LAUNCH_FILES if load_of(port) == "preload" else (os.path.basename(MONO_CONFIG),)
+
+
+def pad_dir_for(names):
+    """Where pad/ goes in an update laid out as *names*: beside main.x86_64 ("pad" or
+    "uptest/pad")."""
+    for n in names:
+        n = _norm(n.replace("\\", "/"))
+        base = _base(n)
+        if base == "main.x86_64":
+            return n[:-len(base)] + PAD_DIR
+    return PAD_DIR
+
+
 def _norm(name):
     return name[2:] if name.startswith("./") else name
+
+
+# ============================================================================ containers
+def _spooky_gpg():
+    """The Spooky plugin's GPG helpers (the app's own, so Build and Write agree)."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from pinball_decryptor.plugins.spooky import gpg, games
+    return gpg, games
+
+
+def container_of(port):
+    return (port or {}).get("update_container") or "tar.gz"
+
+
+def unwrap(stock, tmp, port, log=print):
+    """The stock update's tar.gz -> its path (the stock file itself when it is one)."""
+    kind = container_of(port)
+    if kind == "tar.gz":
+        return stock
+    gpg, games = _spooky_gpg()
+    if kind == "gpg_signed":
+        log("taking the signature off %s..." % os.path.basename(stock))
+        gpg.strip_gpg_signature(stock, tmp)
+    elif kind == "gpg_symmetric":
+        log("decrypting %s..." % os.path.basename(stock))
+        gpg.decrypt_gpg_symmetric(stock, tmp, games.GPG_PASSPHRASES[port["gpg_format"]])
+    else:
+        raise Refused("%s: update container %s is not one this build knows" % (os.path.basename(stock), kind))
+    return tmp
+
+
+def wrap(tar_gz, out, port, log=print):
+    """The new tar.gz -> the update file the machine takes (*out*)."""
+    kind = container_of(port)
+    if kind == "tar.gz":
+        os.replace(tar_gz, out)
+        return
+    gpg, games = _spooky_gpg()
+    if kind == "gpg_signed":
+        log("signing it (PAD's own key: the machine asks before it takes it, as for any update Write makes)...")
+        gpg.sign_beetlejuice(tar_gz, out)
+    else:
+        log("encrypting it with the game's own passphrase...")
+        gpg.encrypt_gpg_symmetric(tar_gz, out, games.GPG_PASSPHRASES[port["gpg_format"]])
 
 
 def _gzipped(path):
@@ -313,52 +432,58 @@ def _gzipped(path):
 
 
 def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda: False):
-    """The stock update (a tar.gz, or Looney Tunes' plain tar) again, written the same way, with
-    pad/ in it and the runtime loaded: its launch lines preloading it (Unity) or an override.cfg
-    beside main.x86_64 naming it (Godot)."""
+    """The stock update again, written the same way (a tar.gz, or Looney Tunes' plain tar), with
+    pad/ beside its main.x86_64 and the runtime loaded: on Unity the title's way in (load_of)
+    patched, on Godot an override.cfg beside main.x86_64 naming it; unwrapped from and wrapped
+    again in the title's container (container_of)."""
     files = pad_files(mode_dir, port)
     tops = top_files(port)
-    launch = launch_files(port)
     if os.path.abspath(stock) == os.path.abspath(out):
         raise Refused("the new update must not replace the stock one")
-    tmp = out + ".partial"
-    total = os.path.getsize(stock)
-    gz = _gzipped(stock)
-    launched, prefix = 0, None
+    load = load_of(port)
+    tmp_in, tmp_tar, tmp_out = out + ".stock.partial", out + ".tar.partial", out + ".partial"
+    patched, prefix, total = 0, None, 0
+    names = patched_names(port)
     t0 = time.time()
     try:
-        with open(stock, "rb") as raw, tarfile.open(fileobj=raw, mode="r|gz" if gz else "r|") as src, \
-                (tarfile.open(tmp, mode="w:gz", compresslevel=1, format=tarfile.GNU_FORMAT) if gz
-                 else tarfile.open(tmp, mode="w", format=tarfile.GNU_FORMAT)) as dst:
+        src_path = unwrap(stock, tmp_in, port, log)
+        total = os.path.getsize(src_path)
+        gz = _gzipped(src_path)
+        with open(src_path, "rb") as raw, tarfile.open(fileobj=raw, mode="r|gz" if gz else "r|") as src, \
+                (tarfile.open(tmp_tar, mode="w:gz", compresslevel=1, format=tarfile.GNU_FORMAT) if gz
+                 else tarfile.open(tmp_tar, mode="w", format=tarfile.GNU_FORMAT)) as dst:
             last = 0
             for ti in src:
                 if cancelled():
                     raise Refused("cancelled")
                 name = _norm(ti.name)
-                base = name.split("/", 1)[1] if name.startswith("uptest/") else name
-                if prefix is None and base.endswith("main.x86_64") and "/" not in base:
+                base = _base(name)
+                if prefix is None and base == "main.x86_64":
                     prefix = name[:-len(base)]
                 if base == PAD_DIR or base.startswith(PAD_DIR + "/"):
                     continue                        # an old modes build's pad/: replaced below
                 if base in (t[0] for t in tops):
                     continue                        # an old modes build's override.cfg: the same
-                if ti.isfile() and base in launch:
-                    text = src.extractfile(ti).read().decode("utf-8", "surrogateescape")
-                    text, n = patch_launch(text)
-                    data = text.encode("utf-8", "surrogateescape")
-                    launched += n
-                    ti.size = len(data)
-                    dst.addfile(ti, io.BytesIO(data))
-                    log("%s: the game's launch line now preloads %s" % (name, RUNTIME_SO))
+                if ti.isfile() and os.path.basename(base) in names:
+                    data = src.extractfile(ti).read()
+                    new, n = patch_file(name, data, port)
+                    if n:
+                        patched += n
+                        log("%s: %s" % (name, "the game's launch line now preloads " + RUNTIME_SO
+                                        if load == "preload" else "Mono's MonoPosixHelper is now " + RUNTIME_SO))
+                    ti.size = len(new)
+                    dst.addfile(ti, io.BytesIO(new))
                     continue
                 dst.addfile(ti, src.extractfile(ti) if ti.isfile() else None)
                 if progress and raw.tell() - last > (16 << 20):
                     last = raw.tell()
                     progress(last, total)
-            if launch and not launched:
-                raise Refused("%s has no launch line starting main.x86_64 (%s): not an update this "
-                              "runtime knows" % (os.path.basename(stock), ", ".join(launch)))
-            if not launch and prefix is None:
+            if names and not patched:
+                what = (", ".join(LAUNCH_FILES) + ": no launch line starting main.x86_64") if load == "preload" \
+                    else (MONO_CONFIG + ": no MonoPosixHelper dllmap")
+                raise Refused("%s has no way in for the runtime (%s): not an update this runtime knows"
+                              % (os.path.basename(stock), what))
+            if not names and prefix is None:
                 raise Refused("%s has no main.x86_64: not an update this runtime knows"
                               % os.path.basename(stock))
             now = int(time.time())
@@ -381,13 +506,16 @@ def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda
                 log("added %s%s: it loads the runtime (%s) when the game starts" % (pre, rel, RUNTIME_GD))
             log("added %s%s/: the runtime and %d mode file(s)" % (
                 pre, PAD_DIR, sum(1 for f in files if f[0].endswith(".mode"))))
-        os.replace(tmp, out)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+        if cancelled():
+            raise Refused("cancelled")
+        wrap(tmp_tar, tmp_out, port, log)
+        os.replace(tmp_out, out)
+    finally:
+        for p in (tmp_in, tmp_tar, tmp_out):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
     if progress:
         progress(total, total)
     log("built %s (%.2f GB) in %.0f s" % (out, os.path.getsize(out) / 1e9, time.time() - t0))

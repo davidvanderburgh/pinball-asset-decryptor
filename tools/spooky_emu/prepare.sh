@@ -17,14 +17,16 @@
 #            this emulator runs (the reason on stderr), 5 no game in it
 #
 # The name is <title>_<version.txt>.  The same file again (name, size and
-# time) starts at once.  Only SPK_CACHE_KEEP builds are kept (a Unity build
-# is ~5 GB); the oldest idle ones go first.  The update is only ever read.
+# time) starts at once.  Only SPK_CACHE_KEEP builds are kept (default 6; a
+# Unity build is 1-2 GB unpacked); the oldest idle ones go first.  The update
+# is only ever read.  One prepare at a time machine-wide (PAD-1418: several
+# tickets' rigs share the cache, and a second prepare's clean-up deleted the
+# first one's unpack.partial half way: "could not unpack ... damaged").
 set -u
 . "$(dirname "$0")/spkpath.sh"
 UPD=${1:-}
 [ -f "$UPD" ] || { echo "prepare.sh: no such file: $UPD" >&2; exit 2; }
-KEEP=${SPK_CACHE_KEEP:-2}
-mkdir -p "$SPK_CACHE"
+KEEP=${SPK_CACHE_KEEP:-6}
 NAME=$(basename "$UPD")
 
 # Spooky's other boards, known by the name before anything is unpacked.

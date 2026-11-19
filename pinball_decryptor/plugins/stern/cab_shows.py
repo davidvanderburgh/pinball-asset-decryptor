@@ -152,7 +152,73 @@ def norm(raw):
     """The sidecar's ``cab_shows``: ``{"shows": [...]}``, each show normalized, at most :data:`SHOWS_MAX`."""
     raw = raw if isinstance(raw, dict) else {}
     shows = raw.get("shows") if isinstance(raw.get("shows"), list) else []
-    return {"shows": [norm_show(s) for s in shows[:SHOWS_MAX] if isinstance(s, dict)]}
+    out = {"shows": [norm_show(s) for s in shows[:SHOWS_MAX] if isinstance(s, dict)]}
+    if isinstance(raw.get(ADDED_KEY), dict):            # PAD-1448: the cabinet lights the owner's cabinet adds
+        out[ADDED_KEY] = norm_added(raw[ADDED_KEY])
+    return out
+
+
+# ---- PAD-1448: cabinet lights the owner's cabinet adds ---------------------------------------------------------
+#: Friday (Pinside): "add speaker light effects to stern games that don't have them ... stranger things or Munsters".
+#: Such a title still lists node 2, Cabinet Lights (the board Stern's Expression Lighting kit and the game-driven
+#: speaker kits hang off), with nothing on it. The owner says what is on his board (speaker lights, blade pixels a
+#: side); the card's addcab.cfg makes the runtime add them to the game's own lights (pad_mode_runtime.c addcab_arm),
+#: and they are cabinet lights like a Led Zeppelin's: the shows light them. lampmap.added_cabinet places them.
+ADDED_KEY = "added"
+ADD_CFG = "addcab.cfg"
+ADDED_PORT_DATA = ("addcab_light_tab", "addcab_dev_tab", "addcab_light_n", "addcab_dev_n")
+ADDED_PORT_VALUES = ("addcab_lights", "addcab_devices", "addcab_clone", "addcab_slot")
+NO_CAB_ADDABLE = ("%s's cabinet has no blades or speaker lights of its own. If yours has a Cabinet Lights board fitted (the "
+                  "board Stern's Expression Lighting kit uses, node 2) with speaker lights or blades on it, say what "
+                  "is on it and the game will light them with your shows.")
+
+
+def norm_added(raw):
+    """``{"on", "speakers", "blades"}``: whether the card adds cabinet lights, how many speaker lights (the two rings)
+    and how many blade pixels a side."""
+    raw = raw if isinstance(raw, dict) else {}
+    sp = _int(raw.get("speakers"), 0, _LM.ADDCAB_SPEAKERS_MAX, _LM.ADDCAB_SPEAKERS_DEFAULT)
+    bl = _int(raw.get("blades"), 0, _LM.ADDCAB_BLADES_MAX, 0)
+    if not sp and not bl:
+        sp = _LM.ADDCAB_SPEAKERS_DEFAULT
+    return {"on": bool(raw.get("on")), "speakers": sp, "blades": bl}
+
+
+def load_added(project):
+    """The project's added cabinet lights (:func:`norm_added`), off when it says nothing."""
+    if not project:
+        return norm_added({})
+    from ...core import staged_changes
+    try:
+        return norm_added((staged_changes.load(project).get(STAGED_KEY) or {}).get(ADDED_KEY))
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
+        return norm_added({})
+
+
+def addable(port):
+    """1 when the port says where this build's light tables are (lampmap.added_cabinet_lines): it can take them."""
+    return (all(n in (port.get("data") or {}) for n in ADDED_PORT_DATA)
+            and all(n in (port.get("value") or {}) for n in ADDED_PORT_VALUES))
+
+
+def added_lights(port, added):
+    """lampmap.added_cabinet's list for *added* on this port's build; [] when off or the build cannot take them."""
+    if not added or not added.get("on") or not addable(port):
+        return []
+    return _LM.added_cabinet(int(port["value"]["addcab_lights"]), added["speakers"], added["blades"])
+
+
+def added_layout(port, added):
+    """:func:`layout` for the added cabinet lights."""
+    return [{"name": c["name"], "lane": 1 if c["role"] == "speaker" else 0,
+             "side": -1 if c["side"] == "L" else 1 if c["side"] == "R" else 0, "u": c["u"], "x": c["x"], "y": c["y"]}
+            for c in added_lights(port, added)]
+
+
+def added_cfg_text(port, added):
+    """addcab.cfg for the card, or "" when it adds none."""
+    cab = added_lights(port, added)
+    return _LM.added_cabinet_cfg(cab) if cab else ""
 
 
 def length_ms(show):
@@ -285,17 +351,19 @@ def project_title(project, probe=False):
     return _pt(project, probe=probe)
 
 
-def port_refusal(port, label):
-    """Why a parsed port cannot carry the shows, or ``""``."""
-    if not port.get("cablamp"):
-        return NO_CAB % label
+def port_refusal(port, label, added=None):
+    """Why a parsed port cannot carry the shows, or ``""``. PAD-1448: a title with no cabinet lights of its own takes
+    them once the owner adds some (*added*, :func:`norm_added`) and its port can (:func:`addable`)."""
+    if not port.get("cablamp") and not added_lights(port, added):
+        return NO_CAB_ADDABLE % label if addable(port) else NO_CAB % label
     if not all(n in port.get("site", {}) for n in PORT_SITES) or not all(n in port.get("data", {}) for n in PORT_DATA):
         return NO_LAYER % label
     return ""
 
 
-def title_refusal(prof):
-    """Why ``prof``'s game cannot have expression light shows of the card's, or ``""``."""
+def title_refusal(prof, added=None):
+    """Why ``prof``'s game cannot have expression light shows of the card's, or ``""`` (*added*: the project's added
+    cabinet lights, PAD-1448)."""
     if prof is None:
         return NO_TITLE
     from . import mode_project as MP
@@ -303,7 +371,7 @@ def title_refusal(prof):
         port = MP.read_port(MP.port_path(prof))
     except (OSError, MP.ModeProjectError):
         return NO_CAB % prof.label
-    return port_refusal(port, prof.label)
+    return port_refusal(port, prof.label, added)
 
 
 def plays_with_songs(port):

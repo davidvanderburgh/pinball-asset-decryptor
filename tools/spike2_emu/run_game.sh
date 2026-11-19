@@ -1278,6 +1278,15 @@ if [ -n "$OVERRIDE_SRC" ]; then
     fi
 fi
 
+# PAD-1448: a card (or a Try it stage) that adds cabinet lights is a cabinet with a Cabinet Lights board fitted -
+# node 2, which the node census silences on a title that names nothing on it. Answer it, as the fitted board would,
+# so the game registers it and lights what addcab.cfg added (the runtime reads that file from /dump on a rig).
+if [ -f "$R/dump/addcab.cfg" ] && [ -n "${PAD_NB_SILENT:-}" ]; then
+    _nb_s=$(printf '%s
+' $(printf '%s' "$PAD_NB_SILENT" | tr ',' ' ') | grep -vx 2 | paste -sd, -)
+    [ "$_nb_s" != "$PAD_NB_SILENT" ] && echo "[watch] addcab.cfg: node 2 (Cabinet Lights) answers - the card adds lights on it"
+    export PAD_NB_SILENT="$_nb_s"
+fi
 cd "$R"
 if [ -n "$PIVOT" ]; then
     # THE CHECKPOINTABLE EXEC (item 13). Three steps, each measured on the

@@ -426,6 +426,17 @@ lamp 146,147,148  0              INTELLIGENT DOME 10  # lamp 18, I/O group 8 ind
 lamp 149,150,151  0              INTELLIGENT DOME 11  # lamp 19, I/O group 8 index 31, at 274,87
 lamp 152,153,154  0              INTELLIGENT DOME 12  # lamp 20, I/O group 8 index 34, at 274,87
 
+# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
+data addcab_light_tab  0x005de928  # the light table's pointer (24-byte records)
+data addcab_dev_tab    0x005dd670  # the device table's pointer (48-byte records)
+data addcab_light_n    0x00534acc  # the light count the game copies at start-up
+data addcab_dev_n      0x00534c30  # the device count it copies
+value addcab_lights    189
+value addcab_devices   312
+value addcab_clone     161  # the LED light the added ones copy: BACK LEFT 1
+value addcab_slot      254  # the first free light slot
+value addcab_group     1
+
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
 site block_start_0      0x0009835c 0xe92d4038 0xe1a04000

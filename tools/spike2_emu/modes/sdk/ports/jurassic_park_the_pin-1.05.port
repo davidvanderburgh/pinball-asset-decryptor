@@ -457,6 +457,17 @@ lamp 40           0              RIGHT ORBIT S  # lamp 53, I/O group 5 index 50,
 lamp 41           0              RIGHT ORBIT RESCUE  # lamp 54, I/O group 5 index 51, at 167,261
 lamp 56           0x3800000      RAPTOR PEN BOLT FLASH  # lamp 55, I/O group 5 index 52, at 193,267; tie: Raptor pen target, Raptor pen 10 pt sw-right, Raptor pen 10 pt sw-bot
 
+# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
+data addcab_light_tab  0x0055ebdc  # the light table's pointer (24-byte records)
+data addcab_dev_tab    0x0055e920  # the device table's pointer (48-byte records)
+data addcab_light_n    0x004d2bb8  # the light count the game copies at start-up
+data addcab_dev_n      0x004d2c8c  # the device count it copies
+value addcab_lights    84
+value addcab_devices   172
+value addcab_clone     57  # the LED light the added ones copy: LEFT STRIP
+value addcab_slot      227  # the first free light slot
+value addcab_group     1
+
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball
 site balls_in_play         0x002f3cd8 0xe92d4010 0xe3054574

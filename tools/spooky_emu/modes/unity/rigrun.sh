@@ -44,6 +44,8 @@ export PAD_SLOT=$S PAD_LABEL=$WHO PAD_HIDDEN=1 PAD_VISIBLE=0 PAD_AUDIO=0
 [ "$PORT" = 1 ] && export SPK_PADMODES_PORT=1
 . "$T/spkpath.sh"
 rm -f "$OUT"/padunity.log "$OUT"/padmodes_port.json "$OUT"/shot*.png
+# the last run on this slot left its log: a wait on it would end at once
+rm -f "$SPK_RIG/logs/padunity.log"
 timeout 900 bash "$T/watch.sh" "$UPD" > "$OUT/run.out" 2>&1 &
 W=$!
 LOG=$SPK_RIG/logs/padunity.log

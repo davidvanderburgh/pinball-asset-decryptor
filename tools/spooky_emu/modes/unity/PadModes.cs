@@ -111,6 +111,8 @@ public class PadRuntime : Mode {
     bool ballLive;
     CMode shown;
     Panel panel;
+    // our callouts in the game's queue, by clip name, until its voice channel takes them
+    readonly List<string> queued = new List<string>();
 
     public PadRuntime(Machine m) : base(m) {
         name = "PAD custom modes";
@@ -301,6 +303,12 @@ public class PadRuntime : Mode {
         foreach (var m in All)
             if (m.Running && m.EndsAt > 0 && now >= m.EndsAt) Stop(m, "time ran out");
         if (shown != null && shown.Running && panel != null) panel.Timer(shown);
+        // the game's callout queue sets voice_channel.clip and calls Play() when the channel is free
+        var vc = Mode.machine.voice_channel;
+        if (queued.Count > 0 && vc != null && vc.clip != null && queued[0] == vc.clip.name) {
+            Loader.Log("callout " + vc.clip.name + " handed to the game's voice channel (Play, playing " + vc.isPlaying + ")");
+            queued.RemoveAt(0);
+        }
     }
 
     // ------------------------------------------------------------------ the game's scoring
@@ -323,6 +331,7 @@ public class PadRuntime : Mode {
         AudioClip clip = Port.Callout(name);
         if (clip == null) { Loader.Log(m.Name + ": " + key + " " + name + ": no such callout in this game"); return; }
         Mode.machine.enqueue_callout(clip);
+        queued.Add(clip.name);
         Loader.Log(m.Name + ": " + key + " " + name + " (" + clip.name + ", " + clip.length.ToString("0.00") + " s) queued as a callout");
     }
 

@@ -38,7 +38,7 @@ PAD_DIR = "pad"
 RUNTIME_SO = "/game/code/uptest/pad/padunity.so"
 #: the files whose ``exec ... main.x86_64`` line starts the game (sway on 6.1 kernels, i3 on 5.10)
 LAUNCH_FILES = ("sway_config", "i3_config")
-_LAUNCH = re.compile(r"^(\s*exec\s+(?:--no-startup-id\s+)?)(\S*main\.x86_64)(.*)$")
+_LAUNCH = re.compile(r"^(\s*exec\s+(?:--no-startup-id\s+)?)((?:env\s+(?:\S+=\S*\s+)*)?)(\S*main\.x86_64)(.*)$")
 MAX_MODES = 24
 
 
@@ -128,6 +128,10 @@ def check_modes(mode_dir, port=None):
         with open(tpath, encoding="utf-8", errors="replace") as f:
             for n, k, v in MJ.parse_cfg(f.read()):
                 kind = TITLE_KEYS.get(k) or KEYS.get(k)
+                if k in BUILD_TITLE_KEYS:
+                    problems.append("title.cfg:%d: %s is the game's own (its port report says it); take "
+                                    "the line out" % (n, k))
+                    continue
                 if kind is None:
                     problems.append("title.cfg:%d: %s" % (n, _unknown(k)))
                     continue
@@ -240,12 +244,18 @@ def patch_launch(text):
     for line in text.splitlines(True):
         body = line.rstrip("\r\n")
         m = _LAUNCH.match(body)
-        if m and RUNTIME_SO not in body:
-            body = "%senv LD_PRELOAD=%s %s%s" % (m.group(1), RUNTIME_SO, m.group(2), m.group(3))
-            line = body + line[len(line.rstrip("\r\n")):]
+        if m:
             n += 1
-        elif m:
-            n += 1
+            if RUNTIME_SO not in m.group(2):
+                env = m.group(2) or "env "
+                pre = re.search(r"(?:^|\s)LD_PRELOAD=(\S*)", env)
+                if pre:                             # the line preloads something else too
+                    env = env.replace("LD_PRELOAD=" + pre.group(1),
+                                      "LD_PRELOAD=%s%s" % (RUNTIME_SO, ":" + pre.group(1) if pre.group(1) else ""), 1)
+                else:
+                    env = env + "LD_PRELOAD=%s " % RUNTIME_SO
+                body = m.group(1) + env + m.group(3) + m.group(4)
+                line = body + line[len(line.rstrip("\r\n")):]
         out.append(line)
     return "".join(out), n
 

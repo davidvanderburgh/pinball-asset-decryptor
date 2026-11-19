@@ -507,3 +507,13 @@ value challenge_menu_sets_on   1    # the pick is a challenge game of the mode's
 # ---- scenes (PAD-1380): a mode's clip and a random clip play on video_bank's surface - the framework's
 # in_game_videos scene 60ed7e50, this card's only clip bank (a mode clip on it filled 64% of the glass on the rig) ----
 scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- attract (PAD-1328, PAD-1415): the attract mode's page table, read off this program's sequencer (its child create at 0x43f454); an owner's attract items play between its pages ----
+data  attract_table       0x019288b0   # 65 entries {test, page, float seconds}, 8-byte pointers (RELATIVE)
+value attract_entry_size  24
+value attract_page_at     8
+value attract_count       65
+site  attract_sleep       0x007f55c0 0xf002fa81 0x91358021
+#   the attract pages' own clip loop: player_advance(player, ms) ; scene_show(player, 3) each frame
+site  attract_show        0x007b6320 0xa9be53f3 0xaa0003f4
+site  player_advance      0x007b62f0 0xaa0003e1 0xb4000080

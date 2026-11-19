@@ -204,7 +204,11 @@ page's process before or after the game's page, which the walk waits on.
 mode_write.attract_into), and the runtime, while an item plays (`clip2_attract`), takes the clip surface from that scene
 and shows that scene's player from the page (`ait_bank`). Modes and random clips stay on 71e39c43.
 
-Proof: see the rig runs below. Tests: tests/test_pad1415_spike3_attract_tables.py (and PAD-1328's / PAD-1380's, updated).
+An item is made in the shape of that scene's own clips (`attract_items.reference_slot`): made like WDR's play-bank clips (a mid-screen box) it was squeezed into a pillar on the full-screen attract bank (39% of the glass on the rig); made like its attract clips (1920x1080) it fills it.
+
+Proof (2026-11-19, Spike 3 rig slots 1-5, hidden and MUTED, the library cards, attract-only Try it sets from `spike3_modes.plan` with one magenta photo item 8 s after screen 4 (entry 3; WDR entry 4), the rebuilt prebuilt mode64.so; C:/tmp/PAD-1415 plan_s3.py + run_att.sh): every title armed on its table (`51 entries of 24 bytes` ..., WDR `played on the attract bank's surface`), and the item was on the glass at 2 s and 5 s: Pokemon 88%, Fallout 92%, Transformers 88%, WDR 88% (39% in a pillar before the clip was sized from its attract clips; its play-bank clip in a mid-screen box before PAD-1415). Each ran its 8 s (`is over after 8000-8176 ms`) and the game's attract went on to the run's cap with no DISPATCH TIMEOUT. A first pass in the first ~20 s of a fresh card can be cut (`its page was ended`): the new machine's Guided Setup restarts the attract, as it does the game's own pages.
+
+Tests: tests/test_pad1415_spike3_attract_tables.py (and PAD-1328's / PAD-1380's / PAD-1287's, updated).
 
 ## Prolonged Competition on Spike 3 (PAD-1327)
 

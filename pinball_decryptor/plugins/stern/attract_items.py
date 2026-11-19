@@ -719,11 +719,16 @@ def project_pages(project, prof=None):
 # ---- making the clips ------------------------------------------------------------------------------------------
 def reference_slot(project, prof):
     """``(slot rel, info)``: the bank clip of the project whose picture is the biggest - the format every item is
-    made into - or ``(None, None)``."""
+    made into - or ``(None, None)``. PAD-1415: the clips of the scene the items go in (the port's attract_bank, where
+    it has one: Walking Dead Remastered's play bank clips are a mid-screen box, and an item made in their shape was
+    squeezed into a pillar on its full-screen attract bank); the bank's when the project has none of those."""
     from . import clip_variants as CV
     from ...core.video import detect_video_info
     best = (None, None, 0)
-    bank = CV.bank_assets(prof)
+    scene = CV.attract_scene(prof)
+    own = scene[:-len("scene.radium")] + "scene.assets/"
+    bank = own if own != CV.bank_assets(prof) and any(
+        c.startswith(own) for c in CV.manifest(project).values()) else CV.bank_assets(prof)
     for rel, card in sorted(CV.manifest(project).items()):
         if not card.startswith(bank):
             continue

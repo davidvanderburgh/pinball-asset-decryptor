@@ -103,7 +103,9 @@ def test_the_walking_dead_port_carries_the_core_and_none_of_star_wars_content():
     body = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
     # PAD-1380: its own video bank (71e39c43, its play clips), never Star Wars ELG's scenes
     assert not [l for l in body if l.split()[0] in ("lamp", "callout")]
-    assert [l for l in body if l.split()[0] == "scene"] == ["scene video_bank           71e39c438cff72938ff0dd6dddecd582fb133415"]
+    assert [l for l in body if l.split()[0] == "scene"] == ["scene video_bank           71e39c438cff72938ff0dd6dddecd582fb133415",
+                                                           # PAD-1415: its attract items' own bank
+                                                           "scene attract_bank         60ed7e5036b8ce09d35a3e101ea6fc1380b37d97"]
     assert not [l for l in body if re.match(r"(site|value|text)\s+(show_(\d|name|kind|secs|proc)|block_|right_gate|mode_flag|held_coils)", l)]
     assert "NOT RUN" not in text and "Emulator-proven 2026-11-15 (PAD-1287)" in text
 

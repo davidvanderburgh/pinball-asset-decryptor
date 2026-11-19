@@ -117,3 +117,24 @@ def test_attract_tab_names_their_screens(game, key, names):
     for k, n in names.items():
         assert pages[k].name == n, (k, pages[k].name)
     assert not pages[3].sometimes and pages[8].sometimes         # the title shows every time, a high score at times
+
+
+def test_wdr_items_are_sized_like_its_attract_clips(tmp_path, monkeypatch):
+    # an item made in the play bank's mid-screen shape was squeezed into a pillar on the full-screen attract bank (rig)
+    from types import SimpleNamespace
+    from pinball_decryptor.core import video as V
+    wdr = MP.profiles()[WDR]
+    play = CV.bank_assets(wdr)
+    att = CV.attract_scene(wdr)[:-len("scene.radium")] + "scene.assets/"
+    (tmp_path / "video").mkdir()
+    rows = {"bank/a.mp4": play + "1.asset", "bank/b.mp4": att + "0.asset"}
+    (tmp_path / "video" / "manifest.txt").write_text("".join("%s\t/%s\n" % kv for kv in rows.items()))
+    for rel in rows:
+        (tmp_path / "video" / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "video" / rel).write_bytes(b"x")
+    sizes = {"a.mp4": (2560, 1440), "b.mp4": (1920, 1080)}         # the play bank's is even bigger: still not taken
+    monkeypatch.setattr(V, "detect_video_info", lambda p: SimpleNamespace(
+        width=sizes[os.path.basename(p)][0], height=sizes[os.path.basename(p)][1]))
+    assert AI.reference_slot(str(tmp_path), wdr)[0] == "video/bank/b.mp4"
+    (tmp_path / "video" / "manifest.txt").write_text("bank/a.mp4\t/%s1.asset\n" % play)
+    assert AI.reference_slot(str(tmp_path), wdr)[0] == "video/bank/a.mp4"   # none of its attract clips: the bank's

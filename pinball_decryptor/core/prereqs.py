@@ -509,14 +509,16 @@ def _load_passes():
 
 
 def _remembered_pass(cmd):
-    """The remembered pass for *cmd* while the WSL VM is down (so the probe
-    would boot it), else None (probe for real)."""
+    """The remembered pass for *cmd* while its distro is not running (so the
+    probe would boot it), else None (probe for real).  The distro, not the
+    VM: the VM lingers for a minute after its last distro stops."""
     try:
         from . import wsl_up
-        if wsl_up.vm_running():
-            return None
+        names = wsl_up.running_distros()
+        if names is None:
+            return None                 # WSL could not say: probe
         name, guid = _probe_distro_guid()
-        if not guid:
+        if not guid or name.casefold() in names:
             return None
         rec = (_load_passes().get(guid) or {}).get(cmd)
         if not rec or time.time() - float(rec.get("t", 0)) > PASS_TTL:

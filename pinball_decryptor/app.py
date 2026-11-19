@@ -1254,8 +1254,8 @@ class App:
             # first reply.
             if any(probes_wsl(p) for p in prereqs):
                 try:
-                    from .core import wsl_up
-                    if not wsl_up.vm_running():
+                    from .core import runtime as _rt, wsl_up
+                    if not wsl_up.distro_running(_rt.wsl_distro()):
                         # the probes answered from memory (PAD-1457): the
                         # line would cost the cold boot this rule avoids
                         raise RuntimeError("WSL is not running")

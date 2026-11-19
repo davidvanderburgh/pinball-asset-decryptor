@@ -223,8 +223,22 @@ def _probe_world(monkeypatch, tmp_path, vm_up, guid="{g1}", rc=0):
     monkeypatch.setattr(prereqs.runtime, "wsl_distro", lambda: "PAD-Runtime")
     monkeypatch.setattr(wsl_up, "registered_distros",
                         lambda: {"pad-runtime": guid})
-    monkeypatch.setattr(wsl_up, "vm_running", lambda: vm_up)
+    monkeypatch.setattr(wsl_up, "running_distros",
+                        lambda: frozenset({"pad-runtime"}) if vm_up
+                        else frozenset())
     return prereqs, ran
+
+
+def test_a_vm_still_winding_down_does_not_count_as_running(
+        monkeypatch, tmp_path):
+    """The VM outlives its last distro by about a minute: a pass is still
+    answered from memory then (the 10-minute proof caught this)."""
+    prereqs, ran = _probe_world(monkeypatch, tmp_path, vm_up=True)
+    prereqs._probe_wsl("command -v debugfs")
+    prereqs, ran = _probe_world(monkeypatch, tmp_path, vm_up=False)
+    monkeypatch.setattr(wsl_up, "running_distros", lambda: frozenset({"ubuntu"}))
+    assert prereqs._probe_wsl("command -v debugfs")[0] is True
+    assert ran == []
 
 
 def test_a_passing_probe_is_remembered_and_answers_while_wsl_sleeps(

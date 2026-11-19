@@ -56,8 +56,9 @@ def test_the_runtime_names_the_gate_and_arms_it_before_anything_else():
     # attract items or PAD-1017's co-op play, which take the whole gate (attract_wanted, coop_wanted).
     # PAD-1071's sound log goes first of all: it only watches the sound worker, and a stock card
     # carrying nothing but the log (soundlog.only) stops there. PAD-1382's shared MORE SETTINGS rows arm next (a thread
-    # of their own that scores nothing), before any setting's reader takes its address
-    assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*if \(soundlog_arm\(\)\) return;[^\n]*\n"
+    # of their own that scores nothing), before any setting's reader takes its address. PAD-1448: the cabinet lights a
+    # card adds go straight after the port gate, before the game's start-up reads its light tables (they score nothing)
+    assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*addcab_arm\(\);[^\n]*\n\s*if \(soundlog_arm\(\)\) return;[^\n]*\n"
                      r"\s*mset_arm\(\);[^\n]*\n"
                      r"\s*clipv_arm\(\);[^\n]*\n\s*sndm_arm\(\);[^\n]*\n"
                      r"\s*pic_arm\(\);[^\n]*\n\s*scnv_arm\(\);[^\n]*\n[^\n]*\n\s*idle_arm\(\);[^\n]*\n\s*hand_arm\(\);[^\n]*\n\s*comp_arm\(\);[^\n]*\n\s*cabs_arm\(\);[^\n]*\n"

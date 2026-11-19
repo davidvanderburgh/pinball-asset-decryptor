@@ -7494,3 +7494,30 @@ In step with the song (C:/tmp/PAD-1040/probe/sync_probe.c, a show whose speakers
 song): the colour matched the song's second in every frame away from a second's edge while it played (73 of 79), while
 the probe held the song's count for 3 s (25 of 25: the lights held), after it let go (16 of 16: the mixer's own cursor,
 13 s, and the lights jumped to it), and from the replay on; the probe's stop handed the lights back 251 ms later.
+
+### Cabinet lights your cabinet adds (PAD-1448)
+
+Friday (Pinside): "add speaker light effects to stern games that don't have them ... stranger things or Munsters".
+31 ports name no blades and no speaker lights (Stranger Things, Munsters, Mando, TMNT, Iron Maiden, Avengers,
+Aerosmith, Beatles, Guardians, Sword of Rage, Bond 60th, Jurassic Park and Star Wars Home). Their node directory still
+lists node 2, Cabinet Lights (520-8511-00, the board Stern's Expression Lighting kit and the game-driven speaker kits
+hang off), as device group 1, with nothing on it: a fitted board is registered and never sent a light. A board at an
+address the directory does not list is "UNEXPECTED NODE ADDRESS", so node 2 is the one an older cabinet can carry.
+
+`addcab.cfg` (beside the runtime, or /dump on a rig; the Expression lights tab writes it with the shows):
+
+    channels <n>                              the board's channels added, G R B a pixel (at most 360)
+    fixture <channel> <u> <x> <y> <name>      a pixel: its first channel, its place on its strip and on the drawing
+
+`addcab_arm` runs right after the port gate, in the constructor, before the game's static initialisers copy its light
+and device counts out of read-only data. It checks the build against the port's `value addcab_lights` /
+`addcab_devices`, copies the two tables with a light and device per channel appended (each a copy of the port's
+`value addcab_clone` light, on group 1, its channel the index, a free `addcab_slot`), repoints `data addcab_light_tab` /
+`addcab_dev_tab` and raises `data addcab_light_n` / `addcab_dev_n`. The game then configures node 2 channel by channel
+and refreshes it itself, and each fixture is a cabinet light of the runtime's (CAB0 on, `pm_cab_*`, cabshow.cfg).
+The port lines are each build's own (lampmap.added_cabinet_lines; addcab_map.py writes the shipped ports'; a derived
+port drafts its own), never a recipe's. On a rig, run_game.sh answers node 2 when addcab.cfg is staged.
+
+**Emulator-proven** (docs/plans/pad1448_added_cabinet_lights.md): on all 21 latest builds that take them, 23 added
+speaker lights (Godzilla's layout) - 69 channel configs on node 2, and a show's red, green and blue on every pixel in
+the game's own colour frames (cmd b6 / 96).

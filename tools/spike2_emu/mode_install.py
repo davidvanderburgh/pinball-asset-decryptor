@@ -96,9 +96,12 @@ EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 64))
 EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 0o100644),
                ("picture.cfg", 0o100644), ("attract.cfg", 0o100644), ("coop.cfg", 0o100644),
                ("idle.cfg", 0o100644), ("handicap.cfg", 0o100644), ("cabshow.cfg", 0o100644),
+               ("addcab.cfg", 0o100644),
                ("comp.cfg", 0o100644), ("scorefeed.cfg", 0o100644),
                ("records.cfg", 0o100644), ("settings.cfg", 0o100644), ("scenes.cfg", 0o100644),
                ("saved.cfg", 0o100644), ("buttons.cfg", 0o100644))
+#: PAD-1448: addcab.cfg, the cabinet lights the owner's cabinet adds (pad_mode_runtime.c addcab_arm) - never
+#: alone: it comes with the shows (cabshow.cfg) that light them.
 #: PAD-1403: buttons.cfg, the cabinet buttons as shots (pad_mode_runtime.c "the cabinet buttons as shots") - never
 #: alone: it comes with the modes that use them.
 #: PAD-1402: saved.cfg, the modes' saved progress (pad_mode_runtime.c "SAVED PROGRESS") - never alone: it comes with

@@ -30575,6 +30575,180 @@ static int soundlog_arm(void)
     return only;
 }
 
+/* ---- PAD-1448: cabinet lights the card adds (addcab.cfg) ------------------------------------------------------
+ * Friday (Pinside): "add speaker light effects to stern games that don't have them ... stranger things or Munsters".
+ * A title with no blades and no speaker lights still lists node 2, "Cabinet Lights" (520-8511-00), as device group 1
+ * with nothing on it: a fitted board is registered and never sent a light. addcab.cfg (written by the Expression
+ * lights tab) makes the game light it ITSELF: before the game's static initialisers copy the light and device counts
+ * out of its read-only data, the game's two tables are copied here with lights of the board's channels appended
+ * (each a copy of an LED light of the game's own, `value addcab_clone`), the two pointers repointed and the two
+ * counts raised. The game then configures node 2 channel by channel and refreshes it as Godzilla does its speaker
+ * board (emulator, Stranger Things LE 1.13), and the added lights are cabinet lights of the runtime's (CAB0 on,
+ * pm_cab_*, cabshow.cfg) like a Led Zeppelin's.
+ *   channels <n>                                 the board's channels added, G R B a pixel (at most ADDCAB_MAX)
+ *   fixture <channel> <u> <x> <y> <name>         a pixel: channels c (G), c+1 (R), c+2 (B); its place on its strip
+ *                                                (u, 0..999) and on the cabinet drawing - the cablamp line's
+ * The port says where this build keeps the tables (`data addcab_*`, `value addcab_*`: lampmap.added_cabinet_lines);
+ * every address is checked against the counts it gives before anything is written. Spike 2 only. */
+#if !PM_A64
+#define ADDCAB_MAX     (3 * (96 + 24))
+#define ADDCAB_LIGHTS  2400               /* the most lights a title may have for this (Bond 60th: 440) */
+#define ADDCAB_DEVS    1600
+static const char *const ADDCAB_FILES[] = { "/usr/local/padmode/addcab.cfg", "/dump/addcab.cfg" };
+static unsigned char addcab_ltab[(ADDCAB_LIGHTS + ADDCAB_MAX + 2) * 24] __attribute__((aligned(8)));
+static unsigned char addcab_dtab[(ADDCAB_DEVS + ADDCAB_MAX + 1) * 48] __attribute__((aligned(8)));
+static char addcab_name[ADDCAB_MAX][40];
+static uint32_t addcab_cell[ADDCAB_MAX][6];   /* the five languages' name, as the game's own name cells */
+static int addcab_n;                          /* the channels added (0: none) */
+
+static void addcab_copy(unsigned char *to, const unsigned char *from, unsigned long n)
+{
+    while (n--) *to++ = *from++;
+}
+
+static int addcab_page_rw(pm_addr a, int rw)
+{
+    pm_addr pg = a & ~(pm_addr)0xfff;
+    return mprotect((void *)(unsigned long)pg, 0x1000, rw ? 7 : 5) == 0;
+}
+
+static void addcab_arm(void)
+{
+    static char raw[16384];
+    static const char col[3] = { 'G', 'R', 'B' };
+    long n = -1, i, start = 0;
+    unsigned k;
+    pm_addr lp = data("addcab_light_tab"), dp = data("addcab_dev_tab"), lc = data("addcab_light_n"),
+            dc = data("addcab_dev_n");
+    uint32_t nl, nd, want_l = (uint32_t)pm_port_value("addcab_lights", 0), want_d = (uint32_t)pm_port_value("addcab_devices", 0);
+    unsigned clone = (unsigned)pm_port_value("addcab_clone", 0), slot = (unsigned)pm_port_value("addcab_slot", 0);
+    int group = (int)pm_port_value("addcab_group", 1), channels = 0, fixtures = 0;
+    const unsigned char *ol, *od, *cl, *cd;
+    for (k = 0; k < sizeof ADDCAB_FILES / sizeof ADDCAB_FILES[0] && n < 0; k++)
+        n = pm_read_file(ADDCAB_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    if (!lp || !dp || !lc || !dc || !want_l || !want_d || !clone) {
+        say("added cabinet lights: off - addcab.cfg is on the card, but this build's port names no addcab_* anchors");
+        return;
+    }
+    nl = *(volatile uint32_t *)(unsigned long)lc;
+    nd = *(volatile uint32_t *)(unsigned long)dc;
+    ol = *(const unsigned char **)(unsigned long)lp;
+    od = *(const unsigned char **)(unsigned long)dp;
+    if (nl != want_l || nd != want_d || !ol || !od || nl > ADDCAB_LIGHTS || nd > ADDCAB_DEVS || clone >= nl) {
+        say("added cabinet lights: off - this build's tables are not where its port says (lights %u, port %u; "
+            "devices %u, port %u)", nl, want_l, nd, want_d);
+        return;
+    }
+    for (i = 0; i <= n; i++) {                 /* channels <n> */
+        const char *s;
+        int ok;
+        if (i < n && raw[i] != '\n') continue;
+        raw[i] = 0;
+        s = raw + start;
+        start = i + 1;
+        while (*s == ' ' || *s == '\t') s++;
+        if (str_starts(s, "channels ")) {
+            s += 9;
+            channels = (int)number(&s, &ok);
+            if (!ok) channels = 0;
+        }
+    }
+    channels -= channels % 3;
+    if (channels <= 0) return;
+    if (channels > ADDCAB_MAX) channels = ADDCAB_MAX;
+    cl = ol + 24u * clone;
+    cd = od + 48u * *(const uint16_t *)(cl + 0x0E);
+    if (*(const uint16_t *)(cl + 0x0E) >= nd) {
+        say("added cabinet lights: off - the light to copy (%u) has no device", clone);
+        return;
+    }
+    for (k = 0; k < (unsigned)channels; k++)
+        pm_snprintf(addcab_name[k], sizeof addcab_name[k], "CABINET %u-%c", k / 3 + 1, col[k % 3]);
+    /* the fixtures name their pixels' lights and become the runtime's cabinet lights */
+    start = 0;
+    for (i = 0; i < n; i++) if (!raw[i]) raw[i] = '\n';
+    for (i = 0; i <= n; i++) {
+        const char *s;
+        int ok1, ok2, ok3, ok4, ch;
+        unsigned u, x, y, j;
+        struct lamp *c;
+        if (i < n && raw[i] != '\n') continue;
+        raw[i] = 0;
+        s = raw + start;
+        start = i + 1;
+        while (*s == ' ' || *s == '\t') s++;
+        if (!str_starts(s, "fixture ")) continue;
+        s += 8;
+        ch = (int)number(&s, &ok1);
+        u = (unsigned)number(&s, &ok2);
+        x = (unsigned)number(&s, &ok3);
+        y = (unsigned)number(&s, &ok4);
+        if (!ok1 || !ok2 || !ok3 || !ok4 || ch < 0 || ch % 3 || ch + 3 > channels || !*s || n_cab >= N_CAB) continue;
+        c = &lamps[CAB0 + n_cab];
+        for (j = 0; j + 1 < sizeof c->name && s[j] && s[j] != '\r' && s[j] != '#'; j++) c->name[j] = s[j];
+        while (j && c->name[j - 1] == ' ') j--;
+        c->name[j] = 0;
+        for (j = 0; j < 3; j++)
+            pm_snprintf(addcab_name[ch + (int)j], sizeof addcab_name[0], "%s-%c", c->name, col[j]);
+        c->light[0] = nl + (unsigned)ch + 1;       /* R, G, B, as a cablamp line names them */
+        c->light[1] = nl + (unsigned)ch;
+        c->light[2] = nl + (unsigned)ch + 2;
+        c->mono = 0;
+        c->shot = 0;
+        c->x = (int)x;
+        c->y = (int)y;
+        c->grp = group;
+        c->gidx = ch;
+        cab_u[n_cab] = u < 1000 ? u : 999u;
+        n_cab++;
+        fixtures++;
+    }
+    /* the tables: the game's own records, ours after them, then the records that followed the game's */
+    addcab_copy(addcab_ltab, ol, 24ul * nl);
+    addcab_copy(addcab_ltab + 24ul * (nl + (unsigned)channels), ol + 24ul * nl, 48);
+    addcab_copy(addcab_dtab, od, 48ul * nd);
+    addcab_copy(addcab_dtab + 48ul * (nd + (unsigned)channels), od + 48ul * nd, 48);
+    for (k = 0; k < (unsigned)channels; k++) {
+        unsigned char *l = addcab_ltab + 24ul * (nl + k), *d = addcab_dtab + 48ul * (nd + k);
+        uint32_t name = (uint32_t)(unsigned long)addcab_name[k];
+        unsigned j;
+        for (j = 0; j < 5; j++) addcab_cell[k][j] = name;
+        addcab_cell[k][5] = 0;
+        addcab_copy(d, cd, 48);
+        *(uint32_t *)(d + 0x0C) = name;
+        *(uint32_t *)(d + 0x10) = (uint32_t)(unsigned long)addcab_cell[k];
+        *(int16_t *)(d + 0x1C) = (int16_t)group;
+        *(int16_t *)(d + 0x1E) = (int16_t)k;         /* the board's channel */
+        for (j = 0x28; j < 0x30; j++) d[j] = 0;      /* no place on the playfield */
+        addcab_copy(l, cl, 24);
+        *(uint32_t *)(l + 0x00) = name;
+        if (*(const uint32_t *)(cl + 0x04)) *(uint32_t *)(l + 0x04) = name;
+        if (*(const uint32_t *)(cl + 0x08)) *(uint32_t *)(l + 0x08) = name;
+        *(uint16_t *)(l + 0x0C) = (uint16_t)(slot + k);
+        *(uint16_t *)(l + 0x0E) = (uint16_t)(nd + k);
+    }
+    if (!addcab_page_rw(lc, 1) || !addcab_page_rw(dc, 1)) {
+        say("added cabinet lights: off - the counts' page could not be written");
+        n_cab -= fixtures;
+        return;
+    }
+    *(volatile uint32_t *)(unsigned long)lc = nl + (uint32_t)channels;
+    *(volatile uint32_t *)(unsigned long)dc = nd + (uint32_t)channels;
+    addcab_page_rw(lc, 0);
+    addcab_page_rw(dc, 0);
+    *(unsigned char **)(unsigned long)lp = addcab_ltab;
+    *(unsigned char **)(unsigned long)dp = addcab_dtab;
+    addcab_n = channels;
+    say("added cabinet lights: %d channel(s) on group %d (node 2) as lights %u..%u, devices %u..%u, copies of "
+        "light %u; %d fixture(s) are cabinet lights", channels, group, nl, nl + (unsigned)channels - 1, nd,
+        nd + (unsigned)channels - 1, clone, fixtures);
+}
+#else
+static void addcab_arm(void) { }
+#endif
+
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
@@ -30595,6 +30769,7 @@ static void pad_mode_start(void)
             port.dropped, port.n_site, N_SITES, port.n_data, N_DATA, port.n_value, N_VALUES, port.n_shot, N_SHOTS,
             port.n_switch, N_SWITCHES);
     if (!port_gate()) return;
+    addcab_arm();                             /* PAD-1448: before the game's static initialisers read its tables */
     if (soundlog_arm()) return;               /* PAD-1071: the sound log, and a stock card's stops there */
     mset_arm();                               /* PAD-1382: the settings that share the MORE SETTINGS rows */
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */

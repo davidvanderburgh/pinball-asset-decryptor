@@ -11851,7 +11851,7 @@ def _cabs_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     prof = None
     if not why:
         prof = _CS.project_title(assets_dir, probe=True)
-        why = _CS.title_refusal(prof)
+        why = _CS.title_refusal(prof, _CS.load_added(assets_dir))     # PAD-1448: lights the cabinet adds
     if why:
         log("Expression lights: left out of this build: %s." % why.rstrip("."), "warning")
         return None, []

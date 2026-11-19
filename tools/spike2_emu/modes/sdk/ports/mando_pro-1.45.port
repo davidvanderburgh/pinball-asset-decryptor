@@ -339,6 +339,17 @@ lamp 127          0              BACKPANEL FLASH  # lamp 65, I/O group 6 index 5
 lamp 128          0x200000       MINI PF SPOT  # lamp 77, I/O group 7 index 22, at 0,0; tie: Mini pf enter opto
 lamp 130          0              LOWER RIGHT FLASH  # lamp 79, I/O group 7 index 24, at 0,0
 
+# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
+data addcab_light_tab  0x00690cfc  # the light table's pointer (24-byte records)
+data addcab_dev_tab    0x00691060  # the device table's pointer (48-byte records)
+data addcab_light_n    0x005a94e8  # the light count the game copies at start-up
+data addcab_dev_n      0x005a9638  # the device count it copies
+value addcab_lights    227
+value addcab_devices   343
+value addcab_clone     6  # the LED light the added ones copy: LOCKDOWN BUTTON-R
+value addcab_slot      296  # the first free light slot
+value addcab_group     1
+
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
 site block_start_10     0x001aa988 0xe92d43f8 0xe1a04000

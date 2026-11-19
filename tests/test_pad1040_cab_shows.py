@@ -205,7 +205,7 @@ def test_the_build_puts_cabshow_cfg_beside_the_runtime(tmp_path):
     said = []
     result = SimpleNamespace(profile=object(), cabshow_file="", lines=[])
     orig = CS.title_refusal
-    CS.title_refusal = lambda prof: ""
+    CS.title_refusal = lambda prof, added=None: ""
     try:
         MW.cabs_into(result, str(tmp_path), shows, {384: [77]}, only=True, log=lambda *a: said.append(a[0]))
     finally:

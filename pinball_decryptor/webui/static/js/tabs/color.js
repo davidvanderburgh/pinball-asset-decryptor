@@ -772,14 +772,26 @@ export function WhichFiles({ s }) {
           `A ${one} with a color profile of its own loses it.`,
           "You are asked first. Undo puts them all back."] }}>${label}<//>`)}
     </div>
-    ${old.map(([k, , , word]) => html`<div key=${k} class="row cp-which-old">
+    <${WhichFilesNotes} s=${s} />
+  <//>`;
+}
+
+// The Which files card's notes - an old Every replaced box still ticked, and what the profile is on now - also under
+// the Colors bar's Copy section (Simon, 2026-11-19: one copy action there, nothing of the card's lost)
+export function WhichFilesNotes({ s }) {
+  const n = s.asset_counts || {};
+  const words = countWords(n);
+  const old = EVERY.filter(([k]) => s["all_" + k]);
+  return html`${old.map(([k, , , word]) => html`<div key=${k} class="row cp-which-old">
       <span class="small muted grow">${`Every replaced ${word} you pick is attached as you pick it: this project still has the old Every replaced ${word} box ticked.`}</span>
       <${Button} size="xs" onClick=${() => call("color.set_all", k, false)}
         title=${`Untick the old Every replaced ${word} box: a ${word} you pick from now on is not attached until you attach it. The ones attached now stay as they are.`}>Turn off<//>
     </div>`)}
-    <p class="small muted cp-which-now">${words ? `Now: ${words}.` : "It is not attached to any file yet."} One file at a time: its palette in the Color column of the Images or Video tab, or in the Scenes layers. Several at once: select them there and pick a profile in the Colors bar. The game's own pictures and clips are locked until Advanced unlocks them.</p>
-  <//>`;
+    <p class="small muted cp-which-now">${words ? `Now: ${words}.` : "It is not attached to any file yet."} One file at a time: its palette in the Color column of the Images or Video tab, or in the Scenes layers. Several at once: select them there and pick a profile in the Colors bar. The game's own pictures and clips are locked until Advanced unlocks them.</p>`;
 }
+
+// the kinds the shared files profile can be given to, for the Colors bar's Copy (EVERY: [kind, button label, one])
+export const EVERY_KINDS = () => EVERY.map(([k, label, one]) => ({ k, label, one }));
 
 function Explainer({ s }) {
   const assets = s.per_file && s.mode === "assets";

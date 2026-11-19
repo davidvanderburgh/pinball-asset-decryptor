@@ -281,4 +281,4 @@ def test_apply_to_all_videos_tooltip_is_dragonrrs_own_words():
     tip_js = pane.split("const ALL_TIP = (one, many) => `", 1)[1].split("`;", 1)[0]
     assert tip_js.replace("${many}", "videos").replace("${one}", "video") == words
     # (PAD-471: lines of text's own; Simon: the tooltip of Copy profile… with All picked)
-    assert 'const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(words[2], words[1]);' in pane
+    assert 'const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(toWords[2], toWords[1]);' in pane

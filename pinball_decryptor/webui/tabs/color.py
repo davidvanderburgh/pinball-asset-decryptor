@@ -1176,6 +1176,49 @@ class ColorTab(TabService):
     _ALL_EACH = {"images": "each replaced one", "videos": "each replaced one",
                  "text": "each one added in Scenes"}
 
+    @rpc
+    def copy_preview(self, source="file", kind=None, scope="profiled", themes="this"):
+        """The Colors bar's Copy summary (Simon, 2026-11-19: one copy action, its choices spelled out): what Copy
+        profile... would change, asked of the same targets the copy itself takes, nothing changed. *source* "file"
+        (the file on show's profile: :meth:`apply_to_all`) or "shared" (the individual files profile, given to every
+        *kind* not locked: :meth:`_apply_to_every`). ``{"n", "text"}``; n 0 when nothing would change."""
+        try:
+            if source == "shared":
+                if kind not in self._ALL_WORDS:
+                    return {"n": 0, "text": ""}
+                fn = getattr(self._all_service(kind), "color_targets", None)
+                targets = dict(fn("all") or {}) if fn is not None else {}
+                name = (self._asset or cp.recommended(self._project, files=True)).label()
+                many = self._ALL_WORDS[kind][1]
+                return {"n": len(targets), "text": (
+                    "Will give “%s”, the shared files profile, to all %d %s that are not locked." % (
+                        name, len(targets), many) if targets else "There are no %s to give it to." % many)}
+            fm = self._file_mode()
+            if fm is None:
+                return {"n": 0, "text": ""}
+            kind, rel = fm
+            svc = self._all_service(kind)
+            fn = getattr(svc, "color_targets", None)
+            themes = "all" if themes == "all" else "this"
+            try:
+                if svc is not None:
+                    svc._targets_themes = themes
+                targets = dict(fn("profiled" if scope != "all" else "all") or {}) if fn is not None else {}
+            finally:
+                if svc is not None:
+                    svc._targets_themes = "this"
+            others = [r for r in targets if r != rel]
+            many = self._ALL_WORDS[kind][1]
+            words = self._theme_words(kind, rel, themes)
+            if not others:
+                return {"n": 0, "text": "No other %s %s%s." % (
+                    many, "with a profile attached" if scope != "all" else "that are not locked", words)}
+            return {"n": len(others), "text": "Will copy “%s” to %d %s%s%s." % (
+                self._shown().label(), len(others), "profiled " if scope != "all" else "", many, words)}
+        except Exception:                               # noqa: BLE001
+            log.exception("color copy preview")
+            return {"n": 0, "text": ""}
+
     def _theme_words(self, kind, rel, themes):
         """" in theme 2 (Dark)" / " in every theme" for Apply to all's warning; "" with no themes (images only)."""
         svc = self.window.service("imgsets")

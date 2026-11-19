@@ -37,7 +37,7 @@
 
 import { html, useEffect, useRef, useState, Button, Check, Icon, Seg, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { Controls, Ranges, CurveEditor, WhichFiles, MODES, MODE_WORDS, useProfile, statusNote,
+import { Controls, Ranges, CurveEditor, WhichFiles, WhichFilesNotes, EVERY_KINDS, MODES, MODE_WORDS, useProfile, statusNote,
   UndoRedo, undoKey } from "./color.js";
 
 for (const href of ["/static/css/tabs/color.css", "/static/css/tabs/color_pane.css"]) {
@@ -191,10 +191,12 @@ const TEXT_ALL_TIP = "This will change all of your unlocked lines of text to the
 // boxes (Images and Scenes only), and one copy action with its choices spelled out, asked first with a WARNING.
 const COPY_WHICH = { profiled: "With a profile attached", all: "All" };
 
-function Tagged({ tag, value, off, title, none }) {
+// (Simon: "if a filename is really long then truncate but pop out the full name if mouse over ... Ditto with the
+// Theme name": the value box ends in "..." where it is cut, and its tooltip is the whole of it)
+function Tagged({ tag, value, off, title, none, full }) {
   return html`<div class=${cx("row cpd-tagrow", off && "cpd-off")} title=${title || ""}>
     <span class="cpd-tag">${tag}</span>
-    <span class=${cx("cpd-val mono ellip", none && "cpd-none")}>${value}</span></div>`;
+    <span class=${cx("cpd-val mono", none && "cpd-none")} title=${full || value}>${value}</span></div>`;
 }
 
 function FileLine({ s, host }) {
@@ -202,9 +204,10 @@ function FileLine({ s, host }) {
   const sets = useNs("imgsets");
   const [which, setWhich] = useState("profiled");
   const [where, setWhere] = useState("this");
+  const [toKind, setToKind] = useState(host === "video" ? "videos" : "images");
+  const [summary, setSummary] = useState("");
   const n = f ? (f.count || 1) : 0;
   const kind = f ? f.kind : (host === "video" ? "videos" : "images");
-  const all = f && (ALL_HOSTS[host] || []).includes(f.kind) ? ALL_WORDS[f.kind] : null;
   const words = ALL_WORDS[kind] || ALL_WORDS.images;
   // themes: pictures on the Images and Scenes tabs (Simon: "Theme applies in scenes and images only")
   const names = sets.names || [];
@@ -218,7 +221,7 @@ function FileLine({ s, host }) {
   const label = f ? String(f.label || "").replace(/ \(theme \d+\)$/, "") : "NONE";
   const shared = `“${s.asset_name || "Recommended"}”`;
   const own = f ? (n > 1 ? (f.own_n || 0) > 0 : !!f.own) : false;
-  const status = !f ? `Click a ${words[2]} to give it a profile of its own, or to copy its profile to others.`
+  const status = !f ? "Nothing selected: click a file to give it a profile of its own, or copy the shared files profile below."
     : t > 1 ? (own ? `It has a profile of its own in this theme (“${s.name || ""}”).`
       : "It uses theme 1's profile. Change anything below and it gets a profile of its own in this theme only.")
     : own ? (n > 1 ? `${f.own_n === n ? "Each has" : `${f.own_n} of them have`} a profile of their own.`
@@ -230,30 +233,71 @@ function FileLine({ s, host }) {
     : html`<${Button} size="xs" onClick=${() => call("color.file_shared", "this")}
         title=${`Drop its own profile: it gets the individual files profile every other file gets (${shared})`}>Same as the other files<//>`)
     : null;
-  const themes = themeLive ? where : "this";
-  const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(words[2], words[1]);
-  const copyTip = !f ? `Click a ${words[2]} first` : !all ? "Copying is not offered for this file here"
-    : which === "all" ? tipAll
-      : { head: `Copy this ${words[0]} color profile to every profiled ${words[2]}`, lines: [{ profile: s.name || "Recommended" },
-        `Every ${words[2]} ${f.kind === "text" ? "in every scene" : host === "scenes" ? "on the Images tab" : "on this tab"} with a color profile attached gets this one, in place of the one it has now.`,
-        `A ${words[2]} with no color profile attached is left as it is.`, "You are asked first. Undo puts them all back."] };
+
+  // ---- Copy (Simon: one copy action, the same every time, what cannot be done greyed with the reason) ----
+  // From: the selected file's profile (PAD-439 Apply to all) or the shared files profile (PAD-463 All images / videos
+  // / text, which needs no file selected - as the Which files card did)
+  const source = f ? "file" : "shared";
+  const fileKinds = f && (ALL_HOSTS[host] || []).includes(f.kind) ? [f.kind] : [];
+  const kinds = source === "file" ? fileKinds : EVERY_KINDS().map((e) => e.k);
+  const to = source === "file" ? (fileKinds[0] || kind) : toKind;
+  const toWords = ALL_WORDS[to] || ALL_WORDS.images;
+  const canCopy = source === "file" ? fileKinds.length > 0 : true;
+  const whichOk = source === "file";                    // the shared profile goes to every file not locked (All)
+  const scope = whichOk ? which : "all";
+  const themesOk = source === "file" && themeLive;
+  const themes = themesOk ? where : "this";
+  useEffect(() => {
+    let live = true;
+    if (!canCopy) { setSummary(""); return undefined; }
+    call("color.copy_preview", source, to, scope, themes).then((r) => { if (live) setSummary((r && r.text) || ""); });
+    return () => { live = false; };
+  }, [source, to, scope, themes, f && f.rel, f && f.own, s.name, s.asset_name, canCopy]);
+  const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(toWords[2], toWords[1]);
+  const copyTip = !canCopy ? "Copying is not offered for this file here"
+    : source === "shared" ? { head: `Give every ${toWords[2]} the shared files profile`, lines: [{ profile: s.asset_name || "Recommended" },
+      `Every ${toWords[2]} that is not locked gets it, attached. A ${toWords[2]} with a color profile of its own loses it.`,
+      "You are asked first. Undo puts them all back."] }
+    : scope === "all" ? tipAll
+      : { head: `Copy this ${toWords[0]} color profile to every profiled ${toWords[2]}`, lines: [{ profile: s.name || "Recommended" },
+        `Every ${toWords[2]} ${f.kind === "text" ? "in every scene" : host === "scenes" ? "on the Images tab" : "on this tab"} with a color profile attached gets this one, in place of the one it has now.`,
+        `A ${toWords[2]} with no color profile attached is left as it is.`, "You are asked first. Undo puts them all back."] };
+  const doCopy = () => (source === "shared" ? call("color.apply_to_all", "all", to)
+    : call("color.apply_to_all", which, null, themes));
+  const kindLabel = { images: "Images", videos: "Videos", text: "Text" };
   return html`<div class="cpd-file cpd-sel">
-    <${Tagged} tag="SELECTED" value=${f && n > 1 ? `${label} and ${n - 1} more` : label} none=${!f} title=${f ? f.rel : ""} />
+    <${Tagged} tag="SELECTED" value=${f && n > 1 ? `${label} and ${n - 1} more` : label} none=${!f}
+      full=${f ? `${label}${n > 1 ? ` and ${n - 1} more` : ""}\n${String(f.rel || "").replace(/^@\d+:/, "")}` : "Nothing selected"} />
     <${Tagged} tag="THEME" value=${themeValue} off=${!themeLive}
-      title=${themeLive ? "The theme picked on the Images tab: what you change here is this theme's" : "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)"} />
-    <div class="row cpd-file-own"><span class="small muted grow">${status}</span>${reset}</div>
-    <div class=${cx("cpd-copy", !all && "cpd-off")}>
-      <div class="eyebrow">Copy this profile to other ${words[1]}</div>
-      <div class="cpd-copy-row"><span class="small">Which ${words[1]}</span>
-        <${Seg} value=${COPY_WHICH[which]} options=${[COPY_WHICH.profiled, COPY_WHICH.all]} disabled=${!all}
+      full=${themeLive ? `Theme ${themeValue}\nThe theme picked on the Images tab: what you change here is this theme's`
+        : "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)"} />
+    <div class="row cpd-file-own"><span class="small muted grow">${status}</span>${reset}
+      ${f && themeLive ? html`<${Button} size="xs" onClick=${() => call("color.file_shared", "all")}
+        title=${`Drop its own profile in every theme, theme 1 too: it gets the individual files profile (${shared}) everywhere`}>Reset in every theme<//>` : null}</div>
+    <div class="cpd-copy">
+      <div class="eyebrow">Copy a profile to other files</div>
+      <div class="cpd-copy-row"><span class="small">Copy from</span>
+        <${Seg} value=${source} onChange=${() => {}} options=${[
+          { value: "file", label: "Selected file", disabled: !f, title: f ? "The profile of the file selected above" : "Select a file first" },
+          { value: "shared", label: "Shared profile", disabled: !!f,
+            title: f ? "Click away from the file (nothing selected) to give the shared files profile to every file of a kind"
+              : `The individual files profile every file without one of its own gets (${shared})` }]} /></div>
+      <div class="cpd-copy-row"><span class="small">To which kind</span>
+        <${Seg} value=${to} onChange=${setToKind} options=${["images", "videos", "text"].map((k) => ({
+          value: k, label: kindLabel[k], disabled: !kinds.includes(k),
+          title: kinds.includes(k) ? "" : source === "file" ? `A ${words[2]}'s profile is copied to other ${words[1]}` : "" }))} /></div>
+      <div class=${cx("cpd-copy-row", !whichOk && "cpd-off")}><span class="small">Which ${toWords[1]}</span>
+        <${Seg} value=${COPY_WHICH[scope]} options=${[COPY_WHICH.profiled, COPY_WHICH.all]} disabled=${!whichOk}
           onChange=${(v) => setWhich(v === COPY_WHICH.all ? "all" : "profiled")} /></div>
-      <div class=${cx("cpd-copy-row", !themeLive && "cpd-off")}><span class="small">Which themes</span>
-        <${Seg} value=${where === "all" ? "Every theme" : "This theme"} options=${["This theme", "Every theme"]}
-          disabled=${!themeLive || !all} onChange=${(v) => setWhere(v === "Every theme" ? "all" : "this")} /></div>
-      <div class="row"><span ...${tip(copyTip)}><${Button} size="sm" icon="copy" disabled=${!all}
-          onClick=${() => call("color.apply_to_all", which, null, themes)}>Copy profile…<//></span>
+      <div class=${cx("cpd-copy-row", !themesOk && "cpd-off")}><span class="small">Which themes</span>
+        <${Seg} value=${themes === "all" ? "Every theme" : "This theme"} options=${["This theme", "Every theme"]}
+          disabled=${!themesOk} onChange=${(v) => setWhere(v === "Every theme" ? "all" : "this")} /></div>
+      ${summary ? html`<div class="small cpd-summary">${summary}</div>` : null}
+      <div class="row"><span ...${tip(copyTip)}><${Button} size="sm" icon="copy" disabled=${!canCopy}
+          onClick=${doCopy}>Copy profile…<//></span>
         <span class="small muted">You are asked first.</span></div>
     </div>
+    ${!f ? html`<${WhichFilesNotes} s=${s} />` : null}
   </div>`;
 }
 
@@ -355,7 +399,6 @@ export function ColorBar({ open, setOpen, host = "scenes", startMode = null, fil
         ${line ? html`<${TextColorLine} line=${line} openFont=${openFont} />` : null}
         <div class="cpd-status">${statusNote(s, line && line.own && !line.game ? line.hex : null)}</div>
         ${s.try_note ? html`<div class="small muted">${s.try_note}</div>` : null}
-        ${s.per_file && mode === "assets" && !s.file ? html`<${WhichFiles} s=${s} />` : null}
         <${Controls} s=${s} p=${p} update=${update} />
         <${Ranges} s=${s} p=${p} update=${update} />
         <${CurveEditor} s=${s} p=${p} update=${update} />

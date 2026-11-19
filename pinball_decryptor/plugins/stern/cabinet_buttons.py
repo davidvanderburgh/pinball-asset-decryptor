@@ -19,6 +19,11 @@ Before it only Godzilla had button shots (PAD-228: three `switch` lines in its p
 Census of the newest library builds (C:/tmp/PAD-1403/census.json, 2026-11-18): every one names both flipper
 buttons and the Start button; every one but The Beatles, Jurassic Park The Pin and Star Wars ELG names an Action
 (LOCKDOWN) button, 34 on all of them.
+
+PAD-1447: Iron Maiden (LE and Pro, every build) names one too, as LOCKDOWN BUTTON (OPTIONAL), but its cabinet has
+none (a reporter's machine, as The Beatles'): it is in :data:`NO_ACTION`, and :func:`program_lacks_action` tells its
+program apart for the co-op lines that read the button off the program alone. "(OPTIONAL)" is no sign by itself:
+TMNT LE names its button so and has one (the Glider).
 """
 
 #: (name, kind, buttons, ms) in the order bits are given: a port with few free bits (King Kong: 9) offers the first
@@ -46,8 +51,19 @@ BUTTON_SHOTS = (
 NAMES = tuple(n for n, _k, _b, _ms in BUTTON_SHOTS)
 _BY_NAME = {n: (k, b, ms) for n, k, b, ms in BUTTON_SHOTS}
 
-#: the titles (game folders) whose game programs name no Action button (the census above)
-NO_ACTION = frozenset({"beatles", "jurassic_park_the_pin", "star_wars_elg"})
+#: the titles (game folders) whose cabinets have no Action button: the game programs of the first three name none
+#: (the census above); Iron Maiden's names one its cabinet lacks (PAD-1447)
+NO_ACTION = frozenset({"beatles", "jurassic_park_the_pin", "star_wars_elg", "iron_maiden_le", "iron_maiden_pro"})
+
+#: PAD-1447: words only the game programs of a :data:`NO_ACTION` title that still names an Action switch carry
+_NO_ACTION_MARKS = (b"iron_maiden",)
+
+
+def program_lacks_action(game_elf):
+    """True for a game program (bytes) of a title whose cabinet has no Action button though its switch table names
+    one (Iron Maiden: LOCKDOWN BUTTON (OPTIONAL))."""
+    data = bytes(game_elf or b"")
+    return any(m in data for m in _NO_ACTION_MARKS)
 
 CFG_NAME = "buttons.cfg"
 

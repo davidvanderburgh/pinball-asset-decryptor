@@ -192,6 +192,20 @@ def bank_scene(prof):
     return "%s/%s/scene.radium" % (prof.game_dir, prof.lcd("bank"))
 
 
+def attract_scene(prof):
+    """PAD-1415: the card path of the scene an attract item's clip goes in: the port's ``scene attract_bank`` (the
+    bank the game's attract pages play their own clips from, where it is not the play bank: Walking Dead Remastered LE
+    0.92's framework scene 60ed7e50, its play clips on 71e39c43), else the bank scene."""
+    from . import mode_project as MP
+    try:
+        sid = MP.read_port(MP.port_path(prof))["scene"].get("attract_bank", "")
+    except (OSError, MP.ModeProjectError, AttributeError, TypeError):
+        sid = ""
+    if not sid:
+        return bank_scene(prof)
+    return "%s/assets/lcd/auto_loaded/%s/scene.radium" % (prof.game_dir, sid)
+
+
 def scene_of(prof, card_path):
     """PAD-723: ``(scene card path, scene id)`` of the scene whose ``scene.assets`` holds the clip at
     ``card_path`` - its ``scene.radium`` and the id the resource manager knows it by (the path under

@@ -5079,6 +5079,10 @@ def import_modes(zip_path, project, replace=(), skip=()):
         try:
             data = json.loads(z.read(SHARE_MANIFEST).decode("utf-8"))
         except (KeyError, ValueError):
+            if "pad_game.json" in z.namelist():            # PAD-1408: core.game_file's
+                raise ModeProjectError(
+                    "%s is a mod pack with modes, not a file of modes: import it on the Mod Pack "
+                    "tab with Import Mod Pack..." % os.path.basename(zip_path)) from None
             raise bad from None
         if not isinstance(data, dict) or data.get("kind") != SHARE_KIND:
             raise bad

@@ -4425,6 +4425,49 @@ JJP_MODES_HELP = [
 ]
 
 
+def _spooky_modes_games():
+    """The Spooky titles custom modes run on, read off their port reports now."""
+    from ..plugins.spooky import custom_modes as SM
+    names = [t["name"] for t in SM.titles() if t["can_run"]]
+    return ("The games whose update the app has read and run the modes in: " + ", ".join(names)
+            + ". The game is the selected update's: select another update for another game's "
+            "modes.") if names else ""
+
+
+#: PAD-1417: the Modes tab on a Spooky game (webui/modes_spooky.py) - the JJP editor's form
+SPOOKY_MODES_HELP = [
+    ("What it's for", [
+        "Make modes of your own for a Spooky game. A mode runs inside the game: the "
+        "game's own switches start it, its shots score through the game's own scoring, "
+        "the game's own callouts announce it, and a panel in the game's fonts shows its "
+        "title, its total and its time left over the game's screen. The game's own modes "
+        "go on as they were.",
+    ]),
+    ("Which games", lambda: _spooky_modes_games()),
+    ("Making a mode", [
+        "The game is the selected update's (its name shows at the top right). Your modes are "
+        "on the left; **New mode** starts one. Every switch, sound and font is picked from "
+        "the game's own list, so nothing can be misspelt. **Started by** and **Hits to start** "
+        "say what starts it; **Scoring shots** and **Points a shot** what it scores; "
+        "**Seconds** how long it runs (0: until the ball ends); **Shots to complete** and "
+        "**Completion bonus** when it is done early. A mode ends when its time runs out, "
+        "when it is completed, and when the ball ends.",
+        "Scooby-Doo rounds every award to 100 points, so the check asks for points that are "
+        "a multiple of 100.",
+        "**Check** runs after every change and lists anything the game would not take.",
+    ]),
+    ("Trying and installing", [
+        "**Try it** starts the game in the Emulate tab with your modes in it, from the stock "
+        "update, without building anything. Start a game there and make a mode's start shots.",
+        "**Build** writes the stock update again with your modes in it, under the same name "
+        "(the machine reads an update by its name). Install it as you would a stock update. "
+        "On its first start after the update the game restarts once by itself, to take up the "
+        "modes. The Write tab carries your modes too, with any pictures or sounds you changed.",
+        "To take the modes out, install the stock update again.",
+    ]),
+]
+
+
 def sections_for(tab_name, mfr=None):
     """The (title, body) sections the "?" window shows for *tab_name*: the
     tab's own, plus those of every preview feature switched on in this run
@@ -4433,6 +4476,8 @@ def sections_for(tab_name, mfr=None):
     caps = getattr(mfr, "capabilities", None)
     if tab_name == "Modes" and getattr(caps, "jjp_modes", False) and not getattr(caps, "modes", False):
         return _render_sections(JJP_MODES_HELP)
+    if tab_name == "Modes" and getattr(caps, "spooky_modes", False) and not getattr(caps, "modes", False):
+        return _render_sections(SPOOKY_MODES_HELP)
     out = list(HELP_CONTENT.get(tab_name) or [])
     try:
         from ..core import preview

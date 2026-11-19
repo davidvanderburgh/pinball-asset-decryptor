@@ -4436,7 +4436,8 @@
   "keep_rules": [],
   "block_modes": [],
   "beds": [],
-  "meters": []
+  "meters": [],
+  "menus": []
  },
  "recipe": {
   "clips": {

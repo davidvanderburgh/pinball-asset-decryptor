@@ -53,6 +53,16 @@ THE PROGRAM (``blocks.json``)::
                   "max": {"k": "num", "v": 5}, "numbers": true}],   four bars while it runs, each filled with its value
                                   out of its most (100 unless said), its label over it ("numbers": "CYCLOPS 3/5"), down
                                   the right edge ("at": [x, y] to place one); on every title with screens
+      "menus": [{"name": "EPISODE", "title": "CHOOSE YOUR EPISODE", "items": ["DARK PHOENIX", "SENTINELS"],
+                 "default": 1, "seconds": 10, "hold": "lane", "color": "#ffb000"}],   PAD-1404: up to two lists the
+                                  player picks from with the flippers (left up, right down, Action or Start takes it;
+                                  its seconds out takes the one highlighted, which opens on the default). Open the menu
+                                  ({"op": "menu_open", "menu": ...}) shows it in the middle of the glass, its buttons
+                                  the menu's (the game sees no Start, no launch, no lane change from them) and the
+                                  mode's clock standing still; "hold": "lane" (a ball's start: a plunge takes the one
+                                  shown), "scoop" (the ball held in the scoop) or "none". The hat
+                                  {"kind": "menu_pick", "menu": ...} runs on the pick, and {"k": "menu_pick", "menu": ...}
+                                  is the item picked (1..n, the player up's last this game; 0 = none yet)
       "scripts": [
         {"hat": {"kind": "shot", "shot": "Left ramp", "when": "idle"},
          "do": [{"op": "if", "cond": {...}, "then": [...], "else": [...]}, ...]}
@@ -280,6 +290,7 @@ HATS = {
     "game_mode": "When the game starts one of its modes",   # PAD-710: the mode runs in its place, counting as it
     "completed": "When the player has completed some of the game's modes",   # PAD-747: N of them, in one game
     "spare_switch": "When a spare switch closes",     # PAD-826: a board input the game has no switch on (a mod's own)
+    "menu_pick": "When the player picks from a menu",   # PAD-1404: one of the mode's menus, picked with the flippers
 }
 #: PAD-615 round 2: the challenge hat's choice that adds the mode to the game's start menu as a challenge of its own
 CHALLENGE_NEW = "A new challenge of its own"
@@ -358,7 +369,8 @@ STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout
               "fade",                                                    # PAD-1405: the whole screen to a colour
               "gi",                                                      # PAD-767: the GI dark for the rest of the mode
               "light_mode", "unlight_mode", "set_hits",
-              "spare_drive")                                             # PAD-826: a driver output the game never fires
+              "spare_drive",                                             # PAD-826: a driver output the game never fires
+              "menu_open", "menu_close")                                 # PAD-1404: a menu picked with the flippers
 #: PAD-395: the mechanisms a block holds, through the runtime as the form's Magnet, Scoop and Other
 #: mechanisms do (PAD-381): a time asked for, clamped to these, and every other limit the runtime's own
 HOLD_MIN_MS, HOLD_MAX_MS = MP.COIL_MIN_MS, MP.COIL_MAX_MS
@@ -544,7 +556,8 @@ CALLOUT_ROLES = {"ten_seconds": "Ten seconds left", "time_up": "Time is up"}
 NUM_KINDS = ("num", "var", "hits", "mode_hits", "scored", "total", "secs_left", "balls", "player", "op",
              "timer_left",
              "combo_chain", "combo_steps",   # PAD-708: the combos in a row; a combo's shots made so far
-             "women_mult")                   # PAD-889: James Bond's Bond Women multiplier now (1 when none runs)
+             "women_mult",                   # PAD-889: James Bond's Bond Women multiplier now (1 when none runs)
+             "menu_pick")                    # PAD-1404: the item picked from a menu (1..n; 0 = none yet this game)
 BOOL_KINDS = ("cmp", "and", "or", "not", "running", "stock", "can_start", "lit",
               "shields_away")   # PAD-690: Godzilla Premium/LE's shield targets face away (never on a Pro)
 OPS = {"+": "+", "-": "-", "*": "*", "/": "/"}
@@ -655,6 +668,7 @@ def normalize(data):
     out["bar"] = _norm_bar(out.get("bar"))
     out["info"] = _norm_info(out.get("info"))
     out["meters"] = _norm_meters(out.get("meters"))       # PAD-1405
+    out["menus"] = _norm_menus(out.get("menus"))          # PAD-1404
     for s in out["scripts"]:
         for b in _walk(s.get("do")):
             # PAD-372: Add seconds takes a value; one saved before held a plain number
@@ -774,6 +788,52 @@ def _norm_meters(ms):
     return out
 
 
+#: PAD-1404: a mode's menus (mode_menus.py: a panel, five rows that scroll, a foot; intricate_kit.h kit_menu)
+MENUS_MAX = 2
+MENU_ITEMS_MAX = 12
+MENU_TITLE_MAX = 32
+MENU_ITEM_MAX = 28
+MENU_SECONDS_MIN, MENU_SECONDS_MAX, MENU_SECONDS = 3, 60, 10
+MENU_COLOR = "#ffb000"
+#: how the ball is held while it is open (the kit's KIT_MENU_HOLD_*)
+MENU_HOLDS = {"lane": "in the shooter lane (a ball's start: a plunge picks the one shown)",
+              "scoop": "in the scoop", "none": "not held"}
+MENU_HOLD_C = {"none": 0, "lane": 1, "scoop": 2}
+
+
+def _norm_menus(ms):
+    """PAD-1404: its menus, each ``{"name", "title", "items", "default", "seconds", "hold", "color"}``: the default a
+    number 1..items (1 when it is not one), the seconds MENU_SECONDS_MIN..MENU_SECONDS_MAX, the hold one of
+    MENU_HOLDS ("lane" when it is not one). Items are kept as written, empty ones too: problems names them."""
+    out = []
+    for m in (ms if isinstance(ms, list) else [])[:MENUS_MAX + 2]:     # one too many is named by problems, not lost
+        if not isinstance(m, dict):
+            continue
+        items = [str(i if i is not None else "").strip()[:MENU_ITEM_MAX]
+                 for i in (m.get("items") if isinstance(m.get("items"), list) else [])][:MENU_ITEMS_MAX + 4]
+        try:
+            dflt = int(m.get("default", 1))
+        except (TypeError, ValueError):
+            dflt = 1
+        try:
+            secs = int(m.get("seconds", MENU_SECONDS))
+        except (TypeError, ValueError):
+            secs = MENU_SECONDS
+        out.append({"name": str(m.get("name") or "").strip()[:24],
+                    "title": str(m.get("title") or "").strip()[:MENU_TITLE_MAX],
+                    "items": items,
+                    "default": dflt if 1 <= dflt <= max(1, len(items)) else 1,
+                    "seconds": max(MENU_SECONDS_MIN, min(MENU_SECONDS_MAX, secs)),
+                    "hold": m.get("hold") if m.get("hold") in MENU_HOLDS else "lane",
+                    "color": m.get("color") if COLOR_RE.match(str(m.get("color") or "")) else MENU_COLOR})
+    return out
+
+
+def menus_of(program):
+    """PAD-1404: what the build needs of its menus (mode_menus.menu_screens): each one's title and colour."""
+    return [{"title": m["title"], "color": m["color"]} for m in (program.get("menus") or [])[:MENUS_MAX]]
+
+
 def fade_style(b):
     return b.get("style") if b.get("style") in FADE_STYLES else "flat"
 
@@ -798,7 +858,8 @@ def fade_layers(program):
 def uses_kit(program):
     """Whether its C includes the examples' kit (intricate_kit.h, copied beside it): its HUD, its meters or a fade
     (PAD-1405) are the kit's."""
-    return bool(program["hud"]["on"] or program.get("meters") or fade_layers(program))
+    return bool(program["hud"]["on"] or program.get("meters") or fade_layers(program)
+                or program.get("menus"))                                         # PAD-1404: kit_menu
 
 
 def meters_of(program):
@@ -980,6 +1041,7 @@ def _sync_assets(project, slug, program):
                or bool(getattr(spec, "info_line", False)) != program["info"]["on"]
                or list(getattr(spec, "meters", None) or []) != meters_of(program)
                or list(getattr(spec, "fades", None) or []) != fade_layers(program)[:FADES_MAX]
+               or list(getattr(spec, "menus", None) or []) != menus_of(program)
                or dict(getattr(spec, "more", None) or {}) != more_of(program))
     if changed or not os.path.isfile(os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)):
         spec.name = program["name"] or slug.upper()
@@ -994,6 +1056,7 @@ def _sync_assets(project, slug, program):
         spec.info_line = program["info"]["on"]          # PAD-547: the build adds PadMode_<slug>_Info
         spec.meters = meters_of(program)                # PAD-1405: the build adds PadMode_<slug>_Meter<k>
         spec.fades = fade_layers(program)[:FADES_MAX]   # ...and PadMode_<slug>_Fade<k>
+        spec.menus = menus_of(program)                  # PAD-1404: and PadMode_<slug>_Menu<k>
         spec.more = more_of(program)                    # PAD-707: the build puts its tile on the selection screen
         CM.save(project, slug, spec)
 
@@ -1346,6 +1409,26 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
         tseen.add(n.lower())
     if len(timers) > MAX_TIMERS:
         out.append("%d timers: %d at most." % (len(timers), MAX_TIMERS))
+    mseen = set()                                                                    # PAD-1404: its menus
+    for m in program.get("menus") or []:
+        n = m["name"]
+        if not VAR_RE.match(n):
+            out.append("A menu's name %r is not one: start with a letter, then letters, digits, spaces or _ "
+                       "(24 at most)." % n)
+        elif n.lower() in mseen:
+            out.append("Two menus are called %s." % n)
+        mseen.add(n.lower())
+        if not m["items"]:
+            out.append("The menu %s has nothing to pick: give it an item or more." % (n or "(no name)"))
+        elif len(m["items"]) > MENU_ITEMS_MAX:
+            out.append("The menu %s has %d items: %d at most." % (n, len(m["items"]), MENU_ITEMS_MAX))
+        if any(not i for i in m["items"]):
+            out.append("The menu %s has an empty item: write it or take it out." % (n or "(no name)"))
+        if m["hold"] == "scoop" and scoop is False:
+            out.append("The menu %s holds the ball in the scoop, which a mode cannot do on this card's game: hold it "
+                       "in the shooter lane or not at all." % n)
+    if len(program.get("menus") or []) > MENUS_MAX:
+        out.append("%d menus: %d at most." % (len(program["menus"]), MENUS_MAX))
     if len(program["scripts"]) > MAX_SCRIPTS:
         out.append("%d scripts: %d at most." % (len(program["scripts"]), MAX_SCRIPTS))
     clips = _check_media(program["clips"], "clip", MAX_CLIPS, folder, out)
@@ -1355,7 +1438,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
     beds = _check_media(program["beds"], "music bed", MAX_BEDS, folder, out)        # PAD-658
     if beds and not program["music"]:
         out.append("More music beds need its own music first: pick its music.")
-    ctx = {"vars": set(n.lower() for n in names), "timers": tseen,
+    ctx = {"vars": set(n.lower() for n in names), "timers": tseen, "menus": mseen,
            "shots": set(shots) if shots is not None else None,
            "events": set(events) if events is not None else None, "count": 0, "out": out,
            "seconds": program["seconds"], "clips": clips, "sounds": sounds, "beds": beds,
@@ -1401,7 +1484,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
         _check_num(m["value"], "Meter %d (%s)" % (k + 1, m["label"] or "no label"), ctx)
         _check_num(m["max"], "Meter %d's most" % (k + 1), ctx)
     if len(fade_layers(program)) > FADES_MAX:
-        out.append("Its Fade the screen blocks use more than %d colours and looks: use %d at most." % (FADES_MAX, FADES_MAX))
+        out.append("Its Fade the screen blocks use more than %d colors and looks: use %d at most." % (FADES_MAX, FADES_MAX))
     for i, s in enumerate(program["scripts"]):
         _check_hat(s.get("hat") or {}, i + 1, ctx)
         _check_stack(s.get("do") or [], 1, "Script %d" % (i + 1), ctx)
@@ -1663,6 +1746,8 @@ def _check_hat(hat, n, ctx):
             ctx["out"].append("%s's seconds must be 1 to %d." % (where, SECONDS_MAX))
     if kind == "timer_done":
         _check_timer(hat.get("timer"), where + "'s When", ctx)
+    if kind == "menu_pick":                                                          # PAD-1404
+        _check_menu(hat.get("menu"), where + "'s When", ctx)
     if kind == "challenge":                                                          # PAD-615
         name = hat.get("challenge")
         if ctx["challenges"] is not None and not ctx["challenges"]:
@@ -1787,6 +1872,14 @@ def _check_combo(hat, where, ctx):
                           "(24 at most)." % (where, name))
 
 
+def _check_menu(name, where, ctx):
+    """PAD-1404: a block, hat or value naming one of the mode's menus."""
+    if not name:
+        ctx["out"].append("%s has no menu chosen." % where)
+    elif str(name).lower() not in ctx.get("menus", ()):
+        ctx["out"].append("%s names a menu that is not there: make it under Menus." % where)
+
+
 def _check_timer(name, where, ctx):
     if not name:
         ctx["out"].append("%s has no timer chosen." % where)
@@ -1906,6 +1999,8 @@ def _check_stack(stack, depth, where, ctx):
                 _check_num(b.get("value"), where, ctx)
             if not _int_ok(b.get("seconds"), 1, AWARD_SECONDS_MAX):
                 ctx["out"].append("%s shows an award for 1 to %d seconds." % (where, AWARD_SECONDS_MAX))
+        elif op in ("menu_open", "menu_close"):                                        # PAD-1404
+            _check_menu(b.get("menu"), where + "'s menu", ctx)
         elif op in ("timer_start", "timer_stop"):
             _check_timer(b.get("timer"), where + "'s timer", ctx)
             if op == "timer_start":
@@ -2269,6 +2364,8 @@ def _check_num(e, where, ctx, depth=0):
         _check_shot(e.get("shot"), where + "'s hits", ctx)
     elif k == "timer_left":
         _check_timer(e.get("timer"), where + "'s time left", ctx)
+    elif k == "menu_pick":                                                          # PAD-1404
+        _check_menu(e.get("menu"), where + "'s item picked", ctx)
     elif k == "combo_steps":                                                        # PAD-708
         name = str(e.get("combo") or "").strip().lower()
         if not name:
@@ -2336,6 +2433,10 @@ class _Gen:
         self.p = program
         self.slug = slug
         self.fades = fade_layers(program)       # PAD-1405: FADE <n> per colour and look
+        self.menus = {}                         # PAD-1404: lower name -> index (menu[<index>], PadMode_<slug>_Menu<n>)
+        for m in (program.get("menus") or [])[:MENUS_MAX]:
+            if VAR_RE.match(m["name"]) and m["name"].lower() not in self.menus:
+                self.menus[m["name"].lower()] = len(self.menus)
         self.shots = []                 # shot names, in first-use order
         self.lamps = []                 # PAD-598: the game's lights the blocks light by name, in first-use order
         self.events = []
@@ -2402,6 +2503,10 @@ class _Gen:
     def timer(self, name):
         return self.timers.get(str(name or "").lower())
 
+    def menu(self, name):
+        """PAD-1404: the menu's index, or None."""
+        return self.menus.get(str(name or "").lower())
+
     def shot(self, name):
         return "S[%d]" % self.shot_i(name)
 
@@ -2457,6 +2562,9 @@ class _Gen:
         if k == "timer_left":
             i = self.timer(e.get("timer"))
             return "timer_left(%d)" % i if i is not None else "0LL"
+        if k == "menu_pick":            # PAD-1404
+            i = self.menu(e.get("menu"))
+            return "menu_value(%d)" % i if i is not None else "0LL"
         if k == "combo_chain":          # PAD-708
             return "combo_in_row()" if self.combos else "0LL"
         if k == "combo_steps":
@@ -2686,6 +2794,9 @@ class _Gen:
                         i, self.num(b.get("to")), self.num(b.get("ms"))))
                 else:
                     out.append(pad + "/* fade: more colours than a mode has */")
+            elif op in ("menu_open", "menu_close"):       # PAD-1404: a menu picked with the flippers
+                i = self.menu(b.get("menu"))
+                out.append(pad + ("%s(%d);" % (op, i) if i is not None else "/* %s: no such menu */" % op))
             elif op == "hud_progress":
                 out.append(pad + "hud_progress(%s);" % self.num(b.get("value")))
             elif op == "roster_progress":                # PAD-733: its new monster's tile on the selection screen
@@ -2966,6 +3077,9 @@ def to_c(program, slug):
             elif kind == "timer_done":
                 t = g.timer(hat.get("timer"))
                 test = "(due[%d])" % t if t is not None else "(0)"
+            elif kind == "menu_pick":                    # PAD-1404: picked on the tick (kit_menu_tick)
+                t = g.menu(hat.get("menu"))
+                test = "(menu_got[%d] >= 0)" % t if t is not None else "(0)"
             elif kind == "combo":                        # PAD-708: judged as the shot came (combo_shot), its gate too
                 k = next((i for i, h in enumerate(g.combos) if h is hat), None)
                 for x in combo_steps(hat)[:COMBO_STEPS_MAX]:   # its shots in the table before the table is written
@@ -3147,6 +3261,67 @@ def to_c(program, slug):
     if fades:
         L.append("static struct kit_fade fade[%d] = {%s};" % (len(fades), ", ".join(
             '{ .scene = "hud", .node = "%s_Fade%d" }' % (st, k + 1) for k in range(len(fades)))))
+    menus = [m for m in program.get("menus") or [] if g.menu(m["name"]) is not None]   # PAD-1404, in index order
+    if menus:
+        st = meter_stem(slug)
+        L.append("")
+        L.append("/* PAD-1404: its menus, picked with the flippers (intricate_kit.h kit_menu); their screens the build put in")
+        L.append(" * the HUD scene (mode_menus.py). While one is open its buttons are its own and the mode's clock waits. */")
+        L.append("#define N_MENUS %d" % len(menus))
+        for k, m in enumerate(menus):
+            L.append("static const char *const MENU%d_ITEMS[%d] = {%s};" % (
+                k, max(1, len(m["items"][:MENU_ITEMS_MAX])),
+                ", ".join(_c_str(i) for i in m["items"][:MENU_ITEMS_MAX]) or '""'))
+        L.append("static const struct { const char *head; const char *const *items; int n, dflt; unsigned long ms; "
+                 "int hold; } MENU[N_MENUS] = {")
+        for k, m in enumerate(menus):
+            L.append("    { %s, MENU%d_ITEMS, %d, %d, %dUL, %d },   /* %s */" % (
+                _c_str(m["title"]), k, len(m["items"][:MENU_ITEMS_MAX]), m["default"] - 1, m["seconds"] * 1000,
+                MENU_HOLD_C[m["hold"]], _comment(m["name"])))
+        L.append("};")
+        L.append("static struct kit_menu menu[N_MENUS] = {%s};" % ", ".join(
+            '{ .scene = "hud", .node = "%s_Menu%d" }' % (st, k + 1) for k in range(len(menus))))
+        L.append("static int menu_picked[N_MENUS][5];  /* each player's last pick this game, 1..n (0 = none yet) */")
+        L.append("static int menu_got[N_MENUS];        /* this tick: the item picked (0..n-1), else -1 */")
+        L.append("")
+        L.append("UNUSED static void menu_open(int i)")
+        L.append("{")
+        L.append("    if (!kit_menu_open(&menu[i], MENU[i].head, MENU[i].items, MENU[i].n, MENU[i].dflt, MENU[i].ms, MENU[i].hold))")
+        L.append('        pm_log("menu %d: not opened (open already, or no game)", i + 1);')
+        L.append("}")
+        L.append("")
+        L.append("UNUSED static void menu_close(int i) { kit_menu_close(&menu[i]); }")
+        L.append("")
+        L.append("UNUSED static long long menu_value(int i)")
+        L.append("{")
+        L.append("    unsigned p = pm_player();")
+        L.append("    return p >= 1 && p <= 4 ? (long long)menu_picked[i][p] : 0LL;")
+        L.append("}")
+        L.append("")
+        L.append("/* 1 while one of its menus is open: its clock waits */")
+        L.append("static int menu_open_any(void)")
+        L.append("{")
+        L.append("    int k;")
+        L.append("    for (k = 0; k < N_MENUS; k++)")
+        L.append("        if (kit_menu_is_open(&menu[k])) return 1;")
+        L.append("    return 0;")
+        L.append("}")
+        L.append("")
+        L.append("/* the mode ends, the ball ends: an open menu closes with nothing picked */")
+        L.append("static void menus_close(void)")
+        L.append("{")
+        L.append("    int k;")
+        L.append("    for (k = 0; k < N_MENUS; k++) kit_menu_close(&menu[k]);")
+        L.append("}")
+        L.append("")
+        L.append("/* a shot one of its open menus takes (its buttons): no script hears it */")
+        L.append("static int menu_shot(uint64_t shot)")
+        L.append("{")
+        L.append("    int k;")
+        L.append("    for (k = 0; k < N_MENUS; k++)")
+        L.append("        if (kit_menu_shot(&menu[k], shot)) return 1;")
+        L.append("    return 0;")
+        L.append("}")
     L.append("")
     L.append("/* ---- the shots, events and variables the blocks name ---- */")
     nshots, nevents, nvars, nhits = max(1, len(g.shots)), max(1, len(g.events)), max(1, len(g.var_names)), max(1, len(g.hits))
@@ -3871,6 +4046,8 @@ def to_c(program, slug):
     L.append("{")
     L.append("    if (!run.on || ending) return;    /* an End block in When the mode ends */")
     L.append("    ending = 1;")
+    if menus:
+        L.append("    menus_close();                    /* PAD-1404: before When the mode ends, which may open one */")
     if battle_slots or place_ids or challenge_names:
         L.append("    const int won = battle_won;       /* PAD-706: as it ended, before When the mode ends runs */")
     L.append("    on_mode_end();")
@@ -4207,6 +4384,8 @@ def to_c(program, slug):
     L.append("    int i, was_on = run.on;           /* the mode's state before this shot */")
     L.append("    int idle;")
     L.append("    if (!pm_in_game() || p < 1 || p > 4) return;")
+    if menus:
+        L.append("    if (menu_shot(shot)) return;      /* PAD-1404: an open menu's buttons are the menu's */")
     L.append("    /* PAD-675: while the mode is not running, and no other of ours is, its idle scripts count toward it -")
     L.append("     * through the game's battles too (PAD-680); while another of ours runs nothing counts, notes or shows */")
     L.append("    idle = !was_on && counting();")
@@ -4294,6 +4473,15 @@ def to_c(program, slug):
         L.append("    kit_fade_tick(&fade[%d]);           /* PAD-1405: and steps each fade */" % k)
     if has_hud:
         L.append("    kit_hud_tick(&hud);                /* finds it, expires an award, writes what changed */")
+    if menus:
+        L.append("    {                                 /* PAD-1404: its menus: drawn, timed, and a pick taken */")
+        L.append("        int k;")
+        L.append("        unsigned p = pm_player();")
+        L.append("        for (k = 0; k < N_MENUS; k++) {")
+        L.append("            menu_got[k] = kit_menu_tick(&menu[k]);")
+        L.append("            if (menu_got[k] >= 0 && p >= 1 && p <= 4) menu_picked[k][p] = menu_got[k] + 1;")
+        L.append("        }")
+        L.append("    }")
     if note_cue:
         L.append("    note_loop_tick();                 /* PAD-658: a note's loop goes with it */")
     if media:
@@ -4322,6 +4510,9 @@ def to_c(program, slug):
     L.append("        for (v = 0; v < %d; v++) T[v] = 0;" % ntimers)
     if g.combos:
         L.append("        combo_clear();                /* PAD-708 */")
+    if menus:
+        L.append("        for (v = 0; v < N_MENUS; v++)   /* PAD-1404: no pick yet in a new game */")
+        L.append("            for (p = 0; p < 5; p++) menu_picked[v][p] = 0;")
     if done_hats:                                   # PAD-747: a met count belongs to its game
         L.append("        for (v = 0; v < %d; v++)" % len(done_hats))
         L.append("            for (p = 0; p < 5; p++) done_last[v][p] = 0, done_pend[v][p] = 0;")
@@ -4469,6 +4660,11 @@ def to_c(program, slug):
         L.append("        }")
         L.extend("    " + line if line else line for code in timer_scripts for line in code.split("\n"))
         L.append("    }")
+    menu_scripts = scripts_of("menu_pick")
+    if menus and menu_scripts:
+        L.append("    if (in_game) {                    /* PAD-1404: a menu picked this tick: its scripts */")
+        L.extend("    " + line if line else line for code in menu_scripts for line in code.split("\n"))
+        L.append("    }")
     if has_hud and gauge_live is not None and hud["gauge"]["meter"]:
         L.append("    if (!run.on) {                    /* PAD-658: the gauge as a meter while it is not running */")
         L.append("        if (in_game && counting()) {   /* PAD-675: hidden while another of ours runs (PAD-680) */")
@@ -4516,7 +4712,8 @@ def to_c(program, slug):
     L.append("    layer_glass();")
     L.append("    if (pm_paused()) return;          /* PAD-1401: a layer of mine over it stands it still: its clock too */")
     L.append("    run.elapsed++;")
-    L.append("    if (RUN_SECONDS%s) {" % (" && !clock_held()" if g.mech else ""))   # PAD-621: a hold_wait stops it
+    L.append("    if (RUN_SECONDS%s%s) {" % (" && !clock_held()" if g.mech else "",   # PAD-621: a hold_wait stops it
+                                         " && !menu_open_any()" if menus else ""))   # PAD-1404: so does a menu
     L.append("        if (run.ticks_left) run.ticks_left--;")
     L.append("        seconds = secs_left();")
     L.append("        if (seconds != run.seconds_shown) {")
@@ -4594,6 +4791,8 @@ def to_c(program, slug):
     L.append("{")
     L.append("    unsigned t;")
     L.append("    for (t = 0; t < %d; t++) T[t] = 0;   /* a ball ending stops every timer */" % ntimers)
+    if menus:
+        L.append("    menus_close();                    /* PAD-1404: no pick for a ball that has gone */")
     if g.combos:
         L.append("    combo_clear();                    /* PAD-708: no combo runs on into the next ball */")
     L.extend(scripts_of("ball_end"))
@@ -5894,6 +6093,8 @@ def _hat_words(hat):
         return "when %s, %s" % (MP.EVENT_LABELS.get(hat.get("event"), hat.get("event")), when)
     if kind == "timer_done":
         return "when the timer %s runs out" % (hat.get("timer") or "(no timer)")
+    if kind == "menu_pick":                                                          # PAD-1404
+        return "when the player picks from the menu %s" % (hat.get("menu") or "(no menu)")
     if kind == "combo":                                                             # PAD-708
         return combo_words(hat)
     if kind == "battle":                                                             # PAD-706

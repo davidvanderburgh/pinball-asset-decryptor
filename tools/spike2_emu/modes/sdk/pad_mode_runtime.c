@@ -3749,6 +3749,12 @@ static void clip_layer_out(void)
     clip_layer_in = 0;
 }
 
+/* PAD-1415: while an attract item plays on a title whose attract pages play their clips from a bank of their own
+ * (`scene attract_bank`: Walking Dead Remastered LE 0.92's 60ed7e50, its play clips on 71e39c43), the clip calls
+ * (pm_clip, its watch, pm_clip_stop) use that bank's surface: an item on the play bank drew in its mid-screen box */
+static volatile int clip2_attract;
+static void *clip2_att_surf;
+static void *clipv_scene_surface(const char *id);
 static void *clip2_surface(void)
 {
 #if PM_A64
@@ -3757,6 +3763,10 @@ static void *clip2_surface(void)
     unsigned str, out[2] = { 0, 0 };
 #endif
     void *root;
+    if (clip2_attract) {
+        if (!clip2_att_surf) clip2_att_surf = clipv_scene_surface("attract_bank");
+        return clip2_att_surf;
+    }
     if (site("video_surface"))                /* the game's own getter: it loads a demand_loaded bank */
         return ((void *(*)(void))(unsigned long)fn("video_surface"))();   /* (JP LE); never cached */
     if (clip2_surf) return clip2_surf;
@@ -4647,6 +4657,7 @@ static unsigned bd_held;                  /* PAD-658: the background the backdro
  * while the mode that asked keeps the game's modes from starting (a qualifying screen like the barrier, never a
  * running mode of the game's), and the one it already held through that mode's ending (its TOTAL) */
 static int coop_cer_on;                   /* PAD-1219 (below): the co-op awards ceremony is on the glass */
+static int coop_cer_up;                   /* PAD-1451 (below): the ceremony runs, from its begin to its end */
 
 static int bd_place_ok(unsigned e)
 {
@@ -16032,6 +16043,7 @@ static int ait_video;
  * advancing its player and showing it (Aerosmith's OilProjectorLoop page 0x286a4: player_advance, scene_show(player, 3),
  * the frame yield). An item does the same from its page while its clip plays on the bank's surface. */
 static int ait_show;
+static const char *ait_bank = "video_bank";  /* PAD-1415: the scene an item plays on: the port's attract_bank, if any */
 static pm_addr ait_show_fn;                 /* `site attract_show` (portattract.show_lines), else the port's scene_show:
                                              * an address (PAD-1371: 32 bits cut a Spike 3 one to a jump into nothing) */
 
@@ -16109,7 +16121,7 @@ static void ait_play(unsigned i)
         while (pm_ms() - ait_began < it->ms && !pm_in_game()) {
             ait_beat = pm_ms();
             if (ait_show && ait_on == (int)i) {           /* the tick has put the clip on the bank's surface */
-                void *pl = scene_player_of("video_bank");
+                void *pl = scene_player_of(ait_bank);
                 unsigned long now = pm_ms();
                 if (pl) {
                     ((void (*)(void *, float))(unsigned long)fn("player_advance"))(pl, (float)(now - last));
@@ -16223,6 +16235,7 @@ static void ait_tick(void)
     if (!ait_n) return;
     if (ait_on >= 0 && (want != ait_on || now - ait_beat > AIT_BEAT_MS || pm_in_game())) {
         if (!ait_video) pm_clip_stop();         /* the element's clip is the game's to stop, as its own pages' are */
+        clip2_attract = 0;
         if (ait_said < 400) {
             ait_said++;
             say("attract items: item %d (\"%s\") %s after %lu ms", ait_on + 1, ait_items[ait_on].clip,
@@ -16232,7 +16245,9 @@ static void ait_tick(void)
         ait_on = -1;
     }
     if (want >= 0 && ait_on < 0 && now - ait_beat <= AIT_BEAT_MS && !pm_in_game()) {
-        int ok = ait_video ? 1 : pm_clip(ait_items[want].clip);
+        int ok;
+        clip2_attract = !ait_video && ait_bank[0] == 'a';
+        ok = ait_video ? 1 : pm_clip(ait_items[want].clip);
         ait_on = want;
         ait_on_ms = now;
         if (ait_said < 400) {
@@ -16346,7 +16361,8 @@ static void attract_arm(void)
     /* the scene show: clip v2 titles, and the clip call's titles whose full-screen clip is not drawn at the frame
      * hand-over (Godzilla's is, and needs nothing more) */
     ait_show_fn = fn("attract_show") ? fn("attract_show") : fn("scene_show");
-    if (!ait_video && !clip_layer && !frame_hooked && ait_show_fn && fn("player_advance") && pm_scene_id("video_bank"))
+    if (pm_scene_id("attract_bank") && !ait_video) ait_bank = "attract_bank";      /* PAD-1415 */
+    if (!ait_video && !clip_layer && !frame_hooked && ait_show_fn && fn("player_advance") && pm_scene_id(ait_bank))
         ait_show = 1;
     if (ait_n && !ait_video && !(can & PM_CAN_CLIPS)) {
         say("attract items: off - this build has no full-screen clip route");
@@ -16417,6 +16433,8 @@ static void attract_arm(void)
         say("attract items: %u item(s) between the game's attract pages (table 0x%08lx, %u entries of %u bytes, %u "
             "page(s) taking items; the process sleep 0x%08lx); played %s", ait_n, (unsigned long)table, count, size,
             ait_anchors, (unsigned long)ait_sleep, ait_video ? "through the attract video element (its pages' own way)"
+            : ait_show && ait_bank[0] == 'a' ? "on the attract bank's surface (the port's attract_bank), its scene shown by the "
+              "page as the game's own clip pages do"
             : ait_show ? "on the video bank's surface, its scene shown by the page as the game's own clip pages do"
             : "full screen (the clip route)");
     attract_hide_arm(table, size, at, count);
@@ -18284,6 +18302,7 @@ static int coop_live;                        /* PAD-1031: co-op characters watch
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
 static int coop_hides(unsigned id);
 static int n_btn;                            /* PAD-1403: button shots from buttons.cfg (btn_edge counts their edges) */
+static volatile int btn_hide_n;              /* PAD-1404: a menu's buttons held back from the game (pm_button_hide) */
 static void btn_edge(unsigned id, unsigned level, unsigned polarity);
 
 /* ---- PAD-1051: a switch the game does not see for a while ----------------------------------------------------------
@@ -18440,7 +18459,7 @@ static void on_switch_edge(pm_reg *r)
     if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
     if (coop_live) coop_edge(id, level, flags, pol);       /* PAD-1031: a co-op character's pick, its save */
     if (n_btn) btn_edge(id, level, pol);                   /* PAD-1403: a button shot's press or release */
-    if (coop_live || edge_hid_n)                           /* PAD-1051: a press the game is not to see, or sees again */
+    if (coop_live || edge_hid_n || btn_hide_n)             /* PAD-1051: a press the game is not to see, or sees again */
         edge_hide_edge(id, base, desc, (volatile unsigned char *)(unsigned long)(st + (unsigned)edge.level_at),
                        (pol & 4u) ? 1u : 0u, (level & 1u) == ((pol & 4u) ? 1u : 0u));
     playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
@@ -18758,6 +18777,91 @@ static void btn_tick(void)
             btn_fire(i, btn[i].kind == BTN_PRESS ? "press" : btn[i].kind == BTN_RELEASE ? "release"
                         : btn[i].kind == BTN_HOLD ? "held" : "both held");
     }
+}
+
+/* ---- PAD-1404: a menu's buttons, which the game does not see while it is open (pad_mode.h pm_button_hide) ---------
+ * A mode's menu (intricate_kit.h kit_menu: a list on the HUD, the flipper buttons move, Action or Start picks) wants
+ * its buttons to itself, as Stern's own choose screens have them: Start must not add a player on ball 1, Action must
+ * not launch the ball waiting in the shooter lane, a flipper press must not change the game's lanes. The switches
+ * behind the button shots asked for are held back from the game by PAD-1051's hider (the level byte reads released,
+ * the handler bits are held back; a press already held is taken mid-press), while the button shots still count each
+ * edge (btn_edge runs before the hider). The ask LAPSES: the mode renews it every tick while the menu is open, and
+ * BTN_HIDE_LAPSE_MS after the last ask (or at once on pm_button_hide(0), or out of a game) each switch is the game's
+ * again from its next press or release. Only the framework generation the hider knows (switch_desc_via, the level
+ * byte after the edge: 59 of the 69 ports); elsewhere it answers 0 and the game sees the presses too. */
+#define BTN_HIDE_LAPSE_MS 500u
+static volatile unsigned btn_hide_id[N_BUTTON_IDS];
+static volatile unsigned long btn_hide_at;
+
+static int btn_hides(unsigned id)
+{
+    int k, n = btn_hide_n;
+    if (!n || !id || pm_ms() - btn_hide_at > BTN_HIDE_LAPSE_MS || !pm_in_game()) return 0;
+    for (k = 0; k < n && k < N_BUTTON_IDS; k++)
+        if (btn_hide_id[k] == id) return 1;
+    return 0;
+}
+
+/* the switches of the button shots in `shots` (presses, releases and holds name one switch each; a combo's are
+ * those of its two presses), each once, in ids; how many. A button that is one of the port's own `switch` lines
+ * (PAD-228: Godzilla's Action and flipper buttons) is found there. */
+static int btn_hide_ids(uint64_t shots, unsigned *ids, int cap)
+{
+    int n = 0, i, k;
+    unsigned id;
+    for (i = 0; i < n_btn + port.n_switch; i++) {
+        if (i < n_btn) {
+            if (!(btn[i].mask & shots) || btn[i].kind == BTN_COMBO) continue;
+            id = btn[i].id;
+        } else {
+            if (!(port.sw[i - n_btn].mask & shots)) continue;
+            id = port.sw[i - n_btn].id;
+        }
+        for (k = 0; k < n && ids[k] != id; k++)
+            ;
+        if (k == n && n < cap) ids[n++] = id;
+    }
+    return n;
+}
+
+int pm_button_hide(uint64_t shots)
+{
+    static uint64_t said;
+    static int said_no;
+    unsigned ids[N_BUTTON_IDS];
+    int n, k, can;
+    if (!shots) {
+        if (btn_hide_n) say("button hide: off - the game sees the buttons again from their next press or release");
+        btn_hide_n = 0;
+        said = 0;
+        return 0;
+    }
+    n = btn_hide_ids(shots, ids, N_BUTTON_IDS);
+#if PM_A64
+    can = 0;
+#else
+    can = edge_hooked && edge.desc_via >= 0 && !edge.level_before;
+#endif
+    if (!n || !can || !pm_in_game()) {
+        btn_hide_n = 0;
+        if (!said_no++)
+            say("button hide: %s", !n ? "no button shot of this card's buttons.cfg in the mask"
+                : !can ? "this framework generation's switch drain is not traced - the game sees the buttons too"
+                : "not in a game");
+        return 0;
+    }
+    for (k = 0; k < n; k++) btn_hide_id[k] = ids[k];
+    btn_hide_at = pm_ms();
+    btn_hide_n = n;
+    if (shots != said) {
+        said = shots;
+        say("button hide: switches %u %u %u %u (of %d) held back from the game while the mode asks", ids[0],
+            n > 1 ? ids[1] : 0u, n > 2 ? ids[2] : 0u, n > 3 ? ids[3] : 0u, n);
+    }
+#if !PM_A64
+    for (k = 0; k < n; k++) edge_take_held(ids[k]);  /* one already held as the menu opened */
+#endif
+    return n;
 }
 
 /* one buttons.cfg line; 0 when it is not a button line the runtime can take */
@@ -20686,6 +20790,7 @@ static int coop_unserved(void)
 static int coop_hides(unsigned id)
 {
     int w;
+    if (btn_hide_n && btn_hides(id)) return 1;   /* PAD-1404: a mode's menu has the button */
     /* PAD-1114: from the intro to the end of the language window the flippers and Action are ours: a skip is not a
      * language flip (nor the game's skip of its film), and the ball waits in the lane for the language and the pick */
     if (coop_live && ci.phase >= CI_PLAY && id && (id == coop_left || id == coop.button || id == coop_action))
@@ -21028,6 +21133,7 @@ static void coop_cer_begin(void)
     coop_final_words_of(words, sizeof words, coop.teams, pm_score(1), pm_score(2));
     if (coop_final_words) pm_set_text(coop_final_words, words);
     if (coop_final) pm_show(coop_final, 1);
+    coop_cer_up = 1;                                          /* PAD-1451: the bonus loop is the game's own now */
     coop_cer_gone_n = coop_cer_vetoes = 0;
     coop_cer_on = coop_cer_keep != 0 && (can & PM_CAN_BACKDROP);
     ccer_begin();                                             /* PAD-1317: the ceremony's own music */
@@ -21048,7 +21154,7 @@ static void coop_cer_end(void)
             coop_cer_vetoes, coop_cer_gone_n);
         for (k = 0; k < coop_cer_gone_n; k++) say("co-op awards:   kept off: scene 0x%08x", coop_cer_gone[k]);
     }
-    coop_cer_on = 0;
+    coop_cer_on = coop_cer_up = 0;
 }
 
 /* ---- PAD-1028 round 3: the cards over the bonus's own loop -----------------------------------------------------
@@ -22653,6 +22759,17 @@ static void on_coop_bonus_play(pm_reg *r)
         return;
     }
     attract_said = 0;
+    /* PAD-1451 (DoomWalrus666: "During the awards ceremony of a co-op game, the previous player portrait is showing
+     * over the end of ball bonus videos that play behind the awards"): the ceremony plays the same loop behind the
+     * cards (coop_cards_backdrop) while the game still counts as played, and coop.turn is the last teammate's. The
+     * ceremony is everyone's: the game's own loop, no character */
+    if (coop_cer_up) {
+        if (cb.says < 60) {
+            cb.says++;
+            say("co-op characters: the awards ceremony plays the bonus loop - its own loop, no character");
+        }
+        return;
+    }
     c = coop.turn >= 1 && coop.turn <= 4 ? coop_pick_of[coop.turn] : -1;
     ours = cb_pick(name, cb.loop, c < coop_ch_n ? c : -1, (const char (*)[32])cb.clip, CPK_CHARS);
     if (cb.says < 60) {

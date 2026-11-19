@@ -43,6 +43,14 @@ class BankSongs:
         """The bank's sound ids whose descriptor plays *record*."""
         return sorted(s for s, (_d, _e, recs) in self.plays.items() if int(record) in recs)
 
+    def keyed_plays(self):
+        """PAD-1414: ``{sound id: [slot, ...]}`` - each of the bank's sound ids and the records its plays
+        name, in order, as :func:`.sound_modes.bank_slot_key` slots (``None`` for a key naming none):
+        what :func:`.cab_shows.sids_for_slot` reads a show's song's starting ids off."""
+        from .sound_modes import bank_slot_key
+        return {s: [bank_slot_key(self.cat, r) if r is not None else None for r in recs]
+                for s, (_d, _e, recs) in self.plays.items()}
+
 
 def play_records(desc, extent, key0_to_idx):
     """The records descriptor *desc*'s plays name (its first *extent* bytes), by the first four
@@ -54,11 +62,12 @@ def play_records(desc, extent, key0_to_idx):
     return out
 
 
-def read_banks(gr_path, img_path, banks, log, cancel=None):
+def read_banks(gr_path, img_path, banks, log, cancel=None, who="Music modes", left="their files are left out"):
     """``{cat: BankSongs}`` for the game's banks *banks* ``{cat: local path}``: each derived on a
     fresh emulator (its records), then loaded by the game's own loader on another, every fragment
     of its table resolved by the game's own resolver and its descriptor read.  A bank that cannot
-    be read is left out (logged); ``{}`` when the build's bank loader cannot be driven."""
+    be read is left out (logged, by *who*: what is then *left* out); ``{}`` when the build's bank
+    loader cannot be driven."""
     from .spike2 import category as C
     from .spike2 import sfx_names as SN
     from . import engine as E
@@ -117,8 +126,8 @@ def read_banks(gr_path, img_path, banks, log, cancel=None):
                 plays[sid] = (desc, ext[off], play_records(desc, ext[off], k0))
             out[cat] = BankSongs(cat, {r["idx"]: r for r in rows}, plays)
         except Exception as e:  # noqa: BLE001 - that bank's songs play their own
-            log("Music modes: the songs of the game's sound bank image-sc%02d.bin could not be "
-                "read (%s); their files are left out." % (cat, e), "warning")
+            log("%s: the songs of the game's sound bank image-sc%02d.bin could not be "
+                "read (%s); %s." % (who, cat, e, left), "warning")
     return out
 
 

@@ -12,7 +12,7 @@
 // app's Linux after each change, and the Check card says how that went. The page scrolls as one.
 //
 // Python (webui/modes_jjp.py) owns every decision; this page renders modes.jjp and edits through
-// call("modes.jjp_set", key, value).
+// call(R("set"), key, value).
 
 import { html, useEffect, useRef, useState, Button, Field, PathField, Select, Chip, Note, Empty, Modal, Icon, cx, tip,
          call, mediaUrl } from "../core/ui.js";
@@ -20,7 +20,11 @@ import { KindTiles, EnterKey, NameField } from "./modes_new.js";
 import { useModeProgram, useEd, Palette, Variables, Script, ProgramBar } from "./modes_blocks.js";
 import { CEditor, CodeView } from "./modes_script.js";
 
-const set = (k, v) => call("modes.jjp_set", k, v);
+// PAD-1417: the page serves Spooky too (webui/modes_spooky.py): its calls go to modes.<ns>_*, the
+// namespace of the page on screen (JjpModes: jjp, SpookyModes: spk)
+let NS = "jjp";
+const R = (n) => `modes.${NS}_${n}`;
+const set = (k, v) => call(R("set"), k, v);
 const words = (v) => String(v || "").split(/[\s,]+/).filter(Boolean);
 function useStored(key, init) {          // modes.js's: the page picked last, kept across visits
   const [v, setV] = useState(() => { try { return localStorage.getItem(key) || init; } catch (e) { return init; } });
@@ -37,7 +41,7 @@ function Hear({ name, have }) {
   const toggle = async (e) => {
     e.stopPropagation();
     if (playing) { playing.audio.pause(); playing.owner(false); const was = playing.name; playing = null; if (was === name) return; }
-    const path = await call("modes.jjp_sound_path", name);
+    const path = await call(R("sound_path"), name);
     if (!path) return;
     const audio = new Audio(mediaUrl(path));
     audio.onended = () => { setOn(false); if (playing && playing.audio === audio) playing = null; };
@@ -269,7 +273,7 @@ function NewJjpMode({ j, onClose }) {
   const [name, setName] = useState("");
   const k = JJP_KINDS.find((x) => x.key === kind);
   const named = !!name.trim();
-  const make = () => { if (!k || !named) return; call("modes.jjp_new", name.trim(), kind); onClose(); };
+  const make = () => { if (!k || !named) return; call(R("new"), name.trim(), kind); onClose(); };
   const full = (j.modes || []).length >= (j.max || 24);
   const offOf = () => (full ? "A game takes 24 custom modes: delete one first." : "");
   const how = {
@@ -297,7 +301,7 @@ function NewJjpMode({ j, onClose }) {
       <div class="nmw-step">
         <${NameField} id="jjpm-new-name" name=${name} setName=${setName} />
         <div class="nmw-how">${how.map((t, i) => html`<div class="nmw-how-row" key=${i}><span class="nmw-num">${i + 1}</span><span>${t}</span></div>`)}</div>
-        ${kind === "cpp" ? html`<button type="button" class="modes-doc-link small" ...${tip(j.api || "")} onClick=${() => call("modes.jjp_open_api")}>
+        ${kind === "cpp" ? html`<button type="button" class="modes-doc-link small" ...${tip(j.api || "")} onClick=${() => call(R("open_api"))}>
           <${Icon} name="file" /> Open jjp_mode.h, the C++ API</button>` : null}
       </div>
       <${EnterKey} onEnter=${make} />`}
@@ -310,17 +314,17 @@ function ModeList({ j, onNew }) {
   return html`<section class="card jjpm-list-card">
     <div class="hd"><span class="h2">Your modes</span><span class="muted small">${modes.length} of ${j.max}</span></div>
     <div class="bd">
-      ${modes.map((m) => html`<div class=${cx("jjpm-mode", m.file === j.open && "on")} key=${m.file} onClick=${() => call("modes.jjp_open", m.file)}>
+      ${modes.map((m) => html`<div class=${cx("jjpm-mode", m.file === j.open && "on")} key=${m.file} onClick=${() => call(R("open"), m.file)}>
         <div class="grow"><div class="row nw" style="gap:6px"><span class="grow ellip">${m.name}</span>${KIND_PILL[m.kind]
           ? html`<span class=${cx("pill", KIND_PILL[m.kind][2])} title=${KIND_PILL[m.kind][1]}>${KIND_PILL[m.kind][0]}</span>` : null}</div>
           <div class="small muted mono">${m.starts || m.start || "nothing starts it yet"}</div></div></div>`)}
       ${!modes.length ? html`<div class="small muted">No modes yet.</div>` : null}
       <div class="row wrap" style="gap:6px;margin-top:10px">
-        <${Button} size="sm" kind="primary" icon="plus" disabled=${full} title=${full ? "A game takes 24 custom modes" : "Make a new mode: from blocks, in C++, or with the form"} onClick=${onNew}>New mode<//>
-        <${Button} size="sm" disabled=${!j.open || full} onClick=${() => call("modes.jjp_duplicate")}>Duplicate<//>
-        <${Button} size="sm" kind="ghost" disabled=${!j.open} onClick=${() => call("modes.jjp_delete")}>Delete<//>
+        <${Button} size="sm" kind="primary" icon="plus" disabled=${full} title=${full ? "A game takes 24 custom modes" : j.ns === "spk" ? "Make a new mode" : "Make a new mode: from blocks, in C++, or with the form"} onClick=${onNew}>New mode<//>
+        <${Button} size="sm" disabled=${!j.open || full} onClick=${() => call(R("duplicate"))}>Duplicate<//>
+        <${Button} size="sm" kind="ghost" disabled=${!j.open} onClick=${() => call(R("delete"))}>Delete<//>
       </div>
-      <div style="margin-top:8px"><${Button} size="xs" kind="ghost" icon="folder" title=${j.folder} onClick=${() => call("modes.jjp_reveal", "folder")}>Open the mode folder<//></div>
+      <div style="margin-top:8px"><${Button} size="xs" kind="ghost" icon="folder" title=${j.folder} onClick=${() => call(R("reveal"), "folder")}>Open the mode folder<//></div>
     </div>
   </section>`;
 }
@@ -352,7 +356,7 @@ function Editor({ j, have }) {
       ? html`<span class=${cx("pill", KIND_PILL[j.kind][2])} title=${KIND_PILL[j.kind][1]}>${KIND_PILL[j.kind][0]}</span>` : null}
       <span class="muted small mono">${j.open}${f.code ? " + " + f.code + (j.kind === "blocks" ? ".blocks.json" : ".cpp") : ""}</span>
       ${j.kind !== "form" ? html`<span class="sp"></span><${Button} size="xs" kind="ghost" icon="file" title=${j.api || ""}
-        onClick=${() => call("modes.jjp_open_api")}>C++ API<//>` : null}</div>
+        onClick=${() => call(R("open_api"))}>C++ API<//>` : null}</div>
     ${pages ? html`<div class="jjpm-pages row"><div class="pages" role="tablist">
         ${pages.map(([k, l, t]) => html`<button type="button" role="tab" key=${k} aria-selected=${page === k} class=${page === k ? "on" : ""}
           title=${t} onClick=${() => setPage(k)}>${l}</button>`)}</div></div>` : null}
@@ -396,7 +400,7 @@ function BlocksCpp({ j }) {
   return html`<div class="stack" style="gap:10px">
     <div class="row wrap">
       <span class="small muted grow">What the game loads: the tab writes it again from the blocks at every change (${b.code || "its"}.cpp), and builds it.</span>
-      <${Button} size="sm" icon="edit" title="Turn this mode into C++ for good, to carry on where the blocks stop" onClick=${() => call("modes.jjp_blocks_to_cpp")}>Edit as C++ (one way)…<//>
+      <${Button} size="sm" icon="edit" title="Turn this mode into C++ for good, to carry on where the blocks stop" onClick=${() => call(R("blocks_to_cpp"))}>Edit as C++ (one way)…<//>
     </div>
     <${CodeView} text=${b.cpp || ""} lang="c" />
   </div>`;
@@ -419,7 +423,7 @@ function CheckCard({ j }) {
   const codeLines = code.lines || [];
   return html`<section class=${cx("card jjpm-check", c.ok ? "ok" : "bad")}>
     <div class="hd"><span class="h2">Check</span><span class="muted small">${c.ok ? `${c.n} mode${c.n === 1 ? "" : "s"}, no problems` : `${probs.length} problem${probs.length === 1 ? "" : "s"}`}${c.when ? " - " + c.when : ""}</span>
-      <span class="sp"></span><${Button} size="sm" onClick=${() => call("modes.jjp_check")}>Check again<//></div>
+      <span class="sp"></span><${Button} size="sm" onClick=${() => call(R("check"))}>Check again<//></div>
     ${probs.length || code.running || (code.msg && !code.ok) ? html`<div class="bd">
       ${code.running ? html`<div class="small muted">Building the C++ in the app's Linux…</div>` : null}
       ${!code.running && code.msg && !code.ok ? html`<div class="small warn-ink">${code.msg}</div>
@@ -434,7 +438,7 @@ function SoundsRow({ j }) {
   return html`<div class="jjpm-sounds small">
     <span class="lbl">Hear sounds from</span>
     <${PathField} ns="modes" k="jjp_sounds" value=${s.folder} placeholder="this game's extract folder"
-      onBrowse=${() => call("modes.jjp_sounds_browse")} onCommit=${(v) => call("modes.jjp_set_sounds", v)} />
+      onBrowse=${() => call(R("sounds_browse"))} onCommit=${(v) => call(R("set_sounds"), v)} />
     <span class="muted">${s.folder ? `${(s.have || []).length} of ${s.total} sounds found` : "Extract this game to hear its sounds"}</span>
   </div>`;
 }
@@ -447,15 +451,15 @@ function BuildCard({ j }) {
     <div class="hd"><span class="h2">Build the install ISO</span><span class="muted small">the stock ISO again, with the mode runtime and these modes in it; install it the way the stock one installs</span></div>
     <div class="bd">
       <div class="jjpm-row"><span class="jjpm-lbl">Stock ISO</span><div class="jjpm-in"><${PathField} ns="modes" k="jjp_iso" value=${b.iso}
-        placeholder=${`${(j.title || {}).label || "the game"}.iso`} onBrowse=${() => call("modes.jjp_iso_browse")} onCommit=${(v) => call("modes.jjp_set_iso", v)} disabled=${b.running} /></div></div>
+        placeholder=${`${(j.title || {}).label || "the game"}.iso`} onBrowse=${() => call(R("iso_browse"))} onCommit=${(v) => call(R("set_iso"), v)} disabled=${b.running} /></div></div>
       <div class="jjpm-row"><span class="jjpm-lbl">New ISO</span><div class="jjpm-in"><${PathField} ns="modes" k="jjp_out" value=${b.out}
-        onBrowse=${() => call("modes.jjp_out_browse")} onCommit=${(v) => call("modes.jjp_set_out", v)} disabled=${b.running} /></div></div>
+        onBrowse=${() => call(R("out_browse"))} onCommit=${(v) => call(R("set_out"), v)} disabled=${b.running} /></div></div>
       <div class="row" style="gap:8px;margin-top:8px">
         <${Button} kind="primary" icon="disk" busy=${b.running} disabled=${b.busy || !c.ok || !b.iso}
           title=${!c.ok ? "Fix what the check found first" : "Runs in the app's Linux as administrator: it opens the ISO's game partition"}
-          onClick=${() => call("modes.jjp_build")}>${b.running ? "Building…" : "Build"}<//>
-        ${b.running ? html`<${Button} kind="ghost" onClick=${() => call("modes.jjp_build_cancel")}>Cancel<//>` : null}
-        ${b.done && b.ok ? html`<${Button} kind="ghost" onClick=${() => call("modes.jjp_reveal", "out")}>Show it<//>` : null}
+          onClick=${() => call(R("build"))}>${b.running ? "Building…" : "Build"}<//>
+        ${b.running ? html`<${Button} kind="ghost" onClick=${() => call(R("build_cancel"))}>Cancel<//>` : null}
+        ${b.done && b.ok ? html`<${Button} kind="ghost" onClick=${() => call(R("reveal"), "out")}>Show it<//>` : null}
         <span class=${cx("small", b.done ? (b.ok ? "ok-ink" : "warn-ink") : "muted")}>${b.msg || ""}</span>
       </div>
       ${lines.length && (b.running || (b.done && !b.ok)) ? html`<pre class="jjpm-log">${lines.join("\n")}</pre>` : null}
@@ -491,21 +495,21 @@ function StickCard({ j }) {
     <div class="bd">
       <div class="jjpm-row"><span class="jjpm-lbl">USB stick</span><div class="jjpm-in"><${PathField} ns="modes" k="jjp_stick" value=${k.path}
         history=${k.drives || []} placeholder="Put in a USB stick (FAT32)" browseLabel="Pick…"
-        onBrowse=${() => call("modes.jjp_stick_browse")} onCommit=${(v) => call("modes.jjp_set_stick", v)} disabled=${busy} /></div></div>
+        onBrowse=${() => call(R("stick_browse"))} onCommit=${(v) => call(R("set_stick"), v)} disabled=${busy} /></div></div>
       <div class="jjpm-row"><span class="jjpm-lbl">The stick</span><div class="jjpm-in row" style="gap:8px">
         <${Select} value=${k.action} options=${k.actions || []} width=${240} disabled=${busy}
-          title=${STICK_TIP[k.action] || ""} onChange=${(v) => call("modes.jjp_stick_action", v)} />
+          title=${STICK_TIP[k.action] || ""} onChange=${(v) => call(R("stick_action"), v)} />
         <${Button} kind="ghost" size="sm" icon="refresh" disabled=${busy} title="Look for USB sticks again"
-          onClick=${() => call("modes.jjp_stick_refresh")}>Find sticks<//>
+          onClick=${() => call(R("stick_refresh"))}>Find sticks<//>
       </div></div>
       ${fsBad ? html`<${Note} kind="warn">This stick is ${k.fs}. The machine reads FAT32 sticks: format it FAT32 first.<//>` : null}
       ${k.owner === "other" ? html`<${Note} kind="warn">This stick already has a hotfix folder that is not a modes stick. Use another stick, or delete that folder first.<//>` : null}
       <div class="row" style="gap:8px;margin-top:8px">
         <${Button} kind="primary" icon="download" busy=${k.running} disabled=${busy || !!why}
           title=${why || (k.owner === "pad" ? "Replaces the modes stick already on it" : "Writes a hotfix folder to the top of the stick")}
-          onClick=${() => call("modes.jjp_write_stick")}>${k.running ? "Writing…" : "Write to USB stick"}<//>
-        ${k.running && !k.runtime_ready ? html`<${Button} kind="ghost" onClick=${() => call("modes.jjp_stick_cancel")}>Cancel<//>` : null}
-        ${k.done && k.ok ? html`<${Button} kind="ghost" onClick=${() => call("modes.jjp_reveal_stick")}>Show it<//>` : null}
+          onClick=${() => call(R("write_stick"))}>${k.running ? "Writing…" : "Write to USB stick"}<//>
+        ${k.running && !k.runtime_ready ? html`<${Button} kind="ghost" onClick=${() => call(R("stick_cancel"))}>Cancel<//>` : null}
+        ${k.done && k.ok ? html`<${Button} kind="ghost" onClick=${() => call(R("reveal_stick"))}>Show it<//>` : null}
         <span class=${cx("small", k.done ? (k.ok ? "ok-ink" : "warn-ink") : "muted")}>${k.msg || note}</span>
       </div>
       ${lines.length && (k.running || (k.done && !k.ok)) ? html`<pre class="jjpm-log">${lines.join("\n")}</pre>` : null}
@@ -518,6 +522,7 @@ function StickCard({ j }) {
 }
 
 export function JjpModes({ s }) {
+  NS = "jjp";
   const j = s.jjp || {};
   const [newMode, setNewMode] = useState(false);
   const titles = j.titles || [];
@@ -549,5 +554,81 @@ export function JjpModes({ s }) {
         </div>
       </div>` : null}
     ${newMode ? html`<${NewJjpMode} j=${j} onClose=${() => setNewMode(false)} />` : null}
+  </div>`;
+}
+
+// ------------------------------------------------------------------ Spooky (PAD-1417)
+// The same page on a Spooky game: the form (the keys the Spooky runtime runs), the check, Try it
+// in the Emulate tab, and the update built again with the runtime and the modes in it.
+function SpookyBuildCard({ j }) {
+  const b = j.build || {};
+  const c = j.check || {};
+  const lines = b.lines || [];
+  return html`<section class="card jjpm-build">
+    <div class="hd"><span class="h2">Build the update</span><span class="muted small">the stock update again, with the mode runtime and these modes in it, under the same name</span></div>
+    <div class="bd">
+      <div class="jjpm-row"><span class="jjpm-lbl">Stock update</span><div class="jjpm-in"><${PathField} ns="modes" k="spk_stock" value=${b.iso}
+        placeholder="the game's update as Spooky ships it" onBrowse=${() => call(R("iso_browse"))} onCommit=${(v) => call(R("set_iso"), v)} disabled=${b.running} /></div></div>
+      <div class="jjpm-row"><span class="jjpm-lbl">New update</span><div class="jjpm-in"><${PathField} ns="modes" k="spk_out" value=${b.out}
+        onBrowse=${() => call(R("out_browse"))} onCommit=${(v) => call(R("set_out"), v)} disabled=${b.running} /></div></div>
+      <div class="row" style="gap:8px;margin-top:8px">
+        <${Button} kind="primary" icon="disk" busy=${b.running} disabled=${b.busy || !c.ok || !b.iso}
+          title=${!c.ok ? "Fix what the check found first" : "Copies the stock update with the modes added: a minute or two"}
+          onClick=${() => call(R("build"))}>${b.running ? "Building…" : "Build"}<//>
+        ${b.running ? html`<${Button} kind="ghost" onClick=${() => call(R("build_cancel"))}>Cancel<//>` : null}
+        ${b.done && b.ok ? html`<${Button} kind="ghost" onClick=${() => call(R("reveal"), "out")}>Show it<//>` : null}
+        <span class=${cx("small", b.done ? (b.ok ? "ok-ink" : "warn-ink") : "muted")}>${b.msg || ""}</span>
+      </div>
+      ${lines.length && (b.running || (b.done && !b.ok)) ? html`<pre class="jjpm-log">${lines.join("\n")}</pre>` : null}
+      <div class="small muted" style="margin-top:6px">Install it the way a stock update installs: on a USB stick, under its own name. The game restarts once by itself on its first start after the update, to take up the modes.</div>
+    </div>
+  </section>`;
+}
+
+function SpookyTryCard({ j }) {
+  const b = j.build || {};
+  const c = j.check || {};
+  const why = !c.ok ? "Fix what the check found first" : !b.iso ? "Pick the stock update under Build first" : "";
+  return html`<section class="card jjpm-try">
+    <div class="hd"><span class="h2">Try it</span><span class="muted small">these modes in the emulator, on the stock update, without building anything</span></div>
+    <div class="bd"><div class="row" style="gap:8px">
+      <${Button} kind="primary" icon="play" disabled=${!!why} title=${why || "Starts the game in the Emulate tab with these modes in it"}
+        onClick=${() => call(R("try"))}>Try it<//>
+      <span class="small muted">Then start a game there and make a mode's start shots: its panel shows over the game's screen.</span>
+    </div></div>
+  </section>`;
+}
+
+export function SpookyModes({ s }) {
+  NS = "spk";
+  const j = s.spk || {};
+  const titles = j.titles || [];
+  const have = new Set(((j.sounds || {}).have) || []);
+  const runs = titles.filter((t) => t.can_run).map((t) => t.name);
+  const selectCard = () => call("ui.select_tab", "card");
+  const scale = j.points_scale > 1 ? ` The game multiplies its own awards by ${j.points_scale} inside; the points set here are what the player gets.` : "";
+  return html`<div class="page modes-page jjpm-page">
+    <div class="pagehead"><div class="grow"><h1 class="h1">Modes</h1>
+      <p>Custom modes that run inside a Spooky game: started by its switches, scored by its own scoring, announced with its own callouts and shown on a panel in its fonts. The game's own modes go on as they were.${scale}</p></div>
+      ${j.label ? html`<div class="actions"><span class="jjpm-game" ...${tip({ head: "The selected update's game", lines: [j.card_name || ""] })}>${(j.title || {}).name || j.label}</span></div>` : null}
+    </div>
+    ${!titles.length ? html`<${Empty} icon="modes" title="No games">No port reports were found in tools/spooky_emu/modes/ports.<//>` : null}
+    ${titles.length && !j.card ? html`<${Empty} icon="modes" title="No update selected">Select the Spooky game's update to make modes for: its game is the one these modes are for.
+      <div style="margin-top:10px"><${Button} size="sm" kind="primary" icon="sd" onClick=${selectCard}>Select card<//></div><//>` : null}
+    ${titles.length && j.card && !j.label ? html`<${Note} kind="warn">${j.card_name} isn't a game custom modes know. Modes are made for: ${runs.join(", ")}.
+      <div style="margin-top:8px"><${Button} size="xs" icon="sd" onClick=${selectCard}>Select another update<//></div><//>` : null}
+    ${j.label && !j.can_run ? html`<${Note} kind="warn">${(j.title || {}).name} can't run custom modes: ${(j.title || {}).why}.<//>` : null}
+    ${j.can_run ? html`
+      <${SoundsRow} j=${j} />
+      <div class="jjpm-body">
+        <${ModeList} j=${j} onNew=${() => call(R("new"), "New Mode", "form")} />
+        <div class="jjpm-main">
+          <${Editor} j=${j} have=${have} />
+          <${TitleSettings} j=${j} have=${have} />
+          <${CheckCard} j=${j} />
+          <${SpookyTryCard} j=${j} />
+          <${SpookyBuildCard} j=${j} />
+        </div>
+      </div>` : null}
   </div>`;
 }

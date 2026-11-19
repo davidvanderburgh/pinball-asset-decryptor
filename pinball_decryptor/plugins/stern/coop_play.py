@@ -1041,7 +1041,10 @@ def timed_plunger(game_elf):
 
 def action_button(game_elf):
     """The switch id of the Action button (the lockdown bar's: LOCKDOWN BUTTON, ACTION BUTTON) in the game program
-    *game_elf* (bytes), or None."""
+    *game_elf* (bytes), or None. PAD-1447: None for Iron Maiden, whose table names one its cabinet lacks."""
+    from .cabinet_buttons import program_lacks_action
+    if program_lacks_action(game_elf):
+        return None
     return _switch_named(game_elf, _ACTION)
 
 
@@ -1522,9 +1525,9 @@ def _project_catalog(project):
 
 def _abilities_v():
     """The abilities cache's version: the catalog itself (round 6: the powers too), so a changed word reads the card
-    again."""
+    again. PAD-1447: and a revision, bumped when what is read off the card changes (Iron Maiden's Action button)."""
     import hashlib
-    return hashlib.sha1((repr(ABILITIES) + repr(POWERS)).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1((repr(ABILITIES) + repr(POWERS) + "rev2").encode("utf-8")).hexdigest()[:12]
 
 
 def port_values(prof):

@@ -273,10 +273,13 @@ value challenge_record_score_size 8
 site challenge_pages_0      0x001b7880 0xd0002f82 0xf9468442
 
 
-# ---- scenes (PAD-1380): a mode's clip, a random clip and an attract item play on video_bank's surface - the game's
-# in-play bank 71e39c43 (its Arena / Blood Bath / Walker clips); the framework's 60ed7e50 holds only its attract
-# clips and is not drawn in play (a mode clip there played unseen on the rig) ----
+# ---- scenes (PAD-1380): a mode's clip and a random clip play on video_bank's surface - the game's in-play bank
+# 71e39c43 (its Arena / Blood Bath / Walker clips); the framework's 60ed7e50 holds only its attract clips and is not
+# drawn in play (a mode clip there played unseen on the rig) ----
 scene video_bank           71e39c438cff72938ff0dd6dddecd582fb133415
+# PAD-1415: an attract item goes in and plays on the attract pages' own bank (on 71e39c43 it drew in that bank's
+# mid-screen box, 16% of the glass; on 60ed7e50 full screen)
+scene attract_bank         60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
 # ---- attract (PAD-1328): the attract mode's page table, read off this program's sequencer (its child create at 0x28abe8); an owner's attract items play between its pages ----
 data  attract_table       0x007b5c38   # 48 entries {test, page}, 8-byte pointers (RELATIVE)

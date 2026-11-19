@@ -166,6 +166,73 @@ then our 1,000,000, our video `EB0` and sound `EB0`; the game plays on
 (second hit: its own SDA/SKF video and sound); final score 2,000,300 against
 300 stock; the DMD frame at 27.3 s shows EB0.
 
+## Ticket 1 done: the Unity runtime and Scooby-Doo (PAD-1417)
+
+What there is now, and the facts the other tickets build on.
+
+**The runtime** (`tools/spooky_emu/modes/unity`): `padunity.so` (preloads only into
+`main.x86_64`, never the topper) loads `PadModes.dll`, which adds one Mode of ours
+(`PadRuntime`, mode 9001) with the game's `Modes.add_mode` and runs every `pad/modes/*.mode`
+beside it: start switches and hit count, scoring shots, points, seconds (0: until the ball
+ends), completion and its bonus, the four sounds, and a panel (title, the mode's total, its
+time left) on a canvas of ours above the game's, in the game's TextMeshPro fonts. A mode ends
+on time, on completion, at the end of the ball, on tilt and when the game goes back to attract;
+start counts reset at every new game. `pad/modes/off` turns them all off. Prebuilt in
+`unity/prebuilt/` (`padunity.so`, `scooby_doo/PadModes.dll`, built against the title's own
+`Managed/` by `build.sh`); `rigrun.sh` drives a proof.
+
+Scooby-Doo's facts, read from its code (IL) and proven in the game:
+
+- **Switches**: `Switches.name` holds labels ("RIGHT INLANE"); `Switches.get_switch_name(n)` the
+  symbols the game uses itself ("right_inlane"). Mode files and the port use the symbols.
+- **Points**: `Game.score_points` multiplies by `score_multiplier`, by balls in play unless the
+  tags hold `bonus`, by tag bonuses (character, clue, trap), then by 10, and rounds to 100. It
+  logs an error unless exactly one *mode* tag is given (`base` is one, `bonus` is not). The
+  runtime asks for points / 10 tagged `base` + `bonus`: 250,000 asked, 250,000 scored. The check
+  refuses points that are not a multiple of 100 (Mathf.Round: half to even).
+- **Sounds**: `Callouts` holds 1,437 static string fields (name -> `Resources` path);
+  `Callouts.get(path)` is `Resources.Load<AudioClip>`, `Machine.enqueue_callout` queues it and
+  the queue sets `voice_channel.clip` and plays it when the channel is free. The runtime logs
+  each of ours the voice channel takes.
+- **Launch line**: `sway_config` (6.1 kernels) and `i3_config` (5.10) both end with
+  `exec --no-startup-id /game/code/uptest/main.x86_64`. A PAD build makes it
+  `exec --no-startup-id env LD_PRELOAD=/game/code/uptest/pad/padunity.so /game/code/uptest/main.x86_64`.
+  The game md5-compares these files with the installed copies at every start, copies a changed
+  one in and reboots once: so the machine takes up the modes on its second start after the
+  update, and the stock update takes them out again the same way.
+
+**The port report** (`modes/ports/scooby_doo-2025.12.01.09.json`) is the runtime's own read of
+the running game (`PADMODES_PORT`, `rigrun.sh --port`): 80 switches (symbols, labels, numbers),
+119 lights, 1,437 callouts with their paths, 58 game modes, 10 fonts, the score tags and the
+points scale measured with one 1,000-point award (10,000 scored), plus the title's starter picks.
+
+**mkspkmodes.py**: the checker (JJP's grammar and value checks, Spooky's own key list; every
+other JJP key refused by name, "not on Spooky games yet"), `stage` (the `pad/` folder) and
+`build` (the stock `.scooby` streamed into a new one with `pad/` added and both launch lines
+patched; 23 s for Scooby-Doo's 1.8 GB). A rebuilt modes update keeps one preload.
+
+**The rig**: `run_game.sh` preloads whatever the update's own launch line preloads, and takes
+`SPK_PAD_OVERLAY=<folder>` (Try it: the folder becomes the run's `uptest/pad`, preloaded the same
+way, no new update); `prepare.sh` keeps a modes update's build beside the stock one
+(`<title>_<version>_padmodes`), never in its place.
+
+**The app**: the Modes tab on a Spooky update is the JJP page's form with Spooky's keys
+(`webui/modes_spooky.py`, `plugins/spooky/custom_modes.py`; the page's calls go to
+`modes.spk_*`), Try it (the Emulate tab on the stock update with the staged folder), Build (in
+the app, no Linux needed), and Write carries the modes for that title with any asset changes
+(modes with problems stay out and the log says so).
+
+Proof (slot 1/4, hidden, muted): the starter modes staged as Try it does, and the same modes in
+a `.scooby` PAD built, booted as an update with no overlay. Snack Attack: two inlane hits start
+it, three slings score 250,000 each, the third completes it with the 2,000,000 bonus. Target
+Rush: a standing target starts it, it ends after 8 s. Every callout found and played on the
+game's voice channel; the panel on the screen in the game's Ghoul font.
+
+What the next tickets take from here: the other Unity titles need their own `PadModes.dll`
+(built against their `Managed/`), a port report each (`rigrun.sh --port`), and their own
+scoring facts (their `score_points` may differ); `mkspkmodes.py` and the Modes tab are ready
+for any port report with `engine` and `runtime_dll`.
+
 ## Rig fix made on the way
 
 Both Spooky rigs now stub `sync` (logging no-op on the game's PATH): WSL's

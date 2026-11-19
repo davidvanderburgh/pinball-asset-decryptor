@@ -742,7 +742,9 @@ def test_the_game_loads_nothing_from_the_rigs_own_folder():
             assert not re.search(r"\$\{?(SPK_TOOLS|SPK_SHIM|HERE)\b", m.group(1)), line
     assert 'cp "$SPK_SHIM" "$SPK_RIG/spkshim.so"' in src
     # PAD-1309: the boot menu's hold-BACK library goes first when the card has one - also from the slot's folder
-    assert "LD_PRELOAD=$MENU_PRE$SPK_RIG/spkshim.so" in src
+    assert "LD_PRELOAD=$MENU_PRE$LAUNCH_PRE$SPK_RIG/spkshim.so" in src
+    # PAD-1417: what the update's own launch line preloads is a path in the game's /game, never the rig's
+    assert "LAUNCH_PRE=/game/code/uptest/pad/padunity.so" in src
     assert 'MENU_PRE="$SPK_RIG/padmenu.so:"' in src
     assert "LD_LIBRARY_PATH=$SPK_RIG/lib" in src
 

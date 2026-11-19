@@ -22,7 +22,7 @@ import { LightShowsView } from "./modes_lightshows.js";
 import { RuleCardsView, StoryView, ShotTableView, TimelineView, NodeGraphView } from "./modes_rules.js";
 import { ScriptView, CodeView, CEditor } from "./modes_script.js";
 import { RulesSheetDialog } from "./modes_sheet.js";
-import { JjpModes } from "./modes_jjp.js";        // PAD-1350: the tab on a JJP game
+import { JjpModes, SpookyModes } from "./modes_jjp.js";   // PAD-1350: the tab on a JJP game; PAD-1417 Spooky
 
 export const css = true;
 
@@ -1404,6 +1404,7 @@ export default function ModesTab() {
   const withClip = Object.assign({}, s, { _showClip: showClip });
   const hasProject = !!s.project;
   if (s.jjp && s.jjp.on) return html`<${JjpModes} s=${s} />`;
+  if (s.spk && s.spk.on) return html`<${SpookyModes} s=${s} />`;
   return html`<div class="page modes-page">
     <${Head} s=${s} />
     <${ReadingPanel} r=${s.reading} />

@@ -269,7 +269,11 @@ def test_edit_as_cpp_turns_a_blocks_mode_into_cpp(tmp_path, preview_on, monkeypa
 def test_the_page_calls_only_rpcs_the_tab_has_and_scrolls():
     from pinball_decryptor.webui import modes_jjp
     src = open(os.path.join(JS, "modes_jjp.js"), encoding="utf-8").read()
-    names = set(re.findall(r'"modes\.(jjp_[a-z_]+)"', src))
+    # PAD-1417: the page's calls go through R("<name>") (modes.<ns>_<name>); the Spooky page at its
+    # end has its own (tests/test_webui_modes_spooky.py)
+    jjp_src = src[:src.index("// ------------------------------------------------------------------ Spooky (PAD-1417)")]
+    names = set(re.findall(r'"modes\.(jjp_[a-z_]+)"', src)) | {
+        "jjp_" + n for n in re.findall(r'\bR\("([a-z_]+)"\)', jjp_src)}
     assert {"jjp_new", "jjp_code_text", "jjp_code_save", "jjp_blocks_save", "jjp_blocks_to_cpp", "jjp_open_api"} <= names
     for n in names:
         assert callable(getattr(modes_jjp.JjpModesMixin, n, None)), n

@@ -227,12 +227,21 @@ function FileLine({ s, host }) {
     : own ? (n > 1 ? `${f.own_n === n ? "Each has" : `${f.own_n} of them have`} a profile of their own.`
       : `It has a profile of its own (“${s.name || ""}”).`)
     : `It uses the individual files profile (${shared}), like the other files. A change here gives it one of its own.`;
-  const reset = f && own ? (t > 1
-    ? html`<${Button} size="xs" onClick=${() => call("color.file_shared", "this")}
-        title="Drop this theme's own profile for it: it uses theme 1's again">Reset to theme 1<//>`
-    : html`<${Button} size="xs" onClick=${() => call("color.file_shared", "this")}
-        title=${`Drop its own profile: it gets the individual files profile every other file gets (${shared})`}>Same as the other files<//>`)
-    : null;
+  // Simon: the reset buttons always there, across the panel, greyed where they do not apply
+  const canShared = !!(f && own && t === 1);
+  const canTheme1 = !!(f && own && t > 1);
+  const canEvery = !!(f && themeLive);
+  const reset = html`<div class="cpd-resets">
+    <${Button} size="xs" disabled=${!canShared} onClick=${() => call("color.file_shared", "this")}
+      title=${canShared ? `Drop its own profile: it gets the individual files profile every other file gets (${shared})`
+        : "Only for a file with a profile of its own, in theme 1"}>Same as the other files<//>
+    <${Button} size="xs" disabled=${!canTheme1} onClick=${() => call("color.file_shared", "this")}
+      title=${canTheme1 ? "Drop this theme's own profile for it: it uses theme 1's again"
+        : "Only for a picture with a profile of its own in theme 2 or up"}>Reset to theme 1<//>
+    <${Button} size="xs" disabled=${!canEvery} onClick=${() => call("color.file_shared", "all")}
+      title=${canEvery ? `Drop its own profile in every theme, theme 1 too: it gets the individual files profile (${shared}) everywhere`
+        : "Only for a picture, with themes on"}>Reset in every theme<//>
+  </div>`;
 
   // ---- Copy (Simon: one copy action, the same every time, what cannot be done greyed with the reason) ----
   // From: the selected file's profile (PAD-439 Apply to all) or the shared files profile (PAD-463 All images / videos
@@ -287,9 +296,8 @@ function FileLine({ s, host }) {
       ${value(themeValue, themeLive ? `Theme ${themeValue}\nThe theme picked on the Images tab: what you change here is this theme's`
         : "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)", { off: !themeLive })}
     </div>
-    <div class="row cpd-file-own"><span class="small muted grow">${status}</span>${reset}
-      ${f && themeLive ? html`<${Button} size="xs" onClick=${() => call("color.file_shared", "all")}
-        title=${`Drop its own profile in every theme, theme 1 too: it gets the individual files profile (${shared}) everywhere`}>Reset in every theme<//>` : null}</div>
+    ${reset}
+    <div class="small muted cpd-status-line">${status}</div>
   </div>
   <div class="cpd-file cpd-copy">
       <div class="eyebrow">Copy a profile to other files</div>
@@ -320,7 +328,7 @@ function FileLine({ s, host }) {
       <div class="cpd-actions">
         ${/* Simon: APPLY NOW on the left, the count on the right, equal halves; the count in the tags' colour and font */""}
         <span class="cpd-applywrap" ...${tip(copyTip)}><button type="button"
-          class="cpd-apply" disabled=${!canCopy} onClick=${doCopy}>APPLY NOW</button></span>
+          class="cpd-apply" disabled=${!canCopy} onClick=${doCopy}>APPLY</button></span>
         <span class="cpd-tag cpd-counttag"
           title=${`${canCopy ? `${summary.n} ${summary.n === 1 ? toWords[2] : toWords[1]}` : "Nothing to apply"}. You are asked first, with a WARNING, and Undo puts them all back.`}>${canCopy
           ? `${summary.n} ${summary.n === 1 ? "ASSET" : "ASSETS"}` : "NONE"}</span>

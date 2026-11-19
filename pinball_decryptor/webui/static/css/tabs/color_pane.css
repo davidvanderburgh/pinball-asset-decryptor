@@ -142,3 +142,7 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-counttag { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cpd-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .cpd-actions .cpd-tag { width: auto; display: flex; align-items: center; justify-content: center; }
+/* Simon (2026-11-19): the reset buttons across the panel, equal widths; the status line under them, full width */
+.cpd-resets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.cpd-resets > .btn { width: 100%; min-width: 0; justify-content: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpd-status-line { width: 100%; }

@@ -14808,6 +14808,23 @@ static void coil_rule_note(const unsigned char *p, int n)
 {
     unsigned s = 0, node, idx;
     int i;
+    /* PAD-1406: some titles clear a rule with the SHORT form `41 <coil>` (D&D
+     * LE/Pro 1.10, Metallica 1.04: `88 03 41 05 2f 00` as their flippers go
+     * off), where X-Men sends the whole rule with power 0. Same frame check;
+     * the rule is cleared. */
+    if (n == 6 && (p[0] & 0x80) && p[1] == 3 && p[2] == 0x41) {
+        for (i = 0; i < n - 1; i++) s += p[i];
+        if (s & 0xff) return;
+        node = (unsigned)p[0] & 0x3f;
+        idx = p[3];
+        if (node >= 16 || idx >= 16) return;
+        led_map();
+        if (!led_shm || led_shm_len < 16384) return;
+        led_shm->rule_pwr[node][idx] = 0;
+        led_shm->rule_in[node][idx] = 0;
+        led_shm->rule_sets++;
+        return;
+    }
     if (n < 31 || !(p[0] & 0x80) || p[2] != 0x41 || n != (int)p[1] + 3) return;
     for (i = 0; i < n - 1; i++) s += p[i];
     if (s & 0xff) return;

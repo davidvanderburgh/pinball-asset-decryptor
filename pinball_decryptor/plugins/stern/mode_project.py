@@ -40,6 +40,10 @@ MAX_MODES = 64
 OWN_GAME_SITES = (("score_add", "score_add32"), ("callout",))
 
 
+#: PAD-1406: the framework's all-flippers off and on (pm_flippers, pm_drain_to_one)
+FLIPPER_SITES = ("flippers_off", "flippers_on")
+
+
 def own_game_sites(sites):
     """PAD-1400: True when a port with these sites can switch the game's own rules off (pm_own_game)."""
     return all(any(s in sites for s in group) for group in OWN_GAME_SITES)
@@ -90,6 +94,8 @@ class TitleProfile:
     #                              shots while a mode blocks, unless it keeps them (block_rule_<n> lines)
     own_game: bool = False       # PAD-1400: a mode can be the whole game (game_modes own_game): the port names
     #                              the game's score and callout sites the runtime holds back, and its mode starts
+    flippers: bool = False       # PAD-1406: the mode that has the whole game can switch the flippers off and on
+    #                              (pm_flippers): the port names the framework's flippers_off and flippers_on
     lamps: int = -1              # named inserts tied to a shot the runtime can light (PM_CAN_LAMPS);
     #                              0 = none, so "Light the shots that score" lights nothing; -1 = not counted
     light_route: str = ""        # item 164: how a mode's Lights run - "language" (the game's own light
@@ -98,6 +104,15 @@ class TitleProfile:
     hud_tree: str = "auto_loaded"    # Iron Maiden keep it in demand_loaded) - and the HUD scene's
     magnet_shot: str = ""            # PAD-381: the shot whose hit is the ball over the magnet; "" = no magnet
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
+    own_game_coils: tuple = ()       # PAD-1406: ((name, label), ...) held coils only the mode that IS the whole game may
+    #                                  hold (`value <name>_own_game 1`: toys and posts the game's rules drive), proven
+    toys: tuple = ()                 # PAD-1406: ((name, label, (action, ...)), ...) a toy's own moves (pm_toy): `text toys`
+    kickbacks: bool = False          # PAD-1406: the whole game's mode can switch the game's kickbacks (pm_kickback):
+    #                                  the port names `site kickback_set` and `data kickback_count` (Guardians)
+    ball_devices: tuple = ()         # PAD-1406: ((name, label), ...) the game's ball devices a whole-game mode may keep balls
+    #                                  in or let go of (pm_device_keep): `text ball_device_names` with `site ball_device_keep`
+    pulse_coils: tuple = ()          # PAD-1406: ((name, label), ...) the game's own one-shot devices (pm_coil_pulse), the
+    #                                  whole game's mode's alone, proven
     coil_caps: tuple = ()            # PAD-420: ((name, ms), ...) a held coil's longest hold where the game's own
     #                                  longest command on it is shorter than COIL_MAX_MS (its `_drive` line's last word);
     #                                  PAD-621: or longer, where the port names the game's own longest hold there
@@ -1800,6 +1815,64 @@ COIL_MAX_MS = 5000                     # pad_mode_runtime.c MAGNET_MAX_MS: every
 #: held as long as the game's own longest there (`value <name>_max_ms`: James Bond's right return up post, 14 s at a
 #: mini-wizard's start); never above this
 COIL_LONGEST_MS = 14000
+#: PAD-1406: held coils only the mode that has the whole game may hold, proven in the emulator: 2026-11-19 coiljob.sh
+#: (C:/tmp/PAD-1406, stock cards, hidden, muted, PAD_COIL_PROBE): each held as one command at the game's own powers on its
+#: board address, capped at the game's own longest (Cerebro post 3500 ms, Sentinel jaw 5000 (4000 asked), hand and finger
+#: 3000), [coildrive] node 9 coils 6, 2, 7, 8; refused once the mode gave the game its rules back
+OWN_GAME_COILS_PROVEN = frozenset({
+    ("uncanny_xmen_le-0.98", "cerebro_post"), ("uncanny_xmen_le-0.98", "sentinel_jaw"),
+    ("uncanny_xmen_le-0.98", "sentinel_hand"), ("uncanny_xmen_le-0.98", "sentinel_finger"),
+    ("uncanny_xmen_pro-0.98", "cerebro_post"), ("uncanny_xmen_pro-0.98", "sentinel_jaw"),
+})
+#: PAD-1406: the game's own one-shot devices (pm_coil_pulse), proven the same run: the Sentinel kicking target fired
+#: through the game's own function (LE 0x337dc, Pro 0x30148): [coildrive] node 9 coil 3, 255 for 60 ms, twice; a second
+#: fire at once refused (1 s apart); refused outside the whole game
+PULSE_COILS_PROVEN = frozenset({("uncanny_xmen_le-0.98", "sentinel_kick"), ("uncanny_xmen_pro-0.98", "sentinel_kick")})
+
+
+def _own_game_coils(port, key):
+    """PAD-1406: ``((name, label), ...)``: the port's held coils marked `value <name>_own_game 1`, proven ones only."""
+    return tuple((n, lab) for n, lab in _held_coils(port)
+                 if port["value"].get("%s_own_game" % n) and (key, n) in OWN_GAME_COILS_PROVEN)
+
+
+#: PAD-1406: virtual ball devices (the game's own bookkeeping: vapor, a jam) a mode is never offered
+_VIRTUAL_DEVICE = re.compile(r"VAPOR|JAM|REMOVED|LOADER")
+
+
+def _ball_devices(port):
+    """PAD-1406: ``((name, label), ...)``: the port's `text ball_device_names` where it names the framework's keep call."""
+    if not port or "ball_device_keep" not in port["site"] or not port["data"].get("ball_devices"):
+        return ()
+    return tuple((n, n.replace("_", " ").title()) for n in port["text"].get("ball_device_names", "").split()
+                 if not _VIRTUAL_DEVICE.search(n.upper()))
+
+
+#: PAD-1406: toys whose moves were proven in the emulator: Uncanny X-Men LE 0.98's Sentinel head (2026-11-19 toyjob.sh:
+#: the game's own up command ran its head motor, node 9 coil 5 at 86/255, stopped by the game's own logic)
+TOYS_PROVEN = frozenset({("uncanny_xmen_le-0.98", "sentinel_head")})
+
+
+def _toys(port, key):
+    """PAD-1406: ``((name, label, actions), ...)``: the port's `text toys` with every move's `site <name>_<move>`."""
+    if not port:
+        return ()
+    out = []
+    for n in port["text"].get("toys", "").split():
+        acts = tuple(a for a in port["text"].get("%s_actions" % n, "").split() if ("%s_%s" % (n, a)) in port["site"])
+        if acts and port["data"].get("%s_obj" % n) and (key, n) in TOYS_PROVEN:
+            out.append((n, port["text"].get("%s_label" % n, n), acts))
+    return tuple(out)
+
+
+def _pulse_coils(port, key):
+    """PAD-1406: ``((name, label), ...)``: the port's `text pulse_coils` with their `site <name>_fire`, proven ones only."""
+    if not port:
+        return ()
+    return tuple((n, port["text"].get("%s_label" % n, n)) for n in port["text"].get("pulse_coils", "").split()
+                 if ("%s_fire" % n) in port["site"] and (key, n) in PULSE_COILS_PROVEN)
+
+
 HELD_COILS_PROVEN = frozenset({
     ("godzilla_le-1.16", "mg_magnet"),  # 2026-10-05 rig 1, the stock Premium/LE card: held 2000 ms as the mode started (255 for 250, then 80 for 1750: its own adjustments), OFF at its end
     ("godzilla_le-1.16", "bridge"),     # the same run: held 2000 ms on the left ramp (255 for 300, then 25 for 1700), a hit mid-hold refused, held again, a mode stop let go 617 ms early; no abort
@@ -2884,6 +2957,7 @@ def profile_from_port(path):
         cannot=tuple(cannot),
         insider_gate=all(n in sites for n in INSIDER_GATE_SITES),
         own_game=own_game_sites(sites) and bool(_game_modes(port)),            # PAD-1400
+        flippers=all(n in sites for n in FLIPPER_SITES),                       # PAD-1406
         # item 147's events, as pad_mode_runtime.c's events_arm would arm them: a bus event
         # needs hook_dispatch, a site event its site. What each run measured is in the port.
         events=events,
@@ -2907,7 +2981,13 @@ def profile_from_port(path):
         hud_tree=measured.get("hud_tree", "auto_loaded"),
         magnet_shot=_magnet_shot_name(port),                 # PAD-381
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
-        coil_caps=_coil_caps(port, [n for n, _l in _held_coils(port) if (key, n) in HELD_COILS_PROVEN]),   # PAD-420
+        coil_caps=_coil_caps(port, [n for n, _l in _held_coils(port) if (key, n) in HELD_COILS_PROVEN]
+                             + [n for n, _l in _own_game_coils(port, key)]),   # PAD-420; PAD-1406
+        own_game_coils=_own_game_coils(port, key),                           # PAD-1406
+        pulse_coils=_pulse_coils(port, key),                                 # PAD-1406
+        ball_devices=_ball_devices(port),                                    # PAD-1406
+        toys=_toys(port, key),                                               # PAD-1406
+        kickbacks="kickback_set" in sites and bool(port["data"].get("kickback_count")),   # PAD-1406
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589
@@ -3270,6 +3350,7 @@ try:
     GODZILLA_PRO_1_15 = replace(
         GODZILLA_PRO_1_15, game_modes=_game_modes(_port_115), game_rules=_game_rules(_port_115),
         own_game=own_game_sites(_port_115["site"]) and bool(_game_modes(_port_115)),   # PAD-1400
+        flippers=all(n in _port_115["site"] for n in FLIPPER_SITES),                  # PAD-1406
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),

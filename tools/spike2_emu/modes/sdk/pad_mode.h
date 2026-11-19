@@ -405,6 +405,48 @@ int pm_block_rules_keep_names(const char *names);   /* the same by name: "Destru
  * calls were held back. */
 int pm_own_game(int on);
 int pm_own_game_on(void);    /* 1 while a mode of ours has the whole game */
+/* PAD-1406: THE FLIPPERS, for the mode that has the whole game (its rules are the ones that would kill them). Off and
+ * back on through the game's own all-flippers off and on (each flipper's enable, which the node board's rule follows:
+ * the coils fire at the game's own powers, from the board, as ever). The flippers alone: slingshots, pop bumpers,
+ * kickbacks and the ball devices play on. pm_flippers(0): off, while the ball lasts; pm_flippers(1): back on - only
+ * flippers a mode switched off (a tilt, the game's end of a ball and its own dead flippers are never undone). They
+ * come back by themselves when the mode ends or gives the game its rules back mid-ball, and at the next ball (the
+ * game's own ball start). 1 = done (or already off); 0 = refused, the reason in mode.log: not the mode that has the
+ * whole game, no game in play, a tilt, a drain to one running (pm_drain_to_one), or the port names no flippers off/on
+ * (`site flippers_off` / `flippers_on`: every newest Spike 2 build). pm_flippers_off: 1 while a mode has them off. */
+int pm_flippers(int on);
+int pm_flippers_off(void);
+/* PAD-1406: THE GAME'S OWN ONE-SHOT DEVICES, for the mode that has the whole game: a toy or kicker the game fires as one
+ * pulse (Uncanny X-Men's Sentinel kicking target, "sentinel_kick"), fired through the game's own function for it, at
+ * the operator's power and time for it. 1 = fired; 0 = refused, the reason in mode.log: not the whole game's mode, no
+ * game, a tilt, the operator disabled it, less than 1 s since the last, 20 already this minute, or this game has no
+ * such device (pm_coil_pulse_known). Coils a mode holds (pm_coil_hold) that the game's rules drive - X-Men's Cerebro
+ * post and Sentinel jaw (and on the LE its hand and finger) - are likewise the whole game's mode's alone. */
+int pm_coil_pulse(const char *name);
+int pm_coil_pulse_known(const char *name);
+/* PAD-1406: THE GAME'S BALL DEVICES - locks, scoops, VUKs - for the mode that has the whole game, by the game's own name
+ * for them ("UPPER LOCK", "left_scoop": any case, _ for a space). pm_device_keep(name, n): the device keeps n balls and
+ * the framework ejects the rest, its own way (the device's power, its retries) - the call the game's own lock rules
+ * make. 0 = let every ball go; a large n = hold whatever lands (n is cut to the device's capacity). The game's own keep
+ * comes back when the mode ends. 1 = done; 0 = refused, the reason in mode.log: not the whole game's mode, no game, a
+ * tilt, the trough or the auto plunger, a kind of device the game's call does not take, or no such device here.
+ * pm_device_balls: the balls in it now (-1 = no such device). pm_device_known: 1 when this game has it. */
+int pm_device_keep(const char *name, unsigned n);
+int pm_device_balls(const char *name);
+int pm_device_known(const char *name);
+/* PAD-1406: THE GAME'S KICKBACKS, for the mode that has the whole game: pm_kickback(1) switches every kickback the game
+ * has on (its node board rule fires it from its switch, at the game's power), pm_kickback(0) off, through the framework's
+ * own switch for each; what each was is put back when the mode ends. 1 = done; 0 = refused (not the whole game's mode, no
+ * game, a tilt, or no kickback here: of the newest builds only Guardians of the Galaxy has any). */
+int pm_kickback(int on);
+int pm_kickback_known(void);
+/* PAD-1406: A TOY'S OWN MOVES, for the mode that has the whole game: pm_toy(name, action) gives the game's own command
+ * for that move (Uncanny X-Men LE: pm_toy("sentinel_head", "up") / "down" - the Sentinel head, driven by its motor to
+ * its own switch the way the service menu's test page does; the game itself ignores it while the head moves or unless
+ * it sits at the other end). 1 = given; 0 = refused, the reason in mode.log (not the whole game's mode, no game, a
+ * tilt, under 1 s since the last move, or no such toy or move here). pm_toy_known: 1 when this game has that move. */
+int pm_toy(const char *name, const char *action);
+int pm_toy_known(const char *name, const char *action);
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

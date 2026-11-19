@@ -4,6 +4,14 @@ David asked why 20SidedDies' "Uncanny X-Men 2.0" can't be done in PAD. The sourc
 (`pinside.com/pinball/forum/topic/uncanny-xmen-20`, 6 pages, 291 posts, read 2026-11-17), especially post #256
 (9391576). Post numbers below are the thread's.
 
+> **Update, 2026-11-19 (PAD-1409).** Row 0 was wrong when it was written: the mode maker has been in every copy,
+> with no code, since PAD-763 (`core/preview.py` `RELEASED`). The "preview code" reason behind the PAD-1059 reply
+> did not hold even then, and only the SDK brief (`MODE_SDK.md`) still said so; it now says anyone can use it.
+> Since this analysis, rows 1, 3, 5 and 6 shipped in PAD-1400 and PAD-1401, row 4 in PAD-1402, row 7 in PAD-1403,
+> rows 9 and 10 in PAD-1405 and row 17 in PAD-1407. Menus (row 8, PAD-1404), the game's coils (row 11, PAD-1406),
+> sharing (row 20, PAD-1408) and the MPF porting guide (row 19, PAD-1410) are still open. The table below is as
+> it was written.
+
 ## The short answer
 
 There are two reasons, and only one is about code.

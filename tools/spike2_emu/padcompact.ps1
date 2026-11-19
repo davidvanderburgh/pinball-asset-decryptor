@@ -27,9 +27,13 @@ param(
     [switch] $DryRun,
     [switch] $Register,
     [int] $MinSlackGB = 20,
-    [int] $EveryDays = 7
+    [int] $EveryDays = 7,
+    # only these disks, by name as the log calls them (card store, rigs' data disk, PAD-Runtime, <default distro>)
+    [string[]] $Only = @()
 )
 $ErrorActionPreference = 'Stop'
+# through -File a list arrives as ONE string ("Ubuntu,PAD-Runtime")
+$Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Root = Join-Path $env:LOCALAPPDATA 'pinball_decryptor'
 $Place = Join-Path $Root 'wsl_place.json'
 $DataRoot = $Root
@@ -91,6 +95,7 @@ if ($default -and $default -ne 'PAD-Runtime') { $disks += @{ name = $default; vh
 $todo = @()
 foreach ($d in $disks) {
     if (-not (Test-Path $d.vhdx)) { continue }
+    if ($Only.Count -and $Only -notcontains $d.name) { continue }
     $size = (Get-Item $d.vhdx).Length / 1GB
     $used = UsedGB $d.distro $d.path
     if ($null -eq $used) { Say ("{0}: {1:N1} GB file, not mounted - skipped" -f $d.name, $size); continue }
@@ -98,7 +103,11 @@ foreach ($d in $disks) {
     Say ("{0}: {1:N1} GB file, {2:N1} GB used, {3:N1} GB to give back" -f $d.name, $size, $used, $slack)
     if ($slack -ge $MinSlackGB) { $d.size = $size; $todo += $d }
 }
-if (-not $todo.Count) { Say "nothing holds $MinSlackGB GB more than it uses"; @{ last = $now } | ConvertTo-Json | Set-Content $State; exit 0 }
+if (-not $todo.Count) {
+    Say "nothing holds $MinSlackGB GB more than it uses"
+    if (-not $Only.Count) { @{ last = $now } | ConvertTo-Json | Set-Content $State }   # a narrowed run says nothing of the rest
+    exit 0
+}
 
 # ---- is anything running? ------------------------------------------------------------------------------------------
 $why = @()
@@ -122,21 +131,31 @@ if ($DryRun) { Say "would compact: $(($todo | ForEach-Object { $_.name }) -join 
 if (-not (IsAdmin)) { Say "compacting needs an administrator: run elevated, or -Register the task"; exit 1 }
 
 # ---- compact --------------------------------------------------------------------------------------------------------
-foreach ($r in $running) { WslIn $r 'fstrim -av 2>/dev/null | tail -5' | ForEach-Object { Say "  fstrim ($r): $_" } }
-& wsl.exe --shutdown
-# WSL lets go of the files a moment after it says it is down
+# every distro that holds a disk on the list, started if it is not (a stopped one's deleted blocks are still mapped)
+foreach ($r in @($todo | ForEach-Object { $_.distro } | Select-Object -Unique)) {
+    WslIn $r '/usr/sbin/fstrim -av 2>&1 | tail -5' | ForEach-Object { Say "  fstrim ($r): $_" }
+}
+$s = Join-Path $env:TEMP 'padcompact.dpt'
+function Free($v) { try { $fs = [IO.File]::Open($v, 'Open', 'ReadWrite', 'None'); $fs.Close(); return $true } catch { return $false } }
 foreach ($d in $todo) {
-    for ($i = 0; $i -lt 60; $i++) {
-        try { $fs = [IO.File]::Open($d.vhdx, 'Open', 'ReadWrite', 'None'); $fs.Close(); break } catch { Start-Sleep 2 }
+    # WSL comes back the moment anything calls wsl.exe (the triage app, a session, a terminal), so it is shut down
+    # right before EACH compact and the compact retried when it lost the race (as core/wsl_disk.reclaim does)
+    $out = @()
+    for ($try = 1; $try -le 4; $try++) {
+        & wsl.exe --shutdown
+        for ($i = 0; $i -lt 30 -and -not (Free $d.vhdx); $i++) { Start-Sleep 1; if ($i % 10 -eq 9) { & wsl.exe --shutdown } }
+        @("select vdisk file=`"$($d.vhdx)`"", 'attach vdisk readonly', 'compact vdisk', 'detach vdisk', 'exit') | Set-Content $s -Encoding ascii
+        $out = @(Clean (diskpart /s $s))
+        if (-not ($out -match 'used by another process')) { break }
+        Say "  $($d.name): WSL took the disk back (try $try) - again"
+        @("select vdisk file=`"$($d.vhdx)`"", 'detach vdisk', 'exit') | Set-Content $s -Encoding ascii
+        diskpart /s $s | Out-Null
     }
-    $s = Join-Path $env:TEMP 'padcompact.dpt'
-    @("select vdisk file=`"$($d.vhdx)`"", 'attach vdisk readonly', 'compact vdisk', 'detach vdisk', 'exit') | Set-Content $s -Encoding ascii
-    $out = Clean (diskpart /s $s)
     $after = (Get-Item $d.vhdx).Length / 1GB
-    Say ("{0}: {1:N1} GB -> {2:N1} GB" -f $d.name, $d.size, $after)
+    Say ("{0}: {1:N1} GB -> {2:N1} GB; C: {3:N1} GB free" -f $d.name, $d.size, $after, ((Get-PSDrive C).Free / 1GB))
     if ($after -ge $d.size - 0.5) { Say "  diskpart: $(($out | Select-Object -Last 4) -join ' | ')" }
 }
-@{ last = $now } | ConvertTo-Json | Set-Content $State
+if (-not $Only.Count) { @{ last = $now } | ConvertTo-Json | Set-Content $State }
 # the card store back where every distro looks for it (the app attaches it at a rig start too)
 $cs = Join-Path $PSScriptRoot 'cardstore.ps1'
 if (Test-Path $cs) { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cs mount -NoFill *>&1 | ForEach-Object { Say "  $_" } }

@@ -21,7 +21,9 @@ import re
 import shutil
 
 #: the title names, by the plugin's game key
-GAME_NAMES = {"scooby_doo": "Scooby-Doo"}
+GAME_NAMES = {"scooby_doo": "Scooby-Doo", "beetlejuice": "Beetlejuice",
+              "texas_chainsaw": "Texas Chainsaw Massacre", "evil_dead": "Evil Dead",
+              "halloween_78": "Halloween", "ultraman": "Ultraman"}
 MAX_MODES = 24
 #: the form's groups: every key of mkspkmodes.KEYS once
 FORM_GROUPS = (
@@ -161,8 +163,18 @@ def game_of(path):
     return getattr(g, "game_key", "") or ""
 
 
+def labels_of(game):
+    """Every port report's label for *game*."""
+    d = ports_dir()
+    pre = (game or "") + "-"
+    return sorted(fn[:-5] for fn in (os.listdir(d) if os.path.isdir(d) else ())
+                  if fn.endswith(".json") and fn.startswith(pre))
+
+
 def label_for_card(path):
-    """The port report the selected update is (its game and version), or ""."""
+    """The port report the selected update is (its game and version), or "".  Texas Chainsaw's,
+    Halloween's and Ultraman's update names carry no date (tcm-1_00.pkg, code_H78.pkg): the port
+    whose stock update is that name and size, else the game's only port."""
     path = (path or "").strip()
     if not path or not os.path.isfile(path):
         return ""
@@ -170,7 +182,17 @@ def label_for_card(path):
     if not game:
         return ""
     label = "%s-%s" % (game, ver)
-    return label if load_port(label) else ""
+    if ver and load_port(label):
+        return label
+    if ver:
+        return ""
+    labels = labels_of(game)
+    size = os.path.getsize(path)
+    for lb in labels:
+        p = load_port(lb) or {}
+        if p.get("update_name") == os.path.basename(path) and int(p.get("update_size") or 0) == size:
+            return lb
+    return labels[0] if len(labels) == 1 else ""
 
 
 # ============================================================================ a title's folder
@@ -373,15 +395,30 @@ def find_stock(label, folders):
     p = load_port(label) or {}
     ext = p.get("update_ext") or ""
     want = p.get("version") or ""
+    name, size = p.get("update_name") or "", int(p.get("update_size") or 0)
     for d in folders:
         if not d or not os.path.isdir(d):
             continue
         for fn in sorted(os.listdir(d)):
             if ext and not fn.lower().endswith(ext):
                 continue
-            if version_of(fn) == want:
+            # a dateless name (code_H78.pkg) is the stock one only at the stock size
+            if name and fn == name and (not size or os.path.getsize(os.path.join(d, fn)) == size):
+                return os.path.join(d, fn)
+            if version_of(fn) and version_of(fn) == want:
                 return os.path.join(d, fn)
     return ""
+
+
+def install_note(label):
+    """What installing a modes update does on this title's machine (the Build card says it)."""
+    p = load_port(label) or {}
+    note = ("The game runs the modes from its first start after the update."
+            if (p.get("load") or "preload") == "dllmap" else
+            "The game restarts once by itself on its first start after the update, to take up the modes.")
+    if p.get("update_container") == "gpg_signed":
+        note += " The machine asks before it installs it: the app signs it, not Spooky."
+    return note
 
 
 def default_out(stock, folder):
@@ -408,36 +445,48 @@ def label_for_extract(folder, meta=None):
         except (OSError, ValueError):
             return ""
     game = next((k for k, v in GAME_NAMES.items() if v == (meta or {}).get("game")), "")
-    ver = ""
+    if not game:
+        return ""
+    # what the extract says its version is: version.txt's first line (Scooby-Doo, Beetlejuice,
+    # Evil Dead, Texas Chainsaw's "TCM V1.00"), or uptest/version_<n>.txt's name (Halloween, Ultraman)
+    seen = []
     for vt in (os.path.join(folder, "version.txt"), os.path.join(folder, "uptest", "version.txt")):
         try:
             with open(vt, encoding="utf-8", errors="replace") as f:
-                ver = version_of(f.readline().strip() + ".x")
+                seen.append(f.readline().strip())
         except OSError:
             continue
-        if ver:
-            break
-    label = "%s-%s" % (game, ver)
-    return label if game and ver and load_port(label) else ""
+    up = os.path.join(folder, "uptest")
+    if os.path.isdir(up):
+        seen += [fn for fn in sorted(os.listdir(up)) if fn.startswith("version_") and fn.endswith(".txt")]
+    for line in seen:
+        ver = version_of(line + ".x")
+        if ver and load_port("%s-%s" % (game, ver)):
+            return "%s-%s" % (game, ver)
+    for lb in labels_of(game):
+        if set(seen) & set((load_port(lb) or {}).get("version_match") or ()):
+            return lb
+    return ""
 
 
-def write_pad_modes(label):
-    """The person's modes for *label* as the Write tab packs them -> ``(files, rewrite, "pad")``
-    for formats.create_tar_gz, None when they have none; ValueError with the check's problems."""
+def write_pad_modes(label, folder=None):
+    """The person's modes for *label* as the Write tab packs them -> ``(files, rewrite, pad)``
+    for formats.create_tar_gz (*pad*: where pad/ goes, beside the extract's main.x86_64), None
+    when they have none; ValueError with the check's problems."""
     d = title_dir(label, seed=False)
     if not os.path.isdir(d) or not any(f.endswith(".mode") for f in os.listdir(d)):
         return None
     m = mk()
+    port = load_port(label)
     try:
-        files = m.pad_files(d, load_port(label))
+        files = m.pad_files(d, port)
     except m.Refused as e:
         raise ValueError(str(e))
 
     def rewrite(rel, data):
-        top = rel[len("uptest/"):] if rel.startswith("uptest/") else rel
-        if top not in m.LAUNCH_FILES:
-            return data
-        text, _n = m.patch_launch(data.decode("utf-8", "surrogateescape"))
-        return text.encode("utf-8", "surrogateescape")
-    rewrite.names = m.LAUNCH_FILES
-    return files, rewrite, m.PAD_DIR
+        return m.patch_file(rel, data, port)[0]
+    rewrite.names = m.patched_names(port)
+    pad = m.PAD_DIR
+    if folder and os.path.isfile(os.path.join(folder, "uptest", "main.x86_64")):
+        pad = "uptest/" + m.PAD_DIR
+    return files, rewrite, pad

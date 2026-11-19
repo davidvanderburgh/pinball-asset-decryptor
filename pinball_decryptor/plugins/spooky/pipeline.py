@@ -719,7 +719,8 @@ class WritePipeline(_BasePipeline):
         temp_tar = self.output_path + ".tmp.tar.gz"
         try:
             create_tar_gz(self.assets_dir, temp_tar,
-                          progress_cb=lambda d, t, n: self.progress(d, t, n))
+                          progress_cb=lambda d, t, n: self.progress(d, t, n),
+                          pad_modes=self.pad_modes)
             self.log(f"tar.gz created: "
                      f"{os.path.getsize(temp_tar) / (1024**3):.2f} GB",
                      "success")
@@ -742,7 +743,8 @@ class WritePipeline(_BasePipeline):
         temp_tar = self.output_path + ".tmp.tar.gz"
         try:
             create_tar_gz(self.assets_dir, temp_tar,
-                          progress_cb=lambda d, t, n: self.progress(d, t, n))
+                          progress_cb=lambda d, t, n: self.progress(d, t, n),
+                          pad_modes=self.pad_modes)
             self.log(f"tar.gz created: "
                      f"{os.path.getsize(temp_tar) / (1024**3):.2f} GB",
                      "success")
@@ -770,14 +772,14 @@ class WritePipeline(_BasePipeline):
     def _custom_modes(self, meta, format_type):
         """PAD-1417: the person's custom modes for this title (Modes tab) as Write packs them,
         or None.  Modes with problems stay out, and the log says so, loudly."""
-        if format_type != "tar_gz":
+        if format_type not in ("tar_gz", "gpg_tar_gz", "um_pkg", "h78_pkg"):
             return None
         try:
             from . import custom_modes as SM
             label = SM.label_for_extract(self.assets_dir, meta)
             if not label:
                 return None
-            pm = SM.write_pad_modes(label)
+            pm = SM.write_pad_modes(label, self.assets_dir)
         except ValueError as e:
             self.log("Your custom modes for this game are NOT in this update - the Modes "
                      "tab's check found problems: %s" % e, "warning")
@@ -787,8 +789,8 @@ class WritePipeline(_BasePipeline):
             return None
         if pm:
             n = sum(1 for rel, _s, _m in pm[0] if rel.endswith(".mode"))
-            self.log("Custom modes: %d mode(s) from the Modes tab go in, with the runtime; the "
-                     "game's launch line preloads it" % n, "success")
+            self.log("Custom modes: %d mode(s) from the Modes tab go in, with the runtime "
+                     "(%s/)" % (n, pm[2]), "success")
         return pm
 
     def _scan_changes(self):

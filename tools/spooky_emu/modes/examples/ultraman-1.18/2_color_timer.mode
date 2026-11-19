@@ -1,0 +1,11 @@
+# Color Timer - a starter mode: target 1 starts it, targets 2 to 4 score for 8 seconds
+name = Color Timer
+title = COLOR TIMER
+start = target_1
+shots = target_2 target_3 target_4
+points = 500000
+seconds = 8
+sound_start = bemular_start
+sound_end = dada_end_mode
+panel = top
+panel_color = 0a2a5ad0

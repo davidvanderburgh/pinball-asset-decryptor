@@ -1,0 +1,11 @@
+# Lift Bank Rush - a starter mode: the mouse trap target starts it, the lift bank targets score for 8 seconds
+name = Lift Bank Rush
+title = LIFT BANK RUSH
+start = mouse_trap_target
+shots = lift_bank_left_target lift_bank_middle_target lift_bank_right_target
+points = 500000
+seconds = 8
+sound_start = ash_sanity_start_0
+sound_end = ash_evil_complete_1
+panel = top
+panel_color = 3a0a0ad0

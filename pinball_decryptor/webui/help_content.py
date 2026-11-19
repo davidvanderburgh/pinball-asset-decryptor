@@ -4450,7 +4450,8 @@ SPOOKY_MODES_HELP = [
         "**Completion bonus** when it is done early. A mode ends when its time runs out, "
         "when it is completed, and when the ball ends.",
         "Scooby-Doo rounds every award to 100 points, so the check asks for points that are "
-        "a multiple of 100.",
+        "a multiple of 100. The other games score what a mode says (Texas Chainsaw Massacre "
+        "doubles it while its 2X playfield runs, as it does its own awards).",
         "**Check** runs after every change and lists anything the game would not take.",
     ]),
     ("Trying and installing", [
@@ -4458,8 +4459,10 @@ SPOOKY_MODES_HELP = [
         "update, without building anything. Start a game there and make a mode's start shots.",
         "**Build** writes the stock update again with your modes in it, under the same name "
         "(the machine reads an update by its name). Install it as you would a stock update. "
-        "On its first start after the update the game restarts once by itself, to take up the "
-        "modes. The Write tab carries your modes too, with any pictures or sounds you changed.",
+        "Scooby-Doo restarts once by itself on its first start after the update, to take up the "
+        "modes; the other games run them from their first start. Beetlejuice asks before it "
+        "installs an update the app built, as it does for any update the Write tab makes for "
+        "it. The Write tab carries your modes too, with any pictures or sounds you changed.",
         "To take the modes out, install the stock update again.",
     ]),
 ]

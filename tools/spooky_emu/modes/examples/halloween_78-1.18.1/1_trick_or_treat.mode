@@ -1,0 +1,16 @@
+# Trick or Treat - a starter mode: both orbits start it, the slings score it
+name = Trick or Treat
+title = TRICK OR TREAT
+start = left_orbit right_orbit
+start_count = 2
+shots = slingl slingr
+points = 250000
+seconds = 30
+complete = 3
+complete_points = 2000000
+sound_start = house_start_1
+sound_shot = jackpot1
+sound_complete = halloween_jackpot
+sound_end = mode_end_any
+title_color = ffdc00
+value_color = ffffff

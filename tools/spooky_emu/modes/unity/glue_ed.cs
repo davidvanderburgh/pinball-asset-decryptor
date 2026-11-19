@@ -1,0 +1,145 @@
+// glue_ed.cs - PadModes on Evil Dead's framework (PAD-1418): the game class is `ed`
+// (switches.game), its modes a List<Mode> (add_mode appends); every mode's handlers are found by
+// name when it is made (CacheEventMethodsThisMode): sw_any(number, symbol, active) for every
+// switch, evt_<name>(...) for callAll's broadcasts.  Return values are ignored and nothing stops
+// a switch, so ours sees every hit.  The game does not broadcast a game's start or a ball's
+// (machineMode calls its own modes directly): those are polled (PadRuntime.Track).
+// addScore(amount, applyMux: false) adds the amount as it is.  audio.playVoice(key) plays a voice
+// wav by its name (audioVoiceFiles.clips: key -> AudioClip, from the assets' voice folders).
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using UnityEngine;
+
+namespace PadModes {
+
+public class Hook : Mode {
+    public Hook(ed g) : base(9001, "PAD custom modes", "system") { game = g; }
+
+    public void sw_any(int sw, string name, bool state) {
+        try { if (state) Loader.Runtime.OnSwitch(sw); } catch (Exception e) { Loader.Log("sw_any: " + e); }
+    }
+
+    public void evt_ball_ending_mode() {
+        try { Loader.Runtime.OnBallEnd("the ball ended"); } catch (Exception e) { Loader.Log("evt_ball_ending_mode: " + e); }
+    }
+}
+
+public static class Glue {
+    public const string Framework = "evil_dead";
+    static Hook hook;
+    static List<Sw> sw;
+    static Dictionary<string, string> paths;
+
+    static ed G { get { return switches.game; } }
+
+    public static bool Ready() { return G != null && G.modes != null && G.modes.Count > 0 && loaderCheck.loadProgress >= 10; }
+
+    public static bool Ensure(PadRuntime r) {
+        var g = G;
+        if (hook == null) hook = new Hook(g);
+        if (g.modes.Contains(hook)) return false;
+        g.add_mode(hook);
+        return true;
+    }
+
+    public static int ModeCount() { return G.modes.Count; }
+
+    public static void Poll(PadRuntime r) {
+        var g = G;
+        r.Track(g.gameActive, g.current_player_number, g.ball, g.tiltmode != null && g.tiltmode.tilted);
+    }
+
+    public static List<Sw> Switches() {
+        if (sw != null && sw.Count > 0) return sw;
+        sw = new List<Sw>();
+        if (switches.switchKeyNum == null) return sw;
+        foreach (var kv in switches.switchKeyNum.OrderBy(kv => kv.Value)) {
+            if (Placeholder(kv.Key)) continue;
+            string label = switches.switch_labels != null && switches.switch_labels.ContainsKey(kv.Key)
+                ? Convert.ToString(switches.switch_labels[kv.Key]) : kv.Key;
+            sw.Add(new Sw(kv.Key, kv.Value, label));
+        }
+        return sw;
+    }
+
+    // "unused...", or a slot the game left its default name ("switch_0", "Switch_8", "_no_switch_31")
+    static bool Placeholder(string sym) {
+        if (string.IsNullOrEmpty(sym) || sym.StartsWith("unused", StringComparison.OrdinalIgnoreCase) ||
+            sym.StartsWith("_no_switch")) return true;
+        if (!sym.StartsWith("switch_", StringComparison.OrdinalIgnoreCase)) return false;
+        int n;
+        return int.TryParse(sym.Substring(7), out n);
+    }
+
+    public static string SwitchName(int n) {
+        foreach (var s in Switches()) if (s.Num == n) return s.Sym;
+        return "#" + n;
+    }
+
+    public static bool HasPlayers() { var g = G; return g != null && g.players != null && g.players.Count > 0; }
+    public static long PlayerScore() { return HasPlayers() ? G.getPlayerScore(G.getCurrentPlayer()) : 0; }
+    public static void Award(long ask) { G.addScore((int)Math.Min(ask, int.MaxValue), false); }
+    public static string ScoreNote() { return "addScore(amount, applyMux: false)"; }
+
+    public static Dictionary<string, string> Voices() {
+        var d = new Dictionary<string, string>();
+        var c = audioVoiceFiles.clips;
+        if (c == null) return d;
+        if (paths == null) paths = WavPaths();
+        foreach (var k in c.Keys) {
+            string key = Convert.ToString(k), p;
+            if (string.IsNullOrEmpty(key)) continue;
+            d[key] = paths.TryGetValue(key, out p) ? p : key;
+        }
+        return d;
+    }
+
+    static Dictionary<string, string> WavPaths() {
+        var d = new Dictionary<string, string>();
+        try {
+            string root = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "assets"));
+            if (!Directory.Exists(root)) return d;
+            foreach (var f in Directory.GetFiles(root, "*.wav", SearchOption.AllDirectories)) {
+                string key = Path.GetFileNameWithoutExtension(f);
+                if (!d.ContainsKey(key)) d[key] = "assets/" + f.Substring(root.Length + 1).Replace('\\', '/');
+            }
+        } catch (Exception e) { Loader.Log("wav paths: " + e.Message); }
+        return d;
+    }
+
+    public static string Voice(string name, out string how) {
+        var c = audioVoiceFiles.clips;
+        var clip = c != null && c.ContainsKey(name) ? c[name] as AudioClip : null;
+        if (clip == null) { how = null; return null; }
+        float t = audio.playVoice(name);
+        how = "(" + clip.name + ", " + clip.length.ToString("0.00") + " s) played with audio.playVoice (" + t.ToString("0.00") + ")";
+        return clip.name;
+    }
+
+    public static AudioSource VoiceChannel() { return audio.getVoiceChannel(); }
+
+    public static List<string> Lamps() {
+        var l = new List<string>();
+        var f = typeof(LightConfig).GetField("lightList", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        var d = f == null ? null : f.GetValue(null) as IDictionary;
+        if (d != null) foreach (var k in d.Keys) l.Add(Convert.ToString(k));
+        l.Sort(StringComparer.Ordinal);
+        return l;
+    }
+
+    public static List<string> GameModes() {
+        return G.modes.Where(m => m != null && m != hook).Select(m => m.Name ?? m.GetType().Name).ToList();
+    }
+
+    public static List<string> ModeClasses() {
+        return G.modes.Where(m => m != null && m != hook).Select(m => m.GetType().Name).Distinct().OrderBy(x => x).ToList();
+    }
+
+    public static List<string> ScoreTags() { return new List<string>(); }
+    public static List<string> ModeTags() { return new List<string>(); }
+}
+}

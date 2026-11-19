@@ -1,30 +1,38 @@
-// PadModes.cs - PAD's custom mode runtime for Spooky's Unity titles (PAD-1417; the
-// PAD-1387 probe made into the runtime).  Built against the title's own Managed/ (build.sh):
-// it subclasses the game's Mode and calls the game's own scoring and callouts.
+// PadModes.cs - PAD's custom mode runtime for Spooky's Unity titles (PAD-1417, PAD-1418; the
+// PAD-1387 probe made into the runtime).  The core is the same on every title; how it joins the
+// game is one glue file per framework (build.sh <Managed> <out> <framework>):
 //
-// padunity.so (LD_PRELOADed by the update's launch line) calls Loader.Init() on a thread
-// attached to the game's Mono domain.  Init only subscribes to Application.onBeforeRender;
-// on the main thread, once the game says Machine.modes_loaded, one Mode of ours (PadRuntime)
-// is added with the game's own Modes.add_mode.  From then on the game's message loop hands
-// it every switch and ball message it hands its own modes, and PadRuntime runs the custom
-// modes in the folder beside this assembly (pad/modes: title.cfg + *.mode, the JJP keys
-// tools/jjp_emu/MODES.md describes; the ones this runtime takes are mkspkmodes.py's KEYS):
+//   glue_scooby.cs   Scooby-Doo               Machine / Modes / int[] messages / Callouts
+//   glue_bj.cs       Beetlejuice              Machine / Modes / Message struct / Media
+//   glue_pc.cs       Texas Chainsaw (-d:TCM), pinballController: sw_* / evt_* by reflection,
+//                    Halloween, Ultraman      audioHelper.playVoice
+//   glue_ed.cs       Evil Dead                ed: sw_any, callAll evt_*, audio.playVoice
+//
+// Every glue file gives the core the same static class Glue: Ready() (the game's modes are
+// loaded), Ensure() (our mode is in the game's mode list, added again if the game dropped it),
+// Poll() (state the game does not announce), the game's switches, its score and scoring call,
+// its callouts, its lights and its modes.  The glue's Mode subclass hands the core the game's
+// switch hits and ball messages.
+//
+// padunity.so calls Loader.Init() on a thread attached to the game's Mono domain: the update's
+// launch line preloads it (Scooby-Doo), or the update's own Mono config maps a library the game
+// loads to it (dllmap: the other titles).  Init only subscribes to Application.onBeforeRender;
+// everything else happens on the main thread.  The modes are the folder beside this assembly
+// (pad/modes: title.cfg + *.mode, the JJP keys tools/jjp_emu/MODES.md describes; the ones this
+// runtime takes are mkspkmodes.py's KEYS):
 //
 //   start / start_count   the game's switches that start it, and how many hits it takes
 //   shots / points        the switches that score while it runs, and what each scores
 //   seconds               how long it runs (0: until the ball ends)
 //   complete / complete_points   shots that complete it, and the bonus for that
-//   sound_start/_shot/_complete/_end   the game's own callouts (Callouts.get + enqueue_callout)
+//   sound_start/_shot/_complete/_end   the game's own callouts
 //   title, panel, fonts, colors        a panel of ours over the game's screen, in its fonts
 //
-// Points go through the game's Mode.score_points -> Game.score_points, which multiplies
-// what it is given by the title's scale (x10 on Scooby-Doo) and rounds to 100: the runtime
-// asks for points / points_scale (title.cfg, from the port report) with the "bonus" tag, the
-// game's tag for a flat award (no balls-in-play multiplier).
+// Points go through the game's own scoring call; points_scale (title.cfg, from the port report)
+// is what that call multiplies by (Scooby-Doo: x10), and the runtime asks for points / scale.
 //
-// PADMODES_PORT=<file>: also write the title's port report there (switches, lights, callouts,
-// the game's modes, fonts, its score tags) and, at the first ball of a game, measure the
-// points scale (one 1,000-point bonus award) into it.  tools/spooky_emu/modes/spkport.sh.
+// PADMODES_PORT=<file>: also write the title's port report there and, at the first ball of a
+// game, measure the points scale (one 1,000-point award) into it.  unity/rigrun.sh --port.
 //
 // Log: PADUNITY_LOG (default /game/logs/padunity.log), the same file padunity.so writes.
 using System;
@@ -32,7 +40,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
@@ -40,11 +47,11 @@ using UnityEngine.UI;
 namespace PadModes {
 
 public static class Loader {
-    public const string Version = "1";
+    public const string Version = "2";
     static readonly string LogPath =
         Environment.GetEnvironmentVariable("PADUNITY_LOG") ?? "/game/logs/padunity.log";
     static readonly object gate = new object();
-    static bool registered;
+    static bool started, ported;
     static int frames;
     public static PadRuntime Runtime;
 
@@ -56,11 +63,12 @@ public static class Loader {
     }
 
     public static void Init() {
-        Log("loaded: PadModes runtime " + Version + " in domain \"" + AppDomain.CurrentDomain.FriendlyName +
-            "\", CLR " + Environment.Version + ", from " + typeof(Loader).Assembly.Location);
+        Log("loaded: PadModes runtime " + Version + " (" + Glue.Framework + ") in domain \"" +
+            AppDomain.CurrentDomain.FriendlyName + "\", CLR " + Environment.Version + ", from " +
+            typeof(Loader).Assembly.Location);
         // Nothing of the game's may be touched on this thread: the first access to a game
-        // class runs its static constructor here, and Machine's then deadlocked against the
-        // main thread (PAD-1387).  Only the event subscription happens here.
+        // class runs its static constructor here, and Scooby-Doo's Machine then deadlocked
+        // against the main thread (PAD-1387).  Only the event subscription happens here.
         Application.onBeforeRender += OnFrame;
     }
 
@@ -68,16 +76,17 @@ public static class Loader {
     static void OnFrame() {
         try {
             frames++;
-            if (!registered) {
-                if (!Machine.modes_loaded) return;
-                registered = true;
-                Runtime = new PadRuntime(Modes.machine);
+            if (!started) {
+                if (!Glue.Ready()) return;
+                started = true;
+                Runtime = new PadRuntime();
                 Runtime.Load();
-                Modes.add_mode(Runtime);
-                Log("PadRuntime added as game mode " + PadRuntime.ModeId + " via Modes.add_mode after " +
-                    frames + " frames; the game now has " + Modes.modes.Count + " modes");
-                Port.WriteIfAsked();
             }
+            if (Glue.Ensure(Runtime))
+                Log("PadRuntime added as game mode " + PadRuntime.ModeId + " (" + Glue.Framework + ") after " +
+                    frames + " frames; the game now has " + Glue.ModeCount() + " modes");
+            if (!ported) { ported = true; Port.WriteIfAsked(); }
+            Glue.Poll(Runtime);
             Runtime.Frame();
         } catch (Exception e) { Log("frame: " + e); }
     }
@@ -102,25 +111,21 @@ public class CMode {
     }
 }
 
-public class PadRuntime : Mode {
+public class PadRuntime {
     public const int ModeId = 9001;
     public string Dir;
     public List<CMode> All = new List<CMode>();
     public Dictionary<string, string> Title = new Dictionary<string, string>();
-    long scale = 1;
+    public long Scale = 1;
     bool ballLive;
+    float ballAt;
     CMode shown;
     Panel panel;
     // our callouts in the game's queue, by clip name, until its voice channel takes them
     readonly List<string> queued = new List<string>();
-
-    public PadRuntime(Machine m) : base(m) {
-        name = "PAD custom modes";
-        mode = ModeId;
-    }
-
-    public override int init() { return 0; }
-    public override int update() { return 0; }
+    // what Track() saw last (the titles that do not announce a game or a ball)
+    bool tActive, tTilted;
+    int tPlayer = -1, tBall = -1;
 
     // ------------------------------------------------------------------ the mode folder
     public void Load() {
@@ -132,8 +137,8 @@ public class PadRuntime : Mode {
         string tp = Path.Combine(Dir, "title.cfg");
         if (System.IO.File.Exists(tp))
             foreach (var kv in Parse(System.IO.File.ReadAllText(tp))) Title[kv.Key] = kv.Value;
-        long.TryParse(Get(Title, "points_scale", "1"), out scale);
-        if (scale < 1) scale = 1;
+        long.TryParse(Get(Title, "points_scale", "1"), out Scale);
+        if (Scale < 1) Scale = 1;
         foreach (var f in Directory.GetFiles(Dir, "*.mode").OrderBy(x => x, StringComparer.Ordinal)) {
             var m = new CMode { File = Path.GetFileName(f) };
             foreach (var kv in Title) m.K[kv.Key] = kv.Value;
@@ -152,7 +157,7 @@ public class PadRuntime : Mode {
                 ", shots " + Names(m.Shots) + " " + m.Points + " each, " + m.Seconds + " s, complete " + m.Complete +
                 " (+" + m.CompletePoints + ")");
         }
-        Loader.Log(All.Count + " custom mode(s) from " + Dir + "; points scale " + scale);
+        Loader.Log(All.Count + " custom mode(s) from " + Dir + "; points scale " + Scale);
     }
 
     static Dictionary<string, string> Parse(string text) {
@@ -183,7 +188,7 @@ public class PadRuntime : Mode {
         return (s ?? "").Split(new[] { ' ', ',', '\t' }, StringSplitOptions.RemoveEmptyEntries);
     }
 
-    // switch names -> the game's switch numbers (Switches.name is indexed by number)
+    // switch names -> the game's switch numbers
     List<int> SwitchList(CMode m, string key) {
         var o = new List<int>();
         foreach (var w in Words(m.Get(key, ""))) {
@@ -194,63 +199,66 @@ public class PadRuntime : Mode {
         return o;
     }
 
-    // A switch by the game's own symbol (Switches.get_switch_name: "right_inlane"), or by its
-    // label in Switches.name ("RIGHT INLANE").
+    // A switch by the game's own symbol ("right_inlane") or by its label ("RIGHT INLANE").
     public static int FindSwitch(string w) {
-        if (Switches.name == null) return -1;
-        for (int i = 0; i < Switches.name.Count; i++) {
-            string sym = null;
-            try { sym = Switches.get_switch_name(i); } catch (Exception) { }
-            if (string.Equals(sym, w, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(Switches.name[i], w, StringComparison.OrdinalIgnoreCase)) return i;
-        }
+        foreach (var s in Glue.Switches())
+            if (string.Equals(s.Sym, w, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(s.Label, w, StringComparison.OrdinalIgnoreCase)) return s.Num;
         return -1;
     }
 
-    // what the game's score_points is handed: "base" is its mode tag for a plain award (one mode
-    // tag, or it logs an error per award), "bonus" its flat award (no balls-in-play multiplier)
-    public static readonly string[] Tags = { "base", "bonus" };
-
     static string Names(List<int> l) {
-        return l.Count == 0 ? "-" : string.Join(" ", l.Select(n => Switches.get_switch_name(n)).ToArray());
+        return l.Count == 0 ? "-" : string.Join(" ", l.Select(n => Glue.SwitchName(n)).ToArray());
     }
 
     // ------------------------------------------------------------------ the game's messages
-    public override int process_message(int[] msg) {
-        try {
-            int what = msg[Messages.offset_message], data = msg[Messages.offset_data];
-            if (what == Messages.switch_active) Switch(data);
-            else if (what == Messages.new_game_started) {
-                foreach (var m in All) { Stop(m, null); m.Hits = 0; }
-                Loader.Log("new_game_started: start counts reset");
-            } else if (what == Messages.ball_start) {
-                ballLive = true;
-                Loader.Log("ball_start");
-                Port.Measure(this);
-            } else if (what == Messages.end_of_ball || what == Messages.tilt) {
-                ballLive = false;
-                foreach (var m in All) Stop(m, what == Messages.tilt ? "tilt" : "the ball ended");
-            } else if (what == Messages.mode_started && data == Modes.attract_mode) {
-                ballLive = false;
-                foreach (var m in All) Stop(m, "the game ended");
-            }
-        } catch (Exception e) { Loader.Log("process_message: " + e); }
-        return 0;
+    public void OnNewGame() {
+        foreach (var m in All) { Stop(m, null); m.Hits = 0; }
+        Loader.Log("new_game_started: start counts reset");
     }
 
-    bool Playing() {
-        Game g = Mode.machine.game;
-        return ballLive && g != null && g.players != null && g.players.Count > 0;
+    public void OnBallStart() {
+        ballLive = true;
+        ballAt = Time.unscaledTime;
+        Loader.Log("ball_start");
     }
 
-    void Switch(int sw) {
+    public void OnBallEnd(string why) {
+        ballLive = false;
+        foreach (var m in All) Stop(m, why);
+    }
+
+    public void OnGameEnd() {
+        ballLive = false;
+        foreach (var m in All) Stop(m, "the game ended");
+    }
+
+    // For the titles that do not announce a game or a ball (Evil Dead), or announce them with
+    // calls whose arguments differ between titles (Texas Chainsaw, Halloween, Ultraman): what
+    // the game says now, once a frame.  A new game when it goes active; a ball when the player
+    // or the ball number changes while it is; the ball's end on tilt.
+    public void Track(bool active, int player, int ball, bool tilted) {
+        if (active && !tActive) { OnNewGame(); tPlayer = tBall = -1; }
+        if (!active && tActive) OnGameEnd();
+        if (active && ball > 0 && (player != tPlayer || ball != tBall)) {
+            if (ballLive) OnBallEnd("the ball ended");
+            tPlayer = player; tBall = ball;
+            if (!tilted) OnBallStart();
+        }
+        if (tilted && !tTilted && ballLive) OnBallEnd("tilt");
+        tActive = active; tTilted = tilted;
+    }
+
+    bool Playing() { return ballLive && Glue.HasPlayers(); }
+
+    public void OnSwitch(int sw) {
         if (!Playing()) return;
         foreach (var m in All) {
             if (m.Running) {
                 if (m.Shots.Contains(sw)) Shot(m, sw);
             } else if (m.Start.Contains(sw)) {
                 m.Hits++;
-                Loader.Log(m.Name + ": start switch " + Switches.get_switch_name(sw) + " hit " + m.Hits + " of " + m.StartCount);
+                Loader.Log(m.Name + ": start switch " + Glue.SwitchName(sw) + " hit " + m.Hits + " of " + m.StartCount);
                 if (m.Hits >= m.StartCount) StartMode(m);
             }
         }
@@ -273,7 +281,7 @@ public class PadRuntime : Mode {
         m.Made++;
         m.Total += got;
         Loader.Log(m.Name + ": shot " + m.Made + (m.Complete > 0 ? " of " + m.Complete : "") + " on " +
-            Switches.get_switch_name(sw) + ": " + got + " points (player score " + Score() + ")");
+            Glue.SwitchName(sw) + ": " + got + " points (player score " + Glue.PlayerScore() + ")");
         Sound(m, "sound_shot");
         shown = m;
         if (m.Complete > 0 && m.Made >= m.Complete) {
@@ -300,39 +308,38 @@ public class PadRuntime : Mode {
 
     public void Frame() {
         float now = Time.unscaledTime;
+        // the port report's points scale, 2 s into a ball: Texas Chainsaw sets its playfield
+        // multiplier in its own ball-started event, after the ball number this saw change
+        if (ballLive && now - ballAt > 2f) Port.Measure(this);
         foreach (var m in All)
             if (m.Running && m.EndsAt > 0 && now >= m.EndsAt) Stop(m, "time ran out");
         if (shown != null && shown.Running && panel != null) panel.Timer(shown);
-        // the game's callout queue sets voice_channel.clip and calls Play() when the channel is free
-        var vc = Mode.machine.voice_channel;
-        if (queued.Count > 0 && vc != null && vc.clip != null && queued[0] == vc.clip.name) {
-            Loader.Log("callout " + vc.clip.name + " handed to the game's voice channel (Play, playing " + vc.isPlaying + ")");
-            queued.RemoveAt(0);
+        // a queued callout: the game's queue sets voice_channel.clip and plays it when the channel is free
+        if (queued.Count > 0) {
+            var vc = Glue.VoiceChannel();
+            if (vc != null && vc.clip != null && queued[0] == vc.clip.name) {
+                Loader.Log("callout " + vc.clip.name + " handed to the game's voice channel (Play, playing " + vc.isPlaying + ")");
+                queued.RemoveAt(0);
+            }
         }
     }
 
     // ------------------------------------------------------------------ the game's scoring
-    long Score() {
-        Game g = Mode.machine.game;
-        return g != null && g.players != null && g.players.Count > 0 ? g.player().score : 0;
-    }
-
     public long Score(long points) {
-        long before = Score();
-        long ask = (points + scale / 2) / scale;
-        score_points(ask, Tags);
-        return Score() - before;
+        long before = Glue.PlayerScore();
+        Glue.Award((points + Scale / 2) / Scale);
+        return Glue.PlayerScore() - before;
     }
 
     // ------------------------------------------------------------------ the game's callouts
     void Sound(CMode m, string key) {
         string name = m.Get(key, "");
         if (name.Length == 0) return;
-        AudioClip clip = Port.Callout(name);
-        if (clip == null) { Loader.Log(m.Name + ": " + key + " " + name + ": no such callout in this game"); return; }
-        Mode.machine.enqueue_callout(clip);
-        queued.Add(clip.name);
-        Loader.Log(m.Name + ": " + key + " " + name + " (" + clip.name + ", " + clip.length.ToString("0.00") + " s) queued as a callout");
+        string how;
+        string watch = Glue.Voice(name, out how);
+        if (how == null) { Loader.Log(m.Name + ": " + key + " " + name + ": no such callout in this game"); return; }
+        if (!string.IsNullOrEmpty(watch)) queued.Add(watch);
+        Loader.Log(m.Name + ": " + key + " " + name + " " + how);
     }
 
     // ------------------------------------------------------------------ the panel
@@ -346,6 +353,13 @@ public class PadRuntime : Mode {
             panel.Set(shown);
         } catch (Exception e) { Loader.Log("panel: " + e.Message); }
     }
+}
+
+// A switch as the glue reports it: the game's symbol, its number, its label.
+public struct Sw {
+    public string Sym, Label;
+    public int Num;
+    public Sw(string sym, int num, string label) { Sym = sym; Num = num; Label = label; }
 }
 
 // The mode's panel: a canvas of ours over the game's screen (sorting order above the game's),
@@ -435,29 +449,11 @@ public class Panel {
     }
 }
 
-// The title's names, for the runtime and for the port report.
+// The title's names, for the port report.
 public static class Port {
-    static Dictionary<string, string> callouts;
     static Dictionary<string, TMPro.TMP_FontAsset> fonts;
     static bool measured;
-
-    // Callouts' static string fields: field name -> the clip's Resources path
-    public static Dictionary<string, string> Callouts() {
-        if (callouts != null) return callouts;
-        callouts = new Dictionary<string, string>();
-        foreach (var f in typeof(global::Callouts).GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-            if (f.FieldType == typeof(string)) {
-                var v = f.GetValue(null) as string;
-                if (!string.IsNullOrEmpty(v)) callouts[f.Name] = v;
-            }
-        return callouts;
-    }
-
-    public static AudioClip Callout(string name) {
-        string path;
-        if (!Callouts().TryGetValue(name, out path)) path = name;
-        return global::Callouts.get(path);
-    }
+    static long scaleSeen;
 
     public static TMPro.TMP_FontAsset Font(string name) {
         if (fonts == null) {
@@ -480,59 +476,42 @@ public static class Port {
     }
 
     static string List(IEnumerable<string> l) { return "[" + string.Join(", ", l.Select(Json).ToArray()) + "]"; }
-
-    static long scaleSeen;
+    static string Map(IEnumerable<KeyValuePair<string, string>> l) {
+        return "{" + string.Join(", ", l.Select(kv => Json(kv.Key) + ": " + Json(kv.Value)).ToArray()) + "}";
+    }
 
     public static void WriteIfAsked() {
         string to = Environment.GetEnvironmentVariable("PADMODES_PORT");
         if (string.IsNullOrEmpty(to)) return;
         try {
             Font("");
-            var g = Mode.machine.game;
-            var sw = new List<string>();
-            var swIds = new List<string>();
-            var swLabels = new List<string>();
-            if (Switches.name != null)
-                for (int i = 0; i < Switches.name.Count; i++)
-                    if (!string.IsNullOrEmpty(Switches.name[i]) && !Switches.name[i].StartsWith("UNUSED")) {
-                        string sym = Switches.get_switch_name(i);
-                        if (string.IsNullOrEmpty(sym)) continue;
-                        sw.Add(sym);
-                        swIds.Add(Json(sym) + ": " + i);
-                        swLabels.Add(Json(sym) + ": " + Json(Switches.name[i]));
-                    }
-            var lamps = Lights.light_names == null ? new List<string>()
-                : Lights.light_names.OrderBy(kv => kv.Key).Select(kv => kv.Value).Where(v => !string.IsNullOrEmpty(v)).ToList();
-            var modes = Modes.modes.OrderBy(kv => kv.Key).Where(kv => kv.Value != null && kv.Key != PadRuntime.ModeId)
-                .Select(kv => kv.Value.name ?? kv.Value.GetType().Name).ToList();
-            var cls = Modes.modes.Values.Where(m => m != null && m.mode != PadRuntime.ModeId).Select(m => m.GetType().Name).Distinct().OrderBy(x => x).ToList();
+            var sw = Glue.Switches().Where(s => !string.IsNullOrEmpty(s.Sym)).ToList();
+            var lamps = Glue.Lamps();
+            var voices = Glue.Voices();
+            var modes = Glue.GameModes();
             var b = new StringBuilder("{\n");
             b.Append("  \"engine\": \"unity\",\n");
+            b.Append("  \"framework\": " + Json(Glue.Framework) + ",\n");
             b.Append("  \"product\": " + Json(Application.productName) + ",\n");
             b.Append("  \"unity\": " + Json(Application.unityVersion) + ",\n");
             b.Append("  \"game_version\": " + Json(Application.version) + ",\n");
             b.Append("  \"runtime\": " + Json(Loader.Version) + ",\n");
-            b.Append("  \"switches\": " + List(sw) + ",\n");
-            b.Append("  \"switch_ids\": {" + string.Join(", ", swIds.ToArray()) + "},\n");
-            b.Append("  \"switch_labels\": {" + string.Join(", ", swLabels.ToArray()) + "},\n");
+            b.Append("  \"switches\": " + List(sw.Select(s => s.Sym)) + ",\n");
+            b.Append("  \"switch_ids\": {" + string.Join(", ", sw.Select(s => Json(s.Sym) + ": " + s.Num).ToArray()) + "},\n");
+            b.Append("  \"switch_labels\": " + Map(sw.Select(s => new KeyValuePair<string, string>(s.Sym, s.Label))) + ",\n");
             b.Append("  \"lamps\": " + List(lamps) + ",\n");
-            b.Append("  \"sounds\": " + List(Callouts().Keys.OrderBy(x => x, StringComparer.Ordinal)) + ",\n");
-            b.Append("  \"sound_paths\": {" + string.Join(", ", Callouts().OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                .Select(kv => Json(kv.Key) + ": " + Json(kv.Value)).ToArray()) + "},\n");
+            b.Append("  \"sounds\": " + List(voices.Keys.OrderBy(x => x, StringComparer.Ordinal)) + ",\n");
+            b.Append("  \"sound_paths\": " + Map(voices.OrderBy(kv => kv.Key, StringComparer.Ordinal)) + ",\n");
             b.Append("  \"game_modes\": " + List(modes) + ",\n");
-            b.Append("  \"mode_classes\": " + List(cls) + ",\n");
+            b.Append("  \"mode_classes\": " + List(Glue.ModeClasses()) + ",\n");
             b.Append("  \"fonts\": " + List(fonts.Keys.OrderBy(x => x, StringComparer.Ordinal)) + ",\n");
-            b.Append("  \"score_tags\": " + List(g != null && g.recognized_tags != null ? g.recognized_tags : new List<string>()) + ",\n");
-            b.Append("  \"mode_tags\": " + List(g != null && g.mode_tags != null ? g.mode_tags : new List<string>()) + ",\n");
+            b.Append("  \"score_tags\": " + List(Glue.ScoreTags()) + ",\n");
+            b.Append("  \"mode_tags\": " + List(Glue.ModeTags()) + ",\n");
             b.Append("  \"points_scale\": " + scaleSeen + "\n}\n");
             File.WriteAllText(to, b.ToString());
             Loader.Log("port report written to " + to + ": " + sw.Count + " switches, " + lamps.Count + " lamps, " +
-                Callouts().Count + " callouts, " + modes.Count + " game modes, " + fonts.Count + " fonts" +
+                voices.Count + " callouts, " + modes.Count + " game modes, " + fonts.Count + " fonts" +
                 (scaleSeen > 0 ? ", points scale " + scaleSeen : ", points scale not measured yet"));
-            // one callout loads, so the names are the right ones
-            var first = Callouts().FirstOrDefault();
-            var clip = first.Key == null ? null : Callout(first.Key);
-            Loader.Log("callout check: " + first.Key + " -> " + first.Value + " -> " + (clip == null ? "NOT FOUND" : clip.name + " " + clip.length.ToString("0.00") + " s"));
         } catch (Exception e) { Loader.Log("port report: " + e); }
     }
 
@@ -541,12 +520,11 @@ public static class Port {
     public static void Measure(PadRuntime r) {
         if (measured || string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PADMODES_PORT"))) return;
         measured = true;
-        var g = Mode.machine.game;
-        long before = g.player().score;
-        r.score_points(1000, PadRuntime.Tags);
-        long got = g.player().score - before;
+        long before = Glue.PlayerScore();
+        Glue.Award(1000);
+        long got = Glue.PlayerScore() - before;
         scaleSeen = got / 1000;
-        Loader.Log("points scale: score_points(1000, base bonus) scored " + got + " (score_multiplier " + g.score_multiplier + ")");
+        Loader.Log("points scale: an award of 1000 scored " + got + " (" + Glue.ScoreNote() + ")");
         WriteIfAsked();
     }
 }

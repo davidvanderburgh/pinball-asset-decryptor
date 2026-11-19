@@ -233,6 +233,66 @@ What the next tickets take from here: the other Unity titles need their own `Pad
 scoring facts (their `score_points` may differ); `mkspkmodes.py` and the Modes tab are ready
 for any port report with `engine` and `runtime_dll`.
 
+## Ticket 2: the other five Unity titles (PAD-1418)
+
+**Three more frameworks.** The runtime does not compile against any of the five as Scooby-Doo's
+code was written, so `PadModes.cs` is now the core (mode files, the mode logic, the panel, the port
+report) and how it joins a game is one glue file per framework (`unity/glue_*.cs`; `build.sh
+<Managed> <out> <framework>`). Every glue gives the core the same `Glue` class (Ready, Ensure,
+Poll, the switches, the score and the scoring call, the callouts, lights, modes) and a `Hook : Mode`.
+
+| framework | titles | joins with | switches | game / ball | points | callouts |
+|---|---|---|---|---|---|---|
+| scooby | Scooby-Doo | `Modes.add_mode` once `Machine.modes_loaded` | `int[]` messages | messages | `score_points(/10, base bonus)` | `Callouts` + `enqueue_callout` |
+| bj | Beetlejuice | `Modes.add_mode` (`Mode(float)`, abstract `Load`) | `Message.Event.switch_active` | messages (`end_of_game`) | `ScorePoints(p, null, 0)`: 1:1 | `Media` VOICE fields + `CalloutEnqueue` (2,976) |
+| pc | Halloween, Ultraman | `AddMode(m, 0)` once `soundmanager.finishedLoading <= -2` | `sw_any(n, sym, state)` (first in the list) | polled (`gameStarted`, ball, player, `tiltmode.tilted`) + `evt_ball_ending(msg)` | `Score(p, force)`: 1:1 | `audioHelper.playVoice` (495 / 670 wavs) |
+| pc-tcm | Texas Chainsaw (Unity 2019) | `add_mode` once `finishedLoading == -2`; again after the menu drops it | a generated `sw_<sym>_active` per switch at the end of its private method cache (walked last to first: ours first, before any mode can stop the switch) | polled + `evt_ball_ending(msg)` | `addScore(p, 0, notValidForComboBet)`: x the 2X playfield | `audioHelper.playVoice` (804) |
+| ed | Evil Dead | `add_mode` once `loaderCheck.loadProgress >= 10` | `sw_any(n, sym, bool)` | polled (no game/ball broadcast) + `evt_ball_ending_mode()` | `addScore(p, applyMux: false)`: 1:1 | `audio.playVoice` (1,759) |
+
+A handler returning false stops a switch or event for the modes after it on the pinballController
+titles: every one of ours returns true. Halloween's `Mode` makes every mode `bail_on_tilt`; ours is
+not. Texas Chainsaw calls `evt_game_started` with no argument and Halloween with one, which is why
+the game's start and its balls are polled there (`PadRuntime.Track`).
+
+**The way in: dllmap.** None of the five updates carries a launch line (Texas Chainsaw, Evil Dead,
+Halloween and Ultraman are started by the machine's image; Beetlejuice's `_profile` just runs
+`sway`). Every one opens its board through Mono's `SerialPort`, which loads `MonoPosixHelper`; the
+update's own `main_Data/MonoBleedingEdge/etc/mono/config` maps that library, and a modes update maps
+it to `/game/code/uptest/pad/padunity.so` (`padunity_dllmap.so`: the same loader, NEEDing the real
+`libMonoPosixHelper.so` beside the game by its RUNPATH, so Mono finds the serial functions through
+it). Mono loads it when the game opens its board; its thread finds the domain and calls
+`Loader.Init` as the preload does. Proven on Evil Dead (a hand-made build: the loader logged from
+inside the game with no preload anywhere). Port reports say `"load": "dllmap"`; Scooby-Doo stays on
+its launch line (`preload`). `Unity 2022.3`'s `RuntimeInitializeOnLoads.json` would have done for
+four of the five, not for Texas Chainsaw's 2019.3 (its list is inside `globalgamemanagers`).
+
+**Containers.** `mkspkmodes.build` unwraps and wraps with the plugin's own GPG code
+(`update_container`): Beetlejuice signed again with PAD's key (the machine asks, as for any Write
+update), Halloween and Ultraman encrypted again with their passphrase (`gpg_format`). The Write tab
+carries modes for those containers too, `pad/` beside `main.x86_64` (`uptest/pad` on the four).
+
+**Ports** (`ports/<label>.json`, the runtime's own read, `rigrun.sh --port`; empty switch slots
+left out): `beetlejuice-2026.09.15.11` (63 switches, 118 lights, 2,976 callouts, 60 modes, 67
+fonts), `texas_chainsaw-1.00` (69, 98, 804, 29, 4), `evil_dead-2026.07.15` (83, 129, 1,759, 33, 6),
+`halloween_78-1.18.1` (66, 146, 495, 55, 8), `ultraman-1.18` (66, 146, 670, 55, 5). Every one
+measured 1:1 (1,000 asked, 1,000 scored; Texas Chainsaw 2 s into the ball, after its own
+ball-started event set the multiplier). The dateless names (`tcm-1_00.pkg`, `code_H78.pkg`,
+`code_UM.pkg`) are found by `update_name` + `update_size` (else the game's only port), extracts by
+`version_match` (`TCM V1.00`, `version_118.txt`, `version_1_18.txt`).
+
+**Rig fixes made on the way.** `prepare.sh` holds `flock` on the cache's `.prepare.lock`: two
+tickets' prepares at once deleted each other's `unpack.partial` ("could not unpack ... damaged"),
+and its default cache keeps 6 builds (1-2 GB each), not 2, which another ticket's prepare used to
+evict a build a queued run was about to boot. `gpg._find_gpg` prefers GnuPG's own `gpg.exe` on
+Windows: Git for Windows' MSYS gpg on the PATH fails on Windows paths.
+
+**Proven so far** (rig, hidden, muted): on all five, the runtime (Try it overlay) joined the game's
+mode list, saw the game start and the first ball, scored through the game's own call and wrote the
+port. Built (from the library's stock updates, as the app's Build does): all five modes updates.
+**Still to run:** each built update booted with no overlay and both starter modes played (start,
+shots, completion bonus, timer, callouts, the panel), and Scooby-Doo again on the refactored
+runtime. Those runs stopped when C: filled (the rig distro's disk file grows on C:).
+
 ## Rig fix made on the way
 
 Both Spooky rigs now stub `sync` (logging no-op on the game's PATH): WSL's

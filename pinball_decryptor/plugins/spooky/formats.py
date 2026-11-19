@@ -229,9 +229,12 @@ def create_tar_gz(source_dir, out_path, progress_cb=None, pad_modes=None):
     all_files, all_dirs = _scan_for_tar(source_dir)
     if pad_modes:
         folder = pad_modes[2]
-        top = lambda rel: rel.replace("\\", "/").split("/")[0]
-        all_files = [x for x in all_files if top(x[1]) != folder]
-        all_dirs = [x for x in all_dirs if top(x[1]) != folder]
+
+        def inside(rel):
+            rel = rel.replace("\\", "/")
+            return rel == folder or rel.startswith(folder + "/")
+        all_files = [x for x in all_files if not inside(x[1])]
+        all_dirs = [x for x in all_dirs if not inside(x[1])]
     total = len(all_files) + len(all_dirs)
     _create_tar_impl(out_path, "w:gz", all_files, all_dirs, total, progress_cb, pad_modes)
 
@@ -309,7 +312,7 @@ def _add_pad_modes(tf, pad_modes):
     import time
     files, _rewrite, folder = pad_modes
     now = int(time.time())
-    for d in (folder, folder + "/modes"):
+    for d in (folder, folder + "/modes"):              # folder: "pad", or "uptest/pad"
         ti = tarfile.TarInfo(d)
         ti.type, ti.mode, ti.mtime = tarfile.DIRTYPE, 0o755, now
         tf.addfile(ti)

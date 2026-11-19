@@ -580,7 +580,7 @@ function SpookyBuildCard({ j }) {
         <span class=${cx("small", b.done ? (b.ok ? "ok-ink" : "warn-ink") : "muted")}>${b.msg || ""}</span>
       </div>
       ${lines.length && (b.running || (b.done && !b.ok)) ? html`<pre class="jjpm-log">${lines.join("\n")}</pre>` : null}
-      <div class="small muted" style="margin-top:6px">Install it the way a stock update installs: on a USB stick, under its own name. The game restarts once by itself on its first start after the update, to take up the modes.</div>
+      <div class="small muted" style="margin-top:6px">Install it the way a stock update installs: on a USB stick, under its own name. ${b.note || ""}</div>
     </div>
   </section>`;
 }

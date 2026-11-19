@@ -182,7 +182,8 @@ class SpookyModesMixin:
         stock = self._spk_recall("stock") or card or SM.find_stock(self._spk_label, self._spk_stock_folders())
         out = self._spk_recall("out") or (SM.default_out(stock, self._spk_out_folder(stock)) if stock else "")
         b = dict(self._spk_build or {})
-        b.update({"iso": stock, "out": out, "running": self._spk_running, "busy": self._spk_running})
+        b.update({"iso": stock, "out": out, "running": self._spk_running, "busy": self._spk_running,
+                  "note": SM.install_note(self._spk_label)})
         return b
 
     def _spk_publish(self, **parts):

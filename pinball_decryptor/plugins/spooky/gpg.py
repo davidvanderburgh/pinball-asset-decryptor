@@ -25,19 +25,18 @@ from .games import GPG_PASSPHRASES
 
 
 def _find_gpg():
-    """Find gpg binary on system."""
-    gpg = shutil.which("gpg")
-    if gpg:
-        return gpg
-    # Check common Windows locations
-    for path in [
+    """Find gpg binary on system.  On Windows GnuPG's own gpg.exe comes first: a gpg on the
+    PATH there may be Git for Windows' MSYS one, which reads Windows paths as its own and
+    fails ("keyblock resource '/c/...C:\\Users\\...\\pubring.kbx'", PAD-1418)."""
+    installed = [
         r"C:\Program Files (x86)\GnuPG\bin\gpg.exe",
         r"C:\Program Files\GnuPG\bin\gpg.exe",
         os.path.expandvars(r"%LOCALAPPDATA%\Programs\GnuPG\bin\gpg.exe"),
-    ]:
+    ] if os.name == "nt" else []
+    for path in installed:
         if os.path.isfile(path):
             return path
-    return None
+    return shutil.which("gpg")
 
 
 def strip_gpg_signature(in_path, out_path, progress_cb=None):

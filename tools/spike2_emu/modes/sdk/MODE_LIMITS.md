@@ -292,7 +292,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 ## Before you flash a real machine
 
-- It's a preview. Treat a card with modes as a test card and keep your stock image.
+- Treat a card with modes as a test card and keep your stock image.
 - A card with modes never sends scores to Insider Connected, and the game awards no Insider achievements.
 - Modes are built for one game version. After a Stern update, Write the card again: until then the modes don't run and the game plays stock.
 

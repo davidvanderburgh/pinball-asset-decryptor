@@ -25,21 +25,18 @@ with the loop below. Everything you need is in these files.
 | `census_mode.c`, `shot_census.py` | Measure which shot each switch makes, and turn that into a port's `shot` lines. |
 | `lamp_map.py`, `lamp_probe.c` | Read a game's playfield inserts into a port's `lamp` lines; hold and read inserts by hand in the emulator ("Lights: named inserts"). |
 
-## The mode maker is a preview feature (in the app)
+## The mode maker is in every copy of the app
 
-In the app the mode maker ships DARK: the Modes tab, its example (TARGET RUSH) and film cutter, Try it,
-the Write tab's "Pending (Modes)" rows, a Write carrying a project's modes and code modes,
-and the game's own modes' numbers (item 145) reaching a card all ride on one preview
-switch, and it is off in every copy until a personal code turns it on (Settings, the gear,
-> Preview features: paste the code, Unlock). A code names the person, the features and the
-last day it works, and is signed with David's Ed25519 key (`tools/preview_code.py issue
---name "..." --days 90`; the app checks it in pure Python, `pinball_decryptor/core/preview.py`,
-once at start-up). With the switch off, a Write of a project that holds modes builds
-everything else exactly as a build without the mode editor does, leaves the modes and the
-game's own modes' numbers off the card, and says so in one log line. What ships to everyone
-is the emulator side: a card's own modes run in the Emulate tab either way. Nothing in this
-folder needs the switch: a mode built here with `build_mode.sh` and tried with the loop below
-runs in the emulator as it always did.
+Anyone can use it: no code, no sign-up, nothing to unlock. The Modes tab, its example (TARGET
+RUSH) and film cutter, Try it, the Write tab's "Pending (Modes)" rows, a Write carrying a
+project's modes and code modes, and the game's own modes' numbers (item 145) reaching a card
+are on in every copy (PAD-763; `pinball_decryptor/core/preview.py` lists the mode maker under
+`RELEASED`, and an old preview code that names it says it is no longer needed). That includes
+the whole-game route: a mode that switches Stern's rules off and is the game (PAD-1400), your
+modes layered over it (PAD-1401), progress saved between games (PAD-1402), the Action and
+flipper buttons as shots (PAD-1403), bar meters and a screen fade (PAD-1405) and your own
+attract in place of the game's (PAD-1407). Nothing in this folder needs the app either: a mode
+built here with `build_mode.sh` and tried with the loop below runs in the emulator.
 
 ## What a mode is
 

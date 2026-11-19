@@ -59,6 +59,7 @@ static volatile int gms_live;                            /* PAD-945's, not under
 static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask) {}
 static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity) {}
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity) {}   /* PAD-1031's */
+static void btn_edge(unsigned id, unsigned level, unsigned polarity) {}   /* PAD-1403's button shots */
 static unsigned hide_id;                                 /* PAD-1051: the switch a hider wants (0: none) */
 static int coop_hides(unsigned id) { return hide_id && id == hide_id; }
 

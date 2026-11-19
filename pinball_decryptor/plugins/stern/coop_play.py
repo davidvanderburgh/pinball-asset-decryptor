@@ -70,14 +70,15 @@ MENU_OFF, MENU_CLASSIC, MENU_ENHANCED = 0, 1, 2
 MENU_HELP = "0 Off. 1 Classic. 2 Enhanced. Games on start menu. Insider off"
 #: how a teammate joins, for the tab and the log. PAD-1443: the games are always on the start menu, no service row
 HOW = ("hold both flipper buttons in attract for the start menu: CO-OP PLAY (each Start in the first ball adds a "
-       "teammate, 2-4 players share one game), with characters ENHANCED CO-OP (the same, each teammate picking a "
-       "character whose ability holds while they are up) and ENHANCED STANDARD (a normal game of competing players, "
-       "each picking a character), and TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1; or hold the right flipper button and "
-       "press Start to add a teammate; a plain Start is the game's own game as always")
+       "teammate, 2-4 players share one game) and TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1. With characters, a game "
+       "picked there (one of these, STANDARD or a challenge) first asks NORMAL, CHARACTERS (each player picks one, "
+       "no special abilities) or ENHANCED (each character's ability holds while its player is up); or hold the right "
+       "flipper button and press Start to add a teammate; a plain Start is the game's own game as always")
 #: PAD-1443: what the card reports, for the tab (daveyvandy: "if you select it then you don't send anything to insider
 #: connect")
 INSIDER_HOW = ("A game played as one of these stays off Insider Connected (its scores, high scores and achievements "
-               "stay on the machine); a Standard game reports as it always has.")
+               "stay on the machine); a Standard game reports as it always has, and so do STANDARD and a challenge "
+               "played NORMAL or CHARACTERS.")
 #: PAD-1042: how a team game is played, for the tab and the log
 TEAMS_HOW = ("pick TEAM PLAY 2 VS 2 on the start menu (both flipper buttons in attract) and one Start adds all "
              "four players: players 1 and 3 against players 2 and 4, each team with its own score and progress, the "

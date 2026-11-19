@@ -19009,7 +19009,10 @@ static struct {
  * NORMAL (co-op and team: no character pick; Standard and a challenge: the game's own game), CHARACTERS (each player
  * picks one, no special abilities: Classic) or ENHANCED (the picks' abilities hold). The flippers walk it, Action takes
  * one (with no Action button, the one shown is taken after STY_AUTO_MS); its cards are PadCoopStyle_1..3 among the
- * pick's screens, the top line says it too. A Start meanwhile adds a player as it would. Then the intro, the players'
+ * pick's screens, the top line says it too. It comes up once the game's start film is over (Godzilla's, with its
+ * "USE FLIPPERS TO SELECT LANGUAGE" bar: emulator, LE 1.16 - the card under the film, the flippers taken from the
+ * language) and any co-op intro before the ball; a Standard or challenge game's film stays the game's own until its
+ * style is known. A Start meanwhile adds a player as it would. Then the intro, the players'
  * lines and the picks run as they always have. Standard or a challenge at NORMAL or CHARACTERS stays on Insider
  * Connected (no ability, nothing unlike the game's own); ENHANCED keeps the rest of that game off it. */
 #define STY_STANDARD 7u                  /* the chooser's own kinds past TEAM_KIND_LAST: the game's STANDARD */
@@ -19017,7 +19020,11 @@ static struct {
 #define STY_AUTO_MS 20000ul              /* with no Action button: the one shown is taken this long after the last walk */
 #define STY_MOST_MS 300000ul             /* the serve never waits longer than this for a chooser left alone */
 static struct {
-    volatile int open;                   /* the chooser is up */
+    volatile int open;                   /* the chooser is asked: ball 1 waits for it */
+    volatile int ready;                  /* ... and up: the game's start film, its language bar and the co-op intro
+                                          * are over (until then the flippers are the game's) */
+    int film_seen;                       /* the game's start film was up since it opened */
+    unsigned long opened_ms, down_ms;    /* when it was asked; when the film was last seen up */
     volatile int walk, take;             /* the flippers' steps, Action (from the switch drain) */
     int at;                              /* the one shown: 0 NORMAL, 1 CHARACTERS, 2 ENHANCED */
     int phase;                           /* the top line's step */
@@ -20404,6 +20411,8 @@ static void coop_intro_begin(const char *why);   /* PAD-1114, below */
 static int ci_film_due(void);
 static void coop_picked_begin(int c);           /* PAD-1123, below */
 static void coop_lobby_now(int formed);         /* PAD-1316, below */
+static int ci_film_up(void);                    /* PAD-1114, below */
+static void coop_pick_open(unsigned t);
 static void ci_start_poll(int formed);          /* PAD-1114, below */
 static int ci_start_was;
 static void coop_turn_show(void);
@@ -20449,11 +20458,22 @@ static void sty_open(unsigned kind)
     sty.at = 0;
     sty.phase = 0;
     sty.walk = sty.take = 0;
-    sty.said_ms = sty.walk_ms = pm_ms();
+    sty.said_ms = sty.walk_ms = sty.opened_ms = sty.down_ms = pm_ms();
+    sty.film_seen = 0;
+    sty.ready = 0;
     sty.open = 1;
     say("styles: %s from the start menu - NORMAL, CHARACTERS or ENHANCED first (the flippers walk, %s); ball 1 waits",
         sty_label(kind), coop_action ? "Action takes one" : "the one shown is taken after 20 s");
-    sty_say();
+}
+
+/* PAD-1449: the chooser may come up now: no start film of the game's up (or seen go down 0.5 s ago; none seen 2 s after
+ * it was asked, where the port can tell), and no co-op intro before its ball (CI_BALL is the intro waiting for the
+ * serve the chooser holds) (tests lift it verbatim) */
+static int sty_may_show(int film_up, int film_seen, int intro_phase, unsigned long since_down, unsigned long since_open)
+{
+    if (film_up == 1 || (intro_phase != CI_OFF && intro_phase != CI_BALL)) return 0;
+    if (film_seen) return since_down >= 500ul;
+    return film_up < 0 || since_open >= 2000ul;
 }
 
 /* the style taken: the game goes on as it says - the intro first where there is one, so the serve's hold has it */
@@ -20474,13 +20494,14 @@ static void sty_close(const char *how)
             say("styles: %s - each player picks a character at their first ball%s", sty_label(sty.kind),
                 st == 2u ? ", no special abilities (Insider Connected as it always has)"
                          : ", its ability holds while they are up (off Insider Connected)");
-            coop.join_n = 1;                                  /* ENHANCED STANDARD's lines, then the pick */
-            coop.join_step = 0;
-            coop.join_at = pm_ms();
+            coop.join_n = 0;                                  /* the chooser said what it is: the pick at once */
         }
     } else {
         coop.plain = st == 1u;                                /* NORMAL: no character pick (PAD-1443's CO-OP PLAY) */
         if (st == 1u) say("styles: no character pick - the balls are served as the game serves them");
+        if (!coop.teams) coop.join_n = 0;                     /* CO-OP PLAY: the pick at once */
+        else if (coop.join_step < 3u * (COOP_JOIN_ROUNDS - 1u))   /* the teams' lines once (the film that hid them */
+            coop.join_step = 3u * (COOP_JOIN_ROUNDS - 1u);        /* is over), then the pick */
         coop.join_at = pm_ms();
     }
     if (coop_teammates() && ci.clip[0] && !ci.phase && pm_player())
@@ -20488,7 +20509,9 @@ static void sty_close(const char *how)
                          : "a co-op game begins");
     if (coop.join_n) coop_join_show();
     else coop_turn_show();
-    sty.open = 0;
+    sty.open = sty.ready = 0;
+    if (coop_teammates() && !coop.join_n)                     /* the first pick now (an intro under way keeps it for */
+        coop_pick_open(coop.turn >= 1 ? coop.turn : 1u);      /* its end: ci.pick_who) */
 }
 
 /* from the tick: the walk, the take, the top line's steps */
@@ -20497,8 +20520,24 @@ static void sty_tick(void)
     int w;
     if (!sty.open) return;
     if (!coop_teammates() || !pm_player()) {
-        sty.open = 0;
+        sty.open = sty.ready = 0;
         say("styles: the chooser is gone - the game ended");
+        return;
+    }
+    if (!sty.ready) {
+        int up = ci_film_up();
+        if (up == 1) {
+            if (!sty.film_seen) say("styles: the game's start film is up - the chooser waits for it");
+            sty.film_seen = 1;
+            sty.down_ms = pm_ms();
+        }
+        if (!sty_may_show(up, sty.film_seen, ci.phase, pm_ms() - sty.down_ms, pm_ms() - sty.opened_ms)) return;
+        sty.walk = sty.take = 0;
+        sty.phase = 0;
+        sty.said_ms = sty.walk_ms = pm_ms();
+        sty.ready = 1;
+        say("styles: the chooser is up (%lu ms after it was asked)", pm_ms() - sty.opened_ms);
+        sty_say();
         return;
     }
     if ((w = sty.walk) != 0) {
@@ -20655,7 +20694,7 @@ static int coop_hides(unsigned id)
         return 1;                         /* PAD-1114 round 2: in the film the flippers choose the language */
     if (coop_live && ci.holding && pk.open && id && (id == coop_left || id == coop.button || id == coop_action))
         return 1;                         /* ... and the pick has them while ball 1 is not served yet */
-    if (coop_live && sty.open && id && (id == coop_left || id == coop.button || id == coop_action))
+    if (coop_live && sty.open && sty.ready && id && (id == coop_left || id == coop.button || id == coop_action))
         return 1;                         /* PAD-1449: ... and the style chooser */
     if (!coop_live || !pk.open || pk.moved || !id || (id != coop_left && id != coop.button && id != coop_action))
         return 0;
@@ -20722,7 +20761,7 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
         }
         return;
     }
-    if (sty.open && coop_teammates()) {                       /* PAD-1449: the style chooser has them */
+    if (sty.open && sty.ready && coop_teammates()) {          /* PAD-1449: the style chooser has them */
         if ((level & 1u) != closed) return;
         if (id == coop_left) sty.walk--;
         else if (id == coop.button) sty.walk++;
@@ -21179,7 +21218,7 @@ static void coop_screens_tick(void)
             "on one", got, coop_ch_n + 1, coop_scr_scene, k);
     }
     want = !coop_teammates() || !pm_in_game() || sty.open ? -1 : pk.open ? pk.at : coop_done.on ? coop_done.c : -1;
-    want_sty = sty.open && coop_teammates() && pm_player() && coop_sty_scr[sty.at] ? sty.at : -1;   /* PAD-1449 */
+    want_sty = sty.open && sty.ready && coop_teammates() && pm_player() && coop_sty_scr[sty.at] ? sty.at : -1;
     if (want_sty != coop_sty_shown) {
         if (coop_sty_shown >= 0) pm_show(coop_sty_scr[coop_sty_shown], 0);
         if (want_sty >= 0) pm_show(coop_sty_scr[want_sty], 1);
@@ -21942,6 +21981,8 @@ static int ci_film_due(void)
     int held = ci_film_held(coop_ch_n && coop_pick_on,
                             coop_button_held() || (coop.held_ms && pm_ms() - (coop.held_ms & ~1ul) <= CI_HELD_MS),
                             coop_switched_on() || coop_teams_switched_on() != 0);
+    if (sty.open && (sty.kind == STY_STANDARD || sty.kind == STY_CHALLENGE)) return 0;   /* PAD-1449: its style
+                                                              * first: NORMAL is the game's own film */
     return ci.clip[0] && coop.on && (ci.phase == CI_START || held
                                      || (tm.pending && pm_ms() - tm.seen_ms < TEAM_PICK_MS)
                                      /* the start menu's team fill runs at ball_start, before the film is asked for */
@@ -25901,22 +25942,39 @@ static unsigned team_entry_at(const unsigned char *ent, unsigned kat, unsigned n
 }
 
 /* PAD-1449: the style chooser's kind for one of the game's own entries of an entry list: its kind 0 is Standard, the
- * challenges are from the port's challenge_menu_kind on (0: the port names none); anything else (Competition) none
- * (tests lift it verbatim) */
-static unsigned sty_own_of_kind(unsigned kind, unsigned first_challenge)
+ * port's challenge_menu_kind (the kind the game makes a challenge game of; 0: the port names none) a challenge;
+ * anything else (Competition, a jukebox) none (tests lift it verbatim) */
+static unsigned sty_own_of_kind(unsigned kind, unsigned challenge_kind)
 {
     if (!kind) return STY_STANDARD;
-    if (first_challenge && kind >= first_challenge && kind < TEAM_KIND) return STY_CHALLENGE;
+    if (challenge_kind && kind == challenge_kind) return STY_CHALLENGE;
     return 0u;
 }
 
-/* PAD-1449: ... of an index menu: Standard's index, Competition's (none), any other the game's challenges (Godzilla:
- * KING OF THE MONSTERS, its TIME ATTACK) (tests lift it verbatim) */
-static unsigned sty_own_of_index(unsigned index, unsigned standard, unsigned competition)
+/* PAD-1449: ... of an index menu: Standard's index, and the indices the port names comp_menu_challenge_0.. (the
+ * game-mode table's entries with the challenge flag: Godzilla's KING OF THE MONSTERS and its TIME ATTACK); not
+ * Competition, DJ MIXER or the rest (tests lift it verbatim) */
+static unsigned sty_own_of_index(unsigned index, unsigned standard, const unsigned *challenges, unsigned n)
 {
+    unsigned k;
+    if (!index) return 0u;
     if (index == standard) return STY_STANDARD;
-    if (!index || index == competition) return 0u;
-    return STY_CHALLENGE;
+    for (k = 0; k < n; k++)
+        if (challenges[k] == index) return STY_CHALLENGE;
+    return 0u;
+}
+
+/* PAD-1449: the port's challenge indices of the index menu (comp_menu_challenge_0..7) into ch; how many */
+static unsigned sty_challenge_indices(unsigned *ch)
+{
+    static const char *const names[8] = { "comp_menu_challenge_0", "comp_menu_challenge_1", "comp_menu_challenge_2",
+                                          "comp_menu_challenge_3", "comp_menu_challenge_4", "comp_menu_challenge_5",
+                                          "comp_menu_challenge_6", "comp_menu_challenge_7" };
+    unsigned k, n = 0;
+    long v;
+    for (k = 0; k < 8; k++)
+        if ((v = pm_port_value(names[k], 0)) > 0) ch[n++] = (unsigned)v;
+    return n;
 }
 
 static int sty_wanted(void);
@@ -26041,9 +26099,10 @@ static void team_menu_frame(pm_reg *r)
         tm.seen_ms = pm_ms();
         tm.own = 0;
     } else {
+        unsigned ch[8], nch = sty_challenge_indices(ch);
         team_frame_restore();
-        sty_menu_own(c < *count + last ? sty_own_of_index(list[c], idx, (unsigned)pm_port_value("comp_menu_index", 0))
-                                       : 0u);           /* PAD-1449: the game's own Standard or a challenge */
+        sty_menu_own(c < *count + last ? sty_own_of_index(list[c], idx, ch, nch) : 0u);   /* PAD-1449: the game's own
+                                                                                        * Standard or a challenge */
     }
     if (tm.pending != was || (tm.pending && tm.kind != was_kind))
         say("teams: %s %s on the start menu", team_kind_name(tm.pending ? tm.kind : was_kind),

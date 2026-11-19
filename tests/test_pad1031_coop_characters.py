@@ -34,7 +34,8 @@ static unsigned long pm_ms(void) { return now_ms; }
 static int in_game = 1;                                  /* PAD-1044: 0 is busy (a menu over the game) */
 static int pm_in_game(void) { return in_game; }
 static unsigned pm_player(void) { return 1; }
-static struct { int on; unsigned button, game, n, turn; int plain; } coop;   /* plain: PAD-1443 */
+static struct { int on; unsigned button, game, n, turn; int plain; unsigned style; } coop;   /* plain: PAD-1443 */
+static struct { volatile int open, ready, walk, take; int at; unsigned kind; } sty;   /* PAD-1449: no chooser here */
 static unsigned coop_teammates(void) { return coop.n; }
 static int str_starts(const char *s, const char *p) { return !strncmp(s, p, strlen(p)); }
 @NUMBER@
@@ -577,8 +578,12 @@ def test_the_pick_has_a_screen_for_each_character_and_random(tmp_path):
     CP.save_picture(project, 1, str(pic))
     assert CP.load_characters(project)["list"][1]["picture"] == "coop/character_2.png"
     screens = CP.pick_screens(project, words_for=CP.words_for())
-    assert [s["name"] for s in screens] == ["PadCoop_1", "PadCoop_2", "PadCoop_Random"]
-    for sc in screens:                                                 # one finished card each, all words on it
+    names = [s["name"] for s in screens]
+    assert names[:3] == ["PadCoop_1", "PadCoop_2", "PadCoop_Random"]
+    # PAD-1449: the Classic patches (the start menu's CHARACTERS) and the style chooser's three cards after them
+    assert names[-3:] == ["PadCoopStyle_1", "PadCoopStyle_2", "PadCoopStyle_3"]
+    assert all(n.startswith("PadCoopClassic_") for n in names[3:-3])
+    for sc in [s for s in screens if not s["name"].startswith("PadCoopClassic_")]:   # one finished card each
         assert sc["art_rgba"].shape == (CP.CARD_SIZE[1], CP.CARD_SIZE[0], 4) and sc["words"] == " "
         assert (sc["x"], sc["y"]) == CP.CARD_AT
     px, py = 40 + 190, 84 + 150                                        # the portrait's middle on card 2: the picture
@@ -615,7 +620,9 @@ def test_co_op_alone_puts_the_pick_screens_in_the_hud_and_names_the_scene(tmp_pa
     result = MW.ModePlan(project=project, profile=Prof(), port="", build=None)
     MW.coop_into(result, b"", str(tmp_path / "scratch"), stock_hud=b"HUD", stock_font=b"")
     # PAD-1028: + the award card; PAD-1219: + the final score's band
-    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopAward_1", "PadCoopFinal"]
+    # PAD-1449: + the style chooser's three cards
+    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopStyle_1", "PadCoopStyle_2", "PadCoopStyle_3",
+                            "PadCoopAward_1", "PadCoopFinal"]
     (card, src), = result.replaced
     assert card == "godzilla_le/godzilla_le/assets/lcd/auto_loaded/32e6ae28/scene.radium"
     assert open(src, "rb").read() == b"HUD+screens"

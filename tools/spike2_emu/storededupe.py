@@ -224,27 +224,55 @@ class HashCache:
 # ---------------------------------------------------------------------------
 
 class Index:
+    """Sorted (hash, packed fid/block) arrays, plus a small unsorted side list.
+    Re-sorting the whole index after every file was seconds a file at ~50M
+    entries - fine for 60 cards, hours for Spike 3's thousands of asset files
+    (2026-11-19) - so new entries wait in `pending` and are merged in only
+    when it grows past MERGE_AT."""
+    MERGE_AT = 500_000          # the side list is sorted at each lookup: kept small (tens of ms)
+
     def __init__(self):
         self.h = np.zeros(0, np.uint64)
         self.v = np.zeros(0, np.uint64)          # fid << 40 | block
+        self.ph, self.pv = [], []
+        self.pn = 0
         self.paths = []
+
+    @staticmethod
+    def _find(hs, vs, h, out):
+        if hs.size == 0 or h.size == 0:
+            return
+        pos = np.minimum(np.searchsorted(hs, h), hs.size - 1)
+        hit = (hs[pos] == h) & (out < 0)
+        out[hit] = vs[pos[hit]].astype(np.int64)
 
     def lookup(self, h):
         """For each hash: the packed (fid, block) already holding it, or -1."""
         out = np.full(h.size, -1, np.int64)
-        if self.h.size == 0 or h.size == 0:
-            return out
-        pos = np.minimum(np.searchsorted(self.h, h), self.h.size - 1)
-        hit = self.h[pos] == h
-        out[hit] = self.v[pos[hit]].astype(np.int64)
+        self._find(self.h, self.v, h, out)
+        if self.pn:
+            ph, pv = np.concatenate(self.ph), np.concatenate(self.pv)
+            o = np.argsort(ph, kind="stable")
+            self._find(ph[o], pv[o], h, out)
         return out
 
     def add(self, fid, h, b):
-        v = (np.uint64(fid) << np.uint64(40)) | b
-        h2 = np.concatenate([self.h, h])
-        v2 = np.concatenate([self.v, v])
+        if h.size == 0:
+            return
+        self.ph.append(h)
+        self.pv.append((np.uint64(fid) << np.uint64(40)) | b)
+        self.pn += h.size
+        if self.pn >= self.MERGE_AT:
+            self.merge()
+
+    def merge(self):
+        if not self.pn:
+            return
+        h2 = np.concatenate([self.h] + self.ph)
+        v2 = np.concatenate([self.v] + self.pv)
         o = np.argsort(h2, kind="stable")
         self.h, self.v = h2[o], v2[o]
+        self.ph, self.pv, self.pn = [], [], 0
 
 
 def _runs(dst_blocks, src_fids, src_blocks):
@@ -430,7 +458,17 @@ def _copy_meta(src, dst, st):
     os.utime(dst, ns=(st.st_atime_ns, st.st_mtime_ns), follow_symlinks=False)
 
 
-def _copy_sparse(src, dst):
+def _syncfs(path):
+    """Flush one filesystem (os.sync() hangs under WSL2 on virtiofs mounts: sync only the store)."""
+    import ctypes
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        ctypes.CDLL(None, use_errno=True).syncfs(fd)
+    finally:
+        os.close(fd)
+
+
+def _copy_sparse(src, dst, sync=True):
     """Copy only the data ranges; holes stay holes."""
     sfd = os.open(src, os.O_RDONLY)
     dfd = os.open(dst + ".ingest", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
@@ -449,7 +487,10 @@ def _copy_sparse(src, dst):
                 os.pwrite(dfd, b, p)
                 p += len(b)
         os.ftruncate(dfd, size)
-        os.fsync(dfd)
+        # a card is flushed before it takes its name; Spike 3's 170,000 small files are not (one fsync each held the
+        # copy to ~1,000 files a minute) - cmd_ingest flushes the store once at the end, and swap byte-compares all
+        if sync:
+            os.fsync(dfd)
     finally:
         os.close(sfd)
         os.close(dfd)
@@ -511,7 +552,11 @@ def cmd_ingest(src, dst, delete=False, host=None, host_min_gb=20):
             dns.insert(0, "library")
         rel = os.path.relpath(dp, src)
         dirs.append((dp, os.path.join(dst, rel) if rel != "." else dst))
-        for n in sorted(fns):
+        # a link to a FOLDER is listed among the folders (and, not followed, never walked): it is copied as the link it
+        # is. Missed, 191 of Spike 3's links were left out of the first copy (PAD-1453, found by comparing links).
+        links = [x for x in dns if os.path.islink(os.path.join(dp, x))]
+        dns[:] = [x for x in dns if x not in links]
+        for n in sorted(fns + links):
             order.append((os.path.join(dp, n), os.path.join(dst, rel, n) if rel != "." else os.path.join(dst, n)))
     t0 = time.time()
     copied = 0
@@ -539,7 +584,7 @@ def cmd_ingest(src, dst, delete=False, host=None, host_min_gb=20):
                     print("ingest\tstopped\t%d" % i, flush=True)
                     return 3
                 try:
-                    _copy_sparse(s, t)
+                    _copy_sparse(s, t, sync=st.st_size >= MIN_FILE)
                 except FileNotFoundError:
                     continue
                 if st.st_size >= MIN_FILE:
@@ -554,6 +599,7 @@ def cmd_ingest(src, dst, delete=False, host=None, host_min_gb=20):
                                       ", %.2f GiB shared" % (got / 2 ** 30) if got else ""))
         for sdir, ddir in reversed(dirs):
             _copy_meta(sdir, ddir, os.lstat(sdir))
+        _syncfs(dst)
     finally:
         d.close()
     print("ingest\t%d\t%d\t%d\t%d" % (len(order), copied, d.shared, d.differs + d.failed), flush=True)
@@ -593,10 +639,19 @@ def cmd_verify(src, dst):
     bad = n = 0
     for dp, dns, fns in os.walk(src):
         dns[:] = sorted(x for x in dns if x not in _SKIP_DIRS)
-        for f in sorted(fns):
+        links = [x for x in dns if os.path.islink(os.path.join(dp, x))]
+        dns[:] = [x for x in dns if x not in links]
+        for f in sorted(fns + links):
             s = os.path.join(dp, f)
             t = os.path.join(dst, os.path.relpath(s, src))
             st = os.lstat(s)
+            if stat.S_ISLNK(st.st_mode):
+                # links too, to files and to folders: the same target, as a link
+                n += 1
+                if not (os.path.islink(t) and os.readlink(t) == os.readlink(s)):
+                    bad += 1
+                    say("DIFFERS (link): %s" % os.path.relpath(s, src))
+                continue
             if not stat.S_ISREG(st.st_mode):
                 continue
             n += 1

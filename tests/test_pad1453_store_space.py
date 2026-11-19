@@ -203,12 +203,34 @@ def test_zero_blocks_become_holes_and_the_file_reads_and_dates_the_same(tmp_path
         assert after.st_blocks < before.st_blocks
 
 
+@pytest.mark.skipif(not hasattr(os, "SEEK_DATA") or not hasattr(os, "symlink"), reason="Linux")
+def test_links_to_folders_are_copied_and_verified_as_links(tmp_path, monkeypatch):
+    # os.walk lists a link to a folder among the folders: the first copy left out 191 of Spike 3's
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    (src / "games" / "pad" / "img0" / "data").mkdir(parents=True)
+    (src / "games" / "pad" / "img0" / "data" / "a.bin").write_bytes(b"x" * 100)
+    os.symlink("pad/img0/data", str(src / "games" / "data"))            # to a folder
+    os.symlink("data/a.bin", str(src / "games" / "pad" / "img0" / "a"))  # to a file
+    dst.mkdir()
+    monkeypatch.setattr(sd, "_cache_dir", lambda _r: str(tmp_path / "cache"))
+    # a copy without the folder link: verify says so
+    os.makedirs(str(dst / "games" / "pad" / "img0" / "data"))
+    (dst / "games" / "pad" / "img0" / "data" / "a.bin").write_bytes(b"x" * 100)
+    os.symlink("data/a.bin", str(dst / "games" / "pad" / "img0" / "a"))
+    assert sd.cmd_verify(str(src), str(dst)) == 1
+    # the copy now brings it, as a link
+    assert sd.cmd_ingest(str(src), str(dst)) == 0
+    assert os.path.islink(str(dst / "games" / "data")) and os.readlink(str(dst / "games" / "data")) == "pad/img0/data"
+    assert sd.cmd_verify(str(src), str(dst)) == 0
+
+
 def test_the_copy_sets_the_size_before_writing():
     src = _text("storededupe.py")
     body = src[src.index("def _copy_sparse"):src.index("def cmd_ingest")]
     assert body.index("os.ftruncate(dfd, size)") < body.index("os.pwrite")
     ingest = src[src.index("def cmd_ingest"):src.index("def cmd_dezero")]
-    after = ingest[ingest.index("_copy_sparse(s, t)"):]
+    after = ingest[ingest.index("_copy_sparse(s, t, sync=st.st_size >= MIN_FILE)"):]
+    assert "_syncfs(dst)" in ingest                   # small files skip their own fsync: the store is flushed once
     assert after.index("punch_zeros(t)") < after.index("_copy_meta(s, t, st)")
 
 

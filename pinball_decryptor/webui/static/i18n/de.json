@@ -12995,5 +12995,11 @@
 "the new stock card image, straight from the manufacturer": "das neue Original-Kartenabbild, direkt vom Hersteller",
 "defaults to the new card's folder": "standardmäßig der Ordner der neuen Karte",
 "What's new in this version?": "Was ist neu in dieser Version?",
-"Open the full list": "Vollständige Liste öffnen"
+"Open the full list": "Vollständige Liste öffnen",
+"It ports a game I wrote in MPF (YAML and Python)": "Es portiert ein Spiel, das ich in MPF geschrieben habe (YAML und Python)",
+"A game written in MPF": "Ein in MPF geschriebenes Spiel",
+"The agent is told to read MPF_PORTING.md too: how MPF's modes, shots, counters, timers, variables, ball saves, multiballs and widgets become the SDK's calls.": "Der Agent soll auch MPF_PORTING.md lesen: wie die Modi, Schüsse, Zähler, Timer, Variablen, Ball-Saves, Multiballs und Widgets von MPF zu Aufrufen des SDK werden.",
+"From the Mission Pinball Framework": "Aus dem Mission Pinball Framework",
+"A game written in MPF: its modes, shots, counters, timers, variables and widgets, and the SDK's call for each.": "Ein in MPF geschriebenes Spiel: seine Modi, Schüsse, Zähler, Timer, Variablen und Widgets und der Aufruf des SDK für jedes.",
+"Open MPF_PORTING.md, the porting guide": "MPF_PORTING.md öffnen, die Portierungsanleitung"
 }

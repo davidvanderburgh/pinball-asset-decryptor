@@ -15,6 +15,7 @@ with the loop below. Everything you need is in these files.
 | `examples/README.md` | The kit every code and blocks mode can build with, `examples/intricate_kit.h` (a shot debounce, the HUD at the glass's edges, the playfield's inserts, light shows, the display priority, a countdown, a pack ledger), and `examples/desk_harness.c`, which plays any mode at the desk against a fake game. No example modes: the app ships none written for one title (PAD-691). |
 | `pad_mode_assets.h` | A code mode's OWN clip, screen, music and calls, as the build carried them (see "A code mode's own clip, screen, music and calls"). |
 | `mode_file.c` | The mode that runs the Modes tab's mode files. It is an ordinary mode on this API. |
+| `MPF_PORTING.md` | A game already written in the Mission Pinball Framework (YAML + Python): each MPF part and the SDK call it becomes, with a whole game ported and played (PAD-1410). |
 | `MODE_PARAMETERS.md` | Every key a mode file takes, every field the Modes tab saves, every call above, and what is measured about each. |
 | `pad_mode_runtime.c` | The runtime, compiled into every mode. You do not edit it. |
 | `ports/<game>-<version>.port` | One per game build: where the game's functions are, plus its shot names, scenes and callouts. |
@@ -35,7 +36,8 @@ are on in every copy (PAD-763; `pinball_decryptor/core/preview.py` lists the mod
 the whole-game route: a mode that switches Stern's rules off and is the game (PAD-1400), your
 modes layered over it (PAD-1401), progress saved between games (PAD-1402), the Action and
 flipper buttons as shots (PAD-1403), bar meters and a screen fade (PAD-1405) and your own
-attract in place of the game's (PAD-1407). Nothing in this folder needs the app either: a mode
+attract in place of the game's (PAD-1407). A game already written in MPF ports onto them by `MPF_PORTING.md`
+(PAD-1410). Nothing in this folder needs the app either: a mode
 built here with `build_mode.sh` and tried with the loop below runs in the emulator.
 
 ## What a mode is
@@ -6422,6 +6424,14 @@ picking (the flippers wrapping and scrolling, Action, Start - no player added - 
 hit) with the ball waiting in the shooter lane meanwhile; and on all 53 newest Spike 2 builds the menu drawn, a flipper
 move and Action (Start on the three with no Action button) and its time each taking the one highlighted
 (`docs/plans/pad1404_flipper_menus.md`).
+
+**A menu at the game's start (PAD-1410).** A game plays its own start-of-game video when Start is pressed, over the
+whole glass and over every screen of the modes'; a menu opened as the game starts (a whole-game mode's, the first
+thing it does) is drawn under it, and with a time shorter than the video it is picked by its time unseen. Uncanny X-Men
+0.98's runs about 15 s, no flipper press skips it, and no call sees it (`pm_display_covered` and `pm_game_words` read 0
+all through it, emulator, LE). Open such a menu after it: the PAD-1410 port's roster waits 17 s from the game's start on
+player 1's first ball (later players have no such video), and a ball launched before then keeps the player's last
+pick instead of a menu over a ball in play. A menu opened later in a game (a mode's start, a scoop) is not affected.
 
 ## Co-op play (PAD-1017)
 

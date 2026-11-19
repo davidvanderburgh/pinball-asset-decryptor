@@ -11,6 +11,11 @@ David asked why 20SidedDies' "Uncanny X-Men 2.0" can't be done in PAD. The sourc
 > rows 9 and 10 in PAD-1405 and row 17 in PAD-1407. Menus (row 8, PAD-1404), the game's coils (row 11, PAD-1406),
 > sharing (row 20, PAD-1408) and the MPF porting guide (row 19, PAD-1410) are still open. The table below is as
 > it was written.
+>
+> **Row 19 (PAD-1410):** `tools/spike2_emu/modes/sdk/MPF_PORTING.md` maps an MPF game's modes, events, shots, logic
+> blocks, variables, ball saves, multiballs, carousels and widgets onto the SDK, and a whole game written in MPF and
+> ported by it (`docs/plans/pad1410_mpf_port/`) played on X-Men LE and Pro 0.98 in the emulator. The new-mode
+> wizard's C step offers the guide and names it in the agent's brief for a game written in MPF.
 
 ## The short answer
 

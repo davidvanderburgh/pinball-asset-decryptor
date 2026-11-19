@@ -1120,6 +1120,10 @@ class TryItMixin:
     def sdk_doc(self):
         return os.path.join(MR.sdk_dir(), "MODE_SDK.md")
 
+    def mpf_doc(self):
+        """PAD-1410: porting a game written in the Mission Pinball Framework to the SDK (beside MODE_SDK.md)."""
+        return os.path.join(MR.sdk_dir(), "MPF_PORTING.md")
+
     def limits_doc(self):
         """What a mode can and can't do (PAD-380). The Modes tips show its parts in the
         app's own Tips window (help_content._limits, PAD-386); nothing opens the file."""

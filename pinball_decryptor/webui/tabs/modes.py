@@ -435,7 +435,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                  stock={"msg": "", "rows": [], "on": False, "sel": None, "note": "",
                         "value": "", "row_on": False},
                  film=None, about=self.ABOUT_TIP, n_form=0, n_code=0, n_blocks=0, ready=False,
-                 fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(),
+                 fix_pages=[], spin=dict(self.SPINBOXES), sdk_doc=self.sdk_doc(), mpf_doc=self.mpf_doc(),
                  no_port_details="", ex_tip="", own_extra_ok=True, write_waits=False,
                  check_offer=False, check_wanted=False, check_done=None,
                  check_tip=self.CHECK_TIP, insider_note="", sheet=None)
@@ -4655,6 +4655,12 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
     @rpc
     def open_sdk_doc(self):
         self.open_path(self.sdk_doc())
+        return True
+
+    @rpc
+    def open_mpf_doc(self):
+        """PAD-1410: MPF_PORTING.md, the guide to porting a game written in MPF, opened as MODE_SDK.md is."""
+        self.open_path(self.mpf_doc())
         return True
 
     @rpc

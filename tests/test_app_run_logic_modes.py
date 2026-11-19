@@ -422,6 +422,10 @@ def test_modes_tab_new_code_mode_copies_the_template_and_opens_the_sdk(tmp_path,
         assert opened == [path]
         w.call("modes.open_sdk_doc")
         assert opened[-1].endswith("MODE_SDK.md") and os.path.isfile(opened[-1])
+        # PAD-1410: the MPF porting guide beside it, offered in the same step
+        w.call("modes.open_mpf_doc")
+        assert opened[-1].endswith("MPF_PORTING.md") and os.path.isfile(opened[-1])
+        assert _st(w)["mpf_doc"] == opened[-1]
 
 
 @pytest.mark.usefixtures("preview_modes_on")

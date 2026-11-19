@@ -1,0 +1,51 @@
+#config_version=6
+# UNCANNY STORY: the MPF game PAD-1410 ports to PAD (docs/plans/pad1410_mpf_port.md). A small whole game in the
+# shape of 20SidedDies' Uncanny X-Men 2.0, written the way an MPF maker writes one: this machine config plus one
+# config per mode under modes/. It is the INPUT of the port; xstory/xstory.c is what an agent makes of it
+# by following tools/spike2_emu/modes/sdk/MPF_PORTING.md.
+#
+# MPF's hardware sections (switches:, coils:, lights:, playfields:, ball_devices:) are not here on purpose: on PAD
+# the machine is Stern's, so the port uses the game's own names for them (the port's shot and lamp lines).
+
+game:
+  balls_per_game: 3
+
+modes:
+  - future       # the game-long base: the whole game
+  - roster       # the mutant pick at each player's first ball
+  - sentinel     # stacked over the base
+  - phoenix      # stacked over the sentinel, a multiball
+
+player_vars:
+  mutant_meter:          # fills from shots, spent by the Action button
+    initial_value: 0
+  sentinel_lit:
+    initial_value: 0
+  mutant:                # 0 cyclops, 1 storm, 2 wolverine
+    initial_value: 0
+
+# Story progress. MPF keeps machine_vars with persist: true in its data files; per-player story progress is
+# usually code of the maker's own (a player's name from a login, a file per profile). On PAD both are the
+# saved-progress store (pm_saved_get / pm_saved_put): player 0 is the machine's, players 1-4 each player's
+# (their Insider Connected login, else the player slot).
+machine_vars:
+  games_played:
+    initial_value: 0
+    persist: true
+  sentinels_defeated:
+    initial_value: 0
+    persist: true
+
+# per player, kept between games and power cycles (a custom saver in MPF):
+#   chapter   the story chapter, 1 at the first game, +1 each Sentinel defeated
+#   mutant    the last mutant picked, the roster's default next game
+
+switches:
+  s_action:        {number: ACTION}           # Stern: LOCKDOWN/ACTION BUTTON
+  s_flipper_left:  {number: LEFT_FLIPPER}     # Stern: LEFT FLIPPER BUTTON
+  s_flipper_right: {number: RIGHT_FLIPPER}    # Stern: RIGHT FLIPPER BUTTON
+  s_start:         {number: START}
+  s_left_ramp:     {number: LEFT_RAMP_EXIT}   # Stern: Left ramp exit opto
+  s_right_ramp:    {number: RIGHT_RAMP_EXIT}  # Stern: Right ramp exit opto
+  s_xjet:          {number: XJET_TARGET}      # Stern: Xjet tgt
+  s_dr_ramp:       {number: DR_RAMP_EXIT}     # Stern: Dr ramp exit

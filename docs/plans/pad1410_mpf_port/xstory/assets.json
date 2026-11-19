@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "name": "UNCANNY STORY",
+  "seconds": 600,
+  "screen": false,
+  "meters": [
+    {"label": "SENTINEL", "color": "#e02020"},
+    {"label": "PHOENIX", "color": "#ffb000"},
+    {"label": "MUTANT METER", "color": "#20b0ff"}
+  ],
+  "fades": [
+    {"color": "#000000", "style": "flat"},
+    {"color": "#ff0000", "style": "glow"}
+  ],
+  "menus": [
+    {"title": "CHOOSE YOUR MUTANT", "color": "#ffb000"}
+  ]
+}

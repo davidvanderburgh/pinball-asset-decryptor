@@ -1,0 +1,41 @@
+#config_version=6
+# A Sentinel with a health bar, stacked over the base. A drain does not end it: it resumes on the next ball.
+mode:
+  start_events: start_mode_sentinel
+  priority: 200
+  stop_on_ball_end: false
+
+ball_saves:
+  sentinel_save:
+    active_time: 10s
+    enable_events: mode_sentinel_started
+
+counters:
+  sentinel_health:          # 6 hits: a ramp is 1, an ability its mutant's damage
+    starting_count: 6
+    count_complete_value: 0
+    direction: down
+    count_events: right_ramp_hit, dr_ramp_hit
+    events_when_complete: sentinel_defeated
+  phoenix_lit:              # two Xjet hits while the Sentinel stands start the Phoenix
+    count_events: xjet_hit
+    count_complete_value: 2
+    reset_on_complete: true
+    events_when_complete: start_mode_phoenix
+
+variable_player:
+  right_ramp_hit:    {score: 5000}
+  dr_ramp_hit:       {score: 5000}
+  sentinel_defeated: {score: 50000}
+
+# kept between games: the player's chapter +1, the machine's sentinels_defeated +1
+machine_var_player:          # (MPF: a custom handler; on PAD pm_saved_put)
+  sentinel_defeated: {sentinels_defeated: 1}
+
+widgets:
+  sentinel_bar:
+    - type: bar
+      value: (device.counters.sentinel_health.value)
+      max: 6
+      label: SENTINEL
+      color: e02020

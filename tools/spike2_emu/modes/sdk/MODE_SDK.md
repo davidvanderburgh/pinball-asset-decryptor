@@ -1623,6 +1623,75 @@ own multiball; two players.
 
 `mode_project.BALL_SAVE_PROVEN` lists the proven builds, and the tab greys Ball save on any other build.
 
+## The flippers, in a mode that is the whole game (PAD-1406)
+
+A mode that is the whole game (`pm_own_game`, above) has switched off the rules that would kill the flippers - a
+"dead flippers" feature, the end of a wizard mode - so it may do it itself: `pm_flippers(0)` switches them off and
+`pm_flippers(1)` back on (the blocks: Mechanisms, *Flippers off* / *Flippers back on*). It goes through the game's own
+code, the framework's all-flippers off and on that PAD-733 found on Godzilla (`site flippers_off` / `flippers_on`, placed
+on every newest build by code: Uncanny X-Men LE 0.98 `0x38a114` / `0x38a1e8`, Pro `0x3ca20c` / `0x3ca2e0`). Emulator-proven on all 53 newest builds:
+each one's 2 to 4 flipper rules (padled v7) go dead with them off and come back on, and nothing else changes. They set
+or clear each flipper record's enable bit and nothing else; the node board's own flipper rule follows it, so the coils
+fire, when they fire, at the game's own powers, from the board, as they always do. The flippers alone: slingshots, pop
+bumpers, kickbacks and the ball devices play on.
+
+The runtime's limits, not the mode's to change:
+
+- Off: only the mode that has the whole game, in a game, not on a tilted ball, not while a drain to one ball runs.
+  It lasts the ball. The framework re-decides each flipper now and then by asking its listeners (bus hook `0x40`:
+  1 = off, 2 = on, then the single flipper's off or on), and a listener of the game's may answer on - Metallica 1.04's
+  did on every pass, so switching them off again each tick fought it (about 950 rule frames a second to its flipper
+  board, the flippers live). The runtime wraps that one call (`site flipper_query_call`, `flippers_on + 0xbc` on every
+  newest build) and answers 1 while a mode has them off, as a rule of the game's would.
+- Back on: only flippers a mode switched off. A tilt, the game's end of a ball (its bonus) and the game's own dead
+  flippers are the game's, never undone from here.
+- They come back by themselves when the mode ends or gives the game its rules back mid-ball, and at the next ball
+  (the game's own ball start turns them on, as after any ball). A tilt leaves them to the game.
+
+**The game's own devices (PAD-1406).** The coils the game's rules drive - toys, posts - are the whole game's mode's
+too. Two routes, both the game's own commands at the operator's adjustments, never a power or time of the mode's:
+
+- Held coils marked `value <name>_own_game 1` in the port: `pm_coil_hold` (the blocks' *Hold the ...*, marked "whole
+  game") refuses them to any other mode. Uncanny X-Men LE and Pro 0.98: the Cerebro post (node 9 coil 6, up to the
+  game's own 3.5 s) and the Sentinel jaw (9.2, 5 s); the LE also the Sentinel hand ramp (9.7) and finger (9.8), 3 s.
+  Each board address was read off the game's own coil records in the emulator, each command off the game's own
+  coil_fire calls that read those adjustments.
+- One-shot devices: `pm_coil_pulse(name)` (the blocks' *Fire the ...*) calls the game's own function that fires the
+  device (`site <name>_fire`, `text pulse_coils`): X-Men's Sentinel kicking target, the Sentinel's bash toy (LE
+  `0x337dc`, Pro `0x30148`: coil_fire(12, SENTINEL KICK TARGET DRAW POWER, DRAW TIME)). At most once a second, 20 a
+  minute, never when the operator disabled it.
+
+**The game's ball devices (PAD-1406).** With the game's rules off, a ball in a scoop is kicked out at once, but one in a
+lock stays there until ball search (emulator: Godzilla Pro's scoop, Turtles Pro's locks). The framework holds and lets go
+of every lock, scoop and eject through one call, keep(device, n): how many balls the device keeps, the rest ejected its own
+way (its power adjustment, its retries) - the call the game's own lock rules make (Turtles Pro: keep(3, 0) and keep(4, 0)
+release both locks). `pm_device_keep(name, n)` makes it for the whole game's mode (the blocks: *The ... keeps every ball*
+/ *lets its balls go*), by the game's own name for the device; the port lists them (`text ball_device_names`). The
+trough and the auto plunger are the game's alone, and so are the device kinds the call does not take (a VUK that cannot
+hold a ball). When the mode ends each device it touched keeps what the game had it keep.
+
+**A toy's own moves (PAD-1406).** A toy the game drives with a motor to its own switches is moved by the game's own
+command for each move: Uncanny X-Men LE's Sentinel head, `pm_toy("sentinel_head", "up")` / `"down"` (the blocks: *Move
+the Sentinel head up*), the two commands its service menu's test page gives (0x32f34, 0x32f78). The game ignores one
+while the head moves, while one of its own head processes runs, or unless the head sits at the other end; its motor
+(node 9 coil 5, the game's 86/255) runs it to the switch and the game stops it there. The X-Men Pro has no head motor.
+
+**Kickbacks (PAD-1406).** The framework keeps its kickbacks as a list beside the pop bumpers and slingshots (the three
+its tilt switches off together). Only Guardians of the Galaxy (Pro and LE 1.15) has any among the newest builds: the
+kickback on input 12 (off until the game's rules light it) and on input 23. `pm_kickback(on)` switches them all through
+the framework's own set(index, on) for each, which the node board's kickback rule follows - the board fires them, at
+the game's power; each is put back as the game had it when the mode ends. Sword of Rage's "kickback" is its own rule's,
+not the framework's, and stays the game's.
+
+The magnet's limit stays the game's own: X-Men's longest magnet command is its grab, 2.5 s on the LE (1.2 s on the
+Pro), and a hold is never longer; a mode grabs again after the runtime's 3 s.
+
+`pm_drain_to_one` (below) uses the same pair, on every build now. With the flippers dead the served ball must bring
+them back, so it needs the shooter lane: the port's `value shooter_lane_switch` (Godzilla 1.16), else the switch the
+game itself names "Shooter Lane" (or "Shooter Lane Opto"), and the trough's "Trough 1".."Trough 6", found by name in
+the game's own switch entries (`data sw_struct`; any case) and read as levels where the switch-edge hook counts no hits
+(Uncanny X-Men: the last ball home 10 s after the drain to one began, the flippers back then).
+
 ## Drain to one ball (PAD-733)
 
 A multiball of the mode's own that ends with two or more balls still up (MINILLA's dad-and-baby multiball won with

@@ -1771,6 +1771,7 @@ class EmulateTab(EmulateLogMixin, TabService):
             return
         d = runtime.wsl_distro()
         self._reattach_card_store(d)
+        self._ensure_cache_disk(d)
         if not rigdata.exists():
             return
         try:
@@ -1795,6 +1796,80 @@ class EmulateTab(EmulateLogMixin, TabService):
         except Exception as exc:                         # noqa: BLE001
             self._log("[emulate] could not attach the card store (%s); cards "
                       "are copied into the runtime's own cache instead." % exc)
+
+    # the user's card cache on a disk of its own (PAD-1459) ---------------
+    def _cache_disk_size(self):
+        """The new disk's maximum, from the cache it is replacing: its limit,
+        or what it holds when that is more."""
+        try:
+            out = self._run(self._cmd("cardmount.sh", "--cache-list"),
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, timeout=60)
+            meta = rig.parse_cache_meta(out.stdout.decode("utf-8", "replace"))
+        except Exception:                                # noqa: BLE001
+            meta = None
+        if not meta:
+            return rigdata.cache_disk_size_gb()
+        return rigdata.cache_disk_size_gb(
+            meta["limit_gb"], -(-meta["used_kb"] // 1048576))
+
+    def _ensure_cache_disk(self, d):
+        """Make (once) and attach the card cache's own disk, then bring the
+        old cache over in the background. Never on a machine with the card
+        store, and never a refusal: without it cards are cached inside
+        Linux, as they always were."""
+        if sys.platform != "win32" or rigdata.cards_exists():
+            return
+        try:
+            size = 0 if rigdata.cache_disk_exists() else self._cache_disk_size()
+            mkfs = ["bash", "%s/cachedisk.sh" % rig.wsl_path(rig.rig_dir()),
+                    "mkfs"]
+            if rigdata.ensure_cache_disk(
+                    d, mkfs, size_gb=size,
+                    log=lambda m: self._log("[emulate] %s" % m)):
+                self._cache_move_later()
+        except Exception as exc:                         # noqa: BLE001
+            self._log("[emulate] could not set up the card cache's own disk "
+                      "(%s); cards are cached inside Linux as before." % exc)
+
+    def _cache_move_later(self):
+        """``cachedisk.sh move`` in the background: the old cache onto the
+        disk, once. It switches only when nothing uses the old cache, so a
+        Start runs it (a new user: an empty cache, done in a moment) and
+        every Stop runs it again until it has moved (a copy already made is
+        not made twice)."""
+        if sys.platform != "win32" or getattr(self, "_cache_moved", False) \
+                or getattr(self, "_cache_moving", False) \
+                or not rigdata.cache_disk_exists() or rigdata.cards_exists():
+            return
+        self._cache_moving = True
+
+        def work():
+            try:
+                out = self._run(rig.rig_cmd_root("cachedisk.sh", "move"),
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=6 * 3600)
+                for line in out.stdout.decode("utf-8", "replace").splitlines():
+                    p = line.split()
+                    if line.startswith("moved ") and len(p) >= 3:
+                        self._cache_moved = True
+                        if p[1].isdigit() and int(p[1]):
+                            self._log(
+                                "[emulate] the Spike 2 card cache (%s card%s, "
+                                "%s) is on its own disk now; identical blocks "
+                                "are stored once." % (
+                                    p[1], "" if p[1] == "1" else "s",
+                                    rig.human_size(int(p[2]))
+                                    if p[2].isdigit() else p[2]))
+                    elif line.startswith("[cachedisk]"):
+                        self._log("[emulate] " + line[len("[cachedisk] "):])
+            except Exception as exc:                     # noqa: BLE001
+                self._log("[emulate] the card cache move did not run (%s); "
+                          "it is tried again after the next Stop." % exc)
+            finally:
+                self._cache_moving = False
+
+        self._thread(work)
 
     def _ensure_data_disk(self):
         d = runtime.wsl_distro()
@@ -2183,7 +2258,17 @@ class EmulateTab(EmulateLogMixin, TabService):
         total = sum(e["real_kb"] for e in entries)
         unused = [e for e in entries if rig.cache_unused(e, now)]
         bits = []
-        if entries:
+        if entries and meta and meta.get("kind") == "disk" \
+                and meta["used_kb"] < total:
+            # the cache's own disk (PAD-1459): its cards share identical
+            # blocks, so what they hold together is the disk's real use,
+            # less than their sizes added up
+            bits.append("%d cached card%s — %s on disk (%s of cards: "
+                        "identical blocks are stored once)" % (
+                            len(entries), "" if len(entries) == 1 else "s",
+                            rig.human_size(meta["used_kb"]),
+                            rig.human_size(total)))
+        elif entries:
             bits.append("%d cached card%s — %s on disk" % (
                 len(entries), "" if len(entries) == 1 else "s",
                 rig.human_size(total)))
@@ -2199,8 +2284,10 @@ class EmulateTab(EmulateLogMixin, TabService):
         elif meta:
             bits.append("no size limit")
         if disk:
-            bits.append("%s free of %s (WSL disk)" % (
-                rig.human_size(disk[0]), rig.human_size(disk[1])))
+            bits.append("%s free of %s (%s)" % (
+                rig.human_size(disk[0]), rig.human_size(disk[1]),
+                "the cache's own disk" if meta and meta.get("kind") == "disk"
+                else "WSL disk"))
         if unused:
             bits.append("%d unused (%s)" % (
                 len(unused), rig.human_size(sum(e["real_kb"]
@@ -3759,6 +3846,9 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._post(self._offer_wsl_restart)
             # the next poll re-reads the status (Stop is VERIFIED)
             self._post(self._poll_soon)
+            # nothing uses the old card cache now: its move can finish
+            # (PAD-1459), in a thread of its own, after Stop's own work
+            self._cache_move_later()
 
         self._thread(run)
 

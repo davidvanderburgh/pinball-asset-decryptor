@@ -915,9 +915,24 @@ def _trim():
     a compact then returns nothing).  Best effort: WSL down, no fstrim, or a
     root denied all leave the compact to do what it can."""
     try:
-        _wsl_bash("fstrim -v / 2>&1 || true", timeout=600)
+        # ...and the card cache's own disk (PAD-1459): an evicted card's
+        # blocks go back to its file the same way
+        _wsl_bash("fstrim -v / 2>&1 || true; mountpoint -q /mnt/wsl/padcache "
+                  "&& fstrim -v /mnt/wsl/padcache 2>&1 || true", timeout=600)
     except Exception:                                   # noqa: BLE001
         pass
+
+
+def _cache_disk():
+    """The user's card cache disk (PAD-1459), when there is one: Reclaim
+    compacts it with the distro's, so the Card cache window's "Reclaim
+    space to Windows" is true of it too."""
+    try:
+        from . import rigdata
+        p = rigdata.cache_disk_path()
+    except Exception:                                   # noqa: BLE001
+        return None
+    return p if os.path.isfile(p) else None
 
 
 def reclaim(progress=None):
@@ -953,14 +968,27 @@ def reclaim(progress=None):
             "Could not locate the WSL virtual disk (ext4.vhdx). Your distro "
             "may be stored somewhere non-standard; reclaiming isn't available.")
 
+    disks = [vhdx] + [p for p in [_cache_disk()] if p]
     try:
-        before = os.path.getsize(vhdx)
+        before = sum(os.path.getsize(p) for p in disks)
     except OSError as e:
         raise WslDiskError(f"Cannot read the virtual disk: {e}")
 
     if progress:
         progress("Trimming the Linux filesystem…")
     _trim()
+    with wsl_paused():
+        for p in disks:
+            _compact(p, progress)
+    try:
+        after = sum(os.path.getsize(p) for p in disks)
+    except OSError:
+        after = before
+    return max(0, before - after)
+
+
+def _compact(vhdx, progress=None):
+    """Compact one disk file, WSL held down by the caller."""
 
     # diskpart compacts an attached-read-only vdisk in place.  It's present on
     # every Windows install (unlike the Hyper-V Optimize-VHD cmdlet), and
@@ -972,44 +1000,37 @@ def reclaim(progress=None):
         f"detach vdisk\n"
     )
     sf = None
-    with wsl_paused():
-        try:
-            with tempfile.NamedTemporaryFile(
-                    "w", suffix=".txt", delete=False, encoding="ascii") as f:
-                f.write(script)
-                sf = f.name
-            out = ""
-            for attempt in (1, 2, 3):
-                _shutdown_until_free(vhdx, progress)
-                if progress:
-                    progress("Compacting the virtual disk (this can take a "
-                             "few minutes)…")
-                proc = subprocess.run(
-                    ["diskpart", "/s", sf], capture_output=True, text=True,
-                    encoding="utf-8", errors="replace", timeout=1800,
-                    creationflags=_CREATE_FLAGS)
-                if proc.returncode == 0:
-                    break
-                out = ((proc.stdout or "") + (proc.stderr or "")).strip()
-                if "used by another process" not in out:
-                    raise WslDiskError(
-                        "diskpart could not compact the disk:\n" + out)
-                # a half-done attach must not stay attached for the retry
-                _diskpart_detach(vhdx)
-            else:
-                raise WslDiskError(_IN_USE_HELP + "\n\ndiskpart said:\n" + out)
-        finally:
-            if sf:
-                try:
-                    os.remove(sf)
-                except OSError:
-                    pass
-
     try:
-        after = os.path.getsize(vhdx)
-    except OSError:
-        after = before
-    return max(0, before - after)
+        with tempfile.NamedTemporaryFile(
+                "w", suffix=".txt", delete=False, encoding="ascii") as f:
+            f.write(script)
+            sf = f.name
+        out = ""
+        for attempt in (1, 2, 3):
+            _shutdown_until_free(vhdx, progress)
+            if progress:
+                progress("Compacting the virtual disk (this can take a "
+                         "few minutes)…")
+            proc = subprocess.run(
+                ["diskpart", "/s", sf], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=1800,
+                creationflags=_CREATE_FLAGS)
+            if proc.returncode == 0:
+                break
+            out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            if "used by another process" not in out:
+                raise WslDiskError(
+                    "diskpart could not compact the disk:\n" + out)
+            # a half-done attach must not stay attached for the retry
+            _diskpart_detach(vhdx)
+        else:
+            raise WslDiskError(_IN_USE_HELP + "\n\ndiskpart said:\n" + out)
+    finally:
+        if sf:
+            try:
+                os.remove(sf)
+            except OSError:
+                pass
 
 
 def _diskpart_detach(vhdx):

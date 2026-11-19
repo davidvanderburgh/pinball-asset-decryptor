@@ -103,7 +103,7 @@ def test_the_cache_check_is_a_dry_run_of_the_copiers_own_rule():
     """The same floors, the same victims in the same order (least recently booted first), nothing deleted:
     evict says how many and how much; full says the rule would run off the original; the real call with
     the same inputs deletes exactly what the dry run counted."""
-    script = _funcs("cache_stamp", "stamp_key", "cache_valid", "card_label", "cache_make_room", "cache_check",
+    script = _funcs("cache_stamp", "stamp_key", "cache_valid", "card_label", "cache_settle", "cache_make_room", "cache_check",
                     "cache_kind", "cache_disk_df", "cache_disk_avail_kb", "room_say") + DRIVER
     # on stdin, as test_pad739 does: a script on the command line reaches WSL's bash mangled
     out = subprocess.run(["bash", "-s"], input=script.encode(), capture_output=True, timeout=60)

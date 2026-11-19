@@ -452,14 +452,18 @@ def parse_cache_list(text):
 
 def parse_cache_meta(text):
     """The ``limit`` line of ``--cache-list`` (PAD-739): ``{limit_gb,
-    used_kb, dir, store}``, or None from an older rig without one."""
+    used_kb, dir, store, kind}``, or None from an older rig without one.
+    *kind* is ``store``, ``disk`` (a user's cache on its own disk, whose
+    used_kb is the disk's real use with shared blocks counted once:
+    PAD-1459) or ``distro``."""
     for line in (text or "").splitlines():
         parts = line.rstrip("\r").split("\t")
         if parts[0] == "limit" and len(parts) >= 5:
             try:
                 return {"limit_gb": int(parts[1]), "used_kb": int(parts[2]),
                         "dir": "\t".join(parts[3:-1]),
-                        "store": parts[-1] == "store"}
+                        "store": parts[-1] == "store",
+                        "kind": parts[-1]}
             except ValueError:
                 return None
     return None

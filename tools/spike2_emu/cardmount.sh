@@ -313,9 +313,10 @@ cache_limit_gb() {
 # right after an eviction already sees it gone.
 cache_used_kb() {
     local u b
-    if [ "$CACHE" = "$CACHE_DISK/cardcache" ] && mountpoint -q "$CACHE_DISK" 2>/dev/null; then
-        u=$(df -k --output=used "$CACHE_DISK" 2>/dev/null | tail -1 | tr -d " ")
-        b=$(tr -dc 0-9 2>/dev/null < "$CACHE_DISK/.base_kb")
+    local d=${CACHE_DISK:-/mnt/wsl/padcache}
+    if [ "$CACHE" = "$d/cardcache" ] && mountpoint -q "$d" 2>/dev/null; then
+        u=$(df -k --output=used "$d" 2>/dev/null | tail -1 | tr -d " ")
+        b=$(tr -dc 0-9 2>/dev/null < "$d/.base_kb")
         if [ -n "$u" ]; then
             u=$(( u - ${b:-0} )); [ "$u" -lt 0 ] && u=0
             echo "$u"; return
@@ -503,6 +504,31 @@ cache_make_room() {   # <img> <own-copy-path>
         rm -f "$CACHE/$victim.raw" "$CACHE/$victim.raw.partial" \
               "$CACHE/$victim.src" "$CACHE/$victim.log" \
               "$CACHE/$victim.boot" "$CACHE/$victim.pid"
+        cache_settle
+    done
+}
+
+# XFS GIVES AN EVICTED CARD'S BLOCKS BACK IN THE BACKGROUND (PAD-1459). On the user's cache disk a card that shares
+# blocks is thousands of extents, and XFS frees a deleted file's extents after the unlink returns: measured, six
+# Godzilla builds deleted, the disk read 9.7 GB used for a minute before it read its empty 1.96. Measured straight
+# after a delete, the limit (cache_used_kb, the disk's own use there) still saw the card and evicted the next - and
+# the next, until the cache was empty. So after a delete on that disk, wait until its use stops falling: two
+# readings 2 s apart with nothing more freed, at most PAD_CACHE_SETTLE_S (90). Nothing on the other kinds, whose
+# du-based count sees a delete at once.
+cache_settle() {
+    [ "$(cache_kind)" = disk ] && [ "${DRY:-0}" != 1 ] || return 0
+    local a b same=0 t0
+    t0=$(date +%s)
+    sync -f "$CACHE" 2>/dev/null
+    a=$(df -k --output=used "$CACHE" 2>/dev/null | tail -1 | tr -d " ")
+    [ -n "$a" ] || return 0
+    while [ $(( $(date +%s) - t0 )) -lt "${PAD_CACHE_SETTLE_S:-90}" ]; do
+        sleep 2
+        b=$(df -k --output=used "$CACHE" 2>/dev/null | tail -1 | tr -d " ")
+        [ -n "$b" ] || return 0
+        if [ "$b" -lt "$a" ]; then same=0; else same=$((same + 1)); fi
+        [ "$same" -ge 2 ] && return 0
+        a=$b
     done
 }
 
@@ -553,7 +579,7 @@ cache_check() {   # <img>
 }
 cache_kind() {
     if [ "$CACHE" = /mnt/wsl/cards/cardcache ]; then echo store
-    elif [ "$CACHE" = "$CACHE_DISK/cardcache" ]; then echo disk
+    elif [ "$CACHE" = "${CACHE_DISK:-/mnt/wsl/padcache}/cardcache" ]; then echo disk
     else echo distro; fi
 }
 
@@ -647,7 +673,7 @@ cache_prune() {   # <keep-days>
             take "over the cache's $(( limit / 1048576 )) GB limit, least recently booted" "$l" "$kb"
             # measured again after a real delete: on the XFS store (PAD-1453) a file's du counts blocks it shares
             # with others, so what a delete frees can be less than its du
-            if [ "${DRY:-0}" = 1 ]; then used=$(( used - kb )); else used=$(cache_used_kb); fi
+            if [ "${DRY:-0}" = 1 ]; then used=$(( used - kb )); else cache_settle; used=$(cache_used_kb); fi
         else
             hold "booted $(( (now - last) / 86400 )) days ago" "$l" "$kb"
         fi

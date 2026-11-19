@@ -1293,6 +1293,23 @@ def test_card_cache_window_pad739(tmp_path, monkeypatch):
         assert [x for x in rec.calls if "--cache-limit" in x][-1][-1] == "32"
 
 
+def test_card_cache_window_on_its_own_disk_pad1459(tmp_path, monkeypatch):
+    # a user's cache on its own XFS disk: the cards share identical blocks, so
+    # what they hold is the disk's real use, not their sizes added up
+    now = int(time.time())
+    text = _cache_739(now).replace(b"limit	64	34474368	/home/u/cardcache	distro",
+                                   b"limit	64	16766020	/mnt/wsl/padcache/cardcache	disk")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        _patch(svc, monkeypatch, answers={"--cache-list": _Done(text)})
+        assert w.call(NS + ".open_cache") is True
+        _wait(w, lambda: (w.state(NS)["cache"] or {}).get("busy") is False)
+        head = w.state(NS)["cache"]["head"]
+        assert head.startswith("5 cached cards — 16.0 GB on disk (32.9 GB of cards: "
+                               "identical blocks are stored once)"), head
+        assert "kept under 64 GB" in head
+
+
 # ------------------------------------------------- setup, runtime, Docker
 def test_check_setup_without_a_rig_says_so(tmp_path):
     with web_app(tmp_path, mfr="stern") as w:

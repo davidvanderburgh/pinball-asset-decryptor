@@ -83,7 +83,7 @@ CACHE=/mnt/wsl/cards/cardcache; echo "store $(cache_limit_gb)"
 def test_the_cache_keeps_under_its_limit_dead_first_never_one_in_use():
     script = _funcs("cache_stamp", "stamp_key", "cache_valid", "copier_alive", "cache_pinned", "label_mounted",
                     "cache_readers", "cache_in_use", "src_is_scratch", "src_drive_present", "cache_source_state", "cache_limit_gb",
-                    "cache_need_kb", "room_say", "cache_make_room") + DRIVER
+                    "cache_need_kb", "room_say", "cache_settle", "cache_kind", "cache_make_room") + DRIVER
     out = subprocess.run(["bash", "-s"], input=script.encode(), stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, timeout=120).stdout.decode("utf-8", "replace")
     lines = out.splitlines()
@@ -141,7 +141,8 @@ def test_the_list_carries_image_state_use_and_unfinished_copies():
     assert by["half"]["leftover"] is True and by["half"]["real_kb"] == 600000
     assert disk == (900000000, 1000000000)
     assert emulate_core.parse_cache_meta(_LIST) == {
-        "limit_gb": 64, "used_kb": 34474368, "dir": "/home/u/cardcache", "store": False}
+        "limit_gb": 64, "used_kb": 34474368, "dir": "/home/u/cardcache", "store": False,
+        "kind": "distro"}
     # an older rig's list: no state lines, no limit - read as before
     old, _ = emulate_core.parse_cache_list("entry\ta\t1\t1\t0\t/x.raw\n")
     assert old[0]["source"] == "" and old[0]["use"] == "" and old[0]["leftover"] is False

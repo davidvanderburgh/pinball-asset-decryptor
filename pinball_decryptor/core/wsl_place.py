@@ -56,7 +56,8 @@ DISK_FS = ("NTFS", "REFS")
 #: reading it where it lies through 9p (79-148 s), but a slowdown nobody asked
 #: for when all they wanted was room on C:.  It can still be put on a hard disk
 #: on purpose (cardstore.ps1 create -Path).
-SLOW_STAYS = ("cards",)
+#: The user's card cache disk (PAD-1459) boots its cards the same way.
+SLOW_STAYS = ("cards", "cardcache")
 SLOW_WHY = ("%s is a hard disk, and a card boots from one in near twice the "
             "time (33-40 s against 20-23 s to attract, measured)")
 
@@ -246,7 +247,10 @@ def items():
             ("data", "the emulators' data disk", rigdata.disk_path(),
              "PAD_DATA_DISK"),
             ("cards", "the Spike 2 card store", rigdata.cards_disk_path(),
-             "PAD_CARDS_DISK")):
+             "PAD_CARDS_DISK"),
+            # a user's card cache on a disk of its own (PAD-1459)
+            ("cardcache", "the Spike 2 card cache", rigdata.cache_disk_path(),
+             "PAD_CACHE_DISK")):
         if os.path.isfile(path):
             out.append({"key": key, "label": label, "path": path,
                         "size": _size(path),

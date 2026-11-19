@@ -87,7 +87,7 @@ How our code gets in: `override.cfg` beside `main.x86_64` adds one autoload
 Our autoload adds its modes to `Modes.all_modes`. No game file changes, and
 the update is a plain tar PAD writes anyway.
 
-Proof (`tools/spooky_emu/modes/godot/probe.sh`, slot 3, hidden, muted):
+Proof (the PAD-1387 probe, slot 3, hidden, muted; PAD-1419 made it the runtime and `unity/rigrun.sh` drives it):
 
 ```
 loaded: /game/code/uptest/pad/pad_modes.gd, engine 4.1.2-rc (custom_build), game LOONEY TUNES 2025.10.08
@@ -232,6 +232,66 @@ What the next tickets take from here: the other Unity titles need their own `Pad
 (built against their `Managed/`), a port report each (`rigrun.sh --port`), and their own
 scoring facts (their `score_points` may differ); `mkspkmodes.py` and the Modes tab are ready
 for any port report with `engine` and `runtime_dll`.
+
+## Ticket 3 done: the Godot runtime and Looney Tunes (PAD-1419)
+
+**The runtime** (`tools/spooky_emu/modes/godot/pad_modes.gd`, GDScript, no build step): one
+more autoload, named by an `override.cfg` beside `main.x86_64`
+(`[autoload] PadModes="*/game/code/uptest/pad/pad_modes.gd"`), which Godot reads at start. It
+runs every `pad/modes/*.mode` with the same keys and rules as the Unity runtime (start switches
+and hit count, shots, points, seconds, completion and bonus, the four sounds, the panel; ends on
+time, completion, the end of the ball, tilt and the end of the game; start counts reset at a new
+game; `pad/modes/off` turns them off). No game file changes. Log: `/game/tmp/pad_modes.log`.
+
+Looney Tunes' facts, read from its GDScript (the PCK) and proven in the game:
+
+- **Switches**: `Switches.items[n].name` ("inlane_left"), `display_name` the label. The runtime
+  hears `Warden.sw_active(n)`, which Warden emits for every switch after the game's own
+  `sw_<name>_active` events, and counts a switch only while a ball is in play
+  (`Game.gameplay_active`, not tilted, not the switch test). The game's mode manager finds a
+  mode's handlers by method name, so a mode of ours cannot take switches named in a file that
+  way; the signal needs nothing from the game.
+- **Points**: `Game.score(points)` multiplies by the playfield multiplier (`Game.multiplier`)
+  and a shot's special multiplier and rounds to 10 (`snapped(..., 10)`): scale 1, measured
+  (1,000 asked, 1,000 scored). The check refuses points that are not a multiple of 10. The
+  multiplier counts for a mode's points as for the game's own awards (the Unity runtime keeps
+  Scooby-Doo's `score_multiplier` too).
+- **Sounds**: `Audio.voice_lines` (key -> `res://` path, played with `Audio.play_voice(key,
+  PLAY_QUEUED)`: the voice channel, queued behind whatever it is saying) and `Audio.sfx` (key ->
+  preloaded stream, `Audio.play_sfx`). The port lists both, voice first. The runtime logs each
+  callout of ours when the voice channel starts it.
+- **Panel**: a `CanvasLayer` (layer 128) over the game's screen, a `Panel` and three `Label`s in
+  the game's fonts (`res://assets/fonts/*.ttf|otf`, by file name), each shrunk to its row (Godot
+  4.1's Label has no auto-size). Mode timers stand still while `Game.timers_paused`.
+- **Install**: the in-game updater untars the `.looney` (a plain tar) into `/game/update`; at
+  the next power-up the profile empties `/game/code/uptest/*` and copies the update in
+  (`docs/plans/pad980_research/research_looney_proc.md`), so the modes are in from that start,
+  and a stock update takes `override.cfg` and `pad/` out again.
+
+**Port reports**: `rigrun.sh --port` has the runtime write the game's own read
+(`PADMODES_PORT`); `mkspkmodes.py port` makes it the shipped file. Both Looney Tunes builds
+in the library have one: 2025.10.08 (96 switches, 107 lights, 1,101 sounds of which 918 voice,
+68 game modes, 12 fonts) and 2025.03.01 (the same switches and lights, 1,019 sounds, 66 game
+modes, 11 fonts: no `digital-7 (mono)`, no `bugs_count_one`, so its starter folder ends Spinner
+Frenzy on `times_up1`).
+
+**mkspkmodes.py** follows the port's `engine`: Godot ships `pad/pad_modes.gd` and the top-level
+`override.cfg`, rewrites no launch line, and `build` writes a plain-tar stock update as a plain
+tar (a gzip one as gzip); a rebuilt modes update keeps one `override.cfg` and one `pad/`.
+**Write** packs the modes into plain-tar updates too (`formats.create_tar(pad_modes=...)`, an
+extract's own `pad/` and `override.cfg` replaced). **The rig**: `run_game.sh` takes a Godot Try
+it folder (`pad_modes.gd` in it) as `uptest/pad` and writes the same `override.cfg`;
+`prepare.sh` keeps a Godot modes update beside the stock one, and now unpacks one update at a
+time (a lock on the cache: two rigs preparing at once wiped each other's `unpack.partial`).
+**The app**: the Modes tab knows Looney Tunes (both builds), its Build card says how a Looney
+Tunes update installs, and the help gives each game's rounding.
+
+Proof (hidden, muted, slots 1/2/5): Try it on 2025.10.08 and 2025.03.01, and PAD-built updates
+of both booted with no overlay. Carrot Chase: both inlanes start it, three slings score 250,000
+each and complete it with the 2,000,000 bonus (the game's score panel agrees); started again, it
+ends when the ball drains, and on tilt. Spinner Frenzy: the drop target starts it, the spinner
+scores 50,000 a hit, it ends after 10 s. Every callout found and played on the game's voice
+channel; the panel on the screen in CCHeroSandwichMeat / Truculenta-Bold.
 
 ## Rig fix made on the way
 

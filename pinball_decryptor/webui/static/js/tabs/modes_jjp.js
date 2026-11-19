@@ -411,7 +411,7 @@ function TitleSettings({ j, have }) {
   const t = j.title_cfg || {};
   return html`<section class="card jjpm-title-card">
     <div class="hd" style="cursor:pointer" onClick=${() => setOpen(!open)}><span class="h2">${open ? "▾" : "▸"} Every mode of this game</span>
-      <span class="muted small">defaults a mode's own settings override: fonts, colors, the panel${t.game ? ` - loads only into ${t.game}` : ""}</span></div>
+      <span class="muted small">defaults a mode's own settings override: fonts, colors, the panel${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
     ${open ? html`<div class="bd">${(j.title_keys || []).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
   </section>`;
 }
@@ -580,7 +580,7 @@ function SpookyBuildCard({ j }) {
         <span class=${cx("small", b.done ? (b.ok ? "ok-ink" : "warn-ink") : "muted")}>${b.msg || ""}</span>
       </div>
       ${lines.length && (b.running || (b.done && !b.ok)) ? html`<pre class="jjpm-log">${lines.join("\n")}</pre>` : null}
-      <div class="small muted" style="margin-top:6px">Install it the way a stock update installs: on a USB stick, under its own name. The game restarts once by itself on its first start after the update, to take up the modes.</div>
+      <div class="small muted" style="margin-top:6px">${b.install_note || "Install it the way a stock update installs: on a USB stick, under its own name. The game restarts once by itself on its first start after the update, to take up the modes."}</div>
     </div>
   </section>`;
 }

@@ -449,7 +449,8 @@ def test_what_keeps_insider_connected_has_a_tab_of_its_own():
     assert "modes.set_score_feed" in net and "FeedContract" in net and "network.configure" in net
     assert ("network", "network", "Network", "Network", "Make", "globe") in T.TABS
     assert [t[0] for t in T.TABS].index("network") == [t[0] for t in T.TABS].index("playopts") + 1
-    assert '"Network": g("modes"),' in win
+    # PAD-1399: the tab shows for remote access (SSH) on Spike 2 and Spike 3 as well as for the score feed
+    assert '"Network": g("modes") or _ssh_offered(mfr),' in win
     assert "Network tab's score feed" in MP.INSIDER_TAB_NOTE
     js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
     assert "modes.set_coop" in js
@@ -502,6 +503,11 @@ def test_the_network_tab_asks_the_modes_service_for_the_score_feed(monkeypatch):
 
     tab = NT.NetworkTab.__new__(NT.NetworkTab)
     monkeypatch.setattr(tab, "set", lambda **kw: state.update(kw), raising=False)
+    # PAD-1399/1427: publishing reads the tab's own state back (the machine's address), and showing it looks for
+    # cards and the machine found - none of which this test is about
+    monkeypatch.setattr(tab, "get", lambda key, default=None: state.get(key, default), raising=False)
+    monkeypatch.setattr(tab, "_show_machine", lambda: None, raising=False)
+    monkeypatch.setattr(tab, "refresh_cards", lambda: None, raising=False)
     tab.window = type("W", (), {"service": lambda self, ns: Modes() if ns == "modes" else None,
                                 "write_assets_var": Var(), "write_upd_var": Var()})()
     monkeypatch.setattr(NT.NetworkTab, "mfr", None, raising=False)

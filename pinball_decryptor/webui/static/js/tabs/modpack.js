@@ -5,7 +5,7 @@
 // Python half: webui/tabs/modpack.py.  Every question, picker and
 // confirmation comes from the run logic (app.py) through the dialog host.
 
-import { html, PageHead, Card, Button, Field, Chip, Note, Icon, tip, call, cx } from "../core/ui.js";
+import { html, PageHead, Card, Button, Field, Check, Chip, Note, Icon, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -15,8 +15,11 @@ const T = {
   intro: "Share your changes as a zip, or apply someone else's.",
   project: "Shared by every tab — it is set on the Extract tab. Click to open it.",
   noProject: "No project folder yet — set it on the Extract tab.",
-  exportTip: "Create a zip holding only your modified files, small enough to share.",
+  exportTip: "Create a zip of your changes to share. Tick what goes in.",
   importTip: "Apply a mod pack zip from another user onto this project's extracted assets.",
+  // PAD-1408: what Export puts in the pack
+  filesTip: "The files you replaced, your settings, high scores, music modes, random clips and attract items.",
+  modesTip: "Your modes with their sounds, clips and pictures, their saved progress and the compiled code you played, so another owner's card runs exactly your game. The card's own files never go in: the owner's card supplies them.",
   moveTitle: "Move Your Mods to Another Card",
   routeA: "New game version, or the other model (Pro ↔ Premium): pick the new card image and build",
   routeAsub: "No extracting by hand: each card is extracted for you (once, and reused), checked for what it adds, and built with your mods.",
@@ -73,6 +76,10 @@ function PackCard({ s }) {
         <div class="stack grow" style="gap:2px">
           <span class="t">Export</span>
           <span class="small muted">${T.exportTip}</span>
+          <div class="row wrap mp-include">
+            <${Check} ns="modpack" k="pack_files" checked=${s.pack_files} title=${T.filesTip} label="Changed files and settings" />
+            ${s.modes_cap ? html`<${Check} ns="modpack" k="pack_modes" checked=${s.pack_modes} title=${T.modesTip} label="Modes (with their compiled code)" />` : null}
+          </div>
         </div>
         <${Button} kind="primary" icon="upload" title=${T.exportTip} onClick=${() => call("modpack.export_pack")}>Export Mod Pack…<//>
       </div>

@@ -11,6 +11,11 @@
 // game's own - a show for each of its songs, Original and Remix, read off its program - played here from their frames
 // as the game plays them; "Make it a show of mine" makes one a show of the project's (a step of the game's show a
 // lane, to cut, move, start later or mix with patterns of your own).
+//
+// PAD-1448 (Friday: "add speaker light effects to stern games that don't have them ... stranger things or Munsters"):
+// a game whose cabinet has no expression lights of its own still lists a Cabinet Lights board (node 2). The owner
+// says what is on his - speaker lights, blade pixels a side - and they are this cabinet's lights: the game itself
+// lights them, with the shows made here (the card's addcab.cfg).
 
 import { html, useEffect, useRef, useState, PageHead, Card, Button, Field, Select, Check, Chip, Note, Empty, Spinner,
          tip, cx, call, openMenu, mediaUrl } from "../core/ui.js";
@@ -204,6 +209,44 @@ function NumBox({ value, onChange, title, min, max }) {
     onChange=${(v) => { const n = Number(String(v).replace(/,/g, "")); if (String(v).trim() !== "" && Number.isInteger(n)) onChange(Math.max(min, Math.min(max, n))); }} />`;
 }
 
+// PAD-1448: the lights the owner's Cabinet Lights board carries, on a game with none of its own
+const ADD_TIP = {
+  speakers: "Speaker lights on the board, counted round both speakers (the left ring first). 23 is the newer games' two rings.",
+  blades: "Pixels on each blade down the cabinet's sides (0: no blades). Their channels come before the speaker lights'.",
+  add: "Add them: the game lights them as its own, with the shows you make here. Your cabinet needs a Cabinet Lights board (node 2) with these lights on it.",
+  remove: "Take the added lights out: the card adds none, and this game's cabinet has no expression lights again.",
+};
+
+function AddedFields({ s, onChange }) {
+  const a = s.added || {};
+  const lim = s.added_limits || { speakers: 24, blades: 48 };
+  return html`<span class="row xl-add-fields">
+    <span class="lbl" ...${tip(ADD_TIP.speakers)}>Speaker lights</span>
+    <${NumBox} value=${a.speakers ?? 23} min=${0} max=${lim.speakers} title=${ADD_TIP.speakers} onChange=${(v) => onChange(v, null)} />
+    <span class="lbl" ...${tip(ADD_TIP.blades)}>Blade pixels a side</span>
+    <${NumBox} value=${a.blades ?? 0} min=${0} max=${lim.blades} title=${ADD_TIP.blades} onChange=${(v) => onChange(null, v)} />
+  </span>`;
+}
+
+function AddCabinet({ s }) {
+  const [sp, setSp] = useState((s.added || {}).speakers ?? 23);
+  const [bl, setBl] = useState((s.added || {}).blades ?? 0);
+  const shown = { ...s, added: { speakers: sp, blades: bl } };
+  return html`<div class="xl-add">
+    <${AddedFields} s=${shown} onChange=${(a, b) => { if (a != null) setSp(a); if (b != null) setBl(b); }} />
+    <${Button} kind="primary" icon="plus" title=${ADD_TIP.add} disabled=${!sp && !bl}
+      onClick=${() => call("lights.set_added", true, sp, bl)}>Add these lights<//>
+  </div>`;
+}
+
+function AddedBar({ s }) {
+  return html`<div class="xl-add xl-add-on">
+    <span class="small"><b>Added on your Cabinet Lights board</b> (node 2): this game has none of its own.</span>
+    <${AddedFields} s=${s} onChange=${(a, b) => call("lights.set_added", true, a, b)} />
+    <${Button} size="sm" icon="trash" title=${ADD_TIP.remove} onClick=${() => call("lights.set_added", false)}>Remove<//>
+  </div>`;
+}
+
 function StepCard({ s, show, sel, edit }) {
   const steps = show[LANES[sel.lane]] || [];
   const st = steps[sel.i];
@@ -324,12 +367,14 @@ export default function LightsTab() {
     return html`<div class="page xl-page">${head}<div class="row"><${Spinner} /><span class="muted">Reading the cabinet's lights off the card…</span></div></div>`;
   }
   if (!s.available) {
-    return html`<div class="page xl-page">${head}<${Empty} title="Nothing to light here" icon="info">${s.why}<//></div>`;
+    return html`<div class="page xl-page">${head}<${Empty} title=${s.addable ? "No expression lights of its own" : "Nothing to light here"}
+      icon="info" action=${s.addable ? html`<${AddCabinet} s=${s} />` : null}>${s.why}<//></div>`;
   }
   const probs = (s.problems || [])[si] || [];
   return html`<div class="page xl-page">
     ${head}
     <${Note}>${s.insider}<//>
+    ${s.addable && (s.added || {}).on ? html`<${AddedBar} s=${s} />` : null}
     <div class="xl-cols">
       <${Card} title="Shows" cls="xl-list">
         <div class="list" role="listbox" aria-label="The project's expression light shows">

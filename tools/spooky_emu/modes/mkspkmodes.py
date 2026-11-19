@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""mkspkmodes.py - custom modes on Spooky's Unity titles (PAD-1417, PAD-1418; docs/plans/spooky_modes.md).
+"""mkspkmodes.py - custom modes on Spooky's Unity and Godot titles (PAD-1417, PAD-1418, PAD-1419;
+docs/plans/spooky_modes.md).
 
 A mode is the same ``key = value`` file as on JJP (tools/jjp_emu/MODES.md); a title's modes are
-one folder of them (``title.cfg`` + ``*.mode``).  The runtime is ``padunity.so`` (preloaded by
-the update's launch line) + ``PadModes.dll`` (built against the title's own Managed/, runs the
-modes through the game's own Mode, scoring and callouts): tools/spooky_emu/modes/unity.
+one folder of them (``title.cfg`` + ``*.mode``).  The runtime is the port report's ``engine``:
+
+  unity  ``padunity.so`` (preloaded by the update's launch line) + ``PadModes.dll`` (built against
+         the title's own Managed/, runs the modes through the game's own Mode, scoring and
+         callouts): tools/spooky_emu/modes/unity.
+  godot  ``pad_modes.gd`` (Looney Tunes): one more autoload, named by an ``override.cfg`` beside
+         main.x86_64, running the modes through the game's own Game.score and Audio:
+         tools/spooky_emu/modes/godot.
 
 How the runtime gets into the game is the port report's ``load``:
 
@@ -24,8 +30,12 @@ again with the game's own passphrase, ``gpg_format``).
   check <mode dir> --port <port.json>            the folder as the runtime will read it
   stage <mode dir> <pad dir> --port <port.json>  the update's pad/ folder (the rig's Try it)
   build <stock update> <mode dir> <new update> --port <port.json>
-                                                 the stock .scooby again, with pad/ in it and
-                                                 its launch lines preloading the runtime
+                                                 the stock update again, with pad/ in it and
+                                                 its launch lines preloading the runtime (or
+                                                 its override.cfg loading it)
+  port <raw port.json> --label <label> --title <name> --ext <.ext> [--defaults <mode>] --out <json>
+                                                 the runtime's own report (PADMODES_PORT) made
+                                                 into the shipped port report
 
 Only the keys in KEYS run on Spooky today; any other JJP key is refused by name ("not on
 Spooky games yet"), never silently ignored.  The game multiplies every award by its points
@@ -46,11 +56,16 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 UNITY = os.path.join(HERE, "unity")
+GODOT = os.path.join(HERE, "godot")
 PREBUILT = os.path.join(UNITY, "prebuilt")
 PORTS = os.path.join(HERE, "ports")
 #: where the runtime sits in the update (and so in /game/code/uptest on the machine)
 PAD_DIR = "pad"
 RUNTIME_SO = "/game/code/uptest/pad/padunity.so"
+#: Godot: the autoload override.cfg (beside main.x86_64, read by the engine at start) adds
+RUNTIME_GD = "/game/code/uptest/pad/pad_modes.gd"
+OVERRIDE_CFG = "override.cfg"
+OVERRIDE_TEXT = '[autoload]\n\nPadModes="*%s"\n' % RUNTIME_GD
 #: the files whose ``exec ... main.x86_64`` line starts the game (sway on 6.1 kernels, i3 on 5.10)
 LAUNCH_FILES = ("sway_config", "i3_config")
 #: the update's Mono config (under its uptest/ on the titles laid out that way); dllmap titles
@@ -110,14 +125,26 @@ def load_port(path_or_label):
         return json.load(f)
 
 
+def engine(port):
+    return (port or {}).get("engine") or "unity"
+
+
 def load_of(port):
-    """How the runtime gets into the title's game: "preload" or "dllmap" (module doc)."""
+    """How the runtime gets into a Unity title's game: "preload" or "dllmap" (module doc)."""
     return (port or {}).get("load") or "preload"
 
 
 def runtime_files(port):
-    """(padunity.so, PadModes.dll) the title runs, or Refused.  A dllmap title's padunity.so is
-    the dllmap build of the loader (unity/build.sh)."""
+    """The runtime's files the title runs - (padunity.so, PadModes.dll) on Unity (a dllmap title's
+    padunity.so is the dllmap build of the loader, unity/build.sh), (pad_modes.gd,) on Godot - or
+    Refused."""
+    if engine(port) == "godot":
+        gd = os.path.join(GODOT, "pad_modes.gd")
+        if not os.path.isfile(gd):
+            raise Refused("no mode runtime for %s (%s)" % (port.get("title", "this title"), gd))
+        return (gd,)
+    if engine(port) != "unity":
+        raise Refused("no mode runtime for %s's engine (%s) yet" % (port.get("title", "this title"), engine(port)))
     so = os.path.join(PREBUILT, "padunity_dllmap.so" if load_of(port) == "dllmap" else "padunity.so")
     dll = os.path.join(PREBUILT, port.get("runtime_dll") or "")
     for p in (so, dll):
@@ -234,15 +261,32 @@ def pad_files(mode_dir, port):
     modes, problems = check_modes(mode_dir, port)
     if problems:
         raise Refused("the modes have problems:\n  " + "\n  ".join(problems))
-    so, dll = runtime_files(port)
-    out = [("padunity.so", so, 0o755), ("PadModes.dll", dll, 0o644),
-           ("modes/title.cfg", title_cfg_text(mode_dir, port).encode("utf-8"), 0o644)]
+    rt = runtime_files(port)
+    if engine(port) == "godot":
+        out = [("pad_modes.gd", rt[0], 0o644)]
+    else:
+        out = [("padunity.so", rt[0], 0o755), ("PadModes.dll", rt[1], 0o644)]
+    out.append(("modes/title.cfg", title_cfg_text(mode_dir, port).encode("utf-8"), 0o644))
     for m in modes:
         out.append(("modes/" + m["file"], os.path.join(mode_dir, m["file"]), 0o644))
     stamp = "PAD custom modes (mkspkmodes.py, runtime %s) for %s: %s\n" % (
         port.get("runtime", "?"), port.get("title", "?"), ", ".join(m["name"] for m in modes))
     out.append(("README.txt", stamp.encode("utf-8"), 0o644))
     return out
+
+
+def top_files(port):
+    """[(path at the update's top, bytes, mode)] the runtime needs beside main.x86_64: Godot's
+    override.cfg (the autoload that loads pad_modes.gd); nothing on Unity (its launch line)."""
+    if engine(port) == "godot":
+        return [(OVERRIDE_CFG, OVERRIDE_TEXT.encode("utf-8"), 0o644)]
+    return []
+
+
+def launch_files(port):
+    """The launch files whose game line a modes build rewrites: a preload Unity title's; none on
+    a dllmap one (patched_names: its Mono config) or on Godot."""
+    return LAUNCH_FILES if engine(port) == "unity" and load_of(port) == "preload" else ()
 
 
 def stage(mode_dir, pad_dir, port):
@@ -316,6 +360,8 @@ def patch_file(rel, data, port):
 
 def patched_names(port):
     """The base names of the files patch_file may change (for a scan by name)."""
+    if engine(port) != "unity":
+        return ()                                   # Godot: override.cfg, nothing patched
     return LAUNCH_FILES if load_of(port) == "preload" else (os.path.basename(MONO_CONFIG),)
 
 
@@ -380,10 +426,18 @@ def wrap(tar_gz, out, port, log=print):
         gpg.encrypt_gpg_symmetric(tar_gz, out, games.GPG_PASSPHRASES[port["gpg_format"]])
 
 
+def _gzipped(path):
+    with open(path, "rb") as f:
+        return f.read(2) == b"\x1f\x8b"
+
+
 def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda: False):
-    """The stock update again, with pad/ beside its main.x86_64 and the title's way in (load_of)
-    patched; unwrapped from and wrapped again in the title's container (container_of)."""
+    """The stock update again, written the same way (a tar.gz, or Looney Tunes' plain tar), with
+    pad/ beside its main.x86_64 and the runtime loaded: on Unity the title's way in (load_of)
+    patched, on Godot an override.cfg beside main.x86_64 naming it; unwrapped from and wrapped
+    again in the title's container (container_of)."""
     files = pad_files(mode_dir, port)
+    tops = top_files(port)
     if os.path.abspath(stock) == os.path.abspath(out):
         raise Refused("the new update must not replace the stock one")
     load = load_of(port)
@@ -394,8 +448,10 @@ def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda
     try:
         src_path = unwrap(stock, tmp_in, port, log)
         total = os.path.getsize(src_path)
-        with open(src_path, "rb") as raw, tarfile.open(fileobj=raw, mode="r|gz") as src, \
-                tarfile.open(tmp_tar, mode="w:gz", compresslevel=1, format=tarfile.GNU_FORMAT) as dst:
+        gz = _gzipped(src_path)
+        with open(src_path, "rb") as raw, tarfile.open(fileobj=raw, mode="r|gz" if gz else "r|") as src, \
+                (tarfile.open(tmp_tar, mode="w:gz", compresslevel=1, format=tarfile.GNU_FORMAT) if gz
+                 else tarfile.open(tmp_tar, mode="w", format=tarfile.GNU_FORMAT)) as dst:
             last = 0
             for ti in src:
                 if cancelled():
@@ -406,6 +462,8 @@ def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda
                     prefix = name[:-len(base)]
                 if base == PAD_DIR or base.startswith(PAD_DIR + "/"):
                     continue                        # an old modes build's pad/: replaced below
+                if base in (t[0] for t in tops):
+                    continue                        # an old modes build's override.cfg: the same
                 if ti.isfile() and os.path.basename(base) in names:
                     data = src.extractfile(ti).read()
                     new, n = patch_file(name, data, port)
@@ -420,11 +478,14 @@ def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda
                 if progress and raw.tell() - last > (16 << 20):
                     last = raw.tell()
                     progress(last, total)
-            if not patched:
+            if names and not patched:
                 what = (", ".join(LAUNCH_FILES) + ": no launch line starting main.x86_64") if load == "preload" \
                     else (MONO_CONFIG + ": no MonoPosixHelper dllmap")
                 raise Refused("%s has no way in for the runtime (%s): not an update this runtime knows"
                               % (os.path.basename(stock), what))
+            if not names and prefix is None:
+                raise Refused("%s has no main.x86_64: not an update this runtime knows"
+                              % os.path.basename(stock))
             now = int(time.time())
             pre = prefix or ""
             d = tarfile.TarInfo(pre + PAD_DIR)
@@ -438,7 +499,13 @@ def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda
                 ti = tarfile.TarInfo(pre + PAD_DIR + "/" + rel)
                 ti.size, ti.mode, ti.mtime = len(data), mode, now
                 dst.addfile(ti, io.BytesIO(data))
-            log("added %s%s/: the runtime and %d mode file(s)" % (pre, PAD_DIR, len(files) - 4))
+            for rel, data, mode in tops:
+                ti = tarfile.TarInfo(pre + rel)
+                ti.size, ti.mode, ti.mtime = len(data), mode, now
+                dst.addfile(ti, io.BytesIO(data))
+                log("added %s%s: it loads the runtime (%s) when the game starts" % (pre, rel, RUNTIME_GD))
+            log("added %s%s/: the runtime and %d mode file(s)" % (
+                pre, PAD_DIR, sum(1 for f in files if f[0].endswith(".mode"))))
         if cancelled():
             raise Refused("cancelled")
         wrap(tmp_tar, tmp_out, port, log)
@@ -453,6 +520,53 @@ def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda
         progress(total, total)
     log("built %s (%.2f GB) in %.0f s" % (out, os.path.getsize(out) / 1e9, time.time() - t0))
     return out
+
+
+# ============================================================================ the port report
+#: what each engine's scoring does to an award, for the port report (read from the game's code)
+POINTS = {
+    "godot": (10, "Game.score multiplies by the playfield multiplier (Game.multiplier) and a shot's "
+                  "special multiplier, and rounds to 10 (snapped(int(points * multiplier), 10)); the "
+                  "runtime calls it as the game's own awards do"),
+}
+
+
+def make_port(raw, label, title, ext, defaults=None):
+    """The runtime's own report (PADMODES_PORT) -> the port report the app ships."""
+    game, _, ver = label.partition("-")
+    eng = raw.get("engine") or "unity"
+    if raw.get("game_version") and ver and raw["game_version"].replace("_", ".") != ver:
+        raise Refused("the report is from %s %s, not %s" % (raw.get("game_title"), raw["game_version"], ver))
+    m = raw.get("points_scale_measured") or {}
+    if not m.get("scored"):
+        raise Refused("the report has no points measurement: run a game with PADMODES_PORT to its first ball")
+    if int(m.get("multiplier") or 1) != 1:
+        raise Refused("the points were measured under a x%s playfield multiplier" % m["multiplier"])
+    scale = int(round(float(m["scored"]) / float(m["asked"])))
+    rnd, note = POINTS.get(eng, (0, ""))
+    out = collections.OrderedDict([
+        ("title", title), ("game", game), ("version", ver), ("update_ext", ext), ("engine", eng),
+        ("made_by", "the runtime itself in the running game on the Spooky rig (PADMODES_PORT, "
+                    "unity/rigrun.sh --port), PAD-1419"),
+    ])
+    if eng == "godot":
+        out["runtime_script"] = "pad_modes.gd"
+    out["points_round"] = rnd
+    out["points_note"] = note
+    if defaults:
+        out["defaults"] = defaults
+    for k, v in raw.items():
+        if k not in out and k != "points_scale_measured":
+            out[k] = v
+    out["points_scale"] = scale
+    return out
+
+
+def _defaults_from(mode_file):
+    with open(mode_file, encoding="utf-8", errors="replace") as f:
+        rows = MJ.parse_cfg(f.read())
+    keep = ("start", "shots", "sound_start", "sound_shot", "sound_complete")
+    return collections.OrderedDict((k, v) for _n, k, v in rows if k in keep)
 
 
 # ============================================================================ cli
@@ -471,8 +585,26 @@ def main(argv=None):
     b.add_argument("dir")
     b.add_argument("out")
     b.add_argument("--port", required=True)
+    r = sub.add_parser("port")
+    r.add_argument("raw")
+    r.add_argument("--label", required=True)
+    r.add_argument("--title", required=True)
+    r.add_argument("--ext", required=True)
+    r.add_argument("--defaults", help="a starter .mode file: the new mode form's picks")
+    r.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     try:
+        if a.cmd == "port":
+            with open(a.raw, encoding="utf-8") as f:
+                raw = json.load(f)
+            p = make_port(raw, a.label, a.title, a.ext, _defaults_from(a.defaults) if a.defaults else None)
+            with open(a.out, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(p, f, indent=1)
+                f.write("\n")
+            print("%s: %d switches, %d lamps, %d sounds, %d game modes, %d fonts, points x%d round %d" % (
+                a.out, len(p.get("switches") or ()), len(p.get("lamps") or ()), len(p.get("sounds") or ()),
+                len(p.get("game_modes") or ()), len(p.get("fonts") or ()), p["points_scale"], p["points_round"]))
+            return 0
         port = load_port(a.port)
         if a.cmd == "check":
             modes, problems = check_modes(a.dir, port)

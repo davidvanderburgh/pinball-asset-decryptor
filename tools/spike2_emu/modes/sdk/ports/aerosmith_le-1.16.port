@@ -322,6 +322,17 @@ lamp 174,175,176      0              LOGO 3  # node/channel 12/23 12/24 12/25
 lamp 177,178,179      0              LOGO 4  # node/channel 12/26 12/27 12/28
 lamp 180,181,182      0              LOGO 5  # node/channel 12/29 12/30 12/31
 
+# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
+data addcab_light_tab  0x005d6de0  # the light table's pointer (24-byte records)
+data addcab_dev_tab    0x005d9360  # the device table's pointer (48-byte records)
+data addcab_light_n    0x00503944  # the light count the game copies at start-up
+data addcab_dev_n      0x00503a40  # the device count it copies
+value addcab_lights    186
+value addcab_devices   313
+value addcab_clone     6  # the LED light the added ones copy: LOCKDOWN BUTTON-RED
+value addcab_slot      210  # the first free light slot
+value addcab_group     1
+
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
 # plain-C / slot-less title: starts found by the start finder (PAD-363, cstarts)
@@ -563,3 +574,21 @@ value coop_ball_msg          1255
 # ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
 site  coop_start_game        0x001f2bc4 0xe92d47f0 0xe30d48b4
 site  coop_lobby_add         0x001f2cec 0xebfffea3 0xe2506000
+
+# PAD-1406: the framework's all-flippers off and on (each flipper record's enable bit at +6, the node board's rule
+# follows), placed from Godzilla LE/Pro 1.16 by code (strict: only branch and literal offsets masked; the pair 0xd4
+# apart on every build): pm_flippers for the mode that has the whole game, and pm_drain_to_one
+site flippers_off         0x001dbaa8 0xe92d4070 0xe3085d00
+site flippers_on          0x001dbb7c 0xe92d4070 0xe3085d00
+# PAD-1406: the framework's flipper policy asks its listeners (bus hook 0x40: 1 = off, 2 = on) whether each flipper may
+# be on, and switches it as answered (flippers_on + 0x78; this call at +0x44): while a whole-game mode has the flippers
+# off the runtime answers 1 here, as a rule of the game's would - Metallica's own listener re-enabled them every pass
+site flipper_query_call  0x001dbc38 0xeb001111 0xe3500000
+
+# PAD-1406: the framework's ball devices (the table the balls-in-play count walks: 40-byte entries, +0x1c each
+# one's name) and its keep(device, n, 1) - how many balls a lock or scoop keeps, the rest ejected the device's
+# own way (placed from Turtles Pro 1.59 by code; its count address checked against this table's): pm_device_keep
+site ball_device_keep     0x00382b94 0xe30d3cb4 0xe340304e
+data ball_devices         0x005eabc8
+text ball_device_names  LEFT_SCOOP TOP_SCOOP RIGHT_EJECT TOY_BOX
+data ball_device_count    0x004edcb4

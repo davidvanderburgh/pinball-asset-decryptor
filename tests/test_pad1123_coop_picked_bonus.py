@@ -342,3 +342,59 @@ def test_godzillas_bank_has_its_bonus_loop_at_squarecrop():
     t = VB.crop_transform(data, "SquareCrop")
     assert abs(t[0] - 1.29) < 0.01 and t[12] == -197.0 and t[13] == -126.0
     assert shutil.which  # (the card's own loop: 8 s, 1360x768 - read in the build by coop_bonus_into)
+
+
+# ---- PAD-1451: the awards ceremony plays the game's own bonus loop, no teammate's portrait -----------------------------
+HOOK_MAIN = r"""
+#include <stdio.h>
+#define CPK_CHARS 16
+typedef unsigned pm_reg;
+static struct { char loop[96]; char clip[CPK_CHARS][32]; int says; } cb = { "EndOfBallBonus_BackgroundLoop",
+                                                                           { "PadCoopBonus1", "PadCoopBonus2" } };
+static struct { unsigned turn; } coop = { 2 };
+static int coop_pick_of[5] = { -1, 0, 1, -1, -1 };
+static int coop_ch_n = 2;
+static struct { const char *name; } coop_ch[2] = { { "ONE" }, { "TWO" } };
+static int in_game = 1, coop_cer_up;
+static int pm_in_game(void) { return in_game; }
+static int coop_teammates(void) { return 2; }
+static void say(const char *f, ...) { (void)f; }
+@FNS@
+static const char *ask(void)
+{
+    static char name[] = "EndOfBallBonus_BackgroundLoop";
+    pm_reg r[1];
+    r[0] = (unsigned)(unsigned long)name;
+    on_coop_bonus_play(r);
+    return (const char *)(unsigned long)r[0];
+}
+int main(void)
+{
+    const char *bonus = ask(), *cer, *attract;
+    coop_cer_up = 1;
+    cer = ask();
+    coop_cer_up = 0;
+    in_game = 0;
+    attract = ask();
+    printf("loops %s %s %s\n", bonus, cer, attract);
+    return 0;
+}
+"""
+
+
+def test_the_ceremony_gets_the_games_own_loop(tmp_path):
+    src = T.RUNTIME.read_text(encoding="utf-8")
+    fns = [R._lift(src, s) for s in SIGS if "cpk_has" not in s] + [R._lift(src, "static void on_coop_bonus_play(pm_reg *r)\n{")]
+    # -no-pie: the hook keeps names in 32-bit registers, as the machine does; the strings must sit below 4 GB
+    out = R._host_run(tmp_path, HOOK_MAIN.replace("@FNS@", "\n".join(fns)), flags=("-no-pie",)).splitlines()
+    # teammate 2's own bonus: theirs; the ceremony after the last ball and attract: the game's own loop
+    assert "loops PadCoopBonus2 EndOfBallBonus_BackgroundLoop EndOfBallBonus_BackgroundLoop" in out
+
+
+def test_the_ceremony_raises_its_flag_for_its_whole_length():
+    src = T.RUNTIME.read_text(encoding="utf-8")
+    begin = R._lift(src, "static void coop_cer_begin(void)\n{")
+    end = R._lift(src, "static void coop_cer_end(void)\n{")
+    assert "coop_cer_up = 1;" in begin and "coop_cer_up = 0;" in end
+    play = R._lift(src, "static void on_coop_bonus_play(pm_reg *r)\n{")
+    assert play.index("if (coop_cer_up) {") < play.index("r[0] = (unsigned)(unsigned long)ours;")

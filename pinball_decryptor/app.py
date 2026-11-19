@@ -3359,6 +3359,12 @@ class App:
                                              action="export")):
                 return
 
+        files, modes = self._pack_includes(assets_dir)
+        if not files and not modes:
+            messagebox.showwarning("Export Mod Pack", "Tick what to put in the pack first: "
+                                   "Changed files and settings, Modes, or both.")
+            return
+
         zip_path = filedialog.asksaveasfilename(
             title="Save Mod Pack As",
             defaultextension=".zip",
@@ -3371,6 +3377,11 @@ class App:
         self.window.remember_browse_dir("mod_pack", zip_path)
 
         self.window.append_log("Exporting mod pack...", "info")
+        if modes:
+            # PAD-1408: with the modes the pack is a whole game (core.game_file)
+            threading.Thread(target=self._share_game_worker,
+                             args=(assets_dir, zip_path, files), daemon=True).start()
+            return
         threading.Thread(target=self._export_worker,
                          args=(assets_dir, zip_path), daemon=True).start()
 
@@ -3448,6 +3459,13 @@ class App:
         # PAD-1050: a file of modes (the Modes tab's Save to a file...) is not a
         # mod pack: judged as one, none of its files "belong to this extract"
         # and the box blamed the card
+        # PAD-1408: a shared game holds a mod pack and more: load it whole
+        from .core import game_file
+        head = game_file.game_file_about(zip_path)
+        if head is not None:
+            self.root.after(0, lambda: self._confirm_load_game(
+                zip_path, assets_dir, head, "Import Mod Pack"))
+            return
         about = modpack.modes_file_about(zip_path)
         if about is not None:
             self.root.after(0, lambda: self._offer_modes_file(
@@ -3510,6 +3528,100 @@ class App:
                 return
         self.window.select_tab("modes")
         modes.load_file(src)
+
+    # -- PAD-1408: a mod pack with the modes: a whole game ----------------
+    def _pack_includes(self, assets_dir):
+        """PAD-1408: ``(files, modes)``: what Export Mod Pack... puts in the pack, from the
+        tab's two boxes; modes only when the project has any (a Stern project's ``modes``)."""
+        def ticked(name):
+            var = getattr(self.window, name, None)
+            try:
+                return True if var is None else bool(var.get())
+            except Exception:                                    # noqa: BLE001
+                return True
+        files = ticked("pack_files_var")
+        modes = ticked("pack_modes_var") and self._current_mfr.key == "stern"
+        if modes:
+            try:
+                modes = any(os.path.isdir(os.path.join(assets_dir, "modes", n))
+                            for n in os.listdir(os.path.join(assets_dir, "modes")))
+            except OSError:
+                modes = False
+            if not modes and not files:
+                modes = True              # say "nothing to share" rather than "tick something"
+        return files, modes
+
+    def _share_game_worker(self, assets_dir, zip_path, files=True):
+        from .core import game_file
+        try:
+            if files:     # as a plain pack: Replace-tab picks reach the disk at build time
+                for stage in (self._stage_pending_audio, self._stage_pending_video,
+                              self._stage_pending_image):
+                    stage(assets_dir)
+            name = os.path.splitext(os.path.basename(zip_path))[0]
+            head = game_file.export_game(
+                assets_dir, zip_path, name=name, files=files,
+                log_cb=lambda t, l="info": self.msg_queue.put(LogMsg(t, l)),
+                progress_cb=lambda c, t, d="": self.msg_queue.put(ProgressMsg(c, t, d)))
+            n_stock = len(head.get("stock") or ())
+            text = ("Mod pack saved to:\n%s\n\n%s\n\nNo file of the manufacturer's is in it%s: an "
+                    "owner imports it into the project of their own card (Import Mod Pack...) and "
+                    "writes it to their card, or builds it as an Edition beside the original on the "
+                    "Multi-boot tab."
+                    % (zip_path, game_file.game_file_words(head),
+                       " (%d file(s) that are the card's own are taken from the owner's card "
+                       "instead)" % n_stock if n_stock else ""))
+            self.msg_queue.put(LogMsg("Mod pack saved: %s" % zip_path, "success"))
+            self.root.after(0, lambda: messagebox.showinfo("Export Complete", text))
+        except Exception as e:                                   # noqa: BLE001
+            self.msg_queue.put(LogMsg("Export failed: %s" % e, "error"))
+            self.root.after(0, lambda e=e: messagebox.showerror("Export Failed", str(e)))
+
+    def _confirm_load_game(self, zip_path, assets_dir, head, title):
+        """Main thread: say what a mod pack with modes holds, then import it on a worker."""
+        from .core import game_file
+        if not messagebox.askyesno(title, "%s\n\nImport it into this project?\n  %s\n\nA mode "
+                                   "an earlier import of this pack brought is replaced; your own "
+                                   "modes stay." % (game_file.game_file_words(head), assets_dir)):
+            return
+        self.window.append_log("Importing mod pack started: %s" % os.path.basename(zip_path), "info")
+
+        def _run():
+            try:
+                res = game_file.import_game(
+                    zip_path, assets_dir,
+                    log_cb=lambda t, l="info": self.msg_queue.put(LogMsg(t, l)),
+                    progress_cb=lambda c, t, d="": self.msg_queue.put(ProgressMsg(c, t, d)))
+                self.msg_queue.put(UiCallMsg(self.window.reload_assets_tabs))
+                modes = None
+                if hasattr(self.window, "service"):
+                    modes = self.window.service("modes")
+                if modes is not None and hasattr(modes, "refresh"):
+                    self.msg_queue.put(UiCallMsg(modes.refresh))
+                lines = []
+                if res["applied"]:
+                    lines.append("%d changed file(s) of the card came in." % len(res["applied"]))
+                if res["skipped"]:
+                    lines.append("%d file(s) were skipped: this card has nothing they match "
+                                 "(each is named in the log)." % len(res["skipped"]))
+                if res["report"] is not None:
+                    lines.append("Modes: %s" % res["report"].summary())
+                if res["objects"]:
+                    lines.append("The maker's compiled code modes came too: a Write uses them "
+                                 "while the code modes stay as they came.")
+                if res["missing"]:
+                    lines.append("%d file(s) the pack takes from the card are not on this card "
+                                 "(named in the log)." % len(res["missing"]))
+                lines.append("Write it to your card on the Write tab, or build it as an Edition "
+                             "beside the original on the Multi-boot tab.")
+                self.msg_queue.put(LogMsg("Mod pack import completed.", "success"))
+                self.root.after(0, lambda: messagebox.showinfo("Import Complete",
+                                                               "\n\n".join(lines)))
+            except Exception as e:                               # noqa: BLE001
+                self.msg_queue.put(LogMsg("Import failed: %s" % e, "error"))
+                self.root.after(0, lambda e=e: messagebox.showerror("Import Failed", str(e)))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _confirm_import(self, zip_path, assets_dir, plan):
         """Main thread: the import confirmation, spelling out the mismatch."""

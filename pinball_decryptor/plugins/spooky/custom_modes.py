@@ -1,9 +1,11 @@
 """Spooky custom modes in the app (PAD-1417): the Tk-free half of the Modes tab on a Spooky game.
 
 The same mode files as on Jersey Jack (``key = value``, tools/jjp_emu/MODES.md), run inside a
-retail Spooky Unity game by PAD's runtime (tools/spooky_emu/modes/unity: ``padunity.so``, which
-the update's launch line preloads, and ``PadModes.dll``, which adds one Mode of ours to the
-game's own mode list).  ``tools/spooky_emu/modes/mkspkmodes.py`` is the checker and the build;
+retail Spooky game by PAD's runtime: on the Unity titles tools/spooky_emu/modes/unity
+(``padunity.so``, which the update's launch line preloads, and ``PadModes.dll``, which adds one
+Mode of ours to the game's own mode list); on Looney Tunes (Godot, PAD-1419)
+tools/spooky_emu/modes/godot (``pad_modes.gd``, one more autoload that an ``override.cfg``
+beside main.x86_64 names).  ``tools/spooky_emu/modes/mkspkmodes.py`` is the checker and the build;
 this module is what the tab needs on top of it:
 
 * the titles - every port report in ``tools/spooky_emu/modes/ports`` (``titles()``): the game's
@@ -23,7 +25,7 @@ import shutil
 #: the title names, by the plugin's game key
 GAME_NAMES = {"scooby_doo": "Scooby-Doo", "beetlejuice": "Beetlejuice",
               "texas_chainsaw": "Texas Chainsaw Massacre", "evil_dead": "Evil Dead",
-              "halloween_78": "Halloween", "ultraman": "Ultraman"}
+              "halloween_78": "Halloween", "ultraman": "Ultraman", "legends_of_tera": "Looney Tunes"}
 MAX_MODES = 24
 #: the form's groups: every key of mkspkmodes.KEYS once
 FORM_GROUPS = (
@@ -378,11 +380,16 @@ def sound_index(folder):
 
 
 def sound_file(index, name, port=None):
-    """The extract's file for callout *name*: its clip's name is the last part of its path."""
+    """The extract's file for callout *name*: its clip's name is the last part of its path (a
+    Unity Resources path has no extension, a Godot res:// path has: .wav, .ogg)."""
     if not name or not index:
         return ""
     path = ((port or {}).get("sound_paths") or {}).get(name) or name
-    return index.get(path.rsplit("/", 1)[-1].lower(), "") or index.get(name.lower(), "")
+    last = path.rsplit("/", 1)[-1]
+    stem, ext = os.path.splitext(last)
+    if ext.lower() not in (".wav", ".ogg"):
+        stem = last
+    return index.get(stem.lower(), "") or index.get(name.lower(), "")
 
 
 # ============================================================================ the build
@@ -413,9 +420,14 @@ def find_stock(label, folders):
 def install_note(label):
     """What installing a modes update does on this title's machine (the Build card says it)."""
     p = load_port(label) or {}
-    note = ("The game runs the modes from its first start after the update."
-            if (p.get("load") or "preload") == "dllmap" else
-            "The game restarts once by itself on its first start after the update, to take up the modes.")
+    note = "Install it the way a stock update installs: on a USB stick, under its own name. "
+    if mk().engine(p) == "godot":
+        note += ("The machine puts it in place when it next powers up, and the modes are in the game "
+                 "from that start. To take them out, install the stock update again.")
+    elif mk().load_of(p) == "dllmap":
+        note += "The game runs the modes from its first start after the update."
+    else:
+        note += "The game restarts once by itself on its first start after the update, to take up the modes."
     if p.get("update_container") == "gpg_signed":
         note += " The machine asks before it installs it: the app signs it, not Spooky."
     return note
@@ -470,9 +482,10 @@ def label_for_extract(folder, meta=None):
 
 
 def write_pad_modes(label, folder=None):
-    """The person's modes for *label* as the Write tab packs them -> ``(files, rewrite, pad)``
-    for formats.create_tar_gz (*pad*: where pad/ goes, beside the extract's main.x86_64), None
-    when they have none; ValueError with the check's problems."""
+    """The person's modes for *label* as the Write tab packs them -> ``(files, rewrite, pad, top)``
+    for formats.create_tar_gz / create_tar (*pad*: where pad/ goes, beside the extract's
+    main.x86_64; ``top``: files beside main.x86_64, Godot's override.cfg), None when they have
+    none; ValueError with the check's problems."""
     d = title_dir(label, seed=False)
     if not os.path.isdir(d) or not any(f.endswith(".mode") for f in os.listdir(d)):
         return None
@@ -489,4 +502,14 @@ def write_pad_modes(label, folder=None):
     pad = m.PAD_DIR
     if folder and os.path.isfile(os.path.join(folder, "uptest", "main.x86_64")):
         pad = "uptest/" + m.PAD_DIR
-    return files, rewrite, pad
+    return files, rewrite, pad, m.top_files(port)
+
+
+def loads_how(label):
+    """How the update PAD writes loads the runtime, for the Write log."""
+    port = load_port(label)
+    if mk().engine(port) == "godot":
+        return "an override.cfg beside the game loads it"
+    if mk().load_of(port) == "dllmap":
+        return "the game's Mono config loads it"
+    return "the game's launch line preloads it"

@@ -586,11 +586,153 @@ def cabinet_lines(elf, t=None, cab=None):
     (:func:`cabinet_from_port`)."""
     cab = cabinet(elf, t) if cab is None else cab
     if not cab:
-        return []
+        return added_cabinet_lines(elf, t) if elf is not None else []      # PAD-1448
     return ["# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----",
             "# %d blade pixel(s), %d speaker light(s), placed on the cabinet drawing (PAD-1040)"
             % (sum(c["role"] == "blade" for c in cab), sum(c["role"] == "speaker" for c in cab))] + \
         [cabinet_line(c) for c in cab]
+
+
+# ---- PAD-1448: cabinet lights a card adds, on a title that names none -------------------------------------------
+#: Friday (Pinside): "add speaker light effects to stern games that don't have them ... stranger things or Munsters".
+#: Those titles (31 ports: no `cablamp` line) still list node 2, "Cabinet Lights" (the 520-8511-00 board Stern's
+#: Expression Lighting kit and the game-driven speaker kits hang off), as device group 1, with nothing on it: a fitted
+#: board is registered and never sent a light. The runtime gives the game lights of its own there (addcab.cfg),
+#: appended to the game's light and device tables before its static initialisers copy their counts, so the game itself
+#: configures and refreshes the board (emulator: Stranger Things LE 1.13 then sends node 2 exactly what Godzilla LE
+#: sends its speaker board). docs/plans/pad1448_added_cabinet_lights.md.
+ADDCAB_GROUP = 1
+#: the most channels the runtime adds (pad_mode_runtime.c ADDCAB_MAX): two 48-pixel blades and 24 speaker lights
+ADDCAB_CHANNELS = 3 * (96 + 24)
+#: what the Expression lights tab offers: speaker lights (Godzilla's 23: the left ring 12, the right 11) and blades
+#: (pixels a side)
+ADDCAB_SPEAKERS_DEFAULT, ADDCAB_SPEAKERS_MAX = 23, 24
+ADDCAB_BLADES_MAX = 48
+_LDR_SELF = 0xE5900000      # ldr rA, [rA]  (| A << 16 | A << 12)
+_STR_TO = 0xE5800000        # str rA, [rB]  (| B << 16 | A << 12)
+
+
+def _pair_at(w, k, rd=None):
+    """(value, register) of a movw at word k and its movt within the next 4 words, or (None, None)."""
+    lo = _movw(w[k], rd)
+    if lo is None:
+        return None, None
+    r = (w[k] >> 12) & 15
+    for j in range(k + 1, min(k + 5, len(w))):
+        hi = _movt(w[j], r)
+        if hi is not None:
+            return lo | (hi << 16), r
+    return None, None
+
+
+def count_const(elf, cnt):
+    """The read-only word a static initialiser copies into the count global *cnt* (`movw/movt rA,#const;
+    movw/movt rB,#cnt; ldr rA,[rA]; str rA,[rB]`), or None. Stranger Things LE 1.13: 0x5dc620 -> 0x891370."""
+    if not cnt:
+        return None
+    w = elf.words
+    lo = cnt & 0xFFFF
+    for k in range(len(w) - 8):
+        if _movw(w[k]) != lo:
+            continue
+        v, rb = _pair_at(w, k)
+        if v != cnt:
+            continue
+        for j in range(max(1, k - 5), min(len(w), k + 8)):
+            if (w[j] & 0xFFF00FFF) != _STR_TO or (w[j] >> 16) & 15 != rb:
+                continue
+            ra = (w[j] >> 12) & 15
+            if ra == rb or w[j - 1] != (_LDR_SELF | ra << 16 | ra << 12):
+                continue
+            for i in range(max(0, k - 6), j - 1):
+                c, _r = _pair_at(w, i, ra)
+                if c is not None and c != cnt and elf.off(c) is not None:
+                    return c
+    return None
+
+
+def added_cabinet_anchor(elf, t=None):
+    """PAD-1448: what the runtime needs to add cabinet lights to this build: {light_ptr, dev_ptr, light_const,
+    dev_const, lights, devices, clone, clone_name, slot, group, why}; ``why`` says why not, when it cannot."""
+    try:
+        t = t or find_tables(elf)
+    except SystemExit as e:
+        return dict(why=str(e))
+    lt, dt = t["light_tab"], t["dev_tab"]
+    lp = [a for a in _accessors(elf, 0xE0830180) if elf.u32(a[0]) == lt and a[1]]
+    dp = [a for a in _accessors(elf, 0xE0830200) if elf.u32(a[0]) == dt and a[1]]
+    if not lp or not dp:
+        return dict(why="the light or device table is not reached through one pointer and count")
+    lc, dc = count_const(elf, lp[0][1]), count_const(elf, dp[0][1])
+    if not lc or not dc:
+        return dict(why="the light or device count is not copied from a constant at start-up")
+    nl, nd = elf.u32(lc), elf.u32(dc)
+    lights = t["lights"]
+    if nl != len(lights):
+        return dict(why="the light count constant (%s) is not the table's %d lights" % (nl, len(lights)))
+    if any(d and d["group"] == ADDCAB_GROUP for d in lights[1:]):
+        return dict(why="the game already has lights on group %d (node 2)" % ADDCAB_GROUP)
+    rgb = {i for l in t["lamps"] if l["kind"] == 2 for i in l["lights"]}
+    slot, strip, insert = 0, None, None
+    for i in range(1, nl):
+        o = elf.off(lt + 24 * i)
+        s0c, dev, f10 = struct.unpack_from("<HHH", elf.b, o + 0x0C)
+        slot = max(slot, s0c + 1)
+        if lights[i]["cls"] != 3 or not 0 < dev < nd:
+            continue
+        if strip is None and f10 & 0x1000:
+            strip = i
+        if insert is None and i in rgb:
+            insert = i
+    clone = strip or insert
+    if not clone:
+        return dict(why="no LED light to copy")
+    return dict(light_ptr=lp[0][0], dev_ptr=dp[0][0], light_const=lc, dev_const=dc, lights=nl, devices=nd,
+                clone=clone, clone_name=lights[clone]["name"], slot=slot, group=ADDCAB_GROUP, why="")
+
+
+def added_cabinet_lines(elf, t=None):
+    """PAD-1448: the port's block for a title with no cabinet lights: the anchors a card's addcab.cfg adds lights
+    with; a comment saying why not when this build cannot take them."""
+    a = added_cabinet_anchor(elf, t)
+    head = "# ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----"
+    if a.get("why"):
+        return [head, "# not on this build: %s" % a["why"]]
+    return [head,
+            "data addcab_light_tab  0x%08x  # the light table's pointer (24-byte records)" % a["light_ptr"],
+            "data addcab_dev_tab    0x%08x  # the device table's pointer (48-byte records)" % a["dev_ptr"],
+            "data addcab_light_n    0x%08x  # the light count the game copies at start-up" % a["light_const"],
+            "data addcab_dev_n      0x%08x  # the device count it copies" % a["dev_const"],
+            "value addcab_lights    %d" % a["lights"],
+            "value addcab_devices   %d" % a["devices"],
+            "value addcab_clone     %d  # the LED light the added ones copy: %s" % (a["clone"], a["clone_name"]),
+            "value addcab_slot      %d  # the first free light slot" % a["slot"],
+            "value addcab_group     %d" % a["group"]]
+
+
+def added_cabinet(lights0, speakers=ADDCAB_SPEAKERS_DEFAULT, blades=0):
+    """PAD-1448: the added cabinet lights as :func:`cabinet` lists them, placed: the board's channels in order,
+    each pixel three (G, R, B, the boards' order), the blades first (left bottom up, then right) and the speaker
+    lights after (the left ring, then the right); light id = *lights0* + channel."""
+    out, ch = [], 0
+    names = ["EXPRESSIVE LIGHTING L %d" % n for n in range(1, blades + 1)] + \
+            ["EXPRESSIVE LIGHTING R %d" % n for n in range(blades + 1, 2 * blades + 1)] + \
+            ["SPEAKER %d" % n for n in range(1, speakers + 1)]
+    for name in names:
+        role = cabinet_role(name)
+        out.append(dict(lamp=0, name=name, lights=[lights0 + ch + 1, lights0 + ch, lights0 + ch + 2], role=role[0],
+                        side=role[1], n=role[2], group=ADDCAB_GROUP, index=ch, x=0, y=0, channel=ch))
+        ch += 3
+    return place_cabinet(out)
+
+
+def added_cabinet_cfg(cab):
+    """PAD-1448: addcab.cfg for :func:`added_cabinet`'s list: `channels N`, then `fixture <channel> <u> <x> <y>
+    <name>` a pixel (pad_mode_runtime.c addcab_arm)."""
+    n = max((c["channel"] + 3 for c in cab), default=0)
+    return "\n".join(["# addcab v1 - PAD-1448: cabinet lights added on the Cabinet Lights board (node 2)",
+                      "channels %d" % n] +
+                      ["fixture %d %d %d %d %s" % (c["channel"], c["u"], c["x"], c["y"], c["name"]) for c in cab]) + "\n"
 
 
 def lamp_line(ins):

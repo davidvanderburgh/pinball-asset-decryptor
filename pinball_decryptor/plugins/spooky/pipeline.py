@@ -672,7 +672,8 @@ class WritePipeline(_BasePipeline):
         if format_type == "plain_tar":
             self.log("Creating tar archive...")
             create_tar(self.assets_dir, out,
-                       progress_cb=lambda d, t, n: self.progress(d, t, n))
+                       progress_cb=lambda d, t, n: self.progress(d, t, n),
+                       pad_modes=self.pad_modes)
             self.log(f"Archive created: "
                      f"{os.path.getsize(out) / (1024**3):.2f} GB", "success")
             return True
@@ -772,7 +773,7 @@ class WritePipeline(_BasePipeline):
     def _custom_modes(self, meta, format_type):
         """PAD-1417: the person's custom modes for this title (Modes tab) as Write packs them,
         or None.  Modes with problems stay out, and the log says so, loudly."""
-        if format_type not in ("tar_gz", "gpg_tar_gz", "um_pkg", "h78_pkg"):
+        if format_type not in ("tar_gz", "gpg_tar_gz", "um_pkg", "h78_pkg", "plain_tar"):
             return None
         try:
             from . import custom_modes as SM
@@ -789,8 +790,8 @@ class WritePipeline(_BasePipeline):
             return None
         if pm:
             n = sum(1 for rel, _s, _m in pm[0] if rel.endswith(".mode"))
-            self.log("Custom modes: %d mode(s) from the Modes tab go in, with the runtime "
-                     "(%s/)" % (n, pm[2]), "success")
+            self.log("Custom modes: %d mode(s) from the Modes tab go in, with the runtime; %s"
+                     % (n, SM.loads_how(label)), "success")
         return pm
 
     def _scan_changes(self):

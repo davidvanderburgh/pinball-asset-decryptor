@@ -41,9 +41,10 @@ def _songs(audio, keep=(), seen=None, banks=False):
     """The project's songs, from the Audio tab's scan: ``[{slot, rel, name, seconds, path, replaced}]`` - every sound
     of a sound-bank record at least :data:`SONG_MIN_SECONDS` long (its replacement's length and file when it has
     one), and the records in *keep* however long (PAD-1068: the songs of the game's own shows). *seen*, a set, gets
-    every record the scan has a file for. PAD-1379: *banks* (a Spike 3 card's project) takes the songs of the
-    game's music banks too (``music_catNN_NNNN``, :func:`.sound_modes.bank_slot_key` below zero): a Spike 3 Write
-    reads the sound ids that start them off the banks themselves (most of Fallout's music is in them)."""
+    every record the scan has a file for. PAD-1379: *banks* takes the songs of the game's music banks too
+    (``music_catNN_NNNN``, :func:`.sound_modes.bank_slot_key` below zero): a Spike 3 Write reads the sound ids that
+    start them off the banks themselves (most of Fallout's music is in them), and PAD-1414 a Spike 2 Write through
+    the game's own bank loader on the emulator (Rush, Foo Fighters, Metallica and the others' licensed songs)."""
     from ...core import audio as _A
     from ...plugins.stern import sound_modes as SM
     if audio is None:
@@ -121,7 +122,6 @@ class LightsTab(TabService):
         self._project = ""
         self._shows = []
         self._read_id = 0
-        self._spike3 = False                            # PAD-1379: the project is a Spike 3 card's
         self._songs_id = 0
         from ...plugins.stern import cab_shows as CS
         self.set(project="", available=False, why="", reading=False, lights=[], songs=[], shows=[], intro=INTRO,
@@ -183,7 +183,7 @@ class LightsTab(TabService):
         def work():
             seen = set()
             try:
-                songs = _songs(audio, keep, seen, banks=self._spike3)
+                songs = _songs(audio, keep, seen, banks=True)     # PAD-1414: Spike 2 cards' too
             except Exception:                           # noqa: BLE001 - a scan replaced under it: the next one's
                 return
             # PAD-1068: why a game's show has no song here, said on the page (not a bare "not one of its songs")
@@ -216,16 +216,17 @@ class LightsTab(TabService):
             self._shows = CS.norm(staged_changes.load(folder).get(CS.STAGED_KEY))["shows"]
         except Exception:                               # noqa: BLE001 - an unreadable sidecar: none yet
             self._shows = []
+        self._added = CS.load_added(folder)
         self.set(project=folder, reading=True)
 
         def work():
-            why, lights = "", []
-            self._spike3 = project_is_spike3(folder)
+            why, lights, addable = "", [], False
             try:
                 why, lights = project_layout(folder)
+                addable = project_added(folder)[0]        # PAD-1448: a cabinet with lights the owner adds
             except Exception as e:                      # noqa: BLE001 - said on the page
                 why = "The game's cabinet lights could not be read: %s" % e
-            self.ctx.loop.post(lambda: self._read_done(rid, lights, why))
+            self.ctx.loop.post(lambda: self._read_done(rid, lights, why, addable))
             if why:
                 return
             try:                                        # PAD-1063: the game's own shows (seconds, once per card)
@@ -235,10 +236,11 @@ class LightsTab(TabService):
             self.ctx.loop.post(lambda: self._stock_done(rid, swhy, stock))
         threading.Thread(target=work, daemon=True, name="lights-read").start()
 
-    def _read_done(self, rid, lights, why):
+    def _read_done(self, rid, lights, why, addable=False):
         if rid != self._read_id:
             return
-        self.set(reading=False, available=not why, why=why, lights=lights, stock=[], stock_meta={}, stock_why="")
+        self.set(reading=False, available=not why, why=why, lights=lights, stock=[], stock_meta={}, stock_why="",
+                 addable=addable, added=dict(self._added))
         self._paint()
         self._songs_now()
 
@@ -272,8 +274,11 @@ class LightsTab(TabService):
             return False
         data = staged_changes.load(self._project)
         before = json.dumps(data.get(CS.STAGED_KEY), sort_keys=True)
-        if self._shows:
+        added = getattr(self, "_added", None) or {}
+        if self._shows or added.get("on"):
             data[CS.STAGED_KEY] = {"shows": self._shows}
+            if added.get("on"):                         # PAD-1448: the cabinet lights the owner's cabinet adds
+                data[CS.STAGED_KEY][CS.ADDED_KEY] = dict(added)
         else:
             data.pop(CS.STAGED_KEY, None)
         staged_changes.save(self._project, data)
@@ -288,6 +293,23 @@ class LightsTab(TabService):
     def refresh(self):
         self._read()
         self._audio_ready()
+        return True
+
+    @rpc
+    def set_added(self, on, speakers=None, blades=None):
+        """PAD-1448: the cabinet lights the owner's cabinet adds on its Cabinet Lights board (node 2): *on*, the
+        speaker lights (both rings) and the blade pixels a side. The page reads the cabinet again with them."""
+        from ...plugins.stern import cab_shows as CS
+        if not self._project:
+            return False
+        cur = getattr(self, "_added", None) or CS.norm_added({})
+        self._added = CS.norm_added({"on": bool(on),
+                                     "speakers": cur["speakers"] if speakers is None else speakers,
+                                     "blades": cur["blades"] if blades is None else blades})
+        a = self._added
+        self._save("cabinet lights added: %d speaker light(s), %d blade pixel(s) a side" % (a["speakers"], a["blades"])
+                   if a["on"] else "added cabinet lights removed")
+        self._read()
         return True
 
     @rpc
@@ -536,7 +558,7 @@ def project_stock(project):
 
 
 def project_is_spike3(project):
-    """PAD-1379: whether *project* was made from a Spike 3 card (its songs then include the music banks')."""
+    """PAD-1379: whether *project* was made from a Spike 3 card (its Run in emulator goes through Try it)."""
     from ...plugins.stern import mode_project as MP
     try:
         got = MP.project_card(project) if project else None
@@ -546,9 +568,52 @@ def project_is_spike3(project):
         return False
 
 
+def project_added(project):
+    """PAD-1448: ``(addable, added, why)``: whether the card *project* was made from can take cabinet lights the owner
+    adds (its port says where its light tables are: cab_shows.addable), the project's choice (cab_shows.norm_added),
+    and the page's words for a cabinet with none of its own."""
+    from ...plugins.stern import cab_shows as CS
+    from ...plugins.stern import mode_project as MP
+    added = CS.load_added(project)
+    prof = CS.project_title(project, probe=True) if project else None
+    if prof is None:
+        return False, added, ""
+    try:
+        port = MP.read_port(MP.port_path(prof))
+    except (OSError, MP.ModeProjectError):
+        return False, added, ""
+    if port.get("cablamp") or not CS.addable(port):
+        return False, added, ""
+    return True, added, CS.NO_CAB_ADDABLE % prof.label
+
+
 def project_layout(project):
     """``(why, lights)``: the cabinet's expression lights of the card *project* was made from (cab_shows.layout),
-    cached per card; ``why`` says why there are none ("" when there are)."""
+    cached per card, or (PAD-1448) the ones the project adds on a cabinet with none of its own; ``why`` says why there
+    are none ("" when there are)."""
+    why, lights = _card_layout(project)
+    if lights or (why and why != _NO_LIGHTS()):
+        return why, lights
+    addable, added, awhy = project_added(project)
+    if not addable:
+        return why, lights
+    if added["on"]:
+        from ...plugins.stern import cab_shows as CS
+        from ...plugins.stern import mode_project as MP
+        prof = CS.project_title(project, probe=True)
+        lights = CS.added_layout(MP.read_port(MP.port_path(prof)), added)
+        if lights:
+            return "", lights
+    return awhy, []
+
+
+def _NO_LIGHTS():
+    from ...plugins.stern import cab_shows as CS
+    return CS.NO_LIGHTS
+
+
+def _card_layout(project):
+    """``(why, lights)`` off the card's own program (cab_shows.layout), cached per card."""
     from ...plugins.stern import cab_shows as CS
     from ...plugins.stern import mode_project as MP
     from ...plugins.stern import title_reader as TR

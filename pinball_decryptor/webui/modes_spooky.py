@@ -1,8 +1,9 @@
-"""The Modes tab on a Spooky game (PAD-1417): custom modes for Spooky's Unity titles.
+"""The Modes tab on a Spooky game (PAD-1417): custom modes for Spooky's Unity titles and Looney
+Tunes (Godot, PAD-1419).
 
 The JJP editor's model (webui/modes_jjp.py) for Spooky: no project, a title's modes are one
 folder of ``key = value`` files that PAD's runtime reads inside the retail game
-(tools/spooky_emu/modes: ``padunity.so`` + ``PadModes.dll``).  ``SpookyModesMixin``, the ``spk``
+(tools/spooky_emu/modes: ``padunity.so`` + ``PadModes.dll``; Looney Tunes ``pad_modes.gd``).  ``SpookyModesMixin``, the ``spk``
 key of the ``modes`` state:
 
 * the title is the selected card's (its update file: the game by its name, the version from
@@ -11,7 +12,8 @@ key of the ``modes`` state:
   (plugins/spooky/custom_modes.FORM_GROUPS), every name picked from the port report;
 * the checker (the build's own, ``mkspkmodes.check_modes``) after every edit;
 * Build: the stock update in, the same update with the runtime and the modes out (its launch
-  line preloads the runtime), in-process on a worker - no Linux needed;
+  line preloads the runtime; Looney Tunes: an override.cfg loads it), in-process on a worker -
+  no Linux needed;
 * Try it: the runtime and the modes staged as the update's ``pad/`` folder, and the Emulate
   tab started on the stock update with them (run_game.sh SPK_PAD_OVERLAY).
 
@@ -113,6 +115,7 @@ class SpookyModesMixin:
                 st["build"] = self._spk_build_state()
                 st["points_scale"] = port.get("points_scale") or 1
                 st["points_round"] = port.get("points_round") or 0
+                st["game_name"] = port.get("title") or ""
         self.set(spk=st)
 
     def _spk_fields(self):
@@ -183,7 +186,7 @@ class SpookyModesMixin:
         out = self._spk_recall("out") or (SM.default_out(stock, self._spk_out_folder(stock)) if stock else "")
         b = dict(self._spk_build or {})
         b.update({"iso": stock, "out": out, "running": self._spk_running, "busy": self._spk_running,
-                  "note": SM.install_note(self._spk_label)})
+                  "install_note": SM.install_note(self._spk_label)})
         return b
 
     def _spk_publish(self, **parts):

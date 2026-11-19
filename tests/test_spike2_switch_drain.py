@@ -56,10 +56,11 @@ static void lit_hold_check(unsigned id) { (void)id; }    /* PAD-503's, not under
 static volatile int att_live;                            /* PAD-641's, not under test here */
 static volatile int gms_live;                            /* PAD-945's, not under test here */
 @EDGE@
+static void btn_edge(unsigned id, unsigned level, unsigned polarity) {}   /* PAD-1403's, not under test here */
 static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, unsigned mask) {}
 static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity) {}
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity) {}   /* PAD-1031's */
-static unsigned hide_id;                                 /* PAD-1051: the switch a hider wants (0: none) */
+static unsigned hide_id;                                /* PAD-1051: the switch a hider wants (0: none) */
 static int coop_hides(unsigned id) { return hide_id && id == hide_id; }
 
 /* generation B: 0x20-byte records (level byte at +0x18) pointing at 0x28-byte descriptors from +8 */

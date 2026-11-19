@@ -292,6 +292,39 @@ def _index_entries(e):
     return n, {v["index"]: (v["flag"] or 0, v["msgs"][1] or 0) for v in ents.values() if v["index"] is not None}
 
 
+#: PAD-1449: the flag a game-mode table's challenge entries carry (Godzilla: KING OF THE MONSTERS and its TIME ATTACK)
+CHALLENGE_FLAG = "FG_PLAYER_CHALLENGE_MODE_ACTIVE"
+#: PAD-1449: the most challenge indices the port names (comp_menu_challenge_0..; Metallica has 7)
+MAX_CHALLENGES = 8
+
+
+def challenge_indices(e, names):
+    """PAD-1449: the game-mode table's indices that start one of the game's challenges (the start menu's style chooser
+    follows them; DJ MIXER, Competition and the rest it does not): Godzilla's own table's entries whose flag is
+    :data:`CHALLENGE_FLAG`, or the GamePlayModes adapter's whose flag is a challenge's."""
+    from . import portchallenge as PC
+    w = e.words
+    tables = set()
+    for k in range(len(w) - 4):
+        x = w[k]
+        if x & 0xFFFFFF00 == 0xE3510000 and w[k + 1] & 0xFFF0F000 == 0x93003000 and w[k + 2] & 0xFFF0F000                 == 0x93403000 and w[k + 3] == 0x90833281 and w[k + 4] == 0x91D300B4:
+            lo = ((w[k + 1] >> 16) & 0xF) << 12 | (w[k + 1] & 0xFFF)
+            hi = ((w[k + 2] >> 16) & 0xF) << 12 | (w[k + 2] & 0xFFF)
+            tables.add(((hi << 16) | lo, (x & 0xFF) + 1))
+
+    def is_ch(f):
+        return 0 < f < len(names) and "CHALLENGE" in names[f]
+    if len(tables) == 1:
+        (tbl, n), = tables
+        return [i for i, (f, f2, _m) in enumerate(PC._table_entries(e, tbl, n))
+                if 0 < f < len(names) and names[f] == CHALLENGE_FLAG][:MAX_CHALLENGES]
+    tbl, n = PC._gpm_table(e)
+    if not tbl:
+        return []
+    return sorted(v["index"] for v in PC._gpm_entries(e, tbl, n).values()
+                  if v["index"] is not None and is_ch(v["flag"] or 0))[:MAX_CHALLENGES]
+
+
 def frame_lines(game_elf):
     """The port lines of a game-mode index menu's frame (see above), or [] when the program has none of that shape."""
     from . import portchallenge as PC
@@ -319,4 +352,6 @@ def frame_lines(game_elf):
             "value comp_menu_index            %d   # COMPETITION" % comp[0][0],
             "value comp_menu_index_msg        %d" % comp[0][1],
             "value comp_menu_end_index        %d   # STANDARD" % std[0][0],
-            "value comp_menu_end_msg          %d" % std[0][1]]
+            "value comp_menu_end_msg          %d" % std[0][1]] + [
+            "value comp_menu_challenge_%d      %d   # PAD-1449: a challenge's index (the style chooser follows it)"
+            % (k, i) for k, i in enumerate(challenge_indices(e, names))]

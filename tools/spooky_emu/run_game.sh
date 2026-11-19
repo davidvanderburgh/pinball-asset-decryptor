@@ -239,7 +239,16 @@ if [ -n "${SPK_PAD_OVERLAY:-}" ] && [ -f "$SPK_PAD_OVERLAY/padunity.so" ]; then
     cp -r "$SPK_PAD_OVERLAY" "$UPTEST/pad" && chmod -R a+rX "$UPTEST/pad"
     LAUNCH_PRE=/game/code/uptest/pad/padunity.so
     echo "run_game.sh: Try it: $SPK_PAD_OVERLAY as uptest/pad"
+elif [ -n "${SPK_PAD_OVERLAY:-}" ] && [ -f "$SPK_PAD_OVERLAY/pad_modes.gd" ]; then
+    # PAD-1419: the Godot title (Looney Tunes).  Its runtime is one more autoload that
+    # override.cfg beside main.x86_64 names, as an update PAD wrote carries it.
+    rm -rf "$UPTEST/pad" "$UPTEST/override.cfg"
+    cp -r "$SPK_PAD_OVERLAY" "$UPTEST/pad" && chmod -R a+rX "$UPTEST/pad"
+    printf '[autoload]\n\nPadModes="*/game/code/uptest/pad/pad_modes.gd"\n' > "$UPTEST/override.cfg"
+    chmod a+r "$UPTEST/override.cfg"
+    echo "run_game.sh: Try it: $SPK_PAD_OVERLAY as uptest/pad, override.cfg loads pad_modes.gd"
 fi
+[ -f "$UPTEST/override.cfg" ] && grep -q 'pad_modes.gd' "$UPTEST/override.cfg"     && echo "run_game.sh: override.cfg adds PAD's mode runtime (pad/pad_modes.gd)"
 [ -n "$LAUNCH_PRE" ] && echo "run_game.sh: the launch line preloads $LAUNCH_PRE" && LAUNCH_PRE="$LAUNCH_PRE:"
 PADMODES_ENV=""
 [ "${SPK_PADMODES_PORT:-0}" = 1 ] && PADMODES_ENV="PADMODES_PORT=/game/logs/padmodes_port.json"

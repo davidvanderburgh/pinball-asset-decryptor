@@ -330,7 +330,9 @@
       "PAD-1356: KrampBoucle is on again (Mike: the ball cannot get up and over the Scars loop without it). The lanterns still bloomed:",
       "each is a bulb with its bulb mesh shown, blinking at 60 (JP: 200) inside a gold lantern on the inlane plastic. No bulb mesh now,",
       "steady, at 8 (the GI bulbs beside them are 15-25): a small warm glow on the plastic.",
-      "PAD-1362: f4 and f5, JP's backboard flashers (25, for a 1 s flash), are the Orca board, lit all game: at 15, as his f2, f7 and f9 are."],
+      "PAD-1362: f4 and f5, JP's backboard flashers (25, for a 1 s flash), are the Orca board, lit all game: at 15, as his f2, f7 and f9 are.",
+      "PAD-1445: the machine has no center post between the flippers (Mike). JP's is three items: Rubber007 (its red rubber, drawn",
+      "only), Primitive034 (its metal post, drawn only) and zCol_Rubber_Sleeve010 (unseen, the part the ball hits): all off."],
     "gi1": {"BWTH": 18.0}, "gi2": {"BWTH": 18.0}, "gi4": {"BWTH": 18.0}, "gi5": {"BWTH": 18.0},
     "f4": {"BWTH": 15.0}, "f5": {"BWTH": 15.0},
     "Lightlantern1": {"RADI": 9.0, "BWTH": 8.0, "SHBM": 0, "STAT": 1, "STTF": 1.0},
@@ -346,7 +348,10 @@
     "Tjackpot": {"TVIS": 0},
     "Tsharkfinal": {"TVIS": 0},
     "Thammerfinal": {"TVIS": 0},
-    "Tsmimerfinal": {"TVIS": 0}
+    "Tsmimerfinal": {"TVIS": 0},
+    "Rubber007": {"RVIS": 0},
+    "Primitive034": {"TVIS": 0},
+    "zCol_Rubber_Sleeve010": {"CLDR": 0}
   },
   "dark": [
     "fcroco",

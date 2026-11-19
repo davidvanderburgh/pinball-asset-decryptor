@@ -127,7 +127,7 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-summary { padding: 4px 8px; border-radius: 4px; background: var(--panel-2, transparent); border-left: 3px solid var(--accent, #e3a33b); }
 
 /* Simon (2026-11-19): SELECTED / THEME and the Copy rows in one grid - a tag column, then six equal columns */
-.cpd-grid { display: grid; grid-template-columns: 92px repeat(6, minmax(0, 1fr)); gap: 5px 6px; align-items: stretch; }
+.cpd-grid { display: grid; grid-template-columns: 92px repeat(12, minmax(0, 1fr)); gap: 5px 6px; align-items: stretch; }
 .cpd-grid .cpd-tag { flex: none; width: auto; display: flex; align-items: center; justify-content: center; }
 .cpd-grid .cpd-val { display: block; }
 .cpd-opt { min-width: 0; padding: 3px 6px; border-radius: 4px; border: 1px solid var(--line-2, var(--line));
@@ -179,3 +179,17 @@ svg.i.cpd-pal { width: 14px; height: 14px; vertical-align: -2px; stroke-width: 1
 /* (only a choice with the palette is a flex row: a plain one keeps its "..." where it is cut) */
 .cpd-opt:has(svg.cpd-pal) { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .cpd-opt:disabled svg.i.cpd-pal { filter: grayscale(1); }
+
+/* Simon (2026-11-19): three looks for the buttons in the Tools, Reset and Copy panels (APPLY keeps its own):
+   red dashes, dark inside - NOT AVAILABLE (cannot be clicked; its inside as faded as a greyed button always was);
+   orange dashes, dark inside - NOT SELECTED (a Copy choice that can be picked);
+   orange line, orange inside - SELECTED (the Copy choice picked, and a Tools / Reset button that can be clicked:
+   "The COPY button should have the Orange border and internal orange hue"). */
+.cpd-tools .btn:not(:disabled), .cpd-resetpanel .btn:not(:disabled) {
+  border: 1px solid var(--accent, #e3a33b); background: var(--warn-soft); }
+.cpd-copy .cpd-opt:not(.on):not(:disabled) { border: 1px dashed var(--accent, #e3a33b); background: transparent; }
+.cpd-tools button:disabled, .cpd-resetpanel button:disabled, .cpd-copy .cpd-opt:disabled {
+  border: 1px dashed var(--err); background: transparent; opacity: 1;
+  color: color-mix(in srgb, currentColor 45%, transparent); }
+/* (text and icons fade through currentColor; the spectrum palette has colours of its own) */
+.cpd-copy button:disabled svg.cpd-pal { opacity: .45; }

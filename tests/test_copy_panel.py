@@ -49,7 +49,10 @@ def test_the_panel_says_what_copy_will_do_first():
         assert 'tag("%s"' % word in pane, word
     assert 'tag(html`COPY <${SpectrumPal} /> FROM`)' in pane
     assert '<span class="cpd-title">Color profiles <${SpectrumPal} /></span>' in pane
-    assert "span: 2, onClick: () => setWhich(" in pane       # WHICH: three choices, two columns each
+    # WHICH?: three choices on twelve columns, 3 / 4 / 5 (Simon: "WITHOUT" was cut off - "make the ALL box smaller
+    # and the WITHOUT box larger")
+    for span, which in ((3, "all"), (4, "profiled"), (5, "off")):
+        assert "span: %d, onClick: () => setWhich(\"%s\")" % (span, which) in pane, which
 
 
 def test_the_preview_asks_the_same_targets_as_the_copy():

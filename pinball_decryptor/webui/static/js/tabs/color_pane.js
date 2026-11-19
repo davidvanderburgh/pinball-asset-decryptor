@@ -258,7 +258,7 @@ function FileLine({ s, host, tools }) {
       title=${!canHere ? "Only for a file with a profile of its own (in the theme on show)"
         : t > 1 ? `Drop this theme's own profile for it: it uses theme 1's (“${(f && f.base_name) || sharedName}”) again`
           : `Drop its own profile: it gets the shared files profile (“${sharedName}”), as every other file without one of its own does`}>${hereLabel}<//>
-    <${Button} size="xs" disabled=${!canEvery} onClick=${() => call("color.file_shared", "all")}
+    <${Button} size="xs" disabled=${!canEvery} cls=${!(themeHost && themesOn) || (f && !themeLive) ? "cpd-never" : ""} onClick=${() => call("color.file_shared", "all")}
       title=${canEvery ? `Drop its own profile in every theme, theme 1 too: it uses the shared files profile (“${sharedName}”) everywhere. Its colour switch is not changed: off, nothing is baked in.`
         : "Only for a picture, with themes on"}>Reset in every theme (“${sharedName}”)<//>
   </div>`;
@@ -327,12 +327,13 @@ function FileLine({ s, host, tools }) {
   // Simon: "match up the look and feel of the SELECTED and THEME with the Copy from, to which kind and so on ...
   // as columnized as possible, box sizes the same" - one grid: a tag column, then six equal columns; three choices
   // take two each, two choices three each, "With profile attached" four and "All" two
-  const opt = (key, label, { on, disabled, title, span, onClick }) => html`<button type="button" key=${key}
-      class=${cx("cpd-opt", on && "on")} style=${`grid-column: span ${span}`} disabled=${!!disabled}
+  // (never: not here at all - a red dashed border; otherwise a disabled one is orange: not now)
+  const opt = (key, label, { on, disabled, never, title, span, onClick }) => html`<button type="button" key=${key}
+      class=${cx("cpd-opt", on && "on", never && "cpd-never")} style=${`grid-column: span ${span}`} disabled=${!!disabled}
       onClick=${onClick} ...${tip(title || "")}>${label}</button>`;
   const tag = (word, off) => html`<span class=${cx("cpd-tag", off && "cpd-off")}>${word}</span>`;
   const value = (text, full, { none, off } = {}) => html`<span class=${cx("cpd-val mono", none && "cpd-none",
-      off && "cpd-off")} style="grid-column: span 6" title=${full || text}>${text}</span>`;
+      off && "cpd-off")} style="grid-column: span 12" title=${full || text}>${text}</span>`;
   // Simon: "Lets make the profile area its own panel ... and the same with selected and theme (one panel for those)"
   return html`<div class="cpd-file cpd-sel">
     <div class="cpd-grid">
@@ -353,28 +354,28 @@ function FileLine({ s, host, tools }) {
       <div class="eyebrow">Copy a profile to other files</div>
       <div class="cpd-grid">
         ${tag(html`COPY <${SpectrumPal} /> FROM`)}
-        ${opt("file", "Selected file", { on: source === "file", disabled: !f, span: 3, onClick: () => setSrcPick("file"),
+        ${opt("file", "Selected file", { on: source === "file", disabled: !f, span: 6, onClick: () => setSrcPick("file"),
           title: f ? "The profile of the file selected above" : "Select a file first" })}
-        ${opt("shared", "Shared profile", { on: source === "shared", span: 3, onClick: () => setSrcPick("shared"),
+        ${opt("shared", "Shared profile", { on: source === "shared", span: 6, onClick: () => setSrcPick("shared"),
           title: `The individual files profile every switched-on file without one of its own gets (${shared})` })}
         ${tag("TO WHAT?")}
-        ${["images", "videos", "text"].map((k) => opt(k, kindLabel[k], { on: to === k, disabled: !kinds.includes(k), span: 2,
+        ${["images", "videos", "text"].map((k) => opt(k, kindLabel[k], { on: to === k, disabled: !kinds.includes(k), never: !multi, span: 4,
           onClick: () => setToKind(k),
           title: kinds.includes(k) ? "" : multi ? `Copying to the ${words[1]} you selected` : `A ${words[2]}'s profile is copied to other ${words[1]}` }))}
         ${tag("WHICH?", !whichOk)}
-        ${opt("all", html`ALL <${SpectrumPal} />`, { on: scope === "all", disabled: !whichOk, span: 2, onClick: () => setWhich("all"),
+        ${opt("all", html`ALL <${SpectrumPal} />`, { on: scope === "all", disabled: !whichOk, span: 3, onClick: () => setWhich("all"),
           title: whichOk ? `Every ${toWords[2]} that is not locked: switched on, and any profile of its own replaced. With Unlock extracted ticked (Advanced) that is every one, otherwise the ones replaced or added`
             : `Copying to the ${toWords[1]} you selected` })}
-        ${opt("profiled", html`WITH <${SpectrumPal} />`, { on: scope === "profiled", disabled: !whichOk, span: 2, onClick: () => setWhich("profiled"),
+        ${opt("profiled", html`WITH <${SpectrumPal} />`, { on: scope === "profiled", disabled: !whichOk, span: 4, onClick: () => setWhich("profiled"),
           title: whichOk ? `Only unlocked ${toWords[1]} with a profile attached (color switch on): theirs is replaced; nothing new is switched on`
             : `Copying to the ${toWords[1]} you selected` })}
-        ${opt("off", html`WITHOUT <${SpectrumPal} />`, { on: scope === "off", disabled: !whichOk, span: 2, onClick: () => setWhich("off"),
+        ${opt("off", html`WITHOUT <${SpectrumPal} />`, { on: scope === "off", disabled: !whichOk, span: 5, onClick: () => setWhich("off"),
           title: whichOk ? `Only unlocked ${toWords[1]} with no profile attached (color switch off): each is switched on and gets it`
             : `Copying to the ${toWords[1]} you selected` })}
         ${tag("THEMES", !themesOk)}
-        ${opt("this", "This theme", { on: !themesOk || where === "this", disabled: !themesOk, span: 3, onClick: () => setWhere("this"),
+        ${opt("this", "This theme", { on: !themesOk || where === "this", disabled: !themesOk, never: !themeAvail, span: 6, onClick: () => setWhere("this"),
           title: themesOk ? `Theme ${t} (${names[t - 1] || ""}) only` : themeTip })}
-        ${opt("pick", `Choose themes ${where === "pick" && themesOk ? "▴" : "▾"}`, { on: themesOk && where === "pick", disabled: !themesOk, span: 3,
+        ${opt("pick", `Choose themes ${where === "pick" && themesOk ? "▴" : "▾"}`, { on: themesOk && where === "pick", disabled: !themesOk, never: !themeAvail, span: 6,
           onClick: () => setWhere(where === "pick" ? "this" : "pick"),
           title: themesOk ? "Tick the themes to copy into: All themes, or any of them" : themeTip })}
       </div>
@@ -388,7 +389,7 @@ function FileLine({ s, host, tools }) {
       <div class="cpd-actions">
         ${/* Simon: APPLY NOW on the left, the count on the right, equal halves; the count in the tags' colour and font */""}
         <span class="cpd-applywrap" ...${tip(copyTip)}><button type="button"
-          class="cpd-apply" disabled=${!canCopy} onClick=${doCopy}>APPLY</button></span>
+          class=${cx("cpd-apply", !canCopy && "cpd-never")} disabled=${!canCopy} onClick=${doCopy}>APPLY</button></span>
         <span class="cpd-tag cpd-counttag"
           title=${`${!canCopy ? "Nothing to apply" : summary.n === null ? "Counting" : summary.n < 0 ? "Could not be counted"
             : `${summary.n} ${summary.n === 1 ? toWords[2] : toWords[1]}`}. You are asked first, with a WARNING, and Undo puts them all back.`}>${canCopy

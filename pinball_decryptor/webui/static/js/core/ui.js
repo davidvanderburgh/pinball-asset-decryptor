@@ -185,6 +185,9 @@ function tipBox(text, rich) {
         }
         continue;
       }
+      // Simon (2026-11-19): {text, tone} a line in a colour of its own ("accent" orange, "info" blue) - the Images
+      // tab's replacement name says what its own colour means, in that colour
+      if (ln && typeof ln === "object" && ln.text != null) { add("tip-l tip-tone-" + (ln.tone || "ink"), ln.text); continue; }
       if (typeof ln === "object" && !Array.isArray(ln)) {
         // PAD-369 (DragonRR): a file's color profile, in one color of its own in every tooltip
         const row = add("tip-l tip-cp");

@@ -544,8 +544,14 @@ export default function ImagesTab() {
       if (!row) return "";
       // PAD-369 (DragonRR): the chosen file's name tells its color profile too
       const pl = row.p === "Choose…" ? null : profileLine(row, colorNs);
+      // Simon (2026-11-19): "I didn't know what it meant and therefore it needs explaining" - what the name's colour
+      // says (theme 1's list only: a theme's own picture goes into its variant scene at the Write, never the project)
+      const fontLine = themeNow > 1 ? null
+        : row.t === "assigned" ? { text: "Orange name = new, not yet written to the project (it goes in at the next Write)", tone: "accent" }
+          : row.t === "changed" ? { text: "Blue name = already written to the project (by an earlier Write)", tone: "info" } : null;
+      const repLines = [pl, fontLine].filter(Boolean);
       return html`<button type="button" class=${cx("img-rep ellip", TAG_CLS[row.t] || "muted")}
-        ...${tip(pl ? { head: row.p, lines: [pl] } : row.p === "Choose…" ? REP_TIP : row.p)}
+        ...${tip(repLines.length ? { head: row.p, lines: repLines } : row.p === "Choose…" ? REP_TIP : row.p)}
         onDblClick=${(ev) => ev.stopPropagation()}
         onClick=${(ev) => {
           ev.stopPropagation();

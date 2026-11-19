@@ -39,3 +39,14 @@ def test_game_own_assets_and_count_panels_are_always_there():
 def test_every_selected_scenes_layer_reaches_the_bar():
     scenes = _src("scenes.js")
     assert "t.sels" in scenes and "more: [...new Set(" in scenes
+
+
+def test_unavailable_buttons_have_a_dashed_border():
+    """Simon (2026-11-19): three looks in the Tools, Reset and Copy panels - red dashes (not available), orange dashes
+    (not selected), orange line and orange inside (selected, or a Tools / Reset button that can be clicked)."""
+    css = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui", "static", "css", "tabs",
+                            "color_pane.css"), encoding="utf-8").read()
+    assert ".cpd-tools button:disabled, .cpd-resetpanel button:disabled, .cpd-copy .cpd-opt:disabled {" in css
+    assert "border: 1px dashed var(--err); background: transparent; opacity: 1;" in css
+    assert ".cpd-copy .cpd-opt:not(.on):not(:disabled) { border: 1px dashed var(--accent, #e3a33b); background: transparent; }" in css
+    assert ".cpd-tools .btn:not(:disabled), .cpd-resetpanel .btn:not(:disabled) {" in css

@@ -63,4 +63,11 @@ Then:
 - Hidden Godzilla Pro on rig 1, Spike 2 Emulate tab: polls every 2 s as
   before (Game running, 16 processes, CPU/memory, renderer fps), one
   running-list per minute.
-- Real WSL stopped, Home, 10 minutes: see the ticket's report.
+- Real WSL stopped, Home, 10 minutes (2026-11-19 15:22-15:32, every plugin
+  loaded): 6 wsl.exe launches, ALL `wsl -l --running -q` (never boots): two
+  in the first 2 s while the VM was still winding down from its last distro,
+  none for the next 4 minutes, then one a minute (Spike 2's off-screen poll)
+  only while another session had a distro up (14 of 119 samples). No call
+  that could start WSL. The first real run (before the last fix) caught the
+  prerequisite check booting PAD-Runtime in that winding-down minute: the
+  memory is now judged by the distro, not the VM.

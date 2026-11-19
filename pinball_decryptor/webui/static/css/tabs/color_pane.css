@@ -146,3 +146,9 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
 .cpd-resets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .cpd-resets > .btn { width: 100%; min-width: 0; justify-content: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cpd-status-line { width: 100%; }
+/* Simon (2026-11-19): Undo / Redo / Copy / Paste across their panel; the reset buttons' words wrap, never cut */
+.cpd-four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.cpd-four > .btn { width: 100%; min-width: 0; justify-content: center; }
+.cpd-resets > .btn { white-space: normal; line-height: 1.2; height: auto; min-height: 26px; padding-top: 3px; padding-bottom: 3px;
+  text-overflow: clip; text-align: center; }
+.cpd-tools + .cpd-file, .cpd-sel + .cpd-resetpanel, .cpd-resetpanel + .cpd-copy { margin-top: 8px; }

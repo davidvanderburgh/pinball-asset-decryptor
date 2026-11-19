@@ -878,10 +878,11 @@ export function undoColor(flush, redo = false) {
   return Promise.resolve(flush && flush()).then(() => call("color.undo", redo));
 }
 
-export function UndoRedo({ s, flush, size = "sm" }) {
-  return html`<${Button} size=${size} kind="ghost" icon="undo" disabled=${!s.can_undo} onClick=${() => undoColor(flush)}
+export function UndoRedo({ s, flush, size = "sm", kind = "ghost" }) {
+  // (kind: the Colors bar's tools panel has them as ordinary buttons, greyed like the others when unavailable - Simon)
+  return html`<${Button} size=${size} kind=${kind} icon="undo" disabled=${!s.can_undo} onClick=${() => undoColor(flush)}
       title="Undo the last change to this profile (Ctrl+Z)">Undo<//>
-    <${Button} size=${size} kind="ghost" icon="redo" disabled=${!s.can_redo} onClick=${() => undoColor(flush, true)}
+    <${Button} size=${size} kind=${kind} icon="redo" disabled=${!s.can_redo} onClick=${() => undoColor(flush, true)}
       title="Redo the change just undone (Ctrl+Y or Ctrl+Shift+Z)">Redo<//>`;
 }
 

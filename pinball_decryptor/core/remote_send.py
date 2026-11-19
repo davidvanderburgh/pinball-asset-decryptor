@@ -46,6 +46,12 @@ import time
 GAMES = "/games"
 ROOT = "/"
 LEDGER = "/data/pad/remote_send.json"
+#: PAD-1444 (David: "Network ssh compare is too slow. Can we cache this somehow?"): the sha1s the machine worked
+#: out on earlier Sends, each with the file's size, times and inode as they were then (:class:`HashCache`)
+HASH_CACHE = "/data/pad/hash_cache.json"
+#: a record written as PAD restarted the machine still holds after that restart when the machine came up within
+#: this many seconds of it: too soon for its card to have been taken out, rewritten on a computer and put back
+HASH_CACHE_REBOOT = 300
 TMP_TAG = ".pad-send"
 #: room kept free on a partition beyond the files a Send puts on it
 SPARE = 8 << 20
@@ -540,6 +546,22 @@ class Machine:
         """``{path: ("file", sha1)}`` for regular files (the full Send's compare); :meth:`state` by default."""
         return self.state(paths)
 
+    # PAD-1444: what the hash record (HashCache) needs.  A machine that can't say leaves it off: every compare
+    # hashes again, as before
+    def file_ids(self, paths):
+        """``(machine clock, {path: (size, mtime, inode, ctime)})`` for the regular files among *paths*, or None."""
+        return None
+
+    def boot_info(self):
+        """``{"boot": boot id, "btime": when it booted, "now": its clock, "mounts": what / and /games are}``."""
+        return None
+
+    def read_hash_cache(self):
+        return getattr(self, "_hash_cache", None)
+
+    def write_hash_cache(self, data):
+        self._hash_cache = data
+
     # the delta
     def block_hashes(self, path):
         """``(size, [sha1 of each DELTA_BLOCK])`` of the machine's file."""
@@ -751,6 +773,21 @@ for d in /proc/[0-9]*; do
   for f in "$d"/fd/*; do readlink "$f"; done
   sed -n 's|^[^/]*\(/.*\)$|\1|p' "$d/maps"
 done 2>/dev/null | sort -u
+"""
+
+#: PAD-1444: the machine's clock, then type, size, mtime, inode and ctime of each file (metadata only: no file is read)
+IDS_SCRIPT = r"""
+date +%s
+stat -c '%f %s %Y %i %Z %n' -- @PATHS@ 2>/dev/null
+true
+"""
+
+#: PAD-1444: which boot this is, when it began, the clock, and what is mounted at / and /games (device, subfolder)
+BOOT_SCRIPT = r"""
+cat /proc/sys/kernel/random/boot_id
+awk '$1 == "btime" {print $2}' /proc/stat
+date +%s
+awk '$5 == "/" || $5 == "/games" {print $5, $3, $4}' /proc/self/mountinfo
 """
 
 STATE_SCRIPT = r"""
@@ -1424,6 +1461,69 @@ class SshMachine(Machine):
                 out[p] = ("file", digest)
         return out
 
+    def file_ids(self, paths):
+        paths = list(paths)
+        now, out, asked = None, {}, set(paths)
+        if not paths:
+            return None
+        for i in range(0, len(paths), 200):
+            chunk = paths[i:i + 200]
+            _rc, text = self.sh(IDS_SCRIPT.replace("@PATHS@", " ".join(_q(p) for p in chunk)), check=False,
+                                timeout=600)
+            lines = text.splitlines()
+            try:
+                clock = int(lines[0])
+            except (IndexError, ValueError):
+                return None
+            now = clock if now is None else min(now, clock)
+            for line in lines[1:]:
+                parts = line.split(" ", 5)
+                if len(parts) != 6 or parts[5] not in asked:
+                    continue
+                try:
+                    mode, size, mtime, ino, ctime = (int(parts[0], 16),) + tuple(int(x) for x in parts[1:5])
+                except ValueError:
+                    continue
+                if stat.S_ISREG(mode):
+                    out[parts[5]] = (size, mtime, ino, ctime)
+        if not out:
+            # a card whose busybox has no stat says nothing about any file: told apart from files that aren't there
+            _rc, probe = self.sh("stat -c %s / 2>/dev/null", check=False)
+            if not probe.strip():
+                return None
+        return now, out
+
+    def boot_info(self):
+        _rc, text = self.sh(BOOT_SCRIPT, check=False)
+        lines = text.splitlines()
+        try:
+            boot, btime, now = lines[0].strip(), int(lines[1]), int(lines[2])
+        except (IndexError, ValueError):
+            return None
+        mounts = {}
+        for line in lines[3:]:
+            parts = line.split()
+            if len(parts) == 3:
+                mounts[parts[0]] = parts[1] + " " + parts[2]    # the last of a mount point's lines is the one seen
+        if not boot or set(mounts) != {ROOT, GAMES}:
+            return None
+        return {"boot": boot, "btime": btime, "now": now, "mounts": mounts}
+
+    def read_hash_cache(self):
+        try:
+            with self.sftp.open(HASH_CACHE, "rb") as f:
+                data = json.loads(f.read().decode("utf-8"))
+            return data if isinstance(data, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    def write_hash_cache(self, data):
+        self.sh("mkdir -p %s" % _q(posixpath.dirname(HASH_CACHE)))
+        tmp = HASH_CACHE + ".tmp"
+        with self.sftp.open(tmp, "wb") as f:
+            f.write(json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+        self.sh("mv -f %s %s && sync" % (_q(tmp), _q(HASH_CACHE)))
+
     def truncate(self, path, size):
         self.sftp.truncate(path, size)
 
@@ -1535,7 +1635,7 @@ class SshMachine(Machine):
 for _name in ("state", "sizes", "read_ranges", "free", "remount", "mkdir", "upload", "commit", "write_ranges", "remove",
               "sync", "read_ledger", "write_ledger", "layout", "mounts", "walk", "mount_part", "umount_part",
               "raw_sha1", "raw_write", "set_mtime", "block_hashes", "file_sha1s", "truncate", "set_attrs", "copy",
-              "in_use", "describe"):
+              "in_use", "describe", "file_ids", "boot_info", "read_hash_cache", "write_hash_cache"):
     setattr(SshMachine, _name, _again(getattr(SshMachine, _name)))
 del _name
 
@@ -1601,6 +1701,141 @@ def _human(n):
         n /= 1024.0
 
 
+class HashCache:
+    """PAD-1444 (David: "Network ssh compare is too slow. Can we cache this somehow?"): the sha1s the machine worked
+    out on earlier Sends, kept on the machine (:data:`HASH_CACHE`), so a compare reads only the files that changed
+    since and not the gigabytes that didn't.
+
+    A file's sha1 is taken from the record only while the file is provably the one that was hashed:
+
+    * its size, mtime, inode and ctime are what they were.  ctime is the kernel's: any write, rename, chmod or
+      touch moves it and nothing can set it back, so whatever changes a file through the running machine (a Send,
+      an older PAD, Stern's updater, a shell) takes it out of the record.  One changed in the second it was looked
+      at isn't recorded (ctime counts whole seconds);
+    * the record is of THIS boot of the machine, or of the boot before when PAD restarted it and it came up within
+      :data:`HASH_CACHE_REBOOT` seconds.  A card dumped, patched on a computer and written back keeps every inode's
+      size, times and number (PAD's own builds patch audio in place like that), so a record that crossed a power
+      cycle could vouch for bytes that are no longer there: it is set aside;
+    * / and /games are the same partitions (and folders of them) they were: a multi-boot card's other image isn't
+      taken for the one hashed.
+
+    Only files of / and /games are recorded: a multi-boot card's other images, which a Send mounts itself, may
+    have been written whole as a partition.  Anything wrong with the record (a card without ``stat``, a record
+    that doesn't read) just leaves it off: the compare hashes everything, as it always did."""
+
+    def __init__(self, machine, log=None):
+        self.machine = machine
+        self.files = {}
+        self.on = self.dirty = False
+        self.hits = self.hit_bytes = 0
+        self.info = None
+        try:
+            info = machine.boot_info()
+            if info is None:
+                return
+            data = machine.read_hash_cache()
+        except (SendError, OSError, ValueError):
+            return
+        self.info, self.on = info, True
+        if not isinstance(data, dict) or data.get("v") != 1:
+            self.dirty = data is not None
+            return
+        same_boot = data.get("boot") == info["boot"]
+        try:
+            restarted = (bool(data.get("rebooting"))
+                         and 0 <= info["btime"] - int(data.get("written")) <= HASH_CACHE_REBOOT)
+        except (TypeError, ValueError):
+            restarted = False
+        if data.get("mounts") != info["mounts"] or not (same_boot or restarted):
+            self.dirty = True                   # set aside: the next save starts it again
+            if log:
+                log("The machine's record of the files it hashed before is from before it was last switched off "
+                    "(or of other partitions); every file is compared again.", "info")
+            return
+        for path, e in (data.get("files") or {}).items():
+            if (isinstance(e, list) and len(e) == 5 and all(isinstance(x, int) for x in e[:4])
+                    and isinstance(e[4], str)):
+                self.files[path] = e
+        self.dirty = not same_boot              # taken over by this boot: said so on the next save
+
+    @staticmethod
+    def _recordable(path):
+        return _mount_of(path) in (ROOT, GAMES) and not path.startswith(TEMP_MOUNT + "/")
+
+    def _ids(self, paths):
+        try:
+            return self.machine.file_ids(paths)
+        except (SendError, OSError, ValueError):
+            return None
+
+    def hashes(self, paths, hasher):
+        """*hasher(paths)* (``machine.file_sha1s`` or ``machine.state``), asking the machine only about the files
+        not in the record unchanged."""
+        paths = list(paths)
+        want = [p for p in paths if self._recordable(p)] if self.on else []
+        got = self._ids(want) if want else None
+        if got is None:
+            return hasher(paths)
+        now, ids = got
+        out, rest = {}, []
+        for p in paths:
+            key, e = ids.get(p), self.files.get(p)
+            if key is not None and e is not None and tuple(e[:4]) == key:
+                out[p] = ("file", e[4])
+                self.hits += 1
+                self.hit_bytes += key[0]
+            else:
+                rest.append(p)
+        if rest:
+            res = hasher(rest)
+            out.update(res)
+            for p in rest:
+                self._note(p, ids.get(p), res.get(p), now)
+        return out
+
+    def _note(self, path, key, got, now):
+        if key is not None and got is not None and got[0] == "file" and key[3] < now:
+            self.files[path] = list(key) + [got[1]]
+            self.dirty = True
+        elif self.files.pop(path, None) is not None:
+            self.dirty = True
+
+    def remember(self, digests):
+        """``{path: sha1}`` of files a Send just wrote and checked on the machine."""
+        digests = {p: d for p, d in digests.items() if self._recordable(p)}
+        if not self.on or not digests:
+            return
+        got = self._ids(list(digests))
+        if got is not None and any(k[3] >= got[0] for k in got[1].values()):
+            time.sleep(1.2)                     # written this second: recorded once the machine's clock moves on
+            got = self._ids(list(digests))
+        if got is None:
+            for p in digests:
+                self.dirty |= self.files.pop(p, None) is not None
+            return
+        now, ids = got
+        for p, d in digests.items():
+            self._note(p, ids.get(p), ("file", d), now)
+
+    def save(self, rebooting=False):
+        """Write the record back when it changed (or the machine is about to be restarted by PAD)."""
+        if not self.on or not (self.dirty or rebooting):
+            return
+        try:
+            info = self.machine.boot_info() or self.info
+            self.machine.write_hash_cache({"v": 1, "boot": info["boot"], "written": info["now"],
+                                           "rebooting": bool(rebooting), "mounts": info["mounts"],
+                                           "files": self.files})
+            self.dirty = False
+        except (SendError, OSError, ValueError):
+            pass
+
+    def said(self, log):
+        if log and self.hits:
+            log("%d file(s) (%s) the machine had hashed on an earlier Send and that haven't changed since weren't "
+                "read again." % (self.hits, _human(self.hit_bytes)), "info")
+
+
 def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
     """Make the machine's system and game partitions match the build's.  Returns a summary line."""
     log = log or (lambda *a, **k: None)
@@ -1636,7 +1871,9 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
                         "files differ, %s. Write the card instead."
                         % (plan.card_id["name"], len(wrong), ", ".join(sorted(wrong)[:3])))
     check()
-    state = machine.state([op.path for op in ops if op.kind != "patch"])
+    cache = HashCache(machine, log)
+    state = cache.hashes([op.path for op in ops if op.kind != "patch"], machine.state)
+    cache.said(log)
     needed, odd = [], []
     for op in ops:
         if op.kind == "patch":
@@ -1673,6 +1910,7 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
                         "the machine isn't running this card as built. Write the card instead."
                         % (", ".join(odd[:3]) + (" and %d more" % (len(odd) - 3) if len(odd) > 3 else ""),
                            "is" if len(odd) == 1 else "are"))
+    cache.save()
     if not needed:
         log("The machine already has every change in this build; nothing to send.", "success")
         if machine.game_held():
@@ -1793,6 +2031,9 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
             log("Restarting the machine on the new files...", "info")
             restart = False
             reboot_after = True
+        # PAD-1444: what went on was checked on the machine: the next compare needn't read it again
+        cache.remember({op.path: op.sha1 for op in puts})
+        cache.save(rebooting=reboot_after)
         if restart:
             line = machine.resume_game()
             if "RESTARTED" in line:
@@ -2231,8 +2472,12 @@ def sync(target, machine, log=None, progress=None, cancel=None):
     busy = [num for num in target.parts.values() if any(dev.endswith("p%d" % num) for dev, _mp in mounts)]
     if busy:
         raise SendError("The machine is using its partition %d; switch it to the main game and send again." % busy[0])
+    cache = HashCache(machine, log)
     log("Comparing everything on the machine with %s (the image isn't a build of the card the machine runs, so "
-        "this reads every file it may need to change: a few minutes)." % os.path.basename(target.path), "info")
+        "this reads every file it may need to change%s)." % (
+            os.path.basename(target.path),
+            "; those it hashed on an earlier Send and that haven't changed since aren't read again" if cache.files
+            else ": a few minutes"), "info")
     mounted, rw, all_ops, temps, walks = [], [], {}, [], {}
     reboot = False
     changed = False
@@ -2251,7 +2496,8 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             protected = _protected(target.platform, tree) if mount == ROOT else set()
             skip = [m for m in on if m != mount and (m.startswith(mount.rstrip("/") + "/") or mount == ROOT)]
             mine = walks[mount] = machine.walk(mount, skip)
-            ops = sync_ops(tree, mine, mount, protected, skip, machine.file_sha1s, log, progress)
+            ops = sync_ops(tree, mine, mount, protected, skip,
+                           lambda paths: cache.hashes(paths, machine.file_sha1s), log, progress)
             if ops:
                 all_ops[mount] = ops
         raws = {}
@@ -2260,6 +2506,8 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             want = target.raw_sha1(num)
             if machine.raw_sha1(num) != want:
                 raws[num] = want
+        cache.said(log)
+        cache.save()                            # kept even if the Send stops part way
         n = sum(len(v) for v in all_ops.values())
         if not n and not raws:
             log("The machine already has everything on this image; nothing to send. Its game starts again.",
@@ -2350,6 +2598,9 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         machine.sync()
         rec = target.plan.record() if target.plan is not None else {"paths": [], "ranges": {}}
         machine.write_ledger(dict(rec, card=target.card_id, pending=False))
+        # PAD-1444: every file it put there was checked on the machine: the next compare needn't read it again
+        cache.remember({op.path: op.sha1 for ops in all_ops.values() for op in ops if op.kind == "put"})
+        cache.save(rebooting=reboot)
     except BaseException:
         if temps:
             with contextlib.suppress(Exception):

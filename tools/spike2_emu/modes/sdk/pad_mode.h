@@ -416,6 +416,14 @@ int pm_own_game_on(void);    /* 1 while a mode of ours has the whole game */
  * (`site flippers_off` / `flippers_on`: every newest Spike 2 build). pm_flippers_off: 1 while a mode has them off. */
 int pm_flippers(int on);
 int pm_flippers_off(void);
+/* PAD-1406: THE GAME'S OWN ONE-SHOT DEVICES, for the mode that has the whole game: a toy or kicker the game fires as one
+ * pulse (Uncanny X-Men's Sentinel kicking target, "sentinel_kick"), fired through the game's own function for it, at
+ * the operator's power and time for it. 1 = fired; 0 = refused, the reason in mode.log: not the whole game's mode, no
+ * game, a tilt, the operator disabled it, less than 1 s since the last, 20 already this minute, or this game has no
+ * such device (pm_coil_pulse_known). Coils a mode holds (pm_coil_hold) that the game's rules drive - X-Men's Cerebro
+ * post and Sentinel jaw (and on the LE its hand and finger) - are likewise the whole game's mode's alone. */
+int pm_coil_pulse(const char *name);
+int pm_coil_pulse_known(const char *name);
 
 /* ---- events -------------------------------------------------------------------------------
  * The game's rules talk through numbered EVENTS (a ball started, a multiball started, the

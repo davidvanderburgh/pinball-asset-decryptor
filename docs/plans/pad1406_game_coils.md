@@ -42,13 +42,41 @@ the first sweep's King Kong Pro start-of-game crash did not repeat either). Two 
   stayed live. `site flipper_query_call` (that policy's call, flippers_on + 0xbc, on all 53) is wrapped by the runtime,
   which answers 1 while a mode has them off - the game's own decision route, no fight.
 
-## Next (runs 2+), in this order
+## Done (run 2): X-Men's own devices
+
+The framework's ball-device table on X-Men (the balls-in-play count walks it: Pro count `0x5305c8`, 40-byte entries at
+`0x60a9cc`; LE `0x539460` / `0x614f00`) holds only TROUGH and AUTO PLUNGER (devprobe.c in the emulator): X-Men has no
+framework lock or scoop. Its toys are its own classes (Device_Cerebro, Sentinel_Jaw/Hand/Finger/Head_Motor/
+Kicking_Target, Magnet, Ramp_Diverter, Right_Return_Post), each driven by coil_fire at the operator's adjustments.
+From the coil_fire calls that read those adjustments (C:/tmp/PAD-1406/firescan.py) and the board addresses in the
+game's own coil records (devprobe ctab):
+
+| device | LE adj | Pro adj | device id | board | longest |
+|---|---|---|---|---|---|
+| Cerebro post | 171-174 | 171-174 | 16 / 14 | 9.6 | 3500 ms |
+| Sentinel jaw | 188-191 | 175-178 | 11 | 9.2 | 5000 ms |
+| Sentinel hand ramp | 176-179 | - | 18 | 9.7 | 3000 ms |
+| Sentinel finger | 180-186 | - | 15 | 9.8 | 3000 ms |
+| Sentinel kicking target (bash toy, one pulse) | 192-194 | 179-181 | 12 | 9.3 | pulse |
+
+- Held coils marked `value <name>_own_game 1`: pm_coil_hold refuses them to any mode but the whole game's
+  (COILS_MAX 6 -> 10). Profile.own_game_coils (OWN_GAME_COILS_PROVEN); the Blocks Hold list shows them "(whole game)".
+- `pm_coil_pulse(name)`: the game's own fire function (`site sentinel_kick_fire`, LE 0x337dc, Pro 0x30148), whole
+  game only, 1 s apart, 20 a minute, the operator's disabled honoured. Profile.pulse_coils; Blocks *Fire the ...*.
+- The magnet stays at the game's own longest command (LE 2.5 s, Pro 1.2 s): "beyond 5 s" is not the game's own.
+
+Proof (coiljob.sh, PAD_COIL_PROBE): LE and Pro, each hold ONE command at the game's powers on its board address
+([coildrive] 9.6 128/82 ms then 82 for 3410 ms; 9.2 192/60 then 56; LE 9.7, 9.8), capped at the game's longest; the
+kick 255 for 60 ms on 9.3 twice, a second one at once refused; both refused once the mode gave the rules back.
+
+## Next (runs 3+), in this order
 
 1. **Switch names at run time.** The game builds its switch table on the heap (mktables.py); the shim already reads
    names from it. A runtime reader of the switch descriptors' names (per framework generation, as the switch-edge
    lines are) gives each build its SHOOTER LANE, TROUGH n and lock/kickback switches with no per-port value: lifts
    the drain-to-one gate on every title and feeds 2 and 3.
-2. **Ball devices: hold, release, eject.** MODE_LIMITS today: in a whole-game mode a ball in a scoop or lock stays
+2. **Ball devices: hold, release, eject** (titles whose framework ball-device table has scoops and locks: Godzilla's
+   scoop, King Kong, Jaws...; X-Men has none). MODE_LIMITS today: in a whole-game mode a ball in a scoop or lock stays
    until ball search frees it. The framework's ball devices call the game's handler with events (21 switch closed,
    2 settled, 16/17 kick, 18 left: the scoop hold, mode_coils.md); the eject is the device's own (its retries, its
    power adjustment). Generalise the scoop wrap to every ball device record the framework lists, and add the device's
@@ -57,8 +85,8 @@ the first sweep's King Kong Pro start-of-game crash did not repeat either). Two 
    at 0x3f04cc beside the flipper pair: find the framework's per-kind switch and the kickback's own enable).
 4. **Diverters, posts, magnets beyond 5 s**: the held-coil route (PAD-381/420) with a whole-game mode's cap raised
    to the game's own longest command on that coil (`<name>_max_ms`, or the drive's last word), never past it.
-5. **Toys**: X-Men's Sentinel bash toy and the other titles' toys through their own device objects (census as
-   mode_coils_census.md did for held coils).
+5. **Toys**: X-Men's Sentinel head motor (up/down, Sentinel_Head_Motor), then the other titles' toys and posts
+   through their own device code (census as mode_coils_census.md did for held coils), each proven like X-Men's.
 
 The older archival versions (not the newest build of their title) carry none of these lines: their cards are not
 read (as PAD-1400); a port derived from a user's own older card gets them where its newest build's recipe places them.

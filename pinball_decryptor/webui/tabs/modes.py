@@ -4130,6 +4130,8 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
                 "own_game_off": ("" if p is None or getattr(p, "own_game", False) else    # PAD-1400
                                  "Not on this game yet: the app has not found where %s adds its own points, makes "
                                  "its calls and starts its modes, so a mode cannot switch them off." % p.label),
+                # PAD-1406: the Fire block: the game's own one-shot devices, for a mode that is the whole game
+                "pulses": [{"name": n, "label": lab} for n, lab in (getattr(p, "pulse_coils", ()) or ())] if p else [],
                 # PAD-1406: the Flippers block, for a mode that is the whole game (pm_flippers)
                 "flippers_off": ("" if p is None or getattr(p, "flippers", False) else
                                  "Not on this game yet: the app has not found where %s switches its flippers off "
@@ -4235,6 +4237,8 @@ class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockR
             out["magnet"] = "magnet"
         if p.can("coils"):
             out.update(p.held_coils)
+            # PAD-1406: the coils only a mode that is the whole game may hold (the checks say so elsewhere)
+            out.update((n, lab + " (whole game)") for n, lab in getattr(p, "own_game_coils", ()) or ())
         return out
 
     @staticmethod

@@ -397,11 +397,27 @@ text right_return_up_label Right return up post
 text magnet_hold_label    Magnet
 text right_return_up_drive 8 7 a169 0 a169 1250
 text magnet_hold_drive    9 0 255 a182 82 1200
-text held_coils            right_return_up magnet_hold
+text held_coils            right_return_up magnet_hold cerebro_post sentinel_jaw
 # PAD-420: Mode > Magnet holds the ball with the held coil magnet_hold, on a hit of the shot nearest it on the
 # playfield picture (Right ramp tgt, 67 px from the magnet; near.py)
 text magnet_coil           magnet_hold
 value magnet_shot          0x20
+# PAD-1406: the game's own devices for the mode that has the whole game (each `_own_game 1`): its own commands and
+# the operator's adjustments (the coil_fire calls that read them: device, draw power, draw ms, hold power, hold ms),
+# board addresses read from the game's coil records in the emulator (devprobe). The kicking target (the Sentinel's
+# bash toy) is one pulse, fired through the game's own function for it.
+text cerebro_post_label Cerebro post
+text cerebro_post_drive 9 6 a171 a172 a173 3500
+value cerebro_post_off_adj 174
+value cerebro_post_own_game 1
+text sentinel_jaw_label Sentinel jaw
+text sentinel_jaw_drive 9 2 a175 a176 a177 5000
+value sentinel_jaw_off_adj 178
+value sentinel_jaw_own_game 1
+text pulse_coils sentinel_kick
+text sentinel_kick_label Sentinel kicking target
+site sentinel_kick_fire 0x00030148 0xe92d4010 0xe3a000b3
+value sentinel_kick_off_adj 181
 
 # PAD-420: its modes' running bytes (object + 0x74), each object found through its own class's constructor as on
 # X-Men LE 0.98's proven port (coils/running_objs.py; Escape Nimrod's object not reached that way - left out)

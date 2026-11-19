@@ -32,7 +32,9 @@ NEWEST = _newest()
 
 def _section(src):
     a = src.index("/* ---- PAD-1406: the flippers, for a mode that is the whole game")
-    return src[a:src.index("/* ---- shots from the switch drain (optional; any build)", a)]
+    b = src.index("/* PAD-1406: the calling mode has the whole game", a)
+    c = src.index("/* the route lets go: back = the ball goes on", b)
+    return src[a:b] + src[c:src.index("/* ---- shots from the switch drain (optional; any build)", c)]
 
 
 def test_it_is_the_game_s_own_switch_and_wired_in():
@@ -252,3 +254,84 @@ def test_the_shim_reads_a_short_rule_clear(tmp_path):
     assert "SET 245 89 1" in out                    # 0x40 | 25 kept as the shim stores it
     assert "SHORT 0 0 2" in out
     assert "BAD 245 3" in out
+
+
+# ---- the game's own devices (run 2) ------------------------------------------------------------------------------------
+
+def test_pulse_refuses_every_limit(tmp_path):
+    src = RUNTIME.read_text(encoding="utf-8")
+    a = src.index("static int pulse_refuses(")
+    body = src[a:src.index("\n}\n", a) + 3]
+    main = r"""
+int main(void)
+{
+    printf("%d %d %d %d %d %d %d %d\n", pulse_refuses(1, 1, 1, 0, 0, ~0ul, 0), pulse_refuses(0, 1, 1, 0, 0, ~0ul, 0),
+           pulse_refuses(1, 0, 1, 0, 0, ~0ul, 0), pulse_refuses(1, 1, 0, 0, 0, ~0ul, 0), pulse_refuses(1, 1, 1, 1, 0, ~0ul, 0),
+           pulse_refuses(1, 1, 1, 0, 1, ~0ul, 0), pulse_refuses(1, 1, 1, 0, 0, 999, 0), pulse_refuses(1, 1, 1, 0, 0, 1000, 20));
+    return 0;
+}
+"""
+    out = _host_run(tmp_path, "#include <stdio.h>\n#define PULSE_GAP_MS 1000ul\n#define PULSE_PER_MIN 20u\n" + body + main)
+    assert out.split() == ["0", "1", "2", "3", "4", "5", "6", "7"]
+
+
+def test_the_held_coils_check_the_whole_game_and_pulses_are_the_game_s_own():
+    src = RUNTIME.read_text(encoding="utf-8")
+    assert '"%s_own_game", c->name' in src and "only the mode that has the whole game may (pm_own_game)" in src
+    sec = src[src.index("/* ---- PAD-1406: a game device's own one-shot"):src.index("/* the route lets go: back = the ball")]
+    sec = re.sub(r"/\*.*?\*/", "", sec, flags=re.S)
+    assert "coil_fire" not in sec and '"%s_fire", name' in sec            # the game's own function, never a pulse of ours
+    assert "#define COILS_MAX 10" in src and "coil_proc9" in src
+    hdr = (SDK / "pad_mode.h").read_text(encoding="utf-8")
+    assert "int pm_coil_pulse(const char *name);" in hdr and "int pm_coil_pulse_known(const char *name);" in hdr
+
+
+XMEN = {"uncanny_xmen_le-0.98": {"cerebro_post": "9 6 a171 a172 a173 3500", "sentinel_jaw": "9 2 a188 a189 a190 5000",
+                                 "sentinel_hand": "9 7 a176 a177 a178 3000", "sentinel_finger": "9 8 a180 a181 a182 3000",
+                                 "fire": (0x337dc, 0xe3a000c0)},
+        "uncanny_xmen_pro-0.98": {"cerebro_post": "9 6 a171 a172 a173 3500", "sentinel_jaw": "9 2 a175 a176 a177 5000",
+                                  "fire": (0x30148, 0xe3a000b3)}}
+
+
+@pytest.mark.parametrize("key", sorted(XMEN))
+def test_the_x_men_devices(key):
+    text = (SDK / "ports" / (key + ".port")).read_text(encoding="utf-8")
+    want = XMEN[key]
+    held = re.search(r"^text held_coils\s+(.*)$", text, re.M).group(1).split()
+    for name, drive in want.items():
+        if name == "fire":
+            continue
+        assert name in held
+        assert re.search(r"^text %s_drive %s$" % (name, re.escape(drive)), text, re.M)
+        assert re.search(r"^value %s_own_game 1$" % name, text, re.M) and re.search(r"^value %s_off_adj \d+$" % name, text, re.M)
+    va, w1 = want["fire"]
+    assert re.search(r"^site sentinel_kick_fire 0x%08x 0xe92d4010 0x%08x$" % (va, w1), text, re.M)
+    assert re.search(r"^text pulse_coils sentinel_kick$", text, re.M)
+    elf = _elf(key)
+    if elf:
+        from elftools.elf.elffile import ELFFile
+        with open(elf, "rb") as f:
+            e = ELFFile(f)
+            v, o, _n = next((s["p_vaddr"], s["p_offset"], s["p_filesz"]) for s in e.iter_segments()
+                            if s["p_type"] == "PT_LOAD" and s["p_vaddr"] <= va < s["p_vaddr"] + s["p_filesz"])
+            f.seek(o + va - v)
+            body = struct.unpack("<14I", f.read(56))
+            assert body[0] == 0xe92d4010 and body[13] >> 24 == 0xeb and body[12] == 0xe3a0000c   # ... mov r0,#12; bl coil_fire
+
+
+def test_profiles_and_blocks_know_the_devices():
+    from pinball_decryptor.plugins.stern import mode_project as MP, block_modes as BM
+    P = MP.profiles()
+    le, pro = P["uncanny_xmen_le_0_98"], P["uncanny_xmen_pro_0_98"]
+    assert dict(le.own_game_coils).keys() == {"cerebro_post", "sentinel_jaw", "sentinel_hand", "sentinel_finger"}
+    assert dict(pro.own_game_coils).keys() == {"cerebro_post", "sentinel_jaw"}
+    assert dict(le.pulse_coils) == dict(pro.pulse_coils) == {"sentinel_kick": "Sentinel kicking target"}
+    assert "cerebro_post" not in dict(le.held_coils)                     # never offered to an ordinary mode
+    for gm, ok in (("own_game", True), ("block", False)):
+        prog = BM.normalize({"name": "X", "game_modes": gm, "scripts": [{"hat": {"kind": "mode_start"}, "do": [
+            {"op": "hold", "what": "sentinel_jaw", "ms": {"k": "num", "v": 2000}}, {"op": "pulse", "what": "sentinel_kick"}]}]})
+        probs = [x for x in BM.problems(prog, **BM.card_checks(pro)) if "jaw" in x or "sentinel_kick" in x]
+        assert (probs == []) == ok, probs
+    prog = BM.normalize({"name": "X", "game_modes": "own_game", "scripts": [{"hat": {"kind": "mode_start"}, "do": [
+        {"op": "pulse", "what": "sentinel_kick"}]}]})
+    assert 'if (run.on && !pm_coil_pulse("sentinel_kick")) pm_log("sentinel_kick: not fired");' in BM.to_c(prog, "x")

@@ -6873,7 +6873,7 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
  * The powers are read from the object (v[29] pulse power, v[30] pulse ms, v[31] hold power): what the game
  * itself would fire it with now (the Godzilla magnet's LO/HI settings, the Mechagodzilla magnet's
  * adjustments 380-383, the bridge's own constants). */
-#define COILS_MAX 6
+#define COILS_MAX 10   /* PAD-1406: Uncanny X-Men LE names seven */
 
 /* ---- PAD-420: held coils on every generation - by the coil's board address -----------------------
  * Godzilla's ControlCoil route above needs the object's virtuals at Godzilla's slots, and only four builds
@@ -7157,8 +7157,12 @@ static void coil_proc2(void) { magnet_proc(&coils[2]); }
 static void coil_proc3(void) { magnet_proc(&coils[3]); }
 static void coil_proc4(void) { magnet_proc(&coils[4]); }
 static void coil_proc5(void) { magnet_proc(&coils[5]); }
+static void coil_proc6(void) { magnet_proc(&coils[6]); }
+static void coil_proc7(void) { magnet_proc(&coils[7]); }
+static void coil_proc8(void) { magnet_proc(&coils[8]); }
+static void coil_proc9(void) { magnet_proc(&coils[9]); }
 static void (*const coil_procs[COILS_MAX])(void) = { coil_proc0, coil_proc1, coil_proc2, coil_proc3, coil_proc4,
-                                                      coil_proc5 };
+                                                      coil_proc5, coil_proc6, coil_proc7, coil_proc8, coil_proc9 };
 
 /* Ask a hold to let go: the process gives control back on its next wake, within a tick. */
 static void coil_let_go(struct held_coil *c, const char *why)
@@ -7293,6 +7297,10 @@ static void coil_clear_countdown(const struct held_coil *c)
         *(volatile unsigned char *)(unsigned long)(c->obj + (unsigned)off) = 0;
 }
 
+/* PAD-1406: `value <name>_own_game 1` - a coil only the mode that has the whole game may hold (a toy or a post the game's
+ * rules drive: Uncanny X-Men's Cerebro post and Sentinel jaw, hand and finger); og is the whole-game section's, below */
+static int og_has_it(void);
+
 int pm_coil_hold(const char *name, unsigned ms)
 {
     struct held_coil *c = coil_named(name);
@@ -7305,6 +7313,11 @@ int pm_coil_hold(const char *name, unsigned ms)
                          c->starts);
     if (!why && proc_alive(c->id)) why = "the last hold's process is still ending";
     if (!why) why = coil_no_hold(c);                     /* PAD-621: the game says no mode holds the ball now */
+    if (!why) {                                          /* PAD-1406 */
+        char key[40];
+        pm_snprintf(key, sizeof key, "%s_own_game", c->name);
+        if (pm_port_value(key, 0) && !og_has_it()) why = "only the mode that has the whole game may (pm_own_game)";
+    }
     if (c->route && c->cap_ms && ms > c->cap_ms) ms = c->cap_ms;   /* PAD-420: never longer than the game's own */
     if (!why && c->route) {
         magnet_plan(ms, coil_drive(c, 0), coil_drive(c, 1), coil_drive(c, 2), &cmd, &why);
@@ -17710,6 +17723,112 @@ int pm_flippers(int on)
 }
 
 int pm_flippers_off(void) { return fl.off; }
+
+/* PAD-1406: the calling mode has the whole game (pm_own_game) */
+static int og_has_it(void)
+{
+    return og.owner && (og.owner == current || og.owner == running);
+}
+
+/* ---- PAD-1406: a game device's own one-shot, for the mode that has the whole game (pm_coil_pulse) ---------------
+ * Toys and kickers the game fires as ONE pulse (Uncanny X-Men's Sentinel kicking target: coil_fire(12, adjustment
+ * SENTINEL KICK TARGET DRAW POWER, ... DRAW TIME, no hold)) are fired through the game's OWN function for it (`site
+ * <name>_fire`, a function of no arguments: LE 0.98 0x337dc, Pro 0x30148), so the coil, its power and its time are
+ * the game's and the operator's, never the mode's. The port lists them (`text pulse_coils <name> ...`, `text
+ * <name>_label`); `value <name>_off_adj` is the operator's "disabled" (not 0 = refused). The limits, the runtime's:
+ * only the mode that has the whole game, in a game, not tilted; PULSE_GAP_MS from one to the next, PULSE_PER_MIN a
+ * minute. */
+#define PULSE_N        6
+#define PULSE_GAP_MS   1000ul
+#define PULSE_PER_MIN  20u
+static struct {
+    char name[24];
+    unsigned long last, starts[PULSE_PER_MIN];
+    unsigned next, fired;
+} pulses[PULSE_N];
+static int n_pulses, pulses_read;
+
+static void pulses_arm(void)
+{
+    const char *t;
+    char key[48];
+    if (pulses_read) return;
+    pulses_read = 1;
+    if (!(t = pm_port_text("pulse_coils"))) return;
+    while (*t && n_pulses < PULSE_N) {
+        unsigned k = 0;
+        while (*t == ' ') t++;
+        while (*t && *t != ' ' && k + 1 < sizeof pulses[0].name) pulses[n_pulses].name[k++] = *t++;
+        pulses[n_pulses].name[k] = 0;
+        while (*t && *t != ' ') t++;
+        if (!k) break;
+        pm_snprintf(key, sizeof key, "%s_fire", pulses[n_pulses].name);
+        if (!fn(key)) { say("pulse: the port names no %s - %s not armed", key, pulses[n_pulses].name); continue; }
+        n_pulses++;
+    }
+    if (n_pulses) say("pulse: %d of the game's own one-shot devices for the whole game's mode (%s%s%s)", n_pulses,
+                      pulses[0].name, n_pulses > 1 ? " ..." : "", "");
+}
+
+/* the decision, from the state alone (tests lift it): 0 = fire, else why not (1 not on this game, 2 not the whole
+ * game's mode, 3 no game, 4 tilted, 5 the operator disabled it, 6 too soon after the last, 7 too many this minute) */
+static int pulse_refuses(int known, int owner, int in_game, int tilted, int disabled, unsigned long since_last,
+                         unsigned in_minute)
+{
+    if (!known) return 1;
+    if (!owner) return 2;
+    if (!in_game) return 3;
+    if (tilted) return 4;
+    if (disabled) return 5;
+    if (since_last < PULSE_GAP_MS) return 6;
+    if (in_minute >= PULSE_PER_MIN) return 7;
+    return 0;
+}
+
+static int pulse_index(const char *name)
+{
+    int i;
+    pulses_arm();
+    for (i = 0; name && i < n_pulses; i++)
+        if (!__builtin_strcmp(pulses[i].name, name)) return i;
+    return -1;
+}
+
+int pm_coil_pulse_known(const char *name) { return pulse_index(name) >= 0; }
+
+int pm_coil_pulse(const char *name)
+{
+    static const char *const why[] = { "", "this game's port names no such device", "only the mode that has the whole "
+        "game (pm_own_game) may", "no game in play", "the ball is tilted", "the operator has it disabled",
+        "too soon after the last (1 s apart)", "too many this minute" };
+    int i = pulse_index(name), r, dis = 0;
+    unsigned long now = pm_ms(), since = ~0ul;
+    unsigned recent = 0, k;
+    char key[48];
+    long adj;
+    if (i >= 0) {
+        pm_snprintf(key, sizeof key, "%s_off_adj", name);
+        if ((adj = pm_port_value(key, 0)) > 0)
+            dis = !fn("adjustment") || ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))((unsigned)adj) != 0;
+        if (pulses[i].fired) since = now - pulses[i].last;
+        for (k = 0; k < PULSE_PER_MIN; k++)
+            if (pulses[i].starts[k] && now - pulses[i].starts[k] < 60000ul) recent++;
+    }
+    r = pulse_refuses(i >= 0, og_has_it(), pm_in_game(), og.tilted || ball_tilted(), dis, since, recent);
+    if (r) {
+        say("pulse: %s asked for %s - refused (%s)", current && current->name ? current->name : "a mode",
+            name ? name : "?", why[r]);
+        return 0;
+    }
+    pm_snprintf(key, sizeof key, "%s_fire", name);
+    ((void (*)(void))(unsigned long)fn(key))();
+    pulses[i].last = now;
+    pulses[i].fired++;
+    pulses[i].starts[pulses[i].next++ % PULSE_PER_MIN] = now | 1;
+    say("pulse: %s fired %s through the game's own 0x%08" PMA " (%u so far)",
+        current && current->name ? current->name : "a mode", name, fn(key), pulses[i].fired);
+    return 1;
+}
 
 /* the route lets go: back = the ball goes on (turn them on), else the game's own next ball brings them back */
 static void fl_done(const char *why, int back)

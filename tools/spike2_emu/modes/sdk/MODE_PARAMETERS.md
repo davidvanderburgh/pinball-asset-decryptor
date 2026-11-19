@@ -285,7 +285,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 201 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 203 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -354,6 +354,8 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_own_game_on()` | PAD-1400: 1 while a mode of ours has the whole game (`pm_own_game`) | - | PAD-1400, desk |
 | `pm_flippers(on)` | PAD-1406: the flippers off (0) or back on (1), for the mode that has the whole game, through the framework's all-flippers off and on (`site flippers_off` / `flippers_on`: each flipper's enable, which the node board's rule follows; the flippers alone). Off lasts the ball: asked again every tick, back on when the mode ends or gives the rules back mid-ball, and at the next ball (the game's own ball start). On undoes only a mode's off (never a tilt, the game's end of a ball or a drain to one). 1 done; 0 refused (not the whole game's mode, no game, a tilt, a drain to one running, no sites) | (the blocks: Flippers off / back on) | PAD-1406: every newest build's port (`site flipper_query_call`: the game's flipper policy answered off meanwhile); emulator, all 53 newest builds |
 | `pm_flippers_off()` | PAD-1406: 1 while a mode has the flippers off (`pm_flippers(0)`) | - | PAD-1406 |
+| `pm_coil_pulse(name)` | PAD-1406: one of the game's own one-shot devices fired once, through the game's own function for it (`text pulse_coils`, `site <name>_fire`; Uncanny X-Men: `sentinel_kick`, the Sentinel's kicking target), at the operator's power and time; only the mode that has the whole game, in a game, not tilted, not when the operator disabled it (`value <name>_off_adj`), 1 s apart, 20 a minute. 1 fired, 0 refused | (the blocks: Fire the ...) | PAD-1406: emulator, Uncanny X-Men LE and Pro 0.98 ([coildrive] node 9 coil 3) |
+| `pm_coil_pulse_known(name)` | PAD-1406: 1 when this game's port has that one-shot device | - | PAD-1406 |
 | `pm_multiball_start(balls, ballsave_s)` | the game serves balls until `balls` (2-6) are in play, with a ball save of that many seconds, through the framework's own start-a-multiball (`site multiball_serve`, its words read off every build's own multiballs); 1 serving, 0 refused (no game in play, a tilt) or no `PM_CAN_MULTIBALL` | F | item 167, emulator-proven 2026-09-26 on all 36 shipped builds (a mode file's `multiball` line; the item 164 provers had called the same function by hand on eleven builds) |
 | `pm_multiball_add(n, ballsave_s)` | `n` more balls than are in play now, the same way | F | item 167, emulator-proven 2026-09-26 on all 36 shipped builds (the add-a-ball shot) |
 | `pm_ball_save(seconds)` | a ball save with no multiball: the same call as `pm_multiball_start`, asking for the balls in play now (at least 1), with `seconds` (1-120) of ball save, as the game's own one-ball saves do (Godzilla Pro 1.15 `0xf49d0`, `0xd6a90`); 1 saving, 0 refused or no `PM_CAN_MULTIBALL` | F | PAD-225 (a mode file's `ball_save` line) |

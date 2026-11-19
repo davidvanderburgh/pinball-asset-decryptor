@@ -53,6 +53,20 @@ def main():
             {"op": "score", "points": num(250000)}] + on},
     ]
     BM.save(project, slug, p)
+    # PAD-1406 run 2: a second mode - the Sentinel's own devices (on a tree without them: a log line there)
+    slug2, _path = BM.new_blocks_mode(project, "SENTINEL", example="ramps")
+    q = BM.load(project, slug2)
+    q["game_modes"] = "own_game"
+    dev = "pulse" in BM.STATEMENTS
+    jaw = ([{"op": "hold", "what": "sentinel_jaw", "ms": num(4000)}] if dev
+           else [{"op": "log", "text": "the Sentinel jaw: no way to hold it"}])
+    kick = ([{"op": "pulse", "what": "sentinel_kick"}] if dev
+            else [{"op": "log", "text": "the kicking target: no way to fire it"}])
+    q["scripts"] = [
+        {"hat": {"kind": "shot", "shot": "Left ramp tgt", "when": "running"}, "do": [{"op": "score", "points": num(500000)}] + jaw},
+        {"hat": {"kind": "shot", "shot": "Right ramp tgt", "when": "running"}, "do": [{"op": "score", "points": num(250000)}] + kick},
+    ]
+    BM.save(project, slug2, q)
     proc, url = S._serve(repo, scratch, project)
     try:
         def blocks(page):
@@ -63,6 +77,16 @@ def main():
                     && e.children.length === 0); if (h) h.scrollIntoView(); } }""")
             time.sleep(1)
             out = os.path.join(out_dir, "%s_blocks_flippers.png" % prefix)
+            page.screenshot(path=out)
+            print("shot", out, flush=True)
+            webui_shot.api(url, "modes.select", slug2, "code")
+            time.sleep(3)
+            page.evaluate("""() => { const w = document.querySelector('.bk-ws'); if (w) w.scrollTop = w.scrollHeight;
+                const pal = document.querySelector('.bk-palette'); if (pal) {
+                  const h = [...pal.querySelectorAll('*')].find((e) => /^Mechanisms/.test(e.textContent || '')
+                    && e.children.length === 0); if (h) h.scrollIntoView(); } }""")
+            time.sleep(1)
+            out = os.path.join(out_dir, "%s_blocks_devices.png" % prefix)
             page.screenshot(path=out)
             print("shot", out, flush=True)
         S._shoot(url, blocks, height=1100)

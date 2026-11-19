@@ -1648,6 +1648,22 @@ The runtime's limits, not the mode's to change:
 - They come back by themselves when the mode ends or gives the game its rules back mid-ball, and at the next ball
   (the game's own ball start turns them on, as after any ball). A tilt leaves them to the game.
 
+**The game's own devices (PAD-1406).** The coils the game's rules drive - toys, posts - are the whole game's mode's
+too. Two routes, both the game's own commands at the operator's adjustments, never a power or time of the mode's:
+
+- Held coils marked `value <name>_own_game 1` in the port: `pm_coil_hold` (the blocks' *Hold the ...*, marked "whole
+  game") refuses them to any other mode. Uncanny X-Men LE and Pro 0.98: the Cerebro post (node 9 coil 6, up to the
+  game's own 3.5 s) and the Sentinel jaw (9.2, 5 s); the LE also the Sentinel hand ramp (9.7) and finger (9.8), 3 s.
+  Each board address was read off the game's own coil records in the emulator, each command off the game's own
+  coil_fire calls that read those adjustments.
+- One-shot devices: `pm_coil_pulse(name)` (the blocks' *Fire the ...*) calls the game's own function that fires the
+  device (`site <name>_fire`, `text pulse_coils`): X-Men's Sentinel kicking target, the Sentinel's bash toy (LE
+  `0x337dc`, Pro `0x30148`: coil_fire(12, SENTINEL KICK TARGET DRAW POWER, DRAW TIME)). At most once a second, 20 a
+  minute, never when the operator disabled it.
+
+The magnet's limit stays the game's own: X-Men's longest magnet command is its grab, 2.5 s on the LE (1.2 s on the
+Pro), and a hold is never longer; a mode grabs again after the runtime's 3 s.
+
 `pm_drain_to_one` (below) uses the same pair, and still waits on a port that names the shooter lane switch too
 (Godzilla 1.16): with the flippers dead, the served ball must bring them back as it lands in the lane.
 

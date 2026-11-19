@@ -104,6 +104,10 @@ class TitleProfile:
     hud_tree: str = "auto_loaded"    # Iron Maiden keep it in demand_loaded) - and the HUD scene's
     magnet_shot: str = ""            # PAD-381: the shot whose hit is the ball over the magnet; "" = no magnet
     held_coils: tuple = ()           # PAD-381: ((name, label), ...) the other coils a mode may hold, proven ones only
+    own_game_coils: tuple = ()       # PAD-1406: ((name, label), ...) held coils only the mode that IS the whole game may
+    #                                  hold (`value <name>_own_game 1`: toys and posts the game's rules drive), proven
+    pulse_coils: tuple = ()          # PAD-1406: ((name, label), ...) the game's own one-shot devices (pm_coil_pulse), the
+    #                                  whole game's mode's alone, proven
     coil_caps: tuple = ()            # PAD-420: ((name, ms), ...) a held coil's longest hold where the game's own
     #                                  longest command on it is shorter than COIL_MAX_MS (its `_drive` line's last word);
     #                                  PAD-621: or longer, where the port names the game's own longest hold there
@@ -1806,6 +1810,35 @@ COIL_MAX_MS = 5000                     # pad_mode_runtime.c MAGNET_MAX_MS: every
 #: held as long as the game's own longest there (`value <name>_max_ms`: James Bond's right return up post, 14 s at a
 #: mini-wizard's start); never above this
 COIL_LONGEST_MS = 14000
+#: PAD-1406: held coils only the mode that has the whole game may hold, proven in the emulator: 2026-11-19 coiljob.sh
+#: (C:/tmp/PAD-1406, stock cards, hidden, muted, PAD_COIL_PROBE): each held as one command at the game's own powers on its
+#: board address, capped at the game's own longest (Cerebro post 3500 ms, Sentinel jaw 5000 (4000 asked), hand and finger
+#: 3000), [coildrive] node 9 coils 6, 2, 7, 8; refused once the mode gave the game its rules back
+OWN_GAME_COILS_PROVEN = frozenset({
+    ("uncanny_xmen_le-0.98", "cerebro_post"), ("uncanny_xmen_le-0.98", "sentinel_jaw"),
+    ("uncanny_xmen_le-0.98", "sentinel_hand"), ("uncanny_xmen_le-0.98", "sentinel_finger"),
+    ("uncanny_xmen_pro-0.98", "cerebro_post"), ("uncanny_xmen_pro-0.98", "sentinel_jaw"),
+})
+#: PAD-1406: the game's own one-shot devices (pm_coil_pulse), proven the same run: the Sentinel kicking target fired
+#: through the game's own function (LE 0x337dc, Pro 0x30148): [coildrive] node 9 coil 3, 255 for 60 ms, twice; a second
+#: fire at once refused (1 s apart); refused outside the whole game
+PULSE_COILS_PROVEN = frozenset({("uncanny_xmen_le-0.98", "sentinel_kick"), ("uncanny_xmen_pro-0.98", "sentinel_kick")})
+
+
+def _own_game_coils(port, key):
+    """PAD-1406: ``((name, label), ...)``: the port's held coils marked `value <name>_own_game 1`, proven ones only."""
+    return tuple((n, lab) for n, lab in _held_coils(port)
+                 if port["value"].get("%s_own_game" % n) and (key, n) in OWN_GAME_COILS_PROVEN)
+
+
+def _pulse_coils(port, key):
+    """PAD-1406: ``((name, label), ...)``: the port's `text pulse_coils` with their `site <name>_fire`, proven ones only."""
+    if not port:
+        return ()
+    return tuple((n, port["text"].get("%s_label" % n, n)) for n in port["text"].get("pulse_coils", "").split()
+                 if ("%s_fire" % n) in port["site"] and (key, n) in PULSE_COILS_PROVEN)
+
+
 HELD_COILS_PROVEN = frozenset({
     ("godzilla_le-1.16", "mg_magnet"),  # 2026-10-05 rig 1, the stock Premium/LE card: held 2000 ms as the mode started (255 for 250, then 80 for 1750: its own adjustments), OFF at its end
     ("godzilla_le-1.16", "bridge"),     # the same run: held 2000 ms on the left ramp (255 for 300, then 25 for 1700), a hit mid-hold refused, held again, a mode stop let go 617 ms early; no abort
@@ -2914,7 +2947,10 @@ def profile_from_port(path):
         hud_tree=measured.get("hud_tree", "auto_loaded"),
         magnet_shot=_magnet_shot_name(port),                 # PAD-381
         held_coils=tuple((n, lab) for n, lab in _held_coils(port) if (key, n) in HELD_COILS_PROVEN),
-        coil_caps=_coil_caps(port, [n for n, _l in _held_coils(port) if (key, n) in HELD_COILS_PROVEN]),   # PAD-420
+        coil_caps=_coil_caps(port, [n for n, _l in _held_coils(port) if (key, n) in HELD_COILS_PROVEN]
+                             + [n for n, _l in _own_game_coils(port, key)]),   # PAD-420; PAD-1406
+        own_game_coils=_own_game_coils(port, key),                           # PAD-1406
+        pulse_coils=_pulse_coils(port, key),                                 # PAD-1406
         shield_rule=port["text"].get("shield_rule", "").strip(),             # PAD-392
         building_rule=next((n for _i, n in _game_rules(port) if n in BUILDING_RULES), ""),   # PAD-589
         roster=_roster(game, port) if not any(c[0] == "roster" for c in cannot) else (),   # PAD-589

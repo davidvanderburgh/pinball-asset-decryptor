@@ -600,11 +600,35 @@ text diverter_label       Diverter
 text right_return_up_drive 8 7 a169 0 a169 1250
 text magnet_hold_drive    9 0 255 a196 82 2500
 text diverter_drive       9 1 a163 a164 a165 1250
-text held_coils            right_return_up magnet_hold diverter
+text held_coils            right_return_up magnet_hold diverter cerebro_post sentinel_jaw sentinel_hand sentinel_finger
 # PAD-420: Mode > Magnet holds the ball with the held coil magnet_hold, on a hit of the shot nearest it on the
 # playfield picture (Right ramp tgt, 67 px from the magnet; near.py)
 text magnet_coil           magnet_hold
 value magnet_shot          0x20
+# PAD-1406: the game's own devices for the mode that has the whole game (each `_own_game 1`): its own commands and
+# the operator's adjustments (the coil_fire calls that read them: device, draw power, draw ms, hold power, hold ms),
+# board addresses read from the game's coil records in the emulator (devprobe). The kicking target (the Sentinel's
+# bash toy) is one pulse, fired through the game's own function for it.
+text cerebro_post_label Cerebro post
+text cerebro_post_drive 9 6 a171 a172 a173 3500
+value cerebro_post_off_adj 174
+value cerebro_post_own_game 1
+text sentinel_jaw_label Sentinel jaw
+text sentinel_jaw_drive 9 2 a188 a189 a190 5000
+value sentinel_jaw_off_adj 191
+value sentinel_jaw_own_game 1
+text sentinel_hand_label Sentinel hand ramp
+text sentinel_hand_drive 9 7 a176 a177 a178 3000
+value sentinel_hand_off_adj 179
+value sentinel_hand_own_game 1
+text sentinel_finger_label Sentinel finger
+text sentinel_finger_drive 9 8 a180 a181 a182 3000
+value sentinel_finger_off_adj 186
+value sentinel_finger_own_game 1
+text pulse_coils sentinel_kick
+text sentinel_kick_label Sentinel kicking target
+site sentinel_kick_fire 0x000337dc 0xe92d4010 0xe3a000c0
+value sentinel_kick_off_adj 194
 
 # ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
 # game's "free every lamp group this process owns" (its process exit calls it for a show it started

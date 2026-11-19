@@ -42,6 +42,7 @@ import shlex
 import stat
 import threading
 import time
+from pathlib import Path
 
 GAMES = "/games"
 ROOT = "/"
@@ -578,6 +579,21 @@ class Machine:
         delta goes into it, then it is renamed over the original."""
         raise NotImplementedError
 
+    # PAD-1435: 64 KB pieces the machine already has (send_pieces); a machine without its helper uses the delta
+    def pieces_ready(self):
+        """Whether the machine can hash and copy 64 KB pieces itself (``resources/pieces/padpieces``)."""
+        return False
+
+    def piece_hashes(self, paths):
+        """``{path: (size, [sha1 hex of each send_pieces.PIECE])}`` of the machine's files (an unreadable one is
+        left out)."""
+        raise NotImplementedError
+
+    def copy_pieces(self, copies):
+        """Do *copies* ``[(src, soff, dst, doff, nbytes)]`` on the machine, in order (a missing *dst* is created,
+        none is cut short).  Returns the bytes copied."""
+        raise NotImplementedError
+
     def in_use(self):
         """Every file a running program has loaded or open (its program, libraries, open files): replacing one
         frees no room until the machine restarts, as the program keeps the old copy."""
@@ -1004,6 +1020,10 @@ class SshMachine(Machine):
         self.log("Connected again; the Send carries on.", "info")
 
     def close(self):
+        if getattr(self, "_pieces", None):
+            with contextlib.suppress(Exception):
+                self.sh("rm -f %s" % self._pieces, check=False, timeout=20)
+            self._pieces = None
         lanes, self._lanes = self._lanes, []
         for lane in lanes:
             if lane is not self and lane is not self._wide:
@@ -1534,6 +1554,62 @@ class SshMachine(Machine):
     def copy(self, src, dst):
         self.sh("rm -f %s && cp -p %s %s" % (_q(dst), _q(src), _q(dst)), timeout=7200)
 
+    def pieces_ready(self):
+        if getattr(self, "_pieces", None) is None:
+            self._pieces = self._put_pieces_helper() or ""
+        return bool(self._pieces)
+
+    def _put_pieces_helper(self):
+        """PAD-1435: the helper for this machine's processor, into its /run tmpfs for this Send (gone at close or
+        the next boot); None when there isn't one for it or it doesn't run there."""
+        try:
+            _rc, arch = self.sh("uname -m", check=False, timeout=30)
+            sub = PIECES_ARCH.get(arch.strip())
+            if sub is None:
+                return None
+            data = (PIECES_DIR / sub / "padpieces").read_bytes()
+            if hashlib.sha256(data).hexdigest() != PIECES_SHA256[sub]:
+                return None
+            for d in ("/run", "/tmp"):
+                name = "%s/pad-pieces-%d" % (d, os.getpid())
+                try:
+                    with self.sftp.open(name, "wb") as f:
+                        f.write(data)
+                    self.sftp.chmod(name, 0o755)
+                except OSError:
+                    continue
+                rc, out = self.sh("%s version" % name, check=False, timeout=30)
+                if rc == 0 and out.strip() == PIECES_VERSION:
+                    return name
+                self.sh("rm -f %s" % name, check=False, timeout=30)
+        except (OSError, SendError):
+            pass
+        return None
+
+    def piece_hashes(self, paths):
+        from .send_pieces import PIECE
+        stdin = "".join(p + "\n" for p in paths).encode("utf-8", "surrogateescape")
+        _rc, out = self.sh("%s hash %d" % (self._pieces, PIECE), stdin=stdin, timeout=7200)
+        res, cur = {}, None
+        for ln in out.split("\n"):
+            if ln.startswith("= "):
+                size, _, path = ln[2:].partition(" ")
+                cur = res[path] = (int(size), [])
+            elif ln.startswith("! "):
+                res.pop(ln[2:], None)
+                cur = None
+            elif len(ln) == 40 and cur is not None:
+                cur[1].append(ln)
+        return res
+
+    def copy_pieces(self, copies):
+        stdin = "".join("%s\t%d\t%s\t%d\t%d\n" % c for c in copies).encode("utf-8", "surrogateescape")
+        _rc, out = self.sh("%s copy" % self._pieces, stdin=stdin, timeout=7200)
+        last = (out.strip().splitlines() or [""])[-1]
+        if not last.startswith("ok "):
+            raise SendError("The machine didn't finish copying the pieces it already has; send again.")
+        return int(last[3:])
+
     def in_use(self):
         _rc, out = self.sh(IN_USE_SCRIPT, check=False, timeout=120)
         return {ln[:-len(" (deleted)")] if ln.endswith(" (deleted)") else ln
@@ -1635,7 +1711,10 @@ class SshMachine(Machine):
 for _name in ("state", "sizes", "read_ranges", "free", "remount", "mkdir", "upload", "commit", "write_ranges", "remove",
               "sync", "read_ledger", "write_ledger", "layout", "mounts", "walk", "mount_part", "umount_part",
               "raw_sha1", "raw_write", "set_mtime", "block_hashes", "file_sha1s", "truncate", "set_attrs", "copy",
-              "in_use", "describe", "file_ids", "boot_info", "read_hash_cache", "write_hash_cache"):
+              "in_use", "describe", "file_ids", "boot_info", "read_hash_cache", "write_hash_cache",
+              # PAD-1435: a batch of copies is cut where a copy would overwrite a piece the batch read (piece_puts),
+              # so done again it reads what it read the first time
+              "piece_hashes", "copy_pieces"):
     setattr(SshMachine, _name, _again(getattr(SshMachine, _name)))
 del _name
 
@@ -1976,9 +2055,24 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
         for op in sorted((o for o in needed if o.kind == "mkdir"), key=lambda o: o.path.count("/")):
             machine.mkdir(op.path, op.mode, op.uid, op.gid)
         sent = 0
+        job = None
+        if tight:
+            # PAD-1435: the game files changed in place are built from 64 KB pieces the machine has anywhere among
+            # them (it reads only those, as the 1 MiB delta did), the rest sent
+            here = [op for op in puts if op.mount == GAMES and (getattr(op, "cur", None) or ("",))[0] == "file"]
+            job = pieces_prepare(machine, plan.trees[GAMES][0], GAMES, here, {op.path for op in here}, progress,
+                                 log)
+            if job is not None and job.ops:
+                if not changed:
+                    machine.screen_changing()
+                    changed = True
+                log("Updating %d game file(s) in place (only the parts that differ)..." % len(job.ops), "info")
+                sent = pieces_run(machine, plan.trees[GAMES][0], job, cancel, progress, sent, total, temps)
         for op in puts:
             check()
             cur = getattr(op, "cur", None)
+            if job is not None and op.path in job.paths:
+                continue
             if tight and op.mount == GAMES and cur and cur[0] == "file":
                 if not changed:
                     machine.screen_changing()
@@ -2146,6 +2240,14 @@ class _RawFile(io.RawIOBase):
 #: block at a time and only the blocks that differ are written, in place - no second copy needs room, and only the
 #: changes cross the network
 DELTA_BLOCK = 1 << 20
+#: PAD-1435: the machine's piece helper (resources/pieces/build.sh prints these), by `uname -m`
+PIECES_DIR = Path(__file__).resolve().parents[1] / "resources" / "pieces"
+PIECES_VERSION = "padpieces 1"
+PIECES_ARCH = {"armv7l": "armv7", "armv7": "armv7", "aarch64": "aarch64", "arm64": "aarch64"}
+PIECES_SHA256 = {"armv7": "c5536de5f32d7e1a8e8ae1c9f5c717cfb0fab9d6025a92479460b48f7fd31464",
+                 "aarch64": "293ebece22295c2a9d3daa07a6727a09435eca3be82c3e27b95bc4f5a9bb4d73"}
+#: copies done in one go at most (the bar moves between batches)
+PIECES_BATCH = 64 << 20
 #: the machine hashes the same-size files a full Send compares in batches this big, the bar moving after each
 COMPARE_BATCH_FILES = 200
 #: differing blocks written per SFTP open: the bar moves after each batch (4 MB: a few seconds over Wi-Fi)
@@ -2216,6 +2318,135 @@ def delta_replace(machine, tree, op, cancel=None, progress=None):
             machine.remove([tmp])
         raise
     return sent
+
+
+class PieceJob:
+    """PAD-1435: one mount's changed game files, to be built from pieces the machine already has
+    (:func:`pieces_prepare`, then :func:`pieces_run` with the game stopped)."""
+
+    def __init__(self, mount, ops, plan, uploads):
+        self.mount, self.ops, self.plan = mount, ops, plan
+        #: new files no piece of which is on the machine: uploaded whole, as before
+        self.uploads = uploads
+        self.paths = {op.path for op in ops}
+        self.net = 0
+
+
+def pieces_prepare(machine, tree, mount, ops, has, progress=None, log=None):
+    """The :class:`PieceJob` for *ops* (puts on one game mount; *has*: the paths of those the machine has a copy
+    of, changed in place), or None when the machine can't do pieces (the 1 MiB delta then, as before).  Reads only
+    the machine's copies of the files it changes in place, as the delta did."""
+    from . import send_pieces as SP
+    ops = [op for op in ops if not any(c in op.path for c in "\t\n")]
+    if not ops or not machine.pieces_ready():
+        return None
+    progress = progress or (lambda *a, **k: None)
+    what = "Comparing the pieces of the changed files"
+    old = [op for op in ops if op.path in has]
+    total_b = (sum(op.size for op in old) + sum(op.size for op in ops)) or 1
+    done_b, index, batch, batch_b = 0, {}, [], 0
+    progress(0, total_b, what)
+    for i, op in enumerate(old):
+        batch.append(op.path)
+        batch_b += op.size
+        if len(batch) >= COMPARE_BATCH_FILES or batch_b >= COMPARE_BATCH_BYTES or i == len(old) - 1:
+            index.update(machine.piece_hashes(batch))
+            done_b += batch_b
+            batch, batch_b = [], 0
+            progress(min(done_b, total_b), total_b, what)
+    files = []
+    for op in ops:
+        files.append((op.path, SP.local_pieces(tree, op.node)))
+        done_b += op.size
+        progress(min(done_b, total_b), total_b, what)
+    # a copy the machine couldn't read is new to it: built like a new file, from pieces and sends
+    plan = SP.plan(index, files)
+    in_place = set(index)
+    uploads = [op for op in ops if op.path not in in_place and not plan.copied_to(op.path)]
+    job = PieceJob(mount, [op for op in ops if op not in uploads], plan, uploads)
+    job.in_place = in_place
+    if log is not None:
+        whole = sum(op.size for op in ops)
+        log("Of the %s of changed game files, the machine has %s already (%s in place, %s elsewhere on its card, "
+            "copied there): %s goes over the network." % (
+                _human(whole), _human(plan.kept + plan.copied), _human(plan.kept), _human(plan.copied),
+                _human(whole - plan.kept - plan.copied)), "info")
+    return job
+
+
+def pieces_run(machine, tree, job, cancel, progress, base, total, temps, free=None):
+    """Make the machine's files *job*'s: copies of its own pieces first, in :func:`send_pieces.plan`'s order and in
+    batches each safe to do again after a dropped connection (none overwrites a piece the batch read), then what
+    it doesn't have, then each file's size, owner, mode and time, checked whole.  A new file is built beside its
+    name and renamed over it, or in place when the room isn't there for that.  Returns *base* plus the job's
+    bytes (the bar's count); ``job.net`` is what crossed the network."""
+    from .send_pieces import PIECE
+    plan = job.plan
+    news = [op for op in job.ops if op.path not in job.in_place]
+    room = machine.free(job.mount) if free is None else free
+    beside = room >= sum(op.size for op in news) + SPARE
+    dest = {}
+    for op in job.ops:
+        if op.path in job.in_place or not beside:
+            dest[op.path] = op.path
+        else:
+            dest[op.path] = posixpath.join(posixpath.dirname(op.path),
+                                           "." + posixpath.basename(op.path) + TMP_TAG)
+            temps.append(dest[op.path])
+    done = plan.kept
+    progress(base + done, total, "Updating")
+    batch, reads, batch_b = [], set(), 0
+
+    def flush():
+        nonlocal batch, reads, batch_b, done
+        if batch:
+            machine.copy_pieces([(s, so, dest.get(d, d), do, n) for s, so, d, do, n in batch])
+            done += batch_b
+            progress(base + done, total, "Updating")
+            if cancel is not None and cancel():
+                raise SendError("Send canceled.")
+        batch, reads, batch_b = [], set(), 0
+
+    for c in plan.copies:
+        s, so, d, do, n = c
+        writes = {(d, k) for k in range(do // PIECE, (do + n + PIECE - 1) // PIECE)}
+        if writes & reads or batch_b + n > PIECES_BATCH:
+            flush()
+        batch.append(c)
+        batch_b += n
+        reads.update((s, k) for k in range(so // PIECE, (so + n + PIECE - 1) // PIECE))
+    flush()
+    for op in job.ops:
+        path = dest[op.path]
+        ranges = plan.sends.get(op.path, ())
+        for i in range(0, len(ranges), DELTA_BATCH):
+            if cancel is not None and cancel():
+                raise SendError("Send canceled.")
+            data = [(off, _read_node(tree, op.node, off, n)) for off, n in ranges[i:i + DELTA_BATCH]]
+            machine.write_ranges(path, data)
+            got = sum(len(b) for _o, b in data)
+            job.net += got
+            done += got
+            progress(base + done, total, "Updating")
+    for op in job.ops:
+        path = dest[op.path]
+        machine.truncate(path, op.size)
+        machine.set_attrs(path, op.mode, op.uid, op.gid)
+        machine.set_mtime(path, op.node["mtime"])
+        if machine.state([path]).get(path) != ("file", op.sha1):
+            raise SendError("%s didn't check out on the machine after its changes were written; send again (the game "
+                            "stays stopped until it does)." % op.path)
+        if path != op.path:
+            machine.commit([(path, op.path)], [], [])
+            temps.remove(path)
+    return base + sum(op.size for op in job.ops)
+
+
+def _read_node(tree, node, off, n):
+    data = tree.read_range(node, off, n)
+    if len(data) != n:
+        raise SendError("Couldn't read the build's file at %d." % off)
+    return bytes(data)
 
 
 def root_room(machine, root_puts, existing):
@@ -2515,6 +2746,17 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             if machine.game_held():
                 machine.resume_game(screen_text("NOTHING TO", "UPDATE", "RESTARTING GAME"))
             return "The machine already has this image."
+        # PAD-1435: changed game files are built from 64 KB pieces the machine has anywhere among the files it
+        # rewrites (only those are read, as the 1 MiB delta read them), the rest sent
+        jobs = {}
+        for mount, ops in all_ops.items():
+            if mount == ROOT:
+                continue
+            mine_puts = [op for op in ops if op.kind == "put"]
+            has = {op.path for op in mine_puts if (walks[mount].get(op.path) or ("",))[0] == "file"}
+            job = pieces_prepare(machine, target.trees[mount], mount, mine_puts, has, progress, log)
+            if job is not None:
+                jobs[mount] = job
         puts = [op for ops in all_ops.values() for op in ops if op.kind == "put"]
         total = sum(op.size for op in puts) or 1
         log("Sending %d change(s): %d file(s) (%s), %d link(s), %d removal(s)%s."
@@ -2548,7 +2790,14 @@ def sync(target, machine, log=None, progress=None, cancel=None):
                 machine.commit([], [], dels)
             for op in sorted((o for o in ops if o.kind == "mkdir"), key=lambda o: o.path.count("/")):
                 machine.mkdir(op.path, op.mode, op.uid, op.gid)
-            for op in (o for o in ops if o.kind == "put"):
+            job = jobs.get(mount)
+            if job is not None and job.ops:
+                check()
+                log("Updating %d game file(s) (%s) from the pieces the machine has and the parts it doesn't..."
+                    % (len(job.ops), _human(sum(op.size for op in job.ops))), "info")
+                sent = pieces_run(machine, tree, job, cancel, progress, sent, total, temps)
+                delta_bytes += job.net
+            for op in (o for o in ops if o.kind == "put" and (job is None or o.path not in job.paths)):
                 check()
                 have = walks[mount].get(op.path)
                 if have is not None and have[0] == "file":

@@ -18332,6 +18332,8 @@ static struct {
     int standard;                        /* PAD-1224: ENHANCED STANDARD - the game's own players, a character each */
     int plain;                           /* PAD-1443: the start menu's CO-OP PLAY on a card with no CO-OP PLAY row: no
                                           * character pick (ENHANCED CO-OP is the one with the pick) */
+    unsigned style;                      /* PAD-1449: the style the start menu's chooser took for this game - 1 NORMAL,
+                                          * 2 CHARACTERS (a pick, no abilities), 3 ENHANCED; 0: none asked */
     unsigned round;                      /* PAD-1042: the round of turns on this ball (1..the larger team) */
     unsigned started;                    /* PAD-1054: the game_start count last seen */
     int solo_ask;                        /* PAD-1054: that game began with the button held: a team of one, once it plays */
@@ -18358,7 +18360,37 @@ static struct {
     volatile unsigned kind;              /* PAD-1073: which of ours it shows (1 CO-OP PLAY, 4 2 VS 2, 3 2 VS 1;
                                           * PAD-1224: 2 ENHANCED STANDARD, 5 3 VS 1) */
     unsigned size;                       /* PAD-1073: the team game the pick is filling now (its kind: 4, 3, 5; 0: none) */
+    volatile unsigned own;               /* PAD-1449: the cursor is on one of the game's own entries that the style
+                                          * chooser follows: STY_STANDARD or STY_CHALLENGE (0: none, or Competition) */
 } tm;
+/* ---- PAD-1449: the play styles ------------------------------------------------------------------------------------
+ * DoomWalrus666: "whenever a mode is selected from the start menu ... a dialog box ... would pop up and ask if player
+ * wants to continue in Normal, Normal with Character Selection, or Enhanced ... This would reduce the amount of options
+ * needed to scroll on the start menu ... This dialogue should not come up if a game is started simply by pressing the
+ * start button without choosing a mode ... if the Normal Characters version of Standard or Challenge is selected ...
+ * Insider Connected should still work as normal." On a card with characters to pick and no CO-OP PLAY row the start
+ * menu carries one entry per game of ours (CO-OP PLAY and the TEAM PLAY games; ENHANCED CO-OP and ENHANCED STANDARD are
+ * gone from it), and a game begun from the menu - on one of those, on the game's own STANDARD or on one of its
+ * challenges (not Competition, whose point is the same game for everyone) - holds ball 1's serve for a chooser first:
+ * NORMAL (co-op and team: no character pick; Standard and a challenge: the game's own game), CHARACTERS (each player
+ * picks one, no special abilities: Classic) or ENHANCED (the picks' abilities hold). The flippers walk it, Action takes
+ * one (with no Action button, the one shown is taken after STY_AUTO_MS); its cards are PadCoopStyle_1..3 among the
+ * pick's screens, the top line says it too. A Start meanwhile adds a player as it would. Then the intro, the players'
+ * lines and the picks run as they always have. Standard or a challenge at NORMAL or CHARACTERS stays on Insider
+ * Connected (no ability, nothing unlike the game's own); ENHANCED keeps the rest of that game off it. */
+#define STY_STANDARD 7u                  /* the chooser's own kinds past TEAM_KIND_LAST: the game's STANDARD */
+#define STY_CHALLENGE 8u                 /* ... one of its challenges */
+#define STY_AUTO_MS 20000ul              /* with no Action button: the one shown is taken this long after the last walk */
+#define STY_MOST_MS 300000ul             /* the serve never waits longer than this for a chooser left alone */
+static struct {
+    volatile int open;                   /* the chooser is up */
+    volatile int walk, take;             /* the flippers' steps, Action (from the switch drain) */
+    int at;                              /* the one shown: 0 NORMAL, 1 CHARACTERS, 2 ENHANCED */
+    int phase;                           /* the top line's step */
+    unsigned kind;                       /* the game it is for: a team kind (1, 3, 4, 5), STY_STANDARD, STY_CHALLENGE */
+    unsigned long said_ms, walk_ms;      /* when the top line last turned; the last walk */
+} sty;
+static const char *const STY_NAMES[3] = { "NORMAL", "CHARACTERS", "ENHANCED" };
 static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";
 static char team_name_3v1[] = "TEAM PLAY 3 VS 1", team_name_std[] = "ENHANCED STANDARD";   /* PAD-1224 */
 static char team_name_ecoop[] = "ENHANCED CO-OP";                                           /* PAD-1443 */
@@ -18460,7 +18492,7 @@ static int coop_switched_on(void)
 /* PAD-1065: CO-OP PLAY says Classic: the characters are picked but have no abilities */
 static int coop_classic(void)
 {
-    if (!coop.setting) return 0;
+    if (!coop.setting) return coop.style == 2u;              /* PAD-1449: the chooser's CHARACTERS */
     return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) == 1u;
 }
 
@@ -19177,6 +19209,8 @@ static void *coop_scr[COOP_CHARS + 1];      /* PadCoop_1.., PadCoop_Random */
 static void *coop_scr_words[COOP_CHARS + 1];/* PAD-1044: each one's words line: the seconds left, then PICKED */
 static char coop_scr_said[16];              /* what the shown one's words line says */
 static int coop_scr_found, coop_scr_shown = -1;
+static void *coop_sty_scr[3];           /* PAD-1449: the style chooser's cards (PadCoopStyle_1..3), where the card has them */
+static int coop_sty_shown = -1;
 static void *coop_scr_classic[COOP_CHARS];  /* PAD-1065: PadCoopClassic_1..: NO SPECIAL ABILITY over each card */
 static int coop_scr_classic_shown = -1;
 static unsigned long coop_scr_try;
@@ -19735,8 +19769,144 @@ static void coop_pick_say(void)
 static void coop_intro_begin(const char *why);   /* PAD-1114, below */
 static int ci_film_due(void);
 static void coop_picked_begin(int c);           /* PAD-1123, below */
+static void coop_lobby_now(int formed);         /* PAD-1316, below */
+static void ci_start_poll(int formed);          /* PAD-1114, below */
+static int ci_start_was;
+static void coop_turn_show(void);
+
+/* PAD-1449: the chooser can be asked - characters to pick, no CO-OP PLAY row (a card with the row plays its row's
+ * style), no coop.cfg `teams` card */
+static int sty_wanted(void)
+{
+    return coop.on && !coop.setting && !coop.teams_always && coop_pick_on && coop_ch_n > 0;
+}
+
+/* PAD-1449: the game the chooser is for, as the top line names it */
+static const char *sty_label(unsigned kind)
+{
+    return kind == STY_STANDARD ? "STANDARD" : kind == STY_CHALLENGE ? "CHALLENGE" : kind == 4u ? "2 VS 2"
+        : kind == 3u ? "2 VS 1" : kind == 5u ? "3 VS 1" : "CO-OP";
+}
+
+/* PAD-1449: what each style is, the top line's second step (20 characters at most: Godzilla LE's line) */
+static const char *const STY_DOES[3] = { "NO CHARACTERS", "NO SPECIAL POWERS", "POWERS UP YOUR TEAM" };
+
+/* PAD-1449: the top line's words for step `phase` of style `at` of game `kind`: its name, what it is, how to take one
+ * (a title with no Action button: the flippers alone) (tests lift it verbatim) */
+static void sty_words(unsigned kind, int at, int phase, int action, char *out, unsigned cap)
+{
+    if (at < 0 || at > 2) at = 0;
+    if (phase % 3 == 1) pm_snprintf(out, cap, "%s", STY_DOES[at]);
+    else if (phase % 3 == 2) pm_snprintf(out, cap, "%s", action ? "ACTION PICKS" : "FLIPPERS CHANGE");
+    else pm_snprintf(out, cap, "%s %s", sty_label(kind), STY_NAMES[at]);
+}
+
+static void sty_say(void)
+{
+    char words[40];
+    if (coop_ball_msg < 0) return;
+    sty_words(sty.kind, sty.at, sty.phase, coop_action != 0u, words, sizeof words);
+    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+}
+
+static void sty_open(unsigned kind)
+{
+    sty.kind = kind;
+    sty.at = 0;
+    sty.phase = 0;
+    sty.walk = sty.take = 0;
+    sty.said_ms = sty.walk_ms = pm_ms();
+    sty.open = 1;
+    say("styles: %s from the start menu - NORMAL, CHARACTERS or ENHANCED first (the flippers walk, %s); ball 1 waits",
+        sty_label(kind), coop_action ? "Action takes one" : "the one shown is taken after 20 s");
+    sty_say();
+}
+
+/* the style taken: the game goes on as it says - the intro first where there is one, so the serve's hold has it */
+static void sty_close(const char *how)
+{
+    unsigned st = (unsigned)sty.at + 1u;
+    coop.style = st;
+    say("styles: %s %s (%s)", sty_label(sty.kind), STY_NAMES[sty.at], how);
+    if (sty.kind == STY_STANDARD || sty.kind == STY_CHALLENGE) {
+        if (st == 1u) {                                       /* the game's own game: nothing of ours in it */
+            coop.game = 0;
+            coop.standard = 0;
+            coop.style = 0;
+            coop.join_n = 0;
+            say("styles: the game's own %s - no characters, Insider Connected as it always has",
+                sty.kind == STY_STANDARD ? "Standard game" : "challenge");
+        } else {
+            say("styles: %s - each player picks a character at their first ball%s", sty_label(sty.kind),
+                st == 2u ? ", no special abilities (Insider Connected as it always has)"
+                         : ", its ability holds while they are up (off Insider Connected)");
+            coop.join_n = 1;                                  /* ENHANCED STANDARD's lines, then the pick */
+            coop.join_step = 0;
+            coop.join_at = pm_ms();
+        }
+    } else {
+        coop.plain = st == 1u;                                /* NORMAL: no character pick (PAD-1443's CO-OP PLAY) */
+        if (st == 1u) say("styles: no character pick - the balls are served as the game serves them");
+        coop.join_at = pm_ms();
+    }
+    if (coop_teammates() && ci.clip[0] && !ci.phase && pm_player())
+        coop_intro_begin(coop.teams ? "a team game begins" : coop.standard ? "an Enhanced Standard game begins"
+                         : "a co-op game begins");
+    if (coop.join_n) coop_join_show();
+    else coop_turn_show();
+    sty.open = 0;
+}
+
+/* from the tick: the walk, the take, the top line's steps */
+static void sty_tick(void)
+{
+    int w;
+    if (!sty.open) return;
+    if (!coop_teammates() || !pm_player()) {
+        sty.open = 0;
+        say("styles: the chooser is gone - the game ended");
+        return;
+    }
+    if ((w = sty.walk) != 0) {
+        __sync_fetch_and_sub(&sty.walk, w);
+        sty.at = ((sty.at + w) % 3 + 3) % 3;
+        sty.phase = 0;
+        sty.said_ms = sty.walk_ms = pm_ms();
+        say("styles: %s shows %s", sty_label(sty.kind), STY_NAMES[sty.at]);
+        sty_say();
+    }
+    if (sty.take) sty_close("Action took it");
+    else if (!coop_action && pm_ms() - sty.walk_ms >= STY_AUTO_MS) sty_close("no Action button: the one shown");
+    else if (pm_ms() - sty.said_ms >= COOP_PICK_FLIP_MS) {
+        sty.phase = (sty.phase + 1) % 3;
+        sty.said_ms = pm_ms();
+        sty_say();
+    }
+}
+
+/* the serve of ball 1 waits for the chooser, as it waits for the intro and the pick; a Start meanwhile adds a player */
+static void sty_hold(void)
+{
+    unsigned long t0 = pm_ms();
+    int said = 0;
+    if (!sty.open || !fn("proc_sleep")) return;
+    ci.holding = 1;
+    ci_start_was = ci.start_sw ? switch_held(ci.start_sw) : 0;
+    while (sty.open) {
+        if (!pm_player()) break;
+        if (pm_ms() - t0 >= STY_MOST_MS) { sty_close("it waited too long: the one shown"); break; }
+        if (!said++) say("styles: ball 1's serve waits for the chooser");
+        coop_lobby_now(1);                                    /* PAD-1316 */
+        ci_start_poll(1);
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    }
+    ci.holding = 0;
+    if (said) say("styles: the chooser took %lu ms", pm_ms() - t0);
+}
+
 static void coop_pick_open(unsigned t)
 {
+    if (sty.open) return;                                     /* PAD-1449: the style first */
     if (coop.plain || !coop_pick_on || !coop_ch_n || t < 1 || t > 4 || coop_pick_of[t] >= 0) return;
     if (!ci.phase) coop_intro_begin("a co-op or team game begins");   /* PAD-1114 */
     if (ci.phase) {                                           /* PAD-1114: after the intro and the language */
@@ -19851,6 +20021,8 @@ static int coop_hides(unsigned id)
         return 1;                         /* PAD-1114 round 2: in the film the flippers choose the language */
     if (coop_live && ci.holding && pk.open && id && (id == coop_left || id == coop.button || id == coop_action))
         return 1;                         /* ... and the pick has them while ball 1 is not served yet */
+    if (coop_live && sty.open && id && (id == coop_left || id == coop.button || id == coop_action))
+        return 1;                         /* PAD-1449: ... and the style chooser */
     if (!coop_live || !pk.open || pk.moved || !id || (id != coop_left && id != coop.button && id != coop_action))
         return 0;
     w = coop_ball_waits();
@@ -19914,6 +20086,13 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
             coop_lane_left_ms = pm_ms();
             coop_ball_out = 1;
         }
+        return;
+    }
+    if (sty.open && coop_teammates()) {                       /* PAD-1449: the style chooser has them */
+        if ((level & 1u) != closed) return;
+        if (id == coop_left) sty.walk--;
+        else if (id == coop.button) sty.walk++;
+        else if (id == coop_action) sty.take = 1;
         return;
     }
     if (ci.phase == CI_LANG && id == coop_action && coop_teammates()) {
@@ -20332,7 +20511,7 @@ static void coop_logo_hold(int card_up)
  * the seconds left on its words line, and PAD-1044's PICKED on the one taken */
 static void coop_screens_tick(void)
 {
-    int i, k, want, want_classic, got = 0;
+    int i, k, k2, want, want_classic, want_sty, got = 0;
     char name[32], key[40], words[16];
     if (!coop_scr_scene[0]) return;
     if (!coop_scr_found) {
@@ -20353,13 +20532,25 @@ static void coop_screens_tick(void)
             if (!coop_scr_classic[i]) coop_scr_classic[i] = pm_node(coop_scr_scene, name);
             if (coop_scr_classic[i]) pm_show(coop_scr_classic[i], 0), k++;
         }
+        for (i = 0, k2 = 0; i < 3; i++) {                     /* PAD-1449: the style chooser's */
+            pm_snprintf(name, sizeof name, "PadCoopStyle_%d", i + 1);
+            if (!coop_sty_scr[i]) coop_sty_scr[i] = pm_node(coop_scr_scene, name);
+            if (coop_sty_scr[i]) pm_show(coop_sty_scr[i], 0), k2++;
+        }
+        if (k2) say("styles: the chooser's %d cards found in %s", k2, coop_scr_scene);
         coop_scr_found = 1;
-        coop_scr_shown = coop_scr_classic_shown = -1;
+        coop_scr_shown = coop_scr_classic_shown = coop_sty_shown = -1;
         coop_cards_find();                                    /* PAD-1028 round 2: the award cards, hidden with them */
         say("co-op characters: %d of the pick's %d screens found in %s (%d Classic patches) - hidden until the pick is "
             "on one", got, coop_ch_n + 1, coop_scr_scene, k);
     }
-    want = !coop_teammates() || !pm_in_game() ? -1 : pk.open ? pk.at : coop_done.on ? coop_done.c : -1;
+    want = !coop_teammates() || !pm_in_game() || sty.open ? -1 : pk.open ? pk.at : coop_done.on ? coop_done.c : -1;
+    want_sty = sty.open && coop_teammates() && pm_player() && coop_sty_scr[sty.at] ? sty.at : -1;   /* PAD-1449 */
+    if (want_sty != coop_sty_shown) {
+        if (coop_sty_shown >= 0) pm_show(coop_sty_scr[coop_sty_shown], 0);
+        if (want_sty >= 0) pm_show(coop_sty_scr[want_sty], 1);
+        coop_sty_shown = want_sty;
+    }
     words[0] = 0;
     if (want >= 0 && pk.open) {
         if (coop_pick_ms) pm_snprintf(words, sizeof words, "%u", coop_pick_secs(pk.left));
@@ -20377,7 +20568,7 @@ static void coop_screens_tick(void)
     }
     if (want != coop_scr_shown && want >= 0 && want <= coop_ch_n && coop_scr[want]) pm_show(coop_scr[want], 1);
     coop_scr_shown = want;
-    coop_logo_hold(want >= 0 && want <= coop_ch_n && coop_scr[want] != 0);       /* PAD-1107 */
+    coop_logo_hold((want >= 0 && want <= coop_ch_n && coop_scr[want] != 0) || want_sty >= 0);   /* PAD-1107 */
     coop_clip_show(want >= 0 && want <= coop_ch_n && coop_scr[want] ? want : -1);     /* PAD-1079: its video */
     want_classic = want >= 0 && want < coop_ch_n && coop_classic() ? want : -1;   /* PAD-1065: over the card */
     if (want_classic != coop_scr_classic_shown) {
@@ -21862,6 +22053,7 @@ static void coop_solo_check(void)
     coop.teams = 0;
     coop.standard = 0;                                        /* PAD-1224 */
     coop.plain = 0;                                           /* PAD-1443 */
+    coop.style = 0;                                           /* PAD-1449 */
     coop.n = 1;
     coop.turn = 1;
     coop.round = 1;
@@ -22208,7 +22400,8 @@ static void coop_tick(void)
     if (n && !coop.teams && !coop.standard && pm_in_game()) coop_scores_same(n);   /* PAD-1042: a team game's are the
                                                               * game's own; PAD-1224: an Enhanced Standard game's too */
     coop_join_tick();                                         /* PAD-1052 */
-    if (n && ci.clip[0] && !ci.phase && pm_in_game() && ci.game != chg_game_now() + 1)   /* PAD-1114 */
+    sty_tick();                                               /* PAD-1449 */
+    if (n && ci.clip[0] && !ci.phase && !sty.open && pm_in_game() && ci.game != chg_game_now() + 1)   /* PAD-1114 */
         coop_intro_begin(coop.teams ? "a team game begins" : coop.standard ? "an Enhanced Standard game begins"
                          : "a co-op game begins");
     coop_intro_tick();                                        /* PAD-1114 */
@@ -22321,6 +22514,7 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.teams = 1;
         coop.standard = 0;                                    /* PAD-1224 */
         coop.plain = 0;                                       /* PAD-1443 */
+        coop.style = 0;                                       /* PAD-1449 */
         coop.team_max = most;
         coop.team_kind = kind;
         coop.team_n[1] = 1;
@@ -22384,8 +22578,8 @@ static int team_pick_live(int pending, unsigned long seen, unsigned long now)
  * for this. */
 static void on_team_dispatch(pm_reg *r)
 {
-    int want;
-    unsigned kind, added;
+    int want, own_want;
+    unsigned kind, added, own;
     if (!tm.armed || r[0] != tm.ball_id || !tm.seen_ms) return;
     if ((coop_teammates() && !(coop_teammates() == 1u && !coop.teams && !coop.standard))   /* PAD-1054's team of
                                                                                          * one: fill it too */
@@ -22399,13 +22593,31 @@ static void on_team_dispatch(pm_reg *r)
         kind = tm.kind;                                       /* PAD-1073: the entry the cursor was on */
         want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && kind && team_menu_kinds(kinds);
     }
-    if (!want)
+    own = tm.own;                                             /* PAD-1449: the game's own Standard or a challenge */
+    own_want = !want && !tm.pending && team_pick_live(own != 0u, tm.seen_ms, pm_ms()) && sty_wanted();
+    if (!want && !own_want)
         say("teams: ball 1 of a one-player game - not the menu's %s (shown %d, %lu ms ago)", team_kind_name(kind),
             tm.pending, pm_ms() - tm.seen_ms);
     tm.pending = 0;
     tm.seen_ms = 0;
     tm.kind = 0;
+    tm.own = 0;
     team_frame_restore();                                     /* the menu's words back as it ends in a game */
+    if (own_want) {                                           /* PAD-1449: an Enhanced Standard game until the chooser
+                                                               * says otherwise - each Start in it the game's own add */
+        coop.game = chg_game_now() + 1;
+        coop.teams = 0;
+        coop.standard = 1;
+        coop.plain = 0;
+        coop.style = 0;
+        coop.n = *coop_players_byte;
+        coop.turn = 1;
+        coop.round = 1;
+        coop_chars_begin();
+        say("styles: the game began as the start menu's %s", own == STY_STANDARD ? "STANDARD" : "challenge");
+        sty_open(own);
+        return;
+    }
     if (!want) return;
     say("teams: the game began as the start menu's %s", team_kind_name(kind));
     if (kind == 1u || kind == 6u) {                           /* CO-OP PLAY (PAD-1443: or ENHANCED CO-OP): a co-op
@@ -22415,6 +22627,7 @@ static void on_team_dispatch(pm_reg *r)
         coop.teams = 0;
         coop.standard = 0;                                    /* PAD-1224 */
         coop.plain = kind == 1u && !coop.setting;             /* PAD-1443: no row - CO-OP PLAY picks no character */
+        coop.style = 0;                                       /* PAD-1449 */
         coop.n = 1;
         coop.turn = 1;
         coop.round = 1;
@@ -22425,7 +22638,8 @@ static void on_team_dispatch(pm_reg *r)
         coop.join_n = 1;                                      /* the top line says so, then player 1's pick */
         coop.join_step = 0;
         coop.join_at = pm_ms();
-        coop_join_show();
+        if (kind == 1u && sty_wanted()) sty_open(kind);       /* PAD-1449: its style first */
+        else coop_join_show();
         return;
     }
     if (kind == 2u) {                                         /* PAD-1224: ENHANCED STANDARD, the game's own players */
@@ -22438,6 +22652,7 @@ static void on_team_dispatch(pm_reg *r)
         coop.teams = 0;
         coop.standard = 1;
         coop.plain = 0;                                       /* PAD-1443 */
+        coop.style = 0;                                       /* PAD-1449 */
         coop.n = *coop_players_byte;
         coop.turn = 1;
         coop.round = 1;
@@ -22454,6 +22669,7 @@ static void on_team_dispatch(pm_reg *r)
     added = coop_team_fill(0, 0, 0, 0);
     tm.size = 0;
     if (!added) say("teams: TEAM PLAY - the game added no one (credits?) - a one-player game");
+    else if (coop_teammates() && sty_wanted()) sty_open(kind);   /* PAD-1449: its style first */
 }
 
 /* PAD-1052: from the tick: the fill's lines on the top line, one at a time, then player 1's pick. While the game's own
@@ -22465,7 +22681,8 @@ static void coop_join_tick(void)
     static int said;
     if (!coop.join_n) return;
     if (!coop_teammates()) coop.join_n = 0;                   /* the game is over (or another) */
-    else if (!pm_in_game() || ci.phase) coop.join_at = pm_ms();   /* busy (a menu over the game, PAD-1114's intro) */
+    else if (!pm_in_game() || ci.phase || sty.open) coop.join_at = pm_ms();   /* busy (a menu over the game, PAD-1114's
+                                                              * intro, PAD-1449's chooser) */
     else if (disp_taken()) {
         coop.join_at = pm_ms();
         if (!said++) say("teams: the players-added lines wait - the game's own display has the screen");
@@ -22515,6 +22732,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.teams = 0;                                       /* PAD-1042: a co-op game, not a team one */
         coop.standard = 0;                                    /* PAD-1224 */
         coop.plain = 0;                                       /* PAD-1443 */
+        coop.style = 0;                                       /* PAD-1449 */
         coop.turn = 1;
         n = 1;
         coop_awards_begin();                                  /* PAD-1028 */
@@ -22863,6 +23081,7 @@ static unsigned (*ci_serve_game)(unsigned, unsigned, unsigned, unsigned);
 static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3);   /* below */
 static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
+    sty_hold();                                               /* PAD-1449: the style first */
     ci_ball_hold(coop_ball_byte ? *coop_ball_byte : 1u);
     coop_pick_hold();                                         /* PAD-1215 */
     return ci_serve_game(r0, r1, r2, r3);
@@ -25004,7 +25223,8 @@ static void feed_arm(void)
  * PAD-1443 (daveyvandy: "I don't think we need to make it a setting in the service menu. I think we can just always
  * have it available"): a card with no CO-OP PLAY row has every game on the menu, the co-op styles picked there - CO-OP
  * PLAY (no character pick), and with characters ENHANCED CO-OP (each teammate picks one, its ability holds) and
- * ENHANCED STANDARD, then the team games (their picks with the abilities). Returns how many (tests lift it verbatim) */
+ * ENHANCED STANDARD, then the team games (their picks with the abilities). PAD-1449: CO-OP PLAY and the team games
+ * alone - the chooser asks NORMAL, CHARACTERS or ENHANCED once one is picked. Returns how many (tests lift it verbatim) */
 static unsigned team_menu_kinds(unsigned *kinds)
 {
     unsigned n;
@@ -25015,12 +25235,8 @@ static unsigned team_menu_kinds(unsigned *kinds)
     if (!coop_switched_on()) return 0;
     kinds[0] = 1u;
     n = 1;
-    if (!coop.setting) {                                     /* PAD-1443: no row - both co-op styles */
-        if (coop_ch_n && coop_pick_on) {
-            kinds[n++] = 6u;                                 /* ENHANCED CO-OP */
-            kinds[n++] = 2u;                                 /* ENHANCED STANDARD */
-        }
-    } else if (!coop_classic()) kinds[n++] = 2u;             /* PAD-1224: ENHANCED STANDARD (Enhanced only) */
+    /* PAD-1449: no row - one entry per game, the style chosen once it is picked (sty_wanted) */
+    if (coop.setting && !coop_classic()) kinds[n++] = 2u;    /* PAD-1224: ENHANCED STANDARD (Enhanced only) */
     kinds[n++] = 4u;
     kinds[n++] = 3u;
     kinds[n++] = 5u;                                         /* PAD-1224: TEAM PLAY 3 VS 1 */
@@ -25048,6 +25264,37 @@ static unsigned team_entry_at(const unsigned char *ent, unsigned kat, unsigned n
         : name == (unsigned)(unsigned long)team_name_coop ? 1u : name == (unsigned)(unsigned long)team_name_std ? 2u
         : name == (unsigned)(unsigned long)team_name_3v1 ? 5u : name == (unsigned)(unsigned long)team_name_ecoop ? 6u
         : 0u;
+}
+
+/* PAD-1449: the style chooser's kind for one of the game's own entries of an entry list: its kind 0 is Standard, the
+ * challenges are from the port's challenge_menu_kind on (0: the port names none); anything else (Competition) none
+ * (tests lift it verbatim) */
+static unsigned sty_own_of_kind(unsigned kind, unsigned first_challenge)
+{
+    if (!kind) return STY_STANDARD;
+    if (first_challenge && kind >= first_challenge && kind < TEAM_KIND) return STY_CHALLENGE;
+    return 0u;
+}
+
+/* PAD-1449: ... of an index menu: Standard's index, Competition's (none), any other the game's challenges (Godzilla:
+ * KING OF THE MONSTERS, its TIME ATTACK) (tests lift it verbatim) */
+static unsigned sty_own_of_index(unsigned index, unsigned standard, unsigned competition)
+{
+    if (index == standard) return STY_STANDARD;
+    if (!index || index == competition) return 0u;
+    return STY_CHALLENGE;
+}
+
+static int sty_wanted(void);
+static void sty_menu_own(unsigned own)
+{
+    unsigned was = tm.own;
+    if (!sty_wanted()) own = 0;
+    tm.own = own;
+    if (own) tm.seen_ms = pm_ms();
+    if (own != was)
+        say("styles: the game's %s %s on the start menu", (own ? own : was) == STY_STANDARD ? "STANDARD"
+            : "challenge", own ? "picked" : "no longer picked");
 }
 
 static void team_menu_built(pm_reg *r)
@@ -25096,6 +25343,10 @@ static void team_menu_picked(pm_reg *r)
         else r[3] = 0;
         tm.kind = k;
         tm.seen_ms = pm_ms();
+        tm.own = 0;
+    } else {                                                /* PAD-1449: the game's own Standard or a challenge */
+        sty_menu_own(sty_own_of_kind(back > 0 ? *(unsigned *)(e8 + MENU_KIND_AT) : (unsigned)r[3],
+                                     (unsigned)pm_port_value("challenge_menu_kind", 0)));
     }
     if (tm.pending != was || (tm.pending && k != was_kind))
         say("teams: %s %s on the start menu", team_kind_name(tm.pending ? k : was_kind), tm.pending ? "picked" : "no longer picked");
@@ -25154,8 +25405,11 @@ static void team_menu_frame(pm_reg *r)
         pm_message_set(msg, team_kind_name(tm.kind));   /* Standard's name: ours while the cursor is on our entry */
         team_frame_msg = msg;
         tm.seen_ms = pm_ms();
+        tm.own = 0;
     } else {
         team_frame_restore();
+        sty_menu_own(c < *count + last ? sty_own_of_index(list[c], idx, (unsigned)pm_port_value("comp_menu_index", 0))
+                                       : 0u);           /* PAD-1449: the game's own Standard or a challenge */
     }
     if (tm.pending != was || (tm.pending && tm.kind != was_kind))
         say("teams: %s %s on the start menu", team_kind_name(tm.pending ? tm.kind : was_kind),
@@ -25535,12 +25789,25 @@ static int insider_holding(unsigned while_at, unsigned value)
     return !while_at || coop_row_mode(value) != 0u;          /* PAD-1073: Classic or Enhanced */
 }
 
+/* PAD-1449: a game of ours that is still the game's own for Insider Connected: Standard or a challenge while its style
+ * is being chosen, or at CHARACTERS (no special ability) (tests lift it verbatim as coop_insider_free_in) */
+static int coop_insider_free_in(int standard, int choosing, unsigned style)
+{
+    return standard && (choosing || style == 2u);
+}
+
+static int coop_insider_free(void)
+{
+    return coop_insider_free_in(coop.standard, sty.open, coop.style);
+}
+
 /* PAD-1443: a game of ours is on, or its Start is coming: co-op teammates (a team, ENHANCED STANDARD, a team of one),
  * or the start menu's cursor on one of our entries within TEAM_PICK_MS */
 static int coop_game_now(void)
 {
     if (!coop.on) return 0;
-    return coop_teammates() != 0u || (tm.kind && team_pick_live(tm.pending, tm.seen_ms, pm_ms()));
+    return (coop_teammates() != 0u && !coop_insider_free())
+        || (tm.kind && team_pick_live(tm.pending, tm.seen_ms, pm_ms()));
 }
 
 /* PAD-1443: the gate holds back now - a card with modes always; a co-op card with the row while it is not Off; a co-op
@@ -25550,7 +25817,7 @@ static int insider_holding_now(void)
     if (insider_while)
         return insider_holding(1, *(volatile const unsigned *)(unsigned long)insider_while);
     if (!insider_per_game) return 1;
-    if (!insider_game_held && coop_teammates()) {
+    if (!insider_game_held && coop_teammates() && !coop_insider_free()) {
         insider_game_held = 1;
         say("insider: this game became one of ours - the rest of it stays off Insider Connected");
     }

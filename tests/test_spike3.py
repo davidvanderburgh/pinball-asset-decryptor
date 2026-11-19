@@ -307,16 +307,17 @@ def test_keysource_no_key_raises():
 
 
 # --------------------------------------------------------------------------
-# Preview gating of the Spike 3 era
+# The Spike 3 era is in every copy (a preview behind a code until PAD-1440)
 # --------------------------------------------------------------------------
-def test_spike3_era_is_preview_gated(monkeypatch):
+def test_spike3_era_is_released_with_no_code():
     from pinball_decryptor.core import preview
     from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
-    m = SternManufacturer()
-    monkeypatch.setattr(preview, "_active", set())
-    assert "spike3" not in [e[0] for e in m.eras]
-    monkeypatch.setattr(preview, "_active", {"spike3"})
-    assert "spike3" in [e[0] for e in m.eras]
+    assert preview.active_features() == frozenset()      # no code loaded
+    assert preview.enabled("spike3")
+    assert "spike3" in preview.RELEASED and "spike3" not in preview.FEATURES
+    eras = {e[0]: e for e in SternManufacturer().eras}
+    # on the era menu with no BETA badge (a 3rd element) beside it
+    assert eras["spike3"] == ("spike3", "SPIKE 3")
 
 
 # --------------------------------------------------------------------------
@@ -398,9 +399,7 @@ def test_spk_detected_as_spike3_and_routed(monkeypatch):
     from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
     m = SternManufacturer()
     path = "pokemon_le-0_87_0_spike3.spk.zip"
-    monkeypatch.setattr(preview, "_active", set())
-    assert m.detect(path) is None                       # gated off
-    monkeypatch.setattr(preview, "_active", {"spike3"})
+    monkeypatch.setattr(preview, "_active", frozenset())    # no preview code (PAD-1440)
     g = m.detect(path)
     assert g is not None and g.era == "spike3" and g.supported   # any title OK
     m.set_era("spike3")

@@ -619,20 +619,12 @@ class SternManufacturer(Manufacturer):
     # Hardware eras, surfaced as a segmented pill switcher in the working-view
     # header so the user picks the era explicitly (which makes the input field
     # single-mode per era — Card image vs ROM zip — instead of multi-modal).
-    # A 3rd tuple element is an optional corner badge on that pill (the GUI's
-    # _build_era_badges renders it) — e.g. "BETA" to mark a preview era.
-    _ERAS = (("spike2", "SPIKE 2"), ("spike3", "SPIKE 3", "BETA"),
-             ("spike1", "SPIKE 1"),
-             ("sam", "SAM"), ("whitestar", "WHITESTAR"))
-
-    @property
-    def eras(self):
-        # Spike 3 is a preview feature (core/preview.py "spike3"): it only
-        # appears in the era switcher once a preview code unlocks it.
-        from ...core import preview
-        if preview.enabled("spike3"):
-            return self._ERAS
-        return tuple(e for e in self._ERAS if e[0] != "spike3")
+    # A 3rd tuple element is an optional badge on that era (the
+    # header's era menu shows it beside the name) — e.g. "BETA" to mark a
+    # preview era.  Spike 3 was one, behind a preview code, until PAD-1440.
+    eras = (("spike2", "SPIKE 2"), ("spike3", "SPIKE 3"),
+            ("spike1", "SPIKE 1"),
+            ("sam", "SAM"), ("whitestar", "WHITESTAR"))
     # Mirror the destination radio so the action button names what it does
     # (the generic "Build update" / "Apply Modifications" don't connect to
     # the SD-card wording above them).
@@ -906,11 +898,9 @@ class SternManufacturer(Manufacturer):
         # — the era it reports on the Game is applied to the live
         # manufacturer by the GUI.
         # Spike 3 .spk package (a .spk.zip Stern publishes) — checked before the
-        # Whitestar .zip branch so it isn't mistaken for a MAME ROM zip.  Behind
-        # the preview code.  A .spk works for ANY title (fleet key), so it is
-        # always "supported".
-        from ...core import preview
-        if preview.enabled("spike3") and _spike3_spk.is_spk_input(path):
+        # Whitestar .zip branch so it isn't mistaken for a MAME ROM zip.  A .spk
+        # works for ANY title (fleet key), so it is always "supported".
+        if _spike3_spk.is_spk_input(path):
             key = spike3_key_for_path(path)
             return Game(key=key, display=spike3_display(key, path),
                         manufacturer_key="stern", era="spike3",
@@ -940,10 +930,8 @@ class SternManufacturer(Manufacturer):
         from ...core.rawdevice import is_device_path
         noun = "card" if is_device_path(path) else "card image"
         # Spike 3 (secure SD image) before Spike 2: its boot/LUKS layout is
-        # distinct, and detect_game only matches the Spike 2 signature.  Behind
-        # the preview code: an app without it doesn't claim a Spike 3 card.
-        from ...core import preview
-        if preview.enabled("spike3") and _spike3.is_spike3_card(path):
+        # distinct, and detect_game only matches the Spike 2 signature.
+        if _spike3.is_spike3_card(path):
             key = spike3_key_for_path(path)
             info = SPIKE3_DB.get(key, {})
             return Game(key=key, display=spike3_display(key, path),

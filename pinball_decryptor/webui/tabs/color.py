@@ -466,7 +466,8 @@ class ColorTab(TabService):
                 # a theme's picture with no profile of its own has theme 1's (Simon: themes, scene_variants)
                 from ...plugins.stern import scene_variants as SV
                 n, base = SV.split_theme_key(fm[1])
-                if n > 1:
+                # (Simon, 2026-11-19: not a picture the theme picked itself - that one is new, so raw)
+                if n > 1 and SV.theme_falls_back(self._project, n, base):
                     own = cp.own_profile(self._project, "images", base)
             return own
         except Exception:                               # noqa: BLE001
@@ -1213,56 +1214,203 @@ class ColorTab(TabService):
     _ALL_EACH = {"images": "each replaced one", "videos": "each replaced one",
                  "text": "each one added in Scenes"}
 
+    # -- the Colors bar's one Copy (Simon, 2026-11-19, his design) ------------------------------------------------------
+    # COPY FROM: the selected file's profile, or the shared files profile (the one every switched-on file without a
+    # profile of its own gets - "Recommended" unless picked). WHICH: "all" every file not locked (switched on, own
+    # profile replaced), "off" only the ones with no profile attached ("Put the recommended setting only on files that
+    # don't have a profile AND are unlocked" - each switched on), "profiled" only the ones switched on (own profile
+    # replaced, nothing new switched on); several files selected, "selected": just those ("it must override WHICH").
+    # THEMES: "this", or a list of theme numbers ("Choose themes", every one ticked = every theme).
+    _WHICH = ("all", "off", "profiled", "selected")
+    _WHICH_WORDS = {"all": "that are not locked", "off": "with no profile attached",
+                    "profiled": "with a profile attached", "selected": "selected"}
+
+    def _theme_list(self, kind, themes):
+        """*themes* as the copy takes it: "this", or the sorted theme numbers (pictures, themes on)."""
+        svc = self.window.service("imgsets")
+        names = (svc.get("names") or []) if svc is not None and svc.get("enabled") else []
+        if kind != "images" or len(names) < 2 or not isinstance(themes, (list, tuple)):
+            return "this", names
+        # (none ticked: nothing to copy into)
+        return sorted({int(t) for t in themes if str(t).isdigit() and 1 <= int(t) <= len(names)}), names
+
+    def _themes_said(self, kind, themes, names, rel=None):
+        """" in theme 2 (Dark)" / " in themes 1 and 3" / " in every theme"; "" with no themes."""
+        if kind != "images" or len(names) < 2:
+            return ""
+        if themes == "this":
+            from ...plugins.stern import scene_variants as SV
+            n = SV.split_theme_key(rel)[0] if rel and SV.split_theme_key(rel)[0] > 1 else self._theme_now()
+            return " in theme %d (%s)" % (n, names[n - 1] if n - 1 < len(names) else "")
+        if len(themes) == len(names):
+            return " in every theme"
+        if len(themes) == 1:
+            return " in theme %d (%s)" % (themes[0], names[themes[0] - 1])
+        return " in themes %s and %d" % (", ".join(str(t) for t in themes[:-1]), themes[-1])
+
+    def _theme_now(self):
+        try:
+            return int(self.window.service("images")._image_set())
+        except Exception:                               # noqa: BLE001
+            return 1
+
+    def _copy_plan(self, source, kind, which, themes):
+        """What one Copy would do, read and nothing changed: ``{"kind", "targets": {key: on}, "value": {key: raw or
+        None}, "attach": [keys], "name", "themes", "names", "rel"}``, or ``{"pending": True}`` while the tab has not read
+        the project, or ``{"error": text}``."""
+        which = which if which in self._WHICH else "profiled"
+        fm = self._file_mode()
+        if source == "file":
+            if fm is None:
+                return {"error": "Select a file first: its profile is the one copied."}
+            kind, rel = fm
+        else:
+            if kind not in self._ALL_WORDS:
+                return {"error": ""}
+            rel = fm[1] if fm is not None else None
+        if self._targets_pending(kind):
+            return {"pending": True, "kind": kind}
+        if which == "selected" and fm is None:
+            return {"error": "Nothing is selected."}
+        themes, names = self._theme_list(kind, themes)
+        svc = self._all_service(kind)
+        fn = getattr(svc, "color_targets", None)
+        try:
+            if svc is not None:
+                svc._targets_themes = "this" if which == "selected" else themes
+            states = dict(fn("profiled" if which == "profiled" else "all") or {}) if fn is not None else {}
+        except Exception:                               # noqa: BLE001
+            log.exception("color profile targets %s", kind)
+            states = {}
+        finally:
+            if svc is not None:
+                svc._targets_themes = "this"
+        if which == "selected":
+            # the files selected that are not locked (locked ones are not in the list), as they are selected
+            states = {r: states[r] for r in self._file_rels() if r in states and fm[0] == kind}
+        elif which == "off":
+            states = {r: on for r, on in states.items() if not on}
+        if source == "file":
+            states.pop(rel, None)
+        from ...plugins.stern import scene_variants as SV
+        mkey = "files\n" + kind
+        owns = self._raw(staged_changes.peek(self._project), mkey)
+        owns = dict(owns) if isinstance(owns, dict) else {}
+        if source == "file":
+            mine = owns.get(rel)
+            value = {r: mine for r in states}
+            name = self._shown().label()
+        else:
+            # the shared profile: no own profile - except a theme's picture that would fall back to theme 1's, which
+            # gets the shared one stored as its own (Simon: a tuned theme really goes back to "Recommended")
+            shared = self._asset or cp.asset_profile(self._project)
+            stored = ({"recommended": True} if not cp.asset_stored(self._project)
+                      else json.loads(json.dumps(cp._profile_dict(shared))))
+            value = {}
+            for r in states:
+                n, base = SV.split_theme_key(r)
+                value[r] = stored if (n > 1 and SV.theme_falls_back(self._project, n, base)) else None
+            name = shared.label()
+        attach = sorted(r for r, on in states.items() if not on) if which != "profiled" else []
+        change = [r for r in states if owns.get(r) != value[r]]
+        # the ones whose own profile is replaced (a theme's picture given the shared one stored as its own had none)
+        lose = [r for r in change if owns.get(r) is not None]
+        return {"kind": kind, "targets": states, "value": value, "attach": attach, "change": change, "lose": lose,
+                "name": name,
+                "themes": themes, "names": names, "rel": rel, "which": which, "source": source}
+
+    def _copy_words(self, plan):
+        """The summary line under the Copy choices."""
+        kind = plan["kind"]
+        one, many = self._ALL_WORDS[kind]
+        n = len(plan["targets"])
+        where = self._themes_said(kind, plan["themes"], plan["names"], plan["rel"])
+        which = self._WHICH_WORDS[plan["which"]]
+        what = "the shared profile “%s”" % plan["name"] if plan["source"] == "shared" else "“%s”" % plan["name"]
+        if not n:
+            return "No %s%s%s%s." % ("other " if plan["source"] == "file" and plan["which"] != "selected" else "",
+                                     many if plan["which"] != "selected" else many + " to give it to",
+                                     "" if plan["which"] == "selected" else " " + which, where)
+        noun = one if n == 1 else many
+        return "Will give %s to %d %s %s%s%s." % (
+            what, n, noun, which if plan["which"] != "selected" else "(the ones selected)", where,
+            " - %d switched on" % len(plan["attach"]) if plan["attach"] else "")
+
+    @rpc
+    def copy_profile(self, source="file", kind=None, which="profiled", themes="this"):
+        """APPLY in the Colors bar's Copy: :meth:`_copy_plan`, after a WARNING; one Undo step puts it all back."""
+        plan = self._copy_plan(source, kind, which, themes)
+        if plan.get("pending"):
+            return self._still_reading(plan["kind"])
+        if "error" in plan:
+            if plan["error"]:
+                self.toast(plan["error"], "info")
+            return False
+        kind, targets = plan["kind"], plan["targets"]
+        one, many = self._ALL_WORDS[kind]
+        if not targets:
+            self.toast(self._copy_words(plan), "info")
+            return False
+        if not (plan["change"] or plan["attach"]):
+            self.toast("All %d %s already have “%s”." % (len(targets), many if len(targets) > 1 else one,
+                                                         plan["name"]), "info")
+            return False
+        where = self._themes_said(kind, plan["themes"], plan["names"], plan["rel"])
+        msg = "WARNING: THIS WILL GIVE THE PROFILE “%s” TO %d %s %s%s.\n\n" % (
+            plan["name"], len(targets), (many if len(targets) > 1 else one).upper(),
+            self._WHICH_WORDS[plan["which"]].upper(), where.upper())
+        if plan["lose"]:
+            msg += ("%d of them lose the profile they have now. " % len(plan["lose"]) if len(plan["lose"]) > 1
+                    else "One of them loses the profile it has now. ")
+        if plan["attach"]:
+            msg += ("%d with no profile attached are switched on. " % len(plan["attach"]) if len(plan["attach"]) > 1
+                    else "One with no profile attached is switched on. ")
+        msg += self._left_out_words(kind) + self._theme_cost(kind, targets)
+        msg += "\n\nUndo in the Colors bar puts them all back."
+        if not compat.messagebox.askyesno("Copy a profile to other files", msg.replace(" \n", "\n")):
+            return False
+        plan = self._copy_plan(source, kind, which, themes)     # read again: the page went on while it was asked
+        targets = plan.get("targets") or {}
+        if not targets:
+            return False
+        key = self._mode_key()
+        mkey = "files\n" + kind
+        before = self._files_raw(mkey, targets)
+        try:
+            data = staged_changes.load(self._project)
+            self._put_raw(data, mkey, {r: json.loads(json.dumps(v)) if v is not None else None
+                                       for r, v in plan["value"].items()})
+            staged_changes.save(self._project, data)
+        except Exception as e:                          # noqa: BLE001
+            self.set(problems=["could not save the files' profiles (%s)" % e])
+            return False
+        switched = self._put_switches(kind, {r: True for r in plan["attach"]}) if plan["attach"] else {}
+        if self._file and self._file.get("rel") in switched:
+            self._file["on"] = True
+        self._last_move.pop(key, None)
+        self._remember_files(key, mkey, targets, before, switched)
+        self.log("Color profile: “%s” given to %d %s %s%s%s." % (
+            plan["name"], len(targets), many if len(targets) > 1 else one, self._WHICH_WORDS[plan["which"]], where,
+            " (attached to %d)" % len(switched) if switched else ""), "info")
+        self._files_preview_on()
+        self._show_on_players(kind, targets)
+        self._publish(problems=[])
+        self._changed(display=False)
+        self._tell_tabs()
+        return True
+
     @rpc
     def copy_preview(self, source="file", kind=None, scope="profiled", themes="this"):
         """The Colors bar's Copy summary (Simon, 2026-11-19: one copy action, its choices spelled out): what Copy
-        profile... would change, asked of the same targets the copy itself takes, nothing changed. *source* "file"
-        (the file on show's profile: :meth:`apply_to_all`) or "shared" (the individual files profile, given to every
-        *kind* not locked: :meth:`_apply_to_every`). ``{"n", "text"}``; n 0 when nothing would change."""
+        would change, asked of the same plan the copy itself takes (:meth:`_copy_plan`), nothing changed.
+        ``{"n", "text"}``; n 0 when nothing would change, None while the tab has not read the project."""
         try:
-            if source == "shared":
-                if kind not in self._ALL_WORDS:
-                    return {"n": 0, "text": ""}
-                if self._targets_pending(kind):     # n None: the page shows "..." until targets_ready
-                    return {"n": None, "text": "Reading the project's %s…" % self._ALL_WORDS[kind][1]}
-                fn = getattr(self._all_service(kind), "color_targets", None)
-                targets = dict(fn("all") or {}) if fn is not None else {}
-                name = (self._asset or cp.recommended(self._project, files=True)).label()
-                many = self._ALL_WORDS[kind][1]
-                one = self._ALL_WORDS[kind][0]
-                return {"n": len(targets), "text": (
-                    ("Will give “%s”, the shared files profile, to the one %s that is not locked." % (name, one)
-                     if len(targets) == 1 else
-                     "Will give “%s”, the shared files profile, to all %d %s that are not locked." % (
-                         name, len(targets), many)) if targets else "There are no %s to give it to." % many)}
-            fm = self._file_mode()
-            if fm is None:
-                return {"n": 0, "text": ""}
-            kind, rel = fm
-            if self._targets_pending(kind):
-                return {"n": None, "text": "Reading the project's %s…" % self._ALL_WORDS[kind][1]}
-            svc = self._all_service(kind)
-            fn = getattr(svc, "color_targets", None)
-            themes = "all" if themes == "all" else "this"
-            try:
-                if svc is not None:
-                    svc._targets_themes = themes
-                targets = dict(fn("profiled" if scope != "all" else "all") or {}) if fn is not None else {}
-            finally:
-                if svc is not None:
-                    svc._targets_themes = "this"
-            others = [r for r in targets if r != rel]
-            many = self._ALL_WORDS[kind][1]
-            words = self._theme_words(kind, rel, themes)
-            if not others:
-                return {"n": 0, "text": "No other %s %s%s." % (
-                    many, "with a profile attached" if scope != "all" else "that are not locked", words)}
-            if len(others) == 1:
-                one = self._ALL_WORDS[kind][0]
-                return {"n": 1, "text": "Will copy “%s” to 1 %s%s%s." % (
-                    self._shown().label(), "profiled " if scope != "all" else "", one, words)}
-            return {"n": len(others), "text": "Will copy “%s” to %d %s%s%s." % (
-                self._shown().label(), len(others), "profiled " if scope != "all" else "", many, words)}
+            plan = self._copy_plan(source, kind, scope, themes)
+            if plan.get("pending"):
+                return {"n": None, "text": "Reading the project's %s…" % self._ALL_WORDS[plan["kind"]][1]}
+            if "error" in plan:
+                return {"n": 0, "text": plan["error"]}
+            return {"n": len(plan["targets"]), "text": self._copy_words(plan)}
         except Exception:                               # noqa: BLE001
             log.exception("color copy preview")
             return {"n": 0, "text": ""}

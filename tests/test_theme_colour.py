@@ -37,6 +37,27 @@ def test_a_theme_inherits_theme_1_until_it_has_its_own(tmp_path):
     assert SV.theme_colour(p, 2, TREL)[0] is False      # off in theme 2 while on in theme 1
 
 
+def test_a_picture_the_theme_picked_starts_raw(tmp_path):
+    """Simon (2026-11-19): "any NEW image brought into PAD is completely raw" - a picture picked for a theme is new:
+    off, and the shared files profile when switched on, never theme 1's (tuned for another picture). A picture the
+    theme has not changed still follows theme 1 (on the card it is theme 1's file)."""
+    p = str(tmp_path)
+    SV.set_themes_on(p, True)
+    SV.add_set(p, "Dark")
+    cp.set_asset_slot(p, "images", TREL, True)
+    cp.store_own_profile(p, "images", TREL, RED)
+    assert SV.theme_falls_back(p, 2, TREL)
+    SV.set_picture(p, 2, TREL, _png(tmp_path / "dark.png", (20, 20, 20, 255)))
+    assert not SV.theme_falls_back(p, 2, TREL)
+    on, prof = SV.theme_colour(p, 2, TREL)
+    assert on is False and prof.name != "Red"          # raw: off, and not theme 1's profile
+    cp.set_asset_slot(p, "images", SV.theme_key(2, TREL), True)
+    on, prof = SV.theme_colour(p, 2, TREL)
+    assert on and prof.label() == cp.asset_profile(p).label()   # the shared files profile
+    SV.set_picture(p, 2, TREL, None)                    # back to theme 1's picture: follows theme 1 again
+    assert SV.theme_colour(p, 2, TREL)[1].name == "Red"
+
+
 def test_a_colour_only_theme_is_a_variant(tmp_path):
     p = str(tmp_path)
     SV.set_themes_on(p, True)

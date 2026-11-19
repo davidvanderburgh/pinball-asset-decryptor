@@ -135,6 +135,13 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cpd-opt.on { border-color: var(--accent, #e3a33b); background: var(--warn-soft); font-weight: 600; }
 .cpd-opt:disabled { opacity: .45; cursor: default; }
+/* Simon (2026-11-19): Choose themes - All themes on top, then a tick for each theme by name (long names cut, whole on
+   hover) */
+.cpd-themepick { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 8px; margin-top: 5px;
+  border: 1px solid var(--line); border-radius: 4px; }
+.cpd-themepick > .chk:first-child { flex-basis: 100%; font-weight: 600; }
+.cpd-themepick .chk > span { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-block; vertical-align: bottom; }
 
 /* Simon (2026-11-19): the Copy panel's action - APPLY NOW in a red box like the Advanced one, the count beside it */
 .cpd-actions { margin-top: 4px; }

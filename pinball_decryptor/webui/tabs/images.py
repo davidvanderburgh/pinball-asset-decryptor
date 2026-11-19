@@ -1437,7 +1437,12 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         out = {}
         n = self._image_set() if hasattr(self, "_set_state") else 1
         themes = getattr(self, "_targets_themes", "this")
-        if n == 1 or themes == "all":
+        names = (self.window.service("imgsets").get("names") or []) if self.window.service("imgsets") else []
+        # the themes asked (Simon, 2026-11-19: "This theme", or "Choose themes" - a list of theme numbers, all ticked
+        # = every theme): theme 1's pictures by their own rel, the others' by theme key
+        want = (set(range(1, max(1, len(names)) + 1)) if themes == "all"
+                else {int(t) for t in themes} if isinstance(themes, (list, tuple, set)) else {n})
+        if 1 in want:
             rels = (self._by_rel if scope == "all" else set(self._assignments)
                     | {r for r, v in self._color.items() if v})
             for rel in rels:
@@ -1447,8 +1452,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         # the themes (Simon: "apply to all in this set ... all, set 1...N"): a theme's every picture in a scene, by its
         # theme key; "all" follows the unlock as theme 1 does (unlocked: every one; else the ones replaced - in theme 1
         # or in the theme - or built)
-        names = (self.window.service("imgsets").get("names") or []) if self.window.service("imgsets") else []
-        themes_n = (range(2, len(names) + 1) if themes == "all" else [n] if n > 1 else [])
+        themes_n = sorted(t for t in want if 1 < t <= len(names))
         if themes_n:
             from ...plugins.stern import scene_variants as SV
             from ...core import colour_profile as cp, staged_changes
@@ -1458,9 +1462,13 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
             settings = cp.asset_settings(self._scan_dir or "")
             slots = settings["images"]
 
-            def _theme_on(t, rel):              # SV.theme_colour's switch, read once for the whole list
+            def _theme_on(t, rel, picks):       # SV.theme_colour's switch, read once for the whole list
                 own = slots.get(SV.theme_key(t, rel))
-                return bool(own) if own is not None else SV._theme1_switch(self._scan_dir, side, settings, rel)
+                if own is not None:
+                    return bool(own)
+                # (Simon, 2026-11-19: a picture the theme picked is new, so raw - off until switched on)
+                return (SV._theme1_switch(self._scan_dir, side, settings, rel)
+                        if SV.theme_falls_back(self._scan_dir, t, rel, picks) else False)
             for t in themes_n:
                 picks = SV.set_pictures(self._scan_dir or "", t)
                 for rel in self._by_rel:
@@ -1469,7 +1477,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
                     if scope == "all" and not (self._color_unlocked or rel in picks
                                                or self._assignments.get(rel) or self._is_built(rel)):
                         continue
-                    on = _theme_on(t, rel)
+                    on = _theme_on(t, rel, picks)
                     if on or scope == "all":
                         out[SV.theme_key(t, rel)] = on
         return out

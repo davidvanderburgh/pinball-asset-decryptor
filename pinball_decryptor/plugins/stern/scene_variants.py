@@ -163,18 +163,33 @@ def _theme1_switch(project, side, settings, rel):
         return False
 
 
-def theme_colour(project, n, rel, side=None, settings=None):
+def theme_falls_back(project, n, rel, picks=None):
+    """Does theme *n*'s picture *rel* follow theme 1's colour where it has none of its own? Only a picture the theme
+    has NOT changed: on the card it is theme 1's own file, theme 1's profile baked in (anything else would cost a raw
+    copy of every scene holding it). Simon (2026-11-19): a picture picked for the theme is a new picture, and "any NEW
+    image brought into PAD is completely raw": off, and the shared files profile when switched on, never theme 1's
+    (that was tuned for another picture). *picks*: :func:`set_pictures` read once by a caller with many."""
+    if int(n) < 2:
+        return False
+    picks = set_pictures(project, n) if picks is None else picks
+    return rel not in picks
+
+
+def theme_colour(project, n, rel, side=None, settings=None, picks=None):
     """``(on, profile or None)``: theme *n*'s colour switch for picture *rel* and the profile baked in with it on -
-    the theme's own, else theme 1's (its own, else the project's individual files profile)."""
+    the theme's own, else for a picture the theme has not changed theme 1's (its own, else the project's individual
+    files profile); a picture the theme picked starts off, with the individual files profile (theme_falls_back)."""
     from ...core import colour_profile as cp, staged_changes
     side = staged_changes.peek(project) if side is None else side
     settings = cp.asset_settings(project) if settings is None else settings
     key = theme_key(n, rel)
+    follows = int(n) < 2 or theme_falls_back(project, n, rel, picks)
     own_on = settings["images"].get(key)
-    on = bool(own_on) if own_on is not None else _theme1_switch(project, side, settings, rel)
+    on = (bool(own_on) if own_on is not None
+          else _theme1_switch(project, side, settings, rel) if follows else False)
     prof = cp.own_profile(project, "images", key) if int(n) >= 2 else None
     if prof is None:
-        prof = cp.file_profile(project, "images", rel)
+        prof = cp.file_profile(project, "images", rel) if follows else cp.asset_profile(project)
     return on, prof
 
 

@@ -12,11 +12,18 @@ def _src(name):
 
 def test_every_old_way_is_still_there():
     pane = _src("color_pane.js")
-    # a file's profile to the other files: profiled / all, this theme / every theme (PAD-439, PAD-462, themes)
-    assert 'call("color.apply_to_all", which, null, themes)' in pane
-    # the shared profile to every image / video / line of text (the Which files card, PAD-463 / PAD-471)
-    assert 'call("color.apply_to_all", "all", to)' in pane
+    # Simon (2026-11-19): one copy, color.copy_profile(source, kind, which, themes). Every old copy is one of its
+    # choices: a file's profile to the profiled / all other files (PAD-439, PAD-462) = "file" + "profiled" / "all";
+    # the shared profile to every image / video / line of text (the Which files card, PAD-463 / PAD-471) = "shared" +
+    # "all"; this theme / every theme = "this" / every theme ticked
+    assert 'call("color.copy_profile", source, to, scope, themes)' in pane
+    for which in ('opt("all", "All"', 'opt("off", "Without a profile"', 'opt("profiled", "With a profile"'):
+        assert which in pane, which
     assert 'EVERY_KINDS().map((e) => e.k)' in pane
+    assert 'label="All themes"' in pane
+    # the old calls stay for anything else that uses them
+    from pinball_decryptor.webui.tabs import color
+    assert hasattr(color.ColorTab, "apply_to_all") and hasattr(color.ColorTab, "_apply_to_every")
     # dropping a file's own profile: here, in this theme, in every theme
     # (Simon: one button for the theme on show - "Same as the other files" in theme 1, "Same as theme 1" above it -
     # naming the profile it lands on; and Reset in every theme)
@@ -38,12 +45,13 @@ def test_the_panel_says_what_copy_will_do_first():
     # one grid (Simon: "as columnized as possible, box sizes the same"): the tags and every row's choices
     for word in ("SELECTED", "THEME", "COPY FROM", "TO KIND", "WHICH", "THEMES"):
         assert 'tag("%s"' % word in pane, word
-    assert '"With profile attached"' in pane and "span: 4" in pane
+    assert "span: 2, onClick: () => setWhich(" in pane       # WHICH: three choices, two columns each
 
 
 def test_the_preview_asks_the_same_targets_as_the_copy():
     from pinball_decryptor.webui.tabs import color
     src = open(color.__file__, encoding="utf-8").read()
     body = src.split("def copy_preview", 1)[1].split("\n    def ", 1)[0]
-    assert 'getattr(self._all_service(kind), "color_targets", None)' in body
-    assert "svc._targets_themes = themes" in body
+    assert "self._copy_plan(source, kind, scope, themes)" in body
+    apply = src.split("def copy_profile", 1)[1].split("\n    def ", 1)[0]
+    assert "self._copy_plan(source, kind, which, themes)" in apply

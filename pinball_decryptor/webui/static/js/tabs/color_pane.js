@@ -201,7 +201,9 @@ function FileLine({ s, host, tools }) {
   const f = s.file;
   const sets = useNs("imgsets");
   const [which, setWhich] = useState("profiled");
-  const [where, setWhere] = useState("this");
+  const [where, setWhere] = useState("this");           // "this" | "pick" (Choose themes)
+  const [chosen, setChosen] = useState(null);           // the themes ticked; null: every one
+  const [srcPick, setSrcPick] = useState("file");       // COPY FROM with a file selected
   const [toKind, setToKind] = useState(host === "video" ? "videos" : "images");
   const [summary, setSummary] = useState({ n: 0, text: "" });
   const n = f ? (f.count || 1) : 0;
@@ -243,18 +245,27 @@ function FileLine({ s, host, tools }) {
   </div>`;
 
   // ---- Copy (Simon: one copy action, the same every time, what cannot be done greyed with the reason) ----
-  // From: the selected file's profile (PAD-439 Apply to all) or the shared files profile (PAD-463 All images / videos
-  // / text, which needs no file selected - as the Which files card did)
-  const source = f ? "file" : "shared";
+  // Simon (2026-11-19, his design): COPY FROM the selected file's profile or the shared files profile, selected or
+  // not; WHICH All / Without a profile / With a profile - or, several files selected, just those ("it must override
+  // WHICH", so WHICH and the themes grey out); THEMES this theme, or Choose themes (a checklist, All themes on top).
+  // Every old copy is one of these: Apply to all profiled = file + With a profile, Apply to all = file + All, All
+  // images / videos / text = shared + All (color.copy_profile; the old calls stay in color.py)
+  const multi = n > 1;
+  const source = f ? srcPick : "shared";
   const fileKinds = f && (ALL_HOSTS[host] || []).includes(f.kind) ? [f.kind] : [];
-  const kinds = source === "file" ? fileKinds : EVERY_KINDS().map((e) => e.k);
-  const to = source === "file" ? (fileKinds[0] || kind) : toKind;
+  const fixedKind = source === "file" || multi;         // the file's own kind: its profile, or the files selected
+  const kinds = fixedKind ? fileKinds : EVERY_KINDS().map((e) => e.k);
+  const to = fixedKind ? (fileKinds[0] || kind) : toKind;
   const toWords = ALL_WORDS[to] || ALL_WORDS.images;
-  const canCopy = source === "file" ? fileKinds.length > 0 : true;
-  const whichOk = source === "file";                    // the shared profile goes to every file not locked (All)
-  const scope = whichOk ? which : "all";
-  const themesOk = source === "file" && themeLive;
-  const themes = themesOk ? where : "this";
+  const canCopy = fixedKind ? fileKinds.length > 0 : true;
+  const whichOk = !multi;
+  const scope = multi ? "selected" : which;
+  const themeAvail = themeHost && themesOn && to === "images";
+  const themesOk = themeAvail && !multi;
+  const allThemes = names.map((_, i) => i + 1);
+  const picks = (chosen || allThemes).filter((x) => x <= names.length);
+  const themes = !themesOk || where === "this" ? "this" : picks;
+  const themesKey = Array.isArray(themes) ? themes.join(",") : themes;
   // the count (Simon: "it doesn't work at all now. Just says 0"): asked a moment after the last change, only the newest
   // answer shown - a slow one (every picture, unlocked) is never dropped for a change made while it was counted - "..."
   // while it counts and "?" when it cannot be counted, so a real 0 is never a count that did not come back
@@ -271,19 +282,27 @@ function FileLine({ s, host, tools }) {
       }, () => { if (mine === seq.current) setSummary({ n: -1, text: "" }); });
     }, 200);
     return () => clearTimeout(timer);
-  }, [source, to, scope, themes, f && f.rel, f && f.own, s.name, s.asset_name, canCopy,
+  }, [source, to, scope, themesKey, f && f.rel, f && f.own, f && f.on, n, s.name, s.asset_name, canCopy,
     JSON.stringify(sets.unlock || {}), sets.current, (sets.names || []).length, JSON.stringify(s.asset_counts || {}), s.targets_rev]);
   const tipAll = f && f.kind === "text" ? TEXT_ALL_TIP : ALL_TIP(toWords[2], toWords[1]);
+  const onTab = to === "text" ? "in every scene" : host === "scenes" ? "on the Images tab" : "on this tab";
+  const given = source === "shared" ? `the shared files profile (${shared})` : `this ${toWords[0]} profile (“${s.name || "Recommended"}”)`;
   const copyTip = !canCopy ? "Copying is not offered for this file here"
-    : source === "shared" ? { head: `Give every ${toWords[2]} the shared files profile`, lines: [{ profile: s.asset_name || "Recommended" },
-      `Every ${toWords[2]} that is not locked gets it, attached. A ${toWords[2]} with a color profile of its own loses it.`,
+    : scope === "selected" ? { head: `Give the ${n} ${toWords[1]} selected ${given}`, lines: [
+      "Each one not locked gets it, attached.", "You are asked first. Undo puts them all back."] }
+    : scope === "all" ? (source === "file" ? tipAll : { head: `Give every ${toWords[2]} ${given}`, lines: [
+      `Every ${toWords[2]} that is not locked gets it, attached. One with a color profile of its own loses it.`,
+      "You are asked first. Undo puts them all back."] })
+    : scope === "off" ? { head: `Give ${given} to every ${toWords[2]} with no profile attached`, lines: [
+      `Each unlocked ${toWords[2]} ${onTab} with its color switch off is switched on and gets it. The ones with a profile are left as they are.`,
       "You are asked first. Undo puts them all back."] }
-    : scope === "all" ? tipAll
-      : { head: `Copy this ${toWords[0]} color profile to every profiled ${toWords[2]}`, lines: [{ profile: s.name || "Recommended" },
-        `Every ${toWords[2]} ${f.kind === "text" ? "in every scene" : host === "scenes" ? "on the Images tab" : "on this tab"} with a color profile attached gets this one, in place of the one it has now.`,
-        `A ${toWords[2]} with no color profile attached is left as it is.`, "You are asked first. Undo puts them all back."] };
-  const doCopy = () => (source === "shared" ? call("color.apply_to_all", "all", to)
-    : call("color.apply_to_all", which, null, themes));
+    : { head: `Give ${given} to every ${toWords[2]} with a profile attached`, lines: [
+      `Each unlocked ${toWords[2]} ${onTab} with its color switch on gets it, in place of the one it has now. Nothing new is switched on.`,
+      "You are asked first. Undo puts them all back."] };
+  const doCopy = () => call("color.copy_profile", source, to, scope, themes);
+  const themeTip = !themeAvail ? "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)"
+    : multi ? "Copying to the files you selected: in the theme on show" : "";
+  const tick = (x, on) => setChosen(on ? [...new Set([...picks, x])].sort((a, b) => a - b) : picks.filter((y) => y !== x));
   const kindLabel = { images: "Images", videos: "Videos", text: "Text" };
   // Simon: "match up the look and feel of the SELECTED and THEME with the Copy from, to which kind and so on ...
   // as columnized as possible, box sizes the same" - one grid: a tag column, then six equal columns; three choices
@@ -314,27 +333,37 @@ function FileLine({ s, host, tools }) {
       <div class="eyebrow">Copy a profile to other files</div>
       <div class="cpd-grid">
         ${tag("COPY FROM")}
-        ${opt("file", "Selected file", { on: source === "file", disabled: !f, span: 3, onClick: () => {},
+        ${opt("file", "Selected file", { on: source === "file", disabled: !f, span: 3, onClick: () => setSrcPick("file"),
           title: f ? "The profile of the file selected above" : "Select a file first" })}
-        ${opt("shared", "Shared profile", { on: source === "shared", disabled: !!f, span: 3, onClick: () => {},
-          title: f ? "Click away from the file (nothing selected) to give the shared files profile to every file of a kind"
-            : `The individual files profile every file without one of its own gets (${shared})` })}
+        ${opt("shared", "Shared profile", { on: source === "shared", span: 3, onClick: () => setSrcPick("shared"),
+          title: `The individual files profile every switched-on file without one of its own gets (${shared})` })}
         ${tag("TO KIND")}
         ${["images", "videos", "text"].map((k) => opt(k, kindLabel[k], { on: to === k, disabled: !kinds.includes(k), span: 2,
           onClick: () => setToKind(k),
-          title: kinds.includes(k) ? "" : source === "file" ? `A ${words[2]}'s profile is copied to other ${words[1]}` : "" }))}
+          title: kinds.includes(k) ? "" : multi ? `Copying to the ${words[1]} you selected` : `A ${words[2]}'s profile is copied to other ${words[1]}` }))}
         ${tag("WHICH", !whichOk)}
-        ${opt("profiled", "With profile attached", { on: scope === "profiled", disabled: !whichOk, span: 4,
-          onClick: () => setWhich("profiled"), title: whichOk ? `Only ${toWords[1]} whose colour switch is on`
-            : "The shared profile goes to every file that is not locked (All)" })}
         ${opt("all", "All", { on: scope === "all", disabled: !whichOk, span: 2, onClick: () => setWhich("all"),
-          title: `Every ${toWords[2]} that is not locked: with Unlock extracted ticked (Advanced) that is every one, otherwise the ones replaced or added` })}
+          title: whichOk ? `Every ${toWords[2]} that is not locked: switched on, and any profile of its own replaced. With Unlock extracted ticked (Advanced) that is every one, otherwise the ones replaced or added`
+            : `Copying to the ${toWords[1]} you selected` })}
+        ${opt("off", "Without a profile", { on: scope === "off", disabled: !whichOk, span: 2, onClick: () => setWhich("off"),
+          title: whichOk ? `Only unlocked ${toWords[1]} with no profile attached (color switch off): each is switched on and gets it`
+            : `Copying to the ${toWords[1]} you selected` })}
+        ${opt("profiled", "With a profile", { on: scope === "profiled", disabled: !whichOk, span: 2, onClick: () => setWhich("profiled"),
+          title: whichOk ? `Only unlocked ${toWords[1]} with a profile attached (color switch on): theirs is replaced; nothing new is switched on`
+            : `Copying to the ${toWords[1]} you selected` })}
         ${tag("THEMES", !themesOk)}
-        ${opt("this", "This theme", { on: themes !== "all", disabled: !themesOk, span: 3, onClick: () => setWhere("this"),
-          title: themesOk ? `Theme ${t} (${names[t - 1] || ""}) only` : "Themes are for a file's own profile, on pictures, with themes on" })}
-        ${opt("every", "Every theme", { on: themes === "all", disabled: !themesOk, span: 3, onClick: () => setWhere("all"),
-          title: "Theme 1 and every other theme too" })}
+        ${opt("this", "This theme", { on: themes === "this", disabled: !themesOk, span: 3, onClick: () => setWhere("this"),
+          title: themesOk ? `Theme ${t} (${names[t - 1] || ""}) only` : themeTip })}
+        ${opt("pick", `Choose themes ${where === "pick" && themesOk ? "▴" : "▾"}`, { on: Array.isArray(themes), disabled: !themesOk, span: 3,
+          onClick: () => setWhere(where === "pick" ? "this" : "pick"),
+          title: themesOk ? "Tick the themes to copy into: All themes, or any of them" : themeTip })}
       </div>
+      ${themesOk && where === "pick" ? html`<div class="cpd-themepick">
+        <${Check} checked=${picks.length === names.length} label="All themes"
+          onChange=${(v) => setChosen(v ? allThemes : [])} />
+        ${names.map((nm, i) => html`<${Check} key=${i} checked=${picks.includes(i + 1)} label=${`${i + 1}: ${nm}`}
+          title=${`${i + 1}: ${nm}`} onChange=${(v) => tick(i + 1, v)} />`)}
+      </div>` : null}
       ${summary.text ? html`<div class="small cpd-summary">${summary.text}</div>` : null}
       <div class="cpd-actions">
         ${/* Simon: APPLY NOW on the left, the count on the right, equal halves; the count in the tags' colour and font */""}

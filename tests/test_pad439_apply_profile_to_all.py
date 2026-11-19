@@ -164,4 +164,4 @@ def test_the_button_is_on_the_images_and_video_bars_only():
     assert 'COPY_WHICH = { profiled: "With a profile attached", all: "All" }' in pane
     # (PAD-471: and the Scenes bar on a line of text; PAD-566: and on a picture in Scenes)
     assert 'ALL_HOSTS = { images: ["images"], video: ["videos"], scenes: ["text", "images"] }' in pane
-    assert "<${FileLine} s=${s} host=${host} />" in pane
+    assert "<${FileLine} s=${s} host=${host} tools=${tools} />" in pane   # (Simon: the tools panel under Selected)

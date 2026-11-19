@@ -236,7 +236,7 @@ def test_the_page_sends_the_selected_clips_and_both_buttons():
     pane = open(os.path.join(_TABS, "color_pane.js"), encoding="utf-8").read()
     assert "file.attach || null, file.more || [])" in pane
     assert ">APPLY</button>" in pane                 # (Simon: one copy action, APPLY NOW)
-    assert ">Same as the other files<//>" in pane
+    assert "Same as the other files (“${sharedName}”)" in pane     # (Simon: it names the profile it lands on)
 
 
 def test_images_apply_to_all_reaches_the_unlocked_game_pictures(tmp_path):

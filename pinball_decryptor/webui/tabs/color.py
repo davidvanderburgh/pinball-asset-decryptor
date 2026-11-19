@@ -601,9 +601,22 @@ class ColorTab(TabService):
             m = self._raw(staged_changes.peek(self._project),
                           "files\n" + f["kind"])
             own_n = sum(1 for r in rels if isinstance(m, dict) and r in m)
-        return {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
-                "on": f.get("on"), "own": mine,
+        # a theme's picture: the profile theme 1 gives it - what "Same as theme 1" lands on (Simon)
+        base_name = ""
+        try:
+            from ...plugins.stern import scene_variants as SV
+            n_t, base = SV.split_theme_key(f["rel"])
+            if n_t > 1:
+                own1 = cp.own_profile(self._project, f["kind"], base)
+                base_name = (own1 or self._asset or cp.recommended(self._project, files=True)).label()
+        except Exception:                               # noqa: BLE001
+            base_name = ""
+        out = {"kind": f["kind"], "rel": f["rel"], "label": f["label"],
+               "on": f.get("on"), "own": mine,
                 "count": len(rels), "own_n": own_n}
+        if base_name:
+            out["base_name"] = base_name                # (only a theme's picture has one)
+        return out
 
     def _skips_plain(self):
         """Files with no color profile attached skip the Machine screen in

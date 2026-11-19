@@ -18,9 +18,12 @@ def test_every_old_way_is_still_there():
     assert 'call("color.apply_to_all", "all", to)' in pane
     assert 'EVERY_KINDS().map((e) => e.k)' in pane
     # dropping a file's own profile: here, in this theme, in every theme
-    assert ">Same as the other files<//>" in pane
-    assert ">Reset to theme 1<//>" in pane
-    assert ">Reset in every theme<//>" in pane
+    # (Simon: one button for the theme on show - "Same as the other files" in theme 1, "Same as theme 1" above it -
+    # naming the profile it lands on; and Reset in every theme)
+    assert "Same as the other files (“${sharedName}”)" in pane
+    assert "Same as theme 1 (“${(f && f.base_name) || sharedName}”)" in pane
+    assert "Reset in every theme (“${sharedName}”)<//>" in pane
+    assert "Reset this file's profile" in pane
     assert 'call("color.file_shared", "all")' in pane
     # the card's notes: an old Every replaced box to turn off, and what the profile is on now
     assert "<${WhichFilesNotes} s=${s} />" in pane

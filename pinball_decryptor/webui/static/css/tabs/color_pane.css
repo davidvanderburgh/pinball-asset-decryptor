@@ -153,3 +153,5 @@ html.bp-1180 .cpd { --cpd-w: 340px; }
   text-overflow: clip; text-align: center; }
 .cpd-tools + .cpd-file, .cpd-sel + .cpd-resetpanel, .cpd-resetpanel + .cpd-copy { margin-top: 8px; }
 .cpd-sel + .cpd-tools { margin-top: 8px; }
+/* Simon (2026-11-19): each reset on a full line of its own */
+.cpd-resets { grid-template-columns: 1fr; }

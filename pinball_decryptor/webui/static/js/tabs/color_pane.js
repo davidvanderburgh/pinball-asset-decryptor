@@ -225,20 +225,21 @@ function FileLine({ s, host, tools }) {
     : own ? (n > 1 ? `${f.own_n === n ? "Each has" : `${f.own_n} of them have`} a profile of their own.`
       : `It has a profile of its own (“${s.name || ""}”).`)
     : `It uses the individual files profile (${shared}), like the other files. A change here gives it one of its own.`;
-  // Simon: the reset buttons always there, across the panel, greyed where they do not apply
-  const canShared = !!(f && own && t === 1);
-  const canTheme1 = !!(f && own && t > 1);
+  // Simon: the resets, one full line each, always there, greyed where they do not apply. "Reset to theme 1" and
+  // "Same as the other files" were one action (drop the file's own profile in the theme on show) landing in two
+  // places, so they are one button that says where it lands; each names the profile it lands on
+  const canHere = !!(f && own);
   const canEvery = !!(f && themeLive);
+  const sharedName = s.asset_name || "Recommended";
+  const hereLabel = t > 1 ? `Same as theme 1 (“${(f && f.base_name) || sharedName}”)` : `Same as the other files (“${sharedName}”)`;
   const reset = html`<div class="cpd-resets">
-    <${Button} size="xs" disabled=${!canShared} onClick=${() => call("color.file_shared", "this")}
-      title=${canShared ? `Drop its own profile: it gets the individual files profile every other file gets (${shared})`
-        : "Only for a file with a profile of its own, in theme 1"}>Same as the other files<//>
-    <${Button} size="xs" disabled=${!canTheme1} onClick=${() => call("color.file_shared", "this")}
-      title=${canTheme1 ? "Drop this theme's own profile for it: it uses theme 1's again"
-        : "Only for a picture with a profile of its own in theme 2 or up"}>Reset to theme 1<//>
+    <${Button} size="xs" disabled=${!canHere} onClick=${() => call("color.file_shared", "this")}
+      title=${!canHere ? "Only for a file with a profile of its own (in the theme on show)"
+        : t > 1 ? `Drop this theme's own profile for it: it uses theme 1's (“${(f && f.base_name) || sharedName}”) again`
+          : `Drop its own profile: it gets the shared files profile (“${sharedName}”), as every other file without one of its own does`}>${hereLabel}<//>
     <${Button} size="xs" disabled=${!canEvery} onClick=${() => call("color.file_shared", "all")}
-      title=${canEvery ? `Drop its own profile in every theme, theme 1 too: it gets the individual files profile (${shared}) everywhere`
-        : "Only for a picture, with themes on"}>Reset in every theme<//>
+      title=${canEvery ? `Drop its own profile in every theme, theme 1 too: it uses the shared files profile (“${sharedName}”) everywhere. Its colour switch is not changed: off, nothing is baked in.`
+        : "Only for a picture, with themes on"}>Reset in every theme (“${sharedName}”)<//>
   </div>`;
 
   // ---- Copy (Simon: one copy action, the same every time, what cannot be done greyed with the reason) ----
@@ -297,7 +298,7 @@ function FileLine({ s, host, tools }) {
     <div class="small muted cpd-status-line">${status}</div>
   </div>
   ${tools}
-  <div class="cpd-file cpd-resetpanel">${reset}</div>
+  <div class="cpd-file cpd-resetpanel"><div class="eyebrow">Reset this file's profile</div>${reset}</div>
   <div class="cpd-file cpd-copy">
       <div class="eyebrow">Copy a profile to other files</div>
       <div class="cpd-grid">

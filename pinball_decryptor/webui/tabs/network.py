@@ -68,9 +68,22 @@ def _scan_scope(report):
     if not report or not report.get('addresses'):
         return ''
     known = report.get('known') or 0
-    return '%d addresses on %s%s' % (report['addresses'], ', '.join(report.get('networks') or []),
-                                     ', the %d devices this computer knew of first, unhurried' % known
-                                     if known else '')
+    careful = report.get('careful') or 0
+    return '%d addresses on %s%s%s' % (report['addresses'], ', '.join(report.get('networks') or []),
+                                       ', the %d devices this computer knew of first, unhurried' % known
+                                       if known else '',
+                                       # PAD-1456
+                                       ', then the %d that didn\'t answer once more, slowly' % careful
+                                       if careful else '')
+
+
+def _careful_note(count):
+    """What the scan says while it asks again, slowly (PAD-1456)."""
+    from ...core import machine_scan
+    secs = machine_scan.careful_seconds(count)
+    when = 'up to about %d minutes' % round(secs / 60.0) if secs >= 90 else 'up to a minute'
+    return ("No machine on the quick look; a machine just switched on is easily missed by one. Looking again, "
+            "more slowly, at the %d addresses that didn't answer (%s)..." % (count, when))
 
 
 class NetworkTab(TabService):
@@ -267,12 +280,16 @@ class NetworkTab(TabService):
             pct = int(done * 100 / total) if total else 0
             loop.post(lambda: self.set(scan_pct=pct))
 
+        def note(count):
+            text = _careful_note(count)
+            loop.post(lambda: self.set(scan_note=text))
+
         def work():
             from ...core import machine_scan
             report = {}
             try:
                 found, err = machine_scan.scan(progress=progress, cancel=lambda: self._scan_cancel,
-                                               report=report), ''
+                                               report=report, note=note), ''
             except Exception as e:                              # noqa: BLE001
                 found, err = [], str(e) or e.__class__.__name__
             loop.post(self._scanned, found, err, report)
@@ -388,8 +405,15 @@ class NetworkTab(TabService):
             except remote_send.Unreachable as e:
                 # PAD-1430: a typed address (no identity to look for) or one the router moved: look over the
                 # network for any machine that lets this computer in, and say what was found
-                self.ctx.loop.post(lambda: self.set(check='%s Looking over your network for it...' % e))
-                self.ctx.loop.post(self._check_by_scan, str(e), *self._scan_for_check())
+                # PAD-1456: the text taken now (``e`` is gone by the time the loop runs a lambda), and the
+                # careful pass said too when the quick look finds nothing
+                reason, loop = str(e), self.ctx.loop
+                loop.post(lambda: self.set(check='%s Looking over your network for it...' % reason))
+
+                def note(count):
+                    text = '%s %s' % (reason, _careful_note(count))
+                    loop.post(lambda: self.set(check=text))
+                loop.post(self._check_by_scan, reason, *self._scan_for_check(note))
                 return
             except remote_send.SendError as e:
                 text, kind = str(e), 'err'
@@ -404,12 +428,12 @@ class NetworkTab(TabService):
         self._show_machine()
 
     @staticmethod
-    def _scan_for_check():
+    def _scan_for_check(note=None):
         """``(found, err, report)``: a whole scan, on the Check connection worker."""
         from ...core import machine_scan
         report = {}
         try:
-            return machine_scan.scan(report=report), '', report
+            return machine_scan.scan(report=report, note=note), '', report
         except Exception as e:                          # noqa: BLE001 - said, never raised into the UI
             return [], str(e) or e.__class__.__name__, report
 

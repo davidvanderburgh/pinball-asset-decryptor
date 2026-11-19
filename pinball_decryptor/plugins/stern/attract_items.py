@@ -226,11 +226,9 @@ def port_table(prof):
 
 #: games whose attract pages play their clips on a scene of their own (4a3b5738...) that has no Video library, so
 #: neither the bank's scene shown nor that scene takes an item onto the glass (emulator sweep, PAD-782)
-#: PAD-1380: Walking Dead Remastered LE (Spike 3) plays its attract clips from the framework bank 60ed7e50 and its play
-#: clips from 71e39c43 (its port's video_bank): an item on the play bank drew in that bank's mid-screen box (16% of
-#: the glass, on the rig), on 60ed7e50 full screen (86%) - it waits on an attract bank of its own in the port
-NOT_ON_GLASS = ("avengers_infinity_le", "avengers_infinity_pro", "jurassic_park_le", "jurassic_park_pro",
-                "walking_dead_remastered_le")
+#: (PAD-1380: Walking Dead Remastered LE plays its attract clips from the framework bank 60ed7e50 and its play clips
+#: from 71e39c43; PAD-1415 gave its port `scene attract_bank` 60ed7e50, so its items go in and play there)
+NOT_ON_GLASS = ("avengers_infinity_le", "avengers_infinity_pro", "jurassic_park_le", "jurassic_park_pro")
 
 
 def title_refusal(prof):
@@ -634,7 +632,7 @@ def _bank_refusal(card, prof):
     clip = (port_table(prof) or {}).get("video_clip") or ""
 
     def check(reader):
-        scene = element_scene(reader, prof.game_dir, clip) if clip else CV.bank_scene(prof)
+        scene = element_scene(reader, prof.game_dir, clip) if clip else CV.attract_scene(prof)
         node = MW.lookup(reader, scene) if scene else None
         if node is None:
             return NO_BANK % prof.label
@@ -721,11 +719,16 @@ def project_pages(project, prof=None):
 # ---- making the clips ------------------------------------------------------------------------------------------
 def reference_slot(project, prof):
     """``(slot rel, info)``: the bank clip of the project whose picture is the biggest - the format every item is
-    made into - or ``(None, None)``."""
+    made into - or ``(None, None)``. PAD-1415: the clips of the scene the items go in (the port's attract_bank, where
+    it has one: Walking Dead Remastered's play bank clips are a mid-screen box, and an item made in their shape was
+    squeezed into a pillar on its full-screen attract bank); the bank's when the project has none of those."""
     from . import clip_variants as CV
     from ...core.video import detect_video_info
     best = (None, None, 0)
-    bank = CV.bank_assets(prof)
+    scene = CV.attract_scene(prof)
+    own = scene[:-len("scene.radium")] + "scene.assets/"
+    bank = own if own != CV.bank_assets(prof) and any(
+        c.startswith(own) for c in CV.manifest(project).values()) else CV.bank_assets(prof)
     for rel, card in sorted(CV.manifest(project).items()):
         if not card.startswith(bank):
             continue
@@ -914,7 +917,12 @@ def build(project, prof, bank, out_dir, log=None, progress=None, cancel=None, re
                            % (len(anchors), MAX_PAGES))
     os.makedirs(out_dir, exist_ok=True)
     data = bank
-    scene = CV.bank_scene(prof)
+    scene = CV.attract_scene(prof)
+    if scene != CV.bank_scene(prof):
+        # PAD-1415: the attract pages' own bank (the port's attract_bank), as the build has it so far
+        data = read_card(scene) if read_card is not None else None
+        if not data and items:
+            raise AttractError("the scene the game's attract clips play from (%s) was not found on the card" % scene)
     clip = port_table(prof).get("video_clip") or ""
     if clip and items:
         # clip v2: the attract pages' own video element plays the items, from its own scene's library

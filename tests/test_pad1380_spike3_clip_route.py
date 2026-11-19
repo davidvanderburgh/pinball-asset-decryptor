@@ -81,26 +81,29 @@ def test_proven_titles_name_their_play_bank_and_offer_clips():
 def test_attract_items_where_the_rig_put_them_on_the_glass():
     for key in ("star_wars_2025_le_0_96_spike3", "star_wars_2025_pro_0_84_spike3"):
         assert AI.title_refusal(MP.profiles()[key]) == "", key          # 47% of the glass on both
+    # PAD-1415: Walking Dead Remastered's items go in and play on its attract bank (on its play bank one drew in a
+    # mid-screen box); Pokemon's attract is a 51-entry table after all (PAD-1380 read its 10-entry slideshow)
     wdr = MP.profiles()["walking_dead_remastered_le_0_92_spike3"]
-    assert AI.title_refusal(wdr) == AI.NO_GLASS % wdr.label      # on its play bank an item drew in a mid-screen box
+    assert AI.title_refusal(wdr) == ""
     poke = MP.profiles()["pokemon_le_0_82_spike3"]
-    assert AI.port_table(poke) is None                           # a director starts its attract pages
-    assert "starts its attract screens in a way" in AI.title_refusal(poke)
+    assert AI.port_table(poke)["table"] == 0x3197b38
+    assert AI.title_refusal(poke) == ""
 
 
-def test_a_timed_table_is_not_taken_for_the_attract_sequence(monkeypatch):
+def test_a_timed_table_is_taken_for_the_attract_sequence(monkeypatch):
+    # PAD-1415: a {test, page, float seconds} table IS the attract sequence on Pokemon, Fallout and Transformers
     S = _s3port()
-    seq = {"entry": 0x3198290, "size": 24, "page_at": 8, "count": 10, "create": 0x691ea0, "sleep": 0x691f70,
-           "at": 0x4c7250, "stamp": 0x110, "seconds_at": 16}
+    seq = {"entry": 0x3197b38, "size": 24, "page_at": 8, "count": 51, "create": 0x691ea0, "sleep": 0x691f70,
+           "at": 0x49fdb4, "stamp": 0x108, "seconds_at": 16}
     monkeypatch.setattr(S, "attract_sequencer", lambda t, ps: seq)
-    assert S.attract_lines(object(), {"proc_sleep": 0x691f70}) == []
-    monkeypatch.setattr(S, "attract_sequencer", lambda t, ps: dict(seq, size=16, seconds_at=None))
     monkeypatch.setattr(S, "attract_show", lambda t, s: None)
 
     class _T:
         def u32(self, va):
             return 0
-    assert "data  attract_table       0x03198290" in "\n".join(S.attract_lines(_T(), {"proc_sleep": 0x691f70}))
+    out = "\n".join(S.attract_lines(_T(), {"proc_sleep": 0x691f70}))
+    assert "data  attract_table       0x03197b38   # 51 entries {test, page, float seconds}" in out
+    assert "value attract_entry_size  24" in out
 
 
 def test_s3run_rebuilds_a_stale_rig_build_and_never_runs_without_the_sync_guard():

@@ -91,8 +91,9 @@ def test_visible_only_for_spike2_and_jjp_with_the_preview_switch(tmp_path, previ
         pytest.skip("no %s plugin" % mfr)
     with web_app(tmp_path, mfr=mfr) as w:
         tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}
-        # PAD-1350: JJP has the tab too - its custom-modes editor (tests/test_webui_modes_jjp.py)
-        assert tabs["modes"]["visible"] == (mfr in ("stern", "jjp"))
+        # PAD-1350: JJP has the tab too - its custom-modes editor (tests/test_webui_modes_jjp.py);
+        # PAD-1417: Spooky too (tests/test_webui_modes_spooky.py)
+        assert tabs["modes"]["visible"] == (mfr in ("stern", "jjp", "spooky"))
         st = w.state("modes")
         if mfr == "stern":
             # no project yet: the Tk tab's no-project state

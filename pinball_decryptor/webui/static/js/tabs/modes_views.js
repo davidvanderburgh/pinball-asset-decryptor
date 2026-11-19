@@ -75,6 +75,7 @@ export function hatWords(h = {}, ch = {}) {
     case "seconds_left": return `When ${h.seconds} seconds are left`;
     case "event": return `When ${eventLabel(h.event, ch)}${when}`;
     case "timer_done": return `When timer ${h.timer} runs out`;
+    case "menu_pick": return `When the player picks from ${h.menu || "a menu"}`;
     case "combo": return `When ${comboWords(h)}${when}`;      // PAD-708
     case "battle": return h.more   // PAD-707: a new monster on the screen, in that battle's place
       ? `When the player picks it on the battle selection screen, a new monster in ${h.name || `battle ${h.slot}`}'s place`
@@ -106,7 +107,8 @@ export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "m
   if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show",
   log: "show", clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", fade: "show", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
-  shake: "mech", shake_game: "mech", spare_drive: "mech" };
+  shake: "mech", shake_game: "mech", spare_drive: "mech", flippers: "mech", pulse: "mech", device: "mech", kickback: "mech", toy: "mech",
+  menu_open: "show", menu_close: "show" };
 const COLOR_NAMES = { "#ffd000": "yellow", "#00a0ff": "blue", "#ff0000": "red", "#00c040": "green", "#ffffff": "white",
   "#ff7800": "orange", "#a040ff": "purple", "#00ff00": "green" };
 const PATTERN_WORDS = { solid: "solid", blink: "blinking", pulse: "pulsing", chase: "chasing",
@@ -133,6 +135,7 @@ export function valWords(e) {
     case "player": return "the player up";
     case "women_mult": return "the Bond Women multiplier";                // PAD-889
     case "timer_left": return `ms left on ${e.timer || "?"}`;
+    case "menu_pick": return `the item picked from ${e.menu || "?"}`;
     case "combo_chain": return "combos in a row";                         // PAD-708
     case "combo_steps": return `shots made of ${e.combo || "?"}`;
     case "op": return `(${valWords(e.a)} ${SYM[e.op] || e.op} ${valWords(e.b)})`;
@@ -174,6 +177,11 @@ export function stmtWords(b, ch = {}) {
     case "multiball": return `Multiball of ${b.balls} balls, ball save ${b.save || 0} s`;
     case "ball_save": return `Ball save for ${b.seconds} s`;
     case "drain_to_one": return "Take the extra balls away: the flippers off until they drain, one ball back to the plunger";
+    case "toy": return `Move the ${b.what || "toy"} ${b.action || ""}`.trim();   // PAD-1406
+    case "kickback": return b.to === "off" ? "Kickbacks off" : "Kickbacks on";   // PAD-1406
+    case "device": return b.keep === "let_go" ? `The ${b.what || "device"} lets its balls go` : `The ${b.what || "device"} keeps every ball that lands`;   // PAD-1406
+    case "pulse": return `Fire the ${b.what || "device"} once (the game's own)`;   // PAD-1406
+    case "flippers": return b.to === "on" ? "Flippers back on" : "Flippers off for the rest of the ball";   // PAD-1406
     case "game_wizard": return `${b.how === "start" ? "Start" : "Light"} the game's ${b.name || "mini-wizard"}`;
     case "hold": return `Hold the ${b.what || "magnet"} for ${msWords(b.ms)}${b.clock === "wait" ? ", its clock waiting until it lets go" : ""}`;
     case "scoop_hold": return `Hold ${b.which === "every" ? "every ball" : "the next ball"} in the scoop for ${msWords(b.ms)}`;
@@ -188,6 +196,8 @@ export function stmtWords(b, ch = {}) {
     case "change": return `Change ${b.var || "?"} by ${valWords(b.by)}`;
     case "set_hits": return `Set the hits of ${b.shot || "?"} to ${valWords(b.value)}`;
     case "timer_start": return `Start timer ${b.timer || "?"} at ${msWords(b.ms)}`;
+    case "menu_open": return `Open the menu ${b.menu || "?"}`;
+    case "menu_close": return `Close the menu ${b.menu || "?"}`;
     case "timer_stop": return `Stop timer ${b.timer || "?"}`;
     case "callout": {
       const c = (ch.callouts || []).find((x) => (x.role || String(x.id)) === (b.role || String(b.id)));
@@ -252,6 +262,7 @@ export function storyOf(prog) {
     else if (h.kind === "mode_end") out.end.push(si);
     else if (h.kind === "ball_end") out.drain.push(si);
     else if (h.kind === "challenge" || h.kind === "battle") out.waiting.push(si);   // PAD-615, PAD-706: the pick comes before the mode starts
+    else if (h.kind === "menu_pick") out.any.push(si);   // PAD-1404: a menu's pick, running or not
     else out.running.push(si);                       // every, seconds left, a timer: they work while it runs
   });
   return out;
@@ -323,7 +334,7 @@ export const LANES = [["clock", "Mode and clock"], ["lights", "Lights"], ["shows
 const LANE_OF = { start_mode: "clock", end_mode: "clock", add_time: "clock", set_time: "clock", timer_start: "clock",
   timer_stop: "clock", multiball: "clock", ball_save: "clock", drain_to_one: "clock", game_wizard: "clock", light_mode: "lights", unlight_mode: "lights",
   light_shot: "lights", lights_off: "lights", gi: "lights", show: "shows", game_show: "shows", callout: "sound", sound: "sound",
-  words: "screen", clip: "screen", hud_text: "screen", hud_counter: "screen", hud_gauge: "screen", fade: "screen", hud_award: "screen", hud_progress: "screen", roster_progress: "screen",
+  words: "screen", clip: "screen", hud_text: "screen", hud_counter: "screen", hud_gauge: "screen", fade: "screen", hud_award: "screen", hud_progress: "screen", roster_progress: "screen", menu_open: "screen", menu_close: "screen",
   score: "score", set: "score", change: "score", set_hits: "score" };
 export const laneOf = (op) => LANE_OF[op] || "other";
 const TRACK_PX = 640;           // about how wide the Timeline's track is drawn, to keep its clips apart
@@ -380,16 +391,20 @@ export function sharedUses(prog) {
   };
   (prog.vars || []).forEach((v) => thing("var", v.name));
   (prog.timers || []).forEach((t) => thing("timer", t.name));
+  (prog.menus || []).forEach((m) => thing("menu", m.name));                     // PAD-1404
   const use = (t, si, how) => { if (!t.uses.some((u) => u.si === si && u.how === how)) t.uses.push({ si, how }); };
   (prog.scripts || []).forEach((sc, si) => {
     const h = sc.hat || {};
     if (h.kind === "timer_done" && h.timer) use(thing("timer", h.timer), si, "starts");
+    if (h.kind === "menu_pick" && h.menu) use(thing("menu", h.menu), si, "starts");
     eachPart(sc.do, (o) => {
       if ((o.op === "set" || o.op === "change") && o.var) use(thing("var", o.var), si, "sets");
       else if ((o.op === "timer_start" || o.op === "timer_stop") && o.timer) use(thing("timer", o.timer), si, "sets");
+      else if ((o.op === "menu_open" || o.op === "menu_close") && o.menu) use(thing("menu", o.menu), si, "sets");
       else if (o.op === "set_hits" && o.shot) use(thing("hits", o.shot), si, "sets");
       if (o.k === "var" && o.name) use(thing("var", o.name), si, "reads");
       else if (o.k === "timer_left" && o.timer) use(thing("timer", o.timer), si, "reads");
+      else if (o.k === "menu_pick" && o.menu) use(thing("menu", o.menu), si, "reads");
       else if (o.k === "hits" && o.shot) use(thing("hits", o.shot), si, "reads");
     });
   });

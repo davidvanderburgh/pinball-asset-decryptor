@@ -26,7 +26,7 @@ SITES = {"godzilla_le-1.16": ("0x003f1898", "0x003f196c"), "godzilla_pro-1.16": 
 
 def _section(src):
     a = src.index("/* ---- PAD-733: drain to one ball (pm_drain_to_one)")
-    return src[a:src.index("/* ---- shots from the switch drain (optional; any build)", a)]
+    return src[a:src.index("/* ---- PAD-1406: the flippers, for a mode that is the whole game", a)]
 
 
 def test_it_kills_the_flippers_alone_and_is_wired_in():
@@ -65,6 +65,9 @@ static int multiball_ok(void) { return 1; }
 static int pm_balls_in_play(void) { return balls; }
 static int pm_ball_save(unsigned s) { printf("SAVE %u\n", s); return save_ok; }
 static uint64_t pm_shot(const char *n) { return n[0] == 'T' ? 0x8000000000000000ull : 0; }
+static long dto_shooter_id(void) { return 62; }           /* PAD-1406: the runtime's switch by name, stubbed */
+static int dto_trough_level(void) { return -1; }
+static int sw_level(long id) { return -1; }
 static void g_off(void) { printf("FLIPPERS OFF\n"); }
 static void g_on(void) { printf("FLIPPERS ON\n"); }
 static void g_delay(unsigned s) { printf("SEARCH DELAY %u\n", s); }

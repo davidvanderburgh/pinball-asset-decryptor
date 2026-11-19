@@ -576,10 +576,12 @@ class WebWindow:
 
     def modes_preview_on(self, mfr=None):
         """The Modes tab: Stern Spike 2's mode maker (``modes``) or the JJP custom-modes
-        editor (``jjp_modes``, PAD-1350), behind the same preview switch."""
+        editor (``jjp_modes``, PAD-1350) or the Spooky one (``spooky_modes``, PAD-1417), behind
+        the same preview switch."""
         mfr = mfr if mfr is not None else self.current_mfr
         if mfr is None or not (getattr(mfr.capabilities, "modes", False)
-                               or getattr(mfr.capabilities, "jjp_modes", False)):
+                               or getattr(mfr.capabilities, "jjp_modes", False)
+                               or getattr(mfr.capabilities, "spooky_modes", False)):
             return False
         from ..core import preview
         return preview.enabled("modes")

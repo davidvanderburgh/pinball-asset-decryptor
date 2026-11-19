@@ -1966,4 +1966,285 @@ static KIT_UNUSED void kit_fade_tick(struct kit_fade *f)
     f->shown = step;
 }
 
+/* ---- PAD-1404: a menu picked with the flippers ----------------------------------------------------------------------
+ * A list on the screen the player picks from, as Stern's own choose screens do (X-Men 2.0's episode through the portal,
+ * a mutant or roster pick at the game's start, any "choose your mode"): the left flipper button moves up, the right one
+ * down (both wrap), Action or Start takes the item highlighted, and when its time runs out the highlighted one is taken
+ * (it opens on the default, so a player who does nothing gets the default). The card build (mode_menus.py) adds the
+ * menu's screens to the title's HUD scene: "PadMode_<slug>_Menu<k>" (the panel, its words the title), its rows
+ * "..._Menu<k>_R<j>" (j 1..KIT_MENU_ROWS: the item's words over a highlight bar "<row>.<row>_Hi" shown on the row the
+ * cursor is on) and "..._Menu<k>_Foot" (what the buttons do and the seconds left). More items than rows scroll.
+ * While it is open:
+ *   - the buttons are the menu's: pm_button_hide every tick (the game sees no Start, no Action launch, no lane change
+ *     from them; the flippers still flip) and kit_menu_shot answers 1 for their shots, so the mode does not act on
+ *     them too;
+ *   - the ball is held as `hold` says: KIT_MENU_HOLD_SCOOP holds it in the scoop (pm_scoop_hold: the running mode, on a
+ *     title with a scoop; the kick-out comes at most 10 s after the ball settled, so the menu's time is cut to 9 s),
+ *     KIT_MENU_HOLD_LANE is for a menu at a ball's start with the ball in the shooter lane (the launch button is the
+ *     menu's; a plunge - any playfield switch - takes the item highlighted, the game moving on), KIT_MENU_HOLD_NONE
+ *     holds nothing.
+ * kit_menu_tick every tick: it finds the screens (twice a second until the scene has loaded, then every one hidden at
+ * once), draws what changed, renews the hide and runs the clock; it answers the item taken (0..n-1) on the tick it is
+ * taken, else -1. A game's end closes it with nothing taken. A card built without the screens finds none: the menu
+ * still runs, picks and logs, unseen. */
+#define KIT_MENU_ROWS   5
+#define KIT_MENU_ITEMS  12
+#define KIT_MENU_HOLD_NONE  0
+#define KIT_MENU_HOLD_LANE  1
+#define KIT_MENU_HOLD_SCOOP 2
+#define KIT_MENU_MIN_MS 3000u
+#define KIT_MENU_MAX_MS 60000u
+#define KIT_MENU_SCOOP_MAX_MS 10000u
+
+struct kit_menu {
+    const char *scene;                       /* "hud" */
+    char node[64];                           /* PadMode_<slug>_Menu<k> */
+    void *panel, *title, *footg, *foot, *rowg[KIT_MENU_ROWS], *roww[KIT_MENU_ROWS], *hi[KIT_MENU_ROWS];
+    int found, rows;
+    unsigned tries;
+    /* the menu as asked */
+    const char *head, *items[KIT_MENU_ITEMS];
+    int n, dflt, hold;
+    unsigned long ms;
+    /* while it is open */
+    int open, at, top, taken, fresh;         /* taken: 1 + the item last picked (0 none); fresh: not yet answered */
+    unsigned long t0;
+    uint64_t left, right, pick, action, buttons;   /* the button shots (pm_shot), resolved at the open */
+    /* on the glass */
+    int up, shown_at, shown_top, shown_n;
+    long shown_secs;
+    const char *shown_head;
+};
+
+static KIT_UNUSED void kit_menu_init(struct kit_menu *m, const char *scene, const char *node)
+{
+    int k;
+    m->scene = scene;
+    for (k = 0; k < (int)sizeof m->node - 1 && node[k]; k++) m->node[k] = node[k];
+    m->node[k] = 0;
+    m->found = m->rows = m->open = m->up = m->n = m->fresh = 0;
+    m->tries = 0;
+    m->taken = 0;
+    m->head = 0;
+}
+
+static KIT_UNUSED int kit_menu_find(struct kit_menu *m)
+{
+    char p[192], r[96];
+    int j;
+    if (m->found) return 1;
+    if (!m->node[0] || !pm_can(PM_CAN_SCREENS) || (m->tries++ % KIT_POLL) != 0) return 0;
+    m->panel = pm_node(m->scene, m->node);
+    if (!m->panel) return 0;
+    pm_snprintf(p, sizeof p, "%s.%s_Words", m->node, m->node);
+    m->title = pm_text(m->scene, p);
+    pm_snprintf(r, sizeof r, "%s_Foot", m->node);
+    m->footg = pm_node(m->scene, r);
+    pm_snprintf(p, sizeof p, "%s.%s_Words", r, r);
+    m->foot = pm_text(m->scene, p);
+    if (m->footg) pm_show(m->footg, 0);
+    for (j = 0; j < KIT_MENU_ROWS; j++) {
+        pm_snprintf(r, sizeof r, "%s_R%d", m->node, j + 1);
+        m->rowg[j] = pm_node(m->scene, r);
+        if (!m->rowg[j]) break;
+        pm_snprintf(p, sizeof p, "%s.%s_Words", r, r);
+        m->roww[j] = pm_text(m->scene, p);
+        pm_snprintf(p, sizeof p, "%s.%s_Hi", r, r);
+        m->hi[j] = pm_node(m->scene, p);
+        if (m->hi[j]) pm_show(m->hi[j], 0);
+        pm_show(m->rowg[j], 0);
+    }
+    m->rows = j;
+    pm_show(m->panel, 0);                    /* built shown, as every screen is */
+    m->found = 1;
+    m->up = 0;
+    m->shown_at = m->shown_top = m->shown_n = -1;
+    m->shown_secs = -1;
+    m->shown_head = 0;
+    pm_log("menu %s found: %d rows, title %s, foot %s", m->node, m->rows, m->title ? "yes" : "none",
+           m->foot ? "yes" : "none");
+    return 1;
+}
+
+/* the first row shown so that item `at` is on the glass, scrolled as little as can be from `top` */
+static KIT_UNUSED int kit_menu_top(int at, int top, int n, int rows)
+{
+    if (rows <= 0 || n <= rows) return 0;
+    if (at < top) top = at;
+    if (at >= top + rows) top = at - rows + 1;
+    if (top > n - rows) top = n - rows;
+    return top < 0 ? 0 : top;
+}
+
+/* open it: `head` over `items` (n of them, at most KIT_MENU_ITEMS; kept by pointer, so static strings), the cursor on
+ * `dflt`, `ms` before the highlighted one is taken (KIT_MENU_MIN_MS..KIT_MENU_MAX_MS), the ball held as `hold` says.
+ * 1 = open; 0 = no items, not in a game, or this menu is open already */
+static KIT_UNUSED int kit_menu_open(struct kit_menu *m, const char *head, const char *const *items, int n, int dflt,
+                                    unsigned long ms, int hold)
+{
+    int k;
+    if (m->open || n <= 0 || !pm_in_game()) return 0;
+    if (n > KIT_MENU_ITEMS) n = KIT_MENU_ITEMS;
+    for (k = 0; k < n; k++) m->items[k] = items[k] ? items[k] : "";
+    m->head = head ? head : "";
+    m->n = n;
+    m->dflt = dflt >= 0 && dflt < n ? dflt : 0;
+    if (ms < KIT_MENU_MIN_MS) ms = KIT_MENU_MIN_MS;
+    if (ms > KIT_MENU_MAX_MS) ms = KIT_MENU_MAX_MS;
+    m->hold = hold;
+    m->left = pm_shot("Left flipper button");
+    m->right = pm_shot("Right flipper button");
+    m->action = pm_shot("Action button");
+    m->pick = m->action | pm_shot("Start button");
+    m->buttons = m->left | m->right | m->pick;
+    if (hold == KIT_MENU_HOLD_SCOOP) {       /* the kick-out comes at most KIT_MENU_SCOOP_MAX_MS after it settled */
+        if (ms > KIT_MENU_SCOOP_MAX_MS - 1000u) ms = KIT_MENU_SCOOP_MAX_MS - 1000u;
+        if (!pm_scoop_hold((unsigned)(ms + 1000u))) pm_log("menu %s: no scoop hold here (the ball is not held)", m->node);
+    }
+    m->ms = ms;
+    m->at = m->dflt;
+    m->top = kit_menu_top(m->at, 0, m->n, m->rows > 0 ? m->rows : KIT_MENU_ROWS);
+    m->fresh = 0;
+    m->t0 = pm_ms();
+    m->open = 1;
+    k = m->buttons ? pm_button_hide(m->buttons) : 0;
+    pm_log("menu %s: open \"%s\", %d items, on %d, %lu ms, hold %s, buttons %s%s, %d held back from the game", m->node,
+           m->head, n, m->at + 1, ms, hold == KIT_MENU_HOLD_SCOOP ? "scoop" : hold == KIT_MENU_HOLD_LANE ? "lane" : "none",
+           m->left && m->right ? "flippers" : "NO FLIPPERS", m->action ? " + Action + Start" : " + Start", k);
+    return 1;
+}
+
+static KIT_UNUSED int kit_menu_is_open(const struct kit_menu *m) { return m->open; }
+
+/* the item it was last picked on (0..n-1), or -1 */
+static KIT_UNUSED int kit_menu_taken(const struct kit_menu *m) { return m->taken - 1; }
+
+static KIT_UNUSED void kit_menu_take(struct kit_menu *m, int item, const char *why)
+{
+    if (!m->open) return;
+    m->open = 0;
+    m->taken = item + 1;
+    m->fresh = 1;
+    pm_button_hide(0);
+    if (m->hold == KIT_MENU_HOLD_SCOOP) pm_scoop_hold(0);    /* the ball held now goes */
+    pm_log("menu %s: picked %d \"%s\" (%s, after %lu ms)", m->node, item + 1,
+           item >= 0 && item < m->n ? m->items[item] : "", why, pm_ms() - m->t0);
+}
+
+/* close it with nothing taken (the mode ended, the ball drained) */
+static KIT_UNUSED void kit_menu_close(struct kit_menu *m)
+{
+    if (!m->open) return;
+    m->open = 0;
+    m->fresh = 0;
+    pm_button_hide(0);
+    if (m->hold == KIT_MENU_HOLD_SCOOP) pm_scoop_hold(0);
+    pm_log("menu %s: closed with no pick", m->node);
+}
+
+/* 1 when `shot` (one bit) is a cabinet button's: every button shot's name says "button" (PAD-1403: "Action button",
+ * "Left flipper button released", "Both flipper buttons", "Start button held 1 s") */
+static KIT_UNUSED int kit_menu_is_button(uint64_t shot)
+{
+    const char *n = pm_shot_name(shot);
+    int i;
+    for (i = 0; n && n[i]; i++)
+        if (n[i] == 'b' && n[i + 1] == 'u' && n[i + 2] == 't' && n[i + 3] == 't' && n[i + 4] == 'o' && n[i + 5] == 'n')
+            return 1;
+    return 0;
+}
+
+/* from .shot: 1 = the menu took this shot (a button's: its press, release, hold or combo), and the mode is not to act
+ * on it */
+static KIT_UNUSED int kit_menu_shot(struct kit_menu *m, uint64_t shots)
+{
+    uint64_t rest, b;
+    const char *other = 0;
+    char why[80];
+    if (!m->open) return 0;
+    if (m->left && (shots & m->left)) {
+        m->at = m->at > 0 ? m->at - 1 : m->n - 1;
+        return 1;
+    }
+    if (m->right && (shots & m->right)) {
+        m->at = m->at < m->n - 1 ? m->at + 1 : 0;
+        return 1;
+    }
+    if (m->pick && (shots & m->pick)) {
+        kit_menu_take(m, m->at, shots & m->action ? "Action" : "Start");
+        return 1;
+    }
+    /* every other bit: a button's (a release, a hold, a combo) is the menu's; a named shot of the port's is the ball
+     * (the 0x1 dispatch, "a switch was hit", comes before a button's own shot on some builds, and is neither) */
+    for (rest = shots & ~1ull; rest; rest &= rest - 1) {
+        b = rest & (~rest + 1);
+        if (!other && !kit_menu_is_button(b)) other = pm_shot_name(b);
+    }
+    if (!other) return (shots & ~1ull) != 0;
+    if (m->hold == KIT_MENU_HOLD_LANE) {     /* the plunge: the game goes on with the one shown */
+        pm_snprintf(why, sizeof why, "the ball moved on: %s", other);
+        kit_menu_take(m, m->at, why);
+    }
+    return 0;
+}
+
+/* every tick: the item taken since the last tick (0..n-1), once; else -1 */
+static KIT_UNUSED int kit_menu_tick(struct kit_menu *m)
+{
+    int j, want, it;
+    long secs;
+    char foot[64];
+    kit_menu_find(m);
+    if (m->open) {
+        if (!pm_in_game()) kit_menu_close(m);
+        else if (pm_ms() - m->t0 >= m->ms) kit_menu_take(m, m->at, "its time ran out");
+        else if (m->buttons) pm_button_hide(m->buttons);
+    }
+    if (m->found) {
+        want = m->open;
+        if (want != m->up) {
+            pm_show(m->panel, want);
+            for (j = 0; j < m->rows; j++) pm_show(m->rowg[j], want && j < m->n);
+            if (m->footg) pm_show(m->footg, want);
+            m->up = want;
+            m->shown_at = m->shown_top = m->shown_n = -1;
+            m->shown_secs = -1;
+            m->shown_head = 0;
+        }
+        if (m->up) {
+            if (m->title && m->shown_head != m->head) {
+                pm_set_text(m->title, m->head[0] ? m->head : " ");
+                m->shown_head = m->head;
+            }
+            m->top = kit_menu_top(m->at, m->top, m->n, m->rows);
+            if (m->top != m->shown_top || m->n != m->shown_n) {
+                for (j = 0; j < m->rows; j++) {
+                    it = m->top + j;
+                    if (m->roww[j]) pm_set_text(m->roww[j], it < m->n && m->items[it][0] ? m->items[it] : " ");
+                    pm_show(m->rowg[j], it < m->n);
+                }
+                m->shown_top = m->top;
+                m->shown_n = m->n;
+                m->shown_at = -1;
+            }
+            if (m->at != m->shown_at) {
+                for (j = 0; j < m->rows; j++)
+                    if (m->hi[j]) pm_show(m->hi[j], m->top + j == m->at);
+                m->shown_at = m->at;
+            }
+            secs = (long)((m->ms - (pm_ms() - m->t0) + 999u) / 1000u);
+            if (m->foot && secs != m->shown_secs && secs >= 0) {
+                pm_snprintf(foot, sizeof foot, "FLIPPERS MOVE   %s PICKS   %ld", m->action ? "ACTION" : "START", secs);
+                pm_set_text(m->foot, foot);
+                m->shown_secs = secs;
+            }
+        }
+    }
+    if (m->fresh) {
+        m->fresh = 0;
+        return m->taken - 1;
+    }
+    return -1;
+}
+
 #endif

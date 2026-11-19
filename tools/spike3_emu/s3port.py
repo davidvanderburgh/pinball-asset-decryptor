@@ -1971,9 +1971,12 @@ def attract_sequencer(t, proc_sleep):
         a = t.tva + 4 * i
         pre = [t.words[j] for j in range(max(0, i - 5), i)]
         page_at = None
-        for x in pre:
+        for k, x in enumerate(pre):
             ls = _ls(x)
-            if ls and ls[0] == "ldr" and ls[1] == 0 and 8 <= ls[3] <= 16:
+            # PAD-1415: Pokemon, Fallout and Transformers load the page into x1 and move it to x0 after a `cbz x1`:
+            #   ldr x1, [xE, #8] ; cbz x1 ; mov x0, x1 ; mov w1, #0 ; bl <child create>
+            if ls and ls[0] == "ldr" and 8 <= ls[3] <= 16 and (
+                    ls[1] == 0 or (0xAA0003E0 | ls[1] << 16) in pre[k + 1:]):
                 page_at = ls[3]
         if page_at is None or not any(x in (0x52800001, 0xD2800001) for x in pre):     # mov w1, #0 / mov x1, #0
             continue
@@ -2021,6 +2024,11 @@ def attract_sequencer(t, proc_sleep):
         b, stride, run = best
         # a fixed count: the index's `cmp wI, #imm` (Star Wars 2025 LE: 0xb6), when it fits the run
         cmps = [((x >> 10) & 0xFFF) for x in body if (x & 0xFFC0001F) == 0x7100001F and 8 <= ((x >> 10) & 0xFFF) < 255]
+        if not cmps:
+            # PAD-1415: the 24-byte sequencers test their index after the page (Transformers `cmp w20, #0x3a`, Fallout
+            # #0x40, Pokemon #0x32: past it the walk starts again at entry 0)
+            cmps = [((x >> 10) & 0xFFF) for x in t.words[i + 1:i + 60]
+                    if (x & 0xFFC0001F) == 0x7100001F and 8 <= ((x >> 10) & 0xFFF) < 255]
         count = max(cmps) + 1 if cmps and max(cmps) + 1 <= run else run
         if not 2 <= count <= ATTRACT_MAX:
             continue
@@ -2035,7 +2043,13 @@ def attract_sequencer(t, proc_sleep):
         found[(b, stride, count)] = {"entry": b, "size": stride, "page_at": page_at, "count": count,
                                      "create": a + 4 * sext(w & 0x3FFFFFF, 26), "sleep": proc_sleep, "at": a,
                                      "stamp": stamp, "seconds_at": secs}
-    return next(iter(found.values())) if len(found) == 1 else None
+    if len(found) > 1:
+        # PAD-1415: Pokemon LE 0.82 has two of the shape: a 10-entry timed slideshow (0x3198290, sequencer 0x4c7190) that
+        # never runs in attract, and the attract mode's own 51 entries (0x3197b38, 0x49fcd0) - its pages are the ones
+        # gdb saw started in attract (PAD-1380's trace, caller 0x49fdb8). The longest table is the attract mode's.
+        top = sorted(found.values(), key=lambda v: -v["count"])
+        return top[0] if top[0]["count"] > top[1]["count"] else None
+    return next(iter(found.values())) if found else None
 
 
 def attract_pages(t, s):
@@ -2096,10 +2110,11 @@ def attract_lines(t, placed):
     the video bank's scene on the glass with (portattract.show_lines), when its pages have one"""
     ps = placed.get("proc_sleep")
     s = attract_sequencer(t, ps) if ps else None
-    if s is None or s["seconds_at"]:
-        # PAD-1380: a table whose entries carry their own seconds is a timed slideshow of its own, not the attract
-        # sequence: Pokemon LE 0.82's (0x3198290, sequencer 0x4c7190) never ran in attract on the rig - gdb on the
-        # child create saw its attract pages started inline by a director (0x4dbca0..), as Fallout's and Transformers'
+    if s is None:
+        # PAD-1415: Pokemon, Fallout and Transformers walk 24-byte {test, page, float seconds} tables too (PAD-1380 had
+        # read Pokemon's 10-entry slideshow, 0x3198290, which never runs in attract, and taken a lamp-show process
+        # starting pages inline, 0x4dbca0.., for its attract): gdb on the child create (rig, hidden, muted) saw every
+        # page of their attract started from the table walk - attract_sequencer reads them now
         return []
     placed["data:attract_table"] = s["entry"]
     out = ["# ---- attract (PAD-1328): the attract mode's page table, read off this program's sequencer (its child "

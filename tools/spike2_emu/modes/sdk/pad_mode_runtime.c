@@ -22665,7 +22665,8 @@ static void coop_pick_hold(void)
     unsigned t = coop.turn;
     int said = 0;
     const char *why = "";
-    if (!fn("proc_sleep") || !coop_pick_due(coop_pick_on, coop_ch_n, t, t >= 1 && t <= 4 ? coop_pick_of[t] : 0,
+    /* PAD-1443: the start menu's plain CO-OP PLAY opens no pick, so its balls are served as the game serves them */
+    if (!fn("proc_sleep") || !coop_pick_due(coop_pick_on && !coop.plain, coop_ch_n, t, t >= 1 && t <= 4 ? coop_pick_of[t] : 0,
                                             coop_teammates(), ci.phase != CI_OFF))
         return;
     ci.holding = 1;
@@ -23339,7 +23340,7 @@ static void hand_close(const char *why)
  * handicap's pick waits for it */
 static int hand_waits_for_coop(void)
 {
-    if (!coop.on || !coop_teammates() || !coop_pick_on || !coop_ch_n) return 0;
+    if (!coop.on || !coop_teammates() || !coop_pick_on || !coop_ch_n || coop.plain) return 0;   /* PAD-1443 */
     return pk.open || (coop.turn >= 1 && coop.turn <= 4 && coop_pick_of[coop.turn] < 0);
 }
 

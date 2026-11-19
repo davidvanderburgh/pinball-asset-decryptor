@@ -570,6 +570,13 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   frame, no collision. The map's script slides it (X, Y, RotZ) and raises
   and sinks it (Z); `item_fields` can leave the real targets unseen as its
   physics.
+* **A ramp the table has not** (PAD-1431). `retrofit_ramps`
+  (`{"PadMidTurn": {"clone": "Ramp053", "shape": [[x, y], ...], "fields":
+  {"TYPE": 1, "CLDR": 0}}}`) copies one of the table's ramps (`clone`, which
+  must be there) onto drag points of its own (`shape`, as many as the clone
+  has; the first is the foot at HTBT, the last the head at HTTP) and sets
+  `fields` as `item_fields` does. Jaws' center ramp turnaround is a 4-wire
+  copy of JP's return wire, drawn only.
 * **A sound played at a wall stops the table** (PAD-992). JP's
   `PlaySoundAt` pans by the object's `.x`, which a wall, ramp or rubber has
   not: Foo Fighters' first KICK TARGET coil stopped Visual Pinball with

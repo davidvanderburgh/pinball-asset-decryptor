@@ -967,7 +967,7 @@ def test_jaws_newton_ball_is_shark_hit_under_vbscript(tmp_path):
         "\n".join("Dim %s : Set %s = Obj(False)" % (n, n) for n in (
             "Tquick1", "Tquick2", "Tquick3", "Tquick4", "Tbeachfinal", "Tnightfinal", "Tbarrelshark", "Tjackpot",
             "Tsharkfinal", "Thammerfinal", "Tsmimerfinal", "Targetshark1", "Targetshark2", "Targetshark3",
-            "Targetshark4", "shark", "Rsaveball", "lockpostG", "lockpostD", "PyramidKicker", "PadMidTimer")),
+            "Targetshark4", "shark", "Rsaveball", "lockpostG", "lockpostD", "PyramidKicker", "PadMidTimer", "PadWaveTimer")),
         vbs, tick,
         "Dim newton, bucket : Set newton = Ball(546, 490) : Set bucket = Ball(325, 582)",
         "Balls = Array(bucket, newton)",
@@ -1203,7 +1203,7 @@ def _jaws_fakes(extra=()):
             "Tquick1", "Tquick2", "Tquick3", "Tquick4", "Tbeachfinal", "Tnightfinal", "Tbarrelshark", "Tjackpot",
             "Tsharkfinal", "Thammerfinal", "Tsmimerfinal", "Targetshark1", "Targetshark2", "Targetshark3",
             "Targetshark4", "shark", "Rsaveball", "lockpostG", "lockpostD", "PyramidKicker", "PadFin", "TimerQuick",
-            "PadMidTimer") + tuple(extra))])
+            "PadMidTimer", "PadWaveTimer") + tuple(extra))])
 
 
 def _cscript(tmp_path, script):
@@ -1307,34 +1307,106 @@ def test_jaws_center_ramp_ball_comes_back_to_the_left_post_under_vbscript(tmp_pa
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the generated VBScript under cscript")
-def test_jaws_beach_panic_goes_up_to_the_upper_deck_under_vbscript(tmp_path):
+def test_jaws_beach_panic_goes_up_the_wave_ramp_under_vbscript(tmp_path):
     # PAD-1425 (Mike): "The beach panic shot should send the ball up the wave
-    # ramp to the upper playfield ... Right now the game is sending the beach
-    # panic around an orbit". The Marina lane is the machine's left ramp
-    # (PAD-1413); a ball going up over sw5 (LEFT RAMP MADE) comes out on JP's
-    # deck (WallHautJaw, 110 high) 50 units out from his lock along its own
-    # eject, lock.kick 230, 12, so it rolls down to the upper flipper. JP's
-    # lock kicker is not used: a ball in it is UP PF SHIP WHEEL MAG
+    # ramp to the upper playfield"; PAD-1425 put it straight on the deck by
+    # JP's lock. PAD-1431 (Mike): "it needs to do so via the wave ramp. The
+    # real game has a ball path that goes to the right and up the wave ramp".
+    # JP's wave ramp is the channel his middle lane ran into: KrampBoucle at
+    # its foot kicks (85, 30) up the curl onto Ramp015 and the deck. A ball
+    # going up over sw5 (LEFT RAMP MADE) rolls on round the orbit; at
+    # PadWaveIn (Tpanic's place, over the channel) it drops into KrampBoucle
     m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
     sw5 = m["switches"]["sw5"]
     assert sw5["id"] == 67 and sw5["up"] is True and sw5["also"] == "PadMarinaUp"
-    body = m["extra_vbs"].split("Sub PadMarinaUp")[1].split("End Sub")[0]
-    assert "lock." not in "\n".join(ln.split("'")[0] for ln in body.split("\n"))
+    assert m["retrofit_triggers"]["PadWaveIn"]["clone"] == "Tpanic"
+    xs = [p[0] for p in m["retrofit_triggers"]["PadWaveIn"]["shape"]]
+    ys = [p[1] for p in m["retrofit_triggers"]["PadWaveIn"]["shape"]]
+    assert min(xs) <= 576 <= max(xs) and min(ys) <= 88 <= max(ys), "on the orbit where Tpanic is"
+    assert m["retrofit_timers"]["PadWaveTimer"] == {"clone": "PulseTimer", "interval_ms": 100}
+
+    def code(sub):
+        body = m["extra_vbs"].split("Sub " + sub)[1].split("End Sub")[0]
+        return "\n".join(ln.split("'")[0] for ln in body.split("\n"))
+    assert "lock." not in code("PadMarinaUp") + code("PadWaveIn_Hit")
     show = ("Sub Show(b) : Log = Log & Round(b.X) & \",\" & Round(b.Y) & \",\" & b.Z & \",\" & Round(b.VelX, 2) & \",\""
             " & Round(b.VelY, 2) & \",\" & b.VelZ & \" \" : End Sub")
     out = _cscript(tmp_path, "\n".join([
-        _jaws_fakes(), m["extra_vbs"], show,
-        "Dim b1 : Set b1 = Ball(367, 165) : b1.VelY = -14 : Set ActiveBall = b1 : PadMarinaUp : Show b1",
-        # the plunge or a ball coming round the top rolls down over it: left alone
-        "Dim b2 : Set b2 = Ball(367, 165) : Set ActiveBall = b2 : PadMarinaUp : Show b2",
-        "Dim b3 : Set b3 = New GoneBall : Set ActiveBall = b3 : PadMarinaUp : Log = Log & \"gone\"",
+        _jaws_fakes(),
+        "Dim KrampBoucle : Set KrampBoucle = New KpisteKicker : KrampBoucle.X = 636 : KrampBoucle.Y = 144",
+        m["extra_vbs"], show,
+        # up over sw5: it rolls on; at PadWaveIn, going right, into the kicker and kicked up the wave
+        "Dim b1 : Set b1 = Ball(367, 165) : b1.VelY = -14 : Set ActiveBall = b1 : GameTime = 1000 : PadMarinaUp : Show b1",
+        "b1.X = 576 : b1.Y = 88 : b1.VelX = 9 : b1.VelY = -2 : GameTime = 1300 : PadWaveIn_Hit : Show b1",
+        "Log = Log & PadWaveTimer.Enabled & \" \" : PadWaveTimer_Timer : Log = Log & PadWaveTimer.Enabled & \" | \"",
+        # once only: past it again with no new shot, left alone
+        "b1.X = 576 : b1.Y = 88 : b1.VelX = 9 : b1.VelY = -2 : GameTime = 1500 : PadWaveIn_Hit : Show b1",
+        # the plunge coming round the other way is left on the orbit, and takes no shot's place
+        "Dim b2 : Set b2 = Ball(367, 165) : b2.VelY = -14 : Set ActiveBall = b2 : GameTime = 2000 : PadMarinaUp",
+        "Dim b3 : Set b3 = Ball(700, 70) : b3.VelX = -9 : Set ActiveBall = b3 : GameTime = 2200 : PadWaveIn_Hit : Show b3",
+        "b2.X = 576 : b2.Y = 88 : b2.VelX = 9 : Set ActiveBall = b2 : GameTime = 2400 : PadWaveIn_Hit : Show b2 : PadWaveTimer_Timer",
+        "Log = Log & \"| \"",
+        # too long after the shot (3.5 s): another ball
+        "Dim b4 : Set b4 = Ball(367, 165) : b4.VelY = -14 : Set ActiveBall = b4 : GameTime = 5000 : PadMarinaUp",
+        "b4.X = 576 : b4.Y = 88 : b4.VelX = 9 : GameTime = 8500 : PadWaveIn_Hit : Show b4",
+        # coming down the lane over sw5 is no shot
+        "Dim b5 : Set b5 = Ball(367, 165) : Set ActiveBall = b5 : GameTime = 10000 : PadMarinaUp",
+        "b5.X = 576 : b5.Y = 88 : b5.VelX = 9 : GameTime = 10100 : PadWaveIn_Hit : Show b5",
+        "Dim b6 : Set b6 = New GoneBall : Set ActiveBall = b6 : PadMarinaUp : PadWaveIn_Hit : Log = Log & \"gone\" & PadWaveTimer.Enabled",
         "WScript.Echo Log"]))
-    assert out == ["237,206,135,-9.19,7.72,0", "367,165,,3,14,0", "gone"], out
-    mark = "' PAD-1425: the center ramp always comes back to the left inlane; Beach Panic goes up to the upper deck"
+    assert out == ["367,165,,3,-14,0", "636,144,25,0,0,0", "1", "kick85,30", "0", "|",
+                   "576,88,25,9,-2,0",
+                   "700,70,,-9,14,0", "636,144,25,0,0,0", "kick85,30", "|",
+                   "576,88,,9,-14,0",
+                   "576,88,,9,14,0",
+                   "gone0"], out
+    mark = "' PAD-1431: Beach Panic goes up the wave ramp; the center ramp turns round on a wire form"
     assert mark in m["extra_vbs"]
     assert any(r.get("absent") == mark for r in m["repatch"])
-    # PAD-1392's rule looked for its center-ramp line, which a new patch no longer writes
+    # the center ramp's own line from PAD-1425 is still written
+    assert ("' PAD-1425: the center ramp always comes back to the left inlane; Beach Panic goes up to the upper deck"
+            in m["extra_vbs"])
     assert not any("PAD-1392: the center ramp" in r.get("absent", "") for r in m["repatch"])
+
+
+def test_jaws_center_ramp_turns_round_on_a_wire_form(vpxfile):
+    # PAD-1431 (Mike): "make the turnaround on scars shot look like a
+    # turnaround wire form ... You can still see the ball path wall headed up
+    # the wave ramp". The center ramp's ball goes down the return wire from
+    # Kpiste (PAD-1425); PadMidTurn, a copy of that wire (Ramp053), curls from
+    # the lane's bend at Target2 round the corridor's mouth and back to the
+    # wire's head, drawn only
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    r = m["retrofit_ramps"]["PadMidTurn"]
+    assert r["clone"] == "Ramp053" and len(r["shape"]) == 13, "as many drag points as JP's return wire"
+    assert r["shape"][-1] == [374, 299], "ends at the return wire's head"
+    assert r["fields"]["CLDR"] == 0, "drawn only: the ball's way is the script's"
+    assert r["fields"]["HTBT"] == 0.0 and r["fields"]["HTTP"] == 55.0
+    assert max(p[0] for p in r["shape"]) > 439 + 28, "round past Target2, in the corridor's mouth"
+    # vpxshadow builds it from the clone: its drag points, the fields
+    vs = pytest.importorskip("vpxshadow")
+
+    def pt(x, y):
+        return _rec("DPNT", b"") + _rec("VCEN", struct.pack("<ff", x, y)) + _rec("SMTH", struct.pack("<i", 1)) + \
+            _rec("ENDB", b"")
+    src = (struct.pack("<i", 12) + _rec("HTBT", struct.pack("<f", 54)) + _rec("HTTP", struct.pack("<f", 55)) +
+           _rec("WDBT", struct.pack("<f", 60)) + _rec("WDTP", struct.pack("<f", 60)) + _rec("TYPE", struct.pack("<i", 2)) +
+           _rec("CLDR", struct.pack("<i", 1)) + _rec("NAME", vpxfile.wide("Ramp053")) +
+           b"".join(pt(k, k) for k in range(13)) + _rec("ENDB", b""))
+
+    class Table:
+        items = [src]
+        item_info = staticmethod(vpxfile.VpxTable.item_info)
+    (item,) = vs.retrofit_items(Table, {"retrofit_ramps": m["retrofit_ramps"]})
+    assert vpxfile.VpxTable.item_info(item)[:2] == ("Ramp", "PadMidTurn")
+    recs = list(vpxfile.item_records(item, 4))
+    assert [tuple(round(v) for v in struct.unpack_from("<ff", p)) for t, p, _ in recs if t == "VCEN"] == \
+        [tuple(p) for p in r["shape"]]
+    top = {t: p for t, p, _ in vpxfile.biff_records(item, 4)}
+    assert struct.unpack("<i", top["TYPE"]) == (1,) and struct.unpack("<i", top["CLDR"]) == (0,)
+    assert struct.unpack("<f", top["HTBT"]) == (0.0,) and struct.unpack("<f", top["WDTP"]) == (36.0,)
+    with pytest.raises(AssertionError):
+        vs.retrofit_items(Table, {"retrofit_ramps": {"X": dict(r, clone="Ramp999")}})
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
@@ -1454,6 +1526,20 @@ def test_jaws_copy_patched_before_pad_1425_asks_for_a_new_patch(tmp_path):
     mark = "' PAD-1425: the center ramp always comes back to the left inlane; Beach Panic goes up to the upper deck"
     old = m["extra_vbs"].replace(mark, "")
     (tmp_path / (name[:-4] + ".script.vbs")).write_text(old, encoding="utf-8")
+    assert why[0] in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
+    (tmp_path / (name[:-4] + ".script.vbs")).write_text(m["extra_vbs"], encoding="utf-8")
+    assert why[0] not in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
+
+def test_jaws_copy_patched_before_pad_1431_asks_for_a_new_patch(tmp_path):
+    # a copy whose Beach Panic ball came out by the lock (PAD-1425, v1.509.1
+    # on) asks for a new patch; a copy patched now does not
+    vsu = pytest.importorskip("vpxsetup")
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    why = [r["why"] for r in m["repatch"] if "instead of going up the wave ramp" in r["why"]]
+    assert len(why) == 1
+    name = "JAWS_50Th_Anniversary (PAD).vpx"
+    mark = "' PAD-1431: Beach Panic goes up the wave ramp; the center ramp turns round on a wire form"
+    (tmp_path / (name[:-4] + ".script.vbs")).write_text(m["extra_vbs"].replace(mark, ""), encoding="utf-8")
     assert why[0] in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
     (tmp_path / (name[:-4] + ".script.vbs")).write_text(m["extra_vbs"], encoding="utf-8")
     assert why[0] not in vsu.missed_fixes(str(tmp_path), name, m["repatch"])

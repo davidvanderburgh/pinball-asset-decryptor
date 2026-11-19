@@ -52,7 +52,21 @@ Each run: a fresh sparse copy of the old card, remote access set up with PAD's o
 The stand-in's network is the WSL bridge (~7.5 MB/s through qemu'd dropbear); over the machine's Wi-Fi
 (~3.6 MB/s) every 0.6 GB less is ~170 s, so the gain there is larger than the 95 s here.
 
-## Still to do
+## On David's Godzilla (2026-11-19, armv7, `C:/tmp/PAD-1435/mprobe2.py`, read-only)
+
+| | |
+|---|---|
+| helper's hashes == busybox's (1 MiB, a 58 MB game file) | yes |
+| today's 1 MiB blocks, cold, 0.20-0.22 GB | 6.3-6.7 MB/s |
+| helper's 64 KB pieces, cold, the other set of files (then swapped) | **15.1-15.9 MB/s** |
+| helper copying 400 scattered 64 KB pieces from a card file into RAM, cold | 8.9 MB/s |
+| one 64 MB file over the machine's Wi-Fi | 0.96 MB/s |
+
+For the files rebuilt from pieces, the helper's hashing replaces the 1 MiB hashing (`sync`: `pieces_run`, then
+`delta_put` only for files outside the job), so on the real board the index is ~2.4x faster than today's read,
+not a cost (under qemu it looked like +44 s). With Wi-Fi at 1-3.9 MB/s, every GB not sent is 4-17 minutes.
+
+## Done
 
 1. (Done for v36 -> v38, above.) Stand-in Send of the real case, V2.3 onto a v38 card with remote access set up: run it twice, with pieces and
    without (`PAD_NO_PIECES=1`). Compare the network bytes, the wall time, and the machine's card file by file

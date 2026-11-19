@@ -226,3 +226,16 @@ def test_the_spooky_page_calls_only_rpcs_the_spooky_tab_has():
     assert {"try", "build", "new", "set", "sound_path"} <= names
     for n in names:
         assert callable(getattr(SpookyModesMixin, "spk_" + n, None)), n
+
+
+def test_a_refused_try_it_start_leaves_no_overlay_behind(tmp_path, monkeypatch):
+    from pinball_decryptor.webui import emulate_spooky_core as core
+    from pinball_decryptor.webui import compat
+    monkeypatch.setattr(core, "rig_available", lambda: True)
+    monkeypatch.setattr(core, "platform_ok", lambda: True)
+    monkeypatch.setattr(compat.messagebox, "showinfo", lambda *a, **k: None)
+    with web_app(tmp_path, mfr="spooky") as w:
+        _spooky(w)
+        emu = w.window.service("emulate_spooky")
+        emu.launch_file(str(tmp_path / "v2025.12.01.09.scooby"), pad_overlay=str(tmp_path))   # no such file
+        assert getattr(emu, "_pad_overlay", "") == ""

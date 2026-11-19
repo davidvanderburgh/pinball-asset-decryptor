@@ -242,7 +242,10 @@ class EmulateSpookyTab(RigTabMixin, TabService):
             return False
         self._pad_overlay = pad_overlay or ""
         self.spooky_emulate_file_var.set(path)
-        self._start_async()
+        try:
+            self._start_async()             # reads it before any worker starts
+        finally:
+            self._pad_overlay = ""          # a refused start leaves nothing for the next one
         return True
 
     # ------------------------------------------------------------------

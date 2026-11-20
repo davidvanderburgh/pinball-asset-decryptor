@@ -1,0 +1,89 @@
+
+Discarded input sections
+
+ .reginfo       0x00000000       0x18 /tmp/ccDIM3Cr.o
+ .MIPS.abiflags
+                0x00000000       0x18 /tmp/ccDIM3Cr.o
+ .pdr           0x00000000      0x160 /tmp/ccDIM3Cr.o
+ .comment       0x00000000       0x2c /tmp/ccDIM3Cr.o
+ .note.GNU-stack
+                0x00000000        0x0 /tmp/ccDIM3Cr.o
+ .gnu.attributes
+                0x00000000       0x10 /tmp/ccDIM3Cr.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+                0x9d050000                        PAD_FLASH = 0x9d050000
+                0xa0010000                        PAD_RAM_AT = 0xa0010000
+                0xa0008200                        GAME_gp = 0xa0008200
+                0xa00009c4                        GAME_this = 0xa00009c4
+                0x9d0283c8                        GAME_tick_target = 0x9d0283c8
+                0x9d03c388                        GAME_add_score = 0x9d03c388
+                0x9d04aa90                        GAME_play_sfx = 0x9d04aa90
+                0x9d049ed4                        GAME_text_str = 0x9d049ed4
+                0x9d047600                        GAME_link_send = 0x9d047600
+                0xa0002ac0                        GAME_data_out = 0xa0002ac0
+                0x9d048000                        GAME_coil_fire = 0x9d048000
+                0xa00002f8                        GAME_switch_ram = 0xa00002f8
+                0xa00025a4                        GAME_lamp_ram = 0xa00025a4
+                0xa000296c                        GAME_score_array = 0xa000296c
+                0xa0000a1c                        GAME_millis = 0xa0000a1c
+                0xa000028a                        GAME_player = 0xa000028a
+                0xa00002c8                        GAME_ball = 0xa00002c8
+                0xa0000230                        GAME_ball_active = 0xa0000230
+                0xa0000263                        GAME_phase = 0xa0000263
+                0xa00002f4                        GAME_tilt = 0xa00002f4
+LOAD /tmp/ccDIM3Cr.o
+                0x9d050000                        . = PAD_FLASH
+
+.head           0x9d050000       0x14
+ *(.head)
+ .head          0x9d050000       0x14 /tmp/ccDIM3Cr.o
+                0x9d050000                PAD_HEAD
+
+.text           0x9d050020      0xee0
+ *(.text.entry)
+ .text.entry    0x9d050020      0x7cc /tmp/ccDIM3Cr.o
+                0x9d050020                pad_entry
+ *(.text .text.*)
+ *fill*         0x9d0507ec        0x4 
+ .text          0x9d0507f0      0x710 /tmp/ccDIM3Cr.o
+
+.rodata         0x9d050f00      0x190
+ *(.rodata .rodata.*)
+ .rodata.str1.4
+                0x9d050f00      0x17c /tmp/ccDIM3Cr.o
+                                0x184 (size before relaxing)
+ *fill*         0x9d05107c        0x4 
+ .rodata        0x9d051080       0x10 /tmp/ccDIM3Cr.o
+
+.data           0x9d051090        0x0
+ *(.data .data.* .sdata .sdata.*)
+ .data          0x9d051090        0x0 /tmp/ccDIM3Cr.o
+
+.bss            0x9d051090        0x0
+ *(.bss .bss.* .sbss .sbss.* COMMON)
+ .bss           0x9d051090        0x0 /tmp/ccDIM3Cr.o
+                0x9d051100                        . = ALIGN (0x100)
+                0x9d051100                        PAD_DATA = .
+                0xa0010000                        PAD_RUN = PAD_RAM_AT
+                0x00000001                        ASSERT ((SIZEOF (.data) == 0x0), padheck: no initialised variables (no start-up code runs them))
+                0x00000001                        ASSERT ((SIZEOF (.bss) == 0x0), padheck: every variable lives in struct run (PAD_RUN))
+
+/DISCARD/
+ *(.reginfo)
+ *(.MIPS.*)
+ *(.pdr)
+ *(.comment)
+ *(.gnu.*)
+ *(.note*)
+ *(.eh_frame*)
+OUTPUT(/tmp/padheck_RZO_V026.elf elf32-tradlittlemips)
+
+.mdebug.abi32   0x00000000        0x0
+ .mdebug.abi32  0x00000000        0x0 /tmp/ccDIM3Cr.o

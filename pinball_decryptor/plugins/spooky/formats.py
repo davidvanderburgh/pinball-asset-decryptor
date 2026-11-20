@@ -212,17 +212,18 @@ def extract_tar_gz(tar_path, output_dir, progress_cb=None):
 def create_zip(source_dir, out_path, progress_cb=None, pad_modes=None):
     """Create a ZIP archive from *source_dir*.  *pad_modes* as :func:`create_tar_gz` (PAD-1420:
     Rick and Morty's game code is a ZIP; its ``pad/`` goes in the game's folder, and the rewrite
-    adds the runtime's line to its config.yaml)."""
+    adds the runtime's line to its config.yaml; PAD-1422, a pinHeck card: no ``pad/`` folder, the
+    rewrite turns the card's PRG into the modes PRG)."""
     all_files, _all_dirs = _scan_for_modes(source_dir, pad_modes)
 
     total = len(all_files)
-    names = getattr(pad_modes[1], "names", ()) if pad_modes else ()
+    names = {n.upper() for n in getattr(pad_modes[1], "names", ())} if pad_modes else set()
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        if pad_modes:
+        if pad_modes and pad_modes[2]:
             _add_pad_modes_zip(zf, pad_modes)
         for i, (full, rel) in enumerate(all_files):
             arc = rel.replace("\\", "/")
-            if names and os.path.basename(rel) in names:
+            if names and os.path.basename(rel).upper() in names:
                 with open(full, "rb") as fh:
                     data = fh.read()
                 new = pad_modes[1](arc, data)
@@ -284,7 +285,7 @@ def _scan_for_modes(source_dir, pad_modes):
     """:func:`_scan_for_tar` without what the custom modes replace: the source's ``pad/`` folder
     and, at its top, the files the modes put there."""
     all_files, all_dirs = _scan_for_tar(source_dir)
-    if pad_modes:
+    if pad_modes and pad_modes[2]:                 # a pinHeck card has no pad/ (PAD-1422)
         folder = pad_modes[2]
         tops = {t[0] for t in (pad_modes[3] if len(pad_modes) > 3 else ())}
         def inside(rel):                            # folder may be nested (uptest/pad, PAD-1418)

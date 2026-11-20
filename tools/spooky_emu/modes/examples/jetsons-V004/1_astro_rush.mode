@@ -1,0 +1,13 @@
+# Astro Rush - a starter mode: two hits on switch 20 start it, switches 0 and 10 score it
+name = Astro Rush
+title = ASTRO RUSH
+start = switch_20
+start_count = 2
+shots = switch_0 switch_10
+points = 250000
+seconds = 30
+complete = 3
+complete_points = 2000000
+sound_start = EB0
+sound_shot = C01
+sound_complete = G00

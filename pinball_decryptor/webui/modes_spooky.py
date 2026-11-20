@@ -394,7 +394,7 @@ class SpookyModesMixin:
         _modes, problems = SM.check(label)
         if problems:
             raise ValueError("Fix the %d problem(s) the check found first" % len(problems))
-        pad = SM.stage_try(label, self._spk_try_base())
+        pad = SM.stage_try(label, self._spk_try_base(), stock)
         emu = self.window.service("emulate_spooky")
         if emu is None or not hasattr(emu, "launch_file"):
             raise ValueError("the Emulate tab is not in this app")

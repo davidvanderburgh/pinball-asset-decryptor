@@ -7,7 +7,9 @@ Mode of ours to the game's own mode list); on Looney Tunes (Godot, PAD-1419)
 tools/spooky_emu/modes/godot (``pad_modes.gd``, one more autoload that an ``override.cfg``
 beside main.x86_64 names); on Rick and Morty (P-ROC, PAD-1420) tools/spooky_emu/modes/proc
 (``padmodes_proc.py``, a package ``pad/`` in the game's folder that one line of its config.yaml
-loads as procgame's board class).  ``tools/spooky_emu/modes/mkspkmodes.py`` is the checker and the build;
+loads as procgame's board class); on the pinHeck DMD games (Jetsons, Domino's, Rob Zombie,
+PAD-1422/1423) tools/spooky_emu/modes/pinheck (compiled into the game's own PRG, the modes packed
+after it).  ``tools/spooky_emu/modes/mkspkmodes.py`` is the checker and the build;
 this module is what the tab needs on top of it:
 
 * the titles - every port report in ``tools/spooky_emu/modes/ports`` (``titles()``): the game's
@@ -28,7 +30,9 @@ import shutil
 GAME_NAMES = {"scooby_doo": "Scooby-Doo", "beetlejuice": "Beetlejuice",
               "texas_chainsaw": "Texas Chainsaw Massacre", "evil_dead": "Evil Dead",
               "halloween_78": "Halloween", "ultraman": "Ultraman", "legends_of_tera": "Looney Tunes",
-              "rick_and_morty": "Rick and Morty", "alice_cooper": "Alice Cooper's Nightmare Castle"}
+              "rick_and_morty": "Rick and Morty", "alice_cooper": "Alice Cooper's Nightmare Castle",
+              "jetsons": "Jetsons", "dominos": "Domino's Spectacular Pinball Adventure",
+              "rob_zombie": "Rob Zombie's Spookshow International"}
 MAX_MODES = 24
 #: the form's groups: every key of mkspkmodes.KEYS once
 FORM_GROUPS = (
@@ -52,10 +56,11 @@ TITLE_FORM = ("panel", "font_title", "font_value", "font_timer", "title_color", 
 def screen_keys_out(port):
     """The form's Screen keys this title's screen cannot show: Alice Cooper's Unity player draws
     the game's own text in its one font with no box behind it (mkspkmodes.UNITY_SCREEN_NOT)."""
+    gone = set((port or {}).get("keys_not_here") or ())     # PAD-1422: a pinHeck DMD's panel
     if (port or {}).get("screen") != "unity_player":
-        return set()
+        return gone
     # PAD-1424: nor a picture or video of the mode's own (the player loads the game's by name)
-    return set(mk().UNITY_SCREEN_NOT) | {"picture", "picture_at", "video", "video_at", "video_loop"}
+    return gone | set(mk().UNITY_SCREEN_NOT) | {"picture", "picture_at", "video", "video_at", "video_loop"}
 
 
 def form_groups(port=None):
@@ -388,6 +393,10 @@ def check(label):
     return mk().check_modes(title_dir(label), load_port(label))
 
 
+def is_pinheck(label):
+    return mk().engine(load_port(label) or {}) == "pinheck"
+
+
 def key_kind(key):
     m = mk()
     return m.KEYS.get(key) or m.TITLE_KEYS.get(key)
@@ -492,6 +501,11 @@ def find_stock(label, folders):
 def install_note(label):
     """What installing a modes update does on this title's machine (the Build card says it)."""
     p = load_port(label) or {}
+    if mk().engine(p) == "pinheck":
+        return ("Install it the way a stock update goes on: unzip it onto the game's SD card, then in "
+                "the service menu choose UPDATE CODE and restart. The machine flashes the new program, "
+                "with the modes in it, into the game. To take them out, put the stock update on the card "
+                "and choose UPDATE CODE again.")
     note = "Install it the way a stock update installs: on a USB stick, under its own name. "
     if mk().engine(p) == "godot":
         note += ("The machine puts it in place when it next powers up, and the modes are in the game "
@@ -516,9 +530,10 @@ def default_out(stock, folder):
     return os.path.join(folder, "PAD modes", os.path.basename(stock))
 
 
-def stage_try(label, base):
-    """The Try it folder (the runtime + the modes as the update's pad/ holds them) -> its path."""
-    return mk().stage(title_dir(label), os.path.join(base, label, "pad"), load_port(label))
+def stage_try(label, base, stock=None):
+    """The Try it folder (the runtime + the modes as the update's pad/ holds them) -> its path;
+    on a pinHeck title the modes PRG made from *stock* (the update zip) -> that file's path."""
+    return mk().stage(title_dir(label), os.path.join(base, label, "pad"), load_port(label), stock)
 
 
 # ============================================================================ Write (the Write tab)
@@ -534,6 +549,11 @@ def label_for_extract(folder, meta=None):
     game = next((k for k, v in GAME_NAMES.items() if v == (meta or {}).get("game")), "")
     if not game:
         return ""
+    # a pinHeck card (Jetsons): its program's name is the build (JET_V004.PRG)
+    for lb in labels_of(game):
+        prg = ((load_port(lb) or {}).get("prg") or "").upper()
+        if prg and _find_prg(folder, prg + ".PRG"):
+            return lb
     # what the extract says its version is: version.txt's first line (Scooby-Doo, Beetlejuice,
     # Evil Dead, Texas Chainsaw's "TCM V1.00"), or uptest/version_<n>.txt's name (Halloween, Ultraman)
     seen = []
@@ -558,6 +578,16 @@ def label_for_extract(folder, meta=None):
     return ""
 
 
+def _find_prg(folder, name):
+    """*name* (a PRG) in an extract folder or one level down (Jetsons/JET_V004.PRG), or ""."""
+    for d in (folder, *(os.path.join(folder, x) for x in sorted(os.listdir(folder))
+                        if os.path.isdir(os.path.join(folder, x)))) if os.path.isdir(folder) else ():
+        for fn in os.listdir(d):
+            if fn.upper() == name:
+                return os.path.join(d, fn)
+    return ""
+
+
 def write_pad_modes(label, folder=None):
     """The person's modes for *label* as the Write tab packs them -> ``(files, rewrite, pad, top)``
     for formats.create_tar_gz / create_tar (*pad*: where pad/ goes, beside the extract's
@@ -568,6 +598,23 @@ def write_pad_modes(label, folder=None):
         return None
     m = mk()
     port = load_port(label)
+    if m.engine(port) == "pinheck":
+        # the update is the card again with its PRG the modes PRG: no pad/ folder, one rewrite
+        modes, problems = m.check_modes(d, port)
+        if problems:
+            raise ValueError("the modes have problems:\n  " + "\n  ".join(problems))
+        want = port["prg"].upper() + ".PRG"
+
+        def rewrite_prg(rel, data):
+            if rel.replace("\\", "/").rsplit("/", 1)[-1].upper() != want:
+                return data
+            try:
+                return m.build_prg_of(data, modes, port)
+            except m.Refused as e:
+                raise ValueError(str(e))
+        rewrite_prg.names = {want}
+        rewrite_prg.modes = len(modes)
+        return [], rewrite_prg, None, []
     try:
         files = m.pad_files(d, port)
     except m.Refused as e:
@@ -585,6 +632,8 @@ def write_pad_modes(label, folder=None):
 def loads_how(label):
     """How the update PAD writes loads the runtime, for the Write log."""
     port = load_port(label)
+    if mk().engine(port) == "pinheck":
+        return "the game's program (%s.PRG) carries it" % port.get("prg", "")
     if mk().engine(port) == "godot":
         return "an override.cfg beside the game loads it"
     if mk().engine(port) == "proc":

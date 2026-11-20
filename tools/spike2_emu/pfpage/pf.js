@@ -740,6 +740,7 @@ function startMain() {
     // Remove). Lining up: drag moves it, the wheel sizes it (Shift: height
     // only, Alt: width only); the spots stay where they are, as the guide.
     const picOn = "picture" in V;
+    let hoverSw = null;
     let pic = V.picture || null, picSrc = "", picNat = null, lining = false;
     const picImg = picOn ? el("img", "pf-pic") : null;
     let picTools = null, picHint = null;
@@ -781,6 +782,15 @@ function startMain() {
         placePic();
         api("pic_rect", pic.rect);
       });
+      tool("hide", "Hide spots", "Hide the numbered spots so the picture's own buttons show: "
+        + "the switches still work there (hover for a ring and the name, click to make one; "
+        + "a made switch shows as a green ring). Kept for this game.", () => {
+        if (!pic) return;
+        pic.hide = !pic.hide;
+        dirty = true;
+        shownTools();
+        api("pic_spots", pic.hide);
+      });
       tool("drop", "Remove", "Take your picture away (the game's own drawing comes back, where it has one)", () => {
         api("pic_clear").then((r) => { pic = r; lining = false; showPic(); });
       });
@@ -809,6 +819,10 @@ function startMain() {
         const own = !!(pic && pic.own);
         if (!own) lining = false;
         b.line.style.display = b.reset.style.display = b.drop.style.display = own ? "" : "none";
+        b.hide.style.display = pic ? "" : "none";
+        b.hide.textContent = spotsHidden() ? "Show spots" : "Hide spots";
+        b.hide.classList.toggle("on", spotsHidden());
+        dirty = true;
         b.pick.textContent = own ? "Picture\u2026" : "Add picture\u2026";
         b.line.classList.toggle("on", lining);
         stage.classList.toggle("lining", lining);
@@ -817,6 +831,8 @@ function startMain() {
         else if (picHint.textContent.startsWith("Drag")) say("");
       };
     }
+    // the spots hidden under a picture (PAD-1468): its own buttons show
+    function spotsHidden() { return !!(pic && pic.hide); }
     function fitRect() {
       const [nw, nh] = picNat || [BW, BH];
       const k = Math.min(BW / nw, BH / nh);
@@ -952,7 +968,8 @@ function startMain() {
         g.strokeStyle = isHeld ? "#ffd400" : hot ? "#ff80ff" : "#ff4040";
         g.strokeRect(cx - h, cy - h, 2 * h, 2 * h);
       }
-      for (const [x0, y0, x1, y1, w] of (V.sketch || [])) {
+      // the flipper sketch stands in for a picture: not over one
+      for (const [x0, y0, x1, y1, w] of (pic ? [] : V.sketch || [])) {
         g.beginPath(); g.moveTo(x0 * scale, y0 * scale); g.lineTo(x1 * scale, y1 * scale);
         g.lineWidth = w * scale; g.lineCap = "round"; g.strokeStyle = "#3a3f47"; g.stroke();
       }
@@ -961,6 +978,18 @@ function startMain() {
         const cx = x * scale, cy = y * scale;
         const isHeld = held && held[0] === "switch" && held[1] === k;
         const isRip = ripping === k;
+        if (spot != null && spotsHidden()) {
+          // hidden: nothing over the picture's own button, unless it is made
+          // (a green ring), held, or under the mouse (a faint ring)
+          const on = !!made[String(id)];
+          if (!(on || isHeld || isRip || hoverSw === k)) continue;
+          g.beginPath(); g.arc(cx, cy, spotR, 0, Math.PI * 2);
+          if (on) { g.fillStyle = "rgba(0,200,83,.28)"; g.fill(); }
+          g.lineWidth = on || isHeld || isRip ? 3 : 1.5;
+          g.strokeStyle = isHeld ? "#ffd400" : isRip ? "#ff9500" : on ? "#00e676" : "rgba(255,255,255,.85)";
+          g.stroke();
+          continue;
+        }
         if (spot != null) {
           // the manual's numbered spot: orange as on its photo, green when made
           const on = !!made[String(id)];
@@ -1002,6 +1031,13 @@ function startMain() {
     (function loop() { draw(); jiggle(); if (cab) cab.draw(); requestAnimationFrame(loop); })();
 
     if (picOn) {
+      // which spot is under the mouse, for the hidden spots' hover ring
+      cv.addEventListener("pointermove", (e) => {
+        const h = lining ? null : hit(...at(e));
+        const k = h && h[0] === "switch" ? h[1] : null;
+        if (k !== hoverSw) { hoverSw = k; if (spotsHidden()) dirty = true; }
+      });
+      cv.addEventListener("pointerleave", () => { if (hoverSw != null) { hoverSw = null; dirty = true; } });
       let drag = null, saveT = 0;
       const save = () => { clearTimeout(saveT); saveT = setTimeout(() => api("pic_rect", pic.rect), 250); };
       const base = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; };

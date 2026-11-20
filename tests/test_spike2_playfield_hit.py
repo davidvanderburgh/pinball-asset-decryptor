@@ -258,4 +258,5 @@ def test_the_artwork_view_uses_the_pure_hit_test():
     i = src.index("function fieldView(")
     body = src[i:src.index("function schematicView(", i)]
     assert "function hit(px, py) { return pfHit(V, fx, scale, px, py); }" in body
-    assert body.count("hit(...at(e))") == 2          # pointermove, pointerdown
+    # pointermove, pointerdown, and the hidden spots' hover ring (PAD-1468)
+    assert body.count("hit(...at(e))") == 3

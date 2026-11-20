@@ -167,3 +167,19 @@ def test_halloweens_own_drawing_comes_from_its_build(pictures):
     t = spkswitches.table(key="um")
     spkswitches.game_picture(str(rig), "um", t)
     assert not t.get("art") and "art_rect" not in t
+
+
+def test_hide_spots_is_kept_per_game_and_outlives_the_picture(pictures):
+    app = appf.App(spkswitches.table(key="um"), rig=None, art="", title="Ultraman")
+    app.api("pic_set", [PNG_1PX])
+    assert app.api("pic_spots", [True])["hide"] is True
+    app.api("pic_rect", [[1, 2, 30, 40]])
+    again = appf.App(spkswitches.table(key="um"), rig=None, art="", title="Ultraman")
+    got = again.state("main")["view"]["picture"]
+    assert got["hide"] is True and got["rect"] == [1, 2, 30, 40]
+    # a new picture keeps the choice but not the old place; Remove leaves no picture
+    got = app.api("pic_set", [PNG_1PX])
+    assert got["hide"] is True and got["rect"] is None
+    assert app.api("pic_clear", []) is None
+    app.api("pic_set", [PNG_1PX])
+    assert app.api("pic_spots", [False])["hide"] is False

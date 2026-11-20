@@ -332,6 +332,22 @@ class App:
             spot)
 
     # -- the picture under the spots (PAD-1468) -------------------------------
+    def _prefs(self):
+        """This game's saved picture settings: {"rect": ..., "hide": bool}."""
+        try:
+            with open(os.path.join(PICTURE_DIR, self.pic_key + ".json"),
+                      encoding="utf-8") as fh:
+                d = json.load(fh)
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_prefs(self, d):
+        os.makedirs(PICTURE_DIR, exist_ok=True)
+        with open(os.path.join(PICTURE_DIR, self.pic_key + ".json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(d, fh)
+
     def _own_picture(self):
         """(path, rect or None) of the user's picture of this game, or None."""
         for ext in sorted(set(PICTURE_TYPES.values())):
@@ -363,20 +379,26 @@ class App:
     def _picture(self):
         """What the page draws under the spots: {own, rect, v} or None."""
         own = self._own_picture()
+        hide = bool(self._prefs().get("hide"))
         if own:
             return {"own": True, "rect": own[1], "v": self._pic_v(),
-                    "game": bool(self.art)}
+                    "game": bool(self.art), "hide": hide}
         if self.spots and self.art:
             return {"own": False, "rect": good_rect(self.t.get("art_rect") or ()),
-                    "v": self._pic_v(), "game": True}
+                    "v": self._pic_v(), "game": True, "hide": hide}
         return None
 
     def _drop_own_picture(self):
-        for ext in set(PICTURE_TYPES.values()) | {"json"}:
+        """The picture and where it was lined up; Hide spots stays."""
+        for ext in set(PICTURE_TYPES.values()):
             try:
                 os.remove(os.path.join(PICTURE_DIR, "%s.%s" % (self.pic_key, ext)))
             except OSError:
                 pass
+        d = self._prefs()
+        if "rect" in d:
+            d.pop("rect")
+            self._save_prefs(d)
 
     def set_picture(self, data_url):
         """The page's chosen file, as a data: URL -> this game's picture."""
@@ -401,9 +423,16 @@ class App:
         rect = good_rect(rect)
         if rect is None or not self._own_picture():
             return self._picture()
-        with open(os.path.join(PICTURE_DIR, self.pic_key + ".json"), "w",
-                  encoding="utf-8") as fh:
-            json.dump({"rect": rect}, fh)
+        d = self._prefs()
+        d["rect"] = rect
+        self._save_prefs(d)
+        return self._picture()
+
+    def set_spots_hidden(self, hide):
+        """Hide spots: the picture's own buttons show, the switches still work."""
+        d = self._prefs()
+        d["hide"] = bool(hide)
+        self._save_prefs(d)
         return self._picture()
 
     def clear_picture(self):
@@ -463,6 +492,8 @@ class App:
             return self.set_picture_rect(args[0])
         if m == "pic_clear":
             return self.clear_picture()
+        if m == "pic_spots":
+            return self.set_spots_hidden(args[0])
         if m == "hold":
             n = int(args[0])
             self.held_ids.add(n)

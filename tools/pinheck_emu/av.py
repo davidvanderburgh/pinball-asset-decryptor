@@ -17,7 +17,8 @@ Two packet layouts are known:
   -> 4, take turns; a slot naming itself repeats). One video shows at a
   time. This is read from the packets and the video lengths, not from the
   Propeller's code. Its text is a layer of its own: 0x12 puts a line up
-  (byte 0 = column << 4 | line, bit 3 a flag not decoded), 0x06 ``n ff ff
+  (byte 0 = column << 3 | line: the game's text() builds it so, column in
+  4-pixel steps, line 0..7 in 8-pixel rows; PAD-1422), 0x06 ``n ff ff
   ..`` clears line n, ``13 03 01`` / ``13 03 00`` show / hide the text; a
   new video keeps it.
 
@@ -245,8 +246,8 @@ class Av:
             text = bytes(pkt[1:15]).split(b"\0")[0].split(b"\xff")[0].decode("latin1")
             if cmd == TEXT_RZ:
                 key = ("rz", pkt[0])
-            elif self.layout == "jetsons":      # line in bits 0..2; bit 3 a flag, not decoded
-                key = ((pkt[0] >> 4) * 8, (pkt[0] & 7) * 8)
+            elif self.layout == "jetsons":      # column << 3 | line (the game's text(), PAD-1422)
+                key = ((pkt[0] >> 3) * 4, (pkt[0] & 7) * 8)
             else:
                 key = ((pkt[0] >> 4) * 8, (pkt[0] & 15) * 8)
             self.texts[key] = text

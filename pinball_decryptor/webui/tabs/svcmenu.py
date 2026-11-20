@@ -35,8 +35,9 @@ SETTINGS = (
                                          "saved between games). Clear clears it; so does a factory reset."),
 )
 
-#: a ticked row with nothing behind it yet goes on the card with placeholder values
-PLACEHOLDER_NOTE = "On the card as a placeholder (values %s): nothing uses it yet. %s"
+#: a ticked row with nothing behind it yet goes on the card with placeholder values (PR #40 review: shown after the
+#: row's place, "On Custom Code. A placeholder ...", so the owner sees it is one)
+PLACEHOLDER_NOTE = "A placeholder (values %s): nothing uses it yet. %s"
 
 #: PAD-1393 round 2: what an unticked row of :data:`.service_menu.OFF_KEYS` means for the card
 OFF_NOTES = {

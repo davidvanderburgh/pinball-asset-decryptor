@@ -18,7 +18,7 @@ import threading
 
 from .base import TabService, rpc
 from .. import compat
-from ...core import card_extras, pad_ssh_key, ssh_card, wifi_card
+from ...core import card_extras, pad_ssh_key, remote_buttons, ssh_card, wifi_card
 
 #: PAD-1397: Send to machine, said for someone who has never heard of it
 SEND_INTRO = ("Changes go to the machine over your network instead of writing the SD card: only the files that "
@@ -141,6 +141,30 @@ class NetworkTab(TabService):
             return dict(supported=False, reason='Select the card image first (Select card tab).', enabled=False)
         return wifi_card.inspect_image(self._source())
 
+    def _inspect_buttons(self):
+        if not remote_buttons.offered(self.mfr):
+            return dict(supported=False, reason=remote_buttons.NOT_SPIKE2, enabled=False)
+        if not self._source():
+            return dict(supported=False, reason='Pick the card on the Extract tab first.', enabled=False)
+        return remote_buttons.inspect_image(self._source())
+
+    def _publish_buttons(self, project):
+        """PAD-1467: the remote-buttons choice and the four buttons (core/remote_buttons.py)."""
+        info = self._inspect_buttons()
+        on, error = info.get('enabled', False), ''
+        try:
+            rec = card_extras.load_buttons(project)
+            if rec is not None:
+                on = rec['enabled']
+        except card_extras.ExtrasError as e:
+            error = str(e)
+        self.set(buttons_offered=remote_buttons.offered(self.mfr), buttons_enabled=bool(on), buttons_error=error,
+                 buttons_supported=bool(info['supported'] and os.path.isdir(project)),
+                 buttons_reason=info['reason'] if project else 'Select a project folder on the Extract tab first.',
+                 buttons_details=[list(row) for row in remote_buttons.DETAILS],
+                 buttons_now=remote_buttons.describe(info),
+                 buttons_labels=[list(pair) for pair in remote_buttons.LABELS])
+
     def _publish_feed(self):
         modes = self.window.service('modes')
         if modes is None:
@@ -181,6 +205,7 @@ class NetworkTab(TabService):
                                    note=wifi_card.COMPARE_NOTE),
                  wifi_adapters=dict(head=list(wifi_card.ADAPTER_HEAD), rows=[list(r) for r in wifi_card.ADAPTERS],
                                     note=wifi_card.ADAPTER_NOTE))
+        self._publish_buttons(project)
         self.set(wifi_offered=wifi_card.offered(self.mfr), wifi_enabled=wifi_on, wifi_error=wifi_error,
                  wifi_supported=bool(wifi['supported'] and os.path.isdir(project)),
                  wifi_reason=wifi['reason'] if project else 'Select a project folder on the Extract tab first.')
@@ -630,7 +655,8 @@ class NetworkTab(TabService):
         if self.get('screen_busy') or self.get('screen_live') or not self.get('address') or self.get('running'):
             return False
         address = self.get('address')
-        live = dict(cond=threading.Condition(), seq=0, jpeg=None, raw=None, geo=None, done=False, stop=False)
+        live = dict(cond=threading.Condition(), seq=0, jpeg=None, raw=None, geo=None, done=False, stop=False,
+                    machine=None)
         self._live = live
         self.set(screen_live=True, screen_live_id=int(self.get('screen_live_id') or 0) + 1,
                  screen_note='Connecting...', screen_kind='', screen_rate='')
@@ -642,6 +668,7 @@ class NetworkTab(TabService):
             m = view = None
             try:
                 m = remote_send.connect(address)
+                live['machine'] = m          # a button pressed during the live view uses its connection
                 view = machine_screen.LiveView(m)
                 live['geo'] = view.geo
                 how = 'plain connection' if view.plain else 'encrypted connection, slower'
@@ -668,6 +695,7 @@ class NetworkTab(TabService):
             except Exception as e:                      # noqa: BLE001 - said, never raised into the UI
                 text, kind = 'Live view stopped: %s' % e, 'err'
             finally:
+                live['machine'] = None
                 for thing in (view, m):
                     try:
                         if thing is not None:
@@ -750,6 +778,56 @@ class NetworkTab(TabService):
         write = self.window.service('write')
         if write is not None:
             write.reload_assets_tabs()
+        return True
+
+    @rpc
+    def configure_buttons(self, enabled, project):
+        """PAD-1467: save the project's remote-buttons choice; the next card written from it carries it."""
+        info = self._inspect_buttons()
+        if project != self._project() or self.get('running') or not info['supported']:
+            return False
+        try:
+            card_extras.save_buttons(project, bool(enabled))
+        except card_extras.ExtrasError as e:
+            self.publish()
+            self.set(buttons_error=str(e))
+            return False
+        self.publish()
+        write = self.window.service('write')
+        if write is not None:
+            write.reload_assets_tabs()
+        return True
+
+    @rpc
+    def press_button(self, name):
+        """Press one of the machine's coin-door service buttons from here, on a worker: over the live view's
+        connection when one is running (a press is then immediate), else over one of its own."""
+        if name not in remote_buttons.BITS or not self.get('address') or self.get('running'):
+            return False
+        if self.get('buttons_busy'):
+            return False
+        address, live = self.get('address'), getattr(self, '_live', None)
+        self.set(buttons_busy=True)
+
+        def work():
+            from ...core import remote_send
+            text, kind = '', ''
+            try:
+                shared = live.get('machine') if live and not live.get('done') else None
+                m = shared or remote_send.connect(address)
+                try:
+                    res = remote_buttons.press(m, name)
+                finally:
+                    if shared is None:
+                        m.close()
+                if not res['ok']:
+                    text, kind = res['reason'], 'err'
+            except remote_send.SendError as e:
+                text, kind = str(e), 'err'
+            except Exception as e:                      # noqa: BLE001 - said, never raised into the UI
+                text, kind = 'The button could not be pressed: %s' % e, 'err'
+            self.ctx.loop.post(lambda: self.set(buttons_busy=False, buttons_note=text, buttons_kind=kind))
+        threading.Thread(target=work, daemon=True, name='pad-button-press').start()
         return True
 
     @rpc

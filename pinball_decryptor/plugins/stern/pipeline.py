@@ -451,7 +451,7 @@ class SternWritePipeline(BasePipeline):
 
     def _run(self):
         self._set_phase(0)  # Detect
-        from ...core import ssh_card, wifi_card
+        from ...core import remote_buttons, ssh_card, wifi_card
         from ...core.card_extras import ExtrasError
         try:
             ssh_config = ssh_card.validate_request(self.original_path, self.assets_dir)
@@ -463,7 +463,12 @@ class SternWritePipeline(BasePipeline):
             wifi_config = wifi_card.validate_request(self.original_path, self.assets_dir)
         except ExtrasError as e:
             raise PipelineError('Wi-Fi', str(e)) from e
-        extras_on = ssh_config is not None or wifi_config is not None
+        try:
+            # PAD-1467: and its remote-buttons choice (core/remote_buttons.py)
+            buttons_config = remote_buttons.validate_request(self.original_path, self.assets_dir)
+        except ExtrasError as e:
+            raise PipelineError('Remote buttons', str(e)) from e
+        extras_on = ssh_config is not None or wifi_config is not None or buttons_config is not None
         try:
             if extras_on or recovering_ssh:
                 ssh_card.validate_output(self.original_path, self.output_path)
@@ -535,7 +540,7 @@ class SternWritePipeline(BasePipeline):
                         if _mw.preview_on() else
                         "the original card with the last build's preview content taken "
                         "out (%s)") % ", ".join(had_modes))
-        ssh_note = wifi_note = ''
+        ssh_note = wifi_note = buttons_note = ''
         if extras_on:
             marker = str(ssh_card.pending_marker(self.output_path))
             step = 'Remote access'
@@ -555,6 +560,12 @@ class SternWritePipeline(BasePipeline):
                         self.original_path, self.output_path, wifi_config,
                         log=self._log, cancel=lambda: self._cancelled)
                     self._check_cancel()
+                if buttons_config is not None:
+                    step = 'Remote buttons'
+                    buttons_note = remote_buttons.apply_to_build(
+                        self.original_path, self.output_path, buttons_config,
+                        log=self._log, cancel=lambda: self._cancelled)
+                    self._check_cancel()
                 ssh_card.note_build(self.output_path, self.assets_dir)
                 os.remove(marker)
             except Exception as e:
@@ -566,11 +577,13 @@ class SternWritePipeline(BasePipeline):
                     except OSError:
                         pass  # pending marker continues to refuse flashes
                 raise PipelineError(step, str(e)) from e
-        if summary == 'no changes' and (ssh_note or wifi_note):
-            summary = ('remote access (SSH) and Wi-Fi start-up' if ssh_note and wifi_note
-                       else 'remote access (SSH)' if ssh_note else 'Wi-Fi start-up')
-        if wifi_note:
-            ssh_note = (ssh_note + '\n' + wifi_note) if ssh_note else wifi_note
+        if summary == 'no changes' and (ssh_note or wifi_note or buttons_note):
+            named = [name for name, said in (('remote access (SSH)', ssh_note), ('Wi-Fi start-up', wifi_note),
+                                             ('remote buttons', buttons_note)) if said]
+            summary = named[0] if len(named) == 1 else ', '.join(named[:-1]) + ' and ' + named[-1]
+        for extra in (wifi_note, buttons_note):
+            if extra:
+                ssh_note = (ssh_note + '\n' + extra) if ssh_note else extra
         if recovering_ssh and not extras_on:
             self._check_cancel()
             if not after.get('complete'):

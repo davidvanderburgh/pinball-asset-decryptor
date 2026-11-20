@@ -135,7 +135,8 @@ def configuration(project):
 def digest(project):
     rec = configuration(project)
     wifi = load_wifi(project)
-    if rec is None and wifi is None:
+    buttons = load_buttons(project)
+    if rec is None and wifi is None and buttons is None:
         return None
     record = None
     if rec is not None:
@@ -145,6 +146,9 @@ def digest(project):
     if wifi is not None:
         # PAD-1467: a project that also sets the Wi-Fi start-up; one that never has keeps the digest it had
         record = {'ssh': record, 'wifi': wifi}
+    if buttons is not None:
+        # PAD-1467: and one that sets remote buttons; again, a project that never has keeps its digest
+        record = {'base': record, 'buttons': buttons}
     return hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
 
 
@@ -166,6 +170,38 @@ def load_wifi(project):
             or type(rec.get('band5', False)) is not bool):
         raise ExtrasError('The project Wi-Fi configuration is invalid.')
     return {'enabled': rec['enabled'], 'band5': bool(rec['enabled'] and rec.get('band5', False))}
+
+
+def load_buttons(project):
+    """PAD-1467: the saved remote-buttons choice ``{'enabled': bool}``, or None when this project never set it
+    (``extras.buttons`` in the project's ``.staged_changes.json``; core/remote_buttons.py puts it on the card)."""
+    if not project or not os.path.isdir(project):
+        return None
+    extras = staged_changes.load(project).get('extras')
+    if extras is None:
+        return None
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    rec = extras.get('buttons')
+    if rec is None:
+        return None
+    if not isinstance(rec, dict) or type(rec.get('enabled')) is not bool:
+        raise ExtrasError('The project remote-buttons configuration is invalid.')
+    return {'enabled': rec['enabled']}
+
+
+def save_buttons(project, enabled):
+    if not project or not os.path.isdir(project):
+        raise ExtrasError('Select a project folder before changing the remote-buttons option.')
+    if type(enabled) is not bool:
+        raise ExtrasError('The remote-buttons option must be a checkbox value.')
+    data = staged_changes.load(project)
+    extras = data.setdefault('extras', {})
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    extras['buttons'] = {'enabled': enabled}
+    _persist(project, data)
+    return dict(extras['buttons'])
 
 
 def save_wifi(project, enabled, band5=False):

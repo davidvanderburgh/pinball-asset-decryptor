@@ -277,6 +277,27 @@ function MachineScreen({ n }) {
         ? html`<img class="net-screen" alt="The machine's screen" src=${mediaUrl(n.screen_path) + "&v=" + (n.screen_seq || 0)} />`
         : null}
     <${Said} text=${n.screen_note} kind=${n.screen_kind} />
+    ${n.buttons_offered ? html`<div class="lbl">Remote buttons</div>
+      <div class="row net-btn-row">
+        ${(n.buttons_labels || []).map(([key, label]) => html`<${Button} key=${key}
+          disabled=${n.running || !n.address} onClick=${() => call("network.press_button", key)}>${label}<//>`)}
+      </div>
+      <${Said} text=${n.buttons_note} kind=${n.buttons_kind} />
+      <span class="small muted">The machine's coin-door service buttons, pressed from here: they work only while
+        the coin door is open, as the real ones do (that is also when the machine's coil power is off). With Live
+        view running a press is immediate; without it each takes a second or two.</span>
+      ${!n.buttons_supported && n.buttons_reason ? html`<${Note}>${n.buttons_reason}<//>` : null}
+      <${Check} label="Put remote buttons on cards I write from this project" checked=${!!n.buttons_enabled}
+        disabled=${!n.buttons_supported || n.running} wrap
+        onChange=${(on) => call("network.configure_buttons", on, n.project)} />
+      <${Advanced} title="Exactly what it changes on the card">
+        <table class="net-fields net-wifi-details">
+          <tbody>${(n.buttons_details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>
+            <td class=${r[2] ? "mono" : ""}>${r[1]}</td></tr>`)}
+            ${n.buttons_now ? html`<tr><th scope="row">The card you picked has</th><td class="mono">${n.buttons_now}</td></tr>` : null}
+          </tbody></table>
+      <//>
+      ${n.buttons_error ? html`<p role="alert" class="err-ink">${n.buttons_error}</p>` : null}` : null}
     <span class="small muted">Live view shows about 5 frames a second on 5 GHz Wi-Fi (measured on a Godzilla LE; less
       on 2.4 GHz), with no sound. The pictures of the screen cross your home network on a plain connection, as
       Send to machine's big files do. It stops when you leave this tab, and by itself after 30 minutes.</span>

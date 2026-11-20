@@ -97,7 +97,26 @@ MENU_HOOK_LINES = [
     "\t\t$1",
     "\tfi",
 ]
-BLOCKS = (MENU_HOOK_LINES, HOOK_LINES)
+#: THE REMOTE-BUTTONS FORM (PAD-1467).  A card with remote buttons (the app's core/remote_buttons.py, which
+#: writes this block) preloads pad-buttons.so into the game as well: it adds a press from the PC to the cabinet
+#: word the game reads, coin door permitting.  One block for every case: each of the three objects when it is
+#: there, the stock line when none is.  The menu first, then the buttons, then the mode runtime: each hands
+#: every ioctl on.  core/remote_buttons.py carries the same lines, and a test holds the two equal.
+BUTTONS_SO = "/usr/local/bin/pad-buttons.so"
+ALL_HOOK_LINES = [
+    "\t# padmode (item 128) + padmenu (PAD-1309) + pad-buttons (PAD-1467): preload into THE GAME only.",
+    "\t# Command-scoped, so the restart lines below and conagent never see it.",
+    "\tPADPRE=",
+    "\t[ -f " + MENU_SO + " ] && PADPRE=" + MENU_SO,
+    "\t[ -f " + BUTTONS_SO + " ] && PADPRE=${PADPRE:+$PADPRE:}" + BUTTONS_SO,
+    "\t[ -f " + MODE_SO + " ] && PADPRE=${PADPRE:+$PADPRE:}" + MODE_SO,
+    "\tif [ -n \"$PADPRE\" ]; then",
+    "\t\tLD_PRELOAD=$PADPRE $1",
+    "\telse",
+    "\t\t$1",
+    "\tfi",
+]
+BLOCKS = (ALL_HOOK_LINES, MENU_HOOK_LINES, HOOK_LINES)
 
 
 class Refused(Exception):
@@ -133,6 +152,13 @@ def has_menu_hook(text):
     return any(lines[k:k + n] == MENU_HOOK_LINES for k in range(len(lines) - n + 1))
 
 
+def has_buttons_hook(text):
+    """True when this script carries the remote-buttons block (ALL_HOOK_LINES)."""
+    lines = _lines(text)
+    n = len(ALL_HOOK_LINES)
+    return any(lines[k:k + n] == ALL_HOOK_LINES for k in range(len(lines) - n + 1))
+
+
 def has_hook(text):
     """True when this script already carries our block.
 
@@ -159,6 +185,7 @@ def hook_game_monitor(text, menu=None):
     """
     if menu is None:
         menu = has_menu_hook(text)
+    buttons = has_buttons_hook(text)        # PAD-1467: a card with remote buttons keeps its block, whatever else
     text = strip_hook(text)
     lines = _lines(text)
     hits = [k for k, l in enumerate(lines) if l == RUN_LINE]
@@ -168,12 +195,15 @@ def hook_game_monitor(text, menu=None):
             "stock Spike 2 game_monitor and nothing has been written"
             % (RUN_LINE, len(hits)))
     k = hits[0]
-    lines[k:k + 1] = MENU_HOOK_LINES if menu else HOOK_LINES
+    lines[k:k + 1] = ALL_HOOK_LINES if buttons else MENU_HOOK_LINES if menu else HOOK_LINES
     return "\n".join(lines)
 
 
 def describe(text):
     """One line for a log: whether this script carries the mode hook."""
+    if has_buttons_hook(text):
+        return ("game_monitor: remote-buttons hook present, preloading %s, %s and %s when there"
+                % (MENU_SO, BUTTONS_SO, MODE_SO))
     if has_menu_hook(text):
         return ("game_monitor: multi-boot hook present, preloading %s and %s when there"
                 % (MENU_SO, MODE_SO))

@@ -3725,10 +3725,13 @@ class TreeEditMixin:
             compat.messagebox.showerror("Save scenes", str(e))
             return None
         colour = _colour_words(counts)
+        tn = counts.get("themes") or 0       # Simon (2026-11-20): the themes' own pictures and colors go too
         self._set_caption("Saved the edits of %d scene%s, %d replaced picture%s with their "
-                          "color profiles%s and %d text edit%s to %s"
+                          "color profiles%s%s and %d text edit%s to %s"
                           % (n, "" if n == 1 else "s", pics, "" if pics == 1 else "s",
-                             ", " + colour if colour else "", texts,
+                             ", " + colour if colour else "",
+                             ", %d theme picture%s or color%s" % (tn, "" if tn == 1 else "s", "" if tn == 1 else "s")
+                             if tn else "", texts,
                              "" if texts == 1 else "s", os.path.basename(path)))
         return path
 
@@ -3766,6 +3769,7 @@ class TreeEditMixin:
         kept, saved_to, reset_n, shown, elsewhere = 0, None, 0, 0, 0
         colours, moved, shown_k, differs, tpairs, skip_scenes = {}, {}, {}, {}, [], set()
         colours_missing, ontop, replaced_out = [], {}, {}
+        theme_skip, theme_report, theme_n = set(), {}, 0     # Simon (2026-11-20): the themes come too
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -3867,9 +3871,11 @@ class TreeEditMixin:
                 gone_text = {id(r) for i, (r, _new) in enumerate(tclash)
                              if "text:%d" % i not in take}
                 tfits = [(r, new) for r, new in tfits if id(r) not in gone_text]
+                if "themes" not in take:
+                    theme_skip = set(clash.get("themes") or ())
                 more = scene_share.has_extras(extras) and (
                     bool(extras["pictures"] or extras["added"] or extras.get("lines")
-                         or extras["colored"]) or overlay)
+                         or extras["colored"] or extras.get("themes")) or overlay)
             renamed = {}
             if got:
                 got, missing = scene_edit.import_edits(self.assets_dir, path,
@@ -3927,6 +3933,9 @@ class TreeEditMixin:
                                                        missing_colored=colours_missing,
                                                        replaced_too=bool(ontop),
                                                        replaced_out=replaced_out)
+                if extras.get("themes"):
+                    theme_n = scene_share.import_themes(self.assets_dir, path, extras["themes"],
+                                                        skip=theme_skip, report=theme_report)
             if tfits:
                 if text_tab is not None:
                     text_tab._set_replacements(
@@ -3939,6 +3948,10 @@ class TreeEditMixin:
             return None
         if more:
             self._shared_loaded(images)
+            if theme_report:
+                sets = self.window.service("imgsets")
+                if sets is not None and hasattr(sets, "publish"):
+                    sets.publish()
         if reset_n:
             self._tree_view_reset()
         self._tsel = None
@@ -3982,6 +3995,23 @@ class TreeEditMixin:
             words += " Your own from before are saved in %s: load it to put them back." % (
                 os.path.join(os.path.basename(os.path.dirname(saved_to)),
                              os.path.basename(saved_to)))
+        # Simon (2026-11-20): the themes' own pictures and colors, and what of them could not go in
+        if theme_n:
+            words += " %d theme picture%s or color%s loaded." % (
+                theme_n, "" if theme_n == 1 else "s", "" if theme_n == 1 else "s")
+        if theme_report.get("switched_on"):
+            words += " Themes were switched on (Images tab, Advanced)."
+        if theme_report.get("added"):
+            words += " Theme%s added: %s." % ("" if len(theme_report["added"]) == 1 else "s",
+                                              ", ".join(theme_report["added"]))
+        if theme_report.get("full"):
+            words += (" No room for theme%s %s (%d themes at most), left out."
+                      % ("" if len(theme_report["full"]) == 1 else "s", ", ".join(theme_report["full"]),
+                         SV_MAX_SETS()))
+        if theme_report.get("missing"):
+            nm = len(theme_report["missing"])
+            words += " %d theme picture%s for pictures not in this project %s left out." % (
+                nm, "" if nm == 1 else "s", "was" if nm == 1 else "were")
         if gone:
             words += (" %d picture%s in the file %s not in this project and %s left out."
                       % (len(gone), "" if len(gone) == 1 else "s",
@@ -4528,3 +4558,9 @@ def _with_tries(draws, tries):
     # (a game line's \n, as the game program writes it, is a line break: GODZILLA\nPOWERUP\nLEVEL 1)
     return [dict(d, shown=tries[d["node"]].replace("\\n", "\n")) if d.get("kind") == "text" and d.get("node") in tries
             else d for d in draws]
+
+
+def SV_MAX_SETS():
+    """The most themes a project can have (:data:`.scene_variants.MAX_SETS`)."""
+    from ..plugins.stern import scene_variants
+    return scene_variants.MAX_SETS

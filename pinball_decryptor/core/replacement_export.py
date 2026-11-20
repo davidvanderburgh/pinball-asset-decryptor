@@ -370,7 +370,16 @@ def record_keys():
     keys += ["attract_items", "replacement_names"]
     keys += list(project_reset._SIDECAR["scenes"])      # the score panel's colors
     keys += list(project_reset._colour_keys())
+    # Simon (2026-11-20): the themes too ("check saving and loading works ... in other areas where you can save the
+    # entire project") - their names and each theme's own pictures (exported with the rest); their colors ride in the
+    # color maps above. The Service menu rows ride in the Defaults (modpack.project_extras).
+    keys += [_THEMES_KEY]
     return tuple(dict.fromkeys(keys))
+
+
+#: the themes' record (plugins/stern/scene_variants.STAGED_KEY): taken whole, never merged key by key - a theme's
+#: number only means something beside its own list of names
+_THEMES_KEY = "scene_variants"
 
 
 #: the Scenes tab's edits, beside the record: the Scenes tab's own file of edits
@@ -728,7 +737,7 @@ def import_record(staged, records):
         if key in ("audio", "video", "image", "video_variants"):
             n += len(val) if isinstance(val, dict) else 0
         if isinstance(val, dict) and isinstance(data.get(key), dict) \
-                and key not in (staged_changes.SOUND_MODES_KEY, "attract_items"):
+                and key not in (staged_changes.SOUND_MODES_KEY, "attract_items", _THEMES_KEY):
             merged = dict(data[key])
             merged.update(val)
             data[key] = merged

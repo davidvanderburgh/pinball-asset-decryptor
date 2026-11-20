@@ -193,8 +193,201 @@ def gather(assets_dir, cards, trees):
     extras = {"pictures": pictures, "added": added, "lines": lines,
               "colored": colored, "files_profile": files_profile,
               "overlay": dict(overlay) if isinstance(overlay, dict) else None,
-              "text": text_to_save(assets_dir, cards, trees)}
+              "text": text_to_save(assets_dir, cards, trees),
+              "themes": themes_to_save(assets_dir, data, settings,
+                                       None if cards is None else {r for r in rels if drawn.get(r[7:])},
+                                       drawn)}
     return edits, extras
+
+
+# ---------------------------------------------------------------------------------------------
+# the themes (Simon, 2026-11-20: "if a scene has multiple theme use then any graphics that go with the scene should be
+# saved including if they are in other themes ... we would need to save Themes too without asking the user")
+# ---------------------------------------------------------------------------------------------
+def themes_to_save(assets_dir, data, settings, scope, drawn):
+    """``{"names": [theme names, theme 1 first], "pictures": {rel: {"drawn"?, "themes": {"<n>": {"src"?, "name"?,
+    "keep", "color", "profile"}}}}}`` - each theme's own picture for a picture (its file and Keep size tick) and its own
+    color switch and profile, as stored (theme keys "@<n>:<rel>", :mod:`.scene_variants`) - for the pictures in
+    *scope* (None: every one); None when the project has no theme of its own for any of them."""
+    from . import scene_variants as SV
+    from ...core import colour_profile as cp
+    names = SV.set_names(assets_dir)
+    if len(names) < 2:
+        return None
+    raw = data.get(SV.STAGED_KEY) if isinstance(data.get(SV.STAGED_KEY), dict) else {}
+    keeps = raw.get("keep") if isinstance(raw.get("keep"), dict) else {}
+    owns = cp._own_dicts(data, "images")
+    colour = SV.theme_colour_rels(data)
+    out = {}
+    for n in range(2, len(names) + 1):
+        picks = SV.set_pictures(assets_dir, n)
+        kept = set(keeps.get(str(n)) or ())
+        for rel in sorted(set(picks) | set(colour.get(n) or ())):
+            if not (rel.startswith("images/") and scene_edit._safe_rel(rel)) or (scope is not None and rel not in scope):
+                continue
+            key = SV.theme_key(n, rel)
+            src = picks.get(rel)
+            entry = {"keep": rel in kept if src else False,
+                     "color": settings["images"].get(key),
+                     "profile": dict(owns[key]) if isinstance(owns.get(key), dict) else None}
+            if src:
+                if not os.path.isfile(src):
+                    continue                # a pick whose file is gone: nothing to carry
+                entry.update(src=src, name=os.path.basename(src))
+            p = out.setdefault(rel, {"themes": {}})
+            p["themes"][str(n)] = entry
+            if drawn.get(rel[len("images/"):]):
+                p["drawn"] = drawn[rel[len("images/"):]]
+    return {"names": names, "pictures": out} if out else None
+
+
+def _theme_entries(themes):
+    return sum(len(p["themes"]) for p in ((themes or {}).get("pictures") or {}).values())
+
+
+def read_themes(doc, members):
+    """The ``themes`` of a file's manifest *doc*, checked (a file it does not name is dropped), or None."""
+    from . import scene_variants as SV
+    t = doc.get("themes") if isinstance(doc, dict) else None
+    if not isinstance(t, dict):
+        return None
+    names = [" ".join(str(x).split())[:24] for x in (t.get("names") or ()) if str(x).strip()][:SV.MAX_SETS]
+    pictures = {}
+    for rel, p in (t.get("pictures") or {}).items() if isinstance(t.get("pictures"), dict) else ():
+        if not (isinstance(rel, str) and rel.startswith("images/") and scene_edit._safe_rel(rel)
+                and isinstance(p, dict) and isinstance(p.get("themes"), dict)):
+            continue
+        good = {}
+        for k, e in p["themes"].items():
+            if not (str(k).isdigit() and 2 <= int(k) <= len(names) and isinstance(e, dict)):
+                continue
+            f = e.get("file")
+            good[str(int(k))] = {"file": f if isinstance(f, str) and f in members else None,
+                                 "name": str(e.get("name") or ""), "keep": bool(e.get("keep")),
+                                 "color": e.get("color") if isinstance(e.get("color"), bool) else None,
+                                 "profile": dict(e["profile"]) if isinstance(e.get("profile"), dict) else None}
+        if good:
+            pictures[rel] = {"themes": good}
+            if isinstance(p.get("drawn"), list):
+                pictures[rel]["drawn"] = p["drawn"]
+    return {"names": names, "pictures": pictures} if pictures and len(names) >= 2 else None
+
+
+def _theme_here(names_here, name):
+    """The number here of the theme called *name* (any case), or None."""
+    for i, have in enumerate(names_here):
+        if have.lower() == name.lower():
+            return i + 1
+    return None
+
+
+def theme_clashes(assets_dir, themes):
+    """``[(theme name, rel)]``: a picture a theme here of the same name already gives its own picture or color for,
+    that the file would change."""
+    from . import scene_variants as SV
+    from ...core import staged_changes
+    if not themes:
+        return []
+    names = SV.set_names(assets_dir)
+    side = staged_changes.load(assets_dir) or {}
+    colour = SV.theme_colour_rels(side)
+    out = []
+    for rel, p in sorted(themes["pictures"].items()):
+        for k in sorted(p["themes"], key=int):
+            name = themes["names"][int(k) - 1]
+            n = _theme_here(names, name)
+            if n is None or n < 2:
+                continue
+            mine = SV.set_pictures(assets_dir, n).get(rel)
+            if mine or rel in (colour.get(n) or ()):
+                out.append((name, rel))
+    return out
+
+
+def import_themes(assets_dir, zip_path, themes, skip=(), report=None):
+    """Put the file's *themes* (:func:`read_themes`, localised) into the project: a theme is found here by its name,
+    else added at the end (8 at most); the themes are switched on; each theme's own picture is copied into
+    :data:`SHARED_DIR` (as the file's replaced pictures are) and picked, with its Keep size tick, and its own color
+    switch and profile set. *skip*: ``(theme name, rel)`` the user kept their own of. A picture this project does not
+    have is left out. Returns the number of theme pictures and colors loaded; *report*, a dict, is filled with
+    ``"added"`` (theme names made), ``"full"`` (names with no room), ``"missing"`` (rels not here), ``"switched_on"``."""
+    from . import scene_variants as SV
+    from ...core import colour_profile as cp, staged_changes
+    report = {} if report is None else report
+    report.update(added=[], full=[], missing=[], switched_on=False)
+    if not themes:
+        return 0
+    skip = set(skip)
+    if not SV.themes_on(assets_dir):
+        SV.set_themes_on(assets_dir, True)
+        report["switched_on"] = True
+    here = {}
+    for i, name in enumerate(themes["names"][1:], start=2):
+        if not any(str(i) in p["themes"] for p in themes["pictures"].values()):
+            continue
+        n = _theme_here(SV.set_names(assets_dir), name)
+        if n is None:
+            try:
+                n = SV.add_set(assets_dir, name)
+                report["added"].append(name)
+            except SV.SceneVariantError:
+                report["full"].append(name)
+                continue
+        if n >= 2:
+            here[i] = n
+    stem = os.path.splitext(os.path.basename(zip_path))[0]
+    stem = re.sub(r"[\\/:*?\"<>|]+", "_", stem).strip(" .") or "scenes"
+    colours = []
+    loaded = 0
+    with zipfile.ZipFile(zip_path) as z:
+        for rel, p in sorted(themes["pictures"].items()):
+            if not _here(assets_dir, rel):
+                report["missing"].append(rel)
+                continue
+            for k, e in sorted(p["themes"].items(), key=lambda kv: int(kv[0])):
+                n = here.get(int(k))
+                name = themes["names"][int(k) - 1]
+                if n is None or (name, rel) in skip:
+                    continue
+                if e["file"]:
+                    blob = z.read(e["file"])
+                    fname = re.sub(r"[\\/:*?\"<>|]+", "_", os.path.basename(e["name"] or e["file"])) or "picture.png"
+                    folder = os.path.join(assets_dir, SHARED_DIR, stem, "theme " + re.sub(r"[\\/:*?\"<>|]+", "_", name))
+                    base, ext = os.path.splitext(fname)
+                    dest, i = os.path.join(folder, fname), 2
+                    while os.path.exists(dest):
+                        with open(dest, "rb") as f:
+                            if _digest(f.read()) == _digest(blob):
+                                break
+                        dest, i = os.path.join(folder, "%s_%d%s" % (base, i, ext)), i + 1
+                    if not os.path.exists(dest):
+                        os.makedirs(folder, exist_ok=True)
+                        with open(dest, "wb") as f:
+                            f.write(blob)
+                    SV.set_picture(assets_dir, n, rel, dest)
+                    SV.set_keep_size(assets_dir, n, rel, e["keep"])
+                colours.append((SV.theme_key(n, rel), e))
+                loaded += 1
+    if colours:
+        data = staged_changes.load(assets_dir) or {}
+        slots = dict(data.get(cp.IMAGE_SLOTS_KEY) or {})
+        owns = dict(cp._own_dicts(data, "images"))
+        for key, e in colours:
+            if e["color"] is None:
+                slots.pop(key, None)
+            else:
+                slots[key] = e["color"]
+            if e["profile"] is not None:
+                owns[key] = dict(e["profile"])
+            else:
+                owns.pop(key, None)
+        for k, val in ((cp.IMAGE_SLOTS_KEY, slots), (cp.FILE_PROFILES_KEY["images"], owns)):
+            if val:
+                data[k] = val
+            else:
+                data.pop(k, None)
+        staged_changes.save(assets_dir, data)
+    return loaded
 
 
 def _game_pictures_on(data, settings, built, drawn, scope=None):
@@ -233,8 +426,10 @@ def export_all(assets_dir, zip_path, cards, trees, counts=None):
     if counts is not None:
         counts.update(colored=len(extras["colored"]),
                       lines=sum(len(per) for per in extras["lines"].values()))
+        if extras.get("themes"):
+            counts["themes"] = _theme_entries(extras["themes"])
     if not (edits or extras["pictures"] or extras["text"] or extras["colored"]
-            or extras["lines"]):
+            or extras["lines"] or extras.get("themes")):
         raise scene_edit.SceneEditError(
             "there are no scene edits, replaced pictures, color profiles or text edits to save")
     added_files = sorted({rel for ops in edits.values()
@@ -266,6 +461,22 @@ def export_all(assets_dir, zip_path, cards, trees, counts=None):
         states = scene_edit.states_to_save(assets_dir, edits, trees)
         if states:
             doc["states"] = states                   # PAD-403
+        if extras.get("themes"):
+            # Simon (2026-11-20): the themes' own pictures and colors go with the scenes, without asking
+            tpics = {}
+            for i, (rel, p) in enumerate(sorted(extras["themes"]["pictures"].items())):
+                tp = {"themes": {}}
+                if p.get("drawn"):
+                    tp["drawn"] = p["drawn"]
+                for k, e in sorted(p["themes"].items(), key=lambda kv: int(kv[0])):
+                    out = {x: e[x] for x in ("keep", "color", "profile")}
+                    if e.get("src"):
+                        member = "themes/%s/%d/%s" % (k, i, re.sub(r"[\\/:*?\"<>|]+", "_", e["name"]) or "picture")
+                        z.write(e["src"], member)
+                        out.update(file=member, name=e["name"])
+                    tp["themes"][k] = out
+                tpics[rel] = tp
+            doc["themes"] = {"names": extras["themes"]["names"], "pictures": tpics}
         z.writestr(scene_edit.SHARE_MANIFEST, json.dumps(doc, indent=1, sort_keys=True))
     return len(edits), len(pictures), len(extras["text"])
 
@@ -330,12 +541,13 @@ def read_extras(zip_path):
     files_profile = (dict(doc["files_profile"]) if isinstance(doc.get("files_profile"), dict)
                      else None)
     return {"pictures": pictures, "added": added, "overlay": overlay, "text": text,
-            "lines": lines, "colored": colored, "files_profile": files_profile}
+            "lines": lines, "colored": colored, "files_profile": files_profile,
+            "themes": read_themes(doc, members)}
 
 
 def has_extras(extras):
     return bool(extras["pictures"] or extras["added"] or extras["overlay"]
-                or extras.get("lines") or extras.get("colored"))
+                or extras.get("lines") or extras.get("colored") or extras.get("themes"))
 
 
 def _followers(extras):
@@ -382,16 +594,20 @@ def localise(assets_dir, extras, trees, moved=None):
     pictures with a color profile (``colored``, PAD-502) are named the same way.  *moved*, a
     dict, is filled with ``{rel in the file: [rel here, ...]}`` of each named otherwise here
     (PAD-552: the load report)."""
-    if not (extras.get("pictures") or extras.get("colored")):
+    if not (extras.get("pictures") or extras.get("colored") or extras.get("themes")):
         return extras
     find = scene_edit.card_finder((trees or {}).keys())
     shown = set()
     for man in (trees or {}).values():
         shown.update("images/" + pic for pic in manifest_drawers(man))
+    themes = extras.get("themes")
+    if themes:
+        # (the themes' pictures named as this project names them too, Simon 2026-11-20)
+        themes = dict(themes, pictures=_localised(assets_dir, themes["pictures"], find, trees, shown, moved))
     return dict(extras, pictures=_localised(assets_dir, extras.get("pictures") or {}, find,
                                             trees, shown, moved),
                 colored=_localised(assets_dir, extras.get("colored") or {}, find, trees, shown,
-                                   moved))
+                                   moved), themes=themes)
 
 
 def _localised(assets_dir, pics, find, trees, shown=None, moved=None):
@@ -491,7 +707,11 @@ def clashes(assets_dir, extras):
     files = bool(_followers(extras) and (shared if isinstance(shared, dict) else {
         "recommended": True}) != _files_profile(extras) and (
             isinstance(shared, dict) or _any_attached(data, built)))
-    return {"pictures": pics, "overlay": overlay, "colored": colored, "files_profile": files}
+    out = {"pictures": pics, "overlay": overlay, "colored": colored, "files_profile": files}
+    themes = theme_clashes(assets_dir, extras.get("themes"))
+    if themes:
+        out["themes"] = themes                       # Simon (2026-11-20): a theme here with its own
+    return out
 
 
 def _game_on_here(data, picks, built, rel):
@@ -569,6 +789,13 @@ def conflict_items(assets_dir, over, extras, clash, tclash, label_of=None):
             "mine": _names([_profile_raw(data, r) for r in clash["colored"]]),
             "theirs": _names([theirs[r].get("profile") or _files_profile(extras)
                               for r in clash["colored"]])})
+    # Simon (2026-11-20): a theme here of the same name with its own picture or color for one the file brings - one row
+    if clash.get("themes"):
+        n = len(clash["themes"])
+        names = sorted({name for name, _rel in clash["themes"]})
+        items.append({"id": "themes", "what": "%d picture%s of theme%s %s" % (
+            n, "" if n == 1 else "s", "" if len(names) == 1 else "s", ", ".join(names)),
+            "mine": "your theme's own picture or color", "theirs": "the file's"})
     for i, (r, new) in enumerate(tclash):
         items.append({"id": "text:%d" % i, "what": 'Text "%s"' % r["original"],
                       "mine": '"%s"' % r["replacement"], "theirs": '"%s"' % new})

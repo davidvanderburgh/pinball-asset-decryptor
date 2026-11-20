@@ -79,7 +79,7 @@ def load_media(tab, kind, assets_dir, slots, running, flush, rescan,
     except (TS.TabSettingsError, OSError) as e:
         compat.messagebox.showinfo(title, str(e))
         return None
-    if not res.slots:
+    if not res.slots and not res.themes:
         compat.messagebox.showinfo(
             title, "None of the slots in %s are on this card, so nothing "
             "was loaded." % name if res.missing else
@@ -105,6 +105,8 @@ def load_media(tab, kind, assets_dir, slots, running, flush, rescan,
     rescan()
     words = "Loaded the settings of %s from %s." % (
         _plural(len(res.slots), "slot"), name)
+    if res.themes:
+        words += " Its themes (%d besides theme 1) take this project's place." % res.themes
     if res.missing:
         words += " %s in the file %s not on this card and %s left out." % (
             _plural(len(res.missing), "slot"),

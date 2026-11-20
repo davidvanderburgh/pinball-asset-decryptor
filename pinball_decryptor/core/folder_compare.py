@@ -340,11 +340,12 @@ SETTING_LABELS = {
     "color_all_images": "Images: color profile on every picture",
     "image_color_unlocked": "Images: game pictures unlocked",
     "image_color_profiles": "Images: this picture's color profile",
+    "scene_variants": "Images: themes",
     "asset_color_profile": "Color profile for your files",
 }
 
 #: Settings compared whole, never slot by slot: a profile is one object.
-_WHOLE = ("asset_color_profile",)
+_WHOLE = ("asset_color_profile", "scene_variants")
 
 #: A setting whose values read better in its own unit than bare.
 _UNITS = {"audio_levels": lambda v: "0 dB" if not v else "%+g dB" % v}

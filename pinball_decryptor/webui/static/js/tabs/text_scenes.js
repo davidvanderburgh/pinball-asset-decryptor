@@ -228,11 +228,11 @@ export function ScenesActions() {
           onClick: () => call("text_scenes.edits_save", "all") },
         // PAD-369 (DragonRR): everything, to hand to someone else
         { label: "Save this scene with pictures, text and color profiles…", icon: "download", disabled: !s.tree_view,
-          title: "Its edits, plus each picture in it you replaced on the Images tab (the file itself, its size tick, its color switch and color profile), the pictures you added, the color profile of each of the game's own pictures and lines in it you switched on, its words you changed on the Text tab, and the whole screen overlay, in one .zip file",
+          title: "Its edits, plus each picture in it you replaced on the Images tab (the file itself, its size tick, its color switch and color profile), the pictures you added, the color profile of each of the game's own pictures and lines in it you switched on, its words you changed on the Text tab, the whole screen overlay, and each theme's own picture (with its size tick) and color profile for the pictures in it, in one .zip file",
           onClick: () => call("text_scenes.edits_save", "this", true) },
         // PAD-387: the project's whole look, sounds, videos and modes aside
         { label: "Save every scene with pictures, text and color profiles…", icon: "download",
-          title: "Your project's whole look in one .zip file: every scene's edits, every picture you replaced on the Images tab (with its size tick, color switch and color profile), the color profile of every one of the game's own pictures and lines you switched on, every Text tab edit and the whole screen overlay. Sounds, videos and modes are not in it.",
+          title: "Your project's whole look in one .zip file: every scene's edits, every picture you replaced on the Images tab (with its size tick, color switch and color profile), the color profile of every one of the game's own pictures and lines you switched on, every Text tab edit, the whole screen overlay and your themes (each theme's own pictures, size ticks and color profiles). Sounds, videos and modes are not in it.",
           onClick: () => call("text_scenes.edits_save", "all", true) },
         { sep: true },
         { label: "Load scene edits from a file…", icon: "upload",

@@ -85,6 +85,8 @@ static unsigned sty_own_of_kind(unsigned k, unsigned f) { (void)k; (void)f; retu
 static unsigned sty_own_of_index(unsigned i, unsigned s, const unsigned *c, unsigned n) { (void)i; (void)s; (void)c; (void)n; return 0; }
 static unsigned sty_challenge_indices(unsigned *ch) { (void)ch; return 0; }
 static void sty_menu_own(unsigned own) { tm.own = own; }
+static void sty_menu_walk(pm_reg *b, unsigned l, unsigned r) { (void)b; (void)l; (void)r; }   /* PAD-1449 round 2 */
+static void sty_menu_line(unsigned m, unsigned i) { (void)m; (void)i; }
 static unsigned long pm_ms(void) { return 7; }
 static void say(const char *f, ...) { (void)f; }
 static const char *lettered = "-";

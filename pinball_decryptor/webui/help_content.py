@@ -3956,12 +3956,15 @@ PREVIEW_HELP = {
                 "**The start menu's games.** Hold both flipper buttons in attract to open the game's start "
                 "menu. Besides the game's own entries it always offers these (no service menu setting):\n\n"
                 "- **How to play it.** With characters, any game picked on the menu (CO-OP PLAY, a TEAM PLAY "
-                "game, the game's own STANDARD or one of its challenges; not Competition) first shows a choice, "
-                "once the game's start film is over: **NORMAL** (no characters: the game as it is), "
-                "**CHARACTERS** (each player picks a character at their first ball, with no special abilities) "
-                "or **ENHANCED** (each character's ability holds while its player is up). The flipper buttons "
-                "step through them and the Action button takes one; a Start meanwhile adds a player as it "
-                "would. A plain Start without the menu never asks: it is the game's own game.\n"
+                "game, the game's own STANDARD or one of its challenges; not Competition) first asks how to play "
+                "it, on the menu itself before the game starts: after **Start** the entry's line shows the game "
+                "and **NORMAL** (no characters: the game as it is), **CHARACTERS** (each player picks a character "
+                "at their first ball, with no special abilities) or **ENHANCED** (each character's ability holds "
+                "while its player is up), then what it does. The flipper buttons step through them and **Start** "
+                "again takes one and starts the game, with no question after its intro. On Godzilla, Jaws, John "
+                "Wick, King Kong, Metallica and X-Men it asks on the menu; on other games the choice comes up "
+                "once the game's start film is over, the flipper buttons stepping and the Action button taking "
+                "one. A plain Start without the menu never asks: it is the game's own game.\n"
                 "- **CO-OP PLAY:** step to it and press **Start**; each Start in the first ball then adds a "
                 "teammate (or teammates join with the right flipper button held, as above).\n"
                 "- **TEAM PLAY 2 VS 2:** players 1 and 3 play against players 2 and 4, picked the way Stern's "
@@ -4458,6 +4461,25 @@ SPOOKY_MODES_HELP = [
         "own awards). On Looney Tunes the game's playfield multiplier counts for a mode's "
         "points, as for its own awards.",
         "**Check** runs after every change and lists anything the game would not take.",
+    ]),
+    ("Starts, lamps, balls, coils and your own files", [
+        "**Starts** begins a mode on a game event (a ball starting, the first or last ball, the "
+        "ball's first playfield switch, a ball save, an extra ball, a multiball ending), after one "
+        "of the game's own modes ends, at a score, or on switches hit in order; it can also run "
+        "at most once a ball or a game.",
+        "**Lamps** lights the game's own lamps in your colour while the mode runs, flashing if "
+        "you like, and hands them back after. The game's ball-save light still shows its save.",
+        "**Balls** adds balls: a multiball of up to 6 balls with its own ball save (it ends when "
+        "one ball is left), a ball on a switch, or a ball save when the mode starts.",
+        "**Coils** fires the game's own coils (only those a mode can fire safely: no flippers, "
+        "trough or scoops). Holding a magnet, post, diverter or the shaker on is off until "
+        "**Coil holds on this title** in Every mode of this game is on.",
+        "Sounds, music, a picture and a video of your own go in this game's mode folder (Open "
+        "the mode folder). Sounds and music: .ogg or .wav (.wav only on Looney Tunes). "
+        "Pictures: .png or .jpg. Video: .webm (VP8) on Scooby-Doo, Beetlejuice, Texas Chainsaw "
+        "Massacre, Evil Dead, Halloween and Ultraman, .ogv (Theora) on Looney Tunes, .mp4 "
+        "(H.264) on Rick and Morty. Alice Cooper's screen shows only the game's own pictures "
+        "and videos. The game's music goes quiet while your music plays.",
     ]),
     ("Trying and installing", [
         "**Try it** starts the game in the Emulate tab with your modes in it, from the stock "

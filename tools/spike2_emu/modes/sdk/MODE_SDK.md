@@ -6747,6 +6747,30 @@ Competition or the DJ MIXER, and never a plain Start.
   one, plays after the chooser for a Standard or challenge game (`ci_film_due` leaves the game's film alone until then).
 - Insider Connected: Standard or a challenge stays the game's own while choosing and at CHARACTERS
   (`coop_insider_free`); ENHANCED latches the rest of the game held, as a joining teammate does.
+
+Round 2 (DoomWalrus666: "Can we make this selection appear BEFORE the game starts, while still in the menu? ... the
+intro plays, THEN the character selection, which feels weird"). On the index menus (`team_menu_frame`: Godzilla, Jaws,
+John Wick, King Kong, Metallica, X-Men) the style is asked on the menu itself. The menus read no Start of their own: the
+game's Start button begins the game and the menu goes with it, and Start's switch descriptor has no handler bits to hold
+back at the drain (emulator, Godzilla LE 1.16). So the game start waits: `coop_start_game_wrap` (`site
+coop_start_game`, the call PAD-1316 wraps for the Insider lobby) first runs `sty_menu_ask`, which, when the menu's frame
+was seen in the last 0.5 s (`sty_menu_live`) on an entry the chooser is for (`sty_menu_kind`: ours, Standard, a
+challenge), sleeps in the game's `proc_sleep` while the menu keeps drawing:
+
+- the entry's name line (`comp_menu_end_msg`; a challenge's `value comp_menu_challenge_msg_<k>`, its game-mode table
+  entry's name message, `prolonged_comp.frame_lines`) says `<GAME> <STYLE>`, then what it is (`sty_menu_words`: THE
+  GAME AS IT IS, NO SPECIAL ABILITIES, POWERS UP `team_words`), turn about every 1.5 s, the game's own USE FLIPPERS TO
+  CHANGE / START TO SELECT under it. `coop.cfg` `team_words YOUR GODZILLA TEAM` (`coop_play.team_words`, written with
+  characters to pick). The chooser's card is not shown there: the pick's scene is not drawn in attract.
+- the flippers walk NORMAL, CHARACTERS, ENHANCED (`sty_menu_walk`, taken out of the frame's buttons, so the cursor stays;
+  the Competition and MODE CHALLENGE entries leave them to it, `sty_menu_up`).
+- the next Start takes the one shown (a press edge from the drain, `sty_menu_edge`, or the switch's level polled in the
+  wait); a minute alone, or the menu's frames gone 3 s, takes the one shown (`sty_menu_wait`). The game start then goes
+  on with the words it was called with, so an Insider lobby's popup, which comes before the start, is shown once.
+- the game that begins takes the style at once (`sty_begin` -> `sty_menu_preset`): Standard or a challenge at NORMAL is
+  the game's own game from its start; any other goes in where the card would have closed (the start film and any intro
+  over, `sty_tick`), so the pick follows the intro as it always has - with no card at ball 1. A plain Start (no menu)
+  never waits; a menu without the game start wrapped asks at ball 1 as before.
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

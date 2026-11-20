@@ -339,3 +339,20 @@ def test_unpack_takes_the_program_from_this_zip(tmp_path):
     assert open(unpack(str(a), cache)[0], "rb").read() == b"stock"
     assert open(unpack(str(b), cache)[0], "rb").read() == b"modes"
     assert open(unpack(str(a), cache)[0], "rb").read() == b"stock"
+
+
+def test_jjp_parity_keys_are_refused_by_name_and_hidden_on_jetsons(mk, port, tmp_path):
+    """PAD-1424 brought start rules, lamps, coils, balls and a mode's own files to the other
+    runtimes; Jetsons' runtime does not run them yet, so the check names them, never ignores them."""
+    (tmp_path / "title.cfg").write_text("coil_holds = on\n")
+    (tmp_path / "a.mode").write_text("start = switch_1\nshots = switch_2\nstart_on = ball_start\n"
+                                     "lamps = L1\ncoil_start = KNOCKER\nmultiball = 2\n"
+                                     "sound_shot = boom.wav\nmusic = song.ogg\n")
+    _modes, problems = mk.check_modes(str(tmp_path), port)
+    text = "\n".join(problems)
+    for k in ("start_on", "lamps", "coil_start", "multiball", "music", "coil_holds"):
+        assert "%s is not on Jetsons yet" % k in text, k
+    assert "sound_shot = boom.wav: Jetsons plays only the game's own sounds" in text
+    from pinball_decryptor.plugins.spooky import custom_modes as SM
+    assert [g for g, ks in SM.form_groups(port) if ks] == ["Mode", "Sounds", "Screen"]
+    assert dict(SM.form_groups(port))["Sounds"] == ("sound_start", "sound_shot", "sound_complete", "sound_end")

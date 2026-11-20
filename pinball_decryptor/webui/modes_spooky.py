@@ -94,7 +94,8 @@ class SpookyModesMixin:
         # a title's screen may not show every Screen key (Alice Cooper: no fonts, no box colour)
         st = {"on": True, "ns": "spk", "maker": "Spooky", "titles": titles, "label": self._spk_label,
               "max": SM.MAX_MODES, "card": card, "card_name": os.path.basename(card),
-              "groups": [{"title": g, "keys": list(ks)} for g, ks in SM.form_groups(port)],
+              # a group with nothing left on this title is not drawn (Jetsons, PAD-1422)
+              "groups": [{"title": g, "keys": list(ks)} for g, ks in SM.form_groups(port) if ks],
               "title_keys": list(SM.title_form(port)), "fields": self._spk_fields()}
         if self._spk_label:
             title = next((t for t in titles if t["label"] == self._spk_label), None)
@@ -110,7 +111,9 @@ class SpookyModesMixin:
                 st["kind"] = "form"
                 st["title_cfg"] = dict(SM.read_title(self._spk_label))
                 st["folder"] = SM.title_dir(self._spk_label)
-                st["names"] = {k: SM.names_for(port, k, st["folder"]) for k in ("switches", "sound", "font", "lamps")}
+                st["names"] = {k: SM.names_for(port, k, st["folder"]) for k in ("switches", "sound", "font", "lamps", "coil_pulse",
+                                                                       "coil_hold", "events", "after", "sound_or_file",
+                                                                       "sound_file", "picture_file", "video_file")}
                 st["check"] = self._spk_check_state()
                 st["sounds"] = self._spk_sounds_state(port)
                 st["build"] = self._spk_build_state()
@@ -121,7 +124,7 @@ class SpookyModesMixin:
 
     def _spk_fields(self):
         out = {}
-        for k in list(SM.mk().KEYS):
+        for k in list(SM.mk().KEYS) + [t for t in SM.mk().TITLE_KEYS if t != "game"]:
             kind = SM.key_kind(k)
             choices = list(kind) if isinstance(kind, tuple) else []
             out[k] = {"label": SM.LABELS.get(k, k), "kind": "choice" if choices else kind,

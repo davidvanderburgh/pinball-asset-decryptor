@@ -198,3 +198,77 @@ def test_mode_runs_inside_the_game(stem, tmp_path, _quiet_unicorn):
     title = _examples(stem)[0]["title"]
     assert any(title in w for w in texts), texts
     assert r["score"] >= 100000
+
+
+# ------------------------------------------------------------------ the app: check, Build, Write
+def _mk():
+    spec = importlib.util.spec_from_file_location("t1423_mk", os.path.join(MODES, "mkspkmodes.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("stem", sorted(ZIPS))
+def test_starter_modes_check_clean_and_titles_list(stem):
+    mk = _mk()
+    port = mk.load_port(LABELS[stem])
+    modes, problems = mk.check_modes(os.path.join(MODES, "examples", LABELS[stem]), port)
+    assert problems == [] and len(modes) == 2
+    assert mk.runtime_files(port)[0].endswith("padheck_%s.bin" % stem)
+    from pinball_decryptor.plugins.spooky import custom_modes as SM
+    t = next(t for t in SM.titles() if t["label"] == LABELS[stem])
+    assert t["can_run"], t
+    assert "UPDATE CODE" in SM.install_note(LABELS[stem])
+
+
+def test_a_title_too_long_for_the_amh_panel_is_refused(tmp_path):
+    mk = _mk()
+    port = mk.load_port("dominos-V006")
+    (tmp_path / "x.mode").write_text("title = EXTRA LARGE PIE\nstart = switch_20\n")
+    _modes, problems = mk.check_modes(str(tmp_path), port)
+    assert any("shows 13" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("stem", sorted(ZIPS))
+def test_build_zip_replaces_only_the_prg(stem, tmp_path):
+    zpath = os.path.join(IMAGES, ZIPS[stem])
+    stock = _stock(stem)
+    mk = _mk()
+    port = mk.load_port(LABELS[stem])
+    # a small stand-in for the update: its PRG and one other file, as the real zip lays them out
+    small = tmp_path / ZIPS[stem]
+    with zipfile.ZipFile(zpath) as src, zipfile.ZipFile(small, "w") as z:
+        name = next(n for n in src.namelist() if n.upper().endswith(".PRG"))
+        z.writestr(name, stock)
+        z.writestr("WHATSNEW.TXT", "x")
+    out = tmp_path / "out" / ZIPS[stem]
+    out.parent.mkdir()
+    mk.build(str(small), os.path.join(MODES, "examples", LABELS[stem]), str(out), port, log=lambda s: None)
+    with zipfile.ZipFile(out) as z:
+        new = z.read(name)
+        assert z.read("WHATSNEW.TXT") == b"x"
+    assert P.is_modes_build(new) and P.stock_of(new) == stock
+
+
+@pytest.mark.parametrize("stem", sorted(ZIPS))
+def test_write_zip_carries_the_modes_prg(stem, tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.spooky import custom_modes as SM
+    from pinball_decryptor.plugins.spooky.formats import create_zip
+    stock = _stock(stem)
+    monkeypatch.setattr(SM, "modes_root", lambda: str(tmp_path / "modes"))
+    SM.title_dir(LABELS[stem])                              # seeded from the starter folder
+    src = tmp_path / "extract"
+    src.mkdir()
+    (src / (stem + ".PRG")).write_bytes(stock)             # the zips keep the PRG at the top
+    (src / "WHATSNEW.TXT").write_text("x")
+    display = {"DOM_V006": "Domino's Spectacular Pinball Adventure",
+               "RZO_V026": "Rob Zombie's Spookshow International"}[stem]
+    assert SM.label_for_extract(str(src), {"game": display}) == LABELS[stem]
+    pm = SM.write_pad_modes(LABELS[stem], str(src))
+    assert pm[1].modes == 2 and (stem + ".PRG") in SM.loads_how(LABELS[stem])
+    out = tmp_path / "w.zip"
+    create_zip(str(src), str(out), pad_modes=pm)
+    with zipfile.ZipFile(out) as z:
+        prg = z.read(stem + ".PRG")
+        assert z.read("WHATSNEW.TXT") == b"x"
+    assert P.is_modes_build(prg) and P.stock_of(prg) == stock

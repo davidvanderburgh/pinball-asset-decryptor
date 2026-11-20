@@ -1184,9 +1184,10 @@ function RewriteSec({ s, g }) {
 }
 
 // PAD-1064: what the app reads off the game program about one of its own modes - what starts it, the clips and the
-// sounds its own code plays - read-only (there is no source to show: the game's modes are compiled into it)
+// sounds its own code plays - read-only (there is no source to show: the game's modes are compiled into it).
+// PAD-1475: and the light shows it starts, named where the app knows the show, else by the game's number
 function HowSec({ h, onClip }) {
-  const starts = h.starts || [], clips = h.clips || [], sounds = h.sounds || [];
+  const starts = h.starts || [], clips = h.clips || [], sounds = h.sounds || [], shows = h.shows || [];
   // PAD-1274: a clip with an extracted file plays on a click, Previous / Next walk the mode's other clips
   const playable = clips.filter((c) => c.path);
   const clipEl = (c) => (c.path && onClip
@@ -1206,7 +1207,12 @@ function HowSec({ h, onClip }) {
         ${sounds.length ? html`<ul class="modes-how-list">${sounds.map((x) => html`<li key=${x.key} ...${tip(x.tip)}>
           ${x.path ? html`<${PlayButton} path=${x.path} />` : null} <b>${x.text}</b>${x.name ? html` <span class="muted">${x.name}</span>` : null}</li>`)}</ul>` : null}
         ${h.sounds_more ? html`<div class="small muted">${h.sounds_more}</div>` : null}
-        <div class="small muted wrap">${h.sounds_note}</div>`}
+        <div class="small muted wrap">${h.sounds_note}</div>
+        <div class="modes-how-k">Light shows it plays <span class="muted">(${shows.length || "none found"})</span></div>
+        ${shows.length ? html`<ul class="modes-how-list">${shows.map((x) => html`<li key=${x.key} ...${tip(x.tip)}>
+          ${x.named ? html`<b>${x.text}</b> <span class="muted">show ${x.num}</span>` : x.text}</li>`)}</ul>` : null}
+        ${h.shows_more ? html`<div class="small muted">${h.shows_more}</div>` : null}
+        ${h.shows_note ? html`<div class="small muted wrap">${h.shows_note}</div>` : null}`}
     </div>
   <//>`;
 }

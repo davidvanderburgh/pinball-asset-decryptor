@@ -839,6 +839,14 @@ class CardClips:
     #: PAD-827: clip name -> what the program says about how it is played (a table it is
     #: picked from or played in turn with, a play call that loops it): :mod:`.clip_static`
     static: dict = field(default_factory=dict)
+    #: PAD-1475: the light shows each mode's own code starts (:class:`.clip_shows.ShowReading`, a dict here until
+    #: :attr:`show_reading` reads it)
+    shows: dict = field(default_factory=dict)
+
+    @property
+    def show_reading(self):
+        from .clip_shows import ShowReading
+        return ShowReading.from_json(self.shows)
 
     @property
     def sound_reading(self):
@@ -855,7 +863,7 @@ class CardClips:
                 "bank_of": dict(self.bank_of), "note": self.note,
                 "unplayed": list(self.unplayed), "sounds": dict(self.sounds),
                 "twins": dict(self.twins), "scenes": list(self.scenes),
-                "static": dict(self.static)}
+                "static": dict(self.static), "shows": dict(self.shows)}
 
     @classmethod
     def from_json(cls, d):
@@ -864,7 +872,7 @@ class CardClips:
                    dict(d.get("bank_of") or {}), d.get("note", ""),
                    list(d.get("unplayed") or ()), dict(d.get("sounds") or {}),
                    dict(d.get("twins") or {}), list(d.get("scenes") or ()),
-                   static=dict(d.get("static") or {}))
+                   static=dict(d.get("static") or {}), shows=dict(d.get("shows") or {}))
 
 
 def manifest_rows(project):
@@ -901,8 +909,9 @@ def _cache_path(card):
     except OSError:
         return None
     from .clip_sounds import READ_REV as SOUNDS_REV
-    key = "%s|%d|%d|%d|%d" % (os.path.normcase(os.path.abspath(card)), st.st_size,
-                              int(st.st_mtime), READ_REV, SOUNDS_REV)
+    from .clip_shows import READ_REV as SHOWS_REV
+    key = "%s|%d|%d|%d|%d|%d" % (os.path.normcase(os.path.abspath(card)), st.st_size,
+                                 int(st.st_mtime), READ_REV, SOUNDS_REV, SHOWS_REV)
     return os.path.join(cache_dir("clip_modes"), hashlib.sha1(key.encode()).hexdigest() + ".json")
 
 
@@ -977,6 +986,7 @@ def read_card(card, rows, cancel=None):
     out.reading = analyse(elf, names, ctx=ctx)
     out.sounds = _sounds(elf, names, fragments, out, ctx)
     out.static = _static(out, ctx)
+    out.shows = _shows(out, ctx)
     for name, v in own.items():                     # a bank's clip of the name comes first
         banks.setdefault(name, v)
     out.bank_of = {n: v for n, v in banks.items()}
@@ -994,6 +1004,18 @@ def read_card(card, rows, cancel=None):
         except OSError:
             pass
     return out
+
+
+def _shows(clips, ctx):
+    """PAD-1475: :func:`.clip_shows.analyse`'s reading as a dict; a failure is its note, never the modes'."""
+    from . import clip_shows as SH
+    if ctx.get("prog") is None:
+        return SH.ShowReading(note="the game program could not be read").to_json()
+    try:
+        got = SH.analyse(game=clips.game, version=clips.version, ctx=ctx)
+    except Exception as e:                                  # noqa: BLE001
+        got = SH.ShowReading(note="the light shows could not be read (%s)" % e)
+    return got.to_json()
 
 
 def _sounds(elf, names, fragments, clips, ctx):

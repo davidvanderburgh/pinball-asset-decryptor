@@ -207,3 +207,43 @@ So no insmod parameter of driver v5.3.1 gets a 5 GHz link with this eero. What i
   holding a link there means the fault is specific to the eero.
 
 Speed on 2.4 GHz stays the only figure: 1.8 MB/s PC to machine, 2.5 MB/s back.
+
+## A newer driver holds 5 GHz; the transfer limit is the encrypted channel on the machine's CPU (2026-11-20)
+
+**Kernel tree.** `wandboard-org/linux` at `08f5291c` with the machine's `/proc/config.gz`, built with kernel.org's
+`x86_64-gcc-4.9.4-nolibc-arm-linux-gnueabi` (its `cc1` wants `libmpfr.so.4`: a private symlink to the host's
+`libmpfr.so.6`). `olddefconfig` changed nothing, `kernel.release` is `3.14.28_1.0.0_ga-wandboard+g08f5291`, and
+all 194 symbol CRCs in Stern's `8812bu.ko` (including `module_layout`) equal the tree's `Module.symvers`. The
+tree is Stern's kernel. Script: `C:\tmp\PAD-1467\kbuild.sh`; tree: WSL `/var/tmp/pad1467/build/linux`.
+
+**Driver.** Realtek `rtl88x2bu` v5.8.7.1_35809.20191129 (`cilynx/rtl88x2bu`, head `04ed700`) built against it
+unchanged: `make ARCH=arm CROSS_COMPILE=... KSRC=<tree> KVER=3.14.28_1.0.0_ga-wandboard+g08f5291`. Result
+`88x2bu.ko`, 2.96 MB, same vermagic, no undefined symbols, every CRC in the tree, alias `usb:v0BDApB812`.
+Six symbols Stern's build does not use (`strcasecmp`, `kern_path`, `single_open_size`, `strstr`, `strrchr`,
+`usb_autopm_put_interface`), all exported by the kernel.
+
+**One-boot trial** (the driver loaded from `/dump` by a one-shot hook, nl80211 mode, then a roam to the strongest
+5 GHz access point): `Associated`, `Key negotiation completed`, `CTRL-EVENT-CONNECTED` on c4:a8:16:b8:64:07 at
+5200 MHz, channel 40, 80 MHz, VHT on, signal -45 to -52 dBm; held for the minutes measured, 20 pings of 20
+answered. Before the roam it had joined 2.4 GHz at the first attempt (16 s) as Stern's driver does in nl80211
+mode. One boot; not yet tried cold on 5 GHz first, nor over hours.
+
+**Speed, same boot, 5 GHz:**
+
+| Path | PC to machine | Machine to PC |
+|---|---|---|
+| Raw TCP (no encryption) | 28 MB/s | 13 MB/s |
+| Remote access channel, dropbear as it runs on this card (no `-W`) | 2.1 MB/s | 2.7 MB/s |
+| Remote access channel, a second dropbear with `-W 4194304` | 3.3 MB/s | 2.9 MB/s |
+
+(2.4 GHz with Stern's driver, remote access channel, no `-W`: 1.8 / 2.5 MB/s. No raw 2.4 GHz figure yet.)
+
+So the radio is not what limits Send to machine. Two things do:
+
+- **This card's dropbear runs without the 4 MB window** (`-W 4194304`, PAD-1434): its `/etc/init.d/sshd`
+  predates that fix. Dropbear's 24 KB default holds it near 2 MB/s.
+- **With the window, the channel is close to the machine's CPU limit.** dropbear (v2025.88, aes128-ctr +
+  hmac-sha2-256) sat at 60 to 70 % of a core at 3.3 MB/s, on a two-core i.MX6 whose other core the game holds
+  at 100 %.
+
+5 GHz is worth about ten times that only to a transfer that does not encrypt the bulk data on the machine.

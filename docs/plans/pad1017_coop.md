@@ -81,6 +81,10 @@ below while building it:
   program; `cur_player` agrees wherever a port has one). Their recipes were rebuilt, and so was prebuilt/mode.so.
   The finder also reads the older shape (the count in a struct at +0x50, Aerosmith LE 1.15 ... TMNT Pro 1.58: all
   16 older shipped builds give the lines), but those ports were left as they were.
+- PAD-1477 (2026-11-20): Godzilla Pro 1.15 got the whole feature - co-op play, characters, the co-op intro and the
+  start menu's play styles - as Pro 1.16 has it: the finders' lines off its program, Pro 1.16's recipe drafted onto it
+  (the hooked functions are the same code), and the characters' rule objects read off the code that loads each one
+  (all 0x6d58 below Pro 1.16's). Emulator-proven: a 2-teammate CO-OP ENHANCED game, STANDARD CHARACTERS and 2 VS 1.
 - Proven on Godzilla LE 1.16: 2 and 4 teammates (6 and 12 balls in turn, game over after the last), every panel the
   team's score, PLAYER n BALL n on top, the team's score on its own board (initials under 2-/4-PLAYER CO-OP; the
   attract page showed the 2-PLAYER CO-OP champion), no faults. Then a rigbatch sweep of the other 37 offered builds

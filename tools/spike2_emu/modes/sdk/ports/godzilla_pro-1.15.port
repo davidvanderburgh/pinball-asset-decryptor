@@ -830,3 +830,145 @@ site coil_off              0x0059f9c8 0xe3510008 0xe1a02001
 data sw_struct             0x007a958c
 data coil_count            0x007e4578
 data coil_table            0x007bcc98
+
+# ==== PAD-1477: co-op play, co-op characters and the start menu's play styles on Pro 1.15 ====
+# ---- PAD-1017/1028/1043/1202/1316: co-op play (portcoop.py, read off this build's program) ----
+site  coop_player_change 0x00460d00 0xe92d41f0 0xe24dd008
+site  coop_add_player    0x00460b40 0xe92d4038 0xe3a00051
+data  coop_player        0x00708170
+data  coop_players       0x007e2ea8
+site  coop_first_ball    0x001f00d4 0xeb09c2d6 0xe1a04000
+value coop_ball_msg          1255
+site  audit_add              0x00422de4 0xe92d43f0 0xe2505000
+site  coop_panel_lit         0x001aa084 0xeb0adac5 0xe5943070
+site  coop_panel_up          0x001a9f48 0xeb0adb14 0xe5d431b5
+site  coop_panel_name        0x001a9a14 0xeb0b35f6 0xe28d101c
+site  coop_panel_name_2      0x001aa2e4 0xeb0b33c2 0xe28d0030
+site  coop_panel_name_user   0x00476e4c 0xebfffbb6 0xe250a000
+site  coop_icon_draw         0x003c2efc 0xebfffdf3 0xe1560004
+site  coop_start_game        0x001f02f4 0xe92d47f0 0xe30c421c
+site  coop_lobby_add         0x001f041c 0xebfffea3 0xe2506000
+site  coop_up_call           0x000554e4 0xeb102dad 0xe2401001
+site  challenge_scores       0x001f9a48 0xe92d4ff0 0xe24dd0bc
+site  challenge_score_entry  0x001f8f7c 0xe1a03000 0xe30a0a50
+site  challenge_scores_gate  0x001f9cb4 0xeb0b05dc 0xe3500000
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+data  challenge_scores_table 0x00717cb8
+data  challenge_scores_count 0x005eb288
+value challenge_scores_cat   1
+site  challenge_pages_0     0x00023a20 0xe307ce84 0xe340c07b
+
+# ---- PAD-1041/1449: the start menu of game-mode table indices (prolonged_comp.frame_lines, read off this build) ----
+site  comp_menu_frame        0x0005ff60 0xe0833106 0xe51330d4
+value comp_menu_frame_list_at    300
+value comp_menu_frame_count_at   64
+value comp_menu_frame_count_last 0
+value comp_menu_frame_cap        9   # the game-mode table's entries
+value comp_menu_frame_cursor_reg 6
+value comp_menu_frame_buttons_reg 5
+value comp_menu_index            3   # COMPETITION
+value comp_menu_index_msg        1920
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1915
+value comp_menu_end_caption_msg  1914   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
+value comp_menu_challenge_0      4   # PAD-1449: a challenge's index (the style chooser follows it)
+value comp_menu_challenge_1      5   # PAD-1449: a challenge's index (the style chooser follows it)
+value comp_menu_challenge_msg_0  3275   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_1  3276   # PAD-1449 round 2: its name message (the menu's style step letters it)
+
+# ---- the co-op intro's start film and language window (PAD-1107/1114; scenes and clips as Pro 1.16's) ----
+value language_adjustment        14
+data  language_player            0x0079daec
+text  language_0                 ENGLISH
+text  language_1                 JAPANESE
+text  start_logo_scene           43b52a63772ce0a35b7f0e3d4f249566066b55f8
+text  start_logo_path            Logo_Instance
+text  start_film_clips           intro*
+data  intro_state                0x0079dbe0
+value intro_state_at             0x44
+value intro_state_up             0
+text  intro_scene                762a9b99fc0c933b6c6c4822cb48911fa92bbd97
+text  intro_hide_0               Line1_Textbox
+text  intro_hide_1               Line2_Textbox
+text  intro_hide_2               JapaneseText_Artbox
+text  bonus_loop_crop            SquareCrop
+
+# ---- the ball start's serve (the framework's serve, request 0x26, after its start display) and the music asked
+# for right after it (PAD-1114 round 2, PAD-1449 round 5) ----
+site  serve_ball                 0x001f01ac 0xeb06a18c 0xe3a00026
+value serve_music                66
+
+# ---- the video surface's calls the co-op intro and the character cards play their clips through (find_node + 0x2f4
+# and Pro 1.16's distances from it) ----
+site  surface_find               0x00578d20 0xe92d4070 0xe24dd008
+site  surface_set_video          0x00570404 0xe5d030d4 0xe92d4ff0
+site  surface_play               0x0056e210 0xe5d030d4 0xe92d43f0
+site  surface_stop               0x0056d9c0 0xe5d030d4 0xe92d40f0
+site  surface_seek               0x0056dea4 0xe92d43f0 0xe1a07003
+site  surface_duration           0x0056db5c 0xe5d030d4 0xe92d40f0
+site  surface_position           0x0056dd00 0xe5d030d4 0xe92d40f0
+
+# ---- the switch handlers the co-op pick reads the flipper buttons through ----
+site  switch_hit                 0x004ec738 0xe2503000 0x012fff1e
+site  switch_hit2                0x004ec7d8 0xe92d4010 0xe2504000
+
+# ---- PAD-1031: co-op characters - the hooks (each function the same code as Pro 1.16's) and the rules' records ----
+site  coop_adj_changed           0x000595b8 0xe92d4070 0xe1a05000
+site  coop_eb_award              0x001fb8fc 0xe92d4070 0xe1a06000
+site  coop_boost                 0x00149654 0xe92d4030 0xe24dd014
+site  coop_cache_173             0x0012175c 0xe92d40f8 0xe1a04000
+value coop_cache_173_at          0x10
+site  coop_cache_168             0x0012b7a4 0xe92d40f8 0xe1a07000
+value coop_cache_168_at          0x4
+site  coop_cache_176             0x001316a0 0xe92d41f0 0xe1a04000
+value coop_cache_176_at          0x4
+data  coop_count_jets_rule       0x007a16ec
+value coop_count_jets_at         0xa8
+site  coop_count_tanks           0x0017d46c 0xe92d43f0 0xe1a04000
+value coop_count_tanks_at        0x44
+value coop_battle_rules          0x7f000
+value coop_tier1_rules           0xf000
+site  coop_yes_maser             0x001064e8 0xe92d4038 0xe1a04000
+site  coop_lit_maser             0x00160bd8 0xe92d4070 0xe1a04002
+value coop_lit_maser_mask        0x8000000
+value coop_lit_maser_at          0x14
+value coop_lit_maser_min         1
+site  coop_count_spins           0x00159084 0xe92d40f8 0xe1a04000
+value coop_count_spins_at        0x74
+site  coop_count_shield          0x00159084 0xe92d40f8 0xe1a04000
+value coop_count_shield_at       0x34
+value coop_count_shield_stride   8
+
+# ---- PAD-1031: the rules' objects a character's counts and keeps act on (each read off the code that loads it on
+# Pro 1.16, placed here and read back: every one 0x6d58 below Pro 1.16's) and their fields (as Pro 1.16's) ----
+value coop_steps_building_obj    0x0079e980
+value coop_steps_building_at     0x2c
+value coop_steps_building_n      6
+value coop_count_heatray_obj     0x0079f978
+value coop_count_heatray_at      0x4
+value coop_count_heatspins_obj   0x0079f978
+value coop_count_heatspins_at    0x28
+value coop_count_heatlevel_obj   0x0079f978
+value coop_count_heatlevel_at    0x24
+value coop_count_saucer_obj      0x0079da58
+value coop_count_saucer_at       0x4
+value coop_steps_powerline_obj   0x0079d800
+value coop_steps_powerline_at    0x38
+value coop_steps_powerline_n     3
+value coop_steps_powerline_inline 1
+value coop_steps_powerline_done  1
+value coop_steps_powerline_width 4
+value coop_keep_magna_obj        0x0079e9bc
+value coop_keep_magna_at         0x14
+value coop_count_rampage_obj     0x0079f90c
+value coop_count_rampage_at      0xb
+value coop_count_rampage_stride  1
+value coop_count_rampage_width   1
+value coop_count_train_obj       0x0079f934
+value coop_count_train_at        0x2c
+value coop_keep_djmult_obj       0x0079e8e8
+value coop_keep_djmult_at        0xc
+value coop_keep_perks_obj        0x0079f9e0
+value coop_keep_perks_at         0x44

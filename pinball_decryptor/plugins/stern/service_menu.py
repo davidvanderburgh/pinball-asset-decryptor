@@ -115,6 +115,8 @@ def placeholder_jobs(project, have, log):
 # ---- the owner's order of the app's rows (PAD-1382 round 3) ---------------------------------------------------------
 # Round 5 (David): "we should just be checking off items that exist (making a new one here doesn't make sense...)":
 # the rows are the app's own settings, switched on their tabs or on the Service menu tab; the owner orders them.
+# PR #40 (Simon) relaxes it for OFF_KEYS: a ticked row with nothing behind it yet goes on as a placeholder
+# (placeholder_jobs), so the menu can be laid out before the content exists. Still no rows of the owner's own making.
 #: the sidecar key: {"order": [setting keys], "on": [setting keys], "coop": true}
 STAGED_KEY = "service_menu"
 #: PAD-1393 round 2 (DragonRR: "Image set ... I cannot uncheck it"): the settings whose row the Service menu tab can

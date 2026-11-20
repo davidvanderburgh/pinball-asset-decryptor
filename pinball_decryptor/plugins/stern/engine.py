@@ -8550,7 +8550,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
             and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
             and not stock_mode_edits and shader_prof is None
-            and not own_clips and not score_edits):
+            and not own_clips and not score_edits
+            and not (not _is_spike3(disk_f)
+                     and _SvM_off.placeholder_jobs(assets_dir, set(), lambda *_a, **_k: None))):
+        # (PR #40 review: a row ticked on the Service menu tab is a change of its own, a placeholder when the
+        # project has nothing behind it yet - the Write tab lists it, so the Write must not say there is nothing)
         raise NothingToWrite(
             "Nothing to write: " + _modes_left_out_clause(_modes_left_out)
             + "every sound (idxNNNN.wav / music_catNN_*.wav) "

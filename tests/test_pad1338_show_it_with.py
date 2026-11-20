@@ -23,6 +23,21 @@ def _rows(*lines, **extra):
     return [dict({"path": GAME, "original": s, "replacement": ""}, **extra) for s in lines]
 
 
+def test_the_line_reading_as_the_stand_in_leads_its_breaks_kept():
+    """Simon (2026-11-20): the power-up box's stand-in GODZILLA POWERUP LEVEL 3 stands for the game's
+    GODZILLA\\nPOWERUP\\nLEVEL %d - offered first, its breaks kept (drawn as line breaks) - not the one-line
+    GODZILLA POWERUP - LEVEL %d; a console line ending in \\n and a %s message are not offered."""
+    from pinball_decryptor.webui.game_filled import try_lines
+    from pinball_decryptor.webui.text_scenes_tree import _with_tries
+    rows = _rows("GODZILLA POWERUP - LEVEL %d", "GODZILLA\\nPOWERUP\\nLEVEL %d", "GODZILLA POWERUP",
+                 "Level %d of godzilla\\n", "GODZILLA %s LEVEL")
+    got = try_lines(rows, "GODZILLA POWERUP LEVEL 3")
+    assert got[:2] == ["GODZILLA\\nPOWERUP\\nLEVEL 1", "GODZILLA POWERUP - LEVEL 1"]
+    assert not any(g.endswith("\\n") or "NAME" in g for g in got)
+    drawn = _with_tries([{"kind": "text", "node": 3, "text": "x"}], {3: got[0]})
+    assert drawn[0]["shown"] == "GODZILLA\nPOWERUP\nLEVEL 1"
+
+
 def test_a_sample_fills_the_games_fill_ins():
     from pinball_decryptor.webui.game_filled import sample_line
     assert sample_line("PLAYER %d - LOG IN", "2") == "PLAYER 2 - LOG IN"

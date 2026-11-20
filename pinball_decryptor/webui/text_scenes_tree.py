@@ -4525,5 +4525,6 @@ def _with_tries(draws, tries):
     with") put in as ``shown``, the words the renderer draws in place of the card's own."""
     if not tries:
         return draws
-    return [dict(d, shown=tries[d["node"]]) if d.get("kind") == "text" and d.get("node") in tries
+    # (a game line's \n, as the game program writes it, is a line break: GODZILLA\nPOWERUP\nLEVEL 1)
+    return [dict(d, shown=tries[d["node"]].replace("\\n", "\n")) if d.get("kind") == "text" and d.get("node") in tries
             else d for d in draws]

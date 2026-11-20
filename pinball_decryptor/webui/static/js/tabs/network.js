@@ -300,7 +300,7 @@ function MachineScreen({ n }) {
           </tbody></table>
       <//>
       ${n.buttons_error ? html`<p role="alert" class="err-ink">${n.buttons_error}</p>` : null}` : null}
-    <span class="small muted">Live view shows about 5 frames a second on 5 GHz Wi-Fi (measured on a Godzilla LE; less
+    <span class="small muted">Live view shows 3 to 5 frames a second on 5 GHz Wi-Fi (measured on a Godzilla LE; less
       on 2.4 GHz), with no sound. It is for setting up and troubleshooting: while it runs it takes most of the machine's Wi-Fi and some of its processor, so do not leave it on during a game that matters. The pictures of the screen cross your home network on a plain connection, as
       Send to machine's big files do. It stops when you leave this tab, and by itself after 30 minutes.</span>
   <//>`;

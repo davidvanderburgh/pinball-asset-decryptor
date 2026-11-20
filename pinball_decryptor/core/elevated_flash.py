@@ -694,7 +694,12 @@ def _remote_access_helper(job, log, progress, cancel, result_path):
     from .card_extras import ExtrasError
     from . import remote_setup
     try:
-        text = remote_setup.run_in_helper(job, log, progress, cancel)
+        if job.get("network_options"):
+            # PAD-1467: the Wi-Fi and remote-buttons options put straight on a plugged-in card
+            from . import network_apply
+            text = network_apply.run_in_helper(job, log, progress, cancel)
+        else:
+            text = remote_setup.run_in_helper(job, log, progress, cancel)
         _write_json_atomic(result_path, {"ok": True, "written": 0, "text": text})
     except ExtrasError as e:
         cancelled = str(e).startswith("Canceled")

@@ -34,6 +34,16 @@ html.bp-1100 .net-layout, html.bp-1100 .net-cols2 { grid-template-columns: 1fr; 
 .net-wifi-compare { margin-bottom: 4px; }
 /* PAD-1467: the machine's own screen, captured or live */
 .net-btn-row button { min-width: 72px; }
+/* PAD-1467: how a panel's settings reach a card, and the two direct routes */
+.net-ways { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 10px; }
+.net-ways-hd { font-size: 12.5px; font-weight: 600; }
+.net-ways-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.net-way { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.net-way.on { border-color: var(--accent-line); background: var(--accent-soft); }
+.net-way.off { color: var(--ink-3); text-decoration: line-through; opacity: .7; }
+.net-direct { display: flex; flex-direction: column; gap: 6px; }
+.net-pick { display: flex; flex-direction: column; gap: 2px; }
+.net-pick .small { padding-left: 26px; }
 .net-log { max-height: 260px; overflow: auto; font-size: 11.5px; line-height: 1.35; margin: 0; padding: 8px;
   border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .net-screen { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #000; }

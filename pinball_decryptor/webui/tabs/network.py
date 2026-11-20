@@ -207,6 +207,9 @@ class NetworkTab(TabService):
                  wifi_adapters=dict(head=list(wifi_card.ADAPTER_HEAD), rows=[list(r) for r in wifi_card.ADAPTERS],
                                     note=wifi_card.ADAPTER_NOTE))
         self._publish_buttons(project)
+        from ...core import network_apply
+        self.set(ways={k: network_apply.ways(k) for k in network_apply.WAYS},
+                 way_notes=dict(network_apply.WAY_NOTES))
         self.set(wifi_offered=wifi_card.offered(self.mfr), wifi_enabled=wifi_on, wifi_error=wifi_error,
                  wifi_supported=bool(wifi['supported'] and os.path.isdir(project)),
                  wifi_reason=wifi['reason'] if project else 'Select a project folder on the Extract tab first.')
@@ -944,6 +947,102 @@ class NetworkTab(TabService):
             return False
         self.set(screen_note='Saved %d frames (%.0f s, %s) to %s.' % (len(frames), seconds, kind, path), screen_kind='ok')
         return True
+
+    # ------------------------------------------------------------------ PAD-1467: straight onto a card or the machine
+    # David: 'Add "Put on the attached card" and "Put on my machine now" to the Wi-Fi and Remote buttons panels'
+    def _direct_options(self, kind):
+        """``(wifi, buttons)`` for the panel *kind*: what its boxes say now (ticked goes on, unticked comes off)."""
+        if kind == 'wifi':
+            return {'enabled': bool(self.get('wifi_enabled')), 'band5': bool(self.get('wifi_band5'))}, None
+        if kind == 'buttons':
+            return None, {'enabled': bool(self.get('buttons_enabled'))}
+        return None, None
+
+    def _direct_start(self, kind, what, work):
+        if self.get('direct_busy') or self.get('running'):
+            return False
+        loop = self.ctx.loop
+        self.set(direct_busy=what, direct_for=kind, direct_note='Starting...', direct_kind='', direct_pct=None)
+
+        def log(text, level='info'):
+            loop.post(self.log, text, level)
+            loop.post(lambda: self.get('direct_busy') and self.set(direct_note=text))
+
+        last = [-1]
+
+        def progress(done, total, msg=''):
+            pct = int(done * 100 / total) if total else 0
+            if pct != last[0]:
+                last[0] = pct
+                loop.post(lambda: self.get('direct_busy') and self.set(direct_pct=pct))
+
+        def run():
+            try:
+                text, kind_ = work(log, progress), 'ok'
+            except Exception as e:                      # noqa: BLE001 - said, never raised into the UI
+                text, kind_ = str(e) or e.__class__.__name__, 'err'
+            loop.post(lambda: self.set(direct_busy='', direct_note=text, direct_kind=kind_, direct_pct=None))
+        threading.Thread(target=run, daemon=True, name='pad-network-direct').start()
+        return True
+
+    @rpc
+    def put_on_card(self, kind):
+        """Put this panel's options straight on the plugged-in card picked under Remote access (asked first)."""
+        from ...core import network_apply
+        wifi, buttons = self._direct_options(kind)
+        device = self.get('card')
+        if (wifi is None and buttons is None) or not device:
+            return False
+        shown = next((c['display'] for c in self.get('cards') or [] if c['device'] == device), device)
+        if not compat.messagebox.askyesno(
+                'Put on the attached card',
+                "Put %s on the card in %s?\n\nOnly the card's system files change: the game, its settings and "
+                "high scores stay as they are. Your computer may ask for administrator access."
+                % (network_apply._said(wifi, buttons), shown), icon='warning'):
+            return False
+        source = self._source() or None
+
+        def work(log, progress):
+            res = network_apply.to_card_with_privileges(device, wifi=wifi, buttons=buttons, stern_from=source,
+                                                        log=log, progress=progress)
+            said = network_apply._said(wifi, buttons)
+            return ('The card already had %s.' % said if res == 'already'
+                    else 'The card has %s now. Put it back in the machine and switch it on.' % said)
+        return self._direct_start(kind, 'Changing the card', work)
+
+    @rpc
+    def put_on_machine(self, kind):
+        """Put this panel's options straight on the machine over remote access; it restarts (asked first)."""
+        from ...core import network_apply
+        wifi, buttons = self._direct_options(kind)
+        address = self.get('address')
+        if (wifi is None and buttons is None) or not address:
+            return False
+        if not compat.messagebox.askyesno(
+                'Put on my machine now',
+                "Put %s on the machine at %s now?\n\nThe machine restarts when it is done (about a minute), so a "
+                "game being played ends. Its settings and high scores stay as they are."
+                % (network_apply._said(wifi, buttons), address), icon='warning'):
+            return False
+        source = self._source() or None
+
+        def work(log, progress):
+            from ...core import remote_send
+            stern = None
+            if wifi is not None and not wifi.get('band5') and source:
+                try:
+                    stern = wifi_card._stern_module(source)
+                except Exception:                       # noqa: BLE001 - asked for only if the machine needs it
+                    stern = None
+            m = remote_send.connect(address)
+            try:
+                res = network_apply.to_machine(m, wifi=wifi, buttons=buttons, stern_module=stern, log=log)
+            finally:
+                m.close()
+            said = network_apply._said(wifi, buttons)
+            return ('The machine already had %s; nothing was changed.' % said if res == 'already'
+                    else 'The machine has %s now and is restarting; it is back in about a minute.' % said)
+        return self._direct_start(kind, 'Changing the machine', work)
 
     def on_show(self):
         self._visible = True

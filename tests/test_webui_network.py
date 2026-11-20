@@ -339,6 +339,11 @@ def test_wifi_card_compares_each_step_from_stock_to_5ghz():
     assert all(len(r) == len(wifi_card.ADAPTER_HEAD) for r in kinds) and 'no 5 GHz radio' in kinds[0][3]
     assert 'n.wifi_adapters' in js
     assert 'What each option gets you' in js and 'n.wifi_compare' in js and 'net-wifi-yours' in js
+    # the panel is short: the long words sit behind disclosures (David: 'a wall of text')
+    panel = js[js.index('function WifiStartup'):js.index('<${Ways} n=${n} panel="wifi" />')]
+    shown = panel[:panel.index('How these were measured')]
+    assert shown.count('<span class="small muted">') == 2 and 'wpa_supplicant' not in shown
+    assert max(len(cell) for row in wifi_card.COMPARE for cell in row) <= 32
 
 
 def test_5ghz_choice_needs_the_start_up_choice_and_a_card_with_the_right_kernel(tmp_path, monkeypatch):

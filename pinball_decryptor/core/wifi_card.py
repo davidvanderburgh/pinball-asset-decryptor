@@ -106,25 +106,20 @@ BAND_DETAILS = (
 #: then "i don't want all of the 'not measured yet' items in there".  One row per box, each on top of the one
 #: before; every figure is one measured on his Godzilla LE (docs/plans/spike2-wifi-5ghz.md has each run).  The
 #: 2.4 GHz speed is the encrypted connection's, the only one timed on that band, so it is given as a floor.
-COMPARE_HEAD = ('Set-up', 'Joining Wi-Fi when the machine starts', 'Band', 'Send to machine, a large file',
-                'A 1 GB update, roughly')
+COMPARE_HEAD = ('', 'Joins Wi-Fi', 'Band', 'Send to machine')
 COMPARE = (
-    ('Machine as shipped (nothing ticked)',
-     'Often fails and is tried again: minutes, sometimes not at all', '2.4 GHz',
-     'At least about 2 MB a second', 'Up to 9 minutes'),
-    ('+ Reliable Wi-Fi start-up (first box)',
-     'At the first try, about 15 seconds after Wi-Fi starts', '2.4 GHz',
-     'At least about 2 MB a second (this box does not change speed)', 'Up to 9 minutes'),
-    ('+ Newer adapter driver (second box)',
-     'At the first try, then on 5 GHz within a minute', '5 GHz, 80 MHz wide',
-     '7 to 13 MB a second', '1.5 to 2.5 minutes'),
+    ('As shipped', 'Often minutes, sometimes never', '2.4 GHz', 'At least 2 MB a second'),
+    ('+ Reliable start-up', 'At the first try, about 15 s', '2.4 GHz', 'At least 2 MB a second'),
+    ('+ 5 GHz driver', 'At the first try', '5 GHz', '7 to 13 MB a second'),
 )
+#: behind "How these were measured" on the tab (David: the panel read as a wall of text)
 COMPARE_NOTE = ("Rough figures from one machine: a Godzilla LE with an AC1200 (RTL8822BU) adapter, an eero router in the "
                 'same room, 24 to 64 MB files. Yours will differ with distance and router. Send to machine needs '
                 'remote access on the card. The 2.4 GHz speed is what the encrypted connection did there; big '
-                'files now go over plain connections, each piece signed and checked, which were timed on 5 GHz (the 7 to 13). '
+                'files now go over plain connections, each piece signed and checked, which were timed on 5 GHz. '
                 "Encrypted, 5 GHz reached 3.4 MB a second: the machine's processor, not the radio, is the limit "
-                'there. The 1 GB times are worked out from the speeds, not timed.')
+                'there. A 1 GB update is about 9 minutes at 2 MB a second and about 2 at 10: worked out from the '
+                'speeds, not timed.')
 #: David (PAD-1467): "add a comparison for the stock adapter vs. the one we bought ... (does the stock not support
 #: 5GHz?)".  The card's start-up script (/etc/init.d/game) loads three adapter drivers; two are for chips with a
 #: 2.4 GHz radio only.  Bands and link rates are the chips' own (Realtek's figures), not measurements.

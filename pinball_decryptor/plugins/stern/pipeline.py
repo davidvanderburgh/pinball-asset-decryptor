@@ -783,9 +783,13 @@ class SternFlashImagePipeline(BasePipeline):
 
     def __init__(self, image_path, device_path,
                  log_cb, phase_cb, progress_cb, done_cb, menu_only=False,
-                 verify=True, keep_data=False):
+                 verify=True, keep_data=False, network_from=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image_path = image_path
+        #: PAD-1467 "Keep my network settings": the project whose remote access, Wi-Fi and remote-buttons
+        #: options go onto a COPY of the image, which is what gets written (core/network_keep.py)
+        self.network_from = network_from or None
+        self._inner = None
         self.device_path = device_path
         #: False = the dialog's "Skip verify" was ticked: no read-back
         self.verify = bool(verify)
@@ -813,12 +817,70 @@ class SternFlashImagePipeline(BasePipeline):
                 "Image file not found: %r" % self.image_path)
         self._check_cancel()
 
+        staged = None
+        if self.network_from and not self.menu_only:
+            staged = self._with_network()
+        try:
+            self._flash(staged or self.image_path)
+        finally:
+            if staged:
+                from ...core import network_keep
+                network_keep.clean(staged)
+
+    def cancel(self):
+        super().cancel()
+        inner = self._inner
+        if inner is not None:
+            inner.cancel()
+
+    def _with_network(self):
+        """PAD-1467: a copy of the image with the project's network options on it; its path, or None when the
+        project has none.  A build from a project that holds nothing but them, so everything a build checks is
+        checked (the card can take them, the files read back) before the card is touched."""
+        import shutil
+        import tempfile
+        from ...core import network_keep
+        from ...core.card_extras import ExtrasError
+        if not network_keep.options(self.network_from):
+            return None
+        out = network_keep.staged_path(self.image_path)
+        network_keep.clean(out)
+        need = os.path.getsize(self.image_path)
+        if shutil.disk_usage(os.path.dirname(out)).free < need + (512 << 20):
+            raise PipelineError(
+                "Check card",
+                "Keeping your network settings needs room for a copy of the image (%.1f GB) beside it, and that "
+                "drive has not got it. Free some space, or untick Keep my network settings." % (need / 1e9))
+        folder = tempfile.mkdtemp(prefix="pad-network-")
+        ok = False
+        try:
+            try:
+                kept = network_keep.stage_project(self.network_from, folder)
+            except ExtrasError as e:
+                raise PipelineError("Check card", str(e)) from e
+            self._log("Keeping your network settings (%s): putting them on a copy of the image first..."
+                      % network_keep.said(self.network_from), "info")
+            inner = SternWritePipeline(self.image_path, folder, out, self._log, lambda *a, **k: None,
+                                       self._progress, lambda *a, **k: None)
+            self._inner = inner
+            inner._run()
+            self._check_cancel()
+            ok = True
+            self._log("The copy has %s on it; writing it to the card." % ", ".join(kept), "info")
+            return out
+        finally:
+            self._inner = None
+            shutil.rmtree(folder, ignore_errors=True)
+            if not ok:
+                network_keep.clean(out)
+
+    def _flash(self, image_path):
         self._set_phase(1)  # Write image
         if not self.verify:
             self._log(SKIP_VERIFY_LOG, "warning")
         try:
             written = flash_image_with_privileges(
-                self.image_path, self.device_path,
+                image_path, self.device_path,
                 log=self._log, progress=self._progress,
                 cancel=lambda: self._cancelled, verify=self.verify,
                 on_verify_start=lambda: self._set_phase(2),  # Verify card

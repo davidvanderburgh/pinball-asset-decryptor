@@ -108,3 +108,42 @@ card trip is possible from a failed trial. It needs David's go-ahead like any ra
 What it should answer, in order: does the stick associate on 5 GHz at all when 2.4 GHz is excluded (the
 log shows the driver's join attempts), and if not, at which step it stops. The feature's mechanism follows
 from that: "prefer 5 GHz with 2.4 GHz fallback", never a hard exclusion.
+
+## Logged trials, 2026-11-20: the fault is the Wi-Fi client's driver mode
+
+Four one-boot trials followed, each with its own log on `/dump` (copies: `/dump/pad1467_run1..3`,
+`/dump/pad1467_trial.*`). What they showed:
+
+- **Held to 5 GHz (`rtw_excl_chs`), wext mode.** The stick hears VanderGiga on channel 40 at -47 dBm. Nine
+  join attempts in 150 s, every one the same: `Trying to associate ... freq=5200 MHz`, `Association request
+  to the driver failed`, `Associated with ...`, then `CTRL-EVENT-DISCONNECTED reason=0` with no handshake
+  (once `Authentication ... timed out`). Never connected.
+- **Country code only, wext mode, both bands.** wpa_supplicant goes for the stronger 5 GHz access point,
+  fails the same way, tries 2.4 GHz once and that fails too (`Association request to the driver failed`,
+  `4-Way Handshake failed`, network temp-disabled as WRONG_KEY), then keeps retrying 5 GHz with growing
+  back-off. So a country code on its own makes the machine worse, not better.
+- **Stock driver line, wext mode (the shipped set-up).** The scan cache already lists the 5 GHz access
+  points (5200 MHz, -48 dBm): the stick's own channel plan includes 5 GHz and **no country code is needed**.
+  Joins show the same failed-request pattern and a kernel `WARNING` in `cfg80211_connect` from the wext
+  path; on 2.4 GHz one of the retries usually gets through, which is the slow, flaky start-up connection.
+- **Stock driver line, nl80211 mode.** One attempt: `Trying to associate`, `Associated`, `Key negotiation
+  completed`, `CTRL-EVENT-CONNECTED`, 14 s after wpa_supplicant started, address 88 s after a soft reboot.
+  No `Association request to the driver failed`, no kernel warning, link steady for the 135 s logged. It
+  joined 2.4 GHz (2412 MHz, -43 dBm, the strongest access point), and `status` now reports the frequency.
+
+Why wext is used: the game sends Stern's connectivity agent (`conagent`) a `CONFIG_NETWORK` message that
+names `wpa-driver wext`. The agent writes `/tmp/network_interface.wlan0` and runs `ifup -i` on it; busybox
+`ifup` runs `/etc/network/if-pre-up.d/wpa-supplicant`, which starts `wpa_supplicant ... -D $IF_WPA_DRIVER`.
+`/etc/network/interfaces` is not involved (changing it has no effect). wpa_supplicant 2.3 on the card lists
+nl80211, and the Realtek driver registers a cfg80211 phy, so nl80211 is the right interface; wext is a
+compatibility layer in which wpa_supplicant's separate set-BSSID and set-SSID calls each start a connect.
+
+**The hook for a card change:** the pre-up script reads `/etc/wpa_supplicant/driver.$IFACE` before anything
+else and uses its contents as the driver name. The directory does not exist on the shipped card. So the
+card change is one new file, `/etc/wpa_supplicant/driver.wlan0`, containing `nl80211`. No script edits.
+The trials overrode the pre-up script in memory for one boot instead (bind mount), which is equivalent.
+
+Still open: whether the machine holds a 5 GHz link in nl80211 mode. It has not been tried: with both bands
+available it picks the stronger 2.4 GHz access point. Two mistakes cost a trial each: the first nl80211
+trial changed `/etc/network/interfaces` (not used), and a stray `%%` in a shell arithmetic line killed its
+logging loop, so its self-restart never ran.

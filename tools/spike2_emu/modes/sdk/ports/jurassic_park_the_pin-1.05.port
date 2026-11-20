@@ -720,3 +720,5 @@ site ball_device_keep     0x002f37d8 0xe30f389c 0xe340304b
 data ball_devices         0x0056d120
 text ball_device_names  T.Rex_Head
 data ball_device_count    0x004bf89c
+# PAD-1464: the game's Start sets its map (ScoreframeMap) in the score frame, the HUD over it: no start film
+text start_film_clips -

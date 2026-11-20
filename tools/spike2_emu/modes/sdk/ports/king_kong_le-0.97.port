@@ -1059,3 +1059,6 @@ site ball_device_keep     0x00599aa0 0xe30e3f10 0xe340306c
 data ball_devices         0x00856624
 text ball_device_names  CAVE_VUK TRAIN_VAPOR
 data ball_device_count    0x006cef10
+# PAD-1464: the game's Start plays Kong_Intro_Pod<N> over the whole glass on a surface of its own (not the bank's),
+# about 22 s, until it asks for Kong_Island_Bg_02_SepiaFx there
+text start_film_clips Kong_Intro_*

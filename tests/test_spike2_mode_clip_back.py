@@ -245,7 +245,9 @@ def test_the_runtime_hooks_it_on_clip_v2_with_the_ports_seek_only():
     src = RUNTIME.read_text(encoding="utf-8")
     arm = _lift(src, "static void ck_arm(void)")
     assert '"surface_seek", "surface_position", 0' in arm and "!clip_v2" in arm   # PAD-725: the length is optional
-    assert 'hook(fn("surface_play"), on_surface_play)' in arm and src.count('hook(fn("surface_play")') == 1
+    # PAD-1464: one hook on surface_play (sp_hook) for its watchers, the put-back and the start film
+    assert "sp_hook()" in arm and src.count('hook(fn("surface_play")') == 1
+    assert 'hook(fn("surface_play"), on_surface_play)' in _lift(src, "static int sp_hook(void)")
     assert "ck_arm();" in src and "ck_tick();" in _lift(src, "static void clip_tick(void)")
     one = _lift(src, "static void on_surface_set_video(pm_reg *r)")
     assert one.index("ck_seen(r)") < one.index("on_clipv_set_video(r)")   # before a variant swaps the name

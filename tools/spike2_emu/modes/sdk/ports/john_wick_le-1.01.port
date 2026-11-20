@@ -817,3 +817,5 @@ site coil_off              0x004f2c10 0xe3510008 0xe1a02001
 data sw_struct             0x006b78ec
 data coil_count            0x006ac36c
 data coil_table            0x006c0728
+# PAD-1464: the game's Start sets its night city (NY_Night) as the background, the HUD over it: no start film
+text start_film_clips -

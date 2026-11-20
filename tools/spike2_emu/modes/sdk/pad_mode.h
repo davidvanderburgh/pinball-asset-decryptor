@@ -553,6 +553,12 @@ int pm_display_priority(unsigned priority);
  * layered foreground: your screen is under it); 0 otherwise. With no priority held (your mode
  * is not running: a qualification note) it looks at the game's display now (PAD-658). */
 int pm_display_covered(void);
+/* PAD-1464: 1 while the game's own start-of-game film plays (the video it shows over the whole glass when Start is
+ * pressed: Uncanny X-Men 0.98's GameIntro, about 15 s, no flipper skips it), and in the first moment of a game before
+ * the game has asked for it; 0 otherwise (a later ball, a later player, a title whose Start plays none). Every screen
+ * of yours is under that film, so a menu, a screen or a clock at the game's start waits it out (the kit's menu does:
+ * kit_menu). Found by the clip the game asks for as its game starts, on every Spike 2 build with clips. */
+int pm_start_film(void);
 /* PAD-662: 1 while a screen of the game's own is on the glass under the HUD - a background of its layered display
  * other than the main play (Godzilla's city): a mode of the game's, a multiball, a qualifying screen like
  * Mechagodzilla's DEFENSE NEO BARRIER, any of them, listed or not. Its scene letters the game's words where a mode's

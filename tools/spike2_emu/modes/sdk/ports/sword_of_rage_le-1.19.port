@@ -720,3 +720,5 @@ site ball_device_keep     0x003232c8 0xe3043360 0xe3403047
 data ball_devices         0x005fb3bc
 text ball_device_names  MULTIBALL_LOCKUP
 data ball_device_count    0x00474360
+# PAD-1464: the game's Start plays its title screen over the whole glass, looped, until it asks for MainplayV1 (7.4 s)
+text start_film_clips BlackKnight_PhotoShoot_TitleScreen

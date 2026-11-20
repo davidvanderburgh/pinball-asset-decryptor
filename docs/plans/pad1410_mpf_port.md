@@ -66,6 +66,10 @@ menu opened at 13.0 s was still under its fade-out). The port opens the roster 1
 first ball (later players have no such video), and a ball in play before then keeps the last pick instead of a menu
 over a live ball. MODE_SDK.md's menu section and the guide say so.
 
+PAD-1464 since: the runtime sees the film (`pm_start_film`) on every Spike 2 build and the kit's menu waits for it
+by itself, so the port opens the roster at FUTURE's start again and its 17 s wait is gone
+(`docs/plans/pad1464_start_film.md`).
+
 ## Tests
 
 `tests/test_pad1410_mpf_porting.py`: the guide sits beside MODE_SDK.md and every `pm_` / `kit_` / `pa_` call it names

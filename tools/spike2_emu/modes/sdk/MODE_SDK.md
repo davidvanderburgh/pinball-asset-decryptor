@@ -6425,13 +6425,7 @@ hit) with the ball waiting in the shooter lane meanwhile; and on all 53 newest S
 move and Action (Start on the three with no Action button) and its time each taking the one highlighted
 (`docs/plans/pad1404_flipper_menus.md`).
 
-**A menu at the game's start (PAD-1410).** A game plays its own start-of-game video when Start is pressed, over the
-whole glass and over every screen of the modes'; a menu opened as the game starts (a whole-game mode's, the first
-thing it does) is drawn under it, and with a time shorter than the video it is picked by its time unseen. Uncanny X-Men
-0.98's runs about 15 s, no flipper press skips it, and no call sees it (`pm_display_covered` and `pm_game_words` read 0
-all through it, emulator, LE). Open such a menu after it: the PAD-1410 port's roster waits 17 s from the game's start on
-player 1's first ball (later players have no such video), and a ball launched before then keeps the player's last
-pick instead of a menu over a ball in play. A menu opened later in a game (a mode's start, a scoop) is not affected.
+**A menu at the game's start (PAD-1410, PAD-1464).** Many games play a film of their own when Start is pressed, over the whole glass with their HUD taken off, so over every screen of the modes' (Uncanny X-Men 0.98's GameIntro about 15 s, Avengers' splash and GameIntro 14 s, Jurassic Park's island flight 24 s, Jaws', King Kong's, Black Knight's title, Godzilla's intro, Foo Fighters', The Beatles', Star Wars ELG's crawl, Stranger Things LE's title). No flipper press skips it, and `pm_display_covered` and `pm_game_words` read 0 through it. `pm_start_film()` is 1 while it plays: the runtime watches the clips the game asks for as its game starts (the video bank's surface, `clip_play`, the video layer), and a port can name its films (`text start_film_clips <names>`, a trailing `*` a prefix) or say its Start plays none over the HUD (`text start_film_clips -`: James Bond, John Wick, Jurassic Park The Pin). The kit's menu waits for it by itself: a `kit_menu_open` under the film (a whole-game mode's roster on the game's first ball; a blocks mode's Open the menu at its start) is not drawn, its time does not run and its buttons stay the game's until the film is over, then it comes up with its whole time; a lane menu's plunge meanwhile takes the one it opened on. In the first 1.5 s of a game, before the game has asked for its film, it reads 1 too, so a menu opened on the game's start tick waits that long at most where there is none. A menu opened later in a game (a mode's start, a scoop) is not affected. Census and proof: `docs/plans/pad1464_start_film.md`.
 
 ## Co-op play (PAD-1017)
 

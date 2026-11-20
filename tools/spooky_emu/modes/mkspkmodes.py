@@ -250,8 +250,8 @@ def keys_not_here(port):
     return out
 
 
-def _not_here(k, port):
-    """Why the title's runtime cannot do *k*, or None."""
+def _not_here(k, port, v=""):
+    """Why the title's runtime cannot do *k* (= *v*), or None."""
     if k in ((port or {}).get("keys_not_here") or ()):
         return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
                 "and colour" % (k, port.get("title", "this game")))
@@ -376,8 +376,8 @@ def check_modes(mode_dir, port=None):
         with open(tpath, encoding="utf-8", errors="replace") as f:
             for n, k, v in MJ.parse_cfg(f.read()):
                 kind = TITLE_KEYS.get(k) or KEYS.get(k)
-                if _not_here(k, port):
-                    problems.append("title.cfg:%d: %s" % (n, _not_here(k, port)))
+                if _not_here(k, port, v):
+                    problems.append("title.cfg:%d: %s" % (n, _not_here(k, port, v)))
                     continue
                 if k in BUILD_TITLE_KEYS:
                     problems.append("title.cfg:%d: %s is the game's own (its port report says it); take "
@@ -411,7 +411,7 @@ def check_modes(mode_dir, port=None):
             if kind is None:
                 problems.append("%s:%d: %s" % (fn, n, _unknown(k)))
                 continue
-            why = _not_here(k, port) or not_on_screen(k, port, v)
+            why = _not_here(k, port, v) or not_on_screen(k, port, v)
             if why:
                 problems.append("%s:%d: %s" % (fn, n, why))
                 continue

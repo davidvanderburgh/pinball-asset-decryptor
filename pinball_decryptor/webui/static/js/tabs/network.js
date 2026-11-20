@@ -178,7 +178,7 @@ function SendToMachine({ n }) {
 }
 
 // PAD-1467: a card whose Wi-Fi program talks to the adapter the current way (core/wifi_card.py). Measured on a
-// Godzilla with Stern's AC1200 adapter: the shipped way failed nine joins of nine in 150 s on one access point,
+// Godzilla with an AC1200 adapter: the shipped way failed nine joins of nine in 150 s on one access point,
 // this one joined at the first attempt, 14 s after it started.
 function WifiStartup({ n }) {
   const [enabled, setEnabled] = useState(!!n.wifi_enabled);
@@ -197,10 +197,17 @@ function WifiStartup({ n }) {
       <table class="net-fields net-wifi-compare">
         <thead><tr>${n.wifi_compare.head.map((h) => html`<th scope="col" key=${h}>${h}</th>`)}</tr></thead>
         <tbody>${n.wifi_compare.rows.map((r, i) => html`<tr key=${r[0]}
-          class=${(i === 2 && enabled && !band) || (i === 3 && band) || (i === 1 && !enabled) ? "net-wifi-yours" : ""}>
+          class=${(i === 0 && !enabled) || (i === 1 && enabled && !band) || (i === 2 && band) ? "net-wifi-yours" : ""}>
           <th scope="row">${r[0]}</th>${r.slice(1).map((c, j) => html`<td key=${j}>${c}</td>`)}</tr>`)}</tbody>
       </table>
       <span class="small muted">The highlighted row is what this project is set to. ${n.wifi_compare.note}</span>` : null}
+    ${n.wifi_adapters ? html`<div class="lbl">Which adapter your machine has matters</div>
+      <table class="net-fields net-wifi-compare">
+        <thead><tr>${n.wifi_adapters.head.map((h) => html`<th scope="col" key=${h}>${h}</th>`)}</tr></thead>
+        <tbody>${n.wifi_adapters.rows.map((r) => html`<tr key=${r[0]}>
+          <th scope="row">${r[0]}</th>${r.slice(1).map((c, j) => html`<td key=${j}>${c}</td>`)}</tr>`)}</tbody>
+      </table>
+      <span class="small muted">${n.wifi_adapters.note}</span>` : null}
     ${!n.wifi_supported ? html`<${Note}>${n.wifi_reason}<//>` : null}
     <${Check} label="Use the reliable Wi-Fi start-up on cards I write from this project" checked=${enabled}
       disabled=${locked} wrap
@@ -213,7 +220,7 @@ function WifiStartup({ n }) {
         <td class=${r[2] ? "mono" : ""}>${r[1]}</td></tr>`)}
         ${n.wifi_now ? html`<tr><th scope="row">The card you picked has</th><td class="mono">${n.wifi_now}</td></tr>` : null}
       </tbody></table>
-    <span class="small muted">Measured on a Godzilla LE with Stern's AC1200 adapter (RTL8822BU): with${" "}
+    <span class="small muted">Measured on a Godzilla LE with an AC1200 adapter (RTL8822BU): with${" "}
       <span class="mono">wext</span>, nine tries of nine to join failed on one access point; with${" "}
       <span class="mono">nl80211</span> it joined at the first try, 14 to 15 seconds after${" "}
       <span class="mono">wpa_supplicant</span> started, on three starts of three.</span>

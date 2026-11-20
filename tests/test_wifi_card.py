@@ -301,7 +301,7 @@ def test_5ghz_choice_is_saved_with_the_project_and_guards_a_flash(card, tmp_path
 def test_the_bundled_driver_is_the_one_committed_and_the_scripts_parse():
     data = W.new_module_bytes()
     assert data[:4] == b'\x7fELF' and W.VERMAGIC in data and b'version=' + W.NEW_VERSION.encode() in data
-    assert b'usb:v0BDApB812' in data                             # Stern's AC1200 adapter
+    assert b'usb:v0BDApB812' in data                             # the AC1200 adapter
     payload = W.band_payload()
     assert set(payload) == {W.MODULE, W.HELPER, W.INIT}
     for old, new in W.MENU_TEXT:

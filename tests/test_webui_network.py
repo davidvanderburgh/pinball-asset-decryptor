@@ -324,15 +324,20 @@ def test_wifi_start_up_says_exactly_what_it_changes(tmp_path, monkeypatch):
 
 
 def test_wifi_card_compares_each_step_from_stock_to_5ghz():
-    """PAD-1467: the card shows what each box gets you, stock to 5 GHz, and never a figure nobody measured."""
+    """PAD-1467: the card shows what each box gets you, stock to 5 GHz, in figures that were measured."""
     from pinball_decryptor.core import wifi_card
-    assert len(wifi_card.COMPARE) == 4 and all(len(r) == len(wifi_card.COMPARE_HEAD) for r in wifi_card.COMPARE)
-    stock, plain, start, band = wifi_card.COMPARE
-    assert '2.4 GHz' == stock[2] == plain[2] == start[2] and band[2].startswith('5 GHz')
+    assert len(wifi_card.COMPARE) == 3 and all(len(r) == len(wifi_card.COMPARE_HEAD) for r in wifi_card.COMPARE)
+    stock, start, band = wifi_card.COMPARE
+    assert '2.4 GHz' == stock[2] == start[2] and band[2].startswith('5 GHz')
     assert 'first try' in start[1] and 'first try' in band[1] and 'first try' not in stock[1]
-    assert plain[3].startswith(wifi_card.NOT_MEASURED)            # no 2.4 GHz plain-connection run exists yet
+    assert not any('not measured' in cell.lower() for row in wifi_card.COMPARE for cell in row)   # David: none of those
+    assert stock[3].startswith('At least') and start[3].startswith('At least')    # a floor: only encrypted was timed there
     assert 'not timed' in wifi_card.COMPARE_NOTE
     js = (Path(wifi_card.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
+    kinds = wifi_card.ADAPTERS
+    assert [r[1] for r in kinds] == ['2.4 GHz only', '2.4 GHz only', '2.4 GHz and 5 GHz']     # only the AC1200 has 5 GHz
+    assert all(len(r) == len(wifi_card.ADAPTER_HEAD) for r in kinds) and 'no 5 GHz radio' in kinds[0][3]
+    assert 'n.wifi_adapters' in js
     assert 'What each option gets you' in js and 'n.wifi_compare' in js and 'net-wifi-yours' in js
 
 

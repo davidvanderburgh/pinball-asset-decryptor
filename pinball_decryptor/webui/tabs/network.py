@@ -178,7 +178,9 @@ class NetworkTab(TabService):
                  wifi_band_details=[list(row) for row in wifi_card.BAND_DETAILS],
                  wifi_band_now=wifi_card.describe_band(wifi),
                  wifi_compare=dict(head=list(wifi_card.COMPARE_HEAD), rows=[list(r) for r in wifi_card.COMPARE],
-                                   note=wifi_card.COMPARE_NOTE))
+                                   note=wifi_card.COMPARE_NOTE),
+                 wifi_adapters=dict(head=list(wifi_card.ADAPTER_HEAD), rows=[list(r) for r in wifi_card.ADAPTERS],
+                                    note=wifi_card.ADAPTER_NOTE))
         self.set(wifi_offered=wifi_card.offered(self.mfr), wifi_enabled=wifi_on, wifi_error=wifi_error,
                  wifi_supported=bool(wifi['supported'] and os.path.isdir(project)),
                  wifi_reason=wifi['reason'] if project else 'Select a project folder on the Extract tab first.')

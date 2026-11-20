@@ -102,29 +102,47 @@ BAND_DETAILS = (
     ('To undo', "Untick it and write the card (or Send to machine): Stern's driver is put back from the "
      'original card and the added files are taken off.', False),
 )
-#: David (PAD-1467): "show rough comparisons of stock, all the way to 5GHz ... how ticking each box can help".  One
-#: row per step, each on top of the one before; every figure is one measured on his Godzilla LE (the notes in
-#: docs/plans/spike2-wifi-5ghz.md have each run), and a step nobody measured says so rather than guessing.
+#: David (PAD-1467): "show rough comparisons of stock, all the way to 5GHz ... how ticking each box can help", and
+#: then "i don't want all of the 'not measured yet' items in there".  One row per box, each on top of the one
+#: before; every figure is one measured on his Godzilla LE (docs/plans/spike2-wifi-5ghz.md has each run).  The
+#: 2.4 GHz speed is the encrypted connection's, the only one timed on that band, so it is given as a floor.
 COMPARE_HEAD = ('Set-up', 'Joining Wi-Fi when the machine starts', 'Band', 'Send to machine, a large file',
                 'A 1 GB update, roughly')
-NOT_MEASURED = 'Not measured yet'
 COMPARE = (
-    ('Machine as shipped, earlier versions of PAD',
+    ('Machine as shipped (nothing ticked)',
      'Often fails and is tried again: minutes, sometimes not at all', '2.4 GHz',
-     'About 2 MB a second (encrypted connection)', '9 minutes'),
-    ('Machine as shipped, this version of PAD (nothing ticked)',
-     'The same', '2.4 GHz', NOT_MEASURED + ' (plain connection, checked by hash)', NOT_MEASURED),
+     'At least about 2 MB a second', 'Up to 9 minutes'),
     ('+ Reliable Wi-Fi start-up (first box)',
-     'At the first try, about 15 seconds after Wi-Fi starts', '2.4 GHz', 'As the row above', 'As the row above'),
+     'At the first try, about 15 seconds after Wi-Fi starts', '2.4 GHz',
+     'At least about 2 MB a second (this box does not change speed)', 'Up to 9 minutes'),
     ('+ Newer adapter driver (second box)',
      'At the first try, then on 5 GHz within a minute', '5 GHz, 80 MHz wide',
-     '10 to 13 MB a second (plain connection, checked by hash)', '1.5 to 2 minutes'),
+     '10 to 13 MB a second', '1.5 to 2 minutes'),
 )
-COMPARE_NOTE = ('Rough figures from one machine: a Godzilla LE with Stern\'s AC1200 adapter, an eero router in the '
+COMPARE_NOTE = ("Rough figures from one machine: a Godzilla LE with an AC1200 (RTL8822BU) adapter, an eero router in the "
                 'same room, 24 to 64 MB files. Yours will differ with distance and router. Send to machine needs '
-                'remote access on the card; its faster plain connection needs no box. On 5 GHz the encrypted '
-                'connection alone reached 3.4 MB a second, because the machine\'s processor, not the radio, is '
-                'the limit there. The 1 GB times are worked out from the speeds, not timed.')
+                'remote access on the card. The 2.4 GHz speed is what the encrypted connection did there; big '
+                'files now go over a plain connection, checked by hash, which was timed on 5 GHz (the 10 to 13). '
+                "Encrypted, 5 GHz reached 3.4 MB a second: the machine's processor, not the radio, is the limit "
+                'there. The 1 GB times are worked out from the speeds, not timed.')
+#: David (PAD-1467): "add a comparison for the stock adapter vs. the one we bought ... (does the stock not support
+#: 5GHz?)".  The card's start-up script (/etc/init.d/game) loads three adapter drivers; two are for chips with a
+#: 2.4 GHz radio only.  Bands and link rates are the chips' own (Realtek's figures), not measurements.
+ADAPTER_HEAD = ('Adapter (the chip inside)', 'Bands', 'Fastest link, on paper', 'What the two boxes do for it')
+ADAPTERS = (
+    ('N150 adapters: Realtek RTL8188EU (driver 8188eu.ko)', '2.4 GHz only', '150 Mbit/s',
+     'First box: start-up through nl80211, or wext as before if the driver has no nl80211. Second box: nothing; '
+     'the chip has no 5 GHz radio.'),
+    ('N300 adapters: Realtek RTL8192EU (driver 8192eu.ko)', '2.4 GHz only', '300 Mbit/s',
+     'The same as the row above.'),
+    ('AC1200 adapters: Realtek RTL8822BU (driver 8812bu.ko)', '2.4 GHz and 5 GHz',
+     '867 Mbit/s on 5 GHz, 300 Mbit/s on 2.4 GHz',
+     'Both boxes: joins at the first try, then moves to 5 GHz. This is the adapter the figures above were '
+     'measured with.'),
+)
+ADAPTER_NOTE = ('These are the three kinds of USB Wi-Fi adapter a Spike 2 machine has drivers for. An adapter with a '
+                '2.4 GHz-only chip cannot join 5 GHz whatever is on the card; for 5 GHz the machine needs an AC1200 '
+                '(RTL8822BU) adapter. The first two rows were not tried on a machine.')
 #: the game program's own network-menu wording, and what it becomes with the 5 GHz choice on (each shorter, so it is
 #: written in place; plugins/stern/engine.py adds these to a build's program text)
 MENU_TEXT = (

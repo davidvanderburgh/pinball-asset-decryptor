@@ -1617,12 +1617,12 @@ HELP_CONTENT = {
             "access. Writing a card without it puts the machine back as shipped.\n"
             "- A card whose system does not have the start-up step this option uses says so here and is left "
             "as it is.",
-            "Measured on a Godzilla LE with Stern's AC1200 adapter (RTL8822BU): with `wext`, nine tries of nine "
+            "Measured on a Godzilla LE with an AC1200 adapter (RTL8822BU): with `wext`, nine tries of nine "
             "to join failed on one access point; with `nl80211` the machine joined at the first try, 14 to 15 "
             "seconds after `wpa_supplicant` started, on three starts of three.",
         ]),
         ("5 GHz", [
-            "**Also use the newer adapter driver** is for a machine with Stern's AC1200 USB Wi-Fi adapter "
+            "**Also use the newer adapter driver** is for a machine with an AC1200 USB Wi-Fi adapter "
             "(Realtek RTL8822BU). The driver the machine ships for it, a 2018 build, joins a current router's "
             "5 GHz signal and is dropped the same moment, so the machine only ever works on 2.4 GHz. A 2019 build "
             "of the same Realtek driver holds a 5 GHz connection.",

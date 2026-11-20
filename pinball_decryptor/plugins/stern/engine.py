@@ -8247,6 +8247,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # Edited LCD display strings (text/strings.tsv rows where replacement !=
     # original) — patched size-neutral, in place, into their .radium scenes.
     text_edits = _changed_radium_text(assets_dir)
+    # PAD-1467: the 5 GHz Wi-Fi choice's menu wording is a game-program edit of its own: a project with nothing
+    # else staged still gets it (found by the end-to-end build, which had only the two Wi-Fi switches on)
+    from ...core import wifi_card as _wifi_card
+    wifi_menu = bool(_wifi_card.menu_text(assets_dir))
     # PAD-305: the color profile, applied to everything the game draws by
     # patching its drawing shaders (plugins/stern/shader_profile.py) - a game
     # program edit with no file of the project behind it
@@ -8554,7 +8558,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
             and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
             and not stock_mode_edits and shader_prof is None
-            and not own_clips and not score_edits):
+            and not own_clips and not score_edits and not wifi_menu):
         raise NothingToWrite(
             "Nothing to write: " + _modes_left_out_clause(_modes_left_out)
             + "every sound (idxNNNN.wav / music_catNN_*.wav) "
@@ -9810,7 +9814,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         image_setting = 0
         saved_setting = 0
         if (text_edits or shader_prof is not None or clip_job is not None
-                or menu_job is not None):
+                or menu_job is not None or wifi_menu):
             if progress:
                 progress(90, 100, "Preparing display text...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")

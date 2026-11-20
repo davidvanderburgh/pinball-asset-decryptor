@@ -147,3 +147,24 @@ Still open: whether the machine holds a 5 GHz link in nl80211 mode. It has not b
 available it picks the stronger 2.4 GHz access point. Two mistakes cost a trial each: the first nl80211
 trial changed `/etc/network/interfaces` (not used), and a stray `%%` in a shell arithmetic line killed its
 logging loop, so its self-restart never ran.
+
+## 5 GHz in nl80211 mode, and transfer speed (2026-11-20)
+
+A sixth trial boot started the client with `-D nl80211,wext` (nl80211 first, wext only if nl80211 cannot
+start) and then asked for a roam to the strongest 5 GHz access point.
+
+- **`nl80211,wext` joins first time too**: connected 14 s after wpa_supplicant started (two boots of two in
+  nl80211 mode). This is the value the card option writes: a stick whose driver has no cfg80211 support
+  still gets wext.
+- **wpa_supplicant already tries 5 GHz first in nl80211 mode.** The boot's own event log:
+  `Trying to associate with c4:a8:16:b8:64:07 (freq=5200 MHz)`, `Associated`, then
+  `CTRL-EVENT-DISCONNECTED reason=34`, then 2.4 GHz and `CTRL-EVENT-CONNECTED`. The requested roam went the
+  same way on two 5 GHz access points, and the machine was back on 2.4 GHz about 7 s later.
+- **Reason 34** is "disassociated: too many frames not acknowledged". The eero drops the stick right after
+  association, at -49 dBm. So with the stock driver parameters this stick (RTL8822BU, driver v5.3.1 of 2018)
+  and the eero's 5 GHz radio do not hold a link. Not tried yet: plainer 5 GHz modes through insmod parameters
+  (`rtw_vht_enable=0`, `rtw_bw_mode`, `rtw_beamform_cap=0`, `rtw_ldpc_cap=0`, `rtw_stbc_cap=0`).
+- **Speed on 2.4 GHz** (24 MB over SSH, channel 1, 20 MHz, -44 dBm): PC to machine 1.8 MB/s, machine to PC
+  2.5 MB/s. There is no 5 GHz figure because no 5 GHz link has held.
+
+A radio scan was not requested at any point: the roam used the boot-time scan cache.

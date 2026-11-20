@@ -2,7 +2,9 @@
 .net-page { gap: 16px; }
 /* PAD-1467 (David: "the second row panels feel disjointed from the first row"): two groups side by side, what a
    card carries and what is done with the machine now, each a column of cards that stack tightly (a short card
-   leaves no hole under it); the machine's screen has the widest column */
+   leaves no hole under it); the machine's screen has the widest column.  Then: "group it by 'remote access' and
+   [another label] ... the score feed ... should be top left": Network settings (score feed, Wi-Fi) on the left,
+   Remote access (everything done to the machine from this computer) beside it */
 .net-layout { display: grid; grid-template-columns: minmax(360px, 1fr) minmax(0, 2.1fr); gap: 20px; align-items: start; }
 .net-group { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .net-group-hd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 0 2px 6px;

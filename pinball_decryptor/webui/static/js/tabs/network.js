@@ -288,7 +288,7 @@ function MachineScreen({ n }) {
       <span class="small muted">The machine's coin-door service buttons, pressed from here: they work only while
         the coin door is open, as the real ones do (that is also when the machine's coil power is off). With Live
         view running a press is immediate; without it each takes a second or two. The machine's card needs
-        Remote buttons on it (on the left).</span>
+        Remote buttons on it (the box beside this card).</span>
       ` : null}
     <span class="small muted">Live view shows 3 to 5 frames a second on 5 GHz Wi-Fi (measured on a Godzilla LE; less
       on 2.4 GHz), with no sound. It is for setting up and troubleshooting: while it runs it takes most of the machine's Wi-Fi and some of its processor, so do not leave it on during a game that matters. The pictures of the screen cross your home network on a plain connection, as
@@ -301,7 +301,7 @@ function MachineScreen({ n }) {
 function RemoteButtonsOption({ n }) {
   return html`<${Card} cls="net-opt" title="Remote buttons">
     <p class="net-does">Lets you press the machine's coin-door service buttons (Back, Minus, Plus, Enter) from this
-      computer, under the machine's screen on the right. They work only while the coin door is open, as the real
+      computer, under the machine's screen. They work only while the coin door is open, as the real
       ones do.</p>
     ${!n.buttons_supported && n.buttons_reason ? html`<${Note}>${n.buttons_reason}<//>` : null}
     <${Check} label="Put remote buttons on cards I write from this project" checked=${!!n.buttons_enabled}
@@ -367,26 +367,26 @@ export default function NetworkTab() {
     <${PageHead} title="Network" sub=${n.intro} />
     ${n.offered === false ? html`<${Note}>Remote access works on Stern Spike 2 and Spike 3 cards only.<//>` : null}
     <div class="net-layout">
-      <section class="net-group" aria-label="On the card">
-        <div class="net-group-hd"><b>On the card</b><span class="muted small">Saved with this project and put on the
-          card when you write it, or Send to machine</span></div>
+      ${(n.project && s.feed_shown) || (n.project && n.wifi_offered) ? html`<section class="net-group" aria-label="Network settings">
+        <div class="net-group-hd"><b>Network settings</b><span class="muted small">What the machine does on your
+          network by itself. Saved with this project and put on the card when you write it</span></div>
         <div class="net-col">
-          ${n.offered !== false ? html`<${RemoteAccess} n=${n} />` : null}
-          ${n.project && n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
-          ${n.offered !== false && n.buttons_offered ? html`<${RemoteButtonsOption} n=${n} />` : null}
           ${n.project && s.feed_shown ? html`<${ScoreFeed} s=${s} />` : null}
+          ${n.project && n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
         </div>
-      </section>
-      ${n.offered !== false ? html`<section class="net-group" aria-label="Your machine">
-        <div class="net-group-hd"><b>Your machine</b><span class="muted small">Over your network, right now: nothing
-          here needs the card taken out</span></div>
+      </section>` : null}
+      ${n.offered !== false ? html`<section class="net-group" aria-label="Remote access">
+        <div class="net-group-hd"><b>Remote access</b><span class="muted small">Reach the machine from this computer
+          over your network: send changes, see its screen, look after it. Set it up once, on the card</span></div>
         <div class="net-cols2">
           <div class="net-col">
+            <${RemoteAccess} n=${n} />
             <${SendToMachine} n=${n} />
-            <${MachineCare} n=${n} />
+            ${n.buttons_offered ? html`<${RemoteButtonsOption} n=${n} />` : null}
           </div>
           <div class="net-col">
             <${MachineScreen} n=${n} />
+            <${MachineCare} n=${n} />
           </div>
         </div>
       </section>` : null}

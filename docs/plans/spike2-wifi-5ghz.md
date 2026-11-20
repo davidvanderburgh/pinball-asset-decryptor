@@ -247,3 +247,44 @@ So the radio is not what limits Send to machine. Two things do:
   at 100 %.
 
 5 GHz is worth about ten times that only to a transfer that does not encrypt the bulk data on the machine.
+
+## What PAD does now (2026-11-20, end of the ticket's build)
+
+Three things came out of the trials, all on the branch:
+
+1. **Network tab, Wi-Fi card, two switches** (`core/wifi_card.py`, the project's `extras.wifi`
+   `{enabled, band5}`):
+   - *Use the reliable Wi-Fi start-up*: `/etc/wpa_supplicant/driver.wlan0` = `nl80211,wext`.
+   - *Also use the newer adapter driver, so the machine can join on 5 GHz* (needs the first): Realtek
+     rtl88x2bu v5.8.7.1 at `/usr/local/spike/8812bu.ko`, the band helper `/usr/local/bin/pad-wifi-band` with
+     `/etc/init.d/padwifi` and `/etc/rc5.d/S31padwifi`, and the game's six network-menu lines without "2.4GHz"
+     (`wifi_card.MENU_TEXT`, applied as program text by `engine._radium_text_writes`). Offered only when the
+     card's own driver has the vermagic the bundled one was built for; off puts Stern's driver back from the
+     original card image.
+   Each lists exactly what it changes (`DETAILS`, `BAND_DETAILS`), is a row on the Write tab, is undone by
+   Revert all, and is carried by Send to machine. Source, licence and build steps of the driver:
+   `pinball_decryptor/resources/wifi/README.md`.
+2. **Send to machine, plain connection for big files** (`remote_send.SshMachine._put_fast`): a file of 4 MB or
+   more has its bytes sent over plain TCP to the machine's own `nc`, with the Send's existing sha1 check on the
+   machine as the judge; any failure falls back to the encrypted path. `PAD_SEND_PLAIN=0` turns it off.
+3. **This card's dropbear** now starts with the 4 MB window (its `/etc/init.d/sshd` was from before PAD-1434).
+
+**On the machine, installed form** (put on over remote access, the same files a build writes): after a plain
+restart it came up on the new driver, joined, and the helper had it on 5200 MHz within a minute.
+
+**Speed through Send to machine's own upload call, 5 GHz, a 64 MB file written to `/dump` and sha1-checked:**
+
+| Path | MB/s |
+|---|---|
+| Plain connection | 12.9, 10.3 |
+| Encrypted, one connection, 4 MB window | 2.7 |
+| Encrypted, two connections (what a Send did before) | 3.4 |
+
+The plain path is about 3 to 4 times the old one, not the 28 MB/s of the bare link: the file is also written
+to the SD card, and each file costs about two seconds of listener start and stop.
+
+**Not proven yet:** a whole PAD build with both switches written to a card or sent to the machine (the parts
+are proven separately: the build step on a copy of the real system partition, the files on the machine by
+hand, the upload path by its own call); the menu wording on the machine's screen (applied to a copy of the
+real game program only); 5 GHz over hours or days; any adapter other than the AC1200; any game or system
+version other than Godzilla LE on Spike system v2.7.0.

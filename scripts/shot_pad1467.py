@@ -4,7 +4,7 @@
 
 Serves <repo> on scratch settings with a Spike 2 card and a project folder (a copy of --project, else an empty one), and shoots the Network tab
 (out_dir/network.png).  After (the ticket branch) it also turns the option on and shoots the tab again
-(network_on.png) and the Write tab's row for it (write_row.png).  Before (main) there is no such option.
+(network_on.png), the 5 GHz switch as well (network_5ghz.png, wifi_card.png) and the Write tab's rows (write_row.png).  Before (main) there is no such option.
 
 Needs Playwright (the user site-packages one), the installed Edge and the card.
 """
@@ -82,7 +82,13 @@ def main():
                 page.get_by_text("Use the reliable Wi-Fi start-up on cards I write from this project").first.click()
                 time.sleep(2)
                 page.screenshot(path=os.path.join(out_dir, "network_on.png"), full_page=True)
-                card_el = page.locator(".net-opt", has_text="Wi-Fi start-up").first
+                try:
+                    page.get_by_text("Also use the newer adapter driver, so the machine can join on 5 GHz").first.click(timeout=4000)
+                    time.sleep(2)
+                    page.screenshot(path=os.path.join(out_dir, "network_5ghz.png"), full_page=True)
+                except Exception:                                        # noqa: BLE001 - a card with another kernel
+                    pass
+                card_el = page.locator(".net-opt", has_text="reliable Wi-Fi start-up").first
                 card_el.screenshot(path=os.path.join(out_dir, "wifi_card.png"))
                 webui_shot.api(url, "ui.select_tab", "write")
                 time.sleep(8)

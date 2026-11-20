@@ -53,7 +53,9 @@ def _read(path):
 
 def _schematic_js():
     src = _read(PF_JS)
-    i = src.index("function schematicView(")
+    # from the LED grid (ledGrid(), PAD-1468: shared with a picture-less
+    # playfield) through the schematic view
+    i = src.index("function ledGrid(")
     return src[i:src.index("function waitingView(", i)]
 
 

@@ -182,8 +182,13 @@ class App:
         self.shooter = self.by_name.get("shooter")
         self.placed = [s for s in sws if "x" in s]
         self.lights_placed = table.get("lights") or []
+        # PAD-1468: a table whose switches have places but no picture (the
+        # Spooky manual's numbered spots) gets the playfield view on a plain
+        # field, its spots numbered, and keeps the schematic's LED grid
+        self.spots = bool(not self.art and table.get("spots") and table.get("size")
+                          and self.placed)
         self.field = bool(self.art and table.get("size")
-                          and (self.placed or self.lights_placed))
+                          and (self.placed or self.lights_placed)) or self.spots
         # the key panel: apswitches.py's rows; the schematic view lists every
         # switch itself, so there it keeps the keyed rows only
         self.rows = [r for r in table.get("rows") or []
@@ -217,9 +222,11 @@ class App:
 
     def _info(self):
         return [["Switches", str(len(self.by_n)),
-                 "%d on the picture" % len(self.placed) if self.field else "no picture"],
+                 "%d on the manual's spots" % len(self.placed) if self.spots
+                 else "%d on the picture" % len(self.placed) if self.field else "no picture"],
                 ["Lights", str(len(self.lights) or len(self.lights_placed)),
-                 "%d on the picture" % len(self.lights_placed) if self.field else ""],
+                 "%d on the picture" % len(self.lights_placed)
+                 if self.field and not self.spots else ""],
                 ["Positions", self.t.get("art_from") or "none in this game", ""]]
 
     def _live(self):
@@ -289,21 +296,33 @@ class App:
         return "  ·  ".join(bits)
 
     def _switch_tip(self, s):
-        return "%s  (%s, %d%s)\nhold to make it; hold the right button to rip it" % (
-            s["label"] or s["name"], s["name"], s["n"], ", an opto" if s.get("nc") else "")
+        spot = ""
+        if s.get("spot"):
+            spot = "\n%s on the manual's switch photo" % (
+                "the trough jam" if s["spot"] == "JAM" else "spot %s" % s["spot"])
+        return "%s  (%s, %d%s)%s\nhold to make it; hold the right button to rip it" % (
+            s["label"] or s["name"], s["name"], s["n"], ", an opto" if s.get("nc") else "",
+            spot)
+
+    def _grid_blocks(self):
+        names = sorted(self.lights) or sorted(k for k, _x, _y in self.lights_placed)
+        return [{"node": "lights", "cells": [{"k": k, "tip": k} for k in names]}] if names else []
 
     def _view(self):
         if self.field:
             w, h = self.t["size"]
-            return {"base": [w, h], "art": True, "coils": [], "trough": None,
-                    "fixtures": [[k, x, y] for k, x, y in self.lights_placed],
-                    "switches": [[str(s["n"]), s["x"], s["y"], s["n"]] for s in self.placed],
-                    "info": self._info()}
-        names = sorted(self.lights) or sorted(k for k, _x, _y in self.lights_placed)
+            v = {"base": [w, h], "art": bool(self.art), "coils": [], "trough": None,
+                 "fixtures": [[k, x, y] for k, x, y in self.lights_placed],
+                 "switches": [[str(s["n"]), s["x"], s["y"], s["n"]]
+                              + ([s["spot"]] if s.get("spot") else []) for s in self.placed],
+                 "info": self._info()}
+            if self.spots:
+                v.update(fixtures=[], sketch=self.t.get("sketch") or [],
+                         grid={"blocks": self._grid_blocks()})
+            return v
         return {"bar": "%s - this game ships no playfield picture: its lights, "
                        "and every switch" % self.title,
-                "grid": {"blocks": [{"node": "lights", "cells": [
-                    {"k": k, "tip": k} for k in names]}] if names else []},
+                "grid": {"blocks": self._grid_blocks()},
                 "entries": [{"id": s["n"], "name": s["label"] or s["name"],
                              "tip": self._switch_tip(s), "live": True}
                             for s in sorted(self.by_n.values(), key=lambda s: s["n"])],
@@ -316,7 +335,8 @@ class App:
         return {"title": "%s - virtual playfield" % self.title, "rig": rig,
                 "status": self._status(), "run": self._run(), "savestates": False,
                 "kind": "field" if self.field else "schematic", "view": self._view(),
-                "dyn": ({"fx": self._fx(), "coil": {}, "sw": self._sw_dyn()} if self.field
+                "dyn": ({"fx": self._fx(), "coil": {}, "sw": self._sw_dyn()}
+                        if self.field and not self.spots
                         else {"grid": self._grid(), "sw": self._sw_dyn()}),
                 "panel": {"spec": self._panel_spec(), "dyn": self._panel_dyn()},
                 "live": self._live()}
@@ -470,7 +490,8 @@ class App:
         if diff:
             f["sw"] = diff
         self._sent["sw"] = sw
-        key, cur = ("fx", self._fx()) if self.field else ("grid", self._grid())
+        key, cur = (("fx", self._fx()) if self.field and not self.spots
+                    else ("grid", self._grid()))
         prev = self._sent.get(key, {})
         d = {k: v for k, v in cur.items() if k not in prev or prev[k] != v}
         if d:

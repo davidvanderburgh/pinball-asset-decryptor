@@ -7,7 +7,9 @@ the window, its keys and its BALLS panel are the same for both makers.
 The switches are the running game's (spktitles.py: $SPK_TITLE, else the
 title run_game.sh wrote in <rig>/title, else Beetlejuice).  The Spooky games
 ship no playfield picture with switch positions, so the window is the
-schematic view: every switch as a row.  [title] overrides the window's
+schematic view: every switch as a row - except Halloween and Ultraman, whose
+switches have the manual's numbered spots (spktitles.PINOTAUR_SPOTS,
+PAD-1468), drawn on a plain playfield.  [title] overrides the window's
 title.
 
 THE KEYS follow the AP/Stern window (every Warden game wires its cabinet
@@ -50,7 +52,11 @@ def cabinet(key=None):
     """Switches wired to the cabinet (Warden: 80-99, and whatever the
     title's aliases name)."""
     al = spktitles.aliases(key)
-    return (set(CABINET) | set(al.values())) - {al["shooter"]}
+    # and every coin switch: Halloween's and Ultraman's COIN RIGHT (59) is
+    # on the coin door but no alias names it (PAD-1468)
+    coins = {n for n, name in spktitles.get(key)["switches"].items()
+             if name.upper().startswith("COIN")}
+    return (set(CABINET) | set(al.values()) | coins) - {al["shooter"]}
 
 
 def title_key(rig=None):
@@ -98,6 +104,13 @@ def table(title=None, key=None):
             "label": t["switches"][n].title(), "group": group_of(n, t, cab),
             "nc": n in optos}
            for n in sorted(t["switches"])]
+    # where the manual puts them (Halloween, Ultraman: PAD-1468) - the window
+    # draws them as its numbered spots on a plain playfield
+    spots = t.get("spots") or {}
+    for s in sws:
+        if s["n"] in spots:
+            spot, x, y = spots[s["n"]]
+            s.update(x=x, y=y, spot=spot)
     by = {s["n"]: s for s in sws}
     rows, taken = [], set()
 
@@ -106,7 +119,11 @@ def table(title=None, key=None):
         if not found:
             return
         taken.update(s["n"] for s in found)
-        rows.append({"label": " + ".join(s["label"] for s in found), "keys": keys,
+        # a switch on the manual's photo carries its spot number, so the key
+        # panel reads as the photo's legend (PAD-1468)
+        rows.append({"label": " + ".join(("%s %s" % (s["spot"], s["label"])) if s.get("spot")
+                                         and s["group"] == "Playfield" else s["label"]
+                                         for s in found), "keys": keys,
                      "codes": list(codes), "cabinet": cabinet,
                      "ns": [s["n"] for s in found], "hold": hold, "unplaced": unplaced})
     def cab(*names):
@@ -133,8 +150,12 @@ def table(title=None, key=None):
         keymap.append({"codes": list(codes), "ns": [n], "action": None})
     for codes, action in ACTIONS:
         keymap.append({"codes": list(codes), "ns": [], "action": action})
-    return {"title": title or t["name"], "art": "", "size": None,
-            "art_from": "", "lights": [], "shooter": t["shooter"],
+    placed = bool(spots)
+    return {"title": title or t["name"], "art": "",
+            "size": t.get("spots_size") if placed else None,
+            "spots": placed, "sketch": t.get("sketch") or [] if placed else [],
+            "art_from": t.get("spots_from", "") if placed else "",
+            "lights": [], "shooter": t["shooter"],
             "coin_door": None, "balls": t["balls"], "switches": sws,
             "rows": rows, "keymap": keymap}
 

@@ -109,6 +109,9 @@ function holdWith(target, ev, down, up) {
 // ---------------------------------------------------------------- hit test
 // The artwork's marker size, which the hit test and the drawing share.
 const PF_LED_R = 5.5;
+// PAD-1468: a numbered spot (a switch placed by a manual's switch photo, on a
+// plain field): a disc this big at the view's scale, within reason
+const pfSpotR = (scale) => Math.max(9, Math.min(15, 10.5 * scale));
 
 // Tk's hit test, kept: the topmost marker whose SHAPE overlaps a 6 px box
 // round the pointer - an unfilled ring or square is hit on its outline
@@ -131,8 +134,9 @@ function pfHit(view, fx, scale, px, py) {
     return overlaps && !inside;
   };
   for (let n = view.switches.length - 1; n >= 0; n--) {
-    const [k, x, y] = view.switches[n];
-    if (ring(x * scale, y * scale, 6, 2)) return ["switch", k];
+    const [k, x, y, , spot] = view.switches[n];
+    if (spot != null ? near(x * scale, y * scale) <= pfSpotR(scale)
+      : ring(x * scale, y * scale, 6, 2)) return ["switch", k];
   }
   for (let n = view.coils.length - 1; n >= 0; n--) {
     const [k, x, y] = view.coils[n];
@@ -734,7 +738,7 @@ function startMain() {
     const cv = el("canvas");
     stage.append(cv);
     if (lookBox) stage.append(lookBox);
-    stage.append(insBox);
+    if (V.art || V.fixtures.length) stage.append(insBox);
     // the ball controls before the key panel comes: in the side panel, never
     // over the picture (PAD-668)
     const balls = ballsBox(V, D);
@@ -743,6 +747,10 @@ function startMain() {
     const made = Object.assign({}, D.sw || {});
     const cab = V.cab ? cabColumn(V.cab, D.cab, made) : null;
     if (cab) wrap.append(cab.el);
+    // PAD-1468: switches placed by a manual's photo, no picture: the LED grid
+    // the schematic view has stays, left of the playfield
+    const leds = V.grid ? ledGrid(V.grid.blocks, D.grid) : null;
+    if (leds) { leds.el.classList.add("pf-grid-side"); wrap.append(leds.el); }
     wrap.append(stage);
     main.append(wrap);
 
@@ -760,7 +768,8 @@ function startMain() {
 
     function fit() {
       const r = wrap.getBoundingClientRect();
-      const s = Math.max(0.2, Math.min((r.width - 16 - GAP) / (BW + CW), (r.height - 16) / BH));
+      const LW = leds ? leds.el.getBoundingClientRect().width + 10 : 0;
+      const s = Math.max(0.2, Math.min((r.width - 16 - GAP - LW) / (BW + CW), (r.height - 16) / BH));
       scale = s;
       stage.style.width = Math.round(BW * s) + "px";
       stage.style.height = Math.round(BH * s) + "px";
@@ -837,10 +846,30 @@ function startMain() {
         g.strokeStyle = isHeld ? "#ffd400" : hot ? "#ff80ff" : "#ff4040";
         g.strokeRect(cx - h, cy - h, 2 * h, 2 * h);
       }
-      for (const [k, x, y, id] of V.switches) {
+      for (const [x0, y0, x1, y1, w] of (V.sketch || [])) {
+        g.beginPath(); g.moveTo(x0 * scale, y0 * scale); g.lineTo(x1 * scale, y1 * scale);
+        g.lineWidth = w * scale; g.lineCap = "round"; g.strokeStyle = "#3a3f47"; g.stroke();
+      }
+      const spotR = pfSpotR(scale);
+      for (const [k, x, y, id, spot] of V.switches) {
         const cx = x * scale, cy = y * scale;
         const isHeld = held && held[0] === "switch" && held[1] === k;
         const isRip = ripping === k;
+        if (spot != null) {
+          // the manual's numbered spot: orange as on its photo, green when made
+          const on = !!made[String(id)];
+          g.beginPath(); g.arc(cx, cy, spotR, 0, Math.PI * 2);
+          g.fillStyle = on ? "#00c853" : "#e8761c"; g.fill();
+          g.lineWidth = isHeld || isRip ? 3 : 1.5;
+          g.strokeStyle = isHeld ? "#ffd400" : isRip ? "#ff9500" : on ? "#b9f6ca" : "#fff3e0";
+          g.stroke();
+          const fs = Math.round(spotR * (spot.length > 2 ? 0.8 : 1.05));
+          g.font = `bold ${fs}px system-ui, sans-serif`;
+          g.textAlign = "center"; g.textBaseline = "middle";
+          g.fillStyle = on ? "#002b12" : "#ffffff";
+          g.fillText(spot, cx, cy + 0.5);
+          continue;
+        }
         g.beginPath(); g.arc(cx, cy, 6, 0, Math.PI * 2);
         g.lineWidth = isHeld || isRip ? 3 : 2;
         g.strokeStyle = isHeld ? "#ffd400" : isRip ? "#ff9500" : "#2a8cff";
@@ -912,6 +941,7 @@ function startMain() {
         if (f.coil) { Object.assign(coilHot, f.coil); dirty = true; }
         if (f.shaker) shakeLvl = f.shaker[0];
         if (f.sw) { Object.assign(made, f.sw); dirty = true; if (cab) cab.touch(); }
+        if (f.grid && leds) leds.paint(f.grid);
         if (f.trough && trough) trough.update(f.trough);
       },
       side: balls ? balls.el : null,
@@ -1140,26 +1170,15 @@ function startMain() {
   }
 
   // ================================================== the schematic view
-  function schematicView(main) {
-    const V = S.view, D = S.dyn || {};
-    const bar = el("div", "pf-bar");
-    bar.append(el("div", "txt", V.bar));
-    main.append(bar);
-    const balls = ballsBox(V, D);
-    const trough = balls ? balls.trough : null;
-    const body = el("div", "pf-schem");
+  // the LED swatch grid: every lamp the wire has shown, by node
+  function ledGrid(blocks, data) {
     const grid = el("div", "pf-grid");
-    const rows = el("div", "pf-rows");
-    body.append(grid, rows);
-    main.append(body);
-
-    // the LED swatch grid: every lamp the wire has shown, by node
     const cells = {};
-    const gridData = Object.assign({}, D.grid || {});
-    if (!V.grid.blocks.length) {
+    const gridData = Object.assign({}, data || {});
+    if (!blocks.length) {
       grid.append(el("div", "note", "LEDs\n\nwaiting for the first\nLED write from the game"));
     }
-    for (const blk of V.grid.blocks) {
+    for (const blk of blocks) {
       const b = el("div", "blk");
       b.append(el("div", "hdr", "node " + blk.node + "  (" + blk.cells.length + ")"));
       const made = {};
@@ -1199,6 +1218,24 @@ function startMain() {
       d.style.borderColor = `rgba(${r},${g},${b},${Math.min(1, a * 1.3)})`;
     };
     for (const k in cells) paintCell(k);
+    return {
+      el: grid,
+      paint(upd) { for (const k in upd) { gridData[k] = upd[k]; paintCell(k); } },
+    };
+  }
+
+  function schematicView(main) {
+    const V = S.view, D = S.dyn || {};
+    const bar = el("div", "pf-bar");
+    bar.append(el("div", "txt", V.bar));
+    main.append(bar);
+    const balls = ballsBox(V, D);
+    const trough = balls ? balls.trough : null;
+    const body = el("div", "pf-schem");
+    const leds = ledGrid(V.grid.blocks, D.grid);
+    const rows = el("div", "pf-rows");
+    body.append(leds.el, rows);
+    main.append(body);
 
     // the switch rows, flowing into the columns the window's height has
     const dots = {};
@@ -1230,7 +1267,7 @@ function startMain() {
     return {
       frame(f) {
         if (f.sw) paintDots(f.sw);
-        if (f.grid) { for (const k in f.grid) { gridData[k] = f.grid[k]; paintCell(k); } }
+        if (f.grid) leds.paint(f.grid);
         if (f.trough && trough) trough.update(f.trough);
       },
       side: balls ? balls.el : null,

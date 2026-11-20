@@ -345,7 +345,7 @@ def test_proc_multiball_add_ball_ball_save(pm, tmp_path, monkeypatch):
     r.pad_switch(_Sw("leftInlane"))
     assert m["running"] and not [x for x in log if x[0] == "add_balls"]     # waits for its multiball_on
     r.pad_switch(_Sw("spinner"))
-    assert ("add_balls", 2) in log and ("ball_save", 2, 5) in log
+    assert ("add_balls", 2) in log and ("ball_save", 3, 5) in log     # every ball in play
     r.pad_switch(_Sw("rightInlane"))
     r.pad_switch(_Sw("rightInlane"))                        # up to once a run
     assert log.count(("add_balls", 1)) == 1

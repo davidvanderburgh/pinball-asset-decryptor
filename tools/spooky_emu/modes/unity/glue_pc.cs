@@ -274,10 +274,19 @@ public static class Glue {
 
     public static void CoilRelease(string c) { var k = CoilOf(c); if (k != null) Pinotar.disable_coil(k.num); }
 
-    public static string AddBalls(int n) { G.trough.launch_ball(n); return "trough.launch_ball(" + n + ")"; }
+    // as the game's own multiballs: a multiball save that keeps all but n balls in the trough, then
+    // TriggerBallLaunch() (check_for_launch ejects the difference and the shooter lane autolaunches)
+    public static string AddBalls(int n) {
+        var bs = G.ballsavemode;
+        int keep = G.trough.num_balls() - n;
+        bs.enable_mb_save(n, 10.0);
+        bs.TriggerBallLaunch();
+        return "ballsavemode.enable_mb_save(" + n + ") + TriggerBallLaunch (" + keep + " kept in the trough)";
+    }
 
     public static string BallSave(int secs, int balls) {
-        if (balls > 1) { G.ballsavemode.enable_mb_save(balls, secs); return "enable_mb_save " + balls + " balls " + secs + " s"; }
+        // enable_mb_save takes the balls beyond the one in play (it keeps the rest in the trough)
+        if (balls > 1) { G.ballsavemode.enable_mb_save(balls - 1, secs); return "enable_mb_save " + balls + " balls " + secs + " s"; }
         G.ballsavemode.enable_save(secs, 1);
         return "enable_save " + secs + " s";
     }

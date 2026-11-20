@@ -528,7 +528,7 @@ public class PadRuntime {
         if (m.AddBall.Contains(sw) && m.Added < m.AddTimes) {
             m.Added++;
             Loader.Log(m.Name + ": add a ball on " + Glue.SwitchName(sw) + " (" + m.Added + " of " + m.AddTimes + "): " + Glue.AddBalls(1));
-            Save(m, Math.Max(2, m.MbBalls > 0 ? m.MbSave : 2), 1);
+            Save(m, Math.Max(2, m.MbBalls > 0 ? m.MbSave : 2), Math.Max(2, Glue.BallsInPlay() + 1));
         }
         if (m.HoldWhen == "switches" && m.HoldOn.Contains(sw)) Hold(m);
     }
@@ -583,7 +583,7 @@ public class PadRuntime {
         m.MbServed = true; m.MbSeen = false; m.MbAt = Time.unscaledTime; m.OneSince = 0f;
         Loader.Log(m.Name + ": multiball, " + m.MbBalls + " balls in play wanted, " + have + " now" +
             (m.MbBalls > have ? ": " + Glue.AddBalls(m.MbBalls - have) : ""));
-        if (m.MbSave > 0) Save(m, m.MbSave, Math.Max(1, m.MbBalls - 1));
+        if (m.MbSave > 0) Save(m, m.MbSave, Math.Max(2, m.MbBalls));       // every ball in play
     }
 
     // A multiball of ours ends the mode once one ball is left for 2 s, after its ball save and 3 s more,

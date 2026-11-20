@@ -638,7 +638,8 @@ def _runtime_class(base):
                     m["added"] += 1
                     log("%s: add a ball on %s (%d of %d)" % (m["name"], name, m["added"], m["add_times"]))
                     self.pad_add_balls(m, 1)
-                    self.pad_ball_save(m, max(2, m["mb_save"] if m.get("mb_balls") else 2), balls=1)
+                    self.pad_ball_save(m, max(2, m["mb_save"] if m.get("mb_balls") else 2),
+                                       balls=max(2, _balls_in_play(self.game) + 1))
             if isinstance(m.get("hold_on"), list) and name in m["hold_on"]:
                 self.pad_hold(m)
 
@@ -755,10 +756,15 @@ def _runtime_class(base):
             """n more balls into play through the game's own trough (counted as in play)."""
             t = getattr(self.game, "trough", None)
             try:
+                um = getattr(self.game, "utilities_mode", None)
                 if hasattr(t, "add_balls"):
                     got = t.add_balls(n)
                     how = "trough.add_balls"
-                elif hasattr(t, "launch_and_autoplunge_balls"):
+                elif um is not None and hasattr(um, "launchBallIntoPlay"):
+                    # Alice Cooper: its own add-a-ball (counted in play; its trough has no autoplunge coil)
+                    got = um.launchBallIntoPlay(count=n, stealth=False)
+                    how = "utilities_mode.launchBallIntoPlay"
+                elif hasattr(t, "launch_and_autoplunge_balls") and getattr(t, "plunge_coilname", None):
                     got = t.launch_and_autoplunge_balls(n)
                     how = "trough.launch_and_autoplunge_balls"
                 else:
@@ -777,7 +783,7 @@ def _runtime_class(base):
                 self.pad_add_balls(m, want - have)
             log("%s: multiball, %d balls in play wanted, ball save %d s" % (m["name"], want, m["mb_save"]))
             if m["mb_save"]:
-                self.pad_ball_save(m, m["mb_save"], balls=max(1, want - 1))
+                self.pad_ball_save(m, m["mb_save"], balls=max(2, want))
 
         def pad_balls_tick(self, m, now):
             """A multiball of ours ends the mode once one ball is left for 2 s, after its ball

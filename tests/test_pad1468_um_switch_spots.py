@@ -103,3 +103,67 @@ def test_a_numbered_spot_is_pressed_anywhere_on_its_disc():
     assert got[2] is None                    # beyond the disc
     assert got[3] is None                    # a bare ring's centre is nothing
     assert got[4] == ["switch", "41"]       # scale 2: the disc grows to 15 px
+
+
+# -- the picture under the spots ------------------------------------------------
+
+PNG_1PX = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+           "nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==")
+
+
+@pytest.fixture
+def pictures(tmp_path, monkeypatch):
+    monkeypatch.setattr(appf, "PICTURE_DIR", str(tmp_path / "pics"))
+    return tmp_path
+
+
+def test_the_users_picture_is_kept_per_game_and_lined_up(pictures):
+    table = spkswitches.table(key="um")
+    app = appf.App(table, rig=None, art="", title="Ultraman")
+    assert app.state("main")["view"]["picture"] is None
+    with pytest.raises(ValueError):
+        app.api("pic_set", ["data:text/html;base64,PGI+"])
+    got = app.api("pic_set", [PNG_1PX])
+    assert got["own"] and got["rect"] is None          # the page fits it first
+    assert os.path.isfile(os.path.join(appf.PICTURE_DIR, "ultraman.png"))
+    assert app.file("picture").endswith("ultraman.png")
+    got = app.api("pic_rect", [[-110, -10, 600, 772]])
+    assert got["rect"] == [-110, -10, 600, 772]
+    assert app.api("pic_rect", [[0, 0, 0, 5]])["rect"] == [-110, -10, 600, 772]   # refused
+    # a new window of the same game finds it; another game does not
+    again = appf.App(table, rig=None, art="", title="Ultraman")
+    assert again.state("main")["view"]["picture"]["rect"] == [-110, -10, 600, 772]
+    other = appf.App(spkswitches.table(key="h78"), rig=None, art="", title="Halloween")
+    assert other.state("main")["view"]["picture"] is None
+    assert app.api("pic_clear", []) is None and app.file("picture") is None
+
+
+def test_halloweens_own_drawing_comes_from_its_build(pictures):
+    build = pictures / "build"
+    src = build / "assets" / "dmd" / "animations" / "menu"
+    src.mkdir(parents=True)
+    (src / "playfield.png").write_bytes(b"\x89PNG drawing")
+    rig = pictures / "rig"
+    rig.mkdir()
+    (rig / "build").write_text(str(build))
+    t = spkswitches.table(key="h78")
+    spkswitches.game_picture(str(rig), "h78", t)
+    assert t["art"] == "playfield.png" and (rig / "playfield.png").read_bytes() == b"\x89PNG drawing"
+    assert t["art_rect"] == spktitles.PINOTAUR_GAME_PICTURE["rect"]
+    app = appf.App(t, rig=None, art=str(rig / "playfield.png"), title="Halloween")
+    v = app.state("main")["view"]
+    assert app.spots and v["art"] is False
+    assert v["picture"]["game"] and not v["picture"]["own"]
+    assert v["picture"]["rect"] == spktitles.PINOTAUR_GAME_PICTURE["rect"]
+    # the user's own picture takes its place; Remove brings the drawing back
+    app.api("pic_set", [PNG_1PX])
+    assert app.file("picture").endswith("halloween.png")
+    assert app.api("pic_rect", [[1, 2, 3, 4]])["rect"] == [1, 2, 3, 4]
+    back = app.api("pic_clear", [])
+    assert back["game"] and not back["own"] and app.file("picture") == str(rig / "playfield.png")
+    # a build without the drawing (Ultraman's) names none
+    (rig / "playfield.png").unlink()
+    (rig / "build").write_text(str(pictures / "nothing"))
+    t = spkswitches.table(key="um")
+    spkswitches.game_picture(str(rig), "um", t)
+    assert not t.get("art") and "art_rect" not in t

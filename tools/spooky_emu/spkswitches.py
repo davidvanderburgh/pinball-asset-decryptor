@@ -22,6 +22,7 @@ door's BACK / - / + / SELECT, F Plunge, D Drain, Pause/F9 freeze.
 """
 import json
 import os
+import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -160,14 +161,42 @@ def table(title=None, key=None):
             "rows": rows, "keymap": keymap}
 
 
+def game_picture(rig, key, t):
+    """The game's own playfield drawing under the spots, where its build has
+    one (Halloween's service-menu playfield.png; Ultraman ships none): copied
+    beside switches.json, so the window on Windows reads it from there, and
+    named in the table with where it goes (PAD-1468).  The user's own picture
+    (the window's Picture button) takes its place."""
+    pic = spktitles.get(key).get("game_picture")
+    if not pic or not t.get("spots"):
+        return
+    try:
+        with open(os.path.join(rig, "build")) as f:
+            build = f.read().strip()
+    except OSError:
+        return
+    src = os.path.join(build, pic["file"])
+    if not os.path.isfile(src):
+        return
+    dst = os.path.join(rig, "playfield.png")
+    try:
+        shutil.copyfile(src, dst + ".tmp")
+        os.replace(dst + ".tmp", dst)
+    except OSError:
+        return
+    t["art"] = "playfield.png"
+    t["art_rect"] = list(pic["rect"])
+
+
 def main(argv):
     if not argv:
         sys.exit(__doc__)
     out = os.path.join(argv[0], "switches.json")
+    t = table(argv[1] if len(argv) > 1 else None, title_key(argv[0]))
+    game_picture(argv[0], title_key(argv[0]), t)
     with open(out + ".tmp", "w") as f:
-        json.dump(table(argv[1] if len(argv) > 1 else None,
-                        title_key(argv[0])), f, indent=1)
-    os.rename(out + ".tmp", out)
+        json.dump(t, f, indent=1)
+    os.replace(out + ".tmp", out)
     return 0
 
 

@@ -32,8 +32,10 @@ game is in the app's Linux.  --parent-pipe: the tab holds stdin open and
 closes it on Stop; the window closes then (and on the game's end).
 """
 import argparse
+import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -50,6 +52,28 @@ POLL_S = 0.2
 GONE_AFTER = 15          # polls without a live game (~3 s) = it is gone
 GEOM_FILE = os.path.join(os.path.expanduser("~"), ".pad_ap_switches.json")
 LED_R = 5.5
+#: PAD-1468: a picture the user put under a game's numbered spots, one per
+#: game: <key>.<ext> and <key>.json ({"rect": [x, y, w, h]} in the table's
+#: base, where the picture is drawn).  Theirs, never shipped.
+PICTURE_DIR = os.path.join(os.path.expanduser("~"), ".pad_playfield_pictures")
+PICTURE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
+                 "image/gif": "gif", "image/bmp": "bmp"}
+PICTURE_MAX = 30 * 1024 * 1024
+
+
+def picture_key(title):
+    return re.sub(r"[^a-z0-9]+", "_", (title or "game").lower()).strip("_") or "game"
+
+
+def good_rect(r):
+    """[x, y, w, h] of finite numbers with a real size, else None."""
+    try:
+        r = [float(v) for v in r]
+    except (TypeError, ValueError):
+        return None
+    if len(r) != 4 or any(v != v or abs(v) > 1e6 for v in r) or r[2] < 1 or r[3] < 1:
+        return None
+    return [round(v, 2) for v in r]
 
 #: The coin-door service buttons' look: switch name, then label, caption,
 #: glyph, fill, ring, caption colour, key codes, key text - the Stern panel's.
@@ -182,13 +206,16 @@ class App:
         self.shooter = self.by_name.get("shooter")
         self.placed = [s for s in sws if "x" in s]
         self.lights_placed = table.get("lights") or []
-        # PAD-1468: a table whose switches have places but no picture (the
-        # Spooky manual's numbered spots) gets the playfield view on a plain
-        # field, its spots numbered, and keeps the schematic's LED grid
-        self.spots = bool(not self.art and table.get("spots") and table.get("size")
-                          and self.placed)
+        # PAD-1468: a table whose switches are the Spooky manual's numbered
+        # spots gets the playfield view, its spots numbered, over the user's
+        # picture, the game's own drawing or a plain field; it keeps the
+        # schematic's LED grid
+        self.spots = bool(table.get("spots") and table.get("size") and self.placed)
         self.field = bool(self.art and table.get("size")
                           and (self.placed or self.lights_placed)) or self.spots
+        # PAD-1468: under the spots, the user's own picture of this game, else
+        # the game's own drawing (the art the table names, at its art_rect)
+        self.pic_key = picture_key(title)
         # the key panel: apswitches.py's rows; the schematic view lists every
         # switch itself, so there it keeps the keyed rows only
         self.rows = [r for r in table.get("rows") or []
@@ -304,6 +331,85 @@ class App:
             s["label"] or s["name"], s["name"], s["n"], ", an opto" if s.get("nc") else "",
             spot)
 
+    # -- the picture under the spots (PAD-1468) -------------------------------
+    def _own_picture(self):
+        """(path, rect or None) of the user's picture of this game, or None."""
+        for ext in sorted(set(PICTURE_TYPES.values())):
+            f = os.path.join(PICTURE_DIR, "%s.%s" % (self.pic_key, ext))
+            if os.path.isfile(f):
+                rect = None
+                try:
+                    with open(os.path.join(PICTURE_DIR, self.pic_key + ".json"),
+                              encoding="utf-8") as fh:
+                        rect = good_rect(json.load(fh).get("rect"))
+                except (OSError, ValueError, AttributeError):
+                    pass
+                return f, rect
+        return None
+
+    def _picture_file(self):
+        own = self._own_picture()
+        if own:
+            return own[0]
+        return self.art if self.spots else None
+
+    def _pic_v(self):
+        """The picture's version for the page's URL (the file route caches)."""
+        try:
+            return int(os.path.getmtime(self._picture_file()) * 1000)
+        except (OSError, TypeError):
+            return 0
+
+    def _picture(self):
+        """What the page draws under the spots: {own, rect, v} or None."""
+        own = self._own_picture()
+        if own:
+            return {"own": True, "rect": own[1], "v": self._pic_v(),
+                    "game": bool(self.art)}
+        if self.spots and self.art:
+            return {"own": False, "rect": good_rect(self.t.get("art_rect") or ()),
+                    "v": self._pic_v(), "game": True}
+        return None
+
+    def _drop_own_picture(self):
+        for ext in set(PICTURE_TYPES.values()) | {"json"}:
+            try:
+                os.remove(os.path.join(PICTURE_DIR, "%s.%s" % (self.pic_key, ext)))
+            except OSError:
+                pass
+
+    def set_picture(self, data_url):
+        """The page's chosen file, as a data: URL -> this game's picture."""
+        m = re.match(r"data:([\w/+.-]+);base64,(.*)$", data_url or "", re.S)
+        if not m or m.group(1).lower() not in PICTURE_TYPES:
+            raise ValueError("pick a PNG, JPEG, WebP, GIF or BMP picture")
+        raw = base64.b64decode(m.group(2), validate=False)
+        if not raw or len(raw) > PICTURE_MAX:
+            raise ValueError("that picture is empty or bigger than 30 MB")
+        os.makedirs(PICTURE_DIR, exist_ok=True)
+        self._drop_own_picture()
+        f = os.path.join(PICTURE_DIR, "%s.%s" % (self.pic_key,
+                                                PICTURE_TYPES[m.group(1).lower()]))
+        with open(f + ".tmp", "wb") as fh:
+            fh.write(raw)
+        os.replace(f + ".tmp", f)
+        return self._picture()
+
+    def set_picture_rect(self, rect):
+        """Where the user lined their picture up; a game drawing's place is
+        the table's, never moved (Reset puts a moved picture back)."""
+        rect = good_rect(rect)
+        if rect is None or not self._own_picture():
+            return self._picture()
+        with open(os.path.join(PICTURE_DIR, self.pic_key + ".json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"rect": rect}, fh)
+        return self._picture()
+
+    def clear_picture(self):
+        self._drop_own_picture()
+        return self._picture()
+
     def _grid_blocks(self):
         names = sorted(self.lights) or sorted(k for k, _x, _y in self.lights_placed)
         return [{"node": "lights", "cells": [{"k": k, "tip": k} for k in names]}] if names else []
@@ -318,7 +424,8 @@ class App:
                  "info": self._info()}
             if self.spots:
                 v.update(fixtures=[], sketch=self.t.get("sketch") or [],
-                         grid={"blocks": self._grid_blocks()})
+                         grid={"blocks": self._grid_blocks()}, art=False,
+                         picture=self._picture())
             return v
         return {"bar": "%s - this game ships no playfield picture: its lights, "
                        "and every switch" % self.title,
@@ -350,6 +457,12 @@ class App:
         self.note = (self.note + [text])[-6:]
 
     def api(self, m, args):
+        if m == "pic_set":
+            return self.set_picture(args[0])
+        if m == "pic_rect":
+            return self.set_picture_rect(args[0])
+        if m == "pic_clear":
+            return self.clear_picture()
         if m == "hold":
             n = int(args[0])
             self.held_ids.add(n)
@@ -477,6 +590,8 @@ class App:
         return None
 
     def file(self, name):
+        if name == "picture":
+            return self._picture_file()
         return self.art if name == "art" else None
 
     # -- the live loop ---------------------------------------------------------------

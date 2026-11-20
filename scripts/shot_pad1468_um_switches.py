@@ -37,13 +37,24 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--title", default="um")
     ap.add_argument("--made", default="")
+    ap.add_argument("--rig", default="", help="a rig folder: its switches.json is written "
+                    "there as run_game.sh does (with the build's own drawing)")
+    ap.add_argument("--pick", default="", help="a picture to choose with Picture...")
     ap.add_argument("--hold", default="", help="x,y on the page: hover there (tooltip shot), "
                     "then hold the mouse button down and say what the rig was asked")
     args = ap.parse_args()
     made = [int(x) for x in args.made.split(",") if x.strip()]
-    table = spkswitches.table(key=args.title)
+    art = ""
+    if args.rig:
+        os.environ["SPK_TITLE"] = args.title
+        spkswitches.main([args.rig])
+        with open(os.path.join(args.rig, "switches.json"), encoding="utf-8") as f:
+            table = __import__("json").load(f)
+        art = os.path.join(args.rig, table["art"]) if table.get("art") else ""
+    else:
+        table = spkswitches.table(key=args.title)
     spkpf.Rig = lambda _distro, _slot: StandIn(made)   # never the real board
-    app, _rig, host = spkpf.serve(table)
+    app, _rig, host = spkpf.serve(table, art=art)
     from playwright.sync_api import sync_playwright
     errors = []
     with sync_playwright() as p:
@@ -53,6 +64,22 @@ def main():
         page.goto(host.url())
         time.sleep(4)
         page.screenshot(path=args.out)
+        if args.pick:
+            with page.expect_file_chooser() as fc:
+                page.get_by_text("Add picture").click()
+            fc.value.set_files(args.pick)
+            time.sleep(2.5)
+            page.screenshot(path=args.out.replace(".png", "_picked.png"))
+            box = page.locator("canvas").first.bounding_box()
+            cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+            page.mouse.move(cx, cy)
+            page.mouse.down()
+            page.mouse.move(cx + 30, cy + 20, steps=5)
+            page.mouse.up()
+            page.mouse.wheel(0, -120)
+            time.sleep(1.0)
+            page.screenshot(path=args.out.replace(".png", "_lined.png"))
+            print("picture:", app._picture())
         if args.hold:
             x, y = (int(v) for v in args.hold.split(","))
             page.mouse.move(x, y)

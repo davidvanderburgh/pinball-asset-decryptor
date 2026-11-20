@@ -735,10 +735,115 @@ function startMain() {
       insPick[k].classList.toggle("on", k === insLook);
       insBox.append(insPick[k]);
     }
+    // PAD-1468: a picture under the manual's numbered spots - the user's own,
+    // else the game's own drawing - and its tools (Picture..., Line up, Reset,
+    // Remove). Lining up: drag moves it, the wheel sizes it (Shift: height
+    // only, Alt: width only); the spots stay where they are, as the guide.
+    const picOn = "picture" in V;
+    let pic = V.picture || null, picSrc = "", picNat = null, lining = false;
+    const picImg = picOn ? el("img", "pf-pic") : null;
+    let picTools = null, picHint = null;
+    if (picOn) {
+      picImg.draggable = false;
+      picImg.style.display = "none";
+      stage.classList.add("haspic");
+      stage.append(picImg);
+      picImg.addEventListener("load", () => {
+        picNat = [picImg.naturalWidth, picImg.naturalHeight];
+        if (pic && !pic.rect) {
+          pic.rect = fitRect();
+          if (pic.own) api("pic_rect", pic.rect);
+        }
+        placePic();
+      });
+      picTools = el("div", "pf-look pf-pictools");
+      const file = el("input");
+      file.type = "file";
+      file.accept = "image/png,image/jpeg,image/webp,image/gif,image/bmp";
+      file.style.display = "none";
+      const say = (t) => { picHint.textContent = t; picHint.style.display = t ? "" : "none"; };
+      const b = {};
+      const tool = (k, label, words, fn) => {
+        b[k] = btn(label, () => { b[k].blur(); fn(); });   // never keep the keyboard
+        b[k].title = words;
+        picTools.append(b[k]);
+      };
+      tool("pick", "Picture\u2026", "Put a picture of the playfield under the switches - "
+        + "the manual's switch photo or one of your own machine. Kept for this game.", () => file.click());
+      tool("line", "Line up", "Move and size your picture under the numbered spots: "
+        + "drag to move, the mouse wheel to size (Shift: height only, Alt: width only)", () => {
+        lining = !lining;
+        shownTools();
+      });
+      tool("reset", "Reset", "Fit your picture to the playfield again", () => {
+        if (!pic || !pic.own || !picNat) return;
+        pic.rect = fitRect();
+        placePic();
+        api("pic_rect", pic.rect);
+      });
+      tool("drop", "Remove", "Take your picture away (the game's own drawing comes back, where it has one)", () => {
+        api("pic_clear").then((r) => { pic = r; lining = false; showPic(); });
+      });
+      picTools.append(file);
+      picHint = el("div", "pf-pichint");
+      picHint.style.display = "none";
+      file.addEventListener("change", () => {
+        const f = file.files && file.files[0];
+        file.value = "";
+        if (!f) return;
+        say("loading " + f.name + "\u2026");
+        const rd = new FileReader();
+        rd.onload = () => {
+          fetch("/api?t=" + encodeURIComponent(TOKEN), {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ m: "pic_set", a: [rd.result] }),
+          }).then((r) => r.json()).then((j) => {
+            if (!j.ok) { say(j.error || "that picture could not be used"); return; }
+            pic = j.r; lining = true; say(""); showPic();
+          }).catch(() => say("that picture could not be used"));
+        };
+        rd.onerror = () => say("that picture could not be read");
+        rd.readAsDataURL(f);
+      });
+      var shownTools = () => {
+        const own = !!(pic && pic.own);
+        if (!own) lining = false;
+        b.line.style.display = b.reset.style.display = b.drop.style.display = own ? "" : "none";
+        b.pick.textContent = own ? "Picture\u2026" : "Add picture\u2026";
+        b.line.classList.toggle("on", lining);
+        stage.classList.toggle("lining", lining);
+        if (lining) say("Drag to move your picture, the wheel to size it (Shift: height, Alt: width). "
+          + "Line it up with the numbered spots, then press Line up again.");
+        else if (picHint.textContent.startsWith("Drag")) say("");
+      };
+    }
+    function fitRect() {
+      const [nw, nh] = picNat || [BW, BH];
+      const k = Math.min(BW / nw, BH / nh);
+      return [(BW - nw * k) / 2, (BH - nh * k) / 2, nw * k, nh * k];
+    }
+    function placePic() {
+      if (!picImg) return;
+      if (!pic || !picNat) { picImg.style.display = "none"; return; }
+      const r = pic.rect || fitRect();
+      Object.assign(picImg.style, { display: "", left: r[0] * scale + "px", top: r[1] * scale + "px",
+        width: r[2] * scale + "px", height: r[3] * scale + "px" });
+    }
+    function showPic() {
+      if (!picImg) return;
+      const src = pic ? "/file/picture?t=" + encodeURIComponent(TOKEN) + "&v=" + pic.v : "";
+      if (src !== picSrc) {
+        picSrc = src; picNat = null;
+        if (src) picImg.src = src; else picImg.removeAttribute("src");
+      }
+      placePic();
+      shownTools();
+    }
     const cv = el("canvas");
     stage.append(cv);
     if (lookBox) stage.append(lookBox);
     if (V.art || V.fixtures.length) stage.append(insBox);
+    if (picTools) { stage.append(picTools); stage.append(picHint); }
     // the ball controls before the key panel comes: in the side panel, never
     // over the picture (PAD-668)
     const balls = ballsBox(V, D);
@@ -777,6 +882,7 @@ function startMain() {
       cv.width = Math.round(BW * s * dpr);
       cv.height = Math.round(BH * s * dpr);
       if (cab) cab.fit(Math.round(CW * s), Math.round(BH * s));
+      placePic();
       dirty = true;
     }
     new ResizeObserver(fit).observe(wrap);
@@ -894,6 +1000,44 @@ function startMain() {
       }
     }
     (function loop() { draw(); jiggle(); if (cab) cab.draw(); requestAnimationFrame(loop); })();
+
+    if (picOn) {
+      let drag = null, saveT = 0;
+      const save = () => { clearTimeout(saveT); saveT = setTimeout(() => api("pic_rect", pic.rect), 250); };
+      const base = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; };
+      cv.addEventListener("pointerdown", (e) => {
+        if (!lining || !pic || !pic.rect) return;
+        e.stopImmediatePropagation(); e.preventDefault();
+        cv.setPointerCapture(e.pointerId);
+        drag = { at: base(e), r: pic.rect.slice() };
+      }, { capture: true });
+      cv.addEventListener("pointermove", (e) => {
+        if (!lining) return;
+        e.stopImmediatePropagation();
+        cv.style.cursor = "move";
+        hideTip();
+        if (!drag) return;
+        const [x, y] = base(e);
+        pic.rect = [drag.r[0] + x - drag.at[0], drag.r[1] + y - drag.at[1], drag.r[2], drag.r[3]];
+        placePic();
+      }, { capture: true });
+      const done = (e) => { if (!drag) return; e.stopImmediatePropagation(); drag = null; save(); };
+      cv.addEventListener("pointerup", done, { capture: true });
+      cv.addEventListener("pointercancel", done, { capture: true });
+      cv.addEventListener("wheel", (e) => {
+        if (!lining || !pic || !pic.rect) return;
+        e.preventDefault();
+        const f = Math.exp(-e.deltaY * 0.0012);
+        const [x, y] = base(e);
+        const r = pic.rect.slice();
+        if (!e.shiftKey) { r[0] = x - (x - r[0]) * f; r[2] = Math.max(20, r[2] * f); }
+        if (!e.altKey) { r[1] = y - (y - r[1]) * f; r[3] = Math.max(20, r[3] * f); }
+        pic.rect = r;
+        placePic();
+        save();
+      }, { passive: false });
+    }
+    showPic();
 
     // Tk's hit test, kept - pfHit() above says how.
     function hit(px, py) { return pfHit(V, fx, scale, px, py); }

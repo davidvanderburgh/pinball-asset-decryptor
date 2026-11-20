@@ -128,6 +128,12 @@ PINOTAUR_SPOTS_SIZE = [450, 760]
 #: playfield.
 PINOTAUR_SKETCH = [[145, 662, 193, 690, 7], [265, 662, 217, 690, 7]]
 PINOTAUR_SPOTS_FROM = "the Halloween / Ultraman manual's switch locations photo"
+#: The game's own playfield drawing (Halloween v1.18's service-menu outline,
+#: 282 x 640; Ultraman v1.18 ships none), drawn under the spots at rect
+#: [x, y, w, h] in the SPOTS_SIZE box: lined up on the manual's photo by its
+#: walls, shooter lane, apron and upper playfield (PAD-1468).
+PINOTAUR_GAME_PICTURE = {"file": "assets/dmd/animations/menu/playfield.png",
+                         "rect": [18, -4, 407, 795]}
 
 # Halloween v1.18.1's coils (CoilConfig.cs; 8 and 10 are unused) - Ultraman
 # names the same ones - and the servos that lift its two subways
@@ -398,6 +404,7 @@ TITLES = {
         "switches": PINOTAUR_SWITCHES,
         "spots": PINOTAUR_SPOTS, "spots_size": PINOTAUR_SPOTS_SIZE,
         "sketch": PINOTAUR_SKETCH, "spots_from": PINOTAUR_SPOTS_FROM,
+        "game_picture": PINOTAUR_GAME_PICTURE,
         "coils": PINOTAUR_COILS, "servos": PINOTAUR_SERVOS,
     },
     # Ultraman v1.18 (SwitchConfig.cs, CoilConfig.cs, VirtualCoil.cs):
@@ -422,6 +429,7 @@ TITLES = {
         "switches": PINOTAUR_SWITCHES,
         "spots": PINOTAUR_SPOTS, "spots_size": PINOTAUR_SPOTS_SIZE,
         "sketch": PINOTAUR_SKETCH, "spots_from": PINOTAUR_SPOTS_FROM,
+        "game_picture": PINOTAUR_GAME_PICTURE,
         "coils": PINOTAUR_COILS, "servos": PINOTAUR_SERVOS,
     },
 }

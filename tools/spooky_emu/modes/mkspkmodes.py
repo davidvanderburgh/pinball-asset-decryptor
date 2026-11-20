@@ -261,11 +261,19 @@ def media_exts(port, kind):
         return ()
     return MEDIA.get(engine(port or {}), MEDIA["unity"]).get(kind, ())
 def _not_here(k, port):
-    """A key the title's runtime cannot do (a pinHeck DMD: no fonts, no colours), or None."""
-    if k in ((port or {}).get("keys_not_here") or ()):
-        return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
-                "and colour" % (k, port.get("title", "this game")))
-    return None
+    """A key the title's runtime cannot do (a pinHeck DMD: no fonts, no colours, no files of a
+    mode's own, no game modes to start after), or None."""
+    if k not in ((port or {}).get("keys_not_here") or ()):
+        return None
+    t = port.get("title", "this game")
+    if k == "start_after":
+        return ("start_after is not on %s: the game has no modes of its own a mode could watch; "
+                "start_on, start_score or start_combo can start it" % t)
+    if k in ("sound_channel", "music", "picture", "picture_at", "video", "video_at", "video_loop"):
+        return ("%s is not on %s: a mode there plays the game's own sounds from its card and draws "
+                "the game's own DMD text, with no files of its own" % (k, t))
+    return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
+            "and colour" % (k, t))
 
 
 def check_value(kind, v, port):
@@ -415,6 +423,14 @@ def check_modes(mode_dir, port=None):
             problems.append("%s: lamp_blink must be 0-10 flashes a second" % fn)
         if m.get("multiball_on") and not m.get("multiball"):
             problems.append("%s: multiball_on without a multiball line (it is ignored)" % fn)
+        balls = (port or {}).get("balls")
+        mbw = MJ._names(m.get("multiball") or "")
+        if balls and mbw and mbw[0].isdigit() and int(mbw[0]) > balls:
+            problems.append("%s: multiball %s: %s has %d balls" % (fn, mbw[0], title_name, balls))
+        if engine(port) == "pinheck" and m.get("sound_start", "") + m.get("sound_shot", "") +                 m.get("sound_complete", "") + m.get("sound_end", "") and any(
+                    "." in (m.get(k) or "") for k in ("sound_start", "sound_shot", "sound_complete", "sound_end")):
+            problems.append("%s: a sound file of the mode's own is not on %s: its sounds are the card's "
+                            "own (their three-letter names)" % (fn, title_name))
         if m.get("coil_hold") and title.get("coil_holds") != "on":
             problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
                             "(after a look at it on the machine)" % fn)

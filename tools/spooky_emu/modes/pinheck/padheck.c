@@ -15,6 +15,19 @@
  *   panel                 middle / bottom / top / none: the mode's title, its total and its
  *                         time left on the DMD's text layer
  *
+ * and (PAD-1469, JJP parity) the start rules, lamps, coils and balls:
+ *
+ *   start_on              ball_start, first_ball, last_ball, valid_playfield, ball_saved,
+ *                         extra_ball, multiball_end: read off the game's own state every ms
+ *   start_score / start_combo + combo_seconds / start_once / start_count_reset
+ *   lamps / lamp_color / lamp_blink   the game's lamp table, written after its houseKeeping
+ *                         filled it (that ms's value), so the lamp shows ours while the mode runs
+ *   coil_start/_shot/_complete, coil_hold + coil_hold_on   the game's fireCoil; a hold is short
+ *                         pulses on power of every 32 steps, and never over a coil the game drives
+ *   multiball / multiball_on / add_ball / ball_save   the game's own ball queue (it loads and
+ *                         launches them, and ends the ball only once every ball is home) and its
+ *                         ball-save timer
+ *
  * A mode ends on time, on completion, when the ball ends (drain or tilt) and when the game
  * ends; start counts reset at every new game.  What the runtime does goes to the game's own
  * serial monitor (UART1, 115200) as "[pad] ..." lines.
@@ -48,7 +61,16 @@ extern volatile u8 GAME_data_out[16];
 extern volatile u8 GAME_switch_ram[8];
 extern volatile u32 GAME_millis;
 extern volatile u32 GAME_score_array[5];
-extern volatile u8 GAME_player, GAME_ball, GAME_ball_active, GAME_tilt;
+extern volatile u8 GAME_player, GAME_ball, GAME_ball_active, GAME_tilt, GAME_phase;
+/* PAD-1469: the game's balls, coils and lamps (hooks.py) */
+extern void GAME_coil_fire(void *self, int coil, int time);
+extern volatile u32 GAME_coil_busy[24];     /* fireCoil's off times: non-zero while a coil is on */
+extern volatile u8 GAME_lamp_ram[64];        /* 0..8 a lamp, refilled by houseKeeping every ms */
+extern volatile u32 GAME_save_timer;         /* the ball save, ms left */
+extern volatile u32 GAME_load_timer;         /* non-zero from a ball's load until it is in the lane */
+extern volatile u16 GAME_ball_queue;         /* balls the game still has to load and launch */
+extern volatile u8 GAME_extra_balls;         /* extra balls the player has waiting */
+extern volatile u8 GAME_ball_limit;          /* the balls-per-game setting + 1 */
 
 #define U1STA (*(volatile u32 *)0xBF806010)
 #define U1TXREG (*(volatile u32 *)0xBF806020)
@@ -60,23 +82,56 @@ extern volatile u8 GAME_player, GAME_ball, GAME_ball_active, GAME_tilt;
 #define PANEL_BOTTOM 2
 #define PANEL_TOP 3
 
-struct pad_mode {               /* 64 bytes, written by mkspkmodes.py (pinheck_data) */
+/* start_on bits */
+#define EV_BALL_START 1
+#define EV_FIRST_BALL 2
+#define EV_LAST_BALL 4
+#define EV_VALID_PLAYFIELD 8
+#define EV_BALL_SAVED 16
+#define EV_EXTRA_BALL 32
+#define EV_MULTIBALL_END 64
+/* pad_mode.flags */
+#define F_RESET_BALL 1          /* start_count_reset = ball */
+#define F_ONCE_BALL 2           /* start_once = ball */
+#define F_ONCE_GAME 4           /* start_once = game */
+#define HOLD_ON_SHOTS 0
+#define HOLD_ON_START 1
+#define HOLD_ON_SWITCHES 2
+#define NO_COIL 0xFF
+
+struct pad_mode {               /* 128 bytes, written by pinheck.py (pack_mode) */
     char title[16];             /* the panel's title, NUL-padded */
     u8 start[8], shots[8];      /* switch bitmaps, as GAME_switch_ram */
     u16 start_count, seconds, complete;
     u8 panel, flags;
     u32 points, complete_points;
     char sound[4][4];           /* start, shot, complete, end: 3 letters + NUL, "" none */
+    /* PAD-1469 */
+    u8 lamps[8];                /* lamp bitmap (lamp n: bit n & 7 of byte n >> 3) */
+    u8 multiball_on[8], add_ball[8], hold_on[8];    /* switch bitmaps */
+    u32 start_score;
+    u8 start_on, lamp_level, lamp_blink, combo_n;   /* EV_ bits; 0..8; flashes a second */
+    u8 combo[6];                /* start_combo's switches, in order */
+    u8 combo_seconds, mb_balls; /* multiball: balls in play (0 none) */
+    u8 mb_save, add_times, ball_save, hold_mode;    /* seconds; add_ball times; seconds; HOLD_ON_ */
+    u8 coil[3], coil_t[3];      /* coil_start / _shot / _complete: coil (NO_COIL none), fireCoil time */
+    u8 hold_coil, hold_power;   /* coil_hold: coil (NO_COIL none), on steps of 32 */
+    u16 hold_ms;
+    u8 pad2[2];
 };
 
 struct pad_data {
-    u32 magic;                  /* 'PHM1' */
-    u8 count, off, pad0, pad1;
+    u32 magic;                  /* 'PHM2' */
+    u8 count, off, lane, scale; /* the shooter lane switch; ms per fireCoil time unit */
+    u8 trough[8];               /* the trough switches (and any ball locks beside them) */
+    u8 coil_ok[24];             /* per coil: 1 a mode may pulse it, 2 a mode may hold it */
+    u8 coil_own[24];            /* its own pulse, in fireCoil time units (an asked one is shorter) */
+    u8 lamp_max, balls, pad1, pad2;     /* balls: the game's balls (0: not known) */
     char names[MAX_MODES][20];  /* the .mode file names, for the log */
     struct pad_mode mode[MAX_MODES];
 };
 
-#define DATA_MAGIC 0x314D4850u  /* "PHM1" */
+#define DATA_MAGIC 0x324D4850u  /* "PHM2" */
 extern const struct pad_data PAD_DATA;
 
 /* ------------------------------------------------------------------ our variables */
@@ -85,14 +140,22 @@ struct run {
     u8 prev[8];
     u8 live, active, player, ball, tilted, shown, drawn_lines;
     u32 drawn_ms, drawn_key;
+    /* PAD-1469: what the game did, read every ms */
+    u8 played, base, inplay, multi, prev_extra, ev_pending, valid_done, pad0;
+    u32 prev_save, multi_since, our_save_until, single_since;
+    /* the coils: when each fired last, its pulses this minute, and the one hold */
+    u32 coil_last[24], minute_at;
+    u8 coil_count[24];
+    u8 hold_coil, hold_owner, hold_t, holds_this_minute;
+    u32 hold_until, hold_next, hold_period, hold_ended[24];
     struct {
-        u8 running;
+        u8 running, combo_i, score_done, once, mb, added, want, came;
         u16 hits, made;
-        u32 total, ends_at;
+        u32 total, ends_at, combo_ms, mb_until, one_since, save_until, game_save_until;
     } m[MAX_MODES];
 };
 
-#define RUN_MAGIC 0x50414453u   /* "PADS" */
+#define RUN_MAGIC 0x32444150u   /* "PAD2" */
 extern struct run PAD_RUN;
 #define R PAD_RUN
 #define D PAD_DATA
@@ -137,7 +200,7 @@ static char *put_str(char *p, const char *s, int max)
 /* "[pad] <mode>: <what> <n>\r\n" */
 static void log3(int i, const char *what, int has_n, u32 n, const char *tail)
 {
-    char b[96], *p = b;
+    char b[160], *p = b;
     p = put_str(p, "[pad] ", 8);
     if (i >= 0)
         p = put_str(put_str(p, D.names[i], 20), ": ", 2);
@@ -145,7 +208,7 @@ static void log3(int i, const char *what, int has_n, u32 n, const char *tail)
     if (has_n)
         p = put_num(p, n);
     if (tail)
-        p = put_str(p, tail, 24);
+        p = put_str(p, tail, 48);
     put_str(p, "\r\n", 2);
     say(b);
 }
@@ -299,12 +362,289 @@ static void draw(u32 now)
     R.drawn_ms = now;
 }
 
+static void stop(int i, const char *why);
+
+/* ------------------------------------------------------------------ helpers */
+static int bit_of(const u8 *map, int n)
+{
+    return map[n >> 3] & (1 << (n & 7));
+}
+
+static int closed(int n)
+{
+    return GAME_switch_ram[n >> 3] & (1 << (n & 7));
+}
+
+static int any_bits(const u8 *map)
+{
+    int k;
+    for (k = 0; k < 8; k++)
+        if (map[k])
+            return 1;
+    return 0;
+}
+
+/* "[pad] <mode>: <what><a><tail><b>" */
+static void log2n(int i, const char *what, u32 a, const char *tail, u32 b)
+{
+    char t[40], *p = t;
+    p = put_str(p, tail, 24);
+    put_num(p, b);
+    log3(i, what, 1, a, t);
+}
+
+/* ------------------------------------------------------------------ coils (PAD-1469) */
+static int coil_may(int c, int need)
+{
+    return c < 24 && (D.coil_ok[c] & need) && R.live && !GAME_tilt;
+}
+
+static void minute(u32 now)
+{
+    int k;
+    if (now - R.minute_at < 60000)
+        return;
+    R.minute_at = now;
+    R.holds_this_minute = 0;
+    for (k = 0; k < 24; k++)
+        R.coil_count[k] = 0;
+}
+
+/* coil_start / coil_shot / coil_complete: one pulse, never longer than the coil's own, 250 ms
+   between two of one coil, 20 a minute; not while the game drives it */
+static void pulse(int i, int which, u32 now)
+{
+    static const char *const key[3] = {"coil_start ", "coil_shot ", "coil_complete "};
+    const struct pad_mode *m = &D.mode[i];
+    int c = m->coil[which], t;
+    if (c == NO_COIL)
+        return;
+    minute(now);
+    if (!coil_may(c, 1)) {
+        log3(i, key[which], 1, c, " not fired: no ball in play");
+        return;
+    }
+    if (GAME_coil_busy[c]) {
+        log3(i, key[which], 1, c, " not fired: the game is driving it");
+        return;
+    }
+    if ((R.coil_last[c] && now - R.coil_last[c] < 250) || R.coil_count[c] >= 20) {
+        log3(i, key[which], 1, c, " not fired: too soon");
+        return;
+    }
+    t = m->coil_t[which] && m->coil_t[which] < D.coil_own[c] ? m->coil_t[which] : D.coil_own[c];
+    GAME_coil_fire(GAME_this, c, t);
+    R.coil_last[c] = now ? now : 1;
+    R.coil_count[c]++;
+    log2n(i, key[which], c, " pulsed, ms ", (u32)t * D.scale);
+}
+
+static void hold_off(const char *why)
+{
+    int c = R.hold_coil;
+    if (c == NO_COIL)
+        return;
+    R.hold_ended[c] = GAME_millis ? GAME_millis : 1;
+    R.hold_coil = NO_COIL;
+    log3(R.hold_owner, "coil_hold off ", 1, c, why);
+}
+
+/* coil_hold: the coil on for hold_ms, on hold_power of every 32 steps, as short pulses of the
+   game's fireCoil (the shortest it gives); 3 s off between two holds of one coil, 6 a minute */
+static void hold_on(int i, u32 now)
+{
+    const struct pad_mode *m = &D.mode[i];
+    int c = m->hold_coil, p = m->hold_power ? m->hold_power : 8, t;
+    if (c == NO_COIL)
+        return;
+    minute(now);
+    if (!coil_may(c, 2)) {
+        log3(i, "coil_hold ", 1, c, " not held: no ball in play");
+        return;
+    }
+    if (R.hold_coil != NO_COIL) {
+        log3(i, "coil_hold ", 1, c, " not held: a hold is on");
+        return;
+    }
+    if ((R.hold_ended[c] && now - R.hold_ended[c] < 3000) || R.holds_this_minute >= 6) {
+        log3(i, "coil_hold ", 1, c, " not held: too soon");
+        return;
+    }
+    if (p > 16)
+        p = 16;
+    t = D.scale > 1 ? 1 : p;                        /* fireCoil time: one unit, or p ms */
+    R.hold_coil = c;
+    R.hold_owner = i;
+    R.hold_t = t;
+    R.hold_period = (u32)t * D.scale * 32 / p;      /* on p of every 32 steps */
+    R.hold_until = now + m->hold_ms;
+    R.hold_next = now;
+    R.holds_this_minute++;
+    log2n(i, "coil_hold ", c, " on, ms ", m->hold_ms);
+}
+
+static void hold_tick(u32 now)
+{
+    int c = R.hold_coil;
+    if (c == NO_COIL)
+        return;
+    if (!R.live || GAME_tilt) {
+        hold_off(" (the ball ended)");
+        return;
+    }
+    if (!R.m[R.hold_owner].running) {
+        hold_off(" (the mode ended)");
+        return;
+    }
+    if (now >= R.hold_until) {
+        hold_off(" (its time)");
+        return;
+    }
+    if (now >= R.hold_next) {
+        if (!GAME_coil_busy[c])                     /* the game always wins */
+            GAME_coil_fire(GAME_this, c, R.hold_t);
+        R.hold_next = now + R.hold_period;
+    }
+}
+
+/* ------------------------------------------------------------------ balls (PAD-1469) */
+static int trough_count(void)
+{
+    int k, n = 0;
+    for (k = 0; k < 64; k++)
+        if (bit_of(D.trough, k) && closed(k))
+            n++;
+    return n;
+}
+
+/* balls in play: one when the ball first went in, plus every ball that left the trough after */
+static void count_balls(u32 now)
+{
+    int t = trough_count();
+    if (!R.live) {
+        R.base = 0xFF;
+        R.inplay = 0;
+        R.multi = 0;
+        R.multi_since = 0;
+        return;
+    }
+    if (R.base == 0xFF) {
+        if (GAME_phase != 3)
+            return;
+        R.base = (u8)t;
+    }
+    R.inplay = t > R.base + 1 ? 0 : (u8)(R.base + 1 - t);
+    if (R.inplay >= 2) {
+        if (!R.multi_since)
+            R.multi_since = now ? now : 1;
+        if (now - R.multi_since >= 500)
+            R.multi = 1;
+        R.single_since = 0;
+    } else {
+        R.multi_since = 0;
+        if (GAME_load_timer || GAME_ball_queue)
+            R.single_since = 0;                     /* a drained ball being served back */
+        else if (!R.single_since)
+            R.single_since = now ? now : 1;
+    }
+}
+
+/* the game's ball save raised to at least ms (it counts it down, and serves back a ball that
+   drains inside it) */
+static void save_at_least(u32 ms)
+{
+    if (GAME_save_timer < ms)
+        GAME_save_timer = ms;
+}
+
+/* serve balls through the game's own queue until want are in play, inside the mode's save */
+static void serve_tick(int i, u32 now)
+{
+    if (R.m[i].mb != 2)
+        return;
+    if (R.inplay >= 2)
+        R.m[i].came = 1;
+    if (now < R.m[i].mb_until) {
+        save_at_least(R.m[i].mb_until - now);
+        if (R.our_save_until < R.m[i].mb_until)
+            R.our_save_until = R.m[i].mb_until;
+        if (R.base != 0xFF && R.inplay + GAME_ball_queue < R.m[i].want && !GAME_load_timer) {
+            GAME_ball_queue = GAME_ball_queue + 1;
+            log2n(i, "a ball asked for, in play ", R.inplay, ", want ", R.m[i].want);
+        }
+    }
+    if (!D.mode[i].mb_balls)
+        return;                                     /* an add_ball alone: no one-ball-left end */
+    if (!R.m[i].came && now >= R.m[i].mb_until + 20000) {
+        stop(i, "the balls did not come)");
+        return;
+    }
+    if (R.m[i].came && now >= R.m[i].mb_until + 3000) {
+        if (R.inplay <= 1) {
+            if (!R.m[i].one_since)
+                R.m[i].one_since = now ? now : 1;
+            else if (now - R.m[i].one_since >= 2000)
+                stop(i, "one ball left)");
+        } else {
+            R.m[i].one_since = 0;
+        }
+    }
+}
+
+static void serve(int i, u32 now)
+{
+    const struct pad_mode *m = &D.mode[i];
+    R.m[i].mb = 2;
+    R.m[i].want = D.balls && m->mb_balls > D.balls ? D.balls : m->mb_balls;
+    R.m[i].mb_until = now + 1000u * m->mb_save;
+    R.m[i].one_since = 0;
+    R.m[i].came = 0;
+    if (any_bits(m->multiball_on))
+        R.m[i].ends_at = 0;                         /* the balls came: one ball left ends it */
+    log2n(i, "multiball, balls ", m->mb_balls, ", ball save s ", m->mb_save);
+}
+
+static void add_ball(int i, int sw, u32 now)
+{
+    const struct pad_mode *m = &D.mode[i];
+    if (R.m[i].added >= (m->add_times ? m->add_times : 1)) {
+        log3(i, "add_ball: no more this run, switch ", 1, sw, 0);
+        return;
+    }
+    if (D.balls && R.inplay + GAME_ball_queue >= D.balls) {
+        log3(i, "add_ball: every ball of the game is in play, switch ", 1, sw, 0);
+        return;
+    }
+    R.m[i].added++;
+    if (R.m[i].mb != 2) {
+        R.m[i].mb = 2;
+        R.m[i].want = R.inplay ? R.inplay : 1;
+        R.m[i].mb_until = now;
+        R.m[i].came = 0;
+    }
+    R.m[i].want++;
+    if (R.m[i].mb_until < now + 2000)
+        R.m[i].mb_until = now + 2000;
+    log2n(i, "add_ball on switch ", sw, ", balls ", R.m[i].want);
+}
+
 /* ------------------------------------------------------------------ the mode logic */
 static void stop(int i, const char *why)
 {
+    u32 now = GAME_millis;
     if (!R.m[i].running)
         return;
     R.m[i].running = 0;
+    if (R.m[i].save_until > now && GAME_save_timer <= R.m[i].save_until - now + 20) {
+        /* our ball save ends with the mode: the game's own save gets what it had left */
+        u32 left = R.m[i].game_save_until > now ? R.m[i].game_save_until - now : 0;
+        GAME_save_timer = left;
+        R.prev_save = left;
+    }
+    R.m[i].save_until = 0;
+    R.m[i].mb = 0;
+    if (R.hold_coil != NO_COIL && R.hold_owner == i)
+        hold_off(" (the mode ended)");
     if (why) {
         log3(i, "ended (", 0, 0, why);
         log3(i, "total ", 1, R.m[i].total, 0);
@@ -341,15 +681,68 @@ static u32 award(u32 points)
 
 static void start(int i, u32 now)
 {
+    const struct pad_mode *m = &D.mode[i];
     R.m[i].running = 1;
     R.m[i].hits = 0;
     R.m[i].made = 0;
     R.m[i].total = 0;
-    R.m[i].ends_at = D.mode[i].seconds ? now + 1000u * D.mode[i].seconds : 0;
-    log3(i, "STARTED, seconds ", 1, D.mode[i].seconds, 0);
+    R.m[i].added = 0;
+    R.m[i].mb = 0;
+    R.m[i].combo_i = 0;
+    R.m[i].once = 3;
+    R.m[i].ends_at = m->seconds ? now + 1000u * m->seconds : 0;
+    log3(i, "STARTED, seconds ", 1, m->seconds, 0);
     sound(i, 0);
+    pulse(i, 0, now);
+    if (m->hold_mode == HOLD_ON_START)
+        hold_on(i, now);
+    if (m->ball_save) {
+        R.m[i].save_until = now + 1000u * m->ball_save;
+        R.m[i].game_save_until = now + GAME_save_timer;
+        save_at_least(1000u * m->ball_save);
+        log3(i, "ball save s ", 1, m->ball_save, 0);
+    }
+    if (m->mb_balls) {
+        if (any_bits(m->multiball_on))
+            R.m[i].mb = 1;                          /* waits for a multiball_on hit */
+        else
+            serve(i, now);
+    }
     R.shown = i;
     draw(now);
+}
+
+/* a start switch hit or a start rule fired: it counts toward start_count */
+static void count_up(int i, const char *why, u32 n, u32 now)
+{
+    const struct pad_mode *m = &D.mode[i];
+    if (R.m[i].running)
+        return;
+    R.m[i].hits++;
+    log3(i, why, 1, n, 0);
+    log3(i, "  hits ", 1, R.m[i].hits, 0);
+    if (R.m[i].hits < (m->start_count ? m->start_count : 1))
+        return;
+    if (((m->flags & F_ONCE_GAME) && (R.m[i].once & 2)) || ((m->flags & F_ONCE_BALL) && (R.m[i].once & 1))) {
+        log3(i, "not started: start_once", 0, 0, 0);
+        R.m[i].hits = 0;
+        return;
+    }
+    start(i, now);
+}
+
+static void raise_ev(int ev, u32 now)
+{
+    static const char *const name[7] = {"ball_start", "first_ball", "last_ball", "valid_playfield",
+                                        "ball_saved", "extra_ball", "multiball_end"};
+    int i, k;
+    for (k = 0; k < 6; k++)
+        if (ev & (1 << k))
+            break;
+    log3(-1, "event ", 0, 0, name[k]);
+    for (i = 0; i < D.count; i++)
+        if (!R.m[i].running && (D.mode[i].start_on & ev))
+            count_up(i, "start_on event ", (u32)k, now);
 }
 
 static void shot(int i, int sw, u32 now)
@@ -362,6 +755,9 @@ static void shot(int i, int sw, u32 now)
     log3(i, "  points scored ", 1, got, 0);
     log3(i, "  player score ", 1, score_now(), 0);
     sound(i, 1);
+    pulse(i, 1, now);
+    if (m->hold_mode == HOLD_ON_SHOTS)
+        hold_on(i, now);
     R.shown = i;
     if (m->complete && R.m[i].made >= m->complete) {
         u32 bonus = m->complete_points ? award(m->complete_points) : 0;
@@ -369,27 +765,77 @@ static void shot(int i, int sw, u32 now)
         log3(i, "COMPLETED, bonus ", 1, bonus, 0);
         log3(i, "total ", 1, R.m[i].total, 0);
         sound(i, 2);
+        pulse(i, 2, now);
         stop(i, 0);
     }
     draw(now);
 }
 
+static void combo(int i, int sw, u32 now)
+{
+    const struct pad_mode *m = &D.mode[i];
+    int k = R.m[i].combo_i;
+    if (k && now - R.m[i].combo_ms > 1000u * (m->combo_seconds ? m->combo_seconds : 5))
+        k = 0;                                      /* too slow: from the first again */
+    if (sw == m->combo[k]) {
+        k++;
+    } else if (sw == m->combo[0]) {
+        k = 1;
+    } else {
+        R.m[i].combo_i = (u8)k;
+        return;                                     /* another switch between: no matter */
+    }
+    R.m[i].combo_ms = now;
+    if (k >= m->combo_n) {
+        R.m[i].combo_i = 0;
+        count_up(i, "start_combo made, last switch ", (u32)sw, now);
+        return;
+    }
+    R.m[i].combo_i = (u8)k;
+}
+
 static void on_switch(int sw, u32 now)
 {
     int i, byte = sw >> 3, bit = 1 << (sw & 7);
+    if (!R.valid_done && R.base != 0xFF && sw != D.lane && !(D.trough[byte] & bit)) {
+        R.valid_done = 1;                           /* the ball's first playfield switch */
+        raise_ev(EV_VALID_PLAYFIELD, now);
+    }
     for (i = 0; i < D.count; i++) {
         const struct pad_mode *m = &D.mode[i];
         if (R.m[i].running) {
+            if (R.m[i].mb == 1 && (m->multiball_on[byte] & bit))
+                serve(i, now);
+            if (m->add_ball[byte] & bit)
+                add_ball(i, sw, now);
+            if (m->hold_mode == HOLD_ON_SWITCHES && (m->hold_on[byte] & bit))
+                hold_on(i, now);
             if (m->shots[byte] & bit)
                 shot(i, sw, now);
-        } else if (m->start[byte] & bit) {
-            R.m[i].hits++;
-            log3(i, "start switch ", 1, sw, 0);
-            log3(i, "  hits ", 1, R.m[i].hits, 0);
-            if (R.m[i].hits >= (m->start_count ? m->start_count : 1))
-                start(i, now);
+        } else {
+            if (m->combo_n)
+                combo(i, sw, now);
+            if (!R.m[i].running && (m->start[byte] & bit))
+                count_up(i, "start switch ", (u32)sw, now);
         }
     }
+}
+
+/* a new ball: start counts (start_count_reset = ball) and start_once ball reset; its ball events
+   wait for the ball in play */
+static void new_ball(void)
+{
+    int i;
+    for (i = 0; i < D.count; i++) {
+        if (D.mode[i].flags & F_RESET_BALL)
+            R.m[i].hits = 0;
+        R.m[i].once &= (u8)~1;
+        R.m[i].combo_i = 0;
+    }
+    R.valid_done = 0;
+    R.base = 0xFF;
+    R.ev_pending = EV_BALL_START | (GAME_ball == 1 ? EV_FIRST_BALL : 0) |
+                   (GAME_ball + 1 == GAME_ball_limit && !GAME_extra_balls ? EV_LAST_BALL : 0);
 }
 
 /* what the game says now: a new game, a ball, the ball's end, tilt, the game's end */
@@ -401,8 +847,11 @@ static void track(void)
         for (i = 0; i < D.count; i++) {
             stop(i, 0);
             R.m[i].hits = 0;
+            R.m[i].once = 0;
+            R.m[i].score_done = 0;
         }
         R.player = R.ball = 0xFF;
+        R.prev_extra = GAME_extra_balls;
         log3(-1, "new game: start counts reset", 0, 0, 0);
     }
     if (!active && R.active) {
@@ -417,8 +866,11 @@ static void track(void)
         R.ball = GAME_ball;
         R.live = GAME_ball_active && !tilted;
         log3(-1, "ball ", 1, GAME_ball, R.live ? " started" : " (not live)");
+        if (R.live)
+            new_ball();
     } else if (active && !R.live && GAME_ball_active && !tilted && R.tilted == 0) {
         R.live = 1;                         /* a ball made live again (ball_active back) */
+        new_ball();
     }
     if (R.live && tilted && !R.tilted) {
         R.live = 0;
@@ -432,6 +884,62 @@ static void track(void)
     R.tilted = tilted;
 }
 
+/* the game events that are not a switch: the ball in play, a ball save, an extra ball, a
+   multiball's end, a score */
+static void events(u32 now)
+{
+    int i, was_multi = R.multi;
+    u32 save = GAME_save_timer;
+    u8 extra = GAME_extra_balls;
+    count_balls(now);
+    if (R.live && R.ev_pending && GAME_phase == 3) {
+        int ev = R.ev_pending, k;
+        R.ev_pending = 0;
+        for (k = 0; k < 3; k++)
+            if (ev & (1 << k))
+                raise_ev(1 << k, now);
+    }
+    if (R.live && !GAME_tilt && R.prev_save >= 50 && !save && now >= R.our_save_until &&
+        (GAME_load_timer || GAME_ball_queue))
+        raise_ev(EV_BALL_SAVED, now);               /* the game spent its save on a drain: it cut
+                                                       the save and served the ball back at once */
+    R.prev_save = save;
+    if (R.active && extra > R.prev_extra)
+        raise_ev(EV_EXTRA_BALL, now);
+    R.prev_extra = extra;
+    if (was_multi && R.live && R.inplay <= 1 && R.single_since && now - R.single_since >= 500) {
+        R.multi = 0;                                /* one ball, settled: the multiball is over */
+        raise_ev(EV_MULTIBALL_END, now);
+    }
+    if (!R.live)
+        return;
+    for (i = 0; i < D.count; i++) {
+        const struct pad_mode *m = &D.mode[i];
+        int p = GAME_player & 3 ? GAME_player : 1;
+        if (m->start_score && !R.m[i].running && !(R.m[i].score_done & (1 << p)) && score_now() >= m->start_score) {
+            R.m[i].score_done |= (u8)(1 << p);
+            count_up(i, "start_score reached ", score_now(), now);
+        }
+    }
+}
+
+/* the mode's lamps over the game's: after houseKeeping filled the table for this ms */
+static void lamps(u32 now)
+{
+    int i, n;
+    for (i = 0; i < D.count; i++) {
+        const struct pad_mode *m = &D.mode[i];
+        u8 level = m->lamp_level;
+        if (!R.m[i].running || !any_bits(m->lamps))
+            continue;
+        if (m->lamp_blink && ((now / (500u / m->lamp_blink)) & 1))
+            level = 0;
+        for (n = 0; n < 64; n++)
+            if (bit_of(m->lamps, n))
+                GAME_lamp_ram[n] = level;
+    }
+}
+
 static void init(u32 now)
 {
     u8 *p = (u8 *)&R;
@@ -441,6 +949,9 @@ static void init(u32 now)
     R.magic = RUN_MAGIC;
     R.shown = 0xFF;
     R.player = R.ball = 0xFF;
+    R.base = 0xFF;
+    R.hold_coil = NO_COIL;
+    R.minute_at = now;
     for (k = 0; k < 8; k++)
         R.prev[k] = GAME_switch_ram[k];
     R.last_ms = now;
@@ -454,12 +965,15 @@ static void tick(void)
     int i, k;
     if (R.magic != RUN_MAGIC || now < R.last_ms)
         init(now);                          /* power-up, or the game started again */
-    if (now == R.last_ms && R.drawn_ms)
-        return;                             /* once a millisecond */
-    R.last_ms = now;
     if (D.magic != DATA_MAGIC || D.off || !D.count)
         return;
+    if (now == R.last_ms && R.drawn_ms) {
+        lamps(now);                         /* houseKeeping ran again this ms: ours over it again */
+        return;
+    }
+    R.last_ms = now;
     track();
+    events(now);
     for (k = 0; k < 8; k++) {
         u8 cur = GAME_switch_ram[k], rose = cur & ~R.prev[k];
         R.prev[k] = cur;
@@ -468,14 +982,24 @@ static void tick(void)
                 if (rose & (1 << i))
                     on_switch(k * 8 + i, now);
     }
-    for (i = 0; i < D.count; i++)
-        if (R.m[i].running && R.m[i].ends_at && now >= R.m[i].ends_at)
+    for (i = 0; i < D.count; i++) {
+        if (!R.m[i].running)
+            continue;
+        if (R.m[i].ends_at && now >= R.m[i].ends_at)
             stop(i, "time ran out)");
+        else
+            serve_tick(i, now);
+    }
+    hold_tick(now);
+    lamps(now);
     if (R.shown != 0xFF && R.m[R.shown].running && now - R.drawn_ms >= 100)
         draw(now);                          /* the time left: sent when it changes */
     else if (R.drawn_lines && (R.shown == 0xFF || !R.m[R.shown].running))
         draw(now);
 }
+
+/* every variable fits the RAM hooks.py gives the runtime (ram: 0x800 bytes) */
+typedef char pad_run_fits[sizeof(struct run) <= 0x800 ? 1 : -1];
 
 /* the game's call: its houseKeeping, then the modes */
 void pad_entry(void *self) __attribute__((section(".text.entry")));

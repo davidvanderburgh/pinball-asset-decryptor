@@ -29,11 +29,20 @@ PREBUILT = os.path.join(HERE, "prebuilt")
 MAX_MODES = 24
 TITLE_MAX = 16
 NAME_MAX = 20
-DATA_MAGIC = 0x314D4850         # "PHM1"
+DATA_MAGIC = 0x324D4850         # "PHM2" (PAD-1469: 128-byte modes; PHM1 was 64)
 HEAD_MAGIC = 0x48444150         # "PADH"
 PANELS = {"none": 0, "middle": 1, "bottom": 2, "top": 3}
 SOUND_KEYS = ("sound_start", "sound_shot", "sound_complete", "sound_end")
-MODE_SIZE = 64
+MODE_SIZE = 128
+#: start_on words -> padheck.c's EV_ bits (every one the runtime reads off the game, PAD-1469)
+EVENTS = {"ball_start": 1, "first_ball": 2, "last_ball": 4, "valid_playfield": 8, "ball_saved": 16,
+          "extra_ball": 32, "multiball_end": 64}
+#: the JJP keys a pinHeck title cannot do: its panel is the game's own DMD text (no fonts, no
+#: colours), it has no mode engine to watch (start_after), and its sounds are the card's own
+#: (no file of a mode's own: sound, music, picture, video)
+KEYS_NOT_HERE = ["font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
+                 "panel_color", "start_after", "sound_channel", "music", "picture", "picture_at", "video",
+                 "video_at", "video_loop"]
 
 
 class Refused(Exception):
@@ -105,12 +114,69 @@ def _int(v, default=0):
     return int(v) if v else default
 
 
+def _words(v):
+    return (v or "").replace(",", " ").split()
+
+
+def _switch_list(words, port, what, fn):
+    """Switch numbers in order (start_combo)."""
+    bits = []
+    for w in words:
+        b = _bits([w], port, what, fn)
+        bits.append(next(k * 8 + j for k in range(8) for j in range(8) if b[k] & (1 << j)))
+    return bits
+
+
+def _lamp_bits(words, fn):
+    out = bytearray(8)
+    for w in words:
+        n = w.lower().rsplit("_", 1)[-1]
+        if not w.lower().startswith("lamp_") or not n.isdigit() or not 0 <= int(n) < 64:
+            raise Refused("%s: lamps %s is not one of the game's lamps (lamp_0..lamp_63, its lamp test's numbers)" % (fn, w))
+        out[int(n) >> 3] |= 1 << (int(n) & 7)
+    return bytes(out)
+
+
+def coil_of(port, name, fn="?"):
+    """(number, own pulse ms, may hold) of a coil by its name in the port report."""
+    t = H.HOOKS.get((port or {}).get("prg") or "") or {}
+    for k, v in (t.get("coils") or {}).items():
+        if k.lower() == (name or "").replace(" ", "_").lower():
+            return v
+    raise Refused("%s: %s is not one of the coils a mode may use on this game" % (fn, name))
+
+
+def _scale(port):
+    return (H.HOOKS.get((port or {}).get("prg") or "") or {}).get("coil_scale", 1)
+
+
+def _coil_pulse(v, port, fn):
+    """(coil, fireCoil time) of '<coil> [ms]'; time 0 = the coil's own pulse."""
+    w = _words(v)
+    if not w:
+        return 0xFF, 0
+    c = coil_of(port, w[0], fn)
+    if len(w) < 2:
+        return c[0], 0
+    sc = _scale(port)
+    ms = min(_int(w[1]), c[1])
+    return c[0], max(1, -(-ms // sc))
+
+
+def lamp_level(rgb, port=None):
+    """A lamp_color as the game's lamp brightness (0..lamp_max): its brightest channel."""
+    mx = (H.HOOKS.get((port or {}).get("prg") or "") or {}).get("lamp_max", 8)
+    h = (rgb or "ffffff").strip().lstrip("#")[:6] or "ffffff"
+    v = max(int(h[k:k + 2], 16) for k in (0, 2, 4))
+    return 0 if not v else max(1, round(v * mx / 255))
+
+
 def pack_mode(m, port):
-    """One struct pad_mode (64 bytes) from a checked mode dict."""
+    """One struct pad_mode (128 bytes) from a checked mode dict."""
     fn = m.get("file", "?")
     title = screen_text(m.get("title") or m.get("name") or fn[:-5])[:title_max((port or {}).get("prg") or "")]
-    start = _bits((m.get("start") or "").replace(",", " ").split(), port, "start", fn)
-    shots = _bits((m.get("shots") or "").replace(",", " ").split(), port, "shots", fn)
+    start = _bits(_words(m.get("start")), port, "start", fn)
+    shots = _bits(_words(m.get("shots") or m.get("start")), port, "shots", fn)
     sounds = b""
     for k in SOUND_KEYS:
         s = (m.get(k) or "").strip().upper()
@@ -118,23 +184,80 @@ def pack_mode(m, port):
             raise Refused("%s: %s %s is not a sound of this game (three letters/digits, SFX/_F?/xxx.wav)" % (fn, k, s))
         sounds += s.encode("ascii").ljust(4, b"\0")
     panel = PANELS.get((m.get("panel") or "middle").strip(), 1)
+    flags = ((1 if (m.get("start_count_reset") or "game").strip() == "ball" else 0) |
+             {"ball": 2, "game": 4}.get((m.get("start_once") or "no").strip(), 0))
     body = struct.pack("<16s8s8sHHHBBII", title.encode("ascii"), start, shots,
                        min(_int(m.get("start_count"), 1), 0xFFFF), min(_int(m.get("seconds")), 0xFFFF),
-                       min(_int(m.get("complete")), 0xFFFF), panel, 0,
+                       min(_int(m.get("complete")), 0xFFFF), panel, flags,
                        _int(m.get("points")), _int(m.get("complete_points"))) + sounds
+    # PAD-1469: start rules, lamps, balls, coils
+    ev = 0
+    for w in _words(m.get("start_on")):
+        if w not in EVENTS:
+            raise Refused("%s: start_on %s is not an event this game's runtime sees" % (fn, w))
+        ev |= EVENTS[w]
+    combo = _switch_list(_words(m.get("start_combo")), port, "start_combo", fn)
+    if len(combo) > 6:
+        raise Refused("%s: start_combo takes up to 6 switches here" % fn)
+    mb = _words(m.get("multiball"))
+    ab = _words(m.get("add_ball"))
+    times = 1
+    if ab and ab[-1].isdigit():
+        times = int(ab[-1])
+        ab = ab[:-1]
+    hold_on = (m.get("coil_hold_on") or "shots").strip()
+    hold_mode = {"shots": 0, "start": 1}.get(hold_on, 2)
+    coils = [_coil_pulse(m.get(k), port, fn) for k in ("coil_start", "coil_shot", "coil_complete")]
+    hw = _words(m.get("coil_hold"))
+    if hw:
+        hc = coil_of(port, hw[0], fn)
+        if not hc[2]:
+            raise Refused("%s: coil_hold %s is a coil a mode may pulse, not hold" % (fn, hw[0]))
+        hold = (hc[0], min(_int(hw[2]), 16) if len(hw) > 2 else 8, _int(hw[1]))
+    else:
+        hold = (0xFF, 0, 0)
+    blink = _int(m.get("lamp_blink"), 4) if (m.get("lamp_blink") or "").strip() else 4
+    body += _lamp_bits(_words(m.get("lamps")), fn)
+    body += _bits(_words(m.get("multiball_on")), port, "multiball_on", fn)
+    body += _bits(ab, port, "add_ball", fn)
+    body += _bits(_words(hold_on) if hold_mode == 2 else [], port, "coil_hold_on", fn)
+    body += struct.pack("<IBBBB", _int(m.get("start_score")), ev, lamp_level(m.get("lamp_color"), port),
+                        min(blink, 10), len(combo))
+    body += bytes(combo).ljust(6, b"\0")
+    body += struct.pack("<BB", min(_int(m.get("combo_seconds"), 5) or 5, 255), int(mb[0]) if mb else 0)
+    body += struct.pack("<BBBB", min(int(mb[1]), 120) if len(mb) > 1 else 10, min(times, 6),
+                        min(_int(m.get("ball_save")), 120), hold_mode)
+    body += bytes(c for c, _t in coils) + bytes(min(t, 255) for _c, t in coils)
+    body += struct.pack("<BBH", hold[0], hold[1], min(hold[2], 5000)) + b"\0\0"
     assert len(body) == MODE_SIZE, len(body)
     return body
 
 
+def title_head(port):
+    """What the runtime knows of the title, before the modes: the lane, the coil time unit, the
+    trough, each coil's pulse/hold permission and own pulse, the lamps' full brightness."""
+    t = H.HOOKS.get((port or {}).get("prg") or "") or {}
+    trough = bytearray(8)
+    for n in t.get("trough") or ():
+        trough[n >> 3] |= 1 << (n & 7)
+    ok, own = bytearray(24), bytearray(24)
+    sc = t.get("coil_scale", 1)
+    for _name, (c, ms, hold) in (t.get("coils") or {}).items():
+        ok[c] = 1 | (2 if hold else 0)
+        own[c] = max(1, min(255, ms // sc))
+    return struct.pack("<BB", t.get("lane", 0xFF) if t.get("lane") is not None else 0xFF, sc) + bytes(trough) + \
+        bytes(ok) + bytes(own) + struct.pack("<BBBB", t.get("lamp_max", 8), t.get("balls") or 0, 0, 0)
+
+
 def pack_data(modes, port, off=False):
-    """struct pad_data: magic, count, off, the names, the modes (padheck.c)."""
+    """struct pad_data: magic, count, off, the title, the names, the modes (padheck.c)."""
     if len(modes) > MAX_MODES:
         raise Refused("%d modes: the runtime takes %d" % (len(modes), MAX_MODES))
     names = b"".join(os.path.splitext(m.get("file", "mode"))[0].encode("ascii", "replace")[:NAME_MAX - 1].ljust(NAME_MAX, b"\0")
                      for m in modes)
     names = names.ljust(MAX_MODES * NAME_MAX, b"\0")
     body = b"".join(pack_mode(m, port) for m in modes).ljust(MAX_MODES * MODE_SIZE, b"\0")
-    return struct.pack("<IBBBB", DATA_MAGIC, len(modes), 1 if off else 0, 0, 0) + names + body
+    return struct.pack("<IBB", DATA_MAGIC, len(modes), 1 if off else 0) + title_head(port) + names + body
 
 
 def build_prg(stock, modes, port, off=False):
@@ -222,8 +345,11 @@ def make_port(stem, card, game, version, defaults=None):
                     "AddScore adds the points to the player's score as they are (no multiplier, no "
                     "rounding); the runtime calls it as the game's own switch handlers do",
         switches=syms, switch_ids={s: n for n, s in enumerate(syms)}, switch_labels=labels,
-        lamps=[], sounds=card_sounds(card), voice_lines=0, game_modes=[], fonts=[],
+        # PAD-1469: the lamps by the number the game's lamp test shows, the coils a mode may use
+        lamps=["lamp_%d" % n for n in range(64)],
+        coils=sorted(t.get("coils") or ()), coil_holds=sorted(k for k, v in (t.get("coils") or {}).items() if v[2]),
+        start_events=list(EVENTS), balls=t.get("balls"),
+        sounds=card_sounds(card), voice_lines=0, game_modes=[], fonts=[],
         dmd=list(t["dmd"]), defaults=defaults or {},
-        keys_not_here=["font_title", "font_value", "font_timer", "title_color", "value_color",
-                       "timer_color", "panel_color"],
+        keys_not_here=list(KEYS_NOT_HERE),
     )

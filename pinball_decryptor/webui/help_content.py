@@ -4477,6 +4477,14 @@ SPOOKY_MODES_HELP = [
         "Massacre, Evil Dead, Halloween and Ultraman, .ogv (Theora) on Looney Tunes, .mp4 "
         "(H.264) on Rick and Morty. Alice Cooper's screen shows only the game's own pictures "
         "and videos. The game's music goes quiet while your music plays.",
+        "On the DMD games (Jetsons, Domino's and Rob Zombie) a mode starts on every game event "
+        "above, at a score or on switches in order, but not after one of the game's modes (they "
+        "have none a mode can watch). Lamps go by the number the game's lamp test shows "
+        "(lamp_0 to lamp_63); these lamps have one colour, so your colour sets how bright. Balls "
+        "come from the game's own trough: Jetsons has 2, Domino's 3. Coils: the knocker and "
+        "shaker on Jetsons; the knocker, shaker, magnet and stop post on Domino's; none on Rob "
+        "Zombie, whose coil test numbers its coils without saying what they are. Sounds are the "
+        "game's own from its card, with no files of your own.",
     ]),
     ("Trying and installing", [
         "**Try it** starts the game in the Emulate tab with your modes in it, from the stock "

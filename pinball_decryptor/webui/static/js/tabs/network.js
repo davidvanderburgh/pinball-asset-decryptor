@@ -301,7 +301,7 @@ function MachineScreen({ n }) {
       <//>
       ${n.buttons_error ? html`<p role="alert" class="err-ink">${n.buttons_error}</p>` : null}` : null}
     <span class="small muted">Live view shows about 5 frames a second on 5 GHz Wi-Fi (measured on a Godzilla LE; less
-      on 2.4 GHz), with no sound. The pictures of the screen cross your home network on a plain connection, as
+      on 2.4 GHz), with no sound. It is for setting up and troubleshooting: while it runs it takes most of the machine's Wi-Fi and some of its processor, so do not leave it on during a game that matters. The pictures of the screen cross your home network on a plain connection, as
       Send to machine's big files do. It stops when you leave this tab, and by itself after 30 minutes.</span>
   <//>`;
 }
@@ -348,7 +348,7 @@ function MachineCare({ n }) {
       ${n.care_busy === "Backing up the card" ? html`<${Button} onClick=${() => call("network.cancel_care")}>Cancel<//>` : null}
     </div>
     <span class="small muted">A byte-for-byte image of the card in the machine, without taking it out: as big as
-      the card, about 20 minutes for 16 GB on 5 GHz. The machine cannot be played meanwhile.</span>
+      the card, and slow: about an hour for 16 GB (measured on a Godzilla LE; the machine reads its card at 4 to 6 MB a second). The machine cannot be played meanwhile.</span>
     ${n.care_busy ? html`<span class="small">${n.care_busy}…</span>` : null}
     ${n.care_pct != null ? html`<${Progress} pct=${n.care_pct} />` : null}
     <${Said} text=${n.care_note} kind=${n.care_kind} />

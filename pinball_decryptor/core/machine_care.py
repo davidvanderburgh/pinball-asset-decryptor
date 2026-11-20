@@ -16,6 +16,7 @@ and everything but :func:`restore_settings`, :func:`restart_game` and :func:`res
   is kept beside it as ``nv.pad-old``), checks every file, and starts the game again.
 - :func:`mode_log_tail`: the end of PAD's mode log, for following it while a game is played.
 - :func:`backup_card`: the whole card, byte for byte, to an image file on the PC, over the plain connection.
+  Measured on a Godzilla LE: 4.5 to 6 MB a second (the card's own reading, not the Wi-Fi), an hour for 16 GB.
 """
 import hashlib
 import io

@@ -886,7 +886,7 @@ class NetworkTab(TabService):
         if not compat.messagebox.askyesno(
                 'Back up the whole card',
                 "Copy the machine's whole card to this computer?\n\nIt is as big as the card (8, 16 or 32 GB) and "
-                'takes about 20 minutes for 16 GB on 5 GHz Wi-Fi. The machine cannot be played meanwhile: its '
+                'takes about an hour for 16 GB. The machine cannot be played meanwhile: its '
                 'screen says PAD is updating it, and the game starts again when it is done.', icon='warning'):
             return False
         self._card_cancel = False

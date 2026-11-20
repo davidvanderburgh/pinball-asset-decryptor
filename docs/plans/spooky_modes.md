@@ -456,6 +456,81 @@ panel showed in the game's own lettering and counted down; after the drain the b
 clean. A probe copy had the game clear its screen 2 s after a shot (`remove_all_text` +
 `unload_assets`): the game's own texts went, the panel was back at once and stayed.
 
+## Ticket 8: JJP parity on every runtime (PAD-1424, in progress)
+
+PinHeck is not in this ticket's runtimes: its runtime is still being built (PAD-1422/1423), so its
+parity keys belong with it. Here: the Unity core + four glues (six titles), Godot (Looney Tunes)
+and P-ROC (Rick and Morty, Alice Cooper).
+
+**Done and proven so far** (hidden, muted, Ubuntu rigs; PAD-Runtime would not start that day):
+
+- **Start rules** (`start_on` ball_start / first_ball / last_ball / valid_playfield / ball_saved /
+  extra_ball / multiball_end, `start_after` a game mode or `any`, `start_score`, `start_combo` +
+  `combo_seconds`, `start_once`, `start_count_reset`): a fired rule counts toward `start_count`.
+  Game events come from each title's own calls: `ball_saved` is Scooby-Doo's message 65,
+  Beetlejuice's `Messages.Event.ball_saved`, Halloween/Ultraman `evt_ball_saving`, Texas Chainsaw
+  `evt_ballSaved_regular`, Evil Dead's `trough.savingBallCount` rising, Looney Tunes' `ball_save.ogv`
+  quick clip (a one-ball save; its multiball saves play none) and SkeletonGame's `evt_ball_saved`.
+  `extra_ball` is the player's extra-ball count rising, `multiball_end` two balls in play for half a
+  second then one, `valid_playfield` the ball's first switch that is not the trough, shooter lane,
+  a button or the coin door (by the switch's own name). `start_after` polls the game's running
+  modes ten times a second, by the port report's names and by class: Scooby-Doo/Beetlejuice
+  `Mode.active`, Evil Dead `modeStarted`, Halloween/Ultraman a mode's own run flag (modeStarted,
+  modestarted, mb_started, incidental_running ...: they keep every mode in `_modes`), Texas Chainsaw
+  a mode's presence in `_modes`, Looney Tunes `Modes.modes`, SkeletonGame the mode queue (Alice
+  Cooper's `modeStarted` 0 = queued, not running).
+- **Lamps** (`lamps`, `lamp_color`, `lamp_blink`): names with spaces are written with `_`
+  (`RIGHT_ORBIT_ARROW`); the runtimes match either. P-ROC: the game's LED controller at our
+  priority (9500; a blink is a two-step script), `disable` at the end (+ Alice Cooper
+  `update_lamps`). Godot: `Leds.enable(n, 1000, OPCODE_SET_LED, rgb, 0, blend=false)` four times a
+  second (the game blends by default, and clears every command at each ball start); its trough
+  (a system mode, 9500+) still shows the ball-save lamp over ours while a save runs. Unity: the
+  core blinks and sets the lamps again four times a second; Scooby-Doo the LED overlay
+  (`Warden.set_led_full_color(..., is_overlay)`, black on the overlay hands back), Beetlejuice a
+  light layer of ours (`SerialLED.SetColor(c, 9001.25)`, `Off(layer)`), Evil Dead
+  `warden.led_color` / `led_disable_name`, Halloween/Ultraman `Pinotar.led_color` / `led_disable` +
+  `update_lamps` (one layer: last write wins), Texas Chainsaw `pinAPI.led_color(..., isOverlay)`.
+- **Coils** (`coil_start/shot/complete`, `coil_hold` + `coil_hold_on`, `coil_holds = on` in
+  title.cfg): each port lists `coils` a mode may fire (no flippers, trough, launchers, scoops, VUKs,
+  ball locks, servos) and `coil_holds` (magnets, posts, diverters, the shaker, lights; Evil Dead's
+  deadite HOLD windings, not HIGH). Asked ms only ever shorten the coil's own pulse. P-ROC
+  `game.coils.X.pulse` / `patter(power, 32-power)` / `disable`; Godot `Coils.pulse(_ms)` /
+  `dangerous_hold(n, power*100/32)` / `release_hold`; Scooby-Doo `Warden.pulse(_for_ms)` /
+  `set_pwm` (off sent three times); Beetlejuice `Coil.Pulse` / `pulse_for_ms` / `SetPower`; Evil
+  Dead and Texas Chainsaw `coil.pulse` / `manualPWM` / `disable`; Halloween/Ultraman
+  `Coils[name].pulse` / `Pinotar.patter` / `disable_coil` (the board takes patter as a hold; a
+  `set_coil_hold_*` + pulse reached it as a plain pulse).
+- **Balls** (`multiball`, `multiball_on`, `add_ball`, `ball_save`): always through the game's own
+  trough, so the game counts the ball. P-ROC `trough.add_balls` (else
+  `launch_and_autoplunge_balls`, else `launch_balls`) and `enable_ball_saver`; Godot
+  `trough.add_balls(n, true)` / `start_ball_save`; Scooby-Doo the `add_a_ball` message and the base
+  mode's `ballsave_timer.refresh(s + 4)`; Beetlejuice `trough.RequestEject` + the shooter lane's
+  `RequestLaunch` / `award_timed_ballsave`; Evil Dead `createMultiballMode` /
+  `incMultiballFromTrough` / `start_standard_save` / `startMBsave`; Halloween/Ultraman
+  `trough.launch_ball` / `enable_save` / `enable_mb_save`; Texas Chainsaw `trough.addMultiballs` /
+  `start_standard_save` / `startMBsave`. A multiball of ours ends its mode once one ball is left for
+  2 s, after its save and 3 s more (in the rig the game's own ball waits in the shooter lane until
+  the rig plunges it, so a multiball at ball start can end that way before the plunge).
+
+Proofs (`C:/tmp/PAD-1424/proof`, `proc_probe.sh`: rigrun plus the emulated board asked every
+0.5 s for the mode's LEDs, the balls in play and the coils): **Rick and Morty** every start rule,
+both lamps red/off at 2 a second on the board (its LEDs are wired inverted: the board shows
+[0,255,255] / [255,255,255]), the knocker and diverter, the post held 1.5 s, both ball saves, two
+balls in play on the board until the drain then "one ball left". **Looney Tunes** the same (LED 97
+red/off; LED 19, the ball-save lamp, held by the game's save). **Halloween** the same, the shaker
+held on the board (`held=[23]`) and let go, `start_after` on its skill shot ending.
+
+**Left for the next run**: build and prove Scooby-Doo (built), Beetlejuice, Evil Dead, Texas
+Chainsaw, Ultraman (their `Managed/` is in PAD-Runtime's cache; Ubuntu can `prepare.sh` them) and
+Alice Cooper; a mode's own sounds, music, picture and video on every runtime: Unity
+`UnityWebRequestMultimedia` clips on an AudioSource of ours, the game's music sources muted while
+ours plays, `VideoPlayer.url` (webm only on Linux Unity) and `Texture2D.LoadImage` on our canvas;
+Godot `AudioStreamOggVorbis.load_from_file`, `Audio.music_player` volume down while ours plays,
+`VideoStreamTheora` (.ogv only), `Image.load_from_file`; Rick and Morty `sound.register_sound` /
+`register_music` + `play_music`, the game's track back by `base.start_track(base.music_track)`,
+`dmd.Animation().load` and `dmd.MovieLayer(movie_file_path=)` (H.264 mp4); Alice Cooper's Unity
+player loads pictures and videos by asset name only, so they are refused there.
+
 ## Rig fix made on the way
 
 Both Spooky rigs now stub `sync` (logging no-op on the game's PATH): WSL's

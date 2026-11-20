@@ -570,8 +570,10 @@ func _lamps_tick(m: Dictionary, now: float) -> void:
 	m["lamp_phase"] = phase
 	m["lamp_at"] = now
 	var rgb: Array = m["lamp_rgb"] if phase == 0 else [0, 0, 0]
+	# blend false: the game's controller blends a command with the ones under it by default, and
+	# black then shows them (the ball-save lamp stayed lit through our flashes)
 	for n in m["lamps"]:
-		Leds.set_color(n, rgb[0], rgb[1], rgb[2], LED_PRI)
+		Leds.enable(n, LED_PRI, Warden.OPCODE_SET_LED, rgb, 0, false)
 	if first:
 		plog("%s: lamps %s lit %s at priority %d%s" % [m["name"], m["lamps"], m["lamp_rgb"], LED_PRI,
 			(", %d flashes a second" % m["lamp_blink"]) if m["lamp_blink"] > 0 else ""])

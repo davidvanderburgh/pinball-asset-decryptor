@@ -264,14 +264,12 @@ public static class Glue {
         return ms > 0 ? "pulse " + Math.Min(ms, 50) + " ms" : "pulse, its own";
     }
 
-    // Pinotar's firmware hold: power on-time of a 32 period, for up to 5 s, then off by itself
+    // Pinotar's patter (on ms, off ms): the coil held at power of 32 until disable_coil
     public static string CoilHold(string c, int power) {
         var k = CoilOf(c);
         if (k == null) return null;
-        Pinotar.set_coil_hold_pwm(k.num, (byte)power, 32);
-        Pinotar.set_coil_hold_time(k.num, 5000);
-        Pinotar.pulse(k.num);
-        return "Pinotar hold " + power + "/32";
+        Pinotar.patter(k.num, (byte)power, (byte)(32 - power));
+        return "Pinotar.patter " + power + "/" + (32 - power) + " ms";
     }
 
     public static void CoilRelease(string c) { var k = CoilOf(c); if (k != null) Pinotar.disable_coil(k.num); }
@@ -320,7 +318,7 @@ public static class Glue {
 
     // Halloween and Ultraman keep every mode in _modes; a game mode says it runs with a flag of
     // its own (modeStarted, mb_started, incidental_running ...), read by reflection
-    static readonly string[] RunFlags = { "modeStarted", "mb_started", "hedge_mb_started", "incidental_running",
+    static readonly string[] RunFlags = { "modeStarted", "modestarted", "mb_started", "hedge_mb_started", "incidental_running",
         "IsCaptureMultiballRunning" };
     static readonly Dictionary<Type, MemberInfo[]> flags = new Dictionary<Type, MemberInfo[]>();
 

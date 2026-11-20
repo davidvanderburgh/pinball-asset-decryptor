@@ -268,9 +268,10 @@ def _frame_points(e):
     return out
 
 
-def _index_entries(e):
+def _index_entries(e, every=False):
     """(n, {index: (flag, name message)}) of the build's game-mode table: Godzilla's own 32-byte table, or the
-    GamePlayModes adapter's (index, flag, caption, name); (0, {}) when neither is there."""
+    GamePlayModes adapter's (index, flag, caption, name); (0, {}) when neither is there. Godzilla's entries with a
+    second flag (its challenges) only with *every* (PAD-1449 round 2: their name messages)."""
     from . import portchallenge as PC
     w = e.words
     tables = set()
@@ -284,7 +285,7 @@ def _index_entries(e):
     if len(tables) == 1:
         (tbl, n), = tables
         ents = PC._table_entries(e, tbl, n)
-        return n, {i: (f, m) for i, (f, f2, m) in enumerate(ents) if not f2}
+        return n, {i: (f, m) for i, (f, f2, m) in enumerate(ents) if every or not f2}
     tbl, n = PC._gpm_table(e)
     if not tbl:
         return 0, {}
@@ -339,6 +340,7 @@ def frame_lines(game_elf):
     if len(points) != 1 or not n or not comp or not std:
         return []
     p = points[0]
+    msgs = {i: m for i, (f, m) in _index_entries(e, every=True)[1].items() if m}
     return ["# PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's "
             "index again",
             "site  %s %s 0x%08x 0x%08x 0x%08x" % (FRAME_SITE, " " * 6, p["site"], p["w0"], p["w1"]),
@@ -354,4 +356,6 @@ def frame_lines(game_elf):
             "value comp_menu_end_index        %d   # STANDARD" % std[0][0],
             "value comp_menu_end_msg          %d" % std[0][1]] + [
             "value comp_menu_challenge_%d      %d   # PAD-1449: a challenge's index (the style chooser follows it)"
-            % (k, i) for k, i in enumerate(challenge_indices(e, names))]
+            % (k, i) for k, i in enumerate(challenge_indices(e, names))] + [
+            "value comp_menu_challenge_msg_%d  %d   # PAD-1449 round 2: its name message (the menu's style step letters it)"
+            % (k, msgs[i]) for k, i in enumerate(challenge_indices(e, names)) if msgs.get(i)]

@@ -1,0 +1,13 @@
+# Pizza Rush - a starter mode: two hits on switches 20 and 43 start it, three shots complete it
+name = Pizza Rush
+title = PIZZA RUSH
+start = switch_20 switch_43
+start_count = 2
+shots = switch_21 switch_44 switch_22
+points = 100000
+seconds = 30
+complete = 3
+complete_points = 1000000
+sound_start = A01
+sound_shot = BEL
+sound_complete = ATA

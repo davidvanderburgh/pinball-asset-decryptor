@@ -775,8 +775,8 @@ class WritePipeline(_BasePipeline):
     def _custom_modes(self, meta, format_type):
         """PAD-1417: the person's custom modes for this title (Modes tab) as Write packs them,
         or None.  Modes with problems stay out, and the log says so, loudly."""
-        if format_type not in ("tar_gz", "gpg_tar_gz", "um_pkg", "h78_pkg", "plain_tar", "plain_zip",
-                               "rm_pkg", "ac_pkg"):
+        if format_type not in ("tar_gz", "gpg_tar_gz", "um_pkg", "h78_pkg", "plain_tar", "rm_pkg", "ac_pkg",
+                               "plain_zip"):
             return None
         try:
             from . import custom_modes as SM

@@ -18,9 +18,10 @@ import sys, hooks
 t = hooks.HOOKS[sys.argv[1]]
 out = ["--defsym=PAD_FLASH=0x%X" % t["free_flash"], "--defsym=PAD_RAM_AT=0x%X" % t["ram"][0]]
 for k in hooks.LINK_KEYS:
-    if k not in ("free_flash",):
+    if k not in ("free_flash",) and t[k] is not None:      # None: not in this game (text_show on AMH)
         out.append("--defsym=GAME_%s=0x%X" % (k, t[k]))
-print(" ".join("-Wl," + o for o in out))
+flags = ["-DTEXT_ABI_AMH"] if t.get("text_abi") == "amh" else []
+print(" ".join(flags + ["-Wl," + o for o in out]))
 PY
 )
     $CC -march=mips32r2 -EL -Os -G0 -mno-abicalls -fno-pic -mno-gpopt -msoft-float \

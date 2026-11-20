@@ -24,8 +24,17 @@ LAUNCH_HOLD_MS = 1200
 
 def run(prg, card, seconds, at, frames=None, frame_at=(), nvram=None, name="JET_V004.PRG"):
     from tools.pinheck_emu import run as R
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("pad_pinheck_hooks", os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks.py"))
+    H = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(H)
+    t = H.HOOKS.get(H.stem_of(name)) or H.HOOKS["JET_V004"]
+    from tools.pinheck_emu.games import game_of
+    game = game_of(name)
     box, out = [], dict(log=[], packets=[], frames=[], events=[])
-    events = sorted([(14.0, "coin"), (15.0, "start"), (24.0, "launch")] + list(at))
+    # Jetsons: the launch button (its skill shot); Domino's and Rob Zombie: the hand plunger
+    serve = (24.0, "launch") if (game or {}).get("launch") is not None else (20.0, "plunge")
+    events = sorted([(14.0, "coin"), (15.0, "start"), serve] + list(at))
     state = {"uart": 0, "releases": []}
 
     def on_ms(ms):
@@ -42,6 +51,8 @@ def run(prg, card, seconds, at, frames=None, frame_at=(), nvram=None, name="JET_
                 state["releases"].append((ms + 100, int(what[2:])))
             elif what == "drain":
                 out["events"][-1] = (t, "drain (%s)" % ("a ball drained" if link.balls.drain() else "no ball in play"))
+            elif what == "plunge":
+                out["events"][-1] = (t, "plunge (%s)" % ("the ball goes" if link.balls.plunge() else "no ball in the lane"))
             elif what == "launch":
                 link.board.set("launch", True)
                 state["releases"].append((ms + LAUNCH_HOLD_MS, "launch"))
@@ -67,13 +78,17 @@ def run(prg, card, seconds, at, frames=None, frame_at=(), nvram=None, name="JET_
             out["frames"].append(p)
 
     def log(pkt):
-        if not box or pkt[15] not in (0x01, 0x03, 0x06, 0x12, 0x13):
+        if not box or pkt[15] not in (0x01, 0x03, 0x06, 0x0F, 0x12, 0x13):
             return
         ms = box[0].board.pic.millis
         if pkt[15] == 0x01:
             what = "sound " + "".join(chr(b) for b in pkt[0:5] if 48 <= b < 91)
         elif pkt[15] == 0x03:
             what = "score[%d] = %d" % (pkt[0], int.from_bytes(pkt[1:5], "little"))
+        elif pkt[15] == 0x0F:
+            if t.get("text_abi") != "amh" or pkt[0] > 1:
+                return                      # the game's own ticker (line 6) and the rest
+            what = "text line %d %r" % (pkt[0], bytes(pkt[1:15]).split(b"\0")[0].decode("latin1"))
         elif pkt[15] == 0x12:
             what = "text col %d line %d %r" % (pkt[0] >> 3, pkt[0] & 7, bytes(pkt[1:15]).split(b"\0")[0].decode("latin1"))
         elif pkt[15] == 0x13:
@@ -84,14 +99,12 @@ def run(prg, card, seconds, at, frames=None, frame_at=(), nvram=None, name="JET_
             what = "text line %d cleared" % pkt[0]
         out["packets"].append((round(ms / 1000, 3), what))
 
-    from tools.pinheck_emu.games import game_of
-    game = game_of(name)
     if frames:
         os.makedirs(frames, exist_ok=True)
     pic, link = R.boot(prg, seconds, log, card, nvram, (), (), on_ms=[on_ms], link_box=box, game=game)
-    player = pic.mu.mem_read(0x6E6, 1)[0]
+    player = pic.mu.mem_read(t["player"] & 0x1FFFFFFF, 1)[0]
     out["player"] = player
-    out["score"] = struct.unpack("<I", pic.mu.mem_read(0x271C + 4 * (player or 1), 4))[0]
+    out["score"] = struct.unpack("<I", pic.mu.mem_read((t["score_array"] + 4 * (player or 1)) & 0x1FFFFFFF, 4))[0]
     out["ran_ms"] = pic.millis
     return out
 

@@ -64,6 +64,56 @@ HOOKS = {
             0x9D02FC3C: "00a0023c682745a0", 0x9D028BD8: "c0ffbd273800beaf",
             0x9D02CE5C: "e0ffbd27ff00a530", 0x9D01F8A4: "c0ffbd2758848427",
         }),
+    # PAD-1423.  Domino's and Rob Zombie are AMH's code base (github.com/benheck/AMH), not
+    # Jetsons': video() is AMH's video(this, name0, name1, name2, [16] attributes (bit 7 loops),
+    # [20] 0, [24] priority) into packet bytes 0..5 (video_abi "amh"), the text is AMH's
+    # text(this, line, const char *) - packet 0x0F, byte 0 the line, 13 characters, centred, no
+    # text layer to show or hide (text_abi "amh", text_show None) - and AddScore(points, flag)
+    # rounds the points down to a multiple of 10 (points_round).  fireCoil(this, coil, time) is
+    # Jetsons' on both, with time x15 on Domino's (as Jetsons) and as given on Rob Zombie
+    # (coil_scale).  Domino's game globals are Jetsons' block moved up 0xE4 byte for byte.
+    "DOM_V006": dict(
+        title="Domino's Spectacular Pinball Adventure", size=0x31990,
+        sha1="3fbebce7f885563e61dd2e4f5d7f0a8a54c53b23",
+        gp=0xA0008200, this=0xA0000724,                 # gp - 0x7ADC
+        tick_site=0x9D030920, tick_target=0x9D019F60,
+        add_score=0x9D02AC84, play_sfx=0x9D0311AC, video=0x9D02DD84,
+        text_str=0x9D0305C0, text_show=None, link_send=0x9D02DBE0, data_out=0xA000261C,
+        coil_fire=0x9D02E028, coil_table=0xA0002188, coil_scale=15, tilt_fn=None,
+        switch_ram=0xA0000824, lamp_ram=0xA0002248, score_array=0xA00025A0, millis=0xA000097C,
+        player=0xA00007CA, ball=0xA0000804, ball_active=0xA0000774, phase=0xA00007A7,
+        tilt=0xA0000820, tilt_warnings=0xA0000821, players=0xA00007D0,
+        video_abi="amh", text_abi="amh", points_round=10,
+        dmd=(128, 32), text_columns=13, text_lines=2,
+        free_flash=0x9D040000, ram=(0xA0010000, 0x800),
+        sigs={
+            0x9D030920: "d867400f",                     # jal 0x9D019F60
+            0x9D019F60: "9085838fb4868297",
+            0x9D02AC84: "38848297e0ffbd27", 0x9D0311AC: "00a0033c1000a993",
+            0x9D02DD84: "2f878293d8ffbd27", 0x9D0305C0: "00a0023c1c2645a0",
+            0x9D02DBE0: "00a0023ce0ffbd27", 0x9D02E028: "e0ffbd27ff00a530",
+        }),
+    "RZO_V026": dict(
+        title="Rob Zombie's Spookshow International", size=0x4B350,
+        sha1="9bf575f033cfdb17dd5abad5e05735ea24f0ef24",
+        gp=0xA0008200, this=0xA00009C4,                 # gp - 0x783C
+        tick_site=0x9D04A2FC, tick_target=0x9D0283C8,
+        add_score=0x9D03C388, play_sfx=0x9D04AA90, video=0x9D0431D0,
+        text_str=0x9D049ED4, text_show=None, link_send=0x9D047600, data_out=0xA0002AC0,
+        coil_fire=0x9D048000, coil_table=0xA000243C, coil_scale=1, tilt_fn=None,
+        switch_ram=0xA00002F8, lamp_ram=0xA00025A4, score_array=0xA000296C, millis=0xA0000A1C,
+        player=0xA000028A, ball=0xA00002C8, ball_active=0xA0000230, phase=0xA0000263,
+        tilt=0xA00002F4, tilt_warnings=0xA00002F5, players=0xA0000290,
+        video_abi="amh", text_abi="amh", points_round=10,
+        dmd=(128, 32), text_columns=13, text_lines=2,
+        free_flash=0x9D050000, ram=(0xA0010000, 0x800),
+        sigs={
+            0x9D04A2FC: "f2a0400f",                     # jal 0x9D0283C8
+            0x9D0283C8: "4c80838f6c818297",
+            0x9D03C388: "32828293d8ffbd27", 0x9D04AA90: "00a0033c1000a993",
+            0x9D0431D0: "e7818293b8ffbd27", 0x9D049ED4: "00a0023cc02a45a0",
+            0x9D047600: "00a0023ce0ffbd27", 0x9D048000: "e0ffbd27ff00a530",
+        }),
 }
 
 #: the names the runtime is linked against (padheck.c's GAME_* symbols), in the order build.sh

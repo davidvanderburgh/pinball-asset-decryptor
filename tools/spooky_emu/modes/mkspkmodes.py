@@ -16,10 +16,10 @@ one folder of them (``title.cfg`` + ``*.mode``).  The runtime is the port report
          ``pinproc_class`` (``pad.padmodes_proc.PinPROC``); it adds one AdvancedMode of ours
          running the modes through the game's own score, sounds and HD fonts:
          tools/spooky_emu/modes/proc.
-  pinheck  ``padheck_<PRG>.bin`` (Jetsons, PAD-1422): compiled MIPS linked into the free flash of
+  pinheck  ``padheck_<PRG>.bin`` (Jetsons, Domino's, Rob Zombie; PAD-1422, PAD-1423): compiled MIPS linked into the free flash of
          the game's own ``<GAME>_Vnnn.PRG``, the modes packed after it as data, one call in the
          game re-pointed at it: tools/spooky_emu/modes/pinheck.  The update is the stock zip with
-         its PRG replaced; Try it is that PRG in the pinHeck emulator on the stock card.
+         its PRG replaced (build_prg_zip); Try it is that PRG in the pinHeck emulator on the stock card.
 
 How the runtime gets into the game is the port report's ``load``:
 
@@ -70,8 +70,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 UNITY = os.path.join(HERE, "unity")
 GODOT = os.path.join(HERE, "godot")
-PINHECK = os.path.join(HERE, "pinheck")
 PROC = os.path.join(HERE, "proc")
+PINHECK = os.path.join(HERE, "pinheck")
 PREBUILT = os.path.join(UNITY, "prebuilt")
 PORTS = os.path.join(HERE, "ports")
 #: where the runtime sits in the update (and so in /game/code/uptest on the machine)
@@ -231,34 +231,33 @@ def _int(v):
     return int(v.replace(",", "").replace("_", "")) if MJ._INT.match(v or "") else None
 
 
-#: what the pinHeck runtime runs (padheck.c, PAD-1422): the core keys; JJP parity's start rules,
-#: lamps, coils, balls and a mode's own files (PAD-1424) are not in it yet
-PINHECK_KEYS = ("name", "title", "start", "start_count", "shots", "points", "seconds", "complete",
-                "complete_points", "sound_start", "sound_shot", "sound_complete", "sound_end", "panel",
-                "game")
+#: what the pinHeck runtime (padheck.c) does not run yet: PAD-1424's start rules, lamps, balls,
+#: coils and a mode's own files, and the title's coil_holds (PAD-1469 brings them to pinHeck).
+#: The check refuses each by name on a pinHeck title and the Modes tab's form leaves them out.
+PINHECK_CANNOT = ("start_on", "start_after", "start_score", "start_combo", "combo_seconds",
+                  "start_count_reset", "start_once", "lamps", "lamp_color", "lamp_blink",
+                  "multiball", "multiball_on", "add_ball", "ball_save", "coil_start", "coil_shot",
+                  "coil_complete", "coil_hold", "coil_hold_on", "sound_channel", "music",
+                  "picture", "picture_at", "video", "video_at", "video_loop", "coil_holds")
 
 
-def keys_out(port):
-    """The mode and title.cfg keys this title cannot take: a pinHeck DMD's ``keys_not_here`` (its
-    panel's fonts and colours) and every key its runtime does not run yet."""
+def keys_not_here(port):
+    """Every key *port*'s runtime cannot do: its port's ``keys_not_here`` (a pinHeck DMD: no fonts,
+    no colours) and, on a pinHeck title, PINHECK_CANNOT."""
     out = set((port or {}).get("keys_not_here") or ())
-    if engine(port or {}) == "pinheck":
-        out |= {k for k in list(KEYS) + list(TITLE_KEYS) if k not in PINHECK_KEYS}
+    if engine(port) == "pinheck":
+        out |= set(PINHECK_CANNOT)
     return out
 
 
 def _not_here(k, port, v=""):
-    """Why the title's runtime cannot take *k* (= *v*), or None."""
-    title = (port or {}).get("title", "this game")
+    """Why the title's runtime cannot do *k* (= *v*), or None."""
     if k in ((port or {}).get("keys_not_here") or ()):
         return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
-                "and colour" % (k, title))
-    if k in keys_out(port):
-        return ("%s is not on %s yet: its runtime runs the start switches, shots, points, time, "
-                "completion, the game's own sounds and the panel; take the line out" % (k, title))
-    if engine(port or {}) == "pinheck" and k.startswith("sound_") and v and MJ.is_sound_file(v):
-        return ("%s = %s: %s plays only the game's own sounds (their three-letter names), not a "
-                "file of the mode's own" % (k, v, title))
+                "and colour" % (k, port.get("title", "this game")))
+    if engine(port) == "pinheck" and k in PINHECK_CANNOT:
+        return ("%s is not on %s yet: its modes run start, shots, points, time, completion, the "
+                "game's own sounds and the panel; take the line out" % (k, port.get("title", "this game")))
     return None
 
 
@@ -290,6 +289,8 @@ def media_exts(port, kind):
     pictures and videos by name only)."""
     if (port or {}).get("screen") == "unity_player" and kind in ("picture_file", "video_file"):
         return ()
+    if engine(port or {}) == "pinheck":
+        return ()
     return MEDIA.get(engine(port or {}), MEDIA["unity"]).get(kind, ())
 
 
@@ -302,6 +303,9 @@ def check_value(kind, v, port):
     if kind in ("sound_file", "picture_file", "video_file"):
         exts = media_exts(port, kind)
         what = {"sound_file": "sound", "picture_file": "picture", "video_file": "video"}[kind]
+        if not exts and engine(port or {}) == "pinheck":
+            return ("%s plays only the sounds on its own card, by their three-letter names (SFX/_F?/xxx.wav); "
+                    "no %s file of a mode's own" % ((port or {}).get("title", "this game"), what))
         if not exts:
             return ("%s's screen cannot show a %s of a mode's own (its Unity player shows the game's "
                     "own by name only)" % ((port or {}).get("title", "this game"), what))
@@ -443,7 +447,7 @@ def check_modes(mode_dir, port=None):
             problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
                             "(after a look at it on the machine)" % fn)
         if engine(port) == "pinheck":
-            tp = ph().title_problem(m.get("title") or m.get("name"))
+            tp = ph().title_problem(m.get("title") or m.get("name"), port.get("prg"))
             if tp:
                 problems.append("%s: title %s" % (fn, tp))
         complete = _int(m.get("complete") or "0") or 0

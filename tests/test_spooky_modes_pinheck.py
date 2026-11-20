@@ -352,7 +352,7 @@ def test_jjp_parity_keys_are_refused_by_name_and_hidden_on_jetsons(mk, port, tmp
     text = "\n".join(problems)
     for k in ("start_on", "lamps", "coil_start", "multiball", "music", "coil_holds"):
         assert "%s is not on Jetsons yet" % k in text, k
-    assert "sound_shot = boom.wav: Jetsons plays only the game's own sounds" in text
+    assert any("sound_shot" in p and "sounds on its own card" in p for p in problems), problems
     from pinball_decryptor.plugins.spooky import custom_modes as SM
     assert [g for g, ks in SM.form_groups(port) if ks] == ["Mode", "Sounds", "Screen"]
     assert dict(SM.form_groups(port))["Sounds"] == ("sound_start", "sound_shot", "sound_complete", "sound_end")

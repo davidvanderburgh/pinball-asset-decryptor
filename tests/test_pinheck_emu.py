@@ -368,9 +368,9 @@ def test_balls_follow_the_load_and_plunger_coils():
     pulse = lambda name: (pic.write(coil_pins(GAMES["JET"])[name][0], coil_pins(GAMES["JET"])[name][1]),
                           pic.write(coil_pins(GAMES["JET"])[name][0], 0))
     pulse("LOAD COIL")
-    assert b.matrix == {35} and 32 not in b.matrix         # rolling
+    assert b.matrix == {34} and 32 not in b.matrix         # rolling; the other ball at the eject end
     tick(Balls.ROLL_MS)
-    assert b.matrix == {35, 32}
+    assert b.matrix == {34, 32}
     pulse("LOAD COIL")                                     # lane taken: nothing moves
     assert balls.in_trough == 1
     pulse("PLUNGER")
@@ -380,6 +380,49 @@ def test_balls_follow_the_load_and_plunger_coils():
     assert b.matrix == {34, 35} and balls.in_trough == 2
     b.set("launch")
     assert 2 in b.cabinet                                  # Jetsons' launch button
+
+
+def test_jetsons_drain_switch_closes_only_for_a_ball_coming_home():
+    """PAD-1472: Jetsons counts a drain by switch 35 (the trough's far end) closing once a ball
+    is launched.  With one ball home and one launched, 35 must be open - a ball left on it read
+    as a drain inside the ball save and served a second ball.  A ball draining onto an empty
+    trough rolls over 35 on its way to 34, so the game sees that drain too."""
+    from tools.pinheck_emu.board import Balls, Board
+    from tools.pinheck_emu.games import GAMES, coil_pins
+    pic = PinPic()
+    pic.on_ms = []
+    b = Board(pic)
+    balls = Balls(b, GAMES["JET"])
+    now = [0]
+
+    def tick(ms):
+        for _ in range(ms):
+            now[0] += 1
+            for f in pic.on_ms:
+                f(now[0])
+    pins = coil_pins(GAMES["JET"])
+    pulse = lambda name: (pic.write(pins[name][0], pins[name][1]), pic.write(pins[name][0], 0))
+    seen = []
+    pic.on_ms.append(lambda ms: seen.append(35 in b.matrix))
+
+    def serve():
+        pulse("LOAD COIL")
+        tick(Balls.ROLL_MS)
+        pulse("PLUNGER")
+    serve()
+    tick(1000)
+    assert balls.in_play == 1 and balls.in_trough == 1 and not any(seen)
+    serve()                                                # a second ball: the trough is empty
+    assert balls.in_play == 2 and not b.matrix & {34, 35}
+    del seen[:]
+    balls.drain()
+    tick(Balls.ROLL_MS + Balls.OVER_MS + 5)
+    assert any(seen) and not seen[-1]                      # rolled over 35 ...
+    assert b.matrix & {34, 35} == {34} and 10 in b.cabinet  # ... to rest at the eject end
+    del seen[:]
+    balls.drain()
+    tick(Balls.ROLL_MS + 5)
+    assert all(seen[Balls.ROLL_MS:]) and b.matrix >= {34, 35} and balls.in_trough == 2
 
 
 def _vid(tmp_path, name, frames, colour):

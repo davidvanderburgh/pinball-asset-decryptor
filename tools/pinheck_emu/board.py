@@ -85,10 +85,14 @@ class Balls:
     The game's LOAD coil moves a ball from the trough into the shooter lane
     (its switch closes 300 ms later); its PLUNGER coil launches it (the lane
     opens and the ball is in play). ``drain()`` sends a ball in play back
-    to the trough. Everything else on the playfield is the player's: press
-    its switches.
+    to the trough: it comes in at the far end (the last switch) and rolls
+    down to the first free place, closing each switch it rolls over for
+    ``OVER_MS`` - Jetsons counts a drain by its far switch closing, even
+    when the ball comes to rest at the eject end (PAD-1472). Everything
+    else on the playfield is the player's: press its switches.
     """
     ROLL_MS = 300
+    OVER_MS = 40
 
     def __init__(self, board, game, count=None):
         from tools.pinheck_emu.games import coil_pins
@@ -99,6 +103,7 @@ class Balls:
         self.in_shooter = False
         self.in_play = 0
         self._rolling = False           # a ball on its way to the shooter lane
+        self._over = set()              # trough switches a draining ball is rolling over
         self._due = []                  # (millis, fn)
         pins = coil_pins(game)
         self._load = pins[game["load"]]
@@ -113,7 +118,7 @@ class Balls:
 
     def _show(self):
         for i, sw in enumerate(self.trough):
-            self.board.set(sw, i < self.in_trough)
+            self.board.set(sw, i < self.in_trough or sw in self._over)
         self.board.set(self.shooter_sw, self.in_shooter)
         if self.ready_bit is not None:
             if self.in_trough:
@@ -166,9 +171,20 @@ class Balls:
             return False
         self.in_play -= 1
 
+        def arrive():
+            # over the switches above its resting place, from the far end down
+            above = self.trough[self.in_trough + 1:]
+            self._over.update(above)
+            if above:
+                self._show()
+                self._later(self.OVER_MS, land)
+            else:
+                land()
+
         def land():
+            self._over.clear()
             self.in_trough = min(self.in_trough + 1, len(self.trough))
-        self._later(self.ROLL_MS, land)
+        self._later(self.ROLL_MS, arrive)
         return True
 
 

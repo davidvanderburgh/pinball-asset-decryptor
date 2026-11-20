@@ -529,7 +529,10 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         if self._refuse_off():
             return
         if spk.is_pinheck(path):
-            self._start_pinheck(path)
+            # PAD-1422: a Try it from the Modes tab is the modes PRG, for this start only
+            prg = getattr(self, "_pad_overlay", "") or ""
+            self._pad_overlay = ""
+            self._start_pinheck(path, prg if prg.lower().endswith(".prg") else "")
             return
         self._busy = True
         # No spinner on the button while starting: it is the Cancel button
@@ -591,7 +594,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
     # the pinHeck DMD games (PAD-320): no WSL, no rig - the game runs in a
     # window of its own on this PC's Python (tools/pinheck_emu/window.py)
     # ------------------------------------------------------------------
-    def _start_pinheck(self, path):
+    def _start_pinheck(self, path, prg=""):
         if spk.in_box():
             # Their window runs on a Python of this computer's own, which
             # the Mac app does not have (it is one frozen program).
@@ -612,7 +615,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
             return False
         try:
             self._ph_proc = subprocess.Popen(
-                spk.pinheck_cmd(py, path, audio_ctl_file()),
+                spk.pinheck_cmd(py, path, audio_ctl_file(), prg),
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL, creationflags=_rig.CREATE_FLAGS)
         except Exception as exc:                           # noqa: BLE001
@@ -622,6 +625,8 @@ class EmulateSpookyTab(RigTabMixin, TabService):
         self._ph_title = spk.title_of(path)
         self._ph_t0 = time.time()
         self._started_here = True
+        if prg:
+            self._log("Spooky: with your custom modes (Modes tab, Try it): %s" % prg)
         self._log("Spooky: %s runs in its own window - the display, the "
                   "buttons, every switch and the sound. Its first start "
                   "unpacks the update once; a first boot of Domino's or Rob "

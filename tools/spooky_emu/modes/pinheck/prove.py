@@ -1,7 +1,7 @@
 """Run a pinHeck PRG (a modes build or stock) in tools/pinheck_emu and show what the modes do
 (PAD-1422).  Headless, muted (the sound is never mixed), no window.
 
-    python -m tools.spooky_emu.modes.pinheck.prove <PRG> --card <card dir> [--seconds 90]
+    python tools/spooky_emu/modes/pinheck/prove.py <update.zip | PRG --card <card dir>> [--seconds 90]
         [--at 27:sw20] [--at 30:drain] [--at 40:tilt] [--frames DIR] [--frame-at 31,33]
 
 Before the script: coin at 14 s, Start at 15 s, the launch button held 1.2 s at 24 s (Jetsons'
@@ -112,7 +112,8 @@ def run(prg, card, seconds, at, frames=None, frame_at=(), nvram=None, name="JET_
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("prg")
-    ap.add_argument("--card", required=True)
+    ap.add_argument("--card", help="the card folder (DMD/, SFX/); an update zip brings its own")
+    ap.add_argument("--cache", help="where an update zip is unpacked (default: the pinHeck window's cache)")
     ap.add_argument("--seconds", type=float, default=60)
     ap.add_argument("--at", action="append", default=[])
     ap.add_argument("--frames")
@@ -125,9 +126,17 @@ def main(argv=None):
     for s in a.at:
         t, _, what = s.partition(":")
         at.append((float(t), what.strip().lower()))
+    name = a.name or os.path.basename(a.prg)
+    if a.prg.lower().endswith(".zip"):          # an update: its PRG on its own card, as the window runs it
+        from tools.pinheck_emu.machine import unpack
+        prg_path, card = unpack(a.prg, a.cache)
+        a.prg, name = prg_path, os.path.basename(prg_path)
+        a.card = a.card or card
+    if not a.card:
+        ap.error("--card is needed for a PRG")
     prg = open(a.prg, "rb").read()
     fa = [float(x) for x in a.frame_at.split(",") if x.strip()]
-    r = run(prg, a.card, a.seconds, at, a.frames, fa, a.nvram, a.name or os.path.basename(a.prg))
+    r = run(prg, a.card, a.seconds, at, a.frames, fa, a.nvram, name)
     merged = sorted([(t, "     ", "%s" % w) for t, w in r["events"]] +
                     [(t, "[pad]", w) for t, w in r["log"]] +
                     [(t, " pkt ", w) for t, w in r["packets"]], key=lambda e: e[0])

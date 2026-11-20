@@ -138,12 +138,13 @@ def pinheck_available():
                for f in ("window.py", "machine.py", "pic32.py", "page/index.html"))
 
 
-def pinheck_cmd(py, path, audio_ctl):
+def pinheck_cmd(py, path, audio_ctl, prg=""):
     """The pinHeck game window's command line: the game runs in it, so the
     window IS the run; ``--parent-pipe`` closes it when the app closes its
-    stdin (Stop)."""
+    stdin (Stop).  *prg* (PAD-1422, the Modes tab's Try it): the modes
+    program, run on the update's own card."""
     return [py, os.path.join(pinheck_dir(), "window.py"), path, "--parent-pipe",
-            "--audio-ctl", audio_ctl]
+            "--audio-ctl", audio_ctl] + (["--prg", prg] if prg else [])
 
 
 def rig_dir():

@@ -72,7 +72,7 @@ struct pad_mode {               /* 64 bytes, written by mkspkmodes.py (pinheck_d
 struct pad_data {
     u32 magic;                  /* 'PHM1' */
     u8 count, off, pad0, pad1;
-    char names[MAX_MODES][12];  /* the .mode file names, for the log */
+    char names[MAX_MODES][20];  /* the .mode file names, for the log */
     struct pad_mode mode[MAX_MODES];
 };
 
@@ -140,7 +140,7 @@ static void log3(int i, const char *what, int has_n, u32 n, const char *tail)
     char b[96], *p = b;
     p = put_str(p, "[pad] ", 8);
     if (i >= 0)
-        p = put_str(put_str(p, D.names[i], 12), ": ", 2);
+        p = put_str(put_str(p, D.names[i], 20), ": ", 2);
     p = put_str(p, what, 48);
     if (has_n)
         p = put_num(p, n);

@@ -24,6 +24,11 @@ Domino's and Rob Zombie ask for a restart on their very first boot (a blank
 EEPROM looks like a fresh update): press Power cycle. Their EEPROMs and the
 unpacked zip live under `%LOCALAPPDATA%\PinballAssetDecryptor\pinheck`.
 
+Custom modes (PAD-1422): `--prg <modes PRG>` runs a program PAD built (the
+Modes tab's Try it) on the update's own card; the runtime and its hooks are in
+`tools/spooky_emu/modes/pinheck`, and `prove.py` there runs a modes update
+headless and prints what the modes did.
+
 Headless, for tests and reverse engineering:
 
 ```

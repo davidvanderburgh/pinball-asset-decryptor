@@ -743,7 +743,7 @@ class NetworkTab(TabService):
 
     # ------------------------------------------------------------------ PAD-1467: looking after the machine
     # David: "grabbing logs from the machine would be very useful. what else?" ... "make all of these"
-    # (core/machine_care.py): status, logs, settings and scores, restart, the mode log, the whole card
+    # (core/machine_care.py): status, logs, settings and scores, restart, the mode log
     def _care(self, what, work, ok_text=None):
         """Run ``work(machine)`` on a worker with a connection of its own; its answer (a line to show, or None) or
         the error is said under the Machine care buttons.  One at a time."""
@@ -873,44 +873,6 @@ class NetworkTab(TabService):
             machine_care.restart_machine(m)
             return 'The machine is restarting; it is back on your network in about a minute.'
         return self._care('Restarting the machine', work)
-
-    @rpc
-    def backup_card(self):
-        if self.get('care_busy') or not self.get('address'):
-            return False
-        path = self.window.ask_save('machine_card', "Save a copy of the machine's whole card",
-                                    initialfile=self._care_name('card') + '.raw', defaultextension='.raw',
-                                    filetypes=[('SD card image', '*.raw')])
-        if not path:
-            return False
-        if not compat.messagebox.askyesno(
-                'Back up the whole card',
-                "Copy the machine's whole card to this computer?\n\nIt is as big as the card (8, 16 or 32 GB) and "
-                'takes about an hour for 16 GB. The machine cannot be played meanwhile: its '
-                'screen says PAD is updating it, and the game starts again when it is done.', icon='warning'):
-            return False
-        self._card_cancel = False
-
-        def work(m):
-            from ...core import machine_care
-            last = [0.0]
-
-            def progress(done, size):
-                now = time.monotonic()
-                if now - last[0] > 1.0:
-                    last[0] = now
-                    pct = int(done * 100 / size) if size else 0
-                    note = 'Copied %s of %s.' % (machine_care._human(done), machine_care._human(size))
-                    self.ctx.loop.post(lambda: self.get('care_busy') and self.set(care_pct=pct, care_note=note))
-            res = machine_care.backup_card(m, path, progress=progress, cancel=lambda: self._card_cancel)
-            return 'Saved the whole card (%s) to %s in %s.' % (machine_care._human(res['bytes']), path,
-                                                               machine_care._duration(res['seconds']))
-        return self._care('Backing up the card', work)
-
-    @rpc
-    def cancel_care(self):
-        self._card_cancel = True
-        return True
 
     @rpc
     def follow_log(self, on):

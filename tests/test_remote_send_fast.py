@@ -16,7 +16,7 @@ def test_a_send_of_start_up_files_restarts_the_machine_not_just_the_game():
     assert 'boot_only(op.path) for op in needed' in src and src.index('boot_only(') < src.index('machine.resume_game()')
 
 
-def test_the_plain_connection_of_the_live_view_and_card_backup_follows_the_sends_switch(monkeypatch):
+def test_the_plain_connection_of_the_live_view_follows_the_sends_switch(monkeypatch):
     monkeypatch.delenv('PAD_SEND_RAW', raising=False)
     monkeypatch.delenv('PAD_SEND_PLAIN', raising=False)
     assert remote_send.plain_allowed()

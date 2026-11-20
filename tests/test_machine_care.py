@@ -1,5 +1,5 @@
 """PAD-1467: looking after a machine over remote access (core/machine_care.py) and the Network tab's Machine care
-card: status, logs, settings and scores, restart, the mode log, the whole card, and recording the live view."""
+card: status, logs, settings and scores, restart, the mode log, and recording the live view."""
 import io
 import tarfile
 import time
@@ -176,13 +176,6 @@ def test_settings_backup_and_restore_check_every_file(tmp_path):
         C.read_backup(str(tmp_path / 'not.zip'))
 
 
-def test_card_backup_needs_a_card_it_can_measure(tmp_path):
-    with pytest.raises(C.CareError, match='could not be measured'):
-        C.backup_card(Machine(), str(tmp_path / 'card.raw'))
-    assert not set(C.CARD_PORTS) & set(MS.LIVE_PORTS)
-    assert 'if=/dev/mmcblk0' in Path(C.__file__).read_text(encoding='utf-8') and ' of=/dev' not in Path(C.__file__).read_text(encoding='utf-8')
-
-
 def test_a_recording_is_saved_as_a_video_or_a_gif(tmp_path):
     from PIL import Image
     frames = []
@@ -274,5 +267,6 @@ def test_network_tab_machine_care(tmp_path, monkeypatch):
         assert w.state('network')['care_kind'] == 'err' and "didn't let" in w.state('network')['care_note']
     js = (Path(C.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
     for call in ('machine_status', 'grab_logs', 'follow_log', 'backup_settings', 'restore_settings', 'restart_game',
-                 'restart_machine', 'backup_card', 'record_live'):
+                 'restart_machine', 'record_live'):
         assert 'network.%s' % call in js, call
+    assert 'backup_card' not in js and not hasattr(C, 'backup_card')      # the whole-card copy was taken out again

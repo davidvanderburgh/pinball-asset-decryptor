@@ -364,3 +364,18 @@ same job less carefully and was dropped in the merge; its measurements above sta
 `remote_send.plain_allowed()` stays, for the live view and the whole-card backup, which follow the same switch and
 the same home-network rule. The Wi-Fi card's comparison now says 7 to 13 MB a second: PAD-1465 measured 7 to 8 with
 a game running, this ticket 10 to 13 with the game held. PAD-1465's path was not re-timed here.
+
+## Machine care (2026-11-20)
+
+`core/machine_care.py`, the Network tab's card. On the Godzilla: status 0.2 s; logs (9 files, one zip, no password
+in it) 1.8 s; settings, audits and high scores (`/data/nv`, 40 files) backed up in 0.4 s and restored in 7.6 s with
+every file's sha1 read back and the game started again; the folder a restore replaces is kept once as
+`/data/nv.pad-old`.
+
+**A copy of the whole card was built and taken out again.** `dd if=/dev/mmcblk0` over a plain connection ran at 3.5
+to 6 MB a second with the Wi-Fi link at 867 Mbit/s and half the processor idle (the card's own reading is the
+limit), so 16 GB held the game for over an hour. David: "a whole backup from the sd card this way is somewhat dumb
+... takes far too long". The run was cancelled at 4.1 GB; the settings backup is what stays.
+
+Not tried on the machine: recording the live view in the real page (its saving step has a test); the live view's
+cost to a game being played.

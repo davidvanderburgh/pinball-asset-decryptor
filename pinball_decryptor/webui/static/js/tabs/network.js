@@ -307,13 +307,13 @@ function MachineScreen({ n }) {
 }
 
 // PAD-1467: looking after the machine over remote access (core/machine_care.py): its status, logs, settings and
-// scores, a restart, PAD's mode log, a copy of its whole card.  David: "grabbing logs from the machine would be very
+// scores, a restart, PAD's mode log.  David: "grabbing logs from the machine would be very
 // useful. what else?" ... "make all of these".
 function MachineCare({ n }) {
   const off = n.running || !!n.care_busy || !n.address;
   return html`<${Card} cls="net-opt" title="Machine care">
     <p class="net-does">Look after your machine from here, over remote access: see how it is doing, collect its
-      logs for a problem report, keep its settings and high scores safe, restart it, or copy its whole card.</p>
+      logs for a problem report, keep its settings and high scores safe, or restart it.</p>
     <div class="lbl">Status</div>
     <div class="row"><${Button} disabled=${off} onClick=${() => call("network.machine_status")}>Read the status<//></div>
     ${(n.care_status || []).length ? html`<table class="net-fields net-wifi-details">
@@ -342,13 +342,6 @@ function MachineCare({ n }) {
       <${Button} disabled=${off} onClick=${() => call("network.restart_game")}>Restart the game<//>
       <${Button} disabled=${off} onClick=${() => call("network.restart_machine")}>Restart the machine<//>
     </div>
-    <div class="lbl">The whole card</div>
-    <div class="row">
-      <${Button} disabled=${off} onClick=${() => call("network.backup_card")}>Back up the whole card…<//>
-      ${n.care_busy === "Backing up the card" ? html`<${Button} onClick=${() => call("network.cancel_care")}>Cancel<//>` : null}
-    </div>
-    <span class="small muted">A byte-for-byte image of the card in the machine, without taking it out: as big as
-      the card, and slow: about an hour for 16 GB (measured on a Godzilla LE; the machine reads its card at 4 to 6 MB a second). The machine cannot be played meanwhile.</span>
     ${n.care_busy ? html`<span class="small">${n.care_busy}…</span>` : null}
     ${n.care_pct != null ? html`<${Progress} pct=${n.care_pct} />` : null}
     <${Said} text=${n.care_note} kind=${n.care_kind} />

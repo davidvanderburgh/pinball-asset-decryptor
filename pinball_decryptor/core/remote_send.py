@@ -891,7 +891,7 @@ RAW_HELLO = b"pad-recv hello"
 def plain_allowed():
     """PAD-1467: False when the user keeps every byte on the encrypted connection (``PAD_SEND_RAW=0``, PAD-1465's
     switch for a Send's big writes; ``PAD_SEND_PLAIN=0`` says the same).  The Network tab's live view of the
-    machine's screen and its whole-card backup ask this before they use a plain connection of their own."""
+    machine's screen asks this before it uses a plain connection of its own."""
     off = ("0", "no", "off", "false")
     return (os.environ.get("PAD_SEND_RAW", "1").strip().lower() not in off
             and os.environ.get("PAD_SEND_PLAIN", "1").strip().lower() not in off)

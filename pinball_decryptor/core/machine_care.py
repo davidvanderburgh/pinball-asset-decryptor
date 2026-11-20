@@ -1,5 +1,5 @@
-"""Looking after a machine over remote access: its logs, its status, its settings and scores, a restart, and a
-copy of its whole card (PAD-1467).
+"""Looking after a machine over remote access: its logs, its status, its settings and scores, and a restart
+(PAD-1467).
 
 David, asked what else remote access is good for: "I think grabbing logs from the machine would be very useful.
 what else?" and, to the list that followed, "make all of these".
@@ -15,8 +15,9 @@ and everything but :func:`restore_settings`, :func:`restart_game` and :func:`res
   high scores (a card written whole loses them).  A restore holds the game, swaps the folder (the one it replaces
   is kept beside it as ``nv.pad-old``), checks every file, and starts the game again.
 - :func:`mode_log_tail`: the end of PAD's mode log, for following it while a game is played.
-- :func:`backup_card`: the whole card, byte for byte, to an image file on the PC, over the plain connection.
-  Measured on a Godzilla LE: 4.5 to 6 MB a second (the card's own reading, not the Wi-Fi), an hour for 16 GB.
+
+A copy of the whole card was built and taken out again (David: "takes far too long"): the machine reads its card
+at 3.5 to 6 MB a second, so 16 GB held the game for over an hour, and the settings backup is what is worth keeping.
 """
 import hashlib
 import io
@@ -303,93 +304,6 @@ def restart_game(machine):
 
 def restart_machine(machine):
     machine.reboot()
-
-
-# ------------------------------------------------------------------ the whole card
-CARD_PORTS = (42317, 42318)
-CARD_PIDFILE = '/var/run/pad-card-backup.pid'
-CARD_STOP = ("p=$(cat {f} 2>/dev/null); if [ -n \"$p\" ] && tr '\\000' ' ' < /proc/$p/cmdline 2>/dev/null "
-             "| grep -q '^nc '; then kill \"$p\" 2>/dev/null; fi; rm -f {f}").format(f=CARD_PIDFILE)
-
-
-def card_size(machine):
-    out = _sh(machine, 'cat /sys/block/mmcblk0/size 2>/dev/null', 20).strip()
-    if not out.isdigit() or int(out) <= 0:
-        raise CareError("The machine's card could not be measured.")
-    return int(out) * 512
-
-
-def backup_card(machine, dest, progress=None, cancel=None, hold=True):
-    """Copy the machine's whole card to the image file *dest* (``dict(bytes, seconds, md5)``).
-
-    The bytes cross on a plain connection (the machine sends, this computer connects), as a Send's big files do; the
-    encrypted one manages about a quarter of the speed.  The game is held meanwhile (*hold*), so the card is not
-    being written under the copy, and started again after.  The image is checked by size here; its md5 is worked
-    out on the way for the user's own records."""
-    import socket
-    from . import remote_send
-    size = card_size(machine)
-    plain = remote_send.plain_allowed() and remote_send._home_network(getattr(machine, 'host', ''))
-    if hold:
-        machine.pause_game()
-    sock, t0, done, digest = None, time.time(), 0, hashlib.md5()
-    try:
-        _sh(machine, 'sync', 60)
-        port, chan = None, None
-        if not plain:
-            # not this computer's own network, or the user keeps every byte encrypted: the same bytes, over the
-            # encrypted connection (the card's own reading speed is the limit either way)
-            chan = machine.t.open_session()
-            chan.settimeout(120)
-            chan.exec_command('dd if=/dev/mmcblk0 bs=1048576 2>/dev/null')
-            chan.shutdown_write()
-        for cand in (CARD_PORTS if plain else ()):
-            rc_out = machine.sh('%s; dd if=/dev/mmcblk0 bs=1048576 2>/dev/null </dev/null | nc -l -p %d >/dev/null 2>&1 & '
-                                'p0=$!; echo $p0 > %s; sleep 1; kill -0 "$p0" 2>/dev/null && echo listening'
-                                % (CARD_STOP, cand, CARD_PIDFILE), timeout=30, check=False)
-            if 'listening' in _text(rc_out):
-                port = cand
-                break
-        if port is None and chan is None:
-            raise CareError('The machine could not start sending its card.')
-        try:
-            if chan is None:
-                sock = socket.create_connection((machine.host, port), timeout=10)
-                sock.settimeout(60)
-            else:
-                sock = chan
-            with open(dest, 'wb') as f:
-                while done < size:
-                    if cancel is not None and cancel():
-                        raise CareError('The card backup was cancelled.')
-                    chunk = sock.recv(min(1 << 20, size - done))
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    digest.update(chunk)
-                    done += len(chunk)
-                    if progress:
-                        progress(done, size)
-        except OSError as e:
-            raise CareError('The card backup stopped: %s' % (e or type(e).__name__)) from None
-        if done != size:
-            raise CareError('Only %s of the card\'s %s arrived; the backup is not complete.' % (_human(done), _human(size)))
-    finally:
-        if sock is not None:
-            try:
-                sock.close()
-            except OSError:
-                pass
-        try:
-            machine.sh(CARD_STOP, timeout=20, check=False)
-        except Exception:                                   # noqa: BLE001
-            pass
-        if hold:
-            try:
-                machine.resume_game()
-            except Exception:                               # noqa: BLE001
-                pass
-    return dict(bytes=done, seconds=time.time() - t0, md5=digest.hexdigest())
 
 
 _SAFE = re.compile(r'[^A-Za-z0-9_.-]+')

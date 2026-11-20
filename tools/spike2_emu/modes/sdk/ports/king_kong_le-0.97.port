@@ -1033,6 +1033,7 @@ value comp_menu_index            2   # COMPETITION
 value comp_menu_index_msg        1920
 value comp_menu_end_index        1   # STANDARD
 value comp_menu_end_msg          1915
+value comp_menu_end_caption_msg  1914   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
 # PAD-1041: the game's flags (Prolonged Competition sets FG_PLAYER_COMPETITION_MODE_ACTIVE)
 data  game_flags          0x008c24c4
 value game_flags_at       4

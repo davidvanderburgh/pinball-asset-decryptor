@@ -102,6 +102,29 @@ BAND_DETAILS = (
     ('To undo', "Untick it and write the card (or Send to machine): Stern's driver is put back from the "
      'original card and the added files are taken off.', False),
 )
+#: David (PAD-1467): "show rough comparisons of stock, all the way to 5GHz ... how ticking each box can help".  One
+#: row per step, each on top of the one before; every figure is one measured on his Godzilla LE (the notes in
+#: docs/plans/spike2-wifi-5ghz.md have each run), and a step nobody measured says so rather than guessing.
+COMPARE_HEAD = ('Set-up', 'Joining Wi-Fi when the machine starts', 'Band', 'Send to machine, a large file',
+                'A 1 GB update, roughly')
+NOT_MEASURED = 'Not measured yet'
+COMPARE = (
+    ('Machine as shipped, earlier versions of PAD',
+     'Often fails and is tried again: minutes, sometimes not at all', '2.4 GHz',
+     'About 2 MB a second (encrypted connection)', '9 minutes'),
+    ('Machine as shipped, this version of PAD (nothing ticked)',
+     'The same', '2.4 GHz', NOT_MEASURED + ' (plain connection, checked by hash)', NOT_MEASURED),
+    ('+ Reliable Wi-Fi start-up (first box)',
+     'At the first try, about 15 seconds after Wi-Fi starts', '2.4 GHz', 'As the row above', 'As the row above'),
+    ('+ Newer adapter driver (second box)',
+     'At the first try, then on 5 GHz within a minute', '5 GHz, 80 MHz wide',
+     '10 to 13 MB a second (plain connection, checked by hash)', '1.5 to 2 minutes'),
+)
+COMPARE_NOTE = ('Rough figures from one machine: a Godzilla LE with Stern\'s AC1200 adapter, an eero router in the '
+                'same room, 24 to 64 MB files. Yours will differ with distance and router. Send to machine needs '
+                'remote access on the card; its faster plain connection needs no box. On 5 GHz the encrypted '
+                'connection alone reached 3.4 MB a second, because the machine\'s processor, not the radio, is '
+                'the limit there. The 1 GB times are worked out from the speeds, not timed.')
 #: the game program's own network-menu wording, and what it becomes with the 5 GHz choice on (each shorter, so it is
 #: written in place; plugins/stern/engine.py adds these to a build's program text)
 MENU_TEXT = (

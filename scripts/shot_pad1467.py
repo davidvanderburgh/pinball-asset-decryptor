@@ -4,7 +4,7 @@
 
 Serves <repo> on scratch settings with a Spike 2 card and a project folder (a copy of --project, else an empty one), and shoots the Network tab
 (out_dir/network.png).  After (the ticket branch) it also turns the option on and shoots the tab again
-(network_on.png), the 5 GHz switch as well (network_5ghz.png, wifi_card.png) and the Write tab's rows (write_row.png).  Before (main) there is no such option.
+(network_on.png), the 5 GHz switch as well (network_5ghz.png), the stock-to-5-GHz comparison (wifi_compare.png) and the Write tab's rows (write_row.png).  Before (main) there is no such option.
 
 Needs Playwright (the user site-packages one), the installed Edge and the card.
 """
@@ -88,8 +88,10 @@ def main():
                     page.screenshot(path=os.path.join(out_dir, "network_5ghz.png"), full_page=True)
                 except Exception:                                        # noqa: BLE001 - a card with another kernel
                     pass
-                card_el = page.locator(".net-opt", has_text="reliable Wi-Fi start-up").first
-                card_el.screenshot(path=os.path.join(out_dir, "wifi_card.png"))
+                page.evaluate("document.querySelector('.net-wifi-compare').previousElementSibling"
+                              ".scrollIntoView({block: 'start'})")
+                time.sleep(1)
+                page.screenshot(path=os.path.join(out_dir, "wifi_compare.png"))     # stock to 5 GHz, step by step
                 webui_shot.api(url, "ui.select_tab", "write")
                 time.sleep(8)
                 page.screenshot(path=os.path.join(out_dir, "write_row.png"), full_page=True)

@@ -193,6 +193,14 @@ function WifiStartup({ n }) {
       <span class="mono">wext</span> driver interface. With it, joining often fails and is tried again, so the
       machine can take minutes to appear on your network, or not appear at all. This starts it with the current
       interface, <span class="mono">nl80211</span>, and keeps <span class="mono">wext</span> as the fallback.</p>
+    ${n.wifi_compare ? html`<div class="lbl">What each option gets you</div>
+      <table class="net-fields net-wifi-compare">
+        <thead><tr>${n.wifi_compare.head.map((h) => html`<th scope="col" key=${h}>${h}</th>`)}</tr></thead>
+        <tbody>${n.wifi_compare.rows.map((r, i) => html`<tr key=${r[0]}
+          class=${(i === 2 && enabled && !band) || (i === 3 && band) || (i === 1 && !enabled) ? "net-wifi-yours" : ""}>
+          <th scope="row">${r[0]}</th>${r.slice(1).map((c, j) => html`<td key=${j}>${c}</td>`)}</tr>`)}</tbody>
+      </table>
+      <span class="small muted">The highlighted row is what this project is set to. ${n.wifi_compare.note}</span>` : null}
     ${!n.wifi_supported ? html`<${Note}>${n.wifi_reason}<//>` : null}
     <${Check} label="Use the reliable Wi-Fi start-up on cards I write from this project" checked=${enabled}
       disabled=${locked} wrap

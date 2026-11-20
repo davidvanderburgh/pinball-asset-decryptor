@@ -323,6 +323,19 @@ def test_wifi_start_up_says_exactly_what_it_changes(tmp_path, monkeypatch):
     assert 'Exactly what it changes on the card' in js and 'n.wifi_details' in js and 'n.wifi_now' in js
 
 
+def test_wifi_card_compares_each_step_from_stock_to_5ghz():
+    """PAD-1467: the card shows what each box gets you, stock to 5 GHz, and never a figure nobody measured."""
+    from pinball_decryptor.core import wifi_card
+    assert len(wifi_card.COMPARE) == 4 and all(len(r) == len(wifi_card.COMPARE_HEAD) for r in wifi_card.COMPARE)
+    stock, plain, start, band = wifi_card.COMPARE
+    assert '2.4 GHz' == stock[2] == plain[2] == start[2] and band[2].startswith('5 GHz')
+    assert 'first try' in start[1] and 'first try' in band[1] and 'first try' not in stock[1]
+    assert plain[3].startswith(wifi_card.NOT_MEASURED)            # no 2.4 GHz plain-connection run exists yet
+    assert 'not timed' in wifi_card.COMPARE_NOTE
+    js = (Path(wifi_card.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
+    assert 'What each option gets you' in js and 'n.wifi_compare' in js and 'net-wifi-yours' in js
+
+
 def test_5ghz_choice_needs_the_start_up_choice_and_a_card_with_the_right_kernel(tmp_path, monkeypatch):
     """PAD-1467: the second Wi-Fi switch (newer adapter driver, 5 GHz) is saved beside the first, goes off with it,
     is refused on a card whose kernel the bundled driver was not built for, and is its own row on the Write tab."""

@@ -118,9 +118,15 @@ KEYS = collections.OrderedDict([
     ("start_on", "events"), ("start_after", "after"), ("start_score", "int"),
     ("start_combo", "switches"), ("combo_seconds", "int"),
     ("start_count_reset", ("game", "ball")), ("start_once", ("no", "ball", "game")),
+    # PAD-1424: the game's lamps on a layer of ours, its coils, its balls (MODES.md "Balls and coils")
+    ("lamps", "lamps"), ("lamp_color", "rgb"), ("lamp_blink", "int"),
+    ("multiball", "multiball"), ("multiball_on", "switches"), ("add_ball", "add_ball"), ("ball_save", "ball_save"),
+    ("coil_start", "coil_pulse"), ("coil_shot", "coil_pulse"), ("coil_complete", "coil_pulse"),
+    ("coil_hold", "coil_hold"), ("coil_hold_on", "hold_on"),
 ])
-#: title.cfg: every mode's defaults (the panel), and the title it is for
-TITLE_KEYS = collections.OrderedDict([("game", "text")])
+#: title.cfg: every mode's defaults (the panel), and the title it is for; coil_holds = on lets the
+#: title's modes hold coils (after a look at it on the machine, as on JJP)
+TITLE_KEYS = collections.OrderedDict([("game", "text"), ("coil_holds", ("on", "off"))])
 #: what the build writes into the staged title.cfg (never the person's)
 BUILD_TITLE_KEYS = ("points_scale",)
 #: JJP keys the Spooky runtime does not run yet (docs/plans/spooky_modes.md ticket 8)
@@ -187,7 +193,43 @@ def _int(v):
     return int(v.replace(",", "").replace("_", "")) if MJ._INT.match(v or "") else None
 
 
+def token(name):
+    """A lamp or coil name as a mode file writes it: one word (Evil Dead's "REAR MAGNET" is
+    REAR_MAGNET, Beetlejuice's "RIGHT ORBIT ARROW" RIGHT_ORBIT_ARROW); the runtimes take either."""
+    return "_".join((name or "").split())
+
+
+def _known(port, key):
+    return {token(n).lower(): token(n) for n in (port or {}).get(key) or ()}
+
+
+def _coil(name, port, hold):
+    known = _known(port, "coil_holds" if hold else "coils")
+    if not port or not (port.get("coils") or ()):
+        return None if port is None else "%s has no coils a mode may use" % port.get("title", "this game")
+    if name.lower() in known:
+        return None
+    if hold and name.lower() in _known(port, "coils"):
+        return ("%s is not one of %s's coils built to stay on (magnets, posts, diverters, the shaker, "
+                "lights): %s" % (name, port.get("title", "this game"), ", ".join(sorted(known.values())) or "none"))
+    return "%s is not one of %s's coils a mode may fire" % (name, port.get("title", "this game"))
+
+
 def check_value(kind, v, port):
+    words = MJ._names(v)
+    if kind == "lamps":
+        known = _known(port, "lamps")
+        bad = [w for w in words if known and w.lower() not in known]
+        return None if not bad else "not one of %s's lamps: %s" % (port.get("title", "this game"), " ".join(bad))
+    if kind == "coil_pulse":      # <coil> [ms]
+        if not 1 <= len(words) <= 2:
+            return "must be <coil> [ms]"
+        return (len(words) > 1 and MJ._int_in(words[1], 1, 255, "ms")) or _coil(words[0], port, False)
+    if kind == "coil_hold":       # <coil> <ms> [power of 32]
+        if not 2 <= len(words) <= 3:
+            return "must be <coil> <ms> [power of 32]"
+        return (MJ._int_in(words[1], 100, 5000, "ms") or (len(words) > 2 and MJ._int_in(words[2], 1, 16, "power"))
+                or _coil(words[0], port, True))
     if kind == "events":
         p = MJ.check_value(kind, v, None)
         if p:
@@ -291,6 +333,14 @@ def check_modes(mode_dir, port=None):
         v = _int(m.get("combo_seconds") or "")
         if v is not None and not 1 <= v <= 60:
             problems.append("%s: combo_seconds must be 1-60" % fn)
+        v = _int(m.get("lamp_blink") or "")
+        if v is not None and not 0 <= v <= 10:
+            problems.append("%s: lamp_blink must be 0-10 flashes a second" % fn)
+        if m.get("multiball_on") and not m.get("multiball"):
+            problems.append("%s: multiball_on without a multiball line (it is ignored)" % fn)
+        if m.get("coil_hold") and title.get("coil_holds") != "on":
+            problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
+                            "(after a look at it on the machine)" % fn)
         complete = _int(m.get("complete") or "0") or 0
         if complete > 0 and not m.get("shots"):
             problems.append("%s: complete = %s but no shots = (nothing can score it)" % (fn, m["complete"]))

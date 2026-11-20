@@ -34,12 +34,18 @@ MAX_MODES = 24
 FORM_GROUPS = (
     ("Mode", ("name", "title", "start", "start_count", "shots", "points", "seconds", "complete",
               "complete_points")),
+    # PAD-1424: JJP's start rules, lamps, balls and coils (the JJP form's groups)
+    ("Starts", ("start_on", "start_after", "start_score", "start_combo", "combo_seconds",
+                "start_count_reset", "start_once")),
     ("Sounds", ("sound_start", "sound_shot", "sound_complete", "sound_end")),
+    ("Lamps", ("lamps", "lamp_color", "lamp_blink")),
     ("Screen", ("panel", "font_title", "font_value", "font_timer", "title_color", "value_color",
                 "timer_color", "panel_color")),
+    ("Balls", ("multiball", "multiball_on", "add_ball", "ball_save")),
+    ("Coils", ("coil_start", "coil_shot", "coil_complete", "coil_hold", "coil_hold_on")),
 )
 TITLE_FORM = ("panel", "font_title", "font_value", "font_timer", "title_color", "value_color",
-              "timer_color", "panel_color")
+              "timer_color", "panel_color", "lamp_color", "lamp_blink", "coil_holds")
 
 
 def screen_keys_out(port):
@@ -63,7 +69,8 @@ def title_form(port=None):
 DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
     "title_color": "ffffff", "value_color": "ffdc00", "timer_color": "ffffff", "panel_color": "000000b0",
-    "panel": "middle",
+    "panel": "middle", "lamp_color": "ffffff", "lamp_blink": "4", "coil_hold_on": "shots", "coil_holds": "off",
+    "combo_seconds": "5", "start_count_reset": "game", "start_once": "no",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
@@ -73,6 +80,16 @@ LABELS = {
     "sound_end": "End sound", "font_title": "Title font", "font_value": "Total font",
     "font_timer": "Timer font", "title_color": "Title color", "value_color": "Total color",
     "timer_color": "Timer color", "panel_color": "Panel color", "panel": "Panel place",
+    "lamps": "Lamps", "lamp_color": "Lamp color", "lamp_blink": "Flashes a second",
+    "multiball": "Multiball", "multiball_on": "Multiball balls come on",
+    "add_ball": "Add a ball on", "ball_save": "Ball save",
+    "coil_start": "Coil at the start", "coil_shot": "Coil on each shot",
+    "coil_complete": "Coil on completion", "coil_hold": "Hold a coil",
+    "coil_hold_on": "Hold it on", "coil_holds": "Coil holds on this title",
+    "start_on": "Starts on a game event", "start_after": "Starts after a game mode ends",
+    "start_score": "Starts at a score", "start_combo": "Starts on a combo (in order)",
+    "combo_seconds": "Combo seconds between shots", "start_count_reset": "Start count resets every",
+    "start_once": "Starts at most once a",
 }
 
 
@@ -375,8 +392,20 @@ def names_for(port, kind, folder=None):
         return list(port.get("sounds") or ())
     if kind == "font":
         return list(port.get("fonts") or ())
-    if kind == "lamps":
-        return list(port.get("lamps") or ())
+    if kind == "lamps":                 # one word each (mkspkmodes.token): a mode line is a list
+        return [mk().token(n) for n in port.get("lamps") or ()]
+    if kind == "coil_pulse":
+        return [mk().token(n) for n in port.get("coils") or ()]
+    if kind == "coil_hold":
+        return [mk().token(n) for n in port.get("coil_holds") or ()]
+    if kind == "events":
+        return [e for e in mk().MJ.START_EVENTS if e in (port.get("start_events") or mk().MJ.START_EVENTS)]
+    if kind == "after":
+        seen = ["any"]
+        for n in list(port.get("game_modes") or ()) + list(port.get("mode_classes") or ()):
+            if n not in seen:
+                seen.append(n)
+        return seen
     return []
 
 

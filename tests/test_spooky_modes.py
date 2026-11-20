@@ -66,10 +66,11 @@ def test_every_key_the_checker_takes_is_one_the_runtime_reads(mk):
     """A key the check accepts but PadModes.cs never reads would be silently ignored."""
     with open(CS, encoding="utf-8") as f:
         src = f.read()
-    read = set(re.findall(r'(?:Get\(|SwitchList\(m, |Sound\(m, )"([a-z_]+)"', src))
+    read = set(re.findall(r'(?:Get\(|SwitchList\(m, |Sound\(m, |Coil\(m, )"([a-z_]+)"', src))
     assert set(mk.KEYS) - {"name", "title"} <= read, set(mk.KEYS) - read
     # and every other JJP key is refused by name
-    assert "lamps" in mk.NOT_YET and "multiball" in mk.NOT_YET and "points" not in mk.NOT_YET
+    assert "code" in mk.NOT_YET and "game_modes" in mk.NOT_YET and "points" not in mk.NOT_YET
+    assert "lamps" not in mk.NOT_YET and "multiball" not in mk.NOT_YET and "start_on" not in mk.NOT_YET
 
 
 # ------------------------------------------------------------------ the check
@@ -81,14 +82,14 @@ def test_the_starter_modes_pass_the_check(folder, port, mk):
 
 def test_the_check_names_what_the_game_would_not_take(folder, port, mk):
     _mode(folder, "9_bad.mode", "name = Bad\nstart = right_inlane nosuch_switch\nshots = left_sling\n"
-                                "points = 250030\nlamps = shoot_again\nsound_shot = no_such_callout\n"
+                                "points = 250030\ncode = rules\nsound_shot = no_such_callout\n"
                                 "wibble = 1\n")
     _mode(folder, "9_nostart.mode", "name = Never\ncomplete = 3\n")
     _modes, problems = mk.check_modes(folder, port)
     text = "\n".join(problems)
     assert "nosuch_switch" in text
     assert "rounds every award to 100, so it would score 250,000" in text
-    assert "lamps is not on Spooky games yet" in text
+    assert "code is not on Spooky games yet" in text
     assert "no_such_callout" in text
     assert "unknown key wibble" in text
     assert "9_nostart.mode: no start rule" in text

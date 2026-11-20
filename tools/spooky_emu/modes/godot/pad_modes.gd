@@ -55,6 +55,9 @@ var mb_was := false
 var last_running = null
 var extra_seen := -1
 var rules_at := 0.0
+# the priority of our LED commands: above the game's shows and modes (5 .. ~400), below its system
+# modes (9500+) and the service menu (9750)
+const LED_PRI := 1000
 const NOT_PLAYFIELD := ["trough", "shooter", "plunge", "launch", "flipper", "start", "coin", "door", "tilt",
 	"slam", "outhole", "drain", "button", "service", "volume", "menu", "eject", "enter", "exit", "up", "down"]
 
@@ -134,6 +137,7 @@ func load_modes() -> void:
 		}
 		m["title"] = cfg.get("title", m["name"])
 		_start_rules(fn, m, cfg)
+		_lamps_coils_balls(fn, m, cfg)
 		all.append(m)
 		plog("mode %s \"%s\": start %s x%d, shots %s, %d points, %s, complete %d (+%d)" % [fn, m["name"],
 			names(m["start"]), m["start_count"], names(m["shots"]), m["points"],
@@ -161,6 +165,58 @@ func _start_rules(fn: String, m: Dictionary, cfg: Dictionary) -> void:
 		plog("mode %s start rules: on %s; after %s; score %d; combo %s within %d s; once %s; count reset %s" % [
 			fn, " ".join(m["start_on"]), " ".join(m["start_after"]), m["start_score"], names(m["combo"]),
 			m["combo_seconds"], m["once"], "ball" if m["reset_ball"] else "game"])
+
+
+# PAD-1424: the game's LEDs at a priority of ours, its coils, its balls (MODES.md "Balls and coils")
+func _lamps_coils_balls(fn: String, m: Dictionary, cfg: Dictionary) -> void:
+	m["lamps"] = []
+	for w in _words(cfg.get("lamps", "")):
+		var n := _const_of(Leds, w)
+		if n < 0:
+			plog("%s: lamp %s is not one of this game's LEDs (ignored)" % [fn, w])
+		else:
+			m["lamps"].append(n)
+	var c := Color.html("#" + cfg.get("lamp_color", "ffffff").trim_prefix("#").substr(0, 6))
+	m["lamp_rgb"] = [int(c.r * 255), int(c.g * 255), int(c.b * 255)]
+	m["lamp_blink"] = clampi(to_int(cfg.get("lamp_blink", "4")), 0, 10)
+	var mb := _words(cfg.get("multiball", ""))
+	m["mb_balls"] = clampi(to_int(mb[0]), 0, 6) if mb.size() > 0 else 0
+	m["mb_save"] = clampi(to_int(mb[1]), 0, 120) if mb.size() > 1 else 10
+	m["mb_on"] = switches(fn, "multiball_on", cfg.get("multiball_on", ""))
+	var ab := _words(cfg.get("add_ball", ""))
+	m["add_times"] = 1
+	if ab.size() > 1 and ab[-1].is_valid_int():
+		m["add_times"] = clampi(int(ab[-1]), 1, 6)
+		ab.remove_at(ab.size() - 1)
+	m["add_ball"] = switches(fn, "add_ball", " ".join(ab))
+	m["ball_save"] = clampi(to_int(cfg.get("ball_save", "0")), 0, 120)
+	for k in ["coil_start", "coil_shot", "coil_complete"]:
+		var w := _words(cfg.get(k, ""))
+		m[k] = [_const_of(Coils, w[0]), to_int(w[1]) if w.size() > 1 else 0, w[0]] if w.size() > 0 else null
+	var h := _words(cfg.get("coil_hold", ""))
+	m["coil_hold"] = [_const_of(Coils, h[0]), clampi(to_int(h[1]), 100, 5000) if h.size() > 1 else 1000,
+		clampi(to_int(h[2]), 1, 16) if h.size() > 2 else 8, h[0]] if h.size() > 0 else null
+	var on: String = cfg.get("coil_hold_on", "shots")
+	m["hold_on"] = on if on in ["shots", "start"] else "switches"
+	m["hold_sw"] = switches(fn, "coil_hold_on", on) if m["hold_on"] == "switches" else []
+	m["holds_ok"] = cfg.get("coil_holds", "off") == "on"
+	m["mb_served"] = false
+	m["mb_at"] = 0.0
+	m["one_since"] = 0.0
+	m["added"] = 0
+	m["held_until"] = 0.0
+	m["lamp_phase"] = -1
+	m["lamp_at"] = 0.0
+	m["started_at"] = 0.0
+
+
+# a constant of an autoload by its name as a mode file writes it (Leds.ORBIT_INNER4, Coils.SHAKER)
+static func _const_of(node: Object, w: String) -> int:
+	var want := w.to_upper()
+	var consts: Dictionary = node.get_script().get_script_constant_map()
+	if consts.has(want) and typeof(consts[want]) == TYPE_INT:
+		return consts[want]
+	return -1
 
 
 static func _words(v: String) -> Array:
@@ -283,7 +339,8 @@ func _on_switch(sw) -> void:
 		_event("valid_playfield")
 	for m in all:
 		if m["running"]:
-			if sw in m["shots"]:
+			_running_switch(m, sw)
+			if m["running"] and sw in m["shots"]:
 				_shot(m, sw)
 			continue
 		_combo(m, sw, now)
@@ -419,6 +476,127 @@ func _rules() -> void:
 	last_running = running
 
 
+# ------------------------------------------------------------------ lamps, coils, balls (PAD-1424)
+func _running_switch(m: Dictionary, sw) -> void:
+	if sw in m["mb_on"] and not m["mb_served"]:
+		_multiball(m)
+	if sw in m["add_ball"] and m["added"] < m["add_times"]:
+		m["added"] += 1
+		plog("%s: add a ball on %s (%d of %d): %s" % [m["name"], Switches.items[sw].name, m["added"], m["add_times"],
+			_add_balls(1)])
+		_save(m, maxi(2, m["mb_save"] if m["mb_balls"] > 0 else 2))
+	if m["hold_on"] == "switches" and sw in m["hold_sw"]:
+		_hold(m)
+
+
+func _trough():
+	return Modes.access("trough")
+
+
+func _add_balls(n: int) -> String:
+	var t = _trough()
+	if t == null:
+		return "no trough"
+	return "trough.add_balls(%d) added %s" % [n, t.add_balls(n, true)]
+
+
+func _save(m: Dictionary, secs: int) -> void:
+	var t = _trough()
+	if t == null:
+		return
+	t.start_ball_save(secs, true)
+	plog("%s: ball save %d s (trough.start_ball_save; active %s)" % [m["name"], secs, t.ball_save_active])
+
+
+func _multiball(m: Dictionary) -> void:
+	var have := maxi(1, _balls_in_play())
+	m["mb_served"] = true
+	m["mb_at"] = Time.get_ticks_msec() / 1000.0
+	m["one_since"] = 0.0
+	plog("%s: multiball, %d balls in play wanted, %d now%s" % [m["name"], m["mb_balls"], have,
+		(": " + _add_balls(m["mb_balls"] - have)) if m["mb_balls"] > have else ""])
+	if m["mb_save"] > 0:
+		_save(m, m["mb_save"])
+
+
+func _coil(m: Dictionary, key: String) -> void:
+	var c = m[key]
+	if c == null:
+		return
+	if c[0] < 0:
+		plog("%s: %s %s is not one of this game's coils" % [m["name"], key, c[2]])
+		return
+	var own: int = int(Coils.items[c[0]].pulse_ms) if Coils.items.size() > c[0] else 0
+	if c[1] > 0 and (own <= 0 or c[1] < own):
+		Coils.pulse_ms(c[0], c[1])
+	else:
+		Coils.pulse(c[0])
+	plog("%s: %s pulsed %s (%s ms, its own %d)" % [m["name"], key, c[2], c[1] if c[1] > 0 and c[1] < own else "its own", own])
+
+
+func _hold(m: Dictionary) -> void:
+	var h = m["coil_hold"]
+	if h == null:
+		return
+	if not m["holds_ok"]:
+		plog("%s: coil_hold %s refused: title.cfg has no coil_holds = on" % [m["name"], h[3]])
+		return
+	if h[0] < 0:
+		plog("%s: coil_hold %s is not one of this game's coils" % [m["name"], h[3]])
+		return
+	Coils.dangerous_hold(h[0], int(h[2] * 100 / 32))
+	m["held_until"] = Time.get_ticks_msec() / 1000.0 + h[1] / 1000.0
+	plog("%s: holding %s for %d ms at %d of 32 (Coils.dangerous_hold %d%%, released by us)" % [m["name"], h[3], h[1], h[2],
+		int(h[2] * 100 / 32)])
+
+
+func _unhold(m: Dictionary) -> void:
+	if m["held_until"] <= 0.0:
+		return
+	m["held_until"] = 0.0
+	Coils.release_hold(m["coil_hold"][0])
+	plog("%s: let go of %s" % [m["name"], m["coil_hold"][3]])
+
+
+# Our colour on the mode's LEDs at LED_PRI, blinking lamp_blink times a second; set again four
+# times a second (the game clears every command of its own at each ball start and tilt).
+func _lamps_tick(m: Dictionary, now: float) -> void:
+	if m["lamps"].is_empty():
+		return
+	var phase := int((now - m["started_at"]) * m["lamp_blink"] * 2.0) % 2 if m["lamp_blink"] > 0 else 0
+	if phase == m["lamp_phase"] and now - m["lamp_at"] < 0.25:
+		return
+	var first: bool = m["lamp_phase"] < 0
+	m["lamp_phase"] = phase
+	m["lamp_at"] = now
+	var rgb: Array = m["lamp_rgb"] if phase == 0 else [0, 0, 0]
+	for n in m["lamps"]:
+		Leds.set_color(n, rgb[0], rgb[1], rgb[2], LED_PRI)
+	if first:
+		plog("%s: lamps %s lit %s at priority %d%s" % [m["name"], m["lamps"], m["lamp_rgb"], LED_PRI,
+			(", %d flashes a second" % m["lamp_blink"]) if m["lamp_blink"] > 0 else ""])
+
+
+func _lamps_off(m: Dictionary) -> void:
+	for n in m["lamps"]:
+		Leds.disable(n, LED_PRI, true)
+	if not m["lamps"].is_empty():
+		plog("%s: lamps handed back to the game" % m["name"])
+
+
+# A multiball of ours ends the mode once one ball is left for 2 s, after its ball save and 3 s more.
+func _balls_tick(m: Dictionary, now: float) -> void:
+	if not m["mb_served"] or now - m["mb_at"] < m["mb_save"] + 3:
+		return
+	if _balls_in_play() <= 1:
+		if m["one_since"] == 0.0:
+			m["one_since"] = now
+		elif now - m["one_since"] >= 2.0:
+			_stop(m, "one ball left")
+	else:
+		m["one_since"] = 0.0
+
+
 func _start(m: Dictionary) -> void:
 	m["hits"] = 0
 	m["combo_at"] = 0
@@ -430,6 +608,18 @@ func _start(m: Dictionary) -> void:
 	m["left"] = float(m["seconds"])
 	plog("%s: STARTED (%s)" % [m["name"], ("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends"])
 	_sound(m, "sound_start")
+	m["started_at"] = Time.get_ticks_msec() / 1000.0
+	m["mb_served"] = false
+	m["one_since"] = 0.0
+	m["added"] = 0
+	m["lamp_phase"] = -1
+	_coil(m, "coil_start")
+	if m["hold_on"] == "start":
+		_hold(m)
+	if m["ball_save"] > 0:
+		_save(m, m["ball_save"])
+	if m["mb_balls"] > 0 and m["mb_on"].is_empty():
+		_multiball(m)
 	shown = m
 	draw()
 
@@ -441,12 +631,16 @@ func _shot(m: Dictionary, sw) -> void:
 	plog("%s: shot %d%s on %s: %d points (player score %s)" % [m["name"], m["made"],
 		(" of %d" % m["complete"]) if m["complete"] > 0 else "", Switches.items[sw].name, got, _score()])
 	_sound(m, "sound_shot")
+	_coil(m, "coil_shot")
+	if m["hold_on"] == "shots":
+		_hold(m)
 	shown = m
 	if m["complete"] > 0 and m["made"] >= m["complete"]:
 		var bonus := _award(m["complete_points"]) if m["complete_points"] > 0 else 0
 		m["total"] += bonus
 		plog("%s: COMPLETED, bonus %d, mode total %d" % [m["name"], bonus, m["total"]])
 		_sound(m, "sound_complete")
+		_coil(m, "coil_complete")
 		_stop(m, "")
 		return
 	draw()
@@ -459,6 +653,11 @@ func _stop(m: Dictionary, why: String) -> void:
 	if why != "":
 		plog("%s: ended (%s), %d shot(s), total %d" % [m["name"], why, m["made"], m["total"]])
 		_sound(m, "sound_end")
+	_lamps_off(m)
+	_unhold(m)
+	if m["ball_save"] > 0 and m["mb_balls"] == 0 and _trough() != null and _trough().ball_save_active \
+			and _trough().ball_save_timer <= m["ball_save"] + 2:
+		_trough().disable_ball_save()
 	if shown == m:
 		shown = null
 		for x in all:
@@ -505,11 +704,20 @@ func _process(delta: float) -> void:
 		_rules()
 	if all.is_empty() or Game.timers_paused:
 		return
+	var now := Time.get_ticks_msec() / 1000.0
 	for m in all:
-		if m["running"] and m["seconds"] > 0:
+		if not m["running"]:
+			continue
+		if m["seconds"] > 0 and not (m["mb_served"] and not m["mb_on"].is_empty()):
 			m["left"] -= delta
 			if m["left"] <= 0.0:
 				_stop(m, "time ran out")
+				continue
+		_balls_tick(m, now)
+		if m["running"]:
+			_lamps_tick(m, now)
+			if m["held_until"] > 0.0 and now >= m["held_until"]:
+				_unhold(m)
 	if shown != null and shown["running"] and box != null:
 		_timer(shown)
 

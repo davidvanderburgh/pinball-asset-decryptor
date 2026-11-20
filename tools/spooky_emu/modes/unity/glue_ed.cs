@@ -59,6 +59,67 @@ public static class Glue {
         savesSeen = saves;
     }
 
+    // ---- lamps, coils, balls (PAD-1424)
+    // warden's named LEDs: last write wins (no layer), so the core sets ours four times a second;
+    // led_disable_name gives a lamp back to the lampshow under it.
+    static Dictionary<string, string> lampNames;
+
+    static string LampName(string l) {
+        if (lampNames == null) {
+            lampNames = new Dictionary<string, string>();
+            foreach (var n in Lamps()) lampNames[PadRuntime.Tok(n)] = n;
+        }
+        string n2;
+        return lampNames.TryGetValue(PadRuntime.Tok(l), out n2) ? n2 : null;
+    }
+
+    public static bool LampSet(string l, Color32 c) {
+        string n = LampName(l);
+        if (n == null) return false;
+        warden.led_color(n, c.r, c.g, c.b);
+        return true;
+    }
+
+    public static void LampRelease(string l) { string n = LampName(l); if (n != null) warden.led_disable_name(n); }
+
+    static coil CoilOf(string c) {
+        string t = PadRuntime.Tok(c);
+        foreach (var kv in coilControl.coils) if (PadRuntime.Tok(kv.Key) == t) return kv.Value;
+        return null;
+    }
+
+    public static string CoilPulse(string c, int ms) {
+        var k = CoilOf(c);
+        if (k == null) return null;
+        // its own pulse is the service menu's (pulse(-1)); an asked time is held to the menu's 50 ms top
+        k.pulse(ms > 0 ? Math.Min(ms, 50) : -1);
+        return ms > 0 ? "pulse " + Math.Min(ms, 50) + " ms" : "pulse, its own";
+    }
+
+    public static string CoilHold(string c, int power) {
+        var k = CoilOf(c);
+        if (k == null) return null;
+        k.manualPWM((byte)(power * 100 / 32));
+        return "manualPWM " + (power * 100 / 32) + "%";
+    }
+
+    public static void CoilRelease(string c) { var k = CoilOf(c); if (k != null) k.disable(); }
+
+    // the trough's own multiball calls: more balls for one that runs, else one of ours
+    public static string AddBalls(int n) {
+        var t = G.trough;
+        if (t.multiballActive) return "trough.incMultiballFromTrough: " + t.incMultiballFromTrough(hook, n) + " added";
+        t.createMultiballMode(hook, n, 100, remain => remain <= 1);
+        return "trough.createMultiballMode(" + n + ")";
+    }
+
+    public static string BallSave(int secs, int balls) {
+        if (balls > 1) { G.ballsavemode.startMBsave(secs); return "startMBsave " + secs + " s"; }
+        return "start_standard_save " + secs + " s: " + G.ballsavemode.start_standard_save(secs);
+    }
+
+    public static void BallSaveOff(int secs) { if (G.ballsavemode.standardSaveActive) G.ballsavemode.disable_saves(); }
+
     // ---- balls and game modes (PAD-1424 start rules)
     static global::Player Up() {
         if (!HasPlayers()) return null;

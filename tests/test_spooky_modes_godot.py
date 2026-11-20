@@ -82,6 +82,9 @@ def test_every_key_the_checker_takes_is_one_the_runtime_reads(mk):
     with open(GD, encoding="utf-8") as f:
         src = f.read()
     read = set(re.findall(r'(?:cfg\.get\(|_sound\(m, )"([a-z_]+)"', src))
+    # keys read in a loop: for k in ["coil_start", ...]: ... cfg.get(k
+    for group in re.findall(r'for k in \[([^\]]+)\]:\s+var w := _words\(cfg\.get\(k', src):
+        read |= set(re.findall(r'"([a-z_]+)"', group))
     assert set(mk.KEYS) - read == set(), set(mk.KEYS) - read
 
 
@@ -116,7 +119,7 @@ def test_the_check_names_what_the_game_would_not_take(folder, port, mk):
     assert "rounds every award to 10, so it would score 1,000" in text
     assert "daphne_jackpot" in text                             # a Scooby-Doo callout
     assert "Comic Sans" in text
-    assert "lamps is not on Spooky games yet" in text
+    assert "not one of Looney Tunes's lamps: X" in text
 
 
 # ------------------------------------------------------------------ the update

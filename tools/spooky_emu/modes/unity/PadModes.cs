@@ -109,6 +109,16 @@ public class CMode {
     public bool Running, RanThisBall, RanThisGame;
     public float EndsAt, ComboTime;
     public HashSet<int> ScoreFired = new HashSet<int>();
+    // lamps, coils, balls (PAD-1424)
+    public List<string> Lamps = new List<string>();
+    public Color32 LampColor = new Color32(255, 255, 255, 255);
+    public int LampBlink = 4, MbBalls, MbSave = 10, AddTimes = 1, BallSave, Added;
+    public List<int> MbOn = new List<int>(), AddBall = new List<int>(), HoldOn = new List<int>();
+    public string HoldWhen = "shots", HoldCoil;
+    public int HoldMs = 1000, HoldPower = 8;
+    public bool HoldsOk, MbServed, Held;
+    public float StartedAt, MbAt, OneSince, HeldUntil, LampAt;
+    public int LampPhase = -1;
 
     public string Get(string k, string dflt) {
         string v;
@@ -164,6 +174,7 @@ public class PadRuntime {
             foreach (var w in Words(m.Get("start_after", ""))) m.StartAfter.Add(w.ToLowerInvariant());
             m.Once = m.Get("start_once", "no");
             m.ResetEachBall = m.Get("start_count_reset", "game") == "ball";
+            LampsCoilsBalls(m);
             All.Add(m);
             if (m.StartOn.Count + m.StartAfter.Count + m.Combo.Count > 0 || m.StartScore > 0)
                 Loader.Log("mode " + m.File + " start rules: on " + string.Join(" ", m.StartOn.ToArray()) +
@@ -175,6 +186,41 @@ public class PadRuntime {
                 " (+" + m.CompletePoints + ")");
         }
         Loader.Log(All.Count + " custom mode(s) from " + Dir + "; points scale " + Scale);
+    }
+
+    // PAD-1424: the game's lamps on a layer of ours, its coils, its balls (MODES.md "Balls and coils")
+    void LampsCoilsBalls(CMode m) {
+        m.Lamps = Words(m.Get("lamps", "")).ToList();
+        var c = Panel.Colour(m.Get("lamp_color", "ffffff"));
+        m.LampColor = new Color32((byte)(c.r * 255), (byte)(c.g * 255), (byte)(c.b * 255), 255);
+        m.LampBlink = Math.Max(0, Math.Min(10, Int(m.Get("lamp_blink", "4"))));
+        var mb = Words(m.Get("multiball", ""));
+        m.MbBalls = mb.Length > 0 ? Math.Max(0, Math.Min(6, Int(mb[0]))) : 0;
+        m.MbSave = mb.Length > 1 ? Math.Max(0, Math.Min(120, Int(mb[1]))) : 10;
+        m.MbOn = SwitchList(m, "multiball_on");
+        var ab = Words(m.Get("add_ball", "")).ToList();
+        int t;
+        if (ab.Count > 1 && int.TryParse(ab[ab.Count - 1], out t)) { m.AddTimes = Math.Max(1, Math.Min(6, t)); ab.RemoveAt(ab.Count - 1); }
+        m.K["add_ball_switches"] = string.Join(" ", ab.ToArray());
+        m.AddBall = SwitchList(m, "add_ball_switches");
+        m.BallSave = Math.Max(0, Math.Min(120, Int(m.Get("ball_save", "0"))));
+        var h = Words(m.Get("coil_hold", ""));
+        if (h.Length > 0) {
+            m.HoldCoil = h[0];
+            m.HoldMs = h.Length > 1 ? Math.Max(100, Math.Min(5000, Int(h[1]))) : 1000;
+            m.HoldPower = h.Length > 2 ? Math.Max(1, Math.Min(16, Int(h[2]))) : 8;
+        }
+        string on = m.Get("coil_hold_on", "shots");
+        m.HoldWhen = on == "start" || on == "shots" ? on : "switches";
+        if (m.HoldWhen == "switches") m.HoldOn = SwitchList(m, "coil_hold_on");
+        m.HoldsOk = m.Get("coil_holds", "off") == "on";
+        if (m.Lamps.Count > 0 || m.MbBalls > 0 || m.AddBall.Count > 0 || m.BallSave > 0 || m.HoldCoil != null ||
+            m.Get("coil_start", "") + m.Get("coil_shot", "") + m.Get("coil_complete", "") != "")
+            Loader.Log("mode " + m.File + ": lamps " + string.Join(" ", m.Lamps.ToArray()) + " #" + m.Get("lamp_color", "ffffff") +
+                " x" + m.LampBlink + "/s; multiball " + m.MbBalls + " (save " + m.MbSave + " s, on " + Names(m.MbOn) +
+                "); add_ball " + Names(m.AddBall) + " x" + m.AddTimes + "; ball_save " + m.BallSave + "; coils " +
+                m.Get("coil_start", "-") + " / " + m.Get("coil_shot", "-") + " / " + m.Get("coil_complete", "-") +
+                "; hold " + (m.HoldCoil ?? "-") + " " + m.HoldMs + " ms " + m.HoldPower + "/32 on " + m.HoldWhen);
     }
 
     static Dictionary<string, string> Parse(string text) {
@@ -199,6 +245,11 @@ public class PadRuntime {
         long v;
         return long.TryParse((s ?? "").Replace(",", "").Replace("_", ""), NumberStyles.Integer,
             CultureInfo.InvariantCulture, out v) ? v : 0;
+    }
+
+    // a lamp or coil name as a mode file writes it, to match the game's ("REAR MAGNET" = REAR_MAGNET)
+    public static string Tok(string n) {
+        return string.Join("_", (n ?? "").ToLowerInvariant().Split(new[] { ' ', '_', '\t' }, StringSplitOptions.RemoveEmptyEntries));
     }
 
     static string[] Words(string s) {
@@ -370,7 +421,8 @@ public class PadRuntime {
         if (!validSeen && IsPlayfield(sw)) { validSeen = true; GameEvent("valid_playfield"); }
         foreach (var m in All) {
             if (m.Running) {
-                if (m.Shots.Contains(sw)) Shot(m, sw);
+                RunningSwitch(m, sw);
+                if (m.Running && m.Shots.Contains(sw)) Shot(m, sw);
                 continue;
             }
             Combo(m, sw, now);
@@ -388,6 +440,12 @@ public class PadRuntime {
         m.EndsAt = m.Seconds > 0 ? Time.unscaledTime + m.Seconds : 0f;
         Loader.Log(m.Name + ": STARTED (" + (m.Seconds > 0 ? m.Seconds + " s" : "until the ball ends") + ")");
         Sound(m, "sound_start");
+        m.StartedAt = Time.unscaledTime;
+        m.MbServed = false; m.OneSince = 0f; m.Added = 0; m.LampPhase = -1;
+        Coil(m, "coil_start");
+        if (m.HoldWhen == "start") Hold(m);
+        if (m.BallSave > 0) Save(m, m.BallSave, 1);
+        if (m.MbBalls > 0 && m.MbOn.Count == 0) Multiball(m);
         shown = m;
         Draw();
     }
@@ -399,12 +457,15 @@ public class PadRuntime {
         Loader.Log(m.Name + ": shot " + m.Made + (m.Complete > 0 ? " of " + m.Complete : "") + " on " +
             Glue.SwitchName(sw) + ": " + got + " points (player score " + Glue.PlayerScore() + ")");
         Sound(m, "sound_shot");
+        Coil(m, "coil_shot");
+        if (m.HoldWhen == "shots") Hold(m);
         shown = m;
         if (m.Complete > 0 && m.Made >= m.Complete) {
             long bonus = m.CompletePoints > 0 ? Score(m.CompletePoints) : 0;
             m.Total += bonus;
             Loader.Log(m.Name + ": COMPLETED, bonus " + bonus + ", mode total " + m.Total);
             Sound(m, "sound_complete");
+            Coil(m, "coil_complete");
             Stop(m, null);
             return;
         }
@@ -418,6 +479,12 @@ public class PadRuntime {
             Loader.Log(m.Name + ": ended (" + why + "), " + m.Made + " shot(s), total " + m.Total);
             Sound(m, "sound_end");
         }
+        try {
+            foreach (var l in m.Lamps) Glue.LampRelease(l);
+            if (m.Lamps.Count > 0) Loader.Log(m.Name + ": lamps handed back to the game");
+            Unhold(m);
+            if (m.BallSave > 0 && m.MbBalls == 0) Glue.BallSaveOff(m.BallSave);
+        } catch (Exception e) { Loader.Log(m.Name + ": hand back: " + e.Message); }
         if (shown == m) shown = All.FirstOrDefault(x => x.Running);
         Draw();
     }
@@ -428,8 +495,13 @@ public class PadRuntime {
         // multiplier in its own ball-started event, after the ball number this saw change
         if (ballLive && now - ballAt > 2f) Port.Measure(this);
         Rules(now);
-        foreach (var m in All)
-            if (m.Running && m.EndsAt > 0 && now >= m.EndsAt) Stop(m, "time ran out");
+        foreach (var m in All) {
+            if (!m.Running) continue;
+            if (m.MbServed && m.MbOn.Count > 0) m.EndsAt = 0f;      // the balls came: the clock stops
+            if (m.EndsAt > 0 && now >= m.EndsAt) { Stop(m, "time ran out"); continue; }
+            try { BallsTick(m, now); LampsTick(m, now); } catch (Exception e) { Loader.Log(m.Name + ": " + e.Message); }
+            if (m.Held && now >= m.HeldUntil) Unhold(m);
+        }
         if (shown != null && shown.Running && panel != null) panel.Timer(shown);
         // a queued callout: the game's queue sets voice_channel.clip and plays it when the channel is free
         if (queued.Count > 0) {
@@ -439,6 +511,79 @@ public class PadRuntime {
                 queued.RemoveAt(0);
             }
         }
+    }
+
+    // ------------------------------------------------------------------ lamps, coils, balls (PAD-1424)
+    void RunningSwitch(CMode m, int sw) {
+        if (m.MbOn.Contains(sw) && !m.MbServed) Multiball(m);
+        if (m.AddBall.Contains(sw) && m.Added < m.AddTimes) {
+            m.Added++;
+            Loader.Log(m.Name + ": add a ball on " + Glue.SwitchName(sw) + " (" + m.Added + " of " + m.AddTimes + "): " + Glue.AddBalls(1));
+            Save(m, Math.Max(2, m.MbBalls > 0 ? m.MbSave : 2), 1);
+        }
+        if (m.HoldWhen == "switches" && m.HoldOn.Contains(sw)) Hold(m);
+    }
+
+    // Our colour on the mode's lamps, blinking lamp_blink times a second; set again four times a
+    // second (the game's own lighting writes the same lamps on titles with no layer of ours).
+    void LampsTick(CMode m, float now) {
+        if (m.Lamps.Count == 0) return;
+        int phase = m.LampBlink > 0 ? (int)((now - m.StartedAt) * m.LampBlink * 2f) % 2 : 0;
+        if (phase == m.LampPhase && now - m.LampAt < 0.25f) return;
+        bool first = m.LampPhase < 0;
+        m.LampPhase = phase; m.LampAt = now;
+        var c = phase == 0 ? m.LampColor : new Color32(0, 0, 0, 255);
+        var missing = new List<string>();
+        foreach (var l in m.Lamps) if (!Glue.LampSet(l, c)) missing.Add(l);
+        if (first)
+            Loader.Log(m.Name + ": lamps " + string.Join(" ", m.Lamps.Where(x => !missing.Contains(x)).ToArray()) + " lit #" +
+                m.Get("lamp_color", "ffffff") + (m.LampBlink > 0 ? ", " + m.LampBlink + " flashes a second" : "") +
+                (missing.Count > 0 ? "; not this game's lamps: " + string.Join(" ", missing.ToArray()) : ""));
+    }
+
+    void Coil(CMode m, string key) {
+        var w = Words(m.Get(key, ""));
+        if (w.Length == 0) return;
+        string how = Glue.CoilPulse(w[0], w.Length > 1 ? Int(w[1]) : 0);
+        Loader.Log(m.Name + ": " + key + " " + w[0] + (how == null ? ": not one of this game's coils" : " pulsed (" + how + ")"));
+    }
+
+    void Hold(CMode m) {
+        if (m.HoldCoil == null) return;
+        if (!m.HoldsOk) { Loader.Log(m.Name + ": coil_hold " + m.HoldCoil + " refused: title.cfg has no coil_holds = on"); return; }
+        string how = Glue.CoilHold(m.HoldCoil, m.HoldPower);
+        if (how == null) { Loader.Log(m.Name + ": coil_hold " + m.HoldCoil + ": not one of this game's coils"); return; }
+        m.Held = true;
+        m.HeldUntil = Time.unscaledTime + m.HoldMs / 1000f;
+        Loader.Log(m.Name + ": holding " + m.HoldCoil + " for " + m.HoldMs + " ms at " + m.HoldPower + " of 32 (" + how + ")");
+    }
+
+    void Unhold(CMode m) {
+        if (!m.Held) return;
+        m.Held = false;
+        Glue.CoilRelease(m.HoldCoil);
+        Loader.Log(m.Name + ": let go of " + m.HoldCoil);
+    }
+
+    void Save(CMode m, int secs, int balls) {
+        Loader.Log(m.Name + ": ball save " + secs + " s (" + balls + " ball(s)): " + Glue.BallSave(secs, balls));
+    }
+
+    void Multiball(CMode m) {
+        int have = Math.Max(1, Glue.BallsInPlay());
+        m.MbServed = true; m.MbAt = Time.unscaledTime; m.OneSince = 0f;
+        Loader.Log(m.Name + ": multiball, " + m.MbBalls + " balls in play wanted, " + have + " now" +
+            (m.MbBalls > have ? ": " + Glue.AddBalls(m.MbBalls - have) : ""));
+        if (m.MbSave > 0) Save(m, m.MbSave, Math.Max(1, m.MbBalls - 1));
+    }
+
+    // A multiball of ours ends the mode once one ball is left for 2 s, after its ball save and 3 s more.
+    void BallsTick(CMode m, float now) {
+        if (!m.MbServed || now - m.MbAt < m.MbSave + 3) return;
+        if (Glue.BallsInPlay() <= 1) {
+            if (m.OneSince == 0f) m.OneSince = now;
+            else if (now - m.OneSince >= 2f) Stop(m, "one ball left");
+        } else m.OneSince = 0f;
     }
 
     // ------------------------------------------------------------------ the game's scoring

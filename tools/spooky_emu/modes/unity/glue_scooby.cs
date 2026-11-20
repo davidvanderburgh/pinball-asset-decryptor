@@ -95,6 +95,91 @@ public static class Glue {
         return o;
     }
 
+    // ---- lamps, coils, balls (PAD-1424)
+    // Lamps on the LED controller's overlay layer (the game's lightshows use it too, and clear it
+    // when one stops: the core sets ours again four times a second); black on the overlay hands
+    // the lamp back to the game's base layer.
+    static Dictionary<string, int> lampNums, coilNums;
+
+    static int LampNum(string l) {
+        if (lampNums == null) {
+            lampNums = new Dictionary<string, int>();
+            if (Lights.light_names != null)
+                foreach (var kv in Lights.light_names) lampNums[PadRuntime.Tok(kv.Value)] = kv.Key;
+        }
+        int n;
+        return lampNums.TryGetValue(PadRuntime.Tok(l), out n) ? n : -1;
+    }
+
+    public static bool LampSet(string l, Color32 c) {
+        int n = LampNum(l);
+        if (n < 0) return false;
+        Warden.set_led_full_color((byte)n, c.r, c.g, c.b, true);
+        return true;
+    }
+
+    public static void LampRelease(string l) {
+        int n = LampNum(l);
+        if (n >= 0) Warden.set_led((byte)n, Lights.black, true);
+    }
+
+    static int CoilNum(string c) {
+        if (coilNums == null) {
+            coilNums = new Dictionary<string, int>();
+            foreach (var f in typeof(global::Coils).GetFields(BindingFlags.Static | BindingFlags.Public))
+                if (f.IsLiteral && (f.FieldType == typeof(byte) || f.FieldType == typeof(int)) && f.Name != "num_coils")
+                    coilNums[PadRuntime.Tok(f.Name)] = Convert.ToInt32(f.GetRawConstantValue());
+        }
+        int n;
+        return coilNums.TryGetValue(PadRuntime.Tok(c), out n) ? n : -1;
+    }
+
+    public static string CoilPulse(string c, int ms) {
+        int n = CoilNum(c);
+        if (n < 0) return null;
+        long own = 0;
+        try { own = Mode.machine.settings.coil_settings[n].pulse_time_slider.current_value; } catch (Exception) { }
+        if (ms > 0 && (own <= 0 || ms < own)) { Warden.pulse_for_ms((byte)n, (byte)ms); return "Warden.pulse_for_ms " + ms + " ms, its own " + own; }
+        Warden.pulse((byte)n);
+        return "Warden.pulse, its own " + own + " ms";
+    }
+
+    public static string CoilHold(string c, int power) {
+        int n = CoilNum(c);
+        if (n < 0) return null;
+        Warden.set_pwm((byte)n, (byte)Math.Min(255, power * 255 / 32));
+        return "Warden.set_pwm " + Math.Min(255, power * 255 / 32);
+    }
+
+    public static void CoilRelease(string c) {
+        int n = CoilNum(c);
+        if (n < 0) return;
+        for (int i = 0; i < 3; i++) Warden.set_pwm((byte)n, 0);      // the game sends its off three times
+    }
+
+    // the game's own add-a-ball message: Trough_mode ejects n (RequestEject), counted in balls_in_play
+    public static string AddBalls(int n) {
+        Mode.machine.append_message(PadRuntime.ModeId, 0, Messages.add_a_ball, n);
+        return "add_a_ball message, " + n + " ball(s)";
+    }
+
+    static Base_mode Base() { return Modes.modes.Values.OfType<Base_mode>().FirstOrDefault(); }
+
+    // the base mode's ball save timer (the game adds 4 s of grace to every save it starts)
+    public static string BallSave(int secs, int balls) {
+        var b = Base();
+        if (b == null || b.ballsave_timer == null) return "no base mode";
+        if (b.ballsave_timer.isEnded() || b.ballsave_timer.seconds_remaining() < secs + 4)
+            b.ballsave_timer.refresh(secs + 4.0);
+        return "Base_mode.ballsave_timer " + b.ballsave_timer.seconds_remaining().ToString("0.0") + " s";
+    }
+
+    public static void BallSaveOff(int secs) {
+        var b = Base();
+        if (b != null && b.ballsave_timer != null && !b.ballsave_timer.isEnded() && b.ballsave_timer.seconds_remaining() <= secs + 4)
+            b.ballsave_timer.refresh(0.0);
+    }
+
     public static long PlayerScore() { return HasPlayers() ? Mode.machine.game.player().score : 0; }
     public static void Award(long ask) { hook.score_points(ask, Tags); }
     public static string ScoreNote() { return "score_points(base bonus), score_multiplier " + Mode.machine.game.score_multiplier; }

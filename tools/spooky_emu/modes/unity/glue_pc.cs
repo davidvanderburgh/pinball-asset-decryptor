@@ -180,6 +180,113 @@ public static class Glue {
 
     public static bool HasPlayers() { var g = G; return g != null && g.players != null && g.players.Count > 0; }
 
+    // ---- lamps, coils, balls (PAD-1424)
+    // Lamps by the game's LightConfig name.  Texas Chainsaw's Warden RGB system has an overlay layer
+    // (led_disable(..., isOverlay) hands the lamp back); Halloween and Ultraman's Pinotar has one
+    // layer, last write wins: the core sets ours four times a second, and update_lamps() repaints
+    // the game's when a lamp is handed back.
+    static Dictionary<string, string> lampNames;
+
+    static string LampName(string l) {
+        if (lampNames == null) {
+            lampNames = new Dictionary<string, string>();
+            foreach (var n in Lamps()) lampNames[PadRuntime.Tok(n)] = n;
+        }
+        string n2;
+        return lampNames.TryGetValue(PadRuntime.Tok(l), out n2) ? n2 : null;
+    }
+
+    public static bool LampSet(string l, Color32 c) {
+        string n = LampName(l);
+        if (n == null) return false;
+#if TCM
+        pinAPI.led_color(n, c.r, c.g, c.b, 1, true);
+#else
+        Pinotar.led_color(n, c.r, c.g, c.b, 1);
+#endif
+        return true;
+    }
+
+    public static void LampRelease(string l) {
+        string n = LampName(l);
+        if (n == null) return;
+#if TCM
+        pinAPI.led_disable(n, 1, true);
+#else
+        Pinotar.led_disable(n);
+#endif
+        try { G.update_lamps(); } catch (Exception) { }
+    }
+
+#if TCM
+    static coil CoilOf(string c) {
+        string t = PadRuntime.Tok(c);
+        if (coilControl.coils != null)
+            foreach (var kv in coilControl.coils) if (PadRuntime.Tok(kv.Key) == t) return kv.Value;
+        return null;
+    }
+
+    public static string CoilPulse(string c, int ms) {
+        var k = CoilOf(c);
+        if (k == null) return null;
+        k.pulse(ms > 0 ? Math.Min(ms, 50) : -1);
+        return ms > 0 ? "pulse " + Math.Min(ms, 50) + " ms" : "pulse, its own";
+    }
+
+    public static string CoilHold(string c, int power) {
+        var k = CoilOf(c);
+        if (k == null) return null;
+        k.manualPWM((byte)(power * 100 / 32));
+        return "manualPWM " + (power * 100 / 32) + "%";
+    }
+
+    public static void CoilRelease(string c) { var k = CoilOf(c); if (k != null) k.disable(); }
+
+    public static string AddBalls(int n) { G.trough.addMultiballs(n); return "trough.addMultiballs(" + n + ")"; }
+
+    public static string BallSave(int secs, int balls) {
+        if (balls > 1) { G.ballsavemode.startMBsave(secs); return "startMBsave " + secs + " s"; }
+        return "start_standard_save " + secs + " s: " + G.ballsavemode.start_standard_save(secs);
+    }
+
+    public static void BallSaveOff(int secs) { }
+#else
+    static Coil CoilOf(string c) {
+        string t = PadRuntime.Tok(c);
+        foreach (var kv in G.Coils) if (PadRuntime.Tok(kv.Key) == t) return kv.Value;
+        return null;
+    }
+
+    public static string CoilPulse(string c, int ms) {
+        var k = CoilOf(c);
+        if (k == null) return null;
+        k.pulse(ms > 0 ? Math.Min(ms, 50) : -1);
+        return ms > 0 ? "pulse " + Math.Min(ms, 50) + " ms" : "pulse, its own";
+    }
+
+    // Pinotar's firmware hold: power on-time of a 32 period, for up to 5 s, then off by itself
+    public static string CoilHold(string c, int power) {
+        var k = CoilOf(c);
+        if (k == null) return null;
+        Pinotar.set_coil_hold_pwm(k.num, (byte)power, 32);
+        Pinotar.set_coil_hold_time(k.num, 5000);
+        Pinotar.pulse(k.num);
+        return "Pinotar hold " + power + "/32";
+    }
+
+    public static void CoilRelease(string c) { var k = CoilOf(c); if (k != null) Pinotar.disable_coil(k.num); }
+
+    public static string AddBalls(int n) { G.trough.launch_ball(n); return "trough.launch_ball(" + n + ")"; }
+
+    public static string BallSave(int secs, int balls) {
+        if (balls > 1) { G.ballsavemode.enable_mb_save(balls, secs); return "enable_mb_save " + balls + " balls " + secs + " s"; }
+        G.ballsavemode.enable_save(secs, 1);
+        return "enable_save " + secs + " s";
+    }
+
+    public static void BallSaveOff(int secs) { if (G.ballsavemode.save_enabled) G.ballsavemode.disable_save(); }
+#endif
+
     // ---- balls and game modes (PAD-1424 start rules)
     public static int BallsPerGame() { return G.balls_per_game; }
     public static int Ball() { return HasPlayers() ? G.ball : 0; }

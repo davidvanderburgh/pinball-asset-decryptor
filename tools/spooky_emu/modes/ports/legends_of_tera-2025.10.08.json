@@ -2987,5 +2987,7 @@
   "Truculenta-Medium",
   "digital-7 (mono)"
  ],
- "points_scale": 1
+ "points_scale": 1,
+ "coils": ["SLING_LEFT", "DROP_TARGET_KNOCKDOWN", "DIVERTER_RAMP_LL", "DROP_TARGET_RESET", "SHAKER", "SLING_RIGHT", "KNOCKER", "POST_TNT_LOCK", "MAGNET", "DIVERTER_ORBIT"],
+ "coil_holds": ["DIVERTER_RAMP_LL", "SHAKER", "POST_TNT_LOCK", "MAGNET", "DIVERTER_ORBIT"]
 }

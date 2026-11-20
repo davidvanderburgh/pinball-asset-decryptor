@@ -185,6 +185,7 @@ def load_modes(game, d):
         }
         m["title"] = cfg.get("title") or m["name"]
         start_rules(game, fn, m, cfg)
+        lamps_coils_balls(game, fn, m, cfg)
         out.append(m)
         log('mode %s "%s": start %s x%d, shots %s, %d points, %s, complete %d (+%d)' % (
             fn, m["name"], " ".join(m["start"]) or "-", m["start_count"], " ".join(m["shots"]) or "-",
@@ -209,6 +210,59 @@ def start_rules(game, fn, m, cfg):
             fn, " ".join(sorted(m["start_on"])) or "-", " ".join(sorted(m["start_after"])) or "-",
             m["start_score"], " ".join(m["combo"]) or "-", m["combo_seconds"], m["once"],
             "ball" if m["reset_ball"] else "game"))
+
+
+def lamps_coils_balls(game, fn, m, cfg):
+    """PAD-1424: lamps on the game's LED controller, its coils, its balls (MODES.md "Balls and coils")."""
+    m["lamps"] = [w for w in cfg.get("lamps", "").replace(",", " ").split()]
+    m["lamp_color"] = (cfg.get("lamp_color") or "ffffff").lstrip("#")[:6].lower()
+    m["lamp_blink"] = max(0, min(10, to_int(cfg.get("lamp_blink"), 4)))
+    mb = cfg.get("multiball", "").split()
+    m["mb_balls"] = max(0, min(6, to_int(mb[0], 0))) if mb else 0
+    m["mb_save"] = max(0, min(120, to_int(mb[1], 10))) if len(mb) > 1 else 10
+    m["mb_on"] = switches(game, fn, "multiball_on", cfg.get("multiball_on", ""))
+    ab = cfg.get("add_ball", "").replace(",", " ").split()
+    times = 1
+    if ab and ab[-1].isdigit() and len(ab) > 1:
+        times = max(1, min(6, int(ab[-1])))
+        ab = ab[:-1]
+    m["add_ball"] = switches(game, fn, "add_ball", " ".join(ab))
+    m["add_times"] = times
+    m["ball_save"] = max(0, min(120, to_int(cfg.get("ball_save"), 0)))
+    for k in ("coil_start", "coil_shot", "coil_complete"):
+        w = cfg.get(k, "").split()
+        m[k] = (w[0], to_int(w[1], 0) if len(w) > 1 else 0) if w else None
+    w = cfg.get("coil_hold", "").split()
+    m["coil_hold"] = (w[0], max(100, min(5000, to_int(w[1], 1000))) if len(w) > 1 else 1000,
+                      max(1, min(16, to_int(w[2], 8))) if len(w) > 2 else 8) if w else None
+    on = (cfg.get("coil_hold_on") or "shots").strip()
+    m["hold_on"] = on if on in ("shots", "start") else switches(game, fn, "coil_hold_on", on)
+    m["holds_ok"] = (cfg.get("coil_holds") or "off") == "on"
+    m.update(mb_served=False, mb_at=0.0, one_since=0.0, added=0, lamps_on=[], held=None)
+
+
+def _norm(name):
+    return "_".join((name or "").split()).lower()
+
+
+def _item(collection, name):
+    """A lamp, LED or coil of the game's by its name as a mode file writes it (spaces as _)."""
+    if collection is None:
+        return None
+    try:
+        it = getattr(collection, name, None)
+        if it is not None and hasattr(it, "name"):
+            return it
+    except Exception:
+        pass
+    want = _norm(name)
+    try:
+        for it in collection:
+            if _norm(getattr(it, "name", "")) == want:
+                return it
+    except Exception:
+        pass
+    return None
 
 
 #: switches that are not the playfield (valid_playfield is the ball's first playfield switch)
@@ -294,7 +348,8 @@ def _runtime_class(base):
             want_all = any("valid_playfield" in m.get("start_on", ()) for m in modes)
             names = list(_switch_names(game).values()) if want_all else []
             for m in modes:
-                for n in m["start"] + m["shots"] + m.get("combo", []) + names:
+                for n in (m["start"] + m["shots"] + m.get("combo", []) + m.get("mb_on", []) + m.get("add_ball", [])
+                          + (m["hold_on"] if isinstance(m.get("hold_on"), list) else []) + names):
                     if n not in seen:
                         seen.append(n)
                         self.add_switch_handler(name=n, event_type="active", delay=None, handler=self.pad_switch)
@@ -374,6 +429,7 @@ def _runtime_class(base):
                         self.pad_event("valid_playfield")
                     for m in self.pad_modes:
                         if m["running"]:
+                            self.pad_running_switch(m, sw.name)
                             if sw.name in m["shots"]:
                                 self.pad_shot(m, sw.name)
                             continue
@@ -463,6 +519,15 @@ def _runtime_class(base):
             m["left"] = float(m["seconds"])
             log("%s: STARTED (%s)" % (m["name"], ("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends"))
             self.pad_sound(m, "sound_start")
+            m.update(mb_served=False, mb_at=0.0, one_since=0.0, added=0)
+            self.pad_lamps(m, True)
+            self.pad_coil(m, "coil_start")
+            if m.get("hold_on") == "start":
+                self.pad_hold(m)
+            if m.get("ball_save"):
+                self.pad_ball_save(m, m["ball_save"])
+            if m.get("mb_balls") and not m.get("mb_on"):
+                self.pad_multiball(m)
             self.shown = m
             self.pad_draw()
 
@@ -474,12 +539,16 @@ def _runtime_class(base):
                 m["name"], m["made"], (" of %d" % m["complete"]) if m["complete"] > 0 else "", name, got,
                 pad_score(self.game)))
             self.pad_sound(m, "sound_shot")
+            self.pad_coil(m, "coil_shot")
+            if m.get("hold_on") == "shots":
+                self.pad_hold(m)
             self.shown = m
             if m["complete"] > 0 and m["made"] >= m["complete"]:
                 bonus = pad_award(self.game, m["complete_points"]) if m["complete_points"] > 0 else 0
                 m["total"] += bonus
                 log("%s: COMPLETED, bonus %d, mode total %d" % (m["name"], bonus, m["total"]))
                 self.pad_sound(m, "sound_complete")
+                self.pad_coil(m, "coil_complete")
                 self.pad_stop(m, "")
                 return
             self.pad_draw()
@@ -491,6 +560,10 @@ def _runtime_class(base):
             if why:
                 log("%s: ended (%s), %d shot(s), total %d" % (m["name"], why, m["made"], m["total"]))
                 self.pad_sound(m, "sound_end")
+            self.pad_lamps(m, False)
+            self.pad_unhold(m)
+            if m.get("ball_save") and not m.get("mb_balls"):
+                self.pad_ball_save_off(m)
             if self.shown is m:
                 self.shown = next((x for x in self.pad_modes if x["running"]), None)
             self.pad_draw()
@@ -510,16 +583,208 @@ def _runtime_class(base):
                     self.pad_watch_voices()
                 self.pad_rules(now)
                 for m in self.pad_modes:
-                    if m["running"] and m["seconds"] > 0:
+                    if m["running"] and m["seconds"] > 0 and not (m.get("mb_served") and m.get("mb_on")):
                         m["left"] -= dt
                         if m["left"] <= 0:
                             self.pad_stop(m, "time ran out")
+                    if m["running"]:
+                        self.pad_balls_tick(m, now)
+                        self.pad_lamps_tick(m, now)
+                        held = m.get("held")
+                        if held and now >= held[1]:
+                            self.pad_unhold(m)
                 if self.shown is not None and self.shown["running"] and (
                         self.shown["seconds"] > 0 or unity_client(self.game) is not None):
                     self.pad_draw(timer_only=True)
             except Exception:
                 log("tick failed: %s" % traceback.format_exc())
             return super(PadRuntime, self).mode_tick()
+
+        # ------------------------------------------------------------ lamps, coils, balls (PAD-1424)
+        def pad_running_switch(self, m, name):
+            if m.get("mb_on") and name in m["mb_on"] and not m.get("mb_served"):
+                self.pad_multiball(m)
+            if m.get("add_ball") and name in m["add_ball"]:
+                if m["added"] < m["add_times"]:
+                    m["added"] += 1
+                    log("%s: add a ball on %s (%d of %d)" % (m["name"], name, m["added"], m["add_times"]))
+                    self.pad_add_balls(m, 1)
+                    self.pad_ball_save(m, max(2, m["mb_save"] if m.get("mb_balls") else 2), balls=1)
+            if isinstance(m.get("hold_on"), list) and name in m["hold_on"]:
+                self.pad_hold(m)
+
+        def pad_lamps(self, m, on):
+            """Our colour on the mode's lamps, above the game's own (its LED controller at our
+            priority), blinking lamp_blink times a second; handed back when it ends."""
+            names = m.get("lamps") or []
+            if not names:
+                return
+            g = self.game
+            ctl = getattr(g, "LEDs", None)
+            done = []
+            for n in names:
+                try:
+                    led = _item(getattr(g, "leds", None), n)
+                    lamp = None if led is not None else _item(getattr(g, "lamps", None), n)
+                    if led is not None and ctl is not None:
+                        if on:
+                            c, b = m["lamp_color"], m["lamp_blink"]
+                            if b > 0:
+                                half = int(500 / b)
+                                ctl.run_script(led.name, [{"color": c, "time": half, "fade": False},
+                                                          {"color": "000000", "time": half, "fade": False}],
+                                               priority=PRIORITY, repeat=True, blend=False)
+                            else:
+                                ctl.enable(led.name, priority=PRIORITY, color=c)
+                        else:
+                            try:
+                                ctl.stop_script(led.name, priority=PRIORITY)
+                            except Exception:
+                                pass
+                            ctl.disable(led.name, priority=PRIORITY)
+                        done.append(led.name)
+                    elif lamp is not None:
+                        if on and m["lamp_blink"] > 0:
+                            lamp.schedule(schedule=0x0f0f0f0f if m["lamp_blink"] >= 4 else 0x00ff00ff,
+                                          cycle_seconds=0, now=True)
+                        elif on:
+                            lamp.enable()
+                        else:
+                            lamp.disable()
+                        done.append(lamp.name)
+                    else:
+                        log("%s: lamp %s is not one of this game's lamps" % (m["name"], n))
+                except Exception:
+                    log("%s: lamp %s failed: %s" % (m["name"], n, traceback.format_exc()))
+            if not on and done and hasattr(g, "update_lamps"):
+                try:
+                    g.update_lamps()          # Alice Cooper lights at priority 0, which disable() skips
+                except Exception:
+                    pass
+            if done:
+                log("%s: lamps %s %s%s" % (m["name"], " ".join(done), "lit #" + m["lamp_color"] if on else "handed back",
+                                          (", %d flashes a second" % m["lamp_blink"]) if on and m["lamp_blink"] else ""))
+            m["lamps_on"] = done if on else []
+
+        def pad_lamps_tick(self, m, now):
+            return None                   # the game's controller keeps ours: nothing to re-assert
+
+        def _pad_coil_item(self, name):
+            return _item(getattr(self.game, "coils", None), name)
+
+        def pad_coil(self, m, key):
+            spec = m.get(key)
+            if not spec:
+                return
+            name, ms = spec
+            c = self._pad_coil_item(name)
+            if c is None:
+                log("%s: %s %s is not one of this game's coils" % (m["name"], key, name))
+                return
+            try:
+                own = int(getattr(c, "default_pulse_time", 0) or 0)
+                use = min(ms, own) if ms and own else (ms or None)
+                if use:
+                    c.pulse(use)
+                else:
+                    c.pulse()
+                log("%s: %s pulsed %s (%s ms)" % (m["name"], key, c.name, use or own or "its own"))
+            except Exception:
+                log("%s: %s %s failed: %s" % (m["name"], key, name, traceback.format_exc()))
+
+        def pad_hold(self, m):
+            spec = m.get("coil_hold")
+            if not spec:
+                return
+            if not m.get("holds_ok"):
+                log("%s: coil_hold %s refused: title.cfg has no coil_holds = on" % (m["name"], spec[0]))
+                return
+            name, ms, power = spec
+            c = self._pad_coil_item(name)
+            if c is None:
+                log("%s: coil_hold %s is not one of this game's coils" % (m["name"], name))
+                return
+            try:
+                c.patter(on_time=power, off_time=32 - power, original_on_time=0, now=True)
+                m["held"] = (c, time.time() + ms / 1000.0)
+                log("%s: holding %s for %d ms at %d of 32" % (m["name"], c.name, ms, power))
+            except Exception:
+                log("%s: coil_hold %s failed: %s" % (m["name"], name, traceback.format_exc()))
+
+        def pad_unhold(self, m):
+            held = m.get("held")
+            if not held:
+                return
+            m["held"] = None
+            try:
+                held[0].disable()
+                log("%s: let go of %s" % (m["name"], held[0].name))
+            except Exception:
+                log("%s: releasing %s failed: %s" % (m["name"], getattr(held[0], "name", "?"), traceback.format_exc()))
+
+        def pad_add_balls(self, m, n):
+            """n more balls into play through the game's own trough (counted as in play)."""
+            t = getattr(self.game, "trough", None)
+            try:
+                if hasattr(t, "add_balls"):
+                    got = t.add_balls(n)
+                    how = "trough.add_balls"
+                elif hasattr(t, "launch_and_autoplunge_balls"):
+                    got = t.launch_and_autoplunge_balls(n)
+                    how = "trough.launch_and_autoplunge_balls"
+                else:
+                    got = t.launch_balls(n, None, stealth=False)
+                    how = "trough.launch_balls"
+                log("%s: %d ball(s) asked of the game (%s -> %r), %d in play" % (m["name"], n, how, got,
+                                                                                 _balls_in_play(self.game)))
+            except Exception:
+                log("%s: adding a ball failed: %s" % (m["name"], traceback.format_exc()))
+
+        def pad_multiball(self, m):
+            want = m.get("mb_balls") or 0
+            have = max(1, _balls_in_play(self.game))
+            m["mb_served"], m["mb_at"] = True, time.time()
+            if want > have:
+                self.pad_add_balls(m, want - have)
+            log("%s: multiball, %d balls in play wanted, ball save %d s" % (m["name"], want, m["mb_save"]))
+            if m["mb_save"]:
+                self.pad_ball_save(m, m["mb_save"], balls=max(1, want - 1))
+
+        def pad_balls_tick(self, m, now):
+            """A multiball of ours ends the mode once one ball is left for 2 s, after its ball
+            save and 3 s more."""
+            if not m.get("mb_served"):
+                return
+            if now - m["mb_at"] < m["mb_save"] + 3:
+                return
+            if _balls_in_play(self.game) <= 1:
+                if not m["one_since"]:
+                    m["one_since"] = now
+                elif now - m["one_since"] >= 2:
+                    self.pad_stop(m, "one ball left")
+            else:
+                m["one_since"] = 0.0
+
+        def pad_ball_save(self, m, secs, balls=1):
+            g = self.game
+            try:
+                if hasattr(g, "enable_ball_saver"):
+                    g.enable_ball_saver(num_balls_to_save=balls, time=secs, now=True, allow_multiple_saves=balls > 1)
+                else:
+                    g.ball_save.start(balls, secs, True, balls > 1)
+                log("%s: ball save %d s (%d ball(s))" % (m["name"], secs, balls))
+            except Exception:
+                log("%s: ball save failed: %s" % (m["name"], traceback.format_exc()))
+
+        def pad_ball_save_off(self, m):
+            bs = getattr(self.game, "ball_save", None)
+            try:
+                left = bs.time_remaining() if hasattr(bs, "time_remaining") else None
+                if bs is not None and bs.is_active() and (left is None or left <= m["ball_save"] + 2):
+                    bs.disable()
+                    log("%s: its ball save ended with it" % m["name"])
+            except Exception:
+                pass
 
         # ------------------------------------------------------------ sounds
         def pad_sound(self, m, key):

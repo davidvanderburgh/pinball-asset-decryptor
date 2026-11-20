@@ -252,3 +252,115 @@ def test_proc_nothing_starts_outside_a_ball(pm, tmp_path, monkeypatch):
     r = _runtime(pm, tmp_path, monkeypatch, ["start_on = ball_saved\n"])
     r.evt_ball_saved()                                      # before the first ball
     assert not r.pad_modes[0]["running"]
+
+
+# ============================================================================ lamps, coils, balls (P-ROC)
+class _Item(object):
+    def __init__(self, name, log, pulse_ms=30):
+        self.name, self.log, self.default_pulse_time = name, log, pulse_ms
+
+    def pulse(self, ms=None):
+        self.log.append(("pulse", self.name, ms))
+
+    def patter(self, on_time=10, off_time=10, original_on_time=0, now=True):
+        self.log.append(("patter", self.name, on_time, off_time))
+
+    def disable(self):
+        self.log.append(("disable", self.name))
+
+
+class _Items(list):
+    def __getattr__(self, n):
+        for it in self:
+            if it.name == n:
+                return it
+        raise AttributeError(n)
+
+
+class _LEDs(object):
+    def __init__(self, log):
+        self.log = log
+
+    def enable(self, name, priority=0, color=None):
+        self.log.append(("led", name, priority, color))
+
+    def run_script(self, name, script, priority=0, repeat=True, blend=False):
+        self.log.append(("script", name, priority, [s["color"] for s in script], script[0]["time"]))
+
+    def stop_script(self, name, priority=0):
+        self.log.append(("stop_script", name, priority))
+
+    def disable(self, name, priority=0):
+        self.log.append(("led_off", name, priority))
+
+
+def _lcb(pm, tmp_path, monkeypatch, body, title=""):
+    r = _runtime(pm, tmp_path, monkeypatch, [body])
+    g, log = r.game, []
+    g.hw = log
+    g.leds = _Items([_Item("rightRampTriangle", log), _Item("shootAgainRGBLeft", log)])
+    g.LEDs = _LEDs(log)
+    g.coils = _Items([_Item("knocker", log, 7), _Item("shipPost", log), _Item("diverter", log)])
+    g.trough.add_balls = lambda n: (log.append(("add_balls", n)), setattr(g.trough, "num_balls_in_play",
+                                                                         g.trough.num_balls_in_play + n))[0]
+    g.enable_ball_saver = lambda num_balls_to_save=1, time=None, now=True, allow_multiple_saves=False: \
+        log.append(("ball_save", num_balls_to_save, time))
+    g.ball_save = types.SimpleNamespace(is_active=lambda: True, time_remaining=lambda: 3,
+                                        disable=lambda: log.append(("ball_save_off",)))
+    for m in r.pad_modes:
+        m["holds_ok"] = "coil_holds = on" in title
+    r.evt_ball_starting()
+    return r, log
+
+
+def test_proc_lamps_and_coils(pm, tmp_path, monkeypatch):
+    r, log = _lcb(pm, tmp_path, monkeypatch,
+                  "start = leftInlane\nseconds = 5\nlamps = rightRampTriangle shootAgainRGBLeft\nlamp_color = ff0000\n"
+                  "lamp_blink = 2\ncoil_start = knocker 50\ncoil_shot = diverter\ncoil_complete = knocker 3\n"
+                  "coil_hold = shipPost 1500 4\ncoil_hold_on = start\ncomplete = 2\n", title="coil_holds = on")
+    r.pad_switch(_Sw("leftInlane"))
+    assert ("script", "rightRampTriangle", pm.PRIORITY, ["ff0000", "000000"], 250) in log
+    assert ("pulse", "knocker", 7) in log                   # 50 asked: only ever shorter than its own 7
+    assert ("patter", "shipPost", 4, 28) in log
+    _tick(r, 1.0)
+    _tick(r, 0.6)
+    assert ("disable", "shipPost") in log                   # its 1.5 s are up
+    r.pad_switch(_Sw("slingRight"))
+    assert ("pulse", "diverter", None) in log
+    r.pad_switch(_Sw("slingRight"))
+    assert ("pulse", "knocker", 3) in log and not r.pad_modes[0]["running"]
+    assert ("led_off", "rightRampTriangle", pm.PRIORITY) in log and ("led_off", "shootAgainRGBLeft", pm.PRIORITY) in log
+
+
+def test_proc_hold_needs_coil_holds_on(pm, tmp_path, monkeypatch):
+    r, log = _lcb(pm, tmp_path, monkeypatch, "start = leftInlane\ncoil_hold = shipPost 1500\ncoil_hold_on = start\n")
+    r.pad_switch(_Sw("leftInlane"))
+    assert not [x for x in log if x[0] == "patter"] and "coil_holds = on" in r.log.read_text()
+
+
+def test_proc_multiball_add_ball_ball_save(pm, tmp_path, monkeypatch):
+    r, log = _lcb(pm, tmp_path, monkeypatch, "start = leftInlane\nmultiball = 3 5\nmultiball_on = spinner\n"
+                                             "add_ball = rightInlane 1\nseconds = 20\n")
+    m = r.pad_modes[0]
+    r.pad_switch(_Sw("leftInlane"))
+    assert m["running"] and not [x for x in log if x[0] == "add_balls"]     # waits for its multiball_on
+    r.pad_switch(_Sw("spinner"))
+    assert ("add_balls", 2) in log and ("ball_save", 2, 5) in log
+    r.pad_switch(_Sw("rightInlane"))
+    r.pad_switch(_Sw("rightInlane"))                        # up to once a run
+    assert log.count(("add_balls", 1)) == 1
+    _tick(r, 30)                                            # the clock stopped when the balls came
+    assert m["running"]
+    r.game.trough.num_balls_in_play = 1
+    _tick(r, 1)
+    _tick(r, 2.5)
+    assert not m["running"] and "ended (one ball left)" in r.log.read_text()
+
+
+def test_proc_ball_save_ends_with_the_mode(pm, tmp_path, monkeypatch):
+    r, log = _lcb(pm, tmp_path, monkeypatch, "start = leftInlane\nball_save = 8\nseconds = 2\n")
+    r.pad_switch(_Sw("leftInlane"))
+    assert ("ball_save", 1, 8) in log
+    for _ in range(3):                                      # a tick counts at most 1 s
+        _tick(r, 1.0)
+    assert ("ball_save_off",) in log

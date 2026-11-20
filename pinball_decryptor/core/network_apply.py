@@ -104,6 +104,23 @@ def to_card(path, *, wifi=None, buttons=None, stern_from=None, log=None, progres
                     done += len(chunk)
                     tick(done, size * 3, 'Reading the card')
         before = ssh_card._hash_file(part)
+        # what the card has already is left exactly as it is (found on a real card image: putting the same
+        # options on twice rewrote 2 MB of identical files and said "done")
+        with part.open('rb') as f:
+            r = Ext4Reader(f, 0, size)
+            if wifi is not None:
+                ws = wifi_card.inspect_root(r)
+                want_on, want_band = bool(wifi.get('enabled')), bool(wifi.get('enabled') and wifi.get('band5'))
+                if ws['enabled'] == want_on and ws['band5'] == want_band and (want_band or ws['stern_module']):
+                    wifi = None
+            if buttons is not None:
+                bs = remote_buttons.inspect_root(r)
+                want = bool(buttons.get('enabled'))
+                if bs['enabled'] == want and (want or not (bs['hooked'] or bs['file'])):
+                    buttons = None
+        if wifi is None and buttons is None:
+            say('%s already has what is ticked; nothing was changed.' % what, 'ok')
+            return 'already'
         say('Putting on %s...' % _said(wifi, buttons), 'info')
         if wifi is not None:
             on, band = bool(wifi.get('enabled')), bool(wifi.get('enabled') and wifi.get('band5'))

@@ -379,3 +379,25 @@ limit), so 16 GB held the game for over an hour. David: "a whole backup from the
 
 Not tried on the machine: recording the live view in the real page (its saving step has a test); the live view's
 cost to a game being played.
+
+## Network options without a build of the project (2026-11-20)
+
+Asked for after the layout: a flash that keeps the network options, and the Wi-Fi and remote-buttons options put
+straight where they go.
+
+- **Keep my network settings on this card** (`core/network_keep.py`, the flash dialog, `SternFlashImagePipeline`
+  `network_from=`): a copy of the image is built from a project that holds only the real project's `extras`
+  records that are on (ssh, wifi, buttons), written, and removed. On a copy of the real Heisei V2.3 image: 36 s,
+  all three on the copy, the image itself unchanged, the copy removed. Not seen in the dialog on screen, and no
+  physical card was written this way.
+- **Straight onto an attached card or card image** (`network_apply.to_card`, after `remote_setup.set_up`): the
+  system partition copied off, `wifi_card.prepare_rootfs` / `remote_buttons.prepare_rootfs` on the copy, the
+  differing blocks written back, all read back. On the V2.3 image file: on in 5 s (10 MB changed), the same again
+  says "already" and writes nothing, off puts Stern's driver and the start-up script back. Not run on a physical
+  card (that goes through the administrator helper, `elevated_flash`'s `network_options` job).
+- **Straight onto the machine** (`network_apply.to_machine`): each file written beside its place, its sha1 read
+  back before any is moved in, then a restart. On the Godzilla its plan was right both ways (everything ticked is
+  byte-identical already, so nothing written; taking all off would write the script and Stern's driver and remove
+  five files). A write-and-restart over this route was not run on the machine.
+- Neither direct route carries the menu wording (a game-program edit) or the score feed (PAD's mode runtime):
+  `network_apply.WAYS` is what each Network tab panel shows.

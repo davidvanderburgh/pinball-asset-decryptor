@@ -76,6 +76,8 @@ def test_screen_keys_refused_by_name(mk, port, tmp_path):
     assert len(problems) == 2
     assert problems[0].startswith("title.cfg:2: font_title: Alice Cooper's Nightmare Castle's screen is its Unity player")
     assert problems[1].startswith("1_rush.mode:5: panel_color:") and "box colour" in problems[1]
+    _m, problems = mk.check_modes(_modes(tmp_path, title_color="ff202080", value_color="ffdc00ff"), port)
+    assert len(problems) == 1 and "title_color" in problems[0] and "cannot be see-through" in problems[0]
     rm = mk.load_port(RM)                                   # Rick and Morty draws its own panel: fonts are fine
     assert not any("Unity player" in p for p in mk.check_modes(
         _modes(tmp_path, title="game = rick_and_morty\nfont_title = neo_128\n", start="leftInlane",

@@ -197,9 +197,15 @@ def check_value(kind, v, port):
 UNITY_SCREEN_NOT = ("font_title", "font_value", "font_timer", "panel_color")
 
 
-def not_on_screen(k, port):
-    """Why *k* cannot show on this title's screen, or None."""
-    if (port or {}).get("screen") == "unity_player" and k in UNITY_SCREEN_NOT:
+def not_on_screen(k, port, v=""):
+    """Why *k* (= *v*) cannot show on this title's screen, or None."""
+    if (port or {}).get("screen") != "unity_player":
+        return None
+    h = (v or "").strip().lstrip("#")
+    if k.endswith("_color") and k not in UNITY_SCREEN_NOT and len(h) == 8 and h[6:].lower() != "ff":
+        return ("%s: %s's Unity player draws its text solid, so it cannot be see-through; give the "
+                "colour without its last two digits (%s)" % (k, port.get("title", "this game"), h[:6]))
+    if k in UNITY_SCREEN_NOT:
         what = "font" if k.startswith("font_") else "box colour"
         return ("%s: %s's screen is its Unity player, which draws the game's own text in its one font, "
                 "with no box behind it, so a %s cannot be set there; take the line out" % (
@@ -226,8 +232,8 @@ def check_modes(mode_dir, port=None):
                 if kind is None:
                     problems.append("title.cfg:%d: %s" % (n, _unknown(k)))
                     continue
-                if not_on_screen(k, port):
-                    problems.append("title.cfg:%d: %s" % (n, not_on_screen(k, port)))
+                if not_on_screen(k, port, v):
+                    problems.append("title.cfg:%d: %s" % (n, not_on_screen(k, port, v)))
                     continue
                 p = check_value(kind, v, port)
                 if p:
@@ -251,8 +257,8 @@ def check_modes(mode_dir, port=None):
             if kind is None:
                 problems.append("%s:%d: %s" % (fn, n, _unknown(k)))
                 continue
-            if not_on_screen(k, port):
-                problems.append("%s:%d: %s" % (fn, n, not_on_screen(k, port)))
+            if not_on_screen(k, port, v):
+                problems.append("%s:%d: %s" % (fn, n, not_on_screen(k, port, v)))
                 continue
             p = check_value(kind, v, port)
             if p:

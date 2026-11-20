@@ -28,6 +28,7 @@ public class Hook : Mode {
             else if (what == Messages.ball_start) r.OnBallStart();
             else if (what == Messages.end_of_ball) r.OnBallEnd("the ball ended");
             else if (what == Messages.tilt) r.OnBallEnd("tilt");
+            else if (what == Messages.ball_saved) r.GameEvent("ball_saved");
             else if (what == Messages.mode_started && data == Modes.attract_mode) r.OnGameEnd();
         } catch (Exception e) { Loader.Log("process_message: " + e); }
         return 0;
@@ -72,6 +73,26 @@ public static class Glue {
     public static bool HasPlayers() {
         Game g = Mode.machine.game;
         return g != null && g.players != null && g.players.Count > 0;
+    }
+
+    // ---- balls and game modes (PAD-1424 start rules)
+    static Player Up() { return HasPlayers() ? Mode.machine.game.player() : null; }
+    public static int BallsPerGame() { return (int)Mode.machine.settings.balls_per_game.current_value; }
+    // no ball number of its own: balls_remaining counts down at each ball's end (not an extra ball's)
+    public static int Ball() { var p = Up(); return p == null ? 0 : (int)(BallsPerGame() - p.balls_remaining + 1); }
+    public static int Player() { return HasPlayers() ? Mode.machine.game.current_player : 0; }
+    public static int ExtraBallsLeft() { var p = Up(); return p == null ? 0 : p.extra_ball; }
+    public static int ExtraBallsAwarded() { var p = Up(); return p == null ? -1 : p.extra_ball; }
+    public static int BallsInPlay() { return HasPlayers() ? Mode.machine.game.balls_in_play : -1; }
+
+    public static List<string> RunningModes() {
+        var o = new List<string>();
+        foreach (var m in Modes.modes.Values)
+            if (m != null && m.active && m.mode != PadRuntime.ModeId) {
+                o.Add(m.GetType().Name);
+                if (!string.IsNullOrEmpty(m.name)) o.Add(m.name);
+            }
+        return o;
     }
 
     public static long PlayerScore() { return HasPlayers() ? Mode.machine.game.player().score : 0; }

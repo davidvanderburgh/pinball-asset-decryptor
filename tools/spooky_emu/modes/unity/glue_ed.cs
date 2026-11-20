@@ -48,9 +48,39 @@ public static class Glue {
 
     public static int ModeCount() { return G.modes.Count; }
 
+    static int savesSeen;
+
     public static void Poll(PadRuntime r) {
         var g = G;
         r.Track(g.gameActive, g.current_player_number, g.ball, g.tiltmode != null && g.tiltmode.tilted);
+        // no ball-saved event: troughMode.checkForSaves counts each save it serves
+        int saves = g.trough != null ? g.trough.savingBallCount : 0;
+        if (saves > savesSeen && g.gameActive) r.GameEvent("ball_saved");
+        savesSeen = saves;
+    }
+
+    // ---- balls and game modes (PAD-1424 start rules)
+    static global::Player Up() {
+        if (!HasPlayers()) return null;
+        int i = G.getCurrentPlayerIndex();
+        return i >= 0 && i < G.players.Count ? G.players[i] : null;
+    }
+    public static int BallsPerGame() { return G.balls_per_game; }
+    public static int Ball() { return HasPlayers() ? G.ball : 0; }
+    public static int Player() { return HasPlayers() ? G.getCurrentPlayerIndex() : 0; }
+    public static int ExtraBallsLeft() { var p = Up(); return p == null ? 0 : p.extra_balls; }
+    public static int ExtraBallsAwarded() { var p = Up(); return p == null ? -1 : p.extra_balls; }
+    public static int BallsInPlay() { return HasPlayers() && G.trough != null ? G.trough.activeBalls : -1; }
+
+    // a game mode runs while it is in the list and started (ended ones wait there to be removed)
+    public static List<string> RunningModes() {
+        var o = new List<string>();
+        foreach (var m in G.modes)
+            if (m != null && m != hook && m.modeStarted) {
+                o.Add(m.GetType().Name);
+                if (!string.IsNullOrEmpty(m.Name)) o.Add(m.Name);
+            }
+        return o;
     }
 
     public static List<Sw> Switches() {

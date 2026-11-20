@@ -54,6 +54,16 @@ public class Hook : Mode {
         try { Loader.Runtime.OnBallEnd("the ball ended"); } catch (Exception e) { Loader.Log("evt_ball_ending: " + e); }
         return true;
     }
+
+    // the game's ball save served a ball back (PAD-1424 start_on ball_saved)
+#if TCM
+    public bool evt_ballSaved_regular(string msg) {
+#else
+    public bool evt_ball_saving(string msg) {
+#endif
+        try { Loader.Runtime.GameEvent("ball_saved"); } catch (Exception e) { Loader.Log("ball saved: " + e); }
+        return true;
+    }
 }
 
 public static class Glue {
@@ -169,6 +179,74 @@ public static class Glue {
     }
 
     public static bool HasPlayers() { var g = G; return g != null && g.players != null && g.players.Count > 0; }
+
+    // ---- balls and game modes (PAD-1424 start rules)
+    public static int BallsPerGame() { return G.balls_per_game; }
+    public static int Ball() { return HasPlayers() ? G.ball : 0; }
+#if TCM
+    public static int Player() { return HasPlayers() ? G.getCurrentPlayerIndex() : 0; }
+    static global::Player Up() {
+        if (!HasPlayers()) return null;
+        int i = G.getCurrentPlayerIndex();
+        return i >= 0 && i < G.players.Count ? G.players[i] : null;
+    }
+    public static int ExtraBallsLeft() { var p = Up(); return p == null ? 0 : p.extra_balls; }
+    public static int ExtraBallsAwarded() { var p = Up(); return p == null ? -1 : p.extra_balls; }
+    public static int BallsInPlay() { return HasPlayers() ? G.getBallsInPlay() : -1; }
+
+    // Texas Chainsaw adds a game mode to _modes while it runs and takes it out when it is done
+    public static List<string> RunningModes() {
+        var o = new List<string>();
+        foreach (var m in G._modes)
+            if (m != null && m != hook) {        // the always-on ones never leave: never "ended"
+                o.Add(m.GetType().Name);
+                if (!string.IsNullOrEmpty(m.Name)) o.Add(m.Name);
+            }
+        return o;
+    }
+#else
+    public static int Player() { return HasPlayers() ? Math.Max(0, G.getCurrentPlayer() - 1) : 0; }
+    // one count for the game (extraballMode.extraballs): what the player up has to play
+    public static int ExtraBallsLeft() { var e = G.extraballmode; return e == null ? 0 : e.extraballs; }
+    public static int ExtraBallsAwarded() { var e = G.extraballmode; return HasPlayers() && e != null ? e.extraballs : -1; }
+    public static int BallsInPlay() { return HasPlayers() && G.trough != null ? G.trough.BallsInPlay() : -1; }
+
+    // Halloween and Ultraman keep every mode in _modes; a game mode says it runs with a flag of
+    // its own (modeStarted, mb_started, incidental_running ...), read by reflection
+    static readonly string[] RunFlags = { "modeStarted", "mb_started", "hedge_mb_started", "incidental_running",
+        "IsCaptureMultiballRunning" };
+    static readonly Dictionary<Type, MemberInfo[]> flags = new Dictionary<Type, MemberInfo[]>();
+
+    static bool Runs(Mode m) {
+        MemberInfo[] fs;
+        var t = m.GetType();
+        if (!flags.TryGetValue(t, out fs)) {
+            var l = new List<MemberInfo>();
+            foreach (var n in RunFlags) {
+                var f = t.GetField(n, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (f != null && f.FieldType == typeof(bool)) { l.Add(f); continue; }
+                var pr = t.GetProperty(n, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (pr != null && pr.PropertyType == typeof(bool) && pr.CanRead) l.Add(pr);
+            }
+            flags[t] = fs = l.ToArray();
+        }
+        foreach (var f in fs) {
+            object v = f is FieldInfo ? ((FieldInfo)f).GetValue(m) : ((PropertyInfo)f).GetValue(m, null);
+            if (v is bool && (bool)v) return true;
+        }
+        return false;
+    }
+
+    public static List<string> RunningModes() {
+        var o = new List<string>();
+        foreach (var m in G._modes)
+            if (m != null && m != hook && Runs(m)) {
+                o.Add(m.GetType().Name);
+                if (!string.IsNullOrEmpty(m.Name)) o.Add(m.Name);
+            }
+        return o;
+    }
+#endif
 
     public static long PlayerScore() {
         if (!HasPlayers()) return 0;

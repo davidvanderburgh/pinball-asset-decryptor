@@ -48,6 +48,15 @@ var measured := false
 var voices := []       # [[key, ticks, starts needed]] our callouts the voice channel has not taken yet
 var voice_starts := 0  # clips the voice channel has started (polled)
 var voice_last := [null, 0.0]
+# start rules (PAD-1424)
+var valid_seen := false
+var mb_since := 0.0
+var mb_was := false
+var last_running = null
+var extra_seen := -1
+var rules_at := 0.0
+const NOT_PLAYFIELD := ["trough", "shooter", "plunge", "launch", "flipper", "start", "coin", "door", "tilt",
+	"slam", "outhole", "drain", "button", "service", "volume", "menu", "eject", "enter", "exit", "up", "down"]
 
 
 func plog(msg: String) -> void:
@@ -85,6 +94,8 @@ func _ready() -> void:
 	Game.ball_ended.connect(func(): _stop_all("the ball ended"))
 	Game.game_ended.connect(func(): _stop_all("the game ended"))
 	Game.tilt_warning.connect(_on_tilt)
+	# no ball-saved signal: a one-ball save plays the game's ball_save clip (trough.save_balls)
+	Game.quick_clip.connect(_on_quick_clip)
 	plog("PadModes joined the game: %d custom mode(s), %d game modes in Modes.all_modes" % [
 		all.size(), Modes.all_modes.size()])
 
@@ -122,12 +133,41 @@ func load_modes() -> void:
 			"hits": 0, "running": false, "made": 0, "total": 0, "left": 0.0,
 		}
 		m["title"] = cfg.get("title", m["name"])
+		_start_rules(fn, m, cfg)
 		all.append(m)
 		plog("mode %s \"%s\": start %s x%d, shots %s, %d points, %s, complete %d (+%d)" % [fn, m["name"],
 			names(m["start"]), m["start_count"], names(m["shots"]), m["points"],
 			("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends",
 			m["complete"], m["complete_points"]])
 	plog("%d custom mode(s) from %s" % [all.size(), dir])
+
+
+# PAD-1424: JJP's start rules (MODES.md "Start rules from the game's hook lists")
+func _start_rules(fn: String, m: Dictionary, cfg: Dictionary) -> void:
+	m["combo"] = switches(fn, "start_combo", cfg.get("start_combo", ""))
+	m["combo_seconds"] = maxi(1, to_int(cfg.get("combo_seconds", "5")))
+	m["start_score"] = to_int(cfg.get("start_score", "0"))
+	m["start_on"] = _words(cfg.get("start_on", ""))
+	m["start_after"] = _words(cfg.get("start_after", ""))
+	m["once"] = cfg.get("start_once", "no")
+	m["reset_ball"] = cfg.get("start_count_reset", "game") == "ball"
+	m["combo_at"] = 0
+	m["combo_time"] = 0.0
+	m["ran_ball"] = false
+	m["ran_game"] = false
+	m["score_fired"] = {}
+	if not m["combo"].is_empty() or not m["start_on"].is_empty() or not m["start_after"].is_empty() \
+			or m["start_score"] > 0:
+		plog("mode %s start rules: on %s; after %s; score %d; combo %s within %d s; once %s; count reset %s" % [
+			fn, " ".join(m["start_on"]), " ".join(m["start_after"]), m["start_score"], names(m["combo"]),
+			m["combo_seconds"], m["once"], "ball" if m["reset_ball"] else "game"])
+
+
+static func _words(v: String) -> Array:
+	var out := []
+	for w in v.replace(",", " ").split(" ", false):
+		out.append(w.to_lower())
+	return out
 
 
 static func parse(text: String) -> Dictionary:
@@ -184,12 +224,31 @@ func _on_game_started() -> void:
 	for m in all:
 		_stop(m, "")
 		m["hits"] = 0
+		m["combo_at"] = 0
+		m["ran_game"] = false
+		m["score_fired"] = {}
 	plog("game_started: start counts reset")
 
 
 func _on_ball_started(shoot_again) -> void:
 	ball_live = true
-	plog("ball_started (ball %s, shoot again %s)" % [Game.ball, shoot_again])
+	plog("ball_started (ball %s of %s, player %d, shoot again %s)" % [Game.ball, Game.balls_per_game,
+		Game.current_player_index + 1, shoot_again])
+	valid_seen = false
+	mb_since = 0.0
+	mb_was = false
+	last_running = null
+	extra_seen = -1
+	for m in all:
+		m["ran_ball"] = false
+		m["combo_at"] = 0
+		if m["reset_ball"]:
+			m["hits"] = 0
+	_event("ball_start")
+	if Game.ball == 1 and not shoot_again:
+		_event("first_ball")
+	if Game.ball >= Game.balls_per_game and _extra_left() <= 0:
+		_event("last_ball")
 	if port_path != "" and not measured:
 		measured = true
 		var before = _score()
@@ -218,19 +277,153 @@ func playing() -> bool:
 func _on_switch(sw) -> void:
 	if all.is_empty() or not playing():
 		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if not valid_seen and _is_playfield(Switches.items[sw].name):
+		valid_seen = true
+		_event("valid_playfield")
 	for m in all:
 		if m["running"]:
 			if sw in m["shots"]:
 				_shot(m, sw)
-		elif sw in m["start"]:
-			m["hits"] += 1
-			plog("%s: start switch %s hit %d of %d" % [m["name"], Switches.items[sw].name, m["hits"], m["start_count"]])
-			if m["hits"] >= m["start_count"]:
-				_start(m)
+			continue
+		_combo(m, sw, now)
+		if not m["running"] and sw in m["start"]:
+			_fire(m, "start switch %s hit" % Switches.items[sw].name)
+
+
+# ------------------------------------------------------------------ start rules (PAD-1424)
+# A start rule fired for m: one more toward its start_count.
+func _fire(m: Dictionary, why: String) -> void:
+	if m["running"] or not playing():
+		return
+	if (m["once"] == "ball" and m["ran_ball"]) or (m["once"] == "game" and m["ran_game"]):
+		return
+	m["hits"] += 1
+	plog("%s: %s (%d of %d)" % [m["name"], why, m["hits"], m["start_count"]])
+	if m["hits"] >= m["start_count"]:
+		_start(m)
+
+
+# start_on: ball_start, first_ball, last_ball, valid_playfield, ball_saved, extra_ball, multiball_end
+func _event(ev: String) -> void:
+	plog("game event %s" % ev)
+	for m in all:
+		if ev in m["start_on"]:
+			_fire(m, "start_on %s" % ev)
+
+
+func _on_quick_clip(c, _how = null) -> void:
+	if typeof(c) == TYPE_DICTIONARY and str(c.get("clip", "")).ends_with("/ball_save.ogv"):
+		_event("ball_saved")
+
+
+# The trough, the shooter lane, the buttons and the coin door are not the playfield.
+static func _is_playfield(n: String) -> bool:
+	var words := n.to_lower().replace(" ", "_").replace("-", "_").split("_", false)
+	for w in words:
+		for x in NOT_PLAYFIELD:
+			if w == x or (x.length() > 3 and w.begins_with(x)):
+				return false
+	return not words.is_empty()
+
+
+func _combo(m: Dictionary, sw, now: float) -> void:
+	var c: Array = m["combo"]
+	if c.size() < 2 or m["running"]:
+		return
+	if m["combo_at"] > 0 and now - m["combo_time"] > m["combo_seconds"]:
+		m["combo_at"] = 0
+	if c[m["combo_at"]] == sw:
+		m["combo_at"] += 1
+		m["combo_time"] = now
+	elif c[0] == sw:
+		m["combo_at"] = 1
+		m["combo_time"] = now
+	if m["combo_at"] >= c.size():
+		m["combo_at"] = 0
+		_fire(m, "start_combo made")
+
+
+func _extra_left() -> int:
+	var p = Game.current_player
+	return int(p.data.get("extra_balls_pending", 0)) if p != null else 0
+
+
+# extra balls earned (only ever goes up in a game), -1 with no player
+func _extra_earned() -> int:
+	var p = Game.current_player
+	return int(p.data.get("extra_balls_earned", 0)) if p != null else -1
+
+
+func _balls_in_play() -> int:
+	var t = Modes.access("trough")
+	return int(t.num_balls_in_play) if t != null else -1
+
+
+# the game's modes running now, by their name in Modes.all_modes (the port report's game_modes)
+func _running_modes() -> Array:
+	var out := []
+	for md in Modes.modes:
+		if md == null:
+			continue
+		for k in Modes.all_modes:
+			if Modes.all_modes[k] == md:
+				out.append(str(k).to_lower())
+				break
+	return out
+
+
+# Ten times a second in a ball: the score, extra balls, the balls in play (a multiball's end)
+# and the game's running modes (start_after).
+func _rules() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if not playing() or now - rules_at < 0.1:
+		return
+	rules_at = now
+	var player: int = Game.current_player_index
+	var score := _score()
+	for m in all:
+		if m["start_score"] > 0 and score >= m["start_score"] and not m["score_fired"].has(player):
+			m["score_fired"][player] = true
+			_fire(m, "start_score %d reached (%d)" % [m["start_score"], score])
+	var extra := _extra_earned()
+	if extra >= 0:
+		if extra_seen >= 0 and extra > extra_seen:
+			_event("extra_ball")
+		extra_seen = extra
+	var in_play := _balls_in_play()
+	if in_play > 1:
+		if mb_since == 0.0:
+			mb_since = now
+		if now - mb_since >= 0.5:
+			mb_was = true
+	else:
+		mb_since = 0.0
+		if mb_was and in_play >= 0:
+			mb_was = false
+			_event("multiball_end")
+	var want := false
+	for m in all:
+		if not m["start_after"].is_empty():
+			want = true
+	if not want:
+		return
+	var running := _running_modes()
+	if last_running != null:
+		for ended in last_running:
+			if ended in running:
+				continue
+			for m in all:
+				if ended in m["start_after"] or "any" in m["start_after"]:
+					_fire(m, "start_after %s ended" % ended)
+	last_running = running
 
 
 func _start(m: Dictionary) -> void:
 	m["hits"] = 0
+	m["combo_at"] = 0
+	m["ran_ball"] = true
+	m["ran_game"] = true
 	m["running"] = true
 	m["made"] = 0
 	m["total"] = 0
@@ -308,6 +501,8 @@ func _voice_poll() -> void:
 func _process(delta: float) -> void:
 	if not voices.is_empty():
 		_watch_voices()
+	if not all.is_empty():
+		_rules()
 	if all.is_empty() or Game.timers_paused:
 		return
 	for m in all:

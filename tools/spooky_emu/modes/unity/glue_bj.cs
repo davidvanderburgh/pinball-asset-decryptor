@@ -27,6 +27,7 @@ public class Hook : Mode {
                 case Messages.Event.ball_start: r.OnBallStart(); break;
                 case Messages.Event.end_of_ball: r.OnBallEnd("the ball ended"); break;
                 case Messages.Event.tilt: r.OnBallEnd("tilt"); break;
+                case Messages.Event.ball_saved: r.GameEvent("ball_saved"); break;
                 case Messages.Event.end_of_game: r.OnGameEnd(); break;
                 case Messages.Event.mode_started: if (m.DataInt == Modes.attract_mode) r.OnGameEnd(); break;
             }
@@ -73,6 +74,26 @@ public static class Glue {
     }
 
     public static bool HasPlayers() { return Machine.game != null && Machine.game.players != null && Machine.game.players.Count > 0; }
+    // ---- balls and game modes (PAD-1424 start rules)
+    static global::Player Up() { return HasPlayers() ? Machine.game.currentPlayer : null; }
+    public static int BallsPerGame() { return Settings.balls_per_game; }
+    public static int Ball() { var p = Up(); return p == null ? 0 : p.CurrentBall; }
+    public static int Player() { return HasPlayers() ? Machine.game.current_player_index : 0; }
+    public static int ExtraBallsLeft() { var p = Up(); return p == null ? 0 : p.extra_balls; }
+    public static int ExtraBallsAwarded() { var p = Up(); return p == null ? -1 : p.extra_balls; }
+    public static int BallsInPlay() { return HasPlayers() ? Game.balls_in_play : -1; }
+
+    // a running mode by its name in the port report (its title, else its class) and by its class
+    public static List<string> RunningModes() {
+        var o = new List<string>();
+        foreach (var m in Modes.modes.Values)
+            if (m != null && m.active && m.mode != PadRuntime.ModeId) {
+                o.Add(m.GetType().Name);
+                if (!string.IsNullOrEmpty(m.title)) o.Add(m.title);
+            }
+        return o;
+    }
+
     public static long PlayerScore() { return HasPlayers() ? Machine.game.currentPlayer.score : 0; }
     public static void Award(long ask) { hook.ScorePoints(ask, null, 0); }
     public static string ScoreNote() { return "Mode.ScorePoints(points, no switch, 0 digits)"; }

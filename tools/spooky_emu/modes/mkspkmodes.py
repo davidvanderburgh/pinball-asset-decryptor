@@ -114,6 +114,10 @@ KEYS = collections.OrderedDict([
     ("font_title", "font"), ("font_value", "font"), ("font_timer", "font"),
     ("title_color", "rgba"), ("value_color", "rgba"), ("timer_color", "rgba"), ("panel_color", "rgba"),
     ("panel", ("middle", "bottom", "top", "none")),
+    # PAD-1424: JJP's start rules (MODES.md "Start rules from the game's hook lists")
+    ("start_on", "events"), ("start_after", "after"), ("start_score", "int"),
+    ("start_combo", "switches"), ("combo_seconds", "int"),
+    ("start_count_reset", ("game", "ball")), ("start_once", ("no", "ball", "game")),
 ])
 #: title.cfg: every mode's defaults (the panel), and the title it is for
 TITLE_KEYS = collections.OrderedDict([("game", "text")])
@@ -184,6 +188,16 @@ def _int(v):
 
 
 def check_value(kind, v, port):
+    if kind == "events":
+        p = MJ.check_value(kind, v, None)
+        if p:
+            return p
+        can = (port or {}).get("start_events")
+        bad = [t for t in MJ._names(v) if can is not None and t not in can]
+        if bad:
+            return "%s: %s's runtime cannot see that event (it can: %s)" % (
+                " ".join(bad), port.get("title", "this game"), ", ".join(can) or "none")
+        return None
     if kind == "sound":
         known = set(port.get("sounds") or ()) if port else set()
         if known and v not in known:
@@ -266,8 +280,17 @@ def check_modes(mode_dir, port=None):
             m[k] = v
         m["file"] = fn
         m.setdefault("name", fn[:-5])
-        if not m.get("start"):
-            problems.append("%s: no start = (the switches that start it): the mode would never start" % fn)
+        if not any(m.get(k) for k in MJ.START_RULES):
+            problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo): "
+                            "the mode would never start" % fn)
+        if m.get("start_combo") and len(MJ._names(m["start_combo"])) < 2:
+            problems.append("%s: start_combo needs two switches or more" % fn)
+        v = _int(m.get("start_score") or "")
+        if v is not None and v <= 0:
+            problems.append("%s: start_score must be above 0" % fn)
+        v = _int(m.get("combo_seconds") or "")
+        if v is not None and not 1 <= v <= 60:
+            problems.append("%s: combo_seconds must be 1-60" % fn)
         complete = _int(m.get("complete") or "0") or 0
         if complete > 0 and not m.get("shots"):
             problems.append("%s: complete = %s but no shots = (nothing can score it)" % (fn, m["complete"]))

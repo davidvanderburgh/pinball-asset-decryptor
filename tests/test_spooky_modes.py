@@ -91,7 +91,7 @@ def test_the_check_names_what_the_game_would_not_take(folder, port, mk):
     assert "lamps is not on Spooky games yet" in text
     assert "no_such_callout" in text
     assert "unknown key wibble" in text
-    assert "9_nostart.mode: no start =" in text
+    assert "9_nostart.mode: no start rule" in text
     assert "complete = 3 but no shots" in text
 
 

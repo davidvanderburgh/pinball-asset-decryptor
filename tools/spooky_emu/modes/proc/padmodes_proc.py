@@ -184,6 +184,7 @@ def load_modes(game, d):
             "hits": 0, "running": False, "made": 0, "total": 0, "left": 0.0,
         }
         m["title"] = cfg.get("title") or m["name"]
+        start_rules(game, fn, m, cfg)
         out.append(m)
         log('mode %s "%s": start %s x%d, shots %s, %d points, %s, complete %d (+%d)' % (
             fn, m["name"], " ".join(m["start"]) or "-", m["start_count"], " ".join(m["shots"]) or "-",
@@ -191,6 +192,40 @@ def load_modes(game, d):
             m["complete"], m["complete_points"]))
     log("%d custom mode(s) from %s" % (len(out), d))
     return out, title
+
+
+def start_rules(game, fn, m, cfg):
+    """PAD-1424: JJP's start rules (MODES.md "Start rules from the game's hook lists")."""
+    m["combo"] = switches(game, fn, "start_combo", cfg.get("start_combo", ""))
+    m["combo_seconds"] = max(1, to_int(cfg.get("combo_seconds"), 5))
+    m["start_score"] = to_int(cfg.get("start_score"), 0)
+    m["start_on"] = set(w.lower() for w in cfg.get("start_on", "").replace(",", " ").split())
+    m["start_after"] = set(w.lower() for w in cfg.get("start_after", "").replace(",", " ").split())
+    m["once"] = cfg.get("start_once") or "no"
+    m["reset_ball"] = (cfg.get("start_count_reset") or "game") == "ball"
+    m.update(combo_at=0, combo_time=0.0, ran_ball=False, ran_game=False, score_fired=set())
+    if m["combo"] or m["start_on"] or m["start_after"] or m["start_score"] > 0:
+        log("mode %s start rules: on %s; after %s; score %d; combo %s within %d s; once %s; count reset %s" % (
+            fn, " ".join(sorted(m["start_on"])) or "-", " ".join(sorted(m["start_after"])) or "-",
+            m["start_score"], " ".join(m["combo"]) or "-", m["combo_seconds"], m["once"],
+            "ball" if m["reset_ball"] else "game"))
+
+
+#: switches that are not the playfield (valid_playfield is the ball's first playfield switch)
+NOT_PLAYFIELD = ("trough", "shooter", "plunge", "launch", "flipper", "start", "coin", "door", "tilt",
+                 "slam", "outhole", "drain", "button", "service", "volume", "menu", "eject", "enter",
+                 "exit", "up", "down")
+
+
+def is_playfield(name):
+    """By the switch's name: the trough, the shooter lane, the buttons and the coin door are not."""
+    import re
+    words = re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+", name or "")   # leftInlane, slingRight, sw_1
+    for w in words:
+        w = w.lower()
+        if any(w == x or (len(x) > 3 and w.startswith(x)) for x in NOT_PLAYFIELD):
+            return False
+    return bool(words)
 
 
 def switches(game, fn, key, v):
@@ -250,9 +285,16 @@ def _runtime_class(base):
             self.panel_key = None
             self.unity_sent = 0.0
             super(PadRuntime, self).__init__(game=game, priority=PRIORITY, mode_type=base.Game)
+            self.valid_seen = False
+            self.mb_since, self.mb_was = 0.0, False
+            self.last_running = None
+            self.extra_seen = -1
+            self.rules_at = 0.0
             seen = []
+            want_all = any("valid_playfield" in m.get("start_on", ()) for m in modes)
+            names = list(_switch_names(game).values()) if want_all else []
             for m in modes:
-                for n in m["start"] + m["shots"]:
+                for n in m["start"] + m["shots"] + m.get("combo", []) + names:
                     if n not in seen:
                         seen.append(n)
                         self.add_switch_handler(name=n, event_type="active", delay=None, handler=self.pad_switch)
@@ -271,11 +313,27 @@ def _runtime_class(base):
             for m in self.pad_modes:
                 self.pad_stop(m, "")
                 m["hits"] = 0
+                m.update(combo_at=0, ran_game=False, score_fired=set())
             log("game starting: start counts reset")
 
         def evt_ball_starting(self):
             self.ball_live = True
-            log("ball starting (ball %s)" % getattr(self.game, "ball", "?"))
+            g = self.game
+            ball, of = to_int(str(getattr(g, "ball", 0)), 0), to_int(str(getattr(g, "balls_per_game", 0)), 0)
+            log("ball starting (ball %s of %s, player %d)" % (ball, of, _player_index(g) + 1))
+            self.valid_seen = False
+            self.mb_since, self.mb_was = 0.0, False
+            self.last_running = None
+            self.extra_seen = -1
+            for m in self.pad_modes:
+                m["ran_ball"], m["combo_at"] = False, 0
+                if m.get("reset_ball"):
+                    m["hits"] = 0
+            self.pad_event("ball_start")
+            if ball == 1:
+                self.pad_event("first_ball")
+            if ball > 0 and of > 0 and ball >= of and _extra_balls(g) <= 0:
+                self.pad_event("last_ball")
             if self.port_path and not self.measured:
                 self.measured = True
                 before = pad_score(self.game)
@@ -283,6 +341,9 @@ def _runtime_class(base):
                 log("points scale: game.score(1000) scored %r (score %r -> %r, multiplier %r)" % (
                     got, before, pad_score(self.game), getattr(self.game, "multiplier", 1)))
                 self.write_port(got)
+
+        def evt_ball_saved(self):
+            self.pad_event("ball_saved")
 
         def evt_ball_ending(self, args=None):
             self.pad_stop_all("the ball ended")
@@ -307,21 +368,98 @@ def _runtime_class(base):
         def pad_switch(self, sw):
             try:
                 if self.pad_playing():
+                    now = time.time()
+                    if not self.valid_seen and is_playfield(sw.name):
+                        self.valid_seen = True
+                        self.pad_event("valid_playfield")
                     for m in self.pad_modes:
                         if m["running"]:
                             if sw.name in m["shots"]:
                                 self.pad_shot(m, sw.name)
-                        elif sw.name in m["start"]:
-                            m["hits"] += 1
-                            log("%s: start switch %s hit %d of %d" % (m["name"], sw.name, m["hits"], m["start_count"]))
-                            if m["hits"] >= m["start_count"]:
-                                self.pad_start(m)
+                            continue
+                        self.pad_combo(m, sw.name, now)
+                        if not m["running"] and sw.name in m["start"]:
+                            self.pad_fire(m, "start switch %s hit" % sw.name)
             except Exception:
                 log("switch %s failed: %s" % (getattr(sw, "name", sw), traceback.format_exc()))
             return None             # SwitchContinue: the game's own modes still see the switch
 
+        # ------------------------------------------------------------ start rules (PAD-1424)
+        def pad_fire(self, m, why):
+            """A start rule fired for m: one more toward its start_count."""
+            if m["running"] or not self.pad_playing():
+                return
+            if (m.get("once") == "ball" and m.get("ran_ball")) or (m.get("once") == "game" and m.get("ran_game")):
+                return
+            m["hits"] += 1
+            log("%s: %s (%d of %d)" % (m["name"], why, m["hits"], m["start_count"]))
+            if m["hits"] >= m["start_count"]:
+                self.pad_start(m)
+
+        def pad_event(self, ev):
+            """start_on: ball_start, first_ball, last_ball, valid_playfield, ball_saved, extra_ball,
+            multiball_end."""
+            log("game event %s" % ev)
+            for m in self.pad_modes:
+                if ev in m.get("start_on", ()):
+                    self.pad_fire(m, "start_on %s" % ev)
+
+        def pad_combo(self, m, name, now):
+            combo = m.get("combo") or []
+            if len(combo) < 2 or m["running"]:
+                return
+            if m["combo_at"] > 0 and now - m["combo_time"] > m["combo_seconds"]:
+                m["combo_at"] = 0
+            if combo[m["combo_at"]] == name:
+                m["combo_at"] += 1
+                m["combo_time"] = now
+            elif combo[0] == name:
+                m["combo_at"], m["combo_time"] = 1, now
+            if m["combo_at"] >= len(combo):
+                m["combo_at"] = 0
+                self.pad_fire(m, "start_combo made")
+
+        def pad_rules(self, now):
+            """Ten times a second in a ball: the score, extra balls, the balls in play (a
+            multiball's end) and the game's running modes (start_after)."""
+            if not self.pad_playing() or now - self.rules_at < 0.1:
+                return
+            self.rules_at = now
+            g = self.game
+            player, score = _player_index(g), pad_score(g)
+            for m in self.pad_modes:
+                if m.get("start_score", 0) > 0 and score >= m["start_score"] and player not in m["score_fired"]:
+                    m["score_fired"].add(player)
+                    self.pad_fire(m, "start_score %d reached (%d)" % (m["start_score"], score))
+            extra = _extra_balls(g)
+            if extra >= 0:
+                if self.extra_seen >= 0 and extra > self.extra_seen:
+                    self.pad_event("extra_ball")
+                self.extra_seen = extra
+            in_play = _balls_in_play(g)
+            if in_play > 1:
+                if not self.mb_since:
+                    self.mb_since = now
+                if now - self.mb_since >= 0.5:
+                    self.mb_was = True
+            else:
+                self.mb_since = 0.0
+                if self.mb_was and in_play >= 0:
+                    self.mb_was = False
+                    self.pad_event("multiball_end")
+            if not any(m.get("start_after") for m in self.pad_modes):
+                return
+            running = set(n.lower() for n in _running_modes(g, self))
+            if self.last_running is not None:
+                for ended in sorted(self.last_running - running):
+                    for m in self.pad_modes:
+                        if ended in m["start_after"] or "any" in m["start_after"]:
+                            self.pad_fire(m, "start_after %s ended" % ended)
+            self.last_running = running
+
         def pad_start(self, m):
             m["hits"], m["running"], m["made"], m["total"] = 0, True, 0, 0
+            m["combo_at"], m["ran_ball"], m["ran_game"] = 0, True, True
             m["left"] = float(m["seconds"])
             log("%s: STARTED (%s)" % (m["name"], ("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends"))
             self.pad_sound(m, "sound_start")
@@ -370,6 +508,7 @@ def _runtime_class(base):
                 self.last_tick = now
                 if self.voices:
                     self.pad_watch_voices()
+                self.pad_rules(now)
                 for m in self.pad_modes:
                     if m["running"] and m["seconds"] > 0:
                         m["left"] -= dt
@@ -468,6 +607,43 @@ def _runtime_class(base):
 
 
 # ============================================================================ the game's scoring
+def _player_index(game):
+    try:
+        return int(getattr(game, "current_player_index", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _extra_balls(game):
+    """The player up's extra balls (awarded, not yet played); -1 when there is no player."""
+    try:
+        p = game.current_player()
+        return -1 if p is None else int(getattr(p, "extra_balls", 0) or 0)
+    except Exception:
+        return -1
+
+
+def _balls_in_play(game):
+    try:
+        return int(game.trough.num_balls_in_play)
+    except Exception:
+        return -1
+
+
+def _running_modes(game, ours=None):
+    """The game's modes running now, by class name (the port report's game_modes).  Alice Cooper
+    keeps some modes queued with modeStarted 0: those are not running."""
+    out = []
+    try:
+        for md in list(game.modes):
+            if md is ours or getattr(md, "modeStarted", 1) in (0, False):
+                continue
+            out.append(type(md).__name__)
+    except Exception:
+        pass
+    return out
+
+
 def pad_score(game):
     p = game.current_player()
     return p.score if p is not None else 0

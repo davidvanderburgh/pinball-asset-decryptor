@@ -120,7 +120,7 @@ def test_the_latest_ports_carry_the_line():
     have = {p.stem for p in with_coop if "site  coop_up_call" in p.read_text(encoding="utf-8")}
     assert have == {"avengers_infinity_le-1.10", "avengers_infinity_pro-1.10", "dungeons_and_dragons_le-1.10",
                     "dungeons_and_dragons_pro-1.10", "foo_fighters_le-1.04", "foo_fighters_pro-1.04",
-                    "godzilla_le-1.16", "godzilla_pro-1.16", "iron_maiden_le-1.18", "iron_maiden_pro-1.18",
+                    "godzilla_le-1.16", "godzilla_pro-1.15", "godzilla_pro-1.16", "iron_maiden_le-1.18", "iron_maiden_pro-1.18",
                     "james_bond_le-1.06", "james_bond_pro-1.06", "jaws_le-1.02", "jaws_pro-1.02",
                     "jurassic_park_le-1.16", "jurassic_park_pro-1.16", "king_kong_le-0.97", "king_kong_pro-0.97",
                     "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22", "mando_le-1.45", "mando_pro-1.45",

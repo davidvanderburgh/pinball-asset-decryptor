@@ -272,7 +272,7 @@ def test_the_latest_ports_carry_the_lines():
     have = {p.stem: [l for l in p.read_text(encoding="utf-8").splitlines() if l.startswith("site  coop_panel_name") and not l.startswith("site  coop_panel_name_user")]   # PAD-1315
             for p in sorted(PORTS.glob("*.port"))}
     have = {k: v for k, v in have.items() if v}
-    assert sorted(have) == ["godzilla_le-1.16", "godzilla_pro-1.16", "uncanny_xmen_le-0.98", "uncanny_xmen_pro-0.98"]
+    assert sorted(have) == ["godzilla_le-1.16", "godzilla_pro-1.15", "godzilla_pro-1.16", "uncanny_xmen_le-0.98", "uncanny_xmen_pro-0.98"]
     assert have["godzilla_le-1.16"] == ["site  coop_panel_name        0x001ade70 0xeb0474be 0xe28d101c",
                                         "site  coop_panel_name_2      0x001ae740 0xeb04728a 0xe28d0030"]
 

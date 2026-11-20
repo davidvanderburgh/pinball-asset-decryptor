@@ -1117,6 +1117,9 @@ site  coop_icon_draw         0x00484440 0xebfffdf3 0xe1560004
 
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 value coop_ball_msg          1255
+# PAD-1478: no length limit on our words on that line (every word of PAD-1449 proven here; the older titles
+# copy it into a fixed buffer and get 16)
+value coop_ball_msg_max      0
 
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x00409454 0xe92d43f0 0xe2505000

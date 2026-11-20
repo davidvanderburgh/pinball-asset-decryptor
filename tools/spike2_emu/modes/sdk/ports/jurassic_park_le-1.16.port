@@ -874,6 +874,8 @@ site  coop_add_player    0x003b650c 0xe92d4038 0xe3a00051
 data  coop_player        0x006d7a24
 data  coop_players       0x00771318
 site  coop_first_ball    0x002fffa0 0xeb02d996 0xe1a04000
+# PAD-1478: the ball start's serve (portcoop.serve_ball): ball 1 waits there for each player's character pick
+site  serve_ball         0x00300078 0xeb0607c9 0xe3a00026
 site  coop_icon_draw         0x003a2d7c 0xebfffdf3 0xe1560004
 
 # ---- PAD-1202: co-op play - the ball start's "player N, you're up" call's read of the player up (portcoop.py) ----

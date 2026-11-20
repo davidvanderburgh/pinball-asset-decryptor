@@ -326,3 +326,30 @@ remote access (`/dev/fb0`: 1360 wide, 16 bits a pixel, two 768-line pages, the s
 **Not proven yet:** the wording seen on the service menu's own page (the program holds it; nobody has opened the
 menu since); 5 GHz over days; another adapter, game or system version. Also seen on this PC: PAD-Runtime times
 out when starting (`HCS_E_CONNECTION_TIMEOUT`), so these builds ran with `PAD_RUNTIME=0` (Ubuntu).
+
+## Machine screen and remote buttons (2026-11-20, asked for after the end-to-end)
+
+**Machine screen** (`core/machine_screen.py`, the Network tab's card, the page server's `/screen`). The game draws
+into `/dev/fb0`: 1360 wide, 16 bits a pixel (RGB565), two 768-line pages, the shown one at
+`/sys/class/graphics/fb0/pan`. One page is 2 MB. Capture: about 2 s. Live, with a game running, on 5 GHz: 1.4 to
+1.6 frames a second over the encrypted connection, 5 to 6.6 over a plain one (the machine listens with `nc`, the
+PC connects, as Send's big files). Nothing is left running on the machine after Stop.
+
+**Remote buttons** (`core/remote_buttons.py`, `resources/remote/pad-buttons.c`).
+
+- The machine has no input device (`/dev/input` holds only `mice`) and its kernel no uinput. The game has
+  `/dev/spidev1.0` (the cabinet switches) and `/dev/ttymxc1` (the playfield boards) open; its cabinet thread loops
+  on an 8-byte `SPI_IOC_MESSAGE`, bits active low (`tools/spike2_emu/hwshim.c` documents the same on the emulator).
+- Bits, read off the machine with a watching build of the shim while David pressed each button: Back 11, Minus 10,
+  Plus 9, Enter 8; the coin door 23 (1 open, 0 closed). A finger's press lasted 15 to 19 hundredths of a second.
+- The shim is preloaded by `/etc/init.d/game_monitor` (PAD's mode runtime already is: `LD_PRELOAD=... $1`). It
+  wraps `ioctl`, makes the real call itself by system call, and clears the asked bits in the word only while the
+  real word's bit 23 reads 1. A press is `<mask hex> <deadline cs> 23 1` in `/run/pad-buttons`; a deadline more
+  than 3 s ahead is refused. `/run/pad-buttons.state` says it is alive and what the real word is.
+- Proven on the machine: Enter, Plus, Back from a script and then from the app's page with the live view running
+  (a press over the live view's connection takes 0.13 s; a connection of its own about 2 s).
+- **Found on the way:** an incremental Send restarted only the game, but `game_monitor`'s running copy is the old
+  script, so the game came back without the shim. The same holds for the Wi-Fi start-up file and the adapter
+  driver. `remote_send.BOOT_ONLY`: a Send that changed one of those restarts the machine.
+- Not done: Start, the flippers and the action button (the playfield boards' serial line, another protocol).
+  The bits are the CPU board's own wiring and so should be every Spike 2 title's, but only a Godzilla was tried.

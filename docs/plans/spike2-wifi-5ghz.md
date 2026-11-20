@@ -288,3 +288,41 @@ are proven separately: the build step on a copy of the real system partition, th
 hand, the upload path by its own call); the menu wording on the machine's screen (applied to a copy of the
 real game program only); 5 GHz over hours or days; any adapter other than the AC1200; any game or system
 version other than Godzilla LE on Spike system v2.7.0.
+
+## End to end on the machine (2026-11-20)
+
+**What ran:** the card image David's Godzilla runs, a Heisei V2.3 card another user built with PAD
+(`Godzilla Premium 1.16 Heisei Custom V2.3 Kaiju Edition.raw`: its own modes, co-op, handicap), as the original;
+a new project holding only remote access and the two Wi-Fi boxes; `SternWritePipeline` from this branch; then
+`remote_send.SendPipeline` to the machine at 192.168.4.77, as the app's Send to machine runs it.
+
+**Two faults the build showed on that card, both fixed here:**
+
+- The menu wording is a game-program edit, so the build took the full path, and that path's
+  `_retire_menu_rows` (PAD-1394) took MUSIC MODE, CO-OP PLAY and HANDICAP off the operator menu, rows the
+  card's own modes use. A Write whose only game-program change is the Wi-Fi wording now skips it
+  (`wifi_menu_only`).
+- The build record came out incomplete, so Send refused the build: that card's game program has a hole
+  (PAD-491's two blocks of zeros at 0x795000), `_file_extents` returns `None` for such a file, and the six
+  wording writes and the bypass's two could not be traced to it. `_map_writes` now maps such a file through
+  `Ext4Reader.mapped_ranges`.
+
+Before those, a project with nothing else staged never got the wording at all (the remote-access shortcut ran).
+
+**The Send:** the machine's files were not the image's (143 game files differed; it had been sent an older
+build of the same card), so it was the full kind. 155 changes, 3.3 GB, of which the machine already held 2.5 GB
+(in place or elsewhere on its card); 862 MB crossed the network. 17 min 27 s in all: 10 min comparing every
+file on the machine, 7 min rebuilding and sending, then the boot partition and a restart. Whole new files went
+over the plain connection (a 77 MB bank in 8 s, a 47 MB one in 5 s, each checked by hash).
+
+**After the restart, read from the machine:** reachable 60 s after the Send ended; `freq=5200`,
+`wpa_state=COMPLETED` on VanderGiga with no help; `/etc/wpa_supplicant/driver.wlan0` = `nl80211,wext`;
+`pad-wifi-band` running; the game running; the adapter driver, the helper, its init script, the override, the
+card's `mode.so`, the game program and a sound bank all byte-identical to the build; no "2.4GHz" left in the
+game program ("Find WiFi Network", "Available WiFi networks", ...). The machine's screen can be read over
+remote access (`/dev/fb0`: 1360 wide, 16 bits a pixel, two 768-line pages, the shown one named by
+`/sys/class/graphics/fb0/pan`); `C:\tmp\PAD-1467\verify.py` saves it as a PNG.
+
+**Not proven yet:** the wording seen on the service menu's own page (the program holds it; nobody has opened the
+menu since); 5 GHz over days; another adapter, game or system version. Also seen on this PC: PAD-Runtime times
+out when starting (`HCS_E_CONNECTION_TIMEOUT`), so these builds ran with `PAD_RUNTIME=0` (Ubuntu).

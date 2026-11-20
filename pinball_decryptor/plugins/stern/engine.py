@@ -5276,6 +5276,121 @@ def _scene_with_overlay(reader, node, overlays):
     return bytes(buf)
 
 
+def _theme_scenes(reader, assets_dir, sets, grown_radium, grown_overlays, tree_whole, work, log, cancel,
+                  dest_is_device=False):
+    """Themes (PAD-1462): *sets* (``scene_variants.load``) with a scene file of its own made for each theme and each
+    scene holding a picture the theme changes.
+
+    Simon (2026-11-20): a theme's pictures can keep their own size ("Keep size" per theme), and a theme's scene is
+    theme 1's in everything else - its layout, longer text and colors ("layout stays theme 1"). So each one is built
+    the way theme 1's own scene is: the card's scene with theme 1's in-place edits (*grown_overlays*, taken before
+    the grown scenes were staged), the theme's pictures written by :func:`_radium_image_writes` (a picture that keeps
+    its own size grows the scene; one that does not is fitted to its place), then - when theme 1 grew the scene
+    (*grown_radium*: longer text, pictures at their own size; *tree_whole*: the Scenes tab's edits) or a theme picture
+    keeps its own size - re-serialized by :func:`_stage_grown_radiums` with theme 1's growth and the theme's pictures
+    in place of theme 1's. Before, a theme's scene was the card's scene with theme 1's in-place edits only, so a scene
+    theme 1 grew lost its edits in every other theme."""
+    from . import scene_variants as _SV
+    from . import mode_write as _MWt
+    sources = _SV.theme_sources(assets_dir, sets, os.path.join(work, "src"), log)
+    if not sources:
+        return sets
+    from PIL import Image
+    out = dict(sets)
+    scenes = {c: dict(v) for c, v in (sets.get("scenes") or {}).items()}
+    node_of = {}
+    for n, got in sorted(sources.items()):
+        if cancel():
+            break
+        name = _SV.theme_name(sets, n)
+        keep = {rel for rel, (_src, k) in got.items() if k}
+        by_card = _SV.theme_places(assets_dir, n, name, {rel: src for rel, (src, _k) in got.items()}, log)
+        edits, fitted = [], {}
+        for card, places in sorted(by_card.items()):
+            if n in scenes.get(card, {}):
+                log("Themes: theme %d (%s) has a scene file of its own for %s; its pictures are not added to it."
+                    % (n, name, card), "info")
+                continue
+            for src, rel, off, length, pw, ph, fmt in places:
+                png = src
+                if rel not in keep:
+                    # Keep size off: fitted to its place, as the Images tab fits theme 1's replacement
+                    png = fitted.get((src, pw, ph))
+                    if png is None:
+                        png = src
+                        try:
+                            with Image.open(src) as im:
+                                w, h = im.size
+                                if (w, h) != (pw, ph) and (_padded4(w), _padded4(h)) != (pw, ph):
+                                    png = os.path.join(work, "fit%d_%dx%d_%s.png" % (
+                                        n, pw, ph, re.sub(r"[^\w.-]", "_", rel)))
+                                    im.convert("RGBA").resize((pw, ph), Image.LANCZOS).save(png)
+                        except Exception as e:          # noqa: BLE001
+                            log("Themes: %s cannot be read (%s); that place keeps theme 1's picture." % (src, e),
+                                "warning")
+                            continue
+                        fitted[(src, pw, ph)] = png
+                edits.append((rel, card, png, off, length, pw, ph, fmt))
+        if not edits:
+            continue
+        grown_n = {}
+        _w, _n_img, overlays_n = _radium_image_writes(
+            reader, assets_dir, None, log, cancel, grow_dir=os.path.join(work, "grow%d" % n),
+            dest_is_device=dest_is_device, grown=grown_n, edits=edits)
+        made = 0
+        for card in sorted({e[1] for e in edits}):
+            node = node_of.get(card)
+            if node is None:
+                node = node_of[card] = _MWt.lookup(reader, card)
+            if node is None:
+                log("Themes: the card has no %s; theme %d (%s)'s pictures in it are left out." % (card, n, name),
+                    "warning")
+                continue
+            ib = bytes(node["i_block"])
+            mine = (overlays_n.get(ib) or (None, {}))[1]
+            grew = (grown_n.get(card) or (None, {}))[1]
+            if not mine and not grew:
+                continue
+            buf = bytearray(reader.read_file_bytes(node))
+            for off, b in list(((grown_overlays or {}).get(ib) or (None, {}))[1].items()) + list(mine.items()):
+                buf[off:off + len(b)] = b
+            _g = (grown_radium or {}).get(card)
+            texts = dict(_g[1]) if _g else {}
+            # theme 1's pictures at their own size, but not where the theme put a picture of its own in
+            images = {o: v for o, v in (dict(_g[2]) if _g and len(_g) > 2 else {}).items() if o not in mine}
+            images.update(grew)
+            plan = (tree_whole or {}).get(card)
+            path = os.path.join(work, "set%d_%s.radium" % (n, _SV.scene_id(card)[:12]))
+            if texts or images or plan:
+                built = bytes(buf)
+
+                class _Built:
+                    @staticmethod
+                    def read_file_bytes(_node, _b=built):
+                        return _b
+
+                where = os.path.join(work, "scene%d_%d" % (n, made))
+                os.makedirs(_lp(where), exist_ok=True)
+                jobs, _f = _stage_grown_radiums(
+                    _Built(), {card: (node, texts, images)}, {}, where,
+                    log, tree_ops={card: plan[1]} if plan else None, assets_dir=assets_dir)
+                if not jobs:
+                    log("Themes: theme %d (%s)'s copy of %s could not be rebuilt; it is left out." % (n, name, card),
+                        "warning")
+                    continue
+                shutil.copyfile(_lp(jobs[0][1]), _lp(path))
+            else:
+                with open(_lp(path), "wb") as f:
+                    f.write(bytes(buf))
+            scenes.setdefault(card, {})[n] = {"file": path}
+            made += 1
+        if made:
+            log("Themes: theme %d (%s): %d picture(s) of its own (chosen or color profiled%s), in %d scene(s)."
+                % (n, name, len(got), ", %d at its own size" % len(keep) if keep else "", made), "info")
+    out["scenes"] = scenes
+    return out
+
+
 def _pad_leftover_scenes(assets_dir):
     """PAD-1255: the card paths (no leading slash) of the scenes a PAD build may have put screens in on the
     project's title - its HUD, its video bank and Godzilla's battle selection - or [] when the title is not known."""
@@ -6627,7 +6742,7 @@ def _encode_workers():
 
 def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                          grow_dir=None, dest_is_device=False, grown=None,
-                         cache=None):
+                         cache=None, edits=None):
     """Re-encode each edited radium-embedded image to its format (BC3/DXT5 or
     BC1/DXT1) and resolve it to a flat ``[(disk_offset, bytes), ...]`` list
     patching the bytes in place inside the ``scene.radium`` inode (same form
@@ -6670,12 +6785,20 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
 
     *cache* (a :class:`_PictureCache`) hands back the bytes of a picture that
     keeps its slot's size when the picture and the slot are what an earlier
-    build encoded (PAD-509); a fitted or grown one is made every time."""
-    glyph_atlases = _glyph_atlas_overrides(assets_dir, baseline, log)
-    scope = _load_glyph_scopes(assets_dir)
-    edits = _changed_radium_images(assets_dir, baseline,
-                                   extra_changed=set(glyph_atlases),
-                                   scope=scope)
+    build encoded (PAD-509); a fitted or grown one is made every time.
+
+    *edits* (Simon, per-theme Keep size): the pictures to write, ``[(output,
+    card path, PNG, data_off, length, pad_w, pad_h, fmt)]``, instead of the
+    project's edited ones - a theme's own pictures, written by the same rules
+    as theme 1's (a PNG of another size keeps it, or is fitted, as above)."""
+    if edits is not None:
+        glyph_atlases, scope = {}, None
+    else:
+        glyph_atlases = _glyph_atlas_overrides(assets_dir, baseline, log)
+        scope = _load_glyph_scopes(assets_dir)
+        edits = _changed_radium_images(assets_dir, baseline,
+                                       extra_changed=set(glyph_atlases),
+                                       scope=scope)
     if scope:
         per_output = {}
         for (o, *_r) in edits:
@@ -10165,12 +10288,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             from . import mode_write as _MWs
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             # Simon: a set's own pictures (the Images tab with that set picked) - a variant of each scene holding one,
-            # built from the scene as this Write has it (set 1's same-size edits on), the set's pictures encoded in
-            scenes_sets = _SV.picture_variants(
-                assets_dir, scenes_sets,
-                lambda _card: (lambda _n: _scene_with_overlay(reader, _n, radium_overlays) if _n is not None
-                               else None)(_MWs.lookup(reader, _card)),
-                os.path.join(grow_work, "scene_sets"), log=log)
+            # built as theme 1's scene is (its in-place edits, its growth and the Scenes tab's), the theme's pictures
+            # in, each at its own size where the theme keeps it (_theme_scenes)
+            scenes_sets = _theme_scenes(
+                reader, assets_dir, scenes_sets, grown_radium, grown_overlays, tree_whole,
+                os.path.join(grow_work, "scene_sets"), log, cancel, dest_is_device=dest_is_device)
             scenes_staged = _SV.stage(
                 assets_dir, scenes_sets, bytes(reader.read_file_bytes(fw_node)),
                 lambda _card: (lambda _n: bytes(reader.read_file_bytes(_n)) if _n is not None else None)(

@@ -1123,7 +1123,22 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         stem = os.path.splitext(os.path.basename(rel))[0]
         return stem not in self._font_atlas_stems()
 
+    def _theme_keep(self, rel):
+        """``(n, the theme's own picture or None, its Keep size tick)`` with theme *n* (2 and up) picked here, else
+        None. Simon (2026-11-20): Keep size per theme - a theme's own picture has its own tick (a picture it has not
+        picked is theme 1's, at theme 1's size)."""
+        state = getattr(self, "_set_state", None)       # (a test's stand-in borrows the row code alone)
+        n, picks, _rows = state() if state is not None else (1, {}, {})
+        if n < 2:
+            return None
+        from ...plugins.stern import scene_variants as SV
+        rep = picks.get(rel)
+        return n, rep, bool(rep) and SV.keeps_size(self._scan_dir or "", n, rel, picks)
+
     def _keep_state(self, rel):
+        theme = self._theme_keep(rel)
+        if theme is not None:
+            return theme[2] if theme[1] and self._can_keep_size(rel) else None
         if not (self._assignments.get(rel) and self._can_keep_size(rel)):
             return None
         return rel in self._keep_size
@@ -2413,8 +2428,10 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         return "In %d scenes: %s%s" % (len(named), shown, more)
 
     def _keep_row(self, rel):
-        """Tk _image_refresh_keep_row: ``{on, text}`` or None (hidden)."""
-        rep = self._assignments.get(rel) if rel else None
+        """Tk _image_refresh_keep_row: ``{on, text}`` or None (hidden). With theme 2 or later picked: that theme's own
+        picture and tick (none for a picture it has not picked)."""
+        theme = self._theme_keep(rel) if rel else None
+        rep = (theme[1] if theme is not None else self._assignments.get(rel)) if rel else None
         if not rep or not self._can_keep_size(rel):
             return None
         slot = self._by_rel[rel]
@@ -2430,7 +2447,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
                 new = im.size
         except Exception:                                # noqa: BLE001
             return None
-        keep = rel in self._keep_size
+        keep = theme[2] if theme is not None else rel in self._keep_size
         self.image_keep_size_var.set(keep)
         if new == orig:
             text = "Same size as the original (%d×%d)." % orig
@@ -2555,9 +2572,21 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
 
     @rpc
     def set_keep(self, rel, value):
-        """Tk _image_set_keep_size."""
+        """Tk _image_set_keep_size. With theme 2 or later picked: that theme's own picture's tick."""
         if not self._can_keep_size(rel):
             return False
+        theme = self._theme_keep(rel)
+        if theme is not None:
+            from ...plugins.stern import scene_variants as SV
+            n, rep, _was = theme
+            if not rep:
+                return False
+            SV.set_keep_size(self._scan_dir, n, rel, bool(value))
+            self.log("Replace Images: theme %d: %s %s." % (
+                n, rel, "keeps its picture's own size" if value
+                else "scales its picture to the original size"), "info")
+            self.on_image_set(n)                        # the rows and the preview, as a pick does
+            return True
         if value:
             self._keep_size.add(rel)
         else:

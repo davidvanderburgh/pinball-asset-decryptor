@@ -3048,11 +3048,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             names = by_num[num]
             named = sh.names.get(str(num), "")
             label = named or "Light show %d" % num
-            if len(names) == 1:
-                group = names[0]
-            else:
-                group = "Started by several of its modes"
-                label += " (%s%s)" % (", ".join(names[:2]), " +%d" % (len(names) - 2) if len(names) > 2 else "")
+            # the mode in the label too: a closed list shows the label alone
+            group = names[0] if len(names) == 1 else "Started by several of its modes"
+            label += " (%s%s)" % (", ".join(names[:2]), " +%d" % (len(names) - 2) if len(names) > 2 else "")
             out.append({"value": "#%d" % num, "label": label, "group": group, "modes": names, "num": num})
         out.sort(key=lambda r: (r["group"] == "Started by several of its modes", r["group"].lower(), r["num"]))
         return out

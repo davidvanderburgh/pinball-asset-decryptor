@@ -206,9 +206,9 @@ def test_the_picks_are_the_modes_own_shows_grouped_by_the_mode():
     tab = SimpleNamespace(_how=clips, _title=lambda: LE)
     rows = ModesTab._mode_show_rows(tab)
     assert [(r["group"], r["value"], r["label"]) for r in rows] == [
-        ("Battle vs Gigan", "#148", "Strobe burst"),
-        ("Hedorah", "#210", "Light show 210"),
-        ("Hedorah", "#211", "Light show 211"),
+        ("Battle vs Gigan", "#148", "Strobe burst (Battle vs Gigan)"),
+        ("Hedorah", "#210", "Light show 210 (Hedorah)"),
+        ("Hedorah", "#211", "Light show 211 (Hedorah)"),
         ("Started by several of its modes", "#348", "Light show 348 (Hedorah, Battle vs Gigan +1)")]   # 999: past it
     other = SimpleNamespace(_how=clips, _title=lambda: MP.profile_from_port(str(SDK / "ports" / "godzilla_pro-1.16.port")))
     assert ModesTab._mode_show_rows(other) == []                  # another build's card: its numbers are not these

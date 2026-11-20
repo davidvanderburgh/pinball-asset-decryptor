@@ -876,6 +876,16 @@ WIDE_WINDOW = 4194304
 WIDE_PORTS = (2222, 22222, 42222)
 LANES = 2  # connections at once: one per core of the machine (a third added 4% over Wi-Fi)
 SPREAD_MIN = 2 << 20  # a file smaller than this goes over one connection
+
+# PAD-1465: a Send's big writes over plain TCP to the machine's helper (padpieces recv), not through SSH.  On a
+# Godzilla's Wi-Fi (ARMv7, dropbear offering only AES-CTR + HMAC-SHA2-256) SSH tops out at 3.7-4.6 MB/s with the
+# wide window and two lanes; raw TCP into the helper did 7-8 MB/s with the game running.  Every frame is signed with
+# a key that went over SSH and is checked on the machine BEFORE it is written, so the bytes are no less trusted.
+# PAD_SEND_RAW=0 keeps every byte on SSH.
+RAW_MIN = SPREAD_MIN  # writes smaller than this stay on SSH (a raw lane costs a command and a connection)
+RAW_FRAME = 1 << 20  # bytes per signed frame (the helper takes up to 4 MiB)
+RAW_LANES = LANES  # raw connections at once (the helper is one process per connection, one per core)
+RAW_HELLO = b"pad-recv hello"
 # stop a temporary listener, only when the pid in its file is still one (a stale file's pid may be reused)
 WIDE_STOP = ("p=$(cat {f} 2>/dev/null); if [ -n \"$p\" ] && tr '\\000' ' ' < /proc/$p/cmdline 2>/dev/null "
              "| grep -q {f}; then kill \"$p\"; fi; rm -f {f}").format(f=WIDE_PIDFILE)
@@ -903,6 +913,106 @@ def _pieces(fileobj, size, piece=1 << 20):
             break
         yield off, data
         off += len(data)
+
+
+def _home_network(host):
+    """PAD-1465: whether *host* is on this computer's own network (a private or link-local address), where the
+    raw lanes may carry a Send's bytes."""
+    import ipaddress
+    import socket
+    try:
+        ip = ipaddress.ip_address(socket.gethostbyname(host))
+    except (OSError, ValueError):
+        return False
+    if ip.is_loopback:
+        return _LOOPBACK_OK
+    return ip.is_private or ip.is_link_local
+
+
+#: tests drive the helper on this computer
+_LOOPBACK_OK = False
+
+
+class _RawFailed(Exception):
+    """PAD-1465: the raw lane couldn't carry a write (the step then goes over SSH)."""
+
+
+def raw_frame(key, seq, kind, path=b"", off=0, data=b""):
+    """One frame of the helper's ``recv`` (padpieces.c): header, path, data, HMAC-SHA1 over the sequence number
+    and all of it."""
+    import hmac
+    import struct
+    hdr = struct.pack(">BQII", ord(kind), off, len(data), len(path))
+    mac = hmac.new(key, struct.pack(">Q", seq), hashlib.sha1)
+    mac.update(hdr)
+    mac.update(path)
+    mac.update(data)
+    return hdr + path, mac.digest()
+
+
+class _RawLane:
+    """PAD-1465: one plain TCP connection into the machine's helper, started over the SSH connection *machine*."""
+
+    def __init__(self, machine):
+        import hmac
+        import socket
+        self.key, self.seq, self.chan, self.sock = os.urandom(32), 0, None, None
+        try:
+            self.chan = machine.t.open_session()
+            self.chan.settimeout(20)
+            self.chan.exec_command("%s recv" % machine._pieces)
+            self.chan.sendall(self.key.hex().encode() + b"\n")
+            self.chan.shutdown_write()
+            line = b""
+            until = time.monotonic() + 20
+            while not line.endswith(b"\n"):
+                if time.monotonic() > until:
+                    raise _RawFailed("the helper didn't say its port")
+                got = self.chan.recv(256)
+                if not got:
+                    raise _RawFailed("the helper stopped: %s" % line.decode("utf-8", "replace").strip())
+                line += got
+            text = line.decode("utf-8", "replace").strip()
+            if not text.startswith("port "):
+                raise _RawFailed(text or "no port")
+            self.sock = socket.create_connection((machine.host, int(text[5:])), timeout=5)
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            with contextlib.suppress(OSError):
+                self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 << 20)
+            self.sock.settimeout(120)
+            self.sock.sendall(hmac.new(self.key, RAW_HELLO, hashlib.sha1).digest())
+        except BaseException:
+            self.close()
+            raise
+
+    def write(self, path, off, data):
+        head, mac = raw_frame(self.key, self.seq, "W", path.encode("utf-8", "surrogateescape"), off, data)
+        self.seq += 1
+        self.sock.sendall(head)
+        self.sock.sendall(data)
+        self.sock.sendall(mac)
+
+    def finish(self):
+        """End the stream; the bytes the helper wrote, once it says they all are."""
+        head, mac = raw_frame(self.key, self.seq, "E")
+        self.sock.sendall(head + mac)
+        reply = b""
+        while not reply.endswith(b"\n"):
+            got = self.sock.recv(600)
+            if not got:
+                break
+            reply += got
+        text = reply.decode("utf-8", "replace").strip()
+        if not text.startswith("ok "):
+            raise _RawFailed(text or "the machine closed the connection")
+        return int(text[3:])
+
+    def close(self):
+        for c in (self.sock, self.chan):
+            if c is not None:
+                with contextlib.suppress(Exception):
+                    c.close()
+        self.sock = self.chan = None
 
 
 class SshMachine(Machine):
@@ -1129,8 +1239,108 @@ class SshMachine(Machine):
             last = out.strip()[-120:]
         raise SendError(last or "no free port")
 
+    # ---- PAD-1465: big writes over plain TCP into the machine's helper
+    def _raw_ready(self):
+        if getattr(self, "_raw_off", False) or os.environ.get("PAD_SEND_RAW", "1") == "0":
+            return False
+        if not _home_network(self.host):
+            return False  # signed but not secret: never over the internet (a forwarded port, a tunnel)
+        try:
+            return self.pieces_ready()
+        except Exception:  # noqa: BLE001 - no helper: SSH carries it, as before
+            return False
+
+    def _raw_send(self, path, pieces, progress=None):
+        """``(offset, bytes)`` pieces of one file over :data:`RAW_LANES` raw connections at once, cut into signed
+        frames.  Raises :class:`_RawFailed` when they couldn't carry it (nothing unsigned was written)."""
+        import queue
+        lanes, errors = [], []
+        try:
+            for _n in range(RAW_LANES):
+                try:
+                    lanes.append(_RawLane(self))
+                except Exception:  # noqa: BLE001 - one lane still carries it
+                    if not lanes:
+                        raise
+                    break
+        except Exception as e:  # noqa: BLE001
+            for lane in lanes:
+                lane.close()
+            raise _RawFailed(str(e)[:160] or type(e).__name__) from e
+        qs = [queue.Queue(maxsize=4) for _ in lanes]
+        done = [0] * len(lanes)
+
+        def work(i, lane, q):
+            try:
+                while True:
+                    item = q.get()
+                    if item is None:
+                        break
+                    off, data = item
+                    mv = memoryview(data)
+                    for at in range(0, len(data), RAW_FRAME):
+                        lane.write(path, off + at, mv[at:at + RAW_FRAME])
+                    done[i] += len(data)
+                lane.finish()
+            except BaseException as e:  # noqa: BLE001 - raised on the Send's own thread
+                errors.append(e)
+                while q.get() is not None:  # keep taking pieces, so the dealer never waits on a dead lane
+                    pass
+
+        threads = [threading.Thread(target=work, args=(i, lane, q), daemon=True, name="pad-send-raw-%d" % i)
+                   for i, (lane, q) in enumerate(zip(lanes, qs))]
+        for th in threads:
+            th.start()
+        try:
+            for n, piece in enumerate(pieces):
+                if errors:
+                    break
+                qs[n % len(qs)].put(piece)
+                if progress is not None:
+                    progress(sum(done))
+        finally:
+            for q in qs:
+                q.put(None)
+            for th in threads:
+                th.join()
+            for lane in lanes:
+                lane.close()
+        if errors:
+            e = errors[0]
+            raise _RawFailed(str(e)[:160] or type(e).__name__) from e
+        if progress is not None:
+            progress(sum(done))
+
+    def _raw_try(self, path, pieces, progress=None):
+        """True when the raw lanes carried the write; False (and SSH for the rest of the Send) when they couldn't.
+        A dropped SSH connection is raised as it is, so the step is done again once connected again."""
+        try:
+            self._raw_send(path, pieces, progress)
+            if not getattr(self, "_raw_said", False):
+                self._raw_said = True
+                self.log("Sending the big files over a direct connection.", "info")
+            return True
+        except _RawFailed as e:
+            if not self._alive():
+                raise (e.__cause__ or e) from None
+            self._raw_off = True
+            self.log("The direct connection didn't work (%s); sending over the usual one." % e, "info")
+            return False
+
     def _put(self, path, fileobj, size, callback=None):
-        """A whole file: over every lane at once when it is big enough to gain (PAD-1434)."""
+        """A whole file: over the raw lanes when it is big (PAD-1465), else over every SSH lane at once when it is
+        big enough to gain (PAD-1434)."""
+        again = getattr(fileobj, "rewind", None) or (lambda: fileobj.seek(0))
+        if size >= RAW_MIN and (hasattr(fileobj, "rewind") or hasattr(fileobj, "seek")) and self._raw_ready():
+            with self.sftp.open(path, "wb"):
+                pass
+            if self._raw_try(path, _pieces(fileobj, size),
+                             None if callback is None else (lambda done: callback(done, size))):
+                got = self.sftp.stat(path).st_size
+                if got != size:
+                    raise SendError("%s arrived %d bytes long, not %d; send again." % (path, got, size))
+                return
+            again()
         if len(self._lanes) > 1 and size >= SPREAD_MIN:
             self._spread(path, _pieces(fileobj, size), create=True,
                          progress=None if callback is None else (lambda done: callback(done, size)))
@@ -1333,7 +1543,10 @@ class SshMachine(Machine):
             self.sh("\n".join(lines))
 
     def write_ranges(self, path, ranges):
-        if len(self._lanes) > 1 and sum(len(d) for _o, d in ranges) >= SPREAD_MIN:
+        big = sum(len(d) for _o, d in ranges)
+        if big >= RAW_MIN and self._raw_ready() and self._raw_try(path, ranges):
+            return
+        if len(self._lanes) > 1 and big >= SPREAD_MIN:
             self._spread(path, ranges)
             return
         with self.sftp.open(path, "r+b") as f:
@@ -2242,10 +2455,10 @@ class _RawFile(io.RawIOBase):
 DELTA_BLOCK = 1 << 20
 #: PAD-1435: the machine's piece helper (resources/pieces/build.sh prints these), by `uname -m`
 PIECES_DIR = Path(__file__).resolve().parents[1] / "resources" / "pieces"
-PIECES_VERSION = "padpieces 1"
+PIECES_VERSION = "padpieces 2"
 PIECES_ARCH = {"armv7l": "armv7", "armv7": "armv7", "aarch64": "aarch64", "arm64": "aarch64"}
-PIECES_SHA256 = {"armv7": "c5536de5f32d7e1a8e8ae1c9f5c717cfb0fab9d6025a92479460b48f7fd31464",
-                 "aarch64": "293ebece22295c2a9d3daa07a6727a09435eca3be82c3e27b95bc4f5a9bb4d73"}
+PIECES_SHA256 = {"armv7": "fa0a33b8966a31b35cf29636996743f449e9b3fbd68282bb868762d4949a3ff2",
+                 "aarch64": "115a161100336ae5e948d0fe57c7388fec302fe7bb5e2a2f23dadcefb64edead"}
 #: copies done in one go at most (the bar moves between batches)
 PIECES_BATCH = 64 << 20
 #: the machine hashes the same-size files a full Send compares in batches this big, the bar moving after each

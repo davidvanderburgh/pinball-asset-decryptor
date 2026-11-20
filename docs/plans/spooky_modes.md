@@ -456,7 +456,7 @@ panel showed in the game's own lettering and counted down; after the drain the b
 clean. A probe copy had the game clear its screen 2 s after a shot (`remove_all_text` +
 `unload_assets`): the game's own texts went, the panel was back at once and stayed.
 
-## Ticket 8: JJP parity on every runtime (PAD-1424, in progress)
+## Ticket 8 done: JJP parity on every runtime (PAD-1424)
 
 PinHeck is not in this ticket's runtimes: its runtime is still being built (PAD-1422/1423), so its
 parity keys belong with it. Here: the Unity core + four glues (six titles), Godot (Looney Tunes)
@@ -520,16 +520,40 @@ balls in play on the board until the drain then "one ball left". **Looney Tunes*
 red/off; LED 19, the ball-save lamp, held by the game's save). **Halloween** the same, the shaker
 held on the board (`held=[23]`) and let go, `start_after` on its skill shot ending.
 
-**Left for the next run**: build and prove Scooby-Doo (built), Beetlejuice, Evil Dead, Texas
-Chainsaw, Ultraman (their `Managed/` is in PAD-Runtime's cache; Ubuntu can `prepare.sh` them) and
-Alice Cooper; a mode's own sounds, music, picture and video on every runtime: Unity
-`UnityWebRequestMultimedia` clips on an AudioSource of ours, the game's music sources muted while
-ours plays, `VideoPlayer.url` (webm only on Linux Unity) and `Texture2D.LoadImage` on our canvas;
-Godot `AudioStreamOggVorbis.load_from_file`, `Audio.music_player` volume down while ours plays,
-`VideoStreamTheora` (.ogv only), `Image.load_from_file`; Rick and Morty `sound.register_sound` /
-`register_music` + `play_music`, the game's track back by `base.start_track(base.music_track)`,
-`dmd.Animation().load` and `dmd.MovieLayer(movie_file_path=)` (H.264 mp4); Alice Cooper's Unity
-player loads pictures and videos by asset name only, so they are refused there.
+- **A mode's own files** (`sound_*` naming a file, `sound_channel`, `music`, `picture` / `picture_at`,
+  `video` / `video_at` / `video_loop`): the build carries them into `pad/modes`. Unity: Unity's own
+  audio loader (`UnityWebRequestMultimedia`, polled) on an AudioSource of ours in the game's voice
+  (or music) mixer group; music looped with the game's music sources muted (Scooby-Doo
+  `music_channel` + `precision_timing_channel`, Beetlejuice primary/secondary, Evil Dead and Texas
+  Chainsaw `music_channel`, Halloween/Ultraman `MusicSource`), unmuted after; the picture
+  (`ImageConversion.LoadImage`) and a VP8 webm (`VideoPlayer.url`, the only video Linux Unity plays)
+  on a canvas just under the panel. Godot: **wav only** (4.1 has no Ogg file loader, and naming
+  4.2's `load_from_file` stops the script from parsing: the runtime never loaded); a PCM wav read
+  into an `AudioStreamWAV`, on the game's sfx/voice/music bus; music with `Audio.music_player` turned
+  down; `Image.load_from_file` and a Theora ogv (`VideoStreamTheora.file`) on a CanvasLayer (127)
+  under the panel. P-ROC: `sound.register_sound` / `register_music` (+ `play_voice` for speech),
+  the game's track back after (`base.start_track(base.music_track)`, else `update_music`, else
+  `playMainMusic`); Rick and Morty's picture (`dmd.Animation().load`, `Frame.scale`) and H.264 mp4
+  (`dmd.MovieLayer`, `ScaledLayer`) composited under the panel (`GroupedLayer`). Alice Cooper's Unity
+  player loads pictures and videos by asset name only: the check refuses them there.
+- **Serving balls the game's way** (found in the rig): Scooby-Doo's `add_a_ball` leaves the ball in
+  the shooter lane, so ours send the trough `autolaunch_balls` as its Cutler multiball does;
+  Halloween/Ultraman start a multiball save (`enable_mb_save`, keeping all but the new balls in the
+  trough) and `TriggerBallLaunch`, as their own multiballs do; Evil Dead's trough ignores a request
+  made while it loads a ball, so the glue waits for `launch_lifecycle` 0; Alice Cooper has no
+  autoplunge coil and adds a ball with `utilities_mode.launchBallIntoPlay`. A multiball's ball save
+  covers every ball in play (a one-ball save cancelled Halloween's queued launch), and its
+  one-ball-left check starts once the game counts the balls (20 s with none ends the mode).
+
+**Proven on all ten titles** (`C:/tmp/PAD-1424/make_proof.py` + `run_proof.sh`, hidden, muted,
+Ubuntu rigs): every start rule; lamps lit and flashing; coil pulses; a hold on the board and let go;
+ball saves; a two-ball multiball (two balls in play on the board on Beetlejuice, Texas Chainsaw,
+Halloween, Ultraman, Rick and Morty and Alice Cooper; counted by the game on Scooby-Doo, Evil Dead
+and Looney Tunes, whose boards do not count the playfield) ending on one ball left; the mode's own
+sound files and music (the game's music back after); its picture and video on the screen with the
+panel (Rick and Morty, Looney Tunes, Scooby-Doo shots). In the rig a playfield switch can come while
+the game's first ball still sits in the shooter lane, which no real game sees; a multiball then
+waits for the lane.
 
 ## Rig fix made on the way
 

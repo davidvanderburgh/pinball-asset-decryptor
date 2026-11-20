@@ -403,3 +403,23 @@ def test_proc_sound_file_and_music(pm, tmp_path, monkeypatch):
     for _ in range(3):
         _tick(r, 1.0)
     assert log[-2:] == [("stop_music",), ("track", "base-loop", -1)]
+
+
+# ============================================================================ the Modes form's lists
+def test_form_pickers_have_their_names(tmp_path):
+    from pinball_decryptor.plugins.spooky import custom_modes as SM
+    ed = SM.load_port("evil_dead-2026.07.15")
+    assert "REAR_MAGNET" in SM.names_for(ed, "coil_pulse") and "REAR_MAGNET" in SM.names_for(ed, "coil_hold")
+    assert "LEFT_DEADITE_HIGH" in SM.names_for(ed, "coil_pulse") and "LEFT_DEADITE_HIGH" not in SM.names_for(ed, "coil_hold")
+    assert "Chased_By_Evil" in SM.names_for(ed, "lamps")
+    assert SM.names_for(ed, "events")[:2] == ["ball_start", "first_ball"] and SM.names_for(ed, "after")[0] == "any"
+    for f in ("a.wav", "b.ogg", "c.png", "d.webm", "e.ogv", "f.mp4"):
+        (tmp_path / f).write_bytes(b"x")
+    lt, rm, ac = (SM.load_port(x) for x in ("legends_of_tera-2025.10.08", "rick_and_morty-2022.09.02", "alice_cooper-1.1.0.5"))
+    assert SM.names_for(lt, "sound_file", str(tmp_path)) == ["a.wav"]                 # Godot 4.1: no ogg file
+    assert SM.names_for(lt, "video_file", str(tmp_path)) == ["e.ogv"]
+    assert SM.names_for(rm, "video_file", str(tmp_path)) == ["f.mp4"]
+    assert SM.names_for(ed, "video_file", str(tmp_path)) == ["d.webm"]
+    assert SM.names_for(ac, "picture_file", str(tmp_path)) == []
+    assert "picture" not in dict(SM.form_groups(ac))["Picture and video"]
+    assert SM.names_for(rm, "sound_or_file", str(tmp_path))[:2] == ["a.wav", "b.ogg"]

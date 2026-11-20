@@ -96,6 +96,9 @@ class SpookyModesMixin:
               "title_keys": list(SM.TITLE_FORM), "fields": self._spk_fields()}
         if self._spk_label:
             port = SM.load_port(self._spk_label) or {}
+            groups, title_keys = SM.form_groups(port)
+            st["groups"] = [{"title": g, "keys": list(ks)} for g, ks in groups]
+            st["title_keys"] = list(title_keys)
             title = next((t for t in titles if t["label"] == self._spk_label), None)
             st["title"] = title
             st["can_run"] = bool(title and title["can_run"])
@@ -391,7 +394,7 @@ class SpookyModesMixin:
         _modes, problems = SM.check(label)
         if problems:
             raise ValueError("Fix the %d problem(s) the check found first" % len(problems))
-        pad = SM.stage_try(label, self._spk_try_base())
+        pad = SM.stage_try(label, self._spk_try_base(), stock)
         emu = self.window.service("emulate_spooky")
         if emu is None or not hasattr(emu, "launch_file"):
             raise ValueError("the Emulate tab is not in this app")

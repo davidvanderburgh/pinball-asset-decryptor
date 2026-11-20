@@ -150,9 +150,8 @@ Compiled C on a PIC32MX795; no mode engine to borrow, so the runtime is ours
 (Jetsons, as an example: link send 0x9D028BD8, video 0x9D02E58C, playSFX
 0x9D02F684, numbers 0x9D02E538, SetScore 0x9D02EB4C, AddScore 0x9D02BE84,
 score array 0xA000271C + 4 x player); Domino's and Rob Zombie's equivalents
-are in the PAD-1387 commit's `pinheck_poc.py` notes. Not found yet: coil
-fire, lamp set, ball start/end, a central switch dispatcher (switch handlers
-are inlined per switch).
+are in the PAD-1387 commit's `pinheck_poc.py` notes. Ticket 6 (below) found the
+rest by reading the game's state instead of its switch handlers.
 
 How our code gets in: a `jal` to a game function is re-pointed at a
 trampoline in free flash that calls the original and then ours. The PRG has
@@ -356,6 +355,68 @@ each and complete it with the 2,000,000 bonus (the game's score panel agrees); s
 ends when the ball drains, and on tilt. Spinner Frenzy: the drop target starts it, the spinner
 scores 50,000 a hit, it ends after 10 s. Every callout found and played on the game's voice
 channel; the panel on the screen in CCHeroSandwichMeat / Truculenta-Bold.
+
+## Ticket 6 done: the pinHeck runtime and Jetsons (PAD-1422)
+
+**The runtime** (`tools/spooky_emu/modes/pinheck/padheck.c`, MIPS32 C, 4.6 KB): linked per game
+build into the free flash after the program (`build.sh`, WSL `gcc-mipsel-linux-gnu`; no C library,
+no start-up code, every variable in one struct in RAM the game never writes). It joins the game
+through **one re-pointed call**: the `jal houseKeeping` inside the function every one of the
+game's loops calls to wait for the next millisecond (attract, play, bonus count, tilt, service).
+Its entry runs houseKeeping and then the modes, once per millisecond whatever the game is doing.
+The modes are data packed after it (`pinheck.py`, struct `pad_data`), so the app writes a modes
+PRG with no compiler. Same keys and rules as the Unity and Godot runtimes (start / start count,
+shots, points, seconds, completion and bonus, the four sounds, the panel); a mode ends on time, on
+completion, when the ball ends, on tilt and when the game ends; start counts reset at a new game.
+Its log is `[pad] ...` lines on the game's own serial monitor (UART1). Fonts and colours are
+refused by name (`keys_not_here` in the port report): the panel is the game's own text on the DMD.
+
+**Jetsons V004's hook table** (`pinheck/hooks.py`; every function also checked by its first bytes,
+the PRG by its sha1, so another build is refused, never patched blind). gp = 0xA0008200, the link
+object `this` = gp - 0x7BA8:
+
+| what | where | how it was found |
+|---|---|---|
+| tick | jal 0x9D018BB4 (houseKeeping) at 0x9D02EFC8, in the ms-wait 0x9D02EFC0 | `find_idle_loops`; callers' $ra per phase (attract 0x9D0144C0, play 0x9D0146FC, bonus 0x9D0207D8) |
+| switches | 0xA0000740: 8 row bytes, switch n = bit n & 7 of byte n >> 3, set while closed | RAM diff per ms around a held switch; byte 4 = 12 in attract (trough 34, 35) |
+| ball / player | 0xA0000720 (0 between games), 0xA00006E6 (1-based) | RAM diffs over whole games (PAD-1423 confirmed game over) |
+| ball live | 0xA0000690: 0 from the drain through the bonus count | the same |
+| phase | 0xA00006C3: 1 serving, 2 shooter lane, 3 in play | the same |
+| tilt | 0xA000073C set by tilt() 0x9D01F8A4; warnings 0xA000073D | the cabinet-switch handler's TL1/TL2 videos and tilt() |
+| AddScore | 0x9D02BE84 (points in a0): score[player] += points, no multiplier, no rounding | its code; asked 250,000, scored 250,000 |
+| sound | playSFX 0x9D02F684 (this, channel, folder, clip0, [16] clip1, [20] priority) | the POC |
+| text | text 0x9D02A314 (this, 0, column, line, s, [20] colour): packet 0x12, byte 0 = column << 3 \| line (4-pixel columns, 8-pixel lines, 128x64 DMD); 13 03 xx shows/hides the layer (0x9D02FC3C); 06 n ff.. clears line n | the service menu's text calls |
+| coils | fireCoil 0x9D02CE5C (this, coil, time), coil table 0xA0002280 | the one writer of the coil pins (0x9D02A9D8) and its caller |
+| lamps | 0xA0002384: 64 brightness bytes the lamp interrupt (0x9D024F2C) multiplexes; houseKeeping fills it every ms | the Timer2 handler |
+| free | flash 0x9D030000-, RAM 0xA0002F48..0xA001DF48 untouched over a whole game | a canary fill |
+
+Coils and lamps are in the table for ticket 8; no key uses them yet. A value written to the lamp
+table after houseKeeping (where the runtime runs) holds for that millisecond.
+
+**The build**: `mkspkmodes.py` takes `engine: pinheck` - `stage` writes the modes PRG from the stock
+update (Try it), `build` writes the stock zip again with only its PRG replaced (9 s for Jetsons'
+0.35 GB); a modes PRG given as stock is cut back to the stock one first. On the machine:
+Service -> UPDATE CODE flashes the card's PRG into the PIC (research_pinheck.md); the stock update
+takes the modes out the same way. The modes PRG keeps the game's version, so the game keeps its
+settings. **Write** packs the modes into a Jetsons update (`create_zip` with the PRG rewritten), and
+finds the title of an extract by its PRG's name. **Try it**: the pinHeck window takes `--prg`
+(the modes PRG on the update's own card); the Emulate tab passes Try it's PRG. The window's unpack
+cache now always takes the program from the zip it was given (a modes update has the stock one's
+name and shares its folder). The Modes tab hides the font and colour fields on Jetsons; its Build
+card says how a pinHeck update installs.
+
+**Port report** (`ports/jetsons-V004.json`): the games' switch test shows numbers only, so the
+switches are `switch_0`..`switch_63` (32 shooter lane, 34/35 trough); the card's 100 sounds by
+their three-letter names; points scale 1, no rounding.
+
+Proof (`pinheck/prove.py`, headless, muted): the PAD-built `Jetsons_Code.zip`, unpacked by the
+emulator's own unpacker, no Try it. Astro Rush: two hits on switch 20 start it, three shots score
+250,000 each (the game's own 150/250 first), the third completes it with the 2,000,000 bonus
+(score packets 250,252 -> 2,750,652). Sprocket Spin (no timer) keeps running through two ball-save
+drains and ends when the ball ends, at the bonus count. A timed mode ends on time; a mode ends on a
+real tilt (third warning). Every sound went out as the game's sound packet (EB0, C01, G00, H00,
+J00); the panel is on the DMD over the game's video. Tests: `tests/test_spooky_modes_pinheck.py`
+runs the shipped runtime binary on Unicorn against a stand-in game (no game files).
 
 ## Rig fix made on the way
 

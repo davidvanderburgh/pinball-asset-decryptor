@@ -209,14 +209,22 @@ def extract_tar_gz(tar_path, output_dir, progress_cb=None):
     return extracted
 
 
-def create_zip(source_dir, out_path, progress_cb=None):
-    """Create a ZIP archive from *source_dir*."""
+def create_zip(source_dir, out_path, progress_cb=None, pad_modes=None):
+    """Create a ZIP archive from *source_dir*.  *pad_modes* (PAD-1422, a pinHeck card): as
+    :func:`create_tar_gz`; its ``rewrite(rel, data)`` turns the card's PRG into the modes PRG
+    (``rewrite.names``: the file names it takes)."""
     all_files, _all_dirs = _scan_for_tar(source_dir)
+    rewrite = pad_modes[1] if pad_modes else None
+    names = {n.upper() for n in getattr(rewrite, "names", ())}
 
     total = len(all_files)
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for i, (full, rel) in enumerate(all_files):
-            zf.write(full, rel)
+            if rewrite and os.path.basename(rel).upper() in names:
+                with open(full, "rb") as f:
+                    zf.writestr(rel.replace("\\", "/"), rewrite(rel, f.read()))
+            else:
+                zf.write(full, rel)
             if progress_cb:
                 progress_cb(i + 1, total, rel)
 

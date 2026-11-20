@@ -22,7 +22,8 @@ tr -d '\r' < "$WT/tools/spike2_emu/modes/sdk/ports/$1.port" > "$ST/game.port"
 bash "$RIG/modes/tryit.sh" install "$ST" > "$OUTD/install.txt" 2>&1 || job_fail "install: $(tail -1 "$OUTD/install.txt")"
 export PAD_MODE_SO=/lib/pad_mode.so
 LOG=$DUMP/mode.log
-fin() { kill "$SAMP" "$BEAT" 2>/dev/null; cp "$LOG" "$OUTD/mode.log" 2>/dev/null; cp "$JOB_OUT/timeline.txt" "$OUTD/" 2>/dev/null; }
+SAMP=
+fin() { kill ${SAMP:+"$SAMP"} "$BEAT" 2>/dev/null; cp "$LOG" "$OUTD/mode.log" 2>/dev/null; cp "$JOB_OUT/timeline.txt" "$OUTD/" 2>/dev/null; }
 fail() { fin; job_fail "$*"; }
 job_boot
 job_wait_attract || fail "$JOB_WHY"

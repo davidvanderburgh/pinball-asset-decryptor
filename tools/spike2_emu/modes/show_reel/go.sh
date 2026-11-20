@@ -21,7 +21,7 @@ for i in $(seq 1 270); do
     sleep 10
 done
 set +e
-bash "$WT/tools/spike2_emu/rigbatch.sh" -n "$N" --speed 1 --who show-reel --job-cap 1200 --out /tmp/rb_show_reel /tmp/show_reel_list.txt -- bash /tmp/show_reel_job.sh > "$REEL_OUT/batch.log" 2>&1 < /dev/null
+bash "$WT/tools/spike2_emu/rigbatch.sh" -n "$N" --speed 1 --who "$(basename "$WT")" --job-cap 1200 --out /tmp/rb_show_reel /tmp/show_reel_list.txt -- bash /tmp/show_reel_job.sh > "$REEL_OUT/batch.log" 2>&1 < /dev/null
 rc=$?
 touch $DONE; sleep 1
 bash "$WT/tools/spike2_emu/riglock.sh" release 2 park-ballfeed > /dev/null 2>&1 || true

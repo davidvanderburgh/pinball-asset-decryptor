@@ -7,9 +7,9 @@ scripts/shot_pad1114.py), and writes two shots to <out_dir>:
 
 * <kind>_mode_lights.png - a new mode's Lights page, "The game's light shows", its "When it starts" list drawn open
   (the native drop-down cannot be photographed, so it is shown as a list box). After: the shows of the game's own
-  modes under each mode (read off the card), the start show set to Mechagodzilla Multiball's first (#259).
+  modes under each mode (read off the card), the start show set to first lit show (#210).
 * <kind>_coop_intro.png - the Co-op characters dialog with <intro video> as the co-op and team games' intro. After:
-  its "Light show with it" row, set to Hedorah's first show (#211).
+  its "Light show with it" row, set to a lit show of the game's (#214).
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
 """
@@ -94,7 +94,7 @@ def main():
                                            "g.label.startsWith('From '))", timeout=600000)
                 except Exception as e:                       # noqa: BLE001
                     print("no mode shows:", e, flush=True)
-                webui_shot.api(url, "ui.set", "modes", "f:show_start", "#259")
+                webui_shot.api(url, "ui.set", "modes", "f:show_start", "#210")
                 time.sleep(3)
             n = page.evaluate(OPEN_LIST, "When it starts")
             print("start list options", n, flush=True)
@@ -114,7 +114,7 @@ def main():
             page.wait_for_selector(".modes-coop-ch-row", timeout=180000)
             CP.save_intro(project, video)
             if kind == "after":
-                webui_shot.api(url, "modes.coop_intro_show", "#211")
+                webui_shot.api(url, "modes.coop_intro_show", "#214")
             webui_shot.api(url, "modes.coop_chars_show", 0)
             time.sleep(5)
             print("intro", CP.load_characters(project).get("intro"), CP.load_characters(project).get("intro_show"),

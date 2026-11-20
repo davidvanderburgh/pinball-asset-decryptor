@@ -469,7 +469,7 @@ export function CoopCharsDialog({ s, onClose }) {
     </div>
     ${ch.intro ? html`<div class="row" style="margin-top:6px; gap:8px">
       <span class="small dim" style="white-space:nowrap">Light show with it</span>
-      <${Select} sm width=${280} value=${ch.intro_show || "(none)"} disabled=${!!ch.intro_show_off}
+      <${Select} sm width=${340} value=${ch.intro_show || "(none)"} disabled=${!!ch.intro_show_off}
         options=${introShowOptions(ch.intro_show || "", s.mode_shows || [])}
         title=${ch.intro_show_off || "One of the light shows the game's own modes play, on the playfield while the intro plays; it stops when the intro ends or is skipped."}
         onChange=${(v) => call("modes.coop_intro_show", v === "(none)" ? "" : v)} />

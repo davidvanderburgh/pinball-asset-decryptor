@@ -335,7 +335,7 @@ function MachineScreen({ n }) {
         view running a press is immediate; without it each takes a second or two. The machine's card needs
         Remote buttons on it (the box beside this card).</span>
       ` : null}
-    <span class="small muted">Live view shows 3 to 5 frames a second on 5 GHz Wi-Fi (measured on a Godzilla LE; less
+    <span class="small muted">Live view shows a few frames a second, up to about 5 on 5 GHz Wi-Fi (measured on a Godzilla LE; less
       on 2.4 GHz), with no sound. It is for setting up and troubleshooting: while it runs it takes most of the machine's Wi-Fi and some of its processor, so do not leave it on during a game that matters. The pictures of the screen cross your home network on a plain connection, as
       Send to machine's big files do. It stops when you leave this tab, and by itself after 30 minutes.</span>
   <//>`;

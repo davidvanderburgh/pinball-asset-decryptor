@@ -697,7 +697,8 @@ class WritePipeline(_BasePipeline):
         temp_zip = self.output_path + ".tmp.zip"
         try:
             create_zip(self.assets_dir, temp_zip,
-                       progress_cb=lambda d, t, n: self.progress(d, t, n))
+                       progress_cb=lambda d, t, n: self.progress(d, t, n),
+                       pad_modes=self.pad_modes)
             self.log(f"ZIP created: "
                      f"{os.path.getsize(temp_zip) / (1024**3):.2f} GB",
                      "success")
@@ -774,7 +775,8 @@ class WritePipeline(_BasePipeline):
     def _custom_modes(self, meta, format_type):
         """PAD-1417: the person's custom modes for this title (Modes tab) as Write packs them,
         or None.  Modes with problems stay out, and the log says so, loudly."""
-        if format_type not in ("tar_gz", "gpg_tar_gz", "um_pkg", "h78_pkg", "plain_tar", "plain_zip"):
+        if format_type not in ("tar_gz", "gpg_tar_gz", "um_pkg", "h78_pkg", "plain_tar", "rm_pkg", "ac_pkg",
+                               "plain_zip"):
             return None
         try:
             from . import custom_modes as SM

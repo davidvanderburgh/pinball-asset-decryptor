@@ -1,0 +1,9 @@
+# Spinner Frenzy - a starter mode: the first center target starts it, the spinner scores for 10 seconds
+name = Spinner Frenzy
+title = SPINNER FRENZY
+start = target1
+shots = spinner
+points = 50000
+seconds = 10
+sound_start = target
+panel = top

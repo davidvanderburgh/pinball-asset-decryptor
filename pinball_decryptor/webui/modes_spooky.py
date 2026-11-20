@@ -90,15 +90,13 @@ class SpookyModesMixin:
         label = SM.label_for_card(card)
         if label != self._spk_label:
             self._spk_label, self._spk_file, self._spk_build = label, "", None
+        port = (SM.load_port(self._spk_label) or {}) if self._spk_label else {}
+        # a title's screen may not show every Screen key (Alice Cooper: no fonts, no box colour)
         st = {"on": True, "ns": "spk", "maker": "Spooky", "titles": titles, "label": self._spk_label,
               "max": SM.MAX_MODES, "card": card, "card_name": os.path.basename(card),
-              "groups": [{"title": g, "keys": list(ks)} for g, ks in SM.FORM_GROUPS],
-              "title_keys": list(SM.TITLE_FORM), "fields": self._spk_fields()}
+              "groups": [{"title": g, "keys": list(ks)} for g, ks in SM.form_groups(port)],
+              "title_keys": list(SM.title_form(port)), "fields": self._spk_fields()}
         if self._spk_label:
-            port = SM.load_port(self._spk_label) or {}
-            groups, title_keys = SM.form_groups(port)
-            st["groups"] = [{"title": g, "keys": list(ks)} for g, ks in groups]
-            st["title_keys"] = list(title_keys)
             title = next((t for t in titles if t["label"] == self._spk_label), None)
             st["title"] = title
             st["can_run"] = bool(title and title["can_run"])

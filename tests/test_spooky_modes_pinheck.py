@@ -310,7 +310,7 @@ def test_write_zip_carries_the_modes_prg(ph, port, tmp_path, monkeypatch):
 def test_modes_tab_form_and_install_note_for_jetsons():
     from pinball_decryptor.plugins.spooky import custom_modes as SM
     port = SM.load_port("jetsons-V004")
-    groups, title_keys = SM.form_groups(port)
+    groups, title_keys = SM.form_groups(port), SM.title_form(port)
     keys = {k for _g, ks in groups for k in ks}
     assert "panel" in keys and not keys & {"font_title", "title_color", "panel_color"}
     assert title_keys == ("panel",)

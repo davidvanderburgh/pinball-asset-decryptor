@@ -8549,6 +8549,21 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         stime_lines, stime_prof, _stime_on = [], None, False
         rec_prof, rec_list, _rec_on = None, [], False
 
+    # PAD-1467: nothing staged but the Wi-Fi menu wording.  Such a Write changes six lines of the game program and
+    # must leave everything else on the card as it is: a card someone else built with PAD (a shared mod image)
+    # keeps the operator-menu rows its own modes use (the end-to-end build on a Heisei card took them off).
+    wifi_menu_only = bool(
+        wifi_menu
+        and not audio_edits and not music_edits and not video_edits
+        and not image_edits and not texture_edits and not radimg_edits
+        and not text_edits and not color_edits and not layout_edits
+        and not tree_edits
+        and not boot_edits and not mode_list and not code_list
+        and not variant_slots and not sound_modes and not editions
+        and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
+        and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
+        and not stock_mode_edits and shader_prof is None
+        and not own_clips and not score_edits)
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
             and not text_edits and not color_edits and not layout_edits
@@ -9942,7 +9957,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # takes the rows an earlier Write gave its settings off it (one that
         # wants some does it in the menu step above), as the score colours
         retire_writes, n_retired = [], 0
-        if menu_job is None and fw_node is not None:
+        if menu_job is None and fw_node is not None and not wifi_menu_only:
             retire_writes, _rt_ov, n_retired = _retire_menu_rows(
                 reader, fw_node, log, patched_fw=patched_gr)
             if _rt_ov:
@@ -11109,6 +11124,17 @@ def _map_writes(files, writes):
     index = []
     for key, (reader, node) in files.items():
         runs = _file_extents(reader, node)
+        if runs is None:
+            # PAD-1467: a file with a HOLE (PAD-491's grown game program on a shared card: two blocks of zeros the
+            # card never stored) still has every other stretch on the disk, and a write into one of those is
+            # traced like any other.  Without this a build that changed six words of that program left its record
+            # incomplete, and Send to machine refused it.
+            try:
+                for f_off, disk, n in reader.mapped_ranges(node):
+                    index.append((int(disk), int(disk) + int(n), key, reader, node, int(f_off)))
+            except Exception:                               # noqa: BLE001 - an inode the reader can't follow
+                pass
+            continue
         if not runs:
             continue
         f_off = 0

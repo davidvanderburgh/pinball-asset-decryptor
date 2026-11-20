@@ -894,6 +894,13 @@ value comp_menu_challenge_3      11   # PAD-1449: a challenge's index (the style
 value comp_menu_challenge_4      12   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_5      13   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_6      14   # PAD-1449: a challenge's index (the style chooser follows it)
+value comp_menu_challenge_msg_0  3691   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_1  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_2  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_3  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_4  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_5  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_6  3656   # PAD-1449 round 2: its name message (the menu's style step letters it)
 # PAD-1041: the game's messages (the start menu's entry is lettered through them; port_tool's draft)
 data message_count          0x0056c2cc
 data message_remap          0x06ff919c

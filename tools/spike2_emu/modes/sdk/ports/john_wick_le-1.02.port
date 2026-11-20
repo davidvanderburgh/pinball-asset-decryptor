@@ -824,6 +824,11 @@ value comp_menu_challenge_1      5   # PAD-1449: a challenge's index (the style 
 value comp_menu_challenge_2      6   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_3      7   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_4      9   # PAD-1449: a challenge's index (the style chooser follows it)
+value comp_menu_challenge_msg_0  2899   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_1  2901   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_2  2903   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_3  2905   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_4  2897   # PAD-1449 round 2: its name message (the menu's style step letters it)
 
 # PAD-1406: the framework's all-flippers off and on (each flipper record's enable bit at +6, the node board's rule
 # follows), placed from Godzilla LE/Pro 1.16 by code (strict: only branch and literal offsets masked; the pair 0xd4

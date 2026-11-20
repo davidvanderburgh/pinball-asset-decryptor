@@ -57,6 +57,12 @@ public static class Glue {
         int saves = g.trough != null ? g.trough.savingBallCount : 0;
         if (saves > savesSeen && g.gameActive) r.GameEvent("ball_saved");
         savesSeen = saves;
+        if (pendingBalls > 0 && (!g.gameActive || g.ball == 0)) pendingBalls = 0;
+        if (pendingBalls > 0 && g.trough != null && g.trough.launch_lifecycle == 0) {
+            int n = pendingBalls;
+            pendingBalls = 0;
+            Loader.Log("the trough's load finished: " + Launch(n));
+        }
     }
 
     // ---- lamps, coils, balls (PAD-1424)
@@ -105,8 +111,17 @@ public static class Glue {
 
     public static void CoilRelease(string c) { var k = CoilOf(c); if (k != null) k.disable(); }
 
-    // the trough's own multiball calls: more balls for one that runs, else one of ours
+    // the trough's own multiball calls: more balls for one that runs, else one of ours.  Asked while
+    // the trough is still loading a ball (launch_lifecycle not 0), the extra one never came out in the
+    // rig: the request waits for the load to finish (Poll)
+    static int pendingBalls;
+
     public static string AddBalls(int n) {
+        if (G.trough.launch_lifecycle != 0) { pendingBalls += n; return "waiting for the trough's load to finish (" + pendingBalls + " ball(s))"; }
+        return Launch(n);
+    }
+
+    static string Launch(int n) {
         var t = G.trough;
         if (t.multiballActive) return "trough.incMultiballFromTrough: " + t.incMultiballFromTrough(hook, n) + " added";
         t.createMultiballMode(hook, n, 100, remain => remain <= 1);

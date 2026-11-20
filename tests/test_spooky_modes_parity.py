@@ -350,11 +350,27 @@ def test_proc_multiball_add_ball_ball_save(pm, tmp_path, monkeypatch):
     r.pad_switch(_Sw("rightInlane"))                        # up to once a run
     assert log.count(("add_balls", 1)) == 1
     _tick(r, 30)                                            # the clock stopped when the balls came
+    assert m["running"] and "the balls are in play" in r.log.read_text()
+    for _ in range(9):                                      # its 5 s save and 3 s more first
+        _tick(r, 1.0)
     assert m["running"]
     r.game.trough.num_balls_in_play = 1
     _tick(r, 1)
     _tick(r, 2.5)
     assert not m["running"] and "ended (one ball left)" in r.log.read_text()
+
+
+def test_proc_multiball_balls_that_never_come(pm, tmp_path, monkeypatch):
+    r, log = _lcb(pm, tmp_path, monkeypatch, "start = leftInlane\nmultiball = 2 4\nseconds = 0\n")
+    r.game.trough.add_balls = lambda n: None                # the trough serves none
+    r.pad_switch(_Sw("leftInlane"))
+    m = r.pad_modes[0]
+    for _ in range(10):                                     # one ball all along: not "one ball left" yet
+        _tick(r, 1.0)
+    assert m["running"]
+    for _ in range(12):
+        _tick(r, 1.0)
+    assert not m["running"] and "the multiball's balls never came" in r.log.read_text()
 
 
 def test_proc_ball_save_ends_with_the_mode(pm, tmp_path, monkeypatch):

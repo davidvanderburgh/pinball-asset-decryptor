@@ -238,17 +238,16 @@ func _is_file(v: String) -> bool:
 	return v.get_extension().to_lower() in ["ogg", "wav", "png", "jpg", "jpeg", "ogv", "webm", "mp4"]
 
 
-# An AudioStream from a file of the mode's own: Ogg Vorbis (where the engine can read one from a
-# file) or PCM wav (read here: AudioStreamWAV takes the samples).
+# An AudioStream from a file of the mode's own: PCM wav, read here (AudioStreamWAV takes the
+# samples).  Godot 4.1 has no Ogg Vorbis loader for a file (load_from_file came in 4.2, and even
+# naming it stops this script from parsing), so the check takes wav only on this engine.
 func _stream(name: String):
 	if streams.has(name):
 		return streams[name]
 	var path := dir.path_join(name)
 	var st = null
 	var ext := name.get_extension().to_lower()
-	if ext == "ogg" and ClassDB.class_has_method("AudioStreamOggVorbis", "load_from_file"):
-		st = AudioStreamOggVorbis.load_from_file(path)
-	elif ext == "wav":
+	if ext == "wav":
 		st = _wav(path)
 	if st == null:
 		plog("%s: cannot play %s on this engine (%s)" % [name, ext, Engine.get_version_info().string])
@@ -694,6 +693,7 @@ func _save(m: Dictionary, secs: int) -> void:
 func _multiball(m: Dictionary) -> void:
 	var have := maxi(1, _balls_in_play())
 	m["mb_served"] = true
+	m["mb_seen"] = false
 	m["mb_at"] = Time.get_ticks_msec() / 1000.0
 	m["one_since"] = 0.0
 	plog("%s: multiball, %d balls in play wanted, %d now%s" % [m["name"], m["mb_balls"], have,
@@ -771,7 +771,17 @@ func _lamps_off(m: Dictionary) -> void:
 
 # A multiball of ours ends the mode once one ball is left for 2 s, after its ball save and 3 s more.
 func _balls_tick(m: Dictionary, now: float) -> void:
-	if not m["mb_served"] or now - m["mb_at"] < m["mb_save"] + 3:
+	if not m["mb_served"]:
+		return
+	if not m.get("mb_seen", false):
+		if _balls_in_play() > 1:
+			m["mb_seen"] = true
+			m["mb_at"] = now
+			plog("%s: the balls are in play" % m["name"])
+		elif now - m["mb_at"] > 20.0:
+			_stop(m, "the multiball's balls never came")
+		return
+	if now - m["mb_at"] < m["mb_save"] + 3:
 		return
 	if _balls_in_play() <= 1:
 		if m["one_since"] == 0.0:

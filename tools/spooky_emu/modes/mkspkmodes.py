@@ -130,11 +130,12 @@ KEYS = collections.OrderedDict([
     ("video", "video_file"), ("video_at", "box"), ("video_loop", ("yes", "no")),
 ])
 #: what each engine's runtime plays from a file of the mode's own: Unity's AudioClip loader and
-#: VideoPlayer on Linux (VP8 webm only), Godot 4.1 (Ogg Vorbis, PCM wav, Theora ogv),
+#: VideoPlayer on Linux (VP8 webm only), Godot 4.1 (PCM wav: it has no Ogg loader for a file;
+#: Theora ogv),
 #: SkeletonGame's pygame mixer and its ffmpeg movie layer (H.264 mp4)
 MEDIA = {
     "unity": {"sound_file": ("ogg", "wav"), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("webm",)},
-    "godot": {"sound_file": ("ogg", "wav"), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("ogv",)},
+    "godot": {"sound_file": ("wav",), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("ogv",)},
     "proc": {"sound_file": ("ogg", "wav"), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("mp4",)},
 }
 MEDIA_KEYS = ("sound_start", "sound_shot", "sound_complete", "sound_end", "music", "picture", "video")

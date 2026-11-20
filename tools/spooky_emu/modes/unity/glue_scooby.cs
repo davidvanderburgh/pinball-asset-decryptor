@@ -157,10 +157,12 @@ public static class Glue {
         for (int i = 0; i < 3; i++) Warden.set_pwm((byte)n, 0);      // the game sends its off three times
     }
 
-    // the game's own add-a-ball message: Trough_mode ejects n (RequestEject), counted in balls_in_play
+    // the trough's autolaunch_balls message, as the game's own multiballs send it (Cutler MB): Trough_mode
+    // ejects n (RequestEject, counted in balls_in_play) and launches them; add_a_ball left the ball in the
+    // shooter lane for the player
     public static string AddBalls(int n) {
-        Mode.machine.append_message(PadRuntime.ModeId, 0, Messages.add_a_ball, n);
-        return "add_a_ball message, " + n + " ball(s)";
+        Mode.machine.append_message(PadRuntime.ModeId, Modes.trough_mode, Messages.autolaunch_balls, n);
+        return "autolaunch_balls message to the trough, " + n + " ball(s)";
     }
 
     static Base_mode Base() { return Modes.modes.Values.OfType<Base_mode>().FirstOrDefault(); }

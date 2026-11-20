@@ -118,7 +118,7 @@ public class CMode {
     public List<int> MbOn = new List<int>(), AddBall = new List<int>(), HoldOn = new List<int>();
     public string HoldWhen = "shots", HoldCoil;
     public int HoldMs = 1000, HoldPower = 8;
-    public bool HoldsOk, MbServed, Held;
+    public bool HoldsOk, MbServed, MbSeen, Held;
     public float StartedAt, MbAt, OneSince, HeldUntil, LampAt;
     public int LampPhase = -1;
     // a mode's own files (PAD-1424)
@@ -580,15 +580,23 @@ public class PadRuntime {
 
     void Multiball(CMode m) {
         int have = Math.Max(1, Glue.BallsInPlay());
-        m.MbServed = true; m.MbAt = Time.unscaledTime; m.OneSince = 0f;
+        m.MbServed = true; m.MbSeen = false; m.MbAt = Time.unscaledTime; m.OneSince = 0f;
         Loader.Log(m.Name + ": multiball, " + m.MbBalls + " balls in play wanted, " + have + " now" +
             (m.MbBalls > have ? ": " + Glue.AddBalls(m.MbBalls - have) : ""));
         if (m.MbSave > 0) Save(m, m.MbSave, Math.Max(1, m.MbBalls - 1));
     }
 
-    // A multiball of ours ends the mode once one ball is left for 2 s, after its ball save and 3 s more.
+    // A multiball of ours ends the mode once one ball is left for 2 s, after its ball save and 3 s more,
+    // counted from when the game has the balls in play (a trough still loading a ball serves ours late);
+    // balls that never come in 20 s end it too.
     void BallsTick(CMode m, float now) {
-        if (!m.MbServed || now - m.MbAt < m.MbSave + 3) return;
+        if (!m.MbServed) return;
+        if (!m.MbSeen) {
+            if (Glue.BallsInPlay() > 1) { m.MbSeen = true; m.MbAt = now; Loader.Log(m.Name + ": the balls are in play"); }
+            else if (now - m.MbAt > 20f) Stop(m, "the multiball's balls never came");
+            return;
+        }
+        if (now - m.MbAt < m.MbSave + 3) return;
         if (Glue.BallsInPlay() <= 1) {
             if (m.OneSince == 0f) m.OneSince = now;
             else if (now - m.OneSince >= 2f) Stop(m, "one ball left");

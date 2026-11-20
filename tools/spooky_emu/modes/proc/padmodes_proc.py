@@ -772,7 +772,7 @@ def _runtime_class(base):
         def pad_multiball(self, m):
             want = m.get("mb_balls") or 0
             have = max(1, _balls_in_play(self.game))
-            m["mb_served"], m["mb_at"] = True, time.time()
+            m["mb_served"], m["mb_seen"], m["mb_at"] = True, False, time.time()
             if want > have:
                 self.pad_add_balls(m, want - have)
             log("%s: multiball, %d balls in play wanted, ball save %d s" % (m["name"], want, m["mb_save"]))
@@ -783,6 +783,13 @@ def _runtime_class(base):
             """A multiball of ours ends the mode once one ball is left for 2 s, after its ball
             save and 3 s more."""
             if not m.get("mb_served"):
+                return
+            if not m.get("mb_seen"):
+                if _balls_in_play(self.game) > 1:
+                    m["mb_seen"], m["mb_at"] = True, now
+                    log("%s: the balls are in play" % m["name"])
+                elif now - m["mb_at"] > 20:
+                    self.pad_stop(m, "the multiball's balls never came")
                 return
             if now - m["mb_at"] < m["mb_save"] + 3:
                 return

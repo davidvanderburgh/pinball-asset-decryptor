@@ -322,5 +322,11 @@ int main(void)
     assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "1100000"
     serve = R._lift(src, "static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)\n{")
     assert serve.index("srv_music_early();") < serve.index("sty_hold();") < serve.index("ci_serve_game(")
-    text = (PORTS / "godzilla_le-1.16.port").read_text(encoding="utf-8")
-    assert re.search(r"^value serve_music +66$", text, re.M)
+    # round 5 (DoomWalrus666: "Why does the stock music not play on the intro in the Pro code"): request 66 is SE GZ MX
+    # MAIN PLAY START on every Godzilla build (the program's own Sound Test names), so every Godzilla port whose ball 1
+    # can wait for the pick (`serve_ball`) names it
+    held = [f for f in sorted(PORTS.glob("godzilla_*.port"))
+            if re.search(r"^site serve_ball ", f.read_text(encoding="utf-8"), re.M)]
+    assert [f.name for f in held] == ["godzilla_le-1.16.port", "godzilla_pro-1.16.port"]
+    for f in held:
+        assert re.search(r"^value serve_music +66$", f.read_text(encoding="utf-8"), re.M), f.name

@@ -28,10 +28,20 @@ typedef unsigned int u32;
 
 /* ------------------------------------------------------------------ the game (build.sh) */
 extern void GAME_tick_target(void *self);
-extern void GAME_add_score(u32 points);
+/* AddScore(points, flag): flag 0 is the plain award (Domino's and Rob Zombie read it: 1 takes
+   another scoring path; Jetsons' ignores it) */
+extern void GAME_add_score(u32 points, int flag);
 extern void GAME_play_sfx(void *self, int channel, int folder, int clip0, int clip1, int priority);
+#ifdef TEXT_ABI_AMH
+/* AMH's text (Domino's, Rob Zombie; PAD-1423): text(this, line, s), packet 0x0F, byte 0 the
+   line, up to 13 characters; no text layer to show or hide - the game's next video clears it */
+extern void GAME_text_str(void *self, int line, const char *s);
+#define TEXT_MAX 13
+#else
 extern void GAME_text_str(void *self, int zero, int column, int line, const char *s, int colour);
 extern void GAME_text_show(void *self, int which, int on);
+#define TEXT_MAX 32
+#endif
 extern void GAME_link_send(void *self, int cmd);
 extern u8 GAME_this[];
 extern volatile u8 GAME_data_out[16];
@@ -154,6 +164,9 @@ static void sound(int i, int which)
 /* ------------------------------------------------------------------ the panel */
 static void text_line_clear(int line)
 {
+#ifdef TEXT_ABI_AMH
+    GAME_text_str(GAME_this, line, "");
+#else
     int k;
     GAME_data_out[0] = (u8)line;
     for (k = 1; k < 9; k++)
@@ -161,6 +174,7 @@ static void text_line_clear(int line)
     for (; k < 15; k++)
         GAME_data_out[k] = 0;
     GAME_link_send(GAME_this, 6);
+#endif
 }
 
 static int len_of(const char *s, int max)
@@ -175,14 +189,19 @@ static void centred(int line, const char *s, int n)
 {
     char b[33];
     int k;
-    if (n > 32)
-        n = 32;
+    if (n > TEXT_MAX)
+        n = TEXT_MAX;
     for (k = 0; k < n; k++)
         b[k] = s[k];
     b[n] = 0;
+#ifdef TEXT_ABI_AMH
+    GAME_text_str(GAME_this, line, b);          /* the Propeller centres the line */
+#else
     GAME_text_str(GAME_this, 0, (32 - n) / 2, line, b, 255);
+#endif
 }
 
+#ifndef TEXT_ABI_AMH
 static char *put_grouped(char *p, u32 v)
 {
     char t[16];
@@ -199,10 +218,16 @@ static char *put_grouped(char *p, u32 v)
     *p = 0;
     return p;
 }
+#endif
 
 static int first_line(int panel)
 {
+#ifdef TEXT_ABI_AMH
+    (void)panel;
+    return 0;           /* lines 0 and 1: the game's own two-line messages; 6 is its ticker */
+#else
     return panel == PANEL_TOP ? 0 : panel == PANEL_BOTTOM ? 6 : 3;
+#endif
 }
 
 static void undraw(void)
@@ -211,7 +236,9 @@ static void undraw(void)
         return;
     text_line_clear(R.drawn_lines - 1);
     text_line_clear(R.drawn_lines);
+#ifndef TEXT_ABI_AMH
     GAME_text_show(GAME_this, 3, 0);
+#endif
     R.drawn_lines = 0;
 }
 
@@ -229,10 +256,18 @@ static void draw(u32 now)
     line = first_line(m->panel);
     if (R.drawn_lines && R.drawn_lines != line + 1)
         undraw();
+#ifdef TEXT_ABI_AMH
+    p = put_num(p, R.m[i].total);                 /* 13 characters: "1000000 0:30" */
+#else
     p = put_grouped(p, R.m[i].total);
+#endif
     if (m->seconds) {
         u32 left = R.m[i].ends_at > now ? (R.m[i].ends_at - now + 999) / 1000 : 0;
+#ifdef TEXT_ABI_AMH
+        p = put_str(p, " ", 1);
+#else
         p = put_str(p, "  ", 2);
+#endif
         p = put_num(p, left / 60);
         *p++ = ':';
         *p++ = '0' + (left % 60) / 10;
@@ -249,11 +284,17 @@ static void draw(u32 now)
             return;
         R.drawn_key = key;
     }
+#ifndef TEXT_ABI_AMH
     GAME_text_show(GAME_this, 3, 1);
+#endif
     R.drawn_lines = line + 1;
-    text_line_clear(line);
+#ifndef TEXT_ABI_AMH
+    text_line_clear(line);              /* AMH's text replaces its line: no clear first */
+#endif
     centred(line, m->title, len_of(m->title, 16));
+#ifndef TEXT_ABI_AMH
     text_line_clear(line + 1);
+#endif
     centred(line + 1, b, (int)(p - b));
     R.drawn_ms = now;
 }
@@ -294,7 +335,7 @@ static u32 score_now(void)
 static u32 award(u32 points)
 {
     u32 before = score_now();
-    GAME_add_score(points);
+    GAME_add_score(points, 0);
     return score_now() - before;
 }
 

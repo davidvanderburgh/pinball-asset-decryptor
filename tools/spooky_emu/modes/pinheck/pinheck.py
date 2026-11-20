@@ -67,10 +67,18 @@ def screen_text(s):
     return "".join(c if 32 <= ord(c) <= 95 else "?" for c in (s or "").upper())
 
 
-def title_problem(s):
+def title_max(stem):
+    """How many characters of a mode's title the build's DMD panel shows (Jetsons 16; AMH's
+    text lines on Domino's and Rob Zombie, 13)."""
+    t = H.HOOKS.get(stem) or {}
+    return min(TITLE_MAX, t.get("text_columns") or TITLE_MAX)
+
+
+def title_problem(s, stem=None):
     t = (s or "").upper()
-    if len(t) > TITLE_MAX:
-        return "is %d characters: the DMD panel shows %d" % (len(t), TITLE_MAX)
+    limit = title_max(stem) if stem else TITLE_MAX
+    if len(t) > limit:
+        return "is %d characters: the DMD panel shows %d" % (len(t), limit)
     bad = sorted({c for c in t if not 32 <= ord(c) <= 95})
     if bad:
         return "has %s, which the DMD's text cannot show (letters, digits and !\"#$%%&'()*+,-./:;<=>?@[]^_)" % " ".join(bad)
@@ -100,7 +108,7 @@ def _int(v, default=0):
 def pack_mode(m, port):
     """One struct pad_mode (64 bytes) from a checked mode dict."""
     fn = m.get("file", "?")
-    title = screen_text(m.get("title") or m.get("name") or fn[:-5])[:TITLE_MAX]
+    title = screen_text(m.get("title") or m.get("name") or fn[:-5])[:title_max((port or {}).get("prg") or "")]
     start = _bits((m.get("start") or "").replace(",", " ").split(), port, "start", fn)
     shots = _bits((m.get("shots") or "").replace(",", " ").split(), port, "shots", fn)
     sounds = b""
@@ -174,7 +182,13 @@ def stock_of(prg):
 #: switches the emulator and the game's own ball handling name (tools/pinheck_emu/games.py);
 #: the games' switch tests show numbers only, so the rest are switch_<n>
 KNOWN_SWITCHES = {"JET_V004": {32: ("shooter_lane", "SHOOTER LANE"), 34: ("trough_2", "TROUGH 2"),
-                               35: ("trough_1", "TROUGH 1")}}
+                               35: ("trough_1", "TROUGH 1")},
+                  "DOM_V006": {0: ("shooter_lane", "SHOOTER LANE"), 1: ("trough_1", "TROUGH 1"),
+                               2: ("trough_2", "TROUGH 2"), 3: ("trough_3", "TROUGH 3")},
+                  # Rob Zombie wants all of 1..7 closed for "no missing balls"; which of them
+                  # are the trough and which hold balls elsewhere is not known
+                  "RZO_V026": dict([(0, ("shooter_lane", "SHOOTER LANE"))] +
+                                   [(n, ("ball_%d" % n, "BALL SWITCH %d" % n)) for n in range(1, 8)])}
 
 
 def card_sounds(card):
@@ -199,10 +213,13 @@ def make_port(stem, card, game, version, defaults=None):
     labels = {s: known.get(n, (None, "SWITCH %d" % n))[1] for n, s in enumerate(syms)}
     return dict(
         title=t["title"], game=game, version=version, update_ext=".zip", engine="pinheck", prg=stem,
-        made_by="the game's code read and proven in tools/pinheck_emu (PAD-1422): hooks.py; sounds "
-                "from the card's SFX folders",
-        runtime="1", points_scale=1, points_round=0,
-        points_note="AddScore adds the points to the player's score as they are (no multiplier, no "
+        made_by="the game's code read and proven in tools/pinheck_emu (PAD-1422, PAD-1423): hooks.py; "
+                "sounds from the card's SFX folders",
+        runtime="1", points_scale=1, points_round=t.get("points_round", 0),
+        points_note=("AddScore adds the points to the player's score rounded down to a multiple of "
+                     "%d (no multiplier); the runtime calls it as the game's own switch handlers do"
+                     % t["points_round"]) if t.get("points_round") else
+                    "AddScore adds the points to the player's score as they are (no multiplier, no "
                     "rounding); the runtime calls it as the game's own switch handlers do",
         switches=syms, switch_ids={s: n for n, s in enumerate(syms)}, switch_labels=labels,
         lamps=[], sounds=card_sounds(card), voice_lines=0, game_modes=[], fonts=[],

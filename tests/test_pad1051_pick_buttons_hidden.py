@@ -159,7 +159,8 @@ def test_the_pick_hides_its_buttons_only_while_its_ball_waits_and_a_launch_takes
     src = C.RUNTIME.read_text(encoding="utf-8")
     # PAD-1404: a mode menu's held-back buttons, none here
     main = C.MAIN[:C.MAIN.index("@DECL@")] + ("static int coop_live;\nstatic int btn_hide_n;\n"
-                                              "static int btn_hides(unsigned id) { return 0; }\n@DECL@") \
+                                              "static int btn_hides(unsigned id) { return 0; }\n"
+                                              "static int sty_menu_owns_action(void) { return 0; }   /* PAD-1449 */\n@DECL@") \
         + C.MAIN[C.MAIN.index("@DECL@") + 6:]
     main = main[:main.index("int main(void)")] + LANE_MAIN
     fns = C.FNS[:C.FNS.index("static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)")] \
@@ -250,7 +251,8 @@ def test_a_launch_press_is_told_from_the_games_plunger_flags(tmp_path):
     src = C.RUNTIME.read_text(encoding="utf-8")
     # PAD-1404: a mode menu's held-back buttons, none here
     main = C.MAIN[:C.MAIN.index("@DECL@")] + ("static int coop_live;\nstatic int btn_hide_n;\n"
-                                              "static int btn_hides(unsigned id) { return 0; }\n@DECL@") \
+                                              "static int btn_hides(unsigned id) { return 0; }\n"
+                                              "static int sty_menu_owns_action(void) { return 0; }   /* PAD-1449 */\n@DECL@") \
         + C.MAIN[C.MAIN.index("@DECL@") + 6:]
     main = main[:main.index("int main(void)")] + SAVE_MAIN
     lifted = "\n".join(C.R._lift(src, sig + "\n{") for sig in C.FNS)

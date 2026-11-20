@@ -10731,6 +10731,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "score_feed": (feed_url if getattr(mode_plan, "scorefeed_file", "") else ""),
                 # PAD-1280: the owner's records on the game's high scores (their names)
                 "records": ([r["name"] for r in rec_list] if getattr(mode_plan, "records_file", "") else []),
+                # PAD-1462: the themes with scenes of their own on the card (Simon: the finished Write names them)
+                "themes": ([scenes_sets["names"][n - 1] for n in sorted(
+                    {n for per in (scenes_sets.get("scenes") or {}).values() for n in per})
+                    if n - 1 < len(scenes_sets["names"])] if scenes_staged[0] and scenes_sets else []),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -14167,7 +14171,8 @@ def _install_modes(output_path, modes, landed, planned, log):
     if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                   or modes.get("picture") or modes.get("attract") or modes.get("coop")
                                   or modes.get("idle") or modes.get("handicap") or modes.get("comp")
-                                  or modes.get("score_feed") or modes.get("records")):
+                                  or modes.get("score_feed") or modes.get("records")
+                                  or modes.get("themes")):     # PAD-1462: a themes-only card is no "0 mode(s)"
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")
@@ -14197,6 +14202,8 @@ def _install_modes(output_path, modes, landed, planned, log):
                                      "p2", "end_sound", "variants", "music_modes", "picture")}
     if modes.get("own_sounds"):
         rec["own_sounds"] = modes.get("own_sounds")
+    if modes.get("themes"):                   # PAD-1462: the finished Write names them (pipeline)
+        rec["themes"] = list(modes["themes"])
     return rec, True
 
 

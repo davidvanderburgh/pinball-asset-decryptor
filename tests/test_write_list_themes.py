@@ -7,6 +7,7 @@ import pytest
 
 from pinball_decryptor.core import colour_profile as cp
 from pinball_decryptor.plugins.stern import scene_variants as SV
+from pinball_decryptor.plugins.stern import service_menu as SM
 from pinball_decryptor.webui import write_scan as W
 
 from tests.test_image_sets_pictures import REL, _png, _project, _scene
@@ -26,7 +27,14 @@ def _themed(tmp_path):
     SV.set_themes_on(p, True)
     assert SV.add_set(p, "LIGHT") == 2
     assert SV.add_set(p, "NIGHT") == 3
+    _tick_image_set(p, True)
     return p
+
+
+def _tick_image_set(p, on):
+    data = SM.load(p)
+    data["on"] = sorted(set(data["on"]) | {"image_set"}) if on else [k for k in data["on"] if k != "image_set"]
+    SM.save(p, data)
 
 
 def test_no_themes_no_rows(tmp_path):
@@ -94,3 +102,28 @@ def test_fingerprint_follows_a_pick(tmp_path):
     after = W.fingerprint(window, p, 0, True)
     assert before != after
     assert W.fingerprint(window, p, 0, True) == after
+
+
+def test_image_set_unticked_the_rows_say_left_off(tmp_path):
+    """The Write leaves the themes off a card whose Image Set row is unticked (engine): the rows say so."""
+    p = _themed(tmp_path)
+    SV.set_picture(p, 2, TREL, _png(tmp_path / "LIGHT-CARD.png", (200, 200, 200, 255)))
+    window = types.SimpleNamespace()
+    on = W.fingerprint(window, p, 0, True)
+    _tick_image_set(p, False)
+    rows = W.theme_rows(_Stern(), p)
+    assert len(rows) == 1 and rows[0][2] == W.PENDING_THEMES_OFF
+    assert "Image Set" in W.PENDING_THEMES_OFF
+    assert W.fingerprint(window, p, 0, True) != on
+
+
+def test_the_finished_write_names_the_themes():
+    """Simon: a Write whose only change is a theme's pictures does not say "no changes" (the build record's
+    ``themes``, engine)."""
+    from pinball_decryptor.plugins.stern.pipeline import _write_summary_with_modes as summary
+    assert summary((0, 0, 0, 0), {"themes": ["LIGHT"]}) == "the pictures of 1 theme(s) (LIGHT)"
+    assert summary((0, 0, 2, 0), {"themes": ["LIGHT", "NIGHT"]}) == \
+        "2 image(s) and the pictures of 2 theme(s) (LIGHT, NIGHT)"
+    assert summary((0, 0, 2, 0), {"names": ["M1"], "themes": ["LIGHT"]}).endswith(
+        "and the pictures of 1 theme(s) (LIGHT)")
+    assert summary((0, 0, 0, 0), {}) == "no changes"

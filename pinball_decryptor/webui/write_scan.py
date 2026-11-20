@@ -429,6 +429,17 @@ PENDING_SCORE_COLOURS = "Pending (score colors)"
 
 #: PAD-1462 themes: a theme's own pictures and color profiles
 PENDING_THEMES = "Pending (Themes)"
+#: ... and the Write leaves them off the card (engine: "IMAGE SET is not ticked on the Service menu tab")
+PENDING_THEMES_OFF = "Pending (Themes — left off: tick Image Set on the Service menu tab)"
+
+
+def _image_set_off(assets_path):
+    """True when the Service menu tab leaves IMAGE SET off the card, so the Write leaves the themes out (PAD-1393)."""
+    try:
+        from ..plugins.stern import service_menu
+        return "image_set" in service_menu.off_keys(assets_path)
+    except Exception:                                   # noqa: BLE001
+        return False
 
 
 def theme_rows(mfr, assets_path):
@@ -447,6 +458,9 @@ def theme_rows(mfr, assets_path):
     names = sets.get("names") or []
     picks_by = sets.get("images") or {}
     colour_by = sets.get("colour") or {}
+    # the Write leaves the themes off a card whose IMAGE SET row is unticked: the rows say so, as a too-long text with
+    # grow off does
+    status = PENDING_THEMES_OFF if _image_set_off(assets_path) else PENDING_THEMES
     scenes_by = {}
     for card, per in (sets.get("scenes") or {}).items():
         for n in per:
@@ -463,10 +477,10 @@ def theme_rows(mfr, assets_path):
             if rel in colour:
                 what.append("own color profile")
             out.append(("%s: %s  —  %s" % (who, rel, ", ".join(what)),
-                        os.path.splitext(rel)[1].lstrip(".") or "?", PENDING_THEMES, "pending"))
+                        os.path.splitext(rel)[1].lstrip(".") or "?", status, "pending"))
         for card in sorted(scenes_by.get(n) or ()):
             out.append(("%s: scene %s  —  a scene file of its own" % (who, SV.scene_id(card)[:8]),
-                        "image", PENDING_THEMES, "pending"))
+                        "image", status, "pending"))
     return out
 
 
@@ -802,7 +816,8 @@ def fingerprint(window, assets_path, epoch, grow_on):
         sets = scene_variants.load(assets_path) or {}
         parts.append((sets.get("names"), repr(sorted((sets.get("scenes") or {}).items())),
                       sorted((n, sorted(p.items())) for n, p in (sets.get("images") or {}).items()),
-                      sorted((n, sorted(r)) for n, r in (sets.get("colour") or {}).items())))
+                      sorted((n, sorted(r)) for n, r in (sets.get("colour") or {}).items()),
+                      _image_set_off(assets_path)))
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     from ..core import card_extras

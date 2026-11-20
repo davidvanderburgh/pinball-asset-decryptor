@@ -751,6 +751,20 @@ def _relaunch_with_checkout_venv(argv):
     return True
 
 
+def _startup_watch():
+    """The clock on the app building itself (core/startup_watch, PAD-1474):
+    a start that waits says where in the log, and one held up by a WSL that
+    stopped answering offers to restart WSL.  None if it cannot start."""
+    try:
+        from ..core import session_log, startup_watch
+        return startup_watch.StartupWatch(
+            session_log.log_dir(),
+            lambda text: session_log.append(text, "warning")).start()
+    except Exception:                                   # noqa: BLE001
+        log.warning("start-up watch did not start", exc_info=True)
+        return None
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -773,7 +787,12 @@ def main(argv=None):
     host = Host(ctx, mode)
     ctx.host = host
     meanwhile = host.preload_window if mode == "native" else None
-    ctx, server = build(ctx, meanwhile=meanwhile)
+    watch = _startup_watch()
+    try:
+        ctx, server = build(ctx, meanwhile=meanwhile)
+    finally:
+        if watch is not None:
+            watch.done()
     try:
         if mode == "native":
             try:

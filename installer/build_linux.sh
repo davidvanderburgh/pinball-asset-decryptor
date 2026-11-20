@@ -145,6 +145,7 @@ pyinstaller \
     --hidden-import "Crypto.Util.Padding" \
     --hidden-import "paramiko" \
     --hidden-import "pinball_decryptor.core.remote_send" \
+    --hidden-import "pinball_decryptor.core.startup_watch" \
     --hidden-import "pinball_decryptor.core.pad_ssh_key" \
     --hidden-import "pinball_decryptor.core.remote_setup" \
     --hidden-import "pinball_decryptor.core.machine_scan" \

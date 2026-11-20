@@ -67,3 +67,44 @@ Once the trial shows the stick holds 5 GHz, the PAD feature is a **Wi-Fi band** 
 (2.4 GHz as Stern ships it / 5 GHz only, plus the country). It is built onto the card the way remote
 access is (card_extras + ssh_card build hook): an edit of the 8812bu `insmod` line, applied only when that
 exact line is there, generic for every Spike 2 system that ships 8812bu.ko, and read back after the build.
+
+## Trial on the machine, 2026-11-20
+
+David approved the two steps above. What happened:
+
+1. **Country only (`rtw_country_code=US`): works, and the stick hears 5 GHz.** After the reboot the cached
+   scan listed VanderGiga at 5200 MHz (channel 40) at -46 dBm as well as on 2.4 GHz at -53 dBm. The machine
+   still joined on 2.4 GHz. So the stick's radio and the US channel plan are fine, and the country code alone
+   does not move it to 5 GHz. It also puts the "strongest signal wins" explanation above in doubt: here the
+   5 GHz access point was the stronger one and 2.4 GHz was still chosen. Either wpa_supplicant 2.3 over wext
+   does not rank the way the source reads, or it tried 5 GHz, failed and fell back. Not yet known which.
+2. **Country plus `rtw_excl_chs=1..14`: the machine lost Wi-Fi.** It never came back on the network and the
+   service menu's Wi-Fi page did not connect. With no network there was no SSH, so the line was put back from
+   the SD card on the PC (the system partition read out raw, `/etc/init.d/game` restored from the on-card
+   backup in WSL, written back and read back identical). The machine is on Wi-Fi again, at 192.168.4.77.
+
+The kernel log of the failed boot is gone: `dmesg` lives in memory and `/dump/log` holds only the
+connectivity agent's logs. So **why** 5 GHz-only fails is not known. `rtw_excl_chs` is ruled out as the
+feature's mechanism until that is known, and "5 GHz only with no fallback" is ruled out for good: it cost
+a trip to the SD card.
+
+## Next trial: one boot, undoes itself, keeps its own log
+
+`/dump` is writable at boot. The 8812bu block in `/etc/init.d/game` becomes:
+
+    if [ -e /dump/pad1467_trial ]; then
+        rm -f /dump/pad1467_trial; sync          # gone before the driver loads: the next boot is stock
+        insmod /usr/local/spike/8812bu.ko <trial parameters>
+        (sleep 150; { dmesg; wpa_cli -i wlan0 status; wpa_cli -i wlan0 scan_results; \
+          cat /proc/net/wireless; } > /dump/pad1467_trial.log 2>&1; sync) &
+    else
+        insmod /usr/local/spike/8812bu.ko
+    fi
+
+A trial is then: create the marker, reboot, wait three minutes, power cycle. The second boot is always the
+stock line whatever the first did, and the log of the trial boot is on `/dump` to read over Wi-Fi. No SD
+card trip is possible from a failed trial. It needs David's go-ahead like any radio change.
+
+What it should answer, in order: does the stick associate on 5 GHz at all when 2.4 GHz is excluded (the
+log shows the driver's join attempts), and if not, at which step it stops. The feature's mechanism follows
+from that: "prefer 5 GHz with 2.4 GHz fallback", never a hard exclusion.

@@ -28,7 +28,7 @@ import shutil
 GAME_NAMES = {"scooby_doo": "Scooby-Doo", "beetlejuice": "Beetlejuice",
               "texas_chainsaw": "Texas Chainsaw Massacre", "evil_dead": "Evil Dead",
               "halloween_78": "Halloween", "ultraman": "Ultraman", "legends_of_tera": "Looney Tunes",
-              "rick_and_morty": "Rick and Morty"}
+              "rick_and_morty": "Rick and Morty", "alice_cooper": "Alice Cooper's Nightmare Castle"}
 MAX_MODES = 24
 #: the form's groups: every key of mkspkmodes.KEYS once
 FORM_GROUPS = (
@@ -40,6 +40,25 @@ FORM_GROUPS = (
 )
 TITLE_FORM = ("panel", "font_title", "font_value", "font_timer", "title_color", "value_color",
               "timer_color", "panel_color")
+
+
+def screen_keys_out(port):
+    """The form's Screen keys this title's screen cannot show: Alice Cooper's Unity player draws
+    the game's own text in its one font with no box behind it (mkspkmodes.UNITY_SCREEN_NOT)."""
+    return set(mk().UNITY_SCREEN_NOT) if (port or {}).get("screen") == "unity_player" else set()
+
+
+def form_groups(port=None):
+    """FORM_GROUPS without the keys *port*'s screen cannot show."""
+    out = screen_keys_out(port)
+    return tuple((g, tuple(k for k in ks if k not in out)) for g, ks in FORM_GROUPS)
+
+
+def title_form(port=None):
+    out = screen_keys_out(port)
+    return tuple(k for k in TITLE_FORM if k not in out)
+
+
 #: what an empty key means (PadModes.cs)
 DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",

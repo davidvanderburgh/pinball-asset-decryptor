@@ -4004,6 +4004,8 @@ class TreeEditMixin:
         if theme_report.get("added"):
             words += " Theme%s added: %s." % ("" if len(theme_report["added"]) == 1 else "s",
                                               ", ".join(theme_report["added"]))
+        if theme_report.get("renamed"):
+            words += " Theme 1 is now called %s, as in the file." % theme_report["renamed"]
         if theme_report.get("full"):
             words += (" No room for theme%s %s (%d themes at most), left out."
                       % ("" if len(theme_report["full"]) == 1 else "s", ", ".join(theme_report["full"]),

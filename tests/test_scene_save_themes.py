@@ -100,6 +100,23 @@ def test_a_scene_with_no_theme_of_its_own_saves_none(tmp_path):
     assert scene_share.read_extras(path)["themes"] is None
 
 
+def test_a_project_with_no_themes_takes_the_files_name_for_theme_1(tmp_path):
+    """Found on a copy of Simon's project, whose theme 1 is called DARK: a fresh project kept "Standard". One with
+    themes of its own keeps its own theme 1 name."""
+    src = _themed(tmp_path)
+    SV.rename_set(src, 1, "HEISEI")
+    path = str(tmp_path / "all.zip")
+    scene_share.export_all(src, path, None, _trees())
+    fresh = _project(tmp_path, "fresh")
+    _n, report = _load(fresh, path)
+    assert SV.set_names(fresh) == ["HEISEI", "DARK", "LIGHT"] and report["renamed"] == "HEISEI"
+    mine = _project(tmp_path, "mine")
+    SV.set_themes_on(mine, True)
+    SV.add_set(mine, "OLD")
+    _n, report = _load(mine, path)
+    assert SV.set_names(mine)[0] == "Standard" and "renamed" not in report
+
+
 def test_a_theme_is_found_here_by_its_name(tmp_path):
     src = _themed(tmp_path)
     path = str(tmp_path / "all.zip")

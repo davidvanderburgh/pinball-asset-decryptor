@@ -262,7 +262,9 @@ def _unpack_themes(zip_path, assets_folder, rec, log_cb=None):
         if n:
             log_cb("Restored from the pack: %d theme picture(s) or color(s)%s%s." % (
                 n, " in the theme(s) " + ", ".join(report["added"]) + " (added)" if report["added"] else "",
-                "; themes switched on" if report["switched_on"] else ""), "success")
+                "; themes switched on" if report["switched_on"] else "")
+                + (" Theme 1 is now called %s, as in the pack." % report["renamed"] if report.get("renamed") else ""),
+                "success")
         if report["full"]:
             log_cb("NOT restored: the theme(s) %s - this project has %d themes already, the most there can be."
                    % (", ".join(report["full"]), _max_themes()), "warning")
@@ -271,6 +273,29 @@ def _unpack_themes(zip_path, assets_folder, rec, log_cb=None):
                    % (len(report["missing"]), ", ".join(os.path.basename(r) for r in report["missing"][:4])),
                    "warning")
     return n
+
+
+def extras_words(extras):
+    """What a pack's manifest *extras* bring beside its files, for the import question ("" when nothing): its music
+    modes, random clips, attract items, themes and Service menu rows (the Service menu rows and themes take the
+    project's place)."""
+    if not isinstance(extras, dict):
+        return ""
+    bits = []
+    if isinstance(extras.get(_EXTRA_SOUND_MODES), dict) and extras[_EXTRA_SOUND_MODES].get("slots"):
+        bits.append(_sound_modes_words(extras[_EXTRA_SOUND_MODES]))
+    if isinstance(extras.get(_EXTRA_VARIANTS), dict) and extras[_EXTRA_VARIANTS]:
+        bits.append(_variants_words(extras[_EXTRA_VARIANTS]))
+    if _attract_asks(extras.get(_EXTRA_ATTRACT)):
+        bits.append(_attract_words(extras[_EXTRA_ATTRACT]))
+    if isinstance(extras.get(_EXTRA_THEMES), dict) and extras[_EXTRA_THEMES].get("pictures"):
+        names = [str(n) for n in extras[_EXTRA_THEMES].get("names") or ()]
+        bits.append("the themes %s" % ", ".join(names) if names else "themes")
+    if isinstance(extras.get(_EXTRA_SERVICE_MENU), dict) and extras[_EXTRA_SERVICE_MENU]:
+        bits.append("its Service menu rows (in place of this project's)")
+    if len(bits) <= 1:
+        return "".join(bits)
+    return ", ".join(bits[:-1]) + " and " + bits[-1]
 
 
 def _max_themes():

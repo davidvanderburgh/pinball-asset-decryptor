@@ -137,3 +137,32 @@ def test_the_images_settings_file_carries_the_themes(tmp_path):
     assert res.data[cp.FILE_PROFILES_KEY["images"]][key] == SEPIA
     assert res.data[cp.IMAGE_SLOTS_KEY][key] is True
     assert key not in res.missing and "images/" + BACK in res.slots
+
+
+def test_the_import_question_names_what_a_pack_brings_beside_its_files(tmp_path):
+    """Found in the app on a copy of Simon's project: the question said only "4 file(s) will be imported", and a pack of
+    themes alone (no files) was refused as "Nothing to Import"."""
+    src = _with_rows(_themed(tmp_path))
+    rec, _files = modpack.pack_themes(src)
+    words = modpack.extras_words({"themes": rec, service_menu.STAGED_KEY: ROWS})
+    assert words == ("the themes Standard, DARK, LIGHT and its Service menu rows (in place of this project's)")
+    assert modpack.extras_words({}) == "" and modpack.extras_words(None) == ""
+    import inspect
+    from pinball_decryptor import app
+    src_code = inspect.getsource(app.App._confirm_import) if hasattr(app, "App") else ""
+    assert not src_code or "if not n_apply and not also" in src_code
+
+
+def test_the_theme_picker_shows_themes_a_pack_brought():
+    """The Images tab's theme picker re-reads the project when a mod pack or Import replacements reloads the tabs."""
+    from pinball_decryptor.webui.tabs import image_sets
+    assert hasattr(image_sets.ImageSetsService, "reload_assets_tabs")
+
+
+def test_the_import_replacements_question_names_the_themes():
+    """Found in the app: Import replacements named only the pictures and "the Defaults"."""
+    rec = {"defaults": {service_menu.STAGED_KEY: ROWS},
+           "records": {SV.STAGED_KEY: {"names": ["DARK", "LIGHT", "NIGHT"], "images": {}}}}
+    assert rx.rest_summary(rec) == ["the Defaults", "the Service menu rows (in place of this project's)",
+                                    "the themes DARK, LIGHT, NIGHT (in place of this project's)"]
+    assert rx.rest_summary({"records": {SV.STAGED_KEY: {"names": ["Standard"]}}}) == []

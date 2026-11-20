@@ -593,7 +593,23 @@ def rest_summary(rec):
                     % (n, "" if n == 1 else "s"))
     if rec.get("defaults"):
         bits.append("the Defaults")
+        if isinstance(rec["defaults"], dict) and rec["defaults"].get("service_menu"):
+            bits.append("the Service menu rows (in place of this project's)")
+    words = themes_words(rec.get("records"))
+    if words:
+        bits.append(words)
     return bits
+
+
+def themes_words(records):
+    """ "the themes DARK, LIGHT (in place of this project's)" for a record's themes (Simon, 2026-11-20: found in the
+    app - the question named the pictures and said "everything else of it stays", though the themes are taken whole),
+    else ""."""
+    raw = (records or {}).get(_THEMES_KEY) if isinstance(records, dict) else None
+    names = [str(n) for n in (raw.get("names") or ())] if isinstance(raw, dict) else []
+    if len(names) < 2:
+        return ""
+    return "the themes %s (in place of this project's)" % ", ".join(names)
 
 
 def _beside(record_path, name):

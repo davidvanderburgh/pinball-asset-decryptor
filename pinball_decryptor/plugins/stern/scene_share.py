@@ -321,6 +321,15 @@ def import_themes(assets_dir, zip_path, themes, skip=(), report=None):
     if not SV.themes_on(assets_dir):
         SV.set_themes_on(assets_dir, True)
         report["switched_on"] = True
+    # a project with no theme of its own takes the file's name for theme 1 too (Simon's project calls it DARK); one
+    # with themes keeps its own
+    first = themes["names"][0] if themes["names"] else ""
+    if len(SV.set_names(assets_dir)) < 2 and first and _theme_here(SV.set_names(assets_dir), first) is None:
+        try:
+            SV.rename_set(assets_dir, 1, first)
+            report["renamed"] = first
+        except SV.SceneVariantError:
+            pass
     here = {}
     for i, name in enumerate(themes["names"][1:], start=2):
         if not any(str(i) in p["themes"] for p in themes["pictures"].values()):

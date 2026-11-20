@@ -1105,6 +1105,8 @@ class ProjectsMixin:
         data, n_slots = rx.import_record(staged_changes.load(target), records)
         staged_changes.save(target, data)
         bits = ["%s on %d slot(s)" % (rx.words(counts), n_slots)]
+        if rx.themes_words(records):
+            bits.append(rx.themes_words(records).split(" (", 1)[0])        # Simon, 2026-11-20
         notes = []
 
         def part(label, fn):

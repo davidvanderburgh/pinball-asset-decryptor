@@ -3650,7 +3650,11 @@ class App:
         """Main thread: the import confirmation, spelling out the mismatch."""
         n_apply = len(plan["applicable"])
         n_all = len(plan["names"])
-        if not n_apply:
+        # what the pack brings beside its files (Simon, 2026-11-20: a pack of themes alone was refused here as
+        # "Nothing to Import", as one of random clips or music modes alone already was)
+        extras = (plan.get("manifest") or {}).get("extras") or {}
+        also = modpack.extras_words(extras)
+        if not n_apply and not also:
             messagebox.showerror(
                 "Nothing to Import",
                 "None of this pack's %d file(s) belong to this extract.\n\n"
@@ -3662,13 +3666,17 @@ class App:
                    plan.get("here_card") or "a different card"))
             return
         lines = ["Extract mod pack into:\n  %s\n" % assets_dir]
-        if n_apply == n_all:
+        if not n_apply:
+            lines.append("The pack holds no files for this extract.")
+        elif n_apply == n_all:
             lines.append("%d file(s) will be imported. Existing files with "
                          "the same names will be overwritten." % n_apply)
         else:
             lines.append("%d of the pack's %d file(s) will be imported; "
                          "existing files with the same names will be "
                          "overwritten." % (n_apply, n_all))
+        if also:
+            lines.append("It also brings %s." % also)
         for level, text in modpack.mismatch_lines(plan):
             if level == "warning":
                 lines.append(text)

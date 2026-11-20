@@ -93,6 +93,11 @@ def load_media(tab, kind, assets_dir, slots, running, flush, rescan,
                "its" if len(res.clash) == 1 else "their")):
         return None
     staged_changes.save(assets_dir, res.data)
+    if res.themes:
+        # the file's themes (Simon, 2026-11-20) show in the theme picker at once
+        sets = tab.window.service("imgsets") if hasattr(tab.window, "service") else None
+        if sets is not None and hasattr(sets, "publish"):
+            sets.publish()
     cb = tab.window.cb.get("on_folder_state_written")
     if cb is not None:
         cb(assets_dir)

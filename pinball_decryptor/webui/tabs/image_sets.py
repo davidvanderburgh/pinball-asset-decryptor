@@ -271,5 +271,10 @@ class ImageSetsService(TabService):
     def on_show(self):
         self.publish()
 
+    def reload_assets_tabs(self):
+        """A mod pack or Import replacements just wrote the project's themes: show them (found on a copy of Simon's
+        project, 2026-11-20 - the Images tab's theme picker still read "Standard" after a pack brought three)."""
+        self.publish()
+
 
 TAB = ImageSetsService

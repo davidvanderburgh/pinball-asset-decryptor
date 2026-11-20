@@ -560,6 +560,8 @@ class SternManufacturer(Manufacturer):
     #: scores" (PAD-736): a whole-image flash that puts the card's own /data
     #: back.  make_flash_pipeline takes ``keep_data=``; no other brand does.
     flash_keep_data = True
+    #: PAD-1467 "Keep my network settings": make_flash_pipeline takes ``network_from=`` (a Spike 2 card only)
+    flash_keep_network = True
     # "Revert all changes" fallback: re-derive originals with no .orig snapshot
     # straight from the source card.
     revert_phases = ("Read source", "Restore")
@@ -1542,10 +1544,11 @@ class SternManufacturer(Manufacturer):
 
     def make_flash_pipeline(self, image_path, device_path,
                             log_cb, phase_cb, progress_cb, done_cb,
-                            menu_only=False, verify=True, keep_data=False):
+                            menu_only=False, verify=True, keep_data=False, network_from=None):
         return SternFlashImagePipeline(
             image_path, device_path, log_cb, phase_cb, progress_cb, done_cb,
-            menu_only=menu_only, verify=verify, keep_data=keep_data)
+            menu_only=menu_only, verify=verify, keep_data=keep_data,
+            network_from=network_from if self._era == "spike2" else None)
 
     def make_revert_pipeline(self, source, assets_dir, rels,
                              log_cb, phase_cb, progress_cb, done_cb,

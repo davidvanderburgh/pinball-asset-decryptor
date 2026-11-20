@@ -4222,6 +4222,12 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
     else:
         raw = reader.read_file_bytes(node)
     edits = dict(pairs)
+    # PAD-1467: the Wi-Fi option's menu wording is asked of every Spike 2 game; a game program that does not
+    # have a line is left alone without a word (the user's own edits still say when theirs is not found)
+    from ...core import wifi_card as _wifi
+    for o, n in _wifi.MENU_TEXT:
+        if edits.get(o) == n and (b"\x00" + o.encode() + b"\x00") not in raw:
+            del edits[o]
     # Only an edit longer than its original can need new space (a longer
     # standalone name grows its host line too, and is itself longer).
     over = [o for o, n in edits.items() if len(n) > len(o)]
@@ -5011,6 +5017,18 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         else:
             edits = dict(edits)
             edits.setdefault(fw_path, [])
+    # PAD-1467: with the 5 GHz Wi-Fi choice on (Network tab), the game's network menus stop saying "2.4GHz".
+    # The words are program text like any other; a line the user changed themselves stays theirs.
+    from ...core import wifi_card as _wifi
+    wifi_text = _wifi.menu_text(assets_dir)
+    if wifi_text:
+        if fw_path is None:
+            fw_path, _fw_node = _game_program_path(reader, cancel)
+        if fw_path is not None:
+            edits = dict(edits)
+            mine = list(edits.get(fw_path, []))
+            have = {o for o, _n in mine}
+            edits[fw_path] = mine + [(o, n) for o, n in wifi_text.items() if o not in have]
     if not edits:
         return [], 0, {}, {}, grown
     nodes = _resolve_card_nodes(reader, list(edits.keys()), cancel)
@@ -8243,6 +8261,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # Edited LCD display strings (text/strings.tsv rows where replacement !=
     # original) — patched size-neutral, in place, into their .radium scenes.
     text_edits = _changed_radium_text(assets_dir)
+    # PAD-1467: the 5 GHz Wi-Fi choice's menu wording is a game-program edit of its own: a project with nothing
+    # else staged still gets it (found by the end-to-end build, which had only the two Wi-Fi switches on)
+    from ...core import wifi_card as _wifi_card
+    wifi_menu = bool(_wifi_card.menu_text(assets_dir))
     # PAD-305: the color profile, applied to everything the game draws by
     # patching its drawing shaders (plugins/stern/shader_profile.py) - a game
     # program edit with no file of the project behind it
@@ -8541,6 +8563,23 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         stime_lines, stime_prof, _stime_on = [], None, False
         rec_prof, rec_list, _rec_on = None, [], False
 
+    # PAD-1467: nothing staged but the Wi-Fi menu wording.  Such a Write changes six lines of the game program and
+    # must leave everything else on the card as it is: a card someone else built with PAD (a shared mod image)
+    # keeps the operator-menu rows its own modes use (the end-to-end build on a Heisei card took them off).
+    wifi_menu_only = bool(
+        wifi_menu
+        and not audio_edits and not music_edits and not video_edits
+        and not image_edits and not texture_edits and not radimg_edits
+        and not text_edits and not color_edits and not layout_edits
+        and not tree_edits
+        and not boot_edits and not mode_list and not code_list
+        and not variant_slots and not sound_modes and not editions
+        and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
+        and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
+        and not stock_mode_edits and shader_prof is None
+        and not own_clips and not score_edits
+        and not (not _is_spike3(disk_f)
+                 and _SvM_off.placeholder_jobs(assets_dir, set(), lambda *_a, **_k: None)))
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
             and not text_edits and not color_edits and not layout_edits
@@ -8550,7 +8589,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
             and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
             and not stock_mode_edits and shader_prof is None
-            and not own_clips and not score_edits
+            and not own_clips and not score_edits and not wifi_menu
             and not (not _is_spike3(disk_f)
                      and _SvM_off.placeholder_jobs(assets_dir, set(), lambda *_a, **_k: None))):
         # (PR #40 review: a row ticked on the Service menu tab is a change of its own, a placeholder when the
@@ -9820,7 +9859,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         image_setting = 0
         saved_setting = 0
         if (text_edits or shader_prof is not None or clip_job is not None
-                or menu_job is not None):
+                or menu_job is not None or wifi_menu):
             if progress:
                 progress(90, 100, "Preparing display text...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
@@ -9948,7 +9987,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # takes the rows an earlier Write gave its settings off it (one that
         # wants some does it in the menu step above), as the score colours
         retire_writes, n_retired = [], 0
-        if menu_job is None and fw_node is not None:
+        if menu_job is None and fw_node is not None and not wifi_menu_only:
             retire_writes, _rt_ov, n_retired = _retire_menu_rows(
                 reader, fw_node, log, patched_fw=patched_gr)
             if _rt_ov:
@@ -11115,6 +11154,17 @@ def _map_writes(files, writes):
     index = []
     for key, (reader, node) in files.items():
         runs = _file_extents(reader, node)
+        if runs is None:
+            # PAD-1467: a file with a HOLE (PAD-491's grown game program on a shared card: two blocks of zeros the
+            # card never stored) still has every other stretch on the disk, and a write into one of those is
+            # traced like any other.  Without this a build that changed six words of that program left its record
+            # incomplete, and Send to machine refused it.
+            try:
+                for f_off, disk, n in reader.mapped_ranges(node):
+                    index.append((int(disk), int(disk) + int(n), key, reader, node, int(f_off)))
+            except Exception:                               # noqa: BLE001 - an inode the reader can't follow
+                pass
+            continue
         if not runs:
             continue
         f_off = 0

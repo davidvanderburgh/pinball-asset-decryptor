@@ -2362,6 +2362,8 @@ class WriteTab(TabService):
                      if orig and os.path.isfile(orig) else None)
         self._flash = FlashDialog(
             self.ctx.loop, mfr, on_flash,
+            network_project=(self.window.write_assets_var.get().strip()
+                             if getattr(mfr, "_era", "") == "spike2" else ""),
             original_size=orig_size, original_path=orig,
             initial_image=initial,
             on_build_flash=self.window.cb.get("on_build_flash"),

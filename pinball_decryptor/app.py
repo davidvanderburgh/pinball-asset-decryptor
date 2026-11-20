@@ -2889,8 +2889,12 @@ class App:
 
     def _start_flash_image(self, image_path, device_path, menu_only=False,
                            target=None, disk_mode=None, image=None,
-                           from_iso=None, verify=True, keep_data=False):
+                           from_iso=None, verify=True, keep_data=False, keep_network=False):
         """Flash a pre-built image onto a card (dd-style whole-image write).
+
+        ``keep_network`` (PAD-1467) puts the project's network options (remote access, Wi-Fi, remote buttons) on
+        a copy of the image first and writes that (:mod:`core.network_keep`), where a flash without it refuses an
+        image that lacks them.
 
         ``menu_only`` writes ONLY the boot menu partition onto a card this
         image was already flashed from - 350 MB rather than the whole image,
@@ -2915,11 +2919,13 @@ class App:
             return
         from .core.ssh_card import guard_flash
         from .core.card_extras import ExtrasError
-        try:
-            guard_flash(self.window.write_assets_var.get().strip(), image_path)
-        except ExtrasError as e:
-            messagebox.showerror('Remote access', str(e))
-            return
+        keep_network = bool(keep_network and not menu_only and getattr(mfr, "flash_keep_network", False))
+        if not keep_network:
+            try:
+                guard_flash(self.window.write_assets_var.get().strip(), image_path)
+            except ExtrasError as e:
+                messagebox.showerror('Remote access', str(e))
+                return
         # ``target`` (item 123): the dialog's second place for the image - the
         # game's own disk in a dock, installed here.  On Windows that hands the
         # disk to WSL whole, which is the elevation gate Direct-SSD stands behind.
@@ -2982,6 +2988,8 @@ class App:
         if (keep_data and not menu_only
                 and getattr(mfr, "flash_keep_data", False)):
             extra["keep_data"] = True
+        if keep_network and not to_disk:
+            extra["network_from"] = self.window.write_assets_var.get().strip()
         try:
             if to_disk:
                 # ``disk_mode`` (item 124): "menu" = only the boot menu,

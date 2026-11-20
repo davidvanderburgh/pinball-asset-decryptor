@@ -128,6 +128,11 @@ class FlashDialog:
                  "the image's, so the machine starts where it left off. A "
                  "card with none (a new one) is refused before anything is "
                  "written.")
+    #: "Keep my network settings" (PAD-1467, core/network_keep.py)
+    NET_LABEL = "Keep my network settings on this card"
+    NET_NOTE = ("This image is written with %s from this project put on it first: a copy is made, written and "
+                "removed, and the image file itself is not changed. A score feed is not carried: it needs a "
+                "build of the project.")
     MENU_NOTE_BUILD = ("A freshly built image has never been on this card, "
                        "so the whole of it has to be written.")
     MENU_NOTE_FRESH = ("This card was only just built or updated, so no SD "
@@ -158,7 +163,7 @@ class FlashDialog:
                  publish=None, ask_open=None, ask_save=None,
                  build_size=None, build_size_hint="", build_refusal=None,
                  image_size_hint=None, original_size=None,
-                 original_path=""):
+                 original_path="", network_project=""):
         self._host = host                  # the UI loop (post)
         #: (image path, its size, the card's size) -> what else the user can
         #: do when an image already built won't fit the card ("" for
@@ -225,6 +230,15 @@ class FlashDialog:
         self.keep_data = bool(self.keep_offered
                               and isinstance(initial_choices, dict)
                               and initial_choices.get("keep_data"))
+        # "Keep my network settings" (PAD-1467): offered when the project has any (remote access, Wi-Fi, remote
+        # buttons), on unless the user turned it off - who set them up wants them on the card they write
+        from ..core import network_keep as _nk
+        self.net_project = network_project or ""
+        self.net_said = (_nk.said(self.net_project)
+                         if getattr(manufacturer, "flash_keep_network", False) else "")
+        self.net_offered = bool(self.net_said)
+        self.net_keep = bool(self.net_offered and (not isinstance(initial_choices, dict)
+                                                   or initial_choices.get("keep_network", True)))
         # "Skip verify" (PAD-217): off every time the dialog opens, never
         # remembered - the read-back is what catches a bad write
         self.verify_offered = bool(getattr(manufacturer, "flash_skip_verify",
@@ -263,6 +277,8 @@ class FlashDialog:
             choices["build"] = bool(self.build)
         if self.keep_offered:
             choices["keep_data"] = bool(self.keep_data)
+        if self.net_offered:
+            choices["keep_network"] = bool(self.net_keep)
         try:
             self._on_choices(choices)
         except Exception:                               # noqa: BLE001
@@ -326,6 +342,13 @@ class FlashDialog:
         settings, audits and high scores (a whole-image flash only: the
         menu-only write keeps them anyway)."""
         return bool(self.keep_offered and self.keep_data and self.write
+                    and not self.menu and not self.to_disk())
+
+    def keeping_network(self):
+        """True when the write about to start puts the project's network options on the image first (PAD-1467):
+        a whole-image flash of an image as it is - a build carries them already, the menu-only write changes
+        nothing else."""
+        return bool(self.net_offered and self.net_keep and self.write and not self.building
                     and not self.menu and not self.to_disk())
 
     def skipping_verify(self):
@@ -568,6 +591,11 @@ class FlashDialog:
             "keep_data": bool(self.keep_data and not self.menu),
             "keep_enabled": bool(writing and not self.menu),
             "keep_note": self.KEEP_NOTE if self.keeping_data() else "",
+            "net_offered": bool(self.net_offered and not self.to_disk() and not building),
+            "net_label": self.NET_LABEL,
+            "net_keep": bool(self.net_keep and not self.menu),
+            "net_enabled": bool(writing and not self.menu),
+            "net_note": (self.NET_NOTE % self.net_said) if self.keeping_network() else "",
             "verify_offered": bool(self.verify_offered
                                    and not self.to_disk()),
             "skip_verify": bool(self.skip_verify),
@@ -602,6 +630,11 @@ class FlashDialog:
             if self.keep_offered and not self.menu:
                 self.keep_data = bool(value)
                 self._sync_sections()
+            return
+        if key == "keep_network":
+            if self.net_offered and not self.menu:
+                self.net_keep = bool(value)
+                self.publish()
             return
         if key in ("build", "write", "menu"):
             if key == "build" and not self._can_build:
@@ -946,6 +979,8 @@ class FlashDialog:
         skip = {"verify": False} if self.skipping_verify() else {}
         if self.keeping_data():
             skip["keep_data"] = True
+        if self.keeping_network():
+            skip["keep_network"] = True
         if self.to_disk():
             extra["target"] = self._target()[0]
             mode = self.current_disk_mode()

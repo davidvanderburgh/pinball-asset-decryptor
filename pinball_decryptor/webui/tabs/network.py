@@ -15,6 +15,7 @@ talks to the adapter the current way, so the machine joins the network at the fi
 
 import os
 import threading
+import time
 
 from .base import TabService, rpc
 from .. import compat
@@ -677,6 +678,9 @@ class NetworkTab(TabService):
                     if live['stop']:
                         break
                     jpeg = machine_screen.encode(raw, view.geo, 'JPEG')
+                    rec = live.get('rec')
+                    if rec is not None and len(rec) < 1800 and _time.monotonic() - live.get('rec_t', 0) < 300:
+                        rec.append((_time.monotonic(), jpeg))
                     with live['cond']:
                         live['jpeg'], live['raw'] = jpeg, raw
                         live['seq'] += 1
@@ -716,6 +720,8 @@ class NetworkTab(TabService):
         return True
 
     def _live_ended(self, live, text, kind, png):
+        if live.get('rec'):
+            self._last_rec = live.pop('rec')     # a recording outlives its live view until it is saved
         if getattr(self, '_live', None) is live:
             self._live = None
         self.set(screen_live=False)
@@ -735,6 +741,248 @@ class NetworkTab(TabService):
         live['stop'] = True
         return True
 
+    # ------------------------------------------------------------------ PAD-1467: looking after the machine
+    # David: "grabbing logs from the machine would be very useful. what else?" ... "make all of these"
+    # (core/machine_care.py): status, logs, settings and scores, restart, the mode log, the whole card
+    def _care(self, what, work, ok_text=None):
+        """Run ``work(machine)`` on a worker with a connection of its own; its answer (a line to show, or None) or
+        the error is said under the Machine care buttons.  One at a time."""
+        if self.get('care_busy') or not self.get('address') or self.get('running'):
+            return False
+        address = self.get('address')
+        self.set(care_busy=what, care_note='', care_kind='', care_pct=None)
+
+        def run():
+            from ...core import machine_care, remote_send
+            text, kind = ok_text or '', 'ok'
+            try:
+                m = remote_send.connect(address)
+                try:
+                    said = work(m)
+                finally:
+                    m.close()
+                if said:
+                    text = said
+            except (machine_care.CareError, remote_send.SendError) as e:
+                text, kind = str(e), 'err'
+            except Exception as e:                      # noqa: BLE001 - said, never raised into the UI
+                text, kind = '%s did not finish: %s' % (what, e), 'err'
+            self.ctx.loop.post(lambda: self.set(care_busy='', care_note=text, care_kind=kind, care_pct=None))
+        threading.Thread(target=run, daemon=True, name='pad-machine-care').start()
+        return True
+
+    def _care_name(self, what):
+        from ...core import machine_care
+        return machine_care.file_stem(self.get('machine_game_key') or self.get('machine_game') or 'machine', what)
+
+    @rpc
+    def machine_status(self):
+        def work(m):
+            from ...core import machine_care
+            rows = machine_care.status(m)
+            self.ctx.loop.post(lambda: self.set(care_status=[list(r) for r in rows]))
+            return 'Read from the machine at %s.' % time.strftime('%H:%M:%S')
+        return self._care('Reading the status', work)
+
+    @rpc
+    def grab_logs(self):
+        if self.get('care_busy') or not self.get('address'):
+            return False
+        path = self.window.ask_save('machine_logs', "Save the machine's logs", initialfile=self._care_name('logs') + '.zip',
+                                    defaultextension='.zip', filetypes=[('Zip file', '*.zip')])
+        if not path:
+            return False
+
+        def work(m):
+            from ...core import machine_care
+            files, size = machine_care.grab_logs(m, path)
+            return 'Saved %d files (%s) to %s.' % (files, machine_care._human(size), path)
+        return self._care('Collecting the logs', work)
+
+    @rpc
+    def backup_settings(self):
+        if self.get('care_busy') or not self.get('address'):
+            return False
+        path = self.window.ask_save('machine_settings', "Save the machine's settings, audits and high scores",
+                                    initialfile=self._care_name('settings') + '.zip', defaultextension='.zip',
+                                    filetypes=[('Settings backup', '*.zip')])
+        if not path:
+            return False
+
+        def work(m):
+            from ...core import machine_care
+            res = machine_care.backup_settings(m, path)
+            return 'Saved the settings, audits and high scores of %s (%d files) to %s.' % (
+                _game_name(res['game']) or res['game'] or 'the machine', res['files'], path)
+        return self._care('Backing up the settings', work)
+
+    @rpc
+    def restore_settings(self):
+        if self.get('care_busy') or not self.get('address'):
+            return False
+        path = self.window.ask_open('machine_settings', 'Pick a settings backup to put back on the machine',
+                                    filetypes=[('Settings backup', '*.zip'), ('All files', '*.*')])
+        if not path:
+            return False
+        from ...core import machine_care
+        try:
+            manifest, _raw = machine_care.read_backup(path)
+        except machine_care.CareError as e:
+            self.set(care_note=str(e), care_kind='err')
+            return False
+        if not compat.messagebox.askyesno(
+                'Restore settings',
+                "Put the settings, audits and high scores saved on %s back on the machine?\n\nA game being "
+                "played ends: the machine's game is held for a few seconds and starts again. What the machine has "
+                'now is replaced; it is kept on the machine once, beside the restored ones.'
+                % manifest.get('taken', 'an unknown date'), icon='warning'):
+            return False
+
+        def work(m):
+            res = machine_care.restore_settings(m, path)
+            return 'Put back %d settings files; the game has started again.' % res['files']
+        return self._care('Restoring the settings', work)
+
+    @rpc
+    def restart_game(self):
+        if self.get('care_busy') or not self.get('address'):
+            return False
+        if not compat.messagebox.askyesno('Restart the game', 'Restart the game on the machine? A game being played '
+                                          'ends.', icon='warning'):
+            return False
+
+        def work(m):
+            from ...core import machine_care
+            line = machine_care.restart_game(m)
+            return ('The game restarted.' if 'RESTARTED' in line
+                    else "The game wasn't running." if 'NOT_RUNNING' in line else 'The game was stopped; it had not '
+                    'started again after 40 s.')
+        return self._care('Restarting the game', work)
+
+    @rpc
+    def restart_machine(self):
+        if self.get('care_busy') or not self.get('address'):
+            return False
+        if not compat.messagebox.askyesno('Restart the machine', 'Restart the whole machine, as switching it off and '
+                                          'on does? A game being played ends. It is back in about a minute.',
+                                          icon='warning'):
+            return False
+
+        def work(m):
+            from ...core import machine_care
+            machine_care.restart_machine(m)
+            return 'The machine is restarting; it is back on your network in about a minute.'
+        return self._care('Restarting the machine', work)
+
+    @rpc
+    def backup_card(self):
+        if self.get('care_busy') or not self.get('address'):
+            return False
+        path = self.window.ask_save('machine_card', "Save a copy of the machine's whole card",
+                                    initialfile=self._care_name('card') + '.raw', defaultextension='.raw',
+                                    filetypes=[('SD card image', '*.raw')])
+        if not path:
+            return False
+        if not compat.messagebox.askyesno(
+                'Back up the whole card',
+                "Copy the machine's whole card to this computer?\n\nIt is as big as the card (8, 16 or 32 GB) and "
+                'takes about 20 minutes for 16 GB on 5 GHz Wi-Fi. The machine cannot be played meanwhile: its '
+                'screen says PAD is updating it, and the game starts again when it is done.', icon='warning'):
+            return False
+        self._card_cancel = False
+
+        def work(m):
+            from ...core import machine_care
+            last = [0.0]
+
+            def progress(done, size):
+                now = time.monotonic()
+                if now - last[0] > 1.0:
+                    last[0] = now
+                    pct = int(done * 100 / size) if size else 0
+                    note = 'Copied %s of %s.' % (machine_care._human(done), machine_care._human(size))
+                    self.ctx.loop.post(lambda: self.get('care_busy') and self.set(care_pct=pct, care_note=note))
+            res = machine_care.backup_card(m, path, progress=progress, cancel=lambda: self._card_cancel)
+            return 'Saved the whole card (%s) to %s in %s.' % (machine_care._human(res['bytes']), path,
+                                                               machine_care._duration(res['seconds']))
+        return self._care('Backing up the card', work)
+
+    @rpc
+    def cancel_care(self):
+        self._card_cancel = True
+        return True
+
+    @rpc
+    def follow_log(self, on):
+        """Follow PAD's mode log on the machine: its last lines, read every two seconds until told to stop."""
+        if not on:
+            self._follow = None
+            self.set(care_following=False)
+            return True
+        if self.get('care_following') or not self.get('address'):
+            return False
+        token = object()
+        self._follow = token
+        address = self.get('address')
+        self.set(care_following=True, care_log='Connecting...')
+
+        def run():
+            from ...core import machine_care, remote_send
+            text = ''
+            try:
+                m = remote_send.connect(address)
+                try:
+                    while self._follow is token:
+                        tail = machine_care.mode_log_tail(m, 120) or "(the machine's card has no mode log yet)"
+                        self.ctx.loop.post(lambda tail=tail: self._follow is token and self.set(care_log=tail))
+                        for _ in range(20):
+                            if self._follow is not token:
+                                break
+                            time.sleep(0.1)
+                finally:
+                    m.close()
+            except Exception as e:                      # noqa: BLE001
+                text = 'The mode log could not be followed: %s' % e
+            if text:
+                self.ctx.loop.post(lambda: self.set(care_following=False, care_note=text, care_kind='err'))
+        threading.Thread(target=run, daemon=True, name='pad-follow-log').start()
+        return True
+
+    # ---- recording the live view (PAD-1467)
+    @rpc
+    def record_live(self, on):
+        """Keep the live view's frames from now (up to five minutes), or stop and save them as a video."""
+        live = getattr(self, '_live', None)
+        if on:
+            if not live or live.get('done'):
+                return False
+            live['rec'] = []
+            live['rec_t'] = time.monotonic()
+            self.set(screen_recording=True)
+            return True
+        frames = (live or {}).pop('rec', None) if live else None
+        if frames is None:
+            frames = getattr(self, '_last_rec', None)
+        self._last_rec = None
+        self.set(screen_recording=False)
+        if not frames:
+            return False
+        seconds = max(frames[-1][0] - frames[0][0], 0.2)
+        fps = max(1.0, min(15.0, (len(frames) - 1) / seconds)) if len(frames) > 1 else 5.0
+        path = self.window.ask_save('machine_screen', "Save the recording of the machine's screen",
+                                    initialfile=self._care_name('screen') + '.mp4', defaultextension='.mp4',
+                                    filetypes=[('Video', '*.mp4'), ('Animated GIF', '*.gif')])
+        if not path:
+            return False
+        try:
+            from ...core import machine_screen
+            kind = machine_screen.save_recording([f for _t, f in frames], fps, path)
+        except Exception as e:                          # noqa: BLE001
+            self.set(screen_note='The recording could not be saved: %s' % e, screen_kind='err')
+            return False
+        self.set(screen_note='Saved %d frames (%.0f s, %s) to %s.' % (len(frames), seconds, kind, path), screen_kind='ok')
+        return True
+
     def on_show(self):
         self._visible = True
         self.publish()
@@ -745,6 +993,8 @@ class NetworkTab(TabService):
     def on_hide(self):
         self._visible = False
         self.stop_live()            # PAD-1467: a live view nobody is looking at stops loading the machine
+        self._follow = None
+        self.set(care_following=False)
 
     def on_project(self, folder):
         self.publish()

@@ -258,3 +258,36 @@ def frame_rate(times, now=None):
     if len(recent) < 2:
         return 0.0
     return (len(recent) - 1) / max(recent[-1] - recent[0], 1e-6)
+
+
+def save_recording(frames, fps, path):
+    """Save live-view *frames* (JPEG bytes, in order) as a video at *path*: an MP4 through ffmpeg when the app has
+    one, else (or for a ``.gif`` name) an animated GIF at half size.  Returns 'MP4 video' or 'animated GIF'."""
+    import subprocess
+    from PIL import Image
+    if not frames:
+        raise ScreenError('There is nothing recorded.')
+    fps = max(1.0, min(float(fps), 30.0))
+    ffmpeg = None
+    if not str(path).lower().endswith('.gif'):
+        try:
+            from .audio import find_ffmpeg
+            ffmpeg = find_ffmpeg()
+        except Exception:                                   # noqa: BLE001 - no ffmpeg: the GIF it is
+            ffmpeg = None
+    if ffmpeg:
+        proc = subprocess.run(
+            [ffmpeg, '-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', '%.3f' % fps, '-c:v', 'mjpeg',
+             '-i', '-', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+             str(path)], input=b''.join(frames), capture_output=True)
+        if proc.returncode == 0:
+            return 'MP4 video'
+        if not str(path).lower().endswith('.mp4'):
+            raise ScreenError('The video could not be made: %s' % proc.stderr.decode(errors='replace')[-200:])
+        path = str(path)[:-4] + '.gif'
+    images = []
+    for data in frames:
+        im = Image.open(io.BytesIO(data)).convert('RGB')
+        images.append(im.resize((im.width // 2, im.height // 2)).quantize(128))
+    images[0].save(str(path), save_all=True, append_images=images[1:], duration=int(1000 / fps), loop=0)
+    return 'animated GIF'

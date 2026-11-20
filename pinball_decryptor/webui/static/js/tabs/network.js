@@ -269,6 +269,8 @@ function MachineScreen({ n }) {
         : html`<${Button} disabled=${busy || !n.address} onClick=${() => call("network.start_live")}>Live view<//>`}
       <${Button} disabled=${!(n.screen_path || n.screen_live)}
         onClick=${() => call("network.save_screen")}>Save picture…<//>
+      ${n.screen_live || n.screen_recording ? html`<${Button}
+        onClick=${() => call("network.record_live", !n.screen_recording)}>${n.screen_recording ? "Stop and save the recording…" : "Record"}<//>` : null}
     </div>
     ${n.screen_live
       ? html`<img class="net-screen" alt="The machine's screen, live"
@@ -304,6 +306,55 @@ function MachineScreen({ n }) {
   <//>`;
 }
 
+// PAD-1467: looking after the machine over remote access (core/machine_care.py): its status, logs, settings and
+// scores, a restart, PAD's mode log, a copy of its whole card.  David: "grabbing logs from the machine would be very
+// useful. what else?" ... "make all of these".
+function MachineCare({ n }) {
+  const off = n.running || !!n.care_busy || !n.address;
+  return html`<${Card} cls="net-opt" title="Machine care">
+    <p class="net-does">Look after your machine from here, over remote access: see how it is doing, collect its
+      logs for a problem report, keep its settings and high scores safe, restart it, or copy its whole card.</p>
+    <div class="lbl">Status</div>
+    <div class="row"><${Button} disabled=${off} onClick=${() => call("network.machine_status")}>Read the status<//></div>
+    ${(n.care_status || []).length ? html`<table class="net-fields net-wifi-details">
+      <tbody>${n.care_status.map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th><td>${r[1]}</td></tr>`)}</tbody>
+    </table>` : null}
+    <div class="lbl">Logs</div>
+    <div class="row">
+      <${Button} disabled=${off} onClick=${() => call("network.grab_logs")}>Save the logs…<//>
+      <${Button} disabled=${n.running || !n.address}
+        onClick=${() => call("network.follow_log", !n.care_following)}>${n.care_following ? "Stop following" : "Follow the mode log"}<//>
+    </div>
+    <span class="small muted">One zip: the system and kernel logs, PAD's mode log, the connectivity logs and a
+      report of the machine's state. It names your Wi-Fi network and the machine's addresses; it holds no
+      password.</span>
+    ${n.care_following || n.care_log ? html`<pre class="net-log">${n.care_log || ""}</pre>` : null}
+    <div class="lbl">Settings, audits and high scores</div>
+    <div class="row">
+      <${Button} disabled=${off} onClick=${() => call("network.backup_settings")}>Back up…<//>
+      <${Button} disabled=${off} onClick=${() => call("network.restore_settings")}>Restore…<//>
+    </div>
+    <span class="small muted">The game keeps them on a small part of the card that writing a whole card wipes.
+      A backup is a small zip; a restore holds the game for a few seconds and keeps what it replaces on the
+      machine once.</span>
+    <div class="lbl">Restart</div>
+    <div class="row">
+      <${Button} disabled=${off} onClick=${() => call("network.restart_game")}>Restart the game<//>
+      <${Button} disabled=${off} onClick=${() => call("network.restart_machine")}>Restart the machine<//>
+    </div>
+    <div class="lbl">The whole card</div>
+    <div class="row">
+      <${Button} disabled=${off} onClick=${() => call("network.backup_card")}>Back up the whole card…<//>
+      ${n.care_busy === "Backing up the card" ? html`<${Button} onClick=${() => call("network.cancel_care")}>Cancel<//>` : null}
+    </div>
+    <span class="small muted">A byte-for-byte image of the card in the machine, without taking it out: as big as
+      the card, about 20 minutes for 16 GB on 5 GHz. The machine cannot be played meanwhile.</span>
+    ${n.care_busy ? html`<span class="small">${n.care_busy}…</span>` : null}
+    ${n.care_pct != null ? html`<${Progress} pct=${n.care_pct} />` : null}
+    <${Said} text=${n.care_note} kind=${n.care_kind} />
+  <//>`;
+}
+
 export default function NetworkTab() {
   const n = useNs("network");
   const s = useNs("modes");
@@ -314,6 +365,7 @@ export default function NetworkTab() {
       ${n.offered !== false ? html`<${RemoteAccess} n=${n} />` : null}
       ${n.offered !== false ? html`<${SendToMachine} n=${n} />` : null}
       ${n.offered !== false ? html`<${MachineScreen} n=${n} />` : null}
+      ${n.offered !== false ? html`<${MachineCare} n=${n} />` : null}
       ${n.project && n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
       ${n.project && s.feed_shown ? html`<${ScoreFeed} s=${s} />` : null}
     </div>

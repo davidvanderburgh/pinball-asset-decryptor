@@ -117,6 +117,7 @@ class HowItWorksMixin:
         self._how_run += 1
         run = self._how_run
         self._how_key, self._how, self._how_names = key, None, None
+        self.set(mode_shows=[])                                       # PAD-1476: another card's are not these
         if not card:
             return
 
@@ -133,6 +134,7 @@ class HowItWorksMixin:
                 self._how = got
                 if self._game_mode is not None:
                     self._publish_game_mode()
+                self.set(mode_shows=self._mode_show_rows())          # PAD-1476: the picks for a mode's shows
             self.ctx.loop.post(_apply)
 
         threading.Thread(target=_work, daemon=True, name="modes-how").start()
@@ -186,6 +188,9 @@ class HowItWorksMixin:
         text = name or "Light show %d" % num
         lines = ["The game's light show %d" % num]
         picks = sh.pickable.get(str(num)) or []
+        if not picks:                                       # PAD-1476: any of them, by the game's own number
+            lines.append('A mode of yours and the co-op intro can play it too: "%s" under this mode on its Lights '
+                         'page' % text)
         if len(picks) == 1:
             lines.append('A mode of yours can play it too: "%s" on its Lights page' % picks[0])
         elif picks:

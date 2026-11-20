@@ -819,3 +819,8 @@ data coil_count            0x006ac36c
 data coil_table            0x006c0728
 # PAD-1464: the game's Start sets its night city (NY_Night) as the background, the HUD over it: no start film
 text start_film_clips -
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x002556d0 0xe92d4070 0xe30563d8   # (n): every show numbered n ends
+value show_count          266

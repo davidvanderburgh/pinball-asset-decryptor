@@ -618,3 +618,8 @@ data ball_device_count    0x004dd094
 # switches one and answers what it was; the count (index 0 unused) - pm_kickback
 site kickback_set         0x0039effc 0xe92d4038 0xe1a04001
 data kickback_count       0x004f3edc
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x002fa050 0xe92d4070 0xe30a6e70   # (n): every show numbered n ends
+value show_count          232

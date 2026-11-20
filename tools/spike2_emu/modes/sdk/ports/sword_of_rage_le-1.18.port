@@ -587,3 +587,9 @@ data sw_boards             0x006aeba4
 site coil_used             0x0027ef90 0xe92d43f8 0xe300850c
 # PAD-1464: the game's Start plays its title screen over the whole glass, looped, until it asks for MainplayV1 (7.4 s)
 text start_film_clips BlackKnight_PhotoShoot_TitleScreen
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_start           0x00292860 0xe92d47f0 0xe2508000   # show_start(n) -> the show's record, or 0
+site show_stop_number     0x00133a28 0xe92d4070 0xe30f67e8   # (n): every show numbered n ends
+value show_count          166

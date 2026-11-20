@@ -875,3 +875,8 @@ site flipper_query_call  0x0038a2a4 0xebf82c7e 0xe3500000
 site ball_device_keep     0x00135790 0xe3093460 0xe3403053
 data ball_devices         0x00614f00
 data ball_device_count    0x00539460
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x0042b058 0xe92d4070 0xe3076b30   # (n): every show numbered n ends
+value show_count          289

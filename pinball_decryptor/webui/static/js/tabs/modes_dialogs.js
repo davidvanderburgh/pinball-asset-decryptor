@@ -330,6 +330,13 @@ function CoopLook({ look }) {
   </div>`;
 }
 
+// PAD-1476: the co-op intro's light show: one the game's own modes play, grouped by the mode (s.mode_shows: "#211")
+function introShowOptions(value, modeShows) {
+  const out = [{ value: "(none)", label: "(none)" }, ...modeShows.map((x) => ({ value: x.value, label: x.label, group: `From ${x.group}` }))];
+  if (value && !modeShows.some((x) => x.value === value)) out.push({ value, label: `Light show ${value.replace("#", "")}` });
+  return out;
+}
+
 export function CoopCharsDialog({ s, onClose }) {
   const ch = s.coop_ch || {};
   const rows = ch.rows || [];
@@ -460,6 +467,14 @@ export function CoopCharsDialog({ s, onClose }) {
         onClick=${() => call("modes.coop_intro", true)} />` : null}
       <span class="small dim wrap">${ch.intro ? `${ch.intro} opens each co-op and team game, with its own sound. While it plays the flippers choose the language (when the game's Player Language Select is on), and both flipper buttons together skip it. Then the character pick opens, and the ball comes to the shooter lane once a character is taken.` : "Open each co-op and team game with a video of your own, with its own sound. Both flipper buttons skip it."}</span>
     </div>
+    ${ch.intro ? html`<div class="row" style="margin-top:6px; gap:8px">
+      <span class="small dim">Light show with it</span>
+      <${Select} sm width=${280} value=${ch.intro_show || "(none)"} disabled=${!!ch.intro_show_off}
+        options=${introShowOptions(ch.intro_show || "", s.mode_shows || [])}
+        title=${ch.intro_show_off || "One of the light shows the game's own modes play, on the playfield while the intro plays; it stops when the intro ends or is skipped."}
+        onChange=${(v) => call("modes.coop_intro_show", v === "(none)" ? "" : v)} />
+      <span class="small dim wrap">${ch.intro_show_off || ((s.mode_shows || []).length ? "Each is listed under the game's mode that plays it (its How it works lists them too)." : "The game's modes' light shows are listed once the card has been read.")}</span>
+    </div>` : null}
     <div class="row" style="margin-top:8px; gap:8px">
       <${Button} size="sm" kind="ghost" icon="film" disabled=${!rows.length || !ch.pick} onClick=${() => call("modes.coop_ceremony", false)}
         title=${ch.ceremony ? "The video behind the award cards at a co-op game's end: choose another." : "A video of your own that plays behind the award cards at a co-op game's end, in place of the game's End of Ball Bonus loop."}>

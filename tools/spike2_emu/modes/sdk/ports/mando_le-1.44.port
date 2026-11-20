@@ -532,3 +532,9 @@ site coil_frame            0x005246f4 0xe5d13000 0xe3530008
 data sw_listen             0x006b47bc
 data sw_boards             0x00744040
 site coil_used             0x003a1710 0xe92d43f8 0xe3088be8
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_start           0x002f2f44 0xe92d47f0 0xe2508000   # show_start(n) -> the show's record, or 0
+site show_stop_number     0x0020900c 0xe92d4070 0xe3086978   # (n): every show numbered n ends
+value show_count          232

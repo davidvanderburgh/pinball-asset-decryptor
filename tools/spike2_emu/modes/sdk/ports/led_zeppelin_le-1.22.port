@@ -954,3 +954,8 @@ site ball_device_keep     0x00136ad8 0xe3033398 0xe340304b
 data ball_devices         0x0421f820
 text ball_device_names  LEFT_EJECT TOP_VUK ELECTRIC_MAGIC_LOCKUP
 data ball_device_count    0x004b3398
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x001037b0 0xe92d4070 0xe30d6958   # (n): every show numbered n ends
+value show_count          129

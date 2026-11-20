@@ -903,3 +903,8 @@ site ball_device_keep     0x004817a4 0xe3083d44 0xe340305e
 data ball_devices         0x006f881c
 text ball_device_names  RAPTOR_CAGE
 data ball_device_count    0x005e8d44
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x002998b8 0xe92d4070 0xe30e6a58   # (n): every show numbered n ends
+value show_count          204

@@ -669,3 +669,8 @@ site ball_device_keep     0x002bb288 0xe3003d5c 0xe340305a
 data ball_devices         0x0076987c
 text ball_device_names  LEFT_EJECT LEFT_DOWN_POST
 data ball_device_count    0x005a0d5c
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x00181df8 0xe92d4070 0xe3056ba8   # (n): every show numbered n ends
+value show_count          371

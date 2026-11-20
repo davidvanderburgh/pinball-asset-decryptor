@@ -3027,7 +3027,8 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         n_max = int(getattr(p, "show_numbers", 0) or 0) if p is not None else 0
         if clips is None or not n_max:
             return []
-        if os.path.basename(getattr(p, "port", "") or "") != "%s-%s.port" % (clips.game, clips.version):
+        ver = ".".join(str(clips.version or "").split(".")[:2])     # the card's "1.16.0" is the port's 1.16
+        if os.path.basename(getattr(p, "port", "") or "") != "%s-%s.port" % (clips.game, ver):
             return []
         sh = clips.show_reading
         reading = clips.reading

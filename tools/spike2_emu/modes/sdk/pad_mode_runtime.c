@@ -1174,8 +1174,10 @@ static void layers_end_lets_go(void)
     shield_let_go("the mode ended");
     shake_mode_ended();
 }
+static void show_owner_ended(const struct pm_mode *m);   /* PAD-1476, with the game's shows below */
 void pm_end(void)
 {
+    show_owner_ended(current);               /* PAD-1476: its show by number ends with it (its end show follows) */
     int was_taker = running && running == current;
     int li = layer_of(current);
     if (li >= 0) {                           /* PAD-1401: a layer ends; the base and the other layers run on */
@@ -9099,7 +9101,7 @@ static int shows_n;
 static int shownum_n;                                /* PAD-1476: how many numbers the game's show table has, 0 = off */
 /* n: the port's show (1..), or minus the game's own number (PAD-1476); call: 0 a process of ours, 1 by the port's
  * call (PAD-642), 2 by the game's own starter and number (PAD-1476) */
-static struct { int n, call; unsigned long started, limit; } show_now;
+static struct { int n, call; unsigned long started, limit; const struct pm_mode *owner; } show_now;
 static unsigned long ball_end_at;                    /* when the last ball ended (on_ball_end), 0 = not yet */
 
 int pm_game_shows(void)
@@ -9315,6 +9317,7 @@ static int show_number_start(int num, unsigned long limit_ms, const char *who)
     }
     show_now.n = -num;
     show_now.call = 2;
+    show_now.owner = 0;
     show_now.started = pm_ms();
     show_now.limit = limit_ms ? limit_ms : SHOW_MAX_MS;
     say("show #%d: the game's own light show, started by its own number for %s", num, who);
@@ -9333,7 +9336,17 @@ int pm_game_show_number(int num)
         say("show #%d: not played - the ball is ending, and the game stops every show of its own with it", num);
         return 0;
     }
-    return show_number_start(num, SHOW_MAX_MS, current && current->name ? current->name : "a mode");
+    if (!show_number_start(num, SHOW_MAX_MS, current && current->name ? current->name : "a mode")) return 0;
+    show_now.owner = current;
+    return 1;
+}
+
+/* PAD-1476: some of the game's shows run until stopped (a mode's own running show, Mechagodzilla Multiball's 259 on
+ * Godzilla LE 1.16: 20 s in the emulator, until replaced), so one a mode started ends as that mode does, not at the
+ * 20 s - its end show, played after pm_end, takes over from there */
+static void show_owner_ended(const struct pm_mode *m)
+{
+    if (m && show_now.n && show_now.call == 2 && show_now.owner == m) show_kill("its mode ended");
 }
 
 int pm_game_show_numbers(void)

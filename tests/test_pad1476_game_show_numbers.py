@@ -202,7 +202,7 @@ def test_the_picks_are_the_modes_own_shows_grouped_by_the_mode():
         "cmode_battle_vs_megalon": [[348, 50, 1]]}, names={"148": "Strobe burst"})
     reading = CM.Reading(labels={"cmode_hedorah": "Hedorah", "cmode_battle_vs_gigan": "Battle vs Gigan",
                                  "cmode_battle_vs_megalon": "Battle vs Megalon"})
-    clips = CM.CardClips(card="card", game="godzilla_le", version="1.16", reading=reading, shows=sh.to_json())
+    clips = CM.CardClips(card="card", game="godzilla_le", version="1.16.0", reading=reading, shows=sh.to_json())   # as read_card names it
     tab = SimpleNamespace(_how=clips, _title=lambda: LE)
     rows = ModesTab._mode_show_rows(tab)
     assert [(r["group"], r["value"], r["label"]) for r in rows] == [

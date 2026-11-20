@@ -168,3 +168,42 @@ start) and then asked for a roam to the strongest 5 GHz access point.
   2.5 MB/s. There is no 5 GHz figure because no 5 GHz link has held.
 
 A radio scan was not requested at any point: the roam used the boot-time scan cache.
+
+## The option as built, and the 5 GHz driver-parameter trials (2026-11-20)
+
+**Built form on the machine.** With Stern's original `/etc/init.d/game` and only
+`/etc/wpa_supplicant/driver.wlan0` (`nl80211,wext`) added, wpa_supplicant started with `-D nl80211,wext` and the
+link was up 15 s later: the third start of three in nl80211 mode. This is what `core/wifi_card.py` writes
+(Network tab, Wi-Fi start-up). Send to machine carries the file (its plans cover the system partition).
+
+**5 GHz with driver parameters: none holds.** Each trial was one boot with the parameters on the 8812bu
+`insmod` line, nl80211 mode, then a roam to the strongest 5 GHz access point from the boot-time scan cache
+(-48 dBm). Every 5 GHz attempt ended `CTRL-EVENT-DISCONNECTED reason=34`, on three eero nodes, and the
+machine went back to 2.4 GHz each time:
+
+| Parameters | 5 GHz attempts | Result |
+|---|---|---|
+| `rtw_bw_mode=0x00` (20 MHz) | 1 | reason 34 |
+| `rtw_vht_enable=0 rtw_bw_mode=0x00 rtw_beamform_cap=0 rtw_rx_stbc=0 rtw_ampdu_enable=0 rtw_power_mgnt=0 rtw_ips_mode=0` | 2 | reason 34 |
+| `rtw_vht_enable=0` | 1 | reason 34 |
+| `rtw_power_mgnt=0 rtw_ips_mode=0` | 4 | reason 34 |
+| `rtw_country_code=US` | 4 | reason 34 |
+
+(A first batch without the roam step was mostly void: five of its six boots joined 2.4 GHz without trying
+5 GHz, because wpa_supplicant only tries 5 GHz first when that signal is the stronger one at that start.)
+
+So no insmod parameter of driver v5.3.1 gets a 5 GHz link with this eero. What is left:
+
+- **A newer driver.** `8812bu.ko` is Realtek v5.3.1_27678.20180430, vermagic
+  `3.14.28_1.0.0_ga-wandboard+g08f5291 SMP preempt mod_unload modversions ARMv7 p2v8`. The kernel commit
+  `08f5291c` is in the public `wandboard-org/linux` (branch `wandboard_imx_3.14.28_1.0.0_ga`), the machine
+  has `/proc/config.gz` (saved as `C:\tmp\PAD-1467\machine.config`), and `/proc/version` names gcc 4.9.2.
+  `CONFIG_MODVERSIONS=y`, so a module needs the kernel's symbol CRCs: build the tree with that config, then
+  check its `Module.symvers` against the 193 CRCs in Stern's own `.ko` (`modprobe --dump-modversions`).
+  Realtek v5.8.7.1 (2019, `cilynx/rtl88x2bu`) is the first candidate. Build script:
+  `C:\tmp\PAD-1467\kbuild.sh` (blocked in the ticket session: it downloads a gcc 4.9 toolchain and runs as
+  root in WSL; David can run it).
+- **Whether the eero is the odd one.** Not known. A 5 GHz phone hotspot separates the two: the adapter
+  holding a link there means the fault is specific to the eero.
+
+Speed on 2.4 GHz stays the only figure: 1.8 MB/s PC to machine, 2.5 MB/s back.

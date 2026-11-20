@@ -40,4 +40,4 @@ def test_service_menu_tab_rows_are_always_tickable(tmp_path):
     for key in SM.OFF_KEYS:
         assert rows[key]["can"] is True
     assert rows["image_set"]["on"] is True and "placeholder" in rows["image_set"]["note"]
-    assert rows["music_mode"]["on"] is False and "right-click" in rows["music_mode"]["note"]
+    assert rows["music_mode"]["on"] is False and "Audio tab" in rows["music_mode"]["note"]   # where it is made

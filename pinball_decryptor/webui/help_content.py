@@ -1597,20 +1597,29 @@ HELP_CONTENT = {
         ("Wi-Fi start-up", [
             "For a Stern Spike 2 machine that uses a USB Wi-Fi adapter. **Use the reliable Wi-Fi start-up** "
             "makes the machine join your Wi-Fi at the first attempt when it is switched on.",
-            "As shipped, the machine's Wi-Fi program talks to the adapter in an older way. With it, joining "
-            "often fails and is tried again, so the machine can take minutes to appear on your network, or not "
-            "appear at all until it is switched off and on. The option switches the program to the current way "
-            "and keeps the older one as a fallback, for an adapter that cannot do the current way.\n\n"
+            "As shipped, the machine starts its Wi-Fi program, `wpa_supplicant`, with the old `wext` driver "
+            "interface (`-D wext`). With it, joining often fails and is tried again, so the machine can take "
+            "minutes to appear on your network, or not appear at all until it is switched off and on. The option "
+            "starts it with `-D nl80211,wext`: the current Linux Wi-Fi interface, `nl80211`, with `wext` kept as "
+            "the fallback for an adapter whose driver cannot do nl80211.\n\n"
+            "Exactly what goes on the card:\n\n"
+            "| | |\n"
+            "|---|---|\n"
+            "| File added | `/etc/wpa_supplicant/driver.wlan0` on the system partition (owner root, mode 644) |\n"
+            "| What it says | `nl80211,wext` |\n"
+            "| Read by | `/etc/network/if-pre-up.d/wpa-supplicant`, Stern's own start-up script, not changed |\n"
+            "| Not changed | the game, the Wi-Fi driver modules, `/etc/wpa_supplicant.conf` |\n\n"
             "- It does not change which Wi-Fi network the machine uses, its password or its band. A machine "
             "still joins on 2.4 GHz where that is what it joined before.\n"
-            "- It is one small settings file on the card's system partition. Nothing in the game is changed.\n"
+            "- The Network tab lists these same details beside the option, with what the card you picked "
+            "has now.\n"
             "- Tick it, then Write the card, or use Send to machine on a machine that already has remote "
             "access. Writing a card without it puts the machine back as shipped.\n"
             "- A card whose system does not have the start-up step this option uses says so here and is left "
             "as it is.",
-            "Measured on a Godzilla with Stern's AC1200 adapter: as shipped, nine tries to join in a row failed "
-            "on one access point; with the option, the machine joined at the first try, 14 seconds after its "
-            "Wi-Fi program started.",
+            "Measured on a Godzilla LE with Stern's AC1200 adapter (RTL8822BU): with `wext`, nine tries of nine "
+            "to join failed on one access point; with `nl80211` the machine joined at the first try, 14 to 15 "
+            "seconds after `wpa_supplicant` started, on three starts of three.",
         ]),
     ],
     "Modes": [],

@@ -297,3 +297,26 @@ def test_wifi_start_up_is_a_spike2_option():
         w.run(svc.on_show)
         assert w.state('network')['wifi_offered'] is False
         assert svc._inspect_wifi() == dict(supported=False, reason=wifi_card.NOT_SPIKE2, enabled=False)
+
+
+def test_wifi_start_up_says_exactly_what_it_changes(tmp_path, monkeypatch):
+    """David (PAD-1467): the option names the file, its contents, the script that reads it and the resulting
+    wpa_supplicant argument, and what the picked card has now."""
+    from pinball_decryptor.core import wifi_card
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda *a, **kw: dict(supported=True, reason='', enabled=False))
+        w.run(svc.on_show)
+        st = w.state('network')
+        rows = {r[0]: r[1] for r in st['wifi_details']}
+        assert rows['File added to the card'].startswith('/etc/wpa_supplicant/driver.wlan0')
+        assert rows['What the file says'] == 'nl80211,wext' == wifi_card.DRIVER.decode()
+        assert rows['Read by'].startswith('/etc/network/if-pre-up.d/wpa-supplicant')
+        assert rows['wpa_supplicant then starts with'].startswith('-D nl80211,wext') and '-D wext' in rows['wpa_supplicant then starts with']
+        assert '8812bu.ko' in rows['Not changed'] and 'To undo' in rows
+        assert st['wifi_now'] == '-D wext (as shipped)'
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda *a, **kw: dict(supported=True, reason='', enabled=True))
+        w.run(svc.on_show)
+        assert w.state('network')['wifi_now'].startswith('-D nl80211,wext')
+    js = (Path(wifi_card.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
+    assert 'Exactly what it changes on the card' in js and 'n.wifi_details' in js and 'n.wifi_now' in js

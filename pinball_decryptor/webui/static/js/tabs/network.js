@@ -186,15 +186,26 @@ function WifiStartup({ n }) {
   const locked = !n.wifi_supported || n.running;
   return html`<${Card} cls="net-opt" title="Wi-Fi start-up">
     <p class="net-does">Makes the machine join your Wi-Fi at the first attempt when it starts. As shipped, the
-      machine's Wi-Fi program talks to the USB Wi-Fi adapter in an older way that often fails and tries again, so the
-      machine can take minutes to appear on your network, or not appear at all. This switches it to the current way
-      and keeps the older one as a fallback.</p>
+      machine starts its Wi-Fi program (<span class="mono">wpa_supplicant</span>) with the old${" "}
+      <span class="mono">wext</span> driver interface. With it, joining often fails and is tried again, so the
+      machine can take minutes to appear on your network, or not appear at all. This starts it with the current
+      interface, <span class="mono">nl80211</span>, and keeps <span class="mono">wext</span> as the fallback.</p>
     ${!n.wifi_supported ? html`<${Note}>${n.wifi_reason}<//>` : null}
     <${Check} label="Use the reliable Wi-Fi start-up on cards I write from this project" checked=${enabled}
       disabled=${locked} wrap
       onChange=${(on) => { setEnabled(on); call("network.configure_wifi", on, n.project); }} />
     <span class="small muted">It does not change which Wi-Fi network or band the machine uses, or its password.
       Writing a card without it puts the machine back as shipped.</span>
+    <div class="lbl">Exactly what it changes on the card</div>
+    <table class="net-fields net-wifi-details">
+      <tbody>${(n.wifi_details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>
+        <td class=${r[2] ? "mono" : ""}>${r[1]}</td></tr>`)}
+        ${n.wifi_now ? html`<tr><th scope="row">The card you picked has</th><td class="mono">${n.wifi_now}</td></tr>` : null}
+      </tbody></table>
+    <span class="small muted">Measured on a Godzilla LE with Stern's AC1200 adapter (RTL8822BU): with${" "}
+      <span class="mono">wext</span>, nine tries of nine to join failed on one access point; with${" "}
+      <span class="mono">nl80211</span> it joined at the first try, 14 to 15 seconds after${" "}
+      <span class="mono">wpa_supplicant</span> started, on three starts of three.</span>
     ${n.wifi_error ? html`<p role="alert" class="err-ink">${n.wifi_error}</p>` : null}
   <//>`;
 }

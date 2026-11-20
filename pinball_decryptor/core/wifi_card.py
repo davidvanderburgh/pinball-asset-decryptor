@@ -40,6 +40,30 @@ HOOK = '/etc/network/if-pre-up.d/wpa-supplicant'
 HOOK_READS = b'/etc/wpa_supplicant/driver.$IFACE'
 SUPPLICANT = '/usr/sbin/wpa_supplicant'
 
+#: David (PAD-1467): "be more technically specific about the settings we are changing so that users can have
+#: confidence in what this option does".  The Network tab shows these rows as they are: (what, value, in code type)
+DETAILS = (
+    ('File added to the card', OVERRIDE + ' (system partition, owner root, mode 644)', True),
+    ('What the file says', DRIVER.decode(), True),
+    ('Read by', HOOK + ", Stern's own start-up script, which is not changed", True),
+    ('wpa_supplicant then starts with', '-D ' + DRIVER.decode() + '   (as shipped: -D wext)', True),
+    ('What that means', 'wpa_supplicant talks to the Wi-Fi adapter through nl80211, the current Linux Wi-Fi '
+     'interface, in place of wext, the older one. If nl80211 cannot start for an adapter, it uses wext as before.',
+     False),
+    ('Not changed', 'The game, the Wi-Fi driver modules (8812bu.ko, 8192eu.ko, 8188eu.ko), '
+     '/etc/wpa_supplicant.conf, and your network name, password and band.', False),
+    ('To undo', 'Untick it and write the card (or Send to machine): the file is taken off again.', False),
+)
+
+
+def describe(info):
+    """What the card at hand has now, for the Network tab: ``-D wext`` as shipped, or ours."""
+    if not info.get('supported'):
+        return ''
+    return ('-D ' + DRIVER.decode() + ' (this option is already on the card)') if info.get('enabled') \
+        else '-D wext (as shipped)'
+
+
 NOT_SPIKE2 = 'The Wi-Fi start-up option is for Stern Spike 2 cards.'
 NO_HOOK = ("This card's system does not have the Wi-Fi start-up hook this option uses, so it is left as it is.")
 FOREIGN = ('This card already names its own Wi-Fi driver (%s); it will not be overwritten.')

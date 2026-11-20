@@ -110,7 +110,8 @@ KEYS = collections.OrderedDict([
     ("name", "text"), ("title", "text"), ("start", "switches"), ("start_count", "int"),
     ("shots", "switches"), ("points", "int"), ("seconds", "int"), ("complete", "int"),
     ("complete_points", "int"),
-    ("sound_start", "sound"), ("sound_shot", "sound"), ("sound_complete", "sound"), ("sound_end", "sound"),
+    ("sound_start", "sound_or_file"), ("sound_shot", "sound_or_file"), ("sound_complete", "sound_or_file"),
+    ("sound_end", "sound_or_file"),
     ("font_title", "font"), ("font_value", "font"), ("font_timer", "font"),
     ("title_color", "rgba"), ("value_color", "rgba"), ("timer_color", "rgba"), ("panel_color", "rgba"),
     ("panel", ("middle", "bottom", "top", "none")),
@@ -123,7 +124,20 @@ KEYS = collections.OrderedDict([
     ("multiball", "multiball"), ("multiball_on", "switches"), ("add_ball", "add_ball"), ("ball_save", "ball_save"),
     ("coil_start", "coil_pulse"), ("coil_shot", "coil_pulse"), ("coil_complete", "coil_pulse"),
     ("coil_hold", "coil_hold"), ("coil_hold_on", "hold_on"),
+    # PAD-1424: a mode's own files (MODES.md "A mode's own sounds, music, picture and video")
+    ("sound_channel", ("fanfare", "fx", "speech", "music")),
+    ("music", "sound_file"), ("picture", "picture_file"), ("picture_at", "box"),
+    ("video", "video_file"), ("video_at", "box"), ("video_loop", ("yes", "no")),
 ])
+#: what each engine's runtime plays from a file of the mode's own: Unity's AudioClip loader and
+#: VideoPlayer on Linux (VP8 webm only), Godot 4.1 (Ogg Vorbis, PCM wav, Theora ogv),
+#: SkeletonGame's pygame mixer and its ffmpeg movie layer (H.264 mp4)
+MEDIA = {
+    "unity": {"sound_file": ("ogg", "wav"), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("webm",)},
+    "godot": {"sound_file": ("ogg", "wav"), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("ogv",)},
+    "proc": {"sound_file": ("ogg", "wav"), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("mp4",)},
+}
+MEDIA_KEYS = ("sound_start", "sound_shot", "sound_complete", "sound_end", "music", "picture", "video")
 #: title.cfg: every mode's defaults (the panel), and the title it is for; coil_holds = on lets the
 #: title's modes hold coils (after a look at it on the machine, as on JJP)
 TITLE_KEYS = collections.OrderedDict([("game", "text"), ("coil_holds", ("on", "off"))])
@@ -215,8 +229,30 @@ def _coil(name, port, hold):
     return "%s is not one of %s's coils a mode may fire" % (name, port.get("title", "this game"))
 
 
+def media_exts(port, kind):
+    """The file endings this title's runtime plays for *kind* (sound_file, picture_file,
+    video_file); () when it cannot show that at all (Alice Cooper's Unity player loads its own
+    pictures and videos by name only)."""
+    if (port or {}).get("screen") == "unity_player" and kind in ("picture_file", "video_file"):
+        return ()
+    return MEDIA.get(engine(port or {}), MEDIA["unity"]).get(kind, ())
+
+
 def check_value(kind, v, port):
     words = MJ._names(v)
+    if kind == "sound_or_file":
+        if "." in v and v.rsplit(".", 1)[1].lower() in MJ.MEDIA_EXTS["sound_file"] + ("mp3",):
+            return check_value("sound_file", v, port)
+        return check_value("sound", v, port)
+    if kind in ("sound_file", "picture_file", "video_file"):
+        exts = media_exts(port, kind)
+        what = {"sound_file": "sound", "picture_file": "picture", "video_file": "video"}[kind]
+        if not exts:
+            return ("%s's screen cannot show a %s of a mode's own (its Unity player shows the game's "
+                    "own by name only)" % ((port or {}).get("title", "this game"), what))
+        if "/" in v or "\\" in v or "." not in v or v.rsplit(".", 1)[1].lower() not in exts:
+            return "must be a %s file in the mode folder ending .%s" % (what, ", .".join(exts))
+        return None
     if kind == "lamps":
         known = _known(port, "lamps")
         bad = [w for w in words if known and w.lower() not in known]
@@ -333,6 +369,12 @@ def check_modes(mode_dir, port=None):
         v = _int(m.get("combo_seconds") or "")
         if v is not None and not 1 <= v <= 60:
             problems.append("%s: combo_seconds must be 1-60" % fn)
+        for k in MEDIA_KEYS:
+            v = m.get(k, "")
+            if v and "." in v and "/" not in v and (k in ("music", "picture", "video") or
+                                                   v.rsplit(".", 1)[1].lower() in ("ogg", "wav", "mp3")) \
+                    and not os.path.isfile(os.path.join(mode_dir, v)):
+                problems.append("%s: %s = %s, but there is no %s in the mode folder" % (fn, k, v, v))
         v = _int(m.get("lamp_blink") or "")
         if v is not None and not 0 <= v <= 10:
             problems.append("%s: lamp_blink must be 0-10 flashes a second" % fn)
@@ -397,8 +439,14 @@ def pad_files(mode_dir, port):
     else:
         out = [("padunity.so", rt[0], 0o755), ("PadModes.dll", rt[1], 0o644)]
     out.append(("modes/title.cfg", title_cfg_text(mode_dir, port).encode("utf-8"), 0o644))
+    sent = set()
     for m in modes:
         out.append(("modes/" + m["file"], os.path.join(mode_dir, m["file"]), 0o644))
+        for k in MEDIA_KEYS:
+            v = m.get(k, "")
+            if v and v not in sent and os.path.isfile(os.path.join(mode_dir, v)):
+                sent.add(v)
+                out.append(("modes/" + v, os.path.join(mode_dir, v), 0o644))
     stamp = "PAD custom modes (mkspkmodes.py, runtime %s) for %s: %s\n" % (
         port.get("runtime", "?"), port.get("title", "?"), ", ".join(m["name"] for m in modes))
     out.append(("README.txt", stamp.encode("utf-8"), 0o644))

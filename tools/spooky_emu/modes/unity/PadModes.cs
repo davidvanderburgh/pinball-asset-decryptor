@@ -42,7 +42,9 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using UnityEngine;
+using UnityEngine.Networking;
 using UnityEngine.UI;
+using UnityEngine.Video;
 
 namespace PadModes {
 
@@ -119,6 +121,9 @@ public class CMode {
     public bool HoldsOk, MbServed, Held;
     public float StartedAt, MbAt, OneSince, HeldUntil, LampAt;
     public int LampPhase = -1;
+    // a mode's own files (PAD-1424)
+    public bool MusicOn;
+    public List<GameObject> Media = new List<GameObject>();
 
     public string Get(string k, string dflt) {
         string v;
@@ -442,6 +447,7 @@ public class PadRuntime {
         Sound(m, "sound_start");
         m.StartedAt = Time.unscaledTime;
         m.MbServed = false; m.OneSince = 0f; m.Added = 0; m.LampPhase = -1;
+        try { Files.Music(this, m, true); Files.Show(this, m, true); } catch (Exception e) { Loader.Log(m.Name + ": files: " + e); }
         Coil(m, "coil_start");
         if (m.HoldWhen == "start") Hold(m);
         if (m.BallSave > 0) Save(m, m.BallSave, 1);
@@ -480,6 +486,8 @@ public class PadRuntime {
             Sound(m, "sound_end");
         }
         try {
+            Files.Music(this, m, false);
+            Files.Show(this, m, false);
             foreach (var l in m.Lamps) Glue.LampRelease(l);
             if (m.Lamps.Count > 0) Loader.Log(m.Name + ": lamps handed back to the game");
             Unhold(m);
@@ -495,6 +503,7 @@ public class PadRuntime {
         // multiplier in its own ball-started event, after the ball number this saw change
         if (ballLive && now - ballAt > 2f) Port.Measure(this);
         Rules(now);
+        Files.Poll();
         foreach (var m in All) {
             if (!m.Running) continue;
             if (m.MbServed && m.MbOn.Count > 0) m.EndsAt = 0f;      // the balls came: the clock stops
@@ -597,6 +606,7 @@ public class PadRuntime {
     void Sound(CMode m, string key) {
         string name = m.Get(key, "");
         if (name.Length == 0) return;
+        if (Files.IsSound(name)) { Files.PlaySound(this, m, key, name); return; }
         string how;
         string watch = Glue.Voice(name, out how);
         if (how == null) { Loader.Log(m.Name + ": " + key + " " + name + ": no such callout in this game"); return; }
@@ -614,6 +624,190 @@ public class PadRuntime {
             if (panel == null) panel = new Panel();
             panel.Set(shown);
         } catch (Exception e) { Loader.Log("panel: " + e.Message); }
+    }
+}
+
+// A mode's own files (PAD-1424): sounds and music through Unity's own audio loader on sources of
+// ours (the game's voice mixer group; its music sources muted while the mode's music plays), the
+// picture and the video (VideoPlayer from the file: VP8 webm on Linux) on a canvas just under the
+// panel, each fitted in its box.
+public static class Files {
+    static readonly Dictionary<string, AudioClip> clips = new Dictionary<string, AudioClip>();
+    static readonly List<KeyValuePair<UnityWebRequest, Action<AudioClip>>> loading =
+        new List<KeyValuePair<UnityWebRequest, Action<AudioClip>>>();
+    static readonly Dictionary<string, List<Action<AudioClip>>> waiting = new Dictionary<string, List<Action<AudioClip>>>();
+    static GameObject root;
+    static AudioSource fx, music;
+    static Canvas canvas;
+    static List<AudioSource> muted = new List<AudioSource>();
+
+    public static bool IsSound(string v) {
+        string e = Path.GetExtension(v ?? "").ToLowerInvariant();
+        return e == ".ogg" || e == ".wav";
+    }
+
+    static string PathOf(PadRuntime r, string name) { return Path.Combine(r.Dir, name); }
+
+    static void Root() {
+        if (root != null) return;
+        root = new GameObject("PadModesFiles");
+        UnityEngine.Object.DontDestroyOnLoad(root);
+        fx = root.AddComponent<AudioSource>();
+        music = root.AddComponent<AudioSource>();
+        fx.playOnAwake = music.playOnAwake = false;
+        fx.spatialBlend = music.spatialBlend = 0f;
+    }
+
+    // the clip, loaded once (UnityWebRequestMultimedia, polled each frame), then *then* with it
+    static void Clip(PadRuntime r, string name, Action<AudioClip> then) {
+        AudioClip c;
+        if (clips.TryGetValue(name, out c)) { then(c); return; }
+        List<Action<AudioClip>> w;
+        if (waiting.TryGetValue(name, out w)) { w.Add(then); return; }
+        waiting[name] = new List<Action<AudioClip>> { then };
+        string path = PathOf(r, name);
+        var type = Path.GetExtension(name).ToLowerInvariant() == ".wav" ? AudioType.WAV : AudioType.OGGVORBIS;
+        var req = UnityWebRequestMultimedia.GetAudioClip("file://" + path, type);
+        req.SendWebRequest();
+        loading.Add(new KeyValuePair<UnityWebRequest, Action<AudioClip>>(req, got => {
+            clips[name] = got;
+            foreach (var a in waiting[name]) a(got);
+            waiting.Remove(name);
+        }));
+    }
+
+    public static void Poll() {
+        for (int i = loading.Count - 1; i >= 0; i--) {
+            var req = loading[i].Key;
+            if (!req.isDone) continue;
+            var then = loading[i].Value;
+            loading.RemoveAt(i);
+            AudioClip c = null;
+            try { c = DownloadHandlerAudioClip.GetContent(req); } catch (Exception e) { Loader.Log("audio file: " + e.Message); }
+            if (c == null || c.length <= 0f) { Loader.Log("audio file " + req.url + " could not be read: " + req.error); c = null; }
+            else Loader.Log("audio file " + req.url + " read (" + c.length.ToString("0.00") + " s)");
+            req.Dispose();
+            try { then(c); } catch (Exception e) { Loader.Log("audio file: " + e.Message); }
+        }
+        if (muted.Count > 0) foreach (var s in muted) if (s != null && !s.mute) s.mute = true;
+    }
+
+    public static void PlaySound(PadRuntime r, CMode m, string key, string name) {
+        Root();
+        // sound_channel music: at the game's music level and mixer group; the others at its voice level
+        bool asMusic = m.Get("sound_channel", "fanfare") == "music";
+        Clip(r, name, c => {
+            if (c == null) return;
+            var vc = asMusic ? Glue.MusicSources().FirstOrDefault(x => x != null) : Glue.VoiceChannel();
+            if (vc != null) fx.outputAudioMixerGroup = vc.outputAudioMixerGroup;
+            fx.PlayOneShot(c, vc != null ? Math.Max(vc.volume, 0.2f) : 1f);
+            Loader.Log(m.Name + ": " + key + " " + name + " (a file of the mode's own) playing at the game's " +
+                (asMusic ? "music" : "voice") + " level");
+        });
+    }
+
+    public static void Music(PadRuntime r, CMode m, bool on) {
+        string name = m.Get("music", "");
+        if (name.Length == 0) return;
+        Root();
+        if (on) {
+            m.MusicOn = true;
+            Clip(r, name, c => {
+                if (c == null || !m.MusicOn) return;
+                var game = Glue.MusicSources().Where(s => s != null).ToList();
+                if (game.Count > 0) { music.outputAudioMixerGroup = game[0].outputAudioMixerGroup; music.volume = Math.Max(game.Max(s => s.volume), 0.2f); }
+                music.clip = c; music.loop = true; music.Play();
+                muted = game;
+                foreach (var s in game) s.mute = true;
+                Loader.Log(m.Name + ": music " + name + " playing (looped); the game's " + game.Count + " music source(s) muted");
+            });
+            return;
+        }
+        if (!m.MusicOn) return;
+        m.MusicOn = false;
+        music.Stop();
+        foreach (var s in muted) if (s != null) s.mute = false;
+        muted = new List<AudioSource>();
+        Loader.Log(m.Name + ": music " + name + " stopped, the game's own music back");
+    }
+
+    public static void Show(PadRuntime r, CMode m, bool on) {
+        foreach (var g in m.Media) if (g != null) UnityEngine.Object.Destroy(g);
+        if (m.Media.Count > 0) Loader.Log(m.Name + ": picture/video taken off the screen");
+        m.Media.Clear();
+        if (!on) return;
+        string pic = m.Get("picture", ""), vid = m.Get("video", "");
+        if (pic.Length == 0 && vid.Length == 0) return;
+        if (canvas == null) {
+            var go = new GameObject("PadModesMedia");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            canvas = go.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 29999;                 // under the panel (30000), over the game
+            var sc = go.AddComponent<CanvasScaler>();
+            sc.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            sc.referenceResolution = new Vector2(1920, 1080);
+        }
+        if (vid.Length > 0) {
+            var g = new GameObject("video");
+            g.transform.SetParent(canvas.transform, false);
+            var img = g.AddComponent<RawImage>();
+            var vp = g.AddComponent<VideoPlayer>();
+            vp.playOnAwake = false;
+            vp.source = VideoSource.Url;
+            vp.url = "file://" + PathOf(r, vid);
+            vp.isLooping = m.Get("video_loop", "yes") != "no";
+            vp.audioOutputMode = VideoAudioOutputMode.None;      // silent, as on JJP
+            vp.renderMode = VideoRenderMode.RenderTexture;
+            var box = Box(m.Get("video_at", ""));
+            vp.prepareCompleted += p => {
+                var rt = new RenderTexture((int)Math.Max(16, p.width), (int)Math.Max(16, p.height), 0);
+                p.targetTexture = rt;
+                img.texture = rt;
+                Place(img.rectTransform, box, p.width, p.height);
+                p.Play();
+                Loader.Log(m.Name + ": video " + vid + " (" + p.width + "x" + p.height + ") playing at " + string.Join(" ", box.Select(x => x.ToString()).ToArray()));
+            };
+            vp.errorReceived += (p, e) => Loader.Log(m.Name + ": video " + vid + ": " + e);
+            Place(img.rectTransform, box, 16, 9);
+            img.color = new Color(0, 0, 0, 0);
+            vp.prepareCompleted += p => img.color = Color.white;
+            vp.Prepare();
+            m.Media.Add(g);
+        }
+        if (pic.Length > 0) {
+            var tex = new Texture2D(2, 2);
+            byte[] bytes = null;
+            try { bytes = File.ReadAllBytes(PathOf(r, pic)); } catch (Exception e) { Loader.Log(m.Name + ": picture " + pic + ": " + e.Message); }
+            if (bytes != null && ImageConversion.LoadImage(tex, bytes)) {
+                var g = new GameObject("picture");
+                g.transform.SetParent(canvas.transform, false);
+                var img = g.AddComponent<RawImage>();
+                img.texture = tex;
+                var box = Box(m.Get("picture_at", ""));
+                Place(img.rectTransform, box, tex.width, tex.height);
+                m.Media.Add(g);
+                Loader.Log(m.Name + ": picture " + pic + " (" + tex.width + "x" + tex.height + ") on the screen at " + string.Join(" ", box.Select(x => x.ToString()).ToArray()));
+            } else if (bytes != null) Loader.Log(m.Name + ": picture " + pic + " could not be read");
+        }
+    }
+
+    static int[] Box(string v) {
+        var w = (v ?? "").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(x => { int n; return int.TryParse(x, out n) ? n : -1; }).ToArray();
+        return w.Length == 4 && w.Min() >= 0 && w[2] > 0 && w[3] > 0 ? w : new[] { 0, 0, 100, 100 };
+    }
+
+    // fitted in the box (x y w h, percent of the screen), its shape kept, centred
+    static void Place(RectTransform rt, int[] b, double w, double h) {
+        float sw = 1920f, sh = 1080f;
+        float bw = sw * b[2] / 100f, bh = sh * b[3] / 100f;
+        float k = Math.Min(bw / (float)Math.Max(w, 1), bh / (float)Math.Max(h, 1));
+        float nw = (float)w * k, nh = (float)h * k;
+        float cx = sw * b[0] / 100f + bw / 2f, cy = sh * b[1] / 100f + bh / 2f;
+        rt.anchorMin = rt.anchorMax = new Vector2(0f, 1f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(nw, nh);
+        rt.anchoredPosition = new Vector2(cx, -cy);
     }
 }
 

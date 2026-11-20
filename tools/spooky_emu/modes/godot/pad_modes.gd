@@ -208,6 +208,189 @@ func _lamps_coils_balls(fn: String, m: Dictionary, cfg: Dictionary) -> void:
 	m["lamp_phase"] = -1
 	m["lamp_at"] = 0.0
 	m["started_at"] = 0.0
+	# a mode's own files (pad/modes beside the .mode)
+	m["sound_channel"] = cfg.get("sound_channel", "fanfare")
+	m["music"] = cfg.get("music", "")
+	m["picture"] = cfg.get("picture", "")
+	m["video"] = cfg.get("video", "")
+	m["picture_at"] = _box(cfg.get("picture_at", ""))
+	m["video_at"] = _box(cfg.get("video_at", ""))
+	m["video_loop"] = cfg.get("video_loop", "yes") != "no"
+	m["media"] = []
+	m["music_player"] = null
+
+
+static func _box(v: String) -> Array:
+	var w := []
+	for x in v.split(" ", false):
+		w.append(to_int(x) if x.is_valid_int() else -1)
+	if w.size() != 4 or w.min() < 0 or w[2] <= 0 or w[3] <= 0:
+		return [0, 0, 100, 100]
+	return w
+
+
+# ------------------------------------------------------------------ a mode's own files (PAD-1424)
+var media_layer: CanvasLayer = null
+var streams := {}
+
+
+func _is_file(v: String) -> bool:
+	return v.get_extension().to_lower() in ["ogg", "wav", "png", "jpg", "jpeg", "ogv", "webm", "mp4"]
+
+
+# An AudioStream from a file of the mode's own: Ogg Vorbis (where the engine can read one from a
+# file) or PCM wav (read here: AudioStreamWAV takes the samples).
+func _stream(name: String):
+	if streams.has(name):
+		return streams[name]
+	var path := dir.path_join(name)
+	var st = null
+	var ext := name.get_extension().to_lower()
+	if ext == "ogg" and ClassDB.class_has_method("AudioStreamOggVorbis", "load_from_file"):
+		st = AudioStreamOggVorbis.load_from_file(path)
+	elif ext == "wav":
+		st = _wav(path)
+	if st == null:
+		plog("%s: cannot play %s on this engine (%s)" % [name, ext, Engine.get_version_info().string])
+	streams[name] = st
+	return st
+
+
+static func _wav(path: String) -> AudioStreamWAV:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null or f.get_buffer(4).get_string_from_ascii() != "RIFF":
+		return null
+	f.get_32()
+	if f.get_buffer(4).get_string_from_ascii() != "WAVE":
+		return null
+	var chans := 0
+	var rate := 0
+	var bits := 0
+	while f.get_position() + 8 <= f.get_length():
+		var id := f.get_buffer(4).get_string_from_ascii()
+		var size := f.get_32()
+		if id == "fmt ":
+			var fmt := f.get_16()
+			chans = f.get_16()
+			rate = f.get_32()
+			f.get_32()
+			f.get_16()
+			bits = f.get_16()
+			if fmt != 1:
+				return null
+			f.seek(f.get_position() + size - 16)
+		elif id == "data":
+			var w := AudioStreamWAV.new()
+			w.format = AudioStreamWAV.FORMAT_16_BITS if bits == 16 else AudioStreamWAV.FORMAT_8_BITS
+			w.mix_rate = rate
+			w.stereo = chans == 2
+			var data := f.get_buffer(size)
+			if bits == 8:
+				for i in data.size():
+					data[i] = (data[i] - 128) & 0xff
+			w.data = data
+			return w
+		else:
+			f.seek(f.get_position() + size + (size & 1))
+	return null
+
+
+func _sound_file(m: Dictionary, key: String, name: String) -> void:
+	var st = _stream(name)
+	if st == null:
+		return
+	var p := AudioStreamPlayer.new()
+	p.stream = st
+	var ch: String = m["sound_channel"]
+	p.bus = "voice" if ch == "speech" else ("music" if ch == "music" else "sfx")
+	add_child(p)
+	p.finished.connect(p.queue_free)
+	p.play()
+	plog("%s: %s %s (a file of the mode's own) playing on the game's %s bus" % [m["name"], key, name, p.bus])
+
+
+func _music(m: Dictionary, on: bool) -> void:
+	if m["music"] == "":
+		return
+	if on:
+		var st = _stream(m["music"])
+		if st == null:
+			return
+		if "loop" in st:
+			st.loop = true
+		if st is AudioStreamWAV:
+			st.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			st.loop_end = st.data.size() / (2 if st.format == AudioStreamWAV.FORMAT_16_BITS else 1) / (2 if st.stereo else 1)
+		var p := AudioStreamPlayer.new()
+		p.stream = st
+		p.bus = "music"
+		add_child(p)
+		p.play()
+		m["music_player"] = p
+		Audio.music_player.volume_db = -80.0
+		plog("%s: music %s playing on the game's music bus, the game's own music down" % [m["name"], m["music"]])
+		return
+	var p = m["music_player"]
+	if p == null:
+		return
+	m["music_player"] = null
+	p.stop()
+	p.queue_free()
+	Audio.music_player.volume_db = 0.0
+	plog("%s: music %s stopped, the game's own music back" % [m["name"], m["music"]])
+
+
+func _media(m: Dictionary, on: bool) -> void:
+	for n in m["media"]:
+		if is_instance_valid(n):
+			n.queue_free()
+	if not m["media"].is_empty():
+		plog("%s: picture/video taken off the screen" % m["name"])
+	m["media"] = []
+	if not on or (m["picture"] == "" and m["video"] == ""):
+		return
+	if media_layer == null:
+		media_layer = CanvasLayer.new()
+		media_layer.layer = 127                      # under the panel (128), over the game
+		add_child(media_layer)
+	var size := get_viewport().get_visible_rect().size
+	if m["video"] != "":
+		var v := VideoStreamTheora.new()
+		v.file = dir.path_join(m["video"])
+		var vp := VideoStreamPlayer.new()
+		vp.stream = v
+		vp.expand = true
+		vp.loop = m["video_loop"]
+		vp.volume_db = -80.0                         # silent, as on JJP
+		media_layer.add_child(vp)
+		vp.play()
+		var tex = vp.get_video_texture()
+		var ts := Vector2(tex.get_width(), tex.get_height()) if tex != null and tex.get_width() > 0 else Vector2(16, 9)
+		_place(vp, m["video_at"], size, ts)
+		m["media"].append(vp)
+		plog("%s: video %s on the screen at %s%s" % [m["name"], m["video"], m["video_at"], ", looped" if m["video_loop"] else ", once"])
+	if m["picture"] != "":
+		var img := Image.load_from_file(dir.path_join(m["picture"]))
+		if img == null:
+			plog("%s: picture %s could not be read" % [m["name"], m["picture"]])
+		else:
+			var tr := TextureRect.new()
+			tr.texture = ImageTexture.create_from_image(img)
+			tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			media_layer.add_child(tr)
+			_place(tr, m["picture_at"], size, Vector2(img.get_width(), img.get_height()))
+			m["media"].append(tr)
+			plog("%s: picture %s (%dx%d) on the screen at %s" % [m["name"], m["picture"], img.get_width(), img.get_height(), m["picture_at"]])
+
+
+# fitted in the box (x y w h, percent of the screen), its shape kept, centred
+static func _place(c: Control, at: Array, screen: Vector2, own: Vector2) -> void:
+	var b := Rect2(screen.x * at[0] / 100.0, screen.y * at[1] / 100.0, screen.x * at[2] / 100.0, screen.y * at[3] / 100.0)
+	var k := minf(b.size.x / maxf(own.x, 1.0), b.size.y / maxf(own.y, 1.0))
+	var s := own * k
+	c.position = b.position + (b.size - s) / 2.0
+	c.size = s
 
 
 # a constant of an autoload by its name as a mode file writes it (Leds.ORBIT_INNER4, Coils.SHAKER)
@@ -615,6 +798,8 @@ func _start(m: Dictionary) -> void:
 	m["one_since"] = 0.0
 	m["added"] = 0
 	m["lamp_phase"] = -1
+	_music(m, true)
+	_media(m, true)
 	_coil(m, "coil_start")
 	if m["hold_on"] == "start":
 		_hold(m)
@@ -656,6 +841,8 @@ func _stop(m: Dictionary, why: String) -> void:
 		plog("%s: ended (%s), %d shot(s), total %d" % [m["name"], why, m["made"], m["total"]])
 		_sound(m, "sound_end")
 	_lamps_off(m)
+	_music(m, false)
+	_media(m, false)
 	_unhold(m)
 	if m["ball_save"] > 0 and m["mb_balls"] == 0 and _trough() != null and _trough().ball_save_active \
 			and _trough().ball_save_timer <= m["ball_save"] + 2:
@@ -738,6 +925,9 @@ func _award(points: int) -> int:
 # ------------------------------------------------------------------ the game's sounds
 func _sound(m: Dictionary, key: String) -> void:
 	var name: String = m["cfg"].get(key, "")
+	if name != "" and _is_file(name):
+		_sound_file(m, key, name)
+		return
 	if name == "":
 		return
 	if Audio.voice_lines.has(name):

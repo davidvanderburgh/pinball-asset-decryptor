@@ -418,6 +418,15 @@ public static class Glue {
     }
 
     public static AudioSource VoiceChannel() { var g = G; return g != null && g.soundmanager != null ? g.soundmanager.voice_channel : null; }
+    public static List<AudioSource> MusicSources() {
+        var sm = audioHelper.manager;
+        if (sm == null) return new List<AudioSource>();
+#if TCM
+        return sm.music_channel != null ? new List<AudioSource>(sm.music_channel) : new List<AudioSource>();
+#else
+        return new List<AudioSource> { sm.MusicSource };
+#endif
+    }
 
     public static List<string> Lamps() {
         var l = new List<string>();

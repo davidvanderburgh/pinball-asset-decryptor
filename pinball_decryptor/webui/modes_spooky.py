@@ -111,7 +111,8 @@ class SpookyModesMixin:
                 st["title_cfg"] = dict(SM.read_title(self._spk_label))
                 st["folder"] = SM.title_dir(self._spk_label)
                 st["names"] = {k: SM.names_for(port, k, st["folder"]) for k in ("switches", "sound", "font", "lamps", "coil_pulse",
-                                                                       "coil_hold", "events", "after")}
+                                                                       "coil_hold", "events", "after", "sound_or_file",
+                                                                       "sound_file", "picture_file", "video_file")}
                 st["check"] = self._spk_check_state()
                 st["sounds"] = self._spk_sounds_state(port)
                 st["build"] = self._spk_build_state()

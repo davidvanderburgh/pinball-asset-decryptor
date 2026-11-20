@@ -187,6 +187,9 @@ public static class Glue {
     }
 
     public static AudioSource VoiceChannel() { return Media.voice_channel; }
+    public static List<AudioSource> MusicSources() {
+        return new List<AudioSource> { Media.primary_music_channel, Media.secondary_music_channel };
+    }
 
     public static List<string> Lamps() {
         return Lights.serialLEDs == null ? new List<string>()

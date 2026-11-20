@@ -364,3 +364,26 @@ def test_proc_ball_save_ends_with_the_mode(pm, tmp_path, monkeypatch):
     for _ in range(3):                                      # a tick counts at most 1 s
         _tick(r, 1.0)
     assert ("ball_save_off",) in log
+
+
+# ============================================================================ a mode's own files (P-ROC)
+def test_proc_sound_file_and_music(pm, tmp_path, monkeypatch):
+    r = _runtime(pm, tmp_path, monkeypatch, ["start = leftInlane\nseconds = 2\nsound_start = yay.ogg\n"
+                                             "sound_channel = speech\nmusic = song.ogg\n"])
+    g, log = r.game, []
+    g.sound = types.SimpleNamespace(
+        sounds={}, music={},
+        register_sound=lambda k, path, is_voice=False: (log.append(("reg", k, os.path.basename(path), is_voice)),
+                                                         g.sound.sounds.__setitem__(k, {})),
+        register_music=lambda k, path: (log.append(("regm", k, os.path.basename(path))), g.sound.music.__setitem__(k, 1)),
+        play_voice=lambda k: log.append(("voice", k)), play=lambda k: log.append(("sfx", k)),
+        play_music=lambda k, loops=0: log.append(("music", k, loops)), stop_music=lambda: log.append(("stop_music",)))
+    g.base = types.SimpleNamespace(music_track="base-loop",
+                                   start_track=lambda t, loops=0: log.append(("track", t, loops)))
+    r.evt_ball_starting()
+    r.pad_switch(_Sw("leftInlane"))
+    assert ("reg", "pad_sound_yay.ogg", "yay.ogg", True) in log and ("voice", "pad_sound_yay.ogg") in log
+    assert ("music", "pad_music_song.ogg", -1) in log
+    for _ in range(3):
+        _tick(r, 1.0)
+    assert log[-2:] == [("stop_music",), ("track", "base-loop", -1)]

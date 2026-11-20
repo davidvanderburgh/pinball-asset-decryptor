@@ -212,6 +212,10 @@ public static class Glue {
     }
 
     public static AudioSource VoiceChannel() { return audio.getVoiceChannel(); }
+    public static List<AudioSource> MusicSources() {
+        var sm = soundMaster.Instance;
+        return sm != null && sm.music_channel != null ? new List<AudioSource>(sm.music_channel) : new List<AudioSource>();
+    }
 
     public static List<string> Lamps() {
         var l = new List<string>();

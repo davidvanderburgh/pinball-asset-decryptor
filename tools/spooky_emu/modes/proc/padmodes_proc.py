@@ -185,6 +185,7 @@ def load_modes(game, d):
         }
         m["title"] = cfg.get("title") or m["name"]
         start_rules(game, fn, m, cfg)
+        m["dir"] = d
         lamps_coils_balls(game, fn, m, cfg)
         out.append(m)
         log('mode %s "%s": start %s x%d, shots %s, %d points, %s, complete %d (+%d)' % (
@@ -239,6 +240,30 @@ def lamps_coils_balls(game, fn, m, cfg):
     m["hold_on"] = on if on in ("shots", "start") else switches(game, fn, "coil_hold_on", on)
     m["holds_ok"] = (cfg.get("coil_holds") or "off") == "on"
     m.update(mb_served=False, mb_at=0.0, one_since=0.0, added=0, lamps_on=[], held=None)
+    # PAD-1424: a mode's own files (in pad/modes beside the .mode)
+    m["sound_channel"] = (cfg.get("sound_channel") or "fanfare").lower()
+    m["music"] = cfg.get("music", "")
+    m["picture"] = cfg.get("picture", "")
+    m["video"] = cfg.get("video", "")
+    m["picture_at"] = box(cfg.get("picture_at"))
+    m["video_at"] = box(cfg.get("video_at"))
+    m["video_loop"] = (cfg.get("video_loop") or "yes") != "no"
+    m.update(media_layers=None, music_on=False)
+
+
+SOUND_EXTS = ("ogg", "wav", "mp3")
+
+
+def is_file(v):
+    return "." in (v or "") and v.rsplit(".", 1)[1].lower() in SOUND_EXTS + ("png", "jpg", "jpeg", "mp4")
+
+
+def box(v):
+    """x y w h in percent of the screen (picture_at / video_at), 0 0 100 100 when absent or bad."""
+    w = [to_int(x, -1) for x in (v or "").split()]
+    if len(w) != 4 or min(w) < 0 or w[2] <= 0 or w[3] <= 0:
+        return (0, 0, 100, 100)
+    return tuple(w)
 
 
 def _norm(name):
@@ -520,6 +545,8 @@ def _runtime_class(base):
             log("%s: STARTED (%s)" % (m["name"], ("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends"))
             self.pad_sound(m, "sound_start")
             m.update(mb_served=False, mb_at=0.0, one_since=0.0, added=0)
+            self.pad_music(m, True)
+            self.pad_media(m, True)
             self.pad_lamps(m, True)
             self.pad_coil(m, "coil_start")
             if m.get("hold_on") == "start":
@@ -561,6 +588,8 @@ def _runtime_class(base):
                 log("%s: ended (%s), %d shot(s), total %d" % (m["name"], why, m["made"], m["total"]))
                 self.pad_sound(m, "sound_end")
             self.pad_lamps(m, False)
+            self.pad_music(m, False)
+            self.pad_media(m, False)
             self.pad_unhold(m)
             if m.get("ball_save") and not m.get("mb_balls"):
                 self.pad_ball_save_off(m)
@@ -791,6 +820,9 @@ def _runtime_class(base):
             name = m["cfg"].get(key, "")
             if not name:
                 return
+            if is_file(name):
+                self.pad_sound_file(m, key, name)
+                return
             try:
                 snd = self.game.sound
                 entry = snd.sounds.get(name)
@@ -808,6 +840,116 @@ def _runtime_class(base):
                     log("%s: %s %s played as a sound effect (game.sound.play)" % (m["name"], key, name))
             except Exception:
                 log("%s: %s %s failed: %s" % (m["name"], key, name, traceback.format_exc()))
+
+        # ------------------------------------------------------------ a mode's own files (PAD-1424)
+        def _pad_register(self, m, name, music=False):
+            """The file registered with the game's own sound controller once, under a key of ours."""
+            snd = self.game.sound
+            key = "pad_%s_%s" % ("music" if music else "sound", name)
+            known = getattr(snd, "music" if music else "sounds", {}) or {}
+            if key not in known:
+                path = os.path.join(m["dir"], name)
+                if music:
+                    snd.register_music(key, path)
+                else:
+                    snd.register_sound(key, path, is_voice=m["sound_channel"] == "speech")
+            return key
+
+        def pad_sound_file(self, m, key, name):
+            try:
+                k = self._pad_register(m, name)
+                if m["sound_channel"] == "speech":
+                    self.game.sound.play_voice(k)
+                    how = "the game's voice channel"
+                else:
+                    self.game.sound.play(k)
+                    how = "a sound effect"
+                log("%s: %s %s (a file of the mode's own) played as %s" % (m["name"], key, name, how))
+            except Exception:
+                log("%s: %s %s failed: %s" % (m["name"], key, name, traceback.format_exc()))
+
+        def pad_music(self, m, on):
+            name = m.get("music")
+            if not name:
+                return
+            snd = self.game.sound
+            try:
+                if on:
+                    k = self._pad_register(m, name, music=True)
+                    snd.play_music(k, loops=-1)
+                    m["music_on"] = True
+                    log("%s: music %s playing (the game's music channel, looped)" % (m["name"], name))
+                    return
+                if not m.get("music_on"):
+                    return
+                m["music_on"] = False
+                snd.stop_music()
+                back = "stopped"
+                base = getattr(self.game, "base", None)
+                if base is not None and getattr(base, "music_track", None) and hasattr(base, "start_track"):
+                    base.start_track(base.music_track, loops=-1)
+                    back = "the game's %s back" % base.music_track
+                elif base is not None and hasattr(base, "update_music"):
+                    base.update_music()
+                    back = "the game's own back (base.update_music)"
+                elif hasattr(self.game, "playMainMusic"):
+                    self.game.playMainMusic()
+                    back = "the game's main music back"
+                log("%s: music %s %s" % (m["name"], name, back))
+            except Exception:
+                log("%s: music %s failed: %s" % (m["name"], name, traceback.format_exc()))
+
+        def pad_media(self, m, on):
+            """The picture and video of the mode's own, under its panel on its layer."""
+            if not on:
+                if m.get("media_layers"):
+                    log("%s: picture/video taken off the screen" % m["name"])
+                m["media_layers"] = None
+                return
+            if not (m.get("picture") or m.get("video")) or unity_client(self.game) is not None:
+                return
+            out = []
+            sw = int(getattr(self.game, "display_width", 1280) or 1280)
+            sh = int(getattr(self.game, "display_height", 720) or 720)
+            try:
+                from procgame import dmd
+            except Exception:
+                log("%s: no procgame.dmd: no picture or video" % m["name"])
+                return
+            if m.get("video"):
+                try:
+                    v = dmd.MovieLayer(opaque=False, hold=True, repeat=m["video_loop"],
+                                       movie_file_path=os.path.join(m["dir"], m["video"]))
+                    out.append(self._pad_place(dmd, v, m["video_at"], sw, sh, v.get_width(), v.get_height()))
+                    log("%s: video %s on the screen at %s%s" % (m["name"], m["video"], m["video_at"],
+                                                              ", looped" if m["video_loop"] else ", once"))
+                except Exception:
+                    log("%s: video %s failed: %s" % (m["name"], m["video"], traceback.format_exc()))
+            if m.get("picture"):
+                try:
+                    a = dmd.Animation().load(os.path.join(m["dir"], m["picture"]))
+                    f = a.frames[0]
+                    lay = dmd.FrameLayer(opaque=False, frame=f)
+                    out.append(self._pad_place(dmd, lay, m["picture_at"], sw, sh, f.width, f.height, frame=f))
+                    log("%s: picture %s (%dx%d) on the screen at %s" % (m["name"], m["picture"], f.width, f.height,
+                                                                     m["picture_at"]))
+                except Exception:
+                    log("%s: picture %s failed: %s" % (m["name"], m["picture"], traceback.format_exc()))
+            m["media_layers"] = out or None
+
+        def _pad_place(self, dmd, layer, at, sw, sh, w, h, frame=None):
+            """Fitted in the box (x y w h, percent of the screen), its shape kept, centred."""
+            bx, by, bw, bh = at[0] * sw // 100, at[1] * sh // 100, at[2] * sw // 100, at[3] * sh // 100
+            w, h = max(1, int(w or bw)), max(1, int(h or bh))
+            k = min(float(bw) / w, float(bh) / h)
+            nw, nh = max(1, int(w * k)), max(1, int(h * k))
+            if frame is not None:
+                if (nw, nh) != (w, h):
+                    frame.scale(None, nw, nh)
+            elif (nw, nh) != (w, h):
+                layer = dmd.ScaledLayer(nw, nh, layer)
+            layer.set_target_position(bx + (bw - nw) // 2, by + (bh - nh) // 2)
+            return layer
 
         def pad_watch_voices(self):
             playing = _voice_now()
@@ -831,6 +973,12 @@ def _runtime_class(base):
 
         def _pad_draw(self, timer_only):
             m = self.shown
+            if m is not None and m["running"] and m["cfg"].get("panel", "middle") == "none" and m.get("media_layers") \
+                    and unity_client(self.game) is None:
+                if self.panel_key != ("media", m["file"]):
+                    self.panel_key = ("media", m["file"])
+                    self.layer = self.pad_compose(m, None)
+                return
             if m is None or not m["running"] or m["cfg"].get("panel", "middle") == "none":
                 self.layer, self.panel_key = None, None
                 tcp = unity_client(self.game)
@@ -851,7 +999,16 @@ def _runtime_class(base):
             if key == self.panel_key:
                 return
             self.panel_key = key
-            self.layer = panel_layer(self.game, m, secs)
+            self.layer = self.pad_compose(m, panel_layer(self.game, m, secs))
+
+        def pad_compose(self, m, panel):
+            media = m.get("media_layers") or []
+            if not media:
+                return panel
+            from procgame import dmd
+            return dmd.GroupedLayer(int(getattr(self.game, "display_width", 1280) or 1280),
+                                    int(getattr(self.game, "display_height", 720) or 720),
+                                    media + ([panel] if panel is not None else []), opaque=False)
 
         # ------------------------------------------------------------ the port report
         def write_port(self, scored=None):

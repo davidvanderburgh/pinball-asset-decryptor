@@ -209,16 +209,55 @@ def extract_tar_gz(tar_path, output_dir, progress_cb=None):
     return extracted
 
 
-def create_zip(source_dir, out_path, progress_cb=None):
-    """Create a ZIP archive from *source_dir*."""
-    all_files, _all_dirs = _scan_for_tar(source_dir)
+def create_zip(source_dir, out_path, progress_cb=None, pad_modes=None):
+    """Create a ZIP archive from *source_dir*.  *pad_modes* as :func:`create_tar_gz` (PAD-1420:
+    Rick and Morty's game code is a ZIP; its ``pad/`` goes in the game's folder, and the rewrite
+    adds the runtime's line to its config.yaml)."""
+    all_files, _all_dirs = _scan_for_modes(source_dir, pad_modes)
 
     total = len(all_files)
+    names = getattr(pad_modes[1], "names", ()) if pad_modes else ()
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        if pad_modes:
+            _add_pad_modes_zip(zf, pad_modes)
         for i, (full, rel) in enumerate(all_files):
+            arc = rel.replace("\\", "/")
+            if names and os.path.basename(rel) in names:
+                with open(full, "rb") as fh:
+                    data = fh.read()
+                new = pad_modes[1](arc, data)
+                if new != data:
+                    zi = zipfile.ZipInfo.from_file(full, arc)
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    zf.writestr(zi, new)
+                    if progress_cb:
+                        progress_cb(i + 1, total, rel)
+                    continue
             zf.write(full, rel)
             if progress_cb:
                 progress_cb(i + 1, total, rel)
+
+
+def _add_pad_modes_zip(zf, pad_modes):
+    """The custom modes' folder in a ZIP (PAD-1420), and their top files."""
+    import time
+    files, _rewrite, folder = pad_modes[:3]
+    now = time.localtime()[:6]
+    for d in (folder, folder + "/modes"):
+        zi = zipfile.ZipInfo(d + "/", now)
+        zi.external_attr = (0o40755 << 16) | 0x10
+        zf.writestr(zi, b"")
+    entries = [(folder + "/" + rel, src, fmode) for rel, src, fmode in files]
+    entries += list(pad_modes[3] if len(pad_modes) > 3 else ())
+    for arc, src, fmode in entries:
+        if isinstance(src, bytes):
+            data = src
+        else:
+            with open(src, "rb") as fh:
+                data = fh.read()
+        zi = zipfile.ZipInfo(arc, now)
+        zi.external_attr, zi.compress_type = (0o100000 | fmode) << 16, zipfile.ZIP_DEFLATED
+        zf.writestr(zi, data)
 
 
 def create_tar_gz(source_dir, out_path, progress_cb=None, pad_modes=None):

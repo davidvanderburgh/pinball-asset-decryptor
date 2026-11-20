@@ -5,7 +5,9 @@ retail Spooky game by PAD's runtime: on the Unity titles tools/spooky_emu/modes/
 (``padunity.so``, which the update's launch line preloads, and ``PadModes.dll``, which adds one
 Mode of ours to the game's own mode list); on Looney Tunes (Godot, PAD-1419)
 tools/spooky_emu/modes/godot (``pad_modes.gd``, one more autoload that an ``override.cfg``
-beside main.x86_64 names).  ``tools/spooky_emu/modes/mkspkmodes.py`` is the checker and the build;
+beside main.x86_64 names); on Rick and Morty (P-ROC, PAD-1420) tools/spooky_emu/modes/proc
+(``padmodes_proc.py``, a package ``pad/`` in the game's folder that one line of its config.yaml
+loads as procgame's board class).  ``tools/spooky_emu/modes/mkspkmodes.py`` is the checker and the build;
 this module is what the tab needs on top of it:
 
 * the titles - every port report in ``tools/spooky_emu/modes/ports`` (``titles()``): the game's
@@ -25,7 +27,8 @@ import shutil
 #: the title names, by the plugin's game key
 GAME_NAMES = {"scooby_doo": "Scooby-Doo", "beetlejuice": "Beetlejuice",
               "texas_chainsaw": "Texas Chainsaw Massacre", "evil_dead": "Evil Dead",
-              "halloween_78": "Halloween", "ultraman": "Ultraman", "legends_of_tera": "Looney Tunes"}
+              "halloween_78": "Halloween", "ultraman": "Ultraman", "legends_of_tera": "Looney Tunes",
+              "rick_and_morty": "Rick and Morty"}
 MAX_MODES = 24
 #: the form's groups: every key of mkspkmodes.KEYS once
 FORM_GROUPS = (
@@ -150,9 +153,14 @@ def titles():
 
 
 def version_of(path):
-    """An update's version from its name: v2025.12.01.09.scooby -> 2025.12.01.09."""
-    m = re.search(r"(\d{4}[._]\d{2}[._]\d{2}(?:[._]\d{2})?)", os.path.basename(path or ""))
-    return m.group(1).replace("_", ".") if m else ""
+    """An update's version from its name: v2025.12.01.09.scooby -> 2025.12.01.09; a P-ROC game
+    code's date, rm-gamecode-20220902.pkg -> 2022.09.02."""
+    base = os.path.basename(path or "")
+    m = re.search(r"(\d{4}[._]\d{2}[._]\d{2}(?:[._]\d{2})?)", base)
+    if m:
+        return m.group(1).replace("_", ".")
+    m = re.search(r"(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)", base)
+    return "%s.%s.%s" % m.groups() if m else ""
 
 
 def game_of(path):
@@ -424,6 +432,9 @@ def install_note(label):
     if mk().engine(p) == "godot":
         note += ("The machine puts it in place when it next powers up, and the modes are in the game "
                  "from that start. To take them out, install the stock update again.")
+    elif mk().engine(p) == "proc":
+        note += ("The modes are in the game from its first start after the update. To take them out, "
+                 "install the stock update again.")
     elif mk().load_of(p) == "dllmap":
         note += "The game runs the modes from its first start after the update."
     else:
@@ -471,6 +482,8 @@ def label_for_extract(folder, meta=None):
     up = os.path.join(folder, "uptest")
     if os.path.isdir(up):
         seen += [fn for fn in sorted(os.listdir(up)) if fn.startswith("version_") and fn.endswith(".txt")]
+    # a P-ROC game code has no version file: its date is in the update's name (the extract's source)
+    seen.append((meta or {}).get("source") or "")
     for line in seen:
         ver = version_of(line + ".x")
         if ver and load_port("%s-%s" % (game, ver)):
@@ -510,6 +523,8 @@ def loads_how(label):
     port = load_port(label)
     if mk().engine(port) == "godot":
         return "an override.cfg beside the game loads it"
+    if mk().engine(port) == "proc":
+        return "a line in the game's config.yaml loads it"
     if mk().load_of(port) == "dllmap":
         return "the game's Mono config loads it"
     return "the game's launch line preloads it"

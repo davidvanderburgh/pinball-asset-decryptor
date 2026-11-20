@@ -6781,6 +6781,34 @@ one (`sty_menu_take`: a drain edge counts only once the press before it is let g
 style is asked as above. While the cursor is on one of ours the entry's caption, Standard's (`value
 comp_menu_end_caption_msg`, the game-mode table entry's caption message, `prolonged_comp.standard_caption`), says CO-OP
 or TEAMS (`team_kind_caption`), so the menu reads STANDARD, COMPETITION, CHALLENGE, ..., CO-OP, TEAMS.
+
+Round 4 (DoomWalrus666: the version asked only after Start, the card at ball 1 anyway, a menu that timed out left stuck
+on CO-OP or began the game, "the action button should be the primary selector not the start button", Action picks the
+mode, then the version, then Start begins; a version not chosen is regular). Round 2-3's wait inside the game start
+(`sty_menu_ask`) is gone: a menu that timed out under it left the call asleep and the step up for good, and its minute
+alone began the game. The step is now the menu's own and the game start never waits:
+
+- Action (a drain edge on the live menu, `sty_menu_edge`) works the step from the menu's frame (`sty_menu_frame`,
+  `sty_menu_act`): it opens the style step (TEAMS: its team step first), Action takes each. Godzilla LE 1.16's Action on
+  the start menu begins the entry's game through the game start itself, never the menu's buttons word (emulator: the
+  frame's word never carried it), so `coop_start_game_wrap` holds that start back (`sty_menu_held`,
+  `sty_menu_hold_back`: Action pressed in the last 0.6 s on the live menu, no Start on it since, an entry the chooser
+  is for) and returns without starting; the game's callers loop on whatever it answers. A Start on the menu arms the
+  pick first, so the Home Team screen's own Action (go on without logging in) is never held back.
+- With no step up the entry's line says the style taken and START TO PLAY, or its name and ACTION TO CHOOSE
+  (`sty_menu_rest_words`); leaving the entry forgets the choice.
+- Start on the live menu (`sty_menu_go`) keeps what the line says - the style taken, the one shown while a step is up,
+  else NORMAL - and the game start takes it (`sty_menu_begin`, no wait, `tm.seen_ms` refreshed so a login between
+  keeps the team fill); no card at ball 1.
+- A menu whose frames come back after `STY_MENU_GONE_MS` starts every step over (`sty_menu_walk`); `sty_menu_up` reads
+  0 once its frames stop, so nothing keeps the flippers. The game's own menu timeout goes to attract; nothing of ours
+  starts a game.
+- The co-op intro plays only in co-op and team games at CHARACTERS or ENHANCED (`ci_film_due` reads the menu's style
+  while the chooser waits, `coop.plain` after; `sty_close` and `coop_pick_open` never begin it for Standard or a
+  challenge, `coop.standard`): Standard or a challenge plays the game's own start film, language bar and music, then
+  the pick, and `coop_pick_hold` keeps ball 1 out of the lane until the character is taken (an intro begun after the
+  film had let it be served under the pick, where TIMED PLUNGER launched it). The handicap pick waits for the
+  character's (`hand_waits_for_coop`).
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

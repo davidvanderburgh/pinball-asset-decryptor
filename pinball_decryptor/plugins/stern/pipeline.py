@@ -153,6 +153,7 @@ def _write_summary(counts):
     n_stock = getattr(counts, "stock_modes", 0)
     if n_stock:
         parts.append("%d number(s) of the game's own modes" % n_stock)
+    parts += _menu_parts(counts)
     if not parts and getattr(counts, "restored", False):
         return "the original card (nothing is staged any more)"
     if not parts:
@@ -160,6 +161,16 @@ def _write_summary(counts):
     if len(parts) == 1:
         return parts[0]
     return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _menu_parts(counts):
+    """The service menu settings a Write put on the card (``_WriteCounts.menu``), as one summary part (or none).
+    Simon: a Write whose only change was the Service menu tab's rows said "Wrote no changes"."""
+    menu = list(getattr(counts, "menu", ()) or ())
+    if not menu:
+        return []
+    names = ["%s (placeholder)" % name if placeholder else name for name, placeholder in menu]
+    return ["%d service menu setting(s) (%s)" % (len(names), ", ".join(names))]
 
 
 def _write_summary_with_modes(counts, modes):
@@ -180,6 +191,7 @@ def _write_summary_with_modes(counts, modes):
         if not clips:
             return base
         return clips if base == "no changes" else base + " and " + clips
+    menu = _menu_parts(counts)
     counts = list(counts)
     snd = (modes or {}).get("end_sound") or None
     if snd and counts and counts[0] > 0:
@@ -203,6 +215,7 @@ def _write_summary_with_modes(counts, modes):
         len(names), ", ".join(names), "; " + ", ".join(extra) if extra else ""))
     if clips:
         parts.append(clips)
+    parts += menu
     if len(parts) == 1:
         return parts[0]
     return ", ".join(parts[:-1]) + " and " + parts[-1]

@@ -4132,18 +4132,32 @@ class _WriteCounts(tuple):
     and ``restored``, True when a Write with nothing staged put this
     project's build back to the original.  The completion dialog reads both
     (``pipeline._write_summary``), so a Write whose only change was a timer
-    or an award no longer reports "no changes"."""
+    or an award no longer reports "no changes".
+    ``menu``: the service menu settings of ours the Write put on the card (Simon: a Write whose only change was the
+    Service menu tab's rows said "Wrote no changes"), each ``(name, placeholder)``."""
 
     stock_modes = 0
     restored = False
+    menu = ()
 
 
-def _with_stock_modes(counts, n=0, restored=False):
-    """*counts* as a :class:`_WriteCounts` carrying *n* and *restored*."""
+def _with_stock_modes(counts, n=0, restored=False, menu=None):
+    """*counts* as a :class:`_WriteCounts` carrying *n*, *restored* and *menu* (when ``None``, the menu settings
+    *counts* already carries)."""
     out = _WriteCounts(tuple(counts))
     out.stock_modes = int(n or 0)
     out.restored = bool(restored)
+    out.menu = tuple(getattr(counts, "menu", ()) if menu is None else menu)
     return out
+
+
+def _menu_done(menu_job):
+    """The settings of *menu_job* (:class:`_MenuJobs`) that went on the card, ``[(name, placeholder)]`` in the
+    menu's order, for :attr:`_WriteCounts.menu`."""
+    if menu_job is None:
+        return []
+    from .menu_settings import caption_of
+    return [(caption_of(j.KEY), bool(getattr(j, "placeholder", False))) for j in menu_job.jobs if j.ok]
 
 
 def _compute_patches_or_restore(restore_ok, log, *args, allow_empty=False, **kwargs):
@@ -8536,7 +8550,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
             and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
             and not stock_mode_edits and shader_prof is None
-            and not own_clips and not score_edits):
+            and not own_clips and not score_edits
+            and not (not _is_spike3(disk_f)
+                     and _SvM_off.placeholder_jobs(assets_dir, set(), lambda *_a, **_k: None))):
+        # (PR #40 review: a row ticked on the Service menu tab is a change of its own, a placeholder when the
+        # project has nothing behind it yet - the Write tab lists it, so the Write must not say there is nothing)
         raise NothingToWrite(
             "Nothing to write: " + _modes_left_out_clause(_modes_left_out)
             + "every sound (idxNNNN.wav / music_catNN_*.wav) "
@@ -9782,6 +9800,16 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         saved_menu = _SavedProgressMenu(log) if _saved_modes else None
         # PAD-1382: the owner's own settings (Service menu tab) beside them, all in the owner's order
         from . import service_menu as _SvM
+        if not _is_spike3(disk_f):
+            # a row the owner ticked with nothing behind it yet still goes on, with placeholder values (NULL1, NULL2)
+            for _ph in _SvM.placeholder_jobs(assets_dir, {j.KEY for j in (music_menu, edition_menu, image_menu)
+                                                          if j is not None}, log):
+                if _ph.KEY == "music_mode":
+                    music_menu = _ph
+                elif _ph.KEY == "edition":
+                    edition_menu = _ph
+                else:
+                    image_menu = _ph
         _menu_list = _SvM.arrange(assets_dir, [music_menu, edition_menu, *picture_menus, coop_menu, hand_menu,
                                               image_menu, saved_menu], log)
         menu_job = _MenuJobs(*_menu_list) if _menu_list else None
@@ -10776,7 +10804,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                   + n_boot,
                   n_text + n_color + n_layout)
         # the game's own modes ride along without changing the tuple's shape
-        counts = _with_stock_modes(counts, n_stock_mode_numbers)
+        counts = _with_stock_modes(counts, n_stock_mode_numbers, menu=_menu_done(menu_job))
         return writes, counts, grow_plan, audio_mode, valpatch_mode
     finally:
         _rmtree(work)
@@ -11657,13 +11685,39 @@ class _MusicModeMenu:
     def wanted(self):
         return self.KEY, self.count, self.names
 
+    #: a row the owner ticked with nothing behind it yet (:func:`.service_menu.placeholder_jobs`)
+    placeholder = False
+
+    def _placeholder_done(self):
+        """The log line for a placeholder row that went on; ``True`` when this job is one."""
+        if not self.placeholder:
+            return False
+        self.ok = True
+        self.log("Operator menu: %s is on the card (%s) as a placeholder, values %s - nothing on this card uses it "
+                 "yet." % (self.KEY.replace("_", " ").upper(), self.setting.where, ", ".join(self.names)), "info")
+        return True
+
+    def _placeholder_fail(self, why):
+        """The log line for a placeholder row that could not go on; ``True`` when this job is one."""
+        if not self.placeholder:
+            return False
+        if not (self.why or self.ok):
+            self.why = str(why).rstrip(".") or "unknown"
+            self.log("Operator menu: the placeholder %s row could not be added (%s)."
+                     % (self.KEY.replace("_", " ").upper(), self.why), "warning")
+        return True
+
     def done(self):
+        if self._placeholder_done():
+            return
         self.ok = True
         self.log("Music modes: MUSIC MODE is in the operator menu (%s), values 1 "
                  "to %d, its help line \"%s\"." % (self.setting.where, self.count,
                                                    self.setting.help), "info")
 
     def fail(self, why):
+        if self._placeholder_fail(why):
+            return
         if self.why or self.ok:
             return
         self.why = str(why).rstrip(".") or "unknown"
@@ -11679,6 +11733,8 @@ class _EditionMenu(_MusicModeMenu):
     KEY = "edition"
 
     def done(self):
+        if self._placeholder_done():
+            return
         self.ok = True
         self.log("Editions: EDITION is in the operator menu (%s), values 1 to %d, "
                  "its help line \"%s\". Put this card on a "
@@ -11688,6 +11744,8 @@ class _EditionMenu(_MusicModeMenu):
                  "info")
 
     def fail(self, why):
+        if self._placeholder_fail(why):
+            return
         if self.why or self.ok:
             return
         self.why = str(why).rstrip(".") or "unknown"
@@ -12173,12 +12231,16 @@ class _ImageSetMenu(_MusicModeMenu):
         super().__init__(len(names), names, log)
 
     def done(self):
+        if self._placeholder_done():
+            return
         self.ok = True
         self.log("Image sets: IMAGE SET is in the operator menu (%s), values 1 to %d, its help line \"%s\". A change "
                  "shows from the next start of the game." % (self.setting.where, self.count, self.setting.help),
                  "info")
 
     def fail(self, why):
+        if self._placeholder_fail(why):
+            return
         if self.why or self.ok:
             return
         self.why = str(why).rstrip(".") or "unknown"
@@ -14430,6 +14492,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         # are rebuilt as plain tuples when a copy fails
         n_stock_mode_numbers = getattr(counts, "stock_modes", 0)
         restored_to_original = getattr(counts, "restored", False)
+        menu_rows = getattr(counts, "menu", ())          # and the service menu settings this Write adds (Simon)
         wlist = _as_write_list(writes)
 
         # What this build puts on the card whole, digested BEFORE any copy
@@ -14622,7 +14685,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
         # when the card will fail Stern's SD-card validation on the machine.
         # The game's own modes ride on the counts (item 145, _WriteCounts).
         counts = _with_stock_modes(counts, n_stock_mode_numbers,
-                                   restored_to_original)
+                                   restored_to_original, menu_rows)
         return counts, audio_mode, valpatch_mode
     finally:
         disk_f.close()

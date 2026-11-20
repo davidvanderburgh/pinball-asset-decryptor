@@ -72,12 +72,51 @@ def wanted(project, honour_off=True):
     if honour_off:
         off = off_keys(project)
         jobs = [j for j in jobs if j.KEY not in off]
+        jobs += placeholder_jobs(project, {j.KEY for j in jobs}, log)
     return [j.wanted() for j in arrange(project, jobs, log)]
+
+
+#: Simon: "in all cases I should be able to add service menu items for these things even if they don't work because
+#: they don't yet exist" - a ticked row of :data:`OFF_KEYS` whose setting the project has nothing for yet (no music
+#: modes, no editions, no image sets) still goes on the card, with these values (a setting of ours has at least two),
+#: so the owner can lay the menu out first and fill it in later. Nothing on the card reads the value until the project
+#: has the thing it picks.
+PLACEHOLDER_NAMES = ("NULL1", "NULL2")
+
+
+def placeholder_jobs(project, have, log):
+    """The engine's menu jobs for the rows the owner ticked (:func:`on_keys`) whose setting is not in *have* (the
+    keys of the jobs the project's own settings made): each a :data:`PLACEHOLDER_NAMES` row, marked ``placeholder``.
+    An EDITION row is left out where the title cannot take editions at all."""
+    from . import engine as E
+    out = []
+    ticked = on_keys(project)
+    names = list(PLACEHOLDER_NAMES)
+    for key in OFF_KEYS:
+        if key not in ticked or key in have:
+            continue
+        if key == "music_mode":
+            job = E._MusicModeMenu(len(names), names, log)
+        elif key == "edition":
+            from . import editions as Ed
+            try:
+                if Ed.title_refusal(Ed.project_title(project, probe=True)):
+                    continue
+            except Exception:                           # noqa: BLE001 - no title, no edition row
+                continue
+            job = E._EditionMenu(len(names), names, log)
+        else:
+            job = E._ImageSetMenu(names, log)
+        job.placeholder = True
+        out.append(job)
+    return out
 
 
 # ---- the owner's order of the app's rows (PAD-1382 round 3) ---------------------------------------------------------
 # Round 5 (David): "we should just be checking off items that exist (making a new one here doesn't make sense...)":
 # the rows are the app's own settings, switched on their tabs or on the Service menu tab; the owner orders them.
+# PR #40 (Simon) relaxes it for OFF_KEYS: a ticked row with nothing behind it yet goes on as a placeholder
+# (placeholder_jobs), so the menu can be laid out before the content exists. Still no rows of the owner's own making.
 #: the sidecar key: {"order": [setting keys], "on": [setting keys], "coop": true}
 STAGED_KEY = "service_menu"
 #: PAD-1393 round 2 (DragonRR: "Image set ... I cannot uncheck it"): the settings whose row the Service menu tab can

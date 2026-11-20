@@ -100,6 +100,14 @@ SETTINGS = {
     IMAGE_SET: (None, "IMAGE SET", "Image Set", 16),
     SAVED_PROGRESS: (None, "SAVED PROGRESS", "Saved Progress", 16),
 }
+
+
+def caption_of(key):
+    """The menu's caption of setting *key* ("CO-OP PLAY"), for the Write's words about it."""
+    got = SETTINGS.get(key)
+    return got[1] if got else str(key).replace("_", " ").upper()
+
+
 #: PAD-1382: when a card wants more settings of ours than the game has spare rows, they all SHARE two: MORE SETTINGS
 #: picks one (its help names them) and the row under it is that one's value. The mode runtime keeps every value in a
 #: file on the card (pad_mode_runtime.c "more settings": /dump/pad_settings.state; it writes the picked setting's

@@ -126,7 +126,7 @@ function Rows({ s, menu }) {
           <${Button} size="sm" icon="down" disabled=${i === list.length - 1} title="Later on the page and on More Settings"
             onClick=${() => call("svcmenu.move", x.key, 1)} />
         </div>
-        <span class="small muted">${placed ? `On ${placed}.` : why ? `Not on the card: ${why}.` : x.note || x.where}</span>
+        <span class="small muted">${placed ? `On ${placed}.${x.on && x.note ? " " + x.note : ""}` : why ? `Not on the card: ${why}.` : x.note || x.where}</span>
       </div>`;
     })}
     ${menu ? html`<p class="small muted sm-count">This game has ${menu.spare} spare row${menu.spare === 1 ? "" : "s"} for

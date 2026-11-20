@@ -9354,6 +9354,56 @@ int pm_game_show_numbers(void)
     return shownum_n;
 }
 
+/* PAD-1476: the show reel - an emulator measurement, read like the trigger files (mode.start), inert without its
+ * file. /dump/showreel holds show numbers on one line; in a game each plays REEL_ON_MS by its number, REEL_GAP_MS
+ * apart, with a line as it goes on and off, so a sampler of the lights can tell which of the game's mode shows light
+ * the playfield on their own (Godzilla LE 1.16: Hedorah's 211 lights Hedorah's shots only while Hedorah runs, its
+ * 210 the whole playfield) - port_show_numbers.py writes what it saw as the port's `text show_lit`. */
+#define REEL_MAX 128
+#define REEL_ON_MS 3000ul
+#define REEL_GAP_MS 3000ul
+static unsigned short reel_num[REEL_MAX];
+static int reel_n, reel_i, reel_on;
+static unsigned long reel_at, reel_looked;
+
+static void reel_tick(void)
+{
+    char buf[800];
+    const char *p;
+    unsigned long now = pm_ms();
+    if (!reel_n) {
+        if (!shownum_n || now - reel_looked < 1000ul) return;
+        reel_looked = now;
+        if (!pm_in_game() || !pm_trigger_text("showreel", buf, sizeof buf)) return;
+        for (p = buf; *p && reel_n < REEL_MAX; ) {
+            unsigned v = 0;
+            while (*p == ' ' || *p == ',') p++;
+            if (*p < '0' || *p > '9') break;
+            while (*p >= '0' && *p <= '9') v = v * 10 + (unsigned)(*p++ - '0');
+            if (v) reel_num[reel_n++] = (unsigned short)v;
+        }
+        reel_i = reel_on = 0;
+        reel_at = now;
+        say("show reel: %d of the game's shows, %lu ms each, %lu ms apart", reel_n, REEL_ON_MS, REEL_GAP_MS);
+        return;
+    }
+    if (!reel_on && now - reel_at >= REEL_GAP_MS) {
+        say("show reel: #%u on (%d of %d)%s", reel_num[reel_i], reel_i + 1, reel_n,
+            show_number_start(reel_num[reel_i], REEL_ON_MS + 1000ul, "the show reel") ? "" : " - REFUSED");
+        reel_on = 1;
+        reel_at = now;
+    } else if (reel_on && now - reel_at >= REEL_ON_MS) {
+        if (show_now.call == 2 && show_now.n == -(int)reel_num[reel_i]) show_kill("the reel moves on");
+        say("show reel: #%u off", reel_num[reel_i]);
+        reel_on = 0;
+        reel_at = now;
+        if (++reel_i >= reel_n) {
+            reel_n = 0;
+            say("show reel: done");
+        }
+    }
+}
+
 static void shownum_arm(void)
 {
     long n = pm_port_value("show_count", 0);
@@ -12099,6 +12149,7 @@ static void on_tick(pm_reg *r)
     scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
     building_tick();                          /* PAD-393: a put-back owed */
     shows_tick();                             /* PAD-411: no show of ours past its 20 s */
+    reel_tick();                              /* PAD-1476: the show reel's measurement (its file only) */
     wizards_tick();                           /* PAD-436: a mini-wizard's refused start, kept lit */
     launch_tick();                            /* PAD-643: a mode's challenge ball launched for the player */
     chg_pages_tick();                         /* PAD-663: a champion page cut short gives its entry back */

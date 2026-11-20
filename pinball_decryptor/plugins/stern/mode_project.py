@@ -138,6 +138,8 @@ class TitleProfile:
     shake_max_ms: tuple = ()         # PAD-414: the game's own longest shake at strength 0..3 (`text shake_max_ms`)
     game_shows: tuple = ()           # PAD-418: ((name, kind, secs), ...) the game's own light shows a mode can play
     #                                  (the port's show_<n> lines, in number order; kind flashy / subdued / accent)
+    show_lit: tuple = None           # PAD-1476: the numbers seen lighting the playfield on their own (the show reel,
+    #                                  `text show_lit`); None = not measured on this build
     show_numbers: int = 0            # PAD-1476: how many numbers the game's show table has, where the port can start
     #                                  and stop any of them by it (a mode's "#211"); 0 = not on this build
     absent: tuple = ()               # PAD-420: HARDWARE_PARTS this machine does not have (machine_absent): the tab
@@ -1633,6 +1635,16 @@ def _show_numbers(port):
     return n if 1 < n <= 4096 else 0
 
 
+def _show_lit(port):
+    """PAD-1476: the show numbers the show reel saw light the playfield on their own (``text show_lit``, written by
+    port_show_numbers.py from an emulator run), or None where the build was not measured. Many of a game's mode shows
+    light only that mode's own shots, and only while it runs (Godzilla LE 1.16: Hedorah's 211 checks Hedorah is
+    running and stops at once otherwise), so a mode of the user's playing one would show nothing."""
+    if not port or "show_lit" not in port.get("text", {}):
+        return None
+    return tuple(sorted({int(w) for w in port["text"]["show_lit"].split("#")[0].split() if w.isdigit()}))
+
+
 def show_number(v):
     """PAD-1476: the game's number of a show asked for by it (``"#211"`` -> 211), else 0 (a port's name, or none)."""
     if isinstance(v, str) and len(v) > 1 and v[0] == "#" and v[1:].isdigit():
@@ -3047,6 +3059,7 @@ def profile_from_port(path):
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418
         show_numbers=_show_numbers(port),                    # PAD-1476
+        show_lit=_show_lit(port),
         # PAD-420: a machine part this build can do is never hidden, whatever MACHINE_HARDWARE read off its coils
         absent=tuple(a for a in machine_absent(game) if a in dict(cannot))
         + (("wizard",) if game in NO_GAME_WIZARDS and not _game_wizards(port) else ()),    # PAD-473: a port's win
@@ -3399,6 +3412,7 @@ try:
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),
         show_numbers=_show_numbers(_port_115),               # PAD-1476
+        show_lit=_show_lit(_port_115),
         roster=_roster("godzilla_pro", _port_115) if not _roster_cannot(_key_115, _label_115, _port_115) else (),
         roster_counts=bool(_port_115 and "battle_stop" in _port_115["site"]),   # PAD-706: not on Pro 1.15
         places=_places(_port_115) if not _place_cannot(_key_115, _label_115, _port_115) else (),   # PAD-710

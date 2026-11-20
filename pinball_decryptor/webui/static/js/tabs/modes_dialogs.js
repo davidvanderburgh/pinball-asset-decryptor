@@ -332,7 +332,7 @@ function CoopLook({ look }) {
 
 // PAD-1476: the co-op intro's light show: one the game's own modes play, grouped by the mode (s.mode_shows: "#211")
 function introShowOptions(value, modeShows) {
-  const out = [{ value: "(none)", label: "(none)" }, ...modeShows.map((x) => ({ value: x.value, label: x.label, group: `From ${x.group}` }))];
+  const out = [{ value: "(none)", label: "(none)" }, ...modeShows.map((x) => ({ value: x.value, label: x.label, group: `From ${x.group}${x.checked === false ? " (not checked on this game)" : ""}` }))];
   if (value && !modeShows.some((x) => x.value === value)) out.push({ value, label: `Light show ${value.replace("#", "")}` });
   return out;
 }

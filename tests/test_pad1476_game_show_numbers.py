@@ -203,8 +203,11 @@ def test_the_picks_are_the_modes_own_shows_grouped_by_the_mode():
     reading = CM.Reading(labels={"cmode_hedorah": "Hedorah", "cmode_battle_vs_gigan": "Battle vs Gigan",
                                  "cmode_battle_vs_megalon": "Battle vs Megalon"})
     clips = CM.CardClips(card="card", game="godzilla_le", version="1.16.0", reading=reading, shows=sh.to_json())   # as read_card names it
-    tab = SimpleNamespace(_how=clips, _title=lambda: LE)
+    import dataclasses
+    unmeasured = dataclasses.replace(LE, show_lit=None)               # every listed show offered, marked unchecked
+    tab = SimpleNamespace(_how=clips, _title=lambda: unmeasured)
     rows = ModesTab._mode_show_rows(tab)
+    assert all(r["checked"] is False for r in rows)
     assert [(r["group"], r["value"], r["label"]) for r in rows] == [
         ("Battle vs Gigan", "#148", "Strobe burst (Battle vs Gigan)"),
         ("Hedorah", "#210", "Light show 210 (Hedorah)"),
@@ -213,3 +216,55 @@ def test_the_picks_are_the_modes_own_shows_grouped_by_the_mode():
     other = SimpleNamespace(_how=clips, _title=lambda: MP.profile_from_port(str(SDK / "ports" / "godzilla_pro-1.16.port")))
     assert ModesTab._mode_show_rows(other) == []                  # another build's card: its numbers are not these
     assert ModesTab._mode_show_rows(SimpleNamespace(_how=None, _title=lambda: LE)) == []
+
+
+# ---- the show reel's verdict -------------------------------------------------------------------------------------
+def test_show_lit_reads_the_reels_verdict_and_none_means_not_measured():
+    port = MP.read_port(str(SDK / "ports" / "godzilla_pro-1.15.port"))
+    port["text"].pop("show_lit", None)
+    assert MP._show_lit(port) is None
+    port["text"]["show_lit"] = "210 146 210"
+    assert MP._show_lit(port) == (146, 210)
+    port["text"]["show_lit"] = ""
+    assert MP._show_lit(port) == ()                                     # measured: none lights on its own
+
+
+def test_measured_builds_offer_only_the_shows_seen_lighting():
+    from types import SimpleNamespace
+    import dataclasses
+
+    from pinball_decryptor.plugins.stern import clip_modes as CM
+    from pinball_decryptor.webui import modes_how as MH
+    from pinball_decryptor.webui.tabs.modes import ModesTab
+    sh = SH.ShowReading(origin="port", count=361, modes={"cmode_hedorah": [[211, 16, 1], [210, 20, 1]]})
+    reading = CM.Reading(labels={"cmode_hedorah": "Hedorah"})
+    clips = CM.CardClips(card="card", game="godzilla_le", version="1.16.0", reading=reading, shows=sh.to_json())
+    measured = dataclasses.replace(LE, show_lit=(210,))
+    rows = ModesTab._mode_show_rows(SimpleNamespace(_how=clips, _title=lambda: measured))
+    assert [r["value"] for r in rows] == ["#210"]
+    unmeasured = dataclasses.replace(LE, show_lit=None)
+    rows = ModesTab._mode_show_rows(SimpleNamespace(_how=clips, _title=lambda: unmeasured))
+    assert [r["value"] for r in rows] == ["#210", "#211"]
+    dark = MH.HowItWorksMixin._how_show(sh, 211, 1, (210,), "Hedorah")
+    assert dark["tip"]["lines"][-1] == "It lights only while this mode runs, so a mode of yours cannot use it"
+    ok = MH.HowItWorksMixin._how_show(sh, 210, 1, (210,), "Hedorah")
+    assert ok["tip"]["lines"][-1] == ('A mode of yours and the co-op intro can play it too: "Light show 210 '
+                                      '(Hedorah)" on its Lights page')
+
+
+def test_the_port_writer_puts_the_verdict_in_the_pad1476_block(tmp_path, monkeypatch):
+    import importlib.util
+    import shutil
+    spec = importlib.util.spec_from_file_location("psn", str(ROOT / "tools" / "spike2_emu" / "modes" /
+                                                              "port_show_numbers.py"))
+    psn = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(psn)
+    shutil.copy(str(SDK / "ports" / "godzilla_pro-1.16.port"), str(tmp_path / "x-1.0.port"))
+    monkeypatch.setattr(psn, "PORTS", str(tmp_path))
+    psn.lit_main(["", "lit", "x-1.0", "263", "210"])
+    psn.lit_main(["", "lit", "x-1.0", "210", "211"])                    # replaced, not added
+    text = (tmp_path / "x-1.0.port").read_text(encoding="utf-8")
+    assert text.count("text show_lit") == 1 and re.search(r"(?m)^text show_lit +210 211$", text)
+    assert text.count("the show reel (emulator)") == 1
+    assert text.index("the show reel (emulator)") < text.index("text show_lit")
+    assert MP._show_lit(MP.read_port(str(tmp_path / "x-1.0.port"))) == (210, 211)

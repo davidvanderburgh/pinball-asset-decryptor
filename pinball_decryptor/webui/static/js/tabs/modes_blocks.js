@@ -621,7 +621,7 @@ function StmtBody({ b, path, ed }) {
       const opts = Object.keys(groups).flatMap((k) => (ed.ch.game_shows || []).filter((x) => x.kind === k)
         .map((x) => ({ value: x.name, label: `${x.name} (${x.secs} s)`, group: groups[k] })))
         // PAD-1476: and the shows the game's own modes start, by the game's number, under the mode
-        .concat((ed.ch.mode_shows || []).map((x) => ({ value: x.value, label: x.label, group: `From ${x.group}` })));
+        .concat((ed.ch.mode_shows || []).map((x) => ({ value: x.value, label: x.label, group: `From ${x.group}${x.checked === false ? " (not checked on this game)" : ""}` })));
       return html`<span class="bk-w" ...${tip(TIP.gameShow)}>Play the game's light show</span><${Pick} value=${b.name}
         options=${opts} missing="(not on this game)" width=${200} onChange=${(v) => set("name", v)} />`;
     }

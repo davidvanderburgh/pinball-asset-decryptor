@@ -83,5 +83,29 @@ def main(argv):
                 f.write(("" if text.endswith("\n") else "\n") + HEAD + "\n".join(add) + "\n")
 
 
+def lit_main(argv):
+    """``port_show_numbers.py lit <port key> <number>...``: the show reel's verdict (pad_mode_runtime.c reel_tick, an
+    emulator run that plays each show the game's own modes start by its number and samples the lights) as the port's
+    ``text show_lit`` - the shows seen lighting the playfield on their own, the only ones the Modes tab offers. A line
+    already there is replaced; an empty list is written too (measured: none lights on its own)."""
+    key, nums = argv[2], sorted({int(n) for n in argv[3:] if n.isdigit()})
+    port = os.path.join(PORTS, key + ".port")
+    text = open(port, encoding="utf-8").read()
+    line = "text %-19s %s" % ("show_lit", " ".join(map(str, nums)))
+    note = "# the show reel (emulator): the shows above seen lighting the playfield on their own"
+    out = [ln for ln in text.splitlines()
+           if not ln.startswith("text show_lit ") and ln.strip() != "text show_lit" and ln != note]
+    at = next((i for i, ln in enumerate(out) if ln.startswith("value show_count")), None)
+    if at is None:
+        sys.exit("%s has no PAD-1476 block (value show_count): run the starter / stopper step first" % key)
+    out[at + 1:at + 1] = [note, line]
+    with open(port, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+    print("%s: show_lit %d" % (key, len(nums)))
+
+
 if __name__ == "__main__":
-    main(sys.argv)
+    if sys.argv[1:2] == ["lit"]:
+        lit_main(sys.argv)
+    else:
+        main(sys.argv)

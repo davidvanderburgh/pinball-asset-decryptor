@@ -3032,10 +3032,11 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             return []
         sh = clips.show_reading
         reading = clips.reading
+        lit = getattr(p, "show_lit", None)              # measured: only the ones seen lighting on their own
         by_num, order = {}, []
         for cls, rows in sh.modes.items():
             for num, _at, _n in rows:
-                if not 0 < num < n_max:
+                if not 0 < num < n_max or (lit is not None and num not in lit):
                     continue
                 if num not in by_num:
                     by_num[num] = []
@@ -3051,7 +3052,8 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             # the mode in the label too: a closed list shows the label alone
             group = names[0] if len(names) == 1 else "Started by several of its modes"
             label += " (%s%s)" % (", ".join(names[:2]), " +%d" % (len(names) - 2) if len(names) > 2 else "")
-            out.append({"value": "#%d" % num, "label": label, "group": group, "modes": names, "num": num})
+            out.append({"value": "#%d" % num, "label": label, "group": group, "modes": names, "num": num,
+                        "checked": lit is not None})              # False: not measured on this build yet
         out.sort(key=lambda r: (r["group"] == "Started by several of its modes", r["group"].lower(), r["num"]))
         return out
 

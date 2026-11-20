@@ -242,7 +242,8 @@ def test_the_scenes_words_box_keeps_a_box_the_game_writes(tmp_path):
         w.call("text_scenes.tree_select", ids["Title1"])
         _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == ids["Title1"])
         words = _tv(w)["props"]["words"]
-        assert words["locked"] is True and words["text"] == "KAIJU"
+        # (Simon, 2026-11-20: the stand-in is not shown in Words either - the game's line the preview draws there)
+        assert words["locked"] is True and words["text"] == "KAIJU!"
         assert words["note"] == ("The game writes this line itself as it plays: change the game "
                                  "program row “KAIJU!” on the Text tab")              # PAD-1261
         assert w.call("text_scenes.tree_words", ids["Title1"], "MONSTER") is False

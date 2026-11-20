@@ -43,9 +43,9 @@ def test_the_inactive_player_box_is_offered_the_player_lines_first():
     rows += [{"path": "/g/s/scene.radium", "original": "Inactive Player", "replacement": ""}]
     got = try_lines(rows, "Inactive Player",
                     "Player1_Instance.P2_InActiveScore_Instance.InActivePlayer_Username_Instance")
-    # lines with the player's number (2, from P2_) ahead of plain ones; shorter first
-    assert got[:3] == ["PLAYER 2", "PLAYER 2 - LOG IN", "PLAYER 2 - ENTER INITIALS"]
-    assert set(got[3:]) == {"Player", "INACTIVE", "SPEECH: PLAYER 4 UP"}
+    # lines with the player's number (2, from P2_), shorter first - and (Simon, 2026-11-20: "the ACTUAL lines that
+    # can be shown") only those: a player's box is offered the lines naming the player, not "Player" or "INACTIVE"
+    assert got == ["PLAYER 2", "PLAYER 2 - LOG IN", "PLAYER 2 - ENTER INITIALS"]
     assert "LOG IN TO PLAY NETWORK GAME" not in got                   # shares no word
     # no player in the path: a sample number of 1
     assert try_lines(rows, "Inactive Player")[0] == "PLAYER 1"
@@ -69,7 +69,9 @@ def test_scenes_shows_a_filled_box_with_a_line_of_the_games(tmp_path):
         w.call("text_scenes.tree_select", box)
         _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == box)
         props = _tv(w)["props"]
-        assert props["try"] == {"words": "", "options": ["KAIJU 1 WINS!"]}
+        # Simon (2026-11-20): the stand-in is never shown - the box starts on the first of the game's lines
+        assert {k: props["try"][k] for k in ("words", "options")} == {"words": "KAIJU 1 WINS!",
+                                                                     "options": ["KAIJU 1 WINS!"]}
         hist = lambda: w.run(lambda: repr(svc._thist.get((svc.assets_dir,  # noqa: E731
                                                           svc._tree_card()[0]))))
         before = hist()
@@ -87,9 +89,10 @@ def test_scenes_shows_a_filled_box_with_a_line_of_the_games(tmp_path):
         w.call("text_scenes.tree_select", own)
         _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == own)
         assert _tv(w)["props"]["try"] is None
-        # Its own: the stand-in again
+        # none picked: the first of the game's lines again, never the stand-in
         assert w.call("text_scenes.tree_try_words", box, None) is True
-        assert all(d.get("shown") is None for d in w.run(lambda: svc._tdraws))
+        shown = {d["node"]: d.get("shown") for d in w.run(lambda: svc._tdraws) if d["kind"] == "text"}
+        assert shown[box] == "KAIJU 1 WINS!" and shown[own] is None
         w.call("text_scenes.close")
 
 

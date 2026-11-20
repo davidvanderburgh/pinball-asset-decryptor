@@ -337,8 +337,13 @@ function FileLine({ s, host, tools }) {
       class=${cx("cpd-opt", on && "on", never && "cpd-never")} style=${`grid-column: span ${span}`} disabled=${!!disabled}
       onClick=${onClick} ...${tip(title || "")}>${label}</button>`;
   const tag = (word, off) => html`<span class=${cx("cpd-tag", off && "cpd-off")}>${word}</span>`;
-  const value = (text, full, { none, off } = {}) => html`<span class=${cx("cpd-val mono", none && "cpd-none",
-      off && "cpd-off")} style="grid-column: span 12" title=${full || text}>${text}</span>`;
+  const value = (text, full, { none, off, span = 12 } = {}) => html`<span class=${cx("cpd-val mono", none && "cpd-none",
+      off && "cpd-off")} style=${`grid-column: span ${span}`} title=${full || text}>${text}</span>`;
+  // Simon (2026-11-20): "reduce the width of the panel for the filename by enough to fit a small box at the end. In
+  // the box put a bitmap graphic for bitmap ... a text graphic for text"
+  const KIND_ICON = { images: ["image", "A picture"], videos: ["film", "A video"], text: ["text", "A line of text"] };
+  const kindBox = (k) => html`<span class=${cx("cpd-kind", !k && "cpd-none")} style="grid-column: span 1"
+      ...${tip(k ? (KIND_ICON[k] || [null, k])[1] : "Nothing selected")}>${k ? html`<${Icon} name=${(KIND_ICON[k] || ["file"])[0]} />` : null}</span>`;
   // Simon: "Lets make the profile area its own panel ... and the same with selected and theme (one panel for those)"
   return html`<div class="cpd-file cpd-sel">
     <div class="cpd-grid">
@@ -346,7 +351,8 @@ function FileLine({ s, host, tools }) {
       ${/* Simon (2026-11-19): the count has its own panel ("X assets selected"), so the box names the first file */""}
       ${value(label,
         f ? `${label}${n > 1 ? ` (first of ${n} selected)` : ""}\n${String(f.rel || "").replace(/^@\d+:/, "")}` : "Nothing selected",
-        { none: !f })}
+        { none: !f, span: 11 })}
+      ${kindBox(f ? kind : null)}
       ${tag("THEME", !themeLive)}
       ${value(themeValue, themeLive ? `Theme ${themeValue}\n${host === "scenes" ? "The theme Scenes shows" : "The theme picked on this tab"}: color changes here are this theme's`
         : "Themes are for pictures, on the Images and Scenes tabs, once switched on (Advanced)", { off: !themeLive })}

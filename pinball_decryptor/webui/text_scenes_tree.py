@@ -266,7 +266,7 @@ class TreeEditMixin:
                                      force=force, through=through, unveil=unveil,
                                      hidden=gone)
         self._fit_kept(draws, worlds)
-        draws = _with_tries(draws, self._ttry.get(card))
+        draws = _with_tries(draws, self._tree_tries(card, man))
         # what the eyes show: a layer the eye turned on is on, even though the plain draw has
         # it off (DragonRR, PAD-280: the eyes stayed crossed); a peek is only while selected
         mine = self._tree_force_set(card) if peek is not None else force
@@ -681,7 +681,7 @@ class TreeEditMixin:
         fps = float((man.get("stage") or [0, 0, 30])[2] or 30)
         state = self._tplay = {"cancel": False}
         job = {"man": man, "pins": pins, "frames": frames, "bg": self._bg,
-               "tries": dict(self._ttry.get(card) or {}),
+               "tries": self._tree_tries(card, man),
                "unveil": set(self._tree_hidden(card)),
                "hidden": set(self._tree_view_hidden(card)),
                "text_edits": self._pending_texts(card, None), "colors": self._pending_colors(card),
@@ -1088,6 +1088,8 @@ class TreeEditMixin:
                 "hid_in": self._tree_hidden_in(man, nid, self._tree_hidden(card)),
                 "view_in": self._tree_hidden_in(man, nid, self._tree_view_hidden(card)),
                 "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n),
+                # Simon (2026-11-20): Show pixel for pixel is a toggle - on while its edit is in the list
+                "one_to_one": any(op.get("node") == nid and op.get("one_to_one") for op in ops),
                 "font": self._tree_font_of(man, n, ops),
                 "filled": self._tree_filled(card, man).get(nid),
                 "try": self._tree_try_of(card, man, n),
@@ -1329,6 +1331,8 @@ class TreeEditMixin:
             from . import game_filled           # PAD-1261: what to change instead
             out["note"] = game_filled.locked_note(orig, assets_dir=self.assets_dir,
                                                    short=True)
+            # Simon (2026-11-20): the stand-in is not shown "in the 'words'" either - the line the preview draws there
+            out["text"] = self._tree_tries(card, man).get(n["id"], out["text"])
         return out
 
     def _tree_try_of(self, card, man, n):
@@ -1340,16 +1344,41 @@ class TreeEditMixin:
             return None
         if n["id"] not in self._tree_filled(card, man):
             return None
+        stand_in, options = self._tree_try_lines(man, n)
+        return {"words": self._tree_tries(card, man).get(n["id"], ""), "stand_in": stand_in,
+                "options": options}
+
+    def _tree_try_lines(self, man, n):
+        """``(stand-in, the game's lines it might show)`` for box *n* the game fills."""
         from . import game_filled
-        names = {m["id"]: m.get("name") or "" for m, _p, _d in _walk_man(man)}
+        names, parent = {}, {}
+        for m, p, _d in _walk_man(man):
+            names[m["id"]] = m.get("name") or ""
+            parent[m["id"]] = p["id"] if p is not None else None
         parts, cur, hops = [], n["id"], 0
         while cur is not None and hops < 256:
             parts.append(names.get(cur, ""))
-            cur, hops = self._tparents.get(cur), hops + 1
+            cur, hops = parent.get(cur), hops + 1
         stand_in = _text_of(man, n, "Text") or ""
-        return {"words": (self._ttry.get(card) or {}).get(n["id"], ""),
-                "options": game_filled.try_lines_for(self.assets_dir, stand_in,
-                                                     ".".join(reversed(parts)))}
+        return stand_in, game_filled.try_lines_for(self.assets_dir, stand_in, ".".join(reversed(parts)))
+
+    def _tree_tries(self, card, man):
+        """The words the preview draws in each box the game fills: the one picked in "Show it with", else the first
+        of the game's lines for it (Simon, 2026-11-20: the stand-in "Inactive Player" - "There is no point in this
+        being shown at all ... Simply replace this with the first option - so in this case it would be PLAYER 4"),
+        else (no line of the game's found) its stand-in."""
+        tries = {}
+        if man is not None:
+            index = scene_edit_index(man)
+            for nid in self._tree_filled(card, man):
+                n = (index.get(nid) or (None,))[0]
+                if n is None or n.get("added") or _kind_of(man, n) != "Text":
+                    continue
+                options = self._tree_try_lines(man, n)[1]
+                if options:
+                    tries[nid] = options[0]
+        tries.update(self._ttry.get(card) or {})
+        return tries
 
     @rpc
     def tree_try_words(self, node, words=None):
@@ -2907,8 +2936,27 @@ class TreeEditMixin:
         big picture leaves jagged edges; a picture made at the size it shows, kept at its own
         size on the Images tab, then needs the scene's scale taken off).  Its top-left corner
         stays where it is."""
-        from ..plugins.stern import scene_eval
+        from ..plugins.stern import scene_edit, scene_eval
         node = int(node)
+        # Simon (2026-11-20): "Show pixel for pixel has no way back - you can't undo except by using the undo button
+        # itself. Make it a toggle": pressed again, its own edit is taken back (one undo step, as the Edits list's
+        # Revert is), whatever came after it staying
+        card, _man = self._tree_card()
+        ops = self._tree_ops(card) if card is not None else []
+        mine = [i for i, op in enumerate(ops) if op.get("node") == node and op.get("one_to_one")]
+        if mine:
+            self._tree_track(card)
+            try:
+                scene_edit.set_ops(self.assets_dir, card, scene_edit.without(ops, mine[-1]))
+            except OSError as e:
+                compat.messagebox.showerror("Scene edit", str(e))
+                return False
+            self._tree_refresh()
+            return True
+        if getattr(self, "_preview_theme", 1) > 1:
+            # Simon (2026-11-20): showing theme N the picture is theme N's, the layout theme 1's - its scale must not be
+            # set to theme N's picture
+            return False
         got = self._tree_picture(node)
         if got is None:
             return False
@@ -2923,7 +2971,7 @@ class TreeEditMixin:
             return False
         px, py = scene_eval.apply(inv, *scene_eval.apply(d["m"], 0.0, 0.0))
         op = {"op": "scale", "node": node, "s": round(1.0 / sx, 6),
-              "px": round(px, 3), "py": round(py, 3)}
+              "px": round(px, 3), "py": round(py, 3), "one_to_one": True}
         if abs(sx - sy) > 1e-6:
             op["sy"] = round(1.0 / sy, 6)
         return self._tree_add(op)

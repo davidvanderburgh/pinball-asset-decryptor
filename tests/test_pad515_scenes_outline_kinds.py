@@ -160,19 +160,26 @@ def test_the_selected_panel_keeps_every_section_greyed_out_not_gone():
     for part in ("<${GameFills} p=${p} proven=${t.fills_proven !== false} />",
                  "<${GameColors} g=${p.game_colors} />",
                  "<${Words} p=${p} find=${find} searching=${searching} />"):
-        assert part in one and ("? " + part) not in one and ("? html`" + part) not in one
+        assert part in one and ("? " + part) not in one
+        # Simon (2026-11-20): Filled in, Words and Painted are panels of their own, shown for the one layer selected
+        # (every kind, greyed when it does not apply), not inside the Selected box
+        assert ("? html`" + part) not in one or ("${p && (t.sels || []).length <= 1 ? html`" + part) in one
     # the picture row, X / Y, W / H and Keep its shape are not left out either
     assert "${p.pic ? html`<div" not in one and "${p.w != null ? html`" not in one
     assert "${isText ? null : html`<label" not in one
     assert 'disabled=${isText || p.w == null}' in one
-    assert "disabled=${!p.pic ||" in one
+    # Show pixel for pixel: greyed for anything but a picture (oneToOneWhy), unless it is on (a toggle, Simon 2026-11-20)
+    assert "disabled=${!p.one_to_one && !!oneToOneOff}" in one
+    assert 'if (!p.pic) return "Only a picture is drawn pixel for pixel"' in src
     # Font controls: there for a picture too, greyed out
     assert 'p.kind === "Text" && p.font && openFont ?' not in one
     assert "disabled=${!(isText && p.font)}" in one
     words = src[src.index("function Words("):]
     words = words[:words.index("\n}\n")]
-    # PAD-513: a line the game writes itself is locked, greyed out the same way
-    assert "disabled=${off}" in words and "const off = !p.words || !!p.words.locked;" in words
+    # PAD-513: a line the game writes itself is locked, greyed out the same way (Simon, 2026-11-20: an EDITABLE TEXT
+    # bar like Filled in by the game - greyed, the bar alone, when it cannot be changed here)
+    assert 'cx("tree-game words", off && "off")' in words and "const off = !p.words || !!p.words.locked;" in words
+    assert "${off ? null : html`" in words
     fills = src[src.index("function GameFills("):]
     fills = fills[:fills.index("\n}\n")]
     # PAD-513: the button is greyed out too when the game writes words of its own

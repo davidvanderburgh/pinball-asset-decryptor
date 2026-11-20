@@ -331,3 +331,74 @@ html.bp-1180 .scenes-card { flex: 0 0 auto; height: 980px; }
 .tree-anim .tree-row { flex-wrap: wrap; gap: 6px; }
 .tree-anim .tree-num .field { width: 64px; }
 .tree-anim-pics .tag { display: inline-flex; align-items: center; gap: 2px; }
+/* Simon (2026-11-20): the Selected box's head is one line, like Switchable parts: SELECTED name kind */
+/* Simon (2026-11-20): SELECTED as the Colors bar has it - a tag box, the name in a box, the kind as a picture in a
+   small box at the end */
+.tree-selhead { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
+.tree-seltag { flex: none; display: flex; align-items: center; padding: 2px 8px; border-radius: 4px; background: var(--ink);
+  color: var(--panel, #111); font-size: 11px; font-weight: 700; letter-spacing: .06em; }
+.tree-selval { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 8px;
+  border-radius: 4px; border: 1px solid var(--accent, #e3a33b); background: var(--warn-soft); color: var(--ink);
+  font-size: 12px; font-weight: 600; }
+.tree-selkind { flex: 0 0 26px; display: flex; align-items: center; justify-content: center; border-radius: 4px;
+  border: 1px solid var(--accent, #e3a33b); background: var(--warn-soft); color: var(--ink); }
+.tree-selkind .i { width: 14px; height: 14px; }
+.tree-selnone { border-style: dashed; background: transparent; color: var(--ink-2); }
+.tree-look { margin: 2px 0 4px; }
+.tree-look summary .grow { flex: 1 1 auto; min-width: 0; }
+/* Simon (2026-11-20): Moment, Switchable parts and Selected each in a panel of their own; the Frame box
+   "far too wide. Make 5 chars wide", "of number" on one line, Play at the end */
+.tree-panel { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--panel-2); width: 100%; box-sizing: border-box; }
+.tree-panel .tree-props { border: 0; padding: 0; background: none; }
+.tree-panel.tree-states summary { border: 0; padding: 0; background: none; }
+.tree-panel .eyebrow { margin: 0; }
+.tree-frame-row { margin-top: 0; }
+.tree-frame-row .field.tree-frame-n { width: auto; flex: 0 0 auto; padding: 0 6px; }
+.tree-frame-n input { width: calc(5ch + 18px); }
+/* Simon (2026-11-20): Switchable parts "too much spacing around height wise"; from "Picture ..." to the end a panel
+   of its own, "grid them up as best you can using the width we have" */
+.tree-panel.tree-states { padding: 4px 8px; gap: 0; }
+.tree-panel.tree-states[open] { padding-bottom: 6px; }
+.tree-panel.tree-states .tree-states-hint { margin: 4px 0; }
+.tree-size .tree-pic { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tree-size .tree-pic .ellip { flex: 1 1 auto; min-width: 0; }
+.tree-size .tree-pic .btn { flex: none; }
+/* label | box | label | box: each label column as wide as its longest label, the boxes share the rest */
+.tree-grid { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+.tree-grid > .tree-num { display: contents; }
+.tree-grid > .tree-num .lbl { width: auto; white-space: nowrap; }
+.tree-grid > .tree-num .field { width: auto; min-width: 0; }
+.tree-grid > .tree-span { grid-column: 1 / -1; }
+.tree-grid .tree-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tree-grid > .tree-wide, .tree-grid > .tree-wide > .tree-num { display: contents; }
+.tree-grid > .tree-wide .lbl { grid-column: 1 / 4; }
+.tree-grid > .tree-wide .field { width: auto; min-width: 0; }
+.tree-grid > .tree-num .tree-color { width: 100%; min-width: 0; }
+.tree-grid .tree-two { grid-column: span 2; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tree-grid .tree-cell > .lbl { flex: 0 0 auto; width: auto; }
+.tree-grid .tree-keep { margin-top: 0; display: flex; align-items: center; }
+.tree-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.tree-btns .btn, .tree-grid .tree-two .btn { width: 100%; justify-content: center; min-width: 0; }
+/* Simon (2026-11-20): "Right align those boxes please (top left/middle)" */
+.tree-grid .tree-cell > .seg { margin-left: auto; }
+/* Simon (2026-11-20): Layers / Contents a panel of its own; shut, the first two lines show and the selection above
+   gets the rest of the height. Filled in / Painted by the game greyed: the bar alone, lower */
+.scenes-inspector > .scenes-top.tree-layers-panel { padding: 6px; gap: 6px; }
+.sc-views { display: flex; align-items: stretch; gap: 6px; }
+.sc-views > .seg { flex: 1 1 auto; min-width: 0; }
+.sc-views > .sc-views-open { order: 2; flex: none; }
+.insp-top.insp-top-full { flex: 1 1 auto; max-height: none; }
+.scenes-inspector > .scenes-top.shut { flex: 0 0 auto; min-height: 0; }
+.scenes-top.shut > .scenes-contents { flex: 0 0 auto; min-height: 0; height: var(--layers-shut-h, 84px); }
+.tree-game.off { padding: 2px 8px; }
+.tree-game.off .tg-head { min-height: 22px; }
+/* Simon (2026-11-20): Filled in / Painted by the game boxes of their own, shaped as the panels round them */
+.tree-side > .tree-game { border-radius: 8px; }
+.tg-try { flex-wrap: nowrap; }
+.tg-try .field { flex: 1 1 0; min-width: 0; width: auto; }
+.tg-try .tg-try-menu { flex: none; }
+/* Simon (2026-11-20): Words as an EDITABLE TEXT bar, lit in the accent when the line can be changed here */
+.tree-game.words { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.tree-game.words.off { border-color: var(--line); color: var(--ink-3); background: none; }
+.tree-game.words .tg-what-row { flex-wrap: nowrap; }
+.tree-game.words .tg-words { width: 100%; box-sizing: border-box; color: var(--ink); }

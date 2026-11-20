@@ -744,8 +744,15 @@ def test_a_pictures_own_size_and_scale_and_draw_it_1_to_1(tmp_path):
         assert p["pic"]["sx"] == 100 and p["pic"]["sy"] == 100
         assert abs(p["w"] - p["pic"]["w"]) <= 1 and abs(p["h"] - p["pic"]["h"]) <= 1
         assert abs(p["x"] - x0) <= 1 and abs(p["y"] - y0) <= 1
-        # already 1:1: nothing to do
-        assert w.call("text_scenes.tree_one_to_one", art) is False
+        assert p["one_to_one"]
+        # Simon (2026-11-20): "Make it a toggle": pressed again it puts the picture back as it was
+        sx_before = _ops(folder)
+        assert w.call("text_scenes.tree_one_to_one", art)
+        p = _tv(w)["props"]
+        assert not p["one_to_one"] and 90 <= p["pic"]["sx"] <= 115 and p["pic"]["sx"] != 100
+        assert len(_ops(folder)) == len(sx_before) - 1
+        assert w.call("text_scenes.tree_undo")                          # one undo step brings it back
+        assert _tv(w)["props"]["one_to_one"]
         w.call("text_scenes.close")
 
 

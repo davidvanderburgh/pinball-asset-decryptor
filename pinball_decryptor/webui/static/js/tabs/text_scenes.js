@@ -256,6 +256,11 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
   const [playFrame, setPlayFrame] = useState(0); // the frame a playback is on
   useEffect(() => { if (!s.tree_play) setPlayFrame(0); }, [s.tree_play]);
   const [split, setSplit] = useState(loadSplit);
+  // Simon (2026-11-20): "make the layers/contents an actual panel, always show at least the first TWO lines and make a
+  // clear drop down graphic which the user can click to expand it" - shut, the selection above gets the room (a
+  // picture's size controls were off the bottom); remembered in this browser
+  const [layersOpen, setLayersOpenRaw] = useState(() => { try { return localStorage.getItem(LAYERS_OPEN_KEY) === "1"; } catch (e) { return false; } });
+  const setLayersOpen = (v) => { setLayersOpenRaw(v); try { localStorage.setItem(LAYERS_OPEN_KEY, v ? "1" : "0"); } catch (e) {} };
   const zoom = useStageZoom();
   const splitRef = useRef(split);
   splitRef.current = split;
@@ -450,12 +455,12 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
       </div>
       <${Divider} k="right" measure=${measureRight} dir=${-1} label="Inspector width" ...${splitProps} />
       <div class="scenes-inspector" ref=${inspRef}>
-        ${editor ? html`<div class="insp-top" ref=${topRef} data-play=${s.tree_play ? 1 : 0}
-            style=${split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
+        ${editor ? html`<div class=${cx("insp-top", !layersOpen && "insp-top-full")} ref=${topRef} data-play=${s.tree_play ? 1 : 0}
+            style=${layersOpen && split.top != null ? `flex:0 0 auto;height:${split.top}px;max-height:calc(100% - 120px)` : ""}>
             <${TreeSide} t=${s.tree_view} play=${s.tree_play} playFrame=${playFrame} openFont=${openFont} from=${s.resize_from}
               find=${s.find} searching=${searching} /></div>
-          <${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />
-          <${TreeTop} s=${s} onMenu=${itemMenu} />`
+          ${layersOpen ? html`<${Divider} k="top" horizontal measure=${measureTop} label="Selection and Layers" ...${splitProps} />` : null}
+          <${TreeTop} s=${s} onMenu=${itemMenu} open=${layersOpen} setOpen=${setLayersOpen} />`
           : s.preparing ? null : html`<${Contents} s=${s} onMenu=${itemMenu} />`}
       </div>
     </div>
@@ -807,14 +812,20 @@ function SnapButton() {
     ])}>Snap${on ? html`<span class="tree-snap-dot"></span>` : null}<//>`;
 }
 
-function TreeTop({ s, onMenu }) {
+const LAYERS_OPEN_KEY = "pad.scenes.layers_open";
+function TreeTop({ s, onMenu, open = true, setOpen }) {
   const [view, setView] = useState("layers");
-  return html`<div class="scenes-top">
-    <div class="sc-views"><${Seg} value=${view} onChange=${setView} options=${[
+  return html`<div class=${cx("scenes-top tree-panel tree-layers-panel", !open && "shut")}>
+    <div class="sc-views">
+    <${Button} size="xs" icon=${open ? "up" : "down"} cls="sc-views-open"
+      title=${open ? "Show only the first two lines, leaving the room to the selection above" : "Show the whole list"}
+      onClick=${() => setOpen && setOpen(!open)}>${open ? "Less" : "More"}<//>
+    <${Seg} value=${view} onChange=${setView} options=${[
       { value: "layers", label: html`<${Icon} name="scenes" />Layers`,
         title: "Every part of the scene, in the order it is drawn: pick, hide or edit them" },
       { value: "contents", label: html`<${Icon} name="list" />Contents`,
-        title: "The pictures, fonts and text this scene uses: click one to pick it on the preview, double-click it to find it on its own tab" }]} /></div>
+        title: "The pictures, fonts and text this scene uses: click one to pick it on the preview, double-click it to find it on its own tab" }]} />
+    </div>
     ${view === "layers" ? html`<${TreeLayers} t=${s.tree_view} />` : html`<${Contents} s=${s} onMenu=${onMenu} />`}
   </div>`;
 }
@@ -1010,15 +1021,20 @@ const filledTip = (f) => ({ head: "Filled in by the game", lines: [
 // why"): a layer drawn in only some looks of a switchable part (the map's Bridge: Loop, Select,
 // Destroyed) names them on its row, and the Selected panel can show that look
 const lookLine = (k) => `Part of ${k.part_name}'s ${k.looks.join(" and ")} ${k.looks.length > 1 ? "looks" : "look"}. The game's code picks which look shows; its other looks sit in the same place.`;
+// Simon (2026-11-20): the Selected box's look note was "FAR too long" - one short line, folded like Switchable parts
+const lookShort = (k) => `Part of ${k.part_name} · ${k.looks.length} ${k.looks.length === 1 ? "look" : "looks"}`;
 function LookNote({ k }) {
   if (!k) return null;
   const back = k.shown && k.pinned != null;
-  return html`<div class="tree-row tree-look">
-    <span class="small muted grow">${lookLine(k)}</span>
-    ${k.shown && !back ? null : html`<${Button} size="xs" icon=${back ? "undo" : "eye"}
+  return html`<details class="tree-states tree-look">
+    <summary title=${`${lookLine(k)} Click to show or hide more.`}>
+      <span class="small ellip grow">${lookShort(k)}</span>
+    </summary>
+    <div class="small muted tree-states-hint">${lookLine(k)}</div>
+    ${k.shown && !back ? null : html`<div class="tree-row"><${Button} size="xs" icon=${back ? "undo" : "eye"}
       title=${back ? `Put ${k.part_name} back as it rests (Switchable parts)` : `Show ${k.part_name} at ${k.looks[0]} in the preview (Switchable parts); the card is not changed`}
-      onClick=${() => call("text_scenes.tree_state", k.part, back ? "" : k.frame)}>${back ? "As it rests" : "Show this look"}<//>`}
-  </div>`;
+      onClick=${() => call("text_scenes.tree_state", k.part, back ? "" : k.frame)}>${back ? "As it rests" : "Show this look"}<//></div>`}
+  </details>`;
 }
 // PAD-1278 (DragonRR): an added picture animated. When it shows (all the time, between two
 // frames with a fade, or as one of the game's layers does), a pulse, and pictures in turn.
@@ -1094,7 +1110,7 @@ const rowTip = (l, cs) => ({
     l.edits || l.kind,
     ...filledLines(l.filled),
     l.painted ? "The game paints it as it plays: the colors the machine shows it in are picked in the Selected panel." : null,
-    l.look ? lookLine(l.look) : null,
+    l.look ? lookShort(l.look) : null,
     l.state_off ? "Off in the preview: the part it sits in shows another of its looks. Its eye turns it on here."
       : l.part_off && !l.view_off ? "The look it sits in is off in the preview: it shows when that look is on."
       : !l.drawn && !l.view_off ? "Not on the screen at this moment." : null,
@@ -1760,9 +1776,9 @@ function GameFills({ p, proven = true }) {
           : !filledFinds(f) ? "The game writes words of its own here, not one line of its text" : f.line ? "Find the game's line on the Replace Text tab" : "List that mode's lines on the Replace Text tab"}
         onClick=${() => call("text_scenes.activate", filledJump(f))}>${f && !f.line ? "Its lines" : "Its line"}<//>
     </div>
-    <div class="small ellip tg-what">${!f ? "Not this one"
-      : f.line ? html`With <b>${f.line}</b>${who ? ` (${who})` : ""}` : who ? html`During <b>${who}</b>`
-        : "With words of its own"}</div>
+    ${/* Simon (2026-11-20): greyed, the bar alone - "remove 'not this one' when greyed" (its tooltip still says it) */""}
+    ${!f ? null : html`<div class="small ellip tg-what">${f.line ? html`With <b>${f.line}</b>${who ? ` (${who})` : ""}` : who ? html`During <b>${who}</b>`
+        : "With words of its own"}</div>`}
     ${f && p.try ? html`<${TryWords} id=${p.id} t=${p.try} />` : null}
     ${proven ? null : html`<div class="tree-row tg-guess">
       <span class="small warn-ink grow" ...${tip({ head: "Guessed, not read off the card", lines: GUESS_LINES })}>
@@ -1779,20 +1795,26 @@ function GameFills({ p, proven = true }) {
 const TRY_TIP = { head: "Show it with", lines: [
   "The machine never shows this box's own words: the game writes its own in as it plays. Pick one of the game's lines (or type any words) to see it here as the machine would, laid out by this box's alignment and its Shrink to fit.",
   "Only the preview changes: nothing is written to the card, and other boxes keep their own words.",
-  ["Its own", "back to the words in the box"] ] };
+  ["Drop-down", "pick one of the game's lines; the box starts on the first"] ] };
 function TryWords({ id, t }) {
   const [v, setV] = useState(t.words || "");
   useEffect(() => setV(t.words || ""), [id, t.words]);
   const go = (w) => { if ((w || "").trim() !== (t.words || "")) call("text_scenes.tree_try_words", id, (w || "").trim() || null); };
-  const listId = `tree-try-${id}`;
+  // Simon (2026-11-20): "'its own words' is actually a drop down - make that obvious and not something that just
+  // appears on a mouse over" and "Keep your method, remove the old one" - the button's list only (no browser
+  // list on the box), the game's lines alone: the stand-in ("Inactive Player") is never shown, the box starts on the
+  // first line (text_scenes_tree._tree_tries)
+  const opts = t.options || [];
+  const menu = (e) => openMenu(e.currentTarget, [
+    { header: opts.length ? "The game's lines" : "No line of the game's found for it" },
+    ...opts.map((x) => ({ label: x, checked: x === (t.words || ""), onClick: () => { setV(x); go(x); } }))],
+  { align: "right" });
   return html`<div class="tree-row tg-try" ...${tip(TRY_TIP)}>
     <span class="small lbl">Show it with</span>
-    <${Field} value=${v} list=${listId} placeholder="its own words" cls="grow"
-      onChange=${(x) => { setV(x); if ((t.options || []).includes(x)) go(x); }}
-      onCommit=${go} />
-    <datalist id=${listId}>${(t.options || []).map((x) => html`<option value=${x} />`)}</datalist>
-    <${Button} size="xs" kind="ghost" disabled=${!t.words} title="Back to the words in the box"
-      onClick=${() => { setV(""); go(""); }}>Its own<//>
+    <${Field} value=${v} placeholder="any words" cls="grow" onChange=${setV} onCommit=${go} />
+    <${Button} size="xs" icon="down" cls="tg-try-menu" label="Pick one of the game's lines" disabled=${!opts.length}
+      title=${opts.length ? "Pick one of the game's lines to see it in the box (or type any words in the box)"
+        : "No line of the game's was found for this box: type any words in the box"} onClick=${menu} />
   </div>`;
 }
 export function GameColors({ g }) {
@@ -1800,7 +1822,7 @@ export function GameColors({ g }) {
     <div class="tree-row tg-head">
       <span class="tg-name" ...${tip(g ? GAME_COLORS_TIP : PAINTS_OFF_TIP)}><${Icon} name="brush" /><span class="eyebrow">Painted by the game</span></span>
     </div>
-    ${!g ? html`<div class="small tg-what">Not this one</div>` : g.roles.map((r) => html`<div key=${r.role} class="tree-row tgc-row" ...${tip({ head: r.label, lines: [
+    ${!g ? null : g.roles.map((r) => html`<div key=${r.role} class="tree-row tgc-row" ...${tip({ head: r.label, lines: [
         `On the machine: ${r.hex} (${gameColorSrc(r)}). As the game ships: ${r.game}.`,
         r.mine ? "This line is drawn in it." : "Another line of the score panel is drawn in it.",
         ["Click the swatch", "pick a color"],
@@ -1817,16 +1839,21 @@ export function GameColors({ g }) {
 // PAD-468 (DragonRR): a line's words, fixed where it sits, and Previous / Next through every
 // line of text of every scene (the lines the search finds, while it has words in it), so
 // spelling and placement are checked here instead of in the game
-const WORDS_TIP = { head: "Words", lines: [
+const WORDS_TIP = { head: "Editable text", lines: [
   "The words this line shows. Change them and press Enter (or click away): the preview draws them at once, and Write puts them on the card.",
   "A line of the game's is the same edit as on the Text tab, which lists it too. A line you added keeps its words in this scene (Undo takes a change back).",
-  "Type \\n for a line break." ] };
+  "Type \\n for a line break.",
+  "To step through every line of text, use the arrows by the search box (Enter / Shift+Enter in it)." ] };
 // PAD-515: greyed out, not gone, on anything whose words cannot be changed here
 const wordsOff = (p) => (p.words && p.words.locked ? (p.words.note || GAME_WRITES)
   : p.kind === "Text" ? "Its words cannot be changed here" : "Only a line of text has words");
 // PAD-513 (DragonRR): the game writes this box itself, so words typed here would never show
 const GAME_WRITES = "The game writes this line itself as it plays: change the game's own line on the Text tab";
-function Words({ p, find, searching }) {
+// Simon (2026-11-20): Words "like the 'filled in by the game' box" - an EDITABLE TEXT bar: greyed with nothing else
+// when the line cannot be changed here (no Previous / Next, no bytes or line count: the search box steps through
+// the lines); lit, "Edit the text here" and the box full width inside the border. ("the up/down ... I can end up
+// being flicked to a different scene": Previous / Next stay on the search box, Enter / Shift+Enter)
+function Words({ p }) {
   const off = !p.words || !!p.words.locked;
   const w = p.words || { text: "" };
   const [draft, setDraft] = useState(w.text);
@@ -1834,32 +1861,22 @@ function Words({ p, find, searching }) {
   const len = [...draft].length;
   const over = w.limit != null && len > w.limit;
   const apply = (v) => { if (v !== w.text && v.trim()) call("text_scenes.tree_words", p.id, v); };
-  const where = find && find.pos && !off ? `${find.pos} of ${find.n}` : "";
-  const what = searching ? "line with the words searched for" : "line of text, in this scene or the next";
-  return html`<div class="tree-words">
-    <div class="tree-row">
-      <span class=${cx("lbl", off && "tree-off")} ...${tip(off ? wordsOff(p) : WORDS_TIP)}>Words</span>
-      <${Field} key=${p.id} sm cls="grow" value=${w.text} onChange=${setDraft} onCommit=${apply} bad=${over}
-        disabled=${off} title=${off ? wordsOff(p) : WORDS_TIP} />
-      <${Button} size="xs" kind="ghost" icon="up" label="Previous line" disabled=${!(find && find.n)}
-        title=${`Previous ${what.replace("next", "one before")} (Shift+Enter in the search box)`}
-        onClick=${() => call("text_scenes.find_step", -1)} />
-      <${Button} size="xs" kind="ghost" icon="down" label="Next line" disabled=${!(find && find.n)}
-        title=${`Next ${what} (Enter in the search box)`}
-        onClick=${() => call("text_scenes.find_step", 1)} />
-    </div>
-    <div class="tree-row">
-      ${off ? html`<span class="small muted tree-off">${wordsOff(p)}</span>` : null}
-      ${w.limit != null ? html`<span class=${cx("small nw", over ? "err-ink" : "muted")}
-        ...${tip(over ? "Too long: a line of a scene can take this many bytes at most." : "Its length, and the most a line of a scene can take.")}>
-        ${len} / ${w.limit} bytes</span>` : null}
-      ${w.limit != null && where ? html`<span class="small muted">·</span>` : null}
-      ${where ? html`<span class="small muted nw" ...${tip(searching ? "Where this line is among the lines the search finds"
-        : "Where this line is among every line of text in every scene listed")}>${searching ? `match ${where}` : `line ${where}`}</span>` : null}
+  return html`<div class=${cx("tree-game words", off && "off")}>
+    <div class="tree-row tg-head">
+      <span class="tg-name" ...${tip(off ? { head: "Editable text", lines: [wordsOff(p), "A line of text whose words you can change is lit here, with a box to type them in."] } : WORDS_TIP)}>
+        <${Icon} name="edit" /><span class="eyebrow">Editable text</span></span>
       <span class="grow"></span>
-      ${w.edited ? html`<${Button} size="xs" icon="undo" title=${`Back to the game's words: "${w.game}"`}
+      ${!off && w.edited ? html`<${Button} size="xs" kind="ghost" icon="undo" title=${`Back to the game's words: "${w.game}"`}
         onClick=${() => call("text_scenes.tree_words", p.id, null)}>Game's words<//>` : null}
     </div>
+    ${off ? null : html`<div class="tree-row tg-what-row">
+        <span class="small ellip tg-what grow">Edit the text here</span>
+        ${w.limit != null ? html`<span class=${cx("small nw", over ? "err-ink" : "muted")}
+          ...${tip(over ? "Too long: a line of a scene can take this many bytes at most." : "Its length in bytes, and the most a line of a scene can take.")}>
+          ${len} / ${w.limit}</span>` : null}
+      </div>
+      <${Field} key=${p.id} sm cls="tg-words" value=${w.text} onChange=${setDraft} onCommit=${apply} bad=${over}
+        title=${WORDS_TIP} />`}
   </div>`;
 }
 
@@ -1876,8 +1893,27 @@ const RESIZE_FROM = [
   { value: "corner", label: "Top-left", title: "Its top-left corner stays where it is, so X and Y keep their numbers. A corner dragged on the preview keeps the corner across from it." },
   { value: "middle", label: "Middle", title: "Its middle stays where it is: it grows or shrinks all round, so X and Y change. A corner dragged on the preview does the same." }];
 
+// Simon (2026-11-20): "It says Draw 1:1 - makes no sense because it isn't": the picture line names the file's size
+// and the size it shows, and the button says what it does - greyed out, with the reason, where it can't help
+const picPct = (pic) => (pic.sx === pic.sy ? `${pic.sx}` : `${pic.sx} x ${pic.sy}`);
+const picLine = (p) => (p.w != null && p.h != null
+  ? `Picture ${p.pic.w} x ${p.pic.h} px, shown at ${Math.round(p.w)} x ${Math.round(p.h)} (${picPct(p.pic)}%)`
+  : `Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${picPct(p.pic)}%`);
+function oneToOneWhy(p, theme, stage) {
+  if (!p.pic) return "Only a picture is drawn pixel for pixel";
+  if (p.pic.sx === 100 && p.pic.sy === 100) return "It is already drawn pixel for pixel (100% of its file)";
+  if (theme > 1) return `Showing theme ${theme}: moving and resizing change theme 1's layout, and this is theme ${theme}'s picture. Show theme 1 to draw theme 1's picture pixel for pixel.`;
+  const [sw, sh] = stage || [1360, 768];
+  if (p.pic.w > sw || p.pic.h > sh) return `At ${p.pic.w} x ${p.pic.h} it would be bigger than the ${sw} x ${sh} screen`;
+  return "";
+}
+// the Selected box's kind picture (Simon, 2026-11-20); any other kind the blocks picture, its name in the tooltip
+const SEL_KIND = { Bitmap: ["image", "A picture (Bitmap)"], Flipbook: ["film", "A flipbook (pictures in turn)"],
+  Video: ["film", "A video"], Text: ["text", "A line of text"], Group: ["blocks", "A group of layers"] };
 function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
   const p = t.props;
+  const previewTheme = useNs("text_scenes").preview_theme || 1;
+  const oneToOneOff = p ? oneToOneWhy(p, previewTheme, t.stage) : "";
   const [tint, setTint] = useState(p ? p.tint : "#ffffff");
   const [keepShape, setKeepShape] = useState(true);
   const isText = !!p && p.kind === "Text";
@@ -1886,25 +1922,30 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
     <span class="lbl">${label}</span>
     <div class=${cx("field sm", off && "disabled")}><input type="number" value=${value ?? ""} disabled=${!!off} onChange=${(e) => onCommit(e.target.value)} /></div>
   </label>`;
+  // Simon (2026-11-20): "Moment ... the drop down below it and the Frame lane should be in it's own panel",
+  // Switchable parts on its own, and "Selected and for now, everything below it - panel on its own"
   return html`<div class="tree-side">
+    <div class="tree-panel">
     <span class="eyebrow">Moment</span>
     <${Select} sm value=${t.moment} options=${t.moments} onChange=${(v) => call("text_scenes.tree_moment", v)}
       title="Which moment of the scene's timeline to show: where it rests, or one of its own labels." />
-    <div class="scenes-ctl">
+    <div class="scenes-ctl tree-frame-row">
       <span class="lbl">Frame</span>
-      <div class="field sm" style="width:84px"><input type="number" min="1" max=${t.frames}
+      <div class="field sm tree-frame-n"><input type="number" min="1" max=${t.frames}
         value=${playFrame || t.frame} disabled=${!!play}
         onChange=${(e) => call("text_scenes.tree_moment", "f:" + e.target.value)} /></div>
-      <span class="small muted">of ${t.frames}</span>
+      <span class="small muted nw">of ${t.frames}</span>
+      <span class="grow"></span>
       ${t.frames > 1 ? html`<${Button} size="xs" kind=${play ? "primary" : ""} icon=${play ? "stop" : "play"}
         title=${play ? "Stop, and go back to the frame you were on" : "Play the scene's animation at its own speed (it loops)"}
         onClick=${() => call("text_scenes.tree_play", !play)}>${play ? "Stop" : "Play"}<//>` : null}
     </div>
     ${play && !play.done ? html`<span class="small muted">${(play.map || []).length ? `Drawing frame ${play.map.length} of ${play.frames}…` : "Working out the frames…"}</span>` : null}
-    ${(t.states || []).length ? html`<details class="tree-states">
-      <summary title="Parts of this scene that can look more than one way. The game's code picks which one shows; the list lets you preview each.">
+    </div>
+    ${(t.states || []).length ? html`<details class="tree-states tree-panel">
+      <summary title="Parts of this scene that can look more than one way. The game's code picks which one shows; click to show or hide the list and preview each.">
         <span class="eyebrow">Switchable parts</span>
-        <span class="small muted">${t.states.length} ${t.states.length === 1 ? "part" : "parts"}, click to <span class="ts-shut">show</span><span class="ts-open">hide</span></span>
+        <span class="small muted">${t.states.length} ${t.states.length === 1 ? "part" : "parts"}</span>
       </summary>
       <div class="small muted tree-states-hint">Each part below can look more than one way, and the game picks which while it runs (which monster, Locked or open). Pick one to see it here. This only changes the preview, not the card.</div>
       ${t.states.map((st, i) => html`<label key=${st.node} class="tree-state" title=${st.path}>
@@ -1913,7 +1954,22 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
         <${Select} sm value=${st.value} options=${st.options} onChange=${(v) => call("text_scenes.tree_state", st.node, v)} />
       </label>`)}
     </details>` : null}
-    <span class="eyebrow">Selected</span>
+    <div class="tree-panel">
+    ${/* Simon (2026-11-20): SELECTED "the color profile style": SELECTED in a tag box, the name in a box, then "a small
+      box at the end ... a bitmap graphic for bitmap (removing the text) a text graphic for text" */""}
+    ${(() => {
+      const many = p && (t.sels || []).length > 1;
+      const name = !p ? "NONE" : many ? `${t.sels.length} selected` : p.name;
+      const kind = p && !many ? p.kind : null;
+      const [icon, what] = SEL_KIND[kind] || ["blocks", kind];
+      return html`<div class="tree-selhead">
+        <span class="tree-seltag">SELECTED</span>
+        <span class=${cx("tree-selval mono", !p && "tree-selnone")} ...${tip(!p ? "Nothing selected"
+          : many ? `${t.sels.length} layers selected` : `${p.name}${p.added ? " (added)" : ""}`)}>${name}</span>
+        <span class=${cx("tree-selkind", !kind && "tree-selnone")} ...${tip(kind ? `${what}${p.added ? ", added" : ""}` : "")}>
+          ${kind ? html`<${Icon} name=${icon} />` : null}</span>
+      </div>`;
+    })()}
     ${p && (t.sels || []).length > 1 ? html`<div class="tree-props">
       <div class="small"><b>${t.sels.length} selected</b></div>
       <div class="small muted">Drag any of them on the preview, or use the arrow keys, to move them together. Ctrl-click one to take it out; click one on its own to pick just that.</div>
@@ -1929,7 +1985,6 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
       </div>
     </div>`
     : p ? html`<div class="tree-props">
-      <div class="small ellip" title=${p.name}><b>${p.name}</b> <span class="muted">${p.kind}${p.added ? ", added" : ""}</span></div>
       ${p.peek && p.view_off ? html`<div class="small muted">Hidden in the preview with its eye. It is shown on top while it is selected.</div>`
       : p.peek && p.view_in ? html`<div class="small muted">It sits in ${p.view_in}, hidden in the preview with its eye. It is shown on top while it is selected.</div>`
       : p.peek ? html`<div class="small muted">The game does not draw this at this moment. It is shown on top while it is selected; an edit holds wherever the game shows it.</div>` : null}
@@ -1937,77 +1992,76 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
         : "Hidden in the game: Write leaves it out of the card."}${p.view_off ? "" : " Its eye is open, so the preview still shows it."}</div>`
       : p.hid_in ? html`<div class="small in-game">It sits in ${p.hid_in}, hidden in the game: Write leaves it out of the card.</div>` : null}
       <${LookNote} k=${p.look} />
-      <${GameFills} p=${p} proven=${t.fills_proven !== false} />
-      <${GameColors} g=${p.game_colors} />
+    </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers. Ctrl-click (or Shift-click) to pick several and move them together.</div>`}
+    </div>
+    ${/* Simon (2026-11-20): "Put filled in by game and painted by the game in their own panels rather than being
+      together. Put 'words' below filled in by game" */""}
+    ${p && (t.sels || []).length <= 1 ? html`<${GameFills} p=${p} proven=${t.fills_proven !== false} />
       <${Words} p=${p} find=${find} searching=${searching} />
-      <div class=${cx("tree-row tree-pic", !p.pic && "tree-off")}>
-        <span class="small muted ellip" ...${tip(p.pic ? "The picture's own size, and how much the game scales it to draw it here. Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with \"Keep this picture's own size\" ticked, then press Draw 1:1."
+      <${GameColors} g=${p.game_colors} />` : null}
+    ${p && (t.sels || []).length <= 1 ? html`<div class="tree-panel tree-size">
+      <div class=${cx("tree-pic", !p.pic && "tree-off")}>
+        <span class="small muted ellip" ...${tip(p.pic ? `${picLine(p)}. The picture file's own size, then the size it shows on the screen here and how much that is of the file (the game scales it as it draws). Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with "Keep this picture's own size" ticked, then press Show pixel for pixel.`
           : "Only a picture has a size of its own to draw it at.")}>
-          ${p.pic ? `Picture ${p.pic.w} x ${p.pic.h} px at ${p.pic.sx === p.pic.sy ? p.pic.sx : `${p.pic.sx} x ${p.pic.sy}`}%` : "No picture of its own"}</span>
-        <${Button} size="xs" disabled=${!p.pic || (p.pic.sx === 100 && p.pic.sy === 100)}
-          title=${p.pic ? "Draw the picture pixel for pixel (100%), keeping its top-left corner where it is" : "Only a picture is drawn 1:1"}
-          onClick=${() => call("text_scenes.tree_one_to_one", p.id)}>Draw 1:1<//>
+          ${p.pic ? picLine(p) : "No picture of its own"}</span>
+        <${Button} size="xs" kind=${p.one_to_one ? "primary" : ""} disabled=${!p.one_to_one && !!oneToOneOff}
+          title=${p.one_to_one ? "On: drawn pixel for pixel. Click to put it back to the size it was before"
+            : oneToOneOff || "Draw the picture pixel for pixel (100% of the file), keeping its top-left corner where it is. Click again to put it back"}
+          onClick=${() => call("text_scenes.tree_one_to_one", p.id)}>Show pixel for pixel<//>
       </div>
       <${AnimBox} p=${p} />
       ${p.x != null ? null : html`<div class="small muted">Not on the glass at this moment.</div>`}
-      <div class="tree-row">
+      <div class="tree-grid">
         ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, r3(Number(v) - exactBox(p).x), 0), "Left edge on the glass (px)", p.x == null)}
         ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, r3(Number(v) - exactBox(p).y)), "Top edge on the glass (px)", p.x == null)}
-      </div>
-      <div class="tree-row">
         ${num("W px", p.w, (v) => call("text_scenes.tree_set_pixels", p.id, v, null, keepShape), isText
           ? "The width of its box on the screen, in pixels. The words stay their size and wrap to fit inside it (the corner handles do the same)."
           : "Its width on the screen, in pixels (the screen is 1360 x 768)", p.w == null)}
         ${num("H px", p.h, (v) => call("text_scenes.tree_set_pixels", p.id, null, v, keepShape), isText
           ? "The height of its box on the screen, in pixels. The words stay their size."
           : "Its height on the screen, in pixels", p.w == null)}
-      </div>
-      <label class=${cx("tree-row small tree-keep", (isText || p.w == null) && "tree-off")} ...${tip(isText
-        ? "A line of text's box takes any width and height: its words keep their size."
-        : "On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.")}>
-        <input type="checkbox" checked=${keepShape && !isText} disabled=${isText || p.w == null}
-          onChange=${(e) => setKeepShape(e.target.checked)} /> Keep its shape
-      </label>
-      <div class=${cx("tree-row", p.x == null && "tree-off")}>
-        <span class="lbl" ...${tip(isText
-          ? "What stays put when Size % or a corner drag resizes it. W px / H px on a line of text keep the side its words sit on."
-          : "What stays put when Size %, Width %, Height %, W px / H px or a corner drag resizes it")}>Resize from</span>
-        <${Seg} value=${from || "corner"} options=${RESIZE_FROM} onChange=${(v) => call("text_scenes.tree_resize_from", v)} />
-      </div>
-      <div class="tree-row">
-        ${num("Size %", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), isText
+        <label class=${cx("small tree-keep tree-span", (isText || p.w == null) && "tree-off")} ...${tip(isText
+          ? "A line of text's box takes any width and height: its words keep their size."
+          : "On: a new width or height resizes it both ways, so it keeps its shape. Off: it stretches one way only.")}>
+          <input type="checkbox" checked=${keepShape && !isText} disabled=${isText || p.w == null}
+            onChange=${(e) => setKeepShape(e.target.checked)} /> Keep its shape
+        </label>
+        <div class=${cx("tree-cell tree-span", p.x == null && "tree-off")}>
+          <span class="lbl" ...${tip(isText
+            ? "What stays put when Size % or a corner drag resizes it. W px / H px on a line of text keep the side its words sit on."
+            : "What stays put when Size %, Width %, Height %, W px / H px or a corner drag resizes it")}>Resize from</span>
+          <${Seg} value=${from || "corner"} options=${RESIZE_FROM} onChange=${(v) => call("text_scenes.tree_resize_from", v)} />
+        </div>
+        <div class="tree-wide">${num("Size % of original", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), isText
           ? "The size of the words (and their box with them), both ways at once; 100 = the size the game ships"
-          : "Both ways at once; 100 = the size the game ships")}
-      </div>
-      <div class="tree-row">
+          : "Both ways at once; 100 = the original art's place and size, as the game ships it. A replacement kept at its own size is fitted into that place, so it is 100 here too (the picture line above says how much of its file that is).")}</div>
         ${num("Width %", p.scale, (v) => call("text_scenes.tree_set_size", p.id, v, null), "Stretch it sideways only")}
         ${num("Height %", p.scale_y, (v) => call("text_scenes.tree_set_size", p.id, null, v), "Stretch it up and down only")}
-      </div>
-      <div class="tree-row">
         ${num("Turn °", p.rotate, (v) => call("text_scenes.tree_set_rotation", p.id, v), "How far you have turned it from as shipped, in degrees clockwise (0 = as shipped), on top of any turn the game gives it")}
-        <${Button} size="xs" title="Turn it 90° anticlockwise" onClick=${() => call("text_scenes.tree_rotate", p.id, -90)}>⟲ 90°<//>
-        <${Button} size="xs" title="Turn it 90° clockwise" onClick=${() => call("text_scenes.tree_rotate", p.id, 90)}>⟳ 90°<//>
-      </div>
-      ${p.game_turn ? html`<div class="small muted">The game draws it ${gameTurnText(p.game_turn)}${p.pic
-        ? ". The Images tab shows its picture as it is stored, not turned" : ""}. Turn ° is your own turn on top.</div>` : null}
-      <div class="tree-row">
-        <span class="lbl">Tint</span>
-        <input type="color" class="tree-color" value=${tint} onInput=${(e) => setTint(e.target.value)}
-          onChange=${(e) => call("text_scenes.tree_tint", p.id, e.target.value, p.alpha)} aria-label="Tint" />
+        <div class="tree-cell tree-two">
+          <${Button} size="xs" title="Turn it 90° anticlockwise" onClick=${() => call("text_scenes.tree_rotate", p.id, -90)}>⟲ 90°<//>
+          <${Button} size="xs" title="Turn it 90° clockwise" onClick=${() => call("text_scenes.tree_rotate", p.id, 90)}>⟳ 90°<//>
+        </div>
+        ${p.game_turn ? html`<div class="small muted tree-span">The game draws it ${gameTurnText(p.game_turn)}${p.pic
+          ? ". The Images tab shows its picture as it is stored, not turned" : ""}. Turn ° is your own turn on top.</div>` : null}
+        <label class="tree-num" ...${tip("The color it is drawn in (white = as shipped)")}>
+          <span class="lbl">Tint</span>
+          <input type="color" class="tree-color" value=${tint} onInput=${(e) => setTint(e.target.value)}
+            onChange=${(e) => call("text_scenes.tree_tint", p.id, e.target.value, p.alpha)} aria-label="Tint" />
+        </label>
         ${num("Opacity %", p.alpha, (v) => call("text_scenes.tree_tint", p.id, tint, v), "100 = as shipped")}
       </div>
-      <div class="tree-row">
+      <div class="tree-btns">
         <${Button} size="xs" title=${p.hidden ? "Put it back in the game and the preview" : "Hide it in the game: Write leaves it out of the card, and the preview hides it too"}
           onClick=${() => call("text_scenes.tree_visible", p.id, p.hidden)}>${p.hidden ? "Show in game" : "Hide in game"}<//>
         <${Button} size="xs" title="Draw it above the next layer" onClick=${() => call("text_scenes.tree_order", p.id, "up")}>Forward<//>
         <${Button} size="xs" title="Draw it below the layer before it" onClick=${() => call("text_scenes.tree_order", p.id, "down")}>Back<//>
-        <span class="small muted">layer ${p.layer}/${p.layers}</span>
+        <${Button} size="xs" title="Draw it above every other layer beside it" onClick=${() => call("text_scenes.tree_order", p.id, "front")}>To front<//>
+        <${Button} size="xs" title="Draw it below every other layer beside it" onClick=${() => call("text_scenes.tree_order", p.id, "back")}>To back<//>
+        <${Button} size="xs" title=${p.added ? "Take this added layer out of the scene" : "Put it back as the game shipped it"}
+          onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
       </div>
-      <div class="tree-row">
-        <${Button} size="xs" onClick=${() => call("text_scenes.tree_order", p.id, "front")}>To front<//>
-        <${Button} size="xs" onClick=${() => call("text_scenes.tree_order", p.id, "back")}>To back<//>
-        <${Button} size="xs" onClick=${() => call("text_scenes.tree_reset", p.id)}>${p.added ? "Remove" : "As shipped"}<//>
-      </div>
+      <div class="small muted">Layer ${p.layer} of ${p.layers}</div>
       ${openFont ? html`<div class=${cx("tree-row", !(isText && p.font) && "tree-off")}>
         <${Button} size="xs" icon="text" disabled=${!(isText && p.font)} title=${{ head: "Font controls", lines: [
           "Opens the Font bar on the right edge: this line's font, size, italic, letter width, spacing, wrapping, where its words sit in its box, Fit box to text and its drop shadow.",
@@ -2016,7 +2070,7 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
         <span class="small muted ellip">${!(isText && p.font) ? (isText ? "Its font is not known" : "Only a line of text has a font")
           : p.font.style ? `${p.font.style}, ${p.font.size} px` : `${p.font.size} px`}</span>
       </div>` : null}
-    </div>` : html`<div class="small muted">Click a picture or a line of text in the preview, or a row in Layers. Ctrl-click (or Shift-click) to pick several and move them together.</div>`}
+    </div>` : null}
     ${(t.notes || []).length ? html`<div class="small warn-ink">${t.notes.join("; ")}</div>` : null}
   </div>`;
 }

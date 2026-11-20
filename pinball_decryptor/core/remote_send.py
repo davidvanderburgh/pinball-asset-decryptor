@@ -876,6 +876,24 @@ WIDE_WINDOW = 4194304
 WIDE_PORTS = (2222, 22222, 42222)
 LANES = 2  # connections at once: one per core of the machine (a third added 4% over Wi-Fi)
 SPREAD_MIN = 2 << 20  # a file smaller than this goes over one connection
+# PAD-1467: the bytes of a big file over a plain connection (SshMachine._put_fast).  Encrypting on the machine is
+# what holds a Send back, not the radio: on a Godzilla's 5 GHz link the encrypted connection carried 3.3 MB/s with
+# its listener at 60 to 70 % of a core (the game holds the other), a plain one 28 MB/s.  Through this path, written
+# to the card and checked: 10 to 13 MB/s for a 64 MB file, against 3.4 MB/s the encrypted way (two connections).
+FAST_MIN = 4 << 20  # a smaller file is not worth the two extra commands
+FAST_PORTS = (42311, 42312, 42313)
+FAST_PIDFILE = "/var/run/pad-send-plain.pid"
+FAST_STOP = ("p=$(cat {f} 2>/dev/null); if [ -n \"$p\" ] && tr '\\000' ' ' < /proc/$p/cmdline 2>/dev/null "
+             "| grep -q '^nc '; then kill \"$p\" 2>/dev/null; fi; rm -f {f}").format(f=FAST_PIDFILE)
+
+
+class _PlainFailed(Exception):
+    """The plain connection could not carry a file; the encrypted one takes it (never shown as it is)."""
+
+
+def plain_allowed():
+    """False when the user turned the plain connection off (``PAD_SEND_PLAIN=0``)."""
+    return os.environ.get("PAD_SEND_PLAIN", "1").strip().lower() not in ("0", "no", "off", "false")
 # stop a temporary listener, only when the pid in its file is still one (a stale file's pid may be reused)
 WIDE_STOP = ("p=$(cat {f} 2>/dev/null); if [ -n \"$p\" ] && tr '\\000' ' ' < /proc/$p/cmdline 2>/dev/null "
              "| grep -q {f}; then kill \"$p\"; fi; rm -f {f}").format(f=WIDE_PIDFILE)
@@ -1129,8 +1147,89 @@ class SshMachine(Machine):
             last = out.strip()[-120:]
         raise SendError(last or "no free port")
 
+    #: PAD-1467: None until a big file tries the plain connection, then whether it works on this network
+    _plain = None
+
+    def _put_fast(self, path, fileobj, size, callback=None):
+        """The bytes of one big file over a plain TCP connection, the rest of the Send staying where it is.
+
+        The machine listens once with its own ``nc`` (started and stopped over the encrypted connection), this
+        computer connects to it and streams the file, and the size is checked when it closes.  Nothing here is
+        trusted: the Send checks every uploaded file's sha1, computed on the machine, before it renames one into
+        place (``send`` and ``sync``), so bytes changed or put there by anything else on the network are caught
+        there and the Send stops.  The plain connection carries game files, which are not secrets; nothing that
+        is (keys, the login) ever leaves the encrypted one.  Raises :class:`_PlainFailed` when the plain
+        connection cannot be used, and the caller sends the file the encrypted way."""
+        import socket
+        q = _q(path)
+        port, why = None, "no free port"
+        for cand in FAST_PORTS:
+            rc, out = self.sh("%s; rm -f %s; nc -l -p %d > %s 2>/dev/null </dev/null & echo $! > %s; sleep 1; "
+                              "kill -0 \"$(cat %s)\" 2>/dev/null && echo listening"
+                              % (FAST_STOP, q, cand, q, FAST_PIDFILE, FAST_PIDFILE), timeout=30, check=False)
+            if rc == 0 and "listening" in out:
+                port = cand
+                break
+            why = (out.strip()[-80:] or "the machine could not listen")
+        if port is None:
+            self.sh(FAST_STOP, timeout=20, check=False)
+            raise _PlainFailed(why)
+        done = 0
+        sock = None
+        try:
+            try:
+                sock = socket.create_connection((self.host, port), timeout=8)
+                sock.settimeout(60)
+                while done < size:
+                    chunk = fileobj.read(min(1 << 20, size - done))
+                    if not chunk:
+                        raise _PlainFailed("the file ended early")
+                    sock.sendall(chunk)
+                    done += len(chunk)
+                    if callback is not None:
+                        callback(done, size)             # raises SendError on cancel: cleaned up below
+                sock.shutdown(socket.SHUT_WR)
+            except OSError as e:
+                raise _PlainFailed(str(e) or type(e).__name__) from None
+            finally:
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+            # the listener ends when the connection does: wait for it, so every byte is in the file
+            self.sh("p=$(cat %s 2>/dev/null); i=0; while [ -n \"$p\" ] && kill -0 \"$p\" 2>/dev/null && [ $i -lt 30 ]; "
+                    "do sleep 1; i=$((i+1)); done; %s" % (FAST_PIDFILE, FAST_STOP), timeout=60, check=False)
+            got = self.sftp.stat(path).st_size
+            if got != size:
+                raise _PlainFailed("%d bytes of %d arrived" % (got, size))
+        except BaseException:
+            try:
+                self.sh("%s; rm -f %s" % (FAST_STOP, q), timeout=20, check=False)
+            except Exception:                            # noqa: BLE001 - the first failure is the one to report
+                pass
+            raise
+
     def _put(self, path, fileobj, size, callback=None):
-        """A whole file: over every lane at once when it is big enough to gain (PAD-1434)."""
+        """A whole file: over every lane at once when it is big enough to gain (PAD-1434); a big one's bytes over
+        a plain connection when this network lets one through (PAD-1467)."""
+        if self._plain is not False and size >= FAST_MIN and plain_allowed():
+            say = getattr(self, "log", None) or (lambda *_a: None)
+            try:
+                self._put_fast(path, fileobj, size, callback)
+                if self._plain is None:
+                    say("Big files go over a plain connection on your network, which the machine handles several "
+                        "times faster; each one is checked by its hash before it is used.", "info")
+                self._plain = True
+                return
+            except _PlainFailed as e:
+                self._plain = False
+                say("The plain connection isn't available here (%s); sending everything over the encrypted "
+                    "one." % e, "info")
+                if hasattr(fileobj, "rewind"):
+                    fileobj.rewind()
+                else:
+                    fileobj.seek(0)
         if len(self._lanes) > 1 and size >= SPREAD_MIN:
             self._spread(path, _pieces(fileobj, size), create=True,
                          progress=None if callback is None else (lambda done: callback(done, size)))

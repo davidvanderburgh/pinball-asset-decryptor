@@ -1530,9 +1530,9 @@ HELP_CONTENT = {
         ("What it's for", [
             "Three things for a machine connected to your home network, by the same cable or Wi-Fi Insider "
             "Connected uses: the **score feed**, which sends each game's final scores to a computer of yours, "
-            "**remote access**, which lets a computer of yours log in to the machine, and **Wi-Fi start-up**, "
-            "which makes a machine on Wi-Fi join your network at the first attempt. Tick what you want, then "
-            "Write the card.",
+            "**remote access**, which lets a computer of yours log in to the machine, and **Wi-Fi**, which makes "
+            "a machine on Wi-Fi join your network at the first attempt and, with a second tick, on 5 GHz. Tick "
+            "what you want, then Write the card.",
             "None of them changes a score: a card with only these stays on Insider Connected.",
         ]),
         ("Score feed", [
@@ -1620,6 +1620,47 @@ HELP_CONTENT = {
             "Measured on a Godzilla LE with Stern's AC1200 adapter (RTL8822BU): with `wext`, nine tries of nine "
             "to join failed on one access point; with `nl80211` the machine joined at the first try, 14 to 15 "
             "seconds after `wpa_supplicant` started, on three starts of three.",
+        ]),
+        ("5 GHz", [
+            "**Also use the newer adapter driver** is for a machine with Stern's AC1200 USB Wi-Fi adapter "
+            "(Realtek RTL8822BU). The driver the machine ships for it, a 2018 build, joins a current router's "
+            "5 GHz signal and is dropped the same moment, so the machine only ever works on 2.4 GHz. A 2019 build "
+            "of the same Realtek driver holds a 5 GHz connection.",
+            "Exactly what goes on the card:\n\n"
+            "| | |\n"
+            "|---|---|\n"
+            "| File replaced | `/usr/local/spike/8812bu.ko`: Realtek rtl88x2bu v5.3.1 (April 2018) becomes "
+            "v5.8.7.1 (November 2019), built from Realtek's unmodified open-source code for the card's own kernel |\n"
+            "| Files added | `/usr/local/bin/pad-wifi-band`, `/etc/init.d/padwifi` and its start-up link "
+            "`/etc/rc5.d/S31padwifi` |\n"
+            "| What they do | once the machine has joined on 2.4 GHz, a short script asks `wpa_supplicant` to move "
+            "to the same network's 5 GHz access point (`wpa_cli roam`) when one is in reach |\n"
+            "| Menu wording | the game's network menus stop saying \"2.4GHz\" |\n\n"
+            "- It needs **Use the reliable Wi-Fi start-up**, and goes off with it.\n"
+            "- Nothing is forced. If the move to 5 GHz fails, the machine stays on 2.4 GHz; after three failed "
+            "moves the script stops asking until the machine is next switched on.\n"
+            "- A driver fits one version of the machine's system only. A card with another version says so here "
+            "and keeps its own driver.\n"
+            "- Unticking it and writing the card puts Stern's driver back, from the original card image, and "
+            "takes the added files off.\n"
+            "- A machine with a different Wi-Fi adapter is not affected: its adapter uses another driver.",
+            "Measured on a Godzilla LE with an eero router: the shipped driver was dropped on 12 tries of 12 to "
+            "join 5 GHz; the newer one joined and held, 80 MHz wide. The driver's source and how it was built are "
+            "in the app's `resources/wifi` folder.",
+        ]),
+        ("How fast Send to machine is", [
+            "What holds a Send back is the machine's own processor, not your Wi-Fi: everything sent to the machine "
+            "is encrypted, and decrypting it on the machine's small two-core board tops out at about 3 MB a second "
+            "on either band.",
+            "So the app sends the contents of big files (4 MB and up) over a second, plain connection on your home "
+            "network, and keeps everything else on the encrypted one. Each file is still checked on the machine by "
+            "its hash before it is used, so a file that arrived wrong, for any reason, is caught and the Send "
+            "stops. Game files are not secrets; nothing that is (the login, the keys) leaves the encrypted "
+            "connection.\n\n"
+            "- Measured on a Godzilla on 5 GHz: a 64 MB file at 10 to 13 MB a second this way, against 3.4 the "
+            "encrypted way.\n"
+            "- If the plain connection cannot be made, the Send says so once and carries on the encrypted way.\n"
+            "- To keep everything encrypted, start the app with the environment variable `PAD_SEND_PLAIN=0`.",
         ]),
     ],
     "Modes": [],

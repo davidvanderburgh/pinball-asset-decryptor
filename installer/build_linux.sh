@@ -60,6 +60,7 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/icon.png:pinball_decryptor" \
     --add-data "$ROOT_DIR/pinball_decryptor/resources/ssh:pinball_decryptor/resources/ssh" \
     --add-data "$ROOT_DIR/pinball_decryptor/resources/pieces:pinball_decryptor/resources/pieces" \
+    --add-data "$ROOT_DIR/pinball_decryptor/resources/wifi:pinball_decryptor/resources/wifi" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/Dockerfile:pinball_decryptor/plugins/spooky" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/Dockerfile:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/partclone_to_raw.py:pinball_decryptor/plugins/jjp" \

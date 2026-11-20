@@ -135,7 +135,8 @@ class NetworkTab(TabService):
     def _inspect_wifi(self):
         """PAD-1467: whether the picked card can take the Wi-Fi start-up choice, and what it has now."""
         if not wifi_card.offered(self.mfr):
-            return dict(supported=False, reason=wifi_card.NOT_SPIKE2, enabled=False)
+            return dict(supported=False, reason=wifi_card.NOT_SPIKE2, enabled=False, band5=False,
+                        band5_supported=False, band5_reason=wifi_card.NOT_SPIKE2)
         if not self._source():
             return dict(supported=False, reason='Select the card image first (Select card tab).', enabled=False)
         return wifi_card.inspect_image(self._source())
@@ -162,14 +163,20 @@ class NetworkTab(TabService):
         except card_extras.ExtrasError as e:
             error = str(e)
         wifi = self._inspect_wifi()
-        wifi_on, wifi_error = wifi.get('enabled', False), ''
+        wifi_on, wifi_band, wifi_error = wifi.get('enabled', False), wifi.get('band5', False), ''
         try:
             rec = card_extras.load_wifi(project)
             if rec is not None:
-                wifi_on = rec['enabled']
+                wifi_on, wifi_band = rec['enabled'], rec['band5']
         except card_extras.ExtrasError as e:
             wifi_error = str(e)
-        self.set(wifi_details=[list(row) for row in wifi_card.DETAILS], wifi_now=wifi_card.describe(wifi))
+        self.set(wifi_details=[list(row) for row in wifi_card.DETAILS], wifi_now=wifi_card.describe(wifi),
+                 wifi_band5=bool(wifi_on and wifi_band),
+                 wifi_band5_supported=bool(wifi['supported'] and wifi.get('band5_supported')
+                                           and os.path.isdir(project)),
+                 wifi_band5_reason=wifi.get('band5_reason', '') if wifi['supported'] else '',
+                 wifi_band_details=[list(row) for row in wifi_card.BAND_DETAILS],
+                 wifi_band_now=wifi_card.describe_band(wifi))
         self.set(wifi_offered=wifi_card.offered(self.mfr), wifi_enabled=wifi_on, wifi_error=wifi_error,
                  wifi_supported=bool(wifi['supported'] and os.path.isdir(project)),
                  wifi_reason=wifi['reason'] if project else 'Select a project folder on the Extract tab first.')
@@ -564,12 +571,19 @@ class NetworkTab(TabService):
         return True
 
     @rpc
-    def configure_wifi(self, enabled, project):
-        """PAD-1467: save the project's Wi-Fi start-up choice; the next card written from it carries it."""
-        if project != self._project() or self.get('running') or not self._inspect_wifi()['supported']:
+    def configure_wifi(self, enabled, project, band5=None):
+        """PAD-1467: save the project's Wi-Fi choices; the next card written from it carries them.  *band5* None
+        keeps the 5 GHz choice as it is (it goes off with the start-up choice, which it needs)."""
+        info = self._inspect_wifi()
+        if project != self._project() or self.get('running') or not info['supported']:
             return False
         try:
-            card_extras.save_wifi(project, enabled)
+            if band5 is None:
+                rec = card_extras.load_wifi(project)
+                band5 = bool(rec and rec['band5'])
+            if band5 and not info.get('band5_supported'):
+                return False
+            card_extras.save_wifi(project, enabled, bool(enabled and band5))
         except card_extras.ExtrasError as e:
             self.publish()
             self.set(wifi_error=str(e))

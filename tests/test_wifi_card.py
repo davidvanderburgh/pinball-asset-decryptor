@@ -21,14 +21,21 @@ fi
 '''
 
 
-def build(tmp_path, hook=HOOK, supplicant=b'\x7fELF drivers: nl80211 wext', extra=None):
+STERN_KO = b'\x7fELF stern driver\x00version=v5.3.1_27678.20180430\x00vermagic=' + W.KERNEL.encode() + b' SMP preempt\x00'
+
+
+def build(tmp_path, hook=HOOK, supplicant=b'\x7fELF drivers: nl80211 wext', extra=None, module=STERN_KO):
     mk = shutil.which('mke2fs') or TOOLS + '/mke2fs'
     if not os.path.exists(mk):
         pytest.skip('real filesystem tools required')
     tree = tmp_path / 'tree'
     for d in ['etc/init.d', 'etc/network/if-pre-up.d', 'usr/local/spike', 'usr/sbin']:
         (tree / d).mkdir(parents=True, exist_ok=True)
-    (tree / 'etc/init.d/game').write_text('SPIKE_PATH=/usr/local/spike\n# stern-spike2.dtb\n')
+    (tree / 'etc/init.d/game').write_text('SPIKE_PATH=/usr/local/spike\n# stern-spike2.dtb\n'
+                                          'insmod /usr/local/spike/8812bu.ko\n')
+    (tree / 'etc/rc5.d').mkdir(parents=True, exist_ok=True)
+    if module is not None:
+        (tree / 'usr/local/spike/8812bu.ko').write_bytes(module)
     if hook is not None:
         (tree / 'etc/network/if-pre-up.d/wpa-supplicant').write_bytes(hook.encode())
     (tree / 'usr/sbin/wpa_supplicant').write_bytes(supplicant)
@@ -68,7 +75,8 @@ def test_on_writes_the_one_file_and_off_puts_the_card_back(card, tmp_path):
     out = tmp_path / 'out.raw'
     shutil.copyfile(card, out)
     before, tail = sha(card), out.read_bytes()[(1 << 20) + (24 << 20):]
-    assert W.inspect_image(str(card)) == {'supported': True, 'reason': '', 'enabled': False,
+    assert W.inspect_image(str(card)) == {'supported': True, 'reason': '', 'enabled': False, 'band5': False,
+                                          'band5_supported': True, 'band5_reason': '', 'stern_module': True,
                                           'partition': (2, 0x83, 1 << 20, 24 << 20)}
     said = []
     note = W.apply_to_build(str(card), str(out), {'enabled': True}, log=lambda t, k: said.append(t))
@@ -148,8 +156,8 @@ def test_project_choice_roundtrip_and_build_request(card, tmp_path):
     assert card_extras.load_wifi(str(project)) is None
     assert W.validate_request(str(card), str(project)) is None and card_extras.digest(str(project)) is None
     card_extras.save_wifi(str(project), True)
-    assert staged_changes.load(str(project))['extras'] == {'wifi': {'enabled': True}}
-    assert W.validate_request(str(card), str(project)) == {'enabled': True}
+    assert staged_changes.load(str(project))['extras'] == {'wifi': {'enabled': True, 'band5': False}}
+    assert W.validate_request(str(card), str(project)) == {'enabled': True, 'band5': False}
     on = card_extras.digest(str(project))
     card_extras.save_wifi(str(project), False)
     off = card_extras.digest(str(project))
@@ -196,3 +204,132 @@ def test_off_on_a_card_that_cannot_carry_it_asks_nothing_of_the_build(tmp_path):
     card_extras.save_wifi(str(project), True)
     with pytest.raises(ExtrasError):
         W.validate_request(str(image), str(project))
+
+
+def test_5ghz_puts_the_newer_driver_and_helper_on_and_off_puts_sterns_back(card, tmp_path):
+    out = tmp_path / 'out.raw'
+    shutil.copyfile(card, out)
+    before = sha(card)
+    both = {'enabled': True, 'band5': True}
+    note = W.apply_to_build(str(card), str(out), both)
+    assert 'rtl88x2bu ' + W.NEW_VERSION in note and '5 GHz' in note
+    assert sha(card) == before
+    ko = node(out, W.MODULE)
+    assert hashlib.sha256(ko['data']).hexdigest() == W.NEW_MODULE_SHA256 and ko['mode'] == 0o100644
+    assert W.VERMAGIC in ko['data']
+    helper, init = node(out, W.HELPER), node(out, W.INIT)
+    assert helper['mode'] == 0o100755 and init['mode'] == 0o100755 and not helper['uid'] and not init['gid']
+    assert helper['data'].startswith(b'#!/bin/sh\n') and b'\r' not in helper['data'] and b'\r' not in init['data']
+    assert b'wpa_cli -i $IF roam' in helper['data'] and b'pad-wifi-band' in init['data']
+    with open(out, 'rb') as f:
+        r = Ext4Reader(f, 1 << 20, 24 << 20)
+        assert r.read_symlink(W.ssh_card._node(r, W.LINK)) == W.LINK_TARGET
+    info = W.inspect_image(str(out))
+    assert info['enabled'] and info['band5'] and not info['stern_module']
+    assert node(out, W.OVERRIDE)['data'] == b'nl80211,wext\n'          # the start-up choice comes with it
+    stamp = sha(out)
+    assert W.apply_to_build(str(card), str(out), both) == note and sha(out) == stamp      # nothing to write again
+    # 5 GHz off, start-up kept: Stern's driver is back from the original, the helper files are gone
+    W.apply_to_build(str(card), str(out), {'enabled': True, 'band5': False})
+    assert node(out, W.MODULE)['data'] == STERN_KO
+    assert node(out, W.HELPER) is None and node(out, W.INIT) is None and node(out, W.LINK) is None
+    info = W.inspect_image(str(out))
+    assert info['enabled'] and not info['band5'] and info['stern_module']
+    # both on, then everything off in one go
+    W.apply_to_build(str(card), str(out), both)
+    assert W.apply_to_build(str(card), str(out), {'enabled': False, 'band5': False}) == "Wi-Fi start-up: as Stern ships it."
+    assert node(out, W.MODULE)['data'] == STERN_KO and node(out, W.OVERRIDE) is None and node(out, W.LINK) is None
+    # band5 without the start-up choice is not a state: it reads as off
+    assert W._wanted({'enabled': False, 'band5': True}) == (False, False)
+
+
+def test_5ghz_is_refused_on_a_card_with_another_kernel(tmp_path):
+    other = STERN_KO.replace(W.KERNEL.encode(), b'4.1.15-g0000000')
+    for i, module in enumerate((other, None)):
+        sub = tmp_path / str(i); sub.mkdir()
+        image = build(sub, module=module)
+        info = W.inspect_image(str(image))
+        assert info['supported'] and not info['band5_supported'] and info['band5_reason'] == W.OTHER_KERNEL
+        out = sub / 'out.raw'
+        shutil.copyfile(image, out)
+        with pytest.raises(ExtrasError, match='another'):
+            W.apply_to_build(str(image), str(out), {'enabled': True, 'band5': True})
+        project = sub / 'project'; project.mkdir()
+        card_extras.save_wifi(str(project), True, True)
+        with pytest.raises(ExtrasError, match='another'):
+            W.validate_request(str(image), str(project))
+        # the start-up choice alone still goes on such a card
+        assert 'nl80211' in W.apply_to_build(str(image), str(out), {'enabled': True, 'band5': False})
+
+
+def test_sterns_driver_cannot_be_put_back_from_an_original_that_has_ours(card, tmp_path):
+    ours = tmp_path / 'ours.raw'
+    shutil.copyfile(card, ours)
+    W.apply_to_build(str(card), str(ours), {'enabled': True, 'band5': True})
+    out = tmp_path / 'out.raw'
+    shutil.copyfile(ours, out)
+    with pytest.raises(ExtrasError, match="Stern's own cannot be put"):
+        W.apply_to_build(str(ours), str(out), {'enabled': True, 'band5': False})
+
+
+def test_5ghz_choice_is_saved_with_the_project_and_guards_a_flash(card, tmp_path):
+    project = tmp_path / 'project'; project.mkdir()
+    card_extras.save_wifi(str(project), True, True)
+    assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': True}
+    assert W.menu_text(str(project)) == dict(W.MENU_TEXT)
+    with pytest.raises(ExtrasError, match='Build the complete image first'):
+        W.guard_flash(str(project), str(card))
+    out = tmp_path / 'out.raw'
+    shutil.copyfile(card, out)
+    W.apply_to_build(str(card), str(out), {'enabled': True, 'band5': False})
+    with pytest.raises(ExtrasError):
+        W.guard_flash(str(project), str(out))                    # the start-up choice alone is not the whole ask
+    W.apply_to_build(str(card), str(out), {'enabled': True, 'band5': True})
+    W.guard_flash(str(project), str(out))
+    one, both = None, card_extras.digest(str(project))
+    card_extras.save_wifi(str(project), True, False)
+    one = card_extras.digest(str(project))
+    assert one != both and W.menu_text(str(project)) == {}
+    card_extras.save_wifi(str(project), False, True)             # off takes 5 GHz with it
+    assert card_extras.load_wifi(str(project)) == {'enabled': False, 'band5': False}
+    # a project saved before the 5 GHz choice existed reads as off
+    data = staged_changes.load(str(project)); data['extras']['wifi'] = {'enabled': True}
+    staged_changes.save(str(project), data, strict=True)
+    assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': False}
+
+
+def test_the_bundled_driver_is_the_one_committed_and_the_scripts_parse():
+    data = W.new_module_bytes()
+    assert data[:4] == b'\x7fELF' and W.VERMAGIC in data and b'version=' + W.NEW_VERSION.encode() in data
+    assert b'usb:v0BDApB812' in data                             # Stern's AC1200 adapter
+    payload = W.band_payload()
+    assert set(payload) == {W.MODULE, W.HELPER, W.INIT}
+    for old, new in W.MENU_TEXT:
+        assert len(new) < len(old) and '2.4' in old and 'GHz' not in new and old.replace('2.4GHz ', '') == new
+    readme = (W.RESOURCES / 'README.md').read_text(encoding='utf-8')
+    assert W.NEW_MODULE_SHA256 in readme and 'General Public License' in readme and W.KERNEL in readme
+    assert (W.RESOURCES / 'LICENSE.GPL-2.0').is_file()
+
+
+def test_menu_wording_is_program_text_written_in_place():
+    """With the 5 GHz choice on, the game's network menus stop saying "2.4GHz": each line is replaced where it
+    is, padded with NULs, and a game program without the lines is left alone without a warning."""
+    from pinball_decryptor.plugins.stern import progtext
+    from tests.test_stern_progtext import BODY_OFF, _elf, _logs, _warnings
+    body = bytearray(b"\x00")
+    offs = {}
+    for old, _new in W.MENU_TEXT:
+        offs[old] = BODY_OFF + len(body)
+        body += old.encode() + b"\x00"
+    body += b"Setting up WiFi network\x00" + b"\x00" * 64
+    raw = _elf(bytes(body))
+    msgs, log = _logs()
+    writes, n, blob = progtext.plan_writes(raw, dict(W.MENU_TEXT), log)
+    assert n == len(W.MENU_TEXT) == 6 and blob == b"" and not _warnings(msgs)
+    by_off = dict(writes)
+    for old, new in W.MENU_TEXT:
+        assert by_off[offs[old]] == new.encode().ljust(len(old), b"\x00")
+    out = bytearray(raw)
+    for off, data in writes:
+        out[off:off + len(data)] = data
+    assert b"2.4GHz" not in out and b"\x00Find WiFi Network\x00" in out and b"Setting up WiFi network" in out

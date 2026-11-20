@@ -4208,6 +4208,12 @@ def _program_text_writes(reader, node, card_path, pairs, patched_fw, log,
     else:
         raw = reader.read_file_bytes(node)
     edits = dict(pairs)
+    # PAD-1467: the Wi-Fi option's menu wording is asked of every Spike 2 game; a game program that does not
+    # have a line is left alone without a word (the user's own edits still say when theirs is not found)
+    from ...core import wifi_card as _wifi
+    for o, n in _wifi.MENU_TEXT:
+        if edits.get(o) == n and (b"\x00" + o.encode() + b"\x00") not in raw:
+            del edits[o]
     # Only an edit longer than its original can need new space (a longer
     # standalone name grows its host line too, and is itself longer).
     over = [o for o, n in edits.items() if len(n) > len(o)]
@@ -4997,6 +5003,18 @@ def _radium_text_writes(reader, assets_dir, log, cancel, patched_fw=None,
         else:
             edits = dict(edits)
             edits.setdefault(fw_path, [])
+    # PAD-1467: with the 5 GHz Wi-Fi choice on (Network tab), the game's network menus stop saying "2.4GHz".
+    # The words are program text like any other; a line the user changed themselves stays theirs.
+    from ...core import wifi_card as _wifi
+    wifi_text = _wifi.menu_text(assets_dir)
+    if wifi_text:
+        if fw_path is None:
+            fw_path, _fw_node = _game_program_path(reader, cancel)
+        if fw_path is not None:
+            edits = dict(edits)
+            mine = list(edits.get(fw_path, []))
+            have = {o for o, _n in mine}
+            edits[fw_path] = mine + [(o, n) for o, n in wifi_text.items() if o not in have]
     if not edits:
         return [], 0, {}, {}, grown
     nodes = _resolve_card_nodes(reader, list(edits.keys()), cancel)

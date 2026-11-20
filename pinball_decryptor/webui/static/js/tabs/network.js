@@ -182,9 +182,12 @@ function SendToMachine({ n }) {
 // this one joined at the first attempt, 14 s after it started.
 function WifiStartup({ n }) {
   const [enabled, setEnabled] = useState(!!n.wifi_enabled);
-  useEffect(() => { setEnabled(!!n.wifi_enabled); }, [n.wifi_enabled, n.project, n.source]);
+  const [band, setBand] = useState(!!n.wifi_band5);
+  useEffect(() => { setEnabled(!!n.wifi_enabled); setBand(!!n.wifi_band5); },
+    [n.wifi_enabled, n.wifi_band5, n.project, n.source]);
   const locked = !n.wifi_supported || n.running;
-  return html`<${Card} cls="net-opt" title="Wi-Fi start-up">
+  const bandLocked = locked || !enabled || !n.wifi_band5_supported;
+  return html`<${Card} cls="net-opt" title="Wi-Fi">
     <p class="net-does">Makes the machine join your Wi-Fi at the first attempt when it starts. As shipped, the
       machine starts its Wi-Fi program (<span class="mono">wpa_supplicant</span>) with the old${" "}
       <span class="mono">wext</span> driver interface. With it, joining often fails and is tried again, so the
@@ -193,7 +196,7 @@ function WifiStartup({ n }) {
     ${!n.wifi_supported ? html`<${Note}>${n.wifi_reason}<//>` : null}
     <${Check} label="Use the reliable Wi-Fi start-up on cards I write from this project" checked=${enabled}
       disabled=${locked} wrap
-      onChange=${(on) => { setEnabled(on); call("network.configure_wifi", on, n.project); }} />
+      onChange=${(on) => { setEnabled(on); if (!on) setBand(false); call("network.configure_wifi", on, n.project); }} />
     <span class="small muted">It does not change which Wi-Fi network or band the machine uses, or its password.
       Writing a card without it puts the machine back as shipped.</span>
     <div class="lbl">Exactly what it changes on the card</div>
@@ -206,6 +209,29 @@ function WifiStartup({ n }) {
       <span class="mono">wext</span>, nine tries of nine to join failed on one access point; with${" "}
       <span class="mono">nl80211</span> it joined at the first try, 14 to 15 seconds after${" "}
       <span class="mono">wpa_supplicant</span> started, on three starts of three.</span>
+    <div class="net-sub">
+      <p class="net-does"><b>5 GHz.</b> The driver the machine ships for its AC1200 USB Wi-Fi adapter (Realtek
+        RTL8822BU, a 2018 build) cannot hold a 5 GHz connection to a current router: it is dropped the moment it
+        joins. A newer build of the same Realtek driver holds it. This puts that driver on the card and has the
+        machine move to your network's 5 GHz signal when it is in reach, staying on 2.4 GHz when it is not.</p>
+      ${n.wifi_supported && !n.wifi_band5_supported && n.wifi_band5_reason
+        ? html`<${Note}>${n.wifi_band5_reason}<//>` : null}
+      <${Check} label="Also use the newer adapter driver, so the machine can join on 5 GHz" checked=${band}
+        disabled=${bandLocked} wrap
+        onChange=${(on) => { setBand(on); call("network.configure_wifi", enabled, n.project, on); }} />
+      <span class="small muted">Needs the option above. It is for the AC1200 adapter only; a machine with another
+        adapter is not affected.</span>
+      <div class="lbl">Exactly what it changes on the card</div>
+      <table class="net-fields net-wifi-details">
+        <tbody>${(n.wifi_band_details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>
+          <td class=${r[2] ? "mono" : ""}>${r[1]}</td></tr>`)}
+          ${n.wifi_band_now ? html`<tr><th scope="row">The card you picked has</th><td class="mono">${n.wifi_band_now}</td></tr>` : null}
+        </tbody></table>
+      <span class="small muted">Measured on the same Godzilla LE with an eero router: the shipped driver was dropped
+        on 12 tries of 12 to join 5 GHz; the newer one joined and held (channel 40, 80 MHz wide). The driver is
+        Realtek's own open-source code, unmodified; its source and how it was built are in the app's${" "}
+        <span class="mono">resources/wifi</span> folder.</span>
+    </div>
     ${n.wifi_error ? html`<p role="alert" class="err-ink">${n.wifi_error}</p>` : null}
   <//>`;
 }

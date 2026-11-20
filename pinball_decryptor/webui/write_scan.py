@@ -389,15 +389,19 @@ def wifi_rows(window, assets_path):
         return []
     source_var = _window_getter(window, 'write_upd_var')
     source = wifi_card.inspect_image(source_var.get()) if source_var is not None else {}
+    rows = []
     if not source.get('supported'):
         # a card that cannot take it: on is said (the build explains why not), off asks nothing of the build
         changed = wifi['enabled']
     else:
         changed = wifi['enabled'] != source.get('enabled')
-    if not changed:
-        return []
-    return [('Wi-Fi start-up — ' + ('join at the first attempt' if wifi['enabled'] else 'as shipped'),
-             'system', 'Pending (Network tab)', 'pending')]
+    if changed:
+        rows.append(('Wi-Fi start-up — ' + ('join at the first attempt' if wifi['enabled'] else 'as shipped'),
+                     'system', 'Pending (Network tab)', 'pending'))
+    if wifi['band5'] != bool(source.get('band5')) and (wifi['band5'] or source.get('supported')):
+        rows.append(('Wi-Fi adapter driver — ' + ('newer driver, 5 GHz' if wifi['band5'] else 'as shipped'),
+                     'system', 'Pending (Network tab)', 'pending'))
+    return rows
 
 
 #: PAD-507: Godzilla's score panel colours, words of the game program

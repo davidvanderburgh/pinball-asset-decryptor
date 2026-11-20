@@ -264,7 +264,7 @@ def test_wifi_start_up_choice_is_saved_shown_and_listed_on_write(tmp_path, monke
         assert w.call('network.configure_wifi', True, str(project)) is False
         w.run(svc.on_running, False, 'write')
         assert w.call('network.configure_wifi', True, str(project)) is True
-        assert card_extras.load_wifi(str(project)) == {'enabled': True}
+        assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': False}
         assert w.state('network')['wifi_enabled'] is True
         assert card_extras.load(str(project)) is None                    # remote access is its own setting
         (project / '.checksums.md5').write_text('')
@@ -296,7 +296,8 @@ def test_wifi_start_up_is_a_spike2_option():
         svc = w.window.service('network')
         w.run(svc.on_show)
         assert w.state('network')['wifi_offered'] is False
-        assert svc._inspect_wifi() == dict(supported=False, reason=wifi_card.NOT_SPIKE2, enabled=False)
+        info = svc._inspect_wifi()
+        assert not info['supported'] and info['reason'] == wifi_card.NOT_SPIKE2 and not info['band5_supported']
 
 
 def test_wifi_start_up_says_exactly_what_it_changes(tmp_path, monkeypatch):
@@ -320,3 +321,45 @@ def test_wifi_start_up_says_exactly_what_it_changes(tmp_path, monkeypatch):
         assert w.state('network')['wifi_now'].startswith('-D nl80211,wext')
     js = (Path(wifi_card.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
     assert 'Exactly what it changes on the card' in js and 'n.wifi_details' in js and 'n.wifi_now' in js
+
+
+def test_5ghz_choice_needs_the_start_up_choice_and_a_card_with_the_right_kernel(tmp_path, monkeypatch):
+    """PAD-1467: the second Wi-Fi switch (newer adapter driver, 5 GHz) is saved beside the first, goes off with it,
+    is refused on a card whose kernel the bundled driver was not built for, and is its own row on the Write tab."""
+    from pinball_decryptor.core import wifi_card
+    from tests.test_webui_write import wait_for
+    state = dict(supported=True, reason='', enabled=False, band5=False, band5_supported=False,
+                 band5_reason=wifi_card.OTHER_KERNEL)
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda *a, **kw: dict(state))
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert st['wifi_supported'] and not st['wifi_band5_supported'] and st['wifi_band5_reason'] == wifi_card.OTHER_KERNEL
+        assert w.call('network.configure_wifi', True, str(project), True) is False
+        assert card_extras.load_wifi(str(project)) is None
+        state.update(band5_supported=True, band5_reason='')
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert st['wifi_band5_supported'] and st['wifi_band_now'].endswith('(as shipped)')
+        rows = {r[0]: r[1] for r in st['wifi_band_details']}
+        assert rows['File replaced on the card'].startswith('/usr/local/spike/8812bu.ko')
+        assert wifi_card.NEW_VERSION in rows['Driver with this option'] and wifi_card.KERNEL in rows['Driver with this option']
+        assert wifi_card.OLD_VERSION in rows['Driver as shipped'] and 'wpa_cli roam' in rows['What the added files do']
+        assert '/usr/local/bin/pad-wifi-band' in rows['Files added'] and '2.4GHz' in rows['Menu wording']
+        assert w.call('network.configure_wifi', True, str(project), True) is True
+        assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': True}
+        assert w.state('network')['wifi_band5'] is True
+        assert w.call('network.configure_wifi', True, str(project)) is True          # the first switch alone keeps it
+        assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': True}
+        (project / '.checksums.md5').write_text('')
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        assert [row['file'] for row in w.state('write')['rows']] == [
+            'Wi-Fi start-up — join at the first attempt', 'Wi-Fi adapter driver — newer driver, 5 GHz']
+        w.call('ui.select_tab', 'network')
+        assert w.call('network.configure_wifi', False, str(project)) is True         # off takes 5 GHz with it
+        assert card_extras.load_wifi(str(project)) == {'enabled': False, 'band5': False}
+        assert w.state('network')['wifi_band5'] is False
+    js = (Path(wifi_card.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
+    assert 'n.wifi_band_details' in js and 'Also use the newer adapter driver' in js

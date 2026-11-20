@@ -149,8 +149,9 @@ def digest(project):
 
 
 def load_wifi(project):
-    """PAD-1467: the saved Wi-Fi start-up choice ``{'enabled': bool}``, or None when this project never set it
-    (``extras.wifi`` in the project's ``.staged_changes.json``; core/wifi_card.py puts it on the card)."""
+    """PAD-1467: the saved Wi-Fi choices ``{'enabled': bool, 'band5': bool}``, or None when this project never
+    set them (``extras.wifi`` in the project's ``.staged_changes.json``; core/wifi_card.py puts them on the card).
+    ``enabled`` is the Wi-Fi start-up, ``band5`` the newer adapter driver and 5 GHz, which needs the first."""
     if not project or not os.path.isdir(project):
         return None
     extras = staged_changes.load(project).get('extras')
@@ -161,21 +162,22 @@ def load_wifi(project):
     rec = extras.get('wifi')
     if rec is None:
         return None
-    if not isinstance(rec, dict) or type(rec.get('enabled')) is not bool:
+    if (not isinstance(rec, dict) or type(rec.get('enabled')) is not bool
+            or type(rec.get('band5', False)) is not bool):
         raise ExtrasError('The project Wi-Fi configuration is invalid.')
-    return {'enabled': rec['enabled']}
+    return {'enabled': rec['enabled'], 'band5': bool(rec['enabled'] and rec.get('band5', False))}
 
 
-def save_wifi(project, enabled):
+def save_wifi(project, enabled, band5=False):
     if not project or not os.path.isdir(project):
         raise ExtrasError('Select a project folder before changing the Wi-Fi option.')
-    if type(enabled) is not bool:
+    if type(enabled) is not bool or type(band5) is not bool:
         raise ExtrasError('The Wi-Fi option must be a checkbox value.')
     data = staged_changes.load(project)
     extras = data.setdefault('extras', {})
     if not isinstance(extras, dict):
         raise ExtrasError('The project Extras configuration is invalid.')
-    extras['wifi'] = {'enabled': enabled}
+    extras['wifi'] = {'enabled': enabled, 'band5': bool(enabled and band5)}
     _persist(project, data)
     return dict(extras['wifi'])
 

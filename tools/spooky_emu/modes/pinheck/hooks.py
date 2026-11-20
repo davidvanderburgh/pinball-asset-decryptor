@@ -31,6 +31,25 @@ called in the game as it is:
   ram           the runtime's variables: RAM the game never writes (a whole game watched with
                 a canary over 0xA0002F48..0xA001DF48)
 
+PAD-1469 (the start rules, lamps, coils and balls of JJP parity), read from each game's code (the
+plan's "Ticket 9" section) and proven in the emulator:
+
+  save_timer    the ball save, ms left: the drain handler serves the ball back while it is not 0
+                (and cuts it to 0 doing so, outside a multiball); a mode's ball_save raises it
+  load_timer    non-zero from a ball's load (the trough's load coil) until it is in the lane
+  ball_queue    balls still to load and launch: while it is not 0, no load is running and the
+                lane is clear, the game loads one and counts it down (its own add-a-ball and
+                multiballs add to it); the ball ends only once every ball is home in the trough
+  extra_balls   the player's extra balls waiting (the next-ball code shoots again while not 0)
+  ball_limit    the balls-per-game setting + 1 (the next-ball code ends the game past it)
+  coil_busy     fireCoil's off times, one word a coil: not 0 while the coil is on
+  coil_scale    ms per fireCoil time unit (time * scale, at most 255 ms)
+  trough, lane  the trough switches (any ball locks beside them count as home) and the lane's
+  coils         the coils a mode may use: name -> (number, its own pulse in ms, may be held).
+                Never the flippers, the trough's load coil, the plunger, slings, pops, scoops or
+                an unnamed SOLn (JJP's rule); held only a shaker, magnet or post
+  lamp_max      a lamp's full brightness in lamp_ram (0..8)
+
 Every address was read from the game's code and proven in tools/pinheck_emu (the plan's
 "pinHeck" section says how).  ``sha1`` is the stock PRG's; ``sigs`` are the first 8 bytes of
 each function and the tick site's word, checked again so a build that is not this one is
@@ -56,6 +75,11 @@ HOOKS = {
         video_abi="jetsons", text_abi="jetsons",
         dmd=(128, 64), text_columns=32, text_lines=8,
         free_flash=0x9D030000, ram=(0xA0010000, 0x800),
+        # PAD-1469
+        save_timer=0xA00007CC, load_timer=0xA00007D8, ball_queue=0xA0000510, extra_balls=0xA0000728,
+        ball_limit=0xA0002914, coil_busy=0xA00022E0, coil_scale=15, lamp_max=8,
+        trough=(34, 35), lane=32, balls=2,
+        coils={'KNOCKER': (0, 30, False), 'SHAKER': (1, 75, True)},
         sigs={
             0x9D02EFC8: "ed62400f",                     # jal 0x9D018BB4
             0x9D018BB4: "ac84838fb4858297",
@@ -86,6 +110,11 @@ HOOKS = {
         video_abi="amh", text_abi="amh", points_round=10,
         dmd=(128, 32), text_columns=13, text_lines=2,
         free_flash=0x9D040000, ram=(0xA0010000, 0x800),
+        # PAD-1469
+        save_timer=0xA00008CC, load_timer=0xA00008D8, ball_queue=0xA0000658, extra_balls=0xA000080C,
+        ball_limit=0xA0002735, coil_busy=0xA00021E8, lamp_max=8,
+        trough=(1, 2, 3), lane=0, balls=3,
+        coils={'KNOCKER': (0, 30, False), 'SHAKER': (1, 75, True), 'MAGNET': (5, 150, True), 'STOP_POST': (6, 225, True)},
         sigs={
             0x9D030920: "d867400f",                     # jal 0x9D019F60
             0x9D019F60: "9085838fb4868297",
@@ -107,6 +136,11 @@ HOOKS = {
         video_abi="amh", text_abi="amh", points_round=10,
         dmd=(128, 32), text_columns=13, text_lines=2,
         free_flash=0x9D050000, ram=(0xA0010000, 0x800),
+        # PAD-1469
+        save_timer=0xA0000384, load_timer=0xA0000390, ball_queue=0xA00009A0, extra_balls=0xA00002D0,
+        ball_limit=0xA0002CC1, coil_busy=0xA000249C, lamp_max=8,
+        trough=(1, 2, 3, 4, 5, 6, 7), lane=0, balls=None,
+        coils={},
         sigs={
             0x9D04A2FC: "f2a0400f",                     # jal 0x9D0283C8
             0x9D0283C8: "4c80838f6c818297",
@@ -120,7 +154,9 @@ HOOKS = {
 #: passes them; every entry must have them all
 LINK_KEYS = ("gp", "this", "tick_target", "add_score", "play_sfx", "text_str", "text_show",
              "link_send", "data_out", "coil_fire", "switch_ram", "lamp_ram", "score_array",
-             "millis", "player", "ball", "ball_active", "phase", "tilt", "free_flash")
+             "millis", "player", "ball", "ball_active", "phase", "tilt", "free_flash",
+             # PAD-1469
+             "save_timer", "load_timer", "ball_queue", "extra_balls", "ball_limit", "coil_busy")
 
 
 class Refused(Exception):

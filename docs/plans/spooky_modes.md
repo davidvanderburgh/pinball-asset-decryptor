@@ -569,8 +569,8 @@ the runtime inside each game in the emulator).
 
 ## Ticket 8 done: JJP parity on every runtime (PAD-1424)
 
-PinHeck is not in this ticket's runtimes: its runtime is still being built (PAD-1422/1423), so its
-parity keys belong with it. Here: the Unity core + four glues (six titles), Godot (Looney Tunes)
+PinHeck is not in this ticket's runtimes: its runtime was still being built (PAD-1422/1423); its
+parity keys are ticket 9 (PAD-1469) below. Here: the Unity core + four glues (six titles), Godot (Looney Tunes)
 and P-ROC (Rick and Morty, Alice Cooper).
 
 **Done and proven so far** (hidden, muted, Ubuntu rigs; PAD-Runtime would not start that day):
@@ -665,6 +665,67 @@ sound files and music (the game's music back after); its picture and video on th
 panel (Rick and Morty, Looney Tunes, Scooby-Doo shots). In the rig a playfield switch can come while
 the game's first ball still sits in the shooter lane, which no real game sees; a multiball then
 waits for the lane.
+
+## Ticket 9 done: JJP parity on the pinHeck runtime (PAD-1469)
+
+Ticket 8 (PAD-1424) left pinHeck out: its runtime was still being built. Here the C runtime
+(`pinheck/padheck.c`, now about 10 KB) takes the same start rules, lamps, coils and balls as the
+other Spooky runtimes, read off each game's own state every millisecond, and the build packs them
+into 128-byte modes (data magic `PHM2`, run magic `PAD2`) after a title header: the lane switch,
+the trough switches, the coils a mode may pulse or hold with their own pulses, a lamp's full
+brightness and the game's ball count.
+
+**What the three games share** (all Ben Heck's code; Domino's and Rob Zombie are AMH's,
+github.com/benheck/AMH; Jetsons' save and load timers sit 0x100 below Domino's): a ball-save timer in ms
+that the drain handler checks (it serves the ball back and cuts the timer to 0, outside a
+multiball); a load timer from the trough's load coil to the lane; a ball queue the plunge code
+loads from whenever no load runs and the lane is clear (the games' own add-a-ball and multiballs
+add to it); an extra-ball count the next-ball code shoots again on; the balls-per-game setting + 1
+it ends the game past. The ball ends only once every ball is home in the trough (Domino's: its
+three trough switches for 1 s with nothing queued), so a multiball needs nothing else.
+
+| key | how found | Jetsons V004 | Domino's V006 | Rob Zombie V026 |
+|---|---|---|---|---|
+| save_timer | RAM falling 1/ms from the ball's first switch, cut at a saved drain; its readers in the drain handler | 0xA00007CC (15 s) | 0xA00008CC (10 s) | 0xA0000384 (15 s) |
+| load_timer | set at a serve and the saved drain, 0 once the ball is in the lane; AutoPlunge's `max(t, 2002)` | 0xA00007D8 | 0xA00008D8 | 0xA0000390 |
+| ball_queue | the halfword the plunge code tests before the load timer; poked to 1 in play, the game loaded and launched a ball | 0xA0000510 | 0xA0000658 | 0xA00009A0 |
+| extra_balls | the first byte the next-ball code tests (ball + 8 on all three); poked to 1, the drain shot again | 0xA0000728 | 0xA000080C | 0xA00002D0 |
+| ball_limit | the byte the ball number is compared with; 4 in a 3-ball game | 0xA0002914 | 0xA0002735 | 0xA0002CC1 |
+| coil_busy | fireCoil's off-time table (time = t x scale ms, at most 255) | 0xA00022E0, x15 | 0xA00021E8, x15 | 0xA000249C, x1 |
+| trough, lane | games.py | 34 35, 32 | 1 2 3, 0 | 1..7, 0 |
+
+Balls in play are counted the same way everywhere: the trough switches closed when the ball first
+went in, and every ball that left the trough after (Rob Zombie's 1..7 may hold locks: a locked ball
+counts as home, which is right for "one ball left").
+
+**Coils**: JJP's rule, not the Unity ports' (no slings or pops): Jetsons KNOCKER and SHAKER (held);
+Domino's KNOCKER, SHAKER, MAGNET and STOP_POST (the last three held). Own pulses from the games'
+own fireCoil calls: shaker 75 ms, magnet 150 ms, stop post its setting (15 x 15 = 225 ms); the
+knocker's call goes through a register, so 30 ms. Rob Zombie's coil test names its coils SOL0..15,
+so it offers none. A hold is one shortest pulse (15 ms on Jetsons and Domino's, power ms on Rob
+Zombie) every 32 x unit / power ms, skipped while the game's own off time for that coil runs.
+
+**Events**: ball_start / first_ball / last_ball at the ball's phase 3 (out of the lane); last_ball
+is ball = limit - 1 with no extra ball waiting; valid_playfield the first switch that is not the
+trough or lane; ball_saved the save timer cut from 50 ms or more to 0 while the game serves a ball
+back at once (load timer or queue); extra_ball the count rising; multiball_end two balls or more for
+0.5 s, then one for 0.5 s with nothing being served back. Not here: start_after (no game modes to
+watch) and every file of a mode's own (sound files, music, pictures, video): `keys_not_here`.
+
+Proof (tools/pinheck_emu, headless, muted, `C:/tmp/PAD-1469/make_proof.py` + `probe.py`: every
+fireCoil call hooked, RAM snapshots every 50 ms): on all three, from modes PRGs the checker passed,
+ball_start, first_ball, valid_playfield, a two-switch combo in 3 s, start_score, extra_ball and a
+mode's lamps over the game's (10 and 11 at 8 flashing twice a second, 12 steady at 2, the game's
+own back after); on Domino's and Rob Zombie also first_ball again on a shoot-again, a start_count
+of 2 ball starts and last_ball on ball 3 (Jetsons' emulated drains never end a ball). Knocker at the start, shaker on a shot (2 units = 30
+ms) and the magnet / shaker hold pulsing every 60 ms for 1.5 s on Domino's and Jetsons, all from
+the runtime's fireCoil calls. Multiball 2: the queue served the second ball, the drain gave
+multiball_end and "one ball left" ended the mode with the ball still on; add_ball served a ball;
+ball_save 20 s made the game serve a drained ball back and raised ball_saved. Jetsons' emulation
+loads the second ball as the first is launched (the game takes it as a save), so its multiball
+proof is the add_ball: our ask, the game's load coil 80 ms later and its plunger.
+Tests: `tests/test_spooky_modes_pinheck.py` runs the shipped runtime on Unicorn against a stand-in
+game for every rule (no game files).
 
 ## Rig fix made on the way
 

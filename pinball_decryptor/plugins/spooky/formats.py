@@ -286,7 +286,7 @@ def _scan_for_modes(source_dir, pad_modes):
     """:func:`_scan_for_tar` without what the custom modes replace: the source's ``pad/`` folder
     and, at its top, the files the modes put there."""
     all_files, all_dirs = _scan_for_tar(source_dir)
-    if pad_modes:
+    if pad_modes and pad_modes[2]:                 # a pinHeck card has no pad/ (PAD-1422)
         folder = pad_modes[2]
         tops = {t[0] for t in (pad_modes[3] if len(pad_modes) > 3 else ())}
         def inside(rel):                            # folder may be nested (uptest/pad, PAD-1418)

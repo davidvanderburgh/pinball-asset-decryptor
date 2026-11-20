@@ -275,23 +275,29 @@ def test_write_zip_carries_the_modes_prg(stem, tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("label", ["jetsons-V004", "dominos-V006", "rob_zombie-V026"])
-def test_keys_the_pinheck_runtime_cannot_do_are_refused_by_name(label, tmp_path):
-    """PAD-1424's start rules, lamps, balls, coils and a mode's own files are not in padheck.c yet
-    (PAD-1469): on a pinHeck title the check refuses each by name, a sound must be one on the card,
-    and the Modes tab's form leaves them out."""
+def test_pinheck_takes_the_parity_keys_and_refuses_what_it_cannot_do(label, tmp_path):
+    """PAD-1469: a pinHeck title runs PAD-1424's start rules, lamps, balls and coils; the check
+    refuses by name only what a DMD game cannot do (start_after, a mode's own files), a sound must
+    be one on the card, and the Modes tab's form leaves those out."""
     mk = _mk()
     port = mk.load_port(label)
     (tmp_path / "x.mode").write_text("title = X\nstart = switch_20\nstart_on = ball_start\n"
-                                      "lamps = lamp_1\nmulti ball = 2\ncoil_start = KNOCKER\n"
+                                      "lamps = lamp_1\nmultiball = 2\nstart_after = any\n"
                                       "music = song.wav\nsound_start = boom.wav\nvideo = v.webm\n")
     _modes, problems = mk.check_modes(str(tmp_path), port)
-    for k in ("start_on", "lamps", "coil_start", "music", "video"):
+    for k in ("start_after", "music", "video"):
         assert any(("%s is not on" % k) in p for p in problems), (k, problems)
+    for k in ("start_on", "lamps", "multiball"):                # a problem line about the key itself
+        assert not any(p.split(": ", 1)[-1].startswith(k + " ") for p in problems), (k, problems)
     assert any("sound_start" in p and "sounds on its own card" in p for p in problems), problems
+    (tmp_path / "x.mode").write_text("title = X\nstart = switch_20\ncoil_start = KNOCKER\n")
+    coil = mk.check_modes(str(tmp_path), port)[1]
+    assert (coil == []) == bool(port.get("coils")), coil     # Rob Zombie names no coil a mode may use
     from pinball_decryptor.plugins.spooky import custom_modes as SM
     keys = {k for _g, ks in SM.form_groups(port) for k in ks}
-    assert not keys & set(mk.PINHECK_CANNOT) and "start" in keys and "sound_start" in keys
-    assert SM.title_form(port) == ("panel",)
+    assert not keys & {"start_after", "music", "picture", "video", "font_title", "panel_color"}
+    assert {"start", "sound_start", "start_on", "lamps", "multiball", "coil_start"} <= keys
+    assert SM.title_form(port) == ("panel", "lamp_color", "lamp_blink", "coil_holds")
     # a P-ROC title keeps every PAD-1424 key
     rm = mk.load_port("rick_and_morty-2022.09.02")
-    assert {"start_on", "lamps", "multiball", "coil_start"} <= {k for _g, ks in SM.form_groups(rm) for k in ks}
+    assert {"start_on", "start_after", "lamps", "multiball", "coil_start", "music"} <= {k for _g, ks in SM.form_groups(rm) for k in ks}

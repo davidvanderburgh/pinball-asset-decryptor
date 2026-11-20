@@ -73,6 +73,9 @@ class Game:
                 JR_RA, NOP))
         # text_show(this, 3, on): LOG[16] = on
         mu.mem_write(t["text_show"] & 0x1FFFFFFF, _mips(0x3C09A001, 0xAD261010, JR_RA, NOP))
+        # PAD-1469 fireCoil(this, coil, time): LOG[20]++, LOG[24] = coil, LOG[28] = time
+        mu.mem_write(t["coil_fire"] & 0x1FFFFFFF, _mips(
+            0x3C09A001, 0x8D281014, 0x25080001, 0xAD281014, 0xAD251018, 0xAD26101C, JR_RA, NOP))
         mu.mem_write(t["tick_target"] & 0x1FFFFFFF, _mips(JR_RA, NOP))
         mu.mem_write(t["free_flash"] & 0x1FFFFFFF, prg_tail)
         self.ms = 1000
@@ -80,6 +83,17 @@ class Game:
 
     def set8(self, a, v):
         self.mu.mem_write(a & 0x1FFFFFFF, bytes([v]))
+
+    def set32(self, a, v):
+        self.mu.mem_write(a & 0x1FFFFFFF, struct.pack("<I", v))
+
+    def get8(self, a):
+        return self.mu.mem_read(a & 0x1FFFFFFF, 1)[0]
+
+    def hold(self, n, closed):
+        a = self.t["switch_ram"] + (n >> 3)
+        cur = self.get8(a)
+        self.set8(a, cur | (1 << (n & 7)) if closed else cur & ~(1 << (n & 7)))
 
     def get32(self, a):
         return struct.unpack("<I", self.mu.mem_read(a & 0x1FFFFFFF, 4))[0]
@@ -192,6 +206,202 @@ def test_runtime_ends_modes_on_time_ball_end_tilt_and_counts_reset_at_a_new_game
     assert g.log.count("new game: start counts reset") == 2
     g.switch(20)
     assert "1_rush: STARTED" not in g.log.split("game over")[-1]
+
+
+# ============================================================================ PAD-1469: parity
+def _ball(g, ball=1, limit=4, phase=3):
+    """A ball in play: the ball-limit setting, the ball live, then in play (phase 3)."""
+    g.set8(g.t["ball_limit"], limit)
+    g.set8(g.t["phase"], 2)
+    g.new_ball(ball)
+    g.set8(g.t["phase"], phase)
+    g.tick(3)
+
+
+def test_start_rules_fire_on_the_games_events(ph, port):
+    m = lambda f, **k: dict(file=f, seconds="2", panel="none", **k)
+    g = _game(ph, port, [
+        m("e1.mode", start_on="ball_start", start_count="2"), m("e2.mode", start_on="first_ball"),
+        m("e3.mode", start_on="last_ball"), m("e4.mode", start_on="valid_playfield"),
+        m("e5.mode", start_on="extra_ball"), m("e6.mode", start_on="ball_saved"),
+        m("e7.mode", start_score="300000"), m("e9.mode", start="switch_44", start_once="game"),
+        m("e8.mode", start_combo="switch_20 switch_21", combo_seconds="2")])
+    g.hold(34, True)                                       # one ball home in the trough
+    _ball(g, 1)
+    assert "e2: STARTED" in g.log and "e1: STARTED" not in g.log      # first ball; ball_start 1 of 2
+    assert "e3: STARTED" not in g.log
+    g.switch(34)                                           # a trough switch is not the playfield
+    assert "event valid_playfield" not in g.log
+    g.switch(20)                                           # the first playfield switch; combo 1 of 2
+    assert "e4: STARTED" in g.log and "e8: STARTED" not in g.log
+    g.switch(21)
+    assert "e8: start_combo made" in g.log and "e8: STARTED" in g.log
+    g.switch(20)
+    g.tick(2500)
+    g.switch(21)                                           # 2.5 s apart: too slow for 2 s
+    assert g.log.count("e8: STARTED") == 1
+    g.set8(g.t["extra_balls"], 1)
+    g.tick(2)
+    assert "e5: STARTED" in g.log
+    g.set32(g.t["save_timer"], 3000)
+    g.tick(2)
+    g.set32(g.t["save_timer"], 0)                          # cut without a ball served back: not a save
+    g.tick(2)
+    assert "e6: STARTED" not in g.log
+    g.set32(g.t["save_timer"], 3000)
+    g.tick(2)
+    g.set32(g.t["save_timer"], 0)
+    g.set32(g.t["load_timer"], 2001)                       # the game served the drained ball back
+    g.tick(2)
+    g.set32(g.t["load_timer"], 0)
+    assert "e6: STARTED" in g.log
+    g.set32(g.t["score_array"] + 4, 350000)
+    g.tick(2)
+    assert "e7: start_score reached 350000" in g.log and "e7: STARTED" in g.log
+    g.tick(3000)
+    g.set32(g.t["score_array"] + 4, 450000)
+    g.tick(2)
+    assert g.log.count("e7: STARTED") == 1                 # once per player per game
+    g.switch(44)
+    g.tick(3000)                                           # e9 runs out
+    g.switch(44)
+    assert g.log.count("e9: STARTED") == 1 and "e9: not started: start_once" in g.log
+    g.set8(g.t["ball_active"], 0)
+    g.tick(3)
+    _ball(g, 2)
+    assert "e1: STARTED" in g.log                          # the second ball start
+    g.set8(g.t["ball_active"], 0)
+    g.tick(3)
+    g.set8(g.t["extra_balls"], 1)
+    _ball(g, 3)
+    assert "e3: STARTED" not in g.log                      # ball 3 with an extra ball waiting
+    g.set8(g.t["ball_active"], 0)
+    g.set8(g.t["extra_balls"], 0)
+    g.tick(3)
+    _ball(g, 3)                                            # the shoot-again: the last ball now
+    assert "e3: STARTED" in g.log
+
+
+def test_lamps_coils_and_holds_through_the_game(ph, port):
+    t = ph.H.HOOKS["JET_V004"]
+    g = _game(ph, port, [dict(file="l.mode", start="switch_20", shots="switch_21", seconds="5",
+                              lamps="lamp_10 lamp_11", lamp_color="400000", lamp_blink="2",
+                              coil_start="KNOCKER", coil_shot="SHAKER 20",
+                              coil_hold="SHAKER 600 8", coil_hold_on="switch_22")])
+    lamp = lambda n: g.get8(t["lamp_ram"] + n)
+    _ball(g)
+    g.switch(20)
+    assert (g.calls(5), g.calls(6), g.calls(7)) == (1, 0, 2)          # the knocker, 2 x 15 = 30 ms
+    levels = set()
+    for _ in range(40):
+        g.tick(25)
+        levels.add((lamp(10), lamp(11)))
+    assert levels == {(2, 2), (0, 0)}                      # 0x40 of 255 = 2 of 8, flashing
+    g.tick(300)
+    g.switch(21)
+    assert (g.calls(5), g.calls(6), g.calls(7)) == (2, 1, 2)          # 20 ms asked: 2 units
+    n = g.calls(5)
+    g.switch(22)                                           # the hold: one 15 ms pulse every 60 ms
+    g.tick(560)
+    assert 9 <= g.calls(5) - n <= 12 and g.calls(6) == 1 and g.calls(7) == 1
+    g.tick(200)
+    n = g.calls(5)
+    g.tick(500)
+    assert g.calls(5) == n and "coil_hold off 1 (its time)" in g.log
+    g.switch(22)                                           # 3 s between two holds of one coil
+    assert "not held: too soon" in g.log
+    g.set32(t["coil_busy"], 12345)                         # the game is driving the knocker
+    g.tick(5000)
+    g.switch(20)
+    assert "coil_start 0 not fired: the game is driving it" in g.log
+    g.set8(t["ball_active"], 0)
+    g.tick(3)
+    g.set8(t["lamp_ram"] + 10, 7)                          # the game's own value, after the mode
+    g.tick(5)
+    assert lamp(10) == 7
+
+
+def test_multiball_add_ball_and_ball_save_through_the_games_queue(ph, port):
+    t = ph.H.HOOKS["JET_V004"]
+    g = _game(ph, port, [dict(file="m.mode", start="switch_20", multiball="2 4", seconds="0"),
+                         dict(file="e.mode", start_on="multiball_end", seconds="2", panel="none"),
+                         dict(file="a.mode", start="switch_30", add_ball="switch_31 3", seconds="30"),
+                         dict(file="s.mode", start="switch_40", ball_save="20", seconds="3")])
+    q = lambda: struct.unpack("<H", g.mu.mem_read(t["ball_queue"] & 0x1FFFFFFF, 2))[0]
+    g.hold(34, True)                                       # Jetsons has two balls: one home
+    _ball(g)
+    g.switch(20)
+    assert q() == 1 and "m: a ball asked for, in play 1, want 2" in g.log
+    assert g.get32(t["save_timer"]) >= 3900                # the multiball's ball save
+    g.mu.mem_write(t["ball_queue"] & 0x1FFFFFFF, b"\0\0")  # the game loads it ...
+    g.hold(34, False)                                      # ... out of the trough: two in play
+    g.tick(5000)
+    assert q() == 0
+    g.hold(34, True)                                       # one drains, after the save
+    g.tick(600)
+    assert "event multiball_end" in g.log and "e: STARTED" in g.log
+    assert "m: ended" not in g.log                         # the save + 3 s are not over yet
+    g.tick(4000)
+    assert "m: ended (one ball left)" in g.log
+    g.switch(30)
+    g.switch(31)
+    assert q() == 1 and "a: add_ball on switch 31, balls 2" in g.log
+    g.switch(31)                                           # two in play is every ball Jetsons has
+    assert "add_ball: every ball of the game is in play" in g.log and q() == 1
+    g.mu.mem_write(t["ball_queue"] & 0x1FFFFFFF, b"\0\0")
+    g.set32(t["save_timer"], 0)
+    g.tick(3000)
+    g.set32(t["save_timer"], 5000)                         # the game's own save, 5 s left
+    g.switch(40)
+    assert g.get32(t["save_timer"]) >= 19000
+    g.set32(t["save_timer"], 16900)                        # as the game counts it down
+    g.tick(3000)                                           # s ends: the game's own save comes back
+    assert "s: ended (time ran out)" in g.log and 1900 <= g.get32(t["save_timer"]) <= 2000
+
+
+def test_pack_mode_parity_layout(ph, port):
+    b = ph.pack_mode(dict(file="p.mode", start="switch_20", start_on="ball_start last_ball",
+                          start_score="5000000", start_combo="switch_1 switch_2 switch_3",
+                          combo_seconds="4", start_once="ball", start_count_reset="ball",
+                          lamps="lamp_0 lamp_63", lamp_color="ff8000", lamp_blink="3",
+                          multiball="2 7", multiball_on="switch_9", add_ball="switch_8 2", ball_save="12",
+                          coil_start="KNOCKER", coil_shot="SHAKER 40", coil_hold="SHAKER 900 6",
+                          coil_hold_on="start"), port)
+    assert len(b) == ph.MODE_SIZE == 128 and b[39] == 1 | 2       # flags: reset ball, once ball
+    assert b[64] == 1 and b[71] == 0x80                    # lamps 0 and 63
+    assert b[72 + 1] == 1 << 1 and b[80 + 1] == 1          # multiball_on 9, add_ball 8
+    score, ev, level, blink, cn = struct.unpack_from("<IBBBB", b, 96)
+    assert (score, ev, level, blink, cn) == (5000000, 1 | 4, 8, 3, 3) and b[104:107] == bytes([1, 2, 3])
+    assert (b[110], b[111], b[112], b[113], b[114], b[115]) == (4, 2, 7, 2, 12, 1)
+    assert b[116:122] == bytes([0, 1, 0xFF, 0, 3, 0])      # knocker own, shaker 40 ms = 3 units
+    assert struct.unpack_from("<BBH", b, 122) == (1, 6, 900)
+    head = ph.pack_data([], port)[6:6 + 64]
+    assert head[0] == 32 and head[1] == 15                 # the lane, 15 ms a fireCoil unit
+    assert head[2 + (34 >> 3)] == (1 << 2) | (1 << 3)      # the trough: 34, 35
+    assert head[10] == 1 and head[11] == 3 and head[34] == 2 and head[35] == 5   # knocker, shaker
+    assert ph.lamp_level("000000") == 0 and ph.lamp_level("010000") == 1
+
+
+def test_check_takes_parity_keys_and_refuses_what_pinheck_cannot_do(mk, port, tmp_path):
+    def problems(text, cfg=""):
+        d = tmp_path / ("m%d" % abs(hash(text + cfg)))
+        d.mkdir()
+        (d / "a.mode").write_text(text)
+        if cfg:
+            (d / "title.cfg").write_text(cfg)
+        return mk.check_modes(str(d), port)[1]
+    ok = ("start_on = valid_playfield ball_saved\nstart_score = 1000000\nlamps = lamp_5\n"
+          "coil_start = KNOCKER\nmultiball = 2\nadd_ball = switch_20\nball_save = 10\n")
+    assert problems(ok) == []
+    assert problems("start = switch_1\ncoil_hold = SHAKER 1000\n", "coil_holds = on\n") == []
+    assert any("multiball 3" in p and "has 2 balls" in p for p in problems("start = switch_1\nmultiball = 3\n"))
+    assert any("start_after is not on" in p for p in problems("start_after = any\n"))
+    for k, v in (("music", "a.ogg"), ("picture", "a.png"), ("video", "a.webm")):
+        assert any("no files of its own" in p for p in problems("start = switch_1\n%s = %s\n" % (k, v)))
+    assert any("not one of" in p for p in problems("start = switch_1\nlamps = lamp_64\n"))
+    assert any("not one of" in p for p in problems("start = switch_1\ncoil_start = PLUNGER\n"))
+    assert any("built to stay on" in p for p in problems("start = switch_1\ncoil_hold = KNOCKER 500\n",
+                                                          "coil_holds = on\n"))
 
 
 def test_runtime_turned_off_and_power_up_logs(ph, port):
@@ -313,7 +523,7 @@ def test_modes_tab_form_and_install_note_for_jetsons():
     groups, title_keys = SM.form_groups(port), SM.title_form(port)
     keys = {k for _g, ks in groups for k in ks}
     assert "panel" in keys and not keys & {"font_title", "title_color", "panel_color"}
-    assert title_keys == ("panel",)
+    assert title_keys == ("panel", "lamp_color", "lamp_blink", "coil_holds")     # PAD-1469
     assert "UPDATE CODE" in SM.install_note("jetsons-V004")
     t = next(t for t in SM.titles() if t["label"] == "jetsons-V004")
     assert t["can_run"] and t["name"] == "Jetsons V004"
@@ -339,20 +549,3 @@ def test_unpack_takes_the_program_from_this_zip(tmp_path):
     assert open(unpack(str(a), cache)[0], "rb").read() == b"stock"
     assert open(unpack(str(b), cache)[0], "rb").read() == b"modes"
     assert open(unpack(str(a), cache)[0], "rb").read() == b"stock"
-
-
-def test_jjp_parity_keys_are_refused_by_name_and_hidden_on_jetsons(mk, port, tmp_path):
-    """PAD-1424 brought start rules, lamps, coils, balls and a mode's own files to the other
-    runtimes; Jetsons' runtime does not run them yet, so the check names them, never ignores them."""
-    (tmp_path / "title.cfg").write_text("coil_holds = on\n")
-    (tmp_path / "a.mode").write_text("start = switch_1\nshots = switch_2\nstart_on = ball_start\n"
-                                     "lamps = L1\ncoil_start = KNOCKER\nmultiball = 2\n"
-                                     "sound_shot = boom.wav\nmusic = song.ogg\n")
-    _modes, problems = mk.check_modes(str(tmp_path), port)
-    text = "\n".join(problems)
-    for k in ("start_on", "lamps", "coil_start", "multiball", "music", "coil_holds"):
-        assert "%s is not on Jetsons yet" % k in text, k
-    assert any("sound_shot" in p and "sounds on its own card" in p for p in problems), problems
-    from pinball_decryptor.plugins.spooky import custom_modes as SM
-    assert [g for g, ks in SM.form_groups(port) if ks] == ["Mode", "Sounds", "Screen"]
-    assert dict(SM.form_groups(port))["Sounds"] == ("sound_start", "sound_shot", "sound_complete", "sound_end")

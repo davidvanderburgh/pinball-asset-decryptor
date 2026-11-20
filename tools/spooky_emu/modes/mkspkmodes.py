@@ -231,34 +231,25 @@ def _int(v):
     return int(v.replace(",", "").replace("_", "")) if MJ._INT.match(v or "") else None
 
 
-#: what the pinHeck runtime (padheck.c) does not run yet: PAD-1424's start rules, lamps, balls,
-#: coils and a mode's own files, and the title's coil_holds (PAD-1469 brings them to pinHeck).
-#: The check refuses each by name on a pinHeck title and the Modes tab's form leaves them out.
-PINHECK_CANNOT = ("start_on", "start_after", "start_score", "start_combo", "combo_seconds",
-                  "start_count_reset", "start_once", "lamps", "lamp_color", "lamp_blink",
-                  "multiball", "multiball_on", "add_ball", "ball_save", "coil_start", "coil_shot",
-                  "coil_complete", "coil_hold", "coil_hold_on", "sound_channel", "music",
-                  "picture", "picture_at", "video", "video_at", "video_loop", "coil_holds")
-
-
 def keys_not_here(port):
     """Every key *port*'s runtime cannot do: its port's ``keys_not_here`` (a pinHeck DMD: no fonts,
-    no colours) and, on a pinHeck title, PINHECK_CANNOT."""
-    out = set((port or {}).get("keys_not_here") or ())
-    if engine(port) == "pinheck":
-        out |= set(PINHECK_CANNOT)
-    return out
+    no colours, no files of a mode's own, no game modes to start after; PAD-1469 runs the rest)."""
+    return set((port or {}).get("keys_not_here") or ())
 
 
 def _not_here(k, port, v=""):
     """Why the title's runtime cannot do *k* (= *v*), or None."""
-    if k in ((port or {}).get("keys_not_here") or ()):
-        return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
-                "and colour" % (k, port.get("title", "this game")))
-    if engine(port) == "pinheck" and k in PINHECK_CANNOT:
-        return ("%s is not on %s yet: its modes run start, shots, points, time, completion, the "
-                "game's own sounds and the panel; take the line out" % (k, port.get("title", "this game")))
-    return None
+    if k not in keys_not_here(port):
+        return None
+    t = port.get("title", "this game")
+    if k == "start_after":
+        return ("start_after is not on %s: the game has no modes of its own a mode could watch; "
+                "start_on, start_score or start_combo can start it" % t)
+    if k in ("sound_channel", "music", "picture", "picture_at", "video", "video_at", "video_loop"):
+        return ("%s is not on %s: a mode there plays the game's own sounds from its card and draws "
+                "the game's own DMD text, with no files of its own" % (k, t))
+    return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
+            "and colour" % (k, t))
 
 
 def token(name):
@@ -443,6 +434,10 @@ def check_modes(mode_dir, port=None):
             problems.append("%s: lamp_blink must be 0-10 flashes a second" % fn)
         if m.get("multiball_on") and not m.get("multiball"):
             problems.append("%s: multiball_on without a multiball line (it is ignored)" % fn)
+        balls = (port or {}).get("balls")
+        mbw = MJ._names(m.get("multiball") or "")
+        if balls and mbw and mbw[0].isdigit() and int(mbw[0]) > balls:
+            problems.append("%s: multiball %s: %s has %d balls" % (fn, mbw[0], title_name, balls))
         if m.get("coil_hold") and title.get("coil_holds") != "on":
             problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
                             "(after a look at it on the machine)" % fn)

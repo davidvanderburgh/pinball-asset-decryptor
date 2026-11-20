@@ -332,7 +332,9 @@ function ModeList({ j, onNew }) {
 function FormGroups({ j, have }) {
   const f = j.form || {};
   const meta = j.fields || {};
-  return (j.groups || []).map((g) => html`<div class="jjpm-group" key=${g.title}>
+  // a group whose every key the title cannot do (Picture and video on Alice Cooper and the pinHeck
+  // DMD games, PAD-1469) is not drawn at all
+  return (j.groups || []).filter((g) => g.keys.length).map((g) => html`<div class="jjpm-group" key=${g.title}>
     <div class="jjpm-gt">${g.title}</div>
     ${g.keys.map((k) => html`<${Row} key=${k} k=${k} meta=${meta[k]} value=${f[k]} j=${j} have=${have} />`)}
   </div>`);

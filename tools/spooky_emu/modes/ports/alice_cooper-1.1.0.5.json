@@ -1946,5 +1946,7 @@
   "SD124"
  ],
  "voice_lines": 389,
- "points_scale": 1
+ "points_scale": 1,
+ "coils": ["knocker", "shaker", "upperMagnet", "lowerMagnet", "dropTarget1Knockdown", "dropTarget2Knockdown", "dropTarget3Knockdown", "dropTarget1Reset", "dropTarget2Reset", "dropTarget3Reset", "resetDropTarget"],
+ "coil_holds": ["shaker", "upperMagnet", "lowerMagnet"]
 }

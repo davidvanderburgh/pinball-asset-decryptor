@@ -27,6 +27,7 @@ public class Hook : Mode {
                 case Messages.Event.ball_start: r.OnBallStart(); break;
                 case Messages.Event.end_of_ball: r.OnBallEnd("the ball ended"); break;
                 case Messages.Event.tilt: r.OnBallEnd("tilt"); break;
+                case Messages.Event.ball_saved: r.GameEvent("ball_saved"); break;
                 case Messages.Event.end_of_game: r.OnGameEnd(); break;
                 case Messages.Event.mode_started: if (m.DataInt == Modes.attract_mode) r.OnGameEnd(); break;
             }
@@ -51,7 +52,7 @@ public static class Glue {
     }
 
     public static int ModeCount() { return Modes.modes.Count; }
-    public static void Poll(PadRuntime r) { }
+    public static void Poll(PadRuntime r) { LaunchPoll(); }
 
     public static string Sym(string label) {
         return string.Join("_", (label ?? "").ToLowerInvariant().Split(new[] { ' ', '-', '/', '.' },
@@ -73,6 +74,92 @@ public static class Glue {
     }
 
     public static bool HasPlayers() { return Machine.game != null && Machine.game.players != null && Machine.game.players.Count > 0; }
+    // ---- balls and game modes (PAD-1424 start rules)
+    static global::Player Up() { return HasPlayers() ? Machine.game.currentPlayer : null; }
+    public static int BallsPerGame() { return Settings.balls_per_game; }
+    public static int Ball() { var p = Up(); return p == null ? 0 : p.CurrentBall; }
+    public static int Player() { return HasPlayers() ? Machine.game.current_player_index : 0; }
+    public static int ExtraBallsLeft() { var p = Up(); return p == null ? 0 : p.extra_balls; }
+    public static int ExtraBallsAwarded() { var p = Up(); return p == null ? -1 : p.extra_balls; }
+    public static int BallsInPlay() { return HasPlayers() ? Game.balls_in_play : -1; }
+
+    // a running mode by its name in the port report (its title, else its class) and by its class
+    public static List<string> RunningModes() {
+        var o = new List<string>();
+        foreach (var m in Modes.modes.Values)
+            if (m != null && m.active && m.mode != PadRuntime.ModeId) {
+                o.Add(m.GetType().Name);
+                if (!string.IsNullOrEmpty(m.title)) o.Add(m.title);
+            }
+        return o;
+    }
+
+    // ---- lamps, coils, balls (PAD-1424)
+    // Lamps on a light layer of ours (the hook's priority, above every game mode's); Off(layer)
+    // hands a lamp back to the layers under it.
+    const float Layer = 9001.25f;
+    static int pendingLaunch;
+
+    static SerialLED Led(string l) {
+        string t = PadRuntime.Tok(l);
+        return Lights.serialLEDs == null ? null : Lights.serialLEDs.FirstOrDefault(x => x != null && PadRuntime.Tok(x.name) == t);
+    }
+
+    public static bool LampSet(string l, Color32 c) {
+        var led = Led(l);
+        if (led == null) return false;
+        led.SetColor((Color)c, Layer, 1f);
+        return true;
+    }
+
+    public static void LampRelease(string l) { var led = Led(l); if (led != null) led.Off(Layer); }
+
+    static Coil CoilOf(string c) {
+        string t = PadRuntime.Tok(c);
+        foreach (var f in typeof(Coils).GetFields(BindingFlags.Static | BindingFlags.Public))
+            if (f.FieldType == typeof(Coil) && PadRuntime.Tok(f.Name) == t) return f.GetValue(null) as Coil;
+        return null;
+    }
+
+    public static string CoilPulse(string c, int ms) {
+        var k = CoilOf(c);
+        if (k == null) return null;
+        long own = k.pulse_time_ms;
+        if (ms > 0 && ms < own) { k.pulse_for_ms((uint)ms); return "pulse_for_ms " + ms + " ms, its own " + own; }
+        k.Pulse();
+        return "Pulse, its own " + own + " ms";
+    }
+
+    public static string CoilHold(string c, int power) {
+        var k = CoilOf(c);
+        if (k == null) return null;
+        k.SetPower((long)(power * 100 / 32));
+        return "SetPower " + (power * 100 / 32) + "%";
+    }
+
+    public static void CoilRelease(string c) { var k = CoilOf(c); if (k != null) k.SetPower(0L); }
+
+    // the trough ejects them (counted: lockedBalls goes down); the shooter lane launches every
+    // ball that lands in it once asked while one is there (Poll asks until it takes)
+    public static string AddBalls(int n) {
+        Game.trough.RequestEject(n);
+        pendingLaunch = 400;
+        return "trough.RequestEject(" + n + "), then the shooter lane's autolaunch";
+    }
+
+    public static void LaunchPoll() {
+        if (pendingLaunch <= 0) return;
+        pendingLaunch--;
+        if (Game.shooterLane != null && Game.shooterLane.RequestLaunch()) { pendingLaunch = 0; Loader.Log("shooter lane: autolaunch on"); }
+    }
+
+    public static string BallSave(int secs, int balls) {
+        Machine.CallEvent(Messages.Event.award_timed_ballsave, secs);
+        return "award_timed_ballsave " + secs + " s";
+    }
+
+    public static void BallSaveOff(int secs) { }       // the game's timed save runs out by itself
+
     public static long PlayerScore() { return HasPlayers() ? Machine.game.currentPlayer.score : 0; }
     public static void Award(long ask) { hook.ScorePoints(ask, null, 0); }
     public static string ScoreNote() { return "Mode.ScorePoints(points, no switch, 0 digits)"; }
@@ -100,6 +187,9 @@ public static class Glue {
     }
 
     public static AudioSource VoiceChannel() { return Media.voice_channel; }
+    public static List<AudioSource> MusicSources() {
+        return new List<AudioSource> { Media.primary_music_channel, Media.secondary_music_channel };
+    }
 
     public static List<string> Lamps() {
         return Lights.serialLEDs == null ? new List<string>()

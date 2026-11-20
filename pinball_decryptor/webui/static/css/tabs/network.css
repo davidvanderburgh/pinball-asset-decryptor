@@ -21,6 +21,8 @@ html.bp-1100 .net-grid { grid-template-columns: 1fr; }
 .net-wifi-details th { width: 34%; white-space: normal; }
 .net-wifi-details td { overflow-wrap: anywhere; }
 .net-wifi-compare { margin-bottom: 4px; }
+/* PAD-1467: the machine's own screen, captured or live */
+.net-screen { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #000; }
 .net-wifi-compare thead th { border-bottom: 2px solid var(--line); }
 .net-wifi-compare tbody th { width: 24%; white-space: normal; color: var(--ink); }
 .net-wifi-compare tr.net-wifi-yours > * { background: var(--accent-soft); }

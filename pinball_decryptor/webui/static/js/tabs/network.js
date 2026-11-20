@@ -2,7 +2,7 @@
 // someone who has never heard of it. The score feed (PAD-1204) moved here from Play options, whose other options
 // change how the game plays; its state and actions are the Modes service's (the `modes` namespace). Remote access
 // (SSH, PR #38) is this tab's own (the `network` namespace).
-import { html, useState, useEffect, PageHead, Card, Field, Check, Note, Button, Select, Progress, call, cx } from "../core/ui.js";
+import { html, useState, useEffect, PageHead, Card, Field, Check, Note, Button, Select, Progress, call, cx, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -251,6 +251,38 @@ function WifiStartup({ n }) {
   <//>`;
 }
 
+// PAD-1467: what the machine's own screen shows, over remote access (core/machine_screen.py): one picture, or a
+// live view the page server plays as a changing picture (/screen).  David: "the remote screenshot feature is
+// actually really useful" and "a 'screen share' live feed ... would be killer".
+function MachineScreen({ n }) {
+  const busy = n.running || n.checking || n.scanning || n.screen_busy;
+  const token = encodeURIComponent(new URLSearchParams(location.search).get("t") || "");
+  return html`<${Card} cls="net-opt" title="Machine screen">
+    <p class="net-does">See what your machine's own screen shows right now, from here. It only reads the screen:
+      the game keeps running and nothing on the machine is changed. It needs remote access on the machine's card,
+      like Send to machine.</p>
+    <div class="row">
+      <${Button} kind=${n.screen_live ? "" : "primary"} disabled=${busy || n.screen_live || !n.address}
+        onClick=${() => call("network.capture_screen")}>${n.screen_busy ? "Capturing…" : "Capture the screen"}<//>
+      ${n.screen_live
+        ? html`<${Button} kind="primary" onClick=${() => call("network.stop_live")}>Stop live view<//>`
+        : html`<${Button} disabled=${busy || !n.address} onClick=${() => call("network.start_live")}>Live view<//>`}
+      <${Button} disabled=${!(n.screen_path || n.screen_live)}
+        onClick=${() => call("network.save_screen")}>Save picture…<//>
+    </div>
+    ${n.screen_live
+      ? html`<img class="net-screen" alt="The machine's screen, live"
+          src=${"/screen?t=" + token + "&v=" + (n.screen_live_id || 0)} />`
+      : n.screen_path
+        ? html`<img class="net-screen" alt="The machine's screen" src=${mediaUrl(n.screen_path) + "&v=" + (n.screen_seq || 0)} />`
+        : null}
+    <${Said} text=${n.screen_note} kind=${n.screen_kind} />
+    <span class="small muted">Live view shows about 5 frames a second on 5 GHz Wi-Fi (measured on a Godzilla LE; less
+      on 2.4 GHz), with no sound. The pictures of the screen cross your home network on a plain connection, as
+      Send to machine's big files do. It stops when you leave this tab, and by itself after 30 minutes.</span>
+  <//>`;
+}
+
 export default function NetworkTab() {
   const n = useNs("network");
   const s = useNs("modes");
@@ -260,6 +292,7 @@ export default function NetworkTab() {
     <div class="net-grid">
       ${n.offered !== false ? html`<${RemoteAccess} n=${n} />` : null}
       ${n.offered !== false ? html`<${SendToMachine} n=${n} />` : null}
+      ${n.offered !== false ? html`<${MachineScreen} n=${n} />` : null}
       ${n.project && n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
       ${n.project && s.feed_shown ? html`<${ScoreFeed} s=${s} />` : null}
     </div>

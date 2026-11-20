@@ -530,6 +530,183 @@ class NetworkTab(TabService):
         fn(path, address)
         return True
 
+    # ------------------------------------------------------------------ PAD-1467: the machine's own screen
+    # David: "the remote screenshot feature is actually really useful. can we build that into the network tab
+    # too?" and "or even if we can do a 'screen share' live feed that would be killer" (core/machine_screen.py)
+    def _screen_file(self):
+        import tempfile
+        folder = os.path.join(tempfile.gettempdir(), 'pad-webui-screen')
+        os.makedirs(folder, exist_ok=True)
+        return os.path.join(folder, 'machine-screen.png')
+
+    def _screen_shown(self, png, width, height, note):
+        """A picture to show and to save: written where the page can load it, and said."""
+        self._screen_png = png
+        path = self._screen_file()
+        try:
+            with open(path, 'wb') as f:
+                f.write(png)
+        except OSError as e:
+            self.set(screen_busy=False, screen_note='The picture could not be shown: %s' % e, screen_kind='err')
+            return
+        self.set(screen_busy=False, screen_path=path, screen_seq=int(self.get('screen_seq') or 0) + 1,
+                 screen_note='%s (%d x %d).' % (note, width, height), screen_kind='ok')
+
+    @rpc
+    def capture_screen(self):
+        """One picture of what the machine's screen shows now, on a worker."""
+        if self.get('screen_busy') or self.get('screen_live') or not self.get('address'):
+            return False
+        address = self.get('address')
+        self.set(screen_busy=True, screen_note='Reading the machine\'s screen...', screen_kind='')
+
+        def work():
+            import time as _time
+            from ...core import machine_screen, remote_send
+            try:
+                m = remote_send.connect(address)
+                try:
+                    png, w, h = machine_screen.capture(m)
+                finally:
+                    m.close()
+            except (machine_screen.ScreenError, remote_send.SendError) as e:
+                text = str(e)
+                self.ctx.loop.post(lambda: self.set(screen_busy=False, screen_note=text, screen_kind='err'))
+                return
+            except Exception as e:                      # noqa: BLE001 - said, never raised into the UI
+                text = "Could not read the machine's screen: %s" % e
+                self.ctx.loop.post(lambda: self.set(screen_busy=False, screen_note=text, screen_kind='err'))
+                return
+            self.ctx.loop.post(self._screen_shown, png, w, h, 'Captured at %s' % _time.strftime('%H:%M:%S'))
+        threading.Thread(target=work, daemon=True, name='pad-screen-capture').start()
+        return True
+
+    @rpc
+    def save_screen(self):
+        """Save the picture on show (during a live view, the frame of that moment) as a PNG."""
+        png = getattr(self, '_screen_png', None)
+        live = getattr(self, '_live', None)
+        if self.get('screen_live') and live and live.get('raw'):
+            from ...core import machine_screen
+            try:
+                png = machine_screen.encode(live['raw'], live['geo'])
+            except Exception:                           # noqa: BLE001 - the last captured picture is kept
+                pass
+        if not png:
+            return False
+        import time as _time
+        path = self.window.ask_save('machine_screen', "Save the picture of the machine's screen",
+                                    initialfile='machine-screen-%s.png' % _time.strftime('%Y%m%d-%H%M%S'),
+                                    defaultextension='.png', filetypes=[('PNG picture', '*.png')])
+        if not path:
+            return False
+        try:
+            with open(path, 'wb') as f:
+                f.write(png)
+        except OSError as e:
+            self.set(screen_note='The picture could not be saved: %s' % e, screen_kind='err')
+            return False
+        self.set(screen_note='Saved to %s.' % path, screen_kind='ok')
+        return True
+
+    def live_frame(self, seq, timeout):
+        """For the page server's ``/screen``: ``(seq, jpeg)`` of a frame newer than *seq*, ``(seq, None)`` when
+        none came within *timeout*, ``None`` once the live view has ended."""
+        live = getattr(self, '_live', None)
+        if not live:
+            return None
+        with live['cond']:
+            if live['seq'] == seq and not live['done']:
+                live['cond'].wait(timeout)
+            if live['done']:
+                return None
+            if live['seq'] == seq:
+                return seq, None
+            return live['seq'], live['jpeg']
+
+    @rpc
+    def start_live(self):
+        """The machine's screen, live, until Stop (or this tab is left, or the machine's side ends)."""
+        if self.get('screen_busy') or self.get('screen_live') or not self.get('address') or self.get('running'):
+            return False
+        address = self.get('address')
+        live = dict(cond=threading.Condition(), seq=0, jpeg=None, raw=None, geo=None, done=False, stop=False)
+        self._live = live
+        self.set(screen_live=True, screen_live_id=int(self.get('screen_live_id') or 0) + 1,
+                 screen_note='Connecting...', screen_kind='', screen_rate='')
+
+        def work():
+            import time as _time
+            from ...core import machine_screen, remote_send
+            text, kind, last = 'Live view stopped.', 'ok', None
+            m = view = None
+            try:
+                m = remote_send.connect(address)
+                view = machine_screen.LiveView(m)
+                live['geo'] = view.geo
+                how = 'plain connection' if view.plain else 'encrypted connection, slower'
+                stamps, said = [], 0.0
+                for raw in view.frames():
+                    if live['stop']:
+                        break
+                    jpeg = machine_screen.encode(raw, view.geo, 'JPEG')
+                    with live['cond']:
+                        live['jpeg'], live['raw'] = jpeg, raw
+                        live['seq'] += 1
+                        live['cond'].notify_all()
+                    last = raw
+                    now = _time.monotonic()
+                    stamps = [t for t in stamps if now - t <= 4.0] + [now]
+                    if now - said > 2.0:
+                        said = now
+                        note = 'Live: %.1f frames a second (%s).' % (machine_screen.frame_rate(stamps, now), how)
+                        self.ctx.loop.post(lambda note=note: self.get('screen_live') and self.set(screen_note=note))
+                else:
+                    text = "Live view ended: the machine stopped sending its screen."
+            except (machine_screen.ScreenError, remote_send.SendError) as e:
+                text, kind = str(e), 'err'
+            except Exception as e:                      # noqa: BLE001 - said, never raised into the UI
+                text, kind = 'Live view stopped: %s' % e, 'err'
+            finally:
+                for thing in (view, m):
+                    try:
+                        if thing is not None:
+                            thing.close()
+                    except Exception:                   # noqa: BLE001
+                        pass
+                with live['cond']:
+                    live['done'] = True
+                    live['cond'].notify_all()
+            png = None
+            if last is not None:
+                try:
+                    png = machine_screen.encode(last, live['geo'])
+                except Exception:                       # noqa: BLE001
+                    png = None
+            self.ctx.loop.post(self._live_ended, live, text, kind, png)
+        threading.Thread(target=work, daemon=True, name='pad-screen-live').start()
+        return True
+
+    def _live_ended(self, live, text, kind, png):
+        if getattr(self, '_live', None) is live:
+            self._live = None
+        self.set(screen_live=False)
+        if png and live.get('geo'):
+            self._screen_shown(png, live['geo']['width'], live['geo']['height'],
+                               text.rstrip('.') + '; the last frame is kept')
+            if kind == 'err':
+                self.set(screen_kind='err')
+        else:
+            self.set(screen_note=text, screen_kind=kind)
+
+    @rpc
+    def stop_live(self):
+        live = getattr(self, '_live', None)
+        if not live:
+            return False
+        live['stop'] = True
+        return True
+
     def on_show(self):
         self._visible = True
         self.publish()
@@ -539,6 +716,7 @@ class NetworkTab(TabService):
 
     def on_hide(self):
         self._visible = False
+        self.stop_live()            # PAD-1467: a live view nobody is looking at stops loading the machine
 
     def on_project(self, folder):
         self.publish()

@@ -1,0 +1,10 @@
+# Hot Delivery - a starter mode: switch 45 starts it, switches 46 and 23 score for 8 seconds
+name = Hot Delivery
+title = HOT DELIVERY
+start = switch_45
+shots = switch_46 switch_23
+points = 50000
+seconds = 8
+sound_start = BLA
+sound_end = ATB
+panel = top

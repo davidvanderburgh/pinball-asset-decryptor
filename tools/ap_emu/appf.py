@@ -32,8 +32,10 @@ game is in the app's Linux.  --parent-pipe: the tab holds stdin open and
 closes it on Stop; the window closes then (and on the game's end).
 """
 import argparse
+import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -50,6 +52,28 @@ POLL_S = 0.2
 GONE_AFTER = 15          # polls without a live game (~3 s) = it is gone
 GEOM_FILE = os.path.join(os.path.expanduser("~"), ".pad_ap_switches.json")
 LED_R = 5.5
+#: PAD-1468: a picture the user put under a game's numbered spots, one per
+#: game: <key>.<ext> and <key>.json ({"rect": [x, y, w, h]} in the table's
+#: base, where the picture is drawn).  Theirs, never shipped.
+PICTURE_DIR = os.path.join(os.path.expanduser("~"), ".pad_playfield_pictures")
+PICTURE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
+                 "image/gif": "gif", "image/bmp": "bmp"}
+PICTURE_MAX = 30 * 1024 * 1024
+
+
+def picture_key(title):
+    return re.sub(r"[^a-z0-9]+", "_", (title or "game").lower()).strip("_") or "game"
+
+
+def good_rect(r):
+    """[x, y, w, h] of finite numbers with a real size, else None."""
+    try:
+        r = [float(v) for v in r]
+    except (TypeError, ValueError):
+        return None
+    if len(r) != 4 or any(v != v or abs(v) > 1e6 for v in r) or r[2] < 1 or r[3] < 1:
+        return None
+    return [round(v, 2) for v in r]
 
 #: The coin-door service buttons' look: switch name, then label, caption,
 #: glyph, fill, ring, caption colour, key codes, key text - the Stern panel's.
@@ -182,8 +206,16 @@ class App:
         self.shooter = self.by_name.get("shooter")
         self.placed = [s for s in sws if "x" in s]
         self.lights_placed = table.get("lights") or []
+        # PAD-1468: a table whose switches are the Spooky manual's numbered
+        # spots gets the playfield view, its spots numbered, over the user's
+        # picture, the game's own drawing or a plain field; it keeps the
+        # schematic's LED grid
+        self.spots = bool(table.get("spots") and table.get("size") and self.placed)
         self.field = bool(self.art and table.get("size")
-                          and (self.placed or self.lights_placed))
+                          and (self.placed or self.lights_placed)) or self.spots
+        # PAD-1468: under the spots, the user's own picture of this game, else
+        # the game's own drawing (the art the table names, at its art_rect)
+        self.pic_key = picture_key(title)
         # the key panel: apswitches.py's rows; the schematic view lists every
         # switch itself, so there it keeps the keyed rows only
         self.rows = [r for r in table.get("rows") or []
@@ -217,9 +249,11 @@ class App:
 
     def _info(self):
         return [["Switches", str(len(self.by_n)),
-                 "%d on the picture" % len(self.placed) if self.field else "no picture"],
+                 "%d on the manual's spots" % len(self.placed) if self.spots
+                 else "%d on the picture" % len(self.placed) if self.field else "no picture"],
                 ["Lights", str(len(self.lights) or len(self.lights_placed)),
-                 "%d on the picture" % len(self.lights_placed) if self.field else ""],
+                 "%d on the picture" % len(self.lights_placed)
+                 if self.field and not self.spots else ""],
                 ["Positions", self.t.get("art_from") or "none in this game", ""]]
 
     def _live(self):
@@ -289,21 +323,142 @@ class App:
         return "  ·  ".join(bits)
 
     def _switch_tip(self, s):
-        return "%s  (%s, %d%s)\nhold to make it; hold the right button to rip it" % (
-            s["label"] or s["name"], s["name"], s["n"], ", an opto" if s.get("nc") else "")
+        spot = ""
+        if s.get("spot"):
+            spot = "\n%s on the manual's switch photo" % (
+                "the trough jam" if s["spot"] == "JAM" else "spot %s" % s["spot"])
+        return "%s  (%s, %d%s)%s\nhold to make it; hold the right button to rip it" % (
+            s["label"] or s["name"], s["name"], s["n"], ", an opto" if s.get("nc") else "",
+            spot)
+
+    # -- the picture under the spots (PAD-1468) -------------------------------
+    def _prefs(self):
+        """This game's saved picture settings: {"rect": ..., "hide": bool}."""
+        try:
+            with open(os.path.join(PICTURE_DIR, self.pic_key + ".json"),
+                      encoding="utf-8") as fh:
+                d = json.load(fh)
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_prefs(self, d):
+        os.makedirs(PICTURE_DIR, exist_ok=True)
+        with open(os.path.join(PICTURE_DIR, self.pic_key + ".json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(d, fh)
+
+    def _own_picture(self):
+        """(path, rect or None) of the user's picture of this game, or None."""
+        for ext in sorted(set(PICTURE_TYPES.values())):
+            f = os.path.join(PICTURE_DIR, "%s.%s" % (self.pic_key, ext))
+            if os.path.isfile(f):
+                rect = None
+                try:
+                    with open(os.path.join(PICTURE_DIR, self.pic_key + ".json"),
+                              encoding="utf-8") as fh:
+                        rect = good_rect(json.load(fh).get("rect"))
+                except (OSError, ValueError, AttributeError):
+                    pass
+                return f, rect
+        return None
+
+    def _picture_file(self):
+        own = self._own_picture()
+        if own:
+            return own[0]
+        return self.art if self.spots else None
+
+    def _pic_v(self):
+        """The picture's version for the page's URL (the file route caches)."""
+        try:
+            return int(os.path.getmtime(self._picture_file()) * 1000)
+        except (OSError, TypeError):
+            return 0
+
+    def _picture(self):
+        """What the page draws under the spots: {own, rect, v} or None."""
+        own = self._own_picture()
+        hide = bool(self._prefs().get("hide"))
+        if own:
+            return {"own": True, "rect": own[1], "v": self._pic_v(),
+                    "game": bool(self.art), "hide": hide}
+        if self.spots and self.art:
+            return {"own": False, "rect": good_rect(self.t.get("art_rect") or ()),
+                    "v": self._pic_v(), "game": True, "hide": hide}
+        return None
+
+    def _drop_own_picture(self):
+        """The picture and where it was lined up; Hide spots stays."""
+        for ext in set(PICTURE_TYPES.values()):
+            try:
+                os.remove(os.path.join(PICTURE_DIR, "%s.%s" % (self.pic_key, ext)))
+            except OSError:
+                pass
+        d = self._prefs()
+        if "rect" in d:
+            d.pop("rect")
+            self._save_prefs(d)
+
+    def set_picture(self, data_url):
+        """The page's chosen file, as a data: URL -> this game's picture."""
+        m = re.match(r"data:([\w/+.-]+);base64,(.*)$", data_url or "", re.S)
+        if not m or m.group(1).lower() not in PICTURE_TYPES:
+            raise ValueError("pick a PNG, JPEG, WebP, GIF or BMP picture")
+        raw = base64.b64decode(m.group(2), validate=False)
+        if not raw or len(raw) > PICTURE_MAX:
+            raise ValueError("that picture is empty or bigger than 30 MB")
+        os.makedirs(PICTURE_DIR, exist_ok=True)
+        self._drop_own_picture()
+        f = os.path.join(PICTURE_DIR, "%s.%s" % (self.pic_key,
+                                                PICTURE_TYPES[m.group(1).lower()]))
+        with open(f + ".tmp", "wb") as fh:
+            fh.write(raw)
+        os.replace(f + ".tmp", f)
+        return self._picture()
+
+    def set_picture_rect(self, rect):
+        """Where the user lined their picture up; a game drawing's place is
+        the table's, never moved (Reset puts a moved picture back)."""
+        rect = good_rect(rect)
+        if rect is None or not self._own_picture():
+            return self._picture()
+        d = self._prefs()
+        d["rect"] = rect
+        self._save_prefs(d)
+        return self._picture()
+
+    def set_spots_hidden(self, hide):
+        """Hide spots: the picture's own buttons show, the switches still work."""
+        d = self._prefs()
+        d["hide"] = bool(hide)
+        self._save_prefs(d)
+        return self._picture()
+
+    def clear_picture(self):
+        self._drop_own_picture()
+        return self._picture()
+
+    def _grid_blocks(self):
+        names = sorted(self.lights) or sorted(k for k, _x, _y in self.lights_placed)
+        return [{"node": "lights", "cells": [{"k": k, "tip": k} for k in names]}] if names else []
 
     def _view(self):
         if self.field:
             w, h = self.t["size"]
-            return {"base": [w, h], "art": True, "coils": [], "trough": None,
-                    "fixtures": [[k, x, y] for k, x, y in self.lights_placed],
-                    "switches": [[str(s["n"]), s["x"], s["y"], s["n"]] for s in self.placed],
-                    "info": self._info()}
-        names = sorted(self.lights) or sorted(k for k, _x, _y in self.lights_placed)
+            v = {"base": [w, h], "art": bool(self.art), "coils": [], "trough": None,
+                 "fixtures": [[k, x, y] for k, x, y in self.lights_placed],
+                 "switches": [[str(s["n"]), s["x"], s["y"], s["n"]]
+                              + ([s["spot"]] if s.get("spot") else []) for s in self.placed],
+                 "info": self._info()}
+            if self.spots:
+                v.update(fixtures=[], sketch=self.t.get("sketch") or [],
+                         grid={"blocks": self._grid_blocks()}, art=False,
+                         picture=self._picture())
+            return v
         return {"bar": "%s - this game ships no playfield picture: its lights, "
                        "and every switch" % self.title,
-                "grid": {"blocks": [{"node": "lights", "cells": [
-                    {"k": k, "tip": k} for k in names]}] if names else []},
+                "grid": {"blocks": self._grid_blocks()},
                 "entries": [{"id": s["n"], "name": s["label"] or s["name"],
                              "tip": self._switch_tip(s), "live": True}
                             for s in sorted(self.by_n.values(), key=lambda s: s["n"])],
@@ -316,7 +471,8 @@ class App:
         return {"title": "%s - virtual playfield" % self.title, "rig": rig,
                 "status": self._status(), "run": self._run(), "savestates": False,
                 "kind": "field" if self.field else "schematic", "view": self._view(),
-                "dyn": ({"fx": self._fx(), "coil": {}, "sw": self._sw_dyn()} if self.field
+                "dyn": ({"fx": self._fx(), "coil": {}, "sw": self._sw_dyn()}
+                        if self.field and not self.spots
                         else {"grid": self._grid(), "sw": self._sw_dyn()}),
                 "panel": {"spec": self._panel_spec(), "dyn": self._panel_dyn()},
                 "live": self._live()}
@@ -330,6 +486,14 @@ class App:
         self.note = (self.note + [text])[-6:]
 
     def api(self, m, args):
+        if m == "pic_set":
+            return self.set_picture(args[0])
+        if m == "pic_rect":
+            return self.set_picture_rect(args[0])
+        if m == "pic_clear":
+            return self.clear_picture()
+        if m == "pic_spots":
+            return self.set_spots_hidden(args[0])
         if m == "hold":
             n = int(args[0])
             self.held_ids.add(n)
@@ -457,6 +621,8 @@ class App:
         return None
 
     def file(self, name):
+        if name == "picture":
+            return self._picture_file()
         return self.art if name == "art" else None
 
     # -- the live loop ---------------------------------------------------------------
@@ -470,7 +636,8 @@ class App:
         if diff:
             f["sw"] = diff
         self._sent["sw"] = sw
-        key, cur = ("fx", self._fx()) if self.field else ("grid", self._grid())
+        key, cur = (("fx", self._fx()) if self.field and not self.spots
+                    else ("grid", self._grid()))
         prev = self._sent.get(key, {})
         d = {k: v for k, v in cur.items() if k not in prev or prev[k] != v}
         if d:

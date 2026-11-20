@@ -149,10 +149,9 @@ Compiled C on a PIC32MX795; no mode engine to borrow, so the runtime is ours
 211 KB (Rob Zombie); ~115 KB free RAM each. Functions found per title
 (Jetsons, as an example: link send 0x9D028BD8, video 0x9D02E58C, playSFX
 0x9D02F684, numbers 0x9D02E538, SetScore 0x9D02EB4C, AddScore 0x9D02BE84,
-score array 0xA000271C + 4 x player); Domino's and Rob Zombie's equivalents
-are in the PAD-1387 commit's `pinheck_poc.py` notes. Not found yet: coil
-fire, lamp set, ball start/end, a central switch dispatcher (switch handlers
-are inlined per switch).
+score array 0xA000271C + 4 x player); Domino's and Rob Zombie's were not in fact
+noted anywhere - ticket 7 (below) found them. Ticket 6 (below) found the
+rest by reading the game's state instead of its switch handlers.
 
 How our code gets in: a `jal` to a game function is re-pointed at a
 trampoline in free flash that calls the original and then ours. The PRG has
@@ -455,6 +454,278 @@ time; the combo_1 callout played on the voice channel, the effects through `game
 panel showed in the game's own lettering and counted down; after the drain the bonus screen was
 clean. A probe copy had the game clear its screen 2 s after a shot (`remove_all_text` +
 `unload_assets`): the game's own texts went, the panel was back at once and stayed.
+
+## Ticket 6 done: the pinHeck runtime and Jetsons (PAD-1422)
+
+**The runtime** (`tools/spooky_emu/modes/pinheck/padheck.c`, MIPS32 C, 4.6 KB): linked per game
+build into the free flash after the program (`build.sh`, WSL `gcc-mipsel-linux-gnu`; no C library,
+no start-up code, every variable in one struct in RAM the game never writes). It joins the game
+through **one re-pointed call**: the `jal houseKeeping` inside the function every one of the
+game's loops calls to wait for the next millisecond (attract, play, bonus count, tilt, service).
+Its entry runs houseKeeping and then the modes, once per millisecond whatever the game is doing.
+The modes are data packed after it (`pinheck.py`, struct `pad_data`), so the app writes a modes
+PRG with no compiler. Same keys and rules as the Unity and Godot runtimes (start / start count,
+shots, points, seconds, completion and bonus, the four sounds, the panel); a mode ends on time, on
+completion, when the ball ends, on tilt and when the game ends; start counts reset at a new game.
+Its log is `[pad] ...` lines on the game's own serial monitor (UART1). Fonts and colours are
+refused by name (`keys_not_here` in the port report): the panel is the game's own text on the DMD.
+
+**Jetsons V004's hook table** (`pinheck/hooks.py`; every function also checked by its first bytes,
+the PRG by its sha1, so another build is refused, never patched blind). gp = 0xA0008200, the link
+object `this` = gp - 0x7BA8:
+
+| what | where | how it was found |
+|---|---|---|
+| tick | jal 0x9D018BB4 (houseKeeping) at 0x9D02EFC8, in the ms-wait 0x9D02EFC0 | `find_idle_loops`; callers' $ra per phase (attract 0x9D0144C0, play 0x9D0146FC, bonus 0x9D0207D8) |
+| switches | 0xA0000740: 8 row bytes, switch n = bit n & 7 of byte n >> 3, set while closed | RAM diff per ms around a held switch; byte 4 = 12 in attract (trough 34, 35) |
+| ball / player | 0xA0000720 (0 between games), 0xA00006E6 (1-based) | RAM diffs over whole games (PAD-1423 confirmed game over) |
+| ball live | 0xA0000690: 0 from the drain through the bonus count | the same |
+| phase | 0xA00006C3: 1 serving, 2 shooter lane, 3 in play | the same |
+| tilt | 0xA000073C set by tilt() 0x9D01F8A4; warnings 0xA000073D | the cabinet-switch handler's TL1/TL2 videos and tilt() |
+| AddScore | 0x9D02BE84 (points in a0): score[player] += points, no multiplier, no rounding | its code; asked 250,000, scored 250,000 |
+| sound | playSFX 0x9D02F684 (this, channel, folder, clip0, [16] clip1, [20] priority) | the POC |
+| text | text 0x9D02A314 (this, 0, column, line, s, [20] colour): packet 0x12, byte 0 = column << 3 \| line (4-pixel columns, 8-pixel lines, 128x64 DMD); 13 03 xx shows/hides the layer (0x9D02FC3C); 06 n ff.. clears line n | the service menu's text calls |
+| coils | fireCoil 0x9D02CE5C (this, coil, time), coil table 0xA0002280 | the one writer of the coil pins (0x9D02A9D8) and its caller |
+| lamps | 0xA0002384: 64 brightness bytes the lamp interrupt (0x9D024F2C) multiplexes; houseKeeping fills it every ms | the Timer2 handler |
+| free | flash 0x9D030000-, RAM 0xA0002F48..0xA001DF48 untouched over a whole game | a canary fill |
+
+Coils and lamps are in the table for ticket 8; no key uses them yet. A value written to the lamp
+table after houseKeeping (where the runtime runs) holds for that millisecond.
+
+**The build**: `mkspkmodes.py` takes `engine: pinheck` - `stage` writes the modes PRG from the stock
+update (Try it), `build` writes the stock zip again with only its PRG replaced (9 s for Jetsons'
+0.35 GB); a modes PRG given as stock is cut back to the stock one first. On the machine:
+Service -> UPDATE CODE flashes the card's PRG into the PIC (research_pinheck.md); the stock update
+takes the modes out the same way. The modes PRG keeps the game's version, so the game keeps its
+settings. **Write** packs the modes into a Jetsons update (`create_zip` with the PRG rewritten), and
+finds the title of an extract by its PRG's name. **Try it**: the pinHeck window takes `--prg`
+(the modes PRG on the update's own card); the Emulate tab passes Try it's PRG. The window's unpack
+cache now always takes the program from the zip it was given (a modes update has the stock one's
+name and shares its folder). The Modes tab hides the font and colour fields on Jetsons; its Build
+card says how a pinHeck update installs.
+
+**Port report** (`ports/jetsons-V004.json`): the games' switch test shows numbers only, so the
+switches are `switch_0`..`switch_63` (32 shooter lane, 34/35 trough); the card's 100 sounds by
+their three-letter names; points scale 1, no rounding.
+
+Proof (`pinheck/prove.py`, headless, muted): the PAD-built `Jetsons_Code.zip`, unpacked by the
+emulator's own unpacker, no Try it. Astro Rush: two hits on switch 20 start it, three shots score
+250,000 each (the game's own 150/250 first), the third completes it with the 2,000,000 bonus
+(score packets 250,252 -> 2,750,652). Sprocket Spin (no timer) keeps running through two ball-save
+drains and ends when the ball ends, at the bonus count. A timed mode ends on time; a mode ends on a
+real tilt (third warning). Every sound went out as the game's sound packet (EB0, C01, G00, H00,
+J00); the panel is on the DMD over the game's video. Tests: `tests/test_spooky_modes_pinheck.py`
+runs the shipped runtime binary on Unicorn against a stand-in game (no game files).
+
+## Ticket 7 done: Domino's and Rob Zombie on the pinHeck runtime (PAD-1423)
+
+Both games are AMH's code base (github.com/benheck/AMH), not Jetsons', so three call shapes
+differ and the runtime builds a second way for them (`text_abi` / `video_abi` "amh" in
+`pinheck/hooks.py`; `build.sh` passes `-DTEXT_ABI_AMH`):
+
+- **text** is AMH's `text(this, line, const char *)`: packet 0x0F, byte 0 the line, up to 13
+  characters, centred by the Propeller. The games put their own two-line messages on lines 0
+  and 1 and their scrolling ticker on line 6, so the mode panel uses lines 0-1 (title; total and
+  time, no commas). There is no text layer to show or hide (`text_show` None): an empty line
+  clears, and the game's next video clears the text too - the runtime redraws once a second.
+  Titles are checked against 13 characters on these builds (`pinheck.title_max`).
+- **video** is AMH's `video(this, n0, n1, n2, [16] attributes (bit 7 loops), [20] 0,
+  [24] priority)` into packet bytes 0..5 (the runtime does not call video yet).
+- **AddScore(points, flag)**: both read the flag (1 takes another scoring path), so the runtime
+  now calls it with 0 on every build (Jetsons' overwrites the register: no change there). Both
+  round the points down to a multiple of 10 (the port report says so); Rob Zombie's also refuses
+  points while the ball is still in the shooter lane, as its own switch awards are refused then.
+
+How each address was found (tools/pinheck_emu, every method checked first on Jetsons' known
+values, which it reproduced exactly):
+
+| key | how | Domino's V006 | Rob Zombie V026 |
+|---|---|---|---|
+| link_send | the function holding `sb a1,15(x)`, its entry the nearest jump target | 0x9D02DBE0 | 0x9D047600 |
+| play_sfx, text_str, video | a code hook on link_send: command in a1, the wrapper from the `jal` before $ra | 0x9D0311AC, 0x9D0305C0, 0x9D02DD84 | 0x9D04AA90, 0x9D049ED4, 0x9D0431D0 (calls link_send itself) |
+| this | `addiu a0,gp,..` at the callers | gp-0x7ADC | gp-0x783C |
+| tick_site | the `jal houseKeeping` in the ms-wait every loop calls (`main`'s `jal loop()` fires only on phase changes: twice in a whole game) | 0x9D030920 -> 0x9D019F60 | 0x9D04A2FC -> 0x9D0283C8 |
+| switch_ram | RAM diff with one switch closed/open: row = n >> 3, bit n & 7, set when closed | 0xA0000824 | 0xA00002F8 |
+| score_array, add_score | RAM search for the score each 0x03 packet sends; the writer's caller | 0xA00025A0, 0x9D02AC84 | 0xA000296C (the writer indexes it by the player byte), 0x9D03C388 |
+| player, ball, ball_active, phase, players | snapshots of a 2-player 3-ball game at every ball, lane and play, and after game over | 0x7CA, 0x804, 0x774, 0x7A7, 0x7D0 (Jetsons' block + 0xE4) | 0x28A, 0x2C8, 0x230, 0x263, 0x290 |
+| tilt, tilt_warnings | a real tilt in each game: the flag is the byte before the warning count | 0xA0000820 / 821 | 0xA00002F4 / 2F5 (its tilt input takes few emulated taps; the warning count poked to 2) |
+| lamp_ram | the 64-byte table the lamp interrupt (Timer2, via the RAM vector table) reads | 0xA0002248 | 0xA00025A4 |
+| coil_fire | the port-latch write when the ball-load coil fires, back to its caller | 0x9D02E028 (time x15) | 0x9D048000 (time as given) |
+
+Corrections on the way: Jetsons' 0xA00006EC is the player count of the last game (2 after game
+over), not "game on" (ticket 6 uses ball != 0); Rob Zombie's 0xA0000318, which looked like its
+tilt, is a 100 ms blink phase that the lamp interrupt reads.
+
+Proof (`pinheck/prove.py`, which now serves the ball with the hand plunger on these two and reads
+the score from the build's table): on both games, from a PAD-built PRG, the first mode starts on
+its second start hit, three shots score 100,000 each through the game's AddScore and complete it
+with the 1,000,000 bonus; the second runs 8 s and ends on time; a mode ends when the ball drains
+and on a real tilt, and starts and scores again on the next ball; the panel is on the DMD over the
+game's own video. Domino's ended that run at 1,595,000 against 145,000 stock. Example modes
+`examples/dominos-V006`, `examples/rob_zombie-V026`; port reports beside them; the app's Modes
+tab, Try it, Build and Write take both through the same pinHeck path as Jetsons. Tests:
+`tests/test_pinheck_modes_amh.py` (with the games' zips on the machine it builds both and runs
+the runtime inside each game in the emulator).
+
+## Ticket 8 done: JJP parity on every runtime (PAD-1424)
+
+PinHeck is not in this ticket's runtimes: its runtime was still being built (PAD-1422/1423); its
+parity keys are ticket 9 (PAD-1469) below. Here: the Unity core + four glues (six titles), Godot (Looney Tunes)
+and P-ROC (Rick and Morty, Alice Cooper).
+
+**Done and proven so far** (hidden, muted, Ubuntu rigs; PAD-Runtime would not start that day):
+
+- **Start rules** (`start_on` ball_start / first_ball / last_ball / valid_playfield / ball_saved /
+  extra_ball / multiball_end, `start_after` a game mode or `any`, `start_score`, `start_combo` +
+  `combo_seconds`, `start_once`, `start_count_reset`): a fired rule counts toward `start_count`.
+  Game events come from each title's own calls: `ball_saved` is Scooby-Doo's message 65,
+  Beetlejuice's `Messages.Event.ball_saved`, Halloween/Ultraman `evt_ball_saving`, Texas Chainsaw
+  `evt_ballSaved_regular`, Evil Dead's `trough.savingBallCount` rising, Looney Tunes' `ball_save.ogv`
+  quick clip (a one-ball save; its multiball saves play none) and SkeletonGame's `evt_ball_saved`.
+  `extra_ball` is the player's extra-ball count rising, `multiball_end` two balls in play for half a
+  second then one, `valid_playfield` the ball's first switch that is not the trough, shooter lane,
+  a button or the coin door (by the switch's own name). `start_after` polls the game's running
+  modes ten times a second, by the port report's names and by class: Scooby-Doo/Beetlejuice
+  `Mode.active`, Evil Dead `modeStarted`, Halloween/Ultraman a mode's own run flag (modeStarted,
+  modestarted, mb_started, incidental_running ...: they keep every mode in `_modes`), Texas Chainsaw
+  a mode's presence in `_modes`, Looney Tunes `Modes.modes`, SkeletonGame the mode queue (Alice
+  Cooper's `modeStarted` 0 = queued, not running).
+- **Lamps** (`lamps`, `lamp_color`, `lamp_blink`): names with spaces are written with `_`
+  (`RIGHT_ORBIT_ARROW`); the runtimes match either. P-ROC: the game's LED controller at our
+  priority (9500; a blink is a two-step script), `disable` at the end (+ Alice Cooper
+  `update_lamps`). Godot: `Leds.enable(n, 1000, OPCODE_SET_LED, rgb, 0, blend=false)` four times a
+  second (the game blends by default, and clears every command at each ball start); its trough
+  (a system mode, 9500+) still shows the ball-save lamp over ours while a save runs. Unity: the
+  core blinks and sets the lamps again four times a second; Scooby-Doo the LED overlay
+  (`Warden.set_led_full_color(..., is_overlay)`, black on the overlay hands back), Beetlejuice a
+  light layer of ours (`SerialLED.SetColor(c, 9001.25)`, `Off(layer)`), Evil Dead
+  `warden.led_color` / `led_disable_name`, Halloween/Ultraman `Pinotar.led_color` / `led_disable` +
+  `update_lamps` (one layer: last write wins), Texas Chainsaw `pinAPI.led_color(..., isOverlay)`.
+- **Coils** (`coil_start/shot/complete`, `coil_hold` + `coil_hold_on`, `coil_holds = on` in
+  title.cfg): each port lists `coils` a mode may fire (no flippers, trough, launchers, scoops, VUKs,
+  ball locks, servos) and `coil_holds` (magnets, posts, diverters, the shaker, lights; Evil Dead's
+  deadite HOLD windings, not HIGH). Asked ms only ever shorten the coil's own pulse. P-ROC
+  `game.coils.X.pulse` / `patter(power, 32-power)` / `disable`; Godot `Coils.pulse(_ms)` /
+  `dangerous_hold(n, power*100/32)` / `release_hold`; Scooby-Doo `Warden.pulse(_for_ms)` /
+  `set_pwm` (off sent three times); Beetlejuice `Coil.Pulse` / `pulse_for_ms` / `SetPower`; Evil
+  Dead and Texas Chainsaw `coil.pulse` / `manualPWM` / `disable`; Halloween/Ultraman
+  `Coils[name].pulse` / `Pinotar.patter` / `disable_coil` (the board takes patter as a hold; a
+  `set_coil_hold_*` + pulse reached it as a plain pulse).
+- **Balls** (`multiball`, `multiball_on`, `add_ball`, `ball_save`): always through the game's own
+  trough, so the game counts the ball. P-ROC `trough.add_balls` (else
+  `launch_and_autoplunge_balls`, else `launch_balls`) and `enable_ball_saver`; Godot
+  `trough.add_balls(n, true)` / `start_ball_save`; Scooby-Doo the `add_a_ball` message and the base
+  mode's `ballsave_timer.refresh(s + 4)`; Beetlejuice `trough.RequestEject` + the shooter lane's
+  `RequestLaunch` / `award_timed_ballsave`; Evil Dead `createMultiballMode` /
+  `incMultiballFromTrough` / `start_standard_save` / `startMBsave`; Halloween/Ultraman
+  `trough.launch_ball` / `enable_save` / `enable_mb_save`; Texas Chainsaw `trough.addMultiballs` /
+  `start_standard_save` / `startMBsave`. A multiball of ours ends its mode once one ball is left for
+  2 s, after its save and 3 s more (in the rig the game's own ball waits in the shooter lane until
+  the rig plunges it, so a multiball at ball start can end that way before the plunge).
+
+Proofs (`C:/tmp/PAD-1424/proof`, `proc_probe.sh`: rigrun plus the emulated board asked every
+0.5 s for the mode's LEDs, the balls in play and the coils): **Rick and Morty** every start rule,
+both lamps red/off at 2 a second on the board (its LEDs are wired inverted: the board shows
+[0,255,255] / [255,255,255]), the knocker and diverter, the post held 1.5 s, both ball saves, two
+balls in play on the board until the drain then "one ball left". **Looney Tunes** the same (LED 97
+red/off; LED 19, the ball-save lamp, held by the game's save). **Halloween** the same, the shaker
+held on the board (`held=[23]`) and let go, `start_after` on its skill shot ending.
+
+- **A mode's own files** (`sound_*` naming a file, `sound_channel`, `music`, `picture` / `picture_at`,
+  `video` / `video_at` / `video_loop`): the build carries them into `pad/modes`. Unity: Unity's own
+  audio loader (`UnityWebRequestMultimedia`, polled) on an AudioSource of ours in the game's voice
+  (or music) mixer group; music looped with the game's music sources muted (Scooby-Doo
+  `music_channel` + `precision_timing_channel`, Beetlejuice primary/secondary, Evil Dead and Texas
+  Chainsaw `music_channel`, Halloween/Ultraman `MusicSource`), unmuted after; the picture
+  (`ImageConversion.LoadImage`) and a VP8 webm (`VideoPlayer.url`, the only video Linux Unity plays)
+  on a canvas just under the panel. Godot: **wav only** (4.1 has no Ogg file loader, and naming
+  4.2's `load_from_file` stops the script from parsing: the runtime never loaded); a PCM wav read
+  into an `AudioStreamWAV`, on the game's sfx/voice/music bus; music with `Audio.music_player` turned
+  down; `Image.load_from_file` and a Theora ogv (`VideoStreamTheora.file`) on a CanvasLayer (127)
+  under the panel. P-ROC: `sound.register_sound` / `register_music` (+ `play_voice` for speech),
+  the game's track back after (`base.start_track(base.music_track)`, else `update_music`, else
+  `playMainMusic`); Rick and Morty's picture (`dmd.Animation().load`, `Frame.scale`) and H.264 mp4
+  (`dmd.MovieLayer`, `ScaledLayer`) composited under the panel (`GroupedLayer`). Alice Cooper's Unity
+  player loads pictures and videos by asset name only: the check refuses them there.
+- **Serving balls the game's way** (found in the rig): Scooby-Doo's `add_a_ball` leaves the ball in
+  the shooter lane, so ours send the trough `autolaunch_balls` as its Cutler multiball does;
+  Halloween/Ultraman start a multiball save (`enable_mb_save`, keeping all but the new balls in the
+  trough) and `TriggerBallLaunch`, as their own multiballs do; Evil Dead's trough ignores a request
+  made while it loads a ball, so the glue waits for `launch_lifecycle` 0; Alice Cooper has no
+  autoplunge coil and adds a ball with `utilities_mode.launchBallIntoPlay`. A multiball's ball save
+  covers every ball in play (a one-ball save cancelled Halloween's queued launch), and its
+  one-ball-left check starts once the game counts the balls (20 s with none ends the mode).
+
+**Proven on all ten titles** (`C:/tmp/PAD-1424/make_proof.py` + `run_proof.sh`, hidden, muted,
+Ubuntu rigs): every start rule; lamps lit and flashing; coil pulses; a hold on the board and let go;
+ball saves; a two-ball multiball (two balls in play on the board on Beetlejuice, Texas Chainsaw,
+Halloween, Ultraman, Rick and Morty and Alice Cooper; counted by the game on Scooby-Doo, Evil Dead
+and Looney Tunes, whose boards do not count the playfield) ending on one ball left; the mode's own
+sound files and music (the game's music back after); its picture and video on the screen with the
+panel (Rick and Morty, Looney Tunes, Scooby-Doo shots). In the rig a playfield switch can come while
+the game's first ball still sits in the shooter lane, which no real game sees; a multiball then
+waits for the lane.
+
+## Ticket 9 done: JJP parity on the pinHeck runtime (PAD-1469)
+
+Ticket 8 (PAD-1424) left pinHeck out: its runtime was still being built. Here the C runtime
+(`pinheck/padheck.c`, now about 10 KB) takes the same start rules, lamps, coils and balls as the
+other Spooky runtimes, read off each game's own state every millisecond, and the build packs them
+into 128-byte modes (data magic `PHM2`, run magic `PAD2`) after a title header: the lane switch,
+the trough switches, the coils a mode may pulse or hold with their own pulses, a lamp's full
+brightness and the game's ball count.
+
+**What the three games share** (all Ben Heck's code; Domino's and Rob Zombie are AMH's,
+github.com/benheck/AMH; Jetsons' save and load timers sit 0x100 below Domino's): a ball-save timer in ms
+that the drain handler checks (it serves the ball back and cuts the timer to 0, outside a
+multiball); a load timer from the trough's load coil to the lane; a ball queue the plunge code
+loads from whenever no load runs and the lane is clear (the games' own add-a-ball and multiballs
+add to it); an extra-ball count the next-ball code shoots again on; the balls-per-game setting + 1
+it ends the game past. The ball ends only once every ball is home in the trough (Domino's: its
+three trough switches for 1 s with nothing queued), so a multiball needs nothing else.
+
+| key | how found | Jetsons V004 | Domino's V006 | Rob Zombie V026 |
+|---|---|---|---|---|
+| save_timer | RAM falling 1/ms from the ball's first switch, cut at a saved drain; its readers in the drain handler | 0xA00007CC (15 s) | 0xA00008CC (10 s) | 0xA0000384 (15 s) |
+| load_timer | set at a serve and the saved drain, 0 once the ball is in the lane; AutoPlunge's `max(t, 2002)` | 0xA00007D8 | 0xA00008D8 | 0xA0000390 |
+| ball_queue | the halfword the plunge code tests before the load timer; poked to 1 in play, the game loaded and launched a ball | 0xA0000510 | 0xA0000658 | 0xA00009A0 |
+| extra_balls | the first byte the next-ball code tests (ball + 8 on all three); poked to 1, the drain shot again | 0xA0000728 | 0xA000080C | 0xA00002D0 |
+| ball_limit | the byte the ball number is compared with; 4 in a 3-ball game | 0xA0002914 | 0xA0002735 | 0xA0002CC1 |
+| coil_busy | fireCoil's off-time table (time = t x scale ms, at most 255) | 0xA00022E0, x15 | 0xA00021E8, x15 | 0xA000249C, x1 |
+| trough, lane | games.py | 34 35, 32 | 1 2 3, 0 | 1..7, 0 |
+
+Balls in play are counted the same way everywhere: the trough switches closed when the ball first
+went in, and every ball that left the trough after (Rob Zombie's 1..7 may hold locks: a locked ball
+counts as home, which is right for "one ball left").
+
+**Coils**: JJP's rule, not the Unity ports' (no slings or pops): Jetsons KNOCKER and SHAKER (held);
+Domino's KNOCKER, SHAKER, MAGNET and STOP_POST (the last three held). Own pulses from the games'
+own fireCoil calls: shaker 75 ms, magnet 150 ms, stop post its setting (15 x 15 = 225 ms); the
+knocker's call goes through a register, so 30 ms. Rob Zombie's coil test names its coils SOL0..15,
+so it offers none. A hold is one shortest pulse (15 ms on Jetsons and Domino's, power ms on Rob
+Zombie) every 32 x unit / power ms, skipped while the game's own off time for that coil runs.
+
+**Events**: ball_start / first_ball / last_ball at the ball's phase 3 (out of the lane); last_ball
+is ball = limit - 1 with no extra ball waiting; valid_playfield the first switch that is not the
+trough or lane; ball_saved the save timer cut from 50 ms or more to 0 while the game serves a ball
+back at once (load timer or queue); extra_ball the count rising; multiball_end two balls or more for
+0.5 s, then one for 0.5 s with nothing being served back. Not here: start_after (no game modes to
+watch) and every file of a mode's own (sound files, music, pictures, video): `keys_not_here`.
+
+Proof (tools/pinheck_emu, headless, muted, `C:/tmp/PAD-1469/make_proof.py` + `probe.py`: every
+fireCoil call hooked, RAM snapshots every 50 ms): on all three, from modes PRGs the checker passed,
+ball_start, first_ball, valid_playfield, a two-switch combo in 3 s, start_score, extra_ball and a
+mode's lamps over the game's (10 and 11 at 8 flashing twice a second, 12 steady at 2, the game's
+own back after); on Domino's and Rob Zombie also first_ball again on a shoot-again, a start_count
+of 2 ball starts and last_ball on ball 3 (Jetsons' emulated drains never end a ball). Knocker at the start, shaker on a shot (2 units = 30
+ms) and the magnet / shaker hold pulsing every 60 ms for 1.5 s on Domino's and Jetsons, all from
+the runtime's fireCoil calls. Multiball 2: the queue served the second ball, the drain gave
+multiball_end and "one ball left" ended the mode with the ball still on; add_ball served a ball;
+ball_save 20 s made the game serve a drained ball back and raised ball_saved. Jetsons' emulation
+loads the second ball as the first is launched (the game takes it as a save), so its multiball
+proof is the add_ball: our ask, the game's load coil 80 ms later and its plunger.
+Tests: `tests/test_spooky_modes_pinheck.py` runs the shipped runtime on Unicorn against a stand-in
+game for every rule (no game files).
 
 ## Rig fix made on the way
 

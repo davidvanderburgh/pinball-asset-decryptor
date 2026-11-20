@@ -172,7 +172,7 @@ def test_form_leaves_out_what_the_screen_cannot_show(sm):
     ac, rm = sm.load_port(LABEL), sm.load_port(RM)
     screen = dict(sm.form_groups(ac))["Screen"]
     assert screen == ("panel", "title_color", "value_color", "timer_color")
-    assert sm.title_form(ac) == screen
+    assert sm.title_form(ac) == screen + ("lamp_color", "lamp_blink", "coil_holds")
     assert dict(sm.form_groups(rm))["Screen"] == dict(sm.FORM_GROUPS)["Screen"]
     assert sm.title_form(rm) == sm.TITLE_FORM and sm.title_form(None) == sm.TITLE_FORM
 

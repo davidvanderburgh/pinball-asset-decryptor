@@ -117,7 +117,7 @@ def test_editing_saves_and_checks(tmp_path, monkeypatch):
         w.run(lambda: svc.spk_set("title:panel", "top"))
         assert _spk(w)["title_cfg"]["panel"] == "top" and _spk(w)["title_cfg"]["game"] == "scooby_doo"
         with pytest.raises(Exception):
-            w.run(lambda: svc.spk_set("lamps", "shoot_again"))      # not on Spooky games yet
+            w.run(lambda: svc.spk_set("code", "my_rules"))          # JJP's own C++ modes: not on Spooky
         fn = w.run(lambda: svc.spk_new("Ghost Chase"))
         assert _spk(w)["open"] == fn and len(_spk(w)["modes"]) == 3
         from pinball_decryptor.webui import compat

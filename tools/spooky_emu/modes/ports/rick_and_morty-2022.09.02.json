@@ -3524,5 +3524,7 @@
   "leftOutlane"
  ],
  "voice_lines": 1040,
- "points_scale": 1
+ "points_scale": 1,
+ "coils": ["knocker", "shaker", "diverter", "antigravity", "shipPost", "leftDropKnockdown", "leftDropReset", "rightDropKnockdown", "rightDropReset", "resetDropTarget", "topperMotor", "garageFlasher", "portalFlasher", "portalEjectFlasher", "floobleCrankFlasher", "leftTopperFlasher", "rightTopperFlasher", "slingPop"],
+ "coil_holds": ["shaker", "diverter", "antigravity", "shipPost", "topperMotor", "garageFlasher", "portalFlasher", "portalEjectFlasher", "floobleCrankFlasher", "leftTopperFlasher", "rightTopperFlasher"]
 }

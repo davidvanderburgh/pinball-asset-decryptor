@@ -29,6 +29,8 @@ MAIN = r"""
 #define TEAM_KIND 0x300u
 #define STY_STANDARD 7u
 #define STY_CHALLENGE 8u
+#define STY_MENU_IDLE_MS 60000ul
+#define STY_MENU_GONE_MS 3000ul
 enum { CI_OFF, CI_START, CI_FILM, CI_PLAY, CI_BALL, CI_LANG };
 @ARR@
 @FNS@
@@ -53,6 +55,15 @@ int main(void)
            sty_may_show(0, 1, CI_OFF, 600, 9999), sty_may_show(0, 0, CI_OFF, 0, 500), sty_may_show(0, 0, CI_OFF, 0, 2500),
            sty_may_show(-1, 0, CI_OFF, 0, 0), sty_may_show(0, 0, CI_PLAY, 0, 9999), sty_may_show(0, 0, CI_BALL, 0, 9999));
     /* Insider: Standard / a challenge while choosing or at CHARACTERS stays the game's own; ENHANCED and co-op not */
+    /* round 2: the game start's wait on the menu - on; Start; a minute alone; the menu gone 3 s */
+    printf("%d%d%d%d%d|", sty_menu_wait(0, 0, 0), sty_menu_wait(1, 70000, 9000), sty_menu_wait(0, 60000, 0),
+           sty_menu_wait(0, 59999, 3000), sty_menu_wait(0, 59999, 2999));
+    for (k = 0; k < 6; k++) {   /* the menu's line: the game and the style, then what it is */
+        sty_menu_words(k < 2 ? STY_STANDARD : k < 4 ? 1u : 4u, k < 2 ? 2 : k < 4 ? 1 : 0, k & 1,
+                       "YOUR GODZILLA TEAM", w, sizeof w);
+        printf("%s/", w);
+    }
+    printf("|");
     printf("%d%d%d%d%d\n", coop_insider_free_in(1, 1, 0), coop_insider_free_in(1, 0, 2), coop_insider_free_in(1, 0, 3),
            coop_insider_free_in(0, 0, 2), coop_insider_free_in(0, 1, 0));
     return 0;
@@ -65,7 +76,9 @@ FNS = ("static unsigned sty_own_of_kind(unsigned kind, unsigned challenge_kind)"
        "static void sty_words(unsigned kind, int at, int phase, int action, char *out, unsigned cap)",
        "static int sty_may_show(int film_up, int film_seen, int intro_phase, unsigned long since_down, "
        "unsigned long since_open)",
-       "static int coop_insider_free_in(int standard, int choosing, unsigned style)")
+       "static int coop_insider_free_in(int standard, int choosing, unsigned style)",
+       "static int sty_menu_wait(int pressed, unsigned long idle, unsigned long unseen)",
+       "static void sty_menu_words(unsigned kind, int at, int phase, const char *team, char *out, unsigned cap)")
 
 
 def test_the_chooser_follows_the_right_entries_and_says_its_styles(tmp_path):
@@ -73,7 +86,10 @@ def test_the_chooser_follows_the_right_entries_and_says_its_styles(tmp_path):
     code = MAIN.replace("@ARR@", _array(src, "STY_NAMES") + "\n" + _array(src, "STY_DOES")) \
         .replace("@FNS@", "\n".join(R._lift(src, s) for s in FNS))
     out = R._host_run(tmp_path, code, flags=("-no-pie",)).strip()
-    menu_list, menu_index, words, show, insider = out.split("|")
+    menu_list, menu_index, words, show, press, line, insider = out.split("|")
+    assert line.split("/")[:-1] == ["STANDARD ENHANCED", "POWERS UP YOUR GODZILLA TEAM", "CO-OP CHARACTERS",
+                                    "NO SPECIAL ABILITIES", "2 VS 2 NORMAL", "THE GAME AS IT IS"]
+    assert press == "01230"
     assert menu_list == "7 8 0 0 0"
     assert menu_index == "7 0 8 8 0 0"
     # 20 characters at most each: Godzilla LE's top line
@@ -95,7 +111,8 @@ def test_the_menu_and_the_game_wait_for_the_chooser():
     assert "!coop_insider_free()" in R._lift(src, "static int insider_holding_now(void)")
     assert "if (!coop.setting) return coop.style == 2u;" in R._lift(src, "static int coop_classic(void)")
     disp = R._lift(src, "static void on_team_dispatch(pm_reg *r)\n{")
-    assert "sty_open(own);" in disp and "if (kind == 1u && sty_wanted()) sty_open(kind);" in disp
+    assert "sty_begin(own);" in disp and "if (kind == 1u && sty_wanted()) sty_begin(kind);" in disp
+    assert "sty_open(" not in disp                                  # round 2: the menu's style first, else the card
     assert "!sty.open && pm_in_game()" in R._lift(src, "static void coop_tick(void)\n{")   # no intro while choosing
     due = R._lift(src, "static int ci_film_due(void)\n{")
     assert "sty.kind == STY_STANDARD || sty.kind == STY_CHALLENGE" in due   # NORMAL is the game's own film
@@ -126,3 +143,37 @@ def test_godzillas_challenges_are_named_in_its_ports():
         text = port.read_text(encoding="utf-8")
         if "comp_menu_challenge_" in text:
             assert "comp_menu_end_index" in text, port.name
+
+
+def test_round2_the_menu_asks_before_the_game_starts():
+    """PAD-1449 round 2: the game start begun from the menu waits while the menu asks; the flippers walk the style off
+    the menu's buttons; the next Start lets the game start go on with it, and ball 1 shows no card"""
+    src = _src()
+    wrap = R._lift(src, "static unsigned coop_start_game_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, "
+                        "unsigned s0)")
+    assert wrap.index("sty_menu_ask();") < wrap.index("lb_start_game(")
+    ask = R._lift(src, "static void sty_menu_ask(void)\n{")
+    assert "!sty_menu_live()" in ask and "proc_sleep" in ask and "smn.preset = smn.at + 1;" in ask
+    assert "sty_menu_edge(id, (level & 1u) == closed);" in R._lift(
+        src, "static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)\n{")
+    frame = R._lift(src, "static void team_menu_frame(pm_reg *r)\n{")
+    assert frame.index("sty_menu_walk(&r[breg], 4u, 2u);") < frame.index("c = comp_frame_cursor(")
+    tick = R._lift(src, "static void sty_tick(void)\n{")
+    assert tick.index('sty_close("taken on the start menu");') < tick.index('"styles: the chooser is up')
+    begin = R._lift(src, "static void sty_begin(unsigned kind)\n{")
+    assert "sty.preset = sty_menu_preset(kind);" in begin
+    # the Competition and MODE CHALLENGE entries leave the flippers to the step
+    assert "sty_menu_up() ? 0u : r[breg] & 4u" in R._lift(src, "static void comp_menu_frame(pm_reg *r)\n{")
+    assert "if (on && !sty_menu_up())" in R._lift(src, "static void challenge_menu_frame(pm_reg *r)\n{")
+
+
+def test_round2_challenge_names_in_the_index_menu_ports():
+    for port in ("godzilla_le-1.16.port", "godzilla_pro-1.16.port"):
+        text = (PORTS / port).read_text(encoding="utf-8")
+        got = re.findall(r"^value comp_menu_challenge_msg_(\d+) +(\d+)", text, re.M)
+        assert got == [("0", "3275"), ("1", "3276")], port            # KING OF THE MONSTERS, TIME ATTACK
+    for port in PORTS.glob("*.port"):
+        text = port.read_text(encoding="utf-8")
+        assert "comp_menu_take" not in text, port.name
+        if "comp_menu_challenge_msg_" in text:
+            assert "comp_menu_challenge_0" in text, port.name

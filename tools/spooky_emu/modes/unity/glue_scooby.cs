@@ -28,6 +28,7 @@ public class Hook : Mode {
             else if (what == Messages.ball_start) r.OnBallStart();
             else if (what == Messages.end_of_ball) r.OnBallEnd("the ball ended");
             else if (what == Messages.tilt) r.OnBallEnd("tilt");
+            else if (what == Messages.ball_saved) r.GameEvent("ball_saved");
             else if (what == Messages.mode_started && data == Modes.attract_mode) r.OnGameEnd();
         } catch (Exception e) { Loader.Log("process_message: " + e); }
         return 0;
@@ -74,6 +75,113 @@ public static class Glue {
         return g != null && g.players != null && g.players.Count > 0;
     }
 
+    // ---- balls and game modes (PAD-1424 start rules)
+    static Player Up() { return HasPlayers() ? Mode.machine.game.player() : null; }
+    public static int BallsPerGame() { return (int)Mode.machine.settings.balls_per_game.current_value; }
+    // no ball number of its own: balls_remaining counts down at each ball's end (not an extra ball's)
+    public static int Ball() { var p = Up(); return p == null ? 0 : (int)(BallsPerGame() - p.balls_remaining + 1); }
+    public static int Player() { return HasPlayers() ? Mode.machine.game.current_player : 0; }
+    public static int ExtraBallsLeft() { var p = Up(); return p == null ? 0 : p.extra_ball; }
+    public static int ExtraBallsAwarded() { var p = Up(); return p == null ? -1 : p.extra_ball; }
+    public static int BallsInPlay() { return HasPlayers() ? Mode.machine.game.balls_in_play : -1; }
+
+    public static List<string> RunningModes() {
+        var o = new List<string>();
+        foreach (var m in Modes.modes.Values)
+            if (m != null && m.active && m.mode != PadRuntime.ModeId) {
+                o.Add(m.GetType().Name);
+                if (!string.IsNullOrEmpty(m.name)) o.Add(m.name);
+            }
+        return o;
+    }
+
+    // ---- lamps, coils, balls (PAD-1424)
+    // Lamps on the LED controller's overlay layer (the game's lightshows use it too, and clear it
+    // when one stops: the core sets ours again four times a second); black on the overlay hands
+    // the lamp back to the game's base layer.
+    static Dictionary<string, int> lampNums, coilNums;
+
+    static int LampNum(string l) {
+        if (lampNums == null) {
+            lampNums = new Dictionary<string, int>();
+            if (Lights.light_names != null)
+                foreach (var kv in Lights.light_names) lampNums[PadRuntime.Tok(kv.Value)] = kv.Key;
+        }
+        int n;
+        return lampNums.TryGetValue(PadRuntime.Tok(l), out n) ? n : -1;
+    }
+
+    public static bool LampSet(string l, Color32 c) {
+        int n = LampNum(l);
+        if (n < 0) return false;
+        Warden.set_led_full_color((byte)n, c.r, c.g, c.b, true);
+        return true;
+    }
+
+    public static void LampRelease(string l) {
+        int n = LampNum(l);
+        if (n >= 0) Warden.set_led((byte)n, Lights.black, true);
+    }
+
+    static int CoilNum(string c) {
+        if (coilNums == null) {
+            coilNums = new Dictionary<string, int>();
+            foreach (var f in typeof(global::Coils).GetFields(BindingFlags.Static | BindingFlags.Public))
+                if (f.IsLiteral && (f.FieldType == typeof(byte) || f.FieldType == typeof(int)) && f.Name != "num_coils")
+                    coilNums[PadRuntime.Tok(f.Name)] = Convert.ToInt32(f.GetRawConstantValue());
+        }
+        int n;
+        return coilNums.TryGetValue(PadRuntime.Tok(c), out n) ? n : -1;
+    }
+
+    public static string CoilPulse(string c, int ms) {
+        int n = CoilNum(c);
+        if (n < 0) return null;
+        long own = 0;
+        try { own = Mode.machine.settings.coil_settings[n].pulse_time_slider.current_value; } catch (Exception) { }
+        if (ms > 0 && (own <= 0 || ms < own)) { Warden.pulse_for_ms((byte)n, (byte)ms); return "Warden.pulse_for_ms " + ms + " ms, its own " + own; }
+        Warden.pulse((byte)n);
+        return "Warden.pulse, its own " + own + " ms";
+    }
+
+    public static string CoilHold(string c, int power) {
+        int n = CoilNum(c);
+        if (n < 0) return null;
+        Warden.set_pwm((byte)n, (byte)Math.Min(255, power * 255 / 32));
+        return "Warden.set_pwm " + Math.Min(255, power * 255 / 32);
+    }
+
+    public static void CoilRelease(string c) {
+        int n = CoilNum(c);
+        if (n < 0) return;
+        for (int i = 0; i < 3; i++) Warden.set_pwm((byte)n, 0);      // the game sends its off three times
+    }
+
+    // the trough's autolaunch_balls message, as the game's own multiballs send it (Cutler MB): Trough_mode
+    // ejects n (RequestEject, counted in balls_in_play) and launches them; add_a_ball left the ball in the
+    // shooter lane for the player
+    public static string AddBalls(int n) {
+        Mode.machine.append_message(PadRuntime.ModeId, Modes.trough_mode, Messages.autolaunch_balls, n);
+        return "autolaunch_balls message to the trough, " + n + " ball(s)";
+    }
+
+    static Base_mode Base() { return Modes.modes.Values.OfType<Base_mode>().FirstOrDefault(); }
+
+    // the base mode's ball save timer (the game adds 4 s of grace to every save it starts)
+    public static string BallSave(int secs, int balls) {
+        var b = Base();
+        if (b == null || b.ballsave_timer == null) return "no base mode";
+        if (b.ballsave_timer.isEnded() || b.ballsave_timer.seconds_remaining() < secs + 4)
+            b.ballsave_timer.refresh(secs + 4.0);
+        return "Base_mode.ballsave_timer " + b.ballsave_timer.seconds_remaining().ToString("0.0") + " s";
+    }
+
+    public static void BallSaveOff(int secs) {
+        var b = Base();
+        if (b != null && b.ballsave_timer != null && !b.ballsave_timer.isEnded() && b.ballsave_timer.seconds_remaining() <= secs + 4)
+            b.ballsave_timer.refresh(0.0);
+    }
+
     public static long PlayerScore() { return HasPlayers() ? Mode.machine.game.player().score : 0; }
     public static void Award(long ask) { hook.score_points(ask, Tags); }
     public static string ScoreNote() { return "score_points(base bonus), score_multiplier " + Mode.machine.game.score_multiplier; }
@@ -101,6 +209,9 @@ public static class Glue {
     }
 
     public static AudioSource VoiceChannel() { return Mode.machine.voice_channel; }
+    public static List<AudioSource> MusicSources() {
+        return new List<AudioSource> { Mode.machine.music_channel, Mode.machine.precision_timing_channel };
+    }
 
     public static List<string> Lamps() {
         return Lights.light_names == null ? new List<string>()

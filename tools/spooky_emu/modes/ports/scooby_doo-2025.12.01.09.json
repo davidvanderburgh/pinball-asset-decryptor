@@ -3418,5 +3418,7 @@
   "wizard",
   "unmasking"
  ],
- "points_scale": 10
+ "points_scale": 10,
+ "coils": ["middle_sling", "right_sling", "left_sling", "trap_door_reset", "trap_door_knockdown", "upper_left_magnet", "upper_right_magnet", "rear_drop_bank_reset", "magnet", "forward_drop_bank_reset", "knocker", "shaker", "lower_spotlights", "upper_right_cutler_hand", "upper_left_cutler_hand", "upper_spotlights"],
+ "coil_holds": ["upper_left_magnet", "upper_right_magnet", "magnet", "shaker", "lower_spotlights", "upper_spotlights"]
 }

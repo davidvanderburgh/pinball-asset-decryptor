@@ -45,13 +45,20 @@ def unpack(path, cache_dir=None):
         stem = os.path.splitext(os.path.basename(path))[0]
         dest = os.path.join(cache_dir or cache_root(), stem)
         stamp = os.path.join(dest, ".unpacked")
-        size = str(os.path.getsize(path))
-        if not (os.path.isfile(stamp) and open(stamp).read() == size):
-            os.makedirs(dest, exist_ok=True)
-            with zipfile.ZipFile(path) as z:
+        st = os.stat(path)
+        size = "%d %d" % (st.st_size, st.st_mtime_ns)
+        with zipfile.ZipFile(path) as z:
+            if not (os.path.isfile(stamp) and open(stamp).read() == size):
+                os.makedirs(dest, exist_ok=True)
                 z.extractall(dest)
-            with open(stamp, "w") as f:
-                f.write(size)
+                with open(stamp, "w") as f:
+                    f.write(size)
+            else:
+                # the program always from this zip: a modes update PAD built has the stock
+                # one's name and the same card, and shares its unpacked folder (PAD-1422)
+                for n in z.namelist():
+                    if n.upper().endswith(".PRG"):
+                        z.extract(n, dest)
         prg = find_prg(dest)
     else:
         prg = path
@@ -65,8 +72,12 @@ def unpack(path, cache_dir=None):
 
 
 class Machine:
-    def __init__(self, path, nvram=None, mute=False, cache_dir=None):
+    def __init__(self, path, nvram=None, mute=False, cache_dir=None, prg=None):
+        """*prg* (PAD-1422, the Modes tab's Try it): run this program instead of the update's
+        own, on the update's card (a modes PRG PAD built from the stock one)."""
         self.prg_path, self.card = unpack(path, cache_dir)
+        if prg:
+            self.prg_path = prg
         self.game = game_of(self.prg_path) or {}
         self.title = self.game.get("title") or os.path.basename(self.prg_path)
         self.nvram = nvram or os.path.join(cache_dir or cache_root(), "nvram",

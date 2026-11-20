@@ -563,7 +563,8 @@ def test_lamps_follow_the_multiplexed_port_b():
 
 def test_jetsons_text_layer_rules(tmp_path):
     """Jetsons: a video keeps the text; 06 n ff.. clears line n; 13 03 00
-    hides it all. Lines are 8 pixels, columns 8, glyphs 4 wide (tinyfont)."""
+    hides it all. Byte 0 is column << 3 | line (the game's text(), PAD-1422):
+    lines 8 pixels, columns 4, glyphs 4 wide (tinyfont)."""
     from tools.pinheck_emu.av import Av
     _vid(tmp_path, "AAA", 1, (0,))
     av = Av(str(tmp_path))
@@ -572,12 +573,12 @@ def test_jetsons_text_layer_rules(tmp_path):
     av.packet(bytes([0x28]) + b"TOP" + bytes(11) + b"\x12", 1)     # line 0, flag bit 3
     av.packet(bytes([3, 1]) + bytes(13) + b"\x13", 2)
     av.packet(bytes([1]) + b"AAA" + bytes(11) + b"\x02", 3)        # a new video
-    assert set(av.texts) == {(8, 24), (16, 0)}
+    assert set(av.texts) == {(8, 24), (20, 0)}
     lit = lambda img: {(x // 8, y // 8) for x in range(128) for y in range(32)
                        if img.getpixel((x, y)) != (0, 0, 0)}
     assert (1, 3) in lit(av.frame(4)) and (2, 0) in lit(av.frame(4))
     av.packet(bytes([3]) + b"\xff" * 7 + bytes(7) + b"\x06", 5)    # clear line 3
-    assert set(av.texts) == {(16, 0)}
+    assert set(av.texts) == {(20, 0)}
     av.packet(bytes([3, 0]) + bytes(13) + b"\x13", 6)              # text off
     assert not av.texts and av.frame(7).getbbox() is None
 

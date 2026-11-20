@@ -123,16 +123,17 @@ function Sheet({ d, onClose }) {
 // PAD-1304: the Cabinet row. The backglass: where B2S puts it, or filling a
 // screen (each patched table gets a <name>.res saying so). B2S's own DMD
 // hidden: the game's screen is the DMD. The two buttons' LEDs and (PAD-1460)
-// the machine's shaker motor as DOF E events, blank = not sent (E190 / E191 /
-// E192 suggested).
+// the machine's shaker motor as DOF E events, blank = not sent: the box says
+// "off" (PAD-1480: a greyed 192 read as set), E190 / E191 / E192 suggested in
+// its tooltip.
 function CabinetRow({ c, disabled }) {
   const screens = c.screens || [];
   const opts = [{ value: "0", label: "Where B2S puts it" }].concat(screens.map((m) => ({
     value: String(m.n), label: "Screen " + m.n + (m.primary ? " (main)" : "") + ", " + m.w + "×" + m.h })));
   const dof = (k, label, suggested, tipText) => html`<span class="vpx-dof small">${label} E<${Field} sm type="number" width="66px" min="0" max="999"
-      value=${c[k] ? String(c[k]) : ""} placeholder=${String(suggested)} disabled=${disabled}
-      title=${tipText || { head: label + " button light to DOF", lines: ["The DOF event (E number) the button's LED is sent as while a table plays; blank: not sent.",
-        "Give it the same number in your DOF config's line for this button (" + suggested + " is free on most)."] }}
+      value=${c[k] ? String(c[k]) : ""} placeholder="off" disabled=${disabled}
+      title=${tipText || { head: label + " button light to DOF", lines: ["The DOF event (E number) the button's LED is sent as while a table plays; off (blank): not sent.",
+        "Type a number here, e.g. " + suggested + " (free on most), and give the button the same E" + suggested + " in your DOF config's line for the table."] }}
       onChange=${() => {}}
       onCommit=${(v) => { const n = parseInt(v, 10) || 0; if (n !== (c[k] || 0)) call("vpx.set_cabinet", { [k]: n }); }} /></span>`;
   return html`<div class="vpx-strip-row">
@@ -150,8 +151,8 @@ function CabinetRow({ c, disabled }) {
     ${dof("dof_start", "Start", (c.suggested || {}).start || 190)}
     ${dof("dof_lockdown", "Lockdown", (c.suggested || {}).lockdown || 191)}
     ${dof("dof_shaker", "Shaker", (c.suggested || {}).shaker || 192, { head: "The machine's shaker motor to DOF",
-      lines: ["The DOF event (E number) sent while the game runs its shaker motor; blank: not sent.",
-        "Give your shaker the same number in your DOF config's line for the table (" + ((c.suggested || {}).shaker || 192) + " is free on most).",
+      lines: ["The DOF event (E number) sent while the game runs its shaker motor; off (blank): not sent.",
+        "Type a number here, e.g. " + ((c.suggested || {}).shaker || 192) + " (free on most), and put the same E" + ((c.suggested || {}).shaker || 192) + " in your DOF config's Shaker column for the table.",
         "The game shakes only while its own SHAKER MOTOR setting has the motor fitted (Jaws LE has it on as it comes)."] })}
   </div>`;
 }

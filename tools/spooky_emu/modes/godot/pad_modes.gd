@@ -48,6 +48,18 @@ var measured := false
 var voices := []       # [[key, ticks, starts needed]] our callouts the voice channel has not taken yet
 var voice_starts := 0  # clips the voice channel has started (polled)
 var voice_last := [null, 0.0]
+# start rules (PAD-1424)
+var valid_seen := false
+var mb_since := 0.0
+var mb_was := false
+var last_running = null
+var extra_seen := -1
+var rules_at := 0.0
+# the priority of our LED commands: above the game's shows and modes (5 .. ~400), below its system
+# modes (9500+) and the service menu (9750)
+const LED_PRI := 1000
+const NOT_PLAYFIELD := ["trough", "shooter", "plunge", "launch", "flipper", "start", "coin", "door", "tilt",
+	"slam", "outhole", "drain", "button", "service", "volume", "menu", "eject", "enter", "exit", "up", "down"]
 
 
 func plog(msg: String) -> void:
@@ -85,6 +97,8 @@ func _ready() -> void:
 	Game.ball_ended.connect(func(): _stop_all("the ball ended"))
 	Game.game_ended.connect(func(): _stop_all("the game ended"))
 	Game.tilt_warning.connect(_on_tilt)
+	# no ball-saved signal: a one-ball save plays the game's ball_save clip (trough.save_balls)
+	Game.quick_clip.connect(_on_quick_clip)
 	plog("PadModes joined the game: %d custom mode(s), %d game modes in Modes.all_modes" % [
 		all.size(), Modes.all_modes.size()])
 
@@ -122,12 +136,276 @@ func load_modes() -> void:
 			"hits": 0, "running": false, "made": 0, "total": 0, "left": 0.0,
 		}
 		m["title"] = cfg.get("title", m["name"])
+		_start_rules(fn, m, cfg)
+		_lamps_coils_balls(fn, m, cfg)
 		all.append(m)
 		plog("mode %s \"%s\": start %s x%d, shots %s, %d points, %s, complete %d (+%d)" % [fn, m["name"],
 			names(m["start"]), m["start_count"], names(m["shots"]), m["points"],
 			("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends",
 			m["complete"], m["complete_points"]])
 	plog("%d custom mode(s) from %s" % [all.size(), dir])
+
+
+# PAD-1424: JJP's start rules (MODES.md "Start rules from the game's hook lists")
+func _start_rules(fn: String, m: Dictionary, cfg: Dictionary) -> void:
+	m["combo"] = switches(fn, "start_combo", cfg.get("start_combo", ""))
+	m["combo_seconds"] = maxi(1, to_int(cfg.get("combo_seconds", "5")))
+	m["start_score"] = to_int(cfg.get("start_score", "0"))
+	m["start_on"] = _words(cfg.get("start_on", ""))
+	m["start_after"] = _words(cfg.get("start_after", ""))
+	m["once"] = cfg.get("start_once", "no")
+	m["reset_ball"] = cfg.get("start_count_reset", "game") == "ball"
+	m["combo_at"] = 0
+	m["combo_time"] = 0.0
+	m["ran_ball"] = false
+	m["ran_game"] = false
+	m["score_fired"] = {}
+	if not m["combo"].is_empty() or not m["start_on"].is_empty() or not m["start_after"].is_empty() \
+			or m["start_score"] > 0:
+		plog("mode %s start rules: on %s; after %s; score %d; combo %s within %d s; once %s; count reset %s" % [
+			fn, " ".join(m["start_on"]), " ".join(m["start_after"]), m["start_score"], names(m["combo"]),
+			m["combo_seconds"], m["once"], "ball" if m["reset_ball"] else "game"])
+
+
+# PAD-1424: the game's LEDs at a priority of ours, its coils, its balls (MODES.md "Balls and coils")
+func _lamps_coils_balls(fn: String, m: Dictionary, cfg: Dictionary) -> void:
+	m["lamps"] = []
+	for w in _words(cfg.get("lamps", "")):
+		var n := _const_of(Leds, w)
+		if n < 0:
+			plog("%s: lamp %s is not one of this game's LEDs (ignored)" % [fn, w])
+		else:
+			m["lamps"].append(n)
+	var c := Color.html("#" + cfg.get("lamp_color", "ffffff").trim_prefix("#").substr(0, 6))
+	m["lamp_rgb"] = [int(c.r * 255), int(c.g * 255), int(c.b * 255)]
+	m["lamp_blink"] = clampi(to_int(cfg.get("lamp_blink", "4")), 0, 10)
+	var mb := _words(cfg.get("multiball", ""))
+	m["mb_balls"] = clampi(to_int(mb[0]), 0, 6) if mb.size() > 0 else 0
+	m["mb_save"] = clampi(to_int(mb[1]), 0, 120) if mb.size() > 1 else 10
+	m["mb_on"] = switches(fn, "multiball_on", cfg.get("multiball_on", ""))
+	var ab := _words(cfg.get("add_ball", ""))
+	m["add_times"] = 1
+	if ab.size() > 1 and ab[-1].is_valid_int():
+		m["add_times"] = clampi(int(ab[-1]), 1, 6)
+		ab.remove_at(ab.size() - 1)
+	m["add_ball"] = switches(fn, "add_ball", " ".join(ab))
+	m["ball_save"] = clampi(to_int(cfg.get("ball_save", "0")), 0, 120)
+	for k in ["coil_start", "coil_shot", "coil_complete"]:
+		var w := _words(cfg.get(k, ""))
+		m[k] = [_const_of(Coils, w[0]), to_int(w[1]) if w.size() > 1 else 0, w[0]] if w.size() > 0 else null
+	var h := _words(cfg.get("coil_hold", ""))
+	m["coil_hold"] = [_const_of(Coils, h[0]), clampi(to_int(h[1]), 100, 5000) if h.size() > 1 else 1000,
+		clampi(to_int(h[2]), 1, 16) if h.size() > 2 else 8, h[0]] if h.size() > 0 else null
+	var on: String = cfg.get("coil_hold_on", "shots")
+	m["hold_on"] = on if on in ["shots", "start"] else "switches"
+	m["hold_sw"] = switches(fn, "coil_hold_on", on) if m["hold_on"] == "switches" else []
+	m["holds_ok"] = cfg.get("coil_holds", "off") == "on"
+	m["mb_served"] = false
+	m["mb_at"] = 0.0
+	m["one_since"] = 0.0
+	m["added"] = 0
+	m["held_until"] = 0.0
+	m["lamp_phase"] = -1
+	m["lamp_at"] = 0.0
+	m["started_at"] = 0.0
+	# a mode's own files (pad/modes beside the .mode)
+	m["sound_channel"] = cfg.get("sound_channel", "fanfare")
+	m["music"] = cfg.get("music", "")
+	m["picture"] = cfg.get("picture", "")
+	m["video"] = cfg.get("video", "")
+	m["picture_at"] = _box(cfg.get("picture_at", ""))
+	m["video_at"] = _box(cfg.get("video_at", ""))
+	m["video_loop"] = cfg.get("video_loop", "yes") != "no"
+	m["media"] = []
+	m["music_player"] = null
+
+
+static func _box(v: String) -> Array:
+	var w := []
+	for x in v.split(" ", false):
+		w.append(to_int(x) if x.is_valid_int() else -1)
+	if w.size() != 4 or w.min() < 0 or w[2] <= 0 or w[3] <= 0:
+		return [0, 0, 100, 100]
+	return w
+
+
+# ------------------------------------------------------------------ a mode's own files (PAD-1424)
+var media_layer: CanvasLayer = null
+var streams := {}
+
+
+func _is_file(v: String) -> bool:
+	return v.get_extension().to_lower() in ["ogg", "wav", "png", "jpg", "jpeg", "ogv", "webm", "mp4"]
+
+
+# An AudioStream from a file of the mode's own: PCM wav, read here (AudioStreamWAV takes the
+# samples).  Godot 4.1 has no Ogg Vorbis loader for a file (load_from_file came in 4.2, and even
+# naming it stops this script from parsing), so the check takes wav only on this engine.
+func _stream(name: String):
+	if streams.has(name):
+		return streams[name]
+	var path := dir.path_join(name)
+	var st = null
+	var ext := name.get_extension().to_lower()
+	if ext == "wav":
+		st = _wav(path)
+	if st == null:
+		plog("%s: cannot play %s on this engine (%s)" % [name, ext, Engine.get_version_info().string])
+	streams[name] = st
+	return st
+
+
+static func _wav(path: String) -> AudioStreamWAV:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null or f.get_buffer(4).get_string_from_ascii() != "RIFF":
+		return null
+	f.get_32()
+	if f.get_buffer(4).get_string_from_ascii() != "WAVE":
+		return null
+	var chans := 0
+	var rate := 0
+	var bits := 0
+	while f.get_position() + 8 <= f.get_length():
+		var id := f.get_buffer(4).get_string_from_ascii()
+		var size := f.get_32()
+		if id == "fmt ":
+			var fmt := f.get_16()
+			chans = f.get_16()
+			rate = f.get_32()
+			f.get_32()
+			f.get_16()
+			bits = f.get_16()
+			if fmt != 1:
+				return null
+			f.seek(f.get_position() + size - 16)
+		elif id == "data":
+			var w := AudioStreamWAV.new()
+			w.format = AudioStreamWAV.FORMAT_16_BITS if bits == 16 else AudioStreamWAV.FORMAT_8_BITS
+			w.mix_rate = rate
+			w.stereo = chans == 2
+			var data := f.get_buffer(size)
+			if bits == 8:
+				for i in data.size():
+					data[i] = (data[i] - 128) & 0xff
+			w.data = data
+			return w
+		else:
+			f.seek(f.get_position() + size + (size & 1))
+	return null
+
+
+func _sound_file(m: Dictionary, key: String, name: String) -> void:
+	var st = _stream(name)
+	if st == null:
+		return
+	var p := AudioStreamPlayer.new()
+	p.stream = st
+	var ch: String = m["sound_channel"]
+	p.bus = "voice" if ch == "speech" else ("music" if ch == "music" else "sfx")
+	add_child(p)
+	p.finished.connect(p.queue_free)
+	p.play()
+	plog("%s: %s %s (a file of the mode's own) playing on the game's %s bus" % [m["name"], key, name, p.bus])
+
+
+func _music(m: Dictionary, on: bool) -> void:
+	if m["music"] == "":
+		return
+	if on:
+		var st = _stream(m["music"])
+		if st == null:
+			return
+		if "loop" in st:
+			st.loop = true
+		if st is AudioStreamWAV:
+			st.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			st.loop_end = st.data.size() / (2 if st.format == AudioStreamWAV.FORMAT_16_BITS else 1) / (2 if st.stereo else 1)
+		var p := AudioStreamPlayer.new()
+		p.stream = st
+		p.bus = "music"
+		add_child(p)
+		p.play()
+		m["music_player"] = p
+		Audio.music_player.volume_db = -80.0
+		plog("%s: music %s playing on the game's music bus, the game's own music down" % [m["name"], m["music"]])
+		return
+	var p = m["music_player"]
+	if p == null:
+		return
+	m["music_player"] = null
+	p.stop()
+	p.queue_free()
+	Audio.music_player.volume_db = 0.0
+	plog("%s: music %s stopped, the game's own music back" % [m["name"], m["music"]])
+
+
+func _media(m: Dictionary, on: bool) -> void:
+	for n in m["media"]:
+		if is_instance_valid(n):
+			n.queue_free()
+	if not m["media"].is_empty():
+		plog("%s: picture/video taken off the screen" % m["name"])
+	m["media"] = []
+	if not on or (m["picture"] == "" and m["video"] == ""):
+		return
+	if media_layer == null:
+		media_layer = CanvasLayer.new()
+		media_layer.layer = 127                      # under the panel (128), over the game
+		add_child(media_layer)
+	var size := get_viewport().get_visible_rect().size
+	if m["video"] != "":
+		var v := VideoStreamTheora.new()
+		v.file = dir.path_join(m["video"])
+		var vp := VideoStreamPlayer.new()
+		vp.stream = v
+		vp.expand = true
+		vp.loop = m["video_loop"]
+		vp.volume_db = -80.0                         # silent, as on JJP
+		media_layer.add_child(vp)
+		vp.play()
+		var tex = vp.get_video_texture()
+		var ts := Vector2(tex.get_width(), tex.get_height()) if tex != null and tex.get_width() > 0 else Vector2(16, 9)
+		_place(vp, m["video_at"], size, ts)
+		m["media"].append(vp)
+		plog("%s: video %s on the screen at %s%s" % [m["name"], m["video"], m["video_at"], ", looped" if m["video_loop"] else ", once"])
+	if m["picture"] != "":
+		var img := Image.load_from_file(dir.path_join(m["picture"]))
+		if img == null:
+			plog("%s: picture %s could not be read" % [m["name"], m["picture"]])
+		else:
+			var tr := TextureRect.new()
+			tr.texture = ImageTexture.create_from_image(img)
+			tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			media_layer.add_child(tr)
+			_place(tr, m["picture_at"], size, Vector2(img.get_width(), img.get_height()))
+			m["media"].append(tr)
+			plog("%s: picture %s (%dx%d) on the screen at %s" % [m["name"], m["picture"], img.get_width(), img.get_height(), m["picture_at"]])
+
+
+# fitted in the box (x y w h, percent of the screen), its shape kept, centred
+static func _place(c: Control, at: Array, screen: Vector2, own: Vector2) -> void:
+	var b := Rect2(screen.x * at[0] / 100.0, screen.y * at[1] / 100.0, screen.x * at[2] / 100.0, screen.y * at[3] / 100.0)
+	var k := minf(b.size.x / maxf(own.x, 1.0), b.size.y / maxf(own.y, 1.0))
+	var s := own * k
+	c.position = b.position + (b.size - s) / 2.0
+	c.size = s
+
+
+# a constant of an autoload by its name as a mode file writes it (Leds.ORBIT_INNER4, Coils.SHAKER)
+static func _const_of(node: Object, w: String) -> int:
+	var want := w.to_upper()
+	var consts: Dictionary = node.get_script().get_script_constant_map()
+	if consts.has(want) and typeof(consts[want]) == TYPE_INT:
+		return consts[want]
+	return -1
+
+
+static func _words(v: String) -> Array:
+	var out := []
+	for w in v.replace(",", " ").split(" ", false):
+		out.append(w.to_lower())
+	return out
 
 
 static func parse(text: String) -> Dictionary:
@@ -184,12 +462,31 @@ func _on_game_started() -> void:
 	for m in all:
 		_stop(m, "")
 		m["hits"] = 0
+		m["combo_at"] = 0
+		m["ran_game"] = false
+		m["score_fired"] = {}
 	plog("game_started: start counts reset")
 
 
 func _on_ball_started(shoot_again) -> void:
 	ball_live = true
-	plog("ball_started (ball %s, shoot again %s)" % [Game.ball, shoot_again])
+	plog("ball_started (ball %s of %s, player %d, shoot again %s)" % [Game.ball, Game.balls_per_game,
+		Game.current_player_index + 1, shoot_again])
+	valid_seen = false
+	mb_since = 0.0
+	mb_was = false
+	last_running = null
+	extra_seen = -1
+	for m in all:
+		m["ran_ball"] = false
+		m["combo_at"] = 0
+		if m["reset_ball"]:
+			m["hits"] = 0
+	_event("ball_start")
+	if Game.ball == 1 and not shoot_again:
+		_event("first_ball")
+	if Game.ball >= Game.balls_per_game and _extra_left() <= 0:
+		_event("last_ball")
 	if port_path != "" and not measured:
 		measured = true
 		var before = _score()
@@ -218,25 +515,308 @@ func playing() -> bool:
 func _on_switch(sw) -> void:
 	if all.is_empty() or not playing():
 		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if not valid_seen and _is_playfield(Switches.items[sw].name):
+		valid_seen = true
+		_event("valid_playfield")
 	for m in all:
 		if m["running"]:
-			if sw in m["shots"]:
+			_running_switch(m, sw)
+			if m["running"] and sw in m["shots"]:
 				_shot(m, sw)
-		elif sw in m["start"]:
-			m["hits"] += 1
-			plog("%s: start switch %s hit %d of %d" % [m["name"], Switches.items[sw].name, m["hits"], m["start_count"]])
-			if m["hits"] >= m["start_count"]:
-				_start(m)
+			continue
+		_combo(m, sw, now)
+		if not m["running"] and sw in m["start"]:
+			_fire(m, "start switch %s hit" % Switches.items[sw].name)
+
+
+# ------------------------------------------------------------------ start rules (PAD-1424)
+# A start rule fired for m: one more toward its start_count.
+func _fire(m: Dictionary, why: String) -> void:
+	if m["running"] or not playing():
+		return
+	if (m["once"] == "ball" and m["ran_ball"]) or (m["once"] == "game" and m["ran_game"]):
+		return
+	m["hits"] += 1
+	plog("%s: %s (%d of %d)" % [m["name"], why, m["hits"], m["start_count"]])
+	if m["hits"] >= m["start_count"]:
+		_start(m)
+
+
+# start_on: ball_start, first_ball, last_ball, valid_playfield, ball_saved, extra_ball, multiball_end
+func _event(ev: String) -> void:
+	plog("game event %s" % ev)
+	for m in all:
+		if ev in m["start_on"]:
+			_fire(m, "start_on %s" % ev)
+
+
+func _on_quick_clip(c, _how = null) -> void:
+	if typeof(c) == TYPE_DICTIONARY and str(c.get("clip", "")).ends_with("/ball_save.ogv"):
+		_event("ball_saved")
+
+
+# The trough, the shooter lane, the buttons and the coin door are not the playfield.
+static func _is_playfield(n: String) -> bool:
+	var words := n.to_lower().replace(" ", "_").replace("-", "_").split("_", false)
+	for w in words:
+		for x in NOT_PLAYFIELD:
+			if w == x or (x.length() > 3 and w.begins_with(x)):
+				return false
+	return not words.is_empty()
+
+
+func _combo(m: Dictionary, sw, now: float) -> void:
+	var c: Array = m["combo"]
+	if c.size() < 2 or m["running"]:
+		return
+	if m["combo_at"] > 0 and now - m["combo_time"] > m["combo_seconds"]:
+		m["combo_at"] = 0
+	if c[m["combo_at"]] == sw:
+		m["combo_at"] += 1
+		m["combo_time"] = now
+	elif c[0] == sw:
+		m["combo_at"] = 1
+		m["combo_time"] = now
+	if m["combo_at"] >= c.size():
+		m["combo_at"] = 0
+		_fire(m, "start_combo made")
+
+
+func _extra_left() -> int:
+	var p = Game.current_player
+	return int(p.data.get("extra_balls_pending", 0)) if p != null else 0
+
+
+# extra balls earned (only ever goes up in a game), -1 with no player
+func _extra_earned() -> int:
+	var p = Game.current_player
+	return int(p.data.get("extra_balls_earned", 0)) if p != null else -1
+
+
+func _balls_in_play() -> int:
+	var t = Modes.access("trough")
+	return int(t.num_balls_in_play) if t != null else -1
+
+
+# the game's modes running now, by their name in Modes.all_modes (the port report's game_modes)
+func _running_modes() -> Array:
+	var out := []
+	for md in Modes.modes:
+		if md == null:
+			continue
+		for k in Modes.all_modes:
+			if Modes.all_modes[k] == md:
+				out.append(str(k).to_lower())
+				break
+	return out
+
+
+# Ten times a second in a ball: the score, extra balls, the balls in play (a multiball's end)
+# and the game's running modes (start_after).
+func _rules() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if not playing() or now - rules_at < 0.1:
+		return
+	rules_at = now
+	var player: int = Game.current_player_index
+	var score := _score()
+	for m in all:
+		if m["start_score"] > 0 and score >= m["start_score"] and not m["score_fired"].has(player):
+			m["score_fired"][player] = true
+			_fire(m, "start_score %d reached (%d)" % [m["start_score"], score])
+	var extra := _extra_earned()
+	if extra >= 0:
+		if extra_seen >= 0 and extra > extra_seen:
+			_event("extra_ball")
+		extra_seen = extra
+	var in_play := _balls_in_play()
+	if in_play > 1:
+		if mb_since == 0.0:
+			mb_since = now
+		if now - mb_since >= 0.5:
+			mb_was = true
+	else:
+		mb_since = 0.0
+		if mb_was and in_play >= 0:
+			mb_was = false
+			_event("multiball_end")
+	var want := false
+	for m in all:
+		if not m["start_after"].is_empty():
+			want = true
+	if not want:
+		return
+	var running := _running_modes()
+	if last_running != null:
+		for ended in last_running:
+			if ended in running:
+				continue
+			for m in all:
+				if ended in m["start_after"] or "any" in m["start_after"]:
+					_fire(m, "start_after %s ended" % ended)
+	last_running = running
+
+
+# ------------------------------------------------------------------ lamps, coils, balls (PAD-1424)
+func _running_switch(m: Dictionary, sw) -> void:
+	if sw in m["mb_on"] and not m["mb_served"]:
+		_multiball(m)
+	if sw in m["add_ball"] and m["added"] < m["add_times"]:
+		m["added"] += 1
+		plog("%s: add a ball on %s (%d of %d): %s" % [m["name"], Switches.items[sw].name, m["added"], m["add_times"],
+			_add_balls(1)])
+		_save(m, maxi(2, m["mb_save"] if m["mb_balls"] > 0 else 2))
+	if m["hold_on"] == "switches" and sw in m["hold_sw"]:
+		_hold(m)
+
+
+func _trough():
+	return Modes.access("trough")
+
+
+func _add_balls(n: int) -> String:
+	var t = _trough()
+	if t == null:
+		return "no trough"
+	return "trough.add_balls(%d) added %s" % [n, t.add_balls(n, true)]
+
+
+func _save(m: Dictionary, secs: int) -> void:
+	var t = _trough()
+	if t == null:
+		return
+	t.start_ball_save(secs, true)
+	plog("%s: ball save %d s (trough.start_ball_save; active %s)" % [m["name"], secs, t.ball_save_active])
+
+
+func _multiball(m: Dictionary) -> void:
+	var have := maxi(1, _balls_in_play())
+	m["mb_served"] = true
+	m["mb_seen"] = false
+	m["mb_at"] = Time.get_ticks_msec() / 1000.0
+	m["one_since"] = 0.0
+	plog("%s: multiball, %d balls in play wanted, %d now%s" % [m["name"], m["mb_balls"], have,
+		(": " + _add_balls(m["mb_balls"] - have)) if m["mb_balls"] > have else ""])
+	if m["mb_save"] > 0:
+		_save(m, m["mb_save"])
+
+
+func _coil(m: Dictionary, key: String) -> void:
+	var c = m[key]
+	if c == null:
+		return
+	if c[0] < 0:
+		plog("%s: %s %s is not one of this game's coils" % [m["name"], key, c[2]])
+		return
+	var own: int = int(Coils.items[c[0]].pulse_ms) if Coils.items.size() > c[0] else 0
+	if c[1] > 0 and (own <= 0 or c[1] < own):
+		Coils.pulse_ms(c[0], c[1])
+	else:
+		Coils.pulse(c[0])
+	plog("%s: %s pulsed %s (%s ms, its own %d)" % [m["name"], key, c[2], c[1] if c[1] > 0 and c[1] < own else "its own", own])
+
+
+func _hold(m: Dictionary) -> void:
+	var h = m["coil_hold"]
+	if h == null:
+		return
+	if not m["holds_ok"]:
+		plog("%s: coil_hold %s refused: title.cfg has no coil_holds = on" % [m["name"], h[3]])
+		return
+	if h[0] < 0:
+		plog("%s: coil_hold %s is not one of this game's coils" % [m["name"], h[3]])
+		return
+	Coils.dangerous_hold(h[0], int(h[2] * 100 / 32))
+	m["held_until"] = Time.get_ticks_msec() / 1000.0 + h[1] / 1000.0
+	plog("%s: holding %s for %d ms at %d of 32 (Coils.dangerous_hold %d%%, released by us)" % [m["name"], h[3], h[1], h[2],
+		int(h[2] * 100 / 32)])
+
+
+func _unhold(m: Dictionary) -> void:
+	if m["held_until"] <= 0.0:
+		return
+	m["held_until"] = 0.0
+	Coils.release_hold(m["coil_hold"][0])
+	plog("%s: let go of %s" % [m["name"], m["coil_hold"][3]])
+
+
+# Our colour on the mode's LEDs at LED_PRI, blinking lamp_blink times a second; set again four
+# times a second (the game clears every command of its own at each ball start and tilt).
+func _lamps_tick(m: Dictionary, now: float) -> void:
+	if m["lamps"].is_empty():
+		return
+	var phase := int((now - m["started_at"]) * m["lamp_blink"] * 2.0) % 2 if m["lamp_blink"] > 0 else 0
+	if phase == m["lamp_phase"] and now - m["lamp_at"] < 0.25:
+		return
+	var first: bool = m["lamp_phase"] < 0
+	m["lamp_phase"] = phase
+	m["lamp_at"] = now
+	var rgb: Array = m["lamp_rgb"] if phase == 0 else [0, 0, 0]
+	# blend false: the game's controller blends a command with the ones under it by default, and
+	# black then shows them (the ball-save lamp stayed lit through our flashes)
+	for n in m["lamps"]:
+		Leds.enable(n, LED_PRI, Warden.OPCODE_SET_LED, rgb, 0, false)
+	if first:
+		plog("%s: lamps %s lit %s at priority %d%s" % [m["name"], m["lamps"], m["lamp_rgb"], LED_PRI,
+			(", %d flashes a second" % m["lamp_blink"]) if m["lamp_blink"] > 0 else ""])
+
+
+func _lamps_off(m: Dictionary) -> void:
+	for n in m["lamps"]:
+		Leds.disable(n, LED_PRI, true)
+	if not m["lamps"].is_empty():
+		plog("%s: lamps handed back to the game" % m["name"])
+
+
+# A multiball of ours ends the mode once one ball is left for 2 s, after its ball save and 3 s more.
+func _balls_tick(m: Dictionary, now: float) -> void:
+	if not m["mb_served"]:
+		return
+	if not m.get("mb_seen", false):
+		if _balls_in_play() > 1:
+			m["mb_seen"] = true
+			m["mb_at"] = now
+			plog("%s: the balls are in play" % m["name"])
+		elif now - m["mb_at"] > 20.0:
+			_stop(m, "the multiball's balls never came")
+		return
+	if now - m["mb_at"] < m["mb_save"] + 3:
+		return
+	if _balls_in_play() <= 1:
+		if m["one_since"] == 0.0:
+			m["one_since"] = now
+		elif now - m["one_since"] >= 2.0:
+			_stop(m, "one ball left")
+	else:
+		m["one_since"] = 0.0
 
 
 func _start(m: Dictionary) -> void:
 	m["hits"] = 0
+	m["combo_at"] = 0
+	m["ran_ball"] = true
+	m["ran_game"] = true
 	m["running"] = true
 	m["made"] = 0
 	m["total"] = 0
 	m["left"] = float(m["seconds"])
 	plog("%s: STARTED (%s)" % [m["name"], ("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends"])
 	_sound(m, "sound_start")
+	m["started_at"] = Time.get_ticks_msec() / 1000.0
+	m["mb_served"] = false
+	m["one_since"] = 0.0
+	m["added"] = 0
+	m["lamp_phase"] = -1
+	_music(m, true)
+	_media(m, true)
+	_coil(m, "coil_start")
+	if m["hold_on"] == "start":
+		_hold(m)
+	if m["ball_save"] > 0:
+		_save(m, m["ball_save"])
+	if m["mb_balls"] > 0 and m["mb_on"].is_empty():
+		_multiball(m)
 	shown = m
 	draw()
 
@@ -248,12 +828,16 @@ func _shot(m: Dictionary, sw) -> void:
 	plog("%s: shot %d%s on %s: %d points (player score %s)" % [m["name"], m["made"],
 		(" of %d" % m["complete"]) if m["complete"] > 0 else "", Switches.items[sw].name, got, _score()])
 	_sound(m, "sound_shot")
+	_coil(m, "coil_shot")
+	if m["hold_on"] == "shots":
+		_hold(m)
 	shown = m
 	if m["complete"] > 0 and m["made"] >= m["complete"]:
 		var bonus := _award(m["complete_points"]) if m["complete_points"] > 0 else 0
 		m["total"] += bonus
 		plog("%s: COMPLETED, bonus %d, mode total %d" % [m["name"], bonus, m["total"]])
 		_sound(m, "sound_complete")
+		_coil(m, "coil_complete")
 		_stop(m, "")
 		return
 	draw()
@@ -266,6 +850,13 @@ func _stop(m: Dictionary, why: String) -> void:
 	if why != "":
 		plog("%s: ended (%s), %d shot(s), total %d" % [m["name"], why, m["made"], m["total"]])
 		_sound(m, "sound_end")
+	_lamps_off(m)
+	_music(m, false)
+	_media(m, false)
+	_unhold(m)
+	if m["ball_save"] > 0 and m["mb_balls"] == 0 and _trough() != null and _trough().ball_save_active \
+			and _trough().ball_save_timer <= m["ball_save"] + 2:
+		_trough().disable_ball_save()
 	if shown == m:
 		shown = null
 		for x in all:
@@ -308,13 +899,24 @@ func _voice_poll() -> void:
 func _process(delta: float) -> void:
 	if not voices.is_empty():
 		_watch_voices()
+	if not all.is_empty():
+		_rules()
 	if all.is_empty() or Game.timers_paused:
 		return
+	var now := Time.get_ticks_msec() / 1000.0
 	for m in all:
-		if m["running"] and m["seconds"] > 0:
+		if not m["running"]:
+			continue
+		if m["seconds"] > 0 and not (m["mb_served"] and not m["mb_on"].is_empty()):
 			m["left"] -= delta
 			if m["left"] <= 0.0:
 				_stop(m, "time ran out")
+				continue
+		_balls_tick(m, now)
+		if m["running"]:
+			_lamps_tick(m, now)
+			if m["held_until"] > 0.0 and now >= m["held_until"]:
+				_unhold(m)
 	if shown != null and shown["running"] and box != null:
 		_timer(shown)
 
@@ -333,6 +935,9 @@ func _award(points: int) -> int:
 # ------------------------------------------------------------------ the game's sounds
 func _sound(m: Dictionary, key: String) -> void:
 	var name: String = m["cfg"].get(key, "")
+	if name != "" and _is_file(name):
+		_sound_file(m, key, name)
+		return
 	if name == "":
 		return
 	if Audio.voice_lines.has(name):

@@ -110,7 +110,9 @@ class SpookyModesMixin:
                 st["kind"] = "form"
                 st["title_cfg"] = dict(SM.read_title(self._spk_label))
                 st["folder"] = SM.title_dir(self._spk_label)
-                st["names"] = {k: SM.names_for(port, k, st["folder"]) for k in ("switches", "sound", "font", "lamps")}
+                st["names"] = {k: SM.names_for(port, k, st["folder"]) for k in ("switches", "sound", "font", "lamps", "coil_pulse",
+                                                                       "coil_hold", "events", "after", "sound_or_file",
+                                                                       "sound_file", "picture_file", "video_file")}
                 st["check"] = self._spk_check_state()
                 st["sounds"] = self._spk_sounds_state(port)
                 st["build"] = self._spk_build_state()
@@ -121,7 +123,7 @@ class SpookyModesMixin:
 
     def _spk_fields(self):
         out = {}
-        for k in list(SM.mk().KEYS):
+        for k in list(SM.mk().KEYS) + [t for t in SM.mk().TITLE_KEYS if t != "game"]:
             kind = SM.key_kind(k)
             choices = list(kind) if isinstance(kind, tuple) else []
             out[k] = {"label": SM.LABELS.get(k, k), "kind": "choice" if choices else kind,

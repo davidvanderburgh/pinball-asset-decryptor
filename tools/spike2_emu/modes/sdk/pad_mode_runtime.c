@@ -14745,6 +14745,7 @@ static char challenge_title[N_CHALLENGE][40];   /* round 2: the name the start m
 #define N_OWN_CHALLENGE 16       /* PAD-686: Godzilla's MODE CHALLENGE steps through every mode of a pack (13 and more) */
 static struct { int (*fn)(unsigned slot); const struct pm_mode *by; char name[40]; int launch; } own_challenge[N_OWN_CHALLENGE];
 static int challenge_launch[N_CHALLENGE];   /* PAD-643: pm_challenge_launch - 0 its start clip, -1 the player, ms */
+static int sty_menu_up(void);            /* PAD-1449 round 2: the start menu's style step has the flippers */
 static volatile int own_pending = -1;    /* the own challenge picked on the start menu, until its ball starts */
 
 /* PAD-630 (luvthatapex, Bond LE): the game's own challenge ENDS THE BALL when it is over. Ahoy Mr. Bond's ending
@@ -17048,7 +17049,7 @@ static void challenge_menu_frame(pm_reg *r)
         on = cursor == ours_at;
     } else {
         on = cursor == ours_at;
-        if (on) {
+        if (on && !sty_menu_up()) {                          /* PAD-1449 round 2: the style step has the flippers */
             frame_sub = challenge_frame_step(n, frame_sub, (r[breg] & lbit) != 0, (r[breg] & rbit) != 0, &eat);
             if (eat == 1) r[breg] &= ~lbit;
             if (eat == 2) r[breg] &= ~rbit;
@@ -19476,6 +19477,7 @@ static struct {
     unsigned long opened_ms, down_ms;    /* when it was asked; when the film was last seen up */
     volatile int walk, take;             /* the flippers' steps, Action (from the switch drain) */
     int at;                              /* the one shown: 0 NORMAL, 1 CHARACTERS, 2 ENHANCED */
+    int preset;                          /* PAD-1449 round 2: 1-3, the style already taken on the start menu (0: ask) */
     int phase;                           /* the top line's step */
     unsigned kind;                       /* the game it is for: a team kind (1, 3, 4, 5), STY_STANDARD, STY_CHALLENGE */
     unsigned long said_ms, walk_ms;      /* when the top line last turned; the last walk */
@@ -20301,6 +20303,7 @@ static char coop_scr_said[16];              /* what the shown one's words line s
 static int coop_scr_found, coop_scr_shown = -1;
 static void *coop_sty_scr[3];           /* PAD-1449: the style chooser's cards (PadCoopStyle_1..3), where the card has them */
 static int coop_sty_shown = -1;
+static char coop_team_words[40] = "YOUR TEAM";   /* PAD-1449 round 2: coop.cfg `team_words` ("YOUR GODZILLA TEAM") */
 static void *coop_scr_classic[COOP_CHARS];  /* PAD-1065: PadCoopClassic_1..: NO SPECIAL ABILITY over each card */
 static int coop_scr_classic_shown = -1;
 static unsigned long coop_scr_try;
@@ -20916,8 +20919,12 @@ static void sty_open(unsigned kind)
     sty.film_seen = 0;
     sty.ready = 0;
     sty.open = 1;
-    say("styles: %s from the start menu - NORMAL, CHARACTERS or ENHANCED first (the flippers walk, %s); ball 1 waits",
-        sty_label(kind), coop_action ? "Action takes one" : "the one shown is taken after 20 s");
+    if (sty.preset >= 1 && sty.preset <= 3)
+        say("styles: %s from the start menu, %s taken there - it goes in once the start film and any intro are over; "
+            "ball 1 waits", sty_label(kind), STY_NAMES[sty.preset - 1]);
+    else
+        say("styles: %s from the start menu - NORMAL, CHARACTERS or ENHANCED first (the flippers walk, %s); ball 1 waits",
+            sty_label(kind), coop_action ? "Action takes one" : "the one shown is taken after 20 s");
 }
 
 /* PAD-1449: the chooser may come up now: no start film of the game's up (or seen go down 0.5 s ago; none seen 2 s after
@@ -20975,6 +20982,7 @@ static void sty_tick(void)
     if (!sty.open) return;
     if (!coop_teammates() || !pm_player()) {
         sty.open = sty.ready = 0;
+        sty.preset = 0;
         say("styles: the chooser is gone - the game ended");
         return;
     }
@@ -20990,6 +20998,12 @@ static void sty_tick(void)
         sty.phase = 0;
         sty.said_ms = sty.walk_ms = pm_ms();
         sty.ready = 1;
+        if (sty.preset >= 1 && sty.preset <= 3) {             /* round 2: taken on the start menu - no card now */
+            sty.at = sty.preset - 1;
+            sty.preset = 0;
+            sty_close("taken on the start menu");
+            return;
+        }
         say("styles: the chooser is up (%lu ms after it was asked)", pm_ms() - sty.opened_ms);
         sty_say();
         return;
@@ -21029,6 +21043,184 @@ static void sty_hold(void)
     }
     ci.holding = 0;
     if (said) say("styles: the chooser took %lu ms", pm_ms() - t0);
+}
+
+/* PAD-1449 round 2 (DoomWalrus666: the choice coming after the game's intro "feels weird" - ask it before the game
+ * starts, while still in the menu). The index menus read no Start of their own: the game's Start button begins the
+ * game (its game start, `site coop_start_game`, the call the Insider lobby is wrapped at) and the menu goes with it
+ * (emulator, Godzilla LE 1.16; the press cannot be held back at the drain - Start's descriptor has no handler bits).
+ * So the game start waits: begun while the menu is up (team_menu_frame seen just now) on an entry the chooser is for,
+ * the call sleeps (the game's proc_sleep, as ball 1's serve waits for the card) while the menu still draws and asks
+ * instead - the entry's name line (`comp_menu_end_msg`, a challenge's `comp_menu_challenge_msg_<k>`) says the game
+ * and the style, then what the style is (ENHANCED: "POWERS UP YOUR GODZILLA TEAM", coop.cfg `team_words`), turn about
+ * every 1.5 s (the chooser's card cannot be shown: its scene is not drawn in attract - emulator, Godzilla LE 1.16), the
+ * game's own USE FLIPPERS TO CHANGE / START TO SELECT under it; the flippers walk NORMAL, CHARACTERS, ENHANCED (taken
+ * out of the frame's buttons, so the cursor stays) - and the next Start takes one: the game start goes on with the words it was called with (an Insider
+ * lobby's already in them: its popup came first, once), the style kept for the game it begins (sty_begin): no card at
+ * ball 1, the style going in where the card would have closed. Left alone a minute, or the menu gone, the one shown is
+ * taken. Without the game start wrapped the chooser asks at ball 1 as before. */
+#define STY_MENU_IDLE_MS 60000ul         /* the step left alone this long takes the one shown */
+#define STY_MENU_LIVE_MS 500ul           /* the menu's frame seen this recently: the menu is up */
+#define STY_MENU_GONE_MS 3000ul          /* ... not seen for this long while the step waits: the menu is gone */
+static struct {
+    volatile int open;                   /* the step is up: the game start waits for it */
+    volatile int take;                   /* a Start press since it came up (from the switch drain) */
+    int at;                              /* the one shown: 0 NORMAL, 1 CHARACTERS, 2 ENHANCED */
+    unsigned kind;                       /* the game it is for (sty.kind's) */
+    unsigned msg;                        /* the message lettered (0: none) */
+    int preset;                          /* 1-3: the style taken, for the game it begins */
+    unsigned preset_kind;
+    unsigned long walk_ms, preset_ms;
+    volatile unsigned long frame_ms;     /* the menu's frame last seen */
+} smn;
+
+static int sty_menu_up(void)
+{
+    return smn.open;
+}
+
+/* the index menu is up: its frame was seen just now, and no game runs */
+static int sty_menu_live(void)
+{
+    return smn.frame_ms && pm_ms() - smn.frame_ms < STY_MENU_LIVE_MS && !pm_in_game();
+}
+
+/* One wait of the step, from the state alone (tests lift it verbatim): `pressed` a new Start since it came up,
+ * `idle` ms since the last walk, `unseen` ms since the menu's last frame. Returns 0 it waits on, 1 Start took the one
+ * shown, 2 it was left alone (the one shown), 3 the menu is gone (the one shown) */
+static int sty_menu_wait(int pressed, unsigned long idle, unsigned long unseen)
+{
+    if (pressed) return 1;
+    if (idle >= STY_MENU_IDLE_MS) return 2;
+    if (unseen >= STY_MENU_GONE_MS) return 3;
+    return 0;
+}
+
+/* the chooser's kind of the entry under the menu's cursor: one of ours the chooser is for (CO-OP PLAY, the team
+ * games), or the game's STANDARD or a challenge (tm.own); 0 none */
+static unsigned sty_menu_kind(void)
+{
+    if (!sty_wanted()) return 0u;
+    if (tm.pending) return tm.kind == 1u || tm.kind == 3u || tm.kind == 4u || tm.kind == 5u ? tm.kind : 0u;
+    return tm.own;
+}
+
+/* The menu's line for style `at` of game `kind` at its step `phase` (tests lift it verbatim): the game and the style,
+ * then what the style is - the chooser card's badges, ENHANCED's naming the title's team */
+static void sty_menu_words(unsigned kind, int at, int phase, const char *team, char *out, unsigned cap)
+{
+    if (at < 0 || at > 2) at = 0;
+    if (!(phase & 1)) pm_snprintf(out, cap, "%s %s", sty_label(kind), STY_NAMES[at]);
+    else if (at == 2) pm_snprintf(out, cap, "POWERS UP %s", team && team[0] ? team : "YOUR TEAM");
+    else pm_snprintf(out, cap, "%s", at ? "NO SPECIAL ABILITIES" : "THE GAME AS IT IS");
+}
+
+/* the entry's name message says the game and the one shown, then what it is (0: the game's words back) */
+static void sty_menu_letter(unsigned msg)
+{
+    char w[64];
+    if (smn.msg && smn.msg != msg) pm_message_restore(smn.msg);
+    smn.msg = 0;
+    if (!msg || !smn.open) return;
+    sty_menu_words(smn.kind, smn.at, (int)((pm_ms() - smn.walk_ms) / COOP_PICK_FLIP_MS), coop_team_words, w, sizeof w);
+    if (pm_message_set(msg, w)) smn.msg = msg;
+}
+
+/* from the menu's frame point, before the press moves the cursor: the step has the flippers */
+static void sty_menu_walk(pm_reg *buttons, unsigned lbit, unsigned rbit)
+{
+    int w = 0;
+    smn.frame_ms = pm_ms();
+    if (!smn.open) return;
+    if (*buttons & lbit) w--;
+    if (*buttons & rbit) w++;
+    *buttons &= ~(pm_reg)(lbit | rbit);
+    if (!w) return;
+    smn.at = ((smn.at + w) % 3 + 3) % 3;
+    smn.walk_ms = pm_ms();
+    say("styles: the start menu's %s shows %s", sty_label(smn.kind), STY_NAMES[smn.at]);
+}
+
+/* from the switch drain (coop_edge): a Start press while the step is up takes the one shown */
+static void sty_menu_edge(unsigned id, int press)
+{
+    if (press && smn.open && id && id == ci.start_sw) smn.take = 1;
+}
+
+/* from the menu's frame (team_menu_frame), the game-mode index under the cursor: while the step is up, the entry's
+ * name line says it - Standard's (ours play as Standard), or the challenge's own (`comp_menu_challenge_msg_<k>`) */
+static unsigned sty_challenge_indices(unsigned *ch);
+static void sty_menu_line(unsigned std_msg, unsigned index)
+{
+    unsigned ch[8], n, k;
+    char key[32];
+    if (!smn.open) return;
+    if (smn.kind != STY_CHALLENGE) {
+        sty_menu_letter(std_msg);
+        return;
+    }
+    n = sty_challenge_indices(ch);
+    for (k = 0; k < n && ch[k] != index; k++) ;
+    pm_snprintf(key, sizeof key, "comp_menu_challenge_msg_%u", k);
+    sty_menu_letter(k < n ? (unsigned)pm_port_value(key, 0) : 0u);
+}
+
+/* from the game start (coop_start_game_wrap), before the game begins: begun from the menu on an entry the chooser is
+ * for, the step asks first and the call waits for it */
+static void sty_menu_ask(void)
+{
+    static const char *const how[4] = { "", "Start took it", "left alone a minute: the one shown",
+                                        "the menu is gone: the one shown" };
+    unsigned kind;
+    unsigned long t0 = pm_ms();
+    int was, down, got = 0;
+    smn.preset = 0;
+    if (!sty_menu_live() || !fn("proc_sleep") || !ci.start_sw || !(kind = sty_menu_kind())) return;
+    smn.kind = kind;
+    smn.at = 0;
+    smn.take = 0;
+    smn.walk_ms = pm_ms();
+    smn.open = 1;
+    say("styles: the game starts from the start menu's %s - it waits: the menu asks NORMAL, CHARACTERS or ENHANCED "
+        "first (the flippers walk, Start takes one)", sty_label(kind));
+    was = switch_held(ci.start_sw);                           /* the press that began it: its release first */
+    while (!got) {
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+        down = switch_held(ci.start_sw);
+        got = sty_menu_wait(smn.take || (down && !was), pm_ms() - smn.walk_ms, pm_ms() - smn.frame_ms);
+        was = down;
+    }
+    smn.open = 0;
+    smn.take = 0;
+    sty_menu_letter(0);
+    smn.preset = smn.at + 1;
+    smn.preset_kind = smn.kind;
+    smn.preset_ms = pm_ms();
+    say("styles: %s %s taken on the start menu (%s, %lu ms) - the game starts", sty_label(smn.kind),
+        STY_NAMES[smn.at], how[got], pm_ms() - t0);
+}
+
+/* the style the start menu took for a game of `kind` that begins now (0: none - the chooser asks at ball 1) */
+static int sty_menu_preset(unsigned kind)
+{
+    int st = smn.preset;
+    smn.preset = 0;
+    return st >= 1 && st <= 3 && smn.preset_kind == kind && pm_ms() - smn.preset_ms < TEAM_PICK_MS ? st : 0;
+}
+
+/* the game begins as the start menu's `kind`: its style taken there goes in where the chooser would have closed (the
+ * game's film and any intro over, so the pick follows them as it always has; the game's own Standard or challenge at
+ * NORMAL at once - nothing of ours in it); none taken there: the chooser at ball 1 */
+static void sty_begin(unsigned kind)
+{
+    sty.preset = sty_menu_preset(kind);
+    sty_open(kind);
+    if (sty.preset == 1 && (kind == STY_STANDARD || kind == STY_CHALLENGE)) {
+        sty.at = 0;
+        sty.preset = 0;
+        sty.ready = 1;
+        sty_close("taken on the start menu");
+    }
 }
 
 static void coop_pick_open(unsigned t)
@@ -21219,6 +21411,7 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
         }
         return;
     }
+    sty_menu_edge(id, (level & 1u) == closed);                /* PAD-1449 round 2: Start takes the menu's style */
     if (sty.open && sty.ready && coop_teammates()) {          /* PAD-1449: the style chooser has them */
         if ((level & 1u) != closed) return;
         if (id == coop_left) sty.walk--;
@@ -23869,7 +24062,7 @@ static void on_team_dispatch(pm_reg *r)
         coop.round = 1;
         coop_chars_begin();
         say("styles: the game began as the start menu's %s", own == STY_STANDARD ? "STANDARD" : "challenge");
-        sty_open(own);
+        sty_begin(own);                                      /* round 2: as the menu took it */
         return;
     }
     if (!want) return;
@@ -23892,7 +24085,7 @@ static void on_team_dispatch(pm_reg *r)
         coop.join_n = 1;                                      /* the top line says so, then player 1's pick */
         coop.join_step = 0;
         coop.join_at = pm_ms();
-        if (kind == 1u && sty_wanted()) sty_open(kind);       /* PAD-1449: its style first */
+        if (kind == 1u && sty_wanted()) sty_begin(kind);      /* PAD-1449: its style first */
         else coop_join_show();
         return;
     }
@@ -23923,7 +24116,7 @@ static void on_team_dispatch(pm_reg *r)
     added = coop_team_fill(0, 0, 0, 0);
     tm.size = 0;
     if (!added) say("teams: TEAM PLAY - the game added no one (credits?) - a one-player game");
-    else if (coop_teammates() && sty_wanted()) sty_open(kind);   /* PAD-1449: its style first */
+    else if (coop_teammates() && sty_wanted()) sty_begin(kind);  /* PAD-1449: its style first */
 }
 
 /* PAD-1052: from the tick: the fill's lines on the top line, one at a time, then player 1's pick. While the game's own
@@ -24198,6 +24391,7 @@ static unsigned coop_lobby_due(unsigned armed, unsigned size, unsigned done, int
 static unsigned coop_start_game_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0)
 {
     unsigned ret;
+    sty_menu_ask();                                           /* PAD-1449 round 2: begun from the menu: its style first */
     lb.a[0] = r0; lb.a[1] = r1; lb.a[2] = r2; lb.a[3] = r3;
     lb.size = s0 & 0xff; lb.armed = 1; lb.added = 0; lb.done = 0;
     if (lb.size > 1) say("co-op lobby: the game begins with %u players from the Insider lobby", lb.size);
@@ -24419,6 +24613,13 @@ static void coop_line(const char *s)
         for (p = s + 11; *p == ' '; p++) ;
         for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && k + 1 < (int)sizeof cb.loop; k++) cb.loop[k] = p[k];
         cb.loop[k] = 0;
+        return;
+    }
+    if (str_starts(s, "team_words ")) {                                   /* PAD-1449 round 2: the menu's line */
+        for (p = s + 11; *p == ' '; p++) ;
+        str_copy(coop_team_words, sizeof coop_team_words, p, sizeof coop_team_words);
+        for (ok = 0; coop_team_words[ok] && coop_team_words[ok] != '\r' && coop_team_words[ok] != '\n'; ok++) ;
+        coop_team_words[ok] = 0;
         return;
     }
     if (str_starts(s, "intro_start ")) {                                  /* PAD-1114 round 3: the Start button */
@@ -25580,7 +25781,8 @@ static void comp_menu_frame(pm_reg *r)
      * wrapping), and the game letters the name as the cursor ARRIVES - so the message is ours from that frame (a
      * `moved` site sees the cursor already where it ends) */
     comp.pending = (moved ? (unsigned)r[creg]
-                          : comp_frame_cursor((unsigned)r[creg], *count + last, r[breg] & 4u, r[breg] & 2u)) == comp_frame_at;
+                          : comp_frame_cursor((unsigned)r[creg], *count + last, sty_menu_up() ? 0u : r[breg] & 4u,
+                                              sty_menu_up() ? 0u : r[breg] & 2u)) == comp_frame_at;
     if (comp.pending) {
         pm_message_set(msg, comp_name());              /* the index's name: ours while the cursor is on our entry */
         comp_frame_msg = msg;
@@ -26668,6 +26870,7 @@ static void team_menu_frame(pm_reg *r)
         say("teams: %s%s on the start menu as entries %u-%u (Standard's game-mode index %u; cursor %" PMU ")",
             team_kind_name(kinds[0]), j > 1 ? " and TEAM PLAY" : "", n + 1, n + j, idx, r[creg]);
     }
+    sty_menu_walk(&r[breg], 4u, 2u);                    /* PAD-1449 round 2: the style step has the flippers */
     /* as Prolonged Competition's: the press read just now moves the cursor after this point */
     c = comp_frame_cursor(r[creg], *count + last, r[breg] & 4u, r[breg] & 2u);
     tm.pending = c >= team_frame_at && c < team_frame_at + team_frame_n;
@@ -26683,6 +26886,7 @@ static void team_menu_frame(pm_reg *r)
         sty_menu_own(c < *count + last ? sty_own_of_index(list[c], idx, ch, nch) : 0u);   /* PAD-1449: the game's own
                                                                                         * Standard or a challenge */
     }
+    sty_menu_line(msg, c < *count + last ? list[c] : 0u);   /* PAD-1449 round 2: the style step's words */
     if (tm.pending != was || (tm.pending && tm.kind != was_kind))
         say("teams: %s %s on the start menu", team_kind_name(tm.pending ? tm.kind : was_kind),
             tm.pending ? "picked" : "no longer picked");

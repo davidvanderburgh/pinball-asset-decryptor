@@ -272,3 +272,26 @@ def test_write_zip_carries_the_modes_prg(stem, tmp_path, monkeypatch):
         prg = z.read(stem + ".PRG")
         assert z.read("WHATSNEW.TXT") == b"x"
     assert P.is_modes_build(prg) and P.stock_of(prg) == stock
+
+
+@pytest.mark.parametrize("label", ["jetsons-V004", "dominos-V006", "rob_zombie-V026"])
+def test_keys_the_pinheck_runtime_cannot_do_are_refused_by_name(label, tmp_path):
+    """PAD-1424's start rules, lamps, balls, coils and a mode's own files are not in padheck.c yet
+    (PAD-1469): on a pinHeck title the check refuses each by name, a sound must be one on the card,
+    and the Modes tab's form leaves them out."""
+    mk = _mk()
+    port = mk.load_port(label)
+    (tmp_path / "x.mode").write_text("title = X\nstart = switch_20\nstart_on = ball_start\n"
+                                      "lamps = lamp_1\nmulti ball = 2\ncoil_start = KNOCKER\n"
+                                      "music = song.wav\nsound_start = boom.wav\nvideo = v.webm\n")
+    _modes, problems = mk.check_modes(str(tmp_path), port)
+    for k in ("start_on", "lamps", "coil_start", "music", "video"):
+        assert any(("%s is not on" % k) in p for p in problems), (k, problems)
+    assert any("sound_start" in p and "sounds on its own card" in p for p in problems), problems
+    from pinball_decryptor.plugins.spooky import custom_modes as SM
+    keys = {k for _g, ks in SM.form_groups(port) for k in ks}
+    assert not keys & set(mk.PINHECK_CANNOT) and "start" in keys and "sound_start" in keys
+    assert SM.title_form(port) == ("panel",)
+    # a P-ROC title keeps every PAD-1424 key
+    rm = mk.load_port("rick_and_morty-2022.09.02")
+    assert {"start_on", "lamps", "multiball", "coil_start"} <= {k for _g, ks in SM.form_groups(rm) for k in ks}

@@ -115,13 +115,38 @@ KEYS = collections.OrderedDict([
     ("name", "text"), ("title", "text"), ("start", "switches"), ("start_count", "int"),
     ("shots", "switches"), ("points", "int"), ("seconds", "int"), ("complete", "int"),
     ("complete_points", "int"),
-    ("sound_start", "sound"), ("sound_shot", "sound"), ("sound_complete", "sound"), ("sound_end", "sound"),
+    ("sound_start", "sound_or_file"), ("sound_shot", "sound_or_file"), ("sound_complete", "sound_or_file"),
+    ("sound_end", "sound_or_file"),
     ("font_title", "font"), ("font_value", "font"), ("font_timer", "font"),
     ("title_color", "rgba"), ("value_color", "rgba"), ("timer_color", "rgba"), ("panel_color", "rgba"),
     ("panel", ("middle", "bottom", "top", "none")),
+    # PAD-1424: JJP's start rules (MODES.md "Start rules from the game's hook lists")
+    ("start_on", "events"), ("start_after", "after"), ("start_score", "int"),
+    ("start_combo", "switches"), ("combo_seconds", "int"),
+    ("start_count_reset", ("game", "ball")), ("start_once", ("no", "ball", "game")),
+    # PAD-1424: the game's lamps on a layer of ours, its coils, its balls (MODES.md "Balls and coils")
+    ("lamps", "lamps"), ("lamp_color", "rgb"), ("lamp_blink", "int"),
+    ("multiball", "multiball"), ("multiball_on", "switches"), ("add_ball", "add_ball"), ("ball_save", "ball_save"),
+    ("coil_start", "coil_pulse"), ("coil_shot", "coil_pulse"), ("coil_complete", "coil_pulse"),
+    ("coil_hold", "coil_hold"), ("coil_hold_on", "hold_on"),
+    # PAD-1424: a mode's own files (MODES.md "A mode's own sounds, music, picture and video")
+    ("sound_channel", ("fanfare", "fx", "speech", "music")),
+    ("music", "sound_file"), ("picture", "picture_file"), ("picture_at", "box"),
+    ("video", "video_file"), ("video_at", "box"), ("video_loop", ("yes", "no")),
 ])
-#: title.cfg: every mode's defaults (the panel), and the title it is for
-TITLE_KEYS = collections.OrderedDict([("game", "text")])
+#: what each engine's runtime plays from a file of the mode's own: Unity's AudioClip loader and
+#: VideoPlayer on Linux (VP8 webm only), Godot 4.1 (PCM wav: it has no Ogg loader for a file;
+#: Theora ogv),
+#: SkeletonGame's pygame mixer and its ffmpeg movie layer (H.264 mp4)
+MEDIA = {
+    "unity": {"sound_file": ("ogg", "wav"), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("webm",)},
+    "godot": {"sound_file": ("wav",), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("ogv",)},
+    "proc": {"sound_file": ("ogg", "wav"), "picture_file": ("png", "jpg", "jpeg"), "video_file": ("mp4",)},
+}
+MEDIA_KEYS = ("sound_start", "sound_shot", "sound_complete", "sound_end", "music", "picture", "video")
+#: title.cfg: every mode's defaults (the panel), and the title it is for; coil_holds = on lets the
+#: title's modes hold coils (after a look at it on the machine, as on JJP)
+TITLE_KEYS = collections.OrderedDict([("game", "text"), ("coil_holds", ("on", "off"))])
 #: what the build writes into the staged title.cfg (never the person's)
 BUILD_TITLE_KEYS = ("points_scale",)
 #: JJP keys the Spooky runtime does not run yet (docs/plans/spooky_modes.md ticket 8)
@@ -206,15 +231,110 @@ def _int(v):
     return int(v.replace(",", "").replace("_", "")) if MJ._INT.match(v or "") else None
 
 
+#: what the pinHeck runtime (padheck.c) does not run yet: PAD-1424's start rules, lamps, balls,
+#: coils and a mode's own files, and the title's coil_holds (PAD-1469 brings them to pinHeck).
+#: The check refuses each by name on a pinHeck title and the Modes tab's form leaves them out.
+PINHECK_CANNOT = ("start_on", "start_after", "start_score", "start_combo", "combo_seconds",
+                  "start_count_reset", "start_once", "lamps", "lamp_color", "lamp_blink",
+                  "multiball", "multiball_on", "add_ball", "ball_save", "coil_start", "coil_shot",
+                  "coil_complete", "coil_hold", "coil_hold_on", "sound_channel", "music",
+                  "picture", "picture_at", "video", "video_at", "video_loop", "coil_holds")
+
+
+def keys_not_here(port):
+    """Every key *port*'s runtime cannot do: its port's ``keys_not_here`` (a pinHeck DMD: no fonts,
+    no colours) and, on a pinHeck title, PINHECK_CANNOT."""
+    out = set((port or {}).get("keys_not_here") or ())
+    if engine(port) == "pinheck":
+        out |= set(PINHECK_CANNOT)
+    return out
+
+
 def _not_here(k, port):
-    """A key the title's runtime cannot do (a pinHeck DMD: no fonts, no colours), or None."""
+    """Why the title's runtime cannot do *k*, or None."""
     if k in ((port or {}).get("keys_not_here") or ()):
         return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
                 "and colour" % (k, port.get("title", "this game")))
+    if engine(port) == "pinheck" and k in PINHECK_CANNOT:
+        return ("%s is not on %s yet: its modes run start, shots, points, time, completion, the "
+                "game's own sounds and the panel; take the line out" % (k, port.get("title", "this game")))
     return None
 
 
+def token(name):
+    """A lamp or coil name as a mode file writes it: one word (Evil Dead's "REAR MAGNET" is
+    REAR_MAGNET, Beetlejuice's "RIGHT ORBIT ARROW" RIGHT_ORBIT_ARROW); the runtimes take either."""
+    return "_".join((name or "").split())
+
+
+def _known(port, key):
+    return {token(n).lower(): token(n) for n in (port or {}).get(key) or ()}
+
+
+def _coil(name, port, hold):
+    known = _known(port, "coil_holds" if hold else "coils")
+    if not port or not (port.get("coils") or ()):
+        return None if port is None else "%s has no coils a mode may use" % port.get("title", "this game")
+    if name.lower() in known:
+        return None
+    if hold and name.lower() in _known(port, "coils"):
+        return ("%s is not one of %s's coils built to stay on (magnets, posts, diverters, the shaker, "
+                "lights): %s" % (name, port.get("title", "this game"), ", ".join(sorted(known.values())) or "none"))
+    return "%s is not one of %s's coils a mode may fire" % (name, port.get("title", "this game"))
+
+
+def media_exts(port, kind):
+    """The file endings this title's runtime plays for *kind* (sound_file, picture_file,
+    video_file); () when it cannot show that at all (Alice Cooper's Unity player loads its own
+    pictures and videos by name only)."""
+    if (port or {}).get("screen") == "unity_player" and kind in ("picture_file", "video_file"):
+        return ()
+    if engine(port or {}) == "pinheck":
+        return ()
+    return MEDIA.get(engine(port or {}), MEDIA["unity"]).get(kind, ())
+
+
 def check_value(kind, v, port):
+    words = MJ._names(v)
+    if kind == "sound_or_file":
+        if "." in v and v.rsplit(".", 1)[1].lower() in MJ.MEDIA_EXTS["sound_file"] + ("mp3",):
+            return check_value("sound_file", v, port)
+        return check_value("sound", v, port)
+    if kind in ("sound_file", "picture_file", "video_file"):
+        exts = media_exts(port, kind)
+        what = {"sound_file": "sound", "picture_file": "picture", "video_file": "video"}[kind]
+        if not exts and engine(port or {}) == "pinheck":
+            return ("%s plays only the sounds on its own card, by their three-letter names (SFX/_F?/xxx.wav); "
+                    "no %s file of a mode's own" % ((port or {}).get("title", "this game"), what))
+        if not exts:
+            return ("%s's screen cannot show a %s of a mode's own (its Unity player shows the game's "
+                    "own by name only)" % ((port or {}).get("title", "this game"), what))
+        if "/" in v or "\\" in v or "." not in v or v.rsplit(".", 1)[1].lower() not in exts:
+            return "must be a %s file in the mode folder ending .%s" % (what, ", .".join(exts))
+        return None
+    if kind == "lamps":
+        known = _known(port, "lamps")
+        bad = [w for w in words if known and w.lower() not in known]
+        return None if not bad else "not one of %s's lamps: %s" % (port.get("title", "this game"), " ".join(bad))
+    if kind == "coil_pulse":      # <coil> [ms]
+        if not 1 <= len(words) <= 2:
+            return "must be <coil> [ms]"
+        return (len(words) > 1 and MJ._int_in(words[1], 1, 255, "ms")) or _coil(words[0], port, False)
+    if kind == "coil_hold":       # <coil> <ms> [power of 32]
+        if not 2 <= len(words) <= 3:
+            return "must be <coil> <ms> [power of 32]"
+        return (MJ._int_in(words[1], 100, 5000, "ms") or (len(words) > 2 and MJ._int_in(words[2], 1, 16, "power"))
+                or _coil(words[0], port, True))
+    if kind == "events":
+        p = MJ.check_value(kind, v, None)
+        if p:
+            return p
+        can = (port or {}).get("start_events")
+        bad = [t for t in MJ._names(v) if can is not None and t not in can]
+        if bad:
+            return "%s: %s's runtime cannot see that event (it can: %s)" % (
+                " ".join(bad), port.get("title", "this game"), ", ".join(can) or "none")
+        return None
     if kind == "sound":
         known = set(port.get("sounds") or ()) if port else set()
         if known and v not in known:
@@ -301,8 +421,31 @@ def check_modes(mode_dir, port=None):
             m[k] = v
         m["file"] = fn
         m.setdefault("name", fn[:-5])
-        if not m.get("start"):
-            problems.append("%s: no start = (the switches that start it): the mode would never start" % fn)
+        if not any(m.get(k) for k in MJ.START_RULES):
+            problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo): "
+                            "the mode would never start" % fn)
+        if m.get("start_combo") and len(MJ._names(m["start_combo"])) < 2:
+            problems.append("%s: start_combo needs two switches or more" % fn)
+        v = _int(m.get("start_score") or "")
+        if v is not None and v <= 0:
+            problems.append("%s: start_score must be above 0" % fn)
+        v = _int(m.get("combo_seconds") or "")
+        if v is not None and not 1 <= v <= 60:
+            problems.append("%s: combo_seconds must be 1-60" % fn)
+        for k in MEDIA_KEYS:
+            v = m.get(k, "")
+            if v and "." in v and "/" not in v and (k in ("music", "picture", "video") or
+                                                   v.rsplit(".", 1)[1].lower() in ("ogg", "wav", "mp3")) \
+                    and not os.path.isfile(os.path.join(mode_dir, v)):
+                problems.append("%s: %s = %s, but there is no %s in the mode folder" % (fn, k, v, v))
+        v = _int(m.get("lamp_blink") or "")
+        if v is not None and not 0 <= v <= 10:
+            problems.append("%s: lamp_blink must be 0-10 flashes a second" % fn)
+        if m.get("multiball_on") and not m.get("multiball"):
+            problems.append("%s: multiball_on without a multiball line (it is ignored)" % fn)
+        if m.get("coil_hold") and title.get("coil_holds") != "on":
+            problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
+                            "(after a look at it on the machine)" % fn)
         if engine(port) == "pinheck":
             tp = ph().title_problem(m.get("title") or m.get("name"), port.get("prg"))
             if tp:
@@ -363,8 +506,14 @@ def pad_files(mode_dir, port):
     else:
         out = [("padunity.so", rt[0], 0o755), ("PadModes.dll", rt[1], 0o644)]
     out.append(("modes/title.cfg", title_cfg_text(mode_dir, port).encode("utf-8"), 0o644))
+    sent = set()
     for m in modes:
         out.append(("modes/" + m["file"], os.path.join(mode_dir, m["file"]), 0o644))
+        for k in MEDIA_KEYS:
+            v = m.get(k, "")
+            if v and v not in sent and os.path.isfile(os.path.join(mode_dir, v)):
+                sent.add(v)
+                out.append(("modes/" + v, os.path.join(mode_dir, v), 0o644))
     stamp = "PAD custom modes (mkspkmodes.py, runtime %s) for %s: %s\n" % (
         port.get("runtime", "?"), port.get("title", "?"), ", ".join(m["name"] for m in modes))
     out.append(("README.txt", stamp.encode("utf-8"), 0o644))

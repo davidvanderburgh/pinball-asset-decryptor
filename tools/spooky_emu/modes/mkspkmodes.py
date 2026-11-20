@@ -192,6 +192,21 @@ def check_value(kind, v, port):
     return MJ.check_value(kind, v, port)
 
 
+#: keys a Unity-player screen (Alice Cooper's: the game's own text over TCP, one font, no boxes)
+#: cannot show
+UNITY_SCREEN_NOT = ("font_title", "font_value", "font_timer", "panel_color")
+
+
+def not_on_screen(k, port):
+    """Why *k* cannot show on this title's screen, or None."""
+    if (port or {}).get("screen") == "unity_player" and k in UNITY_SCREEN_NOT:
+        what = "font" if k.startswith("font_") else "box colour"
+        return ("%s: %s's screen is its Unity player, which draws the game's own text in its one font, "
+                "with no box behind it, so a %s cannot be set there; take the line out" % (
+                    k, port.get("title", "this game"), what))
+    return None
+
+
 def check_modes(mode_dir, port=None):
     """-> (modes, problems), as the runtime will read the folder."""
     problems, modes = [], []
@@ -210,6 +225,9 @@ def check_modes(mode_dir, port=None):
                     continue
                 if kind is None:
                     problems.append("title.cfg:%d: %s" % (n, _unknown(k)))
+                    continue
+                if not_on_screen(k, port):
+                    problems.append("title.cfg:%d: %s" % (n, not_on_screen(k, port)))
                     continue
                 p = check_value(kind, v, port)
                 if p:
@@ -232,6 +250,9 @@ def check_modes(mode_dir, port=None):
             kind = KEYS.get(k)
             if kind is None:
                 problems.append("%s:%d: %s" % (fn, n, _unknown(k)))
+                continue
+            if not_on_screen(k, port):
+                problems.append("%s:%d: %s" % (fn, n, not_on_screen(k, port)))
                 continue
             p = check_value(kind, v, port)
             if p:
@@ -704,6 +725,14 @@ POINTS = {
                   "UP to the next 100 (x if x % 100 == 0 else x + 100 - x % 100); the runtime calls it "
                   "as the game's own awards do"),
 }
+#: a title whose scoring is not its engine's (read from its code): Alice Cooper's ACGame.score is
+#: mainFunctions._score (PAD-1421)
+POINTS_TITLE = {
+    "alice_cooper": (10, "ACGame.score (mainFunctions._score) rounds UP to the next 10 (game.roundup) and "
+                         "applies no playfield multiplier; while the game's Billion Dollar Babies mode runs, "
+                         "or the game has turned scoring off, it scores nothing (the game's own awards too); "
+                         "the runtime calls it as the game's own awards do"),
+}
 #: what each engine's port report says about its runtime and its update (make_port)
 ENGINE_PORT = {
     "godot": {"runtime_script": "pad_modes.gd"},
@@ -714,8 +743,10 @@ PROC_TITLES = {"rick_and_morty": {"update_container": "aes_zip", "aes_key": "rm_
                "alice_cooper": {"update_container": "aes_zip", "aes_key": "ac_pkg", "marker": "ACGame.py"}}
 
 
-def make_port(raw, label, title, ext, defaults=None):
-    """The runtime's own report (PADMODES_PORT) -> the port report the app ships."""
+def make_port(raw, label, title, ext, defaults=None, stock=None):
+    """The runtime's own report (PADMODES_PORT) -> the port report the app ships.  *stock*: the
+    stock update, for a title whose update name carries no version (Alice Cooper's
+    ac-gamecode.pkg): its name and size pick the port, as Halloween's code_H78.pkg does."""
     game, _, ver = label.partition("-")
     eng = raw.get("engine") or "unity"
     if raw.get("game_version") and ver and raw["game_version"].replace("_", ".") != ver:
@@ -726,7 +757,7 @@ def make_port(raw, label, title, ext, defaults=None):
     if int(m.get("multiplier") or 1) != 1:
         raise Refused("the points were measured under a x%s playfield multiplier" % m["multiplier"])
     scale = int(round(float(m["scored"]) / float(m["asked"])))
-    rnd, note = POINTS.get(eng, (0, ""))
+    rnd, note = POINTS_TITLE.get(game) or POINTS.get(eng, (0, ""))
     out = collections.OrderedDict([
         ("title", title), ("game", game), ("version", ver), ("update_ext", ext), ("engine", eng),
         ("made_by", "the runtime itself in the running game on the Spooky rig (PADMODES_PORT, "
@@ -739,6 +770,10 @@ def make_port(raw, label, title, ext, defaults=None):
     out["points_note"] = note
     if defaults:
         out["defaults"] = defaults
+    if stock:
+        out["update_name"] = os.path.basename(stock)
+        out["update_size"] = os.path.getsize(stock)
+        out["version_match"] = [os.path.basename(stock)]
     for k, v in raw.items():
         if k not in out and k != "points_scale_measured":
             out[k] = v
@@ -775,13 +810,16 @@ def main(argv=None):
     r.add_argument("--title", required=True)
     r.add_argument("--ext", required=True)
     r.add_argument("--defaults", help="a starter .mode file: the new mode form's picks")
+    r.add_argument("--stock", help="the stock update, when its name carries no version (its name and size "
+                                   "go in the port)")
     r.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     try:
         if a.cmd == "port":
             with open(a.raw, encoding="utf-8") as f:
                 raw = json.load(f)
-            p = make_port(raw, a.label, a.title, a.ext, _defaults_from(a.defaults) if a.defaults else None)
+            p = make_port(raw, a.label, a.title, a.ext, _defaults_from(a.defaults) if a.defaults else None,
+                          a.stock)
             with open(a.out, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(p, f, indent=1)
                 f.write("\n")

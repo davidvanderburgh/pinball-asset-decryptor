@@ -416,6 +416,46 @@ the spinner and ended when its 10 s ran out; started again, Portal Rush ended wh
 and on ball 2 when the game was tilted. Every callout played on the game's voice channel; the panel
 showed over the game's screen in its NeoSans font.
 
+## Ticket 5 done: Alice Cooper's Nightmare Castle on the P-ROC runtime (PAD-1421)
+
+Alice Cooper 1.1.0.5 (`ac-gamecode.pkg`) runs PAD-1420's runtime as it is for everything but
+the panel: the same `pinproc_class` line loads it, switches, sounds (`game.sound.play` /
+`play_voice`), timers and the game's events are SkeletonGame's. What differs, read from its
+bytecode (`ACGame.py` is plain source, the rest `.pyc`; Python 2.7's `dis` reads them):
+
+- **Score.** `ACGame.score` is `mainFunctions._score`: it rounds UP to the next 10
+  (`game.roundup`), applies **no** playfield multiplier (`bypassMultiplier` is never read), returns
+  None, and scores nothing while the game's Billion Dollar Babies mode runs (`bdb_mode.modeStarted`,
+  unless `force`) or `scoring_enabled` is off; co-op modes copy the score across the team. The
+  runtime's `pad_award` measures the score's change, so all of that is the game's own. The port says
+  `points_round 10`; the check refuses points the game would round (1005 -> 1,010).
+- **Screen.** Nothing is drawn with SkeletonGame layers (no `display_width`): the game sends
+  `||{'cmd':'APPEND_TEXT',...}` lines to its Unity player through `game.tcpclient`
+  (`append_text(name, x, y, depth, text, size, r, g, b, justify, layer)`, colours 0..1,
+  `remove_text`, `update_text`, `blink_text`, `quick_video`, `append_image`...). Its virtual screen
+  is 684x384 (x 342 the middle); its own modes draw shadowed text: a black copy 3-4 dots down-right,
+  one depth step behind. `layer` is base_layer (the room), vid_layer (mode videos) or quick_layer
+  (overlays, depth -110 .. -290). The player has one font and no boxes.
+- **The panel** (`unity_panel` in padmodes_proc.py) is that text: title, total and seconds left,
+  each with its shadow, on quick_layer at depth -300, centred at the place's y (top 92, middle 160,
+  bottom 262). The game clears its screen as its modes come and go (`unload_assets`,
+  `remove_all_text`), so the rows are sent again once a second while a mode shows; they are removed
+  by name when it ends. `font_*` and `panel_color` cannot show there: the port says
+  `screen: unity_player`, the check refuses them by name and the Modes tab's form leaves them out.
+- **The update** has no version in its name: the port carries `update_name` / `update_size` /
+  `version_match` (`mkspkmodes.py port --stock`), as Halloween's does.
+
+Starter modes: Sling Rush (both inlanes start it, the slings score 250,000, three complete it for
+2,000,000) and Spinner Frenzy (the first center target starts it, the spinner scores for 10 s, top).
+
+Proof (Ubuntu slots 1-2, hidden, muted): the PAD-built `ac-gamecode.pkg` (12 s to build) booted with
+no overlay; Sling Rush started on the two inlanes, three slings scored exactly 250,000 each through
+`mf._score` and paid the bonus; Spinner Frenzy started on target1, scored the spinner and ended on
+time; the combo_1 callout played on the voice channel, the effects through `game.sound.play`. The
+panel showed in the game's own lettering and counted down; after the drain the bonus screen was
+clean. A probe copy had the game clear its screen 2 s after a shot (`remove_all_text` +
+`unload_assets`): the game's own texts went, the panel was back at once and stayed.
+
 ## Rig fix made on the way
 
 Both Spooky rigs now stub `sync` (logging no-op on the game's PATH): WSL's

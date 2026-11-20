@@ -1,5 +1,6 @@
 """padmodes_proc.py - PAD's custom mode runtime for Spooky's P-ROC titles (SkeletonGame on
-pyprocgame, Python 2.7): Rick and Morty (PAD-1420; the PAD-1387 probe made into the runtime).
+pyprocgame, Python 2.7): Rick and Morty (PAD-1420; the PAD-1387 probe made into the runtime) and
+Alice Cooper's Nightmare Castle (PAD-1421: its screen is a Unity player, see "Alice Cooper's screen").
 Written so Python 3 reads it too (the app's tests drive its mode logic with a stand-in game).
 
 HOW IT GETS INTO THE GAME.  The update carries this file as ``pad/padmodes_proc.py`` (with an
@@ -27,7 +28,8 @@ describes; the ones taken here are mkspkmodes.py's KEYS):
   complete / complete_points   shots that complete it, and the bonus for that
   sound_start/_shot/_complete/_end   the game's own sounds (game.sound: a voice goes to the
                                      voice channel, queued behind what it is saying)
-  title, panel, fonts, colors        a panel over the game's screen, in the game's HD fonts
+  title, panel, fonts, colors        a panel over the game's screen, in the game's HD fonts (Alice
+                                     Cooper: the game's own text on its Unity player, no fonts)
 
 Switches: the game's own switch handlers (add_switch_handler, active), only while a ball is in
 play (not tilted, no service mode); ours never stop a switch for the game's modes.  Points go
@@ -246,6 +248,7 @@ def _runtime_class(base):
             self.voices = []            # [[key, sounds, asked at]] voices of ours not yet heard
             self.last_tick = None
             self.panel_key = None
+            self.unity_sent = 0.0
             super(PadRuntime, self).__init__(game=game, priority=PRIORITY, mode_type=base.Game)
             seen = []
             for m in modes:
@@ -372,7 +375,8 @@ def _runtime_class(base):
                         m["left"] -= dt
                         if m["left"] <= 0:
                             self.pad_stop(m, "time ran out")
-                if self.shown is not None and self.shown["running"] and self.shown["seconds"] > 0:
+                if self.shown is not None and self.shown["running"] and (
+                        self.shown["seconds"] > 0 or unity_client(self.game) is not None):
                     self.pad_draw(timer_only=True)
             except Exception:
                 log("tick failed: %s" % traceback.format_exc())
@@ -425,9 +429,21 @@ def _runtime_class(base):
             m = self.shown
             if m is None or not m["running"] or m["cfg"].get("panel", "middle") == "none":
                 self.layer, self.panel_key = None, None
+                tcp = unity_client(self.game)
+                if tcp is not None and self.unity_sent:
+                    unity_clear(tcp)
+                    self.unity_sent = 0.0
                 return
             secs = int(max(0.0, m["left"]) + 0.999) if m["seconds"] > 0 else -1
             key = (m["file"], m["title"], m["total"], secs)
+            tcp = unity_client(self.game)
+            if tcp is not None:
+                now = time.time()
+                if key == self.panel_key and now - self.unity_sent < UNITY_REFRESH:
+                    return
+                self.panel_key, self.unity_sent = key, now
+                unity_panel(tcp, m, secs)
+                return
             if key == self.panel_key:
                 return
             self.panel_key = key
@@ -605,10 +621,69 @@ def port_report(game):
                 types[type(m).__name__] = [int(t), int(m.priority)]
     return {
         "engine": "proc", "runtime": VERSION, "game_class": type(game).__name__,
-        "display": [int(getattr(game, "display_width", 0)), int(getattr(game, "display_height", 0))],
+        "display": ([UNITY_W, UNITY_H] if unity_client(game) is not None else
+                    [int(getattr(game, "display_width", 0)), int(getattr(game, "display_height", 0))]),
+        "screen": "unity_player" if unity_client(game) is not None else "skeletongame",
         "switches": sw, "switch_ids": dict((s.name, getattr(s, "number", "")) for s in sws),
         "switch_labels": dict((s.name, labels.get(s.name, s.name)) for s in sws),
         "lamps": lamps, "sounds": voice + effects, "voice_lines": len(voice), "sound_paths": paths,
         "music": sorted(getattr(snd, "music", {}).keys()) if hasattr(snd, "music") else [],
         "game_modes": modes, "game_mode_types": types, "fonts": fonts, "font_files": font_files,
     }
+
+
+# ============================================================================ Alice Cooper's screen
+# Alice Cooper's Nightmare Castle (PAD-1421) draws nothing with SkeletonGame layers: its screen is a
+# Unity player the game drives over TCP (game.tcpclient: ``||{'cmd':'APPEND_TEXT',...}`` messages to
+# 127.0.0.1:9999).  Its panel is the game's own kind of text: rows on the player's 684x384 virtual
+# screen (x 342 is the middle), each with a black copy 3 dots down-right one step behind it, as the
+# game's hurry-up timer and high scores are drawn.  The player has one font and no boxes, so a mode
+# on Alice Cooper takes no font_* and no panel_color (the check refuses them by name).
+#
+# The game clears what is on its screen as its own modes come and go (tcpclient.unload_assets at
+# every mode start), so the rows are sent again once a second while a mode is shown.
+UNITY_W, UNITY_H = 684, 384
+UNITY_LAYER = "quick_layer"      # above base_layer (the room) and vid_layer (the game's mode videos)
+UNITY_DEPTH = -300               # in front of the game's own quick_layer texts (-110 .. -290)
+#: (row, size, dy from the place's y) - sizes in the player's text units (the hurry-up timer is 20)
+UNITY_ROWS = (("title", 10, 0), ("value", 8, 34), ("timer", 7, 62))
+UNITY_PLACES = {"top": 92, "middle": 160, "bottom": 262}
+UNITY_REFRESH = 1.0
+
+
+def unity_client(game):
+    """The game's Unity player client (Alice Cooper), or None for a game drawing its own layers."""
+    tcp = getattr(game, "tcpclient", None)
+    return tcp if tcp is not None and hasattr(tcp, "append_text") else None
+
+
+def unity_names():
+    out = []
+    for k, _s, _y in UNITY_ROWS:
+        out += ["pad_" + k, "pad_" + k + "_b"]
+    return out
+
+
+def unity_clear(tcp):
+    for n in unity_names():
+        tcp.remove_text(n)
+
+
+def unity_panel(tcp, m, secs):
+    """Send the mode's panel to the Unity player: its rows, each with its shadow."""
+    cfg = m["cfg"]
+    y0 = UNITY_PLACES.get(cfg.get("panel", "middle"), UNITY_PLACES["middle"])
+    rows = {"title": (m["title"], "ffffff"), "value": (commas(m["total"]), "ffdc00"),
+            "timer": ("" if secs < 0 else str(secs), "ffffff")}
+    unity_clear(tcp)
+    for k, size, dy in UNITY_ROWS:
+        text, col = rows[k]
+        if not text:
+            continue
+        text = text.replace("'", "").replace("\\", "")       # the message is a quoted dict
+        r, g, b = [c / 255.0 for c in colour(cfg.get(k + "_color"), colour(col))[:3]]
+        y = y0 + dy
+        tcp.append_text("pad_" + k + "_b", UNITY_W // 2 + 3, y + 3, UNITY_DEPTH + 1, text, size,
+                        0, 0, 0, justify="center", layer=UNITY_LAYER)
+        tcp.append_text("pad_" + k, UNITY_W // 2, y, UNITY_DEPTH, text, size, r, g, b,
+                        justify="center", layer=UNITY_LAYER)

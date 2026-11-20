@@ -11,7 +11,9 @@ so there is no source to show; what the app reads off the program is shown inste
 * the sounds and callouts its own code asks for by a fixed number, each with its Sound Test name and the file the
   extract made of it (:attr:`..plugins.stern.clip_sounds.SoundReading.modes`). EMULATOR-CHECKED against PAD-455's
   census on Godzilla LE 1.16: of the 40 listed calls the census heard, 40 played the listed request and 39 while
-  their own mode was forced (the 40th, Planet X Hurry Up, while Planet X Multiball ran - the multiball starts it).
+  their own mode was forced (the 40th, Planet X Hurry Up, while Planet X Multiball ran - the multiball starts it);
+* PAD-1475: the light shows its own code starts by number (:attr:`..plugins.stern.clip_shows.ShowReading.modes`),
+  each named where the build's port names that show, and marked when a mode of the user's can play it too.
 
 Its timers and awards are the page's other section, as before. The card's clips and sounds are read on a worker,
 once per card (``clip_modes.read_card`` keeps the reading by the card file, so after the Video tab's first look it
@@ -27,11 +29,16 @@ from .tabs.base import rpc
 #: the most clips and sounds a page lists before "and N more"
 CLIPS_MAX = 40
 SOUNDS_MAX = 60
+SHOWS_MAX = 60
 
 HOW_NOTE = ("Read from the game program: the game's modes are compiled into it, so there is no code to show, "
             "only what the app can read off it.")
 SOUNDS_NOTE = ("The sounds this mode's own code asks for by a fixed number. A sound the game works out while it "
                "plays (a random pick, one of a list) or asks for from code several modes share is not listed.")
+
+SHOWS_NOTE = ("The game's light shows this mode's own code starts by a fixed number. The app names the ones it has seen "
+              "play in the emulator; the rest go by the game's own number. A show whose number the game works out "
+              "while it plays, or that code several modes share starts, is not listed.")
 
 _START = re.compile(r"^(start|select):\s*(.*)$")
 _IN = re.compile(r",\s*in ([A-Za-z_][\w:]*?)::v\[\d+\]\s*$")
@@ -134,7 +141,7 @@ class HowItWorksMixin:
         """The reading's class for the table's *mode*: the same class (a C++ title), else the one whose words
         are the mode's name (a plain-C title's mode key)."""
         reading = clips.reading
-        known = set(reading.labels) | set(clips.sound_reading.modes)
+        known = set(reading.labels) | set(clips.sound_reading.modes) | set(clips.show_reading.modes)
         if mode.cls in known:
             return mode.cls
 
@@ -170,6 +177,23 @@ class HowItWorksMixin:
             lines.append("Asked for in %d places of its code" % calls)
         return {"key": str(req), "text": text, "name": name if files and name and name not in text else "",
                 "path": os.path.join(project, *files[0].split("/")) if files and project else "",
+                "tip": {"head": text, "lines": lines}}
+
+    @staticmethod
+    def _how_show(sh, num, calls):
+        """PAD-1475: one listed light show: its name where the port names it, else the game's number."""
+        name = sh.names.get(str(num), "")
+        text = name or "Light show %d" % num
+        lines = ["The game's light show %d" % num]
+        picks = sh.pickable.get(str(num)) or []
+        if len(picks) == 1:
+            lines.append('A mode of yours can play it too: "%s" on its Lights page' % picks[0])
+        elif picks:
+            lines.append('A mode of yours can play it too, in one of %d colors: "%s" and the rest on its Lights '
+                         'page' % (len(picks), picks[0]))
+        if calls > 1:
+            lines.append("Started in %d places of its code" % calls)
+        return {"key": str(num), "text": text, "num": num if name else 0, "named": bool(name),
                 "tip": {"head": text, "lines": lines}}
 
     @staticmethod
@@ -222,20 +246,22 @@ class HowItWorksMixin:
         """``{"starts", "clips", "sounds", ...}`` for the game's mode *mid*: what the page's How it works shows."""
         mode = build.modes.get(mid)
         out = {"note": HOW_NOTE, "starts": start_words(build, mode) if mode else [], "clips": [], "clips_more": "",
-               "sounds": [], "sounds_more": "", "sounds_note": SOUNDS_NOTE, "reading": False, "unread": ""}
+               "sounds": [], "sounds_more": "", "sounds_note": SOUNDS_NOTE, "shows": [], "shows_more": "",
+               "shows_note": SHOWS_NOTE, "reading": False, "unread": ""}
         clips = self._how
         if mode is None:
             return out
         if clips is None:
             out["reading"] = bool(self._how_key and self._how_key[1])
-            out["unread"] = ("Reading the card's clips and sounds..." if out["reading"] else
-                             "The card the project was extracted from is not on this PC, so its clips and sounds "
-                             "can't be read.")
+            out["unread"] = ("Reading the card's clips, sounds and light shows..." if out["reading"] else
+                             "The card the project was extracted from is not on this PC, so its clips, sounds and "
+                             "light shows can't be read.")
             return out
         cls = self._how_class(clips, mode)
         if not cls:
-            out["unread"] = ("The app can't tell this mode's code apart in the game program, so its clips and sounds "
-                             "are not listed." if not clips.note else "Clips and sounds: %s." % clips.note)
+            out["unread"] = ("The app can't tell this mode's code apart in the game program, so its clips, sounds "
+                             "and light shows are not listed." if not clips.note
+                             else "Clips, sounds and light shows: %s." % clips.note)
             return out
         reading = clips.reading
         by_name = {}
@@ -253,4 +279,11 @@ class HowItWorksMixin:
             out["sounds_more"] = "And %d more." % (len(rows) - SOUNDS_MAX)
         if not rows and sr.note and not sr.modes:
             out["sounds_note"] = "Sounds: %s." % sr.note
+        sh = clips.show_reading
+        shows = sh.modes.get(cls) or []
+        out["shows"] = [self._how_show(sh, num, n) for num, _at, n in shows[:SHOWS_MAX]]
+        if len(shows) > SHOWS_MAX:
+            out["shows_more"] = "And %d more." % (len(shows) - SHOWS_MAX)
+        if not shows and sh.note and not sh.modes:
+            out["shows_note"] = "Light shows: %s." % sh.note
         return out

@@ -1,0 +1,15 @@
+# Portal Rush - a starter mode: both inlanes start it, the slings score it
+name = Portal Rush
+title = PORTAL RUSH
+start = leftInlane rightInlane
+start_count = 2
+shots = slingRight slingPop
+points = 250000
+seconds = 30
+complete = 3
+complete_points = 2000000
+sound_start = mb_start_1
+sound_shot = megaseed_collect
+sound_complete = ss_complete
+title_color = 97ce4c
+value_color = ffffff

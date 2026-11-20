@@ -14,7 +14,8 @@ keys (plugins/spooky/games.py), unpacks it to $SPP_CACHE/<name>/ and deletes
 the ZIP; the .pkg is only read.
 
 <name> defaults to <title>_<version>: rm_20220902 (the date in the file
-name), ac_<the newest WHATSNEW.txt version>.  `title` in the build says
+name), ac_<the newest WHATSNEW.txt version>; a PAD custom-modes update (its
+pad/padmodes_proc.py) adds _padmodes, so it never replaces the stock build.  `title` in the build says
 which game it is (rm | ac), `src` which file it came from (the Emulate tab's
 Cache window shows it) and `src_key` that file's name, size and time: the
 same file again finds its build without decrypting it (Alice Cooper's
@@ -179,6 +180,10 @@ def main():
         if os.path.exists(os.path.join(tmp, exe)):
             os.chmod(os.path.join(tmp, exe), 0o755)
     name = a.name or "%s_%s" % (title, version(title, a.pkg, tmp))
+    # A PAD modes update (PAD-1420: pad/padmodes_proc.py in it) has the stock one's own name:
+    # its build goes beside the stock build, never in its place.
+    if not a.name and os.path.isfile(os.path.join(tmp, "pad", "padmodes_proc.py")):
+        name += "_padmodes"
     out = os.path.join(SPP_CACHE, name)
     if os.path.exists(os.path.join(out, "title")) and not a.force:
         shutil.rmtree(tmp, ignore_errors=True)

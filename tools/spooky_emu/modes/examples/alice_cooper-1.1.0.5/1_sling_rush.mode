@@ -1,0 +1,14 @@
+# Sling Rush - a starter mode: both inlanes start it, the slings score it
+name = Sling Rush
+title = SLING RUSH
+start = inlaneLeft inlaneRight
+start_count = 2
+shots = slingl slingr
+points = 250000
+seconds = 30
+complete = 3
+complete_points = 2000000
+sound_start = combo_1
+sound_shot = sling
+sound_complete = combosound
+title_color = ff2020

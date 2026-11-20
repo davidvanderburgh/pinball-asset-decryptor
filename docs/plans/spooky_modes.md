@@ -356,6 +356,105 @@ ends when the ball drains, and on tilt. Spinner Frenzy: the drop target starts i
 scores 50,000 a hit, it ends after 10 s. Every callout found and played on the game's voice
 channel; the panel on the screen in CCHeroSandwichMeat / Truculenta-Bold.
 
+## Ticket 4 done: the P-ROC runtime and Rick and Morty (PAD-1420)
+
+**The runtime** (`tools/spooky_emu/modes/proc/padmodes_proc.py`, Python 2.7, also read by Python 3
+for the tests): a package `pad/` in the game's folder (`__init__.py`, `padmodes_proc.py`, `modes/`)
+and ONE line the build adds to the folder's `config.yaml`, `pinproc_class: pad.padmodes_proc.PinPROC`
+(procgame's `util.get_class` does `__import__("pad.padmodes_proc")` from sys.path[0], the game's
+folder). `PinPROC()` returns the machine's own `pinproc.PinPROC`, finds the game in its caller's frame
+and, when `run_loop` starts, adds ONE AdvancedMode of ours (`PadRuntime`, type Game, priority 9500:
+above every game mode that may stop a switch, below the tilt mode's 99998), held by the module
+(SkeletonGame keeps a weakref). It runs every `pad/modes/*.mode` with the keys and rules of the Unity
+and Godot runtimes; log `pad/padmodes.log` (`PAD_MODES_LOG`).
+
+Rick and Morty's facts, read from its decompiled procgame (SkeletonGame) and proven in the game:
+
+- **Switches**: the machine yaml's names (`slingRight`, `leftInlane`...); the runtime takes them with
+  the game's own `add_switch_handler(name, "active")` and returns None (the game's modes still see
+  them). Counted only between `evt_ball_starting` and the ball's end, not tilted, no service mode.
+- **Events**: SkeletonGame adds a Game mode at `game_started` and takes it out at `game_ended`;
+  `evt_game_starting` (start counts reset), `evt_ball_starting`, `evt_ball_ending(args)`, `evt_tilt(slam)`,
+  `evt_tilt_ball_ending`, `evt_game_ending` reach it (`notifyModes`, active modes).
+- **Points**: `RMGame.score` multiplies by the playfield multiplier and rounds UP to the next 100
+  (`x if x % 100 == 0 else x + 100 - x % 100`): scale 1, measured; the check refuses points that are
+  not a multiple of 100 and says what the game would score. The scale is measured as the score's
+  change (a title's `score()` may return None: Alice Cooper's does, PAD-1421).
+- **Sounds**: `game.sound.sounds` (key -> `is_voice`, `sound_list`): a voice through
+  `sound.play_voice` (queued on CH_VOICE), an effect through `sound.play`; the runtime logs each voice
+  when the voice channel plays it. The port lists 1,297 (1,040 voice) with their files from
+  `config/asset_list.yaml`.
+- **Panel**: one HD `Frame` (a filled box, rgba) and three rows drawn with the game's HD fonts by
+  alias (`font.draw(..., font_size=)`), each shrunk to its row; a `FrameLayer` as the mode's `layer`
+  (the game composites mode layers by priority, ours on top).
+- **Install**: the machine unpacks a `rm-gamecode-YYYYMMDD.pkg` (an AES-256-CBC ZIP) into
+  `/game/RickAndMorty`; the modes are in from the first start after it, and the stock update brings
+  the stock `config.yaml` back (no line: the runtime is not loaded).
+
+**mkspkmodes.py**: engine `proc`, load `pinproc_class`, container `aes_zip` (`aes_key`, `marker`):
+`build` decrypts, copies every member's compressed bytes as they are (no recompression), rewrites
+`config.yaml` (any old `pinproc_class` line out, ours in), drops an old `pad/`, adds the new one and
+encrypts with the game's key: 32 s for the 3.27 GB update. **Write** carries the modes on `rm_pkg`
+(and `ac_pkg`) through `create_zip(pad_modes=)`. **The app** knows Rick and Morty by the date in its
+update's name (`version_of`: 20220902 -> 2022.09.02) and an extract by its `.spooky_meta` source name.
+**The rig**: `proc/run_game.sh` takes a P-ROC Try it folder (`SPK_PAD_OVERLAY`, `padmodes_proc.py` in
+it) as the game's `pad/` plus the line in a copy of `config.yaml`; `SPK_PADMODES_PORT=1` has the
+runtime write `padmodes_port.json`; `prepare.py` keeps a modes update's build beside the stock one
+(`rm_20220902_padmodes`); `modes/proc/rigrun.sh` drives a proof. The rig's Python 2.7 env had been
+pruned in both distros; `proc/setup.sh` rebuilt it in Ubuntu (a few minutes).
+
+**Port report**: `ports/rick_and_morty-2022.09.02.json` (64 switches with their yaml labels, 166
+lights, 1,297 sounds, 55 game modes, 42 HD fonts with their files, points x1 rounded up to 100).
+Starter folder: Portal Rush (both inlanes start it, the slings score it, three complete it) and
+Spinner Frenzy (the Noob target starts it, the spinner scores for 10 s).
+
+Proof (Ubuntu slot 1, hidden, muted): Try it on the stock update, then the PAD-built .pkg booted with
+no overlay: Portal Rush started on the two inlanes, three slings scored 250,000 each through the
+game's own score and paid the 2,000,000 bonus; Spinner Frenzy started on the Noob target, scored
+the spinner and ended when its 10 s ran out; started again, Portal Rush ended when the ball drained,
+and on ball 2 when the game was tilted. Every callout played on the game's voice channel; the panel
+showed over the game's screen in its NeoSans font.
+
+## Ticket 5 done: Alice Cooper's Nightmare Castle on the P-ROC runtime (PAD-1421)
+
+Alice Cooper 1.1.0.5 (`ac-gamecode.pkg`) runs PAD-1420's runtime as it is for everything but
+the panel: the same `pinproc_class` line loads it, switches, sounds (`game.sound.play` /
+`play_voice`), timers and the game's events are SkeletonGame's. What differs, read from its
+bytecode (`ACGame.py` is plain source, the rest `.pyc`; Python 2.7's `dis` reads them):
+
+- **Score.** `ACGame.score` is `mainFunctions._score`: it rounds UP to the next 10
+  (`game.roundup`), applies **no** playfield multiplier (`bypassMultiplier` is never read), returns
+  None, and scores nothing while the game's Billion Dollar Babies mode runs (`bdb_mode.modeStarted`,
+  unless `force`) or `scoring_enabled` is off; co-op modes copy the score across the team. The
+  runtime's `pad_award` measures the score's change, so all of that is the game's own. The port says
+  `points_round 10`; the check refuses points the game would round (1005 -> 1,010).
+- **Screen.** Nothing is drawn with SkeletonGame layers (no `display_width`): the game sends
+  `||{'cmd':'APPEND_TEXT',...}` lines to its Unity player through `game.tcpclient`
+  (`append_text(name, x, y, depth, text, size, r, g, b, justify, layer)`, colours 0..1,
+  `remove_text`, `update_text`, `blink_text`, `quick_video`, `append_image`...). Its virtual screen
+  is 684x384 (x 342 the middle); its own modes draw shadowed text: a black copy 3-4 dots down-right,
+  one depth step behind. `layer` is base_layer (the room), vid_layer (mode videos) or quick_layer
+  (overlays, depth -110 .. -290). The player has one font and no boxes.
+- **The panel** (`unity_panel` in padmodes_proc.py) is that text: title, total and seconds left,
+  each with its shadow, on quick_layer at depth -300, centred at the place's y (top 92, middle 160,
+  bottom 262). The game clears its screen as its modes come and go (`unload_assets`,
+  `remove_all_text`), so the rows are sent again once a second while a mode shows; they are removed
+  by name when it ends. `font_*` and `panel_color` cannot show there: the port says
+  `screen: unity_player`, the check refuses them by name and the Modes tab's form leaves them out.
+- **The update** has no version in its name: the port carries `update_name` / `update_size` /
+  `version_match` (`mkspkmodes.py port --stock`), as Halloween's does.
+
+Starter modes: Sling Rush (both inlanes start it, the slings score 250,000, three complete it for
+2,000,000) and Spinner Frenzy (the first center target starts it, the spinner scores for 10 s, top).
+
+Proof (Ubuntu slots 1-2, hidden, muted): the PAD-built `ac-gamecode.pkg` (12 s to build) booted with
+no overlay; Sling Rush started on the two inlanes, three slings scored exactly 250,000 each through
+`mf._score` and paid the bonus; Spinner Frenzy started on target1, scored the spinner and ended on
+time; the combo_1 callout played on the voice channel, the effects through `game.sound.play`. The
+panel showed in the game's own lettering and counted down; after the drain the bonus screen was
+clean. A probe copy had the game clear its screen 2 s after a shot (`remove_all_text` +
+`unload_assets`): the game's own texts went, the panel was back at once and stayed.
+
 ## Ticket 6 done: the pinHeck runtime and Jetsons (PAD-1422)
 
 **The runtime** (`tools/spooky_emu/modes/pinheck/padheck.c`, MIPS32 C, 4.6 KB): linked per game

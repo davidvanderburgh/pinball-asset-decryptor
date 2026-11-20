@@ -342,7 +342,7 @@ def test_wifi_card_compares_each_step_from_stock_to_5ghz():
     # the panel is short: the long words sit behind disclosures (David: 'a wall of text')
     panel = js[js.index('function WifiStartup'):js.index('<${Ways} n=${n} panel="wifi" />')]
     shown = panel[:panel.index('How these were measured')]
-    assert shown.count('<span class="small muted">') == 2 and 'wpa_supplicant' not in shown
+    assert shown.count('<span class="small muted">') == 3 and 'wpa_supplicant' not in shown   # a line a box, and the hint
     assert max(len(cell) for row in wifi_card.COMPARE for cell in row) <= 32
 
 
@@ -386,3 +386,49 @@ def test_5ghz_choice_needs_the_start_up_choice_and_a_card_with_the_right_kernel(
         assert w.state('network')['wifi_band5'] is False
     js = (Path(wifi_card.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
     assert 'n.wifi_band_details' in js and 'Also use the newer adapter driver' in js
+
+
+def test_the_wifi_and_buttons_boxes_need_no_card_image_and_no_project(tmp_path, monkeypatch):
+    """PAD-1467, David: "the checkboxes are grayed out because you need to select a card first? Why?"  A box can be
+    ticked with nothing picked: a build checks the card it builds from, the two direct routes check where they
+    write.  Only a card that WAS picked and cannot take the option greys it."""
+    from pinball_decryptor.core import pad_ssh_key, remote_buttons, wifi_card
+    with web_app(tmp_path, mfr='stern') as w:
+        w.window.current_mfr._era = 'spike2'
+        monkeypatch.setattr(pad_ssh_key, 'KEY_DIR', tmp_path / 'keys')
+        project = tmp_path / 'project'; project.mkdir()
+        w.run(w.window.write_assets_var.set, str(project))
+        svc = w.window.service('network')
+        w.run(svc.on_show)                                                    # a project, no card image picked
+        st = w.state('network')
+        assert st['wifi_supported'] and st['wifi_band5_supported'] and st['buttons_supported']
+        assert 'No card image is picked' in st['wifi_hint'] and not st['wifi_now'] and not st['buttons_now']
+        assert w.call('network.configure_wifi', True, str(project), True)
+        assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': True}
+        assert w.call('network.configure_buttons', True, str(project))
+        assert card_extras.load_buttons(str(project)) == {'enabled': True}
+
+        # a card that was picked and cannot take it still greys the box, with its reason
+        image = tmp_path / 'source.raw'; image.write_bytes(b'card')
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda path, **k: dict(
+            supported=False, reason='This card has no Wi-Fi hook.', enabled=False))
+        monkeypatch.setattr(remote_buttons, 'inspect_image', lambda path, **k: dict(
+            supported=False, reason=remote_buttons.NOT_STOCK, enabled=False))
+        w.run(w.window.write_upd_var.set, str(image))
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert not st['wifi_supported'] and st['wifi_reason'] == 'This card has no Wi-Fi hook.'
+        assert not st['buttons_supported'] and not st['wifi_hint']
+
+        # no project at all: the ticks hold for the session, for the two direct buttons
+        w.run(w.window.write_upd_var.set, '')
+        w.run(w.window.write_assets_var.set, '')
+        svc._unsaved = {}
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert st['wifi_supported'] and not st['wifi_enabled'] and 'No project is open' in st['wifi_hint']
+        assert w.call('network.configure_wifi', True, '', True) and w.call('network.configure_buttons', True, '')
+        st = w.state('network')
+        assert st['wifi_enabled'] and st['wifi_band5'] and st['buttons_enabled']
+        assert svc._direct_options('wifi') == ({'enabled': True, 'band5': True}, None)
+        assert svc._direct_options('buttons') == (None, {'enabled': True})

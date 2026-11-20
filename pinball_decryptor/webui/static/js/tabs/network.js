@@ -236,6 +236,7 @@ function WifiStartup({ n }) {
     <p class="net-does">Makes the machine join your Wi-Fi at the first try, and on 5 GHz if it has an AC1200
       adapter.</p>
     ${!n.wifi_supported ? html`<${Note}>${n.wifi_reason}<//>` : null}
+    ${n.wifi_hint ? html`<span class="small muted">${n.wifi_hint}</span>` : null}
     <div class="net-pick">
       <${Check} label="Use the reliable Wi-Fi start-up on cards I write from this project" checked=${enabled}
         disabled=${locked} wrap
@@ -348,6 +349,7 @@ function RemoteButtonsOption({ n }) {
       computer, under the machine's screen. They work only while the coin door is open, as the real
       ones do.</p>
     ${!n.buttons_supported && n.buttons_reason ? html`<${Note}>${n.buttons_reason}<//>` : null}
+    ${n.buttons_hint ? html`<span class="small muted">${n.buttons_hint}</span>` : null}
     <${Check} label="Put remote buttons on cards I write from this project" checked=${!!n.buttons_enabled}
       disabled=${!n.buttons_supported || n.running} wrap
       onChange=${(on) => call("network.configure_buttons", on, n.project)} />
@@ -413,12 +415,12 @@ export default function NetworkTab() {
     <${PageHead} title="Network" sub=${n.intro} />
     ${n.offered === false ? html`<${Note}>Remote access works on Stern Spike 2 and Spike 3 cards only.<//>` : null}
     <div class="net-layout">
-      ${(n.project && s.feed_shown) || (n.project && n.wifi_offered) ? html`<section class="net-group" aria-label="Network settings">
+      ${(n.project && s.feed_shown) || n.wifi_offered ? html`<section class="net-group" aria-label="Network settings">
         <div class="net-group-hd"><b>Network settings</b><span class="muted small">What the machine does on your
           network by itself. Saved with this project and put on the card when you write it</span></div>
         <div class="net-col">
           ${n.project && s.feed_shown ? html`<${ScoreFeed} s=${s} n=${n} />` : null}
-          ${n.project && n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
+          ${n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
         </div>
       </section>` : null}
       ${n.offered !== false ? html`<section class="net-group" aria-label="Remote access">

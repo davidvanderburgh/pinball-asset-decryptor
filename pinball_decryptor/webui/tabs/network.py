@@ -139,31 +139,51 @@ class NetworkTab(TabService):
             return dict(supported=False, reason=wifi_card.NOT_SPIKE2, enabled=False, band5=False,
                         band5_supported=False, band5_reason=wifi_card.NOT_SPIKE2)
         if not self._source():
-            return dict(supported=False, reason='Select the card image first (Select card tab).', enabled=False)
+            # David: "the checkboxes are grayed out because you need to select a card first? Why?"  No card image
+            # is needed to choose: a build checks the card it builds from, and the two direct routes check the
+            # attached card or the machine when the option goes on.  Only a card that WAS picked and cannot take
+            # it greys the box.
+            return dict(supported=True, reason='', enabled=False, band5=False, band5_supported=True,
+                        band5_reason='', stern_module=True, unpicked=True)
         return wifi_card.inspect_image(self._source())
 
     def _inspect_buttons(self):
         if not remote_buttons.offered(self.mfr):
             return dict(supported=False, reason=remote_buttons.NOT_SPIKE2, enabled=False)
         if not self._source():
-            return dict(supported=False, reason='Pick the card on the Extract tab first.', enabled=False)
+            return dict(supported=True, reason='', enabled=False, unpicked=True)     # as the Wi-Fi boxes
         return remote_buttons.inspect_image(self._source())
+
+    #: PAD-1467: the Wi-Fi and remote-buttons ticks with no project open: kept for this session, for the two
+    #: direct routes (a build needs a project, and saves them there)
+    _unsaved = {}
+
+    @staticmethod
+    def _choice_hint(info, project):
+        """What to know about a tick made without a project or a card image picked ('' when both are)."""
+        if not os.path.isdir(project or ''):
+            return ('No project is open: these ticks are for the two buttons below. Open a project to save them '
+                    'for the cards you build.')
+        if info.get('unpicked'):
+            return ('No card image is picked yet: the card, or the machine, is checked when the option is put '
+                    'on it.')
+        return ''
 
     def _publish_buttons(self, project):
         """PAD-1467: the remote-buttons choice and the four buttons (core/remote_buttons.py)."""
         info = self._inspect_buttons()
         on, error = info.get('enabled', False), ''
         try:
-            rec = card_extras.load_buttons(project)
+            rec = card_extras.load_buttons(project) if os.path.isdir(project) else self._unsaved.get('buttons')
             if rec is not None:
                 on = rec['enabled']
         except card_extras.ExtrasError as e:
             error = str(e)
         self.set(buttons_offered=remote_buttons.offered(self.mfr), buttons_enabled=bool(on), buttons_error=error,
-                 buttons_supported=bool(info['supported'] and os.path.isdir(project)),
-                 buttons_reason=info['reason'] if project else 'Select a project folder on the Extract tab first.',
+                 buttons_supported=bool(info['supported']), buttons_reason=info['reason'],
+                 buttons_hint=self._choice_hint(info, project),
                  buttons_details=[list(row) for row in remote_buttons.DETAILS],
-                 buttons_now=remote_buttons.describe(info),
+                 buttons_now='' if info.get('unpicked') else remote_buttons.describe(info),
                  buttons_labels=[list(pair) for pair in remote_buttons.LABELS])
 
     def _publish_feed(self):
@@ -190,18 +210,20 @@ class NetworkTab(TabService):
         wifi = self._inspect_wifi()
         wifi_on, wifi_band, wifi_error = wifi.get('enabled', False), wifi.get('band5', False), ''
         try:
-            rec = card_extras.load_wifi(project)
+            rec = card_extras.load_wifi(project) if os.path.isdir(project) else self._unsaved.get('wifi')
             if rec is not None:
                 wifi_on, wifi_band = rec['enabled'], rec['band5']
         except card_extras.ExtrasError as e:
             wifi_error = str(e)
-        self.set(wifi_details=[list(row) for row in wifi_card.DETAILS], wifi_now=wifi_card.describe(wifi),
+        unpicked = bool(wifi.get('unpicked'))
+        self.set(wifi_details=[list(row) for row in wifi_card.DETAILS],
+                 wifi_now='' if unpicked else wifi_card.describe(wifi),
                  wifi_band5=bool(wifi_on and wifi_band),
-                 wifi_band5_supported=bool(wifi['supported'] and wifi.get('band5_supported')
-                                           and os.path.isdir(project)),
+                 wifi_band5_supported=bool(wifi['supported'] and wifi.get('band5_supported')),
                  wifi_band5_reason=wifi.get('band5_reason', '') if wifi['supported'] else '',
                  wifi_band_details=[list(row) for row in wifi_card.BAND_DETAILS],
-                 wifi_band_now=wifi_card.describe_band(wifi),
+                 wifi_band_now='' if unpicked else wifi_card.describe_band(wifi),
+                 wifi_hint=self._choice_hint(wifi, project),
                  wifi_compare=dict(head=list(wifi_card.COMPARE_HEAD), rows=[list(r) for r in wifi_card.COMPARE],
                                    note=wifi_card.COMPARE_NOTE),
                  wifi_adapters=dict(head=list(wifi_card.ADAPTER_HEAD), rows=[list(r) for r in wifi_card.ADAPTERS],
@@ -211,8 +233,7 @@ class NetworkTab(TabService):
         self.set(ways={k: network_apply.ways(k) for k in network_apply.WAYS},
                  way_notes=dict(network_apply.WAY_NOTES))
         self.set(wifi_offered=wifi_card.offered(self.mfr), wifi_enabled=wifi_on, wifi_error=wifi_error,
-                 wifi_supported=bool(wifi['supported'] and os.path.isdir(project)),
-                 wifi_reason=wifi['reason'] if project else 'Select a project folder on the Extract tab first.')
+                 wifi_supported=bool(wifi['supported']), wifi_reason=wifi['reason'])
         self.set(project=project, source=self._source(), supported=bool(info['supported'] and os.path.isdir(project)),
                  reason=info['reason'] if project else 'Select a project folder on the Extract tab first.',
                  enabled=enabled, public_keys=keys, error=error, offered=ssh_card.offered(self.mfr),
@@ -1097,6 +1118,10 @@ class NetworkTab(TabService):
         info = self._inspect_buttons()
         if project != self._project() or self.get('running') or not info['supported']:
             return False
+        if not os.path.isdir(project or ''):
+            self._unsaved = dict(self._unsaved, buttons={'enabled': bool(enabled)})
+            self.publish()
+            return True
         try:
             card_extras.save_buttons(project, bool(enabled))
         except card_extras.ExtrasError as e:
@@ -1150,10 +1175,16 @@ class NetworkTab(TabService):
             return False
         try:
             if band5 is None:
-                rec = card_extras.load_wifi(project)
+                rec = (card_extras.load_wifi(project) if os.path.isdir(project or '')
+                       else self._unsaved.get('wifi'))
                 band5 = bool(rec and rec['band5'])
             if band5 and not info.get('band5_supported'):
                 return False
+            if not os.path.isdir(project or ''):
+                self._unsaved = dict(self._unsaved, wifi={'enabled': bool(enabled),
+                                                          'band5': bool(enabled and band5)})
+                self.publish()
+                return True
             card_extras.save_wifi(project, enabled, bool(enabled and band5))
         except card_extras.ExtrasError as e:
             self.publish()

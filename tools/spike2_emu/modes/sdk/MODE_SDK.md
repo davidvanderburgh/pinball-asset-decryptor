@@ -6813,7 +6813,8 @@ alone began the game. The step is now the menu's own and the game start never wa
   character's (`hand_waits_for_coop`).
 - The game asks for its music right after its serve (`serve_ball`; Godzilla LE 1.16 request 66, 7 ms into a stock
   game), so a Standard or challenge game holding ball 1 for the pick had none under its intro. `value serve_music`
-  (Godzilla LE 1.16: 66, from the emulator's sound log) is asked for as the hold begins (`srv_music_early`,
+  (Godzilla LE 1.16: 66, from the emulator's sound log; Pro 1.16 too since round 5, where request 66 is the same
+  SE GZ MX MAIN PLAY START by the program's own Sound Test names) is asked for as the hold begins (`srv_music_early`,
   `srv_music_wanted`); at the serve the game asks for none while it still plays, so it runs on unbroken.
 ### Co-op awards (PAD-1028)
 

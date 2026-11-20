@@ -212,17 +212,19 @@ def extract_tar_gz(tar_path, output_dir, progress_cb=None):
 def create_zip(source_dir, out_path, progress_cb=None, pad_modes=None):
     """Create a ZIP archive from *source_dir*.  *pad_modes* as :func:`create_tar_gz` (PAD-1420:
     Rick and Morty's game code is a ZIP; its ``pad/`` goes in the game's folder, and the rewrite
-    adds the runtime's line to its config.yaml)."""
+    adds the runtime's line to its config.yaml).  A pinHeck card (PAD-1422, PAD-1423) has no
+    ``pad/`` folder: its ``rewrite(rel, data)`` turns the card's PRG into the modes PRG
+    (``rewrite.names``: the file names it takes, matched whatever their case)."""
     all_files, _all_dirs = _scan_for_modes(source_dir, pad_modes)
 
     total = len(all_files)
-    names = getattr(pad_modes[1], "names", ()) if pad_modes else ()
+    names = {n.upper() for n in getattr(pad_modes[1], "names", ())} if pad_modes else set()
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        if pad_modes:
+        if pad_modes and pad_modes[2]:                     # a pinHeck card has no pad/ folder
             _add_pad_modes_zip(zf, pad_modes)
         for i, (full, rel) in enumerate(all_files):
             arc = rel.replace("\\", "/")
-            if names and os.path.basename(rel) in names:
+            if names and os.path.basename(rel).upper() in names:
                 with open(full, "rb") as fh:
                     data = fh.read()
                 new = pad_modes[1](arc, data)
@@ -288,8 +290,8 @@ def _scan_for_modes(source_dir, pad_modes):
         folder = pad_modes[2]
         tops = {t[0] for t in (pad_modes[3] if len(pad_modes) > 3 else ())}
         def inside(rel):                            # folder may be nested (uptest/pad, PAD-1418)
-            rel = rel.replace("\\", "/")
-            return rel == folder or rel.startswith(folder + "/")
+            rel = rel.replace("\\", "/")         # (a pinHeck card has none: no folder to leave out)
+            return bool(folder) and (rel == folder or rel.startswith(folder + "/"))
         all_files = [x for x in all_files if not inside(x[1]) and x[1].replace("\\", "/") not in tops]
         all_dirs = [x for x in all_dirs if not inside(x[1])]
     return all_files, all_dirs

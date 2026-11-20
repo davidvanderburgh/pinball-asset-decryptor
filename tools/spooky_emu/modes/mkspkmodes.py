@@ -16,6 +16,10 @@ one folder of them (``title.cfg`` + ``*.mode``).  The runtime is the port report
          ``pinproc_class`` (``pad.padmodes_proc.PinPROC``); it adds one AdvancedMode of ours
          running the modes through the game's own score, sounds and HD fonts:
          tools/spooky_emu/modes/proc.
+  pinheck  ``padheck_<PRG>.bin`` (Jetsons, Domino's, Rob Zombie; PAD-1422, PAD-1423): compiled MIPS linked into the free flash of
+         the game's own ``<GAME>_Vnnn.PRG``, the modes packed after it as data, one call in the
+         game re-pointed at it: tools/spooky_emu/modes/pinheck.  The update is the stock zip with
+         its PRG replaced (build_prg_zip); Try it is that PRG in the pinHeck emulator on the stock card.
 
 How the runtime gets into the game is the port report's ``load``:
 
@@ -67,6 +71,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 UNITY = os.path.join(HERE, "unity")
 GODOT = os.path.join(HERE, "godot")
 PROC = os.path.join(HERE, "proc")
+PINHECK = os.path.join(HERE, "pinheck")
 PREBUILT = os.path.join(UNITY, "prebuilt")
 PORTS = os.path.join(HERE, "ports")
 #: where the runtime sits in the update (and so in /game/code/uptest on the machine)
@@ -169,6 +174,19 @@ def engine(port):
     return (port or {}).get("engine") or "unity"
 
 
+_PH = []
+
+
+def ph():
+    """tools/spooky_emu/modes/pinheck/pinheck.py (the pinHeck PRG build), loaded once."""
+    if not _PH:
+        spec = importlib.util.spec_from_file_location("pad_pinheck_build", os.path.join(PINHECK, "pinheck.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _PH.append(mod)
+    return _PH[0]
+
+
 def load_of(port):
     """How the runtime gets into the game: "preload" or "dllmap" (Unity), "override" (Godot),
     "pinproc_class" (P-ROC) (module doc)."""
@@ -183,6 +201,11 @@ def runtime_files(port):
     """The runtime's files the title runs - (padunity.so, PadModes.dll) on Unity (a dllmap title's
     padunity.so is the dllmap build of the loader, unity/build.sh), (pad_modes.gd,) on Godot - or
     Refused."""
+    if engine(port) == "pinheck":
+        b = ph().runtime_path(port.get("prg") or "?")
+        if not os.path.isfile(b):
+            raise Refused("no mode runtime built for %s (%s)" % (port.get("title", "this title"), b))
+        return (b,)
     if engine(port) == "godot":
         gd = os.path.join(GODOT, "pad_modes.gd")
         if not os.path.isfile(gd):
@@ -206,6 +229,36 @@ def runtime_files(port):
 # ============================================================================ check
 def _int(v):
     return int(v.replace(",", "").replace("_", "")) if MJ._INT.match(v or "") else None
+
+
+#: what the pinHeck runtime (padheck.c) does not run yet: PAD-1424's start rules, lamps, balls,
+#: coils and a mode's own files, and the title's coil_holds (PAD-1469 brings them to pinHeck).
+#: The check refuses each by name on a pinHeck title and the Modes tab's form leaves them out.
+PINHECK_CANNOT = ("start_on", "start_after", "start_score", "start_combo", "combo_seconds",
+                  "start_count_reset", "start_once", "lamps", "lamp_color", "lamp_blink",
+                  "multiball", "multiball_on", "add_ball", "ball_save", "coil_start", "coil_shot",
+                  "coil_complete", "coil_hold", "coil_hold_on", "sound_channel", "music",
+                  "picture", "picture_at", "video", "video_at", "video_loop", "coil_holds")
+
+
+def keys_not_here(port):
+    """Every key *port*'s runtime cannot do: its port's ``keys_not_here`` (a pinHeck DMD: no fonts,
+    no colours) and, on a pinHeck title, PINHECK_CANNOT."""
+    out = set((port or {}).get("keys_not_here") or ())
+    if engine(port) == "pinheck":
+        out |= set(PINHECK_CANNOT)
+    return out
+
+
+def _not_here(k, port):
+    """Why the title's runtime cannot do *k*, or None."""
+    if k in ((port or {}).get("keys_not_here") or ()):
+        return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
+                "and colour" % (k, port.get("title", "this game")))
+    if engine(port) == "pinheck" and k in PINHECK_CANNOT:
+        return ("%s is not on %s yet: its modes run start, shots, points, time, completion, the "
+                "game's own sounds and the panel; take the line out" % (k, port.get("title", "this game")))
+    return None
 
 
 def token(name):
@@ -236,6 +289,8 @@ def media_exts(port, kind):
     pictures and videos by name only)."""
     if (port or {}).get("screen") == "unity_player" and kind in ("picture_file", "video_file"):
         return ()
+    if engine(port or {}) == "pinheck":
+        return ()
     return MEDIA.get(engine(port or {}), MEDIA["unity"]).get(kind, ())
 
 
@@ -248,6 +303,9 @@ def check_value(kind, v, port):
     if kind in ("sound_file", "picture_file", "video_file"):
         exts = media_exts(port, kind)
         what = {"sound_file": "sound", "picture_file": "picture", "video_file": "video"}[kind]
+        if not exts and engine(port or {}) == "pinheck":
+            return ("%s plays only the sounds on its own card, by their three-letter names (SFX/_F?/xxx.wav); "
+                    "no %s file of a mode's own" % ((port or {}).get("title", "this game"), what))
         if not exts:
             return ("%s's screen cannot show a %s of a mode's own (its Unity player shows the game's "
                     "own by name only)" % ((port or {}).get("title", "this game"), what))
@@ -318,6 +376,9 @@ def check_modes(mode_dir, port=None):
         with open(tpath, encoding="utf-8", errors="replace") as f:
             for n, k, v in MJ.parse_cfg(f.read()):
                 kind = TITLE_KEYS.get(k) or KEYS.get(k)
+                if _not_here(k, port):
+                    problems.append("title.cfg:%d: %s" % (n, _not_here(k, port)))
+                    continue
                 if k in BUILD_TITLE_KEYS:
                     problems.append("title.cfg:%d: %s is the game's own (its port report says it); take "
                                     "the line out" % (n, k))
@@ -350,8 +411,9 @@ def check_modes(mode_dir, port=None):
             if kind is None:
                 problems.append("%s:%d: %s" % (fn, n, _unknown(k)))
                 continue
-            if not_on_screen(k, port, v):
-                problems.append("%s:%d: %s" % (fn, n, not_on_screen(k, port, v)))
+            why = _not_here(k, port) or not_on_screen(k, port, v)
+            if why:
+                problems.append("%s:%d: %s" % (fn, n, why))
                 continue
             p = check_value(kind, v, port)
             if p:
@@ -384,6 +446,10 @@ def check_modes(mode_dir, port=None):
         if m.get("coil_hold") and title.get("coil_holds") != "on":
             problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
                             "(after a look at it on the machine)" % fn)
+        if engine(port) == "pinheck":
+            tp = ph().title_problem(m.get("title") or m.get("name"), port.get("prg"))
+            if tp:
+                problems.append("%s: title %s" % (fn, tp))
         complete = _int(m.get("complete") or "0") or 0
         if complete > 0 and not m.get("shots"):
             problems.append("%s: complete = %s but no shots = (nothing can score it)" % (fn, m["complete"]))
@@ -480,8 +546,54 @@ def launch_files(port):
     return LAUNCH_FILES if engine(port) == "unity" and load_of(port) == "preload" else ()
 
 
-def stage(mode_dir, pad_dir, port):
-    """The pad/ folder on disk (the rig's Try it overlay)."""
+def _base_name(name):
+    return name.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def stock_prg(stock, port):
+    """A pinHeck title's stock PRG bytes from its update zip (or a PRG file); a PRG PAD built
+    comes back as the stock one it was made from."""
+    want = (port.get("prg") or "").upper() + ".PRG"
+    if stock.lower().endswith(".zip"):
+        import zipfile
+        with zipfile.ZipFile(stock) as z:
+            names = [n for n in z.namelist() if _base_name(n).upper() == want]
+            if not names:
+                raise Refused("%s has no %s: not the update this runtime knows" % (os.path.basename(stock), want))
+            data = z.read(names[0])
+    else:
+        with open(stock, "rb") as f:
+            data = f.read()
+    return ph().stock_of(data)
+
+
+def build_prg(stock, mode_dir, port):
+    """The modes PRG (bytes): the stock one with the runtime and these modes in its free flash."""
+    modes, problems = check_modes(mode_dir, port)
+    if problems:
+        raise Refused("the modes have problems:\n  " + "\n  ".join(problems))
+    return build_prg_of(stock_prg(stock, port), modes, port)
+
+
+def build_prg_of(prg, modes, port):
+    try:
+        return ph().build_prg(ph().stock_of(prg), modes, port)
+    except ph().Refused as e:
+        raise Refused(str(e))
+
+
+def stage(mode_dir, pad_dir, port, stock=None):
+    """The pad/ folder on disk (the rig's Try it overlay); on a pinHeck title the modes PRG,
+    written to ``pad_dir/<PRG>`` from *stock* (the update zip) -> its path."""
+    if engine(port) == "pinheck":
+        if not stock:
+            raise Refused("Try it on %s needs its stock update (its PRG)" % port.get("title", "this game"))
+        data = build_prg(stock, mode_dir, port)
+        os.makedirs(pad_dir, exist_ok=True)
+        out = os.path.join(pad_dir, port["prg"] + ".PRG")
+        with open(out, "wb") as f:
+            f.write(data)
+        return out
     if os.path.isdir(pad_dir):
         shutil.rmtree(pad_dir)
     for rel, src, mode in pad_files(mode_dir, port):
@@ -629,11 +741,55 @@ def _gzipped(path):
         return f.read(2) == b"\x1f\x8b"
 
 
+def build_prg_zip(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda: False):
+    """A pinHeck title's update: the stock zip again, every file as it was, its PRG the modes
+    PRG (the machine flashes the card's PRG into the game CPU from Service -> UPDATE CODE)."""
+    import zipfile
+    if os.path.abspath(stock) == os.path.abspath(out):
+        raise Refused("the new update must not replace the stock one")
+    data = build_prg(stock, mode_dir, port)
+    n_modes = len(check_modes(mode_dir, port)[0])
+    want = port["prg"].upper() + ".PRG"
+    tmp, t0, done, replaced = out + ".partial", time.time(), 0, False
+    try:
+        with zipfile.ZipFile(stock) as src, zipfile.ZipFile(tmp, "w") as dst:
+            infos = src.infolist()
+            total = sum(i.file_size for i in infos) or 1
+            for info in infos:
+                if cancelled():
+                    raise Refused("cancelled")
+                zi = zipfile.ZipInfo(info.filename, info.date_time)
+                zi.compress_type, zi.external_attr = info.compress_type, info.external_attr
+                if _base_name(info.filename).upper() == want and not replaced:
+                    dst.writestr(zi, data)
+                    replaced = True
+                    log("%s: the stock program with the mode runtime and %d mode(s) in its free flash "
+                        "(%d bytes, was %d)" % (info.filename, n_modes, len(data), info.file_size))
+                elif info.is_dir():
+                    dst.writestr(zi, b"")
+                else:
+                    with src.open(info) as fi, dst.open(zi, "w") as fo:
+                        shutil.copyfileobj(fi, fo, 1 << 20)
+                done += info.file_size
+                if progress:
+                    progress(done, total)
+        os.replace(tmp, out)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    log("built %s (%.2f GB) in %.0f s" % (out, os.path.getsize(out) / 1e9, time.time() - t0))
+    return out
+
+
 def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda: False):
     """The stock update again, written the same way (a tar.gz, or Looney Tunes' plain tar), with
     pad/ beside its main.x86_64 and the runtime loaded: on Unity the title's way in (load_of)
     patched, on Godot an override.cfg beside main.x86_64 naming it; unwrapped from and wrapped
-    again in the title's container (container_of)."""
+    again in the title's container (container_of).  A pinHeck title's: build_prg_zip."""
+    if engine(port) == "pinheck":
+        return build_prg_zip(stock, mode_dir, out, port, log, progress, cancelled)
     if container_of(port) == "aes_zip":
         return build_zip(stock, mode_dir, out, port, log, progress, cancelled)
     files = pad_files(mode_dir, port)
@@ -927,6 +1083,7 @@ def main(argv=None):
     s.add_argument("dir")
     s.add_argument("out")
     s.add_argument("--port", required=True)
+    s.add_argument("--stock", help="a pinHeck title's stock update (its PRG is the one patched)")
     b = sub.add_parser("build")
     b.add_argument("stock")
     b.add_argument("dir")
@@ -963,7 +1120,7 @@ def main(argv=None):
             print("%d mode(s), %d problem(s)" % (len(modes), len(problems)))
             return 1 if problems else 0
         if a.cmd == "stage":
-            print(stage(a.dir, a.out, port))
+            print(stage(a.dir, a.out, port, a.stock))
             return 0
         build(a.stock, a.dir, a.out, port,
               progress=lambda d, t: print("progress %d" % (d * 100 // max(1, t)), flush=True))

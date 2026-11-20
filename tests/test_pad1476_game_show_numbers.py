@@ -149,6 +149,19 @@ def test_the_runtime_plays_a_named_number_through_the_games_own_starter():
     assert "shownum_arm();" in RUNTIME
 
 
+def test_a_port_without_proc_exists_never_calls_address_zero():
+    # Deadpool LE 1.14, Avengers LE 1.09, Aerosmith LE 1.15 (emulator, 2026-11-20): their ports have no proc_exists, so
+    # the check before every show by number jumped to 0 and the game died at the first one.
+    alive = RUNTIME[RUNTIME.index("static int proc_alive("):]
+    alive = alive[:alive.index("\n}\n")]
+    assert 'f = fn("proc_exists")' in alive and "return f &&" in alive
+    kill = RUNTIME[RUNTIME.index("static void show_kill("):]
+    assert '!fn("event_cancel")) return;' in kill[:kill.index("\n}\n")]
+    arm = RUNTIME[RUNTIME.index("static void shownum_arm("):]
+    arm = arm[:arm.index("\n}\n")]
+    assert '!fn("show_start") || !fn("show_stop_number")' in arm            # verified against the build, not just named
+
+
 def test_the_intro_starts_its_show_with_it_and_stops_it_as_it_ends():
     for fn_, call in (("static void ci_sound_start(", "ci_show_start();"),
                       ("static void ci_played(", 'ci_show_stop("the co-op intro is over");'),

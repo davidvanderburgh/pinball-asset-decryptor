@@ -7297,7 +7297,8 @@ typedef pm_addr (*proc_create_fn)(unsigned, void (*)(void), unsigned);
 
 static int proc_alive(unsigned id)
 {
-    return (((unsigned (*)(unsigned))(unsigned long)fn("proc_exists"))(id) & 0xffu) != 0;
+    pm_addr f = fn("proc_exists");    /* PAD-1476: a port without it (older builds' shows by number) has no process of ours */
+    return f && (((unsigned (*)(unsigned))(unsigned long)f)(id) & 0xffu) != 0;
 }
 
 static struct held_coil *coil_named(const char *name)
@@ -9172,7 +9173,7 @@ static void show_kill(const char *why)
         show_now.n = 0;
         return;
     }
-    if (!proc_alive(id)) return;
+    if (!proc_alive(id) || !fn("event_cancel")) return;
     ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("event_cancel"))(id, 0xffffu);
     say("show %d: stopped (%s) after %lu ms", show_now.n, why, pm_ms() - show_now.started);
     show_now.n = 0;
@@ -9408,7 +9409,7 @@ static void shownum_arm(void)
 {
     long n = pm_port_value("show_count", 0);
     shownum_n = 0;
-    if (n < 2 || n > 4096 || !site("show_start") || !site("show_stop_number")) return;   /* none: silent */
+    if (n < 2 || n > 4096 || !fn("show_start") || !fn("show_stop_number")) return;   /* none, or not this build's: silent */
     shownum_n = (int)n;
     say("game shows by number: the game's own 1-%d", shownum_n - 1);
 }

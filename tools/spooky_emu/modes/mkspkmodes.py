@@ -16,10 +16,10 @@ one folder of them (``title.cfg`` + ``*.mode``).  The runtime is the port report
          ``pinproc_class`` (``pad.padmodes_proc.PinPROC``); it adds one AdvancedMode of ours
          running the modes through the game's own score, sounds and HD fonts:
          tools/spooky_emu/modes/proc.
-  pinheck  ``padheck_<PRG>.bin`` (Jetsons, PAD-1422): compiled MIPS linked into the free flash of
+  pinheck  ``padheck_<PRG>.bin`` (Jetsons, Domino's, Rob Zombie; PAD-1422, PAD-1423): compiled MIPS linked into the free flash of
          the game's own ``<GAME>_Vnnn.PRG``, the modes packed after it as data, one call in the
          game re-pointed at it: tools/spooky_emu/modes/pinheck.  The update is the stock zip with
-         its PRG replaced; Try it is that PRG in the pinHeck emulator on the stock card.
+         its PRG replaced (build_prg_zip); Try it is that PRG in the pinHeck emulator on the stock card.
 
 How the runtime gets into the game is the port report's ``load``:
 
@@ -231,6 +231,27 @@ def _int(v):
     return int(v.replace(",", "").replace("_", "")) if MJ._INT.match(v or "") else None
 
 
+def keys_not_here(port):
+    """Every key *port*'s runtime cannot do: its port's ``keys_not_here`` (a pinHeck DMD: no fonts,
+    no colours, no files of a mode's own, no game modes to start after; PAD-1469 runs the rest)."""
+    return set((port or {}).get("keys_not_here") or ())
+
+
+def _not_here(k, port, v=""):
+    """Why the title's runtime cannot do *k* (= *v*), or None."""
+    if k not in keys_not_here(port):
+        return None
+    t = port.get("title", "this game")
+    if k == "start_after":
+        return ("start_after is not on %s: the game has no modes of its own a mode could watch; "
+                "start_on, start_score or start_combo can start it" % t)
+    if k in ("sound_channel", "music", "picture", "picture_at", "video", "video_at", "video_loop"):
+        return ("%s is not on %s: a mode there plays the game's own sounds from its card and draws "
+                "the game's own DMD text, with no files of its own" % (k, t))
+    return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
+            "and colour" % (k, t))
+
+
 def token(name):
     """A lamp or coil name as a mode file writes it: one word (Evil Dead's "REAR MAGNET" is
     REAR_MAGNET, Beetlejuice's "RIGHT ORBIT ARROW" RIGHT_ORBIT_ARROW); the runtimes take either."""
@@ -259,21 +280,9 @@ def media_exts(port, kind):
     pictures and videos by name only)."""
     if (port or {}).get("screen") == "unity_player" and kind in ("picture_file", "video_file"):
         return ()
+    if engine(port or {}) == "pinheck":
+        return ()
     return MEDIA.get(engine(port or {}), MEDIA["unity"]).get(kind, ())
-def _not_here(k, port):
-    """A key the title's runtime cannot do (a pinHeck DMD: no fonts, no colours, no files of a
-    mode's own, no game modes to start after), or None."""
-    if k not in ((port or {}).get("keys_not_here") or ()):
-        return None
-    t = port.get("title", "this game")
-    if k == "start_after":
-        return ("start_after is not on %s: the game has no modes of its own a mode could watch; "
-                "start_on, start_score or start_combo can start it" % t)
-    if k in ("sound_channel", "music", "picture", "picture_at", "video", "video_at", "video_loop"):
-        return ("%s is not on %s: a mode there plays the game's own sounds from its card and draws "
-                "the game's own DMD text, with no files of its own" % (k, t))
-    return ("%s is not on %s: its panel is the game's own text on the DMD, in the game's font "
-            "and colour" % (k, t))
 
 
 def check_value(kind, v, port):
@@ -285,6 +294,9 @@ def check_value(kind, v, port):
     if kind in ("sound_file", "picture_file", "video_file"):
         exts = media_exts(port, kind)
         what = {"sound_file": "sound", "picture_file": "picture", "video_file": "video"}[kind]
+        if not exts and engine(port or {}) == "pinheck":
+            return ("%s plays only the sounds on its own card, by their three-letter names (SFX/_F?/xxx.wav); "
+                    "no %s file of a mode's own" % ((port or {}).get("title", "this game"), what))
         if not exts:
             return ("%s's screen cannot show a %s of a mode's own (its Unity player shows the game's "
                     "own by name only)" % ((port or {}).get("title", "this game"), what))
@@ -355,8 +367,8 @@ def check_modes(mode_dir, port=None):
         with open(tpath, encoding="utf-8", errors="replace") as f:
             for n, k, v in MJ.parse_cfg(f.read()):
                 kind = TITLE_KEYS.get(k) or KEYS.get(k)
-                if _not_here(k, port):
-                    problems.append("title.cfg:%d: %s" % (n, _not_here(k, port)))
+                if _not_here(k, port, v):
+                    problems.append("title.cfg:%d: %s" % (n, _not_here(k, port, v)))
                     continue
                 if k in BUILD_TITLE_KEYS:
                     problems.append("title.cfg:%d: %s is the game's own (its port report says it); take "
@@ -390,10 +402,9 @@ def check_modes(mode_dir, port=None):
             if kind is None:
                 problems.append("%s:%d: %s" % (fn, n, _unknown(k)))
                 continue
-            if not_on_screen(k, port, v):
-                problems.append("%s:%d: %s" % (fn, n, not_on_screen(k, port, v)))
-            if _not_here(k, port):
-                problems.append("%s:%d: %s" % (fn, n, _not_here(k, port)))
+            why = _not_here(k, port, v) or not_on_screen(k, port, v)
+            if why:
+                problems.append("%s:%d: %s" % (fn, n, why))
                 continue
             p = check_value(kind, v, port)
             if p:
@@ -427,10 +438,6 @@ def check_modes(mode_dir, port=None):
         mbw = MJ._names(m.get("multiball") or "")
         if balls and mbw and mbw[0].isdigit() and int(mbw[0]) > balls:
             problems.append("%s: multiball %s: %s has %d balls" % (fn, mbw[0], title_name, balls))
-        if engine(port) == "pinheck" and m.get("sound_start", "") + m.get("sound_shot", "") +                 m.get("sound_complete", "") + m.get("sound_end", "") and any(
-                    "." in (m.get(k) or "") for k in ("sound_start", "sound_shot", "sound_complete", "sound_end")):
-            problems.append("%s: a sound file of the mode's own is not on %s: its sounds are the card's "
-                            "own (their three-letter names)" % (fn, title_name))
         if m.get("coil_hold") and title.get("coil_holds") != "on":
             problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
                             "(after a look at it on the machine)" % fn)
@@ -729,7 +736,7 @@ def _gzipped(path):
         return f.read(2) == b"\x1f\x8b"
 
 
-def build_pinheck_zip(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda: False):
+def build_prg_zip(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda: False):
     """A pinHeck title's update: the stock zip again, every file as it was, its PRG the modes
     PRG (the machine flashes the card's PRG into the game CPU from Service -> UPDATE CODE)."""
     import zipfile
@@ -775,9 +782,9 @@ def build(stock, mode_dir, out, port, log=print, progress=None, cancelled=lambda
     """The stock update again, written the same way (a tar.gz, or Looney Tunes' plain tar), with
     pad/ beside its main.x86_64 and the runtime loaded: on Unity the title's way in (load_of)
     patched, on Godot an override.cfg beside main.x86_64 naming it; unwrapped from and wrapped
-    again in the title's container (container_of).  A pinHeck title's: build_pinheck_zip."""
+    again in the title's container (container_of).  A pinHeck title's: build_prg_zip."""
     if engine(port) == "pinheck":
-        return build_pinheck_zip(stock, mode_dir, out, port, log, progress, cancelled)
+        return build_prg_zip(stock, mode_dir, out, port, log, progress, cancelled)
     if container_of(port) == "aes_zip":
         return build_zip(stock, mode_dir, out, port, log, progress, cancelled)
     files = pad_files(mode_dir, port)

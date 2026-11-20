@@ -421,5 +421,5 @@ def test_form_pickers_have_their_names(tmp_path):
     assert SM.names_for(rm, "video_file", str(tmp_path)) == ["f.mp4"]
     assert SM.names_for(ed, "video_file", str(tmp_path)) == ["d.webm"]
     assert SM.names_for(ac, "picture_file", str(tmp_path)) == []
-    assert "picture" not in dict(SM.form_groups(ac))["Picture and video"]
+    assert "picture" not in dict(SM.form_groups(ac)).get("Picture and video", ())  # an emptied group goes
     assert SM.names_for(rm, "sound_or_file", str(tmp_path))[:2] == ["a.wav", "b.ogg"]

@@ -448,6 +448,7 @@ static void say(const char *f, ...) { va_list a; va_start(a, f); printf("say: ")
 static unsigned lettered; static const char *letter;
 static int pm_message_set(unsigned id, const char *w) { lettered = id; letter = w; return 1; }
 static void pm_message_restore(unsigned id) { if (lettered == id) lettered = 0; }
+static int sty_menu_up(void) { return 0; }   /* PAD-1449: no start-menu style step up, the cursor is the game's */
 @FNS@
 static unsigned char frame[0x200] __attribute__((aligned(16)));
 static unsigned char f2[0x200] __attribute__((aligned(16)));

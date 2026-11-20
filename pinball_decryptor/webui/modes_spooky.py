@@ -94,7 +94,8 @@ class SpookyModesMixin:
         # a title's screen may not show every Screen key (Alice Cooper: no fonts, no box colour)
         st = {"on": True, "ns": "spk", "maker": "Spooky", "titles": titles, "label": self._spk_label,
               "max": SM.MAX_MODES, "card": card, "card_name": os.path.basename(card),
-              "groups": [{"title": g, "keys": list(ks)} for g, ks in SM.form_groups(port)],
+              # a group with nothing left on this title is not drawn (Jetsons, PAD-1422)
+              "groups": [{"title": g, "keys": list(ks)} for g, ks in SM.form_groups(port) if ks],
               "title_keys": list(SM.title_form(port)), "fields": self._spk_fields()}
         if self._spk_label:
             title = next((t for t in titles if t["label"] == self._spk_label), None)

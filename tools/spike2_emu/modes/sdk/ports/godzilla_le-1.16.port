@@ -1268,6 +1268,8 @@ value comp_menu_end_index        1   # STANDARD
 value comp_menu_end_msg          1915
 value comp_menu_challenge_0      4   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_1      5   # PAD-1449: a challenge's index (the style chooser follows it)
+value comp_menu_challenge_msg_0  3275   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_1  3276   # PAD-1449 round 2: its name message (the menu's style step letters it)
 # copies BRIDGE ATTACK DIFFICULTY (176) into the bridge rule's record (hooked: the rule's object), as 173/168
 site coop_cache_176       0x001349c4 0xe92d41f0 0xe1a04000
 value coop_cache_176_at   0x4

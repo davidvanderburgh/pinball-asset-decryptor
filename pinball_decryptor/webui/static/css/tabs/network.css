@@ -1,7 +1,16 @@
 /* Network tab (js/tabs/network.js, PR #38 review): the score feed and remote access, one card each. */
 .net-page { gap: 16px; }
-.net-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 16px; align-items: start; }
-html.bp-1100 .net-grid { grid-template-columns: 1fr; }
+/* PAD-1467 (David: "the second row panels feel disjointed from the first row"): two groups side by side, what a
+   card carries and what is done with the machine now, each a column of cards that stack tightly (a short card
+   leaves no hole under it); the machine's screen has the widest column */
+.net-layout { display: grid; grid-template-columns: minmax(360px, 1fr) minmax(0, 2.1fr); gap: 20px; align-items: start; }
+.net-group { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.net-group-hd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 0 2px 6px;
+  border-bottom: 1px solid var(--line); font-size: 14px; }
+.net-cols2 { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(380px, 1.25fr); gap: 16px; align-items: start; }
+.net-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (max-width: 1500px) { .net-cols2 { grid-template-columns: 1fr; } }
+html.bp-1100 .net-layout, html.bp-1100 .net-cols2 { grid-template-columns: 1fr; }
 .net-opt .bd { display: flex; flex-direction: column; gap: 10px; }
 .net-does { margin: 0; color: var(--ink-2); line-height: 1.45; }
 .net-uses { margin: 0; padding-left: 20px; color: var(--ink-2); line-height: 1.5; }

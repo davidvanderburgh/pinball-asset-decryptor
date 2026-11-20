@@ -201,25 +201,25 @@ function WifiStartup({ n }) {
           <th scope="row">${r[0]}</th>${r.slice(1).map((c, j) => html`<td key=${j}>${c}</td>`)}</tr>`)}</tbody>
       </table>
       <span class="small muted">The highlighted row is what this project is set to. ${n.wifi_compare.note}</span>` : null}
-    ${n.wifi_adapters ? html`<div class="lbl">Which adapter your machine has matters</div>
+    ${n.wifi_adapters ? html`<${Advanced} title="Which adapter your machine has matters">
       <table class="net-fields net-wifi-compare">
         <thead><tr>${n.wifi_adapters.head.map((h) => html`<th scope="col" key=${h}>${h}</th>`)}</tr></thead>
         <tbody>${n.wifi_adapters.rows.map((r) => html`<tr key=${r[0]}>
           <th scope="row">${r[0]}</th>${r.slice(1).map((c, j) => html`<td key=${j}>${c}</td>`)}</tr>`)}</tbody>
       </table>
-      <span class="small muted">${n.wifi_adapters.note}</span>` : null}
+      <span class="small muted">${n.wifi_adapters.note}</span><//>` : null}
     ${!n.wifi_supported ? html`<${Note}>${n.wifi_reason}<//>` : null}
     <${Check} label="Use the reliable Wi-Fi start-up on cards I write from this project" checked=${enabled}
       disabled=${locked} wrap
       onChange=${(on) => { setEnabled(on); if (!on) setBand(false); call("network.configure_wifi", on, n.project); }} />
     <span class="small muted">It does not change which Wi-Fi network or band the machine uses, or its password.
       Writing a card without it puts the machine back as shipped.</span>
-    <div class="lbl">Exactly what it changes on the card</div>
+    <${Advanced} title="Exactly what it changes on the card">
     <table class="net-fields net-wifi-details">
       <tbody>${(n.wifi_details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>
         <td class=${r[2] ? "mono" : ""}>${r[1]}</td></tr>`)}
         ${n.wifi_now ? html`<tr><th scope="row">The card you picked has</th><td class="mono">${n.wifi_now}</td></tr>` : null}
-      </tbody></table>
+      </tbody></table><//>
     <span class="small muted">Measured on a Godzilla LE with an AC1200 adapter (RTL8822BU): with${" "}
       <span class="mono">wext</span>, nine tries of nine to join failed on one access point; with${" "}
       <span class="mono">nl80211</span> it joined at the first try, 14 to 15 seconds after${" "}
@@ -236,12 +236,12 @@ function WifiStartup({ n }) {
         onChange=${(on) => { setBand(on); call("network.configure_wifi", enabled, n.project, on); }} />
       <span class="small muted">Needs the option above. It is for the AC1200 adapter only; a machine with another
         adapter is not affected.</span>
-      <div class="lbl">Exactly what it changes on the card</div>
+      <${Advanced} title="Exactly what it changes on the card">
       <table class="net-fields net-wifi-details">
         <tbody>${(n.wifi_band_details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>
           <td class=${r[2] ? "mono" : ""}>${r[1]}</td></tr>`)}
           ${n.wifi_band_now ? html`<tr><th scope="row">The card you picked has</th><td class="mono">${n.wifi_band_now}</td></tr>` : null}
-        </tbody></table>
+        </tbody></table><//>
       <span class="small muted">Measured on the same Godzilla LE with an eero router: the shipped driver was dropped
         on 12 tries of 12 to join 5 GHz; the newer one joined and held (channel 40, 80 MHz wide). The driver is
         Realtek's own open-source code, unmodified; its source and how it was built are in the app's${" "}
@@ -287,22 +287,34 @@ function MachineScreen({ n }) {
       <${Said} text=${n.buttons_note} kind=${n.buttons_kind} />
       <span class="small muted">The machine's coin-door service buttons, pressed from here: they work only while
         the coin door is open, as the real ones do (that is also when the machine's coil power is off). With Live
-        view running a press is immediate; without it each takes a second or two.</span>
-      ${!n.buttons_supported && n.buttons_reason ? html`<${Note}>${n.buttons_reason}<//>` : null}
-      <${Check} label="Put remote buttons on cards I write from this project" checked=${!!n.buttons_enabled}
-        disabled=${!n.buttons_supported || n.running} wrap
-        onChange=${(on) => call("network.configure_buttons", on, n.project)} />
-      <${Advanced} title="Exactly what it changes on the card">
-        <table class="net-fields net-wifi-details">
-          <tbody>${(n.buttons_details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>
-            <td class=${r[2] ? "mono" : ""}>${r[1]}</td></tr>`)}
-            ${n.buttons_now ? html`<tr><th scope="row">The card you picked has</th><td class="mono">${n.buttons_now}</td></tr>` : null}
-          </tbody></table>
-      <//>
-      ${n.buttons_error ? html`<p role="alert" class="err-ink">${n.buttons_error}</p>` : null}` : null}
+        view running a press is immediate; without it each takes a second or two. The machine's card needs
+        Remote buttons on it (on the left).</span>
+      ` : null}
     <span class="small muted">Live view shows 3 to 5 frames a second on 5 GHz Wi-Fi (measured on a Godzilla LE; less
       on 2.4 GHz), with no sound. It is for setting up and troubleshooting: while it runs it takes most of the machine's Wi-Fi and some of its processor, so do not leave it on during a game that matters. The pictures of the screen cross your home network on a plain connection, as
       Send to machine's big files do. It stops when you leave this tab, and by itself after 30 minutes.</span>
+  <//>`;
+}
+
+// PAD-1467: the remote-buttons choice, with the other things a card can carry (the buttons themselves are under
+// the machine's screen)
+function RemoteButtonsOption({ n }) {
+  return html`<${Card} cls="net-opt" title="Remote buttons">
+    <p class="net-does">Lets you press the machine's coin-door service buttons (Back, Minus, Plus, Enter) from this
+      computer, under the machine's screen on the right. They work only while the coin door is open, as the real
+      ones do.</p>
+    ${!n.buttons_supported && n.buttons_reason ? html`<${Note}>${n.buttons_reason}<//>` : null}
+    <${Check} label="Put remote buttons on cards I write from this project" checked=${!!n.buttons_enabled}
+      disabled=${!n.buttons_supported || n.running} wrap
+      onChange=${(on) => call("network.configure_buttons", on, n.project)} />
+    <${Advanced} title="Exactly what it changes on the card">
+      <table class="net-fields net-wifi-details">
+        <tbody>${(n.buttons_details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>
+          <td class=${r[2] ? "mono" : ""}>${r[1]}</td></tr>`)}
+          ${n.buttons_now ? html`<tr><th scope="row">The card you picked has</th><td class="mono">${n.buttons_now}</td></tr>` : null}
+        </tbody></table>
+    <//>
+    ${n.buttons_error ? html`<p role="alert" class="err-ink">${n.buttons_error}</p>` : null}
   <//>`;
 }
 
@@ -354,13 +366,30 @@ export default function NetworkTab() {
   return html`<div class="page net-page">
     <${PageHead} title="Network" sub=${n.intro} />
     ${n.offered === false ? html`<${Note}>Remote access works on Stern Spike 2 and Spike 3 cards only.<//>` : null}
-    <div class="net-grid">
-      ${n.offered !== false ? html`<${RemoteAccess} n=${n} />` : null}
-      ${n.offered !== false ? html`<${SendToMachine} n=${n} />` : null}
-      ${n.offered !== false ? html`<${MachineScreen} n=${n} />` : null}
-      ${n.offered !== false ? html`<${MachineCare} n=${n} />` : null}
-      ${n.project && n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
-      ${n.project && s.feed_shown ? html`<${ScoreFeed} s=${s} />` : null}
+    <div class="net-layout">
+      <section class="net-group" aria-label="On the card">
+        <div class="net-group-hd"><b>On the card</b><span class="muted small">Saved with this project and put on the
+          card when you write it, or Send to machine</span></div>
+        <div class="net-col">
+          ${n.offered !== false ? html`<${RemoteAccess} n=${n} />` : null}
+          ${n.project && n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
+          ${n.offered !== false && n.buttons_offered ? html`<${RemoteButtonsOption} n=${n} />` : null}
+          ${n.project && s.feed_shown ? html`<${ScoreFeed} s=${s} />` : null}
+        </div>
+      </section>
+      ${n.offered !== false ? html`<section class="net-group" aria-label="Your machine">
+        <div class="net-group-hd"><b>Your machine</b><span class="muted small">Over your network, right now: nothing
+          here needs the card taken out</span></div>
+        <div class="net-cols2">
+          <div class="net-col">
+            <${SendToMachine} n=${n} />
+            <${MachineCare} n=${n} />
+          </div>
+          <div class="net-col">
+            <${MachineScreen} n=${n} />
+          </div>
+        </div>
+      </section>` : null}
     </div>
   </div>`;
 }

@@ -1174,6 +1174,11 @@ def gen(m, had, quiet=None, dof=None):
             "\tSet Controller = CreateObject(\"PAD.Controller\")",
             "\tIf Err Then MsgBox \"Can't load PAD.Controller: \" & Err.Description",
             "\tController.GameName = %s" % vb(m["title"]),
+            # PAD-1480: the B2S.Server LoadEM made, to PAD.Controller: DOF runs
+            # inside it here, so the cabinet's E events (the shaker, the
+            # buttons) and the BACKBOX GI bulbs go through it
+            "\tIf IsObject(PadB2S) Then Controller.PadB2S PadB2S",
+            "\tErr.Clear",
             "\tController.Run GetPlayerHWnd",
             "\tIf Err Then MsgBox \"Can't start the game: \" & Err.Description",
             "\tOn Error Goto 0",
@@ -1223,7 +1228,8 @@ def gen(m, had, quiet=None, dof=None):
             "\tController.Stop"]
     if had["Table1_Exit"]:
         out.append("\tTable1_Exit_orig")
-    out += ["\tIf IsObject(PadB2S) Then PadB2S.Stop   ' its backglass closes with the table",
+    out += ["\tController.PadB2SFinish",
+            "\tIf IsObject(PadB2S) Then PadB2S.Stop  ' its backglass closes with the table",
             "End Sub",
             "Sub Table1_Paused : Controller.Pause = 1 : End Sub",
             "Sub Table1_UnPaused : Controller.Pause = 0 : End Sub", ""]

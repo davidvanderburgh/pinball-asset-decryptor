@@ -2224,6 +2224,12 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
             log("Restarting the machine on the new files...", "info")
             restart = False
             reboot_after = True
+        if not reboot_after and any(boot_only(op.path) for op in needed):
+            # PAD-1467: a restarted game does not pick these up - the machine reads them when IT starts
+            log("Restarting the machine: this Send changed files it reads only when it starts (its Wi-Fi "
+                "start-up or driver, or how it starts the game).", "info")
+            restart = False
+            reboot_after = True
         # PAD-1444: what went on was checked on the machine: the next compare needn't read it again
         cache.remember({op.path: op.sha1 for op in puts})
         cache.save(rebooting=reboot_after)
@@ -2255,6 +2261,20 @@ def send(plan, machine, log=None, progress=None, cancel=None, restart=True):
         machine.reboot()
     return "Sent %d change(s) (%s) to the machine%s." % (len(needed), _human(sum(op.size for op in puts)),
                                                          "; it is restarting" if reboot_after else "")
+
+
+#: PAD-1467: files the machine reads only when it starts, so a Send that changed one restarts the machine, not
+#: just the game: the Wi-Fi start-up choice and adapter driver (core/wifi_card.py: wpa_supplicant and the kernel
+#: module are loaded once, at start-up), and the script that starts the game (its running copy is the old one:
+#: PAD's modes, a multi-boot menu and remote buttons are all preloaded from it).  Found on a Godzilla: a Send of
+#: remote buttons restarted the game and the game came back without them.
+BOOT_ONLY = ("/etc/init.d/game_monitor", "/etc/init.d/padwifi", "/etc/rc5.d/S31padwifi", "/etc/wpa_supplicant/",
+             "/usr/local/spike/8812bu.ko", "/usr/local/bin/pad-wifi-band", "/usr/local/bin/pad-buttons.so")
+
+
+def boot_only(path):
+    """Whether *path* on the machine takes effect only when the machine starts (:data:`BOOT_ONLY`)."""
+    return any(path == p or (p.endswith("/") and path.startswith(p)) for p in BOOT_ONLY)
 
 
 # ===================================================================== any image: the full Send

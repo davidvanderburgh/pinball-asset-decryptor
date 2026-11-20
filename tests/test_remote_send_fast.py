@@ -142,3 +142,16 @@ def test_the_send_checks_a_plain_upload_by_hash_like_any_other():
     src = inspect.getsource(R.send)
     assert "machine.state(" in src and "op.sha1" in src
     assert "machine.state(" in inspect.getsource(R.sync)
+
+
+def test_a_send_of_start_up_files_restarts_the_machine_not_just_the_game():
+    """PAD-1467: the Wi-Fi files, the adapter driver and the script that starts the game are read at start-up."""
+    from pinball_decryptor.core import remote_buttons, remote_send, wifi_card
+    for path in (wifi_card.OVERRIDE, wifi_card.MODULE, wifi_card.HELPER, wifi_card.INIT, wifi_card.LINK,
+                 remote_buttons.SO, remote_buttons.MONITOR):
+        assert remote_send.boot_only(path), path
+    for path in ('/games/godzilla_le/game', '/usr/local/padmode/mode.so', '/etc/init.d/sshd', '/etc/wpa_supplicant'):
+        assert not remote_send.boot_only(path), path
+    import inspect
+    src = inspect.getsource(remote_send.send)
+    assert 'boot_only(op.path) for op in needed' in src and src.index('boot_only(') < src.index('machine.resume_game()')

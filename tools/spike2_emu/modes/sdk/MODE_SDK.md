@@ -6771,6 +6771,16 @@ challenge), sleeps in the game's `proc_sleep` while the menu keeps drawing:
   the game's own game from its start; any other goes in where the card would have closed (the start film and any intro
   over, `sty_tick`), so the pick follows the intro as it always has - with no card at ball 1. A plain Start (no menu)
   never waits; a menu without the game start wrapped asks at ball 1 as before.
+
+Round 3 (DoomWalrus666: "There should not be a single entry for each type ... There should be: Standard, Challenge,
+Co-op, Teams ... when choosing one, the dialog opens to select Regular, characters, or enhanced"). Where the menu asks
+(`sty_wanted`, the index menus, the game start wrapped) `team_menu_kinds` puts two entries of ours on it, CO-OP PLAY and
+one TEAM PLAY (`TEAM_TEAMS`), not the three team games. Its step asks first which team game: the name line says `TEAMS
+2 VS 2`, then who plays (`sty_menu_shape_words`), the flippers walk 2 VS 2, 2 VS 1, 3 VS 1 (`smn.shaping`), Start takes
+one (`sty_menu_take`: a drain edge counts only once the press before it is let go) and `tm.kind` becomes it; then the
+style is asked as above. While the cursor is on one of ours the entry's caption, Standard's (`value
+comp_menu_end_caption_msg`, the game-mode table entry's caption message, `prolonged_comp.standard_caption`), says CO-OP
+or TEAMS (`team_kind_caption`), so the menu reads STANDARD, COMPETITION, CHALLENGE, ..., CO-OP, TEAMS.
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

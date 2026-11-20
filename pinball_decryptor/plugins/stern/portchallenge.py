@@ -747,9 +747,10 @@ def table_lines(e, names, on_flag):
     return (["value challenge_on_flag   %d" % on_flag] + lines) if slot else []
 
 
-def _table_entries(e, tbl, n):
+def _table_entries(e, tbl, n, caption=False):
     """[(flag, flag2, name message)] of the table's n entries, read off its constructor's stores: the function that
-    stores to tbl + 32 * i + 4 / 6 / 10 from immediates (mov/movw), the table in a register by movw/movt or a literal."""
+    stores to tbl + 32 * i + 4 / 6 / 10 from immediates (mov/movw), the table in a register by movw/movt or a literal.
+    With *caption* (PAD-1449 round 3) each has its caption message (+8: STANDARD, CHALLENGE) last."""
     w, base = e.words, e.text_va
     for k in range(len(w) - 1):
         x = w[k]
@@ -788,6 +789,8 @@ def _table_entries(e, tbl, n):
                 break
         entries = [(mem.get(32 * i + 4), mem.get(32 * i + 6, 0), mem.get(32 * i + 10, 0)) for i in range(n)]
         if sum(1 for f, _f2, _m in entries if f) >= 3:
+            if caption:
+                return [(f or 0, f2, m, mem.get(32 * i + 8, 0)) for i, (f, f2, m) in enumerate(entries)]
             return [(f or 0, f2, m) for f, f2, m in entries]
     return []
 

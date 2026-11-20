@@ -807,6 +807,7 @@ value comp_menu_index            3   # COMPETITION
 value comp_menu_index_msg        1920
 value comp_menu_end_index        1   # STANDARD
 value comp_menu_end_msg          1915
+value comp_menu_end_caption_msg  1914   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
 value comp_menu_challenge_0      8   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_1      9   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_2      10   # PAD-1449: a challenge's index (the style chooser follows it)

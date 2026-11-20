@@ -19467,6 +19467,8 @@ static struct {
  * Connected (no ability, nothing unlike the game's own); ENHANCED keeps the rest of that game off it. */
 #define STY_STANDARD 7u                  /* the chooser's own kinds past TEAM_KIND_LAST: the game's STANDARD */
 #define STY_CHALLENGE 8u                 /* ... one of its challenges */
+#define TEAM_TEAMS 9u                    /* PAD-1449 round 3: the start menu's one TEAMS entry (index menus, the step
+                                          * asking first which: 2 VS 2, 2 VS 1 or 3 VS 1) */
 #define STY_AUTO_MS 20000ul              /* with no Action button: the one shown is taken this long after the last walk */
 #define STY_MOST_MS 300000ul             /* the serve never waits longer than this for a chooser left alone */
 static struct {
@@ -19486,6 +19488,7 @@ static const char *const STY_NAMES[3] = { "NORMAL", "CHARACTERS", "ENHANCED" };
 static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";
 static char team_name_3v1[] = "TEAM PLAY 3 VS 1", team_name_std[] = "ENHANCED STANDARD";   /* PAD-1224 */
 static char team_name_ecoop[] = "ENHANCED CO-OP";                                           /* PAD-1443 */
+static char team_name_teams[] = "TEAM PLAY";                                                 /* PAD-1449 round 3 */
 static unsigned team_menu_kinds(unsigned *kinds);
 static const char *team_kind_name(unsigned k);
 static void team_frame_restore(void);
@@ -21072,7 +21075,19 @@ static struct {
     unsigned preset_kind;
     unsigned long walk_ms, preset_ms;
     volatile unsigned long frame_ms;     /* the menu's frame last seen */
+    int shaping;                         /* round 3: TEAMS' first step is up - which team game (shape_at) */
+    int shape_at;                        /* 0 2 VS 2, 1 2 VS 1, 2 3 VS 1 (TEAM_SHAPES) */
+    unsigned team;                       /* the team game TEAMS' first step took (4, 3, 5; 0: none yet) */
 } smn;
+
+/* PAD-1449 round 3 (DoomWalrus666: "There should not be a single entry for each type, as that is too many. There
+ * should be: Standard, Challenge, Co-op, Teams ... And when choosing one, the dialog opens to select Regular,
+ * characters, or enhanced. Once a version is selected, the game starts"): on the index menus the three TEAM PLAY
+ * entries are one, TEAMS (team_menu_kinds), its step asking first which team game - its line "TEAMS 2 VS 2", then who
+ * plays - and then the style as the others do; each under the caption CO-OP or TEAMS, not Standard's */
+static const unsigned TEAM_SHAPES[3] = { 4u, 3u, 5u };
+static const char *const TEAM_SHAPE_DOES[3] = { "4 PLAYERS, 2 PER TEAM", "3 PLAYERS, 2 AGAINST 1",
+                                                "4 PLAYERS, 3 AGAINST 1" };
 
 static int sty_menu_up(void)
 {
@@ -21101,7 +21116,8 @@ static int sty_menu_wait(int pressed, unsigned long idle, unsigned long unseen)
 static unsigned sty_menu_kind(void)
 {
     if (!sty_wanted()) return 0u;
-    if (tm.pending) return tm.kind == 1u || tm.kind == 3u || tm.kind == 4u || tm.kind == 5u ? tm.kind : 0u;
+    if (tm.pending)
+        return tm.kind == 1u || tm.kind == 3u || tm.kind == 4u || tm.kind == 5u || tm.kind == TEAM_TEAMS ? tm.kind : 0u;
     return tm.own;
 }
 
@@ -21115,14 +21131,25 @@ static void sty_menu_words(unsigned kind, int at, int phase, const char *team, c
     else pm_snprintf(out, cap, "%s", at ? "NO SPECIAL ABILITIES" : "THE GAME AS IT IS");
 }
 
+/* round 3: TEAMS' first step's line for team game `at` at its step `phase` (tests lift it verbatim): the team game,
+ * then who plays it */
+static void sty_menu_shape_words(int at, int phase, char *out, unsigned cap)
+{
+    if (at < 0 || at > 2) at = 0;
+    if (!(phase & 1)) pm_snprintf(out, cap, "TEAMS %s", sty_label(TEAM_SHAPES[at]));
+    else pm_snprintf(out, cap, "%s", TEAM_SHAPE_DOES[at]);
+}
+
 /* the entry's name message says the game and the one shown, then what it is (0: the game's words back) */
 static void sty_menu_letter(unsigned msg)
 {
     char w[64];
+    int phase = (int)((pm_ms() - smn.walk_ms) / COOP_PICK_FLIP_MS);
     if (smn.msg && smn.msg != msg) pm_message_restore(smn.msg);
     smn.msg = 0;
     if (!msg || !smn.open) return;
-    sty_menu_words(smn.kind, smn.at, (int)((pm_ms() - smn.walk_ms) / COOP_PICK_FLIP_MS), coop_team_words, w, sizeof w);
+    if (smn.shaping) sty_menu_shape_words(smn.shape_at, phase, w, sizeof w);
+    else sty_menu_words(smn.kind, smn.at, phase, coop_team_words, w, sizeof w);
     if (pm_message_set(msg, w)) smn.msg = msg;
 }
 
@@ -21136,8 +21163,13 @@ static void sty_menu_walk(pm_reg *buttons, unsigned lbit, unsigned rbit)
     if (*buttons & rbit) w++;
     *buttons &= ~(pm_reg)(lbit | rbit);
     if (!w) return;
-    smn.at = ((smn.at + w) % 3 + 3) % 3;
     smn.walk_ms = pm_ms();
+    if (smn.shaping) {                                        /* round 3: TEAMS' first step */
+        smn.shape_at = ((smn.shape_at + w) % 3 + 3) % 3;
+        say("teams: the start menu's TEAMS shows %s", sty_label(TEAM_SHAPES[smn.shape_at]));
+        return;
+    }
+    smn.at = ((smn.at + w) % 3 + 3) % 3;
     say("styles: the start menu's %s shows %s", sty_label(smn.kind), STY_NAMES[smn.at]);
 }
 
@@ -21167,31 +21199,57 @@ static void sty_menu_line(unsigned std_msg, unsigned index)
 
 /* from the game start (coop_start_game_wrap), before the game begins: begun from the menu on an entry the chooser is
  * for, the step asks first and the call waits for it */
+/* one step's wait: until a new Start (a drain edge once the press before it is let go, or the polled level), a minute
+ * alone or the menu gone; how it ended (sty_menu_wait's) */
+static int sty_menu_take(void)
+{
+    int was = switch_held(ci.start_sw), down, got = 0, up = !was;   /* the press before it: its release first */
+    smn.take = 0;
+    smn.walk_ms = pm_ms();
+    while (!got) {
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+        down = switch_held(ci.start_sw);
+        if (!down && !up) {                                   /* let go: a drain edge from now on is a new press */
+            up = 1;
+            smn.take = 0;
+        }
+        got = sty_menu_wait((up && smn.take) || (down && !was), pm_ms() - smn.walk_ms, pm_ms() - smn.frame_ms);
+        was = down;
+    }
+    smn.take = 0;
+    return got;
+}
+
 static void sty_menu_ask(void)
 {
     static const char *const how[4] = { "", "Start took it", "left alone a minute: the one shown",
                                         "the menu is gone: the one shown" };
     unsigned kind;
     unsigned long t0 = pm_ms();
-    int was, down, got = 0;
+    int got;
     smn.preset = 0;
+    smn.team = 0;
+    smn.shaping = 0;
     if (!sty_menu_live() || !fn("proc_sleep") || !ci.start_sw || !(kind = sty_menu_kind())) return;
     smn.kind = kind;
     smn.at = 0;
-    smn.take = 0;
-    smn.walk_ms = pm_ms();
     smn.open = 1;
+    if (kind == TEAM_TEAMS) {                                 /* round 3: which team game first */
+        smn.shape_at = 0;
+        smn.shaping = 1;
+        say("teams: the game starts from the start menu's TEAMS - it waits: the menu asks 2 VS 2, 2 VS 1 or 3 VS 1 "
+            "first (the flippers walk, Start takes one)");
+        got = sty_menu_take();
+        smn.team = kind = TEAM_SHAPES[smn.shape_at];
+        tm.kind = kind;                                       /* the team game ball 1 fills (team_menu_frame keeps it) */
+        smn.shaping = 0;
+        smn.kind = kind;
+        say("teams: TEAMS %s taken on the start menu (%s) - then its style", sty_label(kind), how[got]);
+    }
     say("styles: the game starts from the start menu's %s - it waits: the menu asks NORMAL, CHARACTERS or ENHANCED "
         "first (the flippers walk, Start takes one)", sty_label(kind));
-    was = switch_held(ci.start_sw);                           /* the press that began it: its release first */
-    while (!got) {
-        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
-        down = switch_held(ci.start_sw);
-        got = sty_menu_wait(smn.take || (down && !was), pm_ms() - smn.walk_ms, pm_ms() - smn.frame_ms);
-        was = down;
-    }
+    got = sty_menu_take();
     smn.open = 0;
-    smn.take = 0;
     sty_menu_letter(0);
     smn.preset = smn.at + 1;
     smn.preset_kind = smn.kind;
@@ -24038,6 +24096,8 @@ static void on_team_dispatch(pm_reg *r)
     {
         unsigned kinds[TEAM_KIND_LAST];
         kind = tm.kind;                                       /* PAD-1073: the entry the cursor was on */
+        if (kind == TEAM_TEAMS) kind = smn.team ? smn.team : 4u;   /* PAD-1449 round 3: the one TEAMS' step took */
+        smn.team = 0;
         want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && kind && team_menu_kinds(kinds);
     }
     own = tm.own;                                             /* PAD-1449: the game's own Standard or a challenge */
@@ -26691,6 +26751,10 @@ static unsigned team_menu_kinds(unsigned *kinds)
     if (!coop_switched_on()) return 0;
     kinds[0] = 1u;
     n = 1;
+    if (sty_wanted() && tm.frame && lb_start_game) {         /* PAD-1449 round 3: one TEAMS entry, its step asking */
+        kinds[n++] = TEAM_TEAMS;                             /* which team game, then the style */
+        return n;
+    }
     /* PAD-1449: no row - one entry per game, the style chosen once it is picked (sty_wanted) */
     if (coop.setting && !coop_classic()) kinds[n++] = 2u;    /* PAD-1224: ENHANCED STANDARD (Enhanced only) */
     kinds[n++] = 4u;
@@ -26702,7 +26766,7 @@ static unsigned team_menu_kinds(unsigned *kinds)
 static const char *team_kind_name(unsigned k)
 {
     return k == 1u ? team_name_coop : k == 2u ? team_name_std : k == 3u ? team_name_2v1 : k == 4u ? team_name_2v2
-        : k == 5u ? team_name_3v1 : k == 6u ? team_name_ecoop : "TEAM PLAY";
+        : k == 5u ? team_name_3v1 : k == 6u ? team_name_ecoop : k == TEAM_TEAMS ? team_name_teams : "TEAM PLAY";
 }
 
 /* the kind (1-5) of a menu kind when it is ours, else 0 */
@@ -26827,6 +26891,8 @@ static void team_menu_picked(pm_reg *r)
 
 static unsigned long team_frame_sp;              /* the menu frame we appended to (a new menu: a new list) */
 static unsigned team_frame_at, team_frame_msg;   /* our entries' place in the list; the message we lettered (0: none) */
+static unsigned team_frame_cap;                  /* PAD-1449 round 3: the caption message we lettered (0: none) */
+static char team_cap_coop[] = "CO-OP", team_cap_teams[] = "TEAMS";
 static unsigned team_frame_n, team_frame_kinds[TEAM_KIND_LAST];   /* PAD-1073: how many of ours are there, and what
                                                                     * each makes */
 
@@ -26834,6 +26900,15 @@ static void team_frame_restore(void)
 {
     if (team_frame_msg) pm_message_restore(team_frame_msg);
     team_frame_msg = 0;
+    if (team_frame_cap) pm_message_restore(team_frame_cap);
+    team_frame_cap = 0;
+}
+
+/* PAD-1449 round 3: the caption over one of ours (tests lift it verbatim): CO-OP or TEAMS; ENHANCED STANDARD keeps
+ * Standard's (0) */
+static const char *team_kind_caption(unsigned k)
+{
+    return k == 1u || k == 6u ? team_cap_coop : k == 3u || k == 4u || k == 5u || k == TEAM_TEAMS ? team_cap_teams : 0;
 }
 
 static void team_menu_frame(pm_reg *r)
@@ -26875,9 +26950,18 @@ static void team_menu_frame(pm_reg *r)
     c = comp_frame_cursor(r[creg], *count + last, r[breg] & 4u, r[breg] & 2u);
     tm.pending = c >= team_frame_at && c < team_frame_at + team_frame_n;
     if (tm.pending) {
-        tm.kind = team_frame_kinds[c - team_frame_at];
-        pm_message_set(msg, team_kind_name(tm.kind));   /* Standard's name: ours while the cursor is on our entry */
+        unsigned cap_msg = (unsigned)pm_port_value("comp_menu_end_caption_msg", 0), entry;
+        const char *cap_words;
+        entry = tm.kind = team_frame_kinds[c - team_frame_at];
+        cap_words = team_kind_caption(entry);
+        if (entry == TEAM_TEAMS && smn.team) tm.kind = smn.team;   /* round 3: TEAMS' first step took one */
+        pm_message_set(msg, team_kind_name(entry));     /* Standard's name: ours while the cursor is on our entry */
         team_frame_msg = msg;
+        if (cap_msg && cap_words && pm_message_set(cap_msg, cap_words)) team_frame_cap = cap_msg;   /* round 3 */
+        else if (team_frame_cap) {
+            pm_message_restore(team_frame_cap);
+            team_frame_cap = 0;
+        }
         tm.seen_ms = pm_ms();
         tm.own = 0;
     } else {

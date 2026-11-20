@@ -177,3 +177,55 @@ def test_round2_challenge_names_in_the_index_menu_ports():
         assert "comp_menu_take" not in text, port.name
         if "comp_menu_challenge_msg_" in text:
             assert "comp_menu_challenge_0" in text, port.name
+
+
+def test_round3_one_teams_entry_asks_the_team_game_then_the_style(tmp_path):
+    """PAD-1449 round 3 (DoomWalrus666: "Standard, Challenge, Co-op, Teams ... when choosing one, the dialog opens"):
+    one TEAMS entry whose step says the team game and who plays it, then the style; the caption over ours"""
+    src = _src()
+    shapes = re.search(r"^static const unsigned TEAM_SHAPES\[3\] = [^;]*;", src, re.M).group(0)
+    does = re.search(r"^static const char \*const TEAM_SHAPE_DOES\[3\] = [^;]*;", src, re.M).group(0)
+    code = (r"""
+#include <stdio.h>
+#define pm_snprintf snprintf
+#define STY_STANDARD 7u
+#define STY_CHALLENGE 8u
+""" + shapes + "\n" + does + "\n" + R._lift(src, "static const char *sty_label(unsigned kind)") + "\n"
+            + R._lift(src, "static void sty_menu_shape_words(int at, int phase, char *out, unsigned cap)") + r"""
+int main(void)
+{
+    char w[40];
+    int k;
+    for (k = 0; k < 6; k++) { sty_menu_shape_words(k / 2, k & 1, w, sizeof w); printf("%s/", w); }
+    printf("\n");
+    return 0;
+}
+""")
+    out = R._host_run(tmp_path, code, flags=("-no-pie",)).strip()
+    assert out.split("/")[:-1] == ["TEAMS 2 VS 2", "4 PLAYERS, 2 PER TEAM", "TEAMS 2 VS 1", "3 PLAYERS, 2 AGAINST 1",
+                                   "TEAMS 3 VS 1", "4 PLAYERS, 3 AGAINST 1"]
+    ask = R._lift(src, "static void sty_menu_ask(void)\n{")
+    assert ask.index("if (kind == TEAM_TEAMS) {") < ask.index("smn.team = kind = TEAM_SHAPES[smn.shape_at];") \
+        < ask.index("tm.kind = kind;") < ask.index("smn.preset = smn.at + 1;")
+    assert ask.count("sty_menu_take();") == 2
+    take = R._lift(src, "static int sty_menu_take(void)\n{")
+    assert "(up && smn.take) || (down && !was)" in take          # the team step's press does not take the style
+    assert "kinds[n++] = TEAM_TEAMS;" in R._lift(src, "static unsigned team_menu_kinds(unsigned *kinds)\n{")
+    assert "if (kind == TEAM_TEAMS) kind = smn.team ? smn.team : 4u;" in R._lift(
+        src, "static void on_team_dispatch(pm_reg *r)\n{")
+    assert "tm.kind == TEAM_TEAMS" in R._lift(src, "static unsigned sty_menu_kind(void)")
+    assert "if (smn.shaping) {" in R._lift(src, "static void sty_menu_walk(pm_reg *buttons, unsigned lbit, unsigned rbit)")
+
+
+def test_round3_the_index_menu_ports_name_standards_caption():
+    seen = 0
+    for port in PORTS.glob("*.port"):
+        text = port.read_text(encoding="utf-8")
+        if "comp_menu_end_msg" not in text:
+            continue
+        got = re.findall(r"^value comp_menu_end_caption_msg +(\d+)", text, re.M)
+        assert got == ["1914"], port.name                              # STANDARD, beside its NORMAL PLAY (1915)
+        seen += 1
+    assert seen == 11
+    from pinball_decryptor.plugins.stern import prolonged_comp as P
+    assert "standard_caption(e)" in pathlib.Path(P.__file__).read_text(encoding="utf-8")   # frame_lines writes it

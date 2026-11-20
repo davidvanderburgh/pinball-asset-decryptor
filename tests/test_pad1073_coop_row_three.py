@@ -29,6 +29,13 @@ static int coop_ch_n, coop_pick_on;                   /* PAD-1443: characters to
 static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";
 static char team_name_3v1[] = "TEAM PLAY 3 VS 1", team_name_std[] = "ENHANCED STANDARD";   /* PAD-1224 */
 static char team_name_ecoop[] = "ENHANCED CO-OP";                                           /* PAD-1443 */
+static char team_name_teams[] = "TEAM PLAY";                                                 /* PAD-1449 round 3 */
+#define TEAM_TEAMS 9u
+static struct { int frame; volatile int pending; volatile unsigned long seen_ms; volatile unsigned kind, own; } tm;
+static struct { unsigned team; } smn;
+static int sty_on;                                   /* PAD-1449 round 3: the style is asked on the menu */
+static int sty_wanted(void) { return sty_on; }
+static void *lb_start_game;
 """
 
 ROW_MAIN = PRELUDE + r"""
@@ -57,6 +64,13 @@ int main(void)
                                                          * asked once a game is picked) */
     coop_pick_on = 1;
     kinds("chars");
+    sty_on = 1;                                         /* PAD-1449 round 3: asked on an index menu, the game start
+                                                         * wrapped - CO-OP PLAY and one TEAMS entry */
+    tm.frame = 1;
+    lb_start_game = &row;
+    kinds("r3");
+    tm.frame = 0;                                       /* ... an entry list keeps the three */
+    kinds("list");
     coop.teams_always = 3;                              /* coop.cfg `teams 2v1`: its one team game */
     kinds("teams");
     printf("\n");
@@ -71,7 +85,8 @@ def test_off_classic_enhanced_and_what_the_menu_offers(tmp_path):
     # PAD-1224: Enhanced adds ENHANCED STANDARD (2) after CO-OP PLAY, and every row TEAM PLAY 3 VS 1 (5) last
     # PAD-1443: no row - CO-OP PLAY and the team games; PAD-1449: with characters too - ENHANCED CO-OP (6) and
     # ENHANCED STANDARD (2) are off the menu, the chooser asks NORMAL, CHARACTERS or ENHANCED once a game is picked
-    assert out == "01221110 0:,00 1:1435,11 2:12435,10 3:12435,10 4:1435,11 none:1435 chars:1435 teams:3"
+    # PAD-1449 round 3: where the menu asks, one TEAMS entry (9) whose step asks the team game first
+    assert out == "01221110 0:,00 1:1435,11 2:12435,10 3:12435,10 4:1435,11 none:1435 chars:1435 r3:19 list:1435 teams:3"
 
 
 MENU_PRELUDE = PRELUDE + r"""
@@ -80,7 +95,6 @@ MENU_PRELUDE = PRELUDE + r"""
 #define MENU_KIND_AT 0u
 #define MENU_CAPTION_AT 4u
 #define MENU_NAME_AT 8u
-static struct { volatile int pending; volatile unsigned long seen_ms; volatile unsigned kind, own; } tm;
 static unsigned sty_own_of_kind(unsigned k, unsigned f) { (void)k; (void)f; return 0; }   /* PAD-1449 */
 static unsigned sty_own_of_index(unsigned i, unsigned s, const unsigned *c, unsigned n) { (void)i; (void)s; (void)c; (void)n; return 0; }
 static unsigned sty_challenge_indices(unsigned *ch) { (void)ch; return 0; }
@@ -89,9 +103,9 @@ static void sty_menu_walk(pm_reg *b, unsigned l, unsigned r) { (void)b; (void)l;
 static void sty_menu_line(unsigned m, unsigned i) { (void)m; (void)i; }
 static unsigned long pm_ms(void) { return 7; }
 static void say(const char *f, ...) { (void)f; }
-static const char *lettered = "-";
-static int pm_message_set(unsigned id, const char *w) { lettered = w; return 1; }
-static void pm_message_restore(unsigned id) { lettered = "-"; }
+static const char *lettered = "-", *captioned = "-";   /* PAD-1449 round 3: the name line's and the caption's */
+static int pm_message_set(unsigned id, const char *w) { if (id == 0x76) captioned = w; else lettered = w; return 1; }
+static void pm_message_restore(unsigned id) { if (id == 0x76) captioned = "-"; else lettered = "-"; }
 static long pm_port_value(const char *n, long d)
 {
     static const struct { const char *n; long v; } t[] = {
@@ -99,7 +113,7 @@ static long pm_port_value(const char *n, long d)
         { "challenge_menu_list_at", 16 }, { "challenge_menu_pick_back", 0 },
         { "comp_menu_frame_list_at", 16 }, { "comp_menu_frame_count_at", 8 }, { "comp_menu_frame_count_last", 0 },
         { "comp_menu_frame_cap", 8 }, { "comp_menu_frame_cursor_reg", 5 }, { "comp_menu_frame_buttons_reg", 6 },
-        { "comp_menu_end_index", 1 }, { "comp_menu_end_msg", 0x77 } };
+        { "comp_menu_end_index", 1 }, { "comp_menu_end_msg", 0x77 }, { "comp_menu_end_caption_msg", 0x76 } };
     unsigned i;
     for (i = 0; i < sizeof t / sizeof t[0]; i++) if (!strcmp(t[i].n, n)) return t[i].v;
     return d;
@@ -149,14 +163,18 @@ def test_the_entry_lists_get_all_three_and_the_pick_says_which(tmp_path):
 
 FRAME_FNS = ROW_FNS + ("static const char *team_kind_name(unsigned k)\n{", "static unsigned team_kind_of(unsigned kind)",
                        "static unsigned comp_frame_cursor(unsigned cursor, unsigned n, unsigned left, unsigned right)",
-                       "static void team_frame_restore(void)\n{", "static void team_menu_frame(pm_reg *r)")
+                       "static void team_frame_restore(void)\n{", "static const char *team_kind_caption(unsigned k)",
+                       "static void team_menu_frame(pm_reg *r)")
 
 FRAME_MAIN = MENU_PRELUDE + r"""
 static unsigned long team_frame_sp;
 static unsigned team_frame_at, team_frame_msg;
 static unsigned team_frame_n, team_frame_kinds[6];
+static unsigned team_frame_cap;
+static char team_cap_coop[] = "CO-OP", team_cap_teams[] = "TEAMS";
+static void team_frame_restore(void);
 @FNS@
-static unsigned r[64];
+static unsigned r[64], r3[64];
 int main(void)
 {
     unsigned char *sp = (unsigned char *)(r + 14);
@@ -172,9 +190,29 @@ int main(void)
     for (c = 0; c <= 7; c++) {                            /* the cursor over every entry */
         r[5] = c;
         team_menu_frame(r);
-        printf(" %u:%d%u:%s", c, tm.pending, tm.pending ? tm.kind : 0, lettered);
+        printf(" %u:%d%u:%s/%s", c, tm.pending, tm.pending ? tm.kind : 0, lettered, captioned);
     }
-    printf(" %u\n", *count);                              /* the same menu: nothing added again */
+    printf(" %u|", *count);                              /* the same menu: nothing added again */
+    /* PAD-1449 round 3: asked on the menu - CO-OP PLAY and one TEAMS entry; TEAMS' step took 2 VS 1 */
+    coop.setting = 0;
+    sty_on = 1;
+    tm.frame = 1;
+    lb_start_game = &row;
+    sp = (unsigned char *)(r3 + 14);
+    list = (unsigned *)(sp + 16);
+    count = (unsigned *)(sp + 8);
+    list[0] = 1; list[1] = 2; list[2] = 3;
+    *count = 3;
+    r3[5] = 0;
+    team_menu_frame(r3);
+    printf("%u", *count);
+    for (c = 2; c <= 5; c++) {
+        r3[5] = c;
+        if (c == 5) { r3[5] = 4; smn.team = 3u; }
+        team_menu_frame(r3);
+        printf(" %u:%d%u:%s/%s", c, tm.pending, tm.pending ? tm.kind : 0, lettered, captioned);
+    }
+    printf("\n");
     return 0;
 }
 """
@@ -183,8 +221,12 @@ int main(void)
 def test_the_index_menus_get_all_three_and_the_cursor_says_which(tmp_path):
     out = R._host_run(tmp_path, FRAME_MAIN.replace("@FNS@", _fns(_src(), *FRAME_FNS)), flags=("-no-pie",)).strip()
     # row 2 is Enhanced: PAD-1224's ENHANCED STANDARD after CO-OP PLAY, TEAM PLAY 3 VS 1 last
-    assert out == ("8 1 1 1 1 1 0:00:- 1:00:- 2:00:- 3:11:CO-OP PLAY 4:12:ENHANCED STANDARD 5:14:TEAM PLAY 2 VS 2"
-                   " 6:13:TEAM PLAY 2 VS 1 7:15:TEAM PLAY 3 VS 1 8")
+    # PAD-1449 round 3: the caption over ours says CO-OP or TEAMS (ENHANCED STANDARD keeps Standard's)
+    old, new = out.split("|")
+    assert old == ("8 1 1 1 1 1 0:00:-/- 1:00:-/- 2:00:-/- 3:11:CO-OP PLAY/CO-OP 4:12:ENHANCED STANDARD/-"
+                   " 5:14:TEAM PLAY 2 VS 2/TEAMS 6:13:TEAM PLAY 2 VS 1/TEAMS 7:15:TEAM PLAY 3 VS 1/TEAMS 8")
+    # ... and asked on the menu: CO-OP PLAY and one TEAM PLAY entry (9), the team game its step took (3) kept
+    assert new == "5 2:00:-/- 3:11:CO-OP PLAY/CO-OP 4:19:TEAM PLAY/TEAMS 5:13:TEAM PLAY/TEAMS"
 
 
 def test_the_pick_not_the_row_sizes_the_team_game():

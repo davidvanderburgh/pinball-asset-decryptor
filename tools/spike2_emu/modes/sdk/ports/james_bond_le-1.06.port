@@ -1172,3 +1172,6 @@ site ball_device_keep     0x003f5370 0xe3083380 0xe340305f
 data ball_devices         0x007d56e8
 text ball_device_names  LEFT_EJECT RIGHT_VUK_OPTO ROCKET_VUK ROCKET_LOCKUP
 data ball_device_count    0x005f8380
+# PAD-1464: the game's Start plays GLDFNGR_Intro1 in the TV, under the HUD (a mode's screens are drawn over it): no start
+# film for a menu to wait for
+text start_film_clips -

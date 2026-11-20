@@ -585,3 +585,5 @@ site coil_frame            0x00404a34 0xe5d13000 0xe3530008
 data sw_listen             0x005ff5b8
 data sw_boards             0x006aeba4
 site coil_used             0x0027ef90 0xe92d43f8 0xe300850c
+# PAD-1464: the game's Start plays its title screen over the whole glass, looped, until it asks for MainplayV1 (7.4 s)
+text start_film_clips BlackKnight_PhotoShoot_TitleScreen

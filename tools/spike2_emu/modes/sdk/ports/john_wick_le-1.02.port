@@ -842,3 +842,5 @@ site ball_device_keep     0x0040b2c0 0xe30d3c34 0xe3403054
 data ball_devices         0x006524c8
 text ball_device_names  LEFT_SCOOP RIGHT_VUK MULTIBALL_LOCKUP
 data ball_device_count    0x0054dc34
+# PAD-1464: the game's Start sets its night city (NY_Night) as the background, the HUD over it: no start film
+text start_film_clips -

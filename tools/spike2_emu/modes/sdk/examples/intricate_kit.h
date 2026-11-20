@@ -1986,7 +1986,11 @@ static KIT_UNUSED void kit_fade_tick(struct kit_fade *f)
  * kit_menu_tick every tick: it finds the screens (twice a second until the scene has loaded, then every one hidden at
  * once), draws what changed, renews the hide and runs the clock; it answers the item taken (0..n-1) on the tick it is
  * taken, else -1. A game's end closes it with nothing taken. A card built without the screens finds none: the menu
- * still runs, picks and logs, unseen. */
+ * still runs, picks and logs, unseen.
+ * PAD-1464: one opened while the game's own start-of-game film plays (pm_start_film: a whole-game mode's menu at the
+ * game's start, under Uncanny X-Men's 15 s GameIntro) waits for it: it is not drawn, its time does not run and its
+ * buttons stay the game's until the film is over, then it comes up with its whole time. A lane menu's plunge meanwhile
+ * still takes the one it opened on. */
 #define KIT_MENU_ROWS   5
 #define KIT_MENU_ITEMS  12
 #define KIT_MENU_HOLD_NONE  0
@@ -2008,6 +2012,7 @@ struct kit_menu {
     unsigned long ms;
     /* while it is open */
     int open, at, top, taken, fresh;         /* taken: 1 + the item last picked (0 none); fresh: not yet answered */
+    int film;                                /* PAD-1464: open, waiting for the game's start film to end */
     unsigned long t0;
     uint64_t left, right, pick, action, buttons;   /* the button shots (pm_shot), resolved at the open */
     /* on the glass */
@@ -2097,20 +2102,22 @@ static KIT_UNUSED int kit_menu_open(struct kit_menu *m, const char *head, const 
     m->action = pm_shot("Action button");
     m->pick = m->action | pm_shot("Start button");
     m->buttons = m->left | m->right | m->pick;
-    if (hold == KIT_MENU_HOLD_SCOOP) {       /* the kick-out comes at most KIT_MENU_SCOOP_MAX_MS after it settled */
-        if (ms > KIT_MENU_SCOOP_MAX_MS - 1000u) ms = KIT_MENU_SCOOP_MAX_MS - 1000u;
-        if (!pm_scoop_hold((unsigned)(ms + 1000u))) pm_log("menu %s: no scoop hold here (the ball is not held)", m->node);
-    }
+    if (hold == KIT_MENU_HOLD_SCOOP && ms > KIT_MENU_SCOOP_MAX_MS - 1000u)   /* the kick-out comes at most */
+        ms = KIT_MENU_SCOOP_MAX_MS - 1000u;                                    /* KIT_MENU_SCOOP_MAX_MS after it settled */
     m->ms = ms;
     m->at = m->dflt;
     m->top = kit_menu_top(m->at, 0, m->n, m->rows > 0 ? m->rows : KIT_MENU_ROWS);
     m->fresh = 0;
     m->t0 = pm_ms();
     m->open = 1;
-    k = m->buttons ? pm_button_hide(m->buttons) : 0;
+    m->film = pm_start_film();               /* PAD-1464: under the game's start film it waits (kit_menu_tick) */
+    k = m->buttons && !m->film ? pm_button_hide(m->buttons) : 0;
     pm_log("menu %s: open \"%s\", %d items, on %d, %lu ms, hold %s, buttons %s%s, %d held back from the game", m->node,
            m->head, n, m->at + 1, ms, hold == KIT_MENU_HOLD_SCOOP ? "scoop" : hold == KIT_MENU_HOLD_LANE ? "lane" : "none",
            m->left && m->right ? "flippers" : "NO FLIPPERS", m->action ? " + Action + Start" : " + Start", k);
+    if (m->film) pm_log("menu %s: the game's start film is playing - it comes up when the film is over", m->node);
+    else if (hold == KIT_MENU_HOLD_SCOOP && !pm_scoop_hold((unsigned)(ms + 1000u)))
+        pm_log("menu %s: no scoop hold here (the ball is not held)", m->node);
     return 1;
 }
 
@@ -2125,8 +2132,11 @@ static KIT_UNUSED void kit_menu_take(struct kit_menu *m, int item, const char *w
     m->open = 0;
     m->taken = item + 1;
     m->fresh = 1;
-    pm_button_hide(0);
-    if (m->hold == KIT_MENU_HOLD_SCOOP) pm_scoop_hold(0);    /* the ball held now goes */
+    if (!m->film) {                          /* (waiting for the start film: nothing was held) */
+        pm_button_hide(0);
+        if (m->hold == KIT_MENU_HOLD_SCOOP) pm_scoop_hold(0);    /* the ball held now goes */
+    }
+    m->film = 0;
     pm_log("menu %s: picked %d \"%s\" (%s, after %lu ms)", m->node, item + 1,
            item >= 0 && item < m->n ? m->items[item] : "", why, pm_ms() - m->t0);
 }
@@ -2137,8 +2147,11 @@ static KIT_UNUSED void kit_menu_close(struct kit_menu *m)
     if (!m->open) return;
     m->open = 0;
     m->fresh = 0;
-    pm_button_hide(0);
-    if (m->hold == KIT_MENU_HOLD_SCOOP) pm_scoop_hold(0);
+    if (!m->film) {
+        pm_button_hide(0);
+        if (m->hold == KIT_MENU_HOLD_SCOOP) pm_scoop_hold(0);
+    }
+    m->film = 0;
     pm_log("menu %s: closed with no pick", m->node);
 }
 
@@ -2162,6 +2175,17 @@ static KIT_UNUSED int kit_menu_shot(struct kit_menu *m, uint64_t shots)
     const char *other = 0;
     char why[80];
     if (!m->open) return 0;
+    if (m->film) {                           /* PAD-1464: under the start film the buttons are the game's; a lane */
+        for (rest = shots & ~1ull; rest; rest &= rest - 1) {      /* menu's plunge takes the one it opened on */
+            b = rest & (~rest + 1);
+            if (!kit_menu_is_button(b) && m->hold == KIT_MENU_HOLD_LANE) {
+                pm_snprintf(why, sizeof why, "the ball moved on under the game's start film: %s", pm_shot_name(b));
+                kit_menu_take(m, m->at, why);
+                break;
+            }
+        }
+        return 0;
+    }
     if (m->left && (shots & m->left)) {
         m->at = m->at > 0 ? m->at - 1 : m->n - 1;
         return 1;
@@ -2195,13 +2219,25 @@ static KIT_UNUSED int kit_menu_tick(struct kit_menu *m)
     long secs;
     char foot[64];
     kit_menu_find(m);
+    if (m->open && m->film && pm_in_game()) {
+        if (pm_start_film()) m->t0 = pm_ms();                    /* PAD-1464: its time waits for the film */
+        else {
+            m->film = 0;
+            m->t0 = pm_ms();
+            j = m->buttons ? pm_button_hide(m->buttons) : 0;
+            if (m->hold == KIT_MENU_HOLD_SCOOP && !pm_scoop_hold((unsigned)(m->ms + 1000u)))
+                pm_log("menu %s: no scoop hold here (the ball is not held)", m->node);
+            pm_log("menu %s: the game's start film is over - up now, %lu ms, %d button(s) held back from the game",
+                   m->node, m->ms, j);
+        }
+    }
     if (m->open) {
         if (!pm_in_game()) kit_menu_close(m);
         else if (pm_ms() - m->t0 >= m->ms) kit_menu_take(m, m->at, "its time ran out");
-        else if (m->buttons) pm_button_hide(m->buttons);
+        else if (m->buttons && !m->film) pm_button_hide(m->buttons);
     }
     if (m->found) {
-        want = m->open;
+        want = m->open && !m->film;
         if (want != m->up) {
             pm_show(m->panel, want);
             for (j = 0; j < m->rows; j++) pm_show(m->rowg[j], want && j < m->n);

@@ -144,7 +144,7 @@ is written**, from what `assets.json` names, and the C shows, hides and fills th
 | `slides:` / `slide_player:` with text | the mode's own screen (`"screen": true`), its words by `pm_set_text`; the HUD at the glass's edges (`"hud"`, the kit's `kit_hud`) |
 | a bar or meter widget (health, energy) | **meters**: up to 4 a mode (`"meters": [{"label", "color"}]`), the kit's `kit_meter_set(m, value, most, words)` |
 | a full-screen colour, a fade | **fades**: up to 3 a mode (`"fades": [{"color", "style": "flat" or "glow"}]`), `kit_fade_to(f, percent, ms)` |
-| `carousel:`, a selection screen | **menus**: up to 2 a mode (`"menus": [{"title", "color"}]`), `kit_menu_open`, `kit_menu_shot`, `kit_menu_tick` (MODE_SDK.md "A menu picked with the flippers"). One at a game's start opens after the game's own start-of-game video (below) |
+| `carousel:`, a selection screen | **menus**: up to 2 a mode (`"menus": [{"title", "color"}]`), `kit_menu_open`, `kit_menu_shot`, `kit_menu_tick` (MODE_SDK.md "A menu picked with the flippers"). One at a game's start waits for the game's own start-of-game video by itself (below) |
 | a video widget | clips: up to 32 a mode (`"clips"`, `pa_clip_full`, `pa_clip_event`), or a game clip by name (`pm_clip`) |
 | `sound_player:` | calls: up to 16 a mode (`"calls"`, `pa_call`), or the game's own callouts (`pm_callout`) |
 | `music_player:` | music beds: one plus 6 more a mode (`"music"`, `"beds"`, `pa_music_bed`) |
@@ -169,8 +169,9 @@ allocation, threads, files or stdio (static variables, `pm_snprintf`, `pm_log`),
   playfield switch toward it themselves, so a ball ends with the game's bonus added on top of your points
   (MODE_SDK.md "The whole game").
 - **The game's start-of-game video.** Stern's program plays it when Start is pressed, over every screen of yours, and
-  no call sees it. A menu or a screen of yours at the game's start waits it out: Uncanny X-Men 0.98's runs about
-  15 s and no flipper press skips it (MODE_SDK.md "A menu at the game's start").
+  no flipper press skips it (Uncanny X-Men 0.98's runs about 15 s). The kit's menu waits it out by itself, and
+  `pm_start_film()` says when it is up for a screen of your own at the game's start (MODE_SDK.md "A menu at the game's
+  start").
 - **MPF-MC's free drawing.** No widget can be made at run time: every screen is built when the card is written,
   from `assets.json`.
 - **Settings and audits of your own.** The operator's settings stay the game's (the Defaults tab sets them).
@@ -212,11 +213,9 @@ static void fut_tick(void)
     else if (!fut_on && !fut_done && pm_player() >= 1) {
         if (pm_begin()) { pm_running_name("FUTURE"); pm_own_game(1); fut_on = 1; }
     }
-    if (fut_on && !intro_over && (up != 1 || ++intro_ticks >= INTRO_S * TPS))
-        intro_over = 1;                                      /* the game's start-of-game video is over (17 s) */
-    if (fut_on && intro_over && !P[up].asked &&
+    if (fut_on && !P[up].asked &&                           /* roster: ball_started{ball==1}; it waits for the */
         kit_menu_open(&roster, "CHOOSE YOUR MUTANT", MUTANTS, 3, P[up].mutant, 10000, KIT_MENU_HOLD_LANE))
-        P[up].asked = 1;                                     /* roster: ball_started{ball==1} */
+        P[up].asked = 1;                                     /* game's start-of-game video by itself */
     int got = kit_menu_tick(&roster);
     if (got >= 0) { P[up].mutant = got; pm_saved_put("xstory:mutant", up, got); }
     ...                                                      /* the meters' and fades' ticks */

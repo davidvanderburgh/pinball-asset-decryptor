@@ -3786,6 +3786,7 @@ static void *clip2_surface(void)
 static volatile int disp_clip_ours, disp_clip_lost;
 static char disp_clip_name[96], disp_lost_name[64];
 static void display_tick(void);           /* the display priority section, below */
+static void sf_tick(void);                /* PAD-1464: the game's start film, below */
 static void block_tick(void);             /* PAD-347: a mode that keeps the game's modes from starting */
 static void bd2_tick(void);               /* PAD-521: the backdrop on the bank's surface, below */
 static void ck_idle_tick(void);           /* PAD-530: the game's main-play video back after ours, below */
@@ -4036,9 +4037,12 @@ static void ck_game_loops(void)
     }
 }
 
+static void sf_play(const pm_reg *r);
 static void on_surface_play(pm_reg *r)
 {
     void *bank = 0;
+    if (!ck_ours && !ck_in) sf_play(r);   /* PAD-1464 */
+    if (!ck_can) return;
     if (!ck_ours && !ck_in) {
         ck_in = 1;
         bank = clip2_surface();
@@ -4049,6 +4053,14 @@ static void on_surface_play(pm_reg *r)
         if (r[1]) ck_game_loops();
     }
     ck_play_seen(r);
+}
+
+/* one hook on surface_play for its watchers (PAD-530's put-back, PAD-1464's start film) */
+static int sp_hooked;
+static int sp_hook(void)
+{
+    if (!sp_hooked) sp_hooked = hook(fn("surface_play"), on_surface_play);
+    return sp_hooked;
 }
 
 /* every tick, from clip_tick: put the clip back once the game's clip is over */
@@ -4150,7 +4162,7 @@ static void ck_arm(void)
     if (!have_sites(s)) return;           /* a port without them: silent, the clip is gone as before */
     if ((sv_ck = 1, sv_hook())) {
         ck_can = 1;
-        ck_play_hooked = hook(fn("surface_play"), on_surface_play);
+        ck_play_hooked = sp_hook();
         if (pm_trigger("cliplog.on")) {
             ck_log = 1;
             say("clip log: every clip of the game's on the bank's surface (cliplog.on)");
@@ -4358,6 +4370,7 @@ static void clip_tick(void)
     unsigned long now;
     long playing = pm_port_value("surface_playing", 2);
     display_tick();                           /* item 154 display: the hold, the covered state */
+    sf_tick();                                /* PAD-1464: the game's start film */
     gw_tick();                                /* PAD-662: the game's own words up or gone, said as they change */
     block_tick();                             /* PAD-347: a block ends with its mode */
     if (ck_can) ck_fx_track();                /* PAD-639: when the game's display effect now began */
@@ -4596,8 +4609,11 @@ static int sv_juke;
 static void juke_set_video(pm_reg *r);
 static void on_clipv_set_video(pm_reg *r);
 static void bd2_seen(pm_reg *r);
+static int sv_sf;
+static void sf_set_video(const pm_reg *r);
 static void on_surface_set_video(pm_reg *r)
 {
+    if (sv_sf) sf_set_video(r);           /* PAD-1464: first, the name as the game asked */
     if (sv_ck) ck_seen(r);                /* PAD-530: first, before a variant swaps the name */
     if (sv_bd) bd2_seen(r);
     if (sv_juke) juke_set_video(r);       /* PAD-685: a song mode's intro, before a variant */
@@ -5529,6 +5545,315 @@ static void display_arm(void)
         "kept its magnet on while its screen waited for a mode)");
 }
 
+
+/* ---- PAD-1464: the game's own start-of-game film ----------------------------------------------------------------
+ * As a game starts, Stern's program plays a film of its own over the whole glass, its HUD taken off meanwhile (Uncanny
+ * X-Men 0.98's GameIntro, about 15 s, no flipper skips it; Avengers' GameStartSplashScreen and then GameIntro; Jurassic
+ * Park's JawsIntroToIsland_Title, 24 s; Jaws' game_intro_start; Black Knight's title screen; Godzilla's intro<N>). A menu
+ * opened as the game starts (a whole-game mode's roster) was drawn under it and ran out its time unseen, and no call saw
+ * it (pm_display_covered, pm_game_words and pm_clip_playing read 0 all through it: the film is a clip on the video
+ * bank's surface, not a display effect). pm_start_film says when it is up, and the kit's menu waits for it.
+ * Found by the clips the game asks for (surface_set_video on the video bank's surface, clip_play, layer_video), from the
+ * game's start (its game_start broadcast):
+ *   - the first one asked within SF_ASK_MS of the start is the film, unless the game loops it (a main-play background,
+ *     a chooser's: Star Wars' starfield, TMNT's character select) - and one asked up to SF_PRE_MS BEFORE the broadcast
+ *     when its name says film (X-Men Pro asks for GameIntro 86 ms before, Black Knight its title screen 137 ms);
+ *   - the next one on its surface carries the film on when its name says film too (Avengers' GameIntro after the
+ *     splash), and ends it otherwise; the same name asked again (clip_play sets its surface itself) is the same film;
+ *   - it is over when its surface has stopped playing for SF_GONE_MS, or SF_MAX_MS ran out.
+ * "Says film": intro, start or title in it, any case. A clip on another surface (a TV or a panel inside the HUD:
+ * Batman's episodes, Elvira's house, Mando's signet) is no film: the HUD is still up over it. A port may name its films
+ * (`text start_film_clips`: names, a trailing * a prefix; PAD-1114's line), which then count wherever they play and
+ * alone; `-` says the title's Start plays none over the HUD (James Bond's GLDFNGR_Intro1 plays in the TV, under a mode's
+ * screens). Until the film is asked for (the first SF_ASK_MS) it reads 1: a menu opened on the game's start tick waits
+ * that long at most where there is none. Census and proof: docs/plans/pad1464_start_film.md. */
+#define SF_ASK_MS  1500ul
+#define SF_PRE_MS  400ul
+#define SF_GONE_MS 1000ul
+#define SF_MAX_MS  120000ul
+static unsigned chg_game_now(void);
+static volatile int clipv_in;
+struct sf_clip {
+    char name[64];
+    pm_addr surf;                /* the surface (or layer object) it plays on; 0 none known */
+    int path;                    /* 1 a surface (surface_set_video, or clip_play's own), 2 clip_play, 3 layer_video */
+    int loop;                    /* 1 looped, 0 not, -1 not known yet */
+    unsigned long ms;            /* asked for (pm_ms) */
+};
+static struct {
+    unsigned game;               /* the game_start count it belongs to */
+    int was_in;                  /* pm_in_game when last looked (a port without the event) */
+    volatile int phase;          /* SF_NONE, SF_DUE (the game began, no film asked for yet), SF_UP */
+    unsigned long t0;            /* the game's start (pm_ms) */
+    unsigned long idle_since;    /* its surface not playing since (0: playing) */
+    struct sf_clip film;         /* SF_UP: the film's clip now */
+    struct sf_clip pre;          /* the last clip asked for that says film (for one asked before the broadcast) */
+} sf;
+enum { SF_NONE, SF_DUE, SF_UP };
+static int sf_armed, sf_ev = -2, sf_in;
+static unsigned sf_log;           /* /dump/startfilm.log: every clip call it sees, for a port's census (at most 300) */
+
+/* the port names its start films (a `text start_film_clips` line that is not "-": PAD-1114's co-op intro swaps them) */
+static int sf_port_films(void)
+{
+    const char *l = pm_port_text("start_film_clips");
+    return l && !(l[0] == '-' && (!l[1] || l[1] == ' '));
+}
+
+static void sf_over(const char *why)
+{
+    if (sf.phase == SF_UP)
+        say("start film: \"%s\" over %lu ms into the game (%s)", sf.film.name, pm_ms() - sf.t0, why);
+    else if (sf.phase == SF_DUE)
+        say("start film: none at this game's start (%s)", why);
+    sf.phase = SF_NONE;
+}
+
+/* the port's `text start_film_clips` against a clip's name: -1 the port names none, 1 one of the title's films, 0 not;
+ * "-" (none at all) is 0 for every name (tests lift it verbatim) */
+static int sf_listed(const char *list, const char *name)
+{
+    const char *p;
+    unsigned n, k, j;
+    if (!list) return -1;
+    for (n = 0; name[n] && name[n] != ' '; n++) ;
+    for (p = list; *p; p += k) {
+        while (*p == ' ') p++;
+        for (k = 0; p[k] && p[k] != ' '; k++) ;
+        if (k > 1 && p[k - 1] == '*') {
+            for (j = 0; j < k - 1 && j < n && p[j] == name[j]; j++) ;
+            if (j == k - 1) return 1;
+        } else if (k && k == n && !(k == 1 && p[0] == '-')) {
+            for (j = 0; j < n && p[j] == name[j]; j++) ;
+            if (j == n) return 1;
+        }
+    }
+    return 0;
+}
+
+/* `word` in the name, any case */
+static int sf_has(const char *name, const char *word)
+{
+    unsigned i, j;
+    for (i = 0; name[i]; i++) {
+        for (j = 0; word[j] && name[i + j] && (name[i + j] | 0x20) == word[j]; j++) ;
+        if (!word[j]) return 1;
+    }
+    return 0;
+}
+
+/* the name says loop: a background, never a film (Jaws' game_intro_loop after its film, Mando's BG_Loop_RazorCrest,
+ * TMNT's MainPlay_Start_Looping) (tests lift it verbatim) */
+static int sf_named_loop(const char *name)
+{
+    return sf_has(name, "loop");
+}
+
+/* "intro", "start" or "title" in the name, any case, and not a loop (tests lift it verbatim) */
+static int sf_named_film(const char *name)
+{
+    return !sf_named_loop(name) && (sf_has(name, "intro") || sf_has(name, "start") || sf_has(name, "title"));
+}
+
+static int sf_same(const char *a, const char *b)
+{
+    unsigned i;
+    for (i = 0; a[i] && a[i] == b[i]; i++) ;
+    return a[i] == b[i];
+}
+
+static void sf_keep(struct sf_clip *c, const char *name, pm_addr surf, int path, int loop)
+{
+    unsigned i;
+    for (i = 0; name[i] && i + 1 < sizeof c->name; i++) c->name[i] = name[i];
+    c->name[i] = 0;
+    c->surf = surf;
+    c->path = path;
+    c->loop = loop;
+    c->ms = pm_ms();
+}
+
+static void sf_up(const struct sf_clip *c, const char *how)
+{
+    sf.film = *c;
+    sf.phase = SF_UP;
+    sf.idle_since = 0;
+    say("start film: \"%s\" asked for %ld ms into the game (%s%s) - a menu at the game's start waits for it", c->name,
+        (long)(c->ms - sf.t0), c->path == 1 ? "its surface" : c->path == 2 ? "clip_play" : "the video layer", how);
+}
+
+/* a new game: its film is due (from pm_start_film, the tick and every ask, whichever looks first) */
+static void sf_look(void)
+{
+    const char *list;
+    unsigned g;
+    int in = pm_in_game(), began;
+    if (sf_ev == -2) sf_ev = pm_event("game_start");
+    if (sf_ev >= 0) {
+        g = chg_game_now();
+        began = g != sf.game;
+        sf.game = g;
+    } else {
+        began = in && !sf.was_in;            /* (no game_start event on this port: the game coming on) */
+    }
+    sf.was_in = in;
+    if (!began) return;
+    if (sf.phase != SF_NONE) sf_over("a new game began");
+    list = pm_port_text("start_film_clips");
+    sf.t0 = pm_ms();
+    if (list && list[0] == '-' && (!list[1] || list[1] == ' ')) {
+        say("start film: a game began - this title's Start plays none over the HUD (its port says)");
+        return;
+    }
+    sf.phase = SF_DUE;
+    if (sf.pre.name[0] && sf.t0 - sf.pre.ms <= SF_PRE_MS
+        && (sf.pre.loop != 1 || sf_listed(list, sf.pre.name) == 1)) sf_up(&sf.pre, ", just before the start");
+    sf.pre.name[0] = 0;
+}
+
+/* a clip the game asks for (never ours): `surf` the surface or layer object, `path` the call, `loop` 1 looped, 0 not,
+ * -1 not known yet (a surface's: its surface_play says); `bank` 1 on the video bank's surface (or the one clip call) */
+static void sf_asked(const char *name, pm_addr surf, int path, int loop, int bank)
+{
+    struct sf_clip c;
+    int listed, film;
+    if (!sf_armed || !name) return;
+    sf_look();
+    if (sf_log && sf_log++ <= 300)
+        say("start film log: \"%.80s\" asked for (%s 0x%08" PMA "%s, loop %d) %ld ms from the game's start", name,
+            path == 1 ? "surface" : path == 2 ? "clip_play" : "layer", surf, bank ? ", the bank's" : "", loop,
+            (long)(pm_ms() - sf.t0));
+    listed = sf_listed(pm_port_text("start_film_clips"), name);
+    film = listed == 1 || (listed < 0 && bank && !sf_named_loop(name));   /* a clip that may be a film at all */
+    if (sf.phase == SF_NONE) {
+        if (listed == 1 || (film && sf_named_film(name) && loop != 1)) sf_keep(&sf.pre, name, surf, path, loop);
+        return;
+    }
+    if (sf.phase == SF_UP && path == sf.film.path && surf == sf.film.surf && sf_same(name, sf.film.name)) return;
+    sf_keep(&c, name, surf, path, loop);
+    if (sf.phase == SF_DUE) {
+        if (pm_ms() - sf.t0 > SF_ASK_MS && listed != 1) { sf_over("none asked for in its first moment"); return; }
+        if (!film || (loop == 1 && listed != 1)) return;   /* (another surface's, a loop, one a naming port does not
+                                                              * name; one it names counts looped: Black Knight's title) */
+        sf_up(&c, "");
+        return;
+    }
+    if (path != sf.film.path || surf != sf.film.surf) return;   /* SF_UP: another surface's clip: the film plays on */
+    if (listed == 1 || (listed < 0 && loop != 1 && sf_named_film(name))) {
+        sf_up(&c, ", the film goes on");
+        return;
+    }
+    say("start film: \"%s\" asked for on its surface", name);
+    sf_over("the game played another clip there");
+}
+
+/* surface_play(surface, loop, count): the film's own clip looped is a main-play background after all */
+static void sf_play(const pm_reg *r)
+{
+    /* (nothing is logged here: a say() from the game's surface_play crashed King Kong LE 0.97's attract on the rig) */
+    if (!sf_armed || !r[1]) return;
+    if (sf_listed(pm_port_text("start_film_clips"), sf.phase == SF_UP ? sf.film.name : sf.pre.name) == 1) return;
+    if (sf.pre.name[0] && sf.pre.path == 1 && (pm_addr)r[0] == sf.pre.surf) sf.pre.loop = 1;
+    if (sf.phase != SF_UP || sf.film.path != 1 || (pm_addr)r[0] != sf.film.surf) return;
+    say("start film: \"%s\" is looped - a background, not a film", sf.film.name);
+    sf_over("looped");
+}
+
+/* is the film's surface playing: 1, 0, or -1 when this build cannot say */
+static int sf_playing(void)
+{
+    int want = (int)pm_port_value("surface_playing", 2);
+    void *v;
+    if (sf.film.path == 1 && sf.film.surf && site("surface_state"))
+        return ((int (*)(void *))(unsigned long)fn("surface_state"))((void *)(unsigned long)sf.film.surf) == want;
+    if (sf.film.path == 2 && site("video_surface") && site("surface_state")) {
+        v = ((void *(*)(void))(unsigned long)fn("video_surface"))();
+        return v ? ((int (*)(void *))(unsigned long)fn("surface_state"))(v) == want : -1;
+    }
+    if (sf.film.path == 3 && sf.film.surf && site("layer_playing"))
+        return ((int (*)(void *))(unsigned long)fn("layer_playing"))((void *)(unsigned long)sf.film.surf) != 0;
+    return -1;
+}
+
+/* every tick, from clip_tick */
+static void sf_tick(void)
+{
+    unsigned long now;
+    int p;
+    if (!sf_armed) return;
+    sf_look();
+    if (sf.phase == SF_NONE) return;
+    now = pm_ms();
+    if (now - sf.t0 > SF_ASK_MS && !pm_in_game()) { sf_over("the game ended"); return; }
+    if (sf.phase == SF_DUE) {
+        if (now - sf.t0 > SF_ASK_MS) sf_over("none asked for in its first moment");
+        return;
+    }
+    if (now - sf.t0 > SF_MAX_MS) { sf_over("its longest"); return; }
+    if ((long)(now - sf.film.ms) < 500l) return;   /* (a clip just asked for may not be playing yet) */
+    p = sf_playing();
+    if (p != 0) { sf.idle_since = 0; return; }
+    if (!sf.idle_since) sf.idle_since = now | 1ul;
+    else if (now - sf.idle_since >= SF_GONE_MS) sf_over("its surface stopped playing");
+}
+
+int pm_start_film(void)
+{
+    if (!sf_armed) return 0;
+    sf_look();
+    if (sf.phase == SF_DUE && pm_ms() - sf.t0 > SF_ASK_MS) sf_over("none asked for in its first moment");
+    return sf.phase != SF_NONE;
+}
+
+/* clip_play(name, loop, crop): on a build with the surface getter, the bank's surface it plays on */
+static void sf_on_clip_play(pm_reg *r)
+{
+    void *v = 0;
+    if (disp_clip_ours || sf_in) return;
+    if (site("video_surface")) {
+        sf_in = 1;
+        v = ((void *(*)(void))(unsigned long)fn("video_surface"))();
+        sf_in = 0;
+    }
+    sf_asked((const char *)(unsigned long)r[0], (pm_addr)(unsigned long)v, v ? 1 : 2, r[1] ? 1 : 0, 1);
+}
+static void sf_on_layer(pm_reg *r)
+{
+    const pm_addr *s = (const pm_addr *)(unsigned long)r[1];
+    if (s && !clip_layer_in) sf_asked((const char *)(unsigned long)s[0], (pm_addr)r[0], 3, r[2] ? 1 : 0, 1);
+}
+/* from on_surface_set_video: the game's own ask (ours is marked) */
+static void sf_set_video(const pm_reg *r)
+{
+    const pm_addr *s = (const pm_addr *)(unsigned long)r[1];
+    void *bank;
+    if (ck_ours || ck_in || clipv_in || sf_in || !s) return;
+    sf_in = 1;
+    bank = clip2_surface();
+    sf_in = 0;
+    sf_asked((const char *)(unsigned long)s[0], (pm_addr)r[0], 1, -1, bank && (pm_addr)(unsigned long)bank == (pm_addr)r[0]);
+}
+static int sv_sf;
+
+/* from the constructor: the clip calls this build plays its clips through */
+static void sf_arm(void)
+{
+    const char *how = 0;
+    if (site("surface_set_video") && fn("surface_set_video") && (sv_sf = 1, sv_hook())) {
+        how = "surface_set_video";
+        if (site("surface_play") && fn("surface_play")) sp_hook();
+    }
+    if (site("clip_play") && fn("clip_play") && hook(fn("clip_play"), sf_on_clip_play) && !how) how = "clip_play";
+    if (site("layer_video") && fn("layer_video") && hook(fn("layer_video"), sf_on_layer) && !how) how = "layer_video";
+    if (!how) {
+        say("start film: not watched - this build's port has no clip call (pm_start_film reads 0)");
+        return;
+    }
+    sf_armed = 1;
+    sf_log = pm_trigger("startfilm.log") ? 1u : 0u;
+    say("start film: watched through %s%s - a menu at a game's start waits for the game's own film", how,
+        sf_port_films() ? " (its port names its films)" : pm_port_text("start_film_clips") ? " (its port says its Start plays none)" : "");
+}
 
 /* ---- the game's own message screens (optional) ----------------------------------------------- */
 #define N_BORROW 8
@@ -22100,7 +22425,7 @@ static void coop_chars_arm(struct site *e)
     else if (save && coop_action)
         say("co-op characters: coop.cfg names no shooter lane - every Action press counts toward x2, a launch's too");
     coop_live = 1;
-    if (ci.clip[0] && pm_port_text("intro_hide_0") && pm_port_text("start_film_clips")) {   /* round 2 */
+    if (ci.clip[0] && pm_port_text("intro_hide_0") && sf_port_films()) {   /* round 2 */
         if (fn("find_text")) hook(fn("find_text"), ci_find_seen);
         if (fn("find_node")) hook(fn("find_node"), ci_find_seen);
     }
@@ -22615,7 +22940,7 @@ static void coop_intro_tick(void)
     edge_take_held(coop_action);
     switch (ci.phase) {
     case CI_START:
-        if (!ci.film_at && pm_port_text("start_film_clips") && now - ci.begun < CI_FILM_WAIT_MS)
+        if (!ci.film_at && sf_port_films() && now - ci.begun < CI_FILM_WAIT_MS)
             return;                                           /* round 2: the game's film is asked for a moment later */
         ci.lang_asks = ci_language_asks();
         if (ci.film_at && now - (ci.film_at & ~1ul) < CI_FILM_FRESH_MS) {   /* round 2: the game's own screen plays it */
@@ -30996,6 +31321,7 @@ static void pad_mode_start(void)
             (unsigned)ball_end_event);
     }
     display_arm();                            /* item 154 display: the clip_play hook, display priority */
+    sf_arm();                                 /* PAD-1464: the game's start film, for a menu at its start */
     block_arm();                              /* PAD-347: a mode may keep the game's modes from starting */
     place_arm();                              /* PAD-710: a mode in the place of one of the game's, counting as it */
     done_arm();                               /* PAD-747: the game's modes each player has completed */

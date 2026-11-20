@@ -774,3 +774,5 @@ site flipper_query_call  0x003246ec 0xebfaa810 0xe3500000
 site ball_device_keep     0x0026f59c 0xe30f3f48 0xe3403046
 data ball_devices         0x005f6b40
 data ball_device_count    0x0046ff48
+# PAD-1464: the game's Start plays its title screen over the whole glass, looped, until it asks for MainplayV1 (7.4 s)
+text start_film_clips BlackKnight_PhotoShoot_TitleScreen

@@ -74,6 +74,27 @@ else
     cp -al "$(realpath "$BUILD")" "$SPP_RIG/game/$DIR"
     rm -f "$SPP_RIG/game/$DIR/title"
 fi
+# PAD's custom modes (PAD-1420, tools/spooky_emu/modes/proc): SPK_PAD_OVERLAY=<folder> (the
+# Modes tab's Try it: the runtime and the modes as a PAD update's pad/ holds them) becomes the
+# game's pad/, and its config.yaml - replaced, not edited: it is the cache's own inode - gets the
+# one line a PAD update adds (pinproc_class: pad.padmodes_proc.PinPROC).  A PAD-written update
+# carries both itself.  SPK_PADMODES_PORT=1: the runtime writes the port report to
+# $SPP_RIG/padmodes_port.json.
+G=$SPP_RIG/game/$DIR
+if [ -n "${SPK_PAD_OVERLAY:-}" ] && [ -f "$SPK_PAD_OVERLAY/padmodes_proc.py" ] && [ -z "${SPP_MACHINE_GAME:-}" ]; then
+    rm -rf "$G/pad"
+    cp -r "$SPK_PAD_OVERLAY" "$G/pad"
+    [ -f "$G/pad/__init__.py" ] || : > "$G/pad/__init__.py"
+    rm -f "$G/pad/padmodes.log" "$G/pad/"*.pyc
+    grep -v '^[[:space:]]*pinproc_class[[:space:]]*:' "$G/config.yaml" > "$SPP_RIG/config.yaml.pad"
+    printf '\n# PAD custom modes (pad/padmodes_proc.py)\npinproc_class: pad.padmodes_proc.PinPROC\n' >> "$SPP_RIG/config.yaml.pad"
+    rm -f "$G/config.yaml"; mv "$SPP_RIG/config.yaml.pad" "$G/config.yaml"
+    echo "run_game.sh: Try it: $SPK_PAD_OVERLAY as pad/, config.yaml loads pad.padmodes_proc"
+fi
+# a modes build's old log (a hard link into the cache): this run writes its own
+[ -z "${SPP_MACHINE_GAME:-}" ] && [ -d "$G/pad" ] && rm -f "$G/pad/padmodes.log"
+SPP_PADMODES_PORT=
+[ "${SPK_PADMODES_PORT:-0}" = 1 ] && SPP_PADMODES_PORT=$SPP_RIG/padmodes_port.json
 echo "$BUILD" > "$SPP_RIG/build"
 echo "$VISIBLE" > "$SPP_RIG/visible"
 echo "$TITLE" > "$SPP_RIG/title"
@@ -154,7 +175,7 @@ setsid -f unshare --net --mount --propagation private \
         SPP_BALLS="$BALLS" PROC_EMU_FPGA="$FPGA" PROC_EMU_CTL="$CTL" SPP_VISIBLE=$VISIBLE $AUDIO_ENV \
         SPP_MACHINE_LAUNCH="${SPP_MACHINE_LAUNCH:-}" SPP_MSIM_FIFO="${SPP_MSIM_FIFO:-}" \
         SPP_MSIM_SHIM="${SPP_MSIM_SHIM:-}" SPP_MSIM_LIB="${SPP_MSIM_LIB:-}" \
-        SPP_MENU_PY="${SPP_MENU_PY:-}" \
+        SPP_MENU_PY="${SPP_MENU_PY:-}" SPP_PADMODES_PORT="$SPP_PADMODES_PORT" \
     bash "$SPP_TOOLS/netns.sh" < /dev/null >> "$SPP_RIG/rig.log" 2>&1
 
 # Up = the game's run loop is going and attract has shown its first page:

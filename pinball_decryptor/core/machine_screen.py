@@ -165,7 +165,9 @@ class LiveView:
         self._sock = self._chan = None
         self._log = log or (lambda *a, **k: None)
         loop = 'while :; do %s || break; done' % _page_command(self.geo)
-        want_plain = remote_send.plain_allowed() if plain is None else plain
+        # PAD-1465's rule for a Send's plain lanes holds here too: only on this computer's own network
+        want_plain = ((remote_send.plain_allowed() and remote_send._home_network(getattr(machine, 'host', '')))
+                      if plain is None else plain)
         if want_plain and not hasattr(machine, 'raw'):
             try:
                 self._open_plain(loop)

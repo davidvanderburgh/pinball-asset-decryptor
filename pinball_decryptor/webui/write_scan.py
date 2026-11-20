@@ -357,6 +357,7 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     rows.extend(colour_rows(mfr, assets_path))
     rows.extend(chosen_files_rows(mfr, assets_path))
     rows.extend(score_colour_rows(mfr, assets_path))
+    rows.extend(service_menu_rows(mfr, assets_path))
     from ..core import card_extras, ssh_card
     try:
         ssh = card_extras.configuration(assets_path)
@@ -424,6 +425,30 @@ def wifi_rows(window, assets_path):
 
 #: PAD-507: Godzilla's score panel colours, words of the game program
 PENDING_SCORE_COLOURS = "Pending (score colors)"
+
+
+#: the Service menu tab's rows (PAD-1382)
+PENDING_SERVICE_MENU = "Pending (Service menu)"
+
+
+def service_menu_rows(mfr, assets_path):
+    """The settings of ours the next Write puts in the game's service menu (:func:`.service_menu.wanted`), a row
+    each. Simon: with only Service menu rows ticked the change scan said "0 total change(s)" and the Write "Wrote
+    no changes", though the Write did add them."""
+    if not assets_path or mfr is None or getattr(mfr, "key", "") != "stern":
+        return []
+    try:
+        from ..plugins.stern import menu_settings, service_menu
+        wanted = service_menu.wanted(assets_path)
+    except Exception:                                   # noqa: BLE001
+        return []
+    out = []
+    for key, _values, names, _opts in (w + ({},) if len(w) == 3 else w for w in wanted):
+        label = menu_settings.caption_of(key)
+        if tuple(names or ()) == tuple(service_menu.PLACEHOLDER_NAMES):
+            label += "  —  placeholder (%s)" % ", ".join(service_menu.PLACEHOLDER_NAMES)
+        out.append(("service menu: " + label, "program", PENDING_SERVICE_MENU, "pending"))
+    return out
 
 
 def score_colour_rows(mfr, assets_path):
@@ -720,6 +745,12 @@ def fingerprint(window, assets_path, epoch, grow_on):
         # PAD-507: the score panel colours
         from ..plugins.stern import score_colours
         parts.append(sorted(score_colours.picks(assets_path).items()))
+    except Exception:                                   # noqa: BLE001
+        parts.append(None)
+    try:
+        # the Service menu tab's rows
+        from ..plugins.stern import service_menu
+        parts.append(service_menu.wanted(assets_path))
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     from ..core import card_extras

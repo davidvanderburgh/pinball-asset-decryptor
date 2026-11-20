@@ -332,7 +332,9 @@ function ModeList({ j, onNew }) {
 function FormGroups({ j, have }) {
   const f = j.form || {};
   const meta = j.fields || {};
-  return (j.groups || []).map((g) => html`<div class="jjpm-group" key=${g.title}>
+  // a group whose every key the title cannot do (Picture and video on Alice Cooper and the pinHeck
+  // DMD games, PAD-1469) is not drawn at all
+  return (j.groups || []).filter((g) => g.keys.length).map((g) => html`<div class="jjpm-group" key=${g.title}>
     <div class="jjpm-gt">${g.title}</div>
     ${g.keys.map((k) => html`<${Row} key=${k} k=${k} meta=${meta[k]} value=${f[k]} j=${j} have=${have} />`)}
   </div>`);
@@ -411,7 +413,7 @@ function TitleSettings({ j, have }) {
   const t = j.title_cfg || {};
   return html`<section class="card jjpm-title-card">
     <div class="hd" style="cursor:pointer" onClick=${() => setOpen(!open)}><span class="h2">${open ? "▾" : "▸"} Every mode of this game</span>
-      <span class="muted small">defaults a mode's own settings override: fonts, colors, the panel${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
+      <span class="muted small">defaults a mode's own settings override: ${(j.title_keys || []).some((k) => k.startsWith("font") || k.endsWith("color")) ? "fonts, colors, the panel" : "the panel"}${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
     ${open ? html`<div class="bd">${(j.title_keys || []).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
   </section>`;
 }

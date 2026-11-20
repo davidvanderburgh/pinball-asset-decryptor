@@ -327,25 +327,37 @@ def backup_card(machine, dest, progress=None, cancel=None, hold=True):
     being written under the copy, and started again after.  The image is checked by size here; its md5 is worked
     out on the way for the user's own records."""
     import socket
+    from . import remote_send
     size = card_size(machine)
+    plain = remote_send.plain_allowed() and remote_send._home_network(getattr(machine, 'host', ''))
     if hold:
         machine.pause_game()
     sock, t0, done, digest = None, time.time(), 0, hashlib.md5()
     try:
         _sh(machine, 'sync', 60)
-        port = None
-        for cand in CARD_PORTS:
+        port, chan = None, None
+        if not plain:
+            # not this computer's own network, or the user keeps every byte encrypted: the same bytes, over the
+            # encrypted connection (the card's own reading speed is the limit either way)
+            chan = machine.t.open_session()
+            chan.settimeout(120)
+            chan.exec_command('dd if=/dev/mmcblk0 bs=1048576 2>/dev/null')
+            chan.shutdown_write()
+        for cand in (CARD_PORTS if plain else ()):
             rc_out = machine.sh('%s; dd if=/dev/mmcblk0 bs=1048576 2>/dev/null </dev/null | nc -l -p %d >/dev/null 2>&1 & '
                                 'p0=$!; echo $p0 > %s; sleep 1; kill -0 "$p0" 2>/dev/null && echo listening'
                                 % (CARD_STOP, cand, CARD_PIDFILE), timeout=30, check=False)
             if 'listening' in _text(rc_out):
                 port = cand
                 break
-        if port is None:
+        if port is None and chan is None:
             raise CareError('The machine could not start sending its card.')
         try:
-            sock = socket.create_connection((machine.host, port), timeout=10)
-            sock.settimeout(60)
+            if chan is None:
+                sock = socket.create_connection((machine.host, port), timeout=10)
+                sock.settimeout(60)
+            else:
+                sock = chan
             with open(dest, 'wb') as f:
                 while done < size:
                     if cancel is not None and cancel():

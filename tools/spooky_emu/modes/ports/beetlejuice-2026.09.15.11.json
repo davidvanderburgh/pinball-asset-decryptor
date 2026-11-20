@@ -6494,5 +6494,7 @@
   ],
   "score_tags": [],
   "mode_tags": [],
-  "points_scale": 1
+  "points_scale": 1,
+ "coils": ["LeftSling", "RightSling", "Shaker", "DropReset", "DropKnockdown", "UpPost", "Knocker", "BeetlejuicePop", "ArgentinaPop", "JunoPop", "Magnet", "BJ_magnet", "OrganSkeletonCoil"],
+ "coil_holds": ["Shaker", "UpPost", "Magnet", "BJ_magnet"]
 }

@@ -1,0 +1,10 @@
+# Sprocket Spin - a starter mode: switch 40 starts it, switch 41 scores until the ball ends
+name = Sprocket Spin
+title = SPROCKET SPIN
+start = switch_40
+shots = switch_41
+points = 50000
+seconds = 0
+sound_start = H00
+sound_end = J00
+panel = top

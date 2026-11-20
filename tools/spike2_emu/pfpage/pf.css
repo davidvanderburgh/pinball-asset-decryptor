@@ -110,6 +110,14 @@ select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); 
 .pf-stagewrap { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 8px; }
 .pf-stage { position: relative; flex: 0 0 auto; background: #000; border-radius: 4px; box-shadow: 0 0 0 1px var(--line), 0 10px 30px rgba(0,0,0,.4); }
 .pf-stage.noart { background: var(--field); }
+/* PAD-1468: a picture under the manual's spots, and its tools */
+.pf-stage img.pf-pic { position: absolute; display: block; opacity: .85; pointer-events: none; user-select: none; }
+.pf-stage.haspic { overflow: hidden; }
+.pf-stage .pf-pictools { left: 6px; right: auto; z-index: 2; }
+.pf-stage .pf-pichint { position: absolute; left: 6px; right: 6px; top: 34px; z-index: 2; padding: 5px 8px; font-size: 11.5px; line-height: 1.35; color: var(--ink); background: rgba(20,22,26,.9); border: 1px solid var(--line); border-radius: 5px; pointer-events: none; }
+.pf-stage.lining { box-shadow: 0 0 0 2px #e8761c, 0 10px 30px rgba(0,0,0,.4); }
+/* PAD-1468: the LED grid beside a picture-less playfield (the manual's spots) */
+.pf-stagewrap .pf-grid-side { flex: 0 0 180px; width: 180px; max-height: 100%; align-self: stretch; margin-right: 10px; border-right: 1px solid var(--line); columns: auto; box-sizing: border-box; }
 .pf-stage img.art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: auto; }
 .pf-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 /* PAD-628: the X-ray look - the Modes tab's playfield picture: the drawing inverted, half seen, on dark */

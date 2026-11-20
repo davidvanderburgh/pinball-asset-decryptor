@@ -260,7 +260,7 @@ int main(void)
     picked = R._lift(src, "static void team_menu_picked(pm_reg *r)")
     assert "else r[3] = 0;" in picked                                  # the game plays it as Standard
     frame = R._lift(src, "static void team_menu_frame(pm_reg *r)")
-    assert 'pm_port_value("comp_menu_end_index", 0)' in frame and "pm_message_set(msg, team_kind_name(tm.kind));" in frame
+    assert 'pm_port_value("comp_menu_end_index", 0)' in frame and "pm_message_set(msg, team_kind_name(entry));" in frame
     arm = R._lift(src, "static void team_menu_arm(void)\n{")
     assert 'hook_full(fn("comp_menu_frame"), team_menu_frame)' in arm
     assert 'hook(fn("challenge_menu_pick"), team_menu_picked)' in arm

@@ -1851,5 +1851,7 @@
   ],
   "score_tags": [],
   "mode_tags": [],
-  "points_scale": 1
+  "points_scale": 1,
+ "coils": ["upper_drop_reset", "middle_drop_reset", "middle_drop_knockdown", "right_sling", "bank_target_reset", "right_front_drop_knockdown", "right_front_drop_reset", "left_sling", "knocker", "shaker"],
+ "coil_holds": ["shaker"]
 }

@@ -268,9 +268,10 @@ def _frame_points(e):
     return out
 
 
-def _index_entries(e):
+def _index_entries(e, every=False):
     """(n, {index: (flag, name message)}) of the build's game-mode table: Godzilla's own 32-byte table, or the
-    GamePlayModes adapter's (index, flag, caption, name); (0, {}) when neither is there."""
+    GamePlayModes adapter's (index, flag, caption, name); (0, {}) when neither is there. Godzilla's entries with a
+    second flag (its challenges) only with *every* (PAD-1449 round 2: their name messages)."""
     from . import portchallenge as PC
     w = e.words
     tables = set()
@@ -284,7 +285,7 @@ def _index_entries(e):
     if len(tables) == 1:
         (tbl, n), = tables
         ents = PC._table_entries(e, tbl, n)
-        return n, {i: (f, m) for i, (f, f2, m) in enumerate(ents) if not f2}
+        return n, {i: (f, m) for i, (f, f2, m) in enumerate(ents) if every or not f2}
     tbl, n = PC._gpm_table(e)
     if not tbl:
         return 0, {}
@@ -325,6 +326,31 @@ def challenge_indices(e, names):
                   if v["index"] is not None and is_ch(v["flag"] or 0))[:MAX_CHALLENGES]
 
 
+def standard_caption(e):
+    """PAD-1449 round 3: the caption message (STANDARD) of the game-mode table's Standard entry - the plain one, as
+    :func:`frame_lines` picks it - which the start menu draws above an entry's name; 0 when it is not read."""
+    from . import portchallenge as PC
+    w = e.words
+    tables = set()
+    for k in range(len(w) - 4):
+        x = w[k]
+        if x & 0xFFFFFF00 == 0xE3510000 and w[k + 1] & 0xFFF0F000 == 0x93003000 and w[k + 2] & 0xFFF0F000                 == 0x93403000 and w[k + 3] == 0x90833281 and w[k + 4] == 0x91D300B4:
+            lo = ((w[k + 1] >> 16) & 0xF) << 12 | (w[k + 1] & 0xFFF)
+            hi = ((w[k + 2] >> 16) & 0xF) << 12 | (w[k + 2] & 0xFFF)
+            tables.add(((hi << 16) | lo, (x & 0xFF) + 1))
+    if len(tables) == 1:
+        (tbl, n), = tables
+        std = [c for i, (f, f2, m, c) in enumerate(PC._table_entries(e, tbl, n, caption=True)) if i and not f and not f2
+               and m and c]
+        return std[0] if std else 0
+    tbl, n = PC._gpm_table(e)
+    if not tbl:
+        return 0
+    std = sorted((v["index"], v["msgs"][0]) for v in PC._gpm_entries(e, tbl, n).values()
+                 if v["index"] and not v["flag"] and v["msgs"][1] and v["msgs"][0])
+    return std[0][1] if std else 0
+
+
 def frame_lines(game_elf):
     """The port lines of a game-mode index menu's frame (see above), or [] when the program has none of that shape."""
     from . import portchallenge as PC
@@ -339,6 +365,7 @@ def frame_lines(game_elf):
     if len(points) != 1 or not n or not comp or not std:
         return []
     p = points[0]
+    msgs = {i: m for i, (f, m) in _index_entries(e, every=True)[1].items() if m}
     return ["# PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's "
             "index again",
             "site  %s %s 0x%08x 0x%08x 0x%08x" % (FRAME_SITE, " " * 6, p["site"], p["w0"], p["w1"]),
@@ -353,5 +380,9 @@ def frame_lines(game_elf):
             "value comp_menu_index_msg        %d" % comp[0][1],
             "value comp_menu_end_index        %d   # STANDARD" % std[0][0],
             "value comp_menu_end_msg          %d" % std[0][1]] + [
+            "value comp_menu_end_caption_msg  %d   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours"
+            % c for c in [standard_caption(e)] if c] + [
             "value comp_menu_challenge_%d      %d   # PAD-1449: a challenge's index (the style chooser follows it)"
-            % (k, i) for k, i in enumerate(challenge_indices(e, names))]
+            % (k, i) for k, i in enumerate(challenge_indices(e, names))] + [
+            "value comp_menu_challenge_msg_%d  %d   # PAD-1449 round 2: its name message (the menu's style step letters it)"
+            % (k, msgs[i]) for k, i in enumerate(challenge_indices(e, names)) if msgs.get(i)]

@@ -88,7 +88,6 @@ def test_live_view_yields_pages_until_the_machine_stops():
     assert MS.frame_rate([0.0, 0.5, 1.0, 1.5], now=1.5) == pytest.approx(2.0) and MS.frame_rate([1.0], now=1.0) == 0.0
     # the machine's side cleans up after itself: its listener is stopped by pid, and ends by itself in time
     assert MS.LIVE_PIDFILE in MS.LIVE_STOP and MS.LIVE_SECONDS == 30 * 60
-    assert not set(MS.LIVE_PORTS) & set(__import__('pinball_decryptor.core.remote_send', fromlist=['x']).FAST_PORTS)
 
 
 def _wait(w, done):

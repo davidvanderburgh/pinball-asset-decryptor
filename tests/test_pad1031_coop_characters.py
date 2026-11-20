@@ -34,8 +34,9 @@ static unsigned long pm_ms(void) { return now_ms; }
 static int in_game = 1;                                  /* PAD-1044: 0 is busy (a menu over the game) */
 static int pm_in_game(void) { return in_game; }
 static unsigned pm_player(void) { return 1; }
-static struct { int on; unsigned button, game, n, turn; int plain; unsigned style; } coop;   /* plain: PAD-1443 */
+static struct { int on; unsigned button, game, n, turn; int plain; unsigned style; int standard; } coop;   /* plain: PAD-1443 */
 static struct { volatile int open, ready, walk, take; int at; unsigned kind; } sty;   /* PAD-1449: no chooser here */
+static void sty_menu_edge(unsigned id, int press) { (void)id; (void)press; }          /* PAD-1449 round 2 */
 static unsigned coop_teammates(void) { return coop.n; }
 static int str_starts(const char *s, const char *p) { return !strncmp(s, p, strlen(p)); }
 @NUMBER@

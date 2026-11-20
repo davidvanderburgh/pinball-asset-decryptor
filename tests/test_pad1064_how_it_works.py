@@ -110,7 +110,7 @@ def test_the_page_lists_the_modes_clips_and_its_sounds_with_their_files(tmp_path
 def test_while_the_card_is_read_the_page_says_so_and_without_a_card_says_why():
     tab = _Tab("p", None)
     b = _build()
-    assert tab._how_for(b, 1)["unread"] == "Reading the card's clips and sounds..."
+    assert tab._how_for(b, 1)["unread"] == "Reading the card's clips, sounds and light shows..."
     tab._how_key = ("p", "", 0, 0)
     assert "not on this PC" in tab._how_for(b, 1)["unread"]
     assert tab._how_for(b, 1)["starts"]

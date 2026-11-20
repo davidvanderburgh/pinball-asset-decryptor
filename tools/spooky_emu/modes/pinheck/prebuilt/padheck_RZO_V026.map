@@ -1,0 +1,93 @@
+
+Discarded input sections
+
+ .reginfo       0x00000000       0x18 /tmp/ccpA5Mzt.o
+ .MIPS.abiflags
+                0x00000000       0x18 /tmp/ccpA5Mzt.o
+ .pdr           0x00000000      0x2e0 /tmp/ccpA5Mzt.o
+ .comment       0x00000000       0x2c /tmp/ccpA5Mzt.o
+ .note.GNU-stack
+                0x00000000        0x0 /tmp/ccpA5Mzt.o
+ .gnu.attributes
+                0x00000000       0x10 /tmp/ccpA5Mzt.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+                0x9d050000                        PAD_FLASH = 0x9d050000
+                0xa0010000                        PAD_RAM_AT = 0xa0010000
+                0xa0008200                        GAME_gp = 0xa0008200
+                0xa00009c4                        GAME_this = 0xa00009c4
+                0x9d0283c8                        GAME_tick_target = 0x9d0283c8
+                0x9d03c388                        GAME_add_score = 0x9d03c388
+                0x9d04aa90                        GAME_play_sfx = 0x9d04aa90
+                0x9d049ed4                        GAME_text_str = 0x9d049ed4
+                0x9d047600                        GAME_link_send = 0x9d047600
+                0xa0002ac0                        GAME_data_out = 0xa0002ac0
+                0x9d048000                        GAME_coil_fire = 0x9d048000
+                0xa00002f8                        GAME_switch_ram = 0xa00002f8
+                0xa00025a4                        GAME_lamp_ram = 0xa00025a4
+                0xa000296c                        GAME_score_array = 0xa000296c
+                0xa0000a1c                        GAME_millis = 0xa0000a1c
+                0xa000028a                        GAME_player = 0xa000028a
+                0xa00002c8                        GAME_ball = 0xa00002c8
+                0xa0000230                        GAME_ball_active = 0xa0000230
+                0xa0000263                        GAME_phase = 0xa0000263
+                0xa00002f4                        GAME_tilt = 0xa00002f4
+                0xa0000384                        GAME_save_timer = 0xa0000384
+                0xa0000390                        GAME_load_timer = 0xa0000390
+                0xa00009a0                        GAME_ball_queue = 0xa00009a0
+                0xa00002d0                        GAME_extra_balls = 0xa00002d0
+                0xa0002cc1                        GAME_ball_limit = 0xa0002cc1
+                0xa000249c                        GAME_coil_busy = 0xa000249c
+LOAD /tmp/ccpA5Mzt.o
+                0x9d050000                        . = PAD_FLASH
+
+.head           0x9d050000       0x14
+ *(.head)
+ .head          0x9d050000       0x14 /tmp/ccpA5Mzt.o
+                0x9d050000                PAD_HEAD
+
+.text           0x9d050020     0x22d0
+ *(.text.entry)
+ .text.entry    0x9d050020      0xfc0 /tmp/ccpA5Mzt.o
+                0x9d050020                pad_entry
+ *(.text .text.*)
+ .text          0x9d050fe0     0x1310 /tmp/ccpA5Mzt.o
+
+.rodata         0x9d0522f0      0x4b0
+ *(.rodata .rodata.*)
+ .rodata.str1.4
+                0x9d0522f0      0x470 /tmp/ccpA5Mzt.o
+                                0x478 (size before relaxing)
+ .rodata        0x9d052760       0x40 /tmp/ccpA5Mzt.o
+
+.data           0x9d0527a0        0x0
+ *(.data .data.* .sdata .sdata.*)
+ .data          0x9d0527a0        0x0 /tmp/ccpA5Mzt.o
+
+.bss            0x9d0527a0        0x0
+ *(.bss .bss.* .sbss .sbss.* COMMON)
+ .bss           0x9d0527a0        0x0 /tmp/ccpA5Mzt.o
+                0x9d052800                        . = ALIGN (0x100)
+                0x9d052800                        PAD_DATA = .
+                0xa0010000                        PAD_RUN = PAD_RAM_AT
+                0x00000001                        ASSERT ((SIZEOF (.data) == 0x0), padheck: no initialised variables (no start-up code runs them))
+                0x00000001                        ASSERT ((SIZEOF (.bss) == 0x0), padheck: every variable lives in struct run (PAD_RUN))
+
+/DISCARD/
+ *(.reginfo)
+ *(.MIPS.*)
+ *(.pdr)
+ *(.comment)
+ *(.gnu.*)
+ *(.note*)
+ *(.eh_frame*)
+OUTPUT(/tmp/padheck_RZO_V026.elf elf32-tradlittlemips)
+
+.mdebug.abi32   0x00000000        0x0
+ .mdebug.abi32  0x00000000        0x0 /tmp/ccpA5Mzt.o

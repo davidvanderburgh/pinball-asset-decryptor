@@ -117,12 +117,12 @@ COMPARE = (
      'At least about 2 MB a second (this box does not change speed)', 'Up to 9 minutes'),
     ('+ Newer adapter driver (second box)',
      'At the first try, then on 5 GHz within a minute', '5 GHz, 80 MHz wide',
-     '10 to 13 MB a second', '1.5 to 2 minutes'),
+     '7 to 13 MB a second', '1.5 to 2.5 minutes'),
 )
 COMPARE_NOTE = ("Rough figures from one machine: a Godzilla LE with an AC1200 (RTL8822BU) adapter, an eero router in the "
                 'same room, 24 to 64 MB files. Yours will differ with distance and router. Send to machine needs '
                 'remote access on the card. The 2.4 GHz speed is what the encrypted connection did there; big '
-                'files now go over a plain connection, checked by hash, which was timed on 5 GHz (the 10 to 13). '
+                'files now go over plain connections, each piece signed and checked, which were timed on 5 GHz (the 7 to 13). '
                 "Encrypted, 5 GHz reached 3.4 MB a second: the machine's processor, not the radio, is the limit "
                 'there. The 1 GB times are worked out from the speeds, not timed.')
 #: David (PAD-1467): "add a comparison for the stock adapter vs. the one we bought ... (does the stock not support

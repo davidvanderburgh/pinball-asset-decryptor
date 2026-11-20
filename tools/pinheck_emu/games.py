@@ -33,7 +33,7 @@ GAMES = {
                "RIGHT SLING", "SOL11", "SOL12", "SOL13", "SOL14", "SOL15",
                "BALL STOP", "BOTTOM POP", "LEFT POP", "SAUCER", "RIGHT POP",
                "SOL21", "SOL22", "SOL23"),
-        trough=(35, 34), shooter=32, ready=10, launch=2,
+        trough=(34, 35), shooter=32, ready=10, launch=2,
         load="LOAD COIL", plunge="PLUNGER"),
     "DOM": dict(
         title="Domino's Spectacular Pinball Adventure",

@@ -181,7 +181,7 @@ way as Jetsons' (a snapshot after attract, then trials):
 
 | | trough | shooter | ready (dedicated) | launch | load / plunge coils |
 |---|---|---|---|---|---|
-| Jetsons | 35, 34 | 32 | bit 10 | bit 2 (button) | LOAD COIL (4) / PLUNGER (5) |
+| Jetsons | 34, 35 | 32 | bit 10 | bit 2 (button) | LOAD COIL (4) / PLUNGER (5) |
 | Domino's | 1, 2, 3 | 0 | bit 10 | hand plunger | LOAD BALL (17) / PLUNGER (16, auto) |
 | Rob Zombie | 1..7 (all needed) | 0 | bit 10 | hand plunger | BALL LOAD (17) / AUTOPLUNGER (16) |
 
@@ -266,3 +266,16 @@ S3 (these games cannot be tried at all today, but nothing breaks). D4 after
 pass 1: the mechanism is known and the CPU half is shown to run. Still D4
 after pass 2: the game CPU now runs a colour game's attract unaided, but
 what is left is the DMD/sound side, switches and the rig - several runs.
+
+## PAD-1472 (2026-11-20): Jetsons' trough was the wrong way round
+
+Holding launch fired PLUNGER and then LOAD COIL 1 ms later: two balls out, and drains
+never ended a ball. Jetsons' eject end is 34, not 35. The game counts a drain by 35 (the
+far end) closing once a ball is launched (0x9D02D9E0, switch byte 4 bit 3, edge state at
+gp-0x7B94); the drain path at 0x9D013250 cuts the ball save to 0 and loads a ball when the
+save is still running. With the order reversed, the ball left home sat on 35, so the first
+look after the launch read as a drain inside the ball save. `board.Balls` now also rolls a
+draining ball over the switches above its resting place (`OVER_MS`), so a drain onto an
+empty trough (both balls out) closes 35 on its way to 34, as on the machine. Proven headless
+on the stock JET_V004: one ball per launch, balls 1-2-3 each ended by a drain, a two-ball
+drain ending the ball only on the second; Domino's and Rob Zombie play the same as before.

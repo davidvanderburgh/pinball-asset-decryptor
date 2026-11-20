@@ -353,3 +353,14 @@ PC connects, as Send's big files). Nothing is left running on the machine after 
   driver. `remote_send.BOOT_ONLY`: a Send that changed one of those restarts the machine.
 - Not done: Start, the flippers and the action button (the playfield boards' serial line, another protocol).
   The bits are the CPU board's own wiring and so should be every Spike 2 title's, but only a Godzilla was tried.
+
+## Merged with main (2026-11-20)
+
+PAD-1465 landed on main while this ticket ran, with its own faster Send: a Send's big writes go over plain TCP into
+the machine's helper (`padpieces recv`), every frame signed with a key that went over SSH and checked before it is
+written, and only on this computer's own network (`remote_send._home_network`, `PAD_SEND_RAW=0` to turn it off).
+This ticket's `SshMachine._put_fast` (a whole file through the machine's `nc`, checked by sha1 afterwards) did the
+same job less carefully and was dropped in the merge; its measurements above stand as measurements of that path.
+`remote_send.plain_allowed()` stays, for the live view and the whole-card backup, which follow the same switch and
+the same home-network rule. The Wi-Fi card's comparison now says 7 to 13 MB a second: PAD-1465 measured 7 to 8 with
+a game running, this ticket 10 to 13 with the game held. PAD-1465's path was not re-timed here.

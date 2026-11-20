@@ -646,6 +646,7 @@ value comp_menu_index            3   # COMPETITION
 value comp_menu_index_msg        1920
 value comp_menu_end_index        1   # STANDARD
 value comp_menu_end_msg          1915
+value comp_menu_end_caption_msg  1914   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
 
 # PAD-1406: the framework's all-flippers off and on (each flipper record's enable bit at +6, the node board's rule
 # follows), placed from Godzilla LE/Pro 1.16 by code (strict: only branch and literal offsets masked; the pair 0xd4

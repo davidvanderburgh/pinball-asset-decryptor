@@ -38,8 +38,9 @@ PAGE_DIR = os.path.join(HERE, "page")
 class App:
     """pfweb's app: state(), api(), blob(), file()."""
 
-    def __init__(self, path, audio_ctl="", mute=False):
+    def __init__(self, path, audio_ctl="", mute=False, prg=None):
         self.path = path
+        self.prg = prg
         self.audio_ctl = audio_ctl
         self.force_mute = mute
         self.host = None
@@ -53,7 +54,7 @@ class App:
 
     # ---- the game ------------------------------------------------------------
     def _boot(self):
-        self.machine = Machine(self.path, mute=True)
+        self.machine = Machine(self.path, mute=True, prg=self.prg)
         self.machine.start()
         self._apply_volume()
 
@@ -221,6 +222,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="pinHeck game window")
     ap.add_argument("game", help="the update zip, a PRG, or an unpacked card folder")
     ap.add_argument("--audio-ctl", default="", help="the app's audio_ctl.json (Volume / Mute)")
+    ap.add_argument("--prg", help="run this game program on the update's card instead of its own "
+                                  "(the Modes tab's Try it: the modes PRG, PAD-1422)")
     ap.add_argument("--mute", action="store_true", help="no sound, whatever the volume says")
     ap.add_argument("--parent-pipe", action="store_true",
                     help="close the window when stdin closes (the app's Stop)")
@@ -234,7 +237,7 @@ def main(argv=None):
     ap.add_argument("--headless", type=float, default=0,
                     help="no window: run this many seconds and print the status (tests)")
     args = ap.parse_args(argv)
-    app = App(args.game, args.audio_ctl, args.mute)
+    app = App(args.game, args.audio_ctl, args.mute, args.prg)
     threading.Thread(target=app.poll_audio_ctl, daemon=True, name="pinheck-vol").start()
     if args.script:
         threading.Thread(target=run_script, args=(app, args.script), daemon=True,

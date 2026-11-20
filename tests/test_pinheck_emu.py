@@ -368,9 +368,9 @@ def test_balls_follow_the_load_and_plunger_coils():
     pulse = lambda name: (pic.write(coil_pins(GAMES["JET"])[name][0], coil_pins(GAMES["JET"])[name][1]),
                           pic.write(coil_pins(GAMES["JET"])[name][0], 0))
     pulse("LOAD COIL")
-    assert b.matrix == {35} and 32 not in b.matrix         # rolling
+    assert b.matrix == {34} and 32 not in b.matrix         # rolling; the other ball at the eject end
     tick(Balls.ROLL_MS)
-    assert b.matrix == {35, 32}
+    assert b.matrix == {34, 32}
     pulse("LOAD COIL")                                     # lane taken: nothing moves
     assert balls.in_trough == 1
     pulse("PLUNGER")
@@ -380,6 +380,49 @@ def test_balls_follow_the_load_and_plunger_coils():
     assert b.matrix == {34, 35} and balls.in_trough == 2
     b.set("launch")
     assert 2 in b.cabinet                                  # Jetsons' launch button
+
+
+def test_jetsons_drain_switch_closes_only_for_a_ball_coming_home():
+    """PAD-1472: Jetsons counts a drain by switch 35 (the trough's far end) closing once a ball
+    is launched.  With one ball home and one launched, 35 must be open - a ball left on it read
+    as a drain inside the ball save and served a second ball.  A ball draining onto an empty
+    trough rolls over 35 on its way to 34, so the game sees that drain too."""
+    from tools.pinheck_emu.board import Balls, Board
+    from tools.pinheck_emu.games import GAMES, coil_pins
+    pic = PinPic()
+    pic.on_ms = []
+    b = Board(pic)
+    balls = Balls(b, GAMES["JET"])
+    now = [0]
+
+    def tick(ms):
+        for _ in range(ms):
+            now[0] += 1
+            for f in pic.on_ms:
+                f(now[0])
+    pins = coil_pins(GAMES["JET"])
+    pulse = lambda name: (pic.write(pins[name][0], pins[name][1]), pic.write(pins[name][0], 0))
+    seen = []
+    pic.on_ms.append(lambda ms: seen.append(35 in b.matrix))
+
+    def serve():
+        pulse("LOAD COIL")
+        tick(Balls.ROLL_MS)
+        pulse("PLUNGER")
+    serve()
+    tick(1000)
+    assert balls.in_play == 1 and balls.in_trough == 1 and not any(seen)
+    serve()                                                # a second ball: the trough is empty
+    assert balls.in_play == 2 and not b.matrix & {34, 35}
+    del seen[:]
+    balls.drain()
+    tick(Balls.ROLL_MS + Balls.OVER_MS + 5)
+    assert any(seen) and not seen[-1]                      # rolled over 35 ...
+    assert b.matrix & {34, 35} == {34} and 10 in b.cabinet  # ... to rest at the eject end
+    del seen[:]
+    balls.drain()
+    tick(Balls.ROLL_MS + 5)
+    assert all(seen[Balls.ROLL_MS:]) and b.matrix >= {34, 35} and balls.in_trough == 2
 
 
 def _vid(tmp_path, name, frames, colour):
@@ -563,7 +606,8 @@ def test_lamps_follow_the_multiplexed_port_b():
 
 def test_jetsons_text_layer_rules(tmp_path):
     """Jetsons: a video keeps the text; 06 n ff.. clears line n; 13 03 00
-    hides it all. Lines are 8 pixels, columns 8, glyphs 4 wide (tinyfont)."""
+    hides it all. Byte 0 is column << 3 | line (the game's text(), PAD-1422):
+    lines 8 pixels, columns 4, glyphs 4 wide (tinyfont)."""
     from tools.pinheck_emu.av import Av
     _vid(tmp_path, "AAA", 1, (0,))
     av = Av(str(tmp_path))
@@ -572,12 +616,12 @@ def test_jetsons_text_layer_rules(tmp_path):
     av.packet(bytes([0x28]) + b"TOP" + bytes(11) + b"\x12", 1)     # line 0, flag bit 3
     av.packet(bytes([3, 1]) + bytes(13) + b"\x13", 2)
     av.packet(bytes([1]) + b"AAA" + bytes(11) + b"\x02", 3)        # a new video
-    assert set(av.texts) == {(8, 24), (16, 0)}
+    assert set(av.texts) == {(8, 24), (20, 0)}
     lit = lambda img: {(x // 8, y // 8) for x in range(128) for y in range(32)
                        if img.getpixel((x, y)) != (0, 0, 0)}
     assert (1, 3) in lit(av.frame(4)) and (2, 0) in lit(av.frame(4))
     av.packet(bytes([3]) + b"\xff" * 7 + bytes(7) + b"\x06", 5)    # clear line 3
-    assert set(av.texts) == {(16, 0)}
+    assert set(av.texts) == {(20, 0)}
     av.packet(bytes([3, 0]) + bytes(13) + b"\x13", 6)              # text off
     assert not av.texts and av.frame(7).getbbox() is None
 

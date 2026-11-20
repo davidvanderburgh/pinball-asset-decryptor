@@ -6747,6 +6747,75 @@ Competition or the DJ MIXER, and never a plain Start.
   one, plays after the chooser for a Standard or challenge game (`ci_film_due` leaves the game's film alone until then).
 - Insider Connected: Standard or a challenge stays the game's own while choosing and at CHARACTERS
   (`coop_insider_free`); ENHANCED latches the rest of the game held, as a joining teammate does.
+
+Round 2 (DoomWalrus666: "Can we make this selection appear BEFORE the game starts, while still in the menu? ... the
+intro plays, THEN the character selection, which feels weird"). On the index menus (`team_menu_frame`: Godzilla, Jaws,
+John Wick, King Kong, Metallica, X-Men) the style is asked on the menu itself. The menus read no Start of their own: the
+game's Start button begins the game and the menu goes with it, and Start's switch descriptor has no handler bits to hold
+back at the drain (emulator, Godzilla LE 1.16). So the game start waits: `coop_start_game_wrap` (`site
+coop_start_game`, the call PAD-1316 wraps for the Insider lobby) first runs `sty_menu_ask`, which, when the menu's frame
+was seen in the last 0.5 s (`sty_menu_live`) on an entry the chooser is for (`sty_menu_kind`: ours, Standard, a
+challenge), sleeps in the game's `proc_sleep` while the menu keeps drawing:
+
+- the entry's name line (`comp_menu_end_msg`; a challenge's `value comp_menu_challenge_msg_<k>`, its game-mode table
+  entry's name message, `prolonged_comp.frame_lines`) says `<GAME> <STYLE>`, then what it is (`sty_menu_words`: THE
+  GAME AS IT IS, NO SPECIAL ABILITIES, POWERS UP `team_words`), turn about every 1.5 s, the game's own USE FLIPPERS TO
+  CHANGE / START TO SELECT under it. `coop.cfg` `team_words YOUR GODZILLA TEAM` (`coop_play.team_words`, written with
+  characters to pick). The chooser's card is not shown there: the pick's scene is not drawn in attract.
+- the flippers walk NORMAL, CHARACTERS, ENHANCED (`sty_menu_walk`, taken out of the frame's buttons, so the cursor stays;
+  the Competition and MODE CHALLENGE entries leave them to it, `sty_menu_up`).
+- the next Start takes the one shown (a press edge from the drain, `sty_menu_edge`, or the switch's level polled in the
+  wait); a minute alone, or the menu's frames gone 3 s, takes the one shown (`sty_menu_wait`). The game start then goes
+  on with the words it was called with, so an Insider lobby's popup, which comes before the start, is shown once.
+- the game that begins takes the style at once (`sty_begin` -> `sty_menu_preset`): Standard or a challenge at NORMAL is
+  the game's own game from its start; any other goes in where the card would have closed (the start film and any intro
+  over, `sty_tick`), so the pick follows the intro as it always has - with no card at ball 1. A plain Start (no menu)
+  never waits; a menu without the game start wrapped asks at ball 1 as before.
+
+Round 3 (DoomWalrus666: "There should not be a single entry for each type ... There should be: Standard, Challenge,
+Co-op, Teams ... when choosing one, the dialog opens to select Regular, characters, or enhanced"). Where the menu asks
+(`sty_wanted`, the index menus, the game start wrapped) `team_menu_kinds` puts two entries of ours on it, CO-OP PLAY and
+one TEAM PLAY (`TEAM_TEAMS`), not the three team games. Its step asks first which team game: the name line says `TEAMS
+2 VS 2`, then who plays (`sty_menu_shape_words`), the flippers walk 2 VS 2, 2 VS 1, 3 VS 1 (`smn.shaping`), Start takes
+one (`sty_menu_take`: a drain edge counts only once the press before it is let go) and `tm.kind` becomes it; then the
+style is asked as above. While the cursor is on one of ours the entry's caption, Standard's (`value
+comp_menu_end_caption_msg`, the game-mode table entry's caption message, `prolonged_comp.standard_caption`), says CO-OP
+or TEAMS (`team_kind_caption`), so the menu reads STANDARD, COMPETITION, CHALLENGE, ..., CO-OP, TEAMS.
+
+Round 4 (DoomWalrus666: the version asked only after Start, the card at ball 1 anyway, a menu that timed out left stuck
+on CO-OP or began the game, "the action button should be the primary selector not the start button", Action picks the
+mode, then the version, then Start begins; a version not chosen is regular). Round 2-3's wait inside the game start
+(`sty_menu_ask`) is gone: a menu that timed out under it left the call asleep and the step up for good, and its minute
+alone began the game. The step is now the menu's own and the game start never waits:
+
+- Action works the step from the menu's frame (`sty_menu_edge` sets `smn.act`; `sty_menu_frame`, `sty_menu_act`): it
+  opens the style step (TEAMS: its team step first), Action takes each. Godzilla LE 1.16's Action on the start menu
+  begins the entry's game through the game start itself, never the menu's buttons word (emulator), so on the live menu,
+  on an entry the chooser is for, with no Start pressed on it since, `coop_hides` keeps Action from the game at the
+  drain (`sty_menu_owns_action`; emulator: "switch 34: the game does not see it") - no game start, no Home Team
+  screen. A Start on the menu arms its pick first (`go`), so a Home Team screen it brings keeps its own Action (go on
+  without logging in). Where the drain cannot hide it, `coop_start_game_wrap` holds back the start Action began
+  (`sty_menu_held`, `sty_menu_hold_back`: Action in the last 0.6 s on the live menu, no Start since) and returns
+  without starting; the game's callers loop on whatever it answers.
+- With no step up the entry's line says the style taken and START TO PLAY, or its name and ACTION TO CHOOSE
+  (`sty_menu_rest_words`); leaving the entry forgets the choice.
+- Start on the live menu (`sty_menu_go`) keeps what the line says - the style taken, the one shown while a step is up,
+  else NORMAL - and the game start takes it (`sty_menu_begin`, no wait, `tm.seen_ms` refreshed so a login between
+  keeps the team fill); no card at ball 1.
+- A menu whose frames come back after `STY_MENU_GONE_MS` starts every step over (`sty_menu_walk`); `sty_menu_up` reads
+  0 once its frames stop, so nothing keeps the flippers. The game's own menu timeout goes to attract; nothing of ours
+  starts a game.
+- The co-op intro plays only in co-op and team games at CHARACTERS or ENHANCED (`ci_film_due` reads the menu's style
+  while the chooser waits, `coop.plain` after; `sty_close` and `coop_pick_open` never begin it for Standard or a
+  challenge, `coop.standard`): Standard or a challenge plays the game's own start film, language bar and music, then
+  the pick, and `coop_pick_hold` keeps ball 1 out of the lane until the character is taken (an intro begun after the
+  film had let it be served under the pick, where TIMED PLUNGER launched it). The handicap pick waits for the
+  character's (`hand_waits_for_coop`).
+- The game asks for its music right after its serve (`serve_ball`; Godzilla LE 1.16 request 66, 7 ms into a stock
+  game), so a Standard or challenge game holding ball 1 for the pick had none under its intro. `value serve_music`
+  (Godzilla LE 1.16: 66, from the emulator's sound log; Pro 1.16 too since round 5, where request 66 is the same
+  SE GZ MX MAIN PLAY START by the program's own Sound Test names) is asked for as the hold begins (`srv_music_early`,
+  `srv_music_wanted`); at the serve the game asks for none while it still plays, so it runs on unbroken.
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

@@ -29,6 +29,7 @@ MAIN = r"""
 #define TEAM_KIND 0x300u
 #define STY_STANDARD 7u
 #define STY_CHALLENGE 8u
+#define STY_MENU_GONE_MS 3000ul
 enum { CI_OFF, CI_START, CI_FILM, CI_PLAY, CI_BALL, CI_LANG };
 @ARR@
 @FNS@
@@ -53,6 +54,17 @@ int main(void)
            sty_may_show(0, 1, CI_OFF, 600, 9999), sty_may_show(0, 0, CI_OFF, 0, 500), sty_may_show(0, 0, CI_OFF, 0, 2500),
            sty_may_show(-1, 0, CI_OFF, 0, 0), sty_may_show(0, 0, CI_PLAY, 0, 9999), sty_may_show(0, 0, CI_BALL, 0, 9999));
     /* Insider: Standard / a challenge while choosing or at CHARACTERS stays the game's own; ENHANCED and co-op not */
+    /* round 4: Action on the menu - no entry of ours; the style step opens; TEAMS' team step; the team taken; the
+     * style taken - then the style Start keeps: the one shown, (TEAMS' team step up) NORMAL, the one taken, none */
+    printf("%d%d%d%d%d,%d%d%d%d|", sty_menu_act(0, 0, 0, 0), sty_menu_act(0, 0, 0, 1), sty_menu_act(0, 0, 1, 1),
+           sty_menu_act(1, 1, 1, 1), sty_menu_act(1, 0, 0, 1), sty_menu_go_style(1, 0, 2, 0),
+           sty_menu_go_style(1, 1, 2, 0), sty_menu_go_style(0, 0, 0, 2), sty_menu_go_style(0, 0, 0, 0));
+    for (k = 0; k < 6; k++) {   /* the menu's line: the game and the style, then what it is */
+        sty_menu_words(k < 2 ? STY_STANDARD : k < 4 ? 1u : 4u, k < 2 ? 2 : k < 4 ? 1 : 0, k & 1,
+                       "YOUR GODZILLA TEAM", w, sizeof w);
+        printf("%s/", w);
+    }
+    printf("|");
     printf("%d%d%d%d%d\n", coop_insider_free_in(1, 1, 0), coop_insider_free_in(1, 0, 2), coop_insider_free_in(1, 0, 3),
            coop_insider_free_in(0, 0, 2), coop_insider_free_in(0, 1, 0));
     return 0;
@@ -65,7 +77,10 @@ FNS = ("static unsigned sty_own_of_kind(unsigned kind, unsigned challenge_kind)"
        "static void sty_words(unsigned kind, int at, int phase, int action, char *out, unsigned cap)",
        "static int sty_may_show(int film_up, int film_seen, int intro_phase, unsigned long since_down, "
        "unsigned long since_open)",
-       "static int coop_insider_free_in(int standard, int choosing, unsigned style)")
+       "static int coop_insider_free_in(int standard, int choosing, unsigned style)",
+       "static int sty_menu_act(int open, int shaping, int teams, int chooser)",
+       "static int sty_menu_go_style(int open, int shaping, int at, int taken)",
+       "static void sty_menu_words(unsigned kind, int at, int phase, const char *team, char *out, unsigned cap)")
 
 
 def test_the_chooser_follows_the_right_entries_and_says_its_styles(tmp_path):
@@ -73,7 +88,10 @@ def test_the_chooser_follows_the_right_entries_and_says_its_styles(tmp_path):
     code = MAIN.replace("@ARR@", _array(src, "STY_NAMES") + "\n" + _array(src, "STY_DOES")) \
         .replace("@FNS@", "\n".join(R._lift(src, s) for s in FNS))
     out = R._host_run(tmp_path, code, flags=("-no-pie",)).strip()
-    menu_list, menu_index, words, show, insider = out.split("|")
+    menu_list, menu_index, words, show, press, line, insider = out.split("|")
+    assert line.split("/")[:-1] == ["STANDARD ENHANCED", "POWERS UP YOUR GODZILLA TEAM", "CO-OP CHARACTERS",
+                                    "NO SPECIAL ABILITIES", "2 VS 2 NORMAL", "THE GAME AS IT IS"]
+    assert press == "01234,3121"
     assert menu_list == "7 8 0 0 0"
     assert menu_index == "7 0 8 8 0 0"
     # 20 characters at most each: Godzilla LE's top line
@@ -95,7 +113,8 @@ def test_the_menu_and_the_game_wait_for_the_chooser():
     assert "!coop_insider_free()" in R._lift(src, "static int insider_holding_now(void)")
     assert "if (!coop.setting) return coop.style == 2u;" in R._lift(src, "static int coop_classic(void)")
     disp = R._lift(src, "static void on_team_dispatch(pm_reg *r)\n{")
-    assert "sty_open(own);" in disp and "if (kind == 1u && sty_wanted()) sty_open(kind);" in disp
+    assert "sty_begin(own);" in disp and "if (kind == 1u && sty_wanted()) sty_begin(kind);" in disp
+    assert "sty_open(" not in disp                                  # round 2: the menu's style first, else the card
     assert "!sty.open && pm_in_game()" in R._lift(src, "static void coop_tick(void)\n{")   # no intro while choosing
     due = R._lift(src, "static int ci_film_due(void)\n{")
     assert "sty.kind == STY_STANDARD || sty.kind == STY_CHALLENGE" in due   # NORMAL is the game's own film
@@ -126,3 +145,188 @@ def test_godzillas_challenges_are_named_in_its_ports():
         text = port.read_text(encoding="utf-8")
         if "comp_menu_challenge_" in text:
             assert "comp_menu_end_index" in text, port.name
+
+
+def test_round4_the_menu_asks_on_action_and_the_game_start_never_waits():
+    """PAD-1449 round 4 (DoomWalrus666: Action the selector, Start only to start; a menu timing out never starts a
+    game and starts over): Action works the step on the menu's own frame, Start only keeps what the entry says, and the
+    game start does not wait"""
+    src = _src()
+    wrap = R._lift(src, "static unsigned coop_start_game_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, "
+                        "unsigned s0)")
+    assert wrap.index("sty_menu_begin();") < wrap.index("lb_start_game(")
+    begin = R._lift(src, "static void sty_menu_begin(void)\n{")
+    assert "proc_sleep" not in begin and "smn.preset = smn.go_style;" in begin and "tm.seen_ms = pm_ms();" in begin
+    assert "sty_menu_ask" not in src and "sty_menu_take" not in src and "STY_MENU_IDLE_MS" not in src
+    edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
+    assert "!sty_menu_live()" in edge and "smn.hold_ms = pm_ms() | 1ul;" in edge and "smn.act = 1;" in edge and "sty_menu_go();" in edge
+    assert "sty_menu_edge(id, (level & 1u) == closed);" in R._lift(
+        src, "static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)\n{")
+    frame = R._lift(src, "static void team_menu_frame(pm_reg *r)\n{")
+    assert frame.index("sty_menu_walk(&r[breg], 4u, 2u);") < frame.index("c = comp_frame_cursor(") \
+        < frame.index("sty_menu_frame(c, ")
+    walk = R._lift(src, "static void sty_menu_walk(pm_reg *buttons, unsigned lbit, unsigned rbit)")
+    assert "STY_MENU_GONE_MS) {" in walk and 'sty_menu_reset("the menu is up again");' in walk \
+        and "smn.go_ms = 0;" in walk                                   # a menu back after a gap starts over
+    assert "pm_ms() - smn.frame_ms < STY_MENU_GONE_MS" in R._lift(src, "static int sty_menu_up(void)\n{")
+    fr = R._lift(src, "static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, unsigned index)")
+    assert "if ((long)c != smn.entry) {" in fr and "smn.taken = smn.at + 1;" in fr
+    tick = R._lift(src, "static void sty_tick(void)\n{")
+    assert tick.index('sty_close("taken on the start menu");') < tick.index('"styles: the chooser is up')
+    assert "sty.preset = sty_menu_preset(kind);" in R._lift(src, "static void sty_begin(unsigned kind)\n{")
+    # the Competition and MODE CHALLENGE entries leave the flippers to the step
+    assert "sty_menu_up() ? 0u : r[breg] & 4u" in R._lift(src, "static void comp_menu_frame(pm_reg *r)\n{")
+    assert "if (on && !sty_menu_up())" in R._lift(src, "static void challenge_menu_frame(pm_reg *r)\n{")
+
+
+def test_round4_menu_lines_action_kept_from_the_menu_and_no_intro_in_standard(tmp_path):
+    """PAD-1449 round 4: the line with no step up (the style taken, then START TO PLAY; none, ACTION TO CHOOSE); the
+    game start the menu's Action began held back on an entry the chooser is for; no co-op intro in Standard"""
+    src = _src()
+    code = (r"""
+#include <stdio.h>
+#define pm_snprintf snprintf
+#define STY_STANDARD 7u
+#define STY_CHALLENGE 8u
+""" + _array(src, "STY_NAMES") + "\n" + R._lift(src, "static const char *sty_label(unsigned kind)") + "\n"
+            + R._lift(src, "static int sty_menu_rest_words(unsigned kind, int taken, int phase, char *out, unsigned cap)")
+            + "\n#define STY_MENU_ACT_MS 600ul\n#define STY_MENU_LIVE_MS 500ul\n"
+            + R._lift(src, "static int sty_menu_hold_back(unsigned long since_frame, unsigned long since_act, int go, "
+                           "int chooser)") + r"""
+int main(void)
+{
+    char w[40];
+    int k, r;
+    for (k = 0; k < 4; k++) {
+        w[0] = 0;
+        r = sty_menu_rest_words(k < 2 ? STY_STANDARD : 4u, k < 2 ? 2 : 0, k & 1, w, sizeof w);
+        printf("%d%s/", r, w);
+    }
+    /* Action just now on the live menu; 700 ms ago; the menu not seen for 600 ms; a Start since (the Home Team
+     * screen's own Action); no chooser on the entry */
+    printf("|%d%d%d%d%d\n", sty_menu_hold_back(16, 40, 0, 1), sty_menu_hold_back(16, 700, 0, 1),
+           sty_menu_hold_back(600, 40, 0, 1), sty_menu_hold_back(16, 40, 1, 1), sty_menu_hold_back(16, 40, 0, 0));
+    return 0;
+}
+""")
+    out = R._host_run(tmp_path, code, flags=("-no-pie",)).strip()
+    words, want = out.split("|")
+    assert words.split("/")[:-1] == ["1STANDARD CHARACTERS", "1START TO PLAY", "0", "1ACTION TO CHOOSE"]
+    assert want == "10000"
+    wrap = R._lift(src, "static unsigned coop_start_game_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, "
+                        "unsigned s0)")
+    assert wrap.index("if (sty_menu_held()) return 0;") < wrap.index("sty_menu_begin();") < wrap.index("lb_start_game(")
+    held = R._lift(src, "static int sty_menu_held(void)\n{")
+    assert "smn.go_ms != 0" in held and "smn.hold_ms = 0;" in held and "smn.act = 1;" not in held
+    # Action on the live menu's chooser entries never reaches the game (the drain hides it), unless a Start came first
+    assert "id == coop_action && sty_menu_owns_action()" in R._lift(src, "static int coop_hides(unsigned id)\n{")
+    takes = R._lift(src, "static int sty_menu_owns_action(void)\n{")
+    assert "sty_menu_live()" in takes and "!smn.go_ms" in takes and "sty_menu_kind() != 0u" in takes
+    assert "comp_menu_keys" not in src
+    # the game's own hint line under the menu, found by its words, says what Action and Start do on our entries
+    hint = R._lift(src, "static const char *sty_hint_words(int open, int taken)")
+    assert '"USE FLIPPERS TO CHANGE / ACTION TO SELECT"' in hint and '"START TO PLAY / ACTION TO CHANGE"' in hint         and '"USE FLIPPERS TO CHANGE / ACTION TO CHOOSE"' in hint
+    find = R._lift(src, "static int sty_hint_find(void)")
+    assert 'sf_has(w, "flippers to change") && sf_has(w, "start to select")' in find
+    assert "sty_menu_hint(0);" in R._lift(src, "static void sty_menu_begin(void)")         and "sty_menu_hint(0);" in R._lift(src, "static void sty_menu_walk(pm_reg *buttons, unsigned lbit, unsigned rbit)")
+    # no co-op intro in the game's own Standard or a challenge
+    assert "!coop.standard && !coop.plain && ci.clip[0] && !ci.phase" in R._lift(src, "static void sty_close(const char *how)")
+    # co-op or teams at NORMAL: the game's own start - the menu's style while the chooser waits, coop.plain after
+    assert "if (sty.open ? sty.preset == 1 : coop.plain) return 0;" in R._lift(src, "static int ci_film_due(void)\n{")
+    assert "if (!ci.phase && !coop.standard) coop_intro_begin(" in R._lift(src, "static void coop_pick_open(unsigned t)\n{")
+    assert "coop_teammates() && !coop.standard && ci.game" in R._lift(src, "static int ci_film_due(void)\n{")
+    assert "prefilm" not in src
+
+
+def test_round2_challenge_names_in_the_index_menu_ports():
+    for port in ("godzilla_le-1.16.port", "godzilla_pro-1.16.port"):
+        text = (PORTS / port).read_text(encoding="utf-8")
+        got = re.findall(r"^value comp_menu_challenge_msg_(\d+) +(\d+)", text, re.M)
+        assert got == [("0", "3275"), ("1", "3276")], port            # KING OF THE MONSTERS, TIME ATTACK
+    for port in PORTS.glob("*.port"):
+        text = port.read_text(encoding="utf-8")
+        assert "comp_menu_take" not in text, port.name
+        if "comp_menu_challenge_msg_" in text:
+            assert "comp_menu_challenge_0" in text, port.name
+
+
+def test_round3_one_teams_entry_asks_the_team_game_then_the_style(tmp_path):
+    """PAD-1449 round 3 (DoomWalrus666: "Standard, Challenge, Co-op, Teams ... when choosing one, the dialog opens"):
+    one TEAMS entry whose step says the team game and who plays it, then the style; the caption over ours"""
+    src = _src()
+    shapes = re.search(r"^static const unsigned TEAM_SHAPES\[3\] = [^;]*;", src, re.M).group(0)
+    does = re.search(r"^static const char \*const TEAM_SHAPE_DOES\[3\] = [^;]*;", src, re.M).group(0)
+    code = (r"""
+#include <stdio.h>
+#define pm_snprintf snprintf
+#define STY_STANDARD 7u
+#define STY_CHALLENGE 8u
+""" + shapes + "\n" + does + "\n" + R._lift(src, "static const char *sty_label(unsigned kind)") + "\n"
+            + R._lift(src, "static void sty_menu_shape_words(int at, int phase, char *out, unsigned cap)") + r"""
+int main(void)
+{
+    char w[40];
+    int k;
+    for (k = 0; k < 6; k++) { sty_menu_shape_words(k / 2, k & 1, w, sizeof w); printf("%s/", w); }
+    printf("\n");
+    return 0;
+}
+""")
+    out = R._host_run(tmp_path, code, flags=("-no-pie",)).strip()
+    assert out.split("/")[:-1] == ["TEAMS 2 VS 2", "4 PLAYERS, 2 PER TEAM", "TEAMS 2 VS 1", "3 PLAYERS, 2 AGAINST 1",
+                                   "TEAMS 3 VS 1", "4 PLAYERS, 3 AGAINST 1"]
+    fr = R._lift(src, "static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, unsigned index)")
+    assert fr.index("case 2:") < fr.index("smn.shaping = 1;") < fr.index("case 3:") \
+        < fr.index("smn.team = smn.kind = TEAM_SHAPES[smn.shape_at];") < fr.index("tm.kind = smn.team;") \
+        < fr.index("case 4:")                                    # round 4: Action takes the team game, then the style
+    assert "kinds[n++] = TEAM_TEAMS;" in R._lift(src, "static unsigned team_menu_kinds(unsigned *kinds)\n{")
+    assert "if (kind == TEAM_TEAMS) kind = smn.team ? smn.team : 4u;" in R._lift(
+        src, "static void on_team_dispatch(pm_reg *r)\n{")
+    assert "tm.kind == TEAM_TEAMS" in R._lift(src, "static unsigned sty_menu_kind(void)")
+    assert "if (smn.shaping) {" in R._lift(src, "static void sty_menu_walk(pm_reg *buttons, unsigned lbit, unsigned rbit)")
+
+
+def test_round3_the_index_menu_ports_name_standards_caption():
+    seen = 0
+    for port in PORTS.glob("*.port"):
+        text = port.read_text(encoding="utf-8")
+        if "comp_menu_end_msg" not in text:
+            continue
+        got = re.findall(r"^value comp_menu_end_caption_msg +(\d+)", text, re.M)
+        assert got == ["1914"], port.name                              # STANDARD, beside its NORMAL PLAY (1915)
+        seen += 1
+    assert seen == 11
+    from pinball_decryptor.plugins.stern import prolonged_comp as P
+    assert "standard_caption(e)" in pathlib.Path(P.__file__).read_text(encoding="utf-8")   # frame_lines writes it
+
+
+def test_round4_the_serve_music_under_standards_intro(tmp_path):
+    """PAD-1449 round 4 (DoomWalrus666: "Stock music should play during the standard stock intro video and not wait for
+    character selection"): ball 1 held for a Standard or challenge pick asks for the serve's music as the hold begins"""
+    src = _src()
+    code = (r"""
+#include <stdio.h>
+#define STY_STANDARD 7u
+#define STY_CHALLENGE 8u
+""" + R._lift(src, "static int srv_music_wanted(unsigned music, unsigned kind, int preset, int open, unsigned ball)") + r"""
+int main(void)
+{
+    /* Standard CHARACTERS; a challenge ENHANCED; Standard NORMAL; no port value; a co-op game; ball 2; chooser shut */
+    printf("%d%d%d%d%d%d%d\n", srv_music_wanted(66, STY_STANDARD, 2, 1, 1), srv_music_wanted(66, STY_CHALLENGE, 3, 1, 1),
+           srv_music_wanted(66, STY_STANDARD, 1, 1, 1), srv_music_wanted(0, STY_STANDARD, 2, 1, 1),
+           srv_music_wanted(66, 1u, 2, 1, 1), srv_music_wanted(66, STY_STANDARD, 2, 1, 2),
+           srv_music_wanted(66, STY_STANDARD, 2, 0, 1));
+    return 0;
+}
+""")
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "1100000"
+    serve = R._lift(src, "static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)\n{")
+    assert serve.index("srv_music_early();") < serve.index("sty_hold();") < serve.index("ci_serve_game(")
+    # round 5 (DoomWalrus666: "Why does the stock music not play on the intro in the Pro code"): request 66 is SE GZ MX
+    # MAIN PLAY START on every Godzilla build (the program's own Sound Test names), so every Godzilla port whose ball 1
+    # can wait for the pick (`serve_ball`) names it
+    held = [f for f in sorted(PORTS.glob("godzilla_*.port"))
+            if re.search(r"^site serve_ball ", f.read_text(encoding="utf-8"), re.M)]
+    assert [f.name for f in held] == ["godzilla_le-1.16.port", "godzilla_pro-1.16.port"]
+    for f in held:
+        assert re.search(r"^value serve_music +66$", f.read_text(encoding="utf-8"), re.M), f.name

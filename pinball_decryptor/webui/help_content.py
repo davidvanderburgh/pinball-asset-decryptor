@@ -1649,18 +1649,15 @@ HELP_CONTENT = {
             "in the app's `resources/wifi` folder.",
         ]),
         ("How fast Send to machine is", [
-            "What holds a Send back is the machine's own processor, not your Wi-Fi: everything sent to the machine "
-            "is encrypted, and decrypting it on the machine's small two-core board tops out at about 3 MB a second "
-            "on either band.",
-            "So the app sends the contents of big files (4 MB and up) over a second, plain connection on your home "
-            "network, and keeps everything else on the encrypted one. Each file is still checked on the machine by "
-            "its hash before it is used, so a file that arrived wrong, for any reason, is caught and the Send "
-            "stops. Game files are not secrets; nothing that is (the login, the keys) leaves the encrypted "
-            "connection.\n\n"
-            "- Measured on a Godzilla on 5 GHz: a 64 MB file at 10 to 13 MB a second this way, against 3.4 the "
-            "encrypted way.\n"
-            "- If the plain connection cannot be made, the Send says so once and carries on the encrypted way.\n"
-            "- To keep everything encrypted, start the app with the environment variable `PAD_SEND_PLAIN=0`.",
+            "What holds a Send back is the machine's own processor, not your Wi-Fi: everything sent over the "
+            "encrypted connection has to be decrypted on the machine's small two-core board, which tops out at "
+            "about 3 to 4 MB a second on either band.",
+            "So on your home network the app sends a Send's big writes over plain connections straight to its "
+            "helper on the machine, and keeps everything else on the encrypted one. Every piece is signed with a "
+            "key that went over the encrypted connection and is checked on the machine before it is written. Game "
+            "files are not secrets; nothing that is (the login, the keys) leaves the encrypted connection.\n\n"
+            "- On a Godzilla on 5 GHz this ran at 7 to 13 MB a second, against 3 to 4 the encrypted way.\n"
+            "- To keep everything encrypted, start the app with the environment variable `PAD_SEND_RAW=0`.",
         ]),
     ],
     "Modes": [],
@@ -4025,12 +4022,27 @@ PREVIEW_HELP = {
                 "**The start menu's games.** Hold both flipper buttons in attract to open the game's start "
                 "menu. Besides the game's own entries it always offers these (no service menu setting):\n\n"
                 "- **How to play it.** With characters, any game picked on the menu (CO-OP PLAY, a TEAM PLAY "
-                "game, the game's own STANDARD or one of its challenges; not Competition) first shows a choice, "
-                "once the game's start film is over: **NORMAL** (no characters: the game as it is), "
-                "**CHARACTERS** (each player picks a character at their first ball, with no special abilities) "
-                "or **ENHANCED** (each character's ability holds while its player is up). The flipper buttons "
-                "step through them and the Action button takes one; a Start meanwhile adds a player as it "
-                "would. A plain Start without the menu never asks: it is the game's own game.\n"
+                "game, the game's own STANDARD or one of its challenges; not Competition) first asks how to play "
+                "it, on the menu itself before the game starts. On Godzilla, Jaws, John Wick, King Kong, "
+                "Metallica and X-Men: step to the entry (its line says **ACTION TO CHOOSE** in turn with its name) "
+                "and press the **Action** button. The line then shows the game and **NORMAL** (no characters: the "
+                "game as it is), **CHARACTERS** (each player picks a character at their first ball, with no "
+                "special abilities) or **ENHANCED** (each character's ability holds while its player is up), then "
+                "what it does; the flipper buttons step through them and **Action** takes one. The line then says "
+                "the game and the one taken, and **START TO PLAY**: **Start** starts the game, with no question "
+                "after its intro. **Start** without choosing plays it NORMAL. Leaving the entry forgets the choice, "
+                "and a menu that times out goes back to attract as the game's always does (no game starts), every "
+                "step over the next time it opens. CO-OP PLAY shows under a **CO-OP** heading and the three team "
+                "games are one **TEAM PLAY** entry under a **TEAMS** heading: **Action** on it shows **TEAMS 2 VS "
+                "2** and who plays it, the flipper buttons step to **2 VS 1** and **3 VS 1**, **Action** takes one, "
+                "then it asks NORMAL, CHARACTERS or ENHANCED as above. The game then starts the way the choice "
+                "says: STANDARD or a challenge plays the game's own intro (its language select and music), then "
+                "the character pick; a co-op or team game at CHARACTERS or ENHANCED plays the co-op intro (with "
+                "the language select), then the pick; at NORMAL it is the game's own start. The ball comes to the "
+                "shooter lane only once the character is picked, and a handicap (when switched on) is asked after "
+                "the pick. On other games the choice comes up once the game's start film is over, the flipper "
+                "buttons stepping and the Action button taking one. A plain Start without the menu never asks: it "
+                "is the game's own game.\n"
                 "- **CO-OP PLAY:** step to it and press **Start**; each Start in the first ball then adds a "
                 "teammate (or teammates join with the right flipper button held, as above).\n"
                 "- **TEAM PLAY 2 VS 2:** players 1 and 3 play against players 2 and 4, picked the way Stern's "
@@ -4527,6 +4539,33 @@ SPOOKY_MODES_HELP = [
         "own awards). On Looney Tunes the game's playfield multiplier counts for a mode's "
         "points, as for its own awards.",
         "**Check** runs after every change and lists anything the game would not take.",
+    ]),
+    ("Starts, lamps, balls, coils and your own files", [
+        "**Starts** begins a mode on a game event (a ball starting, the first or last ball, the "
+        "ball's first playfield switch, a ball save, an extra ball, a multiball ending), after one "
+        "of the game's own modes ends, at a score, or on switches hit in order; it can also run "
+        "at most once a ball or a game.",
+        "**Lamps** lights the game's own lamps in your colour while the mode runs, flashing if "
+        "you like, and hands them back after. The game's ball-save light still shows its save.",
+        "**Balls** adds balls: a multiball of up to 6 balls with its own ball save (it ends when "
+        "one ball is left), a ball on a switch, or a ball save when the mode starts.",
+        "**Coils** fires the game's own coils (only those a mode can fire safely: no flippers, "
+        "trough or scoops). Holding a magnet, post, diverter or the shaker on is off until "
+        "**Coil holds on this title** in Every mode of this game is on.",
+        "Sounds, music, a picture and a video of your own go in this game's mode folder (Open "
+        "the mode folder). Sounds and music: .ogg or .wav (.wav only on Looney Tunes). "
+        "Pictures: .png or .jpg. Video: .webm (VP8) on Scooby-Doo, Beetlejuice, Texas Chainsaw "
+        "Massacre, Evil Dead, Halloween and Ultraman, .ogv (Theora) on Looney Tunes, .mp4 "
+        "(H.264) on Rick and Morty. Alice Cooper's screen shows only the game's own pictures "
+        "and videos. The game's music goes quiet while your music plays.",
+        "On the DMD games (Jetsons, Domino's and Rob Zombie) a mode starts on every game event "
+        "above, at a score or on switches in order, but not after one of the game's modes (they "
+        "have none a mode can watch). Lamps go by the number the game's lamp test shows "
+        "(lamp_0 to lamp_63); these lamps have one colour, so your colour sets how bright. Balls "
+        "come from the game's own trough: Jetsons has 2, Domino's 3. Coils: the knocker and "
+        "shaker on Jetsons; the knocker, shaker, magnet and stop post on Domino's; none on Rob "
+        "Zombie, whose coil test numbers its coils without saying what they are. Sounds are the "
+        "game's own from its card, with no files of your own.",
     ]),
     ("Trying and installing", [
         "**Try it** starts the game in the Emulate tab with your modes in it, from the stock "

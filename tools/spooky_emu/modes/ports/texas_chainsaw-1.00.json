@@ -2026,5 +2026,7 @@
   ],
   "score_tags": [],
   "mode_tags": [],
-  "points_scale": 1
+  "points_scale": 1,
+ "coils": ["left_sling_coil", "right_sling_coil", "drop_reset_up", "diverter", "drop_knock_down", "magnet", "right_stop_post", "meat_grinder_divert", "knocker", "shaker"],
+ "coil_holds": ["diverter", "magnet", "right_stop_post", "meat_grinder_divert", "shaker"]
 }

@@ -36,9 +36,9 @@ HOW_NOTE = ("Read from the game program: the game's modes are compiled into it, 
 SOUNDS_NOTE = ("The sounds this mode's own code asks for by a fixed number. A sound the game works out while it "
                "plays (a random pick, one of a list) or asks for from code several modes share is not listed.")
 
-SHOWS_NOTE = ("The game's light shows this mode's own code starts by number. The app names the ones it has seen play "
-              "in the emulator; the rest go by the game's own number. A show started from code several modes share "
-              "is not listed.")
+SHOWS_NOTE = ("The game's light shows this mode's own code starts by a fixed number. The app names the ones it has seen "
+              "play in the emulator; the rest go by the game's own number. A show whose number the game works out "
+              "while it plays, or that code several modes share starts, is not listed.")
 
 _START = re.compile(r"^(start|select):\s*(.*)$")
 _IN = re.compile(r",\s*in ([A-Za-z_][\w:]*?)::v\[\d+\]\s*$")

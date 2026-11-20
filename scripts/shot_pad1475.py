@@ -57,7 +57,7 @@ def main():
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1500, "height": 1300})
+            page = browser.new_page(viewport={"width": 1500, "height": 1900})
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             time.sleep(2)
@@ -91,9 +91,8 @@ def main():
             sec.scroll_into_view_if_needed()
             print(sec.inner_text(), flush=True)
             k = page.locator(".modes-how-k", has_text="Sounds and callouts").first
-            k.scroll_into_view_if_needed()
-            page.evaluate("window.scrollBy(0, 0)")
-            page.mouse.move(5, 1290)
+            k.evaluate("e => e.scrollIntoView({block: 'start'})")
+            page.mouse.move(5, 1890)
             time.sleep(1)
             page.screenshot(path=os.path.join(outdir, "%s_modes_how.png" % prefix))
             print("shot modes_how", flush=True)

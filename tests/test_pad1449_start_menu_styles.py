@@ -159,7 +159,7 @@ def test_round4_the_menu_asks_on_action_and_the_game_start_never_waits():
     assert "proc_sleep" not in begin and "smn.preset = smn.go_style;" in begin and "tm.seen_ms = pm_ms();" in begin
     assert "sty_menu_ask" not in src and "sty_menu_take" not in src and "STY_MENU_IDLE_MS" not in src
     edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
-    assert "!sty_menu_live()" in edge and "smn.act_ms = pm_ms() | 1ul;" in edge and "sty_menu_go();" in edge
+    assert "!sty_menu_live()" in edge and "smn.hold_ms = pm_ms() | 1ul;" in edge and "smn.act = 1;" in edge and "sty_menu_go();" in edge
     assert "sty_menu_edge(id, (level & 1u) == closed);" in R._lift(
         src, "static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)\n{")
     frame = R._lift(src, "static void team_menu_frame(pm_reg *r)\n{")
@@ -217,7 +217,11 @@ int main(void)
                         "unsigned s0)")
     assert wrap.index("if (sty_menu_held()) return 0;") < wrap.index("sty_menu_begin();") < wrap.index("lb_start_game(")
     held = R._lift(src, "static int sty_menu_held(void)\n{")
-    assert "smn.go_ms != 0" in held and "smn.act = 1;" in held
+    assert "smn.go_ms != 0" in held and "smn.hold_ms = 0;" in held and "smn.act = 1;" not in held
+    # Action on the live menu's chooser entries never reaches the game (the drain hides it), unless a Start came first
+    assert "id == coop_action && sty_menu_owns_action()" in R._lift(src, "static int coop_hides(unsigned id)\n{")
+    takes = R._lift(src, "static int sty_menu_owns_action(void)\n{")
+    assert "sty_menu_live()" in takes and "!smn.go_ms" in takes and "sty_menu_kind() != 0u" in takes
     assert "comp_menu_keys" not in src
     # the game's own hint line under the menu, found by its words, says what Action and Start do on our entries
     hint = R._lift(src, "static const char *sty_hint_words(int open, int taken)")
@@ -294,3 +298,29 @@ def test_round3_the_index_menu_ports_name_standards_caption():
     assert seen == 11
     from pinball_decryptor.plugins.stern import prolonged_comp as P
     assert "standard_caption(e)" in pathlib.Path(P.__file__).read_text(encoding="utf-8")   # frame_lines writes it
+
+
+def test_round4_the_serve_music_under_standards_intro(tmp_path):
+    """PAD-1449 round 4 (DoomWalrus666: "Stock music should play during the standard stock intro video and not wait for
+    character selection"): ball 1 held for a Standard or challenge pick asks for the serve's music as the hold begins"""
+    src = _src()
+    code = (r"""
+#include <stdio.h>
+#define STY_STANDARD 7u
+#define STY_CHALLENGE 8u
+""" + R._lift(src, "static int srv_music_wanted(unsigned music, unsigned kind, int preset, int open, unsigned ball)") + r"""
+int main(void)
+{
+    /* Standard CHARACTERS; a challenge ENHANCED; Standard NORMAL; no port value; a co-op game; ball 2; chooser shut */
+    printf("%d%d%d%d%d%d%d\n", srv_music_wanted(66, STY_STANDARD, 2, 1, 1), srv_music_wanted(66, STY_CHALLENGE, 3, 1, 1),
+           srv_music_wanted(66, STY_STANDARD, 1, 1, 1), srv_music_wanted(0, STY_STANDARD, 2, 1, 1),
+           srv_music_wanted(66, 1u, 2, 1, 1), srv_music_wanted(66, STY_STANDARD, 2, 1, 2),
+           srv_music_wanted(66, STY_STANDARD, 2, 0, 1));
+    return 0;
+}
+""")
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "1100000"
+    serve = R._lift(src, "static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)\n{")
+    assert serve.index("srv_music_early();") < serve.index("sty_hold();") < serve.index("ci_serve_game(")
+    text = (PORTS / "godzilla_le-1.16.port").read_text(encoding="utf-8")
+    assert re.search(r"^value serve_music +66$", text, re.M)

@@ -6788,13 +6788,15 @@ mode, then the version, then Start begins; a version not chosen is regular). Rou
 (`sty_menu_ask`) is gone: a menu that timed out under it left the call asleep and the step up for good, and its minute
 alone began the game. The step is now the menu's own and the game start never waits:
 
-- Action (a drain edge on the live menu, `sty_menu_edge`) works the step from the menu's frame (`sty_menu_frame`,
-  `sty_menu_act`): it opens the style step (TEAMS: its team step first), Action takes each. Godzilla LE 1.16's Action on
-  the start menu begins the entry's game through the game start itself, never the menu's buttons word (emulator: the
-  frame's word never carried it), so `coop_start_game_wrap` holds that start back (`sty_menu_held`,
-  `sty_menu_hold_back`: Action pressed in the last 0.6 s on the live menu, no Start on it since, an entry the chooser
-  is for) and returns without starting; the game's callers loop on whatever it answers. A Start on the menu arms the
-  pick first, so the Home Team screen's own Action (go on without logging in) is never held back.
+- Action works the step from the menu's frame (`sty_menu_edge` sets `smn.act`; `sty_menu_frame`, `sty_menu_act`): it
+  opens the style step (TEAMS: its team step first), Action takes each. Godzilla LE 1.16's Action on the start menu
+  begins the entry's game through the game start itself, never the menu's buttons word (emulator), so on the live menu,
+  on an entry the chooser is for, with no Start pressed on it since, `coop_hides` keeps Action from the game at the
+  drain (`sty_menu_owns_action`; emulator: "switch 34: the game does not see it") - no game start, no Home Team
+  screen. A Start on the menu arms its pick first (`go`), so a Home Team screen it brings keeps its own Action (go on
+  without logging in). Where the drain cannot hide it, `coop_start_game_wrap` holds back the start Action began
+  (`sty_menu_held`, `sty_menu_hold_back`: Action in the last 0.6 s on the live menu, no Start since) and returns
+  without starting; the game's callers loop on whatever it answers.
 - With no step up the entry's line says the style taken and START TO PLAY, or its name and ACTION TO CHOOSE
   (`sty_menu_rest_words`); leaving the entry forgets the choice.
 - Start on the live menu (`sty_menu_go`) keeps what the line says - the style taken, the one shown while a step is up,
@@ -6809,6 +6811,10 @@ alone began the game. The step is now the menu's own and the game start never wa
   the pick, and `coop_pick_hold` keeps ball 1 out of the lane until the character is taken (an intro begun after the
   film had let it be served under the pick, where TIMED PLUNGER launched it). The handicap pick waits for the
   character's (`hand_waits_for_coop`).
+- The game asks for its music right after its serve (`serve_ball`; Godzilla LE 1.16 request 66, 7 ms into a stock
+  game), so a Standard or challenge game holding ball 1 for the pick had none under its intro. `value serve_music`
+  (Godzilla LE 1.16: 66, from the emulator's sound log) is asked for as the hold begins (`srv_music_early`,
+  `srv_music_wanted`); at the serve the game asks for none while it still plays, so it runs on unbroken.
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

@@ -361,6 +361,9 @@ text intro_hide_2 JapaneseText_Artbox
 text bonus_loop_crop SquareCrop
 # the ball start's serve (bl 0x38910c, the framework's serve with the serve record 0x7d3930), after its start display
 site serve_ball             0x002a77ec 0xeb038646 0xe3a00026
+# PAD-1449 round 4: the music the game asks for right after that serve (emulator sound log: request 66, 7 ms into
+# a stock game) - asked for early when ball 1 waits for a Standard game's character pick
+value serve_music          66
 text roster_screen_scene  cac32730af42b9d26d26c4bb6e667b07da53113e
 text roster_screen_path   SelectOverlay_Textbox.CharacterSelect_Instance.
 text roster_tile_0        Ebirah

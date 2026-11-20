@@ -21086,7 +21086,7 @@ static struct {
     int shape_at;                        /* 0 2 VS 2, 1 2 VS 1, 2 3 VS 1 (TEAM_SHAPES) */
     unsigned team;                       /* the team game TEAMS' first step took (4, 3, 5; 0: none yet) */
     volatile unsigned long go_ms;        /* pm_ms() | 1 of the Start pressed on the live menu (0: none) */
-    volatile unsigned long act_ms, start_ms;   /* pm_ms() | 1 of the last Action / Start press on the live menu */
+    volatile unsigned long hold_ms, start_ms;  /* pm_ms() | 1 of the last Action taken / Start pressed on the menu */
     int go_style;                        /* ... the style it keeps, for the game of go_kind (TEAMS: the team game) */
     unsigned go_kind, go_team;
 } smn = { .entry = -1 };
@@ -21265,14 +21265,23 @@ static void sty_menu_go(void)
 
 /* from the switch drain (coop_edge): on the live menu, Action works the step (the menu's frame does it), Start keeps
  * the entry's pick for the game it begins */
+/* Action is the step's, not the game's (coop_hides keeps it from the game at the drain, so it begins no game and
+ * raises no Home Team screen): the live menu, an entry the chooser is for, no Start pressed on it since (`go`: a
+ * Start that brought the Home Team screen leaves that screen its own Action, to go on without logging in) */
+static int sty_menu_owns_action(void)
+{
+    return sty_menu_live() && !smn.go_ms && sty_menu_kind() != 0u;
+}
+
 static void sty_menu_edge(unsigned id, int press)
 {
     if (!press || !id || !sty_menu_live()) return;
     if (id == coop_action) {
-        smn.act_ms = pm_ms() | 1ul;                           /* the game start holds it back (sty_menu_hold_back), */
-        if (!lb_start_game) sty_menu_go();                    /* else the frame works the step once STY_MENU_ACT_MS */
-    } else if (id == ci.start_sw) {                           /* is past; no game start wrapped: Action begins the */
-        smn.start_ms = pm_ms() | 1ul;                         /* game, as Start does */
+        if (!sty_menu_owns_action()) return;                 /* (Competition's: the game's own) */
+        smn.hold_ms = pm_ms() | 1ul;                          /* a start it begins anyway is held back */
+        smn.act = 1;                                          /* the frame works the step */
+    } else if (id == ci.start_sw) {
+        smn.start_ms = pm_ms() | 1ul;
         sty_menu_go();
     }
 }
@@ -21292,12 +21301,11 @@ static int sty_menu_hold_back(unsigned long since_frame, unsigned long since_act
  * game's callers go back to their loop whatever it answers) */
 static int sty_menu_held(void)
 {
-    unsigned long since = smn.act_ms ? pm_ms() - (smn.act_ms & ~1ul) : ~0ul;
+    unsigned long since = smn.hold_ms ? pm_ms() - (smn.hold_ms & ~1ul) : ~0ul;
     if (!sty_menu_hold_back(smn.frame_ms ? pm_ms() - smn.frame_ms : ~0ul, since, smn.go_ms != 0,
                             sty_menu_kind() != 0u))
         return 0;
-    smn.act_ms = 0;
-    smn.act = 1;
+    smn.hold_ms = 0;                                          /* (the drain's edge gave the step its Action) */
     say("styles: Action on the start menu began the game %lu ms after the press - held back, the style step has it "
         "(Start begins the game)", since);
     return 1;
@@ -21354,10 +21362,6 @@ static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, un
     unsigned ch[8], n, k, kind = sty_menu_kind(), msg = std_msg;
     int act;
     char key[32];
-    if (smn.act_ms && pm_ms() - (smn.act_ms & ~1ul) >= STY_MENU_ACT_MS) {   /* an Action the menu took no pick from */
-        smn.act_ms = 0;
-        smn.act = 1;
-    }
     act = smn.act;
     smn.act = 0;
     if ((long)c != smn.entry) {                               /* the cursor moved (no step was up: it has the flippers) */
@@ -21568,9 +21572,12 @@ static int coop_unserved(void)
     return at != 0;
 }
 
+static int sty_menu_owns_action(void);   /* PAD-1449 round 4, above */
 static int coop_hides(unsigned id)
 {
     int w;
+    if (id && id == coop_action && sty_menu_owns_action()) return 1;   /* PAD-1449 round 4: the start menu's Action is
+                                                                     * the style step's */
     if (btn_hide_n && btn_hides(id)) return 1;   /* PAD-1404: a mode's menu has the button */
     /* PAD-1114: from the intro to the end of the language window the flippers and Action are ours: a skip is not a
      * language flip (nor the game's skip of its film), and the ball waits in the lane for the language and the pick */
@@ -24770,8 +24777,30 @@ static void coop_pick_hold(void)
 
 static unsigned (*ci_serve_game)(unsigned, unsigned, unsigned, unsigned);
 static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3);   /* below */
+/* PAD-1449 round 4 (DoomWalrus666: "Stock music should play during the standard stock intro video and not wait for
+ * character selection when standard mode is chosen"): the game asks for its music right after its serve (Godzilla LE
+ * 1.16: request 66, 7 ms into a stock game, the ball start's event after `serve_ball`; emulator sound log), so a
+ * Standard or challenge game whose ball 1 waits for the pick heard none under the game's own intro. Where the port
+ * names it (`value serve_music`), it is asked for as the hold begins - the stock moment; at the serve the game asks
+ * for none while it still plays, so it runs on unbroken (emulator, LE 1.16 sound log). (tests lift srv_music_wanted
+ * verbatim) */
+static int srv_music_wanted(unsigned music, unsigned kind, int preset, int open, unsigned ball)
+{
+    return music && open && ball == 1u && (kind == STY_STANDARD || kind == STY_CHALLENGE) && preset >= 2;
+}
+
+static void srv_music_early(void)
+{
+    unsigned m = (unsigned)pm_port_value("serve_music", 0);
+    if (!srv_music_wanted(m, sty.kind, sty.preset, sty.open, coop_ball_byte ? *coop_ball_byte : 1u)) return;
+    if (!fn("sound_play") || pm_sound_active(m)) return;
+    pm_sound(m);
+    say("styles: ball 1 waits for the pick - the game's serve music %u asked for now, under its intro", m);
+}
+
 static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
+    srv_music_early();                                        /* PAD-1449 round 4: its music at the stock moment */
     sty_hold();                                               /* PAD-1449: the style first */
     ci_ball_hold(coop_ball_byte ? *coop_ball_byte : 1u);
     coop_pick_hold();                                         /* PAD-1215 */

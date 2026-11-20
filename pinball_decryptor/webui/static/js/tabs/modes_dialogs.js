@@ -468,7 +468,7 @@ export function CoopCharsDialog({ s, onClose }) {
       <span class="small dim wrap">${ch.intro ? `${ch.intro} opens each co-op and team game, with its own sound. While it plays the flippers choose the language (when the game's Player Language Select is on), and both flipper buttons together skip it. Then the character pick opens, and the ball comes to the shooter lane once a character is taken.` : "Open each co-op and team game with a video of your own, with its own sound. Both flipper buttons skip it."}</span>
     </div>
     ${ch.intro ? html`<div class="row" style="margin-top:6px; gap:8px">
-      <span class="small dim">Light show with it</span>
+      <span class="small dim" style="white-space:nowrap">Light show with it</span>
       <${Select} sm width=${280} value=${ch.intro_show || "(none)"} disabled=${!!ch.intro_show_off}
         options=${introShowOptions(ch.intro_show || "", s.mode_shows || [])}
         title=${ch.intro_show_off || "One of the light shows the game's own modes play, on the playfield while the intro plays; it stops when the intro ends or is skipped."}

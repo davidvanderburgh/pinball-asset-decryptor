@@ -8,14 +8,17 @@ from it, no SD card pulled; emulator-qualified Stern Spike 2 and Spike 3 cards o
 
 The score feed's state and actions stay the Modes service's (``modes.set_score_feed``; this tab asks it to publish
 for the project, as Play options does for its options). Remote access is this tab's own: the project's
-``.staged_changes.json`` ``extras.ssh`` record (core/card_extras.py; the key stays as the PR wrote it)."""
+``.staged_changes.json`` ``extras.ssh`` record (core/card_extras.py; the key stays as the PR wrote it).
+
+PAD-1467 adds the **Wi-Fi start-up** choice (``extras.wifi``, core/wifi_card.py): a Spike 2 card whose Wi-Fi program
+talks to the adapter the current way, so the machine joins the network at the first attempt."""
 
 import os
 import threading
 
 from .base import TabService, rpc
 from .. import compat
-from ...core import card_extras, pad_ssh_key, ssh_card
+from ...core import card_extras, pad_ssh_key, ssh_card, wifi_card
 
 #: PAD-1397: Send to machine, said for someone who has never heard of it
 SEND_INTRO = ("Changes go to the machine over your network instead of writing the SD card: only the files that "
@@ -129,6 +132,14 @@ class NetworkTab(TabService):
                         enabled=False, public_keys='')
         return ssh_card.inspect_image(self._source())
 
+    def _inspect_wifi(self):
+        """PAD-1467: whether the picked card can take the Wi-Fi start-up choice, and what it has now."""
+        if not wifi_card.offered(self.mfr):
+            return dict(supported=False, reason=wifi_card.NOT_SPIKE2, enabled=False)
+        if not self._source():
+            return dict(supported=False, reason='Select the card image first (Select card tab).', enabled=False)
+        return wifi_card.inspect_image(self._source())
+
     def _publish_feed(self):
         modes = self.window.service('modes')
         if modes is None:
@@ -150,6 +161,17 @@ class NetworkTab(TabService):
                 card_extras.configuration(project)
         except card_extras.ExtrasError as e:
             error = str(e)
+        wifi = self._inspect_wifi()
+        wifi_on, wifi_error = wifi.get('enabled', False), ''
+        try:
+            rec = card_extras.load_wifi(project)
+            if rec is not None:
+                wifi_on = rec['enabled']
+        except card_extras.ExtrasError as e:
+            wifi_error = str(e)
+        self.set(wifi_offered=wifi_card.offered(self.mfr), wifi_enabled=wifi_on, wifi_error=wifi_error,
+                 wifi_supported=bool(wifi['supported'] and os.path.isdir(project)),
+                 wifi_reason=wifi['reason'] if project else 'Select a project folder on the Extract tab first.')
         self.set(project=project, source=self._source(), supported=bool(info['supported'] and os.path.isdir(project)),
                  reason=info['reason'] if project else 'Select a project folder on the Extract tab first.',
                  enabled=enabled, public_keys=keys, error=error, offered=ssh_card.offered(self.mfr),
@@ -533,6 +555,23 @@ class NetworkTab(TabService):
                 pass
             self.publish()
             self.set(error=error)
+            return False
+        self.publish()
+        write = self.window.service('write')
+        if write is not None:
+            write.reload_assets_tabs()
+        return True
+
+    @rpc
+    def configure_wifi(self, enabled, project):
+        """PAD-1467: save the project's Wi-Fi start-up choice; the next card written from it carries it."""
+        if project != self._project() or self.get('running') or not self._inspect_wifi()['supported']:
+            return False
+        try:
+            card_extras.save_wifi(project, enabled)
+        except card_extras.ExtrasError as e:
+            self.publish()
+            self.set(wifi_error=str(e))
             return False
         self.publish()
         write = self.window.service('write')

@@ -177,6 +177,28 @@ function SendToMachine({ n }) {
   <//>`;
 }
 
+// PAD-1467: a card whose Wi-Fi program talks to the adapter the current way (core/wifi_card.py). Measured on a
+// Godzilla with Stern's AC1200 adapter: the shipped way failed nine joins of nine in 150 s on one access point,
+// this one joined at the first attempt, 14 s after it started.
+function WifiStartup({ n }) {
+  const [enabled, setEnabled] = useState(!!n.wifi_enabled);
+  useEffect(() => { setEnabled(!!n.wifi_enabled); }, [n.wifi_enabled, n.project, n.source]);
+  const locked = !n.wifi_supported || n.running;
+  return html`<${Card} cls="net-opt" title="Wi-Fi start-up">
+    <p class="net-does">Makes the machine join your Wi-Fi at the first attempt when it starts. As shipped, the
+      machine's Wi-Fi program talks to the USB Wi-Fi adapter in an older way that often fails and tries again, so the
+      machine can take minutes to appear on your network, or not appear at all. This switches it to the current way
+      and keeps the older one as a fallback.</p>
+    ${!n.wifi_supported ? html`<${Note}>${n.wifi_reason}<//>` : null}
+    <${Check} label="Use the reliable Wi-Fi start-up on cards I write from this project" checked=${enabled}
+      disabled=${locked} wrap
+      onChange=${(on) => { setEnabled(on); call("network.configure_wifi", on, n.project); }} />
+    <span class="small muted">It does not change which Wi-Fi network or band the machine uses, or its password.
+      Writing a card without it puts the machine back as shipped.</span>
+    ${n.wifi_error ? html`<p role="alert" class="err-ink">${n.wifi_error}</p>` : null}
+  <//>`;
+}
+
 export default function NetworkTab() {
   const n = useNs("network");
   const s = useNs("modes");
@@ -186,6 +208,7 @@ export default function NetworkTab() {
     <div class="net-grid">
       ${n.offered !== false ? html`<${RemoteAccess} n=${n} />` : null}
       ${n.offered !== false ? html`<${SendToMachine} n=${n} />` : null}
+      ${n.project && n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
       ${n.project && s.feed_shown ? html`<${ScoreFeed} s=${s} />` : null}
     </div>
   </div>`;

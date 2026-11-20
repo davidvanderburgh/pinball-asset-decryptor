@@ -242,3 +242,58 @@ def test_send_pipeline_reports_its_summary_or_why_not(monkeypatch):
     remote_send.SendPipeline('card.raw', '10.0.0.5', lambda *a, **k: None, lambda *a: None, lambda *a: None,
                              lambda ok, m: done.append((ok, m)), connect_fn=no).run()
     assert done == [(False, "Couldn't reach 10.0.0.5")]
+
+
+def test_wifi_start_up_choice_is_saved_shown_and_listed_on_write(tmp_path, monkeypatch):
+    """PAD-1467: the Network tab's Wi-Fi start-up switch is the project's ``extras.wifi``; a choice that differs
+    from the source card is a row on the Write tab, and Revert all takes it back."""
+    from pinball_decryptor.core import wifi_card
+    from tests.test_webui_write import wait_for
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        st = w.state('network')
+        assert st['wifi_offered'] and not st['wifi_supported'] and st['wifi_reason']      # b'card' is no card
+        assert w.call('network.configure_wifi', True, str(project)) is False
+        assert card_extras.load_wifi(str(project)) is None
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda *a, **kw: dict(supported=True, reason='', enabled=False))
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert st['wifi_supported'] and st['wifi_enabled'] is False and st['wifi_error'] == ''
+        assert w.call('network.configure_wifi', True, str(tmp_path / 'elsewhere')) is False
+        w.run(svc.on_running, True, 'write')
+        assert w.call('network.configure_wifi', True, str(project)) is False
+        w.run(svc.on_running, False, 'write')
+        assert w.call('network.configure_wifi', True, str(project)) is True
+        assert card_extras.load_wifi(str(project)) == {'enabled': True}
+        assert w.state('network')['wifi_enabled'] is True
+        assert card_extras.load(str(project)) is None                    # remote access is its own setting
+        (project / '.checksums.md5').write_text('')
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        rows = [row['file'] for row in w.state('write')['rows']]
+        assert rows == ['Wi-Fi start-up — join at the first attempt']
+        # the same as the source card: nothing to write
+        w.call('ui.select_tab', 'network')
+        assert w.call('network.configure_wifi', False, str(project)) is True
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'] and w.state('write')['rows'] == [])
+        # Revert all forgets the choice
+        w.call('ui.select_tab', 'network')
+        assert w.call('network.configure_wifi', True, str(project)) is True
+        assert w.call('shellx.reset_open')
+        rows = w.state('shellx')['reset']['rows']
+        assert any(row['key'] == 'extras' and row['n'] == 1 for row in rows)
+        w.answers.extend(['yes', 'ok'])
+        assert w.call('shellx.reset_run', [row['key'] for row in rows])
+        assert wait_for(w, lambda: not w.window._running and w.state('network')['wifi_enabled'] is False)
+        assert card_extras.load_wifi(str(project)) is None
+
+
+def test_wifi_start_up_is_a_spike2_option():
+    from pinball_decryptor.core import wifi_card
+    with web_app(Path(__import__('tempfile').mkdtemp()), mfr='stern') as w:
+        w.window.current_mfr._era = 'spike3'
+        svc = w.window.service('network')
+        w.run(svc.on_show)
+        assert w.state('network')['wifi_offered'] is False
+        assert svc._inspect_wifi() == dict(supported=False, reason=wifi_card.NOT_SPIKE2, enabled=False)

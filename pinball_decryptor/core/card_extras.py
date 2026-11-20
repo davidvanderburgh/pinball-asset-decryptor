@@ -134,12 +134,50 @@ def configuration(project):
 
 def digest(project):
     rec = configuration(project)
+    wifi = load_wifi(project)
+    if rec is None and wifi is None:
+        return None
+    record = None
+    if rec is not None:
+        record = dict(rec)
+        if not record['enabled']:
+            record['public_keys'] = ''
+    if wifi is not None:
+        # PAD-1467: a project that also sets the Wi-Fi start-up; one that never has keeps the digest it had
+        record = {'ssh': record, 'wifi': wifi}
+    return hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
+
+
+def load_wifi(project):
+    """PAD-1467: the saved Wi-Fi start-up choice ``{'enabled': bool}``, or None when this project never set it
+    (``extras.wifi`` in the project's ``.staged_changes.json``; core/wifi_card.py puts it on the card)."""
+    if not project or not os.path.isdir(project):
+        return None
+    extras = staged_changes.load(project).get('extras')
+    if extras is None:
+        return None
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    rec = extras.get('wifi')
     if rec is None:
         return None
-    record = dict(rec)
-    if not record['enabled']:
-        record['public_keys'] = ''
-    return hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
+    if not isinstance(rec, dict) or type(rec.get('enabled')) is not bool:
+        raise ExtrasError('The project Wi-Fi configuration is invalid.')
+    return {'enabled': rec['enabled']}
+
+
+def save_wifi(project, enabled):
+    if not project or not os.path.isdir(project):
+        raise ExtrasError('Select a project folder before changing the Wi-Fi option.')
+    if type(enabled) is not bool:
+        raise ExtrasError('The Wi-Fi option must be a checkbox value.')
+    data = staged_changes.load(project)
+    extras = data.setdefault('extras', {})
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    extras['wifi'] = {'enabled': enabled}
+    _persist(project, data)
+    return dict(extras['wifi'])
 
 
 def save(project, enabled, public_keys):
@@ -188,4 +226,4 @@ def _persist(project, data):
     try:
         staged_changes.save(project, data, strict=True)
     except OSError:
-        raise ExtrasError('SSH options could not be saved to this project. Check folder permissions and free space before building.') from None
+        raise ExtrasError('Network options could not be saved to this project. Check folder permissions and free space before building.') from None

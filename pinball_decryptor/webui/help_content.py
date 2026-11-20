@@ -1528,11 +1528,12 @@ HELP_CONTENT = {
     # PR #38 review: what the card does on the owner's home network (webui/tabs/network.py)
     "Network": [
         ("What it's for", [
-            "Two things for a machine connected to your home network, by the same cable or Wi-Fi Insider "
-            "Connected uses: the **score feed**, which sends each game's final scores to a computer of yours, and "
-            "**remote access**, which lets a computer of yours log in to the machine. Tick what you want, then "
+            "Three things for a machine connected to your home network, by the same cable or Wi-Fi Insider "
+            "Connected uses: the **score feed**, which sends each game's final scores to a computer of yours, "
+            "**remote access**, which lets a computer of yours log in to the machine, and **Wi-Fi start-up**, "
+            "which makes a machine on Wi-Fi join your network at the first attempt. Tick what you want, then "
             "Write the card.",
-            "Neither changes a score: a card with only these stays on Insider Connected.",
+            "None of them changes a score: a card with only these stays on Insider Connected.",
         ]),
         ("Score feed", [
             "**Score feed** has the machine send each game's final scores to a server of "
@@ -1592,6 +1593,24 @@ HELP_CONTENT = {
             "box, ready to use again.\n"
             "- The setting and keys stay in this project: they never go into a mod pack you export. **Reset…** "
             "with **Remote access** clears them and goes back to the source card's setting.",
+        ]),
+        ("Wi-Fi start-up", [
+            "For a Stern Spike 2 machine that uses a USB Wi-Fi adapter. **Use the reliable Wi-Fi start-up** "
+            "makes the machine join your Wi-Fi at the first attempt when it is switched on.",
+            "As shipped, the machine's Wi-Fi program talks to the adapter in an older way. With it, joining "
+            "often fails and is tried again, so the machine can take minutes to appear on your network, or not "
+            "appear at all until it is switched off and on. The option switches the program to the current way "
+            "and keeps the older one as a fallback, for an adapter that cannot do the current way.\n\n"
+            "- It does not change which Wi-Fi network the machine uses, its password or its band. A machine "
+            "still joins on 2.4 GHz where that is what it joined before.\n"
+            "- It is one small settings file on the card's system partition. Nothing in the game is changed.\n"
+            "- Tick it, then Write the card, or use Send to machine on a machine that already has remote "
+            "access. Writing a card without it puts the machine back as shipped.\n"
+            "- A card whose system does not have the start-up step this option uses says so here and is left "
+            "as it is.",
+            "Measured on a Godzilla with Stern's AC1200 adapter: as shipped, nine tries to join in a row failed "
+            "on one access point; with the option, the machine joined at the first try, 14 seconds after its "
+            "Wi-Fi program started.",
         ]),
     ],
     "Modes": [],

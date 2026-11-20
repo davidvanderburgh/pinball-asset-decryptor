@@ -254,6 +254,8 @@ def validate_request(original, project, key_source=None):
 def guard_flash(project, image):
     """Flash-only may consume a completed image, never omit pending intent."""
     ensure_not_incomplete(image)
+    from . import wifi_card
+    wifi_card.guard_flash(project, image)       # PAD-1467: the Wi-Fi start-up choice is pending intent too
     config = validate_request(image, project)
     if config is None:
         return
@@ -393,6 +395,51 @@ def prepare_rootfs(part, work, config, platform='stern-spike2', cancel=None):
     with part.open('rb') as f:
         _verify_tree(Ext4Reader(f, 0, size), config, payload, platform)
 
+def rewrite_partition(output, start, size, prepare, cancel=None, what='SSH', stop=None):
+    """Copy the *size* bytes at *start* of the image *output* to a scratch file, let ``prepare(part, work)`` change
+    and verify that file, then write it back and read it back.  Only a prepared, verified partition is written;
+    a failure raises ExtrasError and the caller must treat *output* as incomplete.  *what* names the change in the
+    messages; *stop* is the cancel check (default: this module's)."""
+    stop = stop or _cancel
+    with tempfile.TemporaryDirectory(prefix='pad-ssh-', dir=str(Path(output).parent)) as work:
+        work = Path(work)
+        part = work / 'rootfs.img'
+        with open(output, 'rb') as src, part.open('wb') as dst:
+            src.seek(start)
+            remaining = size
+            while remaining:
+                stop(cancel)
+                chunk = src.read(min(1 << 20, remaining))
+                if not chunk:
+                    raise ExtrasError('The system partition is truncated.')
+                dst.write(chunk)
+                remaining -= len(chunk)
+        prepare(part, work)
+        stop(cancel)
+        expected = _hash_file(part)
+        with open(output, 'r+b') as dst, part.open('rb') as src:
+            dst.seek(start)
+            remaining = size
+            while remaining:
+                stop(cancel)
+                chunk = src.read(min(1 << 20, remaining))
+                if not chunk:
+                    raise ExtrasError('The staged system partition is truncated.')
+                dst.write(chunk)
+                remaining -= len(chunk)
+            dst.flush(); os.fsync(dst.fileno())
+            dst.seek(start)
+            got = hashlib.sha256()
+            remaining = size
+            while remaining:
+                chunk = dst.read(min(1 << 20, remaining))
+                if not chunk:
+                    raise ExtrasError('%s system partition read-back was truncated.' % what)
+                got.update(chunk); remaining -= len(chunk)
+            if got.hexdigest() != expected:
+                raise ExtrasError('%s system partition read-back verification failed.' % what)
+
+
 def apply_to_build(original, output, config, log=None, cancel=None, key_source=None):
     """Apply desired SSH state to an existing output COPY, or raise before success.
 
@@ -420,44 +467,8 @@ def apply_to_build(original, output, config, log=None, cancel=None, key_source=N
     _, _, start, size = dest['partition']
     if shutil.disk_usage(Path(output).parent).free < size + (32 << 20):
         raise ExtrasError('Not enough free space to prepare the SSH system partition.')
-    ex = create_executor()
-    with tempfile.TemporaryDirectory(prefix='pad-ssh-', dir=str(Path(output).parent)) as work:
-        work = Path(work)
-        part = work / 'rootfs.img'
-        with open(output, 'rb') as src, part.open('wb') as dst:
-            src.seek(start)
-            remaining = size
-            while remaining:
-                _cancel(cancel)
-                chunk = src.read(min(1 << 20, remaining))
-                if not chunk:
-                    raise ExtrasError('The system partition is truncated.')
-                dst.write(chunk)
-                remaining -= len(chunk)
-        prepare_rootfs(part, work, config, cancel=cancel)
-        _cancel(cancel)
-        expected = _hash_file(part)
-        with open(output, 'r+b') as dst, part.open('rb') as src:
-            dst.seek(start)
-            remaining = size
-            while remaining:
-                _cancel(cancel)
-                chunk = src.read(min(1 << 20, remaining))
-                if not chunk:
-                    raise ExtrasError('The staged system partition is truncated.')
-                dst.write(chunk)
-                remaining -= len(chunk)
-            dst.flush(); os.fsync(dst.fileno())
-            dst.seek(start)
-            got = hashlib.sha256()
-            remaining = size
-            while remaining:
-                chunk = dst.read(min(1 << 20, remaining))
-                if not chunk:
-                    raise ExtrasError('SSH system partition read-back was truncated.')
-                got.update(chunk); remaining -= len(chunk)
-            if got.hexdigest() != expected:
-                raise ExtrasError('SSH system partition read-back verification failed.')
+    rewrite_partition(output, start, size,
+                      lambda part, work: prepare_rootfs(part, work, config, cancel=cancel), cancel)
     text = 'SSH server enabled (key-only, port 22).' if config['enabled'] else 'SSH server disabled.'
     if log:
         log(text, 'info')

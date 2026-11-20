@@ -373,7 +373,31 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     except card_extras.ExtrasError:
         rows.append(('SSH server — invalid configuration', 'system',
                      'Pending (Network tab: fix the keys)', 'pending'))
+    rows.extend(wifi_rows(window, assets_path))
     return rows
+
+
+def wifi_rows(window, assets_path):
+    """PAD-1467: the project's Wi-Fi start-up choice as a Write row, when it differs from what the source card
+    has (core/wifi_card.py; set on the Network tab)."""
+    from ..core import card_extras, wifi_card
+    try:
+        wifi = card_extras.load_wifi(assets_path)
+    except card_extras.ExtrasError:
+        return [('Wi-Fi start-up — invalid configuration', 'system', 'Pending (Network tab)', 'pending')]
+    if wifi is None:
+        return []
+    source_var = _window_getter(window, 'write_upd_var')
+    source = wifi_card.inspect_image(source_var.get()) if source_var is not None else {}
+    if not source.get('supported'):
+        # a card that cannot take it: on is said (the build explains why not), off asks nothing of the build
+        changed = wifi['enabled']
+    else:
+        changed = wifi['enabled'] != source.get('enabled')
+    if not changed:
+        return []
+    return [('Wi-Fi start-up — ' + ('join at the first attempt' if wifi['enabled'] else 'as shipped'),
+             'system', 'Pending (Network tab)', 'pending')]
 
 
 #: PAD-507: Godzilla's score panel colours, words of the game program
@@ -685,7 +709,7 @@ def fingerprint(window, assets_path, epoch, grow_on):
             stamp = (st.st_size, st.st_mtime_ns)
         except OSError:
             stamp = None
-        parts.append((source, stamp, card_extras.load(assets_path)))
+        parts.append((source, stamp, card_extras.load(assets_path), card_extras.load_wifi(assets_path)))
     except card_extras.ExtrasError:
         parts.append('invalid Extras configuration')
     return repr(parts)

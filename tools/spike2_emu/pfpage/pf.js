@@ -109,6 +109,9 @@ function holdWith(target, ev, down, up) {
 // ---------------------------------------------------------------- hit test
 // The artwork's marker size, which the hit test and the drawing share.
 const PF_LED_R = 5.5;
+// PAD-1468: a numbered spot (a switch placed by a manual's switch photo, on a
+// plain field): a disc this big at the view's scale, within reason
+const pfSpotR = (scale) => Math.max(9, Math.min(15, 10.5 * scale));
 
 // Tk's hit test, kept: the topmost marker whose SHAPE overlaps a 6 px box
 // round the pointer - an unfilled ring or square is hit on its outline
@@ -131,8 +134,9 @@ function pfHit(view, fx, scale, px, py) {
     return overlaps && !inside;
   };
   for (let n = view.switches.length - 1; n >= 0; n--) {
-    const [k, x, y] = view.switches[n];
-    if (ring(x * scale, y * scale, 6, 2)) return ["switch", k];
+    const [k, x, y, , spot] = view.switches[n];
+    if (spot != null ? near(x * scale, y * scale) <= pfSpotR(scale)
+      : ring(x * scale, y * scale, 6, 2)) return ["switch", k];
   }
   for (let n = view.coils.length - 1; n >= 0; n--) {
     const [k, x, y] = view.coils[n];
@@ -731,10 +735,131 @@ function startMain() {
       insPick[k].classList.toggle("on", k === insLook);
       insBox.append(insPick[k]);
     }
+    // PAD-1468: a picture under the manual's numbered spots - the user's own,
+    // else the game's own drawing - and its tools (Picture..., Line up, Reset,
+    // Remove). Lining up: drag moves it, the wheel sizes it (Shift: height
+    // only, Alt: width only); the spots stay where they are, as the guide.
+    const picOn = "picture" in V;
+    let hoverSw = null;
+    let pic = V.picture || null, picSrc = "", picNat = null, lining = false;
+    const picImg = picOn ? el("img", "pf-pic") : null;
+    let picTools = null, picHint = null;
+    if (picOn) {
+      picImg.draggable = false;
+      picImg.style.display = "none";
+      stage.classList.add("haspic");
+      stage.append(picImg);
+      picImg.addEventListener("load", () => {
+        picNat = [picImg.naturalWidth, picImg.naturalHeight];
+        if (pic && !pic.rect) {
+          pic.rect = fitRect();
+          if (pic.own) api("pic_rect", pic.rect);
+        }
+        placePic();
+      });
+      picTools = el("div", "pf-look pf-pictools");
+      const file = el("input");
+      file.type = "file";
+      file.accept = "image/png,image/jpeg,image/webp,image/gif,image/bmp";
+      file.style.display = "none";
+      const say = (t) => { picHint.textContent = t; picHint.style.display = t ? "" : "none"; };
+      const b = {};
+      const tool = (k, label, words, fn) => {
+        b[k] = btn(label, () => { b[k].blur(); fn(); });   // never keep the keyboard
+        b[k].title = words;
+        picTools.append(b[k]);
+      };
+      tool("pick", "Picture\u2026", "Put a picture of the playfield under the switches - "
+        + "the manual's switch photo or one of your own machine. Kept for this game.", () => file.click());
+      tool("line", "Line up", "Move and size your picture under the numbered spots: "
+        + "drag to move, the mouse wheel to size (Shift: height only, Alt: width only)", () => {
+        lining = !lining;
+        shownTools();
+      });
+      tool("reset", "Reset", "Fit your picture to the playfield again", () => {
+        if (!pic || !pic.own || !picNat) return;
+        pic.rect = fitRect();
+        placePic();
+        api("pic_rect", pic.rect);
+      });
+      tool("hide", "Hide spots", "Hide the numbered spots so the picture's own buttons show: "
+        + "the switches still work there (hover for a ring and the name, click to make one; "
+        + "a made switch shows as a green ring). Kept for this game.", () => {
+        if (!pic) return;
+        pic.hide = !pic.hide;
+        dirty = true;
+        shownTools();
+        api("pic_spots", pic.hide);
+      });
+      tool("drop", "Remove", "Take your picture away (the game's own drawing comes back, where it has one)", () => {
+        api("pic_clear").then((r) => { pic = r; lining = false; showPic(); });
+      });
+      picTools.append(file);
+      picHint = el("div", "pf-pichint");
+      picHint.style.display = "none";
+      file.addEventListener("change", () => {
+        const f = file.files && file.files[0];
+        file.value = "";
+        if (!f) return;
+        say("loading " + f.name + "\u2026");
+        const rd = new FileReader();
+        rd.onload = () => {
+          fetch("/api?t=" + encodeURIComponent(TOKEN), {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ m: "pic_set", a: [rd.result] }),
+          }).then((r) => r.json()).then((j) => {
+            if (!j.ok) { say(j.error || "that picture could not be used"); return; }
+            pic = j.r; lining = true; say(""); showPic();
+          }).catch(() => say("that picture could not be used"));
+        };
+        rd.onerror = () => say("that picture could not be read");
+        rd.readAsDataURL(f);
+      });
+      var shownTools = () => {
+        const own = !!(pic && pic.own);
+        if (!own) lining = false;
+        b.line.style.display = b.reset.style.display = b.drop.style.display = own ? "" : "none";
+        b.hide.style.display = pic ? "" : "none";
+        b.hide.textContent = spotsHidden() ? "Show spots" : "Hide spots";
+        b.hide.classList.toggle("on", spotsHidden());
+        dirty = true;
+        b.pick.textContent = own ? "Picture\u2026" : "Add picture\u2026";
+        b.line.classList.toggle("on", lining);
+        stage.classList.toggle("lining", lining);
+        if (lining) say("Drag to move your picture, the wheel to size it (Shift: height, Alt: width). "
+          + "Line it up with the numbered spots, then press Line up again.");
+        else if (picHint.textContent.startsWith("Drag")) say("");
+      };
+    }
+    // the spots hidden under a picture (PAD-1468): its own buttons show
+    function spotsHidden() { return !!(pic && pic.hide); }
+    function fitRect() {
+      const [nw, nh] = picNat || [BW, BH];
+      const k = Math.min(BW / nw, BH / nh);
+      return [(BW - nw * k) / 2, (BH - nh * k) / 2, nw * k, nh * k];
+    }
+    function placePic() {
+      if (!picImg) return;
+      if (!pic || !picNat) { picImg.style.display = "none"; return; }
+      const r = pic.rect || fitRect();
+      Object.assign(picImg.style, { display: "", left: r[0] * scale + "px", top: r[1] * scale + "px",
+        width: r[2] * scale + "px", height: r[3] * scale + "px" });
+    }
+    function showPic() {
+      if (!picImg) return;
+      const src = pic ? "/file/picture?t=" + encodeURIComponent(TOKEN) + "&v=" + pic.v : "";
+      if (src !== picSrc) {
+        picSrc = src; picNat = null;
+        if (src) picImg.src = src; else picImg.removeAttribute("src");
+      }
+      placePic();
+      shownTools();
+    }
     const cv = el("canvas");
     stage.append(cv);
     if (lookBox) stage.append(lookBox);
-    stage.append(insBox);
+    if (V.art || V.fixtures.length) stage.append(insBox);
+    if (picTools) { stage.append(picTools); stage.append(picHint); }
     // the ball controls before the key panel comes: in the side panel, never
     // over the picture (PAD-668)
     const balls = ballsBox(V, D);
@@ -743,6 +868,10 @@ function startMain() {
     const made = Object.assign({}, D.sw || {});
     const cab = V.cab ? cabColumn(V.cab, D.cab, made) : null;
     if (cab) wrap.append(cab.el);
+    // PAD-1468: switches placed by a manual's photo, no picture: the LED grid
+    // the schematic view has stays, left of the playfield
+    const leds = V.grid ? ledGrid(V.grid.blocks, D.grid) : null;
+    if (leds) { leds.el.classList.add("pf-grid-side"); wrap.append(leds.el); }
     wrap.append(stage);
     main.append(wrap);
 
@@ -760,7 +889,8 @@ function startMain() {
 
     function fit() {
       const r = wrap.getBoundingClientRect();
-      const s = Math.max(0.2, Math.min((r.width - 16 - GAP) / (BW + CW), (r.height - 16) / BH));
+      const LW = leds ? leds.el.getBoundingClientRect().width + 10 : 0;
+      const s = Math.max(0.2, Math.min((r.width - 16 - GAP - LW) / (BW + CW), (r.height - 16) / BH));
       scale = s;
       stage.style.width = Math.round(BW * s) + "px";
       stage.style.height = Math.round(BH * s) + "px";
@@ -768,6 +898,7 @@ function startMain() {
       cv.width = Math.round(BW * s * dpr);
       cv.height = Math.round(BH * s * dpr);
       if (cab) cab.fit(Math.round(CW * s), Math.round(BH * s));
+      placePic();
       dirty = true;
     }
     new ResizeObserver(fit).observe(wrap);
@@ -837,10 +968,43 @@ function startMain() {
         g.strokeStyle = isHeld ? "#ffd400" : hot ? "#ff80ff" : "#ff4040";
         g.strokeRect(cx - h, cy - h, 2 * h, 2 * h);
       }
-      for (const [k, x, y, id] of V.switches) {
+      // the flipper sketch stands in for a picture: not over one
+      for (const [x0, y0, x1, y1, w] of (pic ? [] : V.sketch || [])) {
+        g.beginPath(); g.moveTo(x0 * scale, y0 * scale); g.lineTo(x1 * scale, y1 * scale);
+        g.lineWidth = w * scale; g.lineCap = "round"; g.strokeStyle = "#3a3f47"; g.stroke();
+      }
+      const spotR = pfSpotR(scale);
+      for (const [k, x, y, id, spot] of V.switches) {
         const cx = x * scale, cy = y * scale;
         const isHeld = held && held[0] === "switch" && held[1] === k;
         const isRip = ripping === k;
+        if (spot != null && spotsHidden()) {
+          // hidden: nothing over the picture's own button, unless it is made
+          // (a green ring), held, or under the mouse (a faint ring)
+          const on = !!made[String(id)];
+          if (!(on || isHeld || isRip || hoverSw === k)) continue;
+          g.beginPath(); g.arc(cx, cy, spotR, 0, Math.PI * 2);
+          if (on) { g.fillStyle = "rgba(0,200,83,.28)"; g.fill(); }
+          g.lineWidth = on || isHeld || isRip ? 3 : 1.5;
+          g.strokeStyle = isHeld ? "#ffd400" : isRip ? "#ff9500" : on ? "#00e676" : "rgba(255,255,255,.85)";
+          g.stroke();
+          continue;
+        }
+        if (spot != null) {
+          // the manual's numbered spot: orange as on its photo, green when made
+          const on = !!made[String(id)];
+          g.beginPath(); g.arc(cx, cy, spotR, 0, Math.PI * 2);
+          g.fillStyle = on ? "#00c853" : "#e8761c"; g.fill();
+          g.lineWidth = isHeld || isRip ? 3 : 1.5;
+          g.strokeStyle = isHeld ? "#ffd400" : isRip ? "#ff9500" : on ? "#b9f6ca" : "#fff3e0";
+          g.stroke();
+          const fs = Math.round(spotR * (spot.length > 2 ? 0.8 : 1.05));
+          g.font = `bold ${fs}px system-ui, sans-serif`;
+          g.textAlign = "center"; g.textBaseline = "middle";
+          g.fillStyle = on ? "#002b12" : "#ffffff";
+          g.fillText(spot, cx, cy + 0.5);
+          continue;
+        }
         g.beginPath(); g.arc(cx, cy, 6, 0, Math.PI * 2);
         g.lineWidth = isHeld || isRip ? 3 : 2;
         g.strokeStyle = isHeld ? "#ffd400" : isRip ? "#ff9500" : "#2a8cff";
@@ -865,6 +1029,51 @@ function startMain() {
       }
     }
     (function loop() { draw(); jiggle(); if (cab) cab.draw(); requestAnimationFrame(loop); })();
+
+    if (picOn) {
+      // which spot is under the mouse, for the hidden spots' hover ring
+      cv.addEventListener("pointermove", (e) => {
+        const h = lining ? null : hit(...at(e));
+        const k = h && h[0] === "switch" ? h[1] : null;
+        if (k !== hoverSw) { hoverSw = k; if (spotsHidden()) dirty = true; }
+      });
+      cv.addEventListener("pointerleave", () => { if (hoverSw != null) { hoverSw = null; dirty = true; } });
+      let drag = null, saveT = 0;
+      const save = () => { clearTimeout(saveT); saveT = setTimeout(() => api("pic_rect", pic.rect), 250); };
+      const base = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; };
+      cv.addEventListener("pointerdown", (e) => {
+        if (!lining || !pic || !pic.rect) return;
+        e.stopImmediatePropagation(); e.preventDefault();
+        cv.setPointerCapture(e.pointerId);
+        drag = { at: base(e), r: pic.rect.slice() };
+      }, { capture: true });
+      cv.addEventListener("pointermove", (e) => {
+        if (!lining) return;
+        e.stopImmediatePropagation();
+        cv.style.cursor = "move";
+        hideTip();
+        if (!drag) return;
+        const [x, y] = base(e);
+        pic.rect = [drag.r[0] + x - drag.at[0], drag.r[1] + y - drag.at[1], drag.r[2], drag.r[3]];
+        placePic();
+      }, { capture: true });
+      const done = (e) => { if (!drag) return; e.stopImmediatePropagation(); drag = null; save(); };
+      cv.addEventListener("pointerup", done, { capture: true });
+      cv.addEventListener("pointercancel", done, { capture: true });
+      cv.addEventListener("wheel", (e) => {
+        if (!lining || !pic || !pic.rect) return;
+        e.preventDefault();
+        const f = Math.exp(-e.deltaY * 0.0012);
+        const [x, y] = base(e);
+        const r = pic.rect.slice();
+        if (!e.shiftKey) { r[0] = x - (x - r[0]) * f; r[2] = Math.max(20, r[2] * f); }
+        if (!e.altKey) { r[1] = y - (y - r[1]) * f; r[3] = Math.max(20, r[3] * f); }
+        pic.rect = r;
+        placePic();
+        save();
+      }, { passive: false });
+    }
+    showPic();
 
     // Tk's hit test, kept - pfHit() above says how.
     function hit(px, py) { return pfHit(V, fx, scale, px, py); }
@@ -912,6 +1121,7 @@ function startMain() {
         if (f.coil) { Object.assign(coilHot, f.coil); dirty = true; }
         if (f.shaker) shakeLvl = f.shaker[0];
         if (f.sw) { Object.assign(made, f.sw); dirty = true; if (cab) cab.touch(); }
+        if (f.grid && leds) leds.paint(f.grid);
         if (f.trough && trough) trough.update(f.trough);
       },
       side: balls ? balls.el : null,
@@ -1140,26 +1350,15 @@ function startMain() {
   }
 
   // ================================================== the schematic view
-  function schematicView(main) {
-    const V = S.view, D = S.dyn || {};
-    const bar = el("div", "pf-bar");
-    bar.append(el("div", "txt", V.bar));
-    main.append(bar);
-    const balls = ballsBox(V, D);
-    const trough = balls ? balls.trough : null;
-    const body = el("div", "pf-schem");
+  // the LED swatch grid: every lamp the wire has shown, by node
+  function ledGrid(blocks, data) {
     const grid = el("div", "pf-grid");
-    const rows = el("div", "pf-rows");
-    body.append(grid, rows);
-    main.append(body);
-
-    // the LED swatch grid: every lamp the wire has shown, by node
     const cells = {};
-    const gridData = Object.assign({}, D.grid || {});
-    if (!V.grid.blocks.length) {
+    const gridData = Object.assign({}, data || {});
+    if (!blocks.length) {
       grid.append(el("div", "note", "LEDs\n\nwaiting for the first\nLED write from the game"));
     }
-    for (const blk of V.grid.blocks) {
+    for (const blk of blocks) {
       const b = el("div", "blk");
       b.append(el("div", "hdr", "node " + blk.node + "  (" + blk.cells.length + ")"));
       const made = {};
@@ -1199,6 +1398,24 @@ function startMain() {
       d.style.borderColor = `rgba(${r},${g},${b},${Math.min(1, a * 1.3)})`;
     };
     for (const k in cells) paintCell(k);
+    return {
+      el: grid,
+      paint(upd) { for (const k in upd) { gridData[k] = upd[k]; paintCell(k); } },
+    };
+  }
+
+  function schematicView(main) {
+    const V = S.view, D = S.dyn || {};
+    const bar = el("div", "pf-bar");
+    bar.append(el("div", "txt", V.bar));
+    main.append(bar);
+    const balls = ballsBox(V, D);
+    const trough = balls ? balls.trough : null;
+    const body = el("div", "pf-schem");
+    const leds = ledGrid(V.grid.blocks, D.grid);
+    const rows = el("div", "pf-rows");
+    body.append(leds.el, rows);
+    main.append(body);
 
     // the switch rows, flowing into the columns the window's height has
     const dots = {};
@@ -1230,7 +1447,7 @@ function startMain() {
     return {
       frame(f) {
         if (f.sw) paintDots(f.sw);
-        if (f.grid) { for (const k in f.grid) { gridData[k] = f.grid[k]; paintCell(k); } }
+        if (f.grid) leds.paint(f.grid);
         if (f.trough && trough) trough.update(f.trough);
       },
       side: balls ? balls.el : null,

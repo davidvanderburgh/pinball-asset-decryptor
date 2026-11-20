@@ -93,6 +93,48 @@ PINOTAUR_SWITCHES = {
             84: "LAUNCH BUTTON", 85: "TILT", 87: "START BUTTON",
         }
 
+#: Where Halloween's and Ultraman's switches are (PAD-1468): the numbered
+#: spots of the "Playfield Switch Locations Photo (UM/HW)" in Spooky's
+#: Halloween / Ultraman Service Manual (p. 42), each tied to its switch by the
+#: manual's "Playfield Switch Description Chart" (p. 43).  Switch -> (the
+#: manual's spot number, x, y): where the photo puts the number, in a
+#: SPOTS_SIZE box over the playfield, x right, y down.  Only positions: no
+#: picture is shipped, the window draws the spots on a plain playfield.
+#: The manual's spot 24 is a placeholder (no switch); its 32-38 are the
+#: trough, drawn here along the apron as its label runs (38 ... 32, then the
+#: jam); CAPTURE TARGET (32) and RIGHT INLANE (34) have no spot.
+PINOTAUR_SPOTS = {
+    49: ("1", 162, 677), 50: ("2", 63, 601), 51: ("3", 134, 573),
+    66: ("4", 94, 594), 73: ("5", 94, 572), 78: ("6", 94, 551),
+    74: ("7", 94, 529), 76: ("8", 75, 480), 52: ("9", 89, 442),
+    79: ("10", 76, 380), 53: ("11", 89, 353), 77: ("12", 70, 278),
+    54: ("13", 89, 258), 41: ("14", 50, 119), 48: ("15", 95, 136),
+    55: ("16", 125, 223), 39: ("17", 180, 217), 75: ("18", 218, 162),
+    38: ("19", 230, 231), 29: ("20", 172, 273), 27: ("21", 195, 279),
+    28: ("22", 221, 282), 71: ("23", 256, 399), 72: ("25", 345, 462),
+    31: ("26", 319, 442), 37: ("27", 278, 572), 33: ("28", 338, 600),
+    70: ("29", 311, 555), 23: ("30", 370, 653), 36: ("31", 250, 671),
+    18: ("38", 220, 742), 19: ("37", 239, 733), 16: ("36", 259, 724),
+    20: ("35", 278, 715), 21: ("34", 297, 707), 22: ("33", 316, 698),
+    65: ("32", 336, 689), 64: ("JAM", 355, 680),
+    69: ("39", 287, 351), 4: ("40", 297, 312), 35: ("41", 371, 238),
+    7: ("42", 358, 215), 30: ("43", 325, 224), 5: ("44", 294, 224),
+    13: ("45", 357, 43), 14: ("46", 316, 26), 12: ("47", 294, 41),
+    26: ("48", 311, 118), 68: ("49", 180, 34), 67: ("50", 116, 37),
+    15: ("51", 393, 150), 6: ("52", 325, 180),
+}
+PINOTAUR_SPOTS_SIZE = [450, 760]
+#: The flippers, as lines (x0, y0, x1, y1, width), so the spots read as a
+#: playfield.
+PINOTAUR_SKETCH = [[145, 662, 193, 690, 7], [265, 662, 217, 690, 7]]
+PINOTAUR_SPOTS_FROM = "the Halloween / Ultraman manual's switch locations photo"
+#: The game's own playfield drawing (Halloween v1.18's service-menu outline,
+#: 282 x 640; Ultraman v1.18 ships none), drawn under the spots at rect
+#: [x, y, w, h] in the SPOTS_SIZE box: lined up on the manual's photo by its
+#: walls, shooter lane, apron and upper playfield (PAD-1468).
+PINOTAUR_GAME_PICTURE = {"file": "assets/dmd/animations/menu/playfield.png",
+                         "rect": [18, -4, 407, 795]}
+
 # Halloween v1.18.1's coils (CoilConfig.cs; 8 and 10 are unused) - Ultraman
 # names the same ones - and the servos that lift its two subways
 # (subwayMode.cs), which a Visual Pinball table's controller sees as coils
@@ -360,6 +402,9 @@ TITLES = {
                     "enter": 60, "back": 63, "up": 61, "down": 62,
                     "lflip": 81, "rflip": 80, "ulflip": 83, "urflip": 82},
         "switches": PINOTAUR_SWITCHES,
+        "spots": PINOTAUR_SPOTS, "spots_size": PINOTAUR_SPOTS_SIZE,
+        "sketch": PINOTAUR_SKETCH, "spots_from": PINOTAUR_SPOTS_FROM,
+        "game_picture": PINOTAUR_GAME_PICTURE,
         "coils": PINOTAUR_COILS, "servos": PINOTAUR_SERVOS,
     },
     # Ultraman v1.18 (SwitchConfig.cs, CoilConfig.cs, VirtualCoil.cs):
@@ -382,6 +427,9 @@ TITLES = {
                     "enter": 60, "back": 63, "up": 61, "down": 62,
                     "lflip": 81, "rflip": 80, "ulflip": 83, "urflip": 82},
         "switches": PINOTAUR_SWITCHES,
+        "spots": PINOTAUR_SPOTS, "spots_size": PINOTAUR_SPOTS_SIZE,
+        "sketch": PINOTAUR_SKETCH, "spots_from": PINOTAUR_SPOTS_FROM,
+        "game_picture": PINOTAUR_GAME_PICTURE,
         "coils": PINOTAUR_COILS, "servos": PINOTAUR_SERVOS,
     },
 }

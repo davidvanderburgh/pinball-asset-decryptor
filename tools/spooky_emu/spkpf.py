@@ -46,12 +46,12 @@ class App(appf.App):
     the game window" is true."""
 
 
-def serve(table, distro="", slot="0", audio_ctl="", title=""):
+def serve(table, distro="", slot="0", audio_ctl="", title="", art=""):
     """The window's page, served and polling: (app, rig, host).  main()
     shows it; a capture script shows it to a headless browser instead."""
     title = title or table.get("title") or "Beetlejuice"
     rig = Rig(distro, slot)
-    app = App(table, rig, "", title, slot=slot, audio_ctl=audio_ctl)
+    app = App(table, rig, art, title, slot=slot, audio_ctl=audio_ctl)
     host = appf.pfweb.WebHost(appf.PAGE_DIR, app,
                               title="%s - virtual playfield" % title)
     app.host = host
@@ -79,7 +79,9 @@ def main(argv=None):
     args = ap.parse_args(argv)
     with open(args.table, encoding="utf-8") as f:
         table = json.load(f)
-    app, rig, host = serve(table, args.distro, args.slot, args.audio_ctl)
+    # the game's own playfield drawing, copied beside the table (PAD-1468)
+    art = os.path.join(os.path.dirname(args.table), table["art"]) if table.get("art") else ""
+    app, rig, host = serve(table, args.distro, args.slot, args.audio_ctl, art=art)
     if args.parent_pipe:
         threading.Thread(target=appf.watch_parent, args=(app, host), daemon=True,
                          name="spk-parent").start()

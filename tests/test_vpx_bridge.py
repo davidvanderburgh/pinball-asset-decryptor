@@ -8606,10 +8606,13 @@ def test_turtle_faces_on_the_shooter_lane_plaque_light_by_the_turtle_leds(vpxfil
         retro = m["retrofit_lights"]["lights"]
         assert {k: retro[k]["leds"] for k in want} == {k: [[8, i]] for k, i in want.items()}
         assert not any("TURTLE MICHEALANGELO" in s for s in m["unmapped"]["stern_leds_without_light"])
-        # front (Michelangelo, by the player) to back: the sign rises, so does each glow
+        # front (Michelangelo, by the player) to back: the sign is highest at the
+        # FRONT (297 down to 198), so each glow is lower than the one before it.
+        # PAD-1489: the other way up buried all but Leonardo's glow in the sign
         ys = [retro[k]["at"][1] for k in want]
         halos = [retro[k]["fields"]["BHHI"] for k in want]
-        assert ys == sorted(ys, reverse=True) and halos == sorted(halos)
+        assert ys == sorted(ys, reverse=True) and halos == sorted(halos, reverse=True)
+        assert halos == [295.0, 275.0, 254.0, 234.0]
         lamps = "\n".join(P.gen_lamp_lines(m))
         for k, i in want.items():
             assert "NFadeL %d, %s" % (1800 + i, k) in lamps

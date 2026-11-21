@@ -15,7 +15,7 @@
     "The rig's turtles_le tables carry NO positions (switch_xy absent, device_xy all 0), so every",
     "match is by the table's object names, their surfaces (which ramp a trigger rides), the Stern art",
     "under each light, and the table script's own comments. GUESS = wants a look at the machine.",
-    "PAD-1483: the four turtle faces on the plaque over the shooter lane (the Primitive017 sign, image tmntq2) had no light of their own, only the GI on the sign; each is a bulb cloned from flasher16b whose glow sits just over its face (the sign rises from z 126 at the front to 222 at the back), in that turtle's colour"
+    "PAD-1483: the four turtle faces on the plaque over the shooter lane (the Primitive017 sign, image tmntq2) had no light of their own, only the GI on the sign; each is a bulb cloned from flasher16b in that turtle's colour, its glow (BHHI) 4 over the highest point of the sign under the bulb's 50-unit outline. PAD-1489: the sign is 297 high at the front and 198 at the back (Visual Pinball's primitive z is the other way up from PAD-1483's sum), which had buried the glows of all but Leonardo inside it"
   ],
   "title": "turtles_pro",
   "detect": [
@@ -1054,10 +1054,10 @@
     "_": "Stern inserts with no table light: a new Light cloned from `clone` (a light's own `clone` wins), placed at [x, y]; its `fields` (VPX tag -> value) give it a look of its own",
     "clone": "l58a",
     "lights": {
-      "PadTurtleMichelangelo": {"leds": [[8, 59]], "name": "TURTLE MICHEALANGELO (plaque over the shooter lane)", "clone": "flasher16b", "at": [889, 1097], "fields": {"BHHI": 152.0, "RADI": 40.0, "BWTH": 10.0, "COLR": 1739519}},
-      "PadTurtleRaphael": {"leds": [[8, 60]], "name": "TURTLE RAPHEAL (plaque over the shooter lane)", "clone": "flasher16b", "at": [889, 1022], "fields": {"BHHI": 172.0, "RADI": 40.0, "BWTH": 10.0, "COLR": 2763519}},
-      "PadTurtleDonatello": {"leds": [[8, 61]], "name": "TURTLE DONATELLO (plaque over the shooter lane)", "clone": "flasher16b", "at": [889, 944], "fields": {"BHHI": 193.0, "RADI": 40.0, "BWTH": 10.0, "COLR": 16728224}},
-      "PadTurtleLeonardo": {"leds": [[8, 62]], "name": "TURTLE LEONARDO (plaque over the shooter lane)", "clone": "flasher16b", "at": [889, 868], "fields": {"BHHI": 213.0, "RADI": 40.0, "BWTH": 10.0, "COLR": 16739370}},
+      "PadTurtleMichelangelo": {"leds": [[8, 59]], "name": "TURTLE MICHEALANGELO (plaque over the shooter lane)", "clone": "flasher16b", "at": [889, 1097], "fields": {"BHHI": 295.0, "RADI": 40.0, "BWTH": 10.0, "COLR": 1739519}},
+      "PadTurtleRaphael": {"leds": [[8, 60]], "name": "TURTLE RAPHEAL (plaque over the shooter lane)", "clone": "flasher16b", "at": [889, 1022], "fields": {"BHHI": 275.0, "RADI": 40.0, "BWTH": 10.0, "COLR": 2763519}},
+      "PadTurtleDonatello": {"leds": [[8, 61]], "name": "TURTLE DONATELLO (plaque over the shooter lane)", "clone": "flasher16b", "at": [889, 944], "fields": {"BHHI": 254.0, "RADI": 40.0, "BWTH": 10.0, "COLR": 16728224}},
+      "PadTurtleLeonardo": {"leds": [[8, 62]], "name": "TURTLE LEONARDO (plaque over the shooter lane)", "clone": "flasher16b", "at": [889, 868], "fields": {"BHHI": 234.0, "RADI": 40.0, "BWTH": 10.0, "COLR": 16739370}},
       "PL_START_EPISODE": {
         "leds": [
           [
@@ -1138,7 +1138,7 @@
     ]
   },
   "repatch": [
-    {"absent": "' PAD: closing the table stops the game, its backglass and DOF", "why": "closing it leaves the cabinet's DOF lights on as the game left them, even with Visual Pinball closed", "since": "PAD-1489: closing the table stops the game, its backglass and DOF"},
+    {"absent": "' PAD: closing the table stops the game, its backglass and DOF", "why": "only Leonardo's face on the turtle sign lights, and closing it leaves the cabinet's DOF lights on as the game left them, even with Visual Pinball closed", "since": "PAD-1489: closing the table stops the game, its backglass and DOF"},
     {"absent": "' PAD: the plunger key is the table's own plunger, the lockbar key the Action button (launch)", "why": "pulling its plunger fires the auto plunger at once instead of launching the ball", "since": "PAD-1281: the plunger key is the table's own plunger, the lockbar key the Action button"},
     {"absent": "Sub PadLairDisarm", "why": "its LAIR shot rolls past the post instead of stopping on it, so the game never counts it", "since": "PAD-1268: the LAIR ball rolls down its lane onto the LOWER LOCK post"},
     {"absent": "Sub PadVanRollIn(place)", "why": "its lock can stop lighting and call UPPER LOCK and LOWER LOCK a device malfunction", "since": "PAD-1116: the lock empties when the game holds its post"},

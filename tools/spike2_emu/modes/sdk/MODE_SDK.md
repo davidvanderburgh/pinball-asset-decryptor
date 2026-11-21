@@ -6851,6 +6851,25 @@ alone began the game. The step is now the menu's own and the game start never wa
   (Godzilla LE 1.16: 66, from the emulator's sound log; Pro 1.16 too since round 5, where request 66 is the same
   SE GZ MX MAIN PLAY START by the program's own Sound Test names) is asked for as the hold begins (`srv_music_early`,
   `srv_music_wanted`); at the serve the game asks for none while it still plays, so it runs on unbroken.
+
+Round 5 (DoomWalrus666's list per mode: one intro video a game, played first; the co-op/teams intro only for Co-op and
+Teams at CHARACTERS or ENHANCED, with its music; language selection only during the intro; only the handicap in the
+lane; Challenge with no versions; handicaps never carried to the next game):
+
+- `coop_tick` began the intro for any game with teammates once the chooser closed - Standard at CHARACTERS/ENHANCED
+  (`coop.standard`) and co-op/teams at NORMAL (`coop.plain`) included, so it played after the game's own film, under the
+  pick. `ci_tick_begins` now asks for a co-op or team game with characters, and lets it begin while the chooser still
+  waits when the game's film was just swapped for the intro, so the intro's phase (`CI_FILM`, its sound on the carrier)
+  starts with the film; before, it started when the chooser closed, ~9.5 s on (emulator, LE 1.16), and the intro ran
+  silent.
+- One intro a game: a start film of the game's own that plays unswapped (`ci_film_swap`, `ci.own_film_game`) means no
+  intro of ours after it (`coop_intro_begin`).
+- No language window of ours with the ball in the lane: `CI_BALL` ends the intro instead of opening `CI_LANG`. On
+  Godzilla, the only title with PLAYER LANGUAGE SELECT, the language is the game's own bar over its start film, where
+  the intro plays.
+- A challenge is the game's own (`sty_chooser_own`): no ACTION TO CHOOSE, no step, Action the game's.
+- The handicap pick waits for the lane (`hand_may_open`) and starts at 0 each game (Handicaps, below).
+
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the
@@ -7280,8 +7299,12 @@ way round, -3 with no ball save). Any other game's are worked out of its program
 in by thirds - level 1 the first third a step, level 2 two thirds two steps, level 3 all of them three steps.
 
 **The pick.** At each player's first ball (the ball byte is 1, the player's pick not yet shown this game) the game's
-top line ("BALL %d", co-op's borrow) reads `P2 HANDICAP 0`; the flippers walk it, starting at what that player had
-last game (0 at power-up, and 0 for everyone after a game reset with Start + the left flipper: it ends without the game's own game_over); the ball's first score takes it. The player's level holds from the game's first read of an
+top line ("BALL %d", co-op's borrow) reads `P2 HANDICAP 0`; the flippers walk it, starting at 0 every game (PAD-1449
+round 5, DoomWalrus666: "Any handicap selections should not carry over to the next game ever": `hand_game_check` puts
+every level back to 0 at each new game); the ball's first score takes it. It opens only once the ball waits in the
+shooter lane with nothing of the start up (`hand_may_open`): not while the game's start film shows (its language bar
+has the flippers), a co-op intro plays, the style chooser is up or a character pick is open or to come, nor before ball
+1 is served where the plunger flags tell. The player's level holds from the game's first read of an
 adjustment in their first ball: the game reads the ball save time as it serves the ball, before the pick shows, so
 ball 1's save is the level the pick opened at and every later ball's the one taken. Before their first ball the
 getter answers the operator's own values: nothing the game reads for every player before then carries anyone's

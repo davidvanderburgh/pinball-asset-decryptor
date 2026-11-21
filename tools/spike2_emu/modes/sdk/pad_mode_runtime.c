@@ -19766,6 +19766,8 @@ static struct {
     unsigned music[CI_MUSIC], n_music, faded, quiet[8], n_quiet;
     unsigned long join_at;               /* PAD-1221: a Start press while ball 1 waits (`| 1`), for ci_quiet */
     const char *why;
+    volatile unsigned own_film_game;     /* PAD-1449 round 5: chg_game_now() + 1 of a game whose own start film played
+                                          * (not swapped): no intro of ours after it - one intro a game */
 } ci;
 static void ci_find_seen(pm_reg *r);   /* PAD-1114 round 2, below */
 /* PAD-1123: a co-op character's clip and sound once picked (below, "once picked"), and its copy of the game's End of
@@ -21337,6 +21339,8 @@ static struct {
     volatile unsigned long hold_ms, start_ms;  /* pm_ms() | 1 of the last Action taken / Start pressed on the menu */
     int go_style;                        /* ... the style it keeps, for the game of go_kind (TEAMS: the team game) */
     unsigned go_kind, go_team;
+    volatile unsigned long home_ms;      /* round 5: pm_ms() | 1 of a left flipper held alone out of a game - the
+                                          * Home Team screen's: Action is the game's until a game begins (0: none) */
 } smn = { .entry = -1 };
 
 /* PAD-1449 round 3 (DoomWalrus666: "There should not be a single entry for each type, as that is too many. There
@@ -21518,7 +21522,44 @@ static void sty_menu_go(void)
  * Start that brought the Home Team screen leaves that screen its own Action, to go on without logging in) */
 static int sty_menu_owns_action(void)
 {
-    return sty_menu_live() && !smn.go_ms && sty_menu_kind() != 0u;
+    return sty_menu_live() && !smn.go_ms && !smn.home_ms && sty_menu_kind() != 0u;
+}
+
+/* PAD-1449 round 5 (DoomWalrus666: "If you hold the left flipper to enter the home team screen, however, no user or
+ * mode could be selected at all with the action button"; through Start it worked: the Start arms `go`, which leaves
+ * the screen its Action). Holding the left flipper (alone) is the game's way into its Home Team screen, which comes
+ * with no Start, so the menu's Action stayed the style step's and the screen's own users and modes never heard it.
+ * A left flipper held alone STY_HOME_MS out of a game gives Action back to the game until a game begins, or the menu
+ * has been gone STY_HOME_GONE_MS, or STY_MENU_GO_MS has passed - not when the menu's frames come back, as the Home
+ * Team screen may draw that menu. (The emulator has no Insider Connected: its attract only skips on at the hold.)
+ * (tests lift sty_home_hold verbatim) */
+#define STY_HOME_MS 1000ul
+#define STY_HOME_GONE_MS 30000ul
+static int sty_home_hold(int left, int right, unsigned long held_for, int in_game)
+{
+    return !in_game && left && !right && held_for >= STY_HOME_MS;
+}
+
+static void sty_home_tick(void)
+{
+    static unsigned long left_at;
+    unsigned long now = pm_ms();
+    int l = coop_left && switch_held(coop_left), r = coop.button && switch_held(coop.button);
+    if (!l || r) left_at = 0;
+    else if (!left_at) left_at = now | 1ul;
+    if (smn.home_ms && (pm_in_game() || now - (smn.home_ms & ~1ul) >= STY_MENU_GO_MS
+                        || (smn.frame_ms && now - smn.frame_ms >= STY_HOME_GONE_MS
+                            && now - (smn.home_ms & ~1ul) >= STY_HOME_GONE_MS))) {
+        smn.home_ms = 0;
+        say("styles: the start menu's Action is the style step's again (%s)", pm_in_game() ? "a game began"
+            : "the Home Team screen is long gone");
+    }
+    if (!smn.home_ms && sty_home_hold(l, r, left_at ? now - (left_at & ~1ul) : 0ul, pm_in_game())) {
+        smn.home_ms = now | 1ul;
+        if (smn.open || smn.shaping) sty_menu_reset("the left flipper held: the Home Team screen");
+        say("styles: the left flipper held %lu ms out of a game - the Home Team screen's: Action is the game's until a "
+            "game begins", now - (left_at & ~1ul));
+    }
 }
 
 static void sty_menu_edge(unsigned id, int press)
@@ -21550,7 +21591,7 @@ static int sty_menu_hold_back(unsigned long since_frame, unsigned long since_act
 static int sty_menu_held(void)
 {
     unsigned long since = smn.hold_ms ? pm_ms() - (smn.hold_ms & ~1ul) : ~0ul;
-    if (!sty_menu_hold_back(smn.frame_ms ? pm_ms() - smn.frame_ms : ~0ul, since, smn.go_ms != 0,
+    if (!sty_menu_hold_back(smn.frame_ms ? pm_ms() - smn.frame_ms : ~0ul, since, smn.go_ms != 0 || smn.home_ms != 0,
                             sty_menu_kind() != 0u))
         return 0;
     smn.hold_ms = 0;                                          /* (the drain's edge gave the step its Action) */
@@ -21698,14 +21739,29 @@ static int sty_menu_preset(unsigned kind)
     return st >= 1 && st <= 3 && smn.preset_kind == kind && pm_ms() - smn.preset_ms < TEAM_PICK_MS ? st : 0;
 }
 
+/* PAD-1449 round 5 (DoomWalrus666: "No dialog box should appear requesting player select a version"; "If a version of a
+ * mode is not selected, please default to regular"): a game the start menu's own step could have asked for (an index
+ * menu, its frames seen) that begins with no version kept - its Action was the game's, as on the Home Team screen -
+ * plays NORMAL, with no card at ball 1; a title whose menu has no step still asks at ball 1 (tests lift it verbatim) */
+static int sty_default_normal(int preset, int menu_steps)
+{
+    return !preset && menu_steps;
+}
+
 /* the game begins as the start menu's `kind`: its style taken there goes in where the chooser would have closed (the
  * game's film and any intro over, so the pick follows them as it always has; the game's own Standard or challenge at
  * NORMAL at once - nothing of ours in it); none taken there: the chooser at ball 1 */
 static void sty_begin(unsigned kind)
 {
     sty.preset = sty_menu_preset(kind);
+    if (sty_default_normal(sty.preset, smn.frame_ms != 0)) {   /* PAD-1449 round 5 */
+        sty.preset = 1;
+        say("styles: no version chosen on the start menu (its Action was the game's: the Home Team screen) - NORMAL");
+    }
     sty_open(kind);
-    if (sty.preset == 1 && (kind == STY_STANDARD || kind == STY_CHALLENGE)) {
+    if (sty.preset == 1) {                                    /* PAD-1449 round 5: co-op and teams at NORMAL too -
+                                                              * "identical to standard game behavior": ball 1 served
+                                                              * as the game serves it, its music under its own film */
         sty.at = 0;
         sty.preset = 0;
         sty.ready = 1;
@@ -23268,6 +23324,7 @@ static int ci_film_swap(pm_reg *r)
     if (!*p) return 0;
     if (!ci_film_due()) {
         static int said;
+        ci.own_film_game = chg_game_now() + 1;                /* PAD-1449 round 5: the game's own intro, this game */
         if (said < 6 && ++said)
             say("co-op intro: the game's start film \"%s\" asked for - not a co-op Start (held %d, %lu ms since, menu %d, "
                 "teammates %u, phase %d)", name, coop_button_held(), coop.held_ms ? pm_ms() - (coop.held_ms & ~1ul) : 0ul,
@@ -23289,6 +23346,11 @@ static void coop_intro_begin(const char *why)
     unsigned g;
     if (!ci.clip[0] || ci.phase || !coop_ball_byte) return;
     g = chg_game_now() + 1;
+    if (ci.own_film_game == g && ci.game != g) {              /* PAD-1449 round 5: "ONE INTRO VIDEO ON ALL MODES" */
+        ci.game = g;
+        say("co-op intro: not played - %s, but the game's own start film played in this game (one intro a game)", why);
+        return;
+    }
     if (ci.film_at && pm_ms() - (ci.film_at & ~1ul) < CI_FILM_FRESH_MS && ci.game != g) {
         ci.game = g;
         ci.why = why;
@@ -23446,7 +23508,7 @@ static int ci_language_asks(void)
 
 /* the language window opens when the game's PLAYER LANGUAGE SELECT asked at the game's start and the port names the
  * players' words; 0 = none */
-static int ci_language_open(void)
+__attribute__((unused)) static int ci_language_open(void)
 {
     volatile unsigned *w = ci_language_word(1);
     if (!w || !pm_port_value("language_adjustment", 0)) {
@@ -23733,8 +23795,11 @@ static void coop_intro_tick(void)
         if (w != 1 && w >= 0 && now - ci.step_at < CI_BALL_MS) return;
         say("co-op intro: %s", w == 1 ? "the ball waits in the shooter lane" : w < 0
             ? "the port names no plunger flags - on at once" : "no ball in the lane yet - on without it");
-        if (ci_language_open()) ci.phase = CI_LANG;
-        else ci_over("no language window");
+        /* PAD-1449 round 5 (DoomWalrus666: "Language selection must always be during the intro video, it must never
+         * be available after that point"; "Handicap settings are the only thing that should appear ... while the ball
+         * is in the shooter lane"): no language window of ours with the ball in the lane - the language is the game's
+         * own bar over its start film, where the intro plays (start_film_clips). CI_LANG is no longer entered. */
+        ci_over("the ball waits - the language was the start film's");
         return;
     case CI_LANG:
         if ((w = ci.flips) != ci.flips_seen) {
@@ -24353,6 +24418,21 @@ static void coop_users_arm(void)
     }
 }
 
+/* PAD-1449 round 5 (DoomWalrus666: "The co-op video should be the default intro video for: Co-op (characters or
+ * enhanced), Teams (characters or Enhanced) ... The co-op intro video should never be shown during ... Standard
+ * (regular, characters, enhanced)"; "ONE INTRO VIDEO ON ALL MODES. NO INTRO VIDEOS AFTER THE FIRST ONE HAS BEEN
+ * PLAYED"; "Co-op characters currently plays the co-op/teams intro video with NO MUSIC"): whether the tick begins the
+ * game's co-op intro - `n` teammates, an intro on the card, none under way nor asked for in this game, a co-op or team
+ * game with characters (not a Standard game's, not at NORMAL), and the style chooser closed; or still open when the
+ * game's start film was just swapped for the intro (`film_fresh`), so the intro's phase - its sound - begins with the
+ * film, not when the chooser closes 9.5 s on (emulator, LE 1.16: the film plays the clip silent until then)
+ * (tests lift it verbatim) */
+static int ci_tick_begins(unsigned n, int have, int phase, int standard, int plain, int chooser, int film_fresh,
+                          int in_game, int asked)
+{
+    return n && have && !phase && !standard && !plain && (!chooser || film_fresh) && in_game && !asked;
+}
+
 static void coop_tick(void)
 {
     unsigned n;
@@ -24364,9 +24444,14 @@ static void coop_tick(void)
     if (n && !coop.teams && !coop.standard && pm_in_game()) coop_scores_same(n);   /* PAD-1042: a team game's are the
                                                               * game's own; PAD-1224: an Enhanced Standard game's too */
     coop_join_tick();                                         /* PAD-1052 */
+    if (sty_wanted()) sty_home_tick();                        /* PAD-1449 round 5: the Home Team screen's Action */
     sty_tick();                                               /* PAD-1449 */
     srv_tick();                                               /* PAD-1478 */
-    if (n && ci.clip[0] && !ci.phase && !sty.open && pm_in_game() && ci.game != chg_game_now() + 1)   /* PAD-1114 */
+    if (ci_tick_begins(n, ci.clip[0] != 0, ci.phase, coop.standard,
+                       sty.open ? sty.preset == 1 : coop.plain,   /* CO-OP PLAY is plain until the chooser says */
+                       sty.open,
+                       ci.film_at && pm_ms() - (ci.film_at & ~1ul) < CI_FILM_FRESH_MS, pm_in_game(),
+                       ci.game == chg_game_now() + 1))       /* PAD-1114 */
         coop_intro_begin(coop.teams ? "a team game begins" : coop.standard ? "an Enhanced Standard game begins"
                          : "a co-op game begins");
     coop_intro_tick();                                        /* PAD-1114 */
@@ -25448,8 +25533,9 @@ static void coop_arm(void)
  *      adj:<id>-<n>:<lo>:<hi>          ... its own value - n
  *      adj:<id>x<pct>:<lo>:<hi>        ... its own value x pct / 100
  * THE PICK: at each player's first ball the game's top line ("BALL %d", PAD-1017's borrow) reads "P2 HANDICAP +1";
- * the flippers walk it from -3 to +3 (it starts at what that player had last game, 0 at power-up), and the ball's first
- * score takes it. The level holds from the game's first read of an adjustment in that player's first ball (the ball
+ * the flippers walk it from -3 to +3 (it starts at 0 every game: PAD-1449 round 5, DoomWalrus666: "Any handicap
+ * selections should not carry over to the next game ever"), and the ball's first score takes it. It opens only once
+ * ball 1 waits in the shooter lane with nothing else of the start's up (hand_may_open). The level holds from the game's first read of an adjustment in that player's first ball (the ball
  * save time is read as the ball is served, before the pick shows: ball 1's save is the level the pick opened at) until
  * the game's end; before it the getter answers the operator's own values, so nothing the game reads for every player
  * before their first ball carries anyone's level. In a co-op game (PAD-1017) each teammate picks one.
@@ -25468,7 +25554,7 @@ static struct {
     int on, only;
     pm_addr setting;                         /* PAD-1326: an address (a PIE's moved by game_base) */
     unsigned left, right, start;             /* start: the Start button (held: the flippers are not the pick's) */
-    int level[5];                            /* player (1-4) -> the level picked (kept for the next game) */
+    int level[5];                            /* player (1-4) -> the level picked (0 again at each new game) */
     unsigned picked;                         /* a bit per player: their level holds (their first ball began) */
     unsigned asked;                          /* a bit per player: their pick has shown this game */
     unsigned last_up;                        /* the player and ball last seen (player x 256 + ball) */
@@ -25483,6 +25569,8 @@ static struct {
     int line_held;
     int said;
     int census;                              /* /dump/handlog.on: the reads are logged */
+    unsigned long fresh_ms;              /* PAD-1449 round 5: when this game began (| 1) */
+    int wait_said;                       /* ... its pick's wait said */
 } hand;
 static unsigned (*hand_adj_game)(unsigned);
 #define HAND_CENSUS_IDS 1024u
@@ -25644,12 +25732,12 @@ static void hand_game_check(void)
     }
     if (!fresh) return;
     over = pm_event("game_over") >= 0 ? (int)event_count(pm_event("game_over")) : -1;
-    say("handicap: a new game (the game's game_over seen %d time(s))", over);
-    if (hand_was_reset(hand.reset_seen, (int)hand.reset_over, over)) {
-        for (k = 1; k <= 4; k++) hand.level[k] = 0;
-        say("handicap: the last game was reset with Start + left flipper (player %u ball %u, no game over) - every "
-            "player's handicap back to 0", hand.reset_up >> 8, hand.reset_up & 0xffu);
-    }
+    say("handicap: a new game (the game's game_over seen %d time(s)) - every player's handicap back to 0", over);
+    if (hand_was_reset(hand.reset_seen, (int)hand.reset_over, over))
+        say("handicap: the last game was reset with Start + left flipper (player %u ball %u, no game over)",
+            hand.reset_up >> 8, hand.reset_up & 0xffu);
+    for (k = 1; k <= 4; k++) hand.level[k] = 0;              /* PAD-1449 round 5: never carried to the next game */
+    hand.fresh_ms = pm_ms() | 1ul;
     hand.reset_seen = 0;
     if (hand.open) {                             /* the last game's pick, never taken */
         hand.open = 0;
@@ -25658,6 +25746,7 @@ static void hand_game_check(void)
     if (hand.picked && hand.census) __builtin_memset(hand_seen, 0, sizeof hand_seen);
     hand.picked = hand.asked = 0;
     hand.said = 0;
+    hand.wait_said = 0;
 }
 
 /* the level that holds for the player up: theirs from the game's first read in their first ball, else 0 */
@@ -25783,6 +25872,19 @@ static int hand_waits_for_coop(void)
     return pk.open || (coop.turn >= 1 && coop.turn <= 4 && coop_pick_of[coop.turn] < 0);
 }
 
+/* PAD-1449 round 5 (DoomWalrus666: "Only after the ball has been put into the shooter Lane should the handicap settings
+ * be able to be manipulated"; "Selecting a character with the flipper buttons should never affect the handicap
+ * setting"; "Language selection should never be available there"): a player's pick opens only with none of the start's
+ * own steps up - the game's start film (its language bar has the flippers) in the game's first moments, a co-op
+ * intro, the style chooser - and, where the runtime can tell, not while the game's first ball is still to be served
+ * (`waits` the plunger flags: 1 waits, 0 not, -1 unknown; `unserved` no ball served yet) (tests lift it verbatim) */
+#define HAND_FILM_MS 30000ul                 /* the game's start film counts this long into a game */
+static int hand_may_open(int film_up, unsigned long since_new, int intro, int chooser, int waits, int unserved)
+{
+    if ((film_up == 1 && since_new < HAND_FILM_MS) || intro || chooser) return 0;
+    return !(waits == 0 && unserved);
+}
+
 /* from the tick */
 static void hand_tick(void)
 {
@@ -25797,7 +25899,7 @@ static void hand_tick(void)
     hand_game_check();
     if (pm_event("game_over") >= 0 && event_count(pm_event("game_over")) != hand.over_said) {
         hand.over_said = event_count(pm_event("game_over"));
-        say("handicap: the game is over (its game_over, %u so far) - everyone keeps their level", hand.over_said);
+        say("handicap: the game is over (its game_over, %u so far) - the next game starts everyone at 0", hand.over_said);
     }
     if (hand.start && !hand.reset_seen && pm_player() && switch_held(hand.start) && switch_held(hand.left)) {
         hand.reset_seen = 1;
@@ -25823,6 +25925,15 @@ static void hand_tick(void)
     if (!hand.open && p >= 1 && p <= 4 && !(hand.asked & (1u << p))) {
         ball = hand_ball();
         if (ball != 1u || !pm_in_game()) return;
+        if (!hand_may_open(ci_film_up(), hand.fresh_ms ? pm_ms() - (hand.fresh_ms & ~1ul) : ~0ul, ci.phase != CI_OFF,
+                           sty.open, coop_live ? coop_ball_waits() : -1, coop_live && coop_unserved())) {
+            if (!hand.wait_said) {
+                hand.wait_said = 1;
+                say("handicap: player %u's pick waits - ball 1 is not in the shooter lane yet (film %d, intro %d, "
+                    "chooser %d)", p, ci_film_up(), ci.phase, sty.open);
+            }
+            return;
+        }
         hand.picked |= 1u << p;
         hand.asked |= 1u << p;
         hand.open = p;
@@ -27359,9 +27470,18 @@ static unsigned sty_challenge_indices(unsigned *ch)
 }
 
 static int sty_wanted(void);
+/* PAD-1449 round 5 (DoomWalrus666: "Challenge should only have regular version and no characters or enhanced options"):
+ * of the game's own entries only STANDARD has the chooser; a challenge is the game's own, as Competition is (tests lift
+ * it verbatim) */
+static unsigned sty_chooser_own(unsigned own)
+{
+    return own == STY_STANDARD ? own : 0u;
+}
+
 static void sty_menu_own(unsigned own)
 {
     unsigned was = tm.own;
+    own = sty_chooser_own(own);
     if (!sty_wanted()) own = 0;
     tm.own = own;
     if (own) tm.seen_ms = pm_ms();

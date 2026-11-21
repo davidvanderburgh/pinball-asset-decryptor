@@ -115,7 +115,8 @@ def test_the_menu_and_the_game_wait_for_the_chooser():
     disp = R._lift(src, "static void on_team_dispatch(pm_reg *r)\n{")
     assert "sty_begin(own);" in disp and "if (kind == 1u && sty_wanted()) sty_begin(kind);" in disp
     assert "sty_open(" not in disp                                  # round 2: the menu's style first, else the card
-    assert "!sty.open && pm_in_game()" in R._lift(src, "static void coop_tick(void)\n{")   # no intro while choosing
+    assert "sty.open ? sty.preset == 1 : coop.plain," in R._lift(
+        src, "static void coop_tick(void)\n{")   # no intro while choosing (unless the film just took it), round 5
     due = R._lift(src, "static int ci_film_due(void)\n{")
     assert "sty.kind == STY_STANDARD || sty.kind == STY_CHALLENGE" in due   # NORMAL is the game's own film
 
@@ -330,3 +331,88 @@ int main(void)
     assert [f.name for f in held] == ["godzilla_le-1.16.port", "godzilla_pro-1.16.port"]
     for f in held:
         assert re.search(r"^value serve_music +66$", f.read_text(encoding="utf-8"), re.M), f.name
+
+
+def test_round5_one_intro_only_for_coop_and_teams_with_characters(tmp_path):
+    """PAD-1449 round 5 (DoomWalrus666: "The co-op video should be the default intro video for: Co-op (characters or
+    enhanced), Teams (characters or Enhanced) ... never ... Standard (regular, characters, enhanced)"; "ONE INTRO VIDEO
+    ON ALL MODES"; "Co-op characters currently plays the co-op/teams intro video with NO MUSIC"; "Challenge should only
+    have regular version"; "Only after the ball has been put into the shooter Lane should the handicap settings be able
+    to be manipulated"; "Any handicap selections should not carry over to the next game ever")"""
+    src = _src()
+    code = (r"""
+#include <stdio.h>
+#define STY_STANDARD 7u
+#define STY_CHALLENGE 8u
+#define HAND_FILM_MS 30000ul
+""" + R._lift(src, "static int ci_tick_begins(unsigned n, int have, int phase, int standard, int plain, int chooser, "
+                   "int film_fresh,")
+     + "\n" + R._lift(src, "static unsigned sty_chooser_own(unsigned own)")
+     + "\n" + R._lift(src, "static int hand_may_open(int film_up, unsigned long since_new, int intro, int chooser, "
+                       "int waits, int unserved)") + r"""
+int main(void)
+{
+    /* co-op CHARACTERS, chooser shut; Standard (CHARACTERS / ENHANCED); co-op NORMAL; chooser open, no film swap;
+     * chooser open, the film just swapped for the intro; asked already this game; no teammates; under way */
+    printf("%d%d%d%d%d%d%d%d|", ci_tick_begins(2, 1, 0, 0, 0, 0, 0, 1, 0), ci_tick_begins(1, 1, 0, 1, 0, 0, 0, 1, 0),
+           ci_tick_begins(2, 1, 0, 0, 1, 0, 0, 1, 0), ci_tick_begins(2, 1, 0, 0, 0, 1, 0, 1, 0),
+           ci_tick_begins(2, 1, 0, 0, 0, 1, 1, 1, 0), ci_tick_begins(2, 1, 0, 0, 0, 0, 0, 1, 1),
+           ci_tick_begins(0, 1, 0, 0, 0, 0, 0, 1, 0), ci_tick_begins(2, 1, 1, 0, 0, 0, 0, 1, 0));
+    printf("%u %u %u|", sty_chooser_own(STY_STANDARD), sty_chooser_own(STY_CHALLENGE), sty_chooser_own(0));
+    /* the game's film up early; up 40 s in (a stale word); an intro; the chooser; ball 1 still to come; waiting in
+     * the lane; launched (served before); a port with no plunger flags */
+    printf("%d%d%d%d%d%d%d%d\n", hand_may_open(1, 2000, 0, 0, 1, 0), hand_may_open(1, 40000, 0, 0, 1, 0),
+           hand_may_open(0, 2000, 1, 0, 1, 0), hand_may_open(0, 2000, 0, 1, 1, 0), hand_may_open(0, 2000, 0, 0, 0, 1),
+           hand_may_open(0, 2000, 0, 0, 1, 0), hand_may_open(0, 2000, 0, 0, 0, 0), hand_may_open(-1, 2000, 0, 0, -1, 1));
+    return 0;
+}
+""")
+    begins, chooser, hand = R._host_run(tmp_path, code, flags=("-no-pie",)).strip().split("|")
+    assert begins == "10001000"
+    assert chooser == "7 0 0"
+    assert hand == "01000111"
+    own = R._lift(src, "static void sty_menu_own(unsigned own)\n{")
+    assert "own = sty_chooser_own(own);" in own
+    # one intro a game: none after the game's own start film
+    swap = R._lift(src, "static int ci_film_swap(pm_reg *r)\n{")
+    assert "ci.own_film_game = chg_game_now() + 1;" in swap
+    begin = R._lift(src, "static void coop_intro_begin(const char *why)\n{")
+    assert begin.index("ci.own_film_game == g") < begin.index("ci.film_at && pm_ms()")
+    # no language window of ours with the ball in the lane: the language is the start film's own bar
+    tick = R._lift(src, "static void coop_intro_tick(void)\n{")
+    assert "ci.phase = CI_LANG" not in tick and "ci_language_open()" not in tick
+    # the handicap: 0 at every new game, and its pick waits for the lane
+    check = R._lift(src, "static void hand_game_check(void)\n{")
+    assert check.index("for (k = 1; k <= 4; k++) hand.level[k] = 0;") > check.index("if (!fresh) return;")
+    assert "hand_may_open(ci_film_up()," in R._lift(src, "static void hand_tick(void)\n{")
+    # Regular at the menu is the stock game for every kind: no chooser hold on ball 1, its music under its film
+    assert "    if (sty.preset == 1) {" in R._lift(src, "static void sty_begin(unsigned kind)\n{")
+
+
+def test_round5_the_home_team_screen_keeps_its_action(tmp_path):
+    """PAD-1449 round 5 (DoomWalrus666: "If you hold the left flipper to enter the home team screen, however, no user or
+    mode could be selected at all with the action button")"""
+    src = _src()
+    code = (r"""
+#include <stdio.h>
+#define STY_HOME_MS 1000ul
+""" + R._lift(src, "static int sty_home_hold(int left, int right, unsigned long held_for, int in_game)") + r"""
+int main(void)
+{
+    /* the left flipper alone 1.2 s in attract; 0.5 s; both flippers (the start menu's open); in a game; released */
+    printf("%d%d%d%d%d\n", sty_home_hold(1, 0, 1200, 0), sty_home_hold(1, 0, 500, 0), sty_home_hold(1, 1, 3000, 0),
+           sty_home_hold(1, 0, 3000, 1), sty_home_hold(0, 0, 3000, 0));
+    return 0;
+}
+""")
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "10000"
+    assert "!smn.go_ms && !smn.home_ms && sty_menu_kind() != 0u" in R._lift(src, "static int sty_menu_owns_action(void)\n{")
+    assert "smn.go_ms != 0 || smn.home_ms != 0," in R._lift(src, "static int sty_menu_held(void)\n{")
+    assert "sty_home_tick();" in R._lift(src, "static void coop_tick(void)\n{")
+    # a game begun with the game's own Action (the Home Team screen's) plays NORMAL: no version card at ball 1
+    norm = R._lift(src, "static int sty_default_normal(int preset, int menu_steps)")
+    code = "#include <stdio.h>\n" + norm + r"""
+int main(void) { printf("%d%d%d\n", sty_default_normal(0, 1), sty_default_normal(2, 1), sty_default_normal(0, 0)); return 0; }
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "100"
+    assert "sty_default_normal(sty.preset, smn.frame_ms != 0)" in R._lift(src, "static void sty_begin(unsigned kind)\n{")

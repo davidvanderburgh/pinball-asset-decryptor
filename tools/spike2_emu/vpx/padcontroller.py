@@ -3742,6 +3742,21 @@ class Bridge:
 
 # ---------------------------------------------------------------- COM ------
 
+def _no_result(wFlags, value):
+    """What a call hands back to VBScript. VBScript passes a VARIABLE argument
+    by reference, and when the caller takes no result (a statement call,
+    `Controller.PadB2S PadB2S`, or a put) pywin32 writes the return value
+    into the first such variable. PAD-1496: PadB2S, the table's B2S.Server,
+    became True, so every DOF call of an original table went to
+    PAD.Controller and was dropped; PADSPIKE2.vbs's `Controller.PadDOF "E",
+    DOFevent, 1` left DOFevent Null, so a DOF pulse's "off" went to E0 and
+    the toy stayed on; a put's None once took `Controller.Switch(sw)`'s sw.
+    VBScript asks with DISPATCH_PROPERTYGET set whenever it uses the result
+    (`x = Controller.m(v)`, `If Controller.m(v)`); without it, an empty
+    tuple is pywin32's "no byrefs to write" and every variable stays as it was."""
+    return value if wFlags & DISPATCH_PROPERTYGET else ()
+
+
 class _Anything:
     """Controller.Games(name).Settings.Value("volume") and friends: a thing
     that accepts any property and answers 0."""
@@ -3751,10 +3766,10 @@ class _Anything:
 
     def _dynamic_(self, name, lcid, wFlags, args):
         if wFlags & DISPATCH_PROPERTYPUT:
-            return None
+            return ()                       # no write-back (_no_result)
         if name.lower() in ("settings", "games"):
-            return _anything()
-        return 0
+            return _no_result(wFlags, _anything())
+        return _no_result(wFlags, 0)
 
 
 class PadController:
@@ -3776,6 +3791,29 @@ class PadController:
         atexit.register(self.bridge.b2s_finish)
         log("PAD.Controller created")
 
+    def __del__(self):
+        """Visual Pinball let go of the controller (the table closed). PAD-1496:
+        a table that handed B2S.Server over and closed without PadB2SFinish
+        (an exit sub that never ran, a TMNT copy patched with none) kept this
+        process up for good - the B2S thread's reference to B2S.Server is a
+        live COM object, and pywin32's server quits only once none is left -
+        and with it any DOF it hosted, holding the cabinet's devices at the
+        game's last colours so the next table's DOF could not open them. So
+        the last release ends the run, B2S.Server's thread and DOF itself."""
+        b = getattr(self, "bridge", None)
+        if b is None:
+            return
+        try:
+            if b.running:
+                log("released without Stop: stopping the run")
+                b.stop()
+            if b.b2s or b.dof:
+                log("released: B2S.Server and DOF let go")
+            b.b2s_finish()
+            b.dof_finish()
+        except Exception as exc:                            # noqa: BLE001
+            log("release: %s" % exc)
+
     TRACE = os.path.exists(os.path.join(os.path.dirname(LOG), "padvpx_trace"))
 
     def _dynamic_(self, name, lcid, wFlags, args):
@@ -3786,14 +3824,8 @@ class PadController:
         try:
             if wFlags & DISPATCH_PROPERTYPUT:
                 self._put(key, args)
-                # VBScript passes VARIABLES by reference: `Controller.Switch(sw) =
-                # True` hands `sw` over VT_BYREF, and a put that returns nothing
-                # writes Null back into it - the caller's `sw` is gone after the
-                # call (PADSPIKE2.vbs's swStartButton was, on the first real key).
-                # Returning the arguments is pywin32's way of handing byrefs back
-                # unchanged (a put has no return slot, so no leading None).
-                return tuple(args)
-            return self._get(key, args)
+                return ()                   # no write-back (_no_result)
+            return _no_result(wFlags, self._get(key, args))
         except Exception as exc:                            # noqa: BLE001
             # One line for the table's MsgBox ("Can't start Game ... " &
             # Err.Description); the traceback stays in the log. A bare Python

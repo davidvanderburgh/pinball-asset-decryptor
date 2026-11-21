@@ -8764,6 +8764,8 @@ def test_tmnt_closing_the_table_stops_the_game_backglass_and_dof(tmp_path):
     assert out.count("Controller.Stop") == 1 and out.count("Sub Table1_Exit") == 1
     assert out.index("PadStopB2S") < out.index("End Sub")
     # and run: the exit sub the patch writes finishes DOF (PADSPIKE2.vbs under VBScript)
+    if not (sys.platform == "win32" and shutil.which("cscript")):
+        return
     exit_lines = tm.exit_sub("Sub table1_KeyDown(ByVal keycode)\nEnd Sub\n")[0].split("\n")
     vbs, _ = _run_padspike2(tmp_path, ["Set Controller = New FakePad", 'PadB2SName = "tmnt_104"', "DofUp = True",
                                        "PadStartDOF", "PadStartB2S"] + exit_lines + ["table1_Exit"])

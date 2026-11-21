@@ -37,10 +37,19 @@ job_sleep 8
 echo "$NUMS" > "$DUMP/showreel"
 job_wait_log "$LOG" "show reel: [0-9]* of the game's shows" 20 || fail "the reel did not start: $(tail -2 "$LOG" | cut -c1-160 | tr '\n' '|')"
 end=$(( $(date +%s) + n * 6 + 40 ))
+size=0; still=0
 while [ "$(date +%s)" -lt "$end" ]; do
     grep -aq "show reel: done" "$LOG" && break
     python3 "$RIG/plunge.py" plunge > /dev/null 2>&1 < /dev/null    # keep a ball in play
     job_sleep 4
+    # PAD-1475: a show that stops the game leaves the log still after its "on" (Bond LE 1.06's 12 and 19): name it
+    now=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
+    if [ "$now" = "$size" ]; then still=$((still + 4)); else still=0; size=$now; fi
+    if [ "$still" -ge 20 ]; then
+        hung=$(grep -ao "show reel: #[0-9]* on" "$LOG" | tail -1 | grep -o "[0-9]*")
+        fin
+        job_fail "show #${hung:-?} stopped the game (nothing more in the log after its on): put it in the port's show_hangs"
+    fi
 done
 fin
 grep -aq "show reel: done" "$OUTD/mode.log" || job_fail "the reel did not finish: $(grep -ac 'show reel: #.* on' "$OUTD/mode.log") on"

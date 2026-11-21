@@ -4,6 +4,7 @@
 
 import { html, useEffect, useState, Modal, Button, Field, Check, Radio, Select, Seg, Table, Note,
          Spinner, tip, cx, call, mediaUrl } from "../core/ui.js";
+import { useShowNumber } from "./modes_shownum.js";   // PAD-1475 reopened
 
 const STOCK_TIP = "The timers, awards and shots of the modes the game shipped with. Pick a row, type a new value (or pick a shot) and press Set. Changes are saved with this project and put on the card by Write, like the Defaults tab. A timer that is an operator setting is the same number the Defaults tab shows (a machine still on the game's default takes the new one when it boots). A number the game works out in code, or one the game never uses in play, can't be changed here; the row says why. To rename a mode, edit its title on the Text tab.";
 
@@ -331,10 +332,18 @@ function CoopLook({ look }) {
 }
 
 // PAD-1476: the co-op intro's light show: one the game's own modes play, grouped by the mode (s.mode_shows: "#211")
-function introShowOptions(value, modeShows) {
-  const out = [{ value: "(none)", label: "(none)" }, ...modeShows.map((x) => ({ value: x.value, label: x.label, group: `From ${x.group}${x.checked === false ? " (not checked on this game)" : ""}` }))];
-  if (value && !modeShows.some((x) => x.value === value)) out.push({ value, label: `Light show ${value.replace("#", "")}` });
+function introShowOptions(value, modeShows, pick = null) {
+  const out = [{ value: "(none)", label: "(none)" }, ...modeShows.map((x) => ({ value: x.value, label: `${x.label}${x.checked === false ? " (not checked on this game)" : ""}`, group: `From ${x.group}` }))];
+  // PAD-1475 reopened: one the list does not have goes in the number box beside it (useShowNumber)
+  if (value && !modeShows.some((x) => x.value === value) && !(pick && pick.max)) out.push({ value, label: `Light show ${value.replace("#", "")}` });
   return out;
+}
+
+// PAD-1475 reopened: the intro's show pick, with Another, by its number
+function IntroShowPick({ value, modeShows, pick, disabled, title }) {
+  const n = useShowNumber(value || "(none)", introShowOptions(value, modeShows, pick), pick,
+    (v) => call("modes.coop_intro_show", v === "(none)" ? "" : v));
+  return html`<${Select} sm width=${340} value=${n.sel} disabled=${disabled} options=${n.opts} title=${title} onChange=${n.onSel} />${disabled ? null : n.box}`;
 }
 
 export function CoopCharsDialog({ s, onClose }) {
@@ -469,10 +478,8 @@ export function CoopCharsDialog({ s, onClose }) {
     </div>
     ${ch.intro ? html`<div class="row" style="margin-top:6px; gap:8px">
       <span class="small dim" style="white-space:nowrap">Light show with it</span>
-      <${Select} sm width=${340} value=${ch.intro_show || "(none)"} disabled=${!!ch.intro_show_off}
-        options=${introShowOptions(ch.intro_show || "", s.mode_shows || [])}
-        title=${ch.intro_show_off || "One of the light shows the game's own modes play, on the playfield while the intro plays; it stops when the intro ends or is skipped."}
-        onChange=${(v) => call("modes.coop_intro_show", v === "(none)" ? "" : v)} />
+      <${IntroShowPick} value=${ch.intro_show || ""} modeShows=${s.mode_shows || []} pick=${s.show_pick} disabled=${!!ch.intro_show_off}
+        title=${ch.intro_show_off || "One of the game's own light shows (the ones its modes play are listed under the mode, or pick any by its number), on the playfield while the intro plays; it stops when the intro ends or is skipped."} />
       <span class="small dim wrap">${ch.intro_show_off || ((s.mode_shows || []).length ? "Each is listed under the game's mode that plays it (its How it works lists them too)." : "The game's modes' light shows are listed once the card has been read.")}</span>
     </div>` : null}
     <div class="row" style="margin-top:8px; gap:8px">

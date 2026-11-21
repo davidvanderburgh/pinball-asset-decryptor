@@ -148,7 +148,9 @@ def test_the_lights_page_offers_it():
     from pinball_decryptor.webui.tabs import modes as M
     assert "show_hit" in M._STR_FIELDS and M._DEFAULTS["show_hit"] == "(none)"
     js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
-    assert 'When a shot is hit</span><${Select} value=${f.show_hit}' in js and 'k="f:show_hit"' in js
+    # PAD-1475 reopened: its pick (ShowSelect: the list and Another, by its number) saves f:show_hit
+    assert 'When a shot is hit</span><${ShowSelect} k="show_hit" value=${f.show_hit}' in js
+    assert "setF(k, v, true)" in js
 
 
 def test_the_docs_say_so():

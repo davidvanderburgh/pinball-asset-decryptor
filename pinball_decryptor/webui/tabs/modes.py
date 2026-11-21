@@ -207,6 +207,36 @@ def fix_chip(problems):
     return dict(PAGES)[pages[0]] + (" •" if len(pages) == 1 else " +%d •" % (len(pages) - 1))
 
 
+#: PAD-1475 reopened: the pick lists' group of the shows the reel saw light the playfield that are no mode's own
+OTHER_SHOWS = "Other shows seen lighting the playfield"
+
+
+def _mode_show_reading(tab, p=None):
+    """PAD-1476: ``(p, show reading, card reading, n_max)`` where the card read is this title's build and it can
+    play a show by its number; else None."""
+    p = p if p is not None else tab._title()
+    clips = tab._how
+    n_max = int(getattr(p, "show_numbers", 0) or 0) if p is not None else 0
+    if clips is None or not n_max:
+        return None
+    ver = ".".join(str(clips.version or "").split(".")[:2])     # the card's "1.16.0" is the port's 1.16
+    if os.path.basename(getattr(p, "port", "") or "") != "%s-%s.port" % (clips.game, ver):
+        return None
+    return p, clips.show_reading, clips.reading, n_max
+
+def _show_name(sh, reading, num):
+    """PAD-1475 reopened: a show's name: the port's, else its mode's ("Disco Volante Multiball's show") where
+    the show's body is one mode's own code, else ""."""
+    named = sh.names.get(str(num), "")
+    if named:
+        return named
+    cls = sh.own.get(str(num), "")
+    if cls:
+        label = reading.label(cls) if reading is not None else cls
+        return "%s%s show" % (label, "'" if label.endswith("s") else "'s")
+    return ""
+
+
 class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin,
                RulesSheetMixin, HowItWorksMixin, TabService):
     ns = "modes"
@@ -424,7 +454,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         self.set(feed_on=False, feed_url="", feed_note="", feed_note_kind="", feed_shown=False,   # PAD-1204
                  feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="", feed_contract=None)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
-                 profile=self._profile_payload(None), mode_shows=[], rows=[], sel=None, game_rows=[],
+                 profile=self._profile_payload(None), mode_shows=[], show_pick={}, rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
                  cap_text="", new_ok=False, ex_ok=False, dup_ok=False, del_ok=False, copy_ok=False,
                  port_ok=False, port_shown=False, port_word="", port_targets=[],                 # PAD-396
@@ -1222,6 +1252,11 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         if not project:
             return False
         num = _MPs.show_number(value) if isinstance(value, str) else 0
+        prof = self._title()
+        if num and prof is not None and not _MPs.game_show_ok(prof, value):    # PAD-1475 reopened: by any number
+            self._say("co-op intro: %s cannot play the game's light show %d%s" % (
+                prof.label, num, " (it stops the game)" if num in (prof.show_hangs or ()) else ""))
+            return False
         chars = _CP.load_characters(project)
         if num:
             chars["intro_show"] = num
@@ -3017,26 +3052,25 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 "wizard_claims": bool(getattr(p, "wizard_claims", False))}
 
     def _mode_show_rows(self, p=None):
-        """PAD-1476: the light shows the game's OWN modes start (the card's reading, PAD-1475's How it works), as
+        """PAD-1476: the light shows the game's OWN modes play (the card's reading, PAD-1475's How it works), as
         picks for a mode's Lights page, its blocks and the co-op intro: ``[{value "#211", label, group, modes}]``,
-        a show one mode starts under that mode, one several start under "Started by several of its modes"; []
+        a show one mode plays under that mode, one several start under "Started by several of its modes"; []
         until the card is read, when the card is another build than the title shown, or where the build cannot
-        play a show by its number."""
-        p = p if p is not None else self._title()
-        clips = self._how
-        n_max = int(getattr(p, "show_numbers", 0) or 0) if p is not None else 0
-        if clips is None or not n_max:
+        play a show by its number. PAD-1475 reopened: a mode's shows are the ones its code starts by a fixed number
+        and the ones whose body is its own code (it works the number out as it plays), and the shows the reel saw
+        light the playfield that are no mode's come last, under "Other shows seen lighting the playfield"."""
+        got = _mode_show_reading(self, p)
+        if got is None:
             return []
-        ver = ".".join(str(clips.version or "").split(".")[:2])     # the card's "1.16.0" is the port's 1.16
-        if os.path.basename(getattr(p, "port", "") or "") != "%s-%s.port" % (clips.game, ver):
-            return []
-        sh = clips.show_reading
-        reading = clips.reading
+        p, sh, reading, n_max = got
         lit = getattr(p, "show_lit", None)              # measured: only the ones seen lighting on their own
+        fixed = {r[0] for rows in sh.modes.values() for r in rows}
         by_num, order = {}, []
-        for cls, rows in sh.modes.items():
-            for num, _at, _n in rows:
-                if not 0 < num < n_max or (lit is not None and num not in lit):
+        for cls in list(sh.modes) + sorted({c for c in sh.own.values() if c not in sh.modes}):
+            nums = [r[0] for r in sh.modes.get(cls) or ()] + sh.own_shows(cls)
+            for num in nums:
+                state = MP.show_checked(p, num, fixed)
+                if not 0 < num < n_max or state in ("dark", "hangs"):
                     continue
                 if num not in by_num:
                     by_num[num] = []
@@ -3047,21 +3081,50 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         out = []
         for num in order:
             names = by_num[num]
-            named = sh.names.get(str(num), "")
-            label = named or "Light show %d" % num
+            state = MP.show_checked(p, num, fixed)
+            label = sh.names.get(str(num), "") or "Light show %d" % num
             # the mode in the label too: a closed list shows the label alone
             group = names[0] if len(names) == 1 else "Started by several of its modes"
             label += " (%s%s)" % (", ".join(names[:2]), " +%d" % (len(names) - 2) if len(names) > 2 else "")
             out.append({"value": "#%d" % num, "label": label, "group": group, "modes": names, "num": num,
-                        "checked": lit is not None})              # False: not measured on this build yet
-        out.sort(key=lambda r: (r["group"] == "Started by several of its modes", r["group"].lower(), r["num"]))
+                        "checked": state == "lit"})             # False: not measured on this build yet
+        for num in sorted(lit or ()):                       # seen lighting, and no mode's
+            if num in by_num or not 0 < num < n_max or MP.show_checked(p, num) == "hangs":
+                continue
+            label = _show_name(sh, reading, num) or "Light show %d" % num
+            out.append({"value": "#%d" % num, "label": "%s (%d)" % (label, num) if label != "Light show %d" % num
+                        else label, "group": OTHER_SHOWS, "modes": [], "num": num, "checked": True})
+        out.sort(key=lambda r: (r["group"] == OTHER_SHOWS, r["group"] == "Started by several of its modes",
+                                r["group"].lower(), r["num"]))
         return out
+
+    def _show_pick(self, p=None):
+        """PAD-1475 reopened: what "Another, by its number" needs: ``{max, names {n: name}, seen {n: "lit"|"dark"}}``
+        - the highest number the game's table has, every number's name where one is known (the port's, else its
+        mode's) and what the show reel saw of it; {} where no show can be played by its number."""
+        got = _mode_show_reading(self, p)
+        p = p if p is not None else self._title()
+        n_max = int(getattr(p, "show_numbers", 0) or 0) if p is not None else 0
+        if not n_max:
+            return {}
+        names, seen = {}, {}
+        if got is not None:
+            _p, sh, reading, _n = got
+            fixed = {r[0] for rows in sh.modes.values() for r in rows}
+            for num in range(1, n_max):
+                name = _show_name(sh, reading, num)
+                if name:
+                    names[str(num)] = name
+                state = MP.show_checked(p, num, fixed)
+                if state:
+                    seen[str(num)] = state
+        return {"max": n_max - 1, "names": names, "seen": seen}
 
     def _publish_mode_shows(self):
         """PAD-1476: the page's ``mode_shows`` (the picks above), and the card read for them when it is not yet."""
         if self._how is None:
             self._how_kick()
-        self.set(mode_shows=self._mode_show_rows())
+        self.set(mode_shows=self._mode_show_rows(), show_pick=self._show_pick())
 
     @staticmethod
     def _game_show_rows(p):
@@ -3340,7 +3403,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             words = "(no shots: this project names no card)"
         else:
             words = "(no shots: modes of your own can't be made for this card yet)"
-        self.set(profile=self._profile_payload(None), shots_text=words, mode_shows=[])
+        self.set(profile=self._profile_payload(None), shots_text=words, mode_shows=[], show_pick={})
         self._publish_form()
         self._publish_examples()
 

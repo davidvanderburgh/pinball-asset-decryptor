@@ -533,5 +533,8 @@ site coil_used             0x002618b8 0xe92d43f8 0xe30d8d3c
 site show_start           0x003b12c0 0xe92d47f0 0xe2508000   # show_start(n) -> the show's record, or 0
 site show_stop_number     0x0025ee88 0xe92d4070 0xe30a6ab8   # (n): every show numbered n ends
 value show_count          493
+# PAD-1475: the shows that stop the game when one of ours starts them by number (the show reel: the game logs
+# nothing more after its "on"; 2026-11-20) - the runtime never plays them, the Modes tab says so
+text show_hangs          293
 # the show reel (emulator): the shows above seen lighting the playfield on their own
 text show_lit            113 114 115 117 118 119 132 133 134 135 137 138 150 152 153 155 167 168 169 170 172 185 187 198 200 202 216 221 222 235 236 237 238 240 255 256 257 258 270 271 273 295 296 449 450

@@ -2,7 +2,10 @@
 """PAD-1476: the show reel's rigbatch list - one line per port: ``<key>|<card>|NUMS=<the shows its game's own modes
 start, comma-separated>`` - for the builds whose game program and card are found.
 
-    reel_list.py <folder of <game>-<maj>_<min>_0[_spike2].elf> <cards folder> [<key>...] > list.txt
+    reel_list.py <folder of <game>-<maj>_<min>_0[_spike2].elf> <cards folder> [--all] [<key>...] > list.txt
+
+--all reels every number of the game's show table (PAD-1475 reopened: a mode can play any of them by its number, and
+the Modes tab lists the ones seen lighting), not only the ones the game's own modes start.
 
 The cards folder is searched (and its "older versions" folder) for ``<game>-<maj>_<min>_0*.raw``. Ports already
 carrying ``text show_lit`` are left out unless named. Builds missing a program, a card or any mode show are reported
@@ -19,6 +22,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..", "..", "..")))
 sys.path.insert(0, os.path.dirname(HERE))
 from pinball_decryptor.plugins.stern import clip_modes as CM  # noqa: E402
 from pinball_decryptor.plugins.stern import clip_shows as SH  # noqa: E402
+from pinball_decryptor.plugins.stern import mode_project as MP  # noqa: E402
 
 CHUNK = 128                # pad_mode_runtime.c REEL_MAX (and 128 numbers fit its 800-byte read of the file)
 # shows that stop the game when a mode of ours plays them (emulator: the game logs nothing more after "#n on"); left
@@ -42,7 +46,9 @@ def wsl(path):
 
 
 def main(argv):
-    elves, cards, only = argv[1], argv[2], set(argv[3:])
+    elves, cards = argv[1], argv[2]
+    every = "--all" in argv[3:]
+    only = {a for a in argv[3:] if a != "--all"}
     for port in sorted(glob.glob(os.path.join(PSN.PORTS, "*.port"))):
         key = os.path.basename(port)[:-5]
         if only and key not in only:
@@ -57,7 +63,9 @@ def main(argv):
         ctx = {}
         CM.analyse(open(elf, "rb").read(), set(), ctx=ctx)
         reading = SH.analyse(game=game, version=version, ctx=ctx)
-        nums = sorted({n for rows in reading.modes.values() for n, _a, _c in rows} - NEVER.get(game, set()))
+        nums = set(range(1, reading.count)) if every else {n for rows in reading.modes.values() for n, _a, _c in rows}
+        hangs = MP._show_hangs(MP.read_port(port))         # PAD-1475: the port's own list of them
+        nums = sorted(nums - NEVER.get(game, set()) - set(hangs))
         if not nums:
             sys.stderr.write("%s: no mode shows (%s)\n" % (key, reading.note))
             continue

@@ -243,3 +243,26 @@ def test_godzillas_battle_select_on_the_real_card():
     earth = by_size[(1360, 768)]
     s, _left = radium_grow.shown_scale(sc, earth, (6573, 3712))
     assert radium_grow.shown_size((6573, 3712), s) == (2734, 1544)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# video
+# ---------------------------------------------------------------------------------------------------------------
+def test_the_video_tab_says_what_a_replacement_is_converted_to():
+    from types import SimpleNamespace
+    from pinball_decryptor.webui.tabs.video import VideoTab
+
+    class _Tab:
+        _size_note = VideoTab._size_note
+
+        def __init__(self, facts):
+            self._pv = {"rep": {"facts": facts}}
+
+        def get(self, _k):
+            return self._pv
+    slot = SimpleNamespace(info=SimpleNamespace(width=1360, height=768, fps=30.0))
+    note = _Tab({"width": 3840, "height": 2160, "fps": 60.0})._size_note(slot, "video/a.mp4")
+    assert note["text"].startswith("Your video is 3840×2160 at 60 fps. This slot plays 1360×768 at 30 fps: PAD "
+                                   "will convert it to that")
+    assert _Tab({"width": 1360, "height": 768, "fps": 30.0})._size_note(slot, "video/a.mp4") is None
+    assert _Tab({})._size_note(slot, "video/a.mp4") is None             # not read yet

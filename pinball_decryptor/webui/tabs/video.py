@@ -3394,6 +3394,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         pv = dict(pv)
         pv[side] = pane
         self.set(preview=pv)
+        if side == "rep" and "facts" in fields:
+            self._update_note()                     # the size note needs the replacement's facts
 
     @rpc
     def make_proxy(self, side, seq, fmt="mp4"):
@@ -3670,6 +3672,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                         "as-is\" for the lot, or pick a game-ready file."
                         % (conflict or ("%s can't play on the machine "
                                         "as it is" % os.path.basename(rep))))}
+            if note is None and rep:
+                note = self._size_note(slot, rel)
             if note is None and self._variants.get(rel):
                 # PAD-446: the slot's random clips, where nothing is wrong
                 note = {"kind": "info", "text": self._variants_words(rel)}
@@ -3685,6 +3689,25 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             pv["sounds"] = sounds
             pv["seen"] = seen
             self.set(preview=pv)
+
+    def _size_note(self, slot, rel):
+        """Simon (2026-11-21): "Your image/video is nnnn x nnnn. The original image size is nnnn x nnnn. PAD will
+        limit your image to nnnn x nnnn" - a replacement of another size or frame rate is converted to the slot's
+        (core/video_slots.stage_replacement), once its file has been read (the Replacement player's facts)."""
+        facts = ((self.get("preview") or {}).get("rep") or {}).get("facts") or {}
+        info = slot.info
+        if not (facts.get("width") and info and info.width and info.height):
+            return None
+        mine = (int(facts["width"]), int(facts["height"]), float(facts.get("fps") or 0.0))
+        want = (int(info.width), int(info.height), float(info.fps or 0.0))
+        same_fps = not (mine[2] and want[2]) or abs(mine[2] - want[2]) < 0.5
+        if mine[:2] == want[:2] and same_fps:
+            return None
+        def words(v):
+            return "%d×%d" % v[:2] + (" at %g fps" % round(v[2], 2) if v[2] else "")
+        return {"kind": "info", "text": (
+            "Your video is %s. This slot plays %s: PAD will convert it to that, since the machine can't show "
+            "more. Your own file stays as it is." % (words(mine), words(want)))}
 
     def _reselect(self, rels):
         self._sel_seq += 1

@@ -585,5 +585,6 @@ def media_facts(path):
         "backend": _video.backend_for(path) is not None if path else False,
         "width": info.width if info else 0,
         "height": info.height if info else 0,
+        "fps": float(info.fps or 0.0) if info else 0.0,
         "dur": float(dur or 0.0),
     }

@@ -21,6 +21,9 @@ from pinball_decryptor.plugins.stern import clip_modes as CM  # noqa: E402
 from pinball_decryptor.plugins.stern import clip_shows as SH  # noqa: E402
 
 CHUNK = 128                # pad_mode_runtime.c REEL_MAX (and 128 numbers fit its 800-byte read of the file)
+# shows that stop the game when a mode of ours plays them (emulator: the game logs nothing more after "#n on"); left
+# out of the reel so the rest of the chunk is measured - never lit, so never offered
+NEVER = {"batman": {293}}  # Batman 1.13 and 1.14 (2026-11-20)
 import port_show_numbers as PSN  # noqa: E402
 
 
@@ -54,7 +57,7 @@ def main(argv):
         ctx = {}
         CM.analyse(open(elf, "rb").read(), set(), ctx=ctx)
         reading = SH.analyse(game=game, version=version, ctx=ctx)
-        nums = sorted({n for rows in reading.modes.values() for n, _a, _c in rows})
+        nums = sorted({n for rows in reading.modes.values() for n, _a, _c in rows} - NEVER.get(game, set()))
         if not nums:
             sys.stderr.write("%s: no mode shows (%s)\n" % (key, reading.note))
             continue

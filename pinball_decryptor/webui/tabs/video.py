@@ -1597,7 +1597,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                 if not path or path in self._secs_busy:
                     continue
                 key = self._file_key(path)
-                if key is not None and key not in self._secs:
+                # Simon (2026-11-21): the size too - a length read elsewhere (the preview) left Imported blank
+                if key is not None and (key not in self._secs or key not in self._dims):
                     want.append((rel, path))
         if not want:
             return
@@ -1629,8 +1630,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             self._secs_busy.discard(path)
             if key is not None:
                 self._secs[key] = secs
-                if dims and dims[0]:
-                    self._dims[key] = dims[0]
+                self._dims[key] = dims[0] if dims else None
             rels.add(rel)
         if self._sort and self._sort[0] == "fit":
             self._refresh_list()

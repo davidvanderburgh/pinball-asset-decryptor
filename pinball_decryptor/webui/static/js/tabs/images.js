@@ -489,7 +489,8 @@ export default function ImagesTab() {
     },
   };
   const nameCol = {
-    key: "#0", label: "Original Image", sort: "#0", width: `minmax(${MIN_W["#0"]}px,1.5fr)`,
+    // Simon (2026-11-21): "In images - say a half" (the default name width; a dragged one stays)
+    key: "#0", label: "Original Image", sort: "#0", width: `minmax(${MIN_W["#0"]}px,0.75fr)`,
     render: (e) => {
       if (typeof e !== "number") return html`<span class="img-grp ellip" title=${e.l}>${e.l}</span>`;
       const row = slotAt(s, e);

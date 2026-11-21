@@ -215,7 +215,8 @@ const HEADS = { rel: "Original Video", len: "Length", res: "Original", imp: "Imp
 const RES_TIPS = {
   res: "Original: the resolution of the original clip pulled from the raw image.",
   imp: "Imported: the resolution of the video you chose. It stays full size in your project however big it is; only the card gets the Written size.",
-  cur: "Current: the biggest the game shows this slot: its player's box times its biggest zoom, with your scene layout. The clips share a player, so this is the most any of them is shown at.",
+  // Simon (2026-11-21): "The tooltip for the "current" size is pretty awful" - his words
+  cur: "Current: this is the size the machine's video player plays the video at, although the actual screen may be a lower or higher resolution.",
   wri: "Written: the resolution PAD will write to the card - your video in the slot's shape, never bigger than you imported it, than Current, or than the 1920×1088 the machine's video decoder plays. Orange: smaller than you imported it.",
 };
 const ORG_TIP = "Origin: Original is the official card's asset; Custom is not the official card's, but was on the card this project was extracted from.";
@@ -1176,7 +1177,9 @@ export default function VideoTab() {
   }, []);
   const fit = useMemo(() => fitColumns(allRows), [s.rows, fontTick]);
   const flexLeft = FLEX.some((k) => !tuned[k]);
-  const width = (k) => (FLEX.includes(k) ? `minmax(${COL_MIN[k]}px,${fit[k]}fr)` : `${fit[k]}px`);
+  // Simon (2026-11-21): "In videos lets reduce the default filename/path width to perhaps a third of what it currently
+  // is ... User can always re-adjust if they want"
+  const width = (k) => (FLEX.includes(k) ? `minmax(${COL_MIN[k]}px,${k === "rel" ? fit[k] / 3 : fit[k]}fr)` : `${fit[k]}px`);
   // the last column never takes a drag; it only stretches once every
   // stretching column is one the user sized (Tk _pin_tree_columns)
   const convWidth = flexLeft ? `calc(${fit.conv}px)` : `minmax(${fit.conv}px,1fr)`;

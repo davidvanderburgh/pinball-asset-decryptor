@@ -601,7 +601,7 @@ class TextTab(TabService):
         self._current = i
         locked = self._locked(r)
         if locked:
-            note = game_filled.locked_note(r["original"], self._text_rows)
+            note = game_filled.locked_note(r["original"], self._text_rows, self._note_dir())
         elif R.row_is_scene(r):
             note = R.scene_note(r, self._scene_name(r["path"]))
         else:
@@ -643,7 +643,7 @@ class TextTab(TabService):
         new = self.text_new_var.get()
         if new != orig and self._locked(r):
             compat.messagebox.showinfo("The game writes this line",
-                                       game_filled.locked_note(orig, self._text_rows))
+                                       game_filled.locked_note(orig, self._text_rows, self._note_dir()))
             return False
         if R.row_len(r, new) > R.row_budget(r):
             compat.messagebox.showwarning("Replacement too long",
@@ -664,10 +664,14 @@ class TextTab(TabService):
         self._set_replacements([(rr, eff) for rr in targets])
         return True
 
+    def _note_dir(self):
+        """The project folder the rows came from, for :func:`.game_filled.locked_note` (its clip names)."""
+        return self._text_scan_dir or self._assets_path()
+
     def _locked(self, r):
         """PAD-513 (DragonRR): a scene line every box of which the game writes as it plays
         (:mod:`..game_filled`): new words for it would never show, so they are refused."""
-        return game_filled.is_locked(self._text_scan_dir or self._assets_path(), r)
+        return game_filled.is_locked(self._note_dir(), r)
 
     def _apply_all(self, r):
         """Does an edit of row *r* go to every row with its original? Never
@@ -1410,7 +1414,7 @@ class TextTab(TabService):
         new = original if new is None else new
         if new != original and self._locked(rows[0]):
             compat.messagebox.showinfo("The game writes this line",
-                                       game_filled.locked_note(original, self._text_rows))
+                                       game_filled.locked_note(original, self._text_rows, self._note_dir()))
             return False
         if R.row_len(rows[0], new) > R.row_budget(rows[0]):
             compat.messagebox.showwarning("Replacement too long",

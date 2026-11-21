@@ -7069,6 +7069,12 @@ Aerosmith, Batman, Bond, Guardians Pro, Star Wars and Stranger Things at a game'
 double spaces, keeps a closing `BALL %d` whole, and the pick says `P1 ALPHA 20`. `value serve_music` is on the start
 menu's titles too (the request right after the serve in the emulator's sound log: Jaws 66, John Wick
 77, King Kong 124, Metallica 65, X-Men 191 - the first of the two long tracks it asks there). Emulator: 53 of 53 builds hold ball 1 until the character is taken.
+Not every game asks for none while that music still plays: X-Men asks for 191 again at the serve, and its record was
+looked up again (the track started over 6.6 s in). Taking its steal flag away did not help (it was looked up again all
+the same), so from our early request until 3 s past the serve, the game's repeat of it while ours plays is not passed
+on: the sound worker is given request 0 (no record: nothing plays) and the track plays on (`srv_worker`, `srv_tick`;
+the sound worker is hooked at the co-op arm where the port names `serve_music`). Emulator: X-Men LE's 191 is not looked
+up again and still plays a second after the repeat.
 
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
 LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and

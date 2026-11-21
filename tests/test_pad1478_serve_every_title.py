@@ -165,3 +165,18 @@ def test_the_start_menu_titles_name_their_serve_music():
             assert got == [str(want[port.stem])], port.name
         else:                                                         # no chooser: nothing would ask it (Bond 60th)
             assert "serve_music" not in text, port.name
+
+
+def test_the_serve_music_plays_on_through_the_games_repeat():
+    """Uncanny X-Men 0.98 asks for its serve music (191) again at the serve, and the track started over 6.6 s in
+    (emulator sound log). Clearing its steal flag did not help (its record was still looked up again), so from our early
+    request until 3 s past the serve, the game's repeat while ours plays is not passed on: the worker gets request 0."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    worker = R._lift(src, "static int srv_worker(unsigned request)\n{")
+    assert "if (!srv.seen++) return 0;" in worker                     # our own request goes as it is
+    assert worker.index("pm_sound_active(request)") < worker.index("return 1;")
+    assert "if (srv_worker(WORKER_REQ(r))) r[0] = 0;" in R._lift(src, "static void on_sound_worker(pm_reg *r)")
+    wrap = R._lift(src, "static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    assert wrap.index("ci_serve_game(") < wrap.index("srv.until = (pm_ms() + SRV_AFTER_MS) | 1;")
+    assert "srv_tick();" in src
+    assert re.search(r"pm_port_value\(\"serve_music\", 0\) && fn\(\"sound_worker\"\) && !worker_hooked\)", src)

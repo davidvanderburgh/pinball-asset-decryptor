@@ -1791,6 +1791,8 @@ static void sound_key_say(const unsigned char *k)
 #define WORKER_REQ(r) ((r)[0])
 #define WORKER_N(r)   ((r)[2])
 #endif
+static int srv_worker(unsigned request);    /* PAD-1478, with the serve below */
+static void srv_tick(void);
 static void on_sound_worker(pm_reg *r)
 {
     if (worker_log) {
@@ -1800,6 +1802,7 @@ static void on_sound_worker(pm_reg *r)
     if (cabs_live) cabs_worker(WORKER_REQ(r));   /* PAD-1040: a song with an expression light show of the card's */
     if (att_live) att_worker(WORKER_REQ(r));     /* PAD-645: the game's own sound at an attract press */
     if (blist_live) blist_play(WORKER_REQ(r));
+    if (srv_worker(WORKER_REQ(r))) r[0] = 0;     /* PAD-1478: the serve music's repeat is not passed on */
 }
 
 /* ---- item 163: a carrier's STOCK key swapped for an appended record's key, for one play --------
@@ -24174,6 +24177,7 @@ static void coop_tick(void)
                                                               * game's own; PAD-1224: an Enhanced Standard game's too */
     coop_join_tick();                                         /* PAD-1052 */
     sty_tick();                                               /* PAD-1449 */
+    srv_tick();                                               /* PAD-1478 */
     if (n && ci.clip[0] && !ci.phase && !sty.open && pm_in_game() && ci.game != chg_game_now() + 1)   /* PAD-1114 */
         coop_intro_begin(coop.teams ? "a team game begins" : coop.standard ? "an Enhanced Standard game begins"
                          : "a co-op game begins");
@@ -24867,11 +24871,52 @@ static int srv_music_wanted(unsigned music, unsigned kind, int preset, int open,
     return music && open && ball == 1u && (kind == STY_STANDARD || kind == STY_CHALLENGE) && preset >= 2;
 }
 
+/* PAD-1478: not every game asks for none while it plays: Uncanny X-Men 0.98 asks for 191 again at the serve, and its
+ * record was looked up again - the track started over 6.6 s in (emulator sound log). So from our early request until
+ * 3 s past the serve, a request of it while it still plays gets no steal flag, as PAD-645's at an attract press: it
+ * cannot take the channel ours holds, and plays on unbroken. Its flags come back a second later (srv_tick). */
+#define SRV_AFTER_MS 3000ul
+static struct { volatile unsigned music, seen; volatile unsigned long until, check_at; int said; } srv;
+
+/* the sound worker's (any thread): 1 = the game's repeat of the serve music, still playing ours - the worker is given
+ * request 0 instead (no record of its own: nothing is played) and ours plays on */
+static int srv_worker(unsigned request)
+{
+    if (!srv.music || request != srv.music) return 0;
+    if (!srv.seen++) return 0;                                /* our own request */
+    if (srv.until && (long)(pm_ms() - srv.until) > 0) return 0;
+    if (!pm_sound_active(request)) {
+        if (!srv.said++) say("styles: the game asked for its serve music %u again - it had ended, so it plays again", request);
+        return 0;
+    }
+    srv.check_at = pm_ms() | 1;
+    if (!srv.said++) say("styles: the game asked for its serve music %u again while ours played - not passed on, so "
+                         "it plays on", request);
+    return 1;
+}
+
+static void srv_tick(void)
+{
+    unsigned long now = pm_ms();
+    if (!srv.music) return;
+    if (srv.check_at && (long)(now - srv.check_at) > 1000) {
+        srv.check_at = 0;
+        say("styles: the serve music %u %s a second after the game's repeat", srv.music,
+            pm_sound_active(srv.music) ? "still plays" : "has STOPPED");
+    }
+    if (!srv.check_at && srv.until && (long)(now - srv.until) > 0) srv.music = 0;
+}
+
 static void srv_music_early(void)
 {
     unsigned m = (unsigned)pm_port_value("serve_music", 0);
     if (!srv_music_wanted(m, sty.kind, sty.preset, sty.open, coop_ball_byte ? *coop_ball_byte : 1u)) return;
     if (!fn("sound_play") || pm_sound_active(m)) return;
+    srv.seen = 0;
+    srv.check_at = 0;
+    srv.until = 0;
+    srv.said = 0;
+    srv.music = worker_hooked ? m : 0;                        /* the worker is hooked as the serve is (coop arm) */
     pm_sound(m);
     say("styles: ball 1 waits for the pick - the game's serve music %u asked for now, under its intro", m);
 }
@@ -24886,7 +24931,9 @@ static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
      * Venom LE 1.07). Asked here first, on the game's process, it forms before the pick hold decides. */
     coop_solo_check();
     coop_pick_hold();                                         /* PAD-1215 */
-    return ci_serve_game(r0, r1, r2, r3);
+    r0 = ci_serve_game(r0, r1, r2, r3);
+    if (srv.music) srv.until = (pm_ms() + SRV_AFTER_MS) | 1;   /* PAD-1478: the ball start asks for its music now */
+    return r0;
 }
 
 static unsigned coop_first_ball_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
@@ -25146,6 +25193,8 @@ static void coop_arm(void)
         if ((ci.clip[0] || (coop_pick_on && coop_ch_n)) && fn("serve_ball") && !ci_serve_game) {
             unsigned st = hook_call(fn("serve_ball"), (void *)ci_serve_wrap);   /* PAD-1114 round 2, PAD-1215 */
             ci_serve_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)st;
+            if (st && pm_port_value("serve_music", 0) && fn("sound_worker") && !worker_hooked)   /* PAD-1478: srv_worker */
+                worker_hooked = hook(fn("sound_worker"), on_sound_worker);
             say("co-op: %s", !st ? "the serve could not be hooked - the ball comes as the game serves it, and a pick "
                 "with it in the lane takes a launch" : ci.clip[0] ? "ball 1's serve waits for the intro, and each "
                 "player's first ball for their character pick" : "each player's first ball waits to be served for "

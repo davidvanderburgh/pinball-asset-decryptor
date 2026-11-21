@@ -7093,6 +7093,24 @@ player 1's ball waited 20 s for its pick, player 2's was served at the Action pi
     co-op: player 2's ball waits to be served until their character is picked
     co-op: player 2's ball is served after 4513 ms (the character is taken)
 
+PAD-1478: only the Godzilla ports had `site serve_ball`, so on every other title ball 1 came to the lane before the
+pick. portcoop.serve_ball reads it off each build's own program - the ball start's `mov r0, #3 ; bl <serve> ;
+mov r0, #0x26 ; mov r1, #0`, 54 words after its first-ball call (63 on Jaws, Jurassic Park The Pin, Star Wars ELG),
+the same on all 53 shipped programs - and it is a generated line (portgen), as `coop_first_ball` is. A Start with
+the right flipper held (PAD-1054's co-op game of one) formed on the tick after the serve, so the serve now asks first
+(`coop_solo_check`). And our words on the game's BALL line are fitted to `value coop_ball_msg_max` (default 16; 0
+none): the older titles strcpy that line into a fixed buffer, and the pick's `PLAYER 1 PICK  20: ALPHA` crashed
+Aerosmith, Batman, Bond, Guardians Pro, Star Wars and Stranger Things at a game's start (on main too). Fitting drops
+double spaces, keeps a closing `BALL %d` whole, and the pick says `P1 ALPHA 20`. `value serve_music` is on the start
+menu's titles too (the request right after the serve in the emulator's sound log: Jaws 66, John Wick
+77, King Kong 124, Metallica 65, X-Men 191 - the first of the two long tracks it asks there). Emulator: 53 of 53 builds hold ball 1 until the character is taken.
+Not every game asks for none while that music still plays: X-Men asks for 191 again at the serve, and its record was
+looked up again (the track started over 6.6 s in). Taking its steal flag away did not help (it was looked up again all
+the same), so from our early request until 3 s past the serve, the game's repeat of it while ours plays is not passed
+on: the sound worker is given request 0 (no record: nothing plays) and the track plays on (`srv_worker`, `srv_tick`;
+the sound worker is hooked at the co-op arm where the port names `serve_music`). Emulator: X-Men LE's 191 is not looked
+up again and still plays a second after the repeat.
+
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
 LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and
 a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.

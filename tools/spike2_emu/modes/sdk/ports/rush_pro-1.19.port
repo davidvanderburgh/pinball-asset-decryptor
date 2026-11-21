@@ -820,6 +820,8 @@ site  coop_add_player    0x0031c104 0xe92d4038 0xe3a00051
 data  coop_player        0x0b5ec8a4
 data  coop_players       0x0b660248
 site  coop_first_ball    0x0031cdbc 0xebfffd0d 0xe1a04000
+# PAD-1478: the ball start's serve (portcoop.serve_ball): ball 1 waits there for each player's character pick
+site  serve_ball         0x0031ce94 0xeb029d05 0xe3a00026
 site  coop_icon_draw         0x0021b73c 0xebfffdf3 0xe1560004
 
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----

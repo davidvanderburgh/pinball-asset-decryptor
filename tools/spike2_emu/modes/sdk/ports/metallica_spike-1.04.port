@@ -866,6 +866,11 @@ site  coop_add_player    0x00448160 0xe92d4038 0xe3a00051
 data  coop_player        0x06f6838c
 data  coop_players       0x070460e0
 site  coop_first_ball    0x0027ad00 0xeb073553 0xe1a04000
+# PAD-1478: the ball start's serve (portcoop.serve_ball): ball 1 waits there for each player's character pick
+site  serve_ball         0x0027add8 0xeb05a0eb 0xe3a00026
+# PAD-1478: the request the game makes right after that serve (emulator sound log, as Godzilla's 66) - asked
+# for early when ball 1 waits for a Standard game's character pick
+value serve_music          65
 site  coop_icon_draw         0x0021b6f8 0xebfffdf3 0xe1560004
 
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----

@@ -1793,6 +1793,8 @@ static void sound_key_say(const unsigned char *k)
 #define WORKER_REQ(r) ((r)[0])
 #define WORKER_N(r)   ((r)[2])
 #endif
+static int srv_worker(unsigned request);    /* PAD-1478, with the serve below */
+static void srv_tick(void);
 static void on_sound_worker(pm_reg *r)
 {
     if (worker_log) {
@@ -1802,6 +1804,7 @@ static void on_sound_worker(pm_reg *r)
     if (cabs_live) cabs_worker(WORKER_REQ(r));   /* PAD-1040: a song with an expression light show of the card's */
     if (att_live) att_worker(WORKER_REQ(r));     /* PAD-645: the game's own sound at an attract press */
     if (blist_live) blist_play(WORKER_REQ(r));
+    if (srv_worker(WORKER_REQ(r))) r[0] = 0;     /* PAD-1478: the serve music's repeat is not passed on */
 }
 
 /* ---- item 163: a carrier's STOCK key swapped for an appended record's key, for one play --------
@@ -19642,6 +19645,70 @@ static int coop_scores;                  /* the game's end-of-game high scores a
 static int coop_ball_msg = -1;           /* the message table's line that says "BALL %d" (-1: none found) */
 static int coop_ball_held;               /* it says whose turn it is now */
 #define COOP_MSG_ID 0xC0090u             /* our borrow of it (no message id of the game's is this high) */
+
+/* PAD-1478: how long the words we put on that line may be. The older titles copy the line into a fixed buffer with
+ * strcpy (James Bond Pro 1.06: 76 of its message reads), so longer words overrun it and the game crashes moments
+ * later, somewhere else each time (emulator: a flipper-held Start's pick, "PLAYER 1 PICK  20: ALPHA", crashed
+ * Aerosmith, Batman, Bond, Guardians Pro, Star Wars and Stranger Things at the game's start; capped at 16 none did).
+ * 16 is the co-op turn line, "PLAYER n  BALL n", which has run every ball on all of them. A port names a longer line
+ * where it was proven (`value coop_ball_msg_max`; 0: none - Godzilla, every word of PAD-1449 proven there). Counted
+ * as the game shows it: a "%d" is one digit. (tests lift ball_line_len and ball_line_fit verbatim) */
+static unsigned ball_line_len(const char *w)
+{
+    unsigned n = 0;
+    for (; *w; w++, n++)
+        if (w[0] == '%' && w[1] == 'd') w++;
+    return n;
+}
+
+/* fit `w` (its buffer `size` bytes) to `cap`: double spaces go first, then the words before a closing "... %d" (its
+ * BALL n stays whole), else the end - never between a '%' and its 'd' */
+static void ball_line_fit(char *w, unsigned size, unsigned cap)
+{
+    unsigned i, j, n, keep;
+    char *d;
+    if (!cap || !size) return;
+    for (i = 0; w[i] && ball_line_len(w) > cap; )
+        if (w[i] == ' ' && w[i + 1] == ' ') for (j = i; w[j]; j++) w[j] = w[j + 1];
+        else i++;
+    if (ball_line_len(w) <= cap) return;
+    d = 0;
+    for (i = 0; w[i]; i++)
+        if (w[i] == '%' && w[i + 1] == 'd') d = w + i;
+    if (d && !d[2]) {                                         /* "... BALL %d": its last word whole, a space before */
+        while (d > w && d[-1] != ' ') d--;
+        if (d > w && d[0] == '%')                             /* the number alone: the word before it too (BALL) */
+            for (d--; d > w && d[-1] == ' '; d--) ;
+        while (d > w && d[-1] != ' ') d--;
+        if (d > w) d--;
+        if (ball_line_len(d) < cap) {
+            keep = cap - ball_line_len(d);                    /* the words before it are plain: a char each */
+            for (j = 0; d[j]; j++) w[keep + j] = d[j];
+            w[keep + j] = 0;
+            return;
+        }
+    }
+    for (i = 0, n = 0; w[i] && n < cap; i++, n++)
+        if (w[i] == '%' && w[i + 1] == 'd') { if (n + 1 > cap) break; i++; }
+    if (i && w[i - 1] == '%') i--;
+    w[i < size ? i : size - 1] = 0;
+}
+
+static unsigned ball_line_cap(void)
+{
+    return (unsigned)pm_port_value("coop_ball_msg_max", 16);
+}
+
+/* every word of ours on the game's BALL line comes through here, fitted */
+static int ball_line_borrow(unsigned id, const char *words)
+{
+    char w[96];
+    unsigned n = 0;
+    while (words[n] && n + 1 < sizeof w) { w[n] = words[n]; n++; }
+    w[n] = 0;
+    ball_line_fit(w, sizeof w, ball_line_cap());
+    return message_borrow(id, (unsigned)coop_ball_msg, w);
+}
 /* PAD-1114: the co-op and team games' intro (below, "the intro"): its phases, the clip and the sound coop.cfg and
  * sounds.cfg name, and the first pick it holds back until it is over */
 enum { CI_OFF, CI_START, CI_FILM, CI_PLAY, CI_BALL, CI_LANG };
@@ -20291,7 +20358,7 @@ static void coop_turn_show(void)
     }
     if (coop.teams) pm_snprintf(words, sizeof words, "TEAM %u P%u  BALL %%d", coop_team_of_in(coop.team_kind, coop.turn), coop.turn);   /* 19 fit */
     else pm_snprintf(words, sizeof words, "PLAYER %u  BALL %%d", coop.turn);
-    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+    coop_ball_held = ball_line_borrow(COOP_MSG_ID, words);
 }
 
 /* PAD-1052: the one-Start fill's line up now on the top line */
@@ -20301,7 +20368,7 @@ static void coop_join_show(void)
     if (coop_ball_msg < 0
         || !coop_join_words_in(coop.teams ? coop.team_kind : 0u, coop.standard, coop.join_n, coop.join_step % 3u, words,
                                sizeof words)) return;
-    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+    coop_ball_held = ball_line_borrow(COOP_MSG_ID, words);
 }
 
 /* ---- PAD-1031: co-op characters (MODE_SDK.md "Co-op characters"; docs/plans/pad1031_coop_characters.md) ----------
@@ -21010,7 +21077,21 @@ static void coop_pick_say(void)
     else if (pk.at >= coop_ch_n) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s: RANDOM", pk.who, t);
     else if (!pk.phase || !coop_ch[pk.at].does[0] || coop_classic()) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s: %s", pk.who, t, coop_ch[pk.at].name);
     else pm_snprintf(words, sizeof words, "%s", coop_ch[pk.at].does);
-    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+    if (!coop_scr_found && (pk.at >= coop_ch_n || !pk.phase || !coop_ch[pk.at].does[0] || coop_classic())
+        && !(pk.phase && pk.phase == coop_pick_steps() - 1 && coop_pick_how()[0])
+        && ball_line_cap() && ball_line_len(words) > ball_line_cap()) {
+        /* PAD-1478: a short line (ball_line_cap) - who, the one shown and the time, the name cut to fit */
+        const char *name = pk.at >= coop_ch_n ? "RANDOM" : coop_ch[pk.at].name;
+        char head[8], secs[8];
+        unsigned room;
+        pm_snprintf(head, sizeof head, "P%u ", pk.who);
+        secs[0] = 0;
+        if (coop_pick_ms) pm_snprintf(secs, sizeof secs, " %u", coop_pick_secs(pk.left));
+        room = ball_line_cap() > ball_line_len(head) + ball_line_len(secs)
+             ? ball_line_cap() - ball_line_len(head) - ball_line_len(secs) : 1u;
+        pm_snprintf(words, sizeof words, "%s%.*s%s", head, (int)room, name, secs);
+    }
+    coop_ball_held = ball_line_borrow(COOP_MSG_ID, words);
 }
 
 static void coop_intro_begin(const char *why);   /* PAD-1114, below */
@@ -21055,7 +21136,7 @@ static void sty_say(void)
     char words[40];
     if (coop_ball_msg < 0) return;
     sty_words(sty.kind, sty.at, sty.phase, coop_action != 0u, words, sizeof words);
-    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+    coop_ball_held = ball_line_borrow(COOP_MSG_ID, words);
 }
 
 static void sty_open(unsigned kind)
@@ -21671,7 +21752,7 @@ static void coop_pick_close(const char *how)
         char words[64];
         if (coop_scr_found) pm_snprintf(words, sizeof words, "PLAYER %u PICKED", pk.who);
         else pm_snprintf(words, sizeof words, "PLAYER %u IS %s", pk.who, coop_ch[c].name);
-        coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+        coop_ball_held = ball_line_borrow(COOP_MSG_ID, words);
     } else {
         coop_turn_show();
     }
@@ -23320,7 +23401,7 @@ static void ci_language_say(void)
     name = pm_port_text(key);
     if (ci.step == 1) pm_snprintf(words, sizeof words, "FLIPPERS CHANGE IT");
     else pm_snprintf(words, sizeof words, "LANGUAGE: %s", name && name[0] ? name : ci.lang ? "OTHER" : "ENGLISH");
-    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+    coop_ball_held = ball_line_borrow(COOP_MSG_ID, words);
 }
 
 static volatile unsigned *ci_language_word(unsigned p)
@@ -24263,6 +24344,7 @@ static void coop_tick(void)
                                                               * game's own; PAD-1224: an Enhanced Standard game's too */
     coop_join_tick();                                         /* PAD-1052 */
     sty_tick();                                               /* PAD-1449 */
+    srv_tick();                                               /* PAD-1478 */
     if (n && ci.clip[0] && !ci.phase && !sty.open && pm_in_game() && ci.game != chg_game_now() + 1)   /* PAD-1114 */
         coop_intro_begin(coop.teams ? "a team game begins" : coop.standard ? "an Enhanced Standard game begins"
                          : "a co-op game begins");
@@ -24956,11 +25038,52 @@ static int srv_music_wanted(unsigned music, unsigned kind, int preset, int open,
     return music && open && ball == 1u && (kind == STY_STANDARD || kind == STY_CHALLENGE) && preset >= 2;
 }
 
+/* PAD-1478: not every game asks for none while it plays: Uncanny X-Men 0.98 asks for 191 again at the serve, and its
+ * record was looked up again - the track started over 6.6 s in (emulator sound log). So from our early request until
+ * 3 s past the serve, a request of it while it still plays gets no steal flag, as PAD-645's at an attract press: it
+ * cannot take the channel ours holds, and plays on unbroken. Its flags come back a second later (srv_tick). */
+#define SRV_AFTER_MS 3000ul
+static struct { volatile unsigned music, seen; volatile unsigned long until, check_at; int said; } srv;
+
+/* the sound worker's (any thread): 1 = the game's repeat of the serve music, still playing ours - the worker is given
+ * request 0 instead (no record of its own: nothing is played) and ours plays on */
+static int srv_worker(unsigned request)
+{
+    if (!srv.music || request != srv.music) return 0;
+    if (!srv.seen++) return 0;                                /* our own request */
+    if (srv.until && (long)(pm_ms() - srv.until) > 0) return 0;
+    if (!pm_sound_active(request)) {
+        if (!srv.said++) say("styles: the game asked for its serve music %u again - it had ended, so it plays again", request);
+        return 0;
+    }
+    srv.check_at = pm_ms() | 1;
+    if (!srv.said++) say("styles: the game asked for its serve music %u again while ours played - not passed on, so "
+                         "it plays on", request);
+    return 1;
+}
+
+static void srv_tick(void)
+{
+    unsigned long now = pm_ms();
+    if (!srv.music) return;
+    if (srv.check_at && (long)(now - srv.check_at) > 1000) {
+        srv.check_at = 0;
+        say("styles: the serve music %u %s a second after the game's repeat", srv.music,
+            pm_sound_active(srv.music) ? "still plays" : "has STOPPED");
+    }
+    if (!srv.check_at && srv.until && (long)(now - srv.until) > 0) srv.music = 0;
+}
+
 static void srv_music_early(void)
 {
     unsigned m = (unsigned)pm_port_value("serve_music", 0);
     if (!srv_music_wanted(m, sty.kind, sty.preset, sty.open, coop_ball_byte ? *coop_ball_byte : 1u)) return;
     if (!fn("sound_play") || pm_sound_active(m)) return;
+    srv.seen = 0;
+    srv.check_at = 0;
+    srv.until = 0;
+    srv.said = 0;
+    srv.music = worker_hooked ? m : 0;                        /* the worker is hooked as the serve is (coop arm) */
     pm_sound(m);
     say("styles: ball 1 waits for the pick - the game's serve music %u asked for now, under its intro", m);
 }
@@ -24970,8 +25093,14 @@ static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     srv_music_early();                                        /* PAD-1449 round 4: its music at the stock moment */
     sty_hold();                                               /* PAD-1449: the style first */
     ci_ball_hold(coop_ball_byte ? *coop_ball_byte : 1u);
+    /* PAD-1478: a Start with the right flipper held is a co-op game of one (PAD-1054), formed by the tick once the game
+     * plays - after ball 1's serve, so the serve saw no co-op game and ball 1 came before player 1's pick (emulator,
+     * Venom LE 1.07). Asked here first, on the game's process, it forms before the pick hold decides. */
+    coop_solo_check();
     coop_pick_hold();                                         /* PAD-1215 */
-    return ci_serve_game(r0, r1, r2, r3);
+    r0 = ci_serve_game(r0, r1, r2, r3);
+    if (srv.music) srv.until = (pm_ms() + SRV_AFTER_MS) | 1;   /* PAD-1478: the ball start asks for its music now */
+    return r0;
 }
 
 static unsigned coop_first_ball_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
@@ -25237,6 +25366,8 @@ static void coop_arm(void)
         if ((ci.clip[0] || (coop_pick_on && coop_ch_n)) && fn("serve_ball") && !ci_serve_game) {
             unsigned st = hook_call(fn("serve_ball"), (void *)ci_serve_wrap);   /* PAD-1114 round 2, PAD-1215 */
             ci_serve_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)st;
+            if (st && pm_port_value("serve_music", 0) && fn("sound_worker") && !worker_hooked)   /* PAD-1478: srv_worker */
+                worker_hooked = hook(fn("sound_worker"), on_sound_worker);
             say("co-op: %s", !st ? "the serve could not be hooked - the ball comes as the game serves it, and a pick "
                 "with it in the lane takes a launch" : ci.clip[0] ? "ball 1's serve waits for the intro, and each "
                 "player's first ball for their character pick" : "each player's first ball waits to be served for "
@@ -25603,8 +25734,7 @@ static void hand_line_show(unsigned p)
     char words[40];
     if (coop_ball_msg < 0) return;
     pm_snprintf(words, sizeof words, hand.level[p] ? "P%u HANDICAP %+d" : "P%u HANDICAP %d", p, hand.level[p]);
-    hand.line_held = message_borrow(coop.on && coop_teammates() ? COOP_MSG_ID : HAND_MSG_ID,
-                                    (unsigned)coop_ball_msg, words);
+    hand.line_held = ball_line_borrow(coop.on && coop_teammates() ? COOP_MSG_ID : HAND_MSG_ID, words);
 }
 
 static void hand_line_back(void)

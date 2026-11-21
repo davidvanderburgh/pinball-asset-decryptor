@@ -93,7 +93,7 @@ def test_every_build_whose_start_menu_the_app_knows_is_offered_it():
     # every port but Venom's and D&D's (theirs) and three older builds (latest versions only, as co-op)
     assert sorted(set(MP.profiles()) - offered) == [
         "dungeons_and_dragons_le_1_00", "dungeons_and_dragons_le_1_10", "dungeons_and_dragons_pro_1_10",
-        "godzilla_pro_1_15", "john_wick_le_1_01", "metallica_spike_1_03",
+        "john_wick_le_1_01", "metallica_spike_1_03",                         # PAD-1477: + Godzilla Pro 1.15
         "venom_le_1_07", "venom_pro_1_07"]   # PAD-1327: every Spike 3 title with a port has it
     for key in ("deadpool_pro_1_16", "james_bond_le_1_06", "star_wars_pro_1_31", "turtles_pro_1_59",
                 "elvira3_1_13", "mando_pro_1_45", "foo_fighters_le_1_04",            # the menus of entries
@@ -149,7 +149,7 @@ def test_venom_and_dnd_keep_their_own():
     from pinball_decryptor.plugins.stern import prolonged_comp as PCo
     for key in ("venom_pro_1_07", "venom_le_1_07", "dungeons_and_dragons_pro_1_10"):
         assert "already" in PCo.title_refusal(MP.profile(key)), key
-    assert "start menu yet" in PCo.title_refusal(MP.profile("godzilla_pro_1_15"))   # an older build
+    assert "start menu yet" in PCo.title_refusal(MP.profile("john_wick_le_1_01"))   # an older build (PAD-1477: not Godzilla Pro 1.15 now)
     assert PCo.title_refusal(None) == PCo.NO_TITLE
 
 

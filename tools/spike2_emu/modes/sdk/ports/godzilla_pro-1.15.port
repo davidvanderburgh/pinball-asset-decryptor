@@ -839,6 +839,9 @@ data  coop_player        0x00708170
 data  coop_players       0x007e2ea8
 site  coop_first_ball    0x001f00d4 0xeb09c2d6 0xe1a04000
 value coop_ball_msg          1255
+# PAD-1478: no length limit on our words on that line (every word of PAD-1449 proven here; the older titles
+# copy it into a fixed buffer and get 16)
+value coop_ball_msg_max      0
 site  audit_add              0x00422de4 0xe92d43f0 0xe2505000
 site  coop_panel_lit         0x001aa084 0xeb0adac5 0xe5943070
 site  coop_panel_up          0x001a9f48 0xeb0adb14 0xe5d431b5

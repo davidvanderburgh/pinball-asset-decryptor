@@ -817,6 +817,8 @@ site  coop_add_player    0x0031dc7c 0xe92d4038 0xe3a00051
 data  coop_player        0x005fb0e8
 data  coop_players       0x006a1fe4
 site  coop_first_ball    0x003522ec 0xebff2e9f 0xe1a04000
+# PAD-1478: the ball start's serve (portcoop.serve_ball): ball 1 waits there for each player's character pick
+site  serve_ball         0x003523c4 0xebff5aae 0xe3a00026
 site  coop_icon_draw         0x001634e8 0xebfffdf3 0xe1560004
 
 # ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----

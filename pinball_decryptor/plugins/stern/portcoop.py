@@ -31,6 +31,8 @@ The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, th
   site  coop_first_ball     (PAD-1046) the ball start's `bl <ball getter>` that tells a player's first ball (wrapped
                             where it is made: a later teammate's ball 1 is not a first ball, so the team's progress
                             holds)
+  site  serve_ball          (PAD-1478) the ball start's call of the framework's serve, after it: ball 1 waits there
+                            for the co-op intro and each player's character pick (wrapped where it is made)
 
   data  message_table         the game's message table (portchallenge.message_table), and
   value coop_ball_msg         its "BALL %d" line, which says whose turn it is in a co-op game
@@ -185,6 +187,24 @@ def first_ball(e, player):
             if x & 0xFFF0FFFF == 0xE3500001 and (x >> 16) & 0xF in regs:
                 hits.append(base + 4 * k)
                 break
+    return hits[0] if len(hits) == 1 else None
+
+
+def serve_ball(e, first):
+    """PAD-1478: the va of the ball start's call of the framework's serve, after the first-ball call at `first`, or
+    None (not exactly once).
+
+    The same ball start on every Spike 2 build (53 of 53 shipped programs, Aerosmith .. Venom; Godzilla LE 1.16
+    0x2a77ec, Pro 1.16 0x459f44, the sites PAD-1114 round 2 found by hand): 54 words after the first-ball call (63 on
+    Jaws, Jurassic Park The Pin, Star Wars ELG) it puts its start display up and serves - `mov r0, #3 ; bl <serve> ;
+    mov r0, #0x26 ; mov r1, #0` and the ball start's event. The shoot-again branch after it ends in the same event
+    without the serve (a `b` before its `bl`), so `mov r0, #3` tells the serve. The word after the call is plain, so
+    the runtime wraps the call where it is made (hook_call): ball 1 waits there for the co-op intro and each player's
+    character pick (ci_serve_wrap)."""
+    w, base = e.words, e.text_va
+    k0 = (first - base) // 4
+    hits = [base + 4 * k for k in range(k0 + 1, min(k0 + 120, len(w) - 2))
+            if w[k] >> 24 == 0xEB and w[k - 1] == 0xE3A00003 and w[k + 1] == 0xE3A00026 and w[k + 2] == 0xE3A01000]
     return hits[0] if len(hits) == 1 else None
 
 
@@ -512,6 +532,10 @@ def lines(elf):
     first = first_ball(e, player)
     if first is not None:
         out.append("site  coop_first_ball    0x%08x 0x%08x 0x%08x" % (first, e.word(first), e.word(first + 4)))
+        # PAD-1478: the serve after it, where ball 1 waits for the co-op intro and each player's character pick
+        serve = serve_ball(e, first)
+        if serve is not None:
+            out.append("site  serve_ball         0x%08x 0x%08x 0x%08x" % (serve, e.word(serve), e.word(serve + 4)))
     # the team's own high score boards go through the game's end-of-game high scores (PAD-640/663's lines); a build
     # with no challenge list (X-Men) has none of them in its port otherwise. The caller drops what the port has.
     from .portchallenge import message_table, message_text, scores_lines, screen_lines

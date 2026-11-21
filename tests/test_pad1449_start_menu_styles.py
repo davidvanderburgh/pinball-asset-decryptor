@@ -295,7 +295,7 @@ def test_round3_the_index_menu_ports_name_standards_caption():
         got = re.findall(r"^value comp_menu_end_caption_msg +(\d+)", text, re.M)
         assert got == ["1914"], port.name                              # STANDARD, beside its NORMAL PLAY (1915)
         seen += 1
-    assert seen == 11
+    assert seen == 12                                                  # PAD-1477: + Godzilla Pro 1.15
     from pinball_decryptor.plugins.stern import prolonged_comp as P
     assert "standard_caption(e)" in pathlib.Path(P.__file__).read_text(encoding="utf-8")   # frame_lines writes it
 

@@ -4394,7 +4394,14 @@ PREVIEW_HELP = {
              "| Left and right Shift | flippers |\n"
              "| Enter | the plunger: hold to pull it back, let go to shoot (on Godzilla, the launch button) |\n"
              "| Left Alt | the machine's Action button, which also launches the ball (Visual Pinball's lockbar key) |\n"
+             "| 7, 8, 9, 0 | the coin door's buttons: Back, Minus, Plus, Select |\n"
+             "| Arrow keys | the same buttons: Left Back, Up Minus, Down Plus, Right Select |\n"
              "| Esc | leave; the game stops with the table |\n\n"
+             "The game's own menu (its settings, audits and tests): press 0 or the Right "
+             "arrow while the game shows its attract screens. The Up and Down arrows move "
+             "through it, Right goes in, Left comes back out. An arrow Visual Pinball "
+             "already uses for one of its own keys (a flipper or a nudge) stays Visual "
+             "Pinball's; 7, 8, 9 and 0 always work.\n\n"
              "The first time, the game's screen may take the keyboard: click the "
              "playfield once and play on."),
             ("If it does not start",

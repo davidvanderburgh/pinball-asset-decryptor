@@ -1725,12 +1725,55 @@ SERVICE_KEYS = [(8, 9011, "7: Service Back"), (9, 9010, "8: Service Minus"),
                 (10, 9009, "9: Service Plus"), (11, 9008, "0: Service Select")]
 
 
+#: PAD-1482: the arrow keys on the same four buttons, as a menu reads them:
+#: Up and Down move (Minus, Plus), Right goes in (Select), Left comes out
+#: (Back). DirectInput's codes. An arrow Visual Pinball already has for one of
+#: its own keys (a cabinet with its flippers or nudges there) stays its own.
+ARROW_KEYS = [(200, 9010, "Up: Service Minus"), (208, 9009, "Down: Service Plus"),
+              (203, 9011, "Left: Service Back"), (205, 9008, "Right: Service Select")]
+#: Visual Pinball's own keys, by the names its script engine gives them; read
+#: with Eval, so a name an older Visual Pinball lacks is passed over.
+VPX_OWN_KEYS = ("LeftFlipperKey", "RightFlipperKey", "StagedLeftFlipperKey",
+                "StagedRightFlipperKey", "LeftMagnaSave", "RightMagnaSave", "PlungerKey",
+                "StartGameKey", "AddCreditKey", "AddCreditKey2", "LockbarKey",
+                "LeftTiltKey", "RightTiltKey", "CenterTiltKey", "MechanicalTilt")
+
+
+def arrow_function_vbs():
+    """PadArrow(k): the service switch an arrow key presses, 0 for any other
+    key or an arrow Visual Pinball has for its own. The same text is in
+    PADSPIKE2.vbs, for tables that load the system script."""
+    out = ["' PAD: the arrow keys on the coin door's buttons (vpxshadow.py, PAD-1482):",
+           "' Up Minus, Down Plus, Left Back, Right Select. An arrow Visual Pinball",
+           "' has for one of its own keys stays its own.",
+           "Function PadArrow(ByVal k)",
+           "\tPadArrow = 0",
+           "\tSelect Case k"]
+    out += ["\t\tCase %d PadArrow = %d   ' %s" % (k, sw, what) for k, sw, what in ARROW_KEYS]
+    out += ["\t\tCase Else Exit Function",
+            "\tEnd Select",
+            "\tDim n, v",
+            "\tOn Error Resume Next",
+            "\tFor Each n In Array(%s)" % ", ".join('"%s"' % n for n in VPX_OWN_KEYS),
+            "\t\tv = Empty : v = Eval(n)",
+            "\t\tIf v = k Then PadArrow = 0",
+            "\tNext",
+            "\tOn Error Goto 0",
+            "End Function"]
+    return out
+
+
+_PAD882_LINE = re.compile(r"If KeyCode = (8|9|10|11) Then Controller\.Switch\(90(08|09|10|11)\) = ")
+_PAD882_GUARD = "If KeyCode < 8 Or KeyCode > 11 Then "
+
+
 def with_service_keys(lines):
     """`lines` (a script's) with the service buttons in the bridge's
-    Table1_KeyDown / Table1_KeyUp, and the table's own handler kept off those
-    four keys. Used by the patch and, for a table patched before PAD-882, by
-    service_keys_in_place: both give the same script. -> (lines, changed)."""
-    if any("Controller.Switch(%d)" % SERVICE_KEYS[0][1] in ln for ln in lines):
+    Table1_KeyDown / Table1_KeyUp, on 7 8 9 0 and the arrow keys, and the
+    table's own handler kept off those keys. Used by the patch and, for a
+    table patched before PAD-882 or PAD-1482, by service_keys_in_place: all
+    give the same script. -> (lines, changed)."""
+    if any("PadArrow(KeyCode)" in ln for ln in lines):
         return lines, False
     out, sub, changed = [], None, False
     lo, hi = SERVICE_KEYS[0][0], SERVICE_KEYS[-1][0]
@@ -1738,23 +1781,31 @@ def with_service_keys(lines):
         s, cr = ln.strip(), "\r" if ln.endswith("\r") else ""
         if s in ("Sub Table1_KeyDown(ByVal KeyCode)", "Sub Table1_KeyUp(ByVal KeyCode)"):
             sub = "True" if "KeyDown" in s else "False"
+            if sub == "True":
+                out += [x + cr for x in arrow_function_vbs()]
             out.append(ln)
             out += ["\tIf KeyCode = %d Then Controller.Switch(%d) = %s   ' %s%s"
                     % (k, sw, sub, what, cr) for k, sw, what in SERVICE_KEYS]
+            out.append("\tIf PadArrow(KeyCode) Then Controller.Switch(PadArrow(KeyCode)) = %s"
+                       "   ' arrows: Up Minus, Down Plus, Left Back, Right Select%s" % (sub, cr))
             changed = True
             continue
         if sub and s == "End Sub":
             sub = None
-        elif sub and s in ("Table1_KeyDown_orig KeyCode", "Table1_KeyUp_orig KeyCode"):
-            ln = "%sIf KeyCode < %d Or KeyCode > %d Then %s%s" % (
-                ln[:len(ln) - len(ln.lstrip())], lo, hi, s, cr)
+        elif sub and _PAD882_LINE.match(s):
+            continue                        # a PAD-882 table's: written again above
+        elif sub:
+            call = s[len(_PAD882_GUARD):] if s.startswith(_PAD882_GUARD) else s
+            if call in ("Table1_KeyDown_orig KeyCode", "Table1_KeyUp_orig KeyCode"):
+                ln = "%sIf (KeyCode < %d Or KeyCode > %d) And PadArrow(KeyCode) = 0 Then %s%s" % (
+                    ln[:len(ln) - len(ln.lstrip())], lo, hi, call, cr)
         out.append(ln)
     return out, changed
 
 
 def service_keys_in_place(path):
-    """A table this patcher wrote before PAD-882 gets the service keys where
-    it is, once (the tab's Play runs this, as it quiets old soundtracks).
+    """A table this patcher wrote before PAD-882 (or PAD-1482's arrow keys)
+    gets the service keys where it is, once (the tab's Play runs this, as it quiets old soundtracks).
     Returns the report lines, [] when there was nothing to do."""
     table = vpxfile.VpxTable(path)
     script = table.script()
@@ -1774,7 +1825,8 @@ def service_keys_in_place(path):
         return ["WARNING: %s with the service keys does not verify; left as it was"
                 % os.path.basename(path)]
     os.replace(tmp, path)
-    return ["keys: the coin door's service buttons on 7 8 9 0 (Back, Minus, Plus, Select)"]
+    return ["keys: the coin door's service buttons on 7 8 9 0 (Back, Minus, Plus, Select) "
+            "and the arrow keys (Left Back, Up Minus, Down Plus, Right Select)"]
 
 
 def flipper_subs(m, had):

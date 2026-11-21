@@ -952,19 +952,24 @@ function SoundsPage({ s, f, off, dis, rs, lim, labels, files }) {
 }
 
 // PAD-1479: online co-op - what this mode adds to the game's online counts, sent with each game's report
-const ONLINE_ROWS = [["start", "As it starts, add"], ["shot", "On every hit of"], ["won", "When it is won, add"], ["end", "As it ends, add"]];
+const ONLINE_ROWS = [["start", "As it starts"], ["shot", "On every hit of"], ["won", "When it is won"], ["end", "As it ends"]];
 function OnlineCounts({ f, off, shots }) {
   const withValue = (list, v) => (v && !list.some((o) => o.value === v) ? [{ value: v, label: v }, ...list] : list);
   const shotOpts = withValue([{ value: "", label: "(choose a shot)", disabled: true }, ...shots.map((x) => ({ value: x, label: x }))], f.online_shot);
   return html`<${Sec} title="Online co-op counts">
-    ${ONLINE_ROWS.map(([when, label]) => html`<div class="row wrap" key=${when}>
-      <${Check} label=${label} checked=${f["online_on_" + when]} disabled=${off} title=${T.online} ns="modes" k=${"f:online_on_" + when} />
-      ${when === "shot" ? html`<${Select} value=${f.online_shot || ""} options=${shotOpts} ns="modes" k="f:online_shot"
-        disabled=${off || !f.online_on_shot} width=${170} title=${T.online} /><span class="dim nw">add</span>` : null}
-      <${Num} k=${"online_n_" + when} value=${f["online_n_" + when]} disabled=${off || !f["online_on_" + when]} width=${56} title=${T.online} />
-      <span class="dim nw">to</span>
-      <${Field} ns="modes" k=${"f:online_count_" + when} value=${f["online_count_" + when] || ""} disabled=${off || !f["online_on_" + when]}
-        width=${150} mono placeholder="rescued" maxLength=${23} title=${T.online} />
+    ${ONLINE_ROWS.map(([when, label]) => html`<div key=${when}>
+      <div class="row wrap">
+        <${Check} label=${label.replace(/, add$/, "")} checked=${f["online_on_" + when]} disabled=${off} title=${T.online} ns="modes" k=${"f:online_on_" + when} />
+        ${when === "shot" ? html`<${Select} value=${f.online_shot || ""} options=${shotOpts} ns="modes" k="f:online_shot"
+          disabled=${off || !f.online_on_shot} width=${170} title=${T.online} />` : null}
+      </div>
+      <div class="row wrap" style="padding-left:26px">
+        <span class="dim nw">add</span>
+        <${Num} k=${"online_n_" + when} value=${f["online_n_" + when]} disabled=${off || !f["online_on_" + when]} width=${56} title=${T.online} />
+        <span class="dim nw">to</span>
+        <${Field} ns="modes" k=${"f:online_count_" + when} value=${f["online_count_" + when] || ""} disabled=${off || !f["online_on_" + when]}
+          width=${160} mono placeholder="rescued" maxLength=${23} title=${T.online} />
+      </div>
     </div>`)}
     <div class="small muted wrap">${T.online}</div>
   <//>`;

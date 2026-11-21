@@ -87,6 +87,15 @@ def main():
             _hide_log(page)
             time.sleep(1)
             page.screenshot(path=os.path.join(out_dir, "network.png"), full_page=True)
+            if not before:                         # the Online co-op box itself, its design open
+                page.get_by_text("Campaign design: teams, what counts, regions").first.click()
+                time.sleep(1)
+                page.get_by_text("Online co-op", exact=True).first.scroll_into_view_if_needed()
+                page.evaluate("""() => { const h = [...document.querySelectorAll('.card, section, div')].find(
+                    (e) => e.firstElementChild && e.firstElementChild.textContent.trim() === 'Online co-op');
+                    if (h) h.scrollIntoView({block: 'start'}); }""")
+                time.sleep(1)
+                page.screenshot(path=os.path.join(out_dir, "network_online.png"))
             webui_shot.api(url, "ui.select_tab", "modes")
             time.sleep(3)
             webui_shot.api(url, "modes.new")

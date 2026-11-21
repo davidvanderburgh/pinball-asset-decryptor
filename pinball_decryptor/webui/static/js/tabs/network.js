@@ -139,18 +139,17 @@ function OnlineCoop({ n }) {
       ${(d.teams || []).map((t, i) => html`<div class="net-oc-row" key=${"t" + i}>
         <input type="color" class="net-oc-colour" value=${t.colour} title="The team's colour on the map"
           onInput=${(e) => edit((c) => { c.teams[i].colour = e.target.value; })} />
-        <${Field} value=${t.name} width=${220} maxLength=${lim.word} onChange=${(v) => edit((c) => { c.teams[i].name = v; })} />
-        <${Button} size="sm" disabled=${(d.teams || []).length < 2} onClick=${() => edit((c) => { c.teams.splice(i, 1); })}>Remove<//>
+        <${Field} value=${t.name} width=${180} maxLength=${lim.word} onChange=${(v) => edit((c) => { c.teams[i].name = v; })} />
+        <${Button} size="sm" title="Remove this team" disabled=${(d.teams || []).length < 2} onClick=${() => edit((c) => { c.teams.splice(i, 1); })}>×<//>
       </div>`)}
       <${Button} size="sm" disabled=${(d.teams || []).length >= lim.teams} onClick=${() => edit((c) => {
         c.teams.push({ name: "Team " + (c.teams.length + 1), colour: (o.colours || [])[c.teams.length % 8] || "#888888" }); })}>Add a team<//>
-      <div class="lbl">Regions, taken in this order (the first team to reach a region's target takes it)</div>
+      <div class="lbl">Regions, taken in this order: the first team to reach a region's target (in ${unit}) takes it</div>
       ${(d.regions || []).map((r, i) => html`<div class="net-oc-row" key=${"r" + i}>
-        <${Field} value=${r.name} width=${180} maxLength=${31} onChange=${(v) => edit((c) => { c.regions[i].name = v; })} />
-        <${Field} value=${String(r.target)} mono width=${150} title=${"How many " + unit + " take it"}
+        <${Field} value=${r.name} width=${120} maxLength=${31} onChange=${(v) => edit((c) => { c.regions[i].name = v; })} />
+        <${Field} value=${String(r.target)} mono width=${112} title=${"How many " + unit + " take it"}
           onChange=${(v) => edit((c) => { c.regions[i].target = parseInt(String(v).replace(/[^0-9]/g, "") || "0", 10); })} />
-        <span class="small muted">${unit}</span>
-        <${Button} size="sm" disabled=${(d.regions || []).length < 2} onClick=${() => edit((c) => { c.regions.splice(i, 1); })}>Remove<//>
+        <${Button} size="sm" title="Remove this region" disabled=${(d.regions || []).length < 2} onClick=${() => edit((c) => { c.regions.splice(i, 1); })}>×<//>
       </div>`)}
       <${Button} size="sm" disabled=${(d.regions || []).length >= lim.regions} onClick=${() => edit((c) => {
         const last = c.regions[c.regions.length - 1];

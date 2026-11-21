@@ -460,7 +460,8 @@ def test_what_keeps_insider_connected_has_a_tab_of_its_own():
     assert [t for t, _b in HD.sections_for("Play Options")] == [
         "What it's for", "Handicap per player", "Prolonged Competition", "Inactivity pauses timers"]
     assert [t for t, _b in HD.sections_for("Network")] == [
-        "What it's for", "Score feed", "Remote access (SSH)", "Building and changing remote access"]
+        "What it's for", "Score feed", "Remote access (SSH)", "Building and changing remote access",
+        "Wi-Fi start-up", "5 GHz", "How fast Send to machine is"]                # PAD-1480: the Wi-Fi notes
 
 
 def test_the_play_options_tab_asks_the_modes_service_to_publish(monkeypatch):

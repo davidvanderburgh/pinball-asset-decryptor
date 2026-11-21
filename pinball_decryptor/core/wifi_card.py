@@ -73,7 +73,7 @@ BAND_DIRS = ('/usr', '/usr/local', '/usr/local/bin', '/usr/local/spike', '/etc',
 #: David (PAD-1467): "be more technically specific about the settings we are changing so that users can have
 #: confidence in what this option does".  The Network tab shows these rows as they are: (what, value, in code type)
 DETAILS = (
-    ('File added to the card', OVERRIDE + ' (system partition, owner root, mode 644)', True),
+    ('File added to the card', OVERRIDE + ' (system partition, owner root, permissions 644)', True),
     ('What the file says', DRIVER.decode(), True),
     ('Read by', HOOK + ", Stern's own start-up script, which is not changed", True),
     ('wpa_supplicant then starts with', '-D ' + DRIVER.decode() + '   (as shipped: -D wext)', True),

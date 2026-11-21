@@ -115,8 +115,18 @@ def _port(name):
 
 #: PAD-418: the ports that name the game's own light shows (PAD-411's show lines)
 #: PAD-418 / PAD-420: the ports that name the game's own light shows (every latest build since PAD-420)
+#: PAD-1476: and the ports that play any of them by the game's own number (its show starter, its stop-every-show-
+#: with-this-number and its table's size: port_show_numbers.py)
+def _plays_shows(text):
+    if re.search(r"^site show_1 ", text, re.M):
+        return True
+    n = re.search(r"^value\s+show_count\s+(\S+)", text, re.M)
+    return bool(re.search(r"^site\s+show_start\s", text, re.M) and re.search(r"^site\s+show_stop_number\s", text, re.M)
+                and n and 1 < int(n.group(1), 0) <= 4096)
+
+
 GAME_SHOW_PORTS = frozenset(p.stem for p in (SDK / "ports").glob("*.port")
-                            if re.search(r"^site show_1 ", p.read_text(encoding="utf-8"), re.M))
+                            if _plays_shows(p.read_text(encoding="utf-8")))
 
 
 def _mb(name):

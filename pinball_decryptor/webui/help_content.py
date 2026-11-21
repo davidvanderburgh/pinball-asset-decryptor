@@ -1605,7 +1605,7 @@ HELP_CONTENT = {
             "Exactly what goes on the card:\n\n"
             "| | |\n"
             "|---|---|\n"
-            "| File added | `/etc/wpa_supplicant/driver.wlan0` on the system partition (owner root, mode 644) |\n"
+            "| File added | `/etc/wpa_supplicant/driver.wlan0` on the system partition (owner root, permissions 644) |\n"
             "| What it says | `nl80211,wext` |\n"
             "| Read by | `/etc/network/if-pre-up.d/wpa-supplicant`, Stern's own start-up script, not changed |\n"
             "| Not changed | the game, the Wi-Fi driver modules, `/etc/wpa_supplicant.conf` |\n\n"

@@ -176,17 +176,17 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
 |---|---|---|---|---|---|
 | Aerosmith 1.16 | ✓ | no | ✓ | shots | buttons, scoop, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Aerosmith LE 1.15 | ✓ | no | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Aerosmith LE 1.15 | ✓ | no | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Aerosmith LE 1.16 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Batman 66 1.13 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Batman 66 1.13 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Batman 66 1.14 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Deadpool LE 1.14 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Deadpool LE 1.14 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all | buttons, starts on game modes completed |
+| Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all | buttons, light shows, starts on game modes completed |
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
 | Elvira 1.13 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
@@ -194,12 +194,12 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, building, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed |
-| Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, battle slot, challenges, game mode places, starts on game modes completed |
+| Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, light shows, battle slot, challenges, game mode places, starts on game modes completed |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed |
 | Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Iron Maiden LE 1.16 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Iron Maiden LE 1.16 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
@@ -207,7 +207,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, light shows, game mode places |
 | Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| John Wick LE 1.01 | ✓ | no | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| John Wick LE 1.01 | ✓ | no | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | John Wick LE 1.02 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | John Wick Pro 1.02 | ✓ | no | ✓ | shots | buttons, scoop, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
@@ -217,30 +217,30 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Pokemon LE 0.82 (Spike 3) | no | no | ✓ | no | challenges, never waits |
-| Rush LE 1.18 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Rush LE 1.18 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Rush LE 1.19 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Star Wars 2025 LE 0.96 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Star Wars 2025 Pro 0.84 (Spike 3) | no | no | ✓ | no | challenges, waits for multiballs only |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, light shows, challenges, game mode places, starts on game modes completed |
 | Star Wars ELG 1.10 (Spike 3) | ✓ | ✓ | ✓ | shots | mechanisms, light shows, challenges, game mode places, starts on game modes completed |
-| Star Wars LE 1.30 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Star Wars LE 1.30 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| TMNT Pro 1.58 | no | no | ✓ | no | buttons, challenges, game mode places, starts on game modes completed, never waits |
+| TMNT Pro 1.58 | no | no | ✓ | no | buttons, light shows, challenges, game mode places, starts on game modes completed, never waits |
 | TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | The Beatles 1.29 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, waits for multiballs only |
-| The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all | buttons, challenges, game mode places, starts on game modes completed |
+| The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, challenges, game mode places, starts on game modes completed |

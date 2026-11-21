@@ -205,13 +205,16 @@ def test_the_tab_says_a_kept_fill_shows_at_the_same_size(window):
     w.call("images.select", SHAPE)
     w.answers.append(rep)
     assert w.call("images.choose", SHAPE) == SHAPE
+    # Simon (2026-11-21): a new pick starts with Own size on, and is written at the most the screen shows it: a
+    # fill is squeezed into its 64x32 Shape box, its shape kept - 57x32
     keep = w.state("images")["preview"]["keep"]
-    assert keep["on"] is False and "squeezed to fit" in keep["text"]
+    assert keep == {"on": True, "text": (
+        "Your picture is 131×74; the original is 64×32. With your layout as it is now, the game shows it at most "
+        "57×32: PAD will write it at 57×32, smoothed - the sharpest it can look on this screen. Your file stays full "
+        "size in the project, so you can still scale it up on the Scenes tab.")}
+    assert w.call("images.set_keep", SHAPE, False) is not False
+    assert "squeezed into the original's pixels" in w.state("images")["preview"]["keep"]["text"]
     assert w.call("images.set_keep", SHAPE, True) is not False
-    assert w.state("images")["preview"]["keep"] == {"on": True, "text": (
-        "Kept at 131×74 (the original is 64×32): it shows in the original's place and size, "
-        "fitted and centered, with more detail where the scene zooms in on it. Make it "
-        "bigger or smaller on the Scenes tab.")}
     assert w.window.pending_image_assignments(assets)[2] == frozenset({SHAPE})
 
 
@@ -221,9 +224,10 @@ def test_a_picture_drawn_by_size_says_the_same(window):
     w.answers.append(rep)
     assert w.call("images.choose", ICON_REL) == ICON_REL
     assert w.call("images.set_keep", ICON_REL, True) is not False
+    # placed full size where the original was (a new pick), so the game shows all of it
     assert w.state("images")["preview"]["keep"]["text"].endswith(
-        "fitted and centered, with more detail where the scene zooms in on it. Make it "
-        "bigger or smaller on the Scenes tab.")
+        "the game shows it at its own size (placed full size where the original was): PAD writes it as it is. "
+        "Make it smaller or bigger on the Scenes tab.")
     assert w.window.pending_image_assignments(assets)[2] == frozenset({ICON_REL})
 
 

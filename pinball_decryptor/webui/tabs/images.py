@@ -2591,7 +2591,8 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
             return (mine + "With your layout as it is now, the game shows it at most %d×%d%s: PAD will write it at "
                     "%d×%d, smoothed - the sharpest it can look on this screen. Your file stays full size in the "
                     "project, so you can still scale it up on the Scenes tab." % (shown + (where,) + written))
-        return mine + "The game shows it at that size%s: PAD writes it as it is." % where
+        return (mine + "With your layout as it is now, the game shows it at its own size%s (placed full size where "
+                "the original was): PAD writes it as it is. Make it smaller or bigger on the Scenes tab." % where)
 
     @rpc(loop=False)
     def thumb(self, path, w=320, h=214, look=None):

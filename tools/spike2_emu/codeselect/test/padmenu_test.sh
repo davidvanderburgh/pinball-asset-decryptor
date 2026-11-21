@@ -11,6 +11,11 @@
 #   hold    BACK held for the whole run      -> exactly one `<cmd> --reboot`
 #   pulse   BACK 300 ms down / 60 ms up      -> no restart (the hold must be unbroken)
 #   i2c     BACK "held" on /dev/i2c-1        -> no restart (only a spidev counts)
+#   dead    an all-zero word the whole run   -> no restart (PAD-1490: every service
+#           button "pressed" at once is a read the chain did not drive, not a finger)
+#   busy    BACK held with MINUS held too    -> no restart (only BACK on its own counts)
+#   gap     one BACK read, then a 600 ms stall, again and again -> no restart (a
+#           hold is samples in a row: a quiet spell between reads starts it again)
 #   rig-no-standin  held in an emulator with no CODESELECT_REBOOT -> no restart
 set -e
 ROOT=$1
@@ -61,14 +66,15 @@ int main(int argc, char **argv)
     while ((t = ms() - t0) < run_ms) {
         /* every mode but none and pulse holds BACK the whole run */
         int back = strcmp(mode, "none") && (strcmp(mode, "pulse") || (t % 360) < 300);
-        memset(tx, 0xff, 8);
+        memset(tx, strcmp(mode, "dead") ? 0xff : 0x00, 8);
         if (back) tx[1] &= ~(1 << 3);
+        if (!strcmp(mode, "busy")) tx[1] &= ~(1 << 2);
         memset(x, 0, 32);
         p = (uintptr_t)tx; memcpy(x, &p, 8);
         p = (uintptr_t)rx; memcpy(x + 8, &p, 8);
         memcpy(x + 16, &len, 4);
         ioctl(fd, 0x40206b00UL, x);            /* SPI_IOC_MESSAGE(1) */
-        usleep(1000);
+        usleep(strcmp(mode, "gap") ? 1000 : 600000);
     }
     return 0;
 }
@@ -112,6 +118,9 @@ run none spidev1.0 0
 run hold spidev1.0 1
 run pulse spidev1.0 0
 run i2c i2c-1 0
+run dead spidev1.0 0
+run busy spidev1.0 0
+run gap spidev1.0 0
 # in an emulator (its shims' variables set) with no CODESELECT_REBOOT: never a real reboot
 run rig-no-standin spidev1.0 0 PAD_AUDIO_OUT=/dump/audio.raw
 grep -q "not restarting" "$T/err" || { echo "padmenu_test: FAIL rig-no-standin: nothing said"; cat "$T/err"; fail=1; }

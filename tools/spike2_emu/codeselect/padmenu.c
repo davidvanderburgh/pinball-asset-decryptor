@@ -523,17 +523,36 @@ ssize_t __read_chk(int fd, void *buf, size_t n, size_t buflen)
 }
 #else /* the SPI word: Spike 2 and Spike 3 */
 static void fd_reset(int fd) { (void)fd; }
+/* BACK HELD, AND NOTHING ELSE IN ITS BYTE (PAD-1490).  The byte's low four bits
+ * are the four service buttons, Select / Plus / Minus / Back (Spike 3: Select /
+ * Next / Previous / Back), active low.  A finger on BACK leaves the other three
+ * high; a read the chain did not drive - a dead or glitching cabinet word, all
+ * zeros - shows all four "pressed" at once, and three seconds of that must not
+ * restart a machine nobody touched.  So only 0111 in those bits is BACK held:
+ * anything else counts as released and starts the hold again. */
+#define SERVICE_MASK   0x0fu
+#define BACK_ONLY      (SERVICE_MASK & ~(1u << BACK_BIT))
+/* AND UNBROKEN IN TIME.  The game reads the word in a loop with no sleep, an
+ * 8-byte transfer at 100 kHz every ~640 us, so a real hold is thousands of
+ * samples in a row.  Two stray "BACK" reads with a quiet spell between them
+ * (the loop stalled, the device not answering) are not a hold: a gap of more
+ * than GAP_MS between samples starts the hold again. */
+#define GAP_MS         250
+static long long last_sample = -1;
 static void sample(const unsigned char *rx)
 {
-    int back = !((rx[BACK_BYTE] >> BACK_BIT) & 1);    /* active low */
+    int back = (rx[BACK_BYTE] & SERVICE_MASK) == BACK_ONLY;
     long long t;
     if (fired)
         return;
+    t = now_ms();
+    if (last_sample >= 0 && t - last_sample > GAP_MS)
+        held_since = -1;
+    last_sample = t;
     if (!back) {
         held_since = -1;
         return;
     }
-    t = now_ms();
     if (held_since < 0) {
         held_since = t;
         return;

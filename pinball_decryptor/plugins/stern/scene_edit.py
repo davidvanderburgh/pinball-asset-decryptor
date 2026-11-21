@@ -305,7 +305,9 @@ def add(assets_dir, card, op):
         if not last["dx"] and not last["dy"]:
             ops.pop()
     elif (last and last.get("node") == op.get("node") and last["op"] == op["op"] == "scale"
-          and (last.get("px"), last.get("py")) == (op.get("px"), op.get("py"))):
+          and (last.get("px"), last.get("py")) == (op.get("px"), op.get("py"))
+          # Simon (2026-11-20): Show pixel for pixel is a toggle - its edit stays one of its own, to take back alone
+          and not last.get("one_to_one") and not op.get("one_to_one")):
         if "sy" in last or "sy" in op:
             last["sy"] = round(last.get("sy", last["s"]) * op.get("sy", op["s"]), 6)
         last["s"] = round(last["s"] * op["s"], 6)

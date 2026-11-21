@@ -358,6 +358,7 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     rows.extend(chosen_files_rows(mfr, assets_path))
     rows.extend(score_colour_rows(mfr, assets_path))
     rows.extend(service_menu_rows(mfr, assets_path))
+    rows.extend(theme_rows(mfr, assets_path))
     from ..core import card_extras, ssh_card
     try:
         ssh = card_extras.configuration(assets_path)
@@ -425,6 +426,62 @@ def wifi_rows(window, assets_path):
 
 #: PAD-507: Godzilla's score panel colours, words of the game program
 PENDING_SCORE_COLOURS = "Pending (score colors)"
+
+#: PAD-1462 themes: a theme's own pictures and color profiles
+PENDING_THEMES = "Pending (Themes)"
+#: ... and the Write leaves them off the card (engine: "IMAGE SET is not ticked on the Service menu tab")
+PENDING_THEMES_OFF = "Pending (Themes — left off: tick Image Set on the Service menu tab)"
+
+
+def _image_set_off(assets_path):
+    """True when the Service menu tab leaves IMAGE SET off the card, so the Write leaves the themes out (PAD-1393)."""
+    try:
+        from ..plugins.stern import service_menu
+        return "image_set" in service_menu.off_keys(assets_path)
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def theme_rows(mfr, assets_path):
+    """Themes (PAD-1462): each picture a theme changes - a file chosen for it on the Images tab, or a color profile
+    of its own - as a row, so the Write tab lists what the Write will build into the theme's scenes. Simon: the
+    Write already wrote them, but its list did not say ("theme changes in the Write tab's change list")."""
+    if not assets_path or mfr is None or getattr(mfr, "key", "") != "stern":
+        return []
+    try:
+        from ..plugins.stern import scene_variants as SV
+        sets = SV.load(assets_path)
+    except Exception:                                   # noqa: BLE001
+        return []
+    if not sets:
+        return []
+    names = sets.get("names") or []
+    picks_by = sets.get("images") or {}
+    colour_by = sets.get("colour") or {}
+    # the Write leaves the themes off a card whose IMAGE SET row is unticked: the rows say so, as a too-long text with
+    # grow off does
+    status = PENDING_THEMES_OFF if _image_set_off(assets_path) else PENDING_THEMES
+    scenes_by = {}
+    for card, per in (sets.get("scenes") or {}).items():
+        for n in per:
+            scenes_by.setdefault(n, []).append(card)
+    out = []
+    for n in sorted(set(picks_by) | set(colour_by) | set(scenes_by)):
+        who = "theme %d (%s)" % (n, names[n - 1]) if n - 1 < len(names) else "theme %d" % n
+        picks = picks_by.get(n) or {}
+        colour = colour_by.get(n) or set()
+        for rel in sorted(set(picks) | set(colour)):
+            what = []
+            if rel in picks:
+                what.append("← " + os.path.basename(picks[rel]))
+            if rel in colour:
+                what.append("own color profile")
+            out.append(("%s: %s  —  %s" % (who, rel, ", ".join(what)),
+                        os.path.splitext(rel)[1].lstrip(".") or "?", status, "pending"))
+        for card in sorted(scenes_by.get(n) or ()):
+            out.append(("%s: scene %s  —  a scene file of its own" % (who, SV.scene_id(card)[:8]),
+                        "image", status, "pending"))
+    return out
 
 
 #: the Service menu tab's rows (PAD-1382)
@@ -751,6 +808,16 @@ def fingerprint(window, assets_path, epoch, grow_on):
         # the Service menu tab's rows
         from ..plugins.stern import service_menu
         parts.append(service_menu.wanted(assets_path))
+    except Exception:                                   # noqa: BLE001
+        parts.append(None)
+    try:
+        # PAD-1462: the themes' own pictures and color profiles (theme_rows)
+        from ..plugins.stern import scene_variants
+        sets = scene_variants.load(assets_path) or {}
+        parts.append((sets.get("names"), repr(sorted((sets.get("scenes") or {}).items())),
+                      sorted((n, sorted(p.items())) for n, p in (sets.get("images") or {}).items()),
+                      sorted((n, sorted(r)) for n, r in (sets.get("colour") or {}).items()),
+                      _image_set_off(assets_path)))
     except Exception:                                   # noqa: BLE001
         parts.append(None)
     from ..core import card_extras

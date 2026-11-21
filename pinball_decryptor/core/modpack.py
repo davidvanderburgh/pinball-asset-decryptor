@@ -6,6 +6,7 @@ shared :mod:`core.checksums` module.
 
 import json
 import os
+import re
 import shutil
 import zipfile
 
@@ -100,6 +101,17 @@ _EXTRA_VARIANTS = "video_variants"
 # puts them in ATTRACT_FILES_DIR and points the record there.
 ATTRACT_DIR = ".modpack_attract"
 _EXTRA_ATTRACT = "attract_items"
+# Simon (2026-11-20): "check saving and loading works for the new service menu ... and in other areas where you can
+# save the entire project". A Stern project's THEMES (plugins/stern/scene_variants: the theme names, each theme's own
+# pictures with their Keep size tick, and each theme's own color switch and profile) ride as the Scenes tab's save
+# carries them (scene_share.themes_to_save), the pictures' bytes under this zip folder; an import finds each theme by
+# name (or adds it) and puts the pictures in the project's shared pictures folder (scene_share.import_themes).
+THEMES_DIR = ".modpack_themes"
+_EXTRA_THEMES = "themes"
+# ... and the Service menu tab's rows (plugins/stern/service_menu.STAGED_KEY: which rows go on the card, in what
+# order): the pack's take the project's place. Without them a pack's themes would be dropped by the Write, which only
+# builds them with the IMAGE SET row ticked.
+_EXTRA_SERVICE_MENU = "service_menu"
 
 
 def _is_packable(rel):
@@ -195,7 +207,100 @@ def project_extras(assets_folder):
     at = data.get(_EXTRA_ATTRACT)
     if isinstance(at, dict) and (at.get("items") or at.get("champions") is False or at.get("hidden")):
         extras[_EXTRA_ATTRACT] = json.loads(json.dumps(at))
+    svc = data.get(_EXTRA_SERVICE_MENU)
+    if isinstance(svc, dict) and any(svc.get(k) for k in ("order", "on", "coop")):
+        extras[_EXTRA_SERVICE_MENU] = json.loads(json.dumps(svc))
     return extras
+
+
+def pack_themes(assets_folder):
+    """The project's themes as a pack carries them: ``(record, [(file, member)])``, each theme's own picture a zip
+    member under :data:`THEMES_DIR`; ``(None, [])`` for a project with no theme of its own (or not a Stern one)."""
+    try:
+        from ..plugins.stern import scene_share
+        from . import colour_profile as cp
+        data = staged_changes.load(assets_folder)
+        themes = scene_share.themes_to_save(assets_folder, data, cp.asset_settings(assets_folder), None, {})
+    except Exception:                                   # noqa: BLE001 - no themes to carry
+        return None, []
+    if not themes:
+        return None, []
+    files, members, pictures = [], {}, {}
+    for rel, p in sorted(themes["pictures"].items()):
+        out = {}
+        for k, e in sorted(p["themes"].items(), key=lambda kv: int(kv[0])):
+            got = {x: e[x] for x in ("keep", "color", "profile")}
+            if e.get("src"):
+                key = os.path.normcase(os.path.abspath(e["src"]))
+                if key not in members:
+                    members[key] = "%s/%d/%s" % (THEMES_DIR, len(members),
+                                                 re.sub(r"[\\/:*?\"<>|]+", "_", e["name"] or "") or "picture")
+                    files.append((e["src"], members[key]))
+                got.update(file=members[key], name=e["name"])
+            out[k] = got
+        pictures[rel] = {"themes": out}
+    return {"names": themes["names"], "pictures": pictures}, files
+
+
+def _themes_words(rec):
+    n = sum(len(p["themes"]) for p in (rec.get("pictures") or {}).values())
+    return "themes (%d: %d theme picture(s) or color(s))" % (len(rec.get("names") or []) - 1, n)
+
+
+def _unpack_themes(zip_path, assets_folder, rec, log_cb=None):
+    """Put a pack's themes into the project (:func:`scene_share.import_themes`); returns the theme pictures and colors
+    loaded."""
+    from ..plugins.stern import scene_share
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        names = set(zf.namelist())
+    themes = scene_share.read_themes({"themes": rec}, {n for n in names if n.startswith(THEMES_DIR + "/")})
+    if not themes:
+        return 0
+    report = {}
+    n = scene_share.import_themes(assets_folder, zip_path, themes, report=report)
+    if log_cb:
+        if n:
+            log_cb("Restored from the pack: %d theme picture(s) or color(s)%s%s." % (
+                n, " in the theme(s) " + ", ".join(report["added"]) + " (added)" if report["added"] else "",
+                "; themes switched on" if report["switched_on"] else "")
+                + (" Theme 1 is now called %s, as in the pack." % report["renamed"] if report.get("renamed") else ""),
+                "success")
+        if report["full"]:
+            log_cb("NOT restored: the theme(s) %s - this project has %d themes already, the most there can be."
+                   % (", ".join(report["full"]), _max_themes()), "warning")
+        if report["missing"]:
+            log_cb("NOT restored: theme pictures for %d picture(s) this project does not have (%s)."
+                   % (len(report["missing"]), ", ".join(os.path.basename(r) for r in report["missing"][:4])),
+                   "warning")
+    return n
+
+
+def extras_words(extras):
+    """What a pack's manifest *extras* bring beside its files, for the import question ("" when nothing): its music
+    modes, random clips, attract items, themes and Service menu rows (the Service menu rows and themes take the
+    project's place)."""
+    if not isinstance(extras, dict):
+        return ""
+    bits = []
+    if isinstance(extras.get(_EXTRA_SOUND_MODES), dict) and extras[_EXTRA_SOUND_MODES].get("slots"):
+        bits.append(_sound_modes_words(extras[_EXTRA_SOUND_MODES]))
+    if isinstance(extras.get(_EXTRA_VARIANTS), dict) and extras[_EXTRA_VARIANTS]:
+        bits.append(_variants_words(extras[_EXTRA_VARIANTS]))
+    if _attract_asks(extras.get(_EXTRA_ATTRACT)):
+        bits.append(_attract_words(extras[_EXTRA_ATTRACT]))
+    if isinstance(extras.get(_EXTRA_THEMES), dict) and extras[_EXTRA_THEMES].get("pictures"):
+        names = [str(n) for n in extras[_EXTRA_THEMES].get("names") or ()]
+        bits.append("the themes %s" % ", ".join(names) if names else "themes")
+    if isinstance(extras.get(_EXTRA_SERVICE_MENU), dict) and extras[_EXTRA_SERVICE_MENU]:
+        bits.append("its Service menu rows (in place of this project's)")
+    if len(bits) <= 1:
+        return "".join(bits)
+    return ", ".join(bits[:-1]) + " and " + bits[-1]
+
+
+def _max_themes():
+    from ..plugins.stern import scene_variants
+    return scene_variants.MAX_SETS
 
 
 def pack_attract(rec):
@@ -537,7 +642,9 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
     _staged = staged_changes.load(assets_folder)
     if not changed and not staged_changes.sound_modes_of(_staged) \
             and not _variant_map(_staged.get(_EXTRA_VARIANTS)) \
-            and not _attract_asks(_staged.get(_EXTRA_ATTRACT)):
+            and not _attract_asks(_staged.get(_EXTRA_ATTRACT)) \
+            and not pack_themes(assets_folder)[0] \
+            and not project_extras(assets_folder).get(_EXTRA_SERVICE_MENU):
         # a project of music modes (PAD-494) or random clips (PAD-553) alone
         # changes no file of the extract, and is still something to pack
         raise ValueError("No modified files found. Modify some files first.")
@@ -620,6 +727,9 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                    "Attract page before packing to carry them."
                    % (len(gone), ", ".join(os.path.basename(f) for f in gone[:4])),
                    "warning")
+    theme_rec, theme_files = pack_themes(assets_folder)
+    if theme_rec:
+        extras[_EXTRA_THEMES] = theme_rec
     carried_card, named_card = pack_card_files(
         card_replacements(assets_folder))
     manifest = {
@@ -658,6 +768,10 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
             rode.append(_variants_words(extras[_EXTRA_VARIANTS]))
         if extras.get(_EXTRA_ATTRACT):
             rode.append(_attract_words(extras[_EXTRA_ATTRACT]))
+        if extras.get(_EXTRA_THEMES):
+            rode.append(_themes_words(extras[_EXTRA_THEMES]))
+        if extras.get(_EXTRA_SERVICE_MENU):
+            rode.append("the Service menu rows")
         if rode:
             log_cb("Also packing " + ", ".join(rode)
                    + " — they are project settings, not files.", "info")
@@ -717,6 +831,13 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
             except OSError as err:
                 if log_cb:
                     log_cb("Could not pack %s (an attract item) — %s."
+                           % (path, err), "warning")
+        for path, member in theme_files:
+            try:
+                zf.write(path, member)
+            except OSError as err:
+                if log_cb:
+                    log_cb("Could not pack %s (a theme's picture) — %s."
                            % (path, err), "warning")
 
     return len(changed), zip_path
@@ -843,7 +964,8 @@ def inspect_mod_pack(zip_path, assets_folder):
                  if n != MANIFEST_NAME and not n.endswith(("/", "\\"))
                  and not _local_project_state(n)
                  and not n.startswith((CARD_DIR + "/", MODES_DIR + "/",
-                                       CLIPS_DIR + "/", ATTRACT_DIR + "/"))]
+                                       CLIPS_DIR + "/", ATTRACT_DIR + "/",
+                                       THEMES_DIR + "/"))]
         try:
             manifest = json.loads(zf.read(MANIFEST_NAME).decode("utf-8"))
         except (KeyError, ValueError, UnicodeDecodeError):
@@ -1046,6 +1168,11 @@ def apply_extras(assets_folder, extras, log_cb=None):
         # PAD-782: the pack's attract items take the project's place (one attract mode)
         data[_EXTRA_ATTRACT] = at
         applied[_EXTRA_ATTRACT] = len(at.get("items") or []) or 1
+    svc = extras.get(_EXTRA_SERVICE_MENU)
+    if isinstance(svc, dict) and any(svc.get(k) for k in ("order", "on", "coop")):
+        # Simon (2026-11-20): the pack's Service menu rows take the project's place
+        data[_EXTRA_SERVICE_MENU] = svc
+        applied[_EXTRA_SERVICE_MENU] = 1
     if not applied:
         return {}
     staged_changes.save(assets_folder, data)
@@ -1072,7 +1199,8 @@ def apply_extras(assets_folder, extras, log_cb=None):
                  _EXTRA_STOCK_MODES: "%d " + _stock_modes_words(),
                  _EXTRA_SOUND_MODES: "music mode files for %d sound(s)",
                  _EXTRA_VARIANTS: "random clips for %d clip(s)",
-                 _EXTRA_ATTRACT: "%d attract item(s)"}
+                 _EXTRA_ATTRACT: "%d attract item(s)",
+                 _EXTRA_SERVICE_MENU: "the Service menu rows"}
         parts = []
         for key, n in applied.items():
             if key == _EXTRA_STOCK_MODES and not n:
@@ -1103,7 +1231,8 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
     applicable = [name for name in plan["applicable"] if not _local_project_state(name)]
     modes_only = (not plan["names"]
                   and any(isinstance((manifest.get("extras") or {}).get(k), dict)
-                          for k in (_EXTRA_SOUND_MODES, _EXTRA_VARIANTS, _EXTRA_ATTRACT)))
+                          for k in (_EXTRA_SOUND_MODES, _EXTRA_VARIANTS, _EXTRA_ATTRACT,
+                                    _EXTRA_THEMES, _EXTRA_SERVICE_MENU)))
     if log_cb:
         for level, text in mismatch_lines(plan):
             log_cb(text, level)
@@ -1184,7 +1313,17 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
             extras_in[_EXTRA_ATTRACT] = rec
         else:
             extras_in.pop(_EXTRA_ATTRACT)
+    theme_rec = extras_in.pop(_EXTRA_THEMES, None)
     extras = apply_extras(assets_folder, extras_in, log_cb=log_cb)
+    if isinstance(theme_rec, dict):
+        try:
+            n_themes = _unpack_themes(zip_path, assets_folder, theme_rec, log_cb=log_cb)
+        except Exception as err:                    # noqa: BLE001 - the rest of the pack is in
+            n_themes = 0
+            if log_cb:
+                log_cb("The pack's themes could not be restored — %s." % err, "warning")
+        if n_themes:
+            extras[_EXTRA_THEMES] = n_themes
     _note_imported(assets_folder, plan.get("pack_lineage"), zip_path)
     card_files = manifest.get("card_files") or []
     card_saved = _unpack_card_files(zip_path, assets_folder, card_files,

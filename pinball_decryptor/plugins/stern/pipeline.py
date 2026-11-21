@@ -186,6 +186,11 @@ def _write_summary_with_modes(counts, modes):
     variants = list((modes or {}).get("variants") or ())
     clips = ("%d clip(s) that play one of several at random" % len(variants)
              if variants else "")
+    # PAD-1462: the themes with pictures of their own (Simon: a Write of theme changes alone said "no changes")
+    themes = list((modes or {}).get("themes") or ())
+    if themes:
+        clips = (clips + " and " if clips else "") + "the pictures of %d theme(s) (%s)" % (
+            len(themes), ", ".join(themes))
     if not names:
         base = _write_summary(counts)
         if not clips:

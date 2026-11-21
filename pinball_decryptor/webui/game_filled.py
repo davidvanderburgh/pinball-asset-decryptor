@@ -166,6 +166,8 @@ _WORD = re.compile(r"[A-Za-z]{3,}")
 _PLAYER_NO = re.compile(r"(?:^|[._])P(\d)_")
 TRY_MAX = 40            # suggestions offered for one box
 TRY_LONGEST = 60        # a longer line is help text, not a box's words
+_NUMBER_FILL = re.compile(r"%%|%[-+ #0,']*\d*(?:hh|h|ll|l|z|j|t)?[du]|%P\d+(?:/[^/%]*)*/%")  # a count or %%
+_PLAYER_FILL = re.compile(r"\bplayer\s+%[-+ #0,']*\d*(?:hh|h|ll|l|z|j|t)?[du]", re.I)
 
 
 def sample_line(line, number="1"):
@@ -199,29 +201,48 @@ def try_lines(rows, words, path=""):
     got = _PLAYER_NO.search(path or "")
     number = got.group(1) if got else "1"
     own = game_row_for(rows, words)
+    plain = " ".join((words or "").upper().split())
     ranked = []
     for i, r in enumerate(rows or ()):
         if R.row_is_scene(r) or R.row_part(r) or r.get("unused"):
             continue
         orig = r.get("original") or ""
-        if "&" in orig or "\n" in orig or "\n" in orig:
-            continue                        # markup or several lines: not a box's one line
-        shared = len(want & {w.upper() for w in _WORD.findall(R._FILL_IN.sub(" ", orig))})
+        if "&" in orig or "\n" in orig:
+            continue                        # markup: not a box's words
+        if orig.rstrip().endswith("\\n"):
+            continue                        # a log or console line, not a box's
+        if r is not own and any(not _NUMBER_FILL.fullmatch(m.group(0)) for m in R._FILL_IN.finditer(orig)):
+            continue                        # Simon (2026-11-20): "note the error!" - a %s / %x line is a message
+        if r is not own and got and not _PLAYER_FILL.search(orig):
+            continue                        # a player's box: the lines naming the player ("PLAYER %d - LOG IN")
+        # a line the game breaks (\n, kept as written: the box draws it on several lines - Simon, 2026-11-20, the
+        # power-up box's "GODZILLA\nPOWERUP\nLEVEL %d", which the stand-in GODZILLA POWERUP LEVEL 3 stands for)
+        flat = orig.replace("\\n", " ")
+        shared = len(want & {w.upper() for w in _WORD.findall(R._FILL_IN.sub(" ", flat))})
         if r is not own and not shared:
             continue
-        shown = sample_line(orig, number)
+        shown = "\\n".join(sample_line(part, number) for part in orig.split("\\n"))
         if not shown or len(shown) > TRY_LONGEST:
             continue
-        ranked.append(((r is not own, -shared, not R._FILL_IN.search(orig), len(shown), i),
+        # the line reading as the stand-in does, its fill-ins any word and its breaks spaces, leads (GODZILLA
+        # POWERUP LEVEL 3 is GODZILLA\nPOWERUP\nLEVEL %d, not GODZILLA POWERUP - LEVEL %d)
+        alike = bool(plain and re.fullmatch(
+            r"\s*".join(r"\S+" if R._FILL_IN.fullmatch(t) else re.escape(t.upper())
+                        for t in R._FILL_IN.sub(lambda m: " " + m.group(0) + " ", flat).split()),
+            plain))
+        ranked.append(((r is not own, not alike, -shared, not R._FILL_IN.search(orig), len(shown), i),
                        shown))
-    out, seen = [], set()
+    # Simon (2026-11-20): "the ACTUAL lines that can be shown" - one of each, in capitals where the game has it so
+    # (PLAYER 4 and Player 4 are one choice), in the order ranked
+    order, best = [], {}
     for _k, shown in sorted(ranked):
-        if shown not in seen:
-            seen.add(shown)
-            out.append(shown)
-        if len(out) >= TRY_MAX:
-            break
-    return out
+        key = shown.upper()
+        if key not in best:
+            order.append(key)
+            best[key] = shown
+        elif shown == key:
+            best[key] = shown
+    return [best[k] for k in order][:TRY_MAX]
 
 
 def try_lines_for(assets_dir, words, path=""):

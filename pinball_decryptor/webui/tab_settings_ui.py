@@ -79,7 +79,7 @@ def load_media(tab, kind, assets_dir, slots, running, flush, rescan,
     except (TS.TabSettingsError, OSError) as e:
         compat.messagebox.showinfo(title, str(e))
         return None
-    if not res.slots:
+    if not res.slots and not res.themes:
         compat.messagebox.showinfo(
             title, "None of the slots in %s are on this card, so nothing "
             "was loaded." % name if res.missing else
@@ -93,6 +93,11 @@ def load_media(tab, kind, assets_dir, slots, running, flush, rescan,
                "its" if len(res.clash) == 1 else "their")):
         return None
     staged_changes.save(assets_dir, res.data)
+    if res.themes:
+        # the file's themes (Simon, 2026-11-20) show in the theme picker at once
+        sets = tab.window.service("imgsets") if hasattr(tab.window, "service") else None
+        if sets is not None and hasattr(sets, "publish"):
+            sets.publish()
     cb = tab.window.cb.get("on_folder_state_written")
     if cb is not None:
         cb(assets_dir)
@@ -105,6 +110,8 @@ def load_media(tab, kind, assets_dir, slots, running, flush, rescan,
     rescan()
     words = "Loaded the settings of %s from %s." % (
         _plural(len(res.slots), "slot"), name)
+    if res.themes:
+        words += " Its themes (%d besides theme 1) take this project's place." % res.themes
     if res.missing:
         words += " %s in the file %s not on this card and %s left out." % (
             _plural(len(res.missing), "slot"),

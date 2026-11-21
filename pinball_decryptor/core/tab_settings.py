@@ -23,7 +23,9 @@ VERSION = 1
 SECTIONS = {
     "images": ("image", "image_keep_size", "image_group_tags",
                "image_color_slots", "color_all_images",
-               "image_color_unlocked", "image_color_profiles"),
+               "image_color_unlocked", "image_color_profiles",
+               # Simon (2026-11-20): the themes are made on this tab, so its settings file carries them
+               "scene_variants"),
     "audio": ("audio", "audio_loop", "audio_keep", "audio_levels",
               "grow_keep_whole", "audio_trim"),
     "video": ("video", "video_asis_slots", "video_length_slots",
@@ -35,6 +37,46 @@ SECTIONS = {
 PICKS = {"images": "image", "audio": "audio", "video": "video"}
 #: Sections keyed by something other than a slot (kept whole on load).
 NOT_BY_SLOT = ("image_group_tags",)
+#: The themes (plugins/stern/scene_variants): taken whole on load, never merged - a theme's number only means
+#: something beside its own list of names - with the pictures this card has.
+THEMES = "scene_variants"
+
+
+def _slot_of(key):
+    """The slot a color map's key is for: a theme's own key ``"@<n>:<rel>"`` (plugins/stern/scene_variants) is
+    *rel*'s."""
+    if isinstance(key, str) and key.startswith("@") and ":" in key and key[1:key.index(":")].isdigit():
+        return key[key.index(":") + 1:]
+    return key
+
+
+def _themes_here(val, slots, res):
+    """A settings file's themes record with only the pictures this card has (*res* counts the rest)."""
+    out = {k: v for k, v in val.items() if k not in ("images", "keep")}
+    images, keep = {}, {}
+    for n, picks in (val.get("images") or {}).items() if isinstance(val.get("images"), dict) else ():
+        mine = {}
+        for rel, f in (picks.items() if isinstance(picks, dict) else ()):
+            if rel not in slots:
+                res.missing.add(rel)
+                continue
+            res.slots.add(rel)
+            if isinstance(f, str) and not os.path.isfile(f):
+                res.gone.add(rel)
+            mine[rel] = f
+        if mine:
+            images[str(n)] = mine
+    for n, rels in (val.get("keep") or {}).items() if isinstance(val.get("keep"), dict) else ():
+        mine = [r for r in (rels if isinstance(rels, list) else ()) if r in slots]
+        if mine:
+            keep[str(n)] = mine
+    if images:
+        out["images"] = images
+    if keep:
+        out["keep"] = keep
+    if len(out.get("names") or ()) >= 2:
+        res.themes = len(out["names"]) - 1    # the theme names alone are something loaded
+    return out
 LABELS = {"images": "image", "audio": "audio", "video": "video",
           "text": "text"}
 
@@ -91,8 +133,13 @@ def media_count(sections, kind):
     for key, val in sections.items():
         if key in NOT_BY_SLOT:
             continue
+        if key == THEMES:
+            if isinstance(val, dict):
+                for picks in (val.get("images") or {}).values():
+                    rels.update(picks if isinstance(picks, dict) else ())
+            continue
         if isinstance(val, dict):
-            rels.update(val)
+            rels.update(_slot_of(k) for k in val)
         elif isinstance(val, list):
             rels.update(val)
     return len(rels)
@@ -115,6 +162,7 @@ class MediaMerge:
         self.missing = set()      # slots in the file this card lacks
         self.clash = set()        # slots that had a different pick here
         self.gone = set()         # picks whose file is not on this PC
+        self.themes = 0           # themes (beyond theme 1) the file set
 
 
 def merge_media(staged, doc, kind, slots):
@@ -137,14 +185,19 @@ def merge_media(staged, doc, kind, slots):
                 merged.update({str(k): str(v) for k, v in val.items()})
                 data[key] = merged
             continue
+        if key == THEMES:
+            if isinstance(val, dict):
+                data[key] = _themes_here(val, slots, res)
+            continue
         if isinstance(val, dict):
             mine = data.get(key)
             merged = dict(mine) if isinstance(mine, dict) else {}
             for rel, v in val.items():
-                if rel not in slots:
-                    res.missing.add(rel)
+                # a theme's own color (Simon, 2026-11-20) is its picture's: kept when this card has the picture
+                if _slot_of(rel) not in slots:
+                    res.missing.add(_slot_of(rel))
                     continue
-                res.slots.add(rel)
+                res.slots.add(_slot_of(rel))
                 if key == picks_key:
                     if not isinstance(v, str) or not v.strip():
                         continue

@@ -193,3 +193,8 @@ svg.i.cpd-pal { width: 14px; height: 14px; vertical-align: -2px; stroke-width: 1
   color: color-mix(in srgb, currentColor 45%, transparent); }
 /* (text and icons fade through currentColor; the spectrum palette has colours of its own) */
 .cpd-copy button:disabled svg.cpd-pal { opacity: .45; }
+/* Simon (2026-11-20): the selected file's kind as a small picture in a box at the end of its name */
+.cpd-kind { display: flex; align-items: center; justify-content: center; min-width: 22px; border-radius: 4px;
+  border: 1px solid var(--accent, #e3a33b); background: var(--warn-soft); color: var(--ink); }
+.cpd-kind.cpd-none { border-style: dashed; background: transparent; }
+.cpd-kind .i { width: 14px; height: 14px; }

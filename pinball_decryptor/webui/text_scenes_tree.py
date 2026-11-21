@@ -266,7 +266,7 @@ class TreeEditMixin:
                                      force=force, through=through, unveil=unveil,
                                      hidden=gone)
         self._fit_kept(draws, worlds)
-        draws = _with_tries(draws, self._ttry.get(card))
+        draws = _with_tries(draws, self._tree_tries(card, man))
         # what the eyes show: a layer the eye turned on is on, even though the plain draw has
         # it off (DragonRR, PAD-280: the eyes stayed crossed); a peek is only while selected
         mine = self._tree_force_set(card) if peek is not None else force
@@ -681,7 +681,7 @@ class TreeEditMixin:
         fps = float((man.get("stage") or [0, 0, 30])[2] or 30)
         state = self._tplay = {"cancel": False}
         job = {"man": man, "pins": pins, "frames": frames, "bg": self._bg,
-               "tries": dict(self._ttry.get(card) or {}),
+               "tries": self._tree_tries(card, man),
                "unveil": set(self._tree_hidden(card)),
                "hidden": set(self._tree_view_hidden(card)),
                "text_edits": self._pending_texts(card, None), "colors": self._pending_colors(card),
@@ -1088,6 +1088,8 @@ class TreeEditMixin:
                 "hid_in": self._tree_hidden_in(man, nid, self._tree_hidden(card)),
                 "view_in": self._tree_hidden_in(man, nid, self._tree_view_hidden(card)),
                 "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n),
+                # Simon (2026-11-20): Show pixel for pixel is a toggle - on while its edit is in the list
+                "one_to_one": any(op.get("node") == nid and op.get("one_to_one") for op in ops),
                 "font": self._tree_font_of(man, n, ops),
                 "filled": self._tree_filled(card, man).get(nid),
                 "try": self._tree_try_of(card, man, n),
@@ -1329,6 +1331,8 @@ class TreeEditMixin:
             from . import game_filled           # PAD-1261: what to change instead
             out["note"] = game_filled.locked_note(orig, assets_dir=self.assets_dir,
                                                    short=True)
+            # Simon (2026-11-20): the stand-in is not shown "in the 'words'" either - the line the preview draws there
+            out["text"] = self._tree_tries(card, man).get(n["id"], out["text"])
         return out
 
     def _tree_try_of(self, card, man, n):
@@ -1340,16 +1344,41 @@ class TreeEditMixin:
             return None
         if n["id"] not in self._tree_filled(card, man):
             return None
+        stand_in, options = self._tree_try_lines(man, n)
+        return {"words": self._tree_tries(card, man).get(n["id"], ""), "stand_in": stand_in,
+                "options": options}
+
+    def _tree_try_lines(self, man, n):
+        """``(stand-in, the game's lines it might show)`` for box *n* the game fills."""
         from . import game_filled
-        names = {m["id"]: m.get("name") or "" for m, _p, _d in _walk_man(man)}
+        names, parent = {}, {}
+        for m, p, _d in _walk_man(man):
+            names[m["id"]] = m.get("name") or ""
+            parent[m["id"]] = p["id"] if p is not None else None
         parts, cur, hops = [], n["id"], 0
         while cur is not None and hops < 256:
             parts.append(names.get(cur, ""))
-            cur, hops = self._tparents.get(cur), hops + 1
+            cur, hops = parent.get(cur), hops + 1
         stand_in = _text_of(man, n, "Text") or ""
-        return {"words": (self._ttry.get(card) or {}).get(n["id"], ""),
-                "options": game_filled.try_lines_for(self.assets_dir, stand_in,
-                                                     ".".join(reversed(parts)))}
+        return stand_in, game_filled.try_lines_for(self.assets_dir, stand_in, ".".join(reversed(parts)))
+
+    def _tree_tries(self, card, man):
+        """The words the preview draws in each box the game fills: the one picked in "Show it with", else the first
+        of the game's lines for it (Simon, 2026-11-20: the stand-in "Inactive Player" - "There is no point in this
+        being shown at all ... Simply replace this with the first option - so in this case it would be PLAYER 4"),
+        else (no line of the game's found) its stand-in."""
+        tries = {}
+        if man is not None:
+            index = scene_edit_index(man)
+            for nid in self._tree_filled(card, man):
+                n = (index.get(nid) or (None,))[0]
+                if n is None or n.get("added") or _kind_of(man, n) != "Text":
+                    continue
+                options = self._tree_try_lines(man, n)[1]
+                if options:
+                    tries[nid] = options[0]
+        tries.update(self._ttry.get(card) or {})
+        return tries
 
     @rpc
     def tree_try_words(self, node, words=None):
@@ -2907,8 +2936,27 @@ class TreeEditMixin:
         big picture leaves jagged edges; a picture made at the size it shows, kept at its own
         size on the Images tab, then needs the scene's scale taken off).  Its top-left corner
         stays where it is."""
-        from ..plugins.stern import scene_eval
+        from ..plugins.stern import scene_edit, scene_eval
         node = int(node)
+        # Simon (2026-11-20): "Show pixel for pixel has no way back - you can't undo except by using the undo button
+        # itself. Make it a toggle": pressed again, its own edit is taken back (one undo step, as the Edits list's
+        # Revert is), whatever came after it staying
+        card, _man = self._tree_card()
+        ops = self._tree_ops(card) if card is not None else []
+        mine = [i for i, op in enumerate(ops) if op.get("node") == node and op.get("one_to_one")]
+        if mine:
+            self._tree_track(card)
+            try:
+                scene_edit.set_ops(self.assets_dir, card, scene_edit.without(ops, mine[-1]))
+            except OSError as e:
+                compat.messagebox.showerror("Scene edit", str(e))
+                return False
+            self._tree_refresh()
+            return True
+        if getattr(self, "_preview_theme", 1) > 1:
+            # Simon (2026-11-20): showing theme N the picture is theme N's, the layout theme 1's - its scale must not be
+            # set to theme N's picture
+            return False
         got = self._tree_picture(node)
         if got is None:
             return False
@@ -2923,7 +2971,7 @@ class TreeEditMixin:
             return False
         px, py = scene_eval.apply(inv, *scene_eval.apply(d["m"], 0.0, 0.0))
         op = {"op": "scale", "node": node, "s": round(1.0 / sx, 6),
-              "px": round(px, 3), "py": round(py, 3)}
+              "px": round(px, 3), "py": round(py, 3), "one_to_one": True}
         if abs(sx - sy) > 1e-6:
             op["sy"] = round(1.0 / sy, 6)
         return self._tree_add(op)
@@ -3677,10 +3725,13 @@ class TreeEditMixin:
             compat.messagebox.showerror("Save scenes", str(e))
             return None
         colour = _colour_words(counts)
+        tn = counts.get("themes") or 0       # Simon (2026-11-20): the themes' own pictures and colors go too
         self._set_caption("Saved the edits of %d scene%s, %d replaced picture%s with their "
-                          "color profiles%s and %d text edit%s to %s"
+                          "color profiles%s%s and %d text edit%s to %s"
                           % (n, "" if n == 1 else "s", pics, "" if pics == 1 else "s",
-                             ", " + colour if colour else "", texts,
+                             ", " + colour if colour else "",
+                             ", %d theme picture%s or color%s" % (tn, "" if tn == 1 else "s", "" if tn == 1 else "s")
+                             if tn else "", texts,
                              "" if texts == 1 else "s", os.path.basename(path)))
         return path
 
@@ -3718,6 +3769,7 @@ class TreeEditMixin:
         kept, saved_to, reset_n, shown, elsewhere = 0, None, 0, 0, 0
         colours, moved, shown_k, differs, tpairs, skip_scenes = {}, {}, {}, {}, [], set()
         colours_missing, ontop, replaced_out = [], {}, {}
+        theme_skip, theme_report, theme_n = set(), {}, 0     # Simon (2026-11-20): the themes come too
         try:
             scenes = scene_edit.read_share(path)
             # PAD-385: a picture named otherwise here (a project of another card) is found by
@@ -3819,9 +3871,11 @@ class TreeEditMixin:
                 gone_text = {id(r) for i, (r, _new) in enumerate(tclash)
                              if "text:%d" % i not in take}
                 tfits = [(r, new) for r, new in tfits if id(r) not in gone_text]
+                if "themes" not in take:
+                    theme_skip = set(clash.get("themes") or ())
                 more = scene_share.has_extras(extras) and (
                     bool(extras["pictures"] or extras["added"] or extras.get("lines")
-                         or extras["colored"]) or overlay)
+                         or extras["colored"] or extras.get("themes")) or overlay)
             renamed = {}
             if got:
                 got, missing = scene_edit.import_edits(self.assets_dir, path,
@@ -3879,6 +3933,9 @@ class TreeEditMixin:
                                                        missing_colored=colours_missing,
                                                        replaced_too=bool(ontop),
                                                        replaced_out=replaced_out)
+                if extras.get("themes"):
+                    theme_n = scene_share.import_themes(self.assets_dir, path, extras["themes"],
+                                                        skip=theme_skip, report=theme_report)
             if tfits:
                 if text_tab is not None:
                     text_tab._set_replacements(
@@ -3891,6 +3948,10 @@ class TreeEditMixin:
             return None
         if more:
             self._shared_loaded(images)
+            if theme_report:
+                sets = self.window.service("imgsets")
+                if sets is not None and hasattr(sets, "publish"):
+                    sets.publish()
         if reset_n:
             self._tree_view_reset()
         self._tsel = None
@@ -3934,6 +3995,25 @@ class TreeEditMixin:
             words += " Your own from before are saved in %s: load it to put them back." % (
                 os.path.join(os.path.basename(os.path.dirname(saved_to)),
                              os.path.basename(saved_to)))
+        # Simon (2026-11-20): the themes' own pictures and colors, and what of them could not go in
+        if theme_n:
+            words += " %d theme picture%s or color%s loaded." % (
+                theme_n, "" if theme_n == 1 else "s", "" if theme_n == 1 else "s")
+        if theme_report.get("switched_on"):
+            words += " Themes were switched on (Images tab, Advanced)."
+        if theme_report.get("added"):
+            words += " Theme%s added: %s." % ("" if len(theme_report["added"]) == 1 else "s",
+                                              ", ".join(theme_report["added"]))
+        if theme_report.get("renamed"):
+            words += " Theme 1 is now called %s, as in the file." % theme_report["renamed"]
+        if theme_report.get("full"):
+            words += (" No room for theme%s %s (%d themes at most), left out."
+                      % ("" if len(theme_report["full"]) == 1 else "s", ", ".join(theme_report["full"]),
+                         SV_MAX_SETS()))
+        if theme_report.get("missing"):
+            nm = len(theme_report["missing"])
+            words += " %d theme picture%s for pictures not in this project %s left out." % (
+                nm, "" if nm == 1 else "s", "was" if nm == 1 else "were")
         if gone:
             words += (" %d picture%s in the file %s not in this project and %s left out."
                       % (len(gone), "" if len(gone) == 1 else "s",
@@ -4477,5 +4557,12 @@ def _with_tries(draws, tries):
     with") put in as ``shown``, the words the renderer draws in place of the card's own."""
     if not tries:
         return draws
-    return [dict(d, shown=tries[d["node"]]) if d.get("kind") == "text" and d.get("node") in tries
+    # (a game line's \n, as the game program writes it, is a line break: GODZILLA\nPOWERUP\nLEVEL 1)
+    return [dict(d, shown=tries[d["node"]].replace("\\n", "\n")) if d.get("kind") == "text" and d.get("node") in tries
             else d for d in draws]
+
+
+def SV_MAX_SETS():
+    """The most themes a project can have (:data:`.scene_variants.MAX_SETS`)."""
+    from ..plugins.stern import scene_variants
+    return scene_variants.MAX_SETS

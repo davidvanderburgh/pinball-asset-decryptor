@@ -212,7 +212,9 @@ def theme_pictures(project, n, bake=True):
         path = picks.get(rel) or theme1_source(project, rel)
         on, prof = theme_colour(project, n, rel, side, settings)
         colour = prof if (bake and on and prof is not None and not prof.is_identity()) else None
-        out[rel[len("images/"):]] = {"path": path if os.path.isfile(path) else None, "keep": False,
+        # Simon (2026-11-20): Keep size per theme - drawn at its own size where the theme keeps it
+        out[rel[len("images/"):]] = {"path": path if os.path.isfile(path) else None,
+                                     "keep": keeps_size(project, n, rel, picks),
                                      "colour": colour, "skip": not on}
     return out
 
@@ -254,7 +256,7 @@ def _put(project, side, raw):
     from ...core import staged_changes
     names = raw.get("names") or []
     if len(names) <= 1 and names in ([], list(DEFAULT_NAMES)) and not raw.get("scenes") and not raw.get("images") \
-            and not raw.get("force") and not raw.get("on"):
+            and not raw.get("force") and not raw.get("on") and not raw.get("keep"):
         side.pop(STAGED_KEY, None)                      # one set of the default name and nothing in it: none
     else:
         side[STAGED_KEY] = raw
@@ -370,6 +372,12 @@ def _renumber(raw, order):
         raw["images"] = images
     else:
         raw.pop("images", None)
+    keep = {str(new_of[int(k)]): v for k, v in (raw.get("keep") or {}).items()
+            if str(k).isdigit() and int(k) in new_of and new_of[int(k)] >= 2 and v}
+    if keep:
+        raw["keep"] = keep
+    else:
+        raw.pop("keep", None)
     force = raw.get("force")
     raw["force"] = new_of.get(force, 0) if isinstance(force, int) else 0
     if not raw["force"]:
@@ -445,6 +453,60 @@ def set_picture(project, n, rel, path):
         raw["images"] = images
     else:
         raw.pop("images", None)
+    if not path:                                        # back to theme 1's: its Keep size tick goes with it
+        _set_keep(raw, n, rel, False)
+    _put(project, side, raw)
+
+
+# ---- a theme's own Keep size (Simon, 2026-11-20: per-theme "Keep size") -------------------------------------------
+# Theme 1's tick is the Images tab's own (the sidecar's image_keep_size). A theme keeps its own for the pictures it
+# PICKED ({"keep": {"2": [rel, ...]}}): a new pick starts unticked, as a new picture on theme 1 does. A picture the
+# theme only colour profiles is theme 1's picture, so it follows theme 1's tick.
+
+def _set_keep(raw, n, rel, on):
+    keep = dict(raw.get("keep") or {})
+    rels = set(keep.get(str(int(n))) or ())
+    (rels.add if on else rels.discard)(rel)
+    if rels:
+        keep[str(int(n))] = sorted(rels)
+    else:
+        keep.pop(str(int(n)), None)
+    if keep:
+        raw["keep"] = keep
+    else:
+        raw.pop("keep", None)
+
+
+def theme1_keeps(project, rel):
+    """Theme 1's Keep size tick for picture *rel* (the Images tab's own)."""
+    from ...core import staged_changes
+    try:
+        return rel in set(staged_changes.peek(project).get("image_keep_size") or ())
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def keeps_size(project, n, rel, picks=None):
+    """Does theme *n*'s picture *rel* keep its own size? Its own tick for a picture it picked, else theme 1's."""
+    if int(n) < 2:
+        return theme1_keeps(project, rel)
+    picks = set_pictures(project, n) if picks is None else picks
+    if rel not in picks:
+        return theme1_keeps(project, rel)
+    _side, raw = _raw(project)
+    return rel in set((raw.get("keep") or {}).get(str(int(n))) or ())
+
+
+def set_keep_size(project, n, rel, on):
+    """Tick or untick Keep size for theme *n*'s own picture *rel* (one it picked)."""
+    n = int(n)
+    if n < 2:
+        raise SceneVariantError("theme 1's Keep size is the Images tab's own")
+    if rel not in set_pictures(project, n):
+        raise SceneVariantError("theme %d has no picture of its own for %s: it shows theme 1's, at theme 1's size"
+                                % (n, rel))
+    side, raw = _raw(project)
+    _set_keep(raw, n, rel, bool(on))
     _put(project, side, raw)
 
 
@@ -522,31 +584,34 @@ def encode_pictures(data, places, log=None):
     return bytes(buf), done
 
 
-def picture_variants(project, sets, base_scene, work, log=None):
-    """*sets* (:func:`load`) with a variant made for every scene that holds a picture a set gives its own: the scene
-    as *base_scene* ``(card path) -> bytes or None`` has it (set 1's), the set's pictures encoded in, written under
-    *work* as a ``{"file": ...}`` source. A scene the set already has a variant file of keeps that one."""
+def theme_name(sets, n):
+    """Theme *n*'s name in *sets* (:func:`load`), for the log."""
+    names = (sets or {}).get("names") or []
+    return names[n - 1] if n - 1 < len(names) else "theme %d" % n
+
+
+def theme_sources(project, sets, work, log=None):
+    """``{n: {picture rel: (file, keep size)}}``: every picture each theme of *sets* changes - its own file, or theme
+    1's before theme 1's colours (:func:`theme1_source`) - with the theme's colour profile baked in where its switch
+    is on (Simon: "every single image can be colour profiled", per theme), written under *work*; *keep size*
+    :func:`keeps_size`. A theme that changes nothing is not in it."""
     log = log or (lambda *a, **k: None)
     picks_by_set = (sets or {}).get("images") or {}
     colour_by_set = (sets or {}).get("colour") or {}
     if not picks_by_set and not colour_by_set:
-        return sets
+        return {}
     rows = picture_rows(project)
-    out = dict(sets)
-    scenes = {c: dict(v) for c, v in (sets.get("scenes") or {}).items()}
     os.makedirs(work, exist_ok=True)
     from ...core import colour_profile as cp, staged_changes
     side = staged_changes.peek(project)
     settings = cp.asset_settings(project)
+    out = {}
     for n in sorted(set(picks_by_set) | set(colour_by_set)):
-        picks = dict(picks_by_set.get(n) or {})
-        name = sets["names"][n - 1] if n - 1 < len(sets["names"]) else "theme %d" % n
-        by_card = {}
-        # every picture the theme changes: its own file, or theme 1's before theme 1's colours (theme1_source), with
-        # the theme's colour profile baked in where its switch is on (Simon: "every single image can be colour
-        # profiled", per theme)
-        for rel in sorted(set(picks) | set(colour_by_set.get(n) or ())):
-            src = picks.get(rel) or theme1_source(project, rel)
+        own = dict(picks_by_set.get(n) or {})
+        name = theme_name(sets, n)
+        got = {}
+        for rel in sorted(set(own) | set(colour_by_set.get(n) or ())):
+            src = own.get(rel) or theme1_source(project, rel)
             if rows.get(rel) and os.path.isfile(src):
                 try:
                     on, prof = theme_colour(project, n, rel, side, settings)
@@ -558,19 +623,47 @@ def picture_variants(project, sets, base_scene, work, log=None):
                 except Exception as e:                  # noqa: BLE001
                     log("Themes: theme %d (%s)'s color profile could not be baked into %s (%s); it goes in "
                         "without it." % (n, name, rel, e), "warning")
-            picks[rel] = src
-        for rel, src in sorted(picks.items()):
-            if not os.path.isfile(src):
-                log("Themes: theme %d (%s)'s picture for %s is missing (%s); left out." % (n, name, rel, src),
-                    "warning")
-                continue
-            places = rows.get(rel)
-            if not places:
-                log("Themes: %s is not inside a scene, so theme %d (%s) cannot change it; left out."
-                    % (rel, n, name), "warning")
-                continue
-            for card, off, length, pw, ph, fmt in places:
-                by_card.setdefault(card, []).append((src, rel, off, length, pw, ph, fmt))
+            got[rel] = (src, keeps_size(project, n, rel, own))
+        if got:
+            out[n] = got
+    return out
+
+
+def theme_places(project, n, name, picks, log=None):
+    """``{scene card path: [(file, rel, data offset, length, pad w, pad h, format)]}``: where theme *n*'s pictures
+    *picks* ``{rel: file}`` go, from the Extract's table; a missing file or a picture in no scene is left out (said)."""
+    log = log or (lambda *a, **k: None)
+    rows = picture_rows(project)
+    by_card = {}
+    for rel, src in sorted(picks.items()):
+        if not os.path.isfile(src):
+            log("Themes: theme %d (%s)'s picture for %s is missing (%s); left out." % (n, name, rel, src),
+                "warning")
+            continue
+        places = rows.get(rel)
+        if not places:
+            log("Themes: %s is not inside a scene, so theme %d (%s) cannot change it; left out."
+                % (rel, n, name), "warning")
+            continue
+        for card, off, length, pw, ph, fmt in places:
+            by_card.setdefault(card, []).append((src, rel, off, length, pw, ph, fmt))
+    return by_card
+
+
+def picture_variants(project, sets, base_scene, work, log=None):
+    """*sets* (:func:`load`) with a variant made for every scene that holds a picture a set gives its own: the scene
+    as *base_scene* ``(card path) -> bytes or None`` has it (set 1's), the set's pictures encoded in, written under
+    *work* as a ``{"file": ...}`` source. A scene the set already has a variant file of keeps that one."""
+    log = log or (lambda *a, **k: None)
+    sources = theme_sources(project, sets, work, log)
+    if not sources:
+        return sets
+    out = dict(sets)
+    scenes = {c: dict(v) for c, v in (sets.get("scenes") or {}).items()}
+    for n, got in sorted(sources.items()):
+        picks = {rel: src for rel, (src, _keep) in got.items()}
+        name = theme_name(sets, n)
+        by_card = theme_places(project, n, name, picks, log)
         made = 0
         for card, places in sorted(by_card.items()):
             if n in scenes.get(card, {}):

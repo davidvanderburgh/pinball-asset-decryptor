@@ -74,7 +74,19 @@ def url_problem(url):
 
 
 def load(project):
-    """``(on, url)`` from the project's sidecar."""
+    """``(on, url)`` from the project's sidecar. PAD-1479: with online co-op on (:mod:`.online_coop`) the feed is on
+    and posts to the campaign's server."""
+    if not project:
+        return False, ""
+    from . import online_coop as OC
+    oc = OC.load(project)
+    if oc["on"] and oc["url"].strip():
+        return True, oc["url"].strip()
+    return own(project)
+
+
+def own(project):
+    """``(on, url)`` of the project's own score feed (the Network tab's Score feed), online co-op left out."""
     if not project:
         return False, ""
     from ...core import staged_changes

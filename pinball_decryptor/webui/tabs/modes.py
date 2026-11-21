@@ -1778,7 +1778,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         from ...plugins.stern import score_feed as _SF
         prof = _SF.project_title(project) if project else None
         shown = bool(project) and prof is not None and not _SF.title_refusal(prof)
-        on, url = _SF.load(project) if project else (False, "")
+        on, url = _SF.own(project) if project else (False, "")      # PAD-1479: online co-op shows on its own box
         note, kind = "", ""
         if on:
             why = _SF.title_refusal(prof) or _SF.url_problem(url)
@@ -1798,7 +1798,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         if not project:
             return False
         was_on, was_url = _SF.save(project, bool(on), url)
-        now_on, now_url = _SF.load(project)
+        now_on, now_url = _SF.own(project)
         hist = [h for h in (
             history_log.diff_scalar("modes  score feed", "on" if was_on else "off", "on" if now_on else "off"),
             history_log.diff_scalar("modes  score feed address", was_url or "(none)", now_url or "(none)"))

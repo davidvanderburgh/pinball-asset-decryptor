@@ -47,4 +47,4 @@ Spike 3. No second network path.
 
 ## Status
 
-- [x] 1 runtime  - [x] 2 mode file  - [ ] 3 blocks  - [ ] 4 python  - [ ] 5 server  - [ ] 6 UI  - [ ] 7 proof
+- [x] 1 runtime  - [x] 2 mode file  - [x] 3 blocks  - [x] 4 python (UI next)  - [ ] 5 server  - [ ] 6 UI  - [ ] 7 proof

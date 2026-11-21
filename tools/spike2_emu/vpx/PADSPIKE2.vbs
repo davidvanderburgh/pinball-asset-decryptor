@@ -158,6 +158,7 @@ Sub LoadVPM(VPMver, VBSfile, VBSver)
 	  vpmKeyName(keyGreen)        & vbTab & "Service Minus"   & vbNewLine &_
 	  vpmKeyName(keyRed)          & vbTab & "Service Plus"    & vbNewLine &_
 	  vpmKeyName(keyEnter)        & vbTab & "Service Select"  & vbNewLine &_
+	  "Arrow keys"                & vbTab & "Up Minus, Down Plus, Left Back, Right Select" & vbNewLine &_
 	  vpmKeyName(keySlamDoorHit)  & vbTab & "Slam Tilt"
 End Sub
 
@@ -195,6 +196,27 @@ Dim swMemoryProtect : swMemoryProtect = 0
 ' closes both its switches, so the left key flips the upper left flipper too
 ' (PAD-878). Visual Pinball's own StagedLeftFlipperKey is Left Windows by
 ' default, and reading it left Godzilla's third flipper on a key nobody holds.
+' PAD: the arrow keys on the coin door's buttons (vpxshadow.py, PAD-1482):
+' Up Minus, Down Plus, Left Back, Right Select. An arrow Visual Pinball
+' has for one of its own keys stays its own.
+Function PadArrow(ByVal k)
+	PadArrow = 0
+	Select Case k
+		Case 200 PadArrow = 9010   ' Up: Service Minus
+		Case 208 PadArrow = 9009   ' Down: Service Plus
+		Case 203 PadArrow = 9011   ' Left: Service Back
+		Case 205 PadArrow = 9008   ' Right: Service Select
+		Case Else Exit Function
+	End Select
+	Dim n, v
+	On Error Resume Next
+	For Each n In Array("LeftFlipperKey", "RightFlipperKey", "StagedLeftFlipperKey", "StagedRightFlipperKey", "LeftMagnaSave", "RightMagnaSave", "PlungerKey", "StartGameKey", "AddCreditKey", "AddCreditKey2", "LockbarKey", "LeftTiltKey", "RightTiltKey", "CenterTiltKey", "MechanicalTilt")
+		v = Empty : v = Eval(n)
+		If v = k Then PadArrow = 0
+	Next
+	On Error Goto 0
+End Function
+
 Function vpmKeyDown(ByVal keycode)
 	vpmKeyDown = True ' Assume we handle the key
 	Dim stagedFlipperL, stagedFlipperR
@@ -226,7 +248,8 @@ Function vpmKeyDown(ByVal keycode)
 			Case keyEnter        .Switch(swSvcSelect)   = True
 			Case keySlamDoorHit  .Switch(swSlamTilt)    = True
 			Case keyBangBack     vpmNudge.DoMechTilt
-			Case Else            vpmKeyDown = False
+			Case Else
+				If PadArrow(keycode) Then .Switch(PadArrow(keycode)) = True Else vpmKeyDown = False
 		End Select
 	End With
 End Function
@@ -262,7 +285,8 @@ Function vpmKeyUp(ByVal keycode)
 			Case keyShowKeys     .Pause = True : vpmShowHelp : .Pause = False
 			Case keyAddBall      .Pause = True : vpmAddBall  : .Pause = False
 			Case keyReset        .Stop : BeginModal : .Run : vpmTimer.Reset : EndModal
-			Case Else            vpmKeyUp = False
+			Case Else
+				If PadArrow(keycode) Then .Switch(PadArrow(keycode)) = False Else vpmKeyUp = False
 		End Select
 	End With
 End Function

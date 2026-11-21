@@ -168,6 +168,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.dp" \
     --hidden-import "pinball_decryptor.plugins.stern" \
     --hidden-import "pinball_decryptor.plugins.stern.engine" \
+    --hidden-import "pinball_decryptor.plugins.stern.online_coop" \
     --hidden-import "pinball_decryptor.plugins.stern.emulator_log" \
     --hidden-import "pinball_decryptor.plugins.stern.cards" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1" \

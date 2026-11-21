@@ -117,7 +117,7 @@ def design_problems(design):
     names = []
     for t in teams:
         if not isinstance(t, dict):
-            out.append("A team is a name and a colour.")
+            out.append("A team is a name and a color.")
             continue
         w = word_problem("team", t.get("name"))
         if w:

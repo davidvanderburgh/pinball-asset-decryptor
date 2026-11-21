@@ -35,6 +35,7 @@ EVERY_BLOCK = [
     {"op": "shake", "ms": num(500), "strength": "hard"}, {"op": "shake_game", "shake": "jackpot"},
     {"op": "score", "points": num(1000000)}, {"op": "set", "var": "combo", "value": num(0)},
     {"op": "change", "var": "combo", "by": num(1)}, {"op": "set_hits", "shot": "Left ramp", "value": num(0)},
+    {"op": "online_add", "count": "rescued", "by": num(1)},                                   # PAD-1479
     {"op": "timer_start", "timer": "window", "ms": num(5000)}, {"op": "timer_stop", "timer": "window"},
     {"op": "if", "cond": {"k": "running"}, "then": [{"op": "start_mode"}], "else": None},
     {"op": "if", "cond": None, "then": [], "else": []},

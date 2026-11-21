@@ -165,6 +165,17 @@ def test_current_follows_the_scenes_layout(tmp_path, monkeypatch):
     assert got["images/scene_textures/a.png"]["c"] == [48, 24]
 
 
+def test_edits_the_scene_already_shows_are_not_applied_again(tmp_path, monkeypatch):
+    # HEISEI re-check (2026-11-21): a project extracted from a card PAD wrote already shows its Scenes edits
+    # (PAD-403); applied again on top, Simon's V2.3 battle cards read 1626x1162 instead of 821x587
+    monkeypatch.setattr(scene_edit, "trees_of", lambda d: {"card": _man(1.0)})
+    monkeypatch.setattr(scene_edit, "load", lambda d: {"card": [{"op": "scale", "node": 1, "s": 3.0, "px": 0,
+                                                                  "py": 0}]})
+    monkeypatch.setattr(scene_edit, "to_apply", lambda d, card, man, ops: [])      # all already on the card
+    got = picture_sizes.columns(str(tmp_path / "y"), {"images/scene_textures/a.png": ((16, 8), (400, 200))})
+    assert got["images/scene_textures/a.png"]["c"] == [16, 8]
+
+
 def test_imported_size_off_measures_the_squeezed_picture(tmp_path, monkeypatch):
     # Simon (2026-11-21): a 4000x2860 card with Imported size off read Current 347x248 (its own shape kept); it is
     # squeezed into the original's pixels, so the game shows it in the original's shape (347x475)

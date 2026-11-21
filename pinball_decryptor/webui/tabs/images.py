@@ -2152,7 +2152,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         for s in self._slots:
             rep = self._assignments.get(s.rel_path)
             rows[s.rel_path] = (self._orig_size(s), self._size_of(rep) if rep else None)
-            if rep and self._keep_state(s.rel_path) is False:
+            # Imported size off - or a picture that can't change size (a flipbook frame, a font; HEISEI
+            # re-check 2026-11-21): either way squeezed into the original's pixels at the Write
+            if rep and self._keep_state(s.rel_path) is not True:
                 squeezed.add(s.rel_path)
         try:
             from ...plugins.stern import picture_sizes
@@ -2161,8 +2163,11 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
             log.exception("resolution columns")
             cols = {}
         for rel, c in cols.items():
-            if c.get("i") and not c.get("fixed") and self._keep_state(rel) is False:
-                c["w"], c["sq"] = c.get("o"), True          # Imported size off: squeezed into the original's pixels
+            state = self._keep_state(rel) if c.get("i") and not c.get("fixed") else True
+            if state is not True:
+                c["w"], c["sq"] = c.get("o"), True          # squeezed into the original's pixels
+                if state is None:
+                    c["sqn"] = True                         # it can't change size at all
         try:
             from ...core import asset_origin
             self._origin_info = asset_origin.origins(self._scan_dir)
@@ -2181,6 +2186,8 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
                 out["rf"] = True
             if c.get("sq"):
                 out["rq"] = True
+            if c.get("sqn"):
+                out["rqn"] = True
             # orange: PAD writes it smaller than you imported it; amber: the game shows it bigger (may look soft)
             if c["i"] and c["w"] and tuple(c["w"]) != tuple(c["i"]) and not c.get("fixed") and not c.get("sq"):
                 out["rd"] = True

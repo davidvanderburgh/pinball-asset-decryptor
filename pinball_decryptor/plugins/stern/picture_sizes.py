@@ -125,7 +125,14 @@ def scene_scales(assets_dir, natural_of):
     for card, man in trees.items():
         if not isinstance(man, dict) or not man.get("root"):
             continue
+        # PAD-403: a scene read off a card PAD wrote already shows its leading edits - applied again they would
+        # move and size their nodes twice (Simon's HEISEI 2.3 battle cards read 1626x1162, not 821x587)
         ops = edits.get(card)
+        if ops:
+            try:
+                ops = scene_edit.to_apply(assets_dir, card, man, ops)
+            except Exception:                           # noqa: BLE001 - every edit, as before
+                pass
         if ops:
             try:
                 man = scene_edit.apply_manifest(man, ops)[0]

@@ -518,7 +518,7 @@ export default function ImagesTab() {
     if (!v) return html`<span class="mono small muted">—</span>`;
     const lines = [];
     if (k === "rw" && row.rd) lines.push({ text: "Smaller than you imported it: the screen never shows more than this.", tone: "accent" });
-    if (k === "rw" && row.rq) lines.push({ text: "Imported size is off: squeezed into the original's pixels.", tone: "info" });
+    if (k === "rw" && row.rq) lines.push({ text: row.rqn ? "This picture can't change size: squeezed into the original's pixels." : "Imported size is off: squeezed into the original's pixels.", tone: "info" });
     if (k === "rc" && row.rs) lines.push({ text: "The game shows it bigger than your picture, so it may look soft.", tone: "warn" });
     if (row.rf && (k === "rc" || k === "rw")) lines.push({ text: "This picture is used at exactly the original's size.", tone: "info" });
     const cls = cx("mono small", k === "rw" && row.rd && "img-res-down", k === "rc" && row.rs && "img-res-soft",

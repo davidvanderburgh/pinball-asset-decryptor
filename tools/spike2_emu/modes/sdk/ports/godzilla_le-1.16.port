@@ -1358,3 +1358,10 @@ site ball_device_keep     0x0038890c 0xe30c3190 0xe340305f
 data ball_devices         0x00756ff8
 text ball_device_names  RIGHT_SCOOP BUILDING_VAPOR
 data ball_device_count    0x005fc190
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x003f3bd8 0xe92d4070 0xe3066278   # (n): every show numbered n ends
+value show_count          361
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            210 214 215 216 217 249 319

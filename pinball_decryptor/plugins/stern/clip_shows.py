@@ -27,6 +27,8 @@ STARTER_WORDS = (0xE92D47F0, 0xE2508000)
 STARTER_SCAN = 48
 #: a table row's size
 ROW = 12
+#: how far into the starter, and into a stopper candidate, their words are read (PAD-1476)
+STOPPER_SCAN = 120
 _B_MASK, _B = 0xFF000000, 0xEA000000                        # b <target>, always
 
 
@@ -161,6 +163,77 @@ def locate_starter(prog):
             if starter_table(prog, va)[1]:
                 found.append(va)
         i = raw.find(head, i + 4, end)
+    return found[0] if len(found) == 1 else 0
+
+
+# ---- PAD-1476: the game's "stop every show with this number" ----------------------------------------
+def _number_facts(prog, starter):
+    """``(constants, number offset)`` off the starter: every constant it builds with movw/movt (the running-show
+    list's head among them) and the offset it stores the show's number at in the new show's process record
+    (``strh r8, [r0, #0x96]`` - r8 the number it was handed, ``subs r8, r0, #0``), or ``([], None)``."""
+    regs, consts, num, off = {}, [], None, None
+    for i in range(STOPPER_SCAN):
+        try:
+            w = prog.word(starter + 4 * i)
+        except Exception:                                   # noqa: BLE001
+            break
+        if i == 1 and (w & 0x0FFF0FFF) == 0x02500000:        # subs rX, r0, #0
+            num = (w >> 12) & 15
+        m = _movwt(w)
+        if m:
+            reg, half, imm = m
+            if half == 0:
+                regs[reg] = imm
+            elif reg in regs:
+                consts.append(regs.pop(reg) | (imm << 16))
+            continue
+        # strh<c> rt, [rn, #imm] (offset form, no writeback): the number into the new record
+        if (w & 0x0E7000F0) == 0x004000B0 and (w >> 24) & 1 and num is not None and (w >> 12) & 15 == num:
+            off = ((w >> 4) & 0xF0) | (w & 0xF)
+        if (w & 0xFFFF0000) == 0xE8BD0000:                   # pop {...}, always: its end
+            break
+    return (consts, off) if off is not None else ([], None)
+
+
+def locate_stopper(prog, starter):
+    """The game's "stop every show with this number" (James Bond LE 1.06 0x2fce04, the port's `site
+    show_stop_number`; Godzilla LE 1.16 0x3f3bd8), found off the starter *starter*, or 0. It walks the running-show
+    list the starter walks (a movw/movt of its head within its first instructions), compares each record's number
+    (``ldrh rt, [rn, #off]`` then ``cmp rt, rm``) and ends each one that matches (two calls, at least). The
+    process fork also reads that offset, to copy it, never to compare it. Only when exactly one function fits:
+    82 of 82 Spike 2 builds."""
+    consts, off = _number_facts(prog, starter)
+    if off is None:
+        return 0
+    found = []
+    for head in dict.fromkeys(consts):
+        try:
+            sites = prog.movwt_sites(head)
+        except Exception:                                   # noqa: BLE001
+            continue
+        for site in sites:
+            fs = prog.func_start(site)
+            if not fs or fs == starter or fs in found or site - fs > 16:
+                continue
+            try:
+                if (prog.word(fs) & 0xFFFF0000) != 0xE92D0000:   # push {...}
+                    continue
+                calls, compares = 0, False
+                for i in range(STOPPER_SCAN):
+                    w = prog.word(fs + 4 * i)
+                    if (w & 0x0F000000) == 0x0B000000:       # bl
+                        calls += 1
+                    if ((w & 0x0E5000F0) == 0x005000B0 and (w >> 23) & 1 and (w >> 24) & 1
+                            and (((w >> 4) & 0xF0) | (w & 0xF)) == off):
+                        w2 = prog.word(fs + 4 * i + 4)
+                        if (w2 & 0x0FF0F000) == 0x01500000 and not (w2 >> 25) & 1 and (w2 >> 16) & 15 == (w >> 12) & 15:
+                            compares = True
+                    if (w & 0xFFFF0000) == 0xE8BD0000:
+                        break
+            except Exception:                               # noqa: BLE001
+                continue
+            if compares and calls >= 2:
+                found.append(fs)
     return found[0] if len(found) == 1 else 0
 
 

@@ -155,7 +155,9 @@ def test_the_page_lists_the_modes_light_shows():
     how = tab._how_for(b, 7)
     first, fade, flash = how["shows"]
     assert (first["text"], first["named"]) == ("Light show 382", False)
-    assert first["tip"]["lines"] == ["The game's light show 382"]
+    assert first["tip"]["lines"] == ["The game's light show 382",          # PAD-1476: pickable by its number
+                                     'A mode of yours and the co-op intro can play it too: "Light show 382 (Aston '
+                                     'Martin Multiball)" on its Lights page']
     assert (fade["text"], fade["num"], fade["named"]) == ("Wide slow fade", 448, True)
     assert fade["tip"]["lines"] == ["The game's light show 448",
                                     'A mode of yours can play it too: "Wide slow fade" on its Lights page',

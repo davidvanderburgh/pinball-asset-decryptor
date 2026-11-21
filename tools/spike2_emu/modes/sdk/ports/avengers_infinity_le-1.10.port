@@ -767,3 +767,10 @@ site ball_device_keep     0x002c93b8 0xe3073fe8 0xe3403059
 data ball_devices         0x006e342c
 text ball_device_names  SUBWAY_LOCK
 data ball_device_count    0x00597fe8
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x003aed98 0xe92d4070 0xe30768c0   # (n): every show numbered n ends
+value show_count          340
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            36 105 132 153 154 187 199 202 203 204 237 240 245 272 274 276 294 300 310

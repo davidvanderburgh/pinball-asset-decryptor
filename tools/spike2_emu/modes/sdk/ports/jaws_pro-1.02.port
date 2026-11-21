@@ -776,3 +776,10 @@ data ball_device_count    0x006a683c
 # PAD-1464: the game's Start plays game_intro_start over the whole glass (44 s, its JAWS THE PINBALL title at the end),
 # then game_intro_loop under the HUD's skill shot
 text start_film_clips game_intro_start
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x003f410c 0xe92d4070 0xe30d6ea8   # (n): every show numbered n ends
+value show_count          284
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            53

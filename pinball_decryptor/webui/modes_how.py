@@ -117,6 +117,7 @@ class HowItWorksMixin:
         self._how_run += 1
         run = self._how_run
         self._how_key, self._how, self._how_names = key, None, None
+        self.set(mode_shows=[])                                       # PAD-1476: another card's are not these
         if not card:
             return
 
@@ -133,6 +134,7 @@ class HowItWorksMixin:
                 self._how = got
                 if self._game_mode is not None:
                     self._publish_game_mode()
+                self.set(mode_shows=self._mode_show_rows())          # PAD-1476: the picks for a mode's shows
             self.ctx.loop.post(_apply)
 
         threading.Thread(target=_work, daemon=True, name="modes-how").start()
@@ -180,12 +182,18 @@ class HowItWorksMixin:
                 "tip": {"head": text, "lines": lines}}
 
     @staticmethod
-    def _how_show(sh, num, calls):
+    def _how_show(sh, num, calls, lit=None, mode_name=""):
         """PAD-1475: one listed light show: its name where the port names it, else the game's number."""
         name = sh.names.get(str(num), "")
         text = name or "Light show %d" % num
         lines = ["The game's light show %d" % num]
         picks = sh.pickable.get(str(num)) or []
+        if not picks and lit is not None and num not in lit:   # PAD-1476: measured, and it lights nothing alone
+            lines.append("It lights only while this mode runs, so a mode of yours cannot use it")
+        elif not picks:                                     # PAD-1476: any of them, by the game's own number
+            lines.append('A mode of yours and the co-op intro can play it too: "%s (%s)" on its Lights page'
+                         % (text, mode_name) if mode_name else
+                         'A mode of yours and the co-op intro can play it too, on its Lights page')
         if len(picks) == 1:
             lines.append('A mode of yours can play it too: "%s" on its Lights page' % picks[0])
         elif picks:
@@ -281,7 +289,10 @@ class HowItWorksMixin:
             out["sounds_note"] = "Sounds: %s." % sr.note
         sh = clips.show_reading
         shows = sh.modes.get(cls) or []
-        out["shows"] = [self._how_show(sh, num, n) for num, _at, n in shows[:SHOWS_MAX]]
+        p = self._title() if hasattr(self, "_title") else None          # PAD-1476: the build's measured shows
+        lit = getattr(p, "show_lit", None) if p is not None else None
+        name = clips.reading.label(cls) if clips.reading is not None else ""
+        out["shows"] = [self._how_show(sh, num, n, lit, name) for num, _at, n in shows[:SHOWS_MAX]]
         if len(shows) > SHOWS_MAX:
             out["shows_more"] = "And %d more." % (len(shows) - SHOWS_MAX)
         if not shows and sh.note and not sh.modes:

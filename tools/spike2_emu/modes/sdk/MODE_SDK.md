@@ -2624,6 +2624,41 @@ A form mode plays one on each hit of a shot that scores too (`show_hit <name>`, 
 a shot is hit), in place of the shot's white flash (PAD-415), as the game's own modes answer a lit shot; a blocks mode
 puts "Play the game's light show" in a "When a shot is hit" script.
 
+**Any show the game's own modes play, by the game's number (PAD-1476).** DoomWalrus666 (Godzilla): "I would like to
+select from an existing game light show to add to a custom mode or my Co-op teams intro video." The ports' named shows
+are a dozen generic ones; the shows the game's OWN modes start are read off the program per mode (PAD-1475,
+`clip_shows.ShowReading.modes`: Godzilla LE 1.16's Hedorah starts 211 and 210, Mechagodzilla Multiball 259 and 263).
+Every port now carries what plays any of them:
+
+```
+site show_start           0x001f34d4 ...   # show_start(n) -> the show's record, or 0
+site show_stop_number     0x003f3bd8 ...   # (n): every show numbered n ends
+value show_count          361              # the table's rows; a number at or past it is the game's own error
+```
+
+The game's starter looks n up in its 12-byte table and starts that row's body as a show process of its own, flagged as
+a show (0x20 at +2) and numbered n (+0x96); a show of a higher priority playing makes it refuse (0). Its "stop every
+show with this number" walks the same running-show list and ends each one whose number matches. It has no name in any
+program, so `clip_shows.locate_stopper` finds it off the starter: a function that loads the list's head the starter
+loads, compares each record's +0x96 (`ldrh` then `cmp`) and makes two calls or more to end it (the process fork beside
+it reads +0x96 only to copy it). One function fits on each of 82 Spike 2 builds, James Bond LE/Pro 1.06's the two
+PAD-642 named by hand; `tools/spike2_emu/modes/port_show_numbers.py <folder of programs>` wrote the lines into all 69
+ports.
+
+`pm_game_show_number(n)` (or `pm_game_show_named("#211")`, so a mode file's `show_start #211` needs nothing new) plays
+one with every limit of `pm_game_show`: the running mode, in a game, one at a time, not while the ball ends, 20 s at
+most; `pm_game_show_stop` ends it through the stopper. `pm_game_show_numbers()` is the table's size (0: not on this
+build). The co-op intro plays one too (coop.cfg `intro_show <n>`): started with the intro, on either of its paths (the
+game's own intro screen or a full-screen clip), stopped when it ends, is skipped or the game ends, or after the
+intro's own length.
+
+**From the Modes tab.** Lights > The game's light shows (start, end, a hit), a blocks mode's "Play the game's light
+show" and the Co-op characters dialog's "Light show with it" (under Intro video) list them under the mode that plays
+each one ("From Hedorah"; one several modes start under "From Started by several of its modes"), once the card is read
+(the How it works worker, `CardClips`), and only when the card is the build of the title shown. A number is that
+build's alone, so Port to... another build drops it; a named show still moves. A show whose number the game works out
+while it plays is not listed (PAD-1475's note).
+
 ## The game's own mini-wizards (PAD-436)
 
 James Bond LE 1.06 has four mini-wizards, each with its insert on the Right ramp: Chaos at Crab Key (Dr. No, insert

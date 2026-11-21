@@ -1172,6 +1172,7 @@
     ]
   },
   "repatch": [
+    {"absent": "' PAD: closing the table stops the game, its backglass and DOF", "why": "closing it leaves the cabinet's DOF lights on as the game left them, even with Visual Pinball closed", "since": "PAD-1489: closing the table stops the game, its backglass and DOF"},
     {"absent": "' PAD: the plunger key is the table's own plunger, the lockbar key the Action button (launch)", "why": "pulling its plunger fires the auto plunger at once instead of launching the ball", "since": "PAD-1281: the plunger key is the table's own plunger, the lockbar key the Action button"},
     {"absent": "Sub PadLairDisarm", "why": "its LAIR shot rolls past the post instead of stopping on it, so the game never counts it", "since": "PAD-1268: the LAIR ball rolls down its lane onto the LOWER LOCK post"},
     {"absent": "Sub PadVanRollIn(place)", "why": "its lock can stop lighting and call UPPER LOCK and LOWER LOCK a device malfunction", "since": "PAD-1116: the lock empties when the game holds its post"},

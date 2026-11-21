@@ -8517,7 +8517,7 @@ def test_tmnt_copy_patched_before_a_fix_is_asked_to_patch_again(tmp_path):
     for title in ("turtles_pro", "turtles_le"):
         out, m = _tmnt_patch(title, src)
         marks = m["repatch"]
-        assert {k["since"].split(":")[0] for k in marks} == {"PAD-1281", "PAD-1268", "PAD-1116", "PAD-897"}
+        assert {k["since"].split(":")[0] for k in marks} == {"PAD-1489", "PAD-1281", "PAD-1268", "PAD-1116", "PAD-897"}
         name = "T (PAD).vpx"
         (tmp_path / "T (PAD).script.vbs").write_text(out, encoding="utf-8")
         missing = [k["absent"] for k in marks if k["absent"] not in out]
@@ -8634,3 +8634,28 @@ def test_turtle_faces_on_the_shooter_lane_plaque_light_by_the_turtle_leds(vpxfil
     assert f["COLR"][:3] == bytes((0x2A, 0x6C, 0xFF))              # #2a6cff, a COLORREF
     g = {tag: pl for tag, pl, _ in vpxfile.biff_records(plain, 4)}
     assert struct.unpack("<f", g["BHHI"])[0] == 56                  # no fields: the clone's own look
+
+
+def test_tmnt_closing_the_table_stops_the_game_backglass_and_dof(tmp_path):
+    # PAD-1489: the tribute table has no exit sub, so closing it never called
+    # Controller.Stop or PADSPIKE2.vbs's PadStopB2S: DOF was never finished and
+    # the cabinet's LED strips kept the game's last colours after Visual Pinball closed
+    tm = pytest.importorskip("patch_turtles_le")
+    assert "Sub PadStopB2S" in open(os.path.join(VPX, "PADSPIKE2.vbs"), encoding="utf-8").read()
+    for name in ("turtles_pro", "turtles_le"):
+        m = json.load(open(os.path.join(VPX, name + ".vpxmap.json"), encoding="utf-8"))
+        out, rep = tm.patch_script("Sub table1_KeyDown(ByVal keycode)\nEnd Sub\n", m)
+        sub = out[out.index("Sub table1_Exit"):]
+        sub = sub[:sub.index("End Sub")]
+        assert "\tController.Stop\n" in sub and "\tPadStopB2S\n" in sub
+        assert any(r["absent"] == tm.EXIT_MARK for r in m["repatch"]) and tm.EXIT_MARK in out
+        assert "on close: table1_Exit stops the game, B2S and DOF" in rep
+    # a cut of the table with an exit sub of its own: the calls go at its top, Stop once
+    out, rep = tm.exit_sub("Sub Table1_Exit\n\tController.Stop\nEnd Sub\n")
+    assert out.count("Controller.Stop") == 1 and out.count("Sub Table1_Exit") == 1
+    assert out.index("PadStopB2S") < out.index("End Sub")
+    # and run: the exit sub the patch writes finishes DOF (PADSPIKE2.vbs under VBScript)
+    exit_lines = tm.exit_sub("Sub table1_KeyDown(ByVal keycode)\nEnd Sub\n")[0].split("\n")
+    vbs, _ = _run_padspike2(tmp_path, ["Set Controller = New FakePad", 'PadB2SName = "tmnt_104"', "DofUp = True",
+                                       "PadStartDOF", "PadStartB2S"] + exit_lines + ["table1_Exit"])
+    assert vbs[-2:] == ["stop", "doffinish"], vbs

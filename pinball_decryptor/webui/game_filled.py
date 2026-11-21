@@ -95,6 +95,41 @@ def locked_lines(assets_dir):
     return out
 
 
+def clip_names(assets_dir):
+    """The names of the clips the project's video players play (every Video object's ``clips``
+    in scene_tree.json), as written.  The game program holds each as a string it hands its
+    player, so a clip name reads like a line of the game's but is never shown: Godzilla's
+    ``match`` clip read as the line of the Match screen's MATCH title, and the Scenes preview
+    drew "match" there (Simon, 2026-11-21: "It is different, even the case is different.
+    Why?").  Cached until scene_tree.json changes."""
+    if not assets_dir:
+        return frozenset()
+    tree_file = os.path.join(assets_dir, "images", "scene_textures", "scene_tree.json")
+    key = ("clips", os.path.normcase(os.path.abspath(assets_dir)))
+    stamp = _stamp(tree_file)
+    got = _memo.get(key)
+    if got and got[0] == stamp:
+        return got[1]
+    names = set()
+    try:
+        with open(tree_file, encoding="utf-8") as f:
+            trees = json.load(f)
+    except (OSError, ValueError):
+        trees = {}
+    for man in (trees.values() if isinstance(trees, dict) else ()):
+        objects = (man or {}).get("objects") if isinstance(man, dict) else None
+        for o in (objects.values() if isinstance(objects, dict) else ()):
+            if isinstance(o, dict) and o.get("kind") == "Video":
+                names.update(c for c in (o.get("clips") or ()) if isinstance(c, str) and c)
+    out = frozenset(names)
+    _memo[key] = (stamp, out)
+    return out
+
+
+def _is_clip(r, clips):
+    return bool(clips) and (r.get("original") or "") in clips
+
+
 def is_locked(assets_dir, row):
     """Is manifest *row* a scene line the game writes in every box (see :func:`locked_lines`)?"""
     path = row.get("path") or ""
@@ -103,18 +138,19 @@ def is_locked(assets_dir, row):
     return row.get("original") in locked_lines(assets_dir).get(path, ())
 
 
-def game_row_for(rows, words):
+def game_row_for(rows, words, clips=()):
     """The game-program row of manifest *rows* that reads like scene line *words* (spacing,
     case and a closing ``!``/``.``/``?`` aside, else with the row's printf fill-ins taken
     out: :func:`.text_rules.format_words`), the one the game puts on screen in its place,
-    or None.  One mode's own text and a line the game never reads are not offered."""
+    or None.  One mode's own text, a line the game never reads and a clip's name (*clips*,
+    :func:`clip_names`) are not offered."""
     from . import text_rules as R
     want = R.stand_in_words(words, True).upper()
     if len(re.sub(r"\W", "", want)) < 2:          # a letter is no line (PAD-513's T boxes)
         return None
     near = fill = None
     for r in rows or ():
-        if R.row_is_scene(r) or R.row_part(r) or r.get("unused"):
+        if R.row_is_scene(r) or R.row_part(r) or r.get("unused") or _is_clip(r, clips):
             continue
         got = R.stand_in_words(r.get("original"))
         if got.upper() == R.stand_in_words(words).upper():
@@ -146,7 +182,7 @@ def locked_note(words, rows=None, assets_dir=None, short=False):
             rows = text_manifest.load(assets_dir) if assets_dir else []
         except (OSError, ValueError):
             rows = []
-    r = game_row_for(rows, words)
+    r = game_row_for(rows, words, clip_names(assets_dir))
     if r is not None:
         game = R.stand_in_words(r["original"])
         return _SHORT_GAME_ROW.format(game) if short else LOCKED_NOTE + _GAME_ROW_NOTE.format(game)
@@ -190,21 +226,22 @@ def sample_line(line, number="1"):
     return " ".join(R._FILL_IN.sub(fill, (line or "").replace("\n", " ")).split())
 
 
-def try_lines(rows, words, path=""):
+def try_lines(rows, words, path="", clips=()):
     """What the game might write into a box whose own words are the stand-in *words*, for
     the Scenes "Show it with" list: the game-program lines of manifest *rows* sharing a word
     with the stand-in, most words shared first (lines with fill-ins, then the shorter, ahead),
     each filled with a sample (:func:`sample_line`; a player's number from a ``P<n>_`` part of
-    the box's dotted *path*).  The game line reading like the stand-in itself leads."""
+    the box's dotted *path*).  The game line reading like the stand-in itself leads.  A clip's
+    name (*clips*, :func:`clip_names`) is the player's, never a line on screen."""
     from . import text_rules as R
     want = {w.upper() for w in _WORD.findall(R.stand_in_words(words))}
     got = _PLAYER_NO.search(path or "")
     number = got.group(1) if got else "1"
-    own = game_row_for(rows, words)
+    own = game_row_for(rows, words, clips)
     plain = " ".join((words or "").upper().split())
     ranked = []
     for i, r in enumerate(rows or ()):
-        if R.row_is_scene(r) or R.row_part(r) or r.get("unused"):
+        if R.row_is_scene(r) or R.row_part(r) or r.get("unused") or _is_clip(r, clips):
             continue
         orig = r.get("original") or ""
         if "&" in orig or "\n" in orig:
@@ -260,7 +297,8 @@ def try_lines_for(assets_dir, words, path=""):
         except (OSError, ValueError):
             rows = []
         got = _memo[("try", assets_dir)] = (stamp, rows, {})
-    key = (words, path)
+    clips = clip_names(assets_dir)
+    key = (words, path, clips)
     if key not in got[2]:
-        got[2][key] = try_lines(got[1], words, path)
+        got[2][key] = try_lines(got[1], words, path, clips)
     return got[2][key]

@@ -3186,6 +3186,112 @@ def test_munsters_flips_on_the_machines_coils():
         "RF.Fire DOF 102=1 fx_flipperup RightFlipper.RotateToStart DOF 102=0 fx_flipperdown"), r.stdout + r.stderr
 
 
+def _munsters_mod_map():
+    sys.path.insert(0, VPX)
+    import gen_munsters_mod_map as gen
+    base = json.load(open(os.path.join(VPX, "munsters_pro.shadow.json"), encoding="utf-8"))
+    return gen, base, json.load(open(os.path.join(VPX, "munsters_pro_mod.shadow.json"), encoding="utf-8"))
+
+
+def test_munsters_mod_map_is_the_generators():
+    # PAD-1491: burger's Munsters MOD's map is written from the 1.05's; a
+    # change to that one without running the generator again fails here
+    gen, base, mod = _munsters_mod_map()
+    assert open(gen.OUT, encoding="utf-8").read() == gen.text(gen.build(base))
+    assert mod["title"] == "munsters_pro_mod" and mod["game"] == "munsters_pro"
+    assert mod["output"] != base["output"] and "33195" in mod["table"]["url"]
+
+
+def test_munsters_maps_each_fit_their_own_table(monkeypatch):
+    # PAD-1491: the MOD still names Allknowing2012 and mmunsters, so the
+    # 1.05's map fitted it too, and a card for munsters_pro chose that map
+    # by name: each table fits its own map only
+    pv = pytest.importorskip("padvpx")
+    old = "' Allknowing2012 - Please dont redistribute\nConst cGameName = \"mmunsters\"\n"
+    script = {"old.vpx": old, "mod.vpx": old + "Sub BallNotAtHermanTrigger_Hit()\nEnd Sub\n"}
+
+    class Fake:
+        def __init__(self, p):
+            self.p = p
+
+        def script(self):
+            return script[self.p]
+    monkeypatch.setattr(pv.vpxfile, "VpxTable", Fake)
+    assert [t for t, _ in pv.fitting("old.vpx")] == ["munsters_pro"]
+    assert [t for t, _ in pv.fitting("mod.vpx")] == ["munsters_pro_mod"]
+    card = "D:/c/munsters_pro-1_28_0.Release.8G.sdcard.raw"
+    assert pv.recognise("mod.vpx", card=card)[0] == "munsters_pro_mod", "the card's game, the mod's map"
+    assert pv.maps()["munsters_pro_mod"]["game"] == "munsters_pro"
+
+
+def test_munsters_mod_magnet_takes_every_ball():
+    # PAD-1491: the MOD's HMagnet_Hit hands a ball to Herman's magnet only
+    # `If BallAtHerman`, which only its own sw45_Hit sets (the machine's
+    # rules replace it): neutered, the magnet takes every ball as the 1.05's
+    vs = pytest.importorskip("vpxshadow")
+    _, _, m = _munsters_mod_map()
+    script = "\n".join(["Dim mHMagnet, BallAtHerman", "Sub HMagnet_Hit", "    If Not BallAtHerman Then Exit Sub",
+                        "    mHMagnet.AddBall ActiveBall", "End Sub", "Sub sw45_Hit", "\tHermanShake", "End Sub"])
+    gen, _ = vs.patch(script, m)
+    assert "    'PAD neutered: If Not BallAtHerman Then Exit Sub\n    mHMagnet.AddBall ActiveBall" in gen
+    # the Herman opto and the magnet coil are the 1.05's (PAD-1117, PAD-1121)
+    assert "\tController.Switch(1082) = (PadIn_sw45 > 0) And Not CBool(PadKnocked_sw45)" in gen
+    assert "\tmHMagnet.MagnetOn = e\n" in gen
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_munsters_mod_flips_with_nfozzy_and_fleep(tmp_path):
+    # PAD-1491: the flipper keys never reach the MOD's key handler, where it
+    # calls nFozzy's FlipperActivate/Deactivate and its Fleep sounds: the
+    # machine's flipper coils do, in the same order as its handler
+    _, _, m = _munsters_mod_map()
+    stub = lambda n: "Sub %s(f) : calls = calls & \"%s \" & f.Name & \" \" : End Sub" % (n, n)  # noqa: E731
+    harness = "\n".join([
+        "Option Explicit", "Dim calls : calls = \"\"",
+        "Const DOFOff = 0", "Const DOFOn = 1", "Const DOFFlippers = 7",
+        "Dim ReflipAngle : ReflipAngle = 20", "Dim FlipperUpSoundLevel : FlipperUpSoundLevel = 1",
+        "Dim FlipperLeftHitParm, FlipperRightHitParm, LFPress, RFPress",
+        "Sub DOF(ev, st) : calls = calls & \"DOF \" & ev & \"=\" & st & \" \" : End Sub",
+        "Sub PlaySound(n, a, b, c, d, e, f, g, h) : End Sub",
+        "Function AudioPan(o) : AudioPan = 0 : End Function",
+        "Function AudioFade(o) : AudioFade = 0 : End Function",
+        "Function SoundFXDOF(Sound, DOFevent, State, Effect) : SoundFXDOF = Sound : DOF DOFevent, State : End Function",
+        "Sub FlipperActivate(f, p) : p = 1 : calls = calls & \"Activate \" & f.Name & \" \" : End Sub",
+        "Sub FlipperDeactivate(f, p) : p = 0 : calls = calls & \"Deactivate \" & f.Name & \" \" : End Sub",
+        stub("RandomSoundReflipUpLeft"), stub("RandomSoundReflipUpRight"),
+        stub("SoundFlipperUpAttackLeft"), stub("SoundFlipperUpAttackRight"),
+        stub("RandomSoundFlipperUpLeft"), stub("RandomSoundFlipperUpRight"),
+        stub("RandomSoundFlipperDownLeft"), stub("RandomSoundFlipperDownRight"),
+        "Class Obj : Public Name, CurrentAngle, StartAngle, EndAngle",
+        "\tSub Fire : calls = calls & Name & \".Fire \" : End Sub",
+        "\tSub RotateToStart : calls = calls & Name & \".RotateToStart \" : End Sub",
+        "End Class",
+        "Dim LF : Set LF = New Obj : LF.Name = \"LF\"",
+        "Dim RF : Set RF = New Obj : RF.Name = \"RF\"",
+        # resting flippers: up from rest (not a reflip); down from fully up
+        "Dim LeftFlipper : Set LeftFlipper = New Obj : LeftFlipper.Name = \"LeftFlipper\"",
+        "LeftFlipper.StartAngle = 120 : LeftFlipper.EndAngle = 70 : LeftFlipper.CurrentAngle = 120",
+        "Dim RightFlipper : Set RightFlipper = New Obj : RightFlipper.Name = \"RightFlipper\"",
+        "RightFlipper.StartAngle = -120 : RightFlipper.EndAngle = -70 : RightFlipper.CurrentAngle = -120",
+        m["extra_vbs"].split("' the flippers (PAD-1112)")[1].split("\n", 1)[1],
+        "PadLFlip True : calls = calls & \"press=\" & LFPress & \" \"",
+        "LeftFlipper.CurrentAngle = 70 : PadLFlip False : calls = calls & \"press=\" & LFPress & \" \"",
+        "PadRFlip 1 : RightFlipper.CurrentAngle = -70 : PadRFlip 0",
+        "WScript.Echo calls"])
+    vbs = tmp_path / "flip.vbs"
+    vbs.write_text(harness, encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == (
+        "Activate LeftFlipper LF.Fire SoundFlipperUpAttackLeft LeftFlipper RandomSoundFlipperUpLeft LeftFlipper "
+        "DOF 101=1 press=1 "
+        "Deactivate LeftFlipper LeftFlipper.RotateToStart RandomSoundFlipperDownLeft LeftFlipper DOF 101=0 press=0 "
+        "Activate RightFlipper RF.Fire SoundFlipperUpAttackRight RightFlipper RandomSoundFlipperUpRight RightFlipper "
+        "DOF 102=1 "
+        "Deactivate RightFlipper RightFlipper.RotateToStart RandomSoundFlipperDownRight RightFlipper DOF 102=0"
+    ), r.stdout + r.stderr
+
+
 def test_shadow_lamps_drive_the_tables_lights():
     # with `lamps` the machine lights the table: a dictionary from the lamp
     # number (1000 + node*100 + index, the FIRST LED of an RGB insert) to the

@@ -18,7 +18,9 @@
     "(each group's lighting order: Dragula L32 first, Lily L40, Spot L106/L89, Herman",
     "L58, Raven L95) and the rest by place; GUESS = wants a look at the machine.",
     "quiet_subs: its light shows, GI and lane change, which the machine does itself, and",
-    "the triggers that would move the up post or light the ball save behind its back."
+    "the triggers that would move the up post or light the ball save behind its back.",
+    "detect_not: burger's MOD of this table (PAD-1491) has a map of its own,",
+    "munsters_pro_mod.shadow.json (gen_munsters_mod_map.py writes it from this one)."
   ],
   "title": "munsters_pro",
   "model": "Pro",
@@ -26,6 +28,9 @@
   "detect": [
     "Allknowing2012",
     "mmunsters"
+  ],
+  "detect_not": [
+    "BallNotAtHermanTrigger"
   ],
   "output": "Munsters (Original 2020) 1.05 (PAD).vpx",
   "table": {

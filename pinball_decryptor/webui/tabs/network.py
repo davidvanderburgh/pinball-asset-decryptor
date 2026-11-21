@@ -241,8 +241,32 @@ class NetworkTab(TabService):
                  known=self._known())
 
     # ---- PAD-1479: online co-op - machines in different places, one shared goal (plugins/stern/online_coop.py)
+    #: PAD-1486: in place of the Score feed and Online co-op boxes when they cannot show yet, so they do not just
+    #: vanish (a reporter with a Godzilla card picked but its project not extracted yet: "co op mode not showing")
+    MISSING_NO_PROJECT = ('Score feed and Online co-op are saved with a project. Extract this card on the Extract '
+                          'tab to make one, then set them up here.')
+    MISSING_NOT_MADE = ('Score feed and Online co-op are saved with a project, and this one is not made yet: '
+                        'extract the card into it on the Extract tab, then set them up here.')
+    MISSING_TITLE = 'Score feed and Online co-op cannot be put on cards from this project: %s'
+
+    def _online_missing(self, project):
+        """PAD-1486: why the Score feed and Online co-op boxes are not shown, or '' when they are (or do not apply)."""
+        if not wifi_card.offered(self.mfr):
+            return ''
+        if not project:
+            return self.MISSING_NO_PROJECT
+        if not os.path.isdir(project):
+            return self.MISSING_NOT_MADE
+        from ...plugins.stern import score_feed as SF
+        try:
+            why = SF.title_refusal(SF.project_title(project))
+        except Exception:                                   # noqa: BLE001 - a project the reader cannot place
+            why = SF.NO_TITLE
+        return self.MISSING_TITLE % why if why else ''
+
     def _publish_online(self, project, note='', kind=''):
         from ...plugins.stern import online_coop as OC
+        self.set(online_missing=self._online_missing(project))
         if not project or not os.path.isdir(project):
             self.set(online=None)
             return

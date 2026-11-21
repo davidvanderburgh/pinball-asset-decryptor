@@ -2936,7 +2936,11 @@ HELP_CONTENT = {
             "nothing writes to it. A stock card and your own build both work.\n"
             "- The path is remembered per project.\n"
             "- **Boot selector** ticks itself when the card carries a boot menu (a "
-            "multi-image card); pick the build with the flipper buttons, as on the machine.",
+            "multi-image card); pick the build with the flipper buttons, as on the machine.\n"
+            "- **Hold the ball in the shooter lane** is for testing: a served ball waits "
+            "in the lane until you plunge it. The game's own TIMED PLUNGER setting, which "
+            "launches a waiting ball by itself, is held at Off while it runs; your "
+            "machine's own setting comes back at the next Start without the tick.",
             {"cards": [
                 {"icon": "check", "tone": "ok", "title": "Green line",
                  "text": "The card the project was extracted from, or one PAD built from it."},

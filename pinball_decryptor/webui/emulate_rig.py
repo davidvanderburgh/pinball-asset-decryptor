@@ -328,6 +328,16 @@ def forget_playfield_pos():
 
 
 #: The topper tooltip (a literal in the Tk panel's ``_build_source``).
+LAUNCH_HOLD_TIP = (
+    "For testing: a ball the game serves waits in the shooter lane until "
+    "you plunge it (Plunge, the plunger key, or the launch button on a game "
+    "that has one).\n\nWhat it stops is the game's own TIMED PLUNGER "
+    "setting, which launches a waiting ball by itself after a set number of "
+    "idle seconds. It is held at Off while the game runs; your machine's "
+    "own setting is kept and comes back at the next Start without this "
+    "tick. A launch the game makes on purpose (a ball save, a multiball) "
+    "still goes. Takes effect at the next Start.")
+
 TOPPER_TIP = (
     "The second screen a topper adds — a Mandalorian's hologram, "
     "a Venom's, a Stranger Things projector. Untick it to run the "

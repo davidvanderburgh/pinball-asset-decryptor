@@ -766,9 +766,12 @@ def _conversion(cache, slot, rep, orig, slot_noconv, choice, trim_to_length,
         rate = _clip_bitrate(orig or slot.abs_path)
     # A clip going on bigger than its slot (*size*) gets the stock clip's
     # bits per pixel, not its bitrate, and no byte budget: the stock clip's
-    # bytes were sized for the stock clip's pixels (Simon, 2026-11-21)
+    # bytes were sized for the stock clip's pixels (Simon, 2026-11-21).  A
+    # card that holds each clip to its byte length (JJP's Sonic-era images)
+    # keeps the budget: a bigger clip there must still fit the stock bytes.
     if size:
-        budget = None
+        if not pin_byte_size:
+            budget = None
         base = detect_video_info(orig) if orig else slot.info
         if rate and base is not None and base.width and base.height:
             rate = rate * (size[0] * size[1]) / float(base.width * base.height)

@@ -171,3 +171,25 @@ def test_the_write_lists_a_reduced_clip(tmp_path, monkeypatch):
     got = write_scan.video_size_notes(str(tmp_path), Mfr(), {"video/clip_a.mov": Slot()},
                                       {"video/clip_a.mov": str(rep)})
     assert got == {"video/clip_a.mov": "3840×2160 → 1794×1012 (reduced: the most the machine's video player shows it)"}
+
+
+def test_a_bigger_clip_keeps_the_byte_budget_where_the_card_pins_it(tmp_path, monkeypatch):
+    """PR #42 review: a card that holds each clip to its byte length (JJP's Sonic-era images) keeps the stock
+    clip's bytes as the budget of a clip that goes on bigger; elsewhere a bigger clip has none."""
+    stock = tmp_path / "stock.mp4"
+    stock.write_bytes(b"\0" * 5000)
+    slot = video_slots.VideoSlot(rel_path="video/clip_a.mp4", abs_path=str(stock), ext=".mp4", info=None, size=5000)
+    monkeypatch.setattr(video_slots, "_clip_bitrate", lambda p: 1000000)
+    monkeypatch.setattr(video_slots, "_slot_keyint", lambda p: None)
+    monkeypatch.setattr(video_slots, "detect_video_info", lambda p: None)
+
+    class Cache:
+        def recipe(self, *a, **k):
+            return k
+
+    def budget(pin, size):
+        return video_slots._conversion(Cache(), slot, "rep.mp4", str(stock), False, None, True, pin, False,
+                                       None, size)[2]
+    assert budget(True, (1920, 1080)) == 5000
+    assert budget(True, None) == 5000
+    assert budget(False, (1920, 1080)) is None

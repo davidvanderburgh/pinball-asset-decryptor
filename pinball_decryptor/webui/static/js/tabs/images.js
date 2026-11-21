@@ -39,9 +39,10 @@ const SAME_TIP = "Compare every replacement on this tab with the game's own pict
 const CLEAR_TIP = "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.";
 // PAD-534: the scene(s) a picture is in, and how the game turns it there
 const SCENES_TIP = "Where the game draws this picture. The picture here is the file as it is stored; a scene can draw it turned or mirrored, as the Scenes tab shows.";
-// Simon (2026-11-21): "Keep original size" needed a better name; "Own size" keeps the picture's own shape and
-// writes it for the screen (Written), off squeezes it into the original's pixels.
-const KEEP_TIP = "Own size. On (a new pick starts on): your picture keeps its own shape, is placed full size where the original was (scale and move it on the Scenes tab), and is written at the most the screen shows it (the Written column): never bigger than you imported it. Off: it is squeezed into the original's exact pixels. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is squeezed instead, and the log says so.";
+// Simon (2026-11-21): "Keep original size" needed a better name; "Own size is somewhat confusing. Imported size
+// would be better." On: the picture keeps the size and shape it was imported at and is written for the screen
+// (Written); off squeezes it into the original's pixels.
+const KEEP_TIP = "Imported size. On (a new pick starts on): your picture keeps the size and shape you imported it at, is placed full size where the original was (scale and move it on the Scenes tab), and is written at the most the screen shows it (the Written column): never bigger than you imported it. Off: it is squeezed into the original's exact pixels. Needs an image build (not a direct SD write). A picture nothing in its scene draws by size is squeezed instead, and the log says so.";
 // Simon (2026-11-21): the resolution columns, short names, his words in the tooltips
 const RES_TIPS = {
   res: "Original: the resolution of the original asset pulled from the raw image.",
@@ -84,7 +85,7 @@ const TAG_CLS = { assigned: "img-picked", changed: "img-ondisk", foreign: "img-s
 const AUTOSIZE_MAX = 480;
 // the Tk tree's minwidths
 const MIN_W = { th: 36, "#0": 160, n: 50, res: 64, imp: 64, cur: 64, wri: 64, fmt: 80, src: 70, org: 58, keep: 64, color: 56, rep: 110 };
-const FIT_COLS = [["n", "Images"], ["res", "Original"], ["imp", "Imported"], ["cur", "Current"], ["wri", "Written"], ["fmt", "Format"], ["src", "Source"], ["org", "Origin"], ["keep", "Own size"], ["color", "Color"]];
+const FIT_COLS = [["n", "Images"], ["res", "Original"], ["imp", "Imported"], ["cur", "Current"], ["wri", "Written"], ["fmt", "Format"], ["src", "Source"], ["org", "Origin"], ["keep", "Imported size"], ["color", "Color"]];
 let measureCtx = null;
 function textWidth(font, text, spacing = 0) {
   if (!measureCtx) measureCtx = document.createElement("canvas").getContext("2d");
@@ -516,7 +517,7 @@ export default function ImagesTab() {
     if (!v) return html`<span class="mono small muted">—</span>`;
     const lines = [];
     if (k === "rw" && row.rd) lines.push({ text: "Smaller than you imported it: the screen never shows more than this.", tone: "accent" });
-    if (k === "rw" && row.rq) lines.push({ text: "Own size is off: squeezed into the original's pixels.", tone: "info" });
+    if (k === "rw" && row.rq) lines.push({ text: "Imported size is off: squeezed into the original's pixels.", tone: "info" });
     if (k === "rc" && row.rs) lines.push({ text: "The game shows it bigger than your picture, so it may look soft.", tone: "warn" });
     if (row.rf && (k === "rc" || k === "rw")) lines.push({ text: "This picture is used at exactly the original's size.", tone: "info" });
     const cls = cx("mono small", k === "rw" && row.rd && "img-res-down", k === "rc" && row.rs && "img-res-soft",
@@ -541,12 +542,12 @@ export default function ImagesTab() {
   // Tk: a click on the tick flips it (and selects the row); the second click
   // of a double-click is the row's double-click, which opens the picker
   const keepColDef = {
-    key: "keep", label: "Own size", sort: "keep", width: autoW("keep"), cls: "img-keepcell", title: KEEP_TIP,
+    key: "keep", label: "Imported size", sort: "keep", width: autoW("keep"), cls: "img-keepcell", title: KEEP_TIP,
     render: (e) => {
       if (typeof e !== "number") return "";
       const row = slotAt(s, e);
       if (!row || row.k == null) return "";
-      return html`<input type="checkbox" class="img-keep" checked=${!!row.k} aria-label="Own size: keep this picture's own shape, written for the screen"
+      return html`<input type="checkbox" class="img-keep" checked=${!!row.k} aria-label="Imported size: keep the size and shape you imported, written for the screen"
         ...${tip(KEEP_TIP)} onClick=${(ev) => {
           ev.stopPropagation();
           if (ev.detail > 1) { ev.preventDefault(); return; }
@@ -607,14 +608,21 @@ export default function ImagesTab() {
   // PAD-1279: TEST puts the picture on the test card
   const testColDef = testCol({ ns: "images", tags: s.test_tags, full: s.test_full,
     keyOf: (e) => { const row = typeof e === "number" ? slotAt(s, e) : null; return row && row.r != null ? row.r : null; } });
-  const columns = [thumbCol, nameCol, grouped && countCol, resCol, impCol, curCol, wriCol, fmtCol, srcCol, orgCol, keepCol && keepColDef, colorCol && colorColDef, s.test_on && testColDef, repCol].filter(Boolean);
+  // Simon (2026-11-21): "Move "Origin" to after the filename - it ties to that. Move replacement to between
+  // original and imported" - the same order on Images, Video and Audio: name, Origin, the original, Replacement,
+  // then what PAD does with it
+  const columns = [thumbCol, nameCol, orgCol, grouped && countCol, resCol, repCol, impCol, curCol, wriCol, fmtCol, srcCol, keepCol && keepColDef, colorCol && colorColDef, s.test_on && testColDef].filter(Boolean);
+  // Replacement stretches (it used to be last); the last column keeps its own width
+  // (the Table stretches a last column given in plain px)
+  const lastCol = columns[columns.length - 1];
+  if (lastCol !== repCol && /px$/.test(lastCol.width || "")) columns[columns.length - 1] = { ...lastCol, width: `minmax(${lastCol.width},${lastCol.width})` };
 
-  // the dragged widths (never below the Tk tree's minwidths); the last
-  // column always takes what is left
+  // the dragged widths (never below the Tk tree's minwidths); Replacement and
+  // the last column take none (Replacement takes what is left)
   const saved = s.widths || {};
   const widths = {};
   for (const c of columns.slice(0, -1)) {
-    if (saved[c.key] > 0) widths[c.key] = Math.max(MIN_W[c.key] || 36, saved[c.key]);
+    if (c.key !== "rep" && saved[c.key] > 0) widths[c.key] = Math.max(MIN_W[c.key] || 36, saved[c.key]);
   }
   const onResize = (out) => {
     const start = dragStart.current;
@@ -794,7 +802,7 @@ export default function ImagesTab() {
         ${p.keep || p.color ? html`<div class="img-rk img-opts">
           ${p.keep ? html`<div class="img-keeprow">
             <${Check} checked=${!!p.keep.on} onChange=${(v) => call("images.set_keep", prevRel, v)}
-              label="Own size: keep this picture's own shape, written for the screen" title=${KEEP_TIP} />
+              label="Imported size: keep the size and shape you imported, written for the screen" title=${KEEP_TIP} />
             <span class="small muted">${p.keep.text}</span>
           </div>` : null}
           ${p.color ? html`<div class="img-keeprow img-colorrow">

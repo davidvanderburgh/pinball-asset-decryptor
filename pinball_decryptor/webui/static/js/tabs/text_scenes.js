@@ -2007,7 +2007,7 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
       <${GameColors} g=${p.game_colors} />` : null}
     ${p && (t.sels || []).length <= 1 ? html`<div class="tree-panel tree-size">
       <div class=${cx("tree-pic", !p.pic && "tree-off")}>
-        <span class="small muted ellip" ...${tip(p.pic ? `${picLine(p)}. The picture file's own size, then the size it shows on the screen here and how much that is of the file (the game scales it as it draws).${picMost(p.pic)} Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with Own size ticked, then press Show pixel for pixel.`
+        <span class="small muted ellip" ...${tip(p.pic ? `${picLine(p)}. The picture file's own size, then the size it shows on the screen here and how much that is of the file (the game scales it as it draws).${picMost(p.pic)} Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with Imported size ticked, then press Show pixel for pixel.`
           : "Only a picture has a size of its own to draw it at.")}>
           ${p.pic ? picLine(p) : "No picture of its own"}</span>
         <${Button} size="xs" kind=${p.one_to_one ? "primary" : ""} disabled=${!p.one_to_one && !!oneToOneOff}

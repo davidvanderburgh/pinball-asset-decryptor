@@ -283,7 +283,7 @@ def modes_preview_on(mfr):
 def picture_size_notes(assets_path, assignments, keep=()):
     """``{rel: "4000×2860 → 347×248"}`` for each picked scene picture the Write puts on the card at another size
     than the file picked (Simon, 2026-11-21: "Written resolution ... the maximum resolution PAD will write to the
-    card"; plugins/stern/picture_sizes.py), "squeezed" where Own size is off."""
+    card"; plugins/stern/picture_sizes.py), "squeezed" where Imported size is off."""
     out = {}
     try:
         from PIL import Image

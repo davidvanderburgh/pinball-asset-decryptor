@@ -116,7 +116,7 @@ def test_the_tick_appears_for_a_scene_picture_and_reaches_the_build(window):
     w, svc, assets, rep = window
     w.call("images.select", BANNER)
     assert _keep(w) is None                    # nothing assigned yet
-    # Simon (2026-11-21): a new pick of a scene picture starts with Own size on ("assume the user knows what
+    # Simon (2026-11-21): a new pick of a scene picture starts with Imported size on ("assume the user knows what
     # they are doing ... leave them full size")
     _choose(w, BANNER, rep)
     keep = _keep(w)
@@ -165,7 +165,7 @@ def test_the_keep_size_column_shows_every_pick(window):
         _choose(w, rel, rep)
     # A tick box only where the size can change; the Replacement cell still
     # names the pick.
-    # Simon (2026-11-21): a new pick of a scene picture starts with Own size on ("assume the user knows what
+    # Simon (2026-11-21): a new pick of a scene picture starts with Imported size on ("assume the user knows what
     # they are doing ... leave them full size")
     assert _keep_cells(w) == {BANNER: True, ATLAS: None, PLAIN: None}
     assert _by_rel(w.state("images"))[BANNER]["p"] == "SpaceGodzilla.png"
@@ -203,7 +203,7 @@ def test_clicking_the_box_flips_it(window):
     _choose(w, ATLAS, rep)
     n_asked = len(w.asked)
 
-    assert _keep_cells(w)[BANNER] is True               # a new pick starts with Own size on
+    assert _keep_cells(w)[BANNER] is True               # a new pick starts with Imported size on
     w.call("images.set_keep", BANNER, not _keep_cells(w)[BANNER])
     assert svc._keep_size == set()
     assert _keep_cells(w)[BANNER] is False

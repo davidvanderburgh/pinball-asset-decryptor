@@ -7121,7 +7121,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                 if payload is None:
                     log("Radium image %s is %dx%d, and this picture can't take "
                         "a new size (%s), so it is fitted to the original "
-                        "%dx%d instead - the same as leaving Own size off on "
+                        "%dx%d instead - the same as leaving Imported size off on "
                         "the Images tab." % (output, w, h, why, pad_w, pad_h),
                         "warning")
                     im = im.resize((pad_w, pad_h), Image.LANCZOS)

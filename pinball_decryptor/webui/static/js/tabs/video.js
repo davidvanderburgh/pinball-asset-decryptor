@@ -1215,6 +1215,10 @@ export default function VideoTab() {
       render: (r) => html`<span class=${cx("vid-name", (r.follow || r.copy) && "vid-pairrow")} ...${tip({ head: r.rel, lines: [profileLine(r, colorNs)] })}>${r.follow || r.copy
         ? html`<span class="vid-pairmark" aria-hidden="true">↳</span>` : null}${r.dir
         ? html`<span class="mono muted">${r.dir}</span>` : null}${r.name}</span>` },
+    // Simon (2026-11-21): Origin after the name, Replacement after the original (the Images tab's order)
+    { key: "org", label: "Origin", width: width("org"), sort: "org", title: ORG_TIP,
+      render: (r) => (!r.og ? html`<span class="muted">—</span>`
+        : html`<span class=${r.og === "Custom" ? "vid-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>`) },
     // PAD-1115: a clip a game screen shows for a fixed time: that time, amber when the clip freezes or is cut
     { key: "len", label: "Length", width: width("len"), num: true, sort: "len",
       render: (r) => (r.scr
@@ -1225,9 +1229,6 @@ export default function VideoTab() {
     { key: "fmt", label: "Format", width: width("fmt"), sort: "fmt", titleOf: (r) => r.fmt,
       render: (r) => html`<span class=${r.fmt_bad ? "err-ink" : "dim"}>${r.fmt}</span>` },
     { key: "aud", label: "Audio", width: width("aud"), sort: "aud", render: (r) => html`<span class="dim">${r.aud}</span>` },
-    { key: "org", label: "Origin", width: width("org"), sort: "org", title: ORG_TIP,
-      render: (r) => (!r.og ? html`<span class="muted">—</span>`
-        : html`<span class=${r.og === "Custom" ? "vid-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>`) },
     // PAD-369 (DragonRR): the chosen file's name tells its color profile too
     { key: "rep", label: "Replacement", width: width("rep"), sort: "rep",
       render: (r) => html`<span class="vid-repcell"><button type="button" class=${cx("vid-rep", r.rep_cls || "muted")}

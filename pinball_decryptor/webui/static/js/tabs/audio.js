@@ -883,7 +883,7 @@ export default function AudioTab() {
   // Tk tree clipped Replacement instead; the Table has no horizontal room).
   const saved = s.widths || {};
   const tblWidths = {};
-  for (const [k, w] of Object.entries(saved)) if (k !== "#0") tblWidths[k] = w;
+  for (const [k, w] of Object.entries(saved)) if (k !== "#0" && k !== "rep") tblWidths[k] = w;
   const name0 = saved["#0"] ? `minmax(${MIN_W["#0"]}px,${saved["#0"]}px)` : `minmax(${MIN_W["#0"]}px,1.25fr)`;
   const columns = [
     { key: "play", label: "", width: FIXED.play + "px", cls: "aud-pc",
@@ -893,14 +893,23 @@ export default function AudioTab() {
             onPlay=${() => { cursor.current = r.k; anchor.current = r.k; sentSel.current = JSON.stringify([r.k]); setSel([r.k]); call("audio.play_row", r.k); }} />` },
     { key: "#0", label: "Original Track", sort: "#0", width: name0, titleOf: (r) => r.g ? r.label : r.k,
       render: (r) => html`<${NameCell} r=${r} prefix=${s.prefix} />` },
+    // Simon (2026-11-21): Origin after the name, Replacement after the original (the Images tab's order)
+    { key: "org", label: "Origin", sort: "org", width: FIXED.org + "px", title: ORG_TIP,
+      render: (r) => r.g ? "" : !r.og ? html`<span class="muted">—</span>`
+        : html`<span class=${r.og === "Custom" ? "aud-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>` },
     { key: "len", label: "Length", sort: "len", width: FIXED.len + "px", num: true, render: (r) => r.len },
     // PAD-637: a file of several variants of one sound says so, and how Write takes it
     { key: "fmt", label: "Format", sort: "fmt", width: FIXED.fmt + "px", titleOf: (r) => r.fmt_tip ? undefined : r.fmt,
       render: (r) => html`<span class="dim" ...${r.fmt_tip ? tip({ head: "Variants", lines: r.fmt_tip }) : {}}>${r.fmt || ""}</span>` },
     { key: "type", label: "Type", sort: "type", width: FIXED.type + "px", render: (r) => r.type || "" },
-    { key: "org", label: "Origin", sort: "org", width: FIXED.org + "px", title: ORG_TIP,
-      render: (r) => r.g ? "" : !r.og ? html`<span class="muted">—</span>`
-        : html`<span class=${r.og === "Custom" ? "aud-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>` },
+    { key: "rep", label: "Replacement", sort: "rep", width: `minmax(${MIN_W.rep}px,1fr)`, titleOf: (r) => r.rep,
+      render: (r) => r.g ? html`<span class="muted">${r.rep}</span>`
+        : html`<span class="aud-repcell"><button type="button" class=${cx("aud-rep", r.t === "picked" && "picked", r.t === "ondisk" && "ondisk", r.t === "stray" && "stray", !r.t && "choose")}
+            onDblClick=${noDbl} onClick=${once(() => { selectOne(r.k); call("audio.choose", r.k); })}>${r.rep}</button>${r.md
+          ? html`<span class="aud-modes" aria-label=${`Sounds for music modes ${r.md.join(", ")}`} ...${tip({ head: "Music modes", lines: [r.md_tip] })}><${Icon} name="music" />${r.md.join(" ")}</span>`
+          : null}${r.tn
+          ? html`<span class="aud-modes" aria-label=${r.tr ? `Plays ${r.tn} sounds at random` : `Plays ${r.tn} sounds in turn`} ...${tip({ head: r.tr ? "Play at random" : "Play in turn", lines: [r.tn_tip] })}><${Icon} name="shuffle" />${r.tn}</span>`
+          : null}</span>` },
     // PAD-635: how many of the game code's sound requests play the sound
     ...(s.req_cap ? [{ key: "rq", label: "Requests", sort: "rq", title: s.req_tip, width: FIXED.rq + "px", num: true,
       render: (r) => r.rq == null ? "" : html`<span class=${cx(!r.rq && "warn-ink")} aria-label=${r.rq ? `Played by ${r.rq} sound requests` : "No sound request plays it"}
@@ -919,15 +928,14 @@ export default function AudioTab() {
     // PAD-1279: TEST puts the sound on the test card
     ...(s.test_on ? [testCol({ ns: "audio", tags: s.test_tags, full: s.test_full,
       keyOf: (r) => (r.g || r.k == null || String(r.k).startsWith("::") ? null : r.k) })] : []),
-    { key: "rep", label: "Replacement", sort: "rep", width: `minmax(${MIN_W.rep}px,1fr)`, titleOf: (r) => r.rep,
-      render: (r) => r.g ? html`<span class="muted">${r.rep}</span>`
-        : html`<span class="aud-repcell"><button type="button" class=${cx("aud-rep", r.t === "picked" && "picked", r.t === "ondisk" && "ondisk", r.t === "stray" && "stray", !r.t && "choose")}
-            onDblClick=${noDbl} onClick=${once(() => { selectOne(r.k); call("audio.choose", r.k); })}>${r.rep}</button>${r.md
-          ? html`<span class="aud-modes" aria-label=${`Sounds for music modes ${r.md.join(", ")}`} ...${tip({ head: "Music modes", lines: [r.md_tip] })}><${Icon} name="music" />${r.md.join(" ")}</span>`
-          : null}${r.tn
-          ? html`<span class="aud-modes" aria-label=${r.tr ? `Plays ${r.tn} sounds at random` : `Plays ${r.tn} sounds in turn`} ...${tip({ head: r.tr ? "Play at random" : "Play in turn", lines: [r.tn_tip] })}><${Icon} name="shuffle" />${r.tn}</span>`
-          : null}</span>` },
   ];
+  // Replacement stretches (it used to be last); the last column keeps its own width (the Table stretches a last
+  // column given in plain px, and takes no dragged width for it)
+  {
+    const i = columns.length - 1, c = columns[i];
+    const w = c.key !== "rep" && (tblWidths[c.key] ? tblWidths[c.key] + "px" : c.width);
+    if (w && /px$/.test(w)) columns[i] = { ...c, width: `minmax(${w},${w})` };
+  }
   const selected = sel.length === 1 ? sel[0] : new Set(sel);
   const selRel = sel.find((k) => index.has(k) && !String(k).startsWith("::dupgrp::")) || null;
   const cur = s.cur;

@@ -45,13 +45,13 @@ CHANGE_FILTER_VALUES = ("All", "Changed", "Unchanged")
 #: (column, heading, default descending) - Tk's _image_sort_cfg.
 # Simon (2026-11-21): one Resolution column became four, short names with his words in their tooltips (the page's
 # RES_TIPS): Original, Imported, Current, Written; and Origin (the official card's, or custom).  "Keep size" is
-# "Own size" (the picture keeps its own shape and is written for the screen; off, squeezed into the original's
+# "Imported size" (the picture keeps its own shape and is written for the screen; off, squeezed into the original's
 # pixels).
 SORT_CFG = (("#0", "Original Image", False), ("n", "Images", True),
             ("res", "Original", True), ("imp", "Imported", True),
             ("cur", "Current", True), ("wri", "Written", True),
             ("fmt", "Format", False), ("src", "Source", False),
-            ("org", "Origin", False), ("keep", "Own size", True),
+            ("org", "Origin", False), ("keep", "Imported size", True),
             ("color", "Color", True), ("rep", "Replacement", False))
 CHUNK = 256
 #: pictures side by side in Compare (PAD-463, as the Video tab's PAD-440)
@@ -2146,21 +2146,23 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         return (s.info.width, s.info.height) if s.info else None
 
     def _res_table(self):
-        """``{rel: cell}`` of :func:`picture_sizes.columns` for every row, with each pick's Own size (off: written
+        """``{rel: cell}`` of :func:`picture_sizes.columns` for every row, with each pick's Imported size (off: written
         at the original's pixels), and the project's Origin record, worked out once per publish."""
-        rows = {}
+        rows, squeezed = {}, set()
         for s in self._slots:
             rep = self._assignments.get(s.rel_path)
             rows[s.rel_path] = (self._orig_size(s), self._size_of(rep) if rep else None)
+            if rep and self._keep_state(s.rel_path) is False:
+                squeezed.add(s.rel_path)
         try:
             from ...plugins.stern import picture_sizes
-            cols = picture_sizes.columns(self._scan_dir, rows)
+            cols = picture_sizes.columns(self._scan_dir, rows, squeezed)
         except Exception:                                # noqa: BLE001 - the rows go out without them
             log.exception("resolution columns")
             cols = {}
         for rel, c in cols.items():
             if c.get("i") and not c.get("fixed") and self._keep_state(rel) is False:
-                c["w"], c["sq"] = c.get("o"), True          # Own size off: squeezed into the original's pixels
+                c["w"], c["sq"] = c.get("o"), True          # Imported size off: squeezed into the original's pixels
         try:
             from ...core import asset_origin
             self._origin_info = asset_origin.origins(self._scan_dir)
@@ -2571,8 +2573,8 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         if not keep:
             shape = ""
             if abs(new[0] / float(new[1]) - orig[0] / float(orig[1])) > 0.02:
-                shape = " Its shape is not the original's, so it will look squashed: tick Own size to keep its shape."
-            return mine + "Own size is off, so it will be squeezed into the original's pixels." + shape
+                shape = " Its shape is not the original's, so it will look squashed: tick Imported size to keep its shape."
+            return mine + "Imported size is off, so it will be squeezed into the original's pixels." + shape
         cell = None
         try:
             from ...plugins.stern import picture_sizes

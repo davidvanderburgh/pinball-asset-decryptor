@@ -158,18 +158,20 @@ def _stamp(assets_dir):
     return tuple(out)
 
 
-def columns(assets_dir, rows):
+def columns(assets_dir, rows, squeezed=()):
     """The four resolution columns for *rows* ``{rel (images/...): (original (w, h) or None, imported (w, h) or
     None)}``: ``{rel: {"o": original, "i": imported, "c": current, "w": written, "z": biggest zoom of the
     picture, "fixed": True where the size can't change}}``, each size a ``[w, h]`` list or None.
 
     Current and Written are worked out only for scene pictures; any other picture is written at the original's
-    size (``fixed``).  Cached per project until its scenes, edits or picks change."""
+    size (``fixed``).  A rel in *squeezed* (Imported size off) is squeezed into the original's pixels, so it is
+    measured as the original: Current is the original's shape at the scene's zoom, Written the original's size
+    (Simon, 2026-11-21: Current read 347x248 for a 4000x2860 card squeezed into 530x726; it shows at 347x475).  Cached per project until its scenes, edits or picks change."""
     key = (os.path.normcase(os.path.abspath(assets_dir or "")), _stamp(assets_dir) if assets_dir else None)
     natural = {}
     for rel, (orig, imp) in rows.items():
         if rel.startswith("images/" + SCENE_DIR):
-            natural[rel[len("images/"):]] = imp or orig
+            natural[rel[len("images/"):]] = (orig or imp) if rel in squeezed else (imp or orig)
     cached = _CACHE.get(key[0])
     if cached and cached[0] == key[1] and cached[1] == natural:
         scales = cached[2]
@@ -180,16 +182,17 @@ def columns(assets_dir, rows):
     for rel, (orig, imp) in rows.items():
         cell = {"o": list(orig) if orig else None, "i": list(imp) if imp else None,
                 "c": None, "w": None, "z": None, "fixed": False}
-        nat = imp or orig
+        sq = rel in squeezed and orig
+        nat = orig if sq else (imp or orig)
         s = scales.get(rel[len("images/"):]) if rel.startswith("images/" + SCENE_DIR) else None
         if s is not None and nat:
             cell["c"] = list(size_at(nat, s))
             cell["z"] = round(s, 3)
             if imp:
-                cell["w"] = list(written_size(imp, s))
+                cell["w"] = list(orig) if sq else list(written_size(imp, s))
         elif rel.startswith("images/" + SCENE_DIR):
             if imp:
-                cell["w"] = list(imp)
+                cell["w"] = list(orig) if sq else list(imp)
         else:
             cell["fixed"] = True
             cell["c"] = list(orig) if orig else None

@@ -1059,7 +1059,7 @@ HELP_CONTENT = {
          "On Stern Spike 2 a picture inside a game scene (Source **Radium**, not a "
          "font) can keep its own size and shape, e.g. a longer name banner or "
          "high-resolution art.\n\n"
-         "- **Own size** (under the preview, and its column) is on for every new pick: "
+         "- **Imported size** (under the preview, and its column) is on for every new pick: "
          "your picture is placed full size where the original was. Scale and move it "
          "on the **Scenes** tab. Off, it is squeezed into the original's pixels.\n"
          "- Your file stays full size in the project, however big it is.\n"

@@ -405,7 +405,7 @@ def test_choose_keep_size_and_the_build_tuple(scanned):
     st = w.state("images")
     row = _by_rel(st)[BANNER]
     assert row["p"] == "SpaceGodzilla.png" and row["t"] == "assigned"
-    assert row["k"] is True                      # Own size, on for a new pick (Simon, 2026-11-21)
+    assert row["k"] is True                      # Imported size, on for a new pick (Simon, 2026-11-21)
     assert _by_rel(st)[PLAIN]["k"] is None
     assert st["status"] == "6 images, 1 changed"
     assert st["can_clear"] is True
@@ -420,8 +420,8 @@ def test_choose_keep_size_and_the_build_tuple(scanned):
     w.call("images.set_keep", BANNER, False)
     p = w.state("images")["preview"]
     assert p["keep"] == {"on": False, "text": (
-        "Your picture is 90×22; the original is 40×20. Own size is off, so it will be squeezed into the "
-        "original's pixels. Its shape is not the original's, so it will look squashed: tick Own size to keep "
+        "Your picture is 90×22; the original is 40×20. Imported size is off, so it will be squeezed into the "
+        "original's pixels. Its shape is not the original's, so it will look squashed: tick Imported size to keep "
         "its shape.")}
     assert w.window.pending_image_assignments(assets)[2] == frozenset()
     w.call("images.set_keep", BANNER, True)

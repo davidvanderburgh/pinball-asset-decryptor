@@ -45,7 +45,7 @@ export function SetPicker({ cls = "" }) {
 // Above the Images tab's list while a theme other than theme 1 is picked: what this theme keeps, and what still
 // changes theme 1
 const STRIP_NOTE = " Choose…, Clear and color profiles (the Color column and the Colors bar) work on this theme's "
-  + "pictures (pictures in scenes only). Replace from folder, groups and Own size still change theme 1.";
+  + "pictures (pictures in scenes only). Replace from folder, groups and Imported size still change theme 1.";
 
 export function SetStrip() {
   const s = useNs("imgsets");

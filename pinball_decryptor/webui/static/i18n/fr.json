@@ -13006,16 +13006,16 @@
 "Current": "Actuelle",
 "Written": "Écrite",
 "Origin": "Origine",
-"Own size": "Taille propre",
+"Imported size": "Taille importée",
 "Custom": "Personnalisé",
 "Original: the resolution of the original asset pulled from the raw image.": "Original : la résolution de l'élément d'origine extrait de l'image raw.",
 "Imported: the resolution of the graphic you chose. It stays full size in your project however big it is; only the card gets the Written size.": "Importée : la résolution du graphique que vous avez choisi. Il reste en taille réelle dans votre projet, quelle que soit sa taille ; seule la carte reçoit la taille Écrite.",
 "Current: the highest resolution you have set by scaling for this asset in the scenes (the biggest the game shows it, its zoom included); you may have other, lower resolutions set.": "Actuelle : la plus haute résolution que vous avez réglée en mettant cet élément à l'échelle dans les scènes (le plus grand que le jeu l'affiche, zoom compris) ; d'autres résolutions plus basses peuvent aussi être réglées.",
 "Written: the maximum resolution PAD will write to the card. Orange: smaller than you imported it, because the screen never shows more. Amber Current: the game shows it bigger than your picture, so it may look soft.": "Écrite : la résolution maximale que PAD écrira sur la carte. Orange : plus petite que vous ne l'avez importée, car l'écran n'en montre jamais plus. Actuelle en ambre : le jeu l'affiche plus grande que votre image, elle peut donc paraître floue.",
 "Origin: Original is the official card's asset; Custom is not the official card's, but was on the card this project was extracted from.": "Origine : Original est l'élément de la carte officielle ; Personnalisé n'est pas celui de la carte officielle, mais était sur la carte dont ce projet a été extrait.",
-"Your picture is {}×{}; the original is {}×{}. Own size is off, so it will be squeezed into the original's pixels.": "Votre image fait {}×{} ; l'original fait {}×{}. Taille propre est désactivée, elle sera donc comprimée dans les pixels de l'original.",
+"Your picture is {}×{}; the original is {}×{}. Imported size is off, so it will be squeezed into the original's pixels.": "Votre image fait {}×{} ; l'original fait {}×{}. Taille importée est désactivée, elle sera donc comprimée dans les pixels de l'original.",
 "Smaller than you imported it: the screen never shows more than this.": "Plus petite que vous ne l'avez importée : l'écran n'en montre jamais plus.",
 "The game shows it bigger than your picture, so it may look soft.": "Le jeu l'affiche plus grande que votre image, elle peut donc paraître floue.",
 "This picture is used at exactly the original's size.": "Cette image est utilisée exactement à la taille de l'original.",
-"Own size is off: squeezed into the original's pixels.": "Taille propre est désactivée : comprimée dans les pixels de l'original."
+"Imported size is off: squeezed into the original's pixels.": "Taille importée est désactivée : comprimée dans les pixels de l'original."
 }

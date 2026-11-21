@@ -335,7 +335,7 @@ SETTING_LABELS = {
     "color_all_videos": "Video: color profile on every clip",
     "video_color_stock": "Video: color profile on stock clips",
     "video_color_profiles": "Video: this clip's color profile",
-    "image_keep_size": "Images: Own size",
+    "image_keep_size": "Images: Imported size",
     "image_place_own": "Images: placed full size",
     "image_color_slots": "Images: this picture's colors",
     "color_all_images": "Images: color profile on every picture",

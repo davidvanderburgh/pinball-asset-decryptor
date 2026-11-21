@@ -205,7 +205,7 @@ def test_the_tab_says_a_kept_fill_shows_at_the_same_size(window):
     w.call("images.select", SHAPE)
     w.answers.append(rep)
     assert w.call("images.choose", SHAPE) == SHAPE
-    # Simon (2026-11-21): a new pick starts with Own size on, and is written at the most the screen shows it: a
+    # Simon (2026-11-21): a new pick starts with Imported size on, and is written at the most the screen shows it: a
     # fill is squeezed into its 64x32 Shape box, its shape kept - 57x32
     keep = w.state("images")["preview"]["keep"]
     assert keep == {"on": True, "text": (

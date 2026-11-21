@@ -62,14 +62,15 @@ const COLUMNS = [
     render: (r) => (r.pt ? html`<span class="text-pairrow"><span class="text-pairmark" aria-hidden="true">↳</span>${r.o}</span>`
       : r.o),
     titleOf: (r) => r.o },
+  // Simon (2026-11-21): Origin after the name (the Images tab's order)
+  { key: "org", label: "Origin", width: "76px", sort: "org", title: ORG_TIP,
+    render: (r) => (!r.og ? html`<span class="muted">—</span>`
+      : html`<span class=${r.og === "Custom" ? "text-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>`) },
   { key: "n", label: "New Text", width: "minmax(0,1fr)", sort: "new", cls: "pre notr",
     render: (r) => (r.ed ? html`<span class="acc-ink">${r.n}</span>` : r.n), titleOf: (r) => r.n || undefined },
   { key: "mx", label: "Max", width: "92px", sort: "max", cls: "mono small" },
   // wide enough for "49ac2…71dd/scene.radium" (Tk: 170 px of a smaller font)
   { key: "sc", label: "Scene", width: "212px", sort: "scene", cls: "mono small dim", titleOf: (r) => r.sc },
-  { key: "org", label: "Origin", width: "76px", sort: "org", title: ORG_TIP,
-    render: (r) => (!r.og ? html`<span class="muted">—</span>`
-      : html`<span class=${r.og === "Custom" ? "text-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>`) },
   { key: "nm", label: "Name", width: "minmax(0,.7fr)", sort: "name", cls: "notr", titleOf: (r) => r.nm || undefined },
 ];
 const IN_COLUMN = { key: "in", label: "Shown in", width: "minmax(0,.8fr)", sort: "in", title: TIP_IN,

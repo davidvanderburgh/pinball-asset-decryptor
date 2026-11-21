@@ -165,6 +165,17 @@ def test_current_follows_the_scenes_layout(tmp_path, monkeypatch):
     assert got["images/scene_textures/a.png"]["c"] == [48, 24]
 
 
+def test_imported_size_off_measures_the_squeezed_picture(tmp_path, monkeypatch):
+    # Simon (2026-11-21): a 4000x2860 card with Imported size off read Current 347x248 (its own shape kept); it is
+    # squeezed into the original's pixels, so the game shows it in the original's shape (347x475)
+    monkeypatch.setattr(scene_edit, "trees_of", lambda d: {"card": _man(2.0)})
+    rel = "images/scene_textures/a.png"
+    kept = picture_sizes.columns(str(tmp_path), {rel: ((16, 8), (400, 400))})[rel]
+    assert kept["c"] == [16, 16]                                    # its own shape, fitted into the box
+    sq = picture_sizes.columns(str(tmp_path), {rel: ((16, 8), (400, 400))}, squeezed={rel})[rel]
+    assert (sq["i"], sq["c"], sq["w"]) == ([400, 400], [32, 16], [16, 8])
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # Origin
 # ---------------------------------------------------------------------------------------------------------------

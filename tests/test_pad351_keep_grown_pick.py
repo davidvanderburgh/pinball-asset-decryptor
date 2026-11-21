@@ -48,7 +48,7 @@ def test_a_new_pick_on_a_grown_picture_keeps_its_own_size(tmp_path):
 
 
 def test_a_new_pick_on_a_stock_size_picture_starts_ticked_too(tmp_path):
-    """Simon (2026-11-21): every new pick of a scene picture starts with Own size on now ("assume the user knows
+    """Simon (2026-11-21): every new pick of a scene picture starts with Imported size on now ("assume the user knows
     what they are doing"), grown before or not."""
     assets, reps = _project(tmp_path)
     _grown(assets, SPRITE, (20, 10))                   # built before, at the stock size

@@ -1338,6 +1338,7 @@ def card_checks(p):
         "shield": getattr(p, "shield_rule", "") if p.can("shield") else False,
         "game_shows": [n for n, _k, _s in getattr(p, "game_shows", ())],
         "show_numbers": int(getattr(p, "show_numbers", 0) or 0),                    # PAD-1476
+        "show_hangs": list(getattr(p, "show_hangs", ()) or ()),                     # PAD-1475 reopened
         "shaker": {"shakes": [n for n, _l in p.shakes], "max": list(p.shake_max_ms)} if p.can("shaker") else False,
         "game_wizards": [n for n, _f in getattr(p, "game_wizards", ())] if p.can("wizard") else [],
         "inserts": list(getattr(p, "inserts", ()) or ()),
@@ -1362,7 +1363,7 @@ def card_checks(p):
 def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=None, shield=None, game_shows=None, shaker=None,
              game_wizards=None, inserts=None, building=None, modes=None, challenges=None, hold_caps=None,
              drain=None, roster=None, places=None, done=None, spare=None, flippers=None, own_mechs=None,
-             pulses=None, devices=None, kickbacks=None, toys=None, show_numbers=None):
+             pulses=None, devices=None, kickbacks=None, toys=None, show_numbers=None, show_hangs=None):
     """Every reason the program cannot be built, as sentences (empty = it can). ``shots`` and
     ``events``, when given, are the card's: a block naming a shot or event the card does not
     have is named here; ``folder``, when given, is the mode's, where its own clips and sounds
@@ -1449,6 +1450,7 @@ def problems(program, shots=None, events=None, folder=None, mechs=None, scoop=No
            "drain": drain,                            # PAD-690: whether a ball in the trough is reported
            "game_shows": list(game_shows) if game_shows is not None else None,
            "show_numbers": int(show_numbers) if show_numbers is not None else None,   # PAD-1476
+           "show_hangs": set(show_hangs or ()),          # PAD-1475 reopened: numbers that stop the game
            "shaker": shaker, "game_wizards": list(game_wizards) if game_wizards is not None else None,
            "inserts": list(inserts) if inserts is not None else None,
            "modes": set(modes) if modes is not None else None,
@@ -2165,7 +2167,10 @@ def _check_stack(stack, depth, where, ctx):
             if not name or not isinstance(name, str):
                 ctx["out"].append("%s plays the game's light show with none chosen." % where)
             elif re.fullmatch(r"#\d+", name) and ctx.get("show_numbers") is not None:    # PAD-1476: by number
-                if not 0 < int(name[1:]) < ctx["show_numbers"]:
+                if int(name[1:]) in ctx.get("show_hangs", ()):
+                    ctx["out"].append("%s plays the game's light show %s, which stops the game when one of ours starts "
+                                      "it." % (where, name[1:]))
+                elif not 0 < int(name[1:]) < ctx["show_numbers"]:
                     ctx["out"].append("%s plays the game's light show %s, which this card's game cannot play by its "
                                       "number%s." % (where, name[1:], " (its numbers are 1-%d)" % (
                                           ctx["show_numbers"] - 1) if ctx["show_numbers"] else ""))

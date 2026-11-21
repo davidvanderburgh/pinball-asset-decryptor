@@ -6541,6 +6541,35 @@ def test_padspike2_puts_all_four_service_buttons_on_7_8_9_0():
         assert re.search(r"Case %s\s+\.Switch\(%s\)\s+= False" % (key, var), s), key
     # a table patched before still sets these: they stay declared
     assert "Dim swBlack, swGreen, swRed" in s
+    # PAD-1482: the arrow keys on the same buttons, by the tributes' PadArrow
+    vs = pytest.importorskip("vpxshadow")
+    assert "\n".join(vs.arrow_function_vbs()) in s.replace("\r\n", "\n")
+    assert re.search(r"Case Else\s+If PadArrow\(keycode\) Then \.Switch\(PadArrow\(keycode\)\) = True "
+                     r"Else vpmKeyDown = False", s)
+    assert re.search(r"Case Else\s+If PadArrow\(keycode\) Then \.Switch\(PadArrow\(keycode\)\) = False "
+                     r"Else vpmKeyUp = False", s)
+    assert [(k, sw) for k, sw, _ in vs.ARROW_KEYS] == [(200, 9010), (208, 9009), (203, 9011), (205, 9008)]
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not shutil.which("cscript"),
+                    reason="runs PadArrow in Windows Script Host")
+def test_pad_arrow_runs_and_leaves_visual_pinballs_own_arrows_alone(tmp_path):
+    """PAD-1482: Mike St P asked for the arrow keys in the game's menu. The
+    function runs as VBScript, with Option Explicit and a Visual Pinball that
+    lacks some of the key names, and an arrow that is a flipper stays one."""
+    vs = pytest.importorskip("vpxshadow")
+    script = tmp_path / "arrow.vbs"
+    script.write_text("Option Explicit\n" + "\n".join(vs.arrow_function_vbs()) + "\n"
+                      "Dim LeftFlipperKey, RightFlipperKey : LeftFlipperKey = 42 : RightFlipperKey = 54\n"
+                      "WScript.Echo PadArrow(200) & \" \" & PadArrow(208) & \" \" & PadArrow(203) & \" \" & "
+                      "PadArrow(205) & \" \" & PadArrow(42) & \" \" & PadArrow(11)\n"
+                      "LeftFlipperKey = 203 : RightFlipperKey = 205\n"
+                      "WScript.Echo PadArrow(200) & \" \" & PadArrow(203) & \" \" & PadArrow(205)\n",
+                      encoding="ascii")
+    out = subprocess.run(["cscript", "//nologo", str(script)], capture_output=True, text=True,
+                         timeout=60).stdout.split("\n")
+    assert out[0].strip() == "9010 9009 9011 9008 0 0"
+    assert out[1].strip() == "9010 0 0"
     assert "swBlack = 1028" not in open(os.path.join(VPX, "patch_turtles_le.py"), encoding="utf-8").read()
 
 
@@ -6556,15 +6585,29 @@ def test_a_tribute_gets_the_service_keys_and_an_old_patch_the_same_in_place():
     for k, sw in ((8, 9011), (9, 9010), (10, 9009), (11, 9008)):
         assert "If KeyCode = %d Then Controller.Switch(%d) = True" % (k, sw) in down
         assert "If KeyCode = %d Then Controller.Switch(%d) = False" % (k, sw) in up
-    # the shadow game never sees those four keys
-    assert "If KeyCode < 8 Or KeyCode > 11 Then Table1_KeyDown_orig KeyCode" in down
-    assert "If KeyCode < 8 Or KeyCode > 11 Then Table1_KeyUp_orig KeyCode" in up
+    # PAD-1482: the arrow keys too, by PadArrow, defined once before the subs
+    assert "If PadArrow(KeyCode) Then Controller.Switch(PadArrow(KeyCode)) = True" in down
+    assert "If PadArrow(KeyCode) Then Controller.Switch(PadArrow(KeyCode)) = False" in up
+    assert new.count("Function PadArrow(ByVal k)") == 1
+    assert new.index("Function PadArrow(ByVal k)") < new.index("Sub Table1_KeyDown(ByVal KeyCode)")
+    # the shadow game never sees those keys
+    guard = "If (KeyCode < 8 Or KeyCode > 11) And PadArrow(KeyCode) = 0 Then "
+    assert guard + "Table1_KeyDown_orig KeyCode" in down
+    assert guard + "Table1_KeyUp_orig KeyCode" in up
+    fn = "\n".join(vs.arrow_function_vbs()) + "\n"
     # a script patched before PAD-882 (no service lines, a bare orig call)
-    old = [ln for ln in new.split("\n") if "Service " not in ln]
-    old = [ln.replace("If KeyCode < 8 Or KeyCode > 11 Then ", "") for ln in old]
+    old = new.replace(fn, "").split("\n")
+    old = [ln for ln in old if "Service " not in ln and "PadArrow(KeyCode)) = " not in ln]
+    old = [ln.replace(guard, "") for ln in old]
     up_again, changed = vs.with_service_keys(old)
     assert changed and "\n".join(up_again) == new
     assert vs.with_service_keys(up_again) == (up_again, False)      # once
+    # and one patched between PAD-882 and PAD-1482: 7 8 9 0, no arrows
+    mid = [ln for ln in new.replace(fn, "").split("\n") if "PadArrow(KeyCode)) = " not in ln]
+    mid = [ln.replace(guard, "If KeyCode < 8 Or KeyCode > 11 Then ") for ln in mid]
+    assert any("Controller.Switch(9011)" in ln for ln in mid)
+    up_again, changed = vs.with_service_keys(mid)
+    assert changed and "\n".join(up_again) == new
     # CRLF scripts keep their line ends
     crlf = [ln + "\r" for ln in old]
     got, _ = vs.with_service_keys(crlf)

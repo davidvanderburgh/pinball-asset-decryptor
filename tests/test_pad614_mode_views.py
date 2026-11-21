@@ -139,7 +139,7 @@ console.log(JSON.stringify({
 
 
 def _node(tmp_path, script, *args):
-    stubs = _stage(tmp_path, ("modes_blocks.js", "modes_playfield.js", "modes_views.js", "modes_rules.js",
+    stubs = _stage(tmp_path, ("modes_blocks.js", "modes_shownum.js", "modes_playfield.js", "modes_views.js", "modes_rules.js",
                               "modes_script.js"))
     names = set().union(*stubs.values()) - {"useState", "useRef", "useEffect", "call", "html"}
     (tmp_path / "core" / "ui.js").write_text(_UI + "".join("export const %s = () => null;\n" % n for n in sorted(names)),

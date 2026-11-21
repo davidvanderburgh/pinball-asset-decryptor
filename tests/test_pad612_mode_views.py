@@ -171,7 +171,7 @@ console.log(JSON.stringify({ afterEdits, afterUndo, afterRedo: ui.saved.at(-1)[2
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
 def test_every_view_edits_one_program_with_one_history(tmp_path):
-    stubs = _stage(tmp_path, ("modes_blocks.js", "modes_playfield.js", "modes_views.js"))
+    stubs = _stage(tmp_path, ("modes_blocks.js", "modes_shownum.js", "modes_playfield.js", "modes_views.js"))
     names = set().union(*stubs.values()) - {"useState", "useRef", "useEffect", "call", "html"}
     (tmp_path / "core" / "ui.js").write_text(_UI + "".join("export const %s = () => null;\n" % n for n in sorted(names)),
                                               encoding="utf-8")

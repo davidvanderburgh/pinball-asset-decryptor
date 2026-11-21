@@ -10,6 +10,7 @@ SDK=$WT/tools/spike2_emu/modes/sdk
 LIST=${1:?list}
 N=${2:-1}
 export REEL_OUT=${3:-/tmp/show_reel}
+rm -rf "$REEL_OUT/rb"     # PAD-1475: its own rigbatch folder (a shared one handed an earlier run's cards out)
 mkdir -p "$REEL_OUT/stage"
 ( cd "$SDK" && bash build_mode.sh -o "$REEL_OUT/stage/pad_mode.so" mode_file.c ) > "$REEL_OUT/build.txt" 2>&1
 tr -d '\r' < "$KIT/reel_job.sh" > /tmp/show_reel_job.sh
@@ -21,7 +22,7 @@ for i in $(seq 1 270); do
     sleep 10
 done
 set +e
-bash "$WT/tools/spike2_emu/rigbatch.sh" -n "$N" --speed 1 --who "$(basename "$WT")" --job-cap 1200 --out /tmp/rb_show_reel /tmp/show_reel_list.txt -- bash /tmp/show_reel_job.sh > "$REEL_OUT/batch.log" 2>&1 < /dev/null
+bash "$WT/tools/spike2_emu/rigbatch.sh" -n "$N" --speed 1 --who "$(basename "$WT")" --job-cap 1200 --out "$REEL_OUT/rb" /tmp/show_reel_list.txt -- bash /tmp/show_reel_job.sh > "$REEL_OUT/batch.log" 2>&1 < /dev/null
 rc=$?
 touch $DONE; sleep 1
 bash "$WT/tools/spike2_emu/riglock.sh" release 2 park-ballfeed > /dev/null 2>&1 || true

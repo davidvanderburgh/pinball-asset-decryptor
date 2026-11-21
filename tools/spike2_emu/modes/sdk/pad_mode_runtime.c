@@ -9301,6 +9301,23 @@ int pm_game_show(int n)
  * layering and clean-up are all the game's, as when its own mode plays it. A number at or past the table's end is
  * the game's own error, so it is refused here. *limit_ms*: it is stopped then if it still plays (a mode's running
  * show goes on until stopped). *who*: for the log. */
+/* PAD-1475 (reopened): whether the port lists *num* in `text show_hangs` - a show the game stops at once when it is
+ * started by its number (the show reel: nothing more in the log after its "on"; James Bond LE 1.06's 12, Batman's
+ * 293), so none of ours ever plays it, whatever asks: a mode, a block, the co-op intro. */
+static int show_hangs(int num)
+{
+    const char *p = pm_port_text("show_hangs");
+    long v;
+    if (!p) return 0;
+    while (*p) {
+        while (*p == ' ') p++;
+        if (*p < '0' || *p > '9') { while (*p && *p != ' ') p++; continue; }
+        for (v = 0; *p >= '0' && *p <= '9'; p++) v = v * 10 + (*p - '0');
+        if (v == num) return 1;
+    }
+    return 0;
+}
+
 static int show_number_start(int num, unsigned long limit_ms, const char *who)
 {
     void *rec = 0;
@@ -9310,6 +9327,10 @@ static int show_number_start(int num, unsigned long limit_ms, const char *who)
     }
     if (num < 1 || num >= shownum_n) {
         say("show #%d: not played - the game's numbers are 1-%d", num, shownum_n - 1);
+        return 0;
+    }
+    if (show_hangs(num)) {
+        say("show #%d: not played - it stops the game when started by its number (the port's show_hangs)", num);
         return 0;
     }
     if (show_now.n || proc_alive((unsigned)pm_port_value("show_proc", 0))) show_kill("another show begins");

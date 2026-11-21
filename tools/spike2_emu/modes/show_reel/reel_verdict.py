@@ -7,7 +7,8 @@ For each show: the LED view's changes per second and the lamps lit while it play
 against the 2.5 s gap before it. LIT when 6 or more lamps more are lit, or the changes run 1.25 times faster. Godzilla
 LE 1.16 (2026-11-20): the 7 that lit added 10 to 64 lamps (210, 214-217, 249, 319); the 15 that did not stayed within
 3 lamps of the gap (Hedorah's 211 checks that Hedorah runs, and stops at once). A REFUSED show (a show of the game's
-own of a higher priority was playing) is not lit. --write puts the lit ones in the build's port (port_show_numbers.py
+own of a higher priority was playing) is not lit; nor is a BUSY one (it lit nothing over a gap of BUSY changes a
+second or more, the game's own show of the moment hiding it), and neither counts as reeled (``text show_reeled``). --write puts the lit ones in the build's port (port_show_numbers.py
 lit), the directory's name being the port's key. A build reeled in chunks (reel_list.py: <key>~2, <key>~3 ... beside
 <key>) is read as one: its chunks' directories are merged in.
 """
@@ -18,6 +19,11 @@ import subprocess
 import sys
 
 LAMPS, RATIO = 6, 1.25
+#: PAD-1475: the LED view's changes per second at and over which the gap before a show was busy - the sampler's
+#: ceiling is about 1800 (James Bond LE 1.06: the game's own show of the moment, coming and going through a reel, hid
+#: ours, and 27 shows an earlier reel saw lit read dark there). A show that lit nothing over a busy gap is "busy",
+#: not "dark": it is not counted as reeled, so the Modes tab does not say it lights nothing
+BUSY = 1500
 
 
 def verdict(d):
@@ -44,7 +50,8 @@ def verdict(d):
         ac, al = win(t + 300, t + 2800)
         ratio = ac / bc if bc else (9.9 if ac else 1.0)
         lit = not refused and (al - bl >= LAMPS or ratio >= RATIO)
-        out.append((n, "REFUSED" if refused else "lit" if lit else "dark", bc, ac, ratio, bl, al))
+        out.append((n, "REFUSED" if refused else "lit" if lit else "busy" if bc >= BUSY else "dark", bc, ac, ratio,
+                    bl, al))
     return out
 
 
@@ -59,7 +66,25 @@ def main(argv):
         if not rows:
             sys.exit("no reel lines: nothing written")
         tool = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "port_show_numbers.py")
-        subprocess.check_call([sys.executable, tool, "lit", os.path.basename(d)] + [str(n) for n in lit])
+        # PAD-1475 reopened: which numbers this verdict is of - a refused or busy one was not seen either way
+        reeled = ranges(n for n, v, *_r in rows if v in ("lit", "dark"))
+        subprocess.check_call([sys.executable, tool, "lit", os.path.basename(d), "--reeled", reeled] +
+                              [str(n) for n in lit])
+
+
+def ranges(nums):
+    """{1, 2, 3, 7} -> "1-3 7"."""
+    out, run = [], []
+    for n in sorted(set(nums)):
+        if run and n == run[-1] + 1:
+            run.append(n)
+            continue
+        if run:
+            out.append("%d-%d" % (run[0], run[-1]) if len(run) > 1 else str(run[0]))
+        run = [n]
+    if run:
+        out.append("%d-%d" % (run[0], run[-1]) if len(run) > 1 else str(run[0]))
+    return " ".join(out)
 
 
 if __name__ == "__main__":

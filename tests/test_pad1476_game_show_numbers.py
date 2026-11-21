@@ -258,9 +258,9 @@ def test_measured_builds_offer_only_the_shows_seen_lighting():
     unmeasured = dataclasses.replace(LE, show_lit=None)
     rows = ModesTab._mode_show_rows(SimpleNamespace(_how=clips, _title=lambda: unmeasured))
     assert [r["value"] for r in rows] == ["#210", "#211"]
-    dark = MH.HowItWorksMixin._how_show(sh, 211, 1, (210,), "Hedorah")
+    dark = MH.HowItWorksMixin._how_show(sh, 211, 1, MP.show_checked(measured, 211, {210, 211}), "Hedorah")
     assert dark["tip"]["lines"][-1] == "It lights only while this mode runs, so a mode of yours cannot use it"
-    ok = MH.HowItWorksMixin._how_show(sh, 210, 1, (210,), "Hedorah")
+    ok = MH.HowItWorksMixin._how_show(sh, 210, 1, MP.show_checked(measured, 210, {210, 211}), "Hedorah")
     assert ok["tip"]["lines"][-1] == ('A mode of yours and the co-op intro can play it too: "Light show 210 '
                                       '(Hedorah)" on its Lights page')
 

@@ -19,7 +19,7 @@ game's number. Read-only; never raises on a program it can't read.
 import re
 from dataclasses import dataclass, field
 
-READ_REV = 1
+READ_REV = 2                # 2: PAD-1475 reopened - every number named, and ``own``
 
 #: the starter's first two words on every port that places it (58 of 69 ports: ``push {r4-sl, lr}; subs r8, r0, #0``)
 STARTER_WORDS = (0xE92D47F0, 0xE2508000)
@@ -43,15 +43,20 @@ class ShowReading:
     calls: int = 0
     #: mode class -> [[show number, first call VA, how many calls]] in the order its code first asks
     modes: dict = field(default_factory=dict)
-    #: show number (str) -> its name, where the port names that show
+    #: show number (str) -> its name, where the port names that show (any number of the table, not only the modes')
     names: dict = field(default_factory=dict)
     #: show number (str) -> names a mode of the user's can pick for it on the Lights page ([] = none)
     pickable: dict = field(default_factory=dict)
+    #: show number (str) -> the mode class whose own code holds the show's body (PAD-1475 reopened: Bond LE 1.06 has
+    #: 246 such; a show a mode starts by a fixed number has its body in that same mode's code, 127 of 128 - Wizard Mode
+    #: Multiball borrows Super Spinners' 151 - and 118 more are started by a number the mode works out), so a show
+    #: nothing names goes by its mode
+    own: dict = field(default_factory=dict)
 
     def to_json(self):
         return {"rev": READ_REV, "note": self.note, "origin": self.origin, "starter": self.starter,
                 "table": self.table, "count": self.count, "calls": self.calls, "modes": self.modes,
-                "names": self.names, "pickable": self.pickable}
+                "names": self.names, "pickable": self.pickable, "own": self.own}
 
     @classmethod
     def from_json(cls, d):
@@ -59,7 +64,14 @@ class ShowReading:
         return cls(d.get("note", ""), d.get("origin", ""), int(d.get("starter") or 0), int(d.get("table") or 0),
                    int(d.get("count") or 0), int(d.get("calls") or 0),
                    {k: [list(r) for r in v] for k, v in (d.get("modes") or {}).items()},
-                   dict(d.get("names") or {}), {k: list(v) for k, v in (d.get("pickable") or {}).items()})
+                   dict(d.get("names") or {}), {k: list(v) for k, v in (d.get("pickable") or {}).items()},
+                   dict(d.get("own") or {}))
+
+    def own_shows(self, cls):
+        """The numbers whose body is mode *cls*'s own code but which its code starts by no fixed number (it works
+        the number out as it plays), in order."""
+        fixed = {r[0] for r in self.modes.get(cls) or ()}
+        return sorted(int(n) for n, c in self.own.items() if c == cls and int(n) not in fixed)
 
 
 # ---- the port's lines ----------------------------------------------------------------------------
@@ -355,9 +367,12 @@ def analyse(elf=None, game="", version="", ctx=None):
     if owners is not None:
         out.modes = CS.mode_calls(calls, owners)
     bodies, flash = port_names(prog, lines)
-    shown = sorted({r[0] for rs in out.modes.values() for r in rs})
-    for n in shown:
+    for n in range(1, count):                           # PAD-1475 reopened: every number, so any can be picked by it
         body = body_of(prog, table, n)
+        if owners is not None and body:
+            mode = owners.of_code(body)[0]
+            if mode:
+                out.own[str(n)] = mode
         if body in bodies:
             out.names[str(n)] = bodies[body]
             out.pickable[str(n)] = [bodies[body]]

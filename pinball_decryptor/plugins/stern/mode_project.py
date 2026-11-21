@@ -140,6 +140,10 @@ class TitleProfile:
     #                                  (the port's show_<n> lines, in number order; kind flashy / subdued / accent)
     show_lit: tuple = None           # PAD-1476: the numbers seen lighting the playfield on their own (the show reel,
     #                                  `text show_lit`); None = not measured on this build
+    show_reeled: tuple = None        # PAD-1475 reopened: the numbers the reel played (`text show_reeled`, "1-537");
+    #                                  None with show_lit set = the ones the game's own modes start (the first reels)
+    show_hangs: tuple = ()           # PAD-1475 reopened: the numbers that stop the game when started by number
+    #                                  (`text show_hangs`); never played, refused wherever one is picked
     show_numbers: int = 0            # PAD-1476: how many numbers the game's show table has, where the port can start
     #                                  and stop any of them by it (a mode's "#211"); 0 = not on this build
     absent: tuple = ()               # PAD-420: HARDWARE_PARTS this machine does not have (machine_absent): the tab
@@ -1645,6 +1649,48 @@ def _show_lit(port):
     return tuple(sorted({int(w) for w in port["text"]["show_lit"].split("#")[0].split() if w.isdigit()}))
 
 
+def _show_reeled(port):
+    """PAD-1475 reopened: the numbers the show reel played on this build (``text show_reeled``: numbers and ranges,
+    ``1-537``), or None where the port does not say (its reel played the shows the game's own modes start)."""
+    if not port or "show_reeled" not in port.get("text", {}):
+        return None
+    return tuple(sorted(parse_numbers(port["text"]["show_reeled"].split("#")[0])))
+
+
+def _show_hangs(port):
+    """PAD-1475 reopened: the show numbers that stop the game when one of ours starts them (``text show_hangs``,
+    the show reel's finding: James Bond LE 1.06's 12, Batman's 293); () where the port lists none."""
+    if not port or "show_hangs" not in port.get("text", {}):
+        return ()
+    return tuple(sorted(parse_numbers(port["text"]["show_hangs"].split("#")[0])))
+
+
+def parse_numbers(text):
+    """``"1-5 9 12-13"`` -> {1, 2, 3, 4, 5, 9, 12, 13} (words that are neither are skipped)."""
+    out = set()
+    for w in text.replace(",", " ").split():
+        a, dash, b = w.partition("-")
+        if a.isdigit() and (b.isdigit() if dash else True):
+            out.update(range(int(a), int(b or a) + 1))
+    return out
+
+
+def show_checked(p, num, mode_nums=()):
+    """PAD-1475 reopened: what the show reel saw of the game's show *num* on profile *p*'s build: "lit" (it lit the
+    playfield on its own), "dark" (it played and lit nothing on its own: a show that lights only while its mode
+    runs), "hangs" (it stops the game: the port's ``show_hangs``) or "" (not played by the reel). *mode_nums* are the numbers the game's own modes start, the ones a port
+    with no ``show_reeled`` line was reeled for."""
+    if num in (getattr(p, "show_hangs", ()) or ()):
+        return "hangs"                              # it stops the game: never played
+    lit = getattr(p, "show_lit", None)
+    if lit is None:
+        return ""
+    if num in lit:
+        return "lit"
+    reeled = getattr(p, "show_reeled", None)
+    return "dark" if num in (reeled if reeled is not None else mode_nums) else ""
+
+
 def show_number(v):
     """PAD-1476: the game's number of a show asked for by it (``"#211"`` -> 211), else 0 (a port's name, or none)."""
     if isinstance(v, str) and len(v) > 1 and v[0] == "#" and v[1:].isdigit():
@@ -1665,7 +1711,7 @@ def game_show_ok(p, v):
         return False
     n = show_number(v)
     if n:
-        return 0 < n < int(getattr(p, "show_numbers", 0) or 0)
+        return 0 < n < int(getattr(p, "show_numbers", 0) or 0) and n not in (getattr(p, "show_hangs", ()) or ())
     return v in {name for name, _k, _s in getattr(p, "game_shows", ())}
 
 
@@ -3060,6 +3106,8 @@ def profile_from_port(path):
         game_shows=_game_shows(port),                        # PAD-418
         show_numbers=_show_numbers(port),                    # PAD-1476
         show_lit=_show_lit(port),
+        show_reeled=_show_reeled(port),
+        show_hangs=_show_hangs(port),
         # PAD-420: a machine part this build can do is never hidden, whatever MACHINE_HARDWARE read off its coils
         absent=tuple(a for a in machine_absent(game) if a in dict(cannot))
         + (("wizard",) if game in NO_GAME_WIZARDS and not _game_wizards(port) else ()),    # PAD-473: a port's win
@@ -3413,6 +3461,8 @@ try:
         game_shows=_game_shows(_port_115),
         show_numbers=_show_numbers(_port_115),               # PAD-1476
         show_lit=_show_lit(_port_115),
+        show_reeled=_show_reeled(_port_115),
+        show_hangs=_show_hangs(_port_115),
         roster=_roster("godzilla_pro", _port_115) if not _roster_cannot(_key_115, _label_115, _port_115) else (),
         roster_counts=bool(_port_115 and "battle_stop" in _port_115["site"]),   # PAD-706: not on Pro 1.15
         places=_places(_port_115) if not _place_cannot(_key_115, _label_115, _port_115) else (),   # PAD-710
@@ -5744,7 +5794,8 @@ def validate_shows(spec, p):
         elif show_number(v) and not game_show_ok(p, v):     # PAD-1476
             out.append("%s cannot play the game's light show %d %s: %s." % (
                 p.label, show_number(v), when.replace("its", "the mode's"),
-                "its numbers are 1-%d" % (p.show_numbers - 1) if p.show_numbers
+                "it stops the game when one of ours starts it" if show_number(v) in (p.show_hangs or ())
+                else "its numbers are 1-%d" % (p.show_numbers - 1) if p.show_numbers
                 else "this build cannot play the game's shows by number"))
         elif not game_show_ok(p, v):
             out.append("%s has no light show called %r to play %s." % (p.label, v, when.replace("its", "the mode's")))

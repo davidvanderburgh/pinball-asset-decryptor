@@ -1047,12 +1047,32 @@ class Manufacturer(ABC):
         return {}
 
     def video_sizes(self, assets_dir, slots_by_rel, assignments):
-        """``{rel: (w, h)}`` of the assigned clips that go on the card bigger
-        than their slot, at that size (Simon, 2026-11-21: a replacement video
-        goes on at the most the game shows its slot, as pictures do); every
-        other clip is converted to its slot's size.  Default ``{}``: every
-        clip at its slot's size."""
-        return {}
+        """``{rel: (w, h)}`` of the assigned clips that go on the card at
+        another size than their slot (Simon, 2026-11-21: "the image rules need
+        to apply to the video rules" on every machine; core/video_sizes.py).
+        Every other clip is converted to its slot's size."""
+        from . import video_sizes
+        return video_sizes.sizes_for(self, assets_dir, slots_by_rel,
+                                     assignments)
+
+    #: Simon (2026-11-21): a PC-class machine's decoder is not known to PAD;
+    #: a bigger clip there goes up to full HD, with the "not tested on this
+    #: machine" warning, until a machine says otherwise
+    VIDEO_SIZE_LIMIT = (1920, 1080)
+
+    def video_size_limit(self, assets_dir, rel, slot):
+        """``(limit, why, tested)`` for one video slot: the biggest ``(w, h)``
+        the machine's decoder plays (None: only the slot's size); *why* the
+        slot can't change size (None: it can); *tested*, a bigger clip has
+        been seen to show right on this machine (a new pick's Imported size
+        starts on).  Default: a custom-format slot (a fixed canvas) can't;
+        anything else up to :attr:`VIDEO_SIZE_LIMIT`, untested."""
+        from .video_slots import backend_for
+        path = getattr(slot, "abs_path", None)
+        if path and backend_for(path) is not None:
+            return None, ("this clip's format has a fixed canvas: it always "
+                          "goes on at the slot's size"), False
+        return self.VIDEO_SIZE_LIMIT, None, False
 
     def video_players(self, assets_dir):
         """``{clip name: (box w, box h, biggest zoom)}`` of the players the

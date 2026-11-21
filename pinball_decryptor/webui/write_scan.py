@@ -331,37 +331,37 @@ def _video_dims(path):
 
 
 def video_size_notes(assets_path, mfr, slots_by_rel, assignments):
-    """``{rel: "3840×2160 → 1796×1014 (...)"}`` for each picked clip the Write puts on the card at another size
-    than the file picked (Simon, 2026-11-21, "Same as pictures"; plugins/stern/video_sizes.py)."""
+    """``{rel: "3840×2160 → 1794×1012 (...)"}`` for each picked clip the Write puts on the card at another size
+    than the file picked (Simon, 2026-11-21: "the image rules need to apply to the video rules" on every machine;
+    core/video_sizes.py)."""
     out = {}
     try:
-        from ..core import staged_originals
-        from ..plugins.stern import video_sizes
+        from ..core import staged_changes, video_sizes
         players = mfr.video_players(assets_path) if mfr is not None else None
+        keep = (staged_changes.load(assets_path) if assets_path else {}).get(video_sizes.KEEP_KEY) or {}
         for rel, path in (assignments or {}).items():
             slot = (slots_by_rel or {}).get(rel)
             if slot is None or not (isinstance(path, str) and os.path.isfile(path)):
                 continue
-            snap = staged_originals.snapshot_path(assets_path, rel) if assets_path else None
-            stock = _video_dims(snap) if snap else None
-            if not stock and slot.info is not None and slot.info.width and slot.info.height:
-                stock = (int(slot.info.width), int(slot.info.height))
+            stock = video_sizes.stock_size(assets_path, rel, slot, _video_dims)
             mine = _video_dims(path)
             if not stock or not mine:
                 continue
-            player = video_sizes.player_of(players, rel) if players else None
-            got = video_sizes.written_size(stock, mine, player)
-            if tuple(got) == tuple(mine):
+            f = video_sizes.facts(mfr, assets_path, rel, slot, players)
+            got, why = video_sizes.verdict(stock, mine, f, video_sizes.keep_of(keep, rel, f.tested))
+            if why == "same":
                 continue
-            most = video_sizes.shown_size(stock, player)
-            if got[0] > mine[0]:
-                why = "the slot's size"                 # a smaller clip is enlarged to its slot, as before
-            elif tuple(got) != tuple(most) and (got[0] >= video_sizes.DECODER_MAX[0] - 1
-                                                or got[1] >= video_sizes.DECODER_MAX[1] - 1):
-                why = "reduced: the most the machine's video decoder plays"
-            else:
-                why = "reduced: the most the screen shows it"
-            out[rel] = "%d×%d → %d×%d (%s)" % (tuple(mine) + tuple(got) + (why,))
+            say = {"fixed": "the slot's size: " + (f.why or ""),
+                   "off": "the slot's size: Imported size is off",
+                   "up": "the slot's size",
+                   "shown": "reduced: the most the machine's video player shows it",
+                   "limit": "reduced: the most this machine's video decoder plays",
+                   "own": "its own size, in the slot's shape"}[why]
+            if why in ("fixed", "off") and got[0] < mine[0]:
+                say = "reduced: " + say
+            if not f.tested and why in ("shown", "limit", "own"):
+                say += "; NOT TESTED on this machine"
+            out[rel] = "%d×%d → %d×%d (%s)" % (tuple(mine) + tuple(got) + (say,))
     except Exception:                                   # noqa: BLE001 - the rows go out without them
         return out
     return out

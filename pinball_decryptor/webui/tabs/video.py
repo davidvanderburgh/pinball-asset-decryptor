@@ -156,6 +156,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._reveal_after_scan = ""     # PAD-1274: a jump waiting on the scan
         self._assign = {}                # rel -> replacement file path
         self._asis = {}                  # rel -> per-clip as-is override
+        self._keep = {}                  # rel -> Imported size (Simon, 2026-11-21; core/video_sizes.py)
         self._length = {}                # rel -> per-clip length choice
         self._color = {}                 # rel -> per-clip colour switch (PAD-312)
         self._variants = {}              # rel -> [extra clip, ...] (PAD-446)
@@ -258,6 +259,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._by_rel = {}
         self._assign = {}
         self._asis = {}
+        self._keep = {}
         self._length = {}
         self._color = {}
         self._color_all = False
@@ -667,6 +669,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         from ...core import staged_changes
         self._assign = {}
         self._asis = {}
+        self._keep = {}
         self._length = {}
         self._color = {}
         self._color_stock = False
@@ -863,6 +866,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                     rel: v for rel, v in
                     (staged.get("video_length_slots") or {}).items()
                     if rel in self._by_rel and _length_ok(v)}
+                from ...core.video_sizes import KEEP_KEY
+                self._keep = {
+                    rel: bool(v) for rel, v in
+                    (staged.get(KEEP_KEY) or {}).items()
+                    if rel in self._by_rel}
                 self._color = {
                     rel: bool(v) for rel, v in
                     (staged.get("video_color_slots") or {}).items()
@@ -1453,31 +1461,81 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         info = slot.info
         return (int(info.width), int(info.height)) if info is not None and info.width and info.height else None
 
+    def _size_facts(self, slot):
+        """The machine's :class:`core.video_sizes.Facts` for *slot*."""
+        from ...core import video_sizes
+        return video_sizes.facts(self.mfr, self._scan_dir, slot.rel_path, slot,
+                                 getattr(self, "_players_now", None))
+
+    def _keep_for(self, rel, f):
+        from ...core import video_sizes
+        return video_sizes.keep_of(self._keep, rel, f.tested)
+
     def _sizes_of(self, slot, rep):
-        """``(original, imported, current, written)``, each ``(w, h)`` or None."""
-        from ...plugins.stern import video_sizes
+        """``(original, imported, current, written)``, each ``(w, h)`` or None; Current is None where the machine
+        can't be measured."""
+        from ...core import video_sizes
         orig = self._stock_dims(slot)
         mine = self._dims_of(rep) if rep else None
-        players = getattr(self, "_players_now", None)
-        player = video_sizes.player_of(players, slot.rel_path) if players else None
-        cur = video_sizes.shown_size(orig, player) if orig else None
+        f = self._size_facts(slot)
+        cur = video_sizes.shown_size(orig, f.player) if orig else None
+        if cur is None and orig and f.measured:
+            cur = tuple(orig)                           # measured, and shown at its own size
         wri = None
-        if rep and orig:
-            wri = video_sizes.written_size(orig, mine, player) if mine else None
+        if rep and orig and mine:
+            wri = video_sizes.verdict(orig, mine, f, self._keep_for(slot.rel_path, f))[0]
         return orig, mine, cur, wri
 
     def _size_row(self, slot, rep):
         orig, mine, cur, wri = self._sizes_of(slot, rep)
+        f = self._size_facts(slot)
 
         def fmt(wh):
             return "%d×%d" % tuple(wh) if wh else ""
         out = {"ro": fmt(orig), "ri": fmt(mine), "rc": fmt(cur), "rw": fmt(wri)}
+        if orig and cur is None:
+            out["rc"], out["rcu"] = "unknown", True
         if rep and not mine and self._file_key(rep) is not None and self._file_key(rep) not in self._secs:
             out["ri"] = "…"
         # orange: written smaller than your file (the screen never shows more, or the decoder can't play more)
         if mine and wri and (wri[0] < mine[0] - 1 or wri[1] < mine[1] - 1):
             out["rd"] = True
+        # Imported size: its tick, greyed with the reason where the slot can't change size
+        out["kr"] = bool(rep)
+        out["k"] = self._keep_for(slot.rel_path, f) if not f.why and f.limit else None
+        if f.why:
+            out["k_why"] = f.why
+        elif not f.tested:
+            out["k_untested"] = True
         return out
+
+    @rpc
+    @undoable("the Imported size of %s")
+    def set_keep(self, rel, value):
+        """Simon (2026-11-21): a clip's Imported size, as the Images tab's - on, the clip keeps its own size (at
+        most what the machine shows and plays); off, it is converted to the slot's size."""
+        slot = self._by_rel.get(rel)
+        if slot is None:
+            return False
+        f = self._size_facts(slot)
+        if f.why or not f.limit:
+            return False
+        if value and not f.tested:
+            from ...core.video_sizes import UNTESTED
+            if not compat.messagebox.askyesno(
+                    "WARNING", UNTESTED.replace(" Untick Imported size to convert it to the slot's size.", "")
+                    + "\n\nKeep this clip's own size anyway?", icon="warning"):
+                return False
+        if bool(value) == bool(f.tested):
+            self._keep.pop(rel, None)                   # back to the machine's default
+        else:
+            self._keep[rel] = bool(value)
+        self.log("Replace Video: %s - Imported size %s." % (rel, "on" if value else "off"), "info")
+        self._save_staged()
+        self._refresh_list()
+        if rel == self._current:
+            self._update_note(rel)
+        return True
 
     # Simon (2026-11-21): Origin - the official card's clip, or custom (core/asset_origin.py)
     def _origins(self):
@@ -2135,6 +2193,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         data["video_asis_slots"] = {rel: bool(v)
                                     for rel, v in self._asis.items()}
         data["video_length_slots"] = dict(self._length)
+        from ...core.video_sizes import KEEP_KEY
+        if self._keep:
+            data[KEEP_KEY] = {rel: bool(v) for rel, v in self._keep.items()}
+        else:
+            data.pop(KEEP_KEY, None)
         # PAD-446: the slots' random clips, and one history line per slot
         old_var = data.get("video_variants")
         old_var = old_var if isinstance(old_var, dict) else {}
@@ -3764,37 +3827,17 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         info = slot.info
         if not (facts.get("width") and info and info.width and info.height):
             return None
-        from ...plugins.stern import video_sizes
+        from ...core import video_sizes
         stock = self._stock_dims(slot) or (int(info.width), int(info.height))
-        mine = (int(facts["width"]), int(facts["height"]), float(facts.get("fps") or 0.0))
-        fps = float(info.fps or 0.0)
-        players = getattr(self, "_players_now", None)
-        player = video_sizes.player_of(players, rel) if players else None
-        most = video_sizes.shown_size(stock, player)
-        wri = video_sizes.written_size(stock, mine[:2], player)
-        same_fps = not (mine[2] and fps) or abs(mine[2] - fps) < 0.5
-        if mine[:2] == tuple(wri) and same_fps:
+        mine = (int(facts["width"]), int(facts["height"]))
+        mfps, fps = float(facts.get("fps") or 0.0), float(info.fps or 0.0)
+        same_fps = not (mfps and fps) or abs(mfps - fps) < 0.5
+        f = self._size_facts(slot)
+        text = video_sizes.words(stock, mine, f, self._keep_for(rel, f),
+                                 "" if same_fps else " at %g fps" % round(fps, 2))
+        if not text:
             return None
-
-        def words(v):
-            return "%d×%d" % tuple(v[:2])
-        rate = "" if same_fps else " at %g fps" % round(fps, 2)
-        mine_w = words(mine) + (" at %g fps" % round(mine[2], 2) if mine[2] and not same_fps else "")
-        if tuple(wri) == tuple(stock):
-            why = ("the game never shows it bigger" if tuple(most) == tuple(stock) or mine[0] <= stock[0]
-                   else "the machine can't play more")
-            text = ("Your video is %s. The original is %s: PAD will convert it to %s%s, since %s. Your own file "
-                    "stays as it is." % (mine_w, words(stock), words(stock), rate, why))
-        else:
-            cap = tuple(wri) != tuple(most) and (wri[0] >= video_sizes.DECODER_MAX[0] - 1
-                                                 or wri[1] >= video_sizes.DECODER_MAX[1] - 1)
-            why = ("the most the machine's video decoder plays" if cap
-                   else "the most the game shows this slot (its zoom included)" if wri[0] < mine[0] - 1
-                   else "your file's own size, in the slot's shape")
-            text = ("Your video is %s. The original is %s, and the game shows this slot at up to %s: PAD will "
-                    "write it at %s%s, %s. Your own file stays full size in the project."
-                    % (mine_w, words(stock), words(most), words(wri), rate, why))
-        return {"kind": "info", "text": text}
+        return {"kind": "warn" if "WARNING" in text else "info", "text": text}
 
     def _reselect(self, rels):
         self._sel_seq += 1
@@ -3980,7 +4023,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
     # content; the page fits the others, as _autosize_tree_columns did)
     # ==================================================================
     _WIDTHS_KEY = "video_web"
-    _WIDTH_COLS = ("rel", "len", "res", "imp", "cur", "wri", "fmt", "aud", "org", "rep", "fit",
+    _WIDTH_COLS = ("rel", "len", "res", "imp", "cur", "wri", "keep", "fmt", "aud", "org", "rep", "fit",
                    "col", "conv")
 
     def _all_widths(self):

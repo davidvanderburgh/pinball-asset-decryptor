@@ -41,22 +41,82 @@ def test_written_size():
     assert ws((1360, 768), (3840, 2160), None) == (1360, 768)
 
 
-def test_only_clips_going_on_bigger_get_a_size(tmp_path, monkeypatch):
+def _slot(codec="h264", path="video/x.mp4"):
+    from types import SimpleNamespace
+    return SimpleNamespace(info=SimpleNamespace(width=1360, height=768, vcodec=codec), abs_path=path)
+
+
+def test_only_clips_going_on_bigger_get_a_size(tmp_path, monkeypatch, manufacturers_by_key):
+    from pinball_decryptor.core import video_sizes as core
     monkeypatch.setattr(scene_edit, "trees_of", lambda d: {"card": _man(1.32, clips=("big", "small"))})
-
-    class Info:
-        width, height = 1360, 768
-
-    class Slot:
-        info = Info()
+    stern = manufacturers_by_key["stern"]
+    stern.set_era("spike2")
     for n in ("big", "small"):
         (tmp_path / (n + ".mp4")).write_bytes(b"x")
     dims = {"big.mp4": (3840, 2160), "small.mp4": (640, 360)}
-    got = video_sizes.sizes_for(str(tmp_path), {"video/big.mov": Slot(), "video/small.mov": Slot()},
-                                {"video/big.mov": str(tmp_path / "big.mp4"),
-                                 "video/small.mov": str(tmp_path / "small.mp4")},
-                                probe=lambda p: dims.get(os.path.basename(p)) if p else None)
-    assert got == {"video/big.mov": (1794, 1012)}
+
+    def probe(p):
+        return dims.get(os.path.basename(p)) if p else None
+    slots = {"video/big.mov": _slot(), "video/small.mov": _slot()}
+    picks = {"video/big.mov": str(tmp_path / "big.mp4"), "video/small.mov": str(tmp_path / "small.mp4")}
+    assert core.sizes_for(stern, str(tmp_path), slots, picks, probe=probe, saved={}) == {
+        "video/big.mov": (1794, 1012)}
+    # Imported size off: the slot's size, as before
+    assert core.sizes_for(stern, str(tmp_path), slots, picks, probe=probe,
+                          saved={core.KEEP_KEY: {"video/big.mov": False}}) == {}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Simon (2026-11-21): "we MUST cover all machines, spike 3, JJP ALL ... the image rules need to apply to the video
+# rules even if we can't see a valid case right now"
+# ---------------------------------------------------------------------------------------------------------------
+def test_an_unmeasured_machine_keeps_your_size_up_to_its_limit():
+    from pinball_decryptor.core import video_sizes as core
+    ws = core.written_size
+    # a PC-class machine (Spooky, BOF...): no scenes PAD reads, the full HD limit
+    assert ws((1280, 720), (3840, 2160), None, (1920, 1080), True, False) == (1920, 1080)
+    assert ws((1280, 720), (1600, 900), None, (1920, 1080), True, False) == (1600, 900)
+    assert ws((1280, 720), (3840, 2160), None, (1920, 1080), False, False) == (1280, 720)    # Imported size off
+    assert ws((1280, 720), (3840, 2160), None, None, True, False) == (1280, 720)             # no limit known
+
+
+def test_each_machine_says_what_a_slot_can_take(manufacturers_by_key):
+    stern = manufacturers_by_key["stern"]
+    stern.set_era("spike2")
+    assert stern.video_size_limit("", "video/x.mp4", _slot()) == ((1920, 1088), None, True)
+    stern.set_era("spike3")
+    assert stern.video_size_limit("", "video/x.mp4", _slot()) == ((1920, 1088), None, False)
+    assert stern.video_size_limit("", "video/x.mp4", _slot("hevc")) == ((4096, 2160), None, False)
+    assert stern.video_players("") is None                  # Spike 3's scenes are not measured
+    stern.set_era("spike2")
+    jjp = manufacturers_by_key["jjp"]
+    assert jjp.video_size_limit("", "video/a.webm", _slot()) == ((1920, 1080), None, False)
+    limit, why, _t = jjp.video_size_limit("", "video/a.ogv", _slot())
+    assert limit is None and "exact size" in why
+    for key in ("spooky", "bof", "pb", "ap"):
+        assert manufacturers_by_key[key].video_size_limit("", "video/a.webm", _slot()) == (
+            (1920, 1080), None, False)
+
+
+def test_a_fixed_canvas_slot_never_changes_size(tmp_path, manufacturers_by_key):
+    limit, why, _t = manufacturers_by_key["dp"].video_size_limit(
+        "", "videos/clip.cdmd", _slot(path=str(tmp_path / "clip.cdmd")))
+    assert limit is None and "fixed canvas" in why
+
+
+def test_the_note_warns_where_a_bigger_clip_is_untested():
+    from pinball_decryptor.core import video_sizes as core
+    untested = core.Facts(limit=(1920, 1080), tested=False, measured=False)
+    text = core.words((1280, 720), (3840, 2160), untested, True)
+    assert "PAD can't measure how big this machine plays this slot" in text
+    assert "PAD will write it at 1920×1080" in text and "WARNING: " + core.UNTESTED in text
+    assert "WARNING" not in core.words((1280, 720), (3840, 2160), untested, False)        # off: the slot's size
+    fixed = core.Facts(why="this clip's format has a fixed canvas")
+    assert "since this clip's format has a fixed canvas" in core.words((272, 102), (1920, 720), fixed, True)
+    tested = core.Facts(limit=(1920, 1088), tested=True, player=(1360, 768, 1.32), measured=True)
+    text = core.words((1360, 768), (3840, 2160), tested, True)
+    assert "plays this slot at up to 1795×1014" in text and "PAD will write it at 1794×1012" in text
+    assert "WARNING" not in text
 
 
 def _clip(ffmpeg, path, size):
@@ -102,9 +162,12 @@ def test_the_write_lists_a_reduced_clip(tmp_path, monkeypatch):
     class Mfr:
         def video_players(self, d):
             return video_sizes.player_zooms(d)
+
+        def video_size_limit(self, d, rel, slot):
+            return (1920, 1088), None, True
     rep = tmp_path / "mine.mp4"
     rep.write_bytes(b"x")
     monkeypatch.setattr(write_scan, "_video_dims", lambda p: (3840, 2160) if p and p.endswith("mine.mp4") else None)
     got = write_scan.video_size_notes(str(tmp_path), Mfr(), {"video/clip_a.mov": Slot()},
                                       {"video/clip_a.mov": str(rep)})
-    assert got == {"video/clip_a.mov": "3840×2160 → 1794×1012 (reduced: the most the screen shows it)"}
+    assert got == {"video/clip_a.mov": "3840×2160 → 1794×1012 (reduced: the most the machine's video player shows it)"}

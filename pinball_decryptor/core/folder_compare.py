@@ -328,6 +328,7 @@ SETTING_LABELS = {
     "audio_trim": "Audio: Trim box",
     "video_asis_slots": "Video: this clip's conversion",
     "video_length_slots": "Video: this clip's length",
+    "video_keep_size_slots": "Video: Imported size",
     "video_trim": "Video: Trim / pad box",
     "video_no_conversion": "Video: use my files as-is box",
     "video_best_quality": "Video: Best quality box",

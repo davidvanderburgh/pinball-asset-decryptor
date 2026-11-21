@@ -233,7 +233,7 @@ def _stream_mismatch(slot: VideoSlot, ri: Optional[VideoInfo],
     if ri is None:
         return "the app couldn't read your file's video settings"
     if (ri.width, ri.height) != (si.width, si.height):
-        return ("it's %dx%d and this slot's clip is %dx%d"
+        return ("it's %dx%d and it goes on at %dx%d"
                 % (ri.width, ri.height, si.width, si.height))
     if (ri.vcodec or "").lower() != (si.vcodec or "").lower():
         return ("it's %s and this slot's clip is %s"

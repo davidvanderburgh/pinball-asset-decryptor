@@ -271,17 +271,21 @@ def test_the_video_tab_says_what_a_replacement_is_converted_to():
 
         def get(self, _k):
             return self._pv
+    from pinball_decryptor.core import video_sizes as core
     slot = SimpleNamespace(rel_path="video/a.mp4", info=SimpleNamespace(width=1360, height=768, fps=30.0))
     _Tab._stock_dims = lambda self, s: (1360, 768)
+    _Tab._keep_for = lambda self, rel, f: True
+    _Tab._size_facts = lambda self, s: core.Facts(limit=(1920, 1088), tested=True, measured=True)
+    # measured and never zoomed: the slot's size, at the slot's frame rate
     note = _Tab({"width": 3840, "height": 2160, "fps": 60.0})._size_note(slot, "video/a.mp4")
-    assert note["text"].startswith("Your video is 3840×2160 at 60 fps. The original is 1360×768: PAD will "
-                                   "convert it to 1360×768 at 30 fps")
+    assert "PAD will write it at 1360×768 at 30 fps, the most the machine's video player shows it" in note["text"]
     # Simon (2026-11-21, "Same as pictures"): a slot the game zooms takes a bigger clip
     zoomed = _Tab({"width": 3840, "height": 2160, "fps": 30.0})
-    zoomed._players_now = {"a": (1360, 768, 1.32)}
+    zoomed._size_facts = lambda s: core.Facts(limit=(1920, 1088), tested=True, player=(1360, 768, 1.32),
+                                              measured=True)
     assert zoomed._size_note(slot, "video/a.mp4")["text"] == (
-        "Your video is 3840×2160. The original is 1360×768, and the game shows this slot at up to 1795×1014: PAD "
-        "will write it at 1794×1012, the most the game shows this slot (its zoom included). Your own file stays "
-        "full size in the project.")
+        "Your video is 3840×2160. The original is 1360×768, and the machine's video player plays this slot at up "
+        "to 1795×1014: PAD will write it at 1794×1012, the most the machine's video player shows it - a bigger "
+        "clip would not look sharper. Your own file stays full size in the project.")
     assert _Tab({"width": 1360, "height": 768, "fps": 30.0})._size_note(slot, "video/a.mp4") is None
     assert _Tab({})._size_note(slot, "video/a.mp4") is None             # not read yet

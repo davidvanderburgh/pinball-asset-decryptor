@@ -21,14 +21,14 @@ VERSION = 1
 #: The sidecar sections each media tab owns.  Maps are ``{rel: value}``,
 #: lists are rels, anything else is one tab-wide option.
 SECTIONS = {
-    "images": ("image", "image_keep_size", "image_group_tags",
+    "images": ("image", "image_keep_size", "image_place_own", "image_group_tags",
                "image_color_slots", "color_all_images",
                "image_color_unlocked", "image_color_profiles",
                # Simon (2026-11-20): the themes are made on this tab, so its settings file carries them
                "scene_variants"),
     "audio": ("audio", "audio_loop", "audio_keep", "audio_levels",
               "grow_keep_whole", "audio_trim"),
-    "video": ("video", "video_asis_slots", "video_length_slots",
+    "video": ("video", "video_asis_slots", "video_length_slots", "video_keep_size_slots",
               "video_trim", "video_no_conversion", "video_best_quality",
               "video_color_slots", "color_all_videos", "video_color_stock",
               "video_color_profiles", "video_variants"),

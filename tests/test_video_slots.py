@@ -536,7 +536,7 @@ def test_stream_mismatch_names_the_one_property_that_differs(tmp_path,
 
     assert _why() is None                              # a drop-in: no reason
     assert _why(width=320, height=240) == \
-        "it's 320x240 and this slot's clip is 160x120"
+        "it's 320x240 and it goes on at 160x120"
     assert _why(vcodec="hevc") == "it's HEVC and this slot's clip is H264"
     assert _why(fps=25.0) == "it runs at 25 fps and this slot's clip is 10 fps"
     assert _why(pix_fmt="yuv420p10le") == \

@@ -1054,6 +1054,13 @@ class WriteTab(TabService):
             infos.append({"kind": "", "text": (
                 "%d video(s) will be reduced for the screen on the card (your files in the project stay full "
                 "size). Keep your own videos: extracting the written card later gives the reduced clips." % n)})
+        # Simon (2026-11-21): "we must be very careful" - a bigger clip on a machine nobody has tested it on
+        n = sum(1 for v in vred.values() if "NOT TESTED" in v)
+        if n:
+            warns.append({"kind": "warn", "text": (
+                "WARNING: %d video(s) go on bigger than their slot on a machine where that has not been tested "
+                "yet: they may show oversized or cut off. Untick Imported size on the Video tab to convert them "
+                "to the slot's size." % n)})
         return errs + warns + infos
 
     def _refresh_prebuild_notes(self):

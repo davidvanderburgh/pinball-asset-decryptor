@@ -204,8 +204,8 @@ function clock(pos, dur) {
 // Tk tree's minwidth.  Measured over every slot, not only the filtered view,
 // so typing in Search doesn't make the columns jump.
 const FIT_MAX = 480;
-const COL_MIN = { rel: 160, len: 46, res: 70, imp: 64, cur: 64, wri: 64, fmt: 80, aud: 70, org: 58, rep: 110, fit: 70, col: 56, conv: 60, modes: 110, seen: 120 };
-const HEADS = { rel: "Original Video", len: "Length", res: "Original", imp: "Imported", cur: "Current", wri: "Written", fmt: "Format",
+const COL_MIN = { rel: 160, len: 46, res: 70, imp: 64, cur: 64, wri: 64, keep: 64, fmt: 80, aud: 70, org: 58, rep: 110, fit: 70, col: 56, conv: 60, modes: 110, seen: 120 };
+const HEADS = { rel: "Original Video", len: "Length", res: "Original", imp: "Imported", cur: "Current", wri: "Written", keep: "Imported size", fmt: "Format",
                 aud: "Audio", org: "Origin", rep: "Replacement", fit: "Vs stock", col: "Color", conv: "Convert", modes: "Played in",
                 seen: "When it plays" };
 // Simon (2026-11-21): "another column (Probably audio, video, images and even text) to account for whether the
@@ -219,6 +219,8 @@ const RES_TIPS = {
   cur: "Current: this is the size the machine's video player plays the video at, although the actual screen may be a lower or higher resolution.",
   wri: "Written: the resolution PAD will write to the card - your video in the slot's shape, never bigger than you imported it, than Current, or than the 1920×1088 the machine's video decoder plays. Orange: smaller than you imported it.",
 };
+// Simon (2026-11-21): "the image rules need to apply to the video rules" - the Images tab's Imported size
+const KEEP_TIP = "Imported size. On: your clip keeps its own size, in the slot's shape - at most what the machine's video player shows (Current, where PAD can measure it) and what its decoder plays (the Written column). Off: it is converted to the slot's size. A machine where a bigger clip has not been tested yet starts off, and asks before you turn it on.";
 const ORG_TIP = "Origin: Original is the official card's asset; Custom is not the official card's, but was on the card this project was extracted from.";
 // PAD-1232 (DoomWalrus666): the Vs stock column's header tip
 const FIT_TIP = { head: "Vs stock", lines: [
@@ -1248,7 +1250,9 @@ export default function VideoTab() {
     { key: "imp", label: "Imported", width: width("imp"), sort: "imp", title: RES_TIPS.imp,
       render: (r) => (r.ri ? html`<span ...${tip(RES_TIPS.imp)}>${r.ri}</span>` : "") },
     { key: "cur", label: "Current", width: width("cur"), sort: "cur", title: RES_TIPS.cur,
-      render: (r) => (r.rc ? html`<span class="dim" ...${tip(RES_TIPS.cur)}>${r.rc}</span>` : "") },
+      render: (r) => (r.rc ? html`<span class=${cx("dim", r.rcu && "vid-res-unknown")} ...${tip(r.rcu
+        ? { head: RES_TIPS.cur, lines: ["PAD can't measure how big this machine plays this slot."] }
+        : RES_TIPS.cur)}>${r.rc}</span>` : "") },
     { key: "wri", label: "Written", width: width("wri"), sort: "wri", title: RES_TIPS.wri,
       render: (r) => (r.rw ? html`<span class=${cx(r.rd && "vid-res-down")} ...${tip(r.rd
         ? { head: RES_TIPS.wri, lines: [{ text: "Smaller than you imported it: the screen never shows more, or the machine can't play more.", tone: "accent" }] }
@@ -1256,6 +1260,14 @@ export default function VideoTab() {
     { key: "fmt", label: "Format", width: width("fmt"), sort: "fmt", titleOf: (r) => r.fmt,
       render: (r) => html`<span class=${r.fmt_bad ? "err-ink" : "dim"}>${r.fmt}</span>` },
     { key: "aud", label: "Audio", width: width("aud"), sort: "aud", render: (r) => html`<span class="dim">${r.aud}</span>` },
+    { key: "keep", label: "Imported size", width: width("keep"), cls: "vid-keepcell", title: KEEP_TIP,
+      render: (r) => (!r.kr ? ""
+        : r.k == null
+          ? html`<input type="checkbox" class="vid-keep" disabled aria-label="Imported size: not available for this clip"
+              ...${tip({ head: "Imported size", lines: [{ text: "Not available: " + (r.k_why || "this slot can't change size") + ".", tone: "warn" }] })} />`
+          : html`<input type="checkbox" class="vid-keep" checked=${!!r.k} aria-label="Imported size: keep your clip's own size"
+              ...${tip(r.k_untested ? { head: KEEP_TIP, lines: [{ text: "Not tested on this machine yet: it asks before you turn it on.", tone: "warn" }] } : KEEP_TIP)}
+              onClick=${(e) => { e.stopPropagation(); e.preventDefault(); if (e.detail > 1) return; call("video.set_keep", r.rel, !r.k); }} />`) },
     fitCol && { key: "fit", label: "Vs stock", width: width("fit"), num: true, sort: "fit", title: FIT_TIP,
       render: (r) => (r.fit
         ? html`<span class=${cx("vid-fit", r.fit_cls === "on" ? "acc-ink" : "dim")}

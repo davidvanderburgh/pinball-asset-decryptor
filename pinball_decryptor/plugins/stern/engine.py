@@ -3692,7 +3692,7 @@ def _intact_verdict(src, staged):
     if slot is None or not slot.width or not slot.height:
         return True, None     # nothing to compare against; the above stands
     if (info.width, info.height) != (slot.width, slot.height):
-        return False, ("it's %dx%d and this slot's clip is %dx%d"
+        return False, ("it's %dx%d and it goes on at %dx%d"
                        % (info.width, info.height, slot.width, slot.height))
     if slot.fps > 0 and info.fps > 0 and abs(info.fps - slot.fps) > 0.5:
         return False, ("it runs at %.3g fps and this slot's clip is %.3g fps"

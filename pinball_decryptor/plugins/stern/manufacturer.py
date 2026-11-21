@@ -710,16 +710,17 @@ class SternManufacturer(Manufacturer):
         (PAD-1090 stage 5, PAD-1186)."""
         return ("h264", "hevc") if self._era == "spike3" else ("h264",)
 
-    def video_sizes(self, assets_dir, slots_by_rel, assignments):
-        """Spike 2 (Simon, 2026-11-21, "Same as pictures"): a clip bigger than
-        its slot goes on at the most the game shows the slot - its player's
-        box times its biggest zoom, at most what the i.MX6's VPU decodes
-        (plugins/stern/video_sizes.py).  Spike 3 keeps every clip at its
-        slot's size."""
+    def video_size_limit(self, assets_dir, rel, slot):
+        """Spike 2: the i.MX6's VPU decodes H.264 up to 1920x1088, and a 4K
+        clip on tilt_warning showed right in the emulator, scaled into its
+        box (Simon, 2026-11-21).  Spike 3: the Pi 4 decodes HEVC up to 4K and
+        H.264 up to 1920x1088 (the slot's own codec is kept); not yet tested."""
         if self._era == "spike3":
-            return {}
+            codec = ((getattr(getattr(slot, "info", None), "vcodec", "") or "")
+                     .lower())
+            return ((4096, 2160) if codec == "hevc" else (1920, 1088)), None, False
         from . import video_sizes
-        return video_sizes.sizes_for(assets_dir, slots_by_rel, assignments)
+        return video_sizes.DECODER_MAX, None, True
 
     def video_players(self, assets_dir):
         """Spike 2: the scenes' video players (plugins/stern/video_sizes.py);

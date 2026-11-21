@@ -200,3 +200,6 @@ a.vid-sound-go:hover { color: var(--accent); }
 /* Simon (2026-11-21): the Origin column - Custom in the accent colour, as the Images tab's */
 .vid-org-custom { color: var(--accent); }
 .vid-res-down { color: var(--accent); }
+.vid-res-unknown { font-style: italic; }
+.vid-keepcell { text-align: center; }
+.vid-keep:disabled { opacity: .45; cursor: not-allowed; }

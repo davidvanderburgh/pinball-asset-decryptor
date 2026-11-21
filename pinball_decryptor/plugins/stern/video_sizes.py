@@ -83,78 +83,17 @@ def _player_zooms(assets_dir):
     return out
 
 
-def _even(v):
-    return max(2, int(v) // 2 * 2)
+# the rules themselves are every machine's (core/video_sizes.py); these keep Spike 2's words for its callers
+from ...core.video_sizes import player_of  # noqa: E402,F401  (re-exported)
 
 
 def shown_size(slot_wh, player):
-    """``(w, h)`` the most the game shows a clip of a slot *slot_wh* in *player* ``(box w, box h, zoom)`` (or
-    None: shown at its own size)."""
-    if not player:
-        return tuple(slot_wh)
-    bw, bh, z = player
-    return (int(round(bw * z)), int(round(bh * z)))
+    """``(w, h)`` the most the game shows a slot of *slot_wh* in *player*; the slot's own size with none."""
+    from ...core import video_sizes as core
+    return core.shown_size(slot_wh, player) or tuple(slot_wh)
 
 
 def written_size(slot_wh, rep_wh, player):
-    """``(w, h)`` a replacement of *rep_wh* for a slot of *slot_wh* goes on the card at: the slot's shape, as big as
-    the game shows it (*player*, :func:`player_zooms`), never bigger than the replacement nor the decoder's
-    :data:`DECODER_MAX`, and never smaller than the slot (a clip no bigger is converted to the slot's size)."""
-    sw, sh = slot_wh
-    if not (sw and sh):
-        return tuple(slot_wh)
-    most = shown_size(slot_wh, player)
-    s = min(most[0] / float(sw), most[1] / float(sh))
-    if rep_wh and rep_wh[0] and rep_wh[1]:
-        s = min(s, rep_wh[0] / float(sw), rep_wh[1] / float(sh))
-    s = min(s, DECODER_MAX[0] / float(sw), DECODER_MAX[1] / float(sh))
-    if s <= 1.0:
-        return (sw, sh)
-    w, h = _even(sw * s), _even(sh * s)
-    if (w, h) == (sw, sh) or w <= sw or h <= sh:
-        return (sw, sh)
-    return (w, h)
-
-
-def _stem(rel):
-    return os.path.splitext(os.path.basename(rel))[0]
-
-
-def player_of(players, rel):
-    """The player entry of the slot *rel* (``video/<clip>.mov``), or None."""
-    return players.get(_stem(rel))
-
-
-def sizes_for(assets_dir, slots_by_rel, assignments, probe=None):
-    """``{rel: (w, h)}`` of the assigned clips that go on bigger than their slot (:func:`written_size`); the rest
-    are converted to the slot's size as before.  *probe* reads a file's ``(w, h)`` (``core.video``'s by
-    default)."""
-    if probe is None:
-        def probe(path):
-            from ...core.video import detect_video_info
-            info = detect_video_info(path)
-            return (info.width, info.height) if info and info.width and info.height else None
-    from ...core import staged_originals
-    try:
-        players = player_zooms(assets_dir)
-    except Exception:                               # noqa: BLE001 - every clip at its slot's size
-        return {}
-    out = {}
-    for rel, rep in (assignments or {}).items():
-        slot = (slots_by_rel or {}).get(rel)
-        player = player_of(players, rel)
-        if slot is None or not player or not rep or not os.path.isfile(rep):
-            continue
-        # the slot's size is the clip it shipped with: once a bigger clip was staged, the slot holds that one
-        orig = staged_originals.snapshot_path(assets_dir, rel) if assets_dir else None
-        base = probe(orig) if orig else None
-        if not base:
-            info = slot.info
-            base = (info.width, info.height) if info is not None and info.width and info.height else None
-        mine = probe(rep)
-        if not base or not mine:
-            continue
-        got = written_size(base, mine, player)
-        if tuple(got) != tuple(base):
-            out[rel] = tuple(got)
-    return out
+    """Spike 2's Written: :func:`core.video_sizes.written_size` with the VPU's :data:`DECODER_MAX`."""
+    from ...core import video_sizes as core
+    return core.written_size(slot_wh, rep_wh, player, DECODER_MAX, True, True)

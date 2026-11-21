@@ -13001,5 +13001,21 @@
 "The agent is told to read MPF_PORTING.md too: how MPF's modes, shots, counters, timers, variables, ball saves, multiballs and widgets become the SDK's calls.": "Der Agent soll auch MPF_PORTING.md lesen: wie die Modi, Schüsse, Zähler, Timer, Variablen, Ball-Saves, Multiballs und Widgets von MPF zu Aufrufen des SDK werden.",
 "From the Mission Pinball Framework": "Aus dem Mission Pinball Framework",
 "A game written in MPF: its modes, shots, counters, timers, variables and widgets, and the SDK's call for each.": "Ein in MPF geschriebenes Spiel: seine Modi, Schüsse, Zähler, Timer, Variablen und Widgets und der Aufruf des SDK für jedes.",
-"Open MPF_PORTING.md, the porting guide": "MPF_PORTING.md öffnen, die Portierungsanleitung"
+"Open MPF_PORTING.md, the porting guide": "MPF_PORTING.md öffnen, die Portierungsanleitung",
+"Imported": "Importiert",
+"Current": "Aktuell",
+"Written": "Geschrieben",
+"Origin": "Herkunft",
+"Own size": "Eigene Größe",
+"Custom": "Eigen",
+"Original: the resolution of the original asset pulled from the raw image.": "Original: die Auflösung des Originals, wie es aus dem Raw-Image geholt wurde.",
+"Imported: the resolution of the graphic you chose. It stays full size in your project however big it is; only the card gets the Written size.": "Importiert: die Auflösung der Grafik, die Sie gewählt haben. Sie bleibt in Ihrem Projekt in voller Größe, wie groß sie auch ist; nur die Karte bekommt die geschriebene Größe.",
+"Current: the highest resolution you have set by scaling for this asset in the scenes (the biggest the game shows it, its zoom included); you may have other, lower resolutions set.": "Aktuell: die höchste Auflösung, die Sie für dieses Element in den Szenen durch Skalieren eingestellt haben (das Größte, was das Spiel davon zeigt, mit seinem Zoom); andere, niedrigere Auflösungen können auch eingestellt sein.",
+"Written: the maximum resolution PAD will write to the card. Orange: smaller than you imported it, because the screen never shows more. Amber Current: the game shows it bigger than your picture, so it may look soft.": "Geschrieben: die höchste Auflösung, die PAD auf die Karte schreibt. Orange: kleiner als importiert, weil der Bildschirm nie mehr zeigt. Bernsteinfarben bei Aktuell: das Spiel zeigt es größer als Ihr Bild, es kann also weich aussehen.",
+"Origin: Original is the official card's asset; Custom is not the official card's, but was on the card this project was extracted from.": "Herkunft: Original ist das Element der offiziellen Karte; Eigen ist nicht das der offiziellen Karte, war aber auf der Karte, aus der dieses Projekt extrahiert wurde.",
+"Your picture is {}×{}; the original is {}×{}. Own size is off, so it will be squeezed into the original's pixels.": "Ihr Bild ist {}×{}; das Original ist {}×{}. Eigene Größe ist aus, also wird es in die Pixel des Originals gequetscht.",
+"Smaller than you imported it: the screen never shows more than this.": "Kleiner als importiert: Der Bildschirm zeigt nie mehr als das.",
+"The game shows it bigger than your picture, so it may look soft.": "Das Spiel zeigt es größer als Ihr Bild, es kann also weich aussehen.",
+"This picture is used at exactly the original's size.": "Dieses Bild wird genau in der Größe des Originals verwendet.",
+"Own size is off: squeezed into the original's pixels.": "Eigene Größe ist aus: in die Pixel des Originals gequetscht."
 }

@@ -781,3 +781,5 @@ text start_film_clips game_intro_start
 # running-show list and ends each record whose number matches) and how many numbers the starter's table has
 site show_stop_number     0x003f410c 0xe92d4070 0xe30d6ea8   # (n): every show numbered n ends
 value show_count          284
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            53

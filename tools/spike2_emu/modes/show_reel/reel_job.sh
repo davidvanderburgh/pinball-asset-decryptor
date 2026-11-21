@@ -18,7 +18,7 @@ BEAT=$!
 ST=/tmp/padreel_stage_${PAD_SLOT}
 rm -rf "$ST"; mkdir -p "$ST"
 cp "$REEL_OUT/stage/pad_mode.so" "$ST/"
-tr -d '\r' < "$WT/tools/spike2_emu/modes/sdk/ports/$1.port" > "$ST/game.port"
+tr -d '\r' < "$WT/tools/spike2_emu/modes/sdk/ports/${1%%~*}.port" > "$ST/game.port"
 bash "$RIG/modes/tryit.sh" install "$ST" > "$OUTD/install.txt" 2>&1 || job_fail "install: $(tail -1 "$OUTD/install.txt")"
 export PAD_MODE_SO=/lib/pad_mode.so
 LOG=$DUMP/mode.log

@@ -676,3 +676,5 @@ data ball_device_count    0x005c5d78
 # running-show list and ends each record whose number matches) and how many numbers the starter's table has
 site show_stop_number     0x002c7bac 0xe92d4070 0xe3066c10   # (n): every show numbered n ends
 value show_count          377
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            60 61 63 66 68 70 72 75 78 79 80 84 86 89 116 117 122 126 130 131 135 136 138 157 158 162 163 164 166 167 170 176 181 182 183 184 185 188 189 193 194 195 196 200 206 208 210 216 217 221 225 228 232 239 240 244 245 246 247 249 250 254 255 256 257 259 260 264 265 266 267 268 269 272 276 277 278 279 281 284 288 292 293 296 313 316 318 323 325 326 328 333 337 339 342 344 352 354 357 359

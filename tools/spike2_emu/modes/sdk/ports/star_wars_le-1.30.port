@@ -800,3 +800,5 @@ data coil_table            0x00614a38
 # running-show list and ends each record whose number matches) and how many numbers the starter's table has
 site show_stop_number     0x002c7610 0xe92d4070 0xe3066448   # (n): every show numbered n ends
 value show_count          188
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            95 110 113 150 151

@@ -1068,3 +1068,5 @@ text start_film_clips Kong_Intro_*
 # running-show list and ends each record whose number matches) and how many numbers the starter's table has
 site show_stop_number     0x0051fb34 0xe92d4070 0xe30b6c88   # (n): every show numbered n ends
 value show_count          319
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            190 193 195 252 261 262 265 272 273 281 282 288

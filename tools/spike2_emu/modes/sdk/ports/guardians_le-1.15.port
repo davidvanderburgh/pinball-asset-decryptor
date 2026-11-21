@@ -630,3 +630,5 @@ data kickback_count       0x004f27c8
 # running-show list and ends each record whose number matches) and how many numbers the starter's table has
 site show_stop_number     0x003e1afc 0xe92d4070 0xe3016788   # (n): every show numbered n ends
 value show_count          235
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            56 94 98 102 103 107 110 124 125 128 129 130 131 136 140 143 144 145 148 150 153 154 155 156 161 162 166 167 171 172 173 176 180 181 182 220

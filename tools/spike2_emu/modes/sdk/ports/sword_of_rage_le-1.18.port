@@ -593,3 +593,5 @@ text start_film_clips BlackKnight_PhotoShoot_TitleScreen
 site show_start           0x00292860 0xe92d47f0 0xe2508000   # show_start(n) -> the show's record, or 0
 site show_stop_number     0x00133a28 0xe92d4070 0xe30f67e8   # (n): every show numbered n ends
 value show_count          166
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            34 66 72 101 113 119 122

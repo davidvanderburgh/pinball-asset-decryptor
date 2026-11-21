@@ -8,8 +8,10 @@ against the 2.5 s gap before it. LIT when 6 or more lamps more are lit, or the c
 LE 1.16 (2026-11-20): the 7 that lit added 10 to 64 lamps (210, 214-217, 249, 319); the 15 that did not stayed within
 3 lamps of the gap (Hedorah's 211 checks that Hedorah runs, and stops at once). A REFUSED show (a show of the game's
 own of a higher priority was playing) is not lit. --write puts the lit ones in the build's port (port_show_numbers.py
-lit), the directory's name being the port's key.
+lit), the directory's name being the port's key. A build reeled in chunks (reel_list.py: <key>~2, <key>~3 ... beside
+<key>) is read as one: its chunks' directories are merged in.
 """
+import glob
 import os
 import re
 import subprocess
@@ -48,7 +50,7 @@ def verdict(d):
 
 def main(argv):
     d = argv[1].rstrip("/\\")
-    rows = verdict(d)
+    rows = [r for x in [d] + sorted(glob.glob(glob.escape(d) + "~*")) for r in verdict(x)]
     for n, v, bc, ac, ratio, bl, al in rows:
         print("#%-4d %-7s led %8.1f -> %8.1f /s (x%.2f)  lit %6.1f -> %6.1f" % (n, v, bc, ac, ratio, bl, al))
     lit = sorted(n for n, v, *_r in rows if v == "lit")

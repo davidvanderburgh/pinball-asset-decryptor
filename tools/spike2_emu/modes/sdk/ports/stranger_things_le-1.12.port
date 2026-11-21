@@ -554,3 +554,5 @@ site coil_used             0x00202eec 0xe92d43f8 0xe3048f00
 site show_start           0x001c15cc 0xe92d47f0 0xe2508000   # show_start(n) -> the show's record, or 0
 site show_stop_number     0x00378ca4 0xe92d4070 0xe30d6cf8   # (n): every show numbered n ends
 value show_count          377
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            61 63 66 68 70 72 75 78 79 80 84 86 89 138 158 162 163 164 166 167 176 181 182 183 185 188 193 194 195 196 200 206 210 217 225 232 240 244 245 246 247 250 254 255 256 257 260 264 265 266 267 269 272 276 277 278 279 284 288 293 296 310 312 313 316 323 325 326 333 337 339 342 344 354 357 359

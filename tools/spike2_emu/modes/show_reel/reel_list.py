@@ -7,6 +7,8 @@ start, comma-separated>`` - for the builds whose game program and card are found
 The cards folder is searched (and its "older versions" folder) for ``<game>-<maj>_<min>_0*.raw``. Ports already
 carrying ``text show_lit`` are left out unless named. Builds missing a program, a card or any mode show are reported
 on stderr.
+A build with more shows than one reel plays (CHUNK, the runtime's REEL_MAX) gets a line per CHUNK of them, keyed
+``<key>``, ``<key>~2``, ``<key>~3`` ...; reel_verdict.py merges them.
 """
 import glob
 import os
@@ -17,6 +19,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..", "..", "..")))
 sys.path.insert(0, os.path.dirname(HERE))
 from pinball_decryptor.plugins.stern import clip_modes as CM  # noqa: E402
 from pinball_decryptor.plugins.stern import clip_shows as SH  # noqa: E402
+
+CHUNK = 128                # pad_mode_runtime.c REEL_MAX (and 128 numbers fit its 800-byte read of the file)
 import port_show_numbers as PSN  # noqa: E402
 
 
@@ -54,7 +58,9 @@ def main(argv):
         if not nums:
             sys.stderr.write("%s: no mode shows (%s)\n" % (key, reading.note))
             continue
-        print("%s|%s|NUMS=%s" % (key, wsl(card), ",".join(map(str, nums))), flush=True)
+        for k in range(0, len(nums), CHUNK):
+            print("%s|%s|NUMS=%s" % (key + ("~%d" % (k // CHUNK + 1) if k else ""), wsl(card),
+                                     ",".join(map(str, nums[k:k + CHUNK]))), flush=True)
 
 
 if __name__ == "__main__":

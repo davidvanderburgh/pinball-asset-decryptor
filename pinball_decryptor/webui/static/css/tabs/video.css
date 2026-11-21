@@ -196,3 +196,6 @@ a.vid-sound-go:hover { color: var(--accent); }
 .vid-full.vid-idle { cursor: none; }
 .vid-full.vid-idle .vid-screen { cursor: none; }
 .vid-full.vid-idle .vid-transport { opacity: 0; }
+
+/* Simon (2026-11-21): the Origin column - Custom in the accent colour, as the Images tab's */
+.vid-org-custom { color: var(--accent); }

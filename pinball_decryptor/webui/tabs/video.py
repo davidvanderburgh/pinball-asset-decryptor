@@ -1421,7 +1421,31 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                 "col_stock": bool(self._color_stock
                                   and not self._assign.get(rel)),
                 **self._scr_row(rel, s, rep, is_changed),
-                **self._m_row(rel)}
+                **self._m_row(rel),
+                **self._origin_row(rel)}
+
+    # Simon (2026-11-21): Origin - the official card's clip, or custom (core/asset_origin.py)
+    def _origins(self):
+        """The project's Origin record (cached in asset_origin), worked out once per list."""
+        try:
+            from ...core import asset_origin
+            self._origin_info = asset_origin.origins(self._scan_dir) if self._scan_dir else None
+        except Exception:                                   # noqa: BLE001 - the rows go out without it
+            log.exception("video origin")
+            self._origin_info = None
+        return self._origin_info
+
+    def _origin_word(self, rel):
+        info = getattr(self, "_origin_info", None)
+        # PAD-444: a follower with no file of its own has no origin
+        if not info or rel in (getattr(self, "_m_virtual", None) or {}):
+            return None
+        from ...core import asset_origin
+        return asset_origin.origin_of(info, rel)
+
+    def _origin_row(self, rel):
+        og = self._origin_word(rel)
+        return {"og": og} if og else {}
 
     # -- Vs stock: the replacement's length against the stock clip's -----
     @staticmethod
@@ -1828,6 +1852,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             if col == "aud":
                 a = s.info.audio_summary() if s.info else ""
                 return (a.lower(), s.rel_path.lower())
+            if col == "org":
+                return (self._origin_word(s.rel_path) or "", s.rel_path.lower())
             if col == "seen":                   # PAD-827: the seen clips first
                 c = self._m_seen_row(s.rel_path)["seen"]
                 return ((0, c.lower()) if c else (1, ""), s.rel_path.lower())
@@ -1852,6 +1878,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         if self._restoring:
             return
         listed = self._m_slots()            # PAD-444: + the followers' rows
+        self._origins()
         self._publish_rows([self._row(s) for s in listed])
         query = (self.video_search_var.get() or "").strip().lower()
         slots = [s for s in listed
@@ -3843,7 +3870,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
     # content; the page fits the others, as _autosize_tree_columns did)
     # ==================================================================
     _WIDTHS_KEY = "video_web"
-    _WIDTH_COLS = ("rel", "len", "res", "fmt", "aud", "rep", "fit", "col",
+    _WIDTH_COLS = ("rel", "len", "res", "fmt", "aud", "org", "rep", "fit", "col",
                    "conv")
 
     def _all_widths(self):

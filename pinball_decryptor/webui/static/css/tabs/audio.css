@@ -119,3 +119,6 @@ html.bp-760 .aud-kv { grid-template-columns: minmax(0, 1fr); }
 .aud-juke thead th { position: sticky; top: 0; z-index: 2; background: var(--panel); }
 .aud-sort { all: unset; cursor: pointer; white-space: nowrap; }
 .aud-sort:hover { color: var(--ink); }
+
+/* Simon (2026-11-21): the Origin column - Custom in the accent colour, as the Images tab's */
+.aud-org-custom { color: var(--accent); }

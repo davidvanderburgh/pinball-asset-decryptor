@@ -436,7 +436,11 @@ By default every replacement is gained to the same loudness as the sound it repl
 // -------------------------------------------------------------------- tab
 // Default column widths (px) until the user drags one; the dragged ones are
 // the Tk tree's own (settings.json column_widths.audio, shared with Tk).
-const FIXED = { play: 30, len: 96, fmt: 184, type: 92, rq: 88, loop: 58, keep: 58, lvl: 76 };
+const FIXED = { play: 30, len: 96, fmt: 184, type: 92, org: 76, rq: 88, loop: 58, keep: 58, lvl: 76 };
+// Simon (2026-11-21): "another column (Probably audio, video, images and even text) to account for whether the
+// asset is original or custom (custom being an asset that isn't original but has been extracted from the current
+// card)" - the Images tab's Origin column and words
+const ORG_TIP = "Origin: Original is the official card's asset; Custom is not the official card's, but was on the card this project was extracted from.";
 const ROW_H = 32;
 const MIN_W = { "#0": 80, rep: 110, cm: 90 };    // the Tk columns' minwidth (cm: PAD-1069's Comment)
 // A control inside a row: its second click of a double-click does nothing
@@ -894,6 +898,9 @@ export default function AudioTab() {
     { key: "fmt", label: "Format", sort: "fmt", width: FIXED.fmt + "px", titleOf: (r) => r.fmt_tip ? undefined : r.fmt,
       render: (r) => html`<span class="dim" ...${r.fmt_tip ? tip({ head: "Variants", lines: r.fmt_tip }) : {}}>${r.fmt || ""}</span>` },
     { key: "type", label: "Type", sort: "type", width: FIXED.type + "px", render: (r) => r.type || "" },
+    { key: "org", label: "Origin", sort: "org", width: FIXED.org + "px", title: ORG_TIP,
+      render: (r) => r.g ? "" : !r.og ? html`<span class="muted">—</span>`
+        : html`<span class=${r.og === "Custom" ? "aud-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>` },
     // PAD-635: how many of the game code's sound requests play the sound
     ...(s.req_cap ? [{ key: "rq", label: "Requests", sort: "rq", title: s.req_tip, width: FIXED.rq + "px", num: true,
       render: (r) => r.rq == null ? "" : html`<span class=${cx(!r.rq && "warn-ink")} aria-label=${r.rq ? `Played by ${r.rq} sound requests` : "No sound request plays it"}

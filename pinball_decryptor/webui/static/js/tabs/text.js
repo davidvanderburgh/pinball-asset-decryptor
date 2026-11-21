@@ -52,6 +52,10 @@ const inTip = (r) => (r.pt
   : r.pa ? { head: r.in, lines: ["Each of these modes has a row of its own below: give one its own text there."] }
   : r.in);
 
+// Simon (2026-11-21): "another column (Probably audio, video, images and even text) to account for whether the
+// asset is original or custom (custom being an asset that isn't original but has been extracted from the current
+// card)" - the Images tab's Origin column and words
+const ORG_TIP = "Origin: Original is the official card's asset; Custom is not the official card's, but was on the card this project was extracted from.";
 const COLUMNS = [
   // PAD-458: the game's own words (and yours) are never translated: cls "notr"
   { key: "o", label: "On-Screen Text", width: "minmax(0,1.25fr)", sort: "#0", cls: "pre notr",
@@ -63,6 +67,9 @@ const COLUMNS = [
   { key: "mx", label: "Max", width: "92px", sort: "max", cls: "mono small" },
   // wide enough for "49ac2…71dd/scene.radium" (Tk: 170 px of a smaller font)
   { key: "sc", label: "Scene", width: "212px", sort: "scene", cls: "mono small dim", titleOf: (r) => r.sc },
+  { key: "org", label: "Origin", width: "76px", sort: "org", title: ORG_TIP,
+    render: (r) => (!r.og ? html`<span class="muted">—</span>`
+      : html`<span class=${r.og === "Custom" ? "text-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>`) },
   { key: "nm", label: "Name", width: "minmax(0,.7fr)", sort: "name", cls: "notr", titleOf: (r) => r.nm || undefined },
 ];
 const IN_COLUMN = { key: "in", label: "Shown in", width: "minmax(0,.8fr)", sort: "in", title: TIP_IN,

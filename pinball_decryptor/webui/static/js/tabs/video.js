@@ -204,10 +204,14 @@ function clock(pos, dur) {
 // Tk tree's minwidth.  Measured over every slot, not only the filtered view,
 // so typing in Search doesn't make the columns jump.
 const FIT_MAX = 480;
-const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, fit: 70, col: 56, conv: 60, modes: 110, seen: 120 };
+const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, org: 58, rep: 110, fit: 70, col: 56, conv: 60, modes: 110, seen: 120 };
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
-                aud: "Audio", rep: "Replacement", fit: "Vs stock", col: "Color", conv: "Convert", modes: "Played in",
+                aud: "Audio", org: "Origin", rep: "Replacement", fit: "Vs stock", col: "Color", conv: "Convert", modes: "Played in",
                 seen: "When it plays" };
+// Simon (2026-11-21): "another column (Probably audio, video, images and even text) to account for whether the
+// asset is original or custom (custom being an asset that isn't original but has been extracted from the current
+// card)" - the Images tab's Origin column and words
+const ORG_TIP = "Origin: Original is the official card's asset; Custom is not the official card's, but was on the card this project was extracted from.";
 // PAD-1232 (DoomWalrus666): the Vs stock column's header tip
 const FIT_TIP = { head: "Vs stock", lines: [
   "How much longer (+) or shorter (−) your file runs than the clip it replaces, and the speed change that would make it run exactly as long.",
@@ -277,6 +281,7 @@ function rowFit(r, f) {
   if (!w) {
     w = { rel: textWidth(r.dir, f.mono) + textWidth(r.name, f.body), len: textWidth(r.len, f.mono) + (r.scr ? textWidth(r.scr, f.body) + 34 : 0),
           res: textWidth(r.res, f.body), fmt: textWidth(r.fmt, f.body), aud: textWidth(r.aud, f.body),
+          org: textWidth(r.og || "—", f.body),
           rep: textWidth(r.rep, f.body), fit: textWidth(r.fit || "", f.mono), col: 0, conv: textWidth(r.conv, f.body),
           modes: textWidth(modesText(r), f.body), seen: textWidth(r.seen || "", f.body) };
     rowFits.set(r, w);
@@ -1173,7 +1178,7 @@ export default function VideoTab() {
   const modesCol = !!(md.ready && (md.list || []).length);
   // PAD-1232: Vs stock, once a clip has a replacement to compare
   const fitCol = allRows.some((r) => r.fit);
-  const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "rep"].concat(fitCol ? ["fit"] : [], modesCol ? ["modes"] : []).reduce((a, k) =>
+  const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "org", "rep"].concat(fitCol ? ["fit"] : [], modesCol ? ["modes"] : []).reduce((a, k) =>
     a + (tuned[k] ? Math.max(36, tuned[k]) : FLEX.includes(k) ? COL_MIN[k] : fit[k]), 0) + fit.conv
     + (colorCol ? fit.col + 10 : 0) + (modesCol ? 8 : 7) * 10 + 20;
   const dragFrom = useRef(null);
@@ -1220,6 +1225,9 @@ export default function VideoTab() {
     { key: "fmt", label: "Format", width: width("fmt"), sort: "fmt", titleOf: (r) => r.fmt,
       render: (r) => html`<span class=${r.fmt_bad ? "err-ink" : "dim"}>${r.fmt}</span>` },
     { key: "aud", label: "Audio", width: width("aud"), sort: "aud", render: (r) => html`<span class="dim">${r.aud}</span>` },
+    { key: "org", label: "Origin", width: width("org"), sort: "org", title: ORG_TIP,
+      render: (r) => (!r.og ? html`<span class="muted">—</span>`
+        : html`<span class=${r.og === "Custom" ? "vid-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>`) },
     // PAD-369 (DragonRR): the chosen file's name tells its color profile too
     { key: "rep", label: "Replacement", width: width("rep"), sort: "rep",
       render: (r) => html`<span class="vid-repcell"><button type="button" class=${cx("vid-rep", r.rep_cls || "muted")}

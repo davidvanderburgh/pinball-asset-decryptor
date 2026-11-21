@@ -48,3 +48,6 @@ html.bp-900 .text-edit-grid { grid-template-columns: auto minmax(0, 1fr); }
 html.bph-760 .text-table { min-height: 118px; }
 html.bph-760 .text-saved { display: none; }
 html.bph-760 .text-saved-i { display: inline-flex; }
+
+/* Simon (2026-11-21): the Origin column - Custom in the accent colour, as the Images tab's */
+.text-org-custom { color: var(--accent); }

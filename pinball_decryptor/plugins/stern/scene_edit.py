@@ -309,7 +309,26 @@ def mark_own(man, nodes, boxes=None):
 
 def mark_own_of(man, assets_dir, card):
     """:func:`mark_own` with *card*'s own-size nodes and their boxes in *assets_dir*."""
-    return mark_own(man, own_size_nodes(assets_dir, card), own_boxes(assets_dir, card))
+    return mark_own(man, own_size_nodes(assets_dir, card) | placed_man_nodes(man, assets_dir),
+                    own_boxes(assets_dir, card))
+
+
+def placed_man_nodes(man, assets_dir, rels=None):
+    """The preview manifest *man*'s nodes that draw a picture placed pixel for pixel (:func:`placed_rels`, or
+    *rels*): the preview draws it at its own size from the original's origin, as the Write does
+    (:func:`placed_nodes`)."""
+    want = {r[len("images/"):] if r.startswith("images/") else r
+            for r in (placed_rels(assets_dir) if rels is None else rels)}
+    if not want or not isinstance(man, dict):
+        return frozenset()
+    objs = man.get("objects") or {}
+    out = set()
+    for n, _sibs in _man_index(man).values():
+        for _start, oid in n.get("comps") or ():
+            o = objs.get(str(oid)) or {}
+            if o.get("kind") == "Bitmap" and o.get("image") in want:
+                out.add(n.get("id"))
+    return frozenset(out)
 
 
 def save(assets_dir, edits):

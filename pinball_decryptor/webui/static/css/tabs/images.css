@@ -158,3 +158,7 @@ html.bp-1020 .img-pic { height: clamp(80px, calc(22cqh - 40px), 200px); }
 .icm-badge.locked { color: #539bf5; }
 .icm-badge.unlocked { color: #c9d1d9; border-color: rgba(201, 209, 217, .45); }
 html.bp-1020 .icm-grid.n2, html.bp-1020 .icm-grid.n3, html.bp-1020 .icm-grid.n4 { grid-template-columns: minmax(0, 1fr); }
+/* Simon (2026-11-21): Written smaller than imported (orange); Current bigger than the picture (amber, may look soft); a custom asset */
+.img-res-down { color: var(--accent); }
+.img-res-soft { color: var(--warn); }
+.img-org-custom { color: var(--accent); }

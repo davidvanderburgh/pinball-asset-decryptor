@@ -116,25 +116,27 @@ def test_the_tick_appears_for_a_scene_picture_and_reaches_the_build(window):
     w, svc, assets, rep = window
     w.call("images.select", BANNER)
     assert _keep(w) is None                    # nothing assigned yet
+    # Simon (2026-11-21): a new pick of a scene picture starts with Own size on ("assume the user knows what
+    # they are doing ... leave them full size")
     _choose(w, BANNER, rep)
     keep = _keep(w)
     assert keep is not None
-    assert keep["on"] is False
-    assert svc.image_keep_size_var.get() is False
-    assert "90×22" in keep["text"]
-    assert "squeezed" in keep["text"]
+    assert keep["on"] is True
+    assert svc.image_keep_size_var.get() is True
+    assert keep["text"].startswith("Your picture is 90×22; the original is 40×20.")
+    assert w.window.pending_image_assignments(assets)[2] == frozenset({BANNER})
+    assert staged_changes.load(assets)["image_keep_size"] == [BANNER]
+    # ... placed pixel for pixel from the original's origin
+    assert staged_changes.load(assets)["image_place_own"] == [BANNER]
+
+    w.call("images.set_keep", BANNER, False)
+    assert "squeezed into the original's pixels" in _keep(w)["text"]
     assert w.window.pending_image_assignments(assets)[2] == frozenset()
+    assert staged_changes.load(assets)["image_keep_size"] == []
 
     assert w.call("images.set_keep", BANNER, True) is not False
     assert svc._keep_size == {BANNER}
-    assert _keep(w)["text"].startswith("Kept at 90×22")
-    assert w.window.pending_image_assignments(assets)[2] == \
-        frozenset({BANNER})
-    assert staged_changes.load(assets)["image_keep_size"] == [BANNER]
-
-    w.call("images.set_keep", BANNER, False)
-    assert w.window.pending_image_assignments(assets)[2] == frozenset()
-    assert staged_changes.load(assets)["image_keep_size"] == []
+    assert w.window.pending_image_assignments(assets)[2] == frozenset({BANNER})
 
 
 @pytest.mark.parametrize("rel", [ATLAS, PLAIN])
@@ -163,7 +165,9 @@ def test_the_keep_size_column_shows_every_pick(window):
         _choose(w, rel, rep)
     # A tick box only where the size can change; the Replacement cell still
     # names the pick.
-    assert _keep_cells(w) == {BANNER: False, ATLAS: None, PLAIN: None}
+    # Simon (2026-11-21): a new pick of a scene picture starts with Own size on ("assume the user knows what
+    # they are doing ... leave them full size")
+    assert _keep_cells(w) == {BANNER: True, ATLAS: None, PLAIN: None}
     assert _by_rel(w.state("images"))[BANNER]["p"] == "SpaceGodzilla.png"
 
     # The preview's tick and the column are the same flag, both ways.
@@ -199,16 +203,17 @@ def test_clicking_the_box_flips_it(window):
     _choose(w, ATLAS, rep)
     n_asked = len(w.asked)
 
-    w.call("images.set_keep", BANNER, not _keep_cells(w)[BANNER])
-    assert svc._keep_size == {BANNER}
-    assert _keep_cells(w)[BANNER] is True
-    assert staged_changes.load(assets)["image_keep_size"] == [BANNER]
+    assert _keep_cells(w)[BANNER] is True               # a new pick starts with Own size on
     w.call("images.set_keep", BANNER, not _keep_cells(w)[BANNER])
     assert svc._keep_size == set()
+    assert _keep_cells(w)[BANNER] is False
+    assert staged_changes.load(assets)["image_keep_size"] == []
+    w.call("images.set_keep", BANNER, not _keep_cells(w)[BANNER])
+    assert svc._keep_size == {BANNER}
     # An empty cell is not a box: nothing to flip on a font atlas.
     assert _keep_cells(w)[ATLAS] is None
     assert w.call("images.set_keep", ATLAS, True) is False
-    assert svc._keep_size == set()
+    assert svc._keep_size == {BANNER}
     assert len(w.asked) == n_asked             # no picker opened
 
 
@@ -248,14 +253,12 @@ def test_the_original_size_is_the_snapshots_once_a_pick_is_applied(window):
     keep = _keep(w)
     assert keep is not None
     assert keep["on"] is True
-    assert keep["text"] == (
-        "Kept at 90×22 (the original is 40×20): it shows in the original's place and "
-        "size, fitted and centered, with more detail where the scene zooms in on it. Make "
-        "it bigger or smaller on the Scenes tab.")
+    # the original it names is the snapshot's (this project has no scenes to measure in)
+    assert keep["text"].startswith("Your picture is 90×22; the original is 40×20.")
     # unticked, the build squeezes the pick to the snapshot's size, not the
     # slot file's
     w.call("images.set_keep", BANNER, False)
     keep = _keep(w)
     assert keep["on"] is False
-    assert "the original 40×20" in keep["text"]
+    assert "the original is 40×20" in keep["text"]
     assert "squeezed" in keep["text"]

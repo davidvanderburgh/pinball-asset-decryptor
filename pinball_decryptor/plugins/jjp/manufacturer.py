@@ -363,6 +363,15 @@ class JJPManufacturer(Manufacturer):
         # "Trim / pad" checkbox is forced on + disabled (see audio_length_note).
         return True
 
+    def video_size_limit(self, assets_dir, rel, slot):
+        """Simon (2026-11-21): a bigger clip is offered (untested); a
+        ``.ogv`` / ``.avi`` slot must already be the exact size.  A Sonic-era
+        card then fits the clip to the stock clip's bytes at the Write."""
+        if os.path.splitext(rel or "")[1].lower() in (".ogv", ".avi"):
+            return None, ("a .ogv or .avi clip must be the slot's exact size "
+                          "on this machine"), False
+        return super().video_size_limit(assets_dir, rel, slot)
+
     def video_pins_byte_size(self, assets_dir=None):
         # Sonic-era images (asset scheme 3) hold every clip to its original
         # byte length, and which scheme an image uses is only knowable once

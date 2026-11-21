@@ -273,6 +273,7 @@ class _ImageMetaStub:
     _remembered_rep_name = ImagesTab._remembered_rep_name
     _keep_state = ImagesTab._keep_state
     _theme_keep = ImagesTab._theme_keep                 # Keep size per theme (2026-11-20): _keep_state asks it
+    _res_cells = ImagesTab._res_cells                   # Simon (2026-11-21): the resolution columns, Origin
     _color_state = ImagesTab._color_state
     _color_locked = ImagesTab._color_locked
     _per_file_colour = ImagesTab._per_file_colour

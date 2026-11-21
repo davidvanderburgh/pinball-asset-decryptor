@@ -328,6 +328,7 @@ input[type=range] { accent-color: var(--accent); }
 .tip .tip-cp { color: var(--cp-ink); }
 .tip .tip-tone-accent { color: var(--accent); }
 .tip .tip-tone-info { color: var(--info); }
+.tip .tip-tone-warn { color: var(--warn); }
 .tip .tip-cp b { font-weight: 600; }
 .tip .tip-k { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--accent); padding-top: 1px; }
 /* PAD-1005: {sec} a small heading, {li} a bulleted line, {bar} parts of a whole with a key */

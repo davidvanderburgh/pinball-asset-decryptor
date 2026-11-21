@@ -234,7 +234,7 @@ def test_a_bigger_replacement_goes_to_growth(tmp_path, monkeypatch):
     writes, n, ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
     assert writes == [] and ov == {} and n == 1
     (node, imgs), = grown.values()
-    w, h, payload = imgs[banner]
+    w, h, payload = imgs[banner][:3]
     assert (w, h) == (90, 22)
     assert len(payload) == radium_grow.image_block_len(90, 22, 5)
     assert any("re-serialized around its new size" in m for _l, m in msgs)
@@ -485,7 +485,7 @@ def test_an_editor_picture_is_premultiplied_when_resized(tmp_path, monkeypatch):
     Image.fromarray(_straight_text(90, 22), "RGBA").save(png)
     _w, _n, _ov, grown, _msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
     (_node, imgs), = grown.values()
-    w, h, payload = imgs[banner]
+    w, h, payload = imgs[banner][:3]
     decoded = dds.decode_bc3(payload, 92, 24)[:h, :w]
     assert _is_premultiplied(decoded)
     assert decoded[:, 60:, :3].max() <= 16      # the "transparent" white is gone

@@ -356,7 +356,7 @@ class FindOriginalsMixin:
             use = not is_mine
             if kind == "picture" and self._orig_keep_size(rel) and m.ref \
                     and (b.width, b.height) != (m.ref.width, m.ref.height):
-                notes.append("Keep size is on: it would go on at %dx%d, "
+                notes.append("Imported size is on: it would go on at %dx%d, "
                              "not %dx%d" % (b.width, b.height, m.ref.width,
                                             m.ref.height))
                 use = False

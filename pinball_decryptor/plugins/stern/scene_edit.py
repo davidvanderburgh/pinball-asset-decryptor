@@ -221,6 +221,57 @@ def own_boxes(assets_dir, card):
     return out
 
 
+#: the Images tab's sidecar key (``.staged_changes.json``): the pictures picked since Simon's 2026-11-21 decision,
+#: each placed pixel for pixel from the original's origin, not fitted into its box (PAD-865): "when artwork is
+#: loaded we should assume the user knows what they are doing - so ... we located their full sized artwork at the
+#: same origin point but leave them full size".  A pick made before keeps the fit its layout was made over.
+PLACE_KEY = "image_place_own"
+
+
+def placed_rels(assets_dir):
+    """The pictures (``images/...`` rels) placed pixel for pixel (:data:`PLACE_KEY`)."""
+    try:
+        from ...core import staged_changes
+        data = staged_changes.peek(assets_dir) or {}
+    except Exception:                                   # noqa: BLE001
+        return frozenset()
+    got = data.get(PLACE_KEY)
+    return frozenset(r for r in got if isinstance(r, str)) if isinstance(got, list) else frozenset()
+
+
+def texture_offsets(assets_dir, card, rels):
+    """The stock ``data_off`` of each picture of *rels* (``images/scene_textures/...``) in the scene *card*
+    (``radium_images.txt``)."""
+    want = {r[len("images/"):] if r.startswith("images/") else r for r in rels or ()}
+    out = set()
+    if not want:
+        return out
+    path = os.path.join(assets_dir, "images", "scene_textures", "radium_images.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                cols = line.rstrip("\r\n").split("\t")
+                if len(cols) >= 3 and not line.startswith("#") and cols[0] in want and cols[1] == card:
+                    try:
+                        out.add(int(cols[2]))
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    return out
+
+
+def placed_nodes(assets_dir, card, scene, rels=None):
+    """The nodes of *scene* (parsed, *card*'s) that draw a picture placed pixel for pixel (:func:`placed_rels`,
+    or *rels*): they draw it at its own size, like a layout made over it (PAD-981)."""
+    offs = texture_offsets(assets_dir, card, placed_rels(assets_dir) if rels is None else rels)
+    if not offs:
+        return frozenset()
+    tids = {tid for tid, t in scene.textures.items() if t.get("data_off") in offs}
+    return frozenset(n.id for n, _s in _tree_index(scene).values()
+                     if any(c.obj.kind == "Bitmap" and c.obj.body.get("tex") in tids for c in n.components))
+
+
 def pin_own_boxes(assets_dir, boxes):
     """Keep ``{card: {node: (w, h)}}`` as the boxes of those own-size nodes (:func:`own_boxes`),
     each only the first time: the size of the picture the layout was made over."""
@@ -258,7 +309,26 @@ def mark_own(man, nodes, boxes=None):
 
 def mark_own_of(man, assets_dir, card):
     """:func:`mark_own` with *card*'s own-size nodes and their boxes in *assets_dir*."""
-    return mark_own(man, own_size_nodes(assets_dir, card), own_boxes(assets_dir, card))
+    return mark_own(man, own_size_nodes(assets_dir, card) | placed_man_nodes(man, assets_dir),
+                    own_boxes(assets_dir, card))
+
+
+def placed_man_nodes(man, assets_dir, rels=None):
+    """The preview manifest *man*'s nodes that draw a picture placed pixel for pixel (:func:`placed_rels`, or
+    *rels*): the preview draws it at its own size from the original's origin, as the Write does
+    (:func:`placed_nodes`)."""
+    want = {r[len("images/"):] if r.startswith("images/") else r
+            for r in (placed_rels(assets_dir) if rels is None else rels)}
+    if not want or not isinstance(man, dict):
+        return frozenset()
+    objs = man.get("objects") or {}
+    out = set()
+    for n, _sibs in _man_index(man).values():
+        for _start, oid in n.get("comps") or ():
+            o = objs.get(str(oid)) or {}
+            if o.get("kind") == "Bitmap" and o.get("image") in want:
+                out.add(n.get("id"))
+    return frozenset(out)
 
 
 def save(assets_dir, edits):

@@ -31,6 +31,10 @@ from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
 from ..testcard_tags import TestTagMixin
 
+#: the sidecar key of the pictures placed pixel for pixel from the original's origin (the same as
+#: plugins.stern.scene_edit.PLACE_KEY, kept here so this module doesn't load the Stern plugin)
+PLACE_KEY = "image_place_own"
+
 #: Tk's iid prefix for a "Group by scene" header row; the page's id for one.
 GROUP_IID = "::grp::"
 CHANGE_SCAN_NOTE = "  ·  still checking…"
@@ -39,9 +43,15 @@ SOURCES = ("All sources", "File", "Scene texture", "Radium", "Glyph",
            "Boot screen")
 CHANGE_FILTER_VALUES = ("All", "Changed", "Unchanged")
 #: (column, heading, default descending) - Tk's _image_sort_cfg.
+# Simon (2026-11-21): one Resolution column became four, short names with his words in their tooltips (the page's
+# RES_TIPS): Original, Imported, Current, Written; and Origin (the official card's, or custom).  "Keep size" is
+# "Imported size" (the picture keeps its own shape and is written for the screen; off, squeezed into the original's
+# pixels).
 SORT_CFG = (("#0", "Original Image", False), ("n", "Images", True),
-            ("res", "Resolution", True), ("fmt", "Format", False),
-            ("src", "Source", False), ("keep", "Keep size", True),
+            ("res", "Original", True), ("imp", "Imported", True),
+            ("cur", "Current", True), ("wri", "Written", True),
+            ("fmt", "Format", False), ("src", "Source", False),
+            ("org", "Origin", False), ("keep", "Imported size", True),
             ("color", "Color", True), ("rep", "Replacement", False))
 CHUNK = 256
 #: pictures side by side in Compare (PAD-463, as the Video tab's PAD-440)
@@ -357,6 +367,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         self._idx = {}
         self._assignments = {}
         self._keep_size = set()
+        self._place_own = set()
         self._color = {}        # rel -> this picture's own colour switch (PAD-312)
         self._color_all = False  # the Color profile tab's "every replaced picture" box
         # the advanced box (PAD-335): the game's own pictures take a switch too
@@ -462,6 +473,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         self._idx = {}
         self._assignments = {}
         self._keep_size = set()
+        self._place_own = set()
         self._color = {}
         self._color_all = False
         self._color_unlocked = False
@@ -642,6 +654,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
                     staged.get("image"), self._by_rel)
                 self._keep_size = {
                     r for r in (staged.get("image_keep_size") or ())
+                    if r in self._assignments}
+                self._place_own = {
+                    r for r in (staged.get(PLACE_KEY) or ())
                     if r in self._assignments}
                 self._color_unlocked = bool(
                     staged.get("image_color_unlocked"))
@@ -956,6 +971,11 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
             data["image"] = dict(self._assignments)
             data["image_keep_size"] = sorted(
                 r for r in self._keep_size if r in self._assignments)
+            place = sorted(r for r in self._place_own if r in self._assignments)
+            if place:
+                data[PLACE_KEY] = place
+            else:
+                data.pop(PLACE_KEY, None)
             slots = {r: v for r, v in self._color.items()
                      if r in self._assignments or self._is_built(r)
                      or (self._color_unlocked and r in self._by_rel)}
@@ -2090,15 +2110,104 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
                "p": disp, "t": tag, "c": self._color_state(rel),
                "co": rel in self._color, "cl": self._color_locked(rel),
                "cg": not rep}
+        row.update(self._res_cells(s))
         if not rep and self._is_built(rel):
             row["cb"] = True        # PAD-463: the user's own, from a build
         return row
+
+    # -- the resolution columns and Origin (Simon, 2026-11-21) -----------------------------------
+    def _size_of(self, path):
+        """``(w, h)`` of the picture file *path*, or None; remembered while the file is unchanged."""
+        if not path:
+            return None
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        cache = self.__dict__.setdefault("_sizes_seen", {})
+        key = (path, st.st_mtime_ns, st.st_size)
+        if key not in cache:
+            try:
+                from PIL import Image
+                with Image.open(path) as im:
+                    cache[key] = tuple(im.size)
+            except Exception:                            # noqa: BLE001
+                cache[key] = None
+        return cache[key]
+
+    def _orig_size(self, s):
+        """The original picture's size: its pristine snapshot's (the card's, as extracted), else the scan's."""
+        from ...core import staged_originals
+        snap = staged_originals.snapshot_path(self._scan_dir or None, s.rel_path)
+        if snap:
+            got = self._size_of(snap)
+            if got:
+                return got
+        return (s.info.width, s.info.height) if s.info else None
+
+    def _res_table(self):
+        """``{rel: cell}`` of :func:`picture_sizes.columns` for every row, with each pick's Imported size (off: written
+        at the original's pixels), and the project's Origin record, worked out once per publish."""
+        rows, squeezed = {}, set()
+        for s in self._slots:
+            rep = self._assignments.get(s.rel_path)
+            rows[s.rel_path] = (self._orig_size(s), self._size_of(rep) if rep else None)
+            # Imported size off - or a picture that can't change size (a flipbook frame, a font; HEISEI
+            # re-check 2026-11-21): either way squeezed into the original's pixels at the Write
+            if rep and self._keep_state(s.rel_path) is not True:
+                squeezed.add(s.rel_path)
+        try:
+            from ...plugins.stern import picture_sizes
+            cols = picture_sizes.columns(self._scan_dir, rows, squeezed)
+        except Exception:                                # noqa: BLE001 - the rows go out without them
+            log.exception("resolution columns")
+            cols = {}
+        for rel, c in cols.items():
+            state = self._keep_state(rel) if c.get("i") and not c.get("fixed") else True
+            if state is not True:
+                c["w"], c["sq"] = c.get("o"), True          # squeezed into the original's pixels
+                if state is None:
+                    c["sqn"] = True                         # it can't change size at all
+        try:
+            from ...core import asset_origin
+            self._origin_info = asset_origin.origins(self._scan_dir)
+        except Exception:                                # noqa: BLE001
+            self._origin_info = None
+        return cols
+
+    def _res_cells(self, s):
+        c = (getattr(self, "_res_now", None) or {}).get(s.rel_path)
+        out = {}
+        if c:
+            def fmt(wh):
+                return "%d×%d" % tuple(wh) if wh else ""
+            out = {"ro": fmt(c["o"]), "ri": fmt(c["i"]), "rc": fmt(c["c"]), "rw": fmt(c["w"])}
+            if c.get("fixed"):
+                out["rf"] = True
+            if c.get("sq"):
+                out["rq"] = True
+            if c.get("sqn"):
+                out["rqn"] = True
+            # orange: PAD writes it smaller than you imported it; amber: the game shows it bigger (may look soft)
+            if c["i"] and c["w"] and tuple(c["w"]) != tuple(c["i"]) and not c.get("fixed") and not c.get("sq"):
+                out["rd"] = True
+            if c["i"] and c["c"] and not c.get("fixed") and (c["c"][0] > c["i"][0] + 1
+                                                             or c["c"][1] > c["i"][1] + 1):
+                out["rs"] = True
+        info = getattr(self, "_origin_info", None)
+        if info:
+            from ...core import asset_origin
+            og = asset_origin.origin_of(info, s.rel_path)
+            if og:
+                out["og"] = og
+        return out
 
     def _publish_chunks(self, which=None):
         """Send the rows (all chunks, or the chunk numbers in *which*)."""
         n = (len(self._slots) + CHUNK - 1) // CHUNK
         out = {}
         ks = range(n) if which is None else sorted(k for k in which if k < n)
+        self._res_now = self._res_table()
         for k in ks:
             out["rows_%d" % k] = [self._row(s) for s in
                                   self._slots[k * CHUNK:(k + 1) * CHUNK]]
@@ -2145,11 +2254,22 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         if query:
             slots = [s for s in slots if _match(s)]
         col, desc = self._sort
+        res_now = self._res_table() if col in ("imp", "cur", "wri", "org") else {}
+
+        def _origin(rel):
+            from ...core import asset_origin
+            info = getattr(self, "_origin_info", None)
+            return (asset_origin.origin_of(info, rel) if info else None) or ""
 
         def _key(s):
             if col == "res":
                 # width first, then height: every 1920-wide row together (PAD-207)
                 return ((s.info.width, s.info.height) if s.info else (-1, -1),)
+            if col in ("imp", "cur", "wri"):
+                c = (res_now.get(s.rel_path) or {}).get({"imp": "i", "cur": "c", "wri": "w"}[col])
+                return ((c[0], c[1]) if c else (-1, -1), s.rel_path.lower())
+            if col == "org":
+                return (_origin(s.rel_path), s.rel_path.lower())
             if col == "fmt":
                 return (s.format_summary().lower(), s.rel_path.lower())
             if col == "src":
@@ -2449,18 +2569,39 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
             return None
         keep = theme[2] if theme is not None else rel in self._keep_size
         self.image_keep_size_var.set(keep)
+        return {"on": keep, "text": self._size_words(rel, orig, new, keep, theme)}
+
+    def _size_words(self, rel, orig, new, keep, theme=None):
+        """What the Write does with a pick's size, in numbers (Simon, 2026-11-21: "Your image/video is nnnn x nnnn.
+        The original image size is nnnn x nnnn. PAD will limit your image to nnnn x nnnn ...")."""
         if new == orig:
-            text = "Same size as the original (%d×%d)." % orig
-        elif keep:
-            # PAD-865: the build fits it into the original's place (radium_grow.keep_boxes);
-            # a Shape's fill the same, in the Shape's box (PAD-857)
-            text = ("Kept at %d×%d (the original is %d×%d): it shows in the original's place "
-                    "and size, fitted and centered, with more detail where the scene zooms "
-                    "in on it. Make it bigger or smaller on the Scenes tab." % (new + orig))
-        else:
-            text = ("Your picture is %d×%d, the original %d×%d: it will be "
-                    "squeezed to fit." % (new + orig))
-        return {"on": keep, "text": text}
+            return "Same size as the original (%d×%d)." % orig
+        mine = "Your picture is %d×%d; the original is %d×%d. " % (new + orig)
+        if not keep:
+            shape = ""
+            if abs(new[0] / float(new[1]) - orig[0] / float(orig[1])) > 0.02:
+                shape = " Its shape is not the original's, so it will look squashed: tick Imported size to keep its shape."
+            return mine + "Imported size is off, so it will be squeezed into the original's pixels." + shape
+        cell = None
+        try:
+            from ...plugins.stern import picture_sizes
+            cell = picture_sizes.columns(self._scan_dir, {rel: (orig, new)}).get(rel)
+        except Exception:                                # noqa: BLE001
+            cell = None
+        where = " in theme %d" % theme[0] if theme is not None else ""
+        if not cell or not cell.get("c"):
+            return (mine + "PAD can't work out how big the game shows it%s (its scene can't be read), so it will be "
+                    "written at no more than twice the original." % where)
+        shown, written = tuple(cell["c"]), tuple(cell["w"] or new)
+        if shown[0] > new[0] + 1 or shown[1] > new[1] + 1:
+            return (mine + "With your layout as it is now, the game shows it up to %d×%d%s, so the game enlarges it "
+                    "and it may look soft. A picture of at least %d×%d will look its sharpest." % (shown + (where,) + shown))
+        if written != tuple(new):
+            return (mine + "With your layout as it is now, the game shows it at most %d×%d%s: PAD will write it at "
+                    "%d×%d, smoothed - the sharpest it can look on this screen. Your file stays full size in the "
+                    "project, so you can still scale it up on the Scenes tab." % (shown + (where,) + written))
+        return (mine + "With your layout as it is now, the game shows it at its own size%s (placed full size where "
+                "the original was): PAD writes it as it is. Make it smaller or bigger on the Scenes tab." % where)
 
     @rpc(loop=False)
     def thumb(self, path, w=320, h=214, look=None):
@@ -2538,7 +2679,14 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         return rel
 
     def _keep_grown(self, rels):
-        """A new pick for a picture an earlier build kept at its own size
+        """Simon (2026-11-21): "when artwork is loaded we should assume the user knows what they are
+        doing - so ... we located their full sized artwork at the same origin point but leave them
+        full size": a new pick of a scene picture keeps its own size (Best for the screen) and is
+        placed pixel for pixel from the original's origin (scene_edit.PLACE_KEY); the Write sizes it
+        for the screen (radium_grow.shown_scale).  Unticking Keep size still squeezes it into the
+        original's pixels.
+
+        A new pick for a picture an earlier build kept at its own size
         starts with Keep size ticked: the project's file is no longer the
         size of its pristine .orig/ copy.  Unticked, the next build squeezed
         the user's grown picture back to the game's size (DragonRR, PAD-351:
@@ -2547,6 +2695,10 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         from PIL import Image
         kept = []
         for rel in rels:
+            if self._can_keep_size(rel) and self._assignments.get(rel):
+                self._keep_size.add(rel)
+                self._place_own.add(rel)
+                continue
             if rel in self._keep_size or not self._can_keep_size(rel):
                 continue
             snap = staged_originals.snapshot_path(self._scan_dir or None, rel)
@@ -3469,6 +3621,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         if "images" in kinds:
             self._assignments = {}
             self._keep_size = set()
+            self._place_own = set()
         if "colours" in kinds:
             self._color = {}
             self._color_unlocked = False
@@ -3529,7 +3682,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
     #: A key of its own: Tk's "image" widths are Tk pixels for another font
     #: and a table without the thumbnail column (the Audio port's rule).
     _WIDTHS_KEY = "image_web"
-    _WIDTH_COLS = ("th", "#0", "n", "res", "fmt", "src", "keep", "color",
+    _WIDTH_COLS = ("th", "#0", "n", "res", "imp", "cur", "wri", "fmt", "src", "org", "keep", "color",
                    "rep")
 
     def _all_widths(self):

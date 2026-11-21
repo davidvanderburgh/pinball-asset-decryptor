@@ -49,9 +49,11 @@ def _texture(tid, w, h, rgba):
     return u32(FLAG | tid) + u32(w) + u32(h) + u32(5) + s("") + u32(len(blob)) + blob
 
 
-def _scene():
+def _scene(zoom=1.0):
     """A 64x32 stage: an overlay that fills two 64x32 Shape boxes, one at the origin and
-    one at (8, 4), and an icon drawn by one Bitmap.  Returns ``(bytes, fill_off, icon_off)``."""
+    one at (8, 4), and an icon drawn by one Bitmap.  Returns ``(bytes, fill_off, icon_off)``.
+    *zoom*: the scene's root shows everything at that scale (Simon, 2026-11-21: a picture is
+    written at the most the game shows it, so a zoom of 2 leaves room for twice the box)."""
     kids = [
         node(50, "Overlay", [u32(1) + cls(4, "Shape") + u32(FLAG | 14) + u32(6) + s("")
                              + fs(0, 0, *FILL) + u32(0x40000000) + u32(FLAG | 16)
@@ -65,7 +67,9 @@ def _scene():
              tracks=((1, mat(1.0, 8, 8)),)),
     ]
     data = (u8(1) + u64(0) + u64(0) + u32(STAGE[0]) + u32(STAGE[1]) + fs(30.0)
-            + fs(0, 0, 0, 1) + sprite(2, "", 1, kids))
+            + fs(0, 0, 0, 1) + sprite(2, "", 1, kids if zoom == 1.0 else [
+                node(49, "Zoom", [u32(1) + cls(5, "Sprite") + u32(FLAG | 17)
+                                  + sprite(18, "", 1, kids)], tracks=((1, mat(zoom)),))]))
     sc = scene_tree.parse(data)
     return data, sc.textures[20]["data_off"], sc.textures[21]["data_off"]
 
@@ -85,14 +89,14 @@ def test_the_scene_reads_as_a_tree_and_has_no_triples():
 
 def _grown(tmp_path, monkeypatch, off, size, new, name):
     monkeypatch.setattr(engine, "_image_grow_gate", lambda d: (True, ""))
-    data = _scene()[0]
+    data = _scene(zoom=2.0)[0]                 # shown at twice: a picture up to twice is kept whole
     png = _project(tmp_path, data, off, *size, name=name)
     Image.new("RGBA", new, (255, 0, 255, 255)).save(png)
     writes, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
     assert writes == [] and n == 1
     assert not any("can't take a new size" in m for _l, m in msgs)
     (_node, imgs), = grown.values()
-    w, h, payload = imgs[off]
+    w, h, payload = imgs[off][:3]
     assert (w, h) == new
     out = radium_grow.regrow(data, images={off: (w, h, payload)})
     assert radium_grow.agree(data, out["data"], {}, out["shift"], images={off: new})[0] == []
@@ -100,7 +104,7 @@ def _grown(tmp_path, monkeypatch, off, size, new, name):
 
 
 def test_a_picture_one_bitmap_draws_takes_a_new_size(tmp_path, monkeypatch):
-    _data, _fill, icon = _scene()
+    _data, _fill, icon = _scene(zoom=2.0)
     out, msgs = _grown(tmp_path, monkeypatch, icon, ICON, (30, 10), "icon")
     assert out["images"] == {icon: 0}
     sc = scene_tree.parse(out["data"])
@@ -114,7 +118,7 @@ def test_a_picture_one_bitmap_draws_takes_a_new_size(tmp_path, monkeypatch):
 
 
 def test_a_fill_takes_a_new_size_and_its_box_keeps_its_own(tmp_path, monkeypatch):
-    _data, fill, _icon = _scene()
+    _data, fill, _icon = _scene(zoom=2.0)
     out, msgs = _grown(tmp_path, monkeypatch, fill, FILL, (128, 64), "fill")
     sc = scene_tree.parse(out["data"])
     assert (sc.textures[20]["w"], sc.textures[20]["h"]) == (128, 64)
@@ -129,7 +133,8 @@ def test_a_fill_takes_a_new_size_and_its_box_keeps_its_own(tmp_path, monkeypatch
     man = scene_eval.manifest(sc, {sc.textures[20]["data_off"]: "fill.png"})
     got = sorted((d["m"][4], d["m"][5], d["m"][0] * d["w"], d["m"][3] * d["h"])
                  for d in scene_eval.draw_list(man) if d.get("image") == "fill.png")
-    assert got == [(0.0, 0.0, 64.0, 32.0), (8.0, 4.0, 64.0, 32.0)]
+    # (the scene shows everything at twice: _scene(zoom=2.0))
+    assert got == [(0.0, 0.0, 128.0, 64.0), (16.0, 8.0, 128.0, 64.0)]
 
 
 def test_a_scene_that_does_not_walk_keeps_the_byte_rule(tmp_path, monkeypatch):
@@ -200,13 +205,16 @@ def test_the_tab_says_a_kept_fill_shows_at_the_same_size(window):
     w.call("images.select", SHAPE)
     w.answers.append(rep)
     assert w.call("images.choose", SHAPE) == SHAPE
+    # Simon (2026-11-21): a new pick starts with Imported size on, and is written at the most the screen shows it: a
+    # fill is squeezed into its 64x32 Shape box, its shape kept - 57x32
     keep = w.state("images")["preview"]["keep"]
-    assert keep["on"] is False and "squeezed to fit" in keep["text"]
+    assert keep == {"on": True, "text": (
+        "Your picture is 131×74; the original is 64×32. With your layout as it is now, the game shows it at most "
+        "57×32: PAD will write it at 57×32, smoothed - the sharpest it can look on this screen. Your file stays full "
+        "size in the project, so you can still scale it up on the Scenes tab.")}
+    assert w.call("images.set_keep", SHAPE, False) is not False
+    assert "squeezed into the original's pixels" in w.state("images")["preview"]["keep"]["text"]
     assert w.call("images.set_keep", SHAPE, True) is not False
-    assert w.state("images")["preview"]["keep"] == {"on": True, "text": (
-        "Kept at 131×74 (the original is 64×32): it shows in the original's place and size, "
-        "fitted and centered, with more detail where the scene zooms in on it. Make it "
-        "bigger or smaller on the Scenes tab.")}
     assert w.window.pending_image_assignments(assets)[2] == frozenset({SHAPE})
 
 
@@ -216,9 +224,10 @@ def test_a_picture_drawn_by_size_says_the_same(window):
     w.answers.append(rep)
     assert w.call("images.choose", ICON_REL) == ICON_REL
     assert w.call("images.set_keep", ICON_REL, True) is not False
+    # placed full size where the original was (a new pick), so the game shows all of it
     assert w.state("images")["preview"]["keep"]["text"].endswith(
-        "fitted and centered, with more detail where the scene zooms in on it. Make it "
-        "bigger or smaller on the Scenes tab.")
+        "the game shows it at its own size (placed full size where the original was): PAD writes it as it is. "
+        "Make it smaller or bigger on the Scenes tab.")
     assert w.window.pending_image_assignments(assets)[2] == frozenset({ICON_REL})
 
 

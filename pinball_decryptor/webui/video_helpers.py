@@ -51,9 +51,15 @@ PICK_FILETYPES = [("Video files",
                    "*.mpeg *.wmv *.flv *.ts *.3gp *.gif"),
                   ("All files", "*.*")]
 #: MainWindow._video_sort_cfg: (column, header, default descending)
+# Simon (2026-11-21): "another column (Probably audio, video, images and even text) to account for whether the
+# asset is original or custom (custom being an asset that isn't original but has been extracted from the current
+# card)" - Origin (core/asset_origin.py), as the Images tab's.
 SORT_CFG = (("#0", "Original Video", False), ("len", "Length", True),
-            ("res", "Resolution", True), ("fmt", "Format", False),
-            ("aud", "Audio", False), ("rep", "Replacement", False),
+            ("res", "Original", True), ("imp", "Imported", True),
+            ("cur", "Current", True), ("wri", "Written", True),
+            ("fmt", "Format", False),
+            ("aud", "Audio", False), ("org", "Origin", False),
+            ("rep", "Replacement", False),
             ("fit", "Vs stock", False),                # PAD-1232
             ("conv", "Convert", False),
             ("seen", "When it plays", False))      # PAD-827
@@ -581,5 +587,6 @@ def media_facts(path):
         "backend": _video.backend_for(path) is not None if path else False,
         "width": info.width if info else 0,
         "height": info.height if info else 0,
+        "fps": float(info.fps or 0.0) if info else 0.0,
         "dur": float(dur or 0.0),
     }

@@ -156,6 +156,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._reveal_after_scan = ""     # PAD-1274: a jump waiting on the scan
         self._assign = {}                # rel -> replacement file path
         self._asis = {}                  # rel -> per-clip as-is override
+        self._keep = {}                  # rel -> Imported size (Simon, 2026-11-21; core/video_sizes.py)
         self._length = {}                # rel -> per-clip length choice
         self._color = {}                 # rel -> per-clip colour switch (PAD-312)
         self._variants = {}              # rel -> [extra clip, ...] (PAD-446)
@@ -187,6 +188,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         # PAD-1232: seconds per file, {(path, size, mtime_ns): seconds}
         self._secs = {}
         self._secs_busy = set()
+        self._dims = {}              # Simon (2026-11-21): (path, size, mtime) -> (w, h), with _secs
         self._conv_pass = 0
         self._conv_kick = False
         self._unplayable_warned = set()
@@ -257,6 +259,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._by_rel = {}
         self._assign = {}
         self._asis = {}
+        self._keep = {}
         self._length = {}
         self._color = {}
         self._color_all = False
@@ -666,6 +669,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         from ...core import staged_changes
         self._assign = {}
         self._asis = {}
+        self._keep = {}
         self._length = {}
         self._color = {}
         self._color_stock = False
@@ -862,6 +866,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                     rel: v for rel, v in
                     (staged.get("video_length_slots") or {}).items()
                     if rel in self._by_rel and _length_ok(v)}
+                from ...core.video_sizes import KEEP_KEY
+                self._keep = {
+                    rel: bool(v) for rel, v in
+                    (staged.get(KEEP_KEY) or {}).items()
+                    if rel in self._by_rel}
                 self._color = {
                     rel: bool(v) for rel, v in
                     (staged.get("video_color_slots") or {}).items()
@@ -1421,7 +1430,135 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                 "col_stock": bool(self._color_stock
                                   and not self._assign.get(rel)),
                 **self._scr_row(rel, s, rep, is_changed),
-                **self._m_row(rel)}
+                **self._m_row(rel),
+                **self._origin_row(rel),
+                **self._size_row(s, rep)}
+
+    # Simon (2026-11-21): "Same as pictures" - the Images tab's Original / Imported / Current / Written for a
+    # clip: the stock clip's size, your file's, the most the game shows the slot (its player's box times its
+    # biggest zoom) and what the Write puts on the card (plugins/stern/video_sizes.py)
+    def _players(self):
+        """``{clip: (box w, box h, zoom)}`` of the project's scenes, or None where the machine keeps every clip at
+        its slot's size; worked out once per list."""
+        mfr = self.mfr
+        fn = getattr(mfr, "video_players", None)
+        if fn is None or not self._scan_dir:
+            return None
+        try:
+            return fn(self._scan_dir)
+        except Exception:                                   # noqa: BLE001 - the rows go out without them
+            log.exception("video players")
+            return None
+
+    def _dims_of(self, path):
+        key = self._file_key(path) if path else None
+        return self._dims.get(key) if key is not None else None
+
+    def _stock_dims(self, slot):
+        snap = self._stock_path(slot.rel_path)
+        if snap and os.path.isfile(snap):
+            return self._dims_of(snap)
+        info = slot.info
+        return (int(info.width), int(info.height)) if info is not None and info.width and info.height else None
+
+    def _size_facts(self, slot):
+        """The machine's :class:`core.video_sizes.Facts` for *slot*."""
+        from ...core import video_sizes
+        return video_sizes.facts(self.mfr, self._scan_dir, slot.rel_path, slot,
+                                 getattr(self, "_players_now", None))
+
+    def _keep_for(self, rel, f):
+        from ...core import video_sizes
+        return video_sizes.keep_of(self._keep, rel, f.tested)
+
+    def _sizes_of(self, slot, rep):
+        """``(original, imported, current, written)``, each ``(w, h)`` or None; Current is None where the machine
+        can't be measured."""
+        from ...core import video_sizes
+        orig = self._stock_dims(slot)
+        mine = self._dims_of(rep) if rep else None
+        f = self._size_facts(slot)
+        cur = video_sizes.shown_size(orig, f.player) if orig else None
+        if cur is None and orig and f.measured:
+            cur = tuple(orig)                           # measured, and shown at its own size
+        wri = None
+        if rep and orig and mine:
+            wri = video_sizes.verdict(orig, mine, f, self._keep_for(slot.rel_path, f))[0]
+        return orig, mine, cur, wri
+
+    def _size_row(self, slot, rep):
+        orig, mine, cur, wri = self._sizes_of(slot, rep)
+        f = self._size_facts(slot)
+
+        def fmt(wh):
+            return "%d×%d" % tuple(wh) if wh else ""
+        out = {"ro": fmt(orig), "ri": fmt(mine), "rc": fmt(cur), "rw": fmt(wri)}
+        if orig and cur is None:
+            out["rc"], out["rcu"] = "unknown", True
+        if rep and not mine and self._file_key(rep) is not None and self._file_key(rep) not in self._secs:
+            out["ri"] = "…"
+        # orange: written smaller than your file (the screen never shows more, or the decoder can't play more)
+        if mine and wri and (wri[0] < mine[0] - 1 or wri[1] < mine[1] - 1):
+            out["rd"] = True
+        # Imported size: its tick, greyed with the reason where the slot can't change size
+        out["kr"] = bool(rep)
+        out["k"] = self._keep_for(slot.rel_path, f) if not f.why and f.limit else None
+        if f.why:
+            out["k_why"] = f.why
+        elif not f.tested:
+            out["k_untested"] = True
+        return out
+
+    @rpc
+    @undoable("the Imported size of %s")
+    def set_keep(self, rel, value):
+        """Simon (2026-11-21): a clip's Imported size, as the Images tab's - on, the clip keeps its own size (at
+        most what the machine shows and plays); off, it is converted to the slot's size."""
+        slot = self._by_rel.get(rel)
+        if slot is None:
+            return False
+        f = self._size_facts(slot)
+        if f.why or not f.limit:
+            return False
+        if value and not f.tested:
+            from ...core.video_sizes import UNTESTED
+            if not compat.messagebox.askyesno(
+                    "WARNING", UNTESTED.replace(" Untick Imported size to convert it to the slot's size.", "")
+                    + "\n\nKeep this clip's own size anyway?", icon="warning"):
+                return False
+        if bool(value) == bool(f.tested):
+            self._keep.pop(rel, None)                   # back to the machine's default
+        else:
+            self._keep[rel] = bool(value)
+        self.log("Replace Video: %s - Imported size %s." % (rel, "on" if value else "off"), "info")
+        self._save_staged()
+        self._refresh_list()
+        if rel == self._current:
+            self._update_note(rel)
+        return True
+
+    # Simon (2026-11-21): Origin - the official card's clip, or custom (core/asset_origin.py)
+    def _origins(self):
+        """The project's Origin record (cached in asset_origin), worked out once per list."""
+        try:
+            from ...core import asset_origin
+            self._origin_info = asset_origin.origins(self._scan_dir) if self._scan_dir else None
+        except Exception:                                   # noqa: BLE001 - the rows go out without it
+            log.exception("video origin")
+            self._origin_info = None
+        return self._origin_info
+
+    def _origin_word(self, rel):
+        info = getattr(self, "_origin_info", None)
+        # PAD-444: a follower with no file of its own has no origin
+        if not info or rel in (getattr(self, "_m_virtual", None) or {}):
+            return None
+        from ...core import asset_origin
+        return asset_origin.origin_of(info, rel)
+
+    def _origin_row(self, rel):
+        og = self._origin_word(rel)
+        return {"og": og} if og else {}
 
     # -- Vs stock: the replacement's length against the stock clip's -----
     @staticmethod
@@ -1518,22 +1655,28 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                 if not path or path in self._secs_busy:
                     continue
                 key = self._file_key(path)
-                if key is not None and key not in self._secs:
+                # Simon (2026-11-21): the size too - a length read elsewhere (the preview) left Imported blank
+                if key is not None and (key not in self._secs or key not in self._dims):
                     want.append((rel, path))
         if not want:
             return
         self._secs_busy.update(p for _r, p in want)
 
         def _work():
-            from ...core.video import probe_duration
+            from ...core.video import detect_video_info, probe_duration
             got = []
             for rel, path in want:
                 key = self._file_key(path)
+                dims = None
                 try:
-                    secs = float(probe_duration(path) or 0.0)
+                    info = detect_video_info(path)
+                    if info is not None and info.width and info.height:
+                        dims = (int(info.width), int(info.height))
+                    secs = float((info.duration if info is not None else 0.0)
+                                 or probe_duration(path) or 0.0)
                 except Exception:                       # noqa: BLE001
                     secs = 0.0
-                got.append((rel, path, key, secs))
+                got.append((rel, path, key, secs, dims))
             self.ctx.loop.post(self._apply_secs, got)
 
         threading.Thread(target=_work, daemon=True,
@@ -1541,10 +1684,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
 
     def _apply_secs(self, got):
         rels = set()
-        for rel, path, key, secs in got:
+        for rel, path, key, secs, *dims in got:
             self._secs_busy.discard(path)
             if key is not None:
                 self._secs[key] = secs
+                self._dims[key] = dims[0] if dims else None
             rels.add(rel)
         if self._sort and self._sort[0] == "fit":
             self._refresh_list()
@@ -1828,6 +1972,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             if col == "aud":
                 a = s.info.audio_summary() if s.info else ""
                 return (a.lower(), s.rel_path.lower())
+            if col == "org":
+                return (self._origin_word(s.rel_path) or "", s.rel_path.lower())
+            if col in ("imp", "cur", "wri"):            # Simon (2026-11-21): the resolution columns
+                got = self._sizes_of(s, self._assign.get(s.rel_path))[("imp", "cur", "wri").index(col) + 1]
+                return (tuple(got) if got else (-1, -1), s.rel_path.lower())
             if col == "seen":                   # PAD-827: the seen clips first
                 c = self._m_seen_row(s.rel_path)["seen"]
                 return ((0, c.lower()) if c else (1, ""), s.rel_path.lower())
@@ -1852,6 +2001,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         if self._restoring:
             return
         listed = self._m_slots()            # PAD-444: + the followers' rows
+        self._origins()
+        self._players_now = self._players()
         self._publish_rows([self._row(s) for s in listed])
         query = (self.video_search_var.get() or "").strip().lower()
         slots = [s for s in listed
@@ -2042,6 +2193,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         data["video_asis_slots"] = {rel: bool(v)
                                     for rel, v in self._asis.items()}
         data["video_length_slots"] = dict(self._length)
+        from ...core.video_sizes import KEEP_KEY
+        if self._keep:
+            data[KEEP_KEY] = {rel: bool(v) for rel, v in self._keep.items()}
+        else:
+            data.pop(KEEP_KEY, None)
         # PAD-446: the slots' random clips, and one history line per slot
         old_var = data.get("video_variants")
         old_var = old_var if isinstance(old_var, dict) else {}
@@ -3367,6 +3523,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         pv = dict(pv)
         pv[side] = pane
         self.set(preview=pv)
+        if side == "rep" and "facts" in fields:
+            self._update_note()                     # the size note needs the replacement's facts
 
     @rpc
     def make_proxy(self, side, seq, fmt="mp4"):
@@ -3643,6 +3801,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                         "as-is\" for the lot, or pick a game-ready file."
                         % (conflict or ("%s can't play on the machine "
                                         "as it is" % os.path.basename(rep))))}
+            if note is None and rep:
+                note = self._size_note(slot, rel)
             if note is None and self._variants.get(rel):
                 # PAD-446: the slot's random clips, where nothing is wrong
                 note = {"kind": "info", "text": self._variants_words(rel)}
@@ -3658,6 +3818,26 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             pv["sounds"] = sounds
             pv["seen"] = seen
             self.set(preview=pv)
+
+    def _size_note(self, slot, rel):
+        """Simon (2026-11-21): "Your image/video is nnnn x nnnn. The original image size is nnnn x nnnn. PAD will
+        limit your image to nnnn x nnnn" - a replacement of another size or frame rate is converted to the slot's
+        (core/video_slots.stage_replacement), once its file has been read (the Replacement player's facts)."""
+        facts = ((self.get("preview") or {}).get("rep") or {}).get("facts") or {}
+        info = slot.info
+        if not (facts.get("width") and info and info.width and info.height):
+            return None
+        from ...core import video_sizes
+        stock = self._stock_dims(slot) or (int(info.width), int(info.height))
+        mine = (int(facts["width"]), int(facts["height"]))
+        mfps, fps = float(facts.get("fps") or 0.0), float(info.fps or 0.0)
+        same_fps = not (mfps and fps) or abs(mfps - fps) < 0.5
+        f = self._size_facts(slot)
+        text = video_sizes.words(stock, mine, f, self._keep_for(rel, f),
+                                 "" if same_fps else " at %g fps" % round(fps, 2))
+        if not text:
+            return None
+        return {"kind": "warn" if "WARNING" in text else "info", "text": text}
 
     def _reselect(self, rels):
         self._sel_seq += 1
@@ -3843,8 +4023,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
     # content; the page fits the others, as _autosize_tree_columns did)
     # ==================================================================
     _WIDTHS_KEY = "video_web"
-    _WIDTH_COLS = ("rel", "len", "res", "fmt", "aud", "rep", "fit", "col",
-                   "conv")
+    _WIDTH_COLS = ("rel", "len", "res", "imp", "cur", "wri", "keep", "fmt", "aud", "org", "rep", "fit",
+                   "col", "conv")
 
     def _all_widths(self):
         s = getattr(self.app, "_settings", None) if self.app else None

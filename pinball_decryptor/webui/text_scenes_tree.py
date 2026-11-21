@@ -1501,8 +1501,23 @@ class TreeEditMixin:
             return None
         d, (w, h) = got
         a, b, c, dd = d["m"][:4]
-        return {"w": w, "h": h, "sx": round(math.hypot(a, b) * 100, 1),
-                "sy": round(math.hypot(c, dd) * 100, 1)}
+        out = {"w": w, "h": h, "sx": round(math.hypot(a, b) * 100, 1),
+               "sy": round(math.hypot(c, dd) * 100, 1)}
+        # Simon (2026-11-21): the Images tab's Current and Written for this picture - the biggest it is shown in any
+        # scene with the layout as it is now, and what the Write puts on the card (plugins/stern/picture_sizes.py)
+        try:
+            from ..plugins.stern import picture_sizes
+            rel = "images/" + d["image"]
+            stock = self._tree_sizes().get(d["image"]) or (w, h)
+            mine = (w, h) if (w, h) != tuple(stock) else None
+            cell = picture_sizes.columns(self.assets_dir, {rel: (tuple(stock), mine)}).get(rel) or {}
+            if cell.get("c"):
+                out["most"] = cell["c"]
+            if cell.get("w"):
+                out["written"] = cell["w"]
+        except Exception:                                # noqa: BLE001 - the line without them
+            pass
+        return out
 
     def _tree_game_turn(self, nid, rotate):
         """PAD-534 (DragonRR): ``{deg, mirrored}`` the game itself turns node *nid*'s picture

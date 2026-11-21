@@ -1030,6 +1030,37 @@ class WriteTab(TabService):
                 "%s: %d file(s) in this folder aren't part of this extract "
                 "(%s); a build can't use them." % (surface, len(foreign),
                                                    shown))})
+        # Simon (2026-11-21): "once they have written the card they cannot expect to re-extract it at their original
+        # sizes. They would need to go back to their project artwork"
+        try:
+            pend = self.window.pending_image_assignments(assets)
+            reduced = write_scan.picture_size_notes(assets, pend[1], pend[2]) if pend else {}
+        except Exception:                               # noqa: BLE001
+            reduced = {}
+        n = sum(1 for v in reduced.values() if "the most the screen shows it" in v)
+        if n:
+            infos.append({"kind": "", "text": (
+                "%d picture(s) will be reduced for the screen on the card (your files in the project stay full "
+                "size). Keep your own artwork and this project: extracting the written card later gives the "
+                "reduced pictures, not your originals." % n)})
+        # Simon (2026-11-21, "Same as pictures"): a clip bigger than the screen shows its slot
+        try:
+            vpend = self.window.pending_video_assignments(assets)
+            vred = write_scan.video_size_notes(assets, self.mfr, vpend[0], vpend[1]) if vpend else {}
+        except Exception:                               # noqa: BLE001
+            vred = {}
+        n = sum(1 for v in vred.values() if "(reduced:" in v)
+        if n:
+            infos.append({"kind": "", "text": (
+                "%d video(s) will be reduced for the screen on the card (your files in the project stay full "
+                "size). Keep your own videos: extracting the written card later gives the reduced clips." % n)})
+        # Simon (2026-11-21): "we must be very careful" - a bigger clip on a machine nobody has tested it on
+        n = sum(1 for v in vred.values() if "NOT TESTED" in v)
+        if n:
+            warns.append({"kind": "warn", "text": (
+                "WARNING: %d video(s) go on bigger than their slot on a machine where that has not been tested "
+                "yet: they may show oversized or cut off. Untick Imported size on the Video tab to convert them "
+                "to the slot's size." % n)})
         return errs + warns + infos
 
     def _refresh_prebuild_notes(self):

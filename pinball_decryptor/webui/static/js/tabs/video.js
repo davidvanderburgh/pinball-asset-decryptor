@@ -204,10 +204,24 @@ function clock(pos, dur) {
 // Tk tree's minwidth.  Measured over every slot, not only the filtered view,
 // so typing in Search doesn't make the columns jump.
 const FIT_MAX = 480;
-const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, fit: 70, col: 56, conv: 60, modes: 110, seen: 120 };
-const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
-                aud: "Audio", rep: "Replacement", fit: "Vs stock", col: "Color", conv: "Convert", modes: "Played in",
+const COL_MIN = { rel: 160, len: 46, res: 70, imp: 64, cur: 64, wri: 64, keep: 64, fmt: 80, aud: 70, org: 58, rep: 110, fit: 70, col: 56, conv: 60, modes: 110, seen: 120 };
+const HEADS = { rel: "Original Video", len: "Length", res: "Original", imp: "Imported", cur: "Current", wri: "Written", keep: "Imported size", fmt: "Format",
+                aud: "Audio", org: "Origin", rep: "Replacement", fit: "Vs stock", col: "Color", conv: "Convert", modes: "Played in",
                 seen: "When it plays" };
+// Simon (2026-11-21): "another column (Probably audio, video, images and even text) to account for whether the
+// asset is original or custom (custom being an asset that isn't original but has been extracted from the current
+// card)" - the Images tab's Origin column and words
+// Simon (2026-11-21): "Same as pictures" - the Images tab's resolution columns, for a clip
+const RES_TIPS = {
+  res: "Original: the resolution of the original clip pulled from the raw image.",
+  imp: "Imported: the resolution of the video you chose. It stays full size in your project however big it is; only the card gets the Written size.",
+  // Simon (2026-11-21): "The tooltip for the "current" size is pretty awful" - his words
+  cur: "Current: this is the size the machine's video player plays the video at, although the actual screen may be a lower or higher resolution.",
+  wri: "Written: the resolution PAD will write to the card - your video in the slot's shape, never bigger than you imported it, than Current, or than the 1920×1088 the machine's video decoder plays. Orange: smaller than you imported it.",
+};
+// Simon (2026-11-21): "the image rules need to apply to the video rules" - the Images tab's Imported size
+const KEEP_TIP = "Imported size. On: your clip keeps its own size, in the slot's shape - at most what the machine's video player shows (Current, where PAD can measure it) and what its decoder plays (the Written column). Off: it is converted to the slot's size. A machine where a bigger clip has not been tested yet starts off, and asks before you turn it on.";
+const ORG_TIP = "Origin: Original is the official card's asset; Custom is not the official card's, but was on the card this project was extracted from.";
 // PAD-1232 (DoomWalrus666): the Vs stock column's header tip
 const FIT_TIP = { head: "Vs stock", lines: [
   "How much longer (+) or shorter (−) your file runs than the clip it replaces, and the speed change that would make it run exactly as long.",
@@ -276,7 +290,9 @@ function rowFit(r, f) {
   let w = rowFits.get(r);
   if (!w) {
     w = { rel: textWidth(r.dir, f.mono) + textWidth(r.name, f.body), len: textWidth(r.len, f.mono) + (r.scr ? textWidth(r.scr, f.body) + 34 : 0),
-          res: textWidth(r.res, f.body), fmt: textWidth(r.fmt, f.body), aud: textWidth(r.aud, f.body),
+          res: textWidth(r.ro || r.res, f.body), imp: textWidth(r.ri || "", f.body), cur: textWidth(r.rc || "", f.body),
+          wri: textWidth(r.rw || "", f.body), fmt: textWidth(r.fmt, f.body), aud: textWidth(r.aud, f.body),
+          org: textWidth(r.og || "—", f.body),
           rep: textWidth(r.rep, f.body), fit: textWidth(r.fit || "", f.mono), col: 0, conv: textWidth(r.conv, f.body),
           modes: textWidth(modesText(r), f.body), seen: textWidth(r.seen || "", f.body) };
     rowFits.set(r, w);
@@ -1162,18 +1178,19 @@ export default function VideoTab() {
     return () => { if (fs.removeEventListener) fs.removeEventListener("loadingdone", again); };
   }, []);
   const fit = useMemo(() => fitColumns(allRows), [s.rows, fontTick]);
-  const flexLeft = FLEX.some((k) => !tuned[k]);
-  const width = (k) => (FLEX.includes(k) ? `minmax(${COL_MIN[k]}px,${fit[k]}fr)` : `${fit[k]}px`);
+  // Simon (2026-11-21): "In videos lets reduce the default filename/path width to perhaps a third of what it currently
+  // is ... User can always re-adjust if they want"
+  const width = (k) => (FLEX.includes(k) ? `minmax(${COL_MIN[k]}px,${k === "rel" ? fit[k] / 3 : fit[k]}fr)` : `${fit[k]}px`);
   // the last column never takes a drag; it only stretches once every
   // stretching column is one the user sized (Tk _pin_tree_columns)
-  const convWidth = flexLeft ? `calc(${fit.conv}px)` : `minmax(${fit.conv}px,1fr)`;
+  const convWidth = `${fit.conv}px`;              // the space left over now goes to the filler after it
   const colorCol = allRows.some((r) => r.col != null || r.col_lock);
   // PAD-444: Played in, once the card's program has been read and names a mode
   const md = s.modes || {};
   const modesCol = !!(md.ready && (md.list || []).length);
   // PAD-1232: Vs stock, once a clip has a replacement to compare
   const fitCol = allRows.some((r) => r.fit);
-  const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "rep"].concat(fitCol ? ["fit"] : [], modesCol ? ["modes"] : []).reduce((a, k) =>
+  const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "org", "rep"].concat(fitCol ? ["fit"] : [], modesCol ? ["modes"] : []).reduce((a, k) =>
     a + (tuned[k] ? Math.max(36, tuned[k]) : FLEX.includes(k) ? COL_MIN[k] : fit[k]), 0) + fit.conv
     + (colorCol ? fit.col + 10 : 0) + (modesCol ? 8 : 7) * 10 + 20;
   const dragFrom = useRef(null);
@@ -1194,7 +1211,7 @@ export default function VideoTab() {
     const z = zoomOf();
     const changed = {};
     for (const k in out) {
-      if (k === "play" || before[k] == null || Math.abs(out[k] - before[k]) < 1) continue;
+      if (k === "play" || k === "_fill" || before[k] == null || Math.abs(out[k] - before[k]) < 1) continue;
       changed[k] = Math.max(COL_MIN[k] || 36, Math.round(out[k] / z));
     }
     if (!Object.keys(changed).length) return;
@@ -1210,23 +1227,49 @@ export default function VideoTab() {
       render: (r) => html`<span class=${cx("vid-name", (r.follow || r.copy) && "vid-pairrow")} ...${tip({ head: r.rel, lines: [profileLine(r, colorNs)] })}>${r.follow || r.copy
         ? html`<span class="vid-pairmark" aria-hidden="true">↳</span>` : null}${r.dir
         ? html`<span class="mono muted">${r.dir}</span>` : null}${r.name}</span>` },
+    // Simon (2026-11-21): Origin after the name, Replacement after the original (the Images tab's order)
+    { key: "org", label: "Origin", width: width("org"), sort: "org", title: ORG_TIP,
+      render: (r) => (!r.og ? html`<span class="muted">—</span>`
+        : html`<span class=${r.og === "Custom" ? "vid-org-custom" : "dim"} ...${tip(ORG_TIP)}>${r.og}</span>`) },
     // PAD-1115: a clip a game screen shows for a fixed time: that time, amber when the clip freezes or is cut
     { key: "len", label: "Length", width: width("len"), num: true, sort: "len",
       render: (r) => (r.scr
         ? html`<span class="vid-lencell">${r.len}<span class=${cx("vid-scr", r.scr_cls)} aria-label=${r.scr_head}
             ...${tip({ head: r.scr_head, lines: r.scr_tip || [] })}><${Icon} name="clock" />${r.scr}</span></span>`
         : r.len) },
-    { key: "res", label: "Resolution", width: width("res"), sort: "res" },
-    { key: "fmt", label: "Format", width: width("fmt"), sort: "fmt", titleOf: (r) => r.fmt,
-      render: (r) => html`<span class=${r.fmt_bad ? "err-ink" : "dim"}>${r.fmt}</span>` },
-    { key: "aud", label: "Audio", width: width("aud"), sort: "aud", render: (r) => html`<span class="dim">${r.aud}</span>` },
+    { key: "res", label: "Original", width: width("res"), sort: "res", title: RES_TIPS.res,
+      render: (r) => html`<span ...${tip(RES_TIPS.res)}>${r.ro || r.res}</span>` },
     // PAD-369 (DragonRR): the chosen file's name tells its color profile too
-    { key: "rep", label: "Replacement", width: width("rep"), sort: "rep",
+    // Simon (2026-11-21): Replacement "AT MOST the same size as the filename column", the space left at the end
+    { key: "rep", label: "Replacement", sort: "rep",
+      width: tuned.rel ? `minmax(${COL_MIN.rep}px,${Math.max(COL_MIN.rep, tuned.rel)}px)`
+        : `minmax(${COL_MIN.rep}px,${Math.min(fit.rep, fit.rel / 3)}fr)`,
       render: (r) => html`<span class="vid-repcell"><button type="button" class=${cx("vid-rep", r.rep_cls || "muted")}
         ...${tip(r.rep_cls && profileLine(r, colorNs) ? { head: r.rep, lines: [profileLine(r, colorNs)] } : r.rep)}
         onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>${r.var
         ? html`<span class="vid-var" aria-label=${`${r.var} more clips play at random`} ...${tip({ head: "Random clips", lines: [r.var_tip] })}><${Icon} name="shuffle" />+${r.var}</span>`
         : null}</span>` },
+    { key: "imp", label: "Imported", width: width("imp"), sort: "imp", title: RES_TIPS.imp,
+      render: (r) => (r.ri ? html`<span ...${tip(RES_TIPS.imp)}>${r.ri}</span>` : "") },
+    { key: "cur", label: "Current", width: width("cur"), sort: "cur", title: RES_TIPS.cur,
+      render: (r) => (r.rc ? html`<span class=${cx("dim", r.rcu && "vid-res-unknown")} ...${tip(r.rcu
+        ? { head: RES_TIPS.cur, lines: ["PAD can't measure how big this machine plays this slot."] }
+        : RES_TIPS.cur)}>${r.rc}</span>` : "") },
+    { key: "wri", label: "Written", width: width("wri"), sort: "wri", title: RES_TIPS.wri,
+      render: (r) => (r.rw ? html`<span class=${cx(r.rd && "vid-res-down")} ...${tip(r.rd
+        ? { head: RES_TIPS.wri, lines: [{ text: "Smaller than you imported it: the screen never shows more, or the machine can't play more.", tone: "accent" }] }
+        : RES_TIPS.wri)}>${r.rw}</span>` : "") },
+    { key: "fmt", label: "Format", width: width("fmt"), sort: "fmt", titleOf: (r) => r.fmt,
+      render: (r) => html`<span class=${r.fmt_bad ? "err-ink" : "dim"}>${r.fmt}</span>` },
+    { key: "aud", label: "Audio", width: width("aud"), sort: "aud", render: (r) => html`<span class="dim">${r.aud}</span>` },
+    { key: "keep", label: "Imported size", width: width("keep"), cls: "vid-keepcell", title: KEEP_TIP,
+      render: (r) => (!r.kr ? ""
+        : r.k == null
+          ? html`<input type="checkbox" class="vid-keep" disabled aria-label="Imported size: not available for this clip"
+              ...${tip({ head: "Imported size", lines: [{ text: "Not available: " + (r.k_why || "this slot can't change size") + ".", tone: "warn" }] })} />`
+          : html`<input type="checkbox" class="vid-keep" checked=${!!r.k} aria-label="Imported size: keep your clip's own size"
+              ...${tip(r.k_untested ? { head: KEEP_TIP, lines: [{ text: "Not tested on this machine yet: it asks before you turn it on.", tone: "warn" }] } : KEEP_TIP)}
+              onClick=${(e) => { e.stopPropagation(); e.preventDefault(); if (e.detail > 1) return; call("video.set_keep", r.rel, !r.k); }} />`) },
     fitCol && { key: "fit", label: "Vs stock", width: width("fit"), num: true, sort: "fit", title: FIT_TIP,
       render: (r) => (r.fit
         ? html`<span class=${cx("vid-fit", r.fit_cls === "on" ? "acc-ink" : "dim")}
@@ -1259,6 +1302,7 @@ export default function VideoTab() {
         <${Icon} name="palette" /></button>`) },
     { key: "conv", label: "Convert", width: convWidth, sort: "conv", titleOf: (r) => r.conv,
       render: (r) => html`<span class=${r.conv_cls === "bad" ? "err-ink" : r.conv_cls === "stray" ? "warn-ink" : ""}>${r.conv}</span>` },
+    { key: "_fill", label: "", width: `minmax(0,${fit.rel / 3}fr)`, render: () => "" },
   ].filter(Boolean);
   const selected = sel.size === 1 ? [...sel][0] : sel;
   const emptyNode = s.scanning

@@ -282,8 +282,12 @@ _JUKE_TIP = ("A jukebox for the song modes: each time a song mode starts, the ga
              "twice in a game. No setting, no choosing: every start throws the dice.")
 
 #: Click-header sort: (column id, heading, default descending).
+# Simon (2026-11-21): "another column (Probably audio, video, images and even text) to account for whether the
+# asset is original or custom (custom being an asset that isn't original but has been extracted from the current
+# card)" - Origin (core/asset_origin.py), as the Images tab's.
 _SORT_CFG = (("#0", "Original Track", False), ("len", "Length", True),
              ("fmt", "Format", False), ("type", "Type", False),
+             ("org", "Origin", False),
              ("rep", "Replacement", False), ("loop", "Loop", True),
              ("keep", "Full", True), ("lvl", "Level", True),
              ("rq", "Requests", True), ("cm", "Comment", False))
@@ -1538,9 +1542,32 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
             row["rq"] = len(uses)
             row["rq_tip"] = _uses_lines(uses)
         row.update(self._fmt_cells(s))
+        # Simon (2026-11-21): Origin - the official card's sound, or custom
+        info = getattr(self, "_origin_info", None)
+        if info:
+            from ...core import asset_origin
+            og = asset_origin.origin_of(info, rel)
+            if og:
+                row["og"] = og
         if depth:
             row["d"] = depth
         return row
+
+    def _origins(self):
+        """The project's Origin record (core/asset_origin.py, cached there), worked out once per list."""
+        try:
+            from ...core import asset_origin
+            self._origin_info = asset_origin.origins(self._scan_dir) if self._scan_dir else None
+        except Exception:                                # noqa: BLE001 - the rows go out without it
+            self._origin_info = None
+        return self._origin_info
+
+    def _origin_word(self, rel):
+        info = getattr(self, "_origin_info", None)
+        if not info:
+            return ""
+        from ...core import asset_origin
+        return asset_origin.origin_of(info, rel) or ""
 
     def _refresh_list(self):
         """The Tk ``_refresh_audio_list``: filter, sort, (group), count."""
@@ -1571,6 +1598,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         slots = [s for s in self._slots if _passes(s)]
         col, desc = self._sort
         changed = self._changed
+        self._origins()
 
         def _key(s):
             if col == "len":
@@ -1595,6 +1623,8 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
                 return (-1 if uses is None else len(uses), s.rel_path.lower())
             if col == "type":
                 return (_cat_disp(s), s.rel_path.lower())
+            if col == "org":
+                return (self._origin_word(s.rel_path), s.rel_path.lower())
             if col == "cm":
                 # the sounds with a comment first, A to Z
                 cm = comments.get(s.rel_path)
@@ -5625,7 +5655,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
     #: Each column's Tk ``minwidth`` (``_build_audio_tab``): a saved width
     #: never shows narrower than the Tk tree let it be dragged.
     _MIN_WIDTHS = {"#0": 80, "len": 66, "fmt": 104, "rep": 110, "loop": 40,
-                   "keep": 40, "type": 64, "lvl": 58, "cm": 90}
+                   "keep": 40, "type": 64, "lvl": 58, "cm": 90, "org": 58}
 
     def _all_widths(self):
         s = getattr(self.app, "_settings", None) if self.app else None

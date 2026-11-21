@@ -45,8 +45,11 @@ EMPTY_CANCELLED = "Scan canceled — click Scan to try again."
 
 #: Sortable columns: Tk's _text_sort_cfg ids, and whether each starts
 #: descending (Max does).
+#: Simon (2026-11-21): "another column (Probably audio, video, images and even text) to account for whether the
+#: asset is original or custom (custom being an asset that isn't original but has been extracted from the current
+#: card)" - Origin ("org"; core/asset_origin.py), as the Images tab's.
 SORT_COLS = {"#0": False, "new": False, "max": True, "scene": False,
-             "name": False, "in": False}
+             "name": False, "in": False, "org": False}
 
 
 def reveal_in_file_manager(path):
@@ -395,7 +398,30 @@ class TextTab(TabService):
             out["pt"] = True
         elif self._has_parts(r):
             out["pa"] = True
+        og = self._origin_word(r)
+        if og:
+            out["og"] = og
         return out
+
+    # Simon (2026-11-21): Origin - the official card's line, or custom
+    def _origins(self):
+        """The project's Origin record (cached in asset_origin), worked out once per list."""
+        try:
+            from ...core import asset_origin
+            self._origin_info = (asset_origin.origins(self._text_scan_dir)
+                                 if self._text_scan_dir else None)
+        except Exception:                            # noqa: BLE001 - the rows go out without it
+            self._origin_info = None
+        return self._origin_info
+
+    def _origin_word(self, r):
+        """Original / Custom / None for row *r* (its source and its original words: strings.tsv's first two
+        columns)."""
+        info = getattr(self, "_origin_info", None)
+        if not info:
+            return None
+        from ...core import asset_origin
+        return asset_origin.text_origin_of(info, r["path"] or "", r["original"])
 
     def _has_parts(self, r):
         """Does the line of program row *r* have a row per mode below it?"""
@@ -444,6 +470,7 @@ class TextTab(TabService):
             finally:
                 self._suspend -= 1
         rows = self._text_rows
+        self._origins()
         if rows and self.get("empty") == EMPTY_CANCELLED:
             self.set(empty="")
         if rebuild_rows:
@@ -473,6 +500,8 @@ class TextTab(TabService):
             if col == "name":
                 name = self._scene_name(r["path"])
                 return (not name, name.lower(), r["original"].lower())
+            if col == "org":
+                return (self._origin_word(r) or "", r["original"].lower())
             if col == "in":
                 shown = R.shown_in(r)
                 return (not shown, shown.lower(), r["original"].lower(),
@@ -1072,7 +1101,7 @@ class TextTab(TabService):
     _WIDTHS_KEY = "text"
     #: page column key -> Tk Treeview column id
     _WIDTH_IDS = {"o": "#0", "n": "new", "mx": "max", "sc": "scene",
-                  "nm": "name"}
+                  "org": "org", "nm": "name"}
 
     def _all_widths(self):
         s = getattr(self.app, "_settings", None) if self.app else None

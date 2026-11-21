@@ -251,7 +251,7 @@ def test_images_finds_the_masters_behind_card_copies(tmp_path):
         # Keep size is on for this slot: the master would go on at its own
         # size, so it is not ticked
         kept = rows[TEX + names[2]]
-        assert kept["use"] is False and "Keep size is on" in kept["note"]
+        assert kept["use"] is False and "Imported size is on" in kept["note"]
         assert w.call("images.originals_apply") is True
         side = _sidecar(project)["image"]
         assert side[TEX + names[0]] == str(mine / "BW 0.png")

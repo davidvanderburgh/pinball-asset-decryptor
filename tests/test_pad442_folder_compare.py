@@ -258,7 +258,7 @@ def test_the_settings_a_build_reads_are_compared(pair):
         "Project settings"]
     assert details(rows, "Audio: Level") == [
         "audio/y.wav — -2 dB -> 0 dB", "audio/z.wav — 0 dB -> +4 dB"]
-    assert details(rows, "Images: Keep size") == [
+    assert details(rows, "Images: Imported size") == [
         "images/a.png — on -> off", "images/b.png — off -> on"]
     got = dict(r[:2] for r in rows if r[0])
     assert got["Video: Trim / pad box"] == "off -> on"

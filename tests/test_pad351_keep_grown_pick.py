@@ -47,7 +47,9 @@ def test_a_new_pick_on_a_grown_picture_keeps_its_own_size(tmp_path):
         assert staged_changes.load(assets)["image_keep_size"] == []
 
 
-def test_a_new_pick_on_a_stock_size_picture_still_starts_unticked(tmp_path):
+def test_a_new_pick_on_a_stock_size_picture_starts_ticked_too(tmp_path):
+    """Simon (2026-11-21): every new pick of a scene picture starts with Imported size on now ("assume the user knows
+    what they are doing"), grown before or not."""
     assets, reps = _project(tmp_path)
     _grown(assets, SPRITE, (20, 10))                   # built before, at the stock size
     with web_app(tmp_path, mfr="stern") as w:
@@ -55,5 +57,5 @@ def test_a_new_pick_on_a_stock_size_picture_still_starts_unticked(tmp_path):
         for rel in (BANNER, SPRITE):
             w.answers = [os.path.join(reps, "SpaceGodzilla.png")]
             assert w.call("images.choose", rel) == rel
-            assert _by_rel(w.state("images"))[rel]["k"] is False
-        assert not staged_changes.load(assets).get("image_keep_size")
+            assert _by_rel(w.state("images"))[rel]["k"] is True
+        assert staged_changes.load(assets).get("image_keep_size") == sorted((BANNER, SPRITE))

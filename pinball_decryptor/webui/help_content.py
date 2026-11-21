@@ -1054,17 +1054,25 @@ HELP_CONTENT = {
             "Font and sprite atlases in scenes are the exception: they are re-encoded "
             "losslessly at the slot's exact size, with no byte limit.",
         ]),
+        # Simon (2026-11-21): written for the screen, not "as big as possible"
         ("A bigger picture (Spike 2)",
          "On Stern Spike 2 a picture inside a game scene (Source **Radium**, not a "
-         "font) can keep its own size, e.g. a longer name banner.\n\n"
-         "- Tick **Keep this picture's own size** under the preview, or its box in "
-         "the **Keep size** column.\n"
-         "- It shows in the original's place and size, fitted and centered, with "
-         "the extra pixels for where the scene zooms in. Make it bigger or smaller "
-         "on the **Scenes** tab.\n"
+         "font) can keep its own size and shape, e.g. a longer name banner or "
+         "high-resolution art.\n\n"
+         "- **Imported size** (under the preview, and its column) is on for every new pick: "
+         "your picture is placed full size where the original was. Scale and move it "
+         "on the **Scenes** tab. Off, it is squeezed into the original's pixels.\n"
+         "- Your file stays full size in the project, however big it is.\n"
+         "- The Write puts it on the card at the most the screen ever shows it: its "
+         "place on the screen times the biggest zoom the scene gives it, with your "
+         "layout as it is now (the **Current** and **Written** columns). A bigger "
+         "picture would not look sharper, and can look grainy, since the game shrinks "
+         "pictures without smoothing.\n"
+         "- A written card holds those sizes: keep your own artwork, since extracting "
+         "the card again gives the reduced pictures.\n"
          "- Needs an image build, not a direct SD write.\n"
          "- A few pictures can't change size (font atlases, for one): the build "
-         "fits those to the original size and the log names each.\n"
+         "squeezes those to the original size and the log names each.\n"
          "- Tested in the PC emulator; no machine has run one yet."),
         ("Color column (Spike 2)", [
             "Every row has a Color mark saying whether a color profile goes into "

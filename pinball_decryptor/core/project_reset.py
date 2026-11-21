@@ -53,8 +53,8 @@ LABELS = {k: label for k, label, _d in KINDS}
 _SIDECAR = {
     "extras": ("extras",),
     "scenes": ("score_colors",),
-    "images": ("image", "image_keep_size"),
-    "videos": ("video", "video_asis_slots", "video_length_slots", "video_variants",
+    "images": ("image", "image_keep_size", "image_place_own"),
+    "videos": ("video", "video_asis_slots", "video_length_slots", "video_keep_size_slots", "video_variants",
                "own_clips"),
     "sounds": ("audio", "audio_loop", "audio_keep", "audio_levels", "grow_keep_whole",
                "sound_modes"),

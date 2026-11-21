@@ -710,6 +710,26 @@ class SternManufacturer(Manufacturer):
         (PAD-1090 stage 5, PAD-1186)."""
         return ("h264", "hevc") if self._era == "spike3" else ("h264",)
 
+    def video_size_limit(self, assets_dir, rel, slot):
+        """Spike 2: the i.MX6's VPU decodes H.264 up to 1920x1088, and a 4K
+        clip on tilt_warning showed right in the emulator, scaled into its
+        box (Simon, 2026-11-21).  Spike 3: the Pi 4 decodes HEVC up to 4K and
+        H.264 up to 1920x1088 (the slot's own codec is kept); not yet tested."""
+        if self._era == "spike3":
+            codec = ((getattr(getattr(slot, "info", None), "vcodec", "") or "")
+                     .lower())
+            return ((4096, 2160) if codec == "hevc" else (1920, 1088)), None, False
+        from . import video_sizes
+        return video_sizes.DECODER_MAX, None, True
+
+    def video_players(self, assets_dir):
+        """Spike 2: the scenes' video players (plugins/stern/video_sizes.py);
+        Spike 3 keeps every clip at its slot's size."""
+        if self._era == "spike3":
+            return None
+        from . import video_sizes
+        return video_sizes.player_zooms(assets_dir)
+
     def colour_profile_on_display(self):
         """Spike 2: the Write patches the game's drawing shaders
         (shader_profile.py), which reach every picture, clip and line of

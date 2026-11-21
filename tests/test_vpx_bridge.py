@@ -8549,3 +8549,45 @@ def test_shadow_hands_its_b2s_server_to_the_controller():
         < init.index("\tController.Run GetPlayerHWnd")
     ex = out[out.index("\nSub Table1_Exit\n"):]
     assert ex.index("\tController.PadB2SFinish") < ex.index("PadB2S.Stop")
+
+
+def test_turtle_faces_on_the_shooter_lane_plaque_light_by_the_turtle_leds(vpxfile):
+    # PAD-1483: TMNT's plaque over the shooter lane (Primitive017) had no
+    # light behind any face, only the GI on the sign, so the turtle the
+    # player picked never showed. Each face is now a bulb on its own LED
+    # (TURTLE MICHEALANGELO..LEONARDO 8/59..62), glowing just over its face.
+    P = pytest.importorskip("patch_turtles_le")
+    want = {"PadTurtleMichelangelo": 59, "PadTurtleRaphael": 60, "PadTurtleDonatello": 61, "PadTurtleLeonardo": 62}
+    for key in ("turtles_pro", "turtles_le"):
+        m = json.load(open(os.path.join(VPX, key + ".vpxmap.json"), encoding="utf-8"))
+        retro = m["retrofit_lights"]["lights"]
+        assert {k: retro[k]["leds"] for k in want} == {k: [[8, i]] for k, i in want.items()}
+        assert not any("TURTLE MICHEALANGELO" in s for s in m["unmapped"]["stern_leds_without_light"])
+        # front (Michelangelo, by the player) to back: the sign rises, so does each glow
+        ys = [retro[k]["at"][1] for k in want]
+        halos = [retro[k]["fields"]["BHHI"] for k in want]
+        assert ys == sorted(ys, reverse=True) and halos == sorted(halos)
+        lamps = "\n".join(P.gen_lamp_lines(m))
+        for k, i in want.items():
+            assert "NFadeL %d, %s" % (1800 + i, k) in lamps
+
+    def light(name):
+        return struct.pack("<i", 7) + _rec("VCEN", struct.pack("<ff", 835, 921)) + \
+            _rec("RADI", struct.pack("<f", 50)) + _rec("COLR", struct.pack("<I", 0xFFFFFF)) + \
+            _rec("BWTH", struct.pack("<f", 10)) + _rec("BHHI", struct.pack("<f", 56)) + \
+            _rec("NAME", vpxfile.wide(name)) + _rec("ENDB", b"")
+
+    class Table:
+        items = [light("l58a"), light("flasher16b")]
+        item_info = staticmethod(vpxfile.VpxTable.item_info)
+    m = {"retrofit_lights": {"clone": "l58a", "lights": {
+        "PadTurtleLeonardo": {"leds": [[8, 62]], "clone": "flasher16b", "at": [889, 868],
+                              "fields": {"BHHI": 213.0, "RADI": 40.0, "COLR": 0xFF6C2A}},
+        "PL_PLAIN": {"leds": [[9, 26]], "at": [381, 678]}}}}
+    leo, plain = P.retrofit_items(Table, m)
+    assert vpxfile.VpxTable.item_info(leo) == ("Light", "PadTurtleLeonardo", (889, 868))
+    f = {tag: pl for tag, pl, _ in vpxfile.biff_records(leo, 4)}
+    assert struct.unpack("<f", f["BHHI"])[0] == 213 and struct.unpack("<f", f["RADI"])[0] == 40
+    assert f["COLR"][:3] == bytes((0x2A, 0x6C, 0xFF))              # #2a6cff, a COLORREF
+    g = {tag: pl for tag, pl, _ in vpxfile.biff_records(plain, 4)}
+    assert struct.unpack("<f", g["BHHI"])[0] == 56                  # no fields: the clone's own look

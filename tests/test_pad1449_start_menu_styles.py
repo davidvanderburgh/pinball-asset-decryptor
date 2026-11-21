@@ -408,7 +408,7 @@ int main(void)
 }
 """)
     assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "10000"
-    assert "!smn.go_ms && (!smn.home_ms || smn.home_walk) && sty_menu_kind() != 0u" in R._lift(
+    assert "return !smn.go_ms && (!smn.home_ms || smn.home_walk);" in R._lift(
         src, "static int sty_menu_owns_action(void)\n{")
     # round 6 (DoomWalrus666: the game's reset - the left flipper with Start - brings the Home Team screen with the mode
     # list under it): walking the mode list after the hold gives Action on a mode back to the step
@@ -421,7 +421,7 @@ int main(void)
     assert "smn.go_ms != 0," in held and "smn.home_ms != 0," not in held
     assert "smn.home_ms = 0;" in held and "smn.act = 1;" in held
     edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
-    assert edge.index("smn.home_ms && !smn.home_walk && !smn.go_ms && sty_menu_kind() != 0u") < edge.index("sty_menu_owns_action()")
+    assert edge.index("!smn.ov && smn.home_ms && !smn.home_walk && !smn.go_ms && sty_menu_kind() != 0u") < edge.index("sty_menu_owns_action()")
     assert "sty_home_tick();" in R._lift(src, "static void coop_tick(void)\n{")
     # a game begun with the game's own Action (the Home Team screen's) plays NORMAL: no version card at ball 1
     norm = R._lift(src, "static int sty_default_normal(int preset, int menu_steps)")
@@ -430,3 +430,39 @@ int main(void) { printf("%d%d%d\n", sty_default_normal(0, 1), sty_default_normal
 """
     assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "100"
     assert "sty_default_normal(sty.preset, smn.frame_ms != 0)" in R._lift(src, "static void sty_begin(unsigned kind)\n{")
+
+
+def test_round7_action_follows_the_games_home_team_overlay(tmp_path):
+    """PAD-1449 round 7 (DoomWalrus666, on v1.561.1: "other times the action button does nothing on the home team
+    screen, and sometimes the version options do not appear"): the game's NetLoginOverlay state, not a guess"""
+    src = _src()
+    code = "#include <stdio.h>
+#define STY_OV_PLAIN 1
+#define STY_OV_LOGIN 2
+#define STY_OV_MODES 3
+#define STY_OV_START 4
+" +         R._lift(src, "static int sty_overlay_kind(unsigned state, unsigned sub)") + r"""
+int main(void)
+{
+    /* plain menu; Home Team roster (log-in, profile pick, dialog); its game-mode select (6/4, 4/4); a prompt
+     * before it (6/3); PRESS ACTION TO START GAME (5/5); attract; Insider boxes; unknown */
+    printf("%d %d%d%d %d%d %d %d %d %d %d
+", sty_overlay_kind(1, 4), sty_overlay_kind(5, 0), sty_overlay_kind(5, 1),
+           sty_overlay_kind(5, 6), sty_overlay_kind(6, 4), sty_overlay_kind(4, 4), sty_overlay_kind(6, 3),
+           sty_overlay_kind(5, 5), sty_overlay_kind(2, 0), sty_overlay_kind(3, 0), sty_overlay_kind(9, 0));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "1 222 33 2 4 2 2 0"
+    owns = R._lift(src, "static int sty_menu_owns_action(void)
+{")
+    assert "if (smn.ov == STY_OV_MODES) return !smn.open || smn.shaping;" in owns
+    assert "if (smn.ov) return smn.ov == STY_OV_PLAIN && !smn.go_ms;" in owns
+    edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
+    assert edge.index("smn.ov == STY_OV_START") < edge.index("sty_menu_owns_action()")
+    assert "smn.ov == STY_OV_MODES && smn.open && !smn.shaping" in edge
+    assert "if (smn.ov) {" in R._lift(src, "static void sty_home_tick(void)")
+    read = R._lift(src, "static void sty_overlay_read(void)")
+    assert "smn.open && !smn.act" in read
+    hook = R._lift(src, "static void team_menu_frame(pm_reg *r)")
+    assert hook.index("sty_overlay_read();") < hook.index("sty_menu_walk(&r[breg]")

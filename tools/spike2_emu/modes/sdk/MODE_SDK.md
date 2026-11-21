@@ -6841,6 +6841,19 @@ alone began the game. The step is now the menu's own and the game start never wa
   login or GAME MODE SELECT walks no mode) gives Action on a mode back to the step, and before that `sty_menu_edge`
   notes the Action (`smn.hold_ms`) so a game it begins from a mode entry is held back (`sty_menu_held`, only a Start on
   the menu - `go` - lets it through) and the step opens on it.
+- Round 7 (DoomWalrus666, on v1.561.1: "other times the action button does nothing on the home team screen, and
+  sometimes the version options do not appear"; his Home Team profile picker ignored Action): rounds 5/6 guessed the
+  Home Team screen from the left flipper, wrong both ways (Start brings it too; a walk outlived it). The game says it:
+  its `NetLoginOverlay` (the same on all 12 titles with `comp_menu_frame`) has a state word (`value
+  comp_menu_overlay_state`, singleton + 0x9c: 1 the plain menu, 2 attract, 3 Insider player boxes, 4 = 3 + its
+  game-mode select, 5 the Home Team roster, 6 = 5 + its game-mode select; forced to 1 each frame with no network) and a
+  sub-state word (`comp_menu_overlay_sub`, + 0x4c: 4 the game-mode select is up, 5 PRESS ACTION TO START GAME). Both
+  keep their values after the menu, so `sty_overlay_read` reads them at the menu's frame (`team_menu_frame`) into
+  `smn.ov` (`sty_overlay_kind`). On the plain menu Action on a mode is the step's as before; on the overlay's own
+  screens (logins, roster, profile picker, dialogs) it is the game's; in its game-mode select the Action that opens
+  the step is kept from the game and the one that takes the style reaches it too - Action there takes the mode and goes
+  back to the roster (it begins no game); at PRESS ACTION TO START GAME Action keeps the pick as Start does
+  (`sty_menu_go`). A port without the two values keeps rounds 5/6's left-flipper guess.
 - With no step up the entry's line says the style taken and START TO PLAY, or its name and ACTION TO CHOOSE
   (`sty_menu_rest_words`); leaving the entry forgets the choice.
 - Start on the live menu (`sty_menu_go`) keeps what the line says - the style taken, the one shown while a step is up,

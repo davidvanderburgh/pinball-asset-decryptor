@@ -1795,15 +1795,16 @@ function GameFills({ p, proven = true }) {
 const TRY_TIP = { head: "Show it with", lines: [
   "The machine never shows this box's own words: the game writes its own in as it plays. Pick one of the game's lines (or type any words) to see it here as the machine would, laid out by this box's alignment and its Shrink to fit.",
   "Only the preview changes: nothing is written to the card, and other boxes keep their own words.",
-  ["Drop-down", "pick one of the game's lines; the box starts on the first"] ] };
+  ["Drop-down", "pick one of the game's lines; the box starts on the first when it reads like the box's own words, else on its own words"] ] };
 function TryWords({ id, t }) {
   const [v, setV] = useState(t.words || "");
   useEffect(() => setV(t.words || ""), [id, t.words]);
   const go = (w) => { if ((w || "").trim() !== (t.words || "")) call("text_scenes.tree_try_words", id, (w || "").trim() || null); };
   // Simon (2026-11-20): "'its own words' is actually a drop down - make that obvious and not something that just
   // appears on a mouse over" and "Keep your method, remove the old one" - the button's list only (no browser
-  // list on the box), the game's lines alone: the stand-in ("Inactive Player") is never shown, the box starts on the
-  // first line (text_scenes_tree._tree_tries)
+  // list on the box), the game's lines alone: the stand-in ("Inactive Player") is never listed; the box starts on the
+  // first line when it reads like the stand-in, else on the stand-in (PAD-1494: MATCH is not MATCH AWARD;
+  // text_scenes_tree._tree_tries)
   const opts = t.options || [];
   const menu = (e) => openMenu(e.currentTarget, [
     { header: opts.length ? "The game's lines" : "No line of the game's found for it" },

@@ -1939,23 +1939,31 @@ class B2SHost:
                 self.why = "B2S.Server could not be reached: %s" % exc
                 log(self.why)
                 return
-        failed = False
+        failed = set()
         while True:
             item = self._q.get()
             if item is None:
                 break
+            call, args = item
             try:
-                b2s.B2SSetIllumination(*item)
+                getattr(b2s, call)(*args)
                 self.sent += 1
             except Exception as exc:                        # noqa: BLE001
-                if not failed:
-                    log("B2SSetIllumination%r failed: %s" % (item, exc))
-                failed = True
+                if call not in failed:
+                    log("%s%r failed: %s" % (call, args, exc))
+                failed.add(call)
         b2s = None
 
     def set(self, name, value):
         if self.up:
-            self._q.put((str(name), int(value)))
+            self._q.put(("B2SSetIllumination", (str(name), int(value))))
+
+    def data(self, number, value):
+        """A DOF E event through B2S.Server (PAD-1480): B2SSetData with a
+        number is what controller.vbs's own DOF sub sends, and B2S.Server's
+        DOF plugin takes it as E<number>."""
+        if self.up:
+            self._q.put(("B2SSetData", (int(number), int(value))))
 
     def finish(self):
         if self.up:
@@ -2128,17 +2136,37 @@ class Bridge:
         for n, leds in m.dof_flashers.items():
             level = max(self._led_level(data, nd, ix) for nd, ix in leds)
             self._dof_set("S", n, level if level >= LAMP_ON else 0)
-        # PAD-1304: the cabinet's buttons as the E events the kit names
+        for n, v in self._cab_events(data):
+            self._dof_set("E", n, v)
+
+    def _cab_events(self, data):
+        """[(E number, value)] of the cabinet's own DOF events: the buttons'
+        LEDs (PAD-1304) and the machine's shaker motor, on while the game
+        drives it (PAD-1460; the board stops a timed shake itself)."""
+        out = []
         for key, n in (("start", self.cab["dof_start"]), ("lockdown", self.cab["dof_lockdown"])):
             leds = self.cab_leds.get(key)
             if n and leds:
                 level = max(self._led_level(data, nd, ix) for nd, ix in leds)
-                self._dof_set("E", n, level if level >= LAMP_ON else 0)
-        # PAD-1460: the machine's shaker motor as the kit's DOF shaker event,
-        # on while the game drives it (the board stops a timed shake itself)
+                out.append((n, level if level >= LAMP_ON else 0))
         n = self.cab["dof_shaker"]
         if n and self.cab_shaker:
-            self._dof_set("E", n, 1 if self.sol_state.get(self._sol_num(self.cab_shaker)) else 0)
+            out.append((n, 1 if self.sol_state.get(self._sol_num(self.cab_shaker)) else 0))
+        return out
+
+    def _poll_b2s_dof(self, data):
+        """The cabinet's E events through B2S.Server when PAD hosts no DOF of
+        its own (PAD-1480): an original table PAD drives (vpxshadow) keeps the
+        DOF its controller.vbs started inside B2S.Server, and Mike St P's Jaws
+        shaker never reached it."""
+        for n, v in self._cab_events(data):
+            if self._b2s_dof.get(n) != v:
+                if not self._b2s_dof:
+                    log("DOF: the cabinet's E events (start E%s, lockdown E%s, shaker E%s) go to"
+                        " the DOF in B2S.Server" % (self.cab["dof_start"] or "-", self.cab["dof_lockdown"]
+                                                    or "-", self.cab["dof_shaker"] or "-"))
+                self._b2s_dof[n] = v
+                self.b2s.data(n, v)
 
     def b2s_attach(self, obj, direct=False):
         """PADSPIKE2.vbs's B2S.Server, once it runs (PAD-1304). A second
@@ -2151,6 +2179,7 @@ class Bridge:
             self.b2s = None
             return False
         self._b2s_state = {}
+        self._b2s_dof = {}
         self._b2s_gi_seen = False
         log("B2S.Server handed over; BACKBOX GI bulbs for %s: %s"
             % (self.title, ", ".join(self.cab["gi_bulbs"].get(self.title, [])) or "none named"))
@@ -3382,6 +3411,8 @@ class Bridge:
                 self._poll_dof(data)
             if self.b2s and self.b2s.up:
                 self._poll_b2s(data)
+                if not (self.dof and self.dof.up):
+                    self._poll_b2s_dof(data)
 
     def _poll_once_s1(self):
         """The Spike 1 rig's block (s1bridge), or the Spooky board's in the

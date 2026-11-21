@@ -522,3 +522,11 @@ site coil_off              0x004b0430 0xe3510008 0xe1a02001
 data sw_struct             0x006a7840
 data coil_count            0x00657d10
 data coil_table            0x006384d8
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_start           0x002dfa5c 0xe92d47f0 0xe2508000   # show_start(n) -> the show's record, or 0
+site show_stop_number     0x001c34f0 0xe92d4070 0xe3026a90   # (n): every show numbered n ends
+value show_count          237
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            45 47 56 75 82 88 89 91 93 94 152 179 216

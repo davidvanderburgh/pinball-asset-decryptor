@@ -214,7 +214,7 @@ export function stmtWords(b, ch = {}) {
       const s = ((ch.light || {}).shows || []).find((x) => x.key === b.show);
       return `Run the light show ${quote(s ? s.label : b.show)}`;
     }
-    case "game_show": return `Play the game's light show ${b.name || "?"}`;
+    case "game_show": return `Play the game's light show ${/^#\d+$/.test(b.name || "") ? b.name.slice(1) : b.name || "?"}`;
     case "log": return `Write ${quote(b.text)} in the log`;
     case "clip": return `Play the clip ${b.clip || "?"}`;
     case "sound": return `Play the sound ${b.sound || "?"}`;

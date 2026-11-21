@@ -404,3 +404,44 @@ def test_padspike2_hands_b2s_to_the_controller(tmp_path, pre, want):
     r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60, env=env)
     assert not r.stderr.strip(), r.stdout + r.stderr
     assert r.stdout.split() == want
+
+
+class FakeB2SData(FakeB2S):
+    def B2SSetData(self, number, value):
+        self.got.append(("E", number, value))
+
+
+def test_bridge_sends_the_shaker_through_b2s_without_a_dof_of_its_own(tmp_path):
+    """PAD-1480 (Mike St P: E192 mapped to the shaker, nothing on Jaws): an
+    original table PAD drives keeps its DOF inside B2S.Server, PAD hosts none,
+    so the cabinet's E events go to B2S.Server as B2SSetData (controller.vbs's
+    own DOF sub), each change once; with PAD's own DOF up they go there only."""
+    kit = padcabinet.update({}, dof_shaker=192, dof_start=190)
+    pc, b = _bridge(tmp_path, kit)
+    fake = FakeB2SData()
+    assert b.b2s_attach(fake, direct=True)
+    t = 100.0
+    b._poll_coils(_coil_data(pc, {}), t)
+    b._poll_b2s_dof(_data(pc, {}))
+    b._poll_coils(_coil_data(pc, {(1, 0): 1}), t + 0.01)    # the game shakes
+    b._poll_b2s_dof(_data(pc, {(1, 2): 255}))               # and lights start
+    b._poll_b2s_dof(_data(pc, {(1, 2): 255}))               # unchanged: nothing again
+    b._poll_coils(_coil_data(pc, {(1, 0): 1}), t + 5)       # the board ended it
+    b._poll_b2s_dof(_data(pc, {(1, 2): 255}))
+    b.b2s_finish()
+    assert fake.got == [("E", 190, 0), ("E", 192, 0), ("E", 190, 255), ("E", 192, 1), ("E", 192, 0)]
+    # nothing set: nothing sent through B2S either
+    pc, b = _bridge(tmp_path / "2", {})
+    fake = FakeB2SData()
+    b.b2s_attach(fake, direct=True)
+    b._poll_coils(_coil_data(pc, {}), t)
+    b._poll_coils(_coil_data(pc, {(1, 0): 1}), t + 0.01)
+    b._poll_b2s_dof(_data(pc, {(1, 2): 255}))
+    b.b2s_finish()
+    assert fake.got == []
+
+
+def test_poll_routes_cabinet_events_to_one_dof_only():
+    src = open(os.path.join(VPX, "padcontroller.py"), encoding="utf-8").read()
+    i = src.index("            if self.b2s and self.b2s.up:\n                self._poll_b2s(data)")
+    assert "if not (self.dof and self.dof.up):\n                    self._poll_b2s_dof(data)" in src[i:i + 200]

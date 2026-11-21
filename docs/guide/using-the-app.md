@@ -461,6 +461,7 @@ card image with every change since the extract, from every session.
   flashes one onto an SD card, or both in one go. It remembers your last
   ticks. Flashing erases the whole card.
 - **Send to machine** (Stern Spike 2 cards built with Remote access on; also a card on the Network tab) sends the changes to a machine over remote access, without taking the card out. A PAD build goes up as just what changed and the game restarts; any other image of the same layout is sent in full and the machine reboots. The machine's own data, dump and connectivity folders are never touched, and system files are replaced by copy and rename, never in place.
+- **Wi-Fi start-up** (Network tab, Stern Spike 2) makes a machine on a USB Wi-Fi adapter join your Wi-Fi at the first attempt when it starts, in place of the minutes of failed tries the shipped set-up can take. It is one settings file on the card; the network, password and band stay as they are.
 - **Building again** onto this app's own untouched build updates it in
   place, so only what changed is written.
 - **Picks made in another folder?** The warning names both folders and says

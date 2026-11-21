@@ -1174,8 +1174,10 @@ static void layers_end_lets_go(void)
     shield_let_go("the mode ended");
     shake_mode_ended();
 }
+static void show_owner_ended(const struct pm_mode *m);   /* PAD-1476, with the game's shows below */
 void pm_end(void)
 {
+    show_owner_ended(current);               /* PAD-1476: its show by number ends with it (its end show follows) */
     int was_taker = running && running == current;
     int li = layer_of(current);
     if (li >= 0) {                           /* PAD-1401: a layer ends; the base and the other layers run on */
@@ -7298,7 +7300,8 @@ typedef pm_addr (*proc_create_fn)(unsigned, void (*)(void), unsigned);
 
 static int proc_alive(unsigned id)
 {
-    return (((unsigned (*)(unsigned))(unsigned long)fn("proc_exists"))(id) & 0xffu) != 0;
+    pm_addr f = fn("proc_exists");    /* PAD-1476: a port without it (older builds' shows by number) has no process of ours */
+    return f && (((unsigned (*)(unsigned))(unsigned long)f)(id) & 0xffu) != 0;
 }
 
 static struct held_coil *coil_named(const char *name)
@@ -9099,7 +9102,10 @@ static void building_tick(void)
 #define SHOWS_MAX 64
 #define SHOW_MAX_MS 20000ul
 static int shows_n;
-static struct { int n, call; unsigned long started, limit; } show_now;
+static int shownum_n;                                /* PAD-1476: how many numbers the game's show table has, 0 = off */
+/* n: the port's show (1..), or minus the game's own number (PAD-1476); call: 0 a process of ours, 1 by the port's
+ * call (PAD-642), 2 by the game's own starter and number (PAD-1476) */
+static struct { int n, call; unsigned long started, limit; const struct pm_mode *owner; } show_now;
 static unsigned long ball_end_at;                    /* when the last ball ended (on_ball_end), 0 = not yet */
 
 int pm_game_shows(void)
@@ -9109,8 +9115,8 @@ int pm_game_shows(void)
 
 int pm_game_show_playing(void)
 {
-    if (!(can & PM_CAN_GAME_SHOWS)) return 0;
     if (show_now.n && show_now.call) return 1;          /* PAD-642: a called show plays until its length is up */
+    if (!(can & PM_CAN_GAME_SHOWS)) return 0;
     return proc_alive((unsigned)pm_port_value("show_proc", 0));
 }
 
@@ -9121,6 +9127,12 @@ int pm_game_show_named(const char *name)
     char key[24];
     const char *t;
     int n, k;
+    if (name && name[0] == '#') {                       /* PAD-1476: "#211", the game's own number for it */
+        for (n = 0, k = 1; name[k] >= '0' && name[k] <= '9' && n < 100000; k++) n = n * 10 + (name[k] - '0');
+        if (k > 1 && !name[k]) return pm_game_show_number(n);
+        say("show \"%s\": not a number of the game's", name);
+        return 0;
+    }
     if (!(can & PM_CAN_GAME_SHOWS) || !name || !*name) return 0;
     for (n = 1; n <= shows_n; n++) {
         pm_snprintf(key, sizeof key, "show_name_%d", n);
@@ -9152,13 +9164,19 @@ static void show_call_stop(int n)
 static void show_kill(const char *why)
 {
     unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    if (show_now.n && show_now.call == 2) {             /* PAD-1476: the game's "stop every show with this number" */
+        ((unsigned (*)(unsigned))(unsigned long)fn("show_stop_number"))((unsigned)-show_now.n);
+        say("show #%d: stopped (%s) after %lu ms", -show_now.n, why, pm_ms() - show_now.started);
+        show_now.n = 0;
+        return;
+    }
     if (show_now.n && show_now.call) {
         show_call_stop(show_now.n);
         say("show %d: stopped (%s) after %lu ms", show_now.n, why, pm_ms() - show_now.started);
         show_now.n = 0;
         return;
     }
-    if (!proc_alive(id)) return;
+    if (!proc_alive(id) || !fn("event_cancel")) return;
     ((unsigned (*)(unsigned, unsigned))(unsigned long)fn("event_cancel"))(id, 0xffffu);
     say("show %d: stopped (%s) after %lu ms", show_now.n, why, pm_ms() - show_now.started);
     show_now.n = 0;
@@ -9166,7 +9184,7 @@ static void show_kill(const char *why)
 
 void pm_game_show_stop(void)
 {
-    if (can & PM_CAN_GAME_SHOWS) show_kill("asked");
+    if ((can & PM_CAN_GAME_SHOWS) || shownum_n) show_kill("asked");
 }
 
 /* every tick: no show of ours plays longer than its show_secs (SHOW_MAX_MS at most) */
@@ -9272,6 +9290,131 @@ int pm_game_show(int n)
     if (show_now.limit > SHOW_MAX_MS) show_now.limit = SHOW_MAX_MS;
     say("show %d (%s): the game's own light show, playing as process %u", n, name ? name : "unnamed", id);
     return 1;
+}
+
+/* PAD-1476: one of the game's light shows by the game's OWN number for it - the numbers its own modes start them by
+ * (the Modes tab reads them off the program: clip_shows.py, PAD-1475; "Hedorah's light shows"). The game's show
+ * starter (`site show_start`, show_start(n): looks n up in its table of `value show_count` rows, starts that row's
+ * body as a show process of its own, flagged as a show and numbered n, and hands back its record, or 0 when a show
+ * of a higher priority is playing) starts it; the game's "stop every show with this number" (`site
+ * show_stop_number`, found off the starter on every build: port_show_numbers.py) ends it. So its timing, colours,
+ * layering and clean-up are all the game's, as when its own mode plays it. A number at or past the table's end is
+ * the game's own error, so it is refused here. *limit_ms*: it is stopped then if it still plays (a mode's running
+ * show goes on until stopped). *who*: for the log. */
+static int show_number_start(int num, unsigned long limit_ms, const char *who)
+{
+    void *rec = 0;
+    if (!shownum_n) {
+        say("show #%d: not played - the port has no show_start / show_stop_number / show_count lines", num);
+        return 0;
+    }
+    if (num < 1 || num >= shownum_n) {
+        say("show #%d: not played - the game's numbers are 1-%d", num, shownum_n - 1);
+        return 0;
+    }
+    if (show_now.n || proc_alive((unsigned)pm_port_value("show_proc", 0))) show_kill("another show begins");
+    OG_SELF(rec = ((void *(*)(unsigned))(unsigned long)fn("show_start"))((unsigned)num));   /* ours, not the game's */
+    if (!rec) {
+        say("show #%d: not played - the game would not start it now (a show of its own of a higher priority plays)",
+            num);
+        return 0;
+    }
+    show_now.n = -num;
+    show_now.call = 2;
+    show_now.owner = 0;
+    show_now.started = pm_ms();
+    show_now.limit = limit_ms ? limit_ms : SHOW_MAX_MS;
+    say("show #%d: the game's own light show, started by its own number for %s", num, who);
+    return 1;
+}
+
+int pm_game_show_number(int num)
+{
+    if (!(pm_running() || (current && current == show_ended_by && pm_ms() - show_ended_ms < 2000ul)) ||
+        !pm_in_game()) {
+        say("show #%d: not played - only the running mode (or one in the first 2 s of its ending), in a game, "
+            "plays one", num);
+        return 0;
+    }
+    if (ball_end_at && pm_ms() - ball_end_at < 3000ul) {
+        say("show #%d: not played - the ball is ending, and the game stops every show of its own with it", num);
+        return 0;
+    }
+    if (!show_number_start(num, SHOW_MAX_MS, current && current->name ? current->name : "a mode")) return 0;
+    show_now.owner = current;
+    return 1;
+}
+
+/* PAD-1476: some of the game's shows run until stopped (a mode's own running show, Mechagodzilla Multiball's 259 on
+ * Godzilla LE 1.16: 20 s in the emulator, until replaced), so one a mode started ends as that mode does, not at the
+ * 20 s - its end show, played after pm_end, takes over from there */
+static void show_owner_ended(const struct pm_mode *m)
+{
+    if (m && show_now.n && show_now.call == 2 && show_now.owner == m) show_kill("its mode ended");
+}
+
+int pm_game_show_numbers(void)
+{
+    return shownum_n;
+}
+
+/* PAD-1476: the show reel - an emulator measurement, read like the trigger files (mode.start), inert without its
+ * file. /dump/showreel holds show numbers on one line; in a game each plays REEL_ON_MS by its number, REEL_GAP_MS
+ * apart, with a line as it goes on and off, so a sampler of the lights can tell which of the game's mode shows light
+ * the playfield on their own (Godzilla LE 1.16: Hedorah's 211 lights Hedorah's shots only while Hedorah runs, its
+ * 210 the whole playfield) - port_show_numbers.py writes what it saw as the port's `text show_lit`. */
+#define REEL_MAX 128
+#define REEL_ON_MS 3000ul
+#define REEL_GAP_MS 3000ul
+static unsigned short reel_num[REEL_MAX];
+static int reel_n, reel_i, reel_on;
+static unsigned long reel_at, reel_looked;
+
+static void reel_tick(void)
+{
+    char buf[800];
+    const char *p;
+    unsigned long now = pm_ms();
+    if (!reel_n) {
+        if (!shownum_n || now - reel_looked < 1000ul) return;
+        reel_looked = now;
+        if (!pm_in_game() || !pm_trigger_text("showreel", buf, sizeof buf)) return;
+        for (p = buf; *p && reel_n < REEL_MAX; ) {
+            unsigned v = 0;
+            while (*p == ' ' || *p == ',') p++;
+            if (*p < '0' || *p > '9') break;
+            while (*p >= '0' && *p <= '9') v = v * 10 + (unsigned)(*p++ - '0');
+            if (v) reel_num[reel_n++] = (unsigned short)v;
+        }
+        reel_i = reel_on = 0;
+        reel_at = now;
+        say("show reel: %d of the game's shows, %lu ms each, %lu ms apart", reel_n, REEL_ON_MS, REEL_GAP_MS);
+        return;
+    }
+    if (!reel_on && now - reel_at >= REEL_GAP_MS) {
+        say("show reel: #%u on (%d of %d)%s", reel_num[reel_i], reel_i + 1, reel_n,
+            show_number_start(reel_num[reel_i], REEL_ON_MS + 1000ul, "the show reel") ? "" : " - REFUSED");
+        reel_on = 1;
+        reel_at = now;
+    } else if (reel_on && now - reel_at >= REEL_ON_MS) {
+        if (show_now.call == 2 && show_now.n == -(int)reel_num[reel_i]) show_kill("the reel moves on");
+        say("show reel: #%u off", reel_num[reel_i]);
+        reel_on = 0;
+        reel_at = now;
+        if (++reel_i >= reel_n) {
+            reel_n = 0;
+            say("show reel: done");
+        }
+    }
+}
+
+static void shownum_arm(void)
+{
+    long n = pm_port_value("show_count", 0);
+    shownum_n = 0;
+    if (n < 2 || n > 4096 || !fn("show_start") || !fn("show_stop_number")) return;   /* none, or not this build's: silent */
+    shownum_n = (int)n;
+    say("game shows by number: the game's own 1-%d", shownum_n - 1);
 }
 
 static void shows_arm(void)
@@ -12010,6 +12153,7 @@ static void on_tick(pm_reg *r)
     scoop_tick();                             /* PAD-381: the scoop's wrap goes in on the first tick */
     building_tick();                          /* PAD-393: a put-back owed */
     shows_tick();                             /* PAD-411: no show of ours past its 20 s */
+    reel_tick();                              /* PAD-1476: the show reel's measurement (its file only) */
     wizards_tick();                           /* PAD-436: a mini-wizard's refused start, kept lit */
     launch_tick();                            /* PAD-643: a mode's challenge ball launched for the player */
     chg_pages_tick();                         /* PAD-663: a champion page cut short gives its entry back */
@@ -19583,6 +19727,8 @@ static struct {
     int lang_asks;                       /* the game's PLAYER LANGUAGE SELECT asks in this game (read at its start) */
     unsigned hold_adj;                   /* coop.cfg `intro_hold <id>`: TIMED PLUNGER, answered 0 while the ball is held */
     unsigned start_sw;                   /* coop.cfg `intro_start <id>`: the Start button, taken while ball 1 waits */
+    int show;                            /* PAD-1476: coop.cfg `intro_show <n>`: the game's light show n with it, 0 none */
+    int show_on;                         /* ... started for this intro, and not stopped yet */
     volatile unsigned long film_at;      /* pm_ms() | 1 when the game's start film was asked for as the intro; 0 none */
     char film_was[24];                   /* the game's own film it stands in for */
     int film_veto;                       /* the right flipper held through Start: its release is no language flip */
@@ -23179,8 +23325,27 @@ static int ci_join_cut(unsigned bus, unsigned long join_at, unsigned long now)
 #define CI_PRIO_PLAYING 255              /* over the game's "player added" 196 (flagged to steal) */
 static int ci_prio_lifted;
 
+/* PAD-1476: the intro's light show (coop.cfg `intro_show <n>`, one the game's own modes play, picked on the co-op
+ * intro's dialog): started with the intro, by the game's own number for it, and stopped as the intro ends - played,
+ * skipped, or the game over - or once it has played the intro's length; one that ends sooner is not started again */
+static void ci_show_start(void)
+{
+    ci.show_on = 0;
+    if (!ci.show) return;
+    ci.show_on = show_number_start(ci.show, ci.ms ? ci.ms + 500ul : SHOW_MAX_MS, "the co-op intro");
+    if (!ci.show_on) say("co-op intro: its light show %d not played (the line above says why)", ci.show);
+}
+
+static void ci_show_stop(const char *how)
+{
+    if (!ci.show_on) return;
+    ci.show_on = 0;
+    if (show_now.n == -ci.show && show_now.call == 2) show_kill(how);
+}
+
 static void ci_sound_start(unsigned long now)
 {
+    ci_show_start();
     if (!ci.request) return;
     if (pm_sound_active(ci.request)) pm_sound_stop(ci.request);
     ci.swap_until = now + (ci.sound_ms ? ci.sound_ms : ci.ms) + 1000ul;
@@ -23286,6 +23451,7 @@ static void ci_over(const char *how)
 {
     unsigned k;
     int t = ci.pick_who;
+    ci_show_stop("the co-op intro is over");                  /* PAD-1476 */
     ci.phase = CI_OFF;
     ci.film_veto = 0;                                         /* the next game's held Start is vetoed again */
     ci.pick_who = 0;
@@ -23312,6 +23478,7 @@ static void ci_played(const char *how)
     if (pm_clip_playing()) pm_clip_stop();
     ci.swap_until = 0;
     if (ci.request && pm_sound_active(ci.request)) pm_sound_stop(ci.request);
+    ci_show_stop("the co-op intro is over");                  /* PAD-1476 */
     for (k = 0; k < ci.n_music; k++)
         if (!pm_sound_active(ci.music[k])) {
             pm_sound(ci.music[k]);
@@ -24971,6 +25138,12 @@ static void coop_line(const char *s)
             for (ok = 0; coop_clip[n - 1][ok] && coop_clip[n - 1][ok] != ' ' && coop_clip[n - 1][ok] != '\r'; ok++) ;
             coop_clip[n - 1][ok] = 0;
         }
+        return;
+    }
+    if (str_starts(s, "intro_show ")) {                                   /* PAD-1476: the intro's light show */
+        p = s + 11;
+        ci.show = (int)number(&p, &ok);
+        if (!ok || ci.show < 1) ci.show = 0;
         return;
     }
     if (str_starts(s, "intro ")) {                                        /* PAD-1114: the intro's clip and length */
@@ -32016,6 +32189,7 @@ static void pad_mode_start(void)
     building_arm();                                 /* PAD-393: the Premium's building */
     shake_arm();                                    /* PAD-414: the shaker motor */
     shows_arm();                                    /* PAD-411: the game's own light shows */
+    shownum_arm();                                  /* PAD-1476: and any of them by the game's own number */
     wizards_arm();                                  /* PAD-436: the game's own mini-wizards */
     challenges_arm();                               /* PAD-615: the game's Challenge list */
     attract_arm();                                  /* PAD-782: the owner's attract items */

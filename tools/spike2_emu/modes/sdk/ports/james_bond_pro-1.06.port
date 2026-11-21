@@ -948,3 +948,9 @@ data ball_device_count    0x005f48c0
 # PAD-1464: the game's Start plays GLDFNGR_Intro1 in the TV, under the HUD (a mode's screens are drawn over it): no start
 # film for a menu to wait for
 text start_film_clips -
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+value show_count          534
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            76 77 115 116 150 151 153 156 160 161 169 170 172 173 174 176 204 206 209 210 211 213 215 217 237 238 239 240 241 242 248 249 270 274 275 276 277 292 299 305 311 317 323 329 335 339 343 344 345 346 348 351 359 362 363 364 370 373 375 380 383 384 385 392 395 396 397 398 403 408 416 436 446 454 455 458 459 462 463 470 471 474 476 480 481 491 493 496 498 501 504 507 508

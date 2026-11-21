@@ -762,6 +762,13 @@ int pm_game_show_named(const char *name);   /* the same by the port's name for i
 void pm_game_show_stop(void);
 int pm_game_show_playing(void);
 int pm_game_shows(void);
+/* PAD-1476: any of the game's light shows by the game's OWN number for it (the numbers its own modes start them by:
+ * the Modes tab lists them per mode), through its own show starter, stopped by its own "stop every show with this
+ * number" (`site show_start`, `site show_stop_number`, `value show_count`). The same limits as pm_game_show (the
+ * running mode, in a game, one at a time, not while the ball ends, 20 s at most); pm_game_show_named("#211") is
+ * the same. pm_game_show_numbers: how many numbers the game's table has (0 = not on this game). */
+int pm_game_show_number(int num);
+int pm_game_show_numbers(void);
 
 /* ---- the shaker (PAD-414, PAD-474; MODE_SDK.md "The shaker") ---------------------------------------
  * Godzilla Premium/LE can have a shaker motor in the cabinet (optional on a Premium, fitted on an LE), and so

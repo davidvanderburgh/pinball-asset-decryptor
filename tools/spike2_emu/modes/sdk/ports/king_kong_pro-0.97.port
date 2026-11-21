@@ -882,3 +882,10 @@ data ball_device_count    0x006c8398
 # PAD-1464: the game's Start plays Kong_Intro_Pod<N> over the whole glass on a surface of its own (not the bank's),
 # about 22 s, until it asks for Kong_Island_Bg_02_SepiaFx there
 text start_film_clips Kong_Intro_*
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x0041022c 0xe92d4070 0xe30f6b50   # (n): every show numbered n ends
+value show_count          319
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            162 190 261 262 265 272 273 288

@@ -897,3 +897,10 @@ site ball_device_keep     0x003cc74c 0xe30a3dbc 0xe340305a
 data ball_devices         0x008243b8
 text ball_device_names  TRUNK_LOCKUP GARAGE_LOCKUP HOUSE_LOCKUP CELLAR_LOCKUP CRYPT_LOCKUP
 data ball_device_count    0x005aadbc
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x0042e940 0xe92d4070 0xe30466f8   # (n): every show numbered n ends
+value show_count          536
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            72 75 80 83 94 162 166 168 172 173 188 190 192 193 194 195 205 206 207 208 218 219 220 221 231 232 233 238 241 242 243 244 254 256 257 258 261 264 267 270 271 272 274 278 281 283 284 285 288 289 298 299 300 308 310 311 312 323 327 330 334 336 337 338 342 344 347 348 349 350 355 356 358 360 361 364 366 368 369 370 379 380 381 391 394 398 399 403 409 412 413 434 440 442 443 447 461 462 463 470 479 481 490 492 499

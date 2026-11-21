@@ -8536,3 +8536,16 @@ def test_jaws_real_table_flipper_gap_is_open():
         if flag(top, "CLDR") or flag(top, "RVIS") or flag(top, "TVIS") or flag(top, "ISBV"):
             post.append(name)
     assert post == []
+
+
+def test_shadow_hands_its_b2s_server_to_the_controller():
+    # PAD-1480: an original table's DOF runs inside the B2S.Server LoadEM made;
+    # PAD.Controller gets it before the run starts (the shaker's E event, the
+    # BACKBOX GI bulbs) and lets go of it before the table stops it
+    vs = pytest.importorskip("vpxshadow")
+    out, rep = vs.patch(B2S_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    init = out[out.index("\nSub Table1_Init\n"):]
+    assert init.index('CreateObject("PAD.Controller")') < init.index("\tIf IsObject(PadB2S) Then Controller.PadB2S PadB2S") \
+        < init.index("\tController.Run GetPlayerHWnd")
+    ex = out[out.index("\nSub Table1_Exit\n"):]
+    assert ex.index("\tController.PadB2SFinish") < ex.index("PadB2S.Stop")

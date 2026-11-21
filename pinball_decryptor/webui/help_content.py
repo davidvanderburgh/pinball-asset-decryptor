@@ -1528,11 +1528,12 @@ HELP_CONTENT = {
     # PR #38 review: what the card does on the owner's home network (webui/tabs/network.py)
     "Network": [
         ("What it's for", [
-            "Two things for a machine connected to your home network, by the same cable or Wi-Fi Insider "
-            "Connected uses: the **score feed**, which sends each game's final scores to a computer of yours, and "
-            "**remote access**, which lets a computer of yours log in to the machine. Tick what you want, then "
-            "Write the card.",
-            "Neither changes a score: a card with only these stays on Insider Connected.",
+            "Three things for a machine connected to your home network, by the same cable or Wi-Fi Insider "
+            "Connected uses: the **score feed**, which sends each game's final scores to a computer of yours, "
+            "**remote access**, which lets a computer of yours log in to the machine, and **Wi-Fi**, which makes "
+            "a machine on Wi-Fi join your network at the first attempt and, with a second tick, on 5 GHz. Tick "
+            "what you want, then Write the card.",
+            "None of them changes a score: a card with only these stays on Insider Connected.",
         ]),
         ("Score feed", [
             "**Score feed** has the machine send each game's final scores to a server of "
@@ -1592,6 +1593,71 @@ HELP_CONTENT = {
             "box, ready to use again.\n"
             "- The setting and keys stay in this project: they never go into a mod pack you export. **Reset…** "
             "with **Remote access** clears them and goes back to the source card's setting.",
+        ]),
+        ("Wi-Fi start-up", [
+            "For a Stern Spike 2 machine that uses a USB Wi-Fi adapter. **Use the reliable Wi-Fi start-up** "
+            "makes the machine join your Wi-Fi at the first attempt when it is switched on.",
+            "As shipped, the machine starts its Wi-Fi program, `wpa_supplicant`, with the old `wext` driver "
+            "interface (`-D wext`). With it, joining often fails and is tried again, so the machine can take "
+            "minutes to appear on your network, or not appear at all until it is switched off and on. The option "
+            "starts it with `-D nl80211,wext`: the current Linux Wi-Fi interface, `nl80211`, with `wext` kept as "
+            "the fallback for an adapter whose driver cannot do nl80211.\n\n"
+            "Exactly what goes on the card:\n\n"
+            "| | |\n"
+            "|---|---|\n"
+            "| File added | `/etc/wpa_supplicant/driver.wlan0` on the system partition (owner root, mode 644) |\n"
+            "| What it says | `nl80211,wext` |\n"
+            "| Read by | `/etc/network/if-pre-up.d/wpa-supplicant`, Stern's own start-up script, not changed |\n"
+            "| Not changed | the game, the Wi-Fi driver modules, `/etc/wpa_supplicant.conf` |\n\n"
+            "- It does not change which Wi-Fi network the machine uses, its password or its band. A machine "
+            "still joins on 2.4 GHz where that is what it joined before.\n"
+            "- The Network tab lists these same details beside the option, with what the card you picked "
+            "has now.\n"
+            "- Tick it, then Write the card, or use Send to machine on a machine that already has remote "
+            "access. Writing a card without it puts the machine back as shipped.\n"
+            "- A card whose system does not have the start-up step this option uses says so here and is left "
+            "as it is.",
+            "Measured on a Godzilla LE with an AC1200 adapter (RTL8822BU): with `wext`, nine tries of nine "
+            "to join failed on one access point; with `nl80211` the machine joined at the first try, 14 to 15 "
+            "seconds after `wpa_supplicant` started, on three starts of three.",
+        ]),
+        ("5 GHz", [
+            "**Also use the newer adapter driver** is for a machine with an AC1200 USB Wi-Fi adapter "
+            "(Realtek RTL8822BU). The driver the machine ships for it, a 2018 build, joins a current router's "
+            "5 GHz signal and is dropped the same moment, so the machine only ever works on 2.4 GHz. A 2019 build "
+            "of the same Realtek driver holds a 5 GHz connection.",
+            "Exactly what goes on the card:\n\n"
+            "| | |\n"
+            "|---|---|\n"
+            "| File replaced | `/usr/local/spike/8812bu.ko`: Realtek rtl88x2bu v5.3.1 (April 2018) becomes "
+            "v5.8.7.1 (November 2019), built from Realtek's unmodified open-source code for the card's own kernel |\n"
+            "| Files added | `/usr/local/bin/pad-wifi-band`, `/etc/init.d/padwifi` and its start-up link "
+            "`/etc/rc5.d/S31padwifi` |\n"
+            "| What they do | once the machine has joined on 2.4 GHz, a short script asks `wpa_supplicant` to move "
+            "to the same network's 5 GHz access point (`wpa_cli roam`) when one is in reach |\n"
+            "| Menu wording | the game's network menus stop saying \"2.4GHz\" |\n\n"
+            "- It needs **Use the reliable Wi-Fi start-up**, and goes off with it.\n"
+            "- Nothing is forced. If the move to 5 GHz fails, the machine stays on 2.4 GHz; after three failed "
+            "moves the script stops asking until the machine is next switched on.\n"
+            "- A driver fits one version of the machine's system only. A card with another version says so here "
+            "and keeps its own driver.\n"
+            "- Unticking it and writing the card puts Stern's driver back, from the original card image, and "
+            "takes the added files off.\n"
+            "- A machine with a different Wi-Fi adapter is not affected: its adapter uses another driver.",
+            "Measured on a Godzilla LE with an eero router: the shipped driver was dropped on 12 tries of 12 to "
+            "join 5 GHz; the newer one joined and held, 80 MHz wide. The driver's source and how it was built are "
+            "in the app's `resources/wifi` folder.",
+        ]),
+        ("How fast Send to machine is", [
+            "What holds a Send back is the machine's own processor, not your Wi-Fi: everything sent over the "
+            "encrypted connection has to be decrypted on the machine's small two-core board, which tops out at "
+            "about 3 to 4 MB a second on either band.",
+            "So on your home network the app sends a Send's big writes over plain connections straight to its "
+            "helper on the machine, and keeps everything else on the encrypted one. Every piece is signed with a "
+            "key that went over the encrypted connection and is checked on the machine before it is written. Game "
+            "files are not secrets; nothing that is (the login, the keys) leaves the encrypted connection.\n\n"
+            "- On a Godzilla on 5 GHz this ran at 7 to 13 MB a second, against 3 to 4 the encrypted way.\n"
+            "- To keep everything encrypted, start the app with the environment variable `PAD_SEND_RAW=0`.",
         ]),
     ],
     "Modes": [],

@@ -242,3 +242,193 @@ def test_send_pipeline_reports_its_summary_or_why_not(monkeypatch):
     remote_send.SendPipeline('card.raw', '10.0.0.5', lambda *a, **k: None, lambda *a: None, lambda *a: None,
                              lambda ok, m: done.append((ok, m)), connect_fn=no).run()
     assert done == [(False, "Couldn't reach 10.0.0.5")]
+
+
+def test_wifi_start_up_choice_is_saved_shown_and_listed_on_write(tmp_path, monkeypatch):
+    """PAD-1467: the Network tab's Wi-Fi start-up switch is the project's ``extras.wifi``; a choice that differs
+    from the source card is a row on the Write tab, and Revert all takes it back."""
+    from pinball_decryptor.core import wifi_card
+    from tests.test_webui_write import wait_for
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        st = w.state('network')
+        assert st['wifi_offered'] and not st['wifi_supported'] and st['wifi_reason']      # b'card' is no card
+        assert w.call('network.configure_wifi', True, str(project)) is False
+        assert card_extras.load_wifi(str(project)) is None
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda *a, **kw: dict(supported=True, reason='', enabled=False))
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert st['wifi_supported'] and st['wifi_enabled'] is False and st['wifi_error'] == ''
+        assert w.call('network.configure_wifi', True, str(tmp_path / 'elsewhere')) is False
+        w.run(svc.on_running, True, 'write')
+        assert w.call('network.configure_wifi', True, str(project)) is False
+        w.run(svc.on_running, False, 'write')
+        assert w.call('network.configure_wifi', True, str(project)) is True
+        assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': False}
+        assert w.state('network')['wifi_enabled'] is True
+        assert card_extras.load(str(project)) is None                    # remote access is its own setting
+        (project / '.checksums.md5').write_text('')
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        rows = [row['file'] for row in w.state('write')['rows']]
+        assert rows == ['Wi-Fi start-up — join at the first attempt']
+        # the same as the source card: nothing to write
+        w.call('ui.select_tab', 'network')
+        assert w.call('network.configure_wifi', False, str(project)) is True
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'] and w.state('write')['rows'] == [])
+        # Revert all forgets the choice
+        w.call('ui.select_tab', 'network')
+        assert w.call('network.configure_wifi', True, str(project)) is True
+        assert w.call('shellx.reset_open')
+        rows = w.state('shellx')['reset']['rows']
+        assert any(row['key'] == 'extras' and row['n'] == 1 for row in rows)
+        w.answers.extend(['yes', 'ok'])
+        assert w.call('shellx.reset_run', [row['key'] for row in rows])
+        assert wait_for(w, lambda: not w.window._running and w.state('network')['wifi_enabled'] is False)
+        assert card_extras.load_wifi(str(project)) is None
+
+
+def test_wifi_start_up_is_a_spike2_option():
+    from pinball_decryptor.core import wifi_card
+    with web_app(Path(__import__('tempfile').mkdtemp()), mfr='stern') as w:
+        w.window.current_mfr._era = 'spike3'
+        svc = w.window.service('network')
+        w.run(svc.on_show)
+        assert w.state('network')['wifi_offered'] is False
+        info = svc._inspect_wifi()
+        assert not info['supported'] and info['reason'] == wifi_card.NOT_SPIKE2 and not info['band5_supported']
+
+
+def test_wifi_start_up_says_exactly_what_it_changes(tmp_path, monkeypatch):
+    """David (PAD-1467): the option names the file, its contents, the script that reads it and the resulting
+    wpa_supplicant argument, and what the picked card has now."""
+    from pinball_decryptor.core import wifi_card
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda *a, **kw: dict(supported=True, reason='', enabled=False))
+        w.run(svc.on_show)
+        st = w.state('network')
+        rows = {r[0]: r[1] for r in st['wifi_details']}
+        assert rows['File added to the card'].startswith('/etc/wpa_supplicant/driver.wlan0')
+        assert rows['What the file says'] == 'nl80211,wext' == wifi_card.DRIVER.decode()
+        assert rows['Read by'].startswith('/etc/network/if-pre-up.d/wpa-supplicant')
+        assert rows['wpa_supplicant then starts with'].startswith('-D nl80211,wext') and '-D wext' in rows['wpa_supplicant then starts with']
+        assert '8812bu.ko' in rows['Not changed'] and 'To undo' in rows
+        assert st['wifi_now'] == '-D wext (as shipped)'
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda *a, **kw: dict(supported=True, reason='', enabled=True))
+        w.run(svc.on_show)
+        assert w.state('network')['wifi_now'].startswith('-D nl80211,wext')
+    js = (Path(wifi_card.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
+    assert 'Exactly what it changes on the card' in js and 'n.wifi_details' in js and 'n.wifi_now' in js
+
+
+def test_wifi_card_compares_each_step_from_stock_to_5ghz():
+    """PAD-1467: the card shows what each box gets you, stock to 5 GHz, in figures that were measured."""
+    from pinball_decryptor.core import wifi_card
+    assert len(wifi_card.COMPARE) == 3 and all(len(r) == len(wifi_card.COMPARE_HEAD) for r in wifi_card.COMPARE)
+    stock, start, band = wifi_card.COMPARE
+    assert '2.4 GHz' == stock[2] == start[2] and band[2].startswith('5 GHz')
+    assert 'first try' in start[1] and 'first try' in band[1] and 'first try' not in stock[1]
+    assert not any('not measured' in cell.lower() for row in wifi_card.COMPARE for cell in row)   # David: none of those
+    assert stock[3].startswith('At least') and start[3].startswith('At least')    # a floor: only encrypted was timed there
+    assert 'not timed' in wifi_card.COMPARE_NOTE
+    js = (Path(wifi_card.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
+    kinds = wifi_card.ADAPTERS
+    assert [r[1] for r in kinds] == ['2.4 GHz only', '2.4 GHz only', '2.4 GHz and 5 GHz']     # only the AC1200 has 5 GHz
+    assert all(len(r) == len(wifi_card.ADAPTER_HEAD) for r in kinds) and 'no 5 GHz radio' in kinds[0][3]
+    assert 'n.wifi_adapters' in js
+    assert 'What each option gets you' in js and 'n.wifi_compare' in js and 'net-wifi-yours' in js
+    # the panel is short: the long words sit behind disclosures (David: 'a wall of text')
+    panel = js[js.index('function WifiStartup'):js.index('<${Ways} n=${n} panel="wifi" />')]
+    shown = panel[:panel.index('How these were measured')]
+    assert shown.count('<span class="small muted">') == 3 and 'wpa_supplicant' not in shown   # a line a box, and the hint
+    assert max(len(cell) for row in wifi_card.COMPARE for cell in row) <= 32
+
+
+def test_5ghz_choice_needs_the_start_up_choice_and_a_card_with_the_right_kernel(tmp_path, monkeypatch):
+    """PAD-1467: the second Wi-Fi switch (newer adapter driver, 5 GHz) is saved beside the first, goes off with it,
+    is refused on a card whose kernel the bundled driver was not built for, and is its own row on the Write tab."""
+    from pinball_decryptor.core import wifi_card
+    from tests.test_webui_write import wait_for
+    state = dict(supported=True, reason='', enabled=False, band5=False, band5_supported=False,
+                 band5_reason=wifi_card.OTHER_KERNEL)
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda *a, **kw: dict(state))
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert st['wifi_supported'] and not st['wifi_band5_supported'] and st['wifi_band5_reason'] == wifi_card.OTHER_KERNEL
+        assert w.call('network.configure_wifi', True, str(project), True) is False
+        assert card_extras.load_wifi(str(project)) is None
+        state.update(band5_supported=True, band5_reason='')
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert st['wifi_band5_supported'] and st['wifi_band_now'].endswith('(as shipped)')
+        rows = {r[0]: r[1] for r in st['wifi_band_details']}
+        assert rows['File replaced on the card'].startswith('/usr/local/spike/8812bu.ko')
+        assert wifi_card.NEW_VERSION in rows['Driver with this option'] and wifi_card.KERNEL in rows['Driver with this option']
+        assert wifi_card.OLD_VERSION in rows['Driver as shipped'] and 'wpa_cli roam' in rows['What the added files do']
+        assert '/usr/local/bin/pad-wifi-band' in rows['Files added'] and '2.4GHz' in rows['Menu wording']
+        assert w.call('network.configure_wifi', True, str(project), True) is True
+        assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': True}
+        assert w.state('network')['wifi_band5'] is True
+        assert w.call('network.configure_wifi', True, str(project)) is True          # the first switch alone keeps it
+        assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': True}
+        (project / '.checksums.md5').write_text('')
+        w.call('ui.select_tab', 'write')
+        assert wait_for(w, lambda: not w.state('write')['scanning'])
+        assert [row['file'] for row in w.state('write')['rows']] == [
+            'Wi-Fi start-up — join at the first attempt', 'Wi-Fi adapter driver — newer driver, 5 GHz']
+        w.call('ui.select_tab', 'network')
+        assert w.call('network.configure_wifi', False, str(project)) is True         # off takes 5 GHz with it
+        assert card_extras.load_wifi(str(project)) == {'enabled': False, 'band5': False}
+        assert w.state('network')['wifi_band5'] is False
+    js = (Path(wifi_card.__file__).parents[1] / 'webui/static/js/tabs/network.js').read_text(encoding='utf-8')
+    assert 'n.wifi_band_details' in js and 'Also use the newer adapter driver' in js
+
+
+def test_the_wifi_and_buttons_boxes_need_no_card_image_and_no_project(tmp_path, monkeypatch):
+    """PAD-1467, David: "the checkboxes are grayed out because you need to select a card first? Why?"  A box can be
+    ticked with nothing picked: a build checks the card it builds from, the two direct routes check where they
+    write.  Only a card that WAS picked and cannot take the option greys it."""
+    from pinball_decryptor.core import pad_ssh_key, remote_buttons, wifi_card
+    with web_app(tmp_path, mfr='stern') as w:
+        w.window.current_mfr._era = 'spike2'
+        monkeypatch.setattr(pad_ssh_key, 'KEY_DIR', tmp_path / 'keys')
+        project = tmp_path / 'project'; project.mkdir()
+        w.run(w.window.write_assets_var.set, str(project))
+        svc = w.window.service('network')
+        w.run(svc.on_show)                                                    # a project, no card image picked
+        st = w.state('network')
+        assert st['wifi_supported'] and st['wifi_band5_supported'] and st['buttons_supported']
+        assert 'No card image is picked' in st['wifi_hint'] and not st['wifi_now'] and not st['buttons_now']
+        assert w.call('network.configure_wifi', True, str(project), True)
+        assert card_extras.load_wifi(str(project)) == {'enabled': True, 'band5': True}
+        assert w.call('network.configure_buttons', True, str(project))
+        assert card_extras.load_buttons(str(project)) == {'enabled': True}
+
+        # a card that was picked and cannot take it still greys the box, with its reason
+        image = tmp_path / 'source.raw'; image.write_bytes(b'card')
+        monkeypatch.setattr(wifi_card, 'inspect_image', lambda path, **k: dict(
+            supported=False, reason='This card has no Wi-Fi hook.', enabled=False))
+        monkeypatch.setattr(remote_buttons, 'inspect_image', lambda path, **k: dict(
+            supported=False, reason=remote_buttons.NOT_STOCK, enabled=False))
+        w.run(w.window.write_upd_var.set, str(image))
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert not st['wifi_supported'] and st['wifi_reason'] == 'This card has no Wi-Fi hook.'
+        assert not st['buttons_supported'] and not st['wifi_hint']
+
+        # no project at all: the ticks hold for the session, for the two direct buttons
+        w.run(w.window.write_upd_var.set, '')
+        w.run(w.window.write_assets_var.set, '')
+        svc._unsaved = {}
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert st['wifi_supported'] and not st['wifi_enabled'] and 'No project is open' in st['wifi_hint']
+        assert w.call('network.configure_wifi', True, '', True) and w.call('network.configure_buttons', True, '')
+        st = w.state('network')
+        assert st['wifi_enabled'] and st['wifi_band5'] and st['buttons_enabled']
+        assert svc._direct_options('wifi') == ({'enabled': True, 'band5': True}, None)
+        assert svc._direct_options('buttons') == (None, {'enabled': True})

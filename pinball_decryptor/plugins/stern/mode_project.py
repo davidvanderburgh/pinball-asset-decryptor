@@ -138,6 +138,10 @@ class TitleProfile:
     shake_max_ms: tuple = ()         # PAD-414: the game's own longest shake at strength 0..3 (`text shake_max_ms`)
     game_shows: tuple = ()           # PAD-418: ((name, kind, secs), ...) the game's own light shows a mode can play
     #                                  (the port's show_<n> lines, in number order; kind flashy / subdued / accent)
+    show_lit: tuple = None           # PAD-1476: the numbers seen lighting the playfield on their own (the show reel,
+    #                                  `text show_lit`); None = not measured on this build
+    show_numbers: int = 0            # PAD-1476: how many numbers the game's show table has, where the port can start
+    #                                  and stop any of them by it (a mode's "#211"); 0 = not on this build
     absent: tuple = ()               # PAD-420: HARDWARE_PARTS this machine does not have (machine_absent): the tab
     #                                  leaves their sections out rather than saying why they cannot be used
     game_wizards: tuple = ()         # PAD-436: ((name, film), ...) the game's own mini-wizards a mode can hand over
@@ -1615,9 +1619,60 @@ def _game_shows(port):
     return tuple(out)
 
 
+#: PAD-1476: the port lines that play any of the game's light shows by its own number (port_show_numbers.py)
+SHOW_NUMBER_SITES = ("show_start", "show_stop_number")
+
+
+def _show_numbers(port):
+    """PAD-1476: how many numbers the game's show table has (``value show_count``), where the port has its show
+    starter and its "stop every show with this number" too; else 0."""
+    if not port or not all(n in port["site"] for n in SHOW_NUMBER_SITES):
+        return 0
+    try:
+        n = int(port["value"].get("show_count", 0))
+    except (TypeError, ValueError):
+        return 0
+    return n if 1 < n <= 4096 else 0
+
+
+def _show_lit(port):
+    """PAD-1476: the show numbers the show reel saw light the playfield on their own (``text show_lit``, written by
+    port_show_numbers.py from an emulator run), or None where the build was not measured. Many of a game's mode shows
+    light only that mode's own shots, and only while it runs (Godzilla LE 1.16: Hedorah's 211 checks Hedorah is
+    running and stops at once otherwise), so a mode of the user's playing one would show nothing."""
+    if not port or "show_lit" not in port.get("text", {}):
+        return None
+    return tuple(sorted({int(w) for w in port["text"]["show_lit"].split("#")[0].split() if w.isdigit()}))
+
+
+def show_number(v):
+    """PAD-1476: the game's number of a show asked for by it (``"#211"`` -> 211), else 0 (a port's name, or none)."""
+    if isinstance(v, str) and len(v) > 1 and v[0] == "#" and v[1:].isdigit():
+        return int(v[1:])
+    return 0
+
+
+def show_words(v):
+    """A show as the page says it: a port's name as it is, a number as "light show 211"."""
+    n = show_number(v)
+    return "light show %d" % n if n else str(v)
+
+
+def game_show_ok(p, v):
+    """Whether the build of profile *p* can play the show *v*: one the port names (PAD-418), or one of the game's
+    numbers its table has (PAD-1476)."""
+    if not isinstance(v, str) or not v:
+        return False
+    n = show_number(v)
+    if n:
+        return 0 < n < int(getattr(p, "show_numbers", 0) or 0)
+    return v in {name for name, _k, _s in getattr(p, "game_shows", ())}
+
+
 def _shows_cannot(label, port=None):
-    """The ``cannot`` entry for the game's own light shows, or () when the port names at least one."""
-    if _game_shows(port):
+    """The ``cannot`` entry for the game's own light shows, or () when the port names at least one, or can play
+    them by the game's own number (PAD-1476)."""
+    if _game_shows(port) or _show_numbers(port):
         return ()
     return (("shows", "The app has not found %s's own light shows, so a mode of yours cannot play one at its "
                       "start or end." % label),)
@@ -3003,6 +3058,8 @@ def profile_from_port(path):
         shakes=_shakes(port),                                                # PAD-414
         shake_max_ms=_shake_max_ms(port),                                    # PAD-414
         game_shows=_game_shows(port),                        # PAD-418
+        show_numbers=_show_numbers(port),                    # PAD-1476
+        show_lit=_show_lit(port),
         # PAD-420: a machine part this build can do is never hidden, whatever MACHINE_HARDWARE read off its coils
         absent=tuple(a for a in machine_absent(game) if a in dict(cannot))
         + (("wizard",) if game in NO_GAME_WIZARDS and not _game_wizards(port) else ()),    # PAD-473: a port's win
@@ -3354,6 +3411,8 @@ try:
         magnet_shot=_magnet_shot_name(_port_115),
         held_coils=tuple((n, lab) for n, lab in _held_coils(_port_115) if (_key_115, n) in HELD_COILS_PROVEN),
         game_shows=_game_shows(_port_115),
+        show_numbers=_show_numbers(_port_115),               # PAD-1476
+        show_lit=_show_lit(_port_115),
         roster=_roster("godzilla_pro", _port_115) if not _roster_cannot(_key_115, _label_115, _port_115) else (),
         roster_counts=bool(_port_115 and "battle_stop" in _port_115["site"]),   # PAD-706: not on Pro 1.15
         places=_places(_port_115) if not _place_cannot(_key_115, _label_115, _port_115) else (),   # PAD-710
@@ -4519,7 +4578,7 @@ def port_words(old, new, p):
         gone.append("the building")
     if old.shakes and not new.shakes:
         gone.append("the shaker")
-    shows = [s for s in dict.fromkeys((old.show_start, old.show_end, old.show_hit))
+    shows = [show_words(s) for s in dict.fromkeys((old.show_start, old.show_end, old.show_hit))
              if isinstance(s, str) and s and s not in (new.show_start, new.show_end, new.show_hit)]
     if gone:
         words.append("%s does not hold %s, so %s left out there" % (
@@ -4618,10 +4677,11 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         have = {name for _n, name in getattr(p, "game_rules", ())}
         out.keep_rules = [r for r in out.keep_rules if r in have]
     if old_key != p.key:
-        # PAD-418: a light show is the game's own, asked for by name: one the other game does not name is dropped
+        # PAD-418: a light show is the game's own, asked for by name: one the other game does not name is dropped.
+        # PAD-1476: one asked for by the game's own number is that build's alone (another build numbers its own)
         have = {name for name, _k, _s in getattr(p, "game_shows", ())}
         for f in ("show_start", "show_end", "show_hit"):
-            if isinstance(getattr(out, f), str) and getattr(out, f) not in have:
+            if isinstance(getattr(out, f), str) and (getattr(out, f) not in have or show_number(getattr(out, f))):
                 setattr(out, f, "")
         # PAD-436: so is a mini-wizard
         if isinstance(out.game_wizard, str) and out.game_wizard not in {n for n, _f in getattr(p, "game_wizards", ())}:
@@ -5673,7 +5733,6 @@ def shake_lines(spec, p):
 def validate_shows(spec, p):
     """Every reason the light-show part cannot be built; nothing when the mode plays none."""
     out = []
-    have = {name for name, _k, _s in getattr(p, "game_shows", ())}
     for f, when in (("show_start", "at its start"), ("show_end", "at its end"), ("show_hit", "on its shots")):
         v = getattr(spec, f)
         if v in ("", None):
@@ -5682,7 +5741,12 @@ def validate_shows(spec, p):
             out.append("The light show %s is a show's name." % when)
         elif not p.can("shows"):
             out.append("A light show of the game's is not on %s (Lights says why)." % p.label)
-        elif v not in have:
+        elif show_number(v) and not game_show_ok(p, v):     # PAD-1476
+            out.append("%s cannot play the game's light show %d %s: %s." % (
+                p.label, show_number(v), when.replace("its", "the mode's"),
+                "its numbers are 1-%d" % (p.show_numbers - 1) if p.show_numbers
+                else "this build cannot play the game's shows by number"))
+        elif not game_show_ok(p, v):
             out.append("%s has no light show called %r to play %s." % (p.label, v, when.replace("its", "the mode's")))
     return out
 
@@ -5691,9 +5755,8 @@ def show_lines(spec, p):
     """The runtime lines of the light shows: nothing unless the mode plays one, and only where the title can."""
     if not p.can("shows"):
         return []
-    have = {name for name, _k, _s in p.game_shows}
     return ["%-14s %s" % (f, getattr(spec, f)) for f in ("show_start", "show_end", "show_hit")
-            if getattr(spec, f) in have]
+            if game_show_ok(p, getattr(spec, f))]
 
 
 # ---- PAD-436: the game's own mini-wizard instead of a mode of its own -----------------------

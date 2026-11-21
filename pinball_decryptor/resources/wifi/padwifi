@@ -1,0 +1,20 @@
+#!/bin/sh
+# PAD Wi-Fi band helper start-up (PAD-1467): runs /usr/local/bin/pad-wifi-band in the background.
+HELPER=/usr/local/bin/pad-wifi-band
+PIDFILE=/var/run/pad-wifi-band.pid
+case "$1" in
+  start)
+    if [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then exit 0; fi
+    [ -x "$HELPER" ] || exit 0
+    "$HELPER" >/dev/null 2>&1 &
+    echo $! > "$PIDFILE"
+    ;;
+  stop)
+    if [ -s "$PIDFILE" ]; then
+      kill "$(cat "$PIDFILE")" 2>/dev/null || true
+      rm -f "$PIDFILE"
+    fi
+    ;;
+  restart) "$0" stop; "$0" start ;;
+  *) echo "Usage: $0 {start|stop|restart}" >&2; exit 1 ;;
+esac

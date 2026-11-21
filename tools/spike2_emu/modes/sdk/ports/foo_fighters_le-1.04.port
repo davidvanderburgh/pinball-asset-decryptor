@@ -1029,3 +1029,10 @@ site flipper_query_call  0x002b3010 0xeb008064 0xe3500000
 site ball_device_keep     0x00170da4 0xe30131c4 0xe340304f
 data ball_devices         0x03b67a80
 data ball_device_count    0x004f11c4
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x003988b0 0xe92d4070 0xe3046ab0   # (n): every show numbered n ends
+value show_count          198
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            51 54 56 57 58 61 62 72 76 77 80

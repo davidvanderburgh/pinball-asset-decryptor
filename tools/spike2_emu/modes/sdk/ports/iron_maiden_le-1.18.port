@@ -704,3 +704,10 @@ site ball_device_keep     0x00111f50 0xe30f3cf0 0xe3403051
 data ball_devices         0x005f31c0
 text ball_device_names  CENTER_EJECT SARCOPHAGUS
 data ball_device_count    0x0051fcf0
+# ---- PAD-1476: the game's light shows by its own number (pad_mode_runtime.c pm_game_show_number): the
+# starter, the game's "stop every show with this number" (found off the starter: it walks the same
+# running-show list and ends each record whose number matches) and how many numbers the starter's table has
+site show_stop_number     0x0035c8b8 0xe92d4070 0xe3086c18   # (n): every show numbered n ends
+value show_count          208
+# the show reel (emulator): the shows above seen lighting the playfield on their own
+text show_lit            157 158 166 167 180 191 197 207

@@ -60,6 +60,8 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/icon.png:pinball_decryptor" \
     --add-data "$ROOT_DIR/pinball_decryptor/resources/ssh:pinball_decryptor/resources/ssh" \
     --add-data "$ROOT_DIR/pinball_decryptor/resources/pieces:pinball_decryptor/resources/pieces" \
+    --add-data "$ROOT_DIR/pinball_decryptor/resources/wifi:pinball_decryptor/resources/wifi" \
+    --add-data "$ROOT_DIR/pinball_decryptor/resources/remote:pinball_decryptor/resources/remote" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/spooky/Dockerfile:pinball_decryptor/plugins/spooky" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/Dockerfile:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/partclone_to_raw.py:pinball_decryptor/plugins/jjp" \
@@ -273,6 +275,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.video_bank" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_files" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_modes" \
+    --hidden-import "pinball_decryptor.plugins.stern.clip_shows" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_sounds" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_seen" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_static" \

@@ -1,0 +1,37 @@
+#!/bin/sh
+# PAD Wi-Fi band helper (PAD-1467). Once the machine has joined its Wi-Fi network on 2.4 GHz, ask wpa_supplicant to
+# move to the same network's 5 GHz access point when one is in reach. Nothing is forced: if the move fails,
+# wpa_supplicant rejoins 2.4 GHz by itself, and after three failed moves this stops asking until the next start.
+# It asks for no scan of its own: it reads the list wpa_supplicant already has.
+IF=wlan0
+MIN=-72
+tries=0
+while [ $tries -lt 3 ]; do
+	sleep 5
+	[ -e /var/run/wpa_supplicant/$IF ] || continue
+	s=$(wpa_cli -i $IF status 2>/dev/null)
+	echo "$s" | grep -q '^wpa_state=COMPLETED' || continue
+	f=$(echo "$s" | sed -n 's/^freq=//p')
+	case "$f" in ''|*[!0-9]*) f=0 ;; esac
+	if [ "$f" -ge 5000 ]; then
+		tries=0
+		sleep 55
+		continue
+	fi
+	# freq=0 is the old wext interface, which cannot be asked to move
+	if [ "$f" -eq 0 ]; then
+		sleep 55
+		continue
+	fi
+	ssid=$(echo "$s" | sed -n 's/^ssid=//p')
+	[ -n "$ssid" ] || continue
+	best=$(wpa_cli -i $IF scan_results 2>/dev/null | awk -F'\t' -v s="$ssid" -v m="$MIN" \
+		'$5==s && $2>=5000 && $3>=m {print $3, $1}' | sort -n | tail -n 1 | cut -d' ' -f2)
+	if [ -z "$best" ]; then
+		sleep 25
+		continue
+	fi
+	wpa_cli -i $IF roam "$best" >/dev/null 2>&1
+	tries=$((tries+1))
+	sleep 20
+done

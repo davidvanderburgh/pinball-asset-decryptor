@@ -141,7 +141,7 @@ const TIP = {
   spareSwitch: "A switch you wired to a node board input the game has no switch on. Board and input are the board's own numbers (the node, and the input bit 0 to 63). Only an input with no switch of the game's on it is read: anything else is refused and left alone. Closed is the input reading low, Stern's way for a switch; pick high for one that reads high when made (an opto). A bounce is not a hit.",
   spareDrive: "Sends ONE command to a driver output you wired something to that the game never fires: the power (1 to 255) for the pulse's ms, then an optional hold power for more ms. Board and output are the board's own numbers (the node, output 0 to 8). It is 48 V into wiring PAD has never seen, so the limits cannot be raised: only while the mode runs in a game, a pulse of at most 1000 ms, at most 5 s in all, the output on at most half of any 10 seconds, and it goes off when the mode ends, the ball ends or the game ends or tilts. An output the game uses is refused.",
   shakeGame: "Plays one of the game's own shakes, as the game does: on Godzilla its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble or its multiball start (five shakes over 4 seconds); on the other games the one it plays most of each length (a tap, a short, medium or long shake, a rumble). The same limits as Shake the cabinet.",
-  gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds; a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
+  gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds (or one a mode of the game's own plays, listed under that mode); a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
   lightMode: "Lights this mode for the player up, as the game lights one of its own mini-wizards: the shot's lights and the inserts picked (a villain's; several take turns with Chase) shine in this color while the mode is not running, ball after ball, and that shot made starts the mode. As the game's own do, it waits while the game says one of its modes is in the way (on James Bond: a henchman, villain or Q Branch mode, or one of its mini-wizards) and, as this mode is set, while another of the game's modes or a multiball runs; it stays lit for the next shot. While the game says one of its modes is in the way, only the insert held solid shows: the shot's lights and the inserts picked light once that mode is over, as the game's own wait to cycle their villains. Once it could start, its shot is its own: the game does not start one of its own modes on it (on James Bond's Right ramp, a henchman or villain), which waits for a later shot. It stays lit when a ball or one of the game's modes ends. Starting, however it starts, puts the light out, and so does a new game. Each player's is their own.",
   unlight: "Puts out a Light the mode at for the player up: this mode's, or another mode of yours on the card (another target's when this one is qualified, so only one is ready at a time). It lights again only when a Light the mode at block runs again.",
   setHits: "Sets a shot's hits this ball for the player up. The hits are one count for every mode of yours on the card, so setting another target's hits back below what qualifies it takes it back for its own mode too. A ball ending or a new game puts every count back to 0.",
@@ -619,7 +619,9 @@ function StmtBody({ b, path, ed }) {
       // PAD-418: by the port's name, grouped by its kind for it
       const groups = { flashy: "Flashy (a start)", subdued: "Subdued (an end)", accent: "Accent (a moment)" };
       const opts = Object.keys(groups).flatMap((k) => (ed.ch.game_shows || []).filter((x) => x.kind === k)
-        .map((x) => ({ value: x.name, label: `${x.name} (${x.secs} s)`, group: groups[k] })));
+        .map((x) => ({ value: x.name, label: `${x.name} (${x.secs} s)`, group: groups[k] })))
+        // PAD-1476: and the shows the game's own modes start, by the game's number, under the mode
+        .concat((ed.ch.mode_shows || []).map((x) => ({ value: x.value, label: x.label, group: `From ${x.group}${x.checked === false ? " (not checked on this game)" : ""}` })));
       return html`<span class="bk-w" ...${tip(TIP.gameShow)}>Play the game's light show</span><${Pick} value=${b.name}
         options=${opts} missing="(not on this game)" width=${200} onChange=${(v) => set("name", v)} />`;
     }
@@ -1489,7 +1491,7 @@ export function useEd(pg, ch) {
 export function BlocksEditor({ s, c, pg }) {
   const b = c.blocks || {};
   const { prog } = pg;
-  const ed = useEd(pg, b.choices || {});
+  const ed = useEd(pg, { ...(b.choices || {}), mode_shows: s.mode_shows || [] });   // PAD-1476
   // a hat dropped on the workspace starts a new script
   const wsDrop = {
     onDragOver: (e) => { if (dragging && dragging.tpl && dragging.tpl.hat) e.preventDefault(); },

@@ -47,4 +47,14 @@ Spike 3. No second network path.
 
 ## Status
 
-- [x] 1 runtime  - [x] 2 mode file  - [x] 3 blocks  - [x] 4 python (UI next)  - [x] 5 server  - [x] 6 UI  - [ ] 7 proof
+- [x] 1 runtime  - [x] 2 mode file  - [x] 3 blocks  - [x] 4 python (UI next)  - [x] 5 server  - [x] 6 UI  - [x] 7 proof
+
+## Proof (2026-11-21)
+
+Emulator, Ubuntu's rig (PAD-Runtime would not start: HCS_E_CONNECTION_TIMEOUT), stock Godzilla LE 1.16 card, rig kit
+`C:	mp\PAD-1479ig` (go.sh as root in Ubuntu; slot 2 parked for its stale ballfeed.off). scorefeed.cfg made by the
+app's own code (online_coop.save + mode_write.feed_into) for the server at the distro's own IP; the online co-op
+server ran beside it. A plain game, ONLINETEST forced: `online start kaiju_fights 1`, `online shot cities_saved 2`,
+`online won wins 1` and `online end modes_played 1` all fired; drained to game over; the report posted HTTP 200 and
+the server logged "counted 3,769,950 for Team Godzilla; counts cities_saved 40, kaiju_fights 1, modes_played 1,
+wins 1" and "Team Godzilla took Tokyo". Runs pass 1/1 in 4m7s twice.

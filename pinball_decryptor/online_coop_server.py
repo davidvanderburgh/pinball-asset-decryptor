@@ -67,7 +67,8 @@ def load_campaign(path):
 def fresh_state(campaign):
     """The state of a campaign no game has been played in."""
     return {"campaign": campaign["campaign"], "games": 0, "started": int(time.time()), "won_by": None,
-            "teams": {t["name"]: {"total": 0, "progress": 0, "games": 0, "regions": 0} for t in campaign["teams"]},
+            "teams": {t["name"]: {"total": 0, "progress": 0, "games": 0, "regions": 0, "counts": {}}
+                      for t in campaign["teams"]},
             "regions": [{"name": r["name"], "target": r["target"], "owner": None, "taken": None}
                         for r in campaign["regions"]],
             "machines": {}, "log": []}
@@ -84,7 +85,7 @@ def fit_state(state, campaign):
             s[k] = state[k]
     for name, t in (state.get("teams") or {}).items():
         if name in s["teams"] and isinstance(t, dict):
-            s["teams"][name].update({k: t[k] for k in ("total", "progress", "games", "regions") if k in t})
+            s["teams"][name].update({k: t[k] for k in ("total", "progress", "games", "regions", "counts") if k in t})
     old = {r.get("name"): r for r in state.get("regions") or [] if isinstance(r, dict)}
     for r in s["regions"]:
         o = old.get(r["name"])
@@ -104,6 +105,13 @@ def game_points(report, goal):
         return 0
     pts = max(scores) if report.get("game_type") == "cooperation" else sum(scores)
     return pts if pts <= POINTS_MAX else 0
+
+
+def report_counts(report):
+    """The report's online counts the server believes: {name: n} (whole numbers, 0 < n <= POINTS_MAX)."""
+    raw = report.get("counts") if isinstance(report.get("counts"), dict) else {}
+    return {str(k)[:23]: v for k, v in list(raw.items())[:8]
+            if isinstance(v, int) and not isinstance(v, bool) and 0 < v <= POINTS_MAX}
 
 
 def open_region(state):
@@ -160,7 +168,7 @@ class Campaign:
                                sorted((report.get("counts") or {}).items()))
         with self.lock:
             m = self.s["machines"].setdefault(machine, {"team": team, "games": 0, "points": 0, "last": None,
-                                                        "game": report.get("game"), "seen": []})
+                                                        "game": report.get("game"), "seen": [], "counts": {}})
             if sig in m["seen"]:
                 return 202, "game already counted (a resend)", []
             m["seen"] = (m["seen"] + [sig])[-SEEN_MAX:]
@@ -172,6 +180,10 @@ class Campaign:
             t = self.s["teams"][team]
             t["games"] += 1
             t["total"] += pts
+            counts = report_counts(report)                  # every count, whatever the goal: the designers see them
+            for k, v in counts.items():
+                t.setdefault("counts", {})[k] = t.get("counts", {}).get(k, 0) + v
+                m.setdefault("counts", {})[k] = m.get("counts", {}).get(k, 0) + v
             news = []
             i = open_region(self.s)
             if pts and i is not None:
@@ -194,7 +206,8 @@ class Campaign:
             self.s["log"] = (self.s["log"] + [{"t": int(self.clock()), "machine": machine, "team": team,
                                                "points": pts, "news": news}])[-LOG_MAX:]
             self._save()
-        return 200, "counted %s for %s" % (_n(pts), team), news
+        return 200, "counted %s for %s%s" % (_n(pts), team, "; counts %s" % ", ".join(
+            "%s %s" % (k, _n(v)) for k, v in sorted(counts.items())) if counts else ""), news
 
     def _save(self):
         if not self.path:

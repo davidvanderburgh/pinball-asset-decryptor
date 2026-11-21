@@ -69,6 +69,7 @@ def test_a_count_campaign_fills_its_island():
         camp.take(_report(team="Rescuers", n=i, key="", campaign="Rescue", counts={"rescued": 2}))
     s = camp.snapshot()
     assert s["teams"]["Rescuers"]["total"] == 24 and s["regions"][0]["owner"] is None   # 24 of 25: not yet
+    assert s["teams"]["Rescuers"]["counts"] == {"rescued": 24} and s["machines"]["Dave"]["counts"] == {"rescued": 24}
     camp.take(_report(team="Rescuers", n=99, key="", campaign="Rescue", counts={"rescued": 1}))
     assert camp.snapshot()["regions"][0]["owner"] == "Rescuers"
 
@@ -76,8 +77,10 @@ def test_a_count_campaign_fills_its_island():
 def test_a_resend_is_counted_once():
     camp = S.Campaign(_camp())
     r = _report(scores=(400,))
-    assert camp.take(r)[0] == 200
+    r["counts"] = {"cities_saved": 20, "wins": 1, "bad": -3, "flag": True}
+    assert camp.take(r)[:2] == (200, "counted 400 for Team Godzilla; counts cities_saved 20, wins 1")
     assert camp.take(dict(r))[:2] == (202, "game already counted (a resend)")
+    assert camp.snapshot()["teams"]["Team Godzilla"]["counts"] == {"cities_saved": 20, "wins": 1}
     assert camp.snapshot()["teams"]["Team Godzilla"]["total"] == 400
 
 

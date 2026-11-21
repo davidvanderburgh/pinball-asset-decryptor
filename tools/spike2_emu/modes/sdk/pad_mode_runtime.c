@@ -21341,6 +21341,8 @@ static struct {
     unsigned go_kind, go_team;
     volatile unsigned long home_ms;      /* round 5: pm_ms() | 1 of a left flipper held alone out of a game - the
                                           * Home Team screen's: Action is the game's until a game begins (0: none) */
+    int home_walk;                       /* round 6: the mode list's cursor walked since then - its Action is the
+                                          * step's again (a login or GAME MODE SELECT walks no mode) */
 } smn = { .entry = -1 };
 
 /* PAD-1449 round 3 (DoomWalrus666: "There should not be a single entry for each type, as that is too many. There
@@ -21522,7 +21524,7 @@ static void sty_menu_go(void)
  * Start that brought the Home Team screen leaves that screen its own Action, to go on without logging in) */
 static int sty_menu_owns_action(void)
 {
-    return sty_menu_live() && !smn.go_ms && !smn.home_ms && sty_menu_kind() != 0u;
+    return sty_menu_live() && !smn.go_ms && (!smn.home_ms || smn.home_walk) && sty_menu_kind() != 0u;
 }
 
 /* PAD-1449 round 5 (DoomWalrus666: "If you hold the left flipper to enter the home team screen, however, no user or
@@ -21556,6 +21558,7 @@ static void sty_home_tick(void)
     }
     if (!smn.home_ms && sty_home_hold(l, r, left_at ? now - (left_at & ~1ul) : 0ul, pm_in_game())) {
         smn.home_ms = now | 1ul;
+        smn.home_walk = 0;
         if (smn.open || smn.shaping) sty_menu_reset("the left flipper held: the Home Team screen");
         say("styles: the left flipper held %lu ms out of a game - the Home Team screen's: Action is the game's until a "
             "game begins", now - (left_at & ~1ul));
@@ -21566,6 +21569,12 @@ static void sty_menu_edge(unsigned id, int press)
 {
     if (!press || !id || !sty_menu_live()) return;
     if (id == coop_action) {
+        if (smn.home_ms && !smn.home_walk && !smn.go_ms && sty_menu_kind() != 0u) {   /* round 6: the Home Team screen's Action is the
+                                                              * game's, but a game it begins from a mode entry is held
+                                                              * back (sty_menu_held) and the step opens there */
+            smn.hold_ms = pm_ms() | 1ul;
+            return;
+        }
         if (!sty_menu_owns_action()) return;                 /* (Competition's: the game's own) */
         smn.hold_ms = pm_ms() | 1ul;                          /* a start it begins anyway is held back */
         smn.act = 1;                                          /* the frame works the step */
@@ -21591,10 +21600,17 @@ static int sty_menu_hold_back(unsigned long since_frame, unsigned long since_act
 static int sty_menu_held(void)
 {
     unsigned long since = smn.hold_ms ? pm_ms() - (smn.hold_ms & ~1ul) : ~0ul;
-    if (!sty_menu_hold_back(smn.frame_ms ? pm_ms() - smn.frame_ms : ~0ul, since, smn.go_ms != 0 || smn.home_ms != 0,
+    if (!sty_menu_hold_back(smn.frame_ms ? pm_ms() - smn.frame_ms : ~0ul, since, smn.go_ms != 0,
                             sty_menu_kind() != 0u))
         return 0;
     smn.hold_ms = 0;                                          /* (the drain's edge gave the step its Action) */
+    if (smn.home_ms) {                                        /* round 6: the mode list after the Home Team screen's
+                                                              * GAME MODE SELECT - the step opens on this Action */
+        smn.home_ms = 0;
+        smn.act = 1;
+        say("styles: Action began a game from the start menu after the Home Team screen - the mode list is up: the "
+            "style step has Action again");
+    }
     say("styles: Action on the start menu began the game %lu ms after the press - held back, the style step has it "
         "(Start begins the game)", since);
     return 1;
@@ -21654,6 +21670,12 @@ static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, un
     act = smn.act;
     smn.act = 0;
     if ((long)c != smn.entry) {                               /* the cursor moved (no step was up: it has the flippers) */
+        if (smn.home_ms && smn.entry >= 0 && !smn.home_walk) {   /* round 6: a mode walked on the Home Team screen's
+                                                              * mode list (its GAME MODE SELECT, or after the game's
+                                                              * reset): Action on a mode is the step's again */
+            smn.home_walk = 1;
+            say("styles: the mode list walked after the left flipper's hold - Action on a mode is the style step's again");
+        }
         if (smn.taken || smn.team) say("styles: the cursor left the entry - its pick is forgotten");
         smn.entry = (long)c;
         smn.open = smn.shaping = 0;

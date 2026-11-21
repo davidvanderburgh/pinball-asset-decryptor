@@ -1178,13 +1178,12 @@ export default function VideoTab() {
     return () => { if (fs.removeEventListener) fs.removeEventListener("loadingdone", again); };
   }, []);
   const fit = useMemo(() => fitColumns(allRows), [s.rows, fontTick]);
-  const flexLeft = FLEX.some((k) => !tuned[k]);
   // Simon (2026-11-21): "In videos lets reduce the default filename/path width to perhaps a third of what it currently
   // is ... User can always re-adjust if they want"
   const width = (k) => (FLEX.includes(k) ? `minmax(${COL_MIN[k]}px,${k === "rel" ? fit[k] / 3 : fit[k]}fr)` : `${fit[k]}px`);
   // the last column never takes a drag; it only stretches once every
   // stretching column is one the user sized (Tk _pin_tree_columns)
-  const convWidth = flexLeft ? `calc(${fit.conv}px)` : `minmax(${fit.conv}px,1fr)`;
+  const convWidth = `${fit.conv}px`;              // the space left over now goes to the filler after it
   const colorCol = allRows.some((r) => r.col != null || r.col_lock);
   // PAD-444: Played in, once the card's program has been read and names a mode
   const md = s.modes || {};
@@ -1212,7 +1211,7 @@ export default function VideoTab() {
     const z = zoomOf();
     const changed = {};
     for (const k in out) {
-      if (k === "play" || before[k] == null || Math.abs(out[k] - before[k]) < 1) continue;
+      if (k === "play" || k === "_fill" || before[k] == null || Math.abs(out[k] - before[k]) < 1) continue;
       changed[k] = Math.max(COL_MIN[k] || 36, Math.round(out[k] / z));
     }
     if (!Object.keys(changed).length) return;
@@ -1241,7 +1240,10 @@ export default function VideoTab() {
     { key: "res", label: "Original", width: width("res"), sort: "res", title: RES_TIPS.res,
       render: (r) => html`<span ...${tip(RES_TIPS.res)}>${r.ro || r.res}</span>` },
     // PAD-369 (DragonRR): the chosen file's name tells its color profile too
-    { key: "rep", label: "Replacement", width: width("rep"), sort: "rep",
+    // Simon (2026-11-21): Replacement "AT MOST the same size as the filename column", the space left at the end
+    { key: "rep", label: "Replacement", sort: "rep",
+      width: tuned.rel ? `minmax(${COL_MIN.rep}px,${Math.max(COL_MIN.rep, tuned.rel)}px)`
+        : `minmax(${COL_MIN.rep}px,${Math.min(fit.rep, fit.rel / 3)}fr)`,
       render: (r) => html`<span class="vid-repcell"><button type="button" class=${cx("vid-rep", r.rep_cls || "muted")}
         ...${tip(r.rep_cls && profileLine(r, colorNs) ? { head: r.rep, lines: [profileLine(r, colorNs)] } : r.rep)}
         onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>${r.var
@@ -1300,6 +1302,7 @@ export default function VideoTab() {
         <${Icon} name="palette" /></button>`) },
     { key: "conv", label: "Convert", width: convWidth, sort: "conv", titleOf: (r) => r.conv,
       render: (r) => html`<span class=${r.conv_cls === "bad" ? "err-ink" : r.conv_cls === "stray" ? "warn-ink" : ""}>${r.conv}</span>` },
+    { key: "_fill", label: "", width: `minmax(0,${fit.rel / 3}fr)`, render: () => "" },
   ].filter(Boolean);
   const selected = sel.size === 1 ? [...sel][0] : sel;
   const emptyNode = s.scanning

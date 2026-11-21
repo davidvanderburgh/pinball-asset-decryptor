@@ -582,7 +582,10 @@ export default function ImagesTab() {
   // and the double-click stops here (Tk's picker was modal and took the
   // grab, so there was only ever one)
   const repCol = {
-    key: "rep", label: "Replacement", sort: "rep", width: `minmax(${MIN_W.rep}px,1fr)`,
+    // Simon (2026-11-21): "the size of the replacement column has taken up all the space. This needs setting to AT
+    // MOST the same size as the filename column. Any remaining space should be after all of the columns at the end"
+    key: "rep", label: "Replacement", sort: "rep",
+    width: (s.widths || {})["#0"] > 0 ? `minmax(${MIN_W.rep}px,${Math.max(MIN_W.rep, s.widths["#0"])}px)` : `minmax(${MIN_W.rep}px,0.75fr)`,
     render: (e) => {
       if (typeof e !== "number") return "";
       const row = slotAt(s, e);
@@ -612,18 +615,16 @@ export default function ImagesTab() {
   // Simon (2026-11-21): "Move "Origin" to after the filename - it ties to that. Move replacement to between
   // original and imported" - the same order on Images, Video and Audio: name, Origin, the original, Replacement,
   // then what PAD does with it
-  const columns = [thumbCol, nameCol, orgCol, grouped && countCol, resCol, repCol, impCol, curCol, wriCol, fmtCol, srcCol, keepCol && keepColDef, colorCol && colorColDef, s.test_on && testColDef].filter(Boolean);
-  // Replacement stretches (it used to be last); the last column keeps its own width
-  // (the Table stretches a last column given in plain px)
-  const lastCol = columns[columns.length - 1];
-  if (lastCol !== repCol && /px$/.test(lastCol.width || "")) columns[columns.length - 1] = { ...lastCol, width: `minmax(${lastCol.width},${lastCol.width})` };
+  // the space left over goes after the last column (Simon, 2026-11-21)
+  const fillCol = { key: "_fill", label: "", width: "minmax(0,1fr)", render: () => "" };
+  const columns = [thumbCol, nameCol, orgCol, grouped && countCol, resCol, repCol, impCol, curCol, wriCol, fmtCol, srcCol, keepCol && keepColDef, colorCol && colorColDef, s.test_on && testColDef, fillCol].filter(Boolean);
 
   // the dragged widths (never below the Tk tree's minwidths); Replacement and
   // the last column take none (Replacement takes what is left)
   const saved = s.widths || {};
   const widths = {};
   for (const c of columns.slice(0, -1)) {
-    if (c.key !== "rep" && saved[c.key] > 0) widths[c.key] = Math.max(MIN_W[c.key] || 36, saved[c.key]);
+    if (c.key !== "rep" && c.key !== "_fill" && saved[c.key] > 0) widths[c.key] = Math.max(MIN_W[c.key] || 36, saved[c.key]);
   }
   const onResize = (out) => {
     const start = dragStart.current;

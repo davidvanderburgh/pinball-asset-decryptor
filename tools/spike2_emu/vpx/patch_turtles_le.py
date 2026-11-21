@@ -717,6 +717,19 @@ def patch_script(src, m):
     return text, rep
 
 
+def retrofit_light(src, name, v):
+    """One retrofit Light: `src` cloned to `at`, then given the map's own
+    `fields` for it (VPX tag -> value, a float as <f, an int as <i: the
+    shadow maps' convention, vpxshadow.retrofit_items). PAD-1483: the turtle
+    faces on the plaque over the shooter lane are bulbs whose glow (BHHI)
+    sits just over their face, in that turtle's colour (COLR)."""
+    item = vpxfile.clone_item(src, name, *v["at"])
+    has = {tag for tag, _, _ in vpxfile.biff_records(item, 4)}   # a stand-in light may lack some
+    fields = {tag: struct.pack("<f" if isinstance(x, float) else "<i", x)
+              for tag, x in (v.get("fields") or {}).items() if tag in has}
+    return vpxfile.set_fields(item, fields) if fields else item
+
+
 def retrofit_items(table, m):
     """New GameItem streams: lights cloned from the map's `clone` light, the
     test timer cloned from its `clone` timer."""
@@ -726,10 +739,13 @@ def retrofit_items(table, m):
         by_name[name.lower()] = (kind, data)
     items = []
     rl = m["retrofit_lights"]
-    kind, src = by_name[rl["clone"].lower()]
-    assert kind == "Light", rl["clone"]
     for name, v in rl["lights"].items():
-        items.append(vpxfile.clone_item(src, name, *v["at"]))
+        clone = v.get("clone", rl["clone"])
+        if clone.lower() not in by_name:    # another cut of the table: the map's own template
+            clone = rl["clone"]
+        kind, src = by_name[clone.lower()]
+        assert kind == "Light", clone
+        items.append(retrofit_light(src, name, v))
     for name, v in m.get("retrofit_triggers", {}).items():
         if name.startswith("_"):
             continue

@@ -1348,8 +1348,9 @@ class TreeEditMixin:
         return {"words": self._tree_tries(card, man).get(n["id"], ""), "stand_in": stand_in,
                 "options": options}
 
-    def _tree_try_lines(self, man, n):
-        """``(stand-in, the game's lines it might show)`` for box *n* the game fills."""
+    def _tree_try_lines(self, man, n, sure=False):
+        """``(stand-in, the game's lines it might show)`` for box *n* the game fills; with *sure*,
+        ``(stand-in, the line the preview draws there before one is picked, or None)``."""
         from . import game_filled
         names, parent = {}, {}
         for m, p, _d in _walk_man(man):
@@ -1360,13 +1361,15 @@ class TreeEditMixin:
             parts.append(names.get(cur, ""))
             cur, hops = parent.get(cur), hops + 1
         stand_in = _text_of(man, n, "Text") or ""
-        return stand_in, game_filled.try_lines_for(self.assets_dir, stand_in, ".".join(reversed(parts)))
+        return stand_in, game_filled.try_lines_for(self.assets_dir, stand_in, ".".join(reversed(parts)),
+                                                   sure=sure)
 
     def _tree_tries(self, card, man):
         """The words the preview draws in each box the game fills: the one picked in "Show it with", else the first
         of the game's lines for it (Simon, 2026-11-20: the stand-in "Inactive Player" - "There is no point in this
-        being shown at all ... Simply replace this with the first option - so in this case it would be PLAYER 4"),
-        else (no line of the game's found) its stand-in."""
+        being shown at all ... Simply replace this with the first option - so in this case it would be PLAYER 4")
+        when that line reads as the stand-in (:func:`.game_filled.sure_line`), else its stand-in: a line that only
+        shares a word with it is a guess (PAD-1494: the Match screen's MATCH drew the service menu's MATCH AWARD)."""
         tries = {}
         if man is not None:
             index = scene_edit_index(man)
@@ -1374,9 +1377,9 @@ class TreeEditMixin:
                 n = (index.get(nid) or (None,))[0]
                 if n is None or n.get("added") or _kind_of(man, n) != "Text":
                     continue
-                options = self._tree_try_lines(man, n)[1]
-                if options:
-                    tries[nid] = options[0]
+                line = self._tree_try_lines(man, n, sure=True)[1]
+                if line:
+                    tries[nid] = line
         tries.update(self._ttry.get(card) or {})
         return tries
 

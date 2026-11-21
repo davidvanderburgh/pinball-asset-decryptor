@@ -84,8 +84,9 @@ def test_scenes_shows_a_filled_box_with_a_line_of_the_games(tmp_path):
         w.call("text_scenes.tree_select", box)
         _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == box)
         props = _tv(w)["props"]
-        # Simon (2026-11-20): the stand-in is never shown - the box starts on the first of the game's lines
-        assert {k: props["try"][k] for k in ("words", "options")} == {"words": "KAIJU 1 WINS!",
+        # PAD-1494: KAIJU %d WINS! only shares a word with the stand-in KAIJU - offered, but a guess: the box starts
+        # on its own words (the box starting on a line reading as the stand-in: test_pad1494_sure_line)
+        assert {k: props["try"][k] for k in ("words", "options")} == {"words": "",
                                                                      "options": ["KAIJU 1 WINS!"]}
         hist = lambda: w.run(lambda: repr(svc._thist.get((svc.assets_dir,  # noqa: E731
                                                           svc._tree_card()[0]))))
@@ -104,10 +105,10 @@ def test_scenes_shows_a_filled_box_with_a_line_of_the_games(tmp_path):
         w.call("text_scenes.tree_select", own)
         _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == own)
         assert _tv(w)["props"]["try"] is None
-        # none picked: the first of the game's lines again, never the stand-in
+        # none picked: its own words again (PAD-1494: no line of the game's reads as them)
         assert w.call("text_scenes.tree_try_words", box, None) is True
         shown = {d["node"]: d.get("shown") for d in w.run(lambda: svc._tdraws) if d["kind"] == "text"}
-        assert shown[box] == "KAIJU 1 WINS!" and shown[own] is None
+        assert shown[box] is None and shown[own] is None
         w.call("text_scenes.close")
 
 

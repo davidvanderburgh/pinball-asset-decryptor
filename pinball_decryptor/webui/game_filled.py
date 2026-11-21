@@ -226,13 +226,47 @@ def sample_line(line, number="1"):
     return " ".join(R._FILL_IN.sub(fill, (line or "").replace("\n", " ")).split())
 
 
+# a number in a stand-in: 0, 85, 1,000,000, X, XX (PAD-1494: a count's %d is not any word - ADVANCE TRAIN LIT
+# is not %d TRAIN%P1//S/%, nor CITY COMBO X/X %d COMBO%P1//S/%)
+_STAND_IN_NUMBER = r"[-+]?[\dX][\dX,.]*"
+
+
+def _fill_rx(tok):
+    """What printf fill-in *tok* of a game line stands for in a stand-in's words."""
+    if tok == "%%":
+        return "%"
+    if tok.startswith("%P"):
+        return r"\S*"                       # a plural's ending (FLIP%P1//S/%: FLIPS)
+    if tok[-1] in "duifx":
+        return _STAND_IN_NUMBER
+    return r"\S+"                           # a name
+
+
 def try_lines(rows, words, path="", clips=()):
-    """What the game might write into a box whose own words are the stand-in *words*, for
+    """:func:`ranked_lines` without the sure flags: the Scenes "Show it with" list."""
+    return [shown for shown, _sure in ranked_lines(rows, words, path, clips)]
+
+
+def sure_line(rows, words, path="", clips=()):
+    """The line of :func:`try_lines` the Scenes preview draws in a box the game fills before one
+    is picked, or None to draw its own stand-in *words*: the first, only when it reads as the
+    stand-in (the game's own line, the line with its fill-ins any word - BALL 0 for ``BALL %d`` -
+    or a player's line in a player's box).  A line that only shares a word with it is a guess
+    and draws nothing on its own (PAD-1494: on Godzilla Pro 1.16 the Match screen's MATCH drew
+    the service menu's MATCH AWARD, every LINE n stand-in drew ``Line1``, X,XXX,XXX drew
+    SPI-XXX-000000); it is still offered in the list."""
+    got = ranked_lines(rows, words, path, clips)
+    return got[0][0] if got and got[0][1] else None
+
+
+def ranked_lines(rows, words, path="", clips=()):
+    """``[(line, sure)]``: what the game might write into a box whose own words are the stand-in *words*, for
     the Scenes "Show it with" list: the game-program lines of manifest *rows* sharing a word
     with the stand-in, most words shared first (lines with fill-ins, then the shorter, ahead),
     each filled with a sample (:func:`sample_line`; a player's number from a ``P<n>_`` part of
     the box's dotted *path*).  The game line reading like the stand-in itself leads.  A clip's
-    name (*clips*, :func:`clip_names`) is the player's, never a line on screen."""
+    name (*clips*, :func:`clip_names`) is the player's, never a line on screen.  *sure*: the
+    line reads as the stand-in (see :func:`sure_line`)."""
     from . import text_rules as R
     want = {w.upper() for w in _WORD.findall(R.stand_in_words(words))}
     got = _PLAYER_NO.search(path or "")
@@ -264,29 +298,31 @@ def try_lines(rows, words, path="", clips=()):
         # the line reading as the stand-in does, its fill-ins any word and its breaks spaces, leads (GODZILLA
         # POWERUP LEVEL 3 is GODZILLA\nPOWERUP\nLEVEL %d, not GODZILLA POWERUP - LEVEL %d)
         alike = bool(plain and re.fullmatch(
-            r"\s*".join(r"\S+" if R._FILL_IN.fullmatch(t) else re.escape(t.upper())
+            r"\s*".join(_fill_rx(t) if R._FILL_IN.fullmatch(t) else re.escape(t.upper())
                         for t in R._FILL_IN.sub(lambda m: " " + m.group(0) + " ", flat).split()),
             plain))
+        # a player's box offers only the lines naming the player (above): each is the player's line
+        sure = r is own or alike or bool(got)
         ranked.append(((r is not own, not alike, -shared, not R._FILL_IN.search(orig), len(shown), i),
-                       shown))
+                       shown, sure))
     # Simon (2026-11-20): "the ACTUAL lines that can be shown" - one of each, in capitals where the game has it so
     # (PLAYER 4 and Player 4 are one choice), in the order ranked
-    order, best = [], {}
-    for _k, shown in sorted(ranked):
+    order, best, sure = [], {}, {}
+    for _k, shown, ok in sorted(ranked):
         key = shown.upper()
         if key not in best:
             order.append(key)
-            best[key] = shown
+            best[key], sure[key] = shown, ok
         elif shown == key:
             best[key] = shown
-    return [best[k] for k in order][:TRY_MAX]
+    return [(best[k], sure[k]) for k in order][:TRY_MAX]
 
 
-def try_lines_for(assets_dir, words, path=""):
+def try_lines_for(assets_dir, words, path="", sure=False):
     """:func:`try_lines` over the project's manifest in *assets_dir* (read once until it
-    changes)."""
+    changes); with *sure*, :func:`sure_line` instead."""
     if not assets_dir:
-        return []
+        return None if sure else []
     from ..core import text_manifest
     mpath = text_manifest.manifest_path(assets_dir)
     stamp = _stamp(mpath)
@@ -300,5 +336,8 @@ def try_lines_for(assets_dir, words, path=""):
     clips = clip_names(assets_dir)
     key = (words, path, clips)
     if key not in got[2]:
-        got[2][key] = try_lines(got[1], words, path, clips)
-    return got[2][key]
+        got[2][key] = ranked_lines(got[1], words, path, clips)
+    ranked = got[2][key]
+    if sure:
+        return ranked[0][0] if ranked and ranked[0][1] else None
+    return [shown for shown, _ok in ranked]

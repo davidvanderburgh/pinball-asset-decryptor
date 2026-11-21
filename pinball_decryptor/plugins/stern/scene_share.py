@@ -360,7 +360,8 @@ def import_themes(assets_dir, zip_path, themes, skip=(), report=None):
                     continue
                 if e["file"]:
                     blob = z.read(e["file"])
-                    fname = re.sub(r"[\\/:*?\"<>|]+", "_", os.path.basename(e["name"] or e["file"])) or "picture.png"
+                    fname = re.sub(r"[\\/:*?\"<>|]+", "_", os.path.basename(e["name"] or e["file"])).strip(" .") \
+                        or "picture.png"                # (never "..": the name is the file's, not ours)
                     folder = os.path.join(assets_dir, SHARED_DIR, stem, "theme " + re.sub(r"[\\/:*?\"<>|]+", "_", name))
                     base, ext = os.path.splitext(fname)
                     dest, i = os.path.join(folder, fname), 2

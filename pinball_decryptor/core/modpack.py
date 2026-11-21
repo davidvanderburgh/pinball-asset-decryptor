@@ -642,7 +642,9 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
     _staged = staged_changes.load(assets_folder)
     if not changed and not staged_changes.sound_modes_of(_staged) \
             and not _variant_map(_staged.get(_EXTRA_VARIANTS)) \
-            and not _attract_asks(_staged.get(_EXTRA_ATTRACT))             and not pack_themes(assets_folder)[0]             and not project_extras(assets_folder).get(_EXTRA_SERVICE_MENU):
+            and not _attract_asks(_staged.get(_EXTRA_ATTRACT)) \
+            and not pack_themes(assets_folder)[0] \
+            and not project_extras(assets_folder).get(_EXTRA_SERVICE_MENU):
         # a project of music modes (PAD-494) or random clips (PAD-553) alone
         # changes no file of the extract, and is still something to pack
         raise ValueError("No modified files found. Modify some files first.")

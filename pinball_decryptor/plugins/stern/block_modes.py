@@ -352,7 +352,7 @@ RESETS = {"ball": "each ball", "mode": "each time the mode starts", "game": "eac
 #: PAD-1402: the variables a mode keeps between games (the card's saved progress, pm_saved_get / pm_saved_put)
 SAVED_RESETS = ("saved", "saved_all")
 SHARED_RESETS = ("ball", "game") + SAVED_RESETS
-STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "if", "callout", "words",
+STATEMENTS = ("start_mode", "end_mode", "score", "set", "change", "online_add", "if", "callout", "words",
               "light_shot", "lights_off", "add_time", "set_time", "multiball", "log", "clip", "sound",
               "show", "timer_start", "timer_stop", "hud_text", "hud_counter", "hud_gauge", "hud_award",
               "hud_progress",                                            # PAD-690: the panel's number, live
@@ -1918,6 +1918,12 @@ def _check_stack(stack, depth, where, ctx):
                 ctx["out"].append("%s sets a variable that is not there: make it under Variables."
                                   % where)
             _check_num(b.get("value" if op == "set" else "by"), where, ctx)
+        elif op == "online_add":                                                     # PAD-1479: online co-op
+            from . import online_coop as _OC
+            why = _OC.count_problem(b.get("count"))
+            if why:
+                ctx["out"].append("%s adds to an online count: %s" % (where, why))
+            _check_num(b.get("by"), where, ctx)
         elif op == "if":
             _check_bool(b.get("cond"), where, ctx)
             _check_stack(b.get("then") or [], depth + 1, where, ctx)
@@ -2668,6 +2674,11 @@ class _Gen:
                 i = self.vars.get(str(b.get("var") or "").lower())
                 if i is not None:
                     out.append(pad + "%s += %s;" % (self.var(i), self.num(b.get("by"))))
+            elif op == "online_add":                                                  # PAD-1479
+                from . import online_coop as _OC
+                if not _OC.count_problem(b.get("count")):
+                    # the game's report carries it to the campaign (pad_mode.h; the runtime says why one is not)
+                    out.append(pad + "pm_online_add(%s, %s);" % (_c_str(b["count"]), self.num(b.get("by"))))
             elif op == "timer_start":
                 i = self.timer(b.get("timer"))
                 if i is not None:

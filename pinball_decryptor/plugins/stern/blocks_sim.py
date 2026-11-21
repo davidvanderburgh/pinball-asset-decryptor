@@ -32,6 +32,7 @@ class Sim:
                 self.var_reset[v["name"]] = v.get("reset") or "mode"
         self.vars = {}
         self.hits = {}
+        self.online = {}                # PAD-1479: the game's online co-op counts
         self.mode_hits = {}             # PAD-721: made while it runs, since it started
         self.timers = {}                # name -> due ms
         self.now = 0
@@ -295,6 +296,10 @@ class Sim:
                 self.vars[b.get("var")] = self.vars.get(b.get("var"), 0) + self.val(b.get("by"))
             elif op == "set_hits":
                 self.hits[b.get("shot")] = max(0, self.val(b.get("value")))
+            elif op == "online_add":                    # PAD-1479: online co-op
+                name, n = b.get("count"), self.val(b.get("by"))
+                self.online[name] = self.online.get(name, 0) + n
+                self.events.append(("online", name, n))
             elif op == "light_shot":
                 shot = b.get("shot")
                 if shot:

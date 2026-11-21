@@ -41,6 +41,7 @@ static const char *const MODE_DIRS[] = { "/usr/local/padmode/", "/dump/" };
 #define SHOT_AWARD_MAX  16          /* shot_award lines a file may carry (item 141) */
 #define BLOCK_LIST_MAX  128         /* PAD-363: the game's mode ids a `block_modes` line may list */
 
+#define ONLINE_MAX 4                /* PAD-1479: `online` lines a mode may have */
 #define ALSO_MAX 3                  /* PAD-227: trigger_also lines a mode may have */
 #define SEQ_MAX 8                   /* PAD-314: trigger_seq lines a mode may have (shots in order) */
 
@@ -123,6 +124,12 @@ struct mode_cfg {
     char shake_name[4][24];           /* one of the game's own shakes; "" = shake_ms at shake_strength */
     uint64_t shake_bits[4];           /* SHAKE_AT_SHOT: on each hit of these shots */
     unsigned n_shake;
+    /* PAD-1479 `online start|shot|won|end <count> <n> [mask]`: add n to an online co-op count (pm_online_add) */
+    unsigned char online_when[ONLINE_MAX];   /* ONLINE_AT_* */
+    char online_name[ONLINE_MAX][24];
+    long long online_n[ONLINE_MAX];
+    uint64_t online_bits[ONLINE_MAX];  /* ONLINE_AT_SHOT: on each hit of these shots */
+    unsigned n_online;
     /* PAD-227: more than one thing to meet before it starts (their own functions below) */
     uint64_t also_bits[ALSO_MAX];
     unsigned also_count[ALSO_MAX], n_also;
@@ -495,6 +502,11 @@ static int clock_waits(struct slot *M)
 #define SHAKE_AT_SHOT  1
 #define SHAKE_AT_END   2
 static int shakes_at(struct slot *M, unsigned when, uint64_t mask);   /* PAD-414: the shaker, below */
+#define ONLINE_AT_START 0
+#define ONLINE_AT_SHOT  1
+#define ONLINE_AT_WON   2
+#define ONLINE_AT_END   3
+static void online_at(struct slot *M, unsigned when, uint64_t mask);   /* PAD-1479: online co-op counts, below */
 
 /* A shot of the running mode's: the magnet, when it is the magnet's shot */
 static void magnet_shot(struct slot *M, uint64_t mask)
@@ -502,6 +514,7 @@ static void magnet_shot(struct slot *M, uint64_t mask)
     coils_at(M, mask);                       /* PAD-381: the held coils on their shots, too */
     building_at(M, mask);                    /* PAD-589: the building on its shots */
     shakes_at(M, SHAKE_AT_SHOT, mask);       /* PAD-414: the shaker on its shots */
+    online_at(M, ONLINE_AT_SHOT, mask);      /* PAD-1479: online co-op counts on its shots */
     if (!cfg.magnet_ms || !(mask & cfg.magnet_bits)) return;
     pm_log("%s: magnet shot %08x_%08x - %s", cfg.name, (unsigned)(mask >> 32), (unsigned)mask,
            pm_magnet_grab(cfg.magnet_ms) ? "holding the ball" : "no grab (the runtime's line says why)");
@@ -573,6 +586,59 @@ static int shakes_at(struct slot *M, unsigned when, uint64_t mask)
         if (r) { any = 1; break; }           /* one at a time: the runtime refuses the next while it runs */
     }
     return any;
+}
+
+/* PAD-1479: online co-op (MODE_SDK.md "Online co-op") - a count the game's report carries to the campaign's server
+ *   online start <count> <n>          as the mode starts: n added to the count <count> (letters, digits, _ - .)
+ *   online shot <count> <n> <mask>    on every hit of <mask> while it runs
+ *   online won <count> <n>            as it ends WON: its end shot made, or (no end shot) its clock ran out
+ *   online end <count> <n>            as it ends, however it ends
+ * Up to 4 lines. The runtime keeps up to 8 counts a game; a card with the score feed off counts nothing. */
+static int online_line(struct slot *M, const char *line)
+{
+    const char *a = key_is(line, "online"), *b;
+    unsigned n = cfg.n_online, k = 0;
+    if (!a) return 0;
+    if (n >= ONLINE_MAX) return 1;
+    if ((b = key_is(a, "start"))) cfg.online_when[n] = ONLINE_AT_START;
+    else if ((b = key_is(a, "shot"))) cfg.online_when[n] = ONLINE_AT_SHOT;
+    else if ((b = key_is(a, "won"))) cfg.online_when[n] = ONLINE_AT_WON;
+    else if ((b = key_is(a, "end"))) cfg.online_when[n] = ONLINE_AT_END;
+    else {
+        pm_log("online takes start, shot, won or end - \"%.40s\" ignored", a);
+        return 1;
+    }
+    a = b;
+    while (*a && !is_space(*a) && k + 1 < sizeof cfg.online_name[n]) cfg.online_name[n][k++] = *a++;
+    cfg.online_name[n][k] = 0;
+    while (*a && !is_space(*a)) a++;
+    while (is_space(*a)) a++;
+    cfg.online_n[n] = (*a >= '0' && *a <= '9') ? (long long)num(&a) : 1;
+    while (is_space(*a)) a++;
+    cfg.online_bits[n] = (*a >= '0' && *a <= '9') ? num(&a) : 0;
+    if (!k) {
+        pm_log("online needs a count's name - \"%.60s\" ignored", line);
+        return 1;
+    }
+    if (cfg.online_when[n] == ONLINE_AT_SHOT && !cfg.online_bits[n]) {
+        pm_log("online shot needs a shot mask - \"%.60s\" ignored", line);
+        return 1;
+    }
+    cfg.n_online++;
+    return 1;
+}
+
+/* The online counts of `when` (ONLINE_AT_SHOT: those whose mask the hit has) */
+static void online_at(struct slot *M, unsigned when, uint64_t mask)
+{
+    static const char *const at[] = { "as it starts", "on its shot", "as it was won", "as it ends" };
+    unsigned i;
+    for (i = 0; i < cfg.n_online; i++) {
+        if (cfg.online_when[i] != when || (when == ONLINE_AT_SHOT && !(mask & cfg.online_bits[i]))) continue;
+        pm_log("%s: online count %s +%lld %s - %s (%lld this game)", cfg.name, cfg.online_name[i], cfg.online_n[i],
+               at[when & 3], pm_online_add(cfg.online_name[i], cfg.online_n[i]) ? "counted" : "not counted",
+               pm_online_count(cfg.online_name[i]));
+    }
 }
 
 static int stack_line(struct slot *M, const char *line)
@@ -2324,6 +2390,7 @@ static void cfg_line(struct slot *M, const char *line)
     if (shield_line(M, line)) return;        /* PAD-392 */
     if (building_line(M, line)) return;      /* PAD-589 */
     if (shake_line(M, line)) return;         /* PAD-414 */
+    if (online_line(M, line)) return;        /* PAD-1479 */
     if (params_line(M, line)) return;
     if (trigger_on_line(M, line)) return;
     if (roster_line(M, line)) return;
@@ -2401,6 +2468,9 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.n_shake)                         /* PAD-414 */
         pm_log("\"%s\": %u shake line(s)%s", cfg.name, cfg.n_shake,
                pm_can(PM_CAN_SHAKER) ? "" : " - this game's port has no shaker: no shake");
+    if (cfg.n_online)                        /* PAD-1479 */
+        pm_log("\"%s\": %u online count line(s)%s", cfg.name, cfg.n_online,
+               pm_online() ? "" : " - online co-op is off on this card: nothing is counted");
     if (cfg.wizard[0]) {                     /* PAD-436 */
         pm_log("\"%s\": when it starts, the game's mini-wizard \"%s\" is %s instead - nothing of its own runs%s", cfg.name,
                cfg.wizard, cfg.wizard_start ? "started" : "lit for its start shot",
@@ -2677,6 +2747,7 @@ static void mode_start_in(struct slot *M, const char *why)
     run.at_ball_start = name_is(why, "challenge pick");
     coils_at(M, 0);                                      /* PAD-381: held coils with no shot hold as it starts */
     shakes_at(M, SHAKE_AT_START, 0);                     /* PAD-414 */
+    online_at(M, ONLINE_AT_START, 0);                    /* PAD-1479 */
     run.shield_due = cfg.shield ? (pm_ms() + SHIELD_DELAY_MS) | 1ul : 0;   /* PAD-392 */
     run.building_due = cfg.building_1 && !cfg.building_bits ? (pm_ms() + SHIELD_DELAY_MS) | 1ul : 0;   /* PAD-589 */
     run.no_clock = cfg.seconds == 0 || cfg.game_modes == GM_OWN;   /* PAD-1400: the whole game has no clock */
@@ -2749,6 +2820,9 @@ static void mode_end(const char *why)
     clip_later_drop("the mode ended");       /* a start clip still waiting never plays after the end */
     if (cfg.display_priority) pm_display_priority(0);   /* item 154 display: the game's display order again */
     if (shakes_at(M, SHAKE_AT_END, 0)) pm_shake_outlast();   /* PAD-414: before pm_end, which then leaves it to run */
+    if (name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")))
+        online_at(M, ONLINE_AT_WON, 0);                  /* PAD-1479: won - roster_ended's rule */
+    online_at(M, ONLINE_AT_END, 0);
     pm_end();
     /* PAD-706: its end shot is the battle won; a mode with no end shot wins it by playing to its clock's end */
     roster_ended(name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")));

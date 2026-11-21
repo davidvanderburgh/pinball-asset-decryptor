@@ -1036,4 +1036,15 @@ long long pm_saved_get(const char *key, unsigned player, long long dflt);
 int pm_saved_put(const char *key, unsigned player, long long value);
 unsigned pm_saved_stamp(unsigned player);
 
+/* ---- PAD-1479: online co-op - counts sent with each game's report ----------------------------------------------
+ * The score feed (PAD-1204; MODE_SDK.md "Online co-op") posts each game's report to the owner's server; with online
+ * co-op on it names the campaign, team and machine, and carries the game's online COUNTS: numbers your modes add up
+ * through the game ("pokemon_rescued", "cities_saved"), up to 8 names a game (letters, digits, _ - . up to 23).
+ * The server adds them to the team's totals. The counts start from nothing at each game's start.
+ * pm_online_add: 1 counted; 0 not (the feed is off, no game is being played, 8 names already, a bad name).
+ * pm_online_count: this game's count so far (0 when none). pm_online: 1 when the card plays in a campaign. */
+int pm_online_add(const char *name, long long n);
+long long pm_online_count(const char *name);
+int pm_online(void);
+
 #endif

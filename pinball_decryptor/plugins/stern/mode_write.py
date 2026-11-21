@@ -1235,6 +1235,11 @@ def feed_into(result, game_elf, scratch, url, only):
         text = SF.cfg_text(url, getattr(result.profile, "label", ""), game_elf, only)
     except SF.ScoreFeedError as e:
         raise ModeWriteError(str(e)) from None
+    from . import online_coop as OC                 # PAD-1479: the campaign this card plays in
+    oc = OC.wanted(getattr(result, "project", "")) if getattr(result, "project", "") else None
+    if oc and oc["url"].strip() == url.strip():
+        text += "".join(l + "\n" for l in OC.cfg_lines(oc))
+        result.lines.append("online co-op: %s" % (OC.HOW % (oc["campaign"], oc["team"], url)))
     os.makedirs(scratch, exist_ok=True)
     path = os.path.join(scratch, SF.CFG_NAME)
     with open(path, "w", encoding="utf-8", newline="\n") as f:

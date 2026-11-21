@@ -63,6 +63,7 @@ const T = {
   startSave: "When the mode starts, the game's own ball saver is on for this many seconds: a ball that drains in that time is served back, and the ball does not end. A multiball uses its own ball save instead.",
   coilWait: "The mode's seconds stand still while this holds, and its clock starts when it lets go. Hold the ball at a post as the mode starts (James Bond's right return up post when the mode starts at the Right ramp, as the game's own mini-wizards do) and the start clip plays with the ball held, then the ball is let go and the clock starts. Not when the mode starts as a challenge: that ball starts in the shooter lane, so it does not hold and the clock runs.",
   coils: "Holds this mechanism the same way as the magnet: one command at the power the game itself uses for it, for this long (0.1 to 5 seconds; a post the game keeps up itself as long as the game's own longest hold there), then it is let go. As the mode starts, or on every hit of a shot while it runs. The same limits as the magnet: one hold at a time, 3 seconds between holds, at most 6 a minute, never while the game is using it, and let go when the mode or the ball ends or the game tilts.",
+  online: "Online co-op (the Network tab): numbers this mode adds to the game's online counts, sent with each game's report to the campaign's server - a campaign that counts one of these names (like rescued) takes its regions as every machine's add up. Won is its end shot made, or its clock run out when it has none. A name is letters, digits and _ - . (no spaces). With online co-op off nothing is counted.",
   shaker: "Shakes the cabinet's shaker motor: as the mode starts, on every hit of a shot while it runs, or as it ends (that one runs out after the mode). A shake is one of the game's own (on Godzilla its jackpot shake, its multiball start...; on the other games the one it plays most of each length) or one of the mode's own at a strength the game itself shakes at (some games have one only), never longer than the game's own longest at that strength (shown beside the time). It goes the way the game shakes, so the operator's Shaker Motor setting always applies: switched off (or no shaker fitted), nothing shakes. The limits are the app's and cannot be changed: one shake at a time (a longer one takes over, a shorter one is skipped, as in the game), never over one of the game's own, the motor running at most 30 seconds a minute (the game's own shakes count too); it runs out when the mode ends and stops when the ball or the game ends.",
   shield: "While the mode runs, the shield targets face the player: the platform turns 1.5 seconds after the mode starts (once the ball that started it is clear of it) and turns back when the mode ends, the ball drains, or the game ends or tilts. The game's ball search swings the platform when no switch closes for a while; it is turned back after that. The limits are the app's and cannot be changed: never while one of the game's own modes or multiballs runs, 1.5 seconds between moves, at most 12 a minute. It stays turned only while the game's modes cannot start and its own shield feature does not keep counting: that feature turns the platform back about 2 seconds after every move. An operator who switched the shield motor off in the game's settings keeps it where it is.",
   battle: "The mode takes the place of one of the game's battles on its selection screen: when the player picks that battle (its ramps lit, then the scoop), this mode starts instead, once the screen has closed, and the game's own battle never runs. The game counts the mode as that battle: won when its end shot ends it (with no end shot, when its clock runs out) - Completed on the screen, the city won, the battle's audits - and lost any other way, when the next lit scoop plays the mode again, as the game does with a lost battle. One mode per battle. The screen keeps the battle's picture and name, and the battle's own callout is silent. King of the Monsters, the operator menu and the audits still name the old battle.",
@@ -950,6 +951,30 @@ function SoundsPage({ s, f, off, dis, rs, lim, labels, files }) {
   </div>`;
 }
 
+// PAD-1479: online co-op - what this mode adds to the game's online counts, sent with each game's report
+const ONLINE_ROWS = [["start", "As it starts"], ["shot", "On every hit of"], ["won", "When it is won"], ["end", "As it ends"]];
+function OnlineCounts({ f, off, shots }) {
+  const withValue = (list, v) => (v && !list.some((o) => o.value === v) ? [{ value: v, label: v }, ...list] : list);
+  const shotOpts = withValue([{ value: "", label: "(choose a shot)", disabled: true }, ...shots.map((x) => ({ value: x, label: x }))], f.online_shot);
+  return html`<${Sec} title="Online co-op counts">
+    ${ONLINE_ROWS.map(([when, label]) => html`<div key=${when}>
+      <div class="row wrap">
+        <${Check} label=${label.replace(/, add$/, "")} checked=${f["online_on_" + when]} disabled=${off} title=${T.online} ns="modes" k=${"f:online_on_" + when} />
+        ${when === "shot" ? html`<${Select} value=${f.online_shot || ""} options=${shotOpts} ns="modes" k="f:online_shot"
+          disabled=${off || !f.online_on_shot} width=${170} title=${T.online} />` : null}
+      </div>
+      <div class="row wrap" style="padding-left:26px">
+        <span class="dim nw">add</span>
+        <${Num} k=${"online_n_" + when} value=${f["online_n_" + when]} disabled=${off || !f["online_on_" + when]} width=${56} title=${T.online} />
+        <span class="dim nw">to</span>
+        <${Field} ns="modes" k=${"f:online_count_" + when} value=${f["online_count_" + when] || ""} disabled=${off || !f["online_on_" + when]}
+          width=${160} mono placeholder="rescued" maxLength=${23} title=${T.online} />
+      </div>
+    </div>`)}
+    <div class="small muted wrap">${T.online}</div>
+  <//>`;
+}
+
 function ScoringPage({ s, f, off }) {
   const prof = s.profile || {};
   const shots = prof.shots || [];
@@ -966,6 +991,7 @@ function ScoringPage({ s, f, off }) {
           <${Radio} name="m-ladder" value="fixed" label="Fixed" checked=${f.award_ladder === "fixed"} disabled=${off} title=${T.fixed} onChange=${(v) => setF("award_ladder", v, true)} />
         </div>
       <//>
+      <${OnlineCounts} f=${f} off=${off} shots=${shots} />
     </div>
     <${Sec} title="Points per shot">
       ${shots.length ? html`<div class="modes-points">

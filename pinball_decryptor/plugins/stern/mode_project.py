@@ -4154,6 +4154,10 @@ class ModeSpec:
     # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
     # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
     shakes: list = field(default_factory=list)
+    # PAD-1479: online co-op counts - [[when, count, amount, shot]]: when "start", "shot" (every hit of `shot` while it
+    # runs), "won" (its end shot made, or its clock run out when it has none) or "end"; amount added to the online
+    # count `count` (online_coop.count_problem) in the game's report. shot "" unless when is "shot". Up to ONLINE_MAX
+    online: list = field(default_factory=list)
     # PAD-418: the game's own light show at its start and at its end, by the port's name for it (the profile's
     # game_shows); "" = none. The end's is skipped when the ball is ending (the game stops every show of its own then)
     show_start: str = ""
@@ -4461,7 +4465,7 @@ def retarget(spec, p):
 MODEL_FIELDS = ("start_shot", "start_or", "start_also", "start_sequence", "scoring_shots", "shot_award", "end_shot",
                 "add_ball_shot", "multiball_on_shot", "magnet_ms", "scoop_hold_ms", "coil_holds",
                 "shield", "building_floor", "building_shot", "shakes", "show_start", "show_end", "show_hit",
-                "game_wizard")
+                "game_wizard", "online")
 #: what each model word is called in the words
 MODEL_WORDS = {"pro": "Pro", "le": "Premium/LE", "premium": "Premium", "prem": "Premium"}
 
@@ -4542,6 +4546,9 @@ def _map_shots(spec, fn):
     if isinstance(spec.shakes, list):                  # PAD-414
         spec.shakes = [[r[0], r[1], r[2], one(r[3])] if isinstance(r, (list, tuple)) and len(r) == 4 else r
                        for r in spec.shakes]
+    if isinstance(spec.online, list):                  # PAD-1479
+        spec.online = [[r[0], r[1], r[2], one(r[3]) if r[3] else r[3]] if isinstance(r, (list, tuple)) and len(r) == 4
+                       else r for r in spec.online]
     spec.building_shot = one(spec.building_shot)       # PAD-589
 
 
@@ -5399,6 +5406,7 @@ def validate(spec, folder=None):
     out += validate_shield(spec, p)                    # PAD-392
     out += validate_building(spec, p)                  # PAD-589
     out += validate_shakes(spec, p)                    # PAD-414
+    out += validate_online(spec, p)                    # PAD-1479
     out += validate_shows(spec, p)                     # PAD-418
     out += validate_more_to_start(spec, p)
     out += validate_game_modes(spec, p)
@@ -5779,6 +5787,54 @@ def shake_lines(spec, p):
         body = "game %s" % what if isinstance(what, str) else "%d %d" % (int(what), int(strength))
         out.append("shake          %s %s%s" % (when, body, " 0x%08x" % p.mask([shot]) if when == "shot" else ""))
     return out
+# ---- PAD-1479: online co-op counts -------------------------------------------------------------
+#: the runtime's ONLINE_MAX (mode_file.c): `online` lines a mode may have
+ONLINE_MAX = 4
+ONLINE_WHEN = {"start": "as the mode starts", "shot": "on every hit of a shot while it runs",
+               "won": "when it is won (its end shot, or its clock run out when it has none)", "end": "as it ends"}
+ONLINE_AMOUNT_MAX = 1000000
+
+
+def validate_online(spec, p):
+    """Every reason the online co-op counts cannot be built; nothing when the mode counts none."""
+    from . import online_coop as OC
+    rows = spec.online
+    if rows in (None, []):
+        return []
+    if not isinstance(rows, list):
+        return ["The online counts are a list."]
+    out = []
+    if len(rows) > ONLINE_MAX:
+        out.append("A mode adds to up to %d online counts." % ONLINE_MAX)
+    shots = dict(p.shots) if p is not None else {}
+    for r in rows:
+        if not isinstance(r, (list, tuple)) or len(r) != 4:
+            out.append("An online count is when, its name, how much and (on a shot) which shot.")
+            continue
+        when, name, amount, shot = r
+        if when not in ONLINE_WHEN:
+            out.append("An online count is added as the mode starts, on a shot, when it is won, or as it ends.")
+        why = OC.count_problem(name)
+        if why:
+            out.append(why)
+        if isinstance(amount, bool) or not isinstance(amount, int) or not 1 <= amount <= ONLINE_AMOUNT_MAX:
+            out.append("An online count adds 1 to %d at a time." % ONLINE_AMOUNT_MAX)
+        if when == "shot" and shot not in shots:
+            out.append("%s has no shot called %r to count on." % (getattr(p, "label", "This game"), shot))
+    return out
+
+
+def online_lines(spec, p):
+    """The runtime lines of the online counts: ``online start|shot|won|end <count> <n> [mask]``."""
+    if not isinstance(spec.online, list):
+        return []
+    out = []
+    for when, name, amount, shot in (r for r in spec.online if isinstance(r, (list, tuple)) and len(r) == 4):
+        out.append("online         %s %s %d%s" % (when, name, int(amount),
+                                                  " 0x%08x" % p.mask([shot]) if when == "shot" else ""))
+    return out
+
+
 # ---- PAD-418: the game's own light shows at the start and the end ---------------------------
 def validate_shows(spec, p):
     """Every reason the light-show part cannot be built; nothing when the mode plays none."""
@@ -6108,6 +6164,7 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
     lines += shield_lines(spec, p)          # PAD-392: the shield targets toward the player while it runs
     lines += building_lines(spec, p)        # PAD-589: the building to a floor as it starts or on a shot
     lines += shake_lines(spec, p)           # PAD-414: the cabinet's shaker
+    lines += online_lines(spec, p)          # PAD-1479: online co-op counts
     lines += show_lines(spec, p)            # PAD-418: the game's own light shows at its start and end
     if spec.screen and p.can("screen"):
         lines += [

@@ -74,7 +74,19 @@ def url_problem(url):
 
 
 def load(project):
-    """``(on, url)`` from the project's sidecar."""
+    """``(on, url)`` from the project's sidecar. PAD-1479: with online co-op on (:mod:`.online_coop`) the feed is on
+    and posts to the campaign's server."""
+    if not project:
+        return False, ""
+    from . import online_coop as OC
+    oc = OC.load(project)
+    if oc["on"] and oc["url"].strip():
+        return True, oc["url"].strip()
+    return own(project)
+
+
+def own(project):
+    """``(on, url)`` of the project's own score feed (the Network tab's Score feed), online co-op left out."""
     if not project:
         return False, ""
     from ...core import staged_changes
@@ -211,11 +223,21 @@ FIELDS = (
     ("insider", "array of strings or null",
      "each player's Insider Connected account id (8-4-4-4-12 hex, the same every game); null for a player who was "
      "not logged in"),
+    # PAD-1479: online co-op - only when the card plays in a campaign (the Network tab's Online co-op)
+    ("campaign", "string", "online co-op only: the campaign the machine plays in"),
+    ("team", "string", "online co-op only: the machine's team in it (\"\" when the campaign has none)"),
+    ("machine", "string", "online co-op only: the machine's own name, as its owner gave it"),
+    ("key", "string", "online co-op only: the campaign's join key, as its owner gave it (\"\" when none)"),
+    ("counts", "object",
+     "online co-op (or a mode that counts): the game's online counts, each a name your modes add to and its "
+     "number, e.g. {\"pokemon_rescued\": 3}; {} when none"),
 )
 #: a game's report as the machine sends it (two players, player 1 logged in)
 SAMPLE = {"source": "PAD score feed", "game": "Godzilla Premium/LE 1.16", "port": "godzilla_le 1.16",
           "game_number": 3, "game_type": "challenge", "challenge": "King of the Monsters", "time": 1794510083, "players": 2, "scores": [123456780, 98765430],
-          "insider": ["3f2a9c1e-5b7d-4e20-8a61-0c9d2b4f7e13", None]}
+          "insider": ["3f2a9c1e-5b7d-4e20-8a61-0c9d2b4f7e13", None],
+          "campaign": "Kaiju War", "team": "Team Godzilla", "machine": "Dave's basement", "key": "monster-island",
+          "counts": {"cities_saved": 2}}
 #: what the server answers, and what the machine does when it does not
 ANSWER = ("Answer with any 2xx status (200 or 204); the body is not read. Anything else, no answer within 5 s, or a "
           "refused connection counts as not taken: the machine tries again 10 s later, 3 tries in all, then lets that "

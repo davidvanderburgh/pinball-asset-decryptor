@@ -141,6 +141,7 @@ const TIP = {
   // PAD-826: hardware a mod adds, on what the game never uses
   spareSwitch: "A switch you wired to a node board input the game has no switch on. Board and input are the board's own numbers (the node, and the input bit 0 to 63). Only an input with no switch of the game's on it is read: anything else is refused and left alone. Closed is the input reading low, Stern's way for a switch; pick high for one that reads high when made (an opto). A bounce is not a hit.",
   spareDrive: "Sends ONE command to a driver output you wired something to that the game never fires: the power (1 to 255) for the pulse's ms, then an optional hold power for more ms. Board and output are the board's own numbers (the node, output 0 to 8). It is 48 V into wiring PAD has never seen, so the limits cannot be raised: only while the mode runs in a game, a pulse of at most 1000 ms, at most 5 s in all, the output on at most half of any 10 seconds, and it goes off when the mode ends, the ball ends or the game ends or tilts. An output the game uses is refused.",
+  onlineAdd: "Online co-op: adds to one of this game's online counts (a name like rescued: letters, digits and _ - .). Each game's report carries its counts to the campaign's server, which adds every machine's up for its team; a campaign that counts this name takes its regions as they grow. Up to 8 names a game. Online co-op is set up on the Network tab; without it nothing is counted.",
   shakeGame: "Plays one of the game's own shakes, as the game does: on Godzilla its hit (a battle's shot), its big hit, its jackpot (every super jackpot), its long rumble or its multiball start (five shakes over 4 seconds); on the other games the one it plays most of each length (a tap, a short, medium or long shake, a rumble). The same limits as Shake the cabinet.",
   gameShow: "One of the game's own playfield light shows, played as the game plays it, for its own few seconds (or one a mode of the game's own plays, listed under that mode, or any of them by its own number: Another, by its number…); a new one takes the place of one still playing. Only while the mode runs or as it ends (When the mode ends), never as the ball drains: the game stops its own shows then.",
   lightMode: "Lights this mode for the player up, as the game lights one of its own mini-wizards: the shot's lights and the inserts picked (a villain's; several take turns with Chase) shine in this color while the mode is not running, ball after ball, and that shot made starts the mode. As the game's own do, it waits while the game says one of its modes is in the way (on James Bond: a henchman, villain or Q Branch mode, or one of its mini-wizards) and, as this mode is set, while another of the game's modes or a multiball runs; it stays lit for the next shot. While the game says one of its modes is in the way, only the insert held solid shows: the shot's lights and the inserts picked light once that mode is over, as the game's own wait to cycle their villains. Once it could start, its shot is its own: the game does not start one of its own modes on it (on James Bond's Right ramp, a henchman or villain), which waits for a later shot. It stays lit when a ball or one of the game's modes ends. Starting, however it starts, puts the light out, and so does a new game. Each player's is their own.",
@@ -271,7 +272,8 @@ export function stmtTemplates(ch, vars, prog = {}) {
       ...((ch.spare || []).includes("out") ? [{ op: "spare_drive", node: 9, output: 0, power: 255, ms: 40, hold_power: 0, hold_ms: 0 }] : []),
     ].filter((t) => !machineLacks(t, ch))],
     ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) },
-      { op: "change", var: v, by: num(1) }, { op: "set_hits", shot, value: num(0) }]],
+      { op: "change", var: v, by: num(1) }, { op: "set_hits", shot, value: num(0) },
+      { op: "online_add", count: "rescued", by: num(1) }]],   // PAD-1479: online co-op
     ["Timers", [{ op: "timer_start", timer: t, ms: num(5000) }, { op: "timer_stop", timer: t }]],
     ["Menus", [{ op: "menu_open", menu: ((prog.menus || [])[0] || {}).name || "" },          // PAD-1404
       { op: "menu_close", menu: ((prog.menus || [])[0] || {}).name || "" }]],
@@ -320,7 +322,7 @@ const VALUE_WORDS = { num: "a number", var: "a variable", hits: "hits of a shot 
 const COND_WORDS = { cmp: "compare two values", and: "both", or: "either", not: "not", running: "the mode is running",
   can_start: "the mode could start now", lit: "the mode is lit", stock: "a game mode of its own runs",
   shields_away: "the shield targets face away" };
-export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", drain_to_one: "mode", game_wizard: "mode", score: "score",
+export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", online_add: "var", end_mode: "mode", add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", drain_to_one: "mode", game_wizard: "mode", score: "score",
   set: "var", change: "var", if: "flow", callout: "show", words: "show", fade: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
@@ -523,6 +525,8 @@ function StmtBody({ b, path, ed }) {
       return html`<span class="bk-w" ...${tip(TIP.unlight)}>Put out the light of</span><${Pick} value=${b.mode || "-"}
         options=${[["-", "this mode"], ...others]} missing="(no such mode)" width=${200} onChange=${(v) => set("mode", v === "-" ? "" : v)} />`;
     }
+    case "online_add": return html`<span class="bk-w" ...${tip(TIP.onlineAdd)}>Add</span><${Slot} kind="num" value=${b.by} path=${[...path, "by"]} ed=${ed} />
+      <span class="bk-w">to the online count</span><${Text} value=${b.count} width=${130} max=${23} placeholder="rescued" onChange=${(v) => set("count", v.replace(/[^A-Za-z0-9_.-]/g, "_"))} />`;   // PAD-1479
     case "set_hits": return html`<span class="bk-w" ...${tip(TIP.setHits)}>Set the hits of</span><${ShotPick} value=${b.shot} ed=${ed} onChange=${(v) => set("shot", v)} />
       <span class="bk-w">to</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} />`;
     case "score": return html`<span class="bk-w">Score</span><${Slot} kind="num" value=${b.points} path=${[...path, "points"]} ed=${ed} /><span class="bk-w">points</span>`;
@@ -929,6 +933,7 @@ export function stmtLabel(b) {
     hud_progress: "Progress panel number", roster_progress: "Selection screen count",
     timer_start: "Start a timer", timer_stop: "Stop a timer",
     hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", flippers: b.to === "on" ? "Flippers back on" : "Flippers off", pulse: "Fire a device", device: b.keep === "let_go" ? "Let go of the balls in" : "Hold the balls in", kickback: b.to === "off" ? "Kickbacks off" : "Kickbacks on", toy: "Move a toy", building: "Move the building to",
+    online_add: "Add to an online count",
     shake: "Shake the cabinet for", shake_game: "Shake it the game's way", game_wizard: "The game's mini-wizard",
     spare_drive: "Drive a spare output", menu_open: "Open the menu", menu_close: "Close the menu",
     jjp_sound: "Play a game sound", jjp_lamp: "Light a lamp", jjp_lamp_off: "Hand back a lamp", jjp_coil: "Fire a coil", jjp_title: "Title the panel",

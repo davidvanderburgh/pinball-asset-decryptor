@@ -26705,7 +26705,7 @@ static void comp_arm(void)
 #define FEED_TIMEOUT_MS 5000ul
 #define FEED_RETRY_MS   10000ul
 #define FEED_QUEUE      8
-#define FEED_JSON_MAX   1024
+#define FEED_JSON_MAX   1792                     /* PAD-1479: room for the online fields and 8 counts */
 #define FEED_REQ_MAX    (FEED_JSON_MAX + 384)
 #define FEED_HOST_MAX   96
 #define FEED_PATH_MAX   160
@@ -26727,6 +26727,10 @@ extern int *__errno_location(void) __attribute__((weak));
 enum { FEED_IDLE, FEED_WAIT, FEED_CONNECTING, FEED_SENDING, FEED_READING };
 
 #define FEED_TYPES      8                        /* PAD-1344: scorefeed.cfg's type lines */
+#define FEED_COUNTS     8                        /* PAD-1479: the online counts one game's report carries */
+#define FEED_NAME_MAX   24                       /* ... a count's name, with its NUL */
+#define FEED_WORD_MAX   32                       /* PAD-1479: campaign, team, machine, with the NUL */
+#define FEED_KEY_MAX    48                       /* ... the campaign's join key */
 #define FEED_RANK_STANDARD  1                    /* a game type's rank: 0 unknown, 1 standard, then the type lines' */
 #define FEED_RANK_CHALLENGE (FEED_TYPES + 2)     /* a challenge game outranks every type line */
 
@@ -26737,6 +26741,11 @@ struct feed_report {
     uint64_t scores[4];
     unsigned char ids[4][16];
     unsigned char has_id[4];
+    /* PAD-1479: online co-op - the campaign this machine plays in (campaign[0] 0: not online), and the game's counts */
+    char campaign[FEED_WORD_MAX], team[FEED_WORD_MAX], machine[FEED_WORD_MAX], key[FEED_KEY_MAX];
+    unsigned n_counts;
+    char count_name[FEED_COUNTS][FEED_NAME_MAX];
+    long long count_val[FEED_COUNTS];
 };
 
 static struct {
@@ -26766,6 +26775,10 @@ static struct {
     unsigned long state_ms;                     /* when the state began */
     unsigned req_len, req_sent, resp_len;
     char req[FEED_REQ_MAX], body[FEED_JSON_MAX], resp[64];
+    /* PAD-1479: online co-op - scorefeed.cfg's online / team / machine / key lines, and this game's counts so far
+     * (pm_online_add), in a report's own fields: feed_snapshot copies them over */
+    struct feed_report cur;
+    int counts_full_said;
 } feed;
 
 static int feed_cfg_only(void)
@@ -26904,9 +26917,70 @@ static unsigned feed_json(char *out, unsigned cap, const struct feed_report *r, 
     }
     if (n + 3 >= cap) return 0;
     out[n++] = ']';
+    /* PAD-1479: online co-op - which campaign, team and machine, the join key, and the game's counts */
+    if (r->campaign[0]) {
+        char tm[2 * FEED_WORD_MAX], mc[2 * FEED_WORD_MAX], ky[2 * FEED_KEY_MAX];
+        feed_json_str(t, sizeof t, r->campaign);
+        feed_json_str(tm, sizeof tm, r->team);
+        feed_json_str(mc, sizeof mc, r->machine);
+        feed_json_str(ky, sizeof ky, r->key);
+        m = feed_fmt(out + n, cap - n, ",\"campaign\":\"%s\",\"team\":\"%s\",\"machine\":\"%s\",\"key\":\"%s\"",
+                     t, tm, mc, ky);
+        if (m <= 0 || (unsigned)m >= cap - n) return 0;
+        n += (unsigned)m;
+    }
+    if (r->campaign[0] || r->n_counts) {
+        m = feed_fmt(out + n, cap - n, ",\"counts\":{");
+        if (m <= 0 || (unsigned)m >= cap - n) return 0;
+        n += (unsigned)m;
+        for (p = 0; p < r->n_counts && p < FEED_COUNTS; p++) {
+            feed_json_str(t, sizeof t, r->count_name[p]);
+            m = feed_fmt(out + n, cap - n, "%s\"%s\":%lld", p ? "," : "", t, r->count_val[p]);
+            if (m <= 0 || (unsigned)m >= cap - n) return 0;
+            n += (unsigned)m;
+        }
+        if (n + 2 >= cap) return 0;
+        out[n++] = '}';
+    }
+    if (n + 2 >= cap) return 0;
     out[n++] = '}';
     out[n] = 0;
     return n;
+}
+
+/* PAD-1479: 1 when s is a name an online count may have - letters, digits, _ - . - 1 to FEED_NAME_MAX-1 of them.
+ * (tests lift it verbatim) */
+static int feed_count_name_ok(const char *s)
+{
+    unsigned n = 0;
+    if (!s) return 0;
+    for (; *s; s++, n++) {
+        char c = *s;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+              || c == '.'))
+            return 0;
+    }
+    return n > 0 && n < FEED_NAME_MAX;
+}
+
+/* PAD-1479: add n to the count `name` in a report's table: the slot it has, else a new one; 0 when the table is full
+ * or the name is not one. (tests lift it verbatim) */
+static int feed_count_add(struct feed_report *r, const char *name, long long n)
+{
+    unsigned i, k;
+    if (!feed_count_name_ok(name)) return 0;
+    for (i = 0; i < r->n_counts; i++) {
+        for (k = 0; name[k] && name[k] == r->count_name[i][k]; k++) {}
+        if (!name[k] && !r->count_name[i][k]) {
+            r->count_val[i] += n;
+            return 1;
+        }
+    }
+    if (r->n_counts >= FEED_COUNTS) return 0;
+    for (k = 0; name[k] && k + 1 < FEED_NAME_MAX; k++) r->count_name[r->n_counts][k] = name[k];
+    r->count_name[r->n_counts][k] = 0;
+    r->count_val[r->n_counts++] = n;
+    return 1;
 }
 
 /* 1 when any score is lower than the one kept: the game zeroed them, a new game. (tests lift it verbatim) */
@@ -27091,12 +27165,35 @@ static int feed_login(unsigned p, unsigned char out[16])
     return 0;
 }
 
+/* PAD-1479: the online fields and this game's counts into a report */
+static void feed_online_into(struct feed_report *r)
+{
+    unsigned i, k;
+    for (k = 0; k < sizeof r->campaign; k++) r->campaign[k] = feed.cur.campaign[k];
+    for (k = 0; k < sizeof r->team; k++) r->team[k] = feed.cur.team[k];
+    for (k = 0; k < sizeof r->machine; k++) r->machine[k] = feed.cur.machine[k];
+    for (k = 0; k < sizeof r->key; k++) r->key[k] = feed.cur.key[k];
+    r->n_counts = feed.cur.n_counts;
+    for (i = 0; i < FEED_COUNTS; i++) {
+        for (k = 0; k < FEED_NAME_MAX; k++) r->count_name[i][k] = feed.cur.count_name[i][k];
+        r->count_val[i] = feed.cur.count_val[i];
+    }
+}
+
+/* PAD-1479: a new game - its counts start from nothing */
+static void feed_counts_clear(void)
+{
+    feed.cur.n_counts = 0;
+    feed.counts_full_said = 0;
+}
+
 static void feed_snapshot(struct feed_report *r)
 {
     unsigned p;
     r->players = feed.max_player > 4 ? 4 : feed.max_player;
     for (p = 0; p < sizeof r->type; p++) r->type[p] = feed.type[p];             /* PAD-1344 */
     for (p = 0; p < sizeof r->challenge; p++) r->challenge[p] = feed.challenge[p];
+    feed_online_into(r);                                                       /* PAD-1479 */
     for (p = 0; p < 4; p++) {
         r->scores[p] = p < r->players ? pm_score(p + 1) : 0;
         r->has_id[p] = (unsigned char)(p < r->players && feed_login(p + 1, r->ids[p]));
@@ -27117,6 +27214,9 @@ static void feed_queue(const struct feed_report *r, const char *why)
         q->players, (unsigned long long)q->scores[0], (unsigned long long)q->scores[1],
         (unsigned long long)q->scores[2], (unsigned long long)q->scores[3], q->has_id[0], q->has_id[1], q->has_id[2],
         q->has_id[3]);
+    if (q->campaign[0] || q->n_counts)                  /* PAD-1479 */
+        say("online co-op: game %u for team \"%s\" - %u count(s)%s%s %lld", q->number, q->team, q->n_counts,
+            q->n_counts ? ", first " : "", q->n_counts ? q->count_name[0] : "", q->n_counts ? q->count_val[0] : 0ll);
     feed.head++;
 }
 
@@ -27221,12 +27321,14 @@ static void on_feed_tick(pm_reg *regs)
         feed.max_player = 0;
         feed.rank = 0;                                  /* PAD-1344: the new game's type is read afresh */
         feed.type[0] = feed.challenge[0] = 0;
+        feed_counts_clear();                            /* PAD-1479 */
     }
     if (in_game && p > feed.max_player) {
         if (feed.reported) {                            /* a game the bus did not announce (first after boot) */
             feed.reported = 0;
             feed.rank = 0;
             feed.type[0] = feed.challenge[0] = 0;
+            feed_counts_clear();                        /* PAD-1479 */
         }
         feed.max_player = p;
     }
@@ -27277,6 +27379,48 @@ static void on_feed_tick(pm_reg *regs)
     }
 }
 
+/* PAD-1479: online co-op counts (pad_mode.h pm_online_add) - added to this game's report; only while the feed is on
+ * and a game is being played */
+int pm_online_add(const char *name, long long n)
+{
+    if (!feed.armed || !pm_in_game()) return 0;
+    if (!feed_count_add(&feed.cur, name, n)) {
+        if (!feed.counts_full_said) {
+            feed.counts_full_said = 1;
+            say("online co-op: count \"%.30s\" not kept - %s", name ? name : "",
+                feed_count_name_ok(name) ? "this game has 8 counts already" : "a count's name is letters, digits, _ - .");
+        }
+        return 0;
+    }
+    return 1;
+}
+
+long long pm_online_count(const char *name)
+{
+    unsigned i, k;
+    if (!name) return 0;
+    for (i = 0; i < feed.cur.n_counts; i++) {
+        for (k = 0; name[k] && name[k] == feed.cur.count_name[i][k]; k++) {}
+        if (!name[k] && !feed.cur.count_name[i][k]) return feed.cur.count_val[i];
+    }
+    return 0;
+}
+
+int pm_online(void)
+{
+    return feed.armed && feed.cur.campaign[0];
+}
+
+/* PAD-1479: the rest of a scorefeed.cfg line (to its end, trailing spaces dropped) into out */
+static void feed_cfg_word(const char *p, char *out, unsigned cap)
+{
+    unsigned m = 0;
+    while (*p == ' ') p++;
+    for (; *p && *p != '\n' && *p != '\r' && m + 1 < cap; p++) out[m++] = *p;
+    while (m && out[m - 1] == ' ') m--;
+    out[m] = 0;
+}
+
 static void feed_arm(void)
 {
     static char raw[1024];
@@ -27307,6 +27451,14 @@ static void feed_arm(void)
             if (ok) feed.off[1] = (unsigned)number(&p, &ok);
             if (!ok || feed.off[0] > 0x1000u || feed.off[1] > 0x1000u) feed.mgr = 0;
             if (feed.mgr) feed.mgr += (pm_addr)game_base;               /* PAD-1326: a PIE's (0 on Spike 2) */
+        } else if (str_starts(raw + i, "online ")) {      /* PAD-1479: online co-op */
+            feed_cfg_word(raw + i + 7, feed.cur.campaign, sizeof feed.cur.campaign);
+        } else if (str_starts(raw + i, "team ")) {
+            feed_cfg_word(raw + i + 5, feed.cur.team, sizeof feed.cur.team);
+        } else if (str_starts(raw + i, "machine ")) {
+            feed_cfg_word(raw + i + 8, feed.cur.machine, sizeof feed.cur.machine);
+        } else if (str_starts(raw + i, "key ")) {
+            feed_cfg_word(raw + i + 4, feed.cur.key, sizeof feed.cur.key);
         } else if (str_starts(raw + i, "type ") && feed.n_types < FEED_TYPES) {   /* PAD-1344 */
             unsigned id, m = 0;
             p = raw + i + 5;
@@ -27352,6 +27504,10 @@ static void feed_arm(void)
         return;
     }
     feed.armed = 1;
+    if (feed.cur.campaign[0])                           /* PAD-1479 */
+        say("online co-op: campaign \"%s\", team \"%s\", machine \"%s\"%s - each game's report names them, with "
+            "the game's online counts", feed.cur.campaign, feed.cur.team[0] ? feed.cur.team : "(none)",
+            feed.cur.machine[0] ? feed.cur.machine : "(none)", feed.cur.key[0] ? ", join key set" : ", no join key");
     say("score feed: armed - each game's final scores%s are posted to http://%s:%u%s (%s; bus 0x%x game, 0x%x ball%s)%s",
         feed.mgr ? " and Insider logins" : "", feed.host, feed.port, feed.path,
         feed.over_named ? "at the game's game_over" : "once play has stopped 30 s with no new ball",

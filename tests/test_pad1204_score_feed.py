@@ -37,7 +37,7 @@ int main(void)
 {
     unsigned char ip[4];
     struct feed_report r;
-    char out[1024];
+    char out[2048];
     unsigned n;
     uint64_t kept[4] = { 500, 900, 0, 0 }, same[4] = { 500, 950, 0, 0 }, zeroed[4] = { 0, 900, 0, 0 };
     url("http://192.168.1.50:8080/scores");
@@ -98,6 +98,27 @@ int main(void)
     }
     r.players = 4;
     printf("small %u\n", feed_json(out, 40, &r, "x", "y", 0));
+    /* PAD-1479: online co-op - the campaign's fields and the game's counts */
+    memset(&r, 0, sizeof r);
+    r.players = 1;
+    r.number = 4;
+    r.scores[0] = 777;
+    strcpy(r.campaign, "Kaiju War");
+    strcpy(r.team, "Team \"G\"");
+    strcpy(r.machine, "Dave");
+    printf("addok %d %d %d", feed_count_add(&r, "cities_saved", 2), feed_count_add(&r, "cities_saved", 1),
+           feed_count_add(&r, "bad name", 1));
+    printf(" %d %d\n", feed_count_add(&r, "", 1), feed_count_add(&r, "a23456789012345678901234", 1));
+    printf("online %s\n", feed_json(out, sizeof out, &r, "x", "y", 0) ? out : "-");
+    for (n = 0; n < 8; n++) {
+        char nm[8] = { 'c', (char)('0' + n), 0 };
+        printf("%d", feed_count_add(&r, nm, 1));
+    }
+    printf(" full %u\n", r.n_counts);
+    memset(&r, 0, sizeof r);
+    r.players = 1;
+    feed_count_add(&r, "pokemon", 5);
+    printf("countsonly %s\n", feed_json(out, sizeof out, &r, "x", "y", 0) ? out : "-");
     printf("fell %d %d\n", feed_scores_fell(kept, same, 2), feed_scores_fell(kept, zeroed, 2));
     printf("status %d %d %d %d %d\n", feed_status("HTTP/1.1 200 OK\r\n", 17), feed_status("HTTP/1.0 404 Not", 16),
            feed_status("HTTP/1.1 20", 11), feed_status("SSH-2.0-OpenSSH", 15), feed_status("HTTP/1.1 2x0 OK", 15));
@@ -123,6 +144,8 @@ def _run(tmp_path):
         "static int feed_fmt(char *b, unsigned long cap, const char *f, ...)",
         "static unsigned feed_json_str(char *out, unsigned cap, const char *s)",
         "static unsigned feed_json(char *out, unsigned cap, const struct feed_report *r, const char *title,",
+        "static int feed_count_name_ok(const char *s)",
+        "static int feed_count_add(struct feed_report *r, const char *name, long long n)",
         "static int feed_scores_fell(const uint64_t *kept, const uint64_t *now, unsigned players)",
         "static int feed_status(const char *resp, unsigned len)",
         "static int feed_rank_of(int was, int set, int seen)")])
@@ -533,3 +556,17 @@ def test_the_api_contract_is_what_the_machine_sends():
     assert keys == [f["name"] for f in c["fields"]] == list(SF.SAMPLE)
     assert SF.contract("https://bad/")["request"].startswith("POST /scores HTTP/1.0\nHost: 192.168.1.50:8080")
     assert "2xx" in c["answer"] and "3 tries" in c["answer"]
+
+
+def test_pad1479_online_fields_and_counts_ride_in_the_report(tmp_path):
+    """PAD-1479: a card in an online co-op campaign names the campaign, team, machine and join key, and carries the
+    game's counts (pm_online_add); a card that is not online but whose mode counted carries the counts alone."""
+    import json as _json
+    out = _run(tmp_path)
+    assert "addok 1 1 0 0 0" in out
+    doc = _json.loads(next(l for l in out if l.startswith("online "))[7:])
+    assert doc["campaign"] == "Kaiju War" and doc["team"] == 'Team "G"' and doc["machine"] == "Dave"
+    assert doc["key"] == "" and doc["counts"] == {"cities_saved": 3} and doc["scores"] == [777]
+    assert "11111110 full 8" in out           # cities_saved + 7 more: the 9th name is refused
+    only = _json.loads(next(l for l in out if l.startswith("countsonly "))[11:])
+    assert only["counts"] == {"pokemon": 5} and "campaign" not in only

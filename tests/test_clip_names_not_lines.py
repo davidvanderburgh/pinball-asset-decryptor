@@ -58,3 +58,14 @@ def test_try_lines_for_reads_the_projects_clips(tmp_path, monkeypatch):
                         lambda a: os.path.join(a, "images", "scene_textures", "scene_tree.json"))
     got = game_filled.try_lines_for(assets, "MATCH", "Title_Instance")
     assert got and "match" not in got
+
+
+def test_the_locked_note_does_not_name_a_clip(tmp_path):
+    """The Text tab and the Scenes Words box name the game's line to change; a clip's name is not
+    one (the Text tab hands its rows and the project folder they came from)."""
+    from pinball_decryptor.webui.game_filled import locked_note
+    assets = _project(tmp_path, ["match"])
+    rows = _rows("match")
+    assert "“match”" in locked_note("MATCH", rows)
+    note = locked_note("MATCH", rows, assets)
+    assert "“match”" not in note and "MATCH" in note

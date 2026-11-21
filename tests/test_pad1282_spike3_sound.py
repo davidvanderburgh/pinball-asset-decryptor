@@ -137,7 +137,8 @@ def test_the_worker_takes_the_request_as_a_u16_on_64_bit_arm():
     assert "#define WORKER_N(r)   ((unsigned)(r)[2] & 0xffu)" in src
     body = _lift(src, "static void on_sound_worker(pm_reg *r)")
     assert "sound_say(WORKER_REQ(r), WORKER_N(r));" in body
-    assert "r[0]" not in body
+    # never READ whole: PAD-1478 zeroes the request to drop the serve music's repeat, a write of the whole register
+    assert "r[0]" not in body.replace("r[0] = 0;", "")
 
 
 def test_the_32_bit_only_sound_pieces_stay_off_on_64_bit_arm():

@@ -84,7 +84,8 @@ static int pm_stock_mode_running(unsigned kinds) { return kinds == PM_STOCK_MULT
 static int pm_balls_in_play(void) { return balls_now; }
 static unsigned added_balls;
 static int pm_multiball_add(unsigned n, unsigned s) { (void)s; if (refuse_add) return 0; added_balls += n; return 1; }
-static long pm_port_value(const char *n, long f) { (void)n; return f; }
+/* the Godzilla ports' values: no cap on the BALL line's words (PAD-1478: value coop_ball_msg_max 0) */
+static long pm_port_value(const char *n, long f) { return strcmp(n, "coop_ball_msg_max") ? f : 0; }
 static uint64_t pm_stock_lit(struct pm_stock_rule *r) { (void)r; return 0; }
 static unsigned more_state(unsigned slot) { (void)slot; return 0; }
 static unsigned long data(const char *name) { (void)name; return 0; }
@@ -188,6 +189,11 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static void coop_steps_tick(void)",
        "static void coop_keep_tick(void)",
 
+       # PAD-1478: every word of ours on the game's BALL line is fitted to the older titles' buffer on its way
+       "static unsigned ball_line_len(const char *w)",
+       "static void ball_line_fit(char *w, unsigned size, unsigned cap)",
+       "static unsigned ball_line_cap(void)",
+       "static int ball_line_borrow(unsigned id, const char *words)",
        "static const char *coop_pick_how(void)",
        "static int coop_pick_steps(void)",
        "static void coop_pick_say(void)",

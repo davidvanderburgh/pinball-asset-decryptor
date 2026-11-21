@@ -10,6 +10,7 @@ the card's reading stubbed."""
 import json
 import os
 import struct
+import threading
 
 import pytest
 
@@ -381,7 +382,7 @@ def _stub_reading(monkeypatch, tmp_path, proj, names=None, reading=None):
     reads = []
 
     def fake(card_path, rows, cancel=None):
-        reads.append(card_path)
+        reads.append((card_path, threading.current_thread().name))
         return CM.CardClips(card=card_path, game="godzilla_pro", version="1.16.0", reading=reading,
                             name_of=dict(names),
                             bank_of={n: ["/g/" + BANK_DIR, "2.asset/%d.asset" % i]
@@ -434,7 +435,9 @@ def test_a_shared_clip_has_a_row_for_each_mode_and_the_list_filters_by_mode(tmp_
         assert w.call("video.row_menu", [FOLLOW])["back"] == ""
         _scan(w, proj)
         _ready(w)
-        assert len(reads) == 1
+        # PAD-1476: the Modes tab reads the card once too, for its show picks (the real reading is kept on disk by
+        # the card file, so that is no second read); the Video tab's own worker read it once
+        assert len([r for r in reads if r[1] == "video-modes"]) == 1
 
 
 def test_a_replacement_in_a_modes_row_gives_it_a_clip_of_its_own(tmp_path, monkeypatch):

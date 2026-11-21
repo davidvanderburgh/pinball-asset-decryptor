@@ -285,7 +285,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 212 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 214 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |
@@ -391,6 +391,8 @@ F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 | `pm_game_show_stop()` | stops the show playing now: the game's own exit hook takes its lights away, and the runtime's frees its lamp groups (PAD-420) | `show_reel_mode.c` | PAD-411 |
 | `pm_game_show_playing()` | 1 while a show of the runtime's plays | `show_reel_mode.c` | PAD-411 |
 | `pm_game_shows()` | how many shows the port names (0 = none on this game) | `show_reel_mode.c` | PAD-411 |
+| `pm_game_show_number(num)` | PAD-1476: plays any of the game's light shows by the game's OWN number for it (the numbers its own modes start them by: the Modes tab lists them per mode), through its own show starter, stopped by its own "stop every show with this number" (`site show_start`, `site show_stop_number`, `value show_count`). The same limits as `pm_game_show` (the running mode, in a game, one at a time, not while the ball ends, 20 s at most); `pm_game_show_named("#211")` is the same. 1 = playing | `mode_file.c` (`show_start #<n>`, through `pm_game_show_named`); the co-op intro (coop.cfg `intro_show`) starts its show through the same starter | PAD-1476, emulator (Godzilla LE 1.16: each of the 22 shows its modes start played by number; the 7 that light the playfield on their own are the port's `text show_lit`) |
+| `pm_game_show_numbers()` | PAD-1476: how many numbers the game's show table has (0 = not on this game) | none yet: for a mode's own C | PAD-1476 |
 | `pm_balls_in_play()` | the framework's count of the balls in play (while a multiball is being served, the balls it asked for); -1 without `site balls_in_play` | F | item 164 (the stack route on the titles with no cmode rules, 12 builds), item 167 |
 | `pm_magnet_grab(ms)` | PAD-381: the playfield magnet for `ms` (100-5000, the draw included) as ONE coil command the board ends by itself: the operator's LO draw power for the draw time, then the LO hold power; never re-sent. Refused (0, the reason in mode.log) unless the running mode, in a game, the magnet not disabled, none of the game's magnet sequences running, no grab holding, 3 s since the last ended, fewer than 6 in the last minute. Sent from a game process of the runtime's (`value magnet_proc`) that takes control of the magnet the way the game's own grabs do, so the game's coil update does not switch it off; it gives control back to let go, and the game's update then switches the magnet off. Let go at the end, on `pm_magnet_release`, mode end, ball end, game end or tilt, and when the game ends the process (a drain); gives the magnet back when the game's own magnet starts | `magnet_test_mode.c`, `mode_file.c` (`magnet`) | PAD-381, emulator (Pro 1.16 and Premium/LE 1.16): held to its end, a hit mid-grab refused with no OFF from the game, a mode stop and a drain mid-grab let go early with no abort; the clamp and the refusals (the first, tick-fired version was switched off by the game 1 ms in: MODE_SDK.md "The magnet") |
 | `pm_magnet_release()` / `pm_magnet_holding()` | let go now (an OFF); 1 while a grab holds | `magnet_test_mode.c` | PAD-381 |

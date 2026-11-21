@@ -102,7 +102,7 @@ NOT_STOCK = ("This card's game start-up script (/etc/init.d/game_monitor) is not
              'as it is and remote buttons cannot be put on it.')
 #: what the Network tab shows under "Exactly what it changes on the card": (what, value, in code type)
 DETAILS = (
-    ('File added to the card', SO + ' (system partition, owner root, mode 755; 6 KB, no library needed)', True),
+    ('File added to the card', SO + ' (system partition, owner root, permissions 755; 6 KB, no library needed)', True),
     ('File changed', MONITOR + ": the one line that starts the game also loads that file into it", True),
     ('What the file does', 'The game reads its cabinet buttons as 8 bytes from /dev/spidev1.0, one bit a switch. '
      'The file lets that read happen and then, for 0.15 s after you click a button here, shows the game the '
@@ -230,7 +230,7 @@ def guard_flash(project, image):
 
 def _stop(cancel):
     if cancel is not None and cancel():
-        raise ExtrasError('The remote-buttons preparation was cancelled.')
+        raise ExtrasError('The remote-buttons preparation was canceled.')
 
 
 def _command(ex, program, *args):

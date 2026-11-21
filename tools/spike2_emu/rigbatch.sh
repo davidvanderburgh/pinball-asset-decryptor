@@ -134,6 +134,9 @@ WHO=${WHO:-$(pad_label)}
 WHO=${WHO:-rigbatch}
 OUT=${OUT:-$PAD_HOME/rigbatch/$(basename "$LIST" .list)-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$OUT"
+# a batch's staged-card notes (stage/<n>: where job n's card was copied) are its own: one left by an earlier batch
+# in the same --out handed job n THAT batch's card (PAD-1475: a Bond reel booted the last reel's Batman card)
+rm -rf "$OUT/stage"
 pad_give_back "$PAD_HOME/rigbatch" "$OUT"
 P=$OUT/progress.txt
 say() { echo "$(date +%T) $*" | tee -a "$P"; }

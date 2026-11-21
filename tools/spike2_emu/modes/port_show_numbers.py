@@ -87,18 +87,27 @@ def lit_main(argv):
     """``port_show_numbers.py lit <port key> <number>...``: the show reel's verdict (pad_mode_runtime.c reel_tick, an
     emulator run that plays each show the game's own modes start by its number and samples the lights) as the port's
     ``text show_lit`` - the shows seen lighting the playfield on their own, the only ones the Modes tab offers. A line
-    already there is replaced; an empty list is written too (measured: none lights on its own)."""
-    key, nums = argv[2], sorted({int(n) for n in argv[3:] if n.isdigit()})
+    already there is replaced; an empty list is written too (measured: none lights on its own). ``--reeled <numbers>``
+    (reel_verdict.py's: "1-537") writes the numbers the reel played as ``text show_reeled`` beside it, the shows
+    the Modes tab can say lit nothing on their own (without it, the ones the game's own modes start)."""
+    args = list(argv[3:])
+    reeled = ""
+    if "--reeled" in args:                  # PAD-1475 reopened: the numbers the reel played ("1-537"), as `show_reeled`
+        i = args.index("--reeled")
+        reeled = args[i + 1] if i + 1 < len(args) else ""
+        del args[i:i + 2]
+    key, nums = argv[2], sorted({int(n) for n in args if n.isdigit()})
     port = os.path.join(PORTS, key + ".port")
     text = open(port, encoding="utf-8").read()
     line = "text %-19s %s" % ("show_lit", " ".join(map(str, nums)))
     note = "# the show reel (emulator): the shows above seen lighting the playfield on their own"
     out = [ln for ln in text.splitlines()
-           if not ln.startswith("text show_lit ") and ln.strip() != "text show_lit" and ln != note]
+           if not ln.startswith(("text show_lit ", "text show_reeled ")) and ln.strip() != "text show_lit"
+           and ln != note]
     at = next((i for i, ln in enumerate(out) if ln.startswith("value show_count")), None)
     if at is None:
         sys.exit("%s has no PAD-1476 block (value show_count): run the starter / stopper step first" % key)
-    out[at + 1:at + 1] = [note, line]
+    out[at + 1:at + 1] = [note, line] + (["text %-19s %s" % ("show_reeled", reeled)] if reeled.strip() else [])
     with open(port, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(out) + "\n")
     print("%s: show_lit %d" % (key, len(nums)))

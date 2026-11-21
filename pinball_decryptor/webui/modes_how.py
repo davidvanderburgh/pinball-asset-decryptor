@@ -36,9 +36,10 @@ HOW_NOTE = ("Read from the game program: the game's modes are compiled into it, 
 SOUNDS_NOTE = ("The sounds this mode's own code asks for by a fixed number. A sound the game works out while it "
                "plays (a random pick, one of a list) or asks for from code several modes share is not listed.")
 
-SHOWS_NOTE = ("The game's light shows this mode's own code starts by a fixed number. The app names the ones it has seen "
-              "play in the emulator; the rest go by the game's own number. A show whose number the game works out "
-              "while it plays, or that code several modes share starts, is not listed.")
+SHOWS_NOTE = ("The game's light shows this mode plays: the ones its own code starts by a fixed number, then the ones "
+              "that are its own code but that it picks as it plays. The app names the ones it has seen play in the "
+              "emulator; the rest go by the game's own number. A show that code several modes share starts is not "
+              "listed.")
 
 _START = re.compile(r"^(start|select):\s*(.*)$")
 _IN = re.compile(r",\s*in ([A-Za-z_][\w:]*?)::v\[\d+\]\s*$")
@@ -117,7 +118,7 @@ class HowItWorksMixin:
         self._how_run += 1
         run = self._how_run
         self._how_key, self._how, self._how_names = key, None, None
-        self.set(mode_shows=[])                                       # PAD-1476: another card's are not these
+        self.set(mode_shows=[], show_pick={})                                     # PAD-1476: another card's are not these
         if not card:
             return
 
@@ -134,7 +135,7 @@ class HowItWorksMixin:
                 self._how = got
                 if self._game_mode is not None:
                     self._publish_game_mode()
-                self.set(mode_shows=self._mode_show_rows())          # PAD-1476: the picks for a mode's shows
+                self.set(mode_shows=self._mode_show_rows(), show_pick=self._show_pick())        # PAD-1476: the picks for a mode's shows
             self.ctx.loop.post(_apply)
 
         threading.Thread(target=_work, daemon=True, name="modes-how").start()
@@ -182,13 +183,19 @@ class HowItWorksMixin:
                 "tip": {"head": text, "lines": lines}}
 
     @staticmethod
-    def _how_show(sh, num, calls, lit=None, mode_name=""):
-        """PAD-1475: one listed light show: its name where the port names it, else the game's number."""
+    def _how_show(sh, num, calls, seen="", mode_name=""):
+        """PAD-1475: one listed light show: its name where the port names it, else the game's number. *seen* is
+        what the show reel saw of it (:func:`.mode_project.show_checked`); *calls* 0 = a show whose body is this
+        mode's own code that its code starts by a number it works out as it plays (PAD-1475 reopened)."""
         name = sh.names.get(str(num), "")
         text = name or "Light show %d" % num
         lines = ["The game's light show %d" % num]
+        if not calls:
+            lines.append("This mode's own show: its code picks it as it plays (a number it works out)")
         picks = sh.pickable.get(str(num)) or []
-        if not picks and lit is not None and num not in lit:   # PAD-1476: measured, and it lights nothing alone
+        if seen == "hangs":                                 # PAD-1475 reopened: the port's show_hangs
+            lines.append("It stops the game when one of ours starts it, so a mode of yours cannot use it")
+        elif not picks and seen == "dark":                  # PAD-1476: measured, and it lights nothing alone
             lines.append("It lights only while this mode runs, so a mode of yours cannot use it")
         elif not picks:                                     # PAD-1476: any of them, by the game's own number
             lines.append('A mode of yours and the co-op intro can play it too: "%s (%s)" on its Lights page'
@@ -288,11 +295,14 @@ class HowItWorksMixin:
         if not rows and sr.note and not sr.modes:
             out["sounds_note"] = "Sounds: %s." % sr.note
         sh = clips.show_reading
-        shows = sh.modes.get(cls) or []
+        from ..plugins.stern import mode_project as MP
+        # PAD-1475 reopened: and the ones whose body is its own code, started by a number it works out
+        shows = [(num, n) for num, _at, n in sh.modes.get(cls) or ()] + [(num, 0) for num in sh.own_shows(cls)]
         p = self._title() if hasattr(self, "_title") else None          # PAD-1476: the build's measured shows
-        lit = getattr(p, "show_lit", None) if p is not None else None
+        fixed = {r[0] for rows in sh.modes.values() for r in rows}
         name = clips.reading.label(cls) if clips.reading is not None else ""
-        out["shows"] = [self._how_show(sh, num, n, lit, name) for num, _at, n in shows[:SHOWS_MAX]]
+        out["shows"] = [self._how_show(sh, num, n, MP.show_checked(p, num, fixed) if p is not None else "", name)
+                        for num, n in shows[:SHOWS_MAX]]
         if len(shows) > SHOWS_MAX:
             out["shows_more"] = "And %d more." % (len(shows) - SHOWS_MAX)
         if not shows and sh.note and not sh.modes:

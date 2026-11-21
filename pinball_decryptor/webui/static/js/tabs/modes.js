@@ -19,6 +19,7 @@ import { NewModeWizard, KindTiles } from "./modes_new.js";
 import { BlocksEditor, BlocksCode, ProgramBar, useModeProgram } from "./modes_blocks.js";
 import { PlayfieldView } from "./modes_playfield.js";
 import { LightShowsView } from "./modes_lightshows.js";
+import { useShowNumber } from "./modes_shownum.js";   // PAD-1475 reopened
 import { RuleCardsView, StoryView, ShotTableView, TimelineView, NodeGraphView } from "./modes_rules.js";
 import { ScriptView, CodeView, CEditor } from "./modes_script.js";
 import { RulesSheetDialog } from "./modes_sheet.js";
@@ -71,7 +72,7 @@ const T = {
   addBall: "A shot that puts one more ball in play while the multiball runs, up to that many times. It still scores if it is also a scoring shot.",
   mbOn: "When the game serves the balls. On a shot (the Action button, say), the mode's clock is the time the player has to hit it: time up ends the mode with no multiball. Once the balls come, the clock stops and one ball left ends it. Light the shots that score lights that shot too.",
   wizard: "Make this mode the game's own mini-wizard: when it starts (on its shot, an event such as a film done, or shots in order), the player gets the game's mode itself, with its own shots, lights, screens, sounds and award. Lit (where the game lights that one for a start shot), it waits for the game's own start shot, as when the game lights one; started, it begins at once, or the moment none of the game's own modes is in its way, and if the ball ends first it is lit for the start shot where the game has one. On James Bond 007 it is the only one lit until it starts, so the game's own choosing cannot swap it for another, and the game no longer lights it by itself (its own way: a henchman, villain, Q Branch or gadget in all six films), so only this mode hands it out. On the other games the game's own rules still light and start it too. A mini-wizard the player has already played this game plays again.",
-  gameShows: "One of the game's own playfield light shows as the mode starts, another as it ends, and one on each hit of a shot that scores: flashy ones suit a start, subdued ones an end, accents a hit (one on a hit plays in place of the shot's white flash). Or one a mode of the game's own plays, listed under that mode: only the ones the app has seen light the playfield on their own (many light just that mode's shots, and only while it runs); on a game not checked yet they are all listed and marked so. Each plays for its own few seconds, one at a time (a new one takes the place of one still playing). The one at the end is skipped when the mode ends because the ball drained: the game stops its own shows then.",
+  gameShows: "One of the game's own playfield light shows as the mode starts, another as it ends, and one on each hit of a shot that scores: flashy ones suit a start, subdued ones an end, accents a hit (one on a hit plays in place of the shot's white flash). Or one a mode of the game's own plays, listed under that mode: only the ones the app has seen light the playfield on their own (many light just that mode's shots, and only while it runs); on a game not checked yet they are all listed and marked so. Or any of the game's shows by its own number (Another, by its number…, last in the list): the box beside it names the show where the app knows it and says whether it was seen lighting the playfield; one that stops the game cannot be picked. Each plays for its own few seconds, one at a time (a new one takes the place of one still playing). The one at the end is skipped when the mode ends because the ball drained: the game stops its own shows then.",
   lit: "While the mode runs, the insert in front of every shot that scores (and every shot with its own points) shows this color and pattern, over the game's own light shows; every other insert keeps doing what the game wants. They go back to the game the moment the mode ends. Blink and Pulse repeat about twice a second and every 1.6 s; Chase lights one of them at a time.",
   priority: "Kept for modes made before it changed: it no longer holds the game's displays back. A mode never makes the game's screens wait (holding one kept Godzilla's Magna-Grab magnet on until the machine was switched off), so the game's awards, starts and jackpots always come through, and the mode's screen is back when they end. 0 = none.",
   film: "Cut this mode's clip, its sound or its screen's picture from a video file of your own (a film, an episode, anything): pick the video, a start time and a length (up to 30 seconds), and whether to keep its letterbox or fill the frame. The mode keeps only the cut (clip.mp4, end.wav, art.png), never the video.",
@@ -840,14 +841,23 @@ function FilmSec({ off, dis, rs, labels, only }) {
 // the title does not have stays shown as it is, so the problem line can name it)
 const SHOW_KINDS = [["flashy", "Flashy (a start)"], ["subdued", "Subdued (an end)"], ["accent", "Accent (a moment)"]];
 // PAD-1476: and the shows the game's own modes start (s.mode_shows, read off the card: "#211"), grouped by the mode
-function showOptions(shows, value, modeShows = []) {
+function showOptions(shows, value, modeShows = [], pick = null) {
   const out = [{ value: "(none)", label: "(none)" }];
   for (const [kind, words] of SHOW_KINDS)
     for (const x of shows.filter((y) => y.kind === kind)) out.push({ value: x.name, label: `${x.name} (${x.secs} s)`, group: words });
-  for (const x of modeShows) out.push({ value: x.value, label: x.label, group: `From ${x.group}${x.checked === false ? " (not checked on this game)" : ""}` });
-  if (value && value !== "(none)" && !shows.some((x) => x.name === value) && !modeShows.some((x) => x.value === value))
+  for (const x of modeShows) out.push({ value: x.value, label: `${x.label}${x.checked === false ? " (not checked on this game)" : ""}`, group: `From ${x.group}` });
+  // PAD-1475 reopened: a number the lists do not have goes in the number box beside it (useShowNumber)
+  if (value && value !== "(none)" && !shows.some((x) => x.name === value) && !modeShows.some((x) => x.value === value)
+      && !(pick && pick.max && /^#\d+$/.test(value)))
     out.push({ value, label: /^#\d+$/.test(value) ? `Light show ${value.slice(1)}` : `${value} (not on this game)` });
   return out;
+}
+
+// PAD-1475 reopened: one of the Lights page's show picks, with Another, by its number
+function ShowSelect({ k, value, shows, ms, pick, disabled }) {
+  const n = useShowNumber(value, showOptions(shows, value, ms, pick), pick, (v) => setF(k, v, true));
+  return html`<div class="row wrap" style="gap:6px">
+    <${Select} value=${n.sel} options=${n.opts} onChange=${n.onSel} disabled=${disabled} width=${240} sm />${disabled ? null : n.box}</div>`;
 }
 
 function LightsPage({ s, f, off, dis, rs }) {
@@ -877,12 +887,9 @@ function LightsPage({ s, f, off, dis, rs }) {
     <//>
     <${Sec} title="The game's light shows" tipText=${T.gameShows} reason=${rs.shows}>
       <div class="modes-kv">
-        <span class="lbl">When it starts</span><${Select} value=${f.show_start} options=${showOptions(shows, f.show_start, ms)}
-          ns="modes" k="f:show_start" disabled=${sOff} width=${240} sm />
-        <span class="lbl">When it ends</span><${Select} value=${f.show_end} options=${showOptions(shows, f.show_end, ms)}
-          ns="modes" k="f:show_end" disabled=${sOff} width=${240} sm />
-        <span class="lbl">When a shot is hit</span><${Select} value=${f.show_hit} options=${showOptions(shows, f.show_hit, ms)}
-          ns="modes" k="f:show_hit" disabled=${sOff} width=${240} sm />
+        <span class="lbl">When it starts</span><${ShowSelect} k="show_start" value=${f.show_start} shows=${shows} ms=${ms} pick=${s.show_pick} disabled=${sOff} />
+        <span class="lbl">When it ends</span><${ShowSelect} k="show_end" value=${f.show_end} shows=${shows} ms=${ms} pick=${s.show_pick} disabled=${sOff} />
+        <span class="lbl">When a shot is hit</span><${ShowSelect} k="show_hit" value=${f.show_hit} shows=${shows} ms=${ms} pick=${s.show_pick} disabled=${sOff} />
       </div>
       ${dis.shows ? null : html`<div class="small muted wrap">${T.gameShows}</div>`}
     <//>

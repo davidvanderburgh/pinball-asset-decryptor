@@ -414,6 +414,10 @@ def extracted_from_note(came, scenes=True):
         "game shipped.",
         "Pictures and text an earlier Write added are part of that card now, so they cannot "
         "be taken back here. Layers it hid can: %s." % shown,
+        # Simon (2026-11-21): "once they have written the card they cannot expect to re-extract it at their
+        # original sizes. They would need to go back to their project artwork"
+        "Its pictures are the sizes the screen shows, not the artwork they were made from: to change one "
+        "at a higher resolution, bring your original artwork back in.",
         "To start from the game as it shipped, extract the official card into a new project."]}
 
 

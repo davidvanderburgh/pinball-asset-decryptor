@@ -1896,9 +1896,15 @@ const RESIZE_FROM = [
 // Simon (2026-11-20): "It says Draw 1:1 - makes no sense because it isn't": the picture line names the file's size
 // and the size it shows, and the button says what it does - greyed out, with the reason, where it can't help
 const picPct = (pic) => (pic.sx === pic.sy ? `${pic.sx}` : `${pic.sx} x ${pic.sy}`);
+// Simon (2026-11-21): and what the Write puts on the card - the Images tab's Written (the most any scene shows it,
+// with the layout as it is now; never more than the picture itself)
+const picWritten = (pic) => (pic.written && (pic.written[0] !== pic.w || pic.written[1] !== pic.h)
+  ? `; written at ${pic.written[0]} x ${pic.written[1]}` : "");
 const picLine = (p) => (p.w != null && p.h != null
-  ? `Picture ${p.pic.w} x ${p.pic.h} px, shown at ${Math.round(p.w)} x ${Math.round(p.h)} (${picPct(p.pic)}%)`
-  : `Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${picPct(p.pic)}%`);
+  ? `Picture ${p.pic.w} x ${p.pic.h} px, shown at ${Math.round(p.w)} x ${Math.round(p.h)} (${picPct(p.pic)}%)${picWritten(p.pic)}`
+  : `Picture ${p.pic.w} x ${p.pic.h} px, drawn at ${picPct(p.pic)}%${picWritten(p.pic)}`);
+const picMost = (pic) => (pic.most ? ` The most any scene shows it, with your layout as it is now: ${pic.most[0]} x ${pic.most[1]}${
+  pic.written ? `, so the Write puts it on the card at ${pic.written[0]} x ${pic.written[1]} (never bigger than the picture itself; your own file stays full size in the project)` : ""}.` : "");
 function oneToOneWhy(p, theme, stage) {
   if (!p.pic) return "Only a picture is drawn pixel for pixel";
   if (p.pic.sx === 100 && p.pic.sy === 100) return "It is already drawn pixel for pixel (100% of its file)";
@@ -2001,7 +2007,7 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
       <${GameColors} g=${p.game_colors} />` : null}
     ${p && (t.sels || []).length <= 1 ? html`<div class="tree-panel tree-size">
       <div class=${cx("tree-pic", !p.pic && "tree-off")}>
-        <span class="small muted ellip" ...${tip(p.pic ? `${picLine(p)}. The picture file's own size, then the size it shows on the screen here and how much that is of the file (the game scales it as it draws). Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with "Keep this picture's own size" ticked, then press Show pixel for pixel.`
+        <span class="small muted ellip" ...${tip(p.pic ? `${picLine(p)}. The picture file's own size, then the size it shows on the screen here and how much that is of the file (the game scales it as it draws).${picMost(p.pic)} Anything but 100% is resized by the game as it draws, which can leave jagged edges: make the picture at the size it shows, replace it on the Images tab with Own size ticked, then press Show pixel for pixel.`
           : "Only a picture has a size of its own to draw it at.")}>
           ${p.pic ? picLine(p) : "No picture of its own"}</span>
         <${Button} size="xs" kind=${p.one_to_one ? "primary" : ""} disabled=${!p.one_to_one && !!oneToOneOff}
@@ -2034,7 +2040,7 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
         </div>
         <div class="tree-wide">${num("Size % of original", p.scale === p.scale_y ? p.scale : "", (v) => call("text_scenes.tree_set_scale", p.id, v), isText
           ? "The size of the words (and their box with them), both ways at once; 100 = the size the game ships"
-          : "Both ways at once; 100 = the original art's place and size, as the game ships it. A replacement kept at its own size is fitted into that place, so it is 100 here too (the picture line above says how much of its file that is).")}</div>
+          : "Both ways at once; 100 = the original art's place and size, as the game ships it. A replacement picked with an older version of PAD is fitted into that place, so it is 100 here too; one picked now is placed full size, pixel for pixel, where the original was (the picture line above says how much of its file that is, and what the Write puts on the card).")}</div>
         ${num("Width %", p.scale, (v) => call("text_scenes.tree_set_size", p.id, v, null), "Stretch it sideways only")}
         ${num("Height %", p.scale_y, (v) => call("text_scenes.tree_set_size", p.id, null, v), "Stretch it up and down only")}
         ${num("Turn °", p.rotate, (v) => call("text_scenes.tree_set_rotation", p.id, v), "How far you have turned it from as shipped, in degrees clockwise (0 = as shipped), on top of any turn the game gives it")}

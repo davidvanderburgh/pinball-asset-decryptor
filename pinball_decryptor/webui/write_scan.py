@@ -280,6 +280,35 @@ def modes_preview_on(mfr):
     return preview.enabled("modes")
 
 
+def picture_size_notes(assets_path, assignments, keep=()):
+    """``{rel: "4000×2860 → 347×248"}`` for each picked scene picture the Write puts on the card at another size
+    than the file picked (Simon, 2026-11-21: "Written resolution ... the maximum resolution PAD will write to the
+    card"; plugins/stern/picture_sizes.py), "squeezed" where Own size is off."""
+    out = {}
+    try:
+        from PIL import Image
+        from ..plugins.stern import picture_sizes, scene_render
+        stock = scene_render.picture_sizes(assets_path)
+        rows = {}
+        for rel, path in (assignments or {}).items():
+            orig = stock.get(rel[len("images/"):]) if rel.startswith("images/") else None
+            if not orig or not (isinstance(path, str) and os.path.isfile(path)):
+                continue
+            with Image.open(path) as im:
+                rows[rel] = (tuple(orig), tuple(im.size))
+        cells = picture_sizes.columns(assets_path, rows) if rows else {}
+        for rel, cell in cells.items():
+            imp = tuple(cell.get("i") or ())
+            if rel not in keep:
+                if imp and imp != tuple(cell["o"] or ()):
+                    out[rel] = "%d×%d → %d×%d (squeezed into the original's pixels)" % (imp + tuple(cell["o"]))
+            elif cell.get("w") and tuple(cell["w"]) != imp:
+                out[rel] = "%d×%d → %d×%d (the most the screen shows it)" % (imp + tuple(cell["w"]))
+    except Exception:                                   # noqa: BLE001 - the rows go out without them
+        return out
+    return out
+
+
 def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     """Every staged change the MD5 walk cannot see, as rows."""
     rows = []
@@ -297,9 +326,11 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
         if not pend:
             continue
         assignments = pend[1]
+        sizes = picture_size_notes(assets_path, assignments, pend[2] if len(pend) > 2 else ())             if key == "image" else {}
         for rel in sorted(assignments):
             ext = os.path.splitext(rel)[1].lstrip(".") or "?"
-            rows.append((rel, ext, "Pending (%s)" % label, "pending"))
+            name = "%s  —  %s" % (rel, sizes[rel]) if rel in sizes else rel
+            rows.append((name, ext, "Pending (%s)" % label, "pending"))
     if assets_path and not all(got.values()):
         from ..core import staged_changes
         try:

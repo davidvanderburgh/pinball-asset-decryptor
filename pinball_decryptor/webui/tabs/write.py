@@ -1030,6 +1030,19 @@ class WriteTab(TabService):
                 "%s: %d file(s) in this folder aren't part of this extract "
                 "(%s); a build can't use them." % (surface, len(foreign),
                                                    shown))})
+        # Simon (2026-11-21): "once they have written the card they cannot expect to re-extract it at their original
+        # sizes. They would need to go back to their project artwork"
+        try:
+            pend = self.window.pending_image_assignments(assets)
+            reduced = write_scan.picture_size_notes(assets, pend[1], pend[2]) if pend else {}
+        except Exception:                               # noqa: BLE001
+            reduced = {}
+        n = sum(1 for v in reduced.values() if "the most the screen shows it" in v)
+        if n:
+            infos.append({"kind": "", "text": (
+                "%d picture(s) will be reduced for the screen on the card (your files in the project stay full "
+                "size). Keep your own artwork and this project: extracting the written card later gives the "
+                "reduced pictures, not your originals." % n)})
         return errs + warns + infos
 
     def _refresh_prebuild_notes(self):

@@ -665,6 +665,20 @@ def _with_length(slot: VideoSlot, seconds: float) -> VideoSlot:
     return replace(slot, info=info, probed=True)
 
 
+def _with_size(slot: VideoSlot, size) -> VideoSlot:
+    """*slot* as a clip of *size* ``(w, h)``, so a conversion scales the
+    replacement to that instead of the stock clip's size: a bigger clip goes
+    on at the most the game shows its slot (Simon, 2026-11-21, "Same as
+    pictures"; plugins/stern/video_sizes.py)."""
+    info = slot.info if slot.info is not None else (
+        detect_video_info(slot.abs_path))
+    if info is None or not size:
+        return slot
+    info = copy.copy(info)
+    info.width, info.height = int(size[0]), int(size[1])
+    return replace(slot, info=info, probed=True)
+
+
 #: The "replacement" of a game's own clip whose Color switch is on (PAD-336):
 #: staging re-encodes the slot from its ``.orig/`` snapshot with the
 #: individual files profile baked in.
@@ -724,7 +738,7 @@ def _stock_put_back(rep, clip_colour):
 
 
 def _conversion(cache, slot, rep, orig, slot_noconv, choice, trim_to_length,
-                pin_byte_size, best_quality, clip_colour):
+                pin_byte_size, best_quality, clip_colour, size=None):
     """What staging *rep* into *slot* is asked for: ``(slot_trim, seconds,
     budget, rate, recipe)``, *choice* being the clip's length choice (see
     :func:`stage_replacements`).  Worked out once, for the staging and for
@@ -750,6 +764,14 @@ def _conversion(cache, slot, rep, orig, slot_noconv, choice, trim_to_length,
     rate = None
     if not pin_byte_size:
         rate = _clip_bitrate(orig or slot.abs_path)
+    # A clip going on bigger than its slot (*size*) gets the stock clip's
+    # bits per pixel, not its bitrate, and no byte budget: the stock clip's
+    # bytes were sized for the stock clip's pixels (Simon, 2026-11-21)
+    if size:
+        budget = None
+        base = detect_video_info(orig) if orig else slot.info
+        if rate and base is not None and base.width and base.height:
+            rate = rate * (size[0] * size[1]) / float(base.width * base.height)
     # A short-GOP slot's recipe names its spacing, so a conversion made
     # before conversions kept it (PAD-298) is made again; every other
     # slot's recipe is exactly what it was.
@@ -765,6 +787,10 @@ def _conversion(cache, slot, rep, orig, slot_noconv, choice, trim_to_length,
     # conversion from a held last frame; every other recipe is exactly what
     # it was.
     gop.update(fill_kwargs(choice))
+    # A clip going on bigger than its slot is a different conversion; every
+    # other recipe is exactly what it was.
+    if size:
+        gop["size"] = "%dx%d" % tuple(size)
     recipe = cache.recipe(slot, rep, orig, trim=slot_trim,
                           length=seconds or 0,
                           noconv=slot_noconv, budget=budget,
@@ -780,7 +806,8 @@ def conversions_due(slots_by_rel: Dict[str, VideoSlot],
                     assets_dir=None, pin_byte_size: bool = False,
                     asis_overrides: Optional[Dict[str, bool]] = None,
                     best_quality: bool = False,
-                    length_overrides: Optional[Dict[str, object]] = None):
+                    length_overrides: Optional[Dict[str, object]] = None,
+                    sizes: Optional[Dict[str, tuple]] = None):
     """The clips :func:`stage_replacements` would convert if it ran now with
     the same arguments, so a caller can say how long that takes before it
     starts (PAD-489): ``({rel: pixels}, coloured)``, *pixels* being frames x
@@ -815,7 +842,8 @@ def conversions_due(slots_by_rel: Dict[str, VideoSlot],
         if orig:
             recipe = _conversion(cache, slot, rep, orig, False,
                                  lengths.get(rel), trim_to_length,
-                                 pin_byte_size, best_quality, clip_colour)[4]
+                                 pin_byte_size, best_quality, clip_colour,
+                                 (sizes or {}).get(rel))[4]
             if cache.fresh(slot, recipe):
                 continue
         pixels = 0
@@ -839,8 +867,14 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        cancel_cb=None, pin_byte_size: bool = False,
                        asis_overrides: Optional[Dict[str, bool]] = None,
                        best_quality: bool = False,
-                       length_overrides: Optional[Dict[str, object]] = None):
+                       length_overrides: Optional[Dict[str, object]] = None,
+                       sizes: Optional[Dict[str, tuple]] = None):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
+
+    *sizes*, when given, is ``{rel_path: (w, h)}``: the clips that go on
+    bigger than their slot, at that size (Simon, 2026-11-21, "Same as
+    pictures": the most the game shows the slot, plugins/stern/
+    video_sizes.py); every other clip is converted to its slot's size.
 
     *slots_by_rel* maps the same rel_path keys to their VideoSlot.  Returns
     ``(staged, failures)`` where *failures* is a list of ``(rel_path, error)``.
@@ -957,9 +991,10 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                 return False, False, (rel, why), lines
             rep = orig
         clip_colour = colour or chosen.get(rel)
+        size = (sizes or {}).get(rel)
         slot_trim, seconds, budget, rate, recipe = _conversion(
             cache, slot, rep, orig, slot_noconv, lengths.get(rel),
-            trim_to_length, pin_byte_size, best_quality, clip_colour)
+            trim_to_length, pin_byte_size, best_quality, clip_colour, size)
         with lock:
             fresh = cache.fresh(slot, recipe)
         if fresh:
@@ -969,6 +1004,11 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
         target = _pristine_slot(slot, orig)
         if seconds:
             target = _with_length(target, seconds)
+        if size:
+            target = _with_size(target, size)
+            say((f"  {rel}: your clip goes on at {size[0]}x{size[1]}, the "
+                 f"most the game shows this slot (its zoom included)",
+                 "info"))
         ok, detail = stage_replacement(target, rep,
                                        trim_to_length=slot_trim,
                                        no_conversion=slot_noconv,

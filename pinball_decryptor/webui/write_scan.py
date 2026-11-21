@@ -309,6 +309,64 @@ def picture_size_notes(assets_path, assignments, keep=()):
     return out
 
 
+_VIDEO_DIMS = {}
+
+
+def _video_dims(path):
+    """``(w, h)`` of the clip *path* (ffprobe, kept per file and change), or None."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    key = (os.path.normcase(os.path.abspath(path)), st.st_size, st.st_mtime_ns)
+    if key not in _VIDEO_DIMS:
+        from ..core.video import detect_video_info
+        try:
+            info = detect_video_info(path)
+        except Exception:                               # noqa: BLE001
+            info = None
+        _VIDEO_DIMS[key] = ((int(info.width), int(info.height))
+                            if info is not None and info.width and info.height else None)
+    return _VIDEO_DIMS[key]
+
+
+def video_size_notes(assets_path, mfr, slots_by_rel, assignments):
+    """``{rel: "3840×2160 → 1796×1014 (...)"}`` for each picked clip the Write puts on the card at another size
+    than the file picked (Simon, 2026-11-21, "Same as pictures"; plugins/stern/video_sizes.py)."""
+    out = {}
+    try:
+        from ..core import staged_originals
+        from ..plugins.stern import video_sizes
+        players = mfr.video_players(assets_path) if mfr is not None else None
+        for rel, path in (assignments or {}).items():
+            slot = (slots_by_rel or {}).get(rel)
+            if slot is None or not (isinstance(path, str) and os.path.isfile(path)):
+                continue
+            snap = staged_originals.snapshot_path(assets_path, rel) if assets_path else None
+            stock = _video_dims(snap) if snap else None
+            if not stock and slot.info is not None and slot.info.width and slot.info.height:
+                stock = (int(slot.info.width), int(slot.info.height))
+            mine = _video_dims(path)
+            if not stock or not mine:
+                continue
+            player = video_sizes.player_of(players, rel) if players else None
+            got = video_sizes.written_size(stock, mine, player)
+            if tuple(got) == tuple(mine):
+                continue
+            most = video_sizes.shown_size(stock, player)
+            if got[0] > mine[0]:
+                why = "the slot's size"                 # a smaller clip is enlarged to its slot, as before
+            elif tuple(got) != tuple(most) and (got[0] >= video_sizes.DECODER_MAX[0] - 1
+                                                or got[1] >= video_sizes.DECODER_MAX[1] - 1):
+                why = "reduced: the most the machine's video decoder plays"
+            else:
+                why = "reduced: the most the screen shows it"
+            out[rel] = "%d×%d → %d×%d (%s)" % (tuple(mine) + tuple(got) + (why,))
+    except Exception:                                   # noqa: BLE001 - the rows go out without them
+        return out
+    return out
+
+
 def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     """Every staged change the MD5 walk cannot see, as rows."""
     rows = []
@@ -326,7 +384,8 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
         if not pend:
             continue
         assignments = pend[1]
-        sizes = picture_size_notes(assets_path, assignments, pend[2] if len(pend) > 2 else ())             if key == "image" else {}
+        sizes = (picture_size_notes(assets_path, assignments, pend[2] if len(pend) > 2 else ()) if key == "image"
+                 else video_size_notes(assets_path, mfr, pend[0], assignments) if key == "video" else {})
         for rel in sorted(assignments):
             ext = os.path.splitext(rel)[1].lstrip(".") or "?"
             name = "%s  —  %s" % (rel, sizes[rel]) if rel in sizes else rel

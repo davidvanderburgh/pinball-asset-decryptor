@@ -5173,11 +5173,21 @@ class App:
                     self._current_mfr.video_pins_byte_size(assets_dir))
             except Exception:
                 pin_size = False
+        # Simon (2026-11-21): a bigger clip goes on at the most the game
+        # shows its slot (plugins/stern/video_sizes.py)
+        sizes = {}
+        if self._current_mfr is not None:
+            try:
+                sizes = dict(self._current_mfr.video_sizes(
+                    assets_dir, slots_by_rel, assignments) or {})
+            except Exception:
+                sizes = {}
         return dict(slots_by_rel=slots_by_rel, assignments=assignments,
                     trim_to_length=trim, no_conversion=no_conversion,
                     assets_dir=assets_dir, pin_byte_size=pin_size,
                     asis_overrides=asis, best_quality=best,
-                    length_overrides=lengths)
+                    length_overrides=lengths,
+                    **({"sizes": sizes} if sizes else {}))
 
     def _image_staging(self, assets_dir):
         """:meth:`_video_staging` for the pictures: ``slots_by_rel``,

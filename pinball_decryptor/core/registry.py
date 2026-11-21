@@ -1046,6 +1046,20 @@ class Manufacturer(ABC):
         Called off the UI thread."""
         return {}
 
+    def video_sizes(self, assets_dir, slots_by_rel, assignments):
+        """``{rel: (w, h)}`` of the assigned clips that go on the card bigger
+        than their slot, at that size (Simon, 2026-11-21: a replacement video
+        goes on at the most the game shows its slot, as pictures do); every
+        other clip is converted to its slot's size.  Default ``{}``: every
+        clip at its slot's size."""
+        return {}
+
+    def video_players(self, assets_dir):
+        """``{clip name: (box w, box h, biggest zoom)}`` of the players the
+        project's scenes play clips in (the Video tab's Current column), or
+        None (the default) where every clip goes on at its slot's size."""
+        return None
+
     def video_pins_byte_size(self, assets_dir=None) -> bool:
         """Whether this plugin's Write may hold a replacement clip to the
         original's exact byte length.

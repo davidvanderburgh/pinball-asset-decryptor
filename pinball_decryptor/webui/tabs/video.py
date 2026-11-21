@@ -187,6 +187,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         # PAD-1232: seconds per file, {(path, size, mtime_ns): seconds}
         self._secs = {}
         self._secs_busy = set()
+        self._dims = {}              # Simon (2026-11-21): (path, size, mtime) -> (w, h), with _secs
         self._conv_pass = 0
         self._conv_kick = False
         self._unplayable_warned = set()
@@ -1422,7 +1423,61 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                                   and not self._assign.get(rel)),
                 **self._scr_row(rel, s, rep, is_changed),
                 **self._m_row(rel),
-                **self._origin_row(rel)}
+                **self._origin_row(rel),
+                **self._size_row(s, rep)}
+
+    # Simon (2026-11-21): "Same as pictures" - the Images tab's Original / Imported / Current / Written for a
+    # clip: the stock clip's size, your file's, the most the game shows the slot (its player's box times its
+    # biggest zoom) and what the Write puts on the card (plugins/stern/video_sizes.py)
+    def _players(self):
+        """``{clip: (box w, box h, zoom)}`` of the project's scenes, or None where the machine keeps every clip at
+        its slot's size; worked out once per list."""
+        mfr = self.mfr
+        fn = getattr(mfr, "video_players", None)
+        if fn is None or not self._scan_dir:
+            return None
+        try:
+            return fn(self._scan_dir)
+        except Exception:                                   # noqa: BLE001 - the rows go out without them
+            log.exception("video players")
+            return None
+
+    def _dims_of(self, path):
+        key = self._file_key(path) if path else None
+        return self._dims.get(key) if key is not None else None
+
+    def _stock_dims(self, slot):
+        snap = self._stock_path(slot.rel_path)
+        if snap and os.path.isfile(snap):
+            return self._dims_of(snap)
+        info = slot.info
+        return (int(info.width), int(info.height)) if info is not None and info.width and info.height else None
+
+    def _sizes_of(self, slot, rep):
+        """``(original, imported, current, written)``, each ``(w, h)`` or None."""
+        from ...plugins.stern import video_sizes
+        orig = self._stock_dims(slot)
+        mine = self._dims_of(rep) if rep else None
+        players = getattr(self, "_players_now", None)
+        player = video_sizes.player_of(players, slot.rel_path) if players else None
+        cur = video_sizes.shown_size(orig, player) if orig else None
+        wri = None
+        if rep and orig:
+            wri = video_sizes.written_size(orig, mine, player) if mine else None
+        return orig, mine, cur, wri
+
+    def _size_row(self, slot, rep):
+        orig, mine, cur, wri = self._sizes_of(slot, rep)
+
+        def fmt(wh):
+            return "%d×%d" % tuple(wh) if wh else ""
+        out = {"ro": fmt(orig), "ri": fmt(mine), "rc": fmt(cur), "rw": fmt(wri)}
+        if rep and not mine and self._file_key(rep) is not None and self._file_key(rep) not in self._secs:
+            out["ri"] = "…"
+        # orange: written smaller than your file (the screen never shows more, or the decoder can't play more)
+        if mine and wri and (wri[0] < mine[0] - 1 or wri[1] < mine[1] - 1):
+            out["rd"] = True
+        return out
 
     # Simon (2026-11-21): Origin - the official card's clip, or custom (core/asset_origin.py)
     def _origins(self):
@@ -1549,15 +1604,20 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._secs_busy.update(p for _r, p in want)
 
         def _work():
-            from ...core.video import probe_duration
+            from ...core.video import detect_video_info, probe_duration
             got = []
             for rel, path in want:
                 key = self._file_key(path)
+                dims = None
                 try:
-                    secs = float(probe_duration(path) or 0.0)
+                    info = detect_video_info(path)
+                    if info is not None and info.width and info.height:
+                        dims = (int(info.width), int(info.height))
+                    secs = float((info.duration if info is not None else 0.0)
+                                 or probe_duration(path) or 0.0)
                 except Exception:                       # noqa: BLE001
                     secs = 0.0
-                got.append((rel, path, key, secs))
+                got.append((rel, path, key, secs, dims))
             self.ctx.loop.post(self._apply_secs, got)
 
         threading.Thread(target=_work, daemon=True,
@@ -1565,10 +1625,12 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
 
     def _apply_secs(self, got):
         rels = set()
-        for rel, path, key, secs in got:
+        for rel, path, key, secs, *dims in got:
             self._secs_busy.discard(path)
             if key is not None:
                 self._secs[key] = secs
+                if dims and dims[0]:
+                    self._dims[key] = dims[0]
             rels.add(rel)
         if self._sort and self._sort[0] == "fit":
             self._refresh_list()
@@ -1854,6 +1916,9 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                 return (a.lower(), s.rel_path.lower())
             if col == "org":
                 return (self._origin_word(s.rel_path) or "", s.rel_path.lower())
+            if col in ("imp", "cur", "wri"):            # Simon (2026-11-21): the resolution columns
+                got = self._sizes_of(s, self._assign.get(s.rel_path))[("imp", "cur", "wri").index(col) + 1]
+                return (tuple(got) if got else (-1, -1), s.rel_path.lower())
             if col == "seen":                   # PAD-827: the seen clips first
                 c = self._m_seen_row(s.rel_path)["seen"]
                 return ((0, c.lower()) if c else (1, ""), s.rel_path.lower())
@@ -1879,6 +1944,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             return
         listed = self._m_slots()            # PAD-444: + the followers' rows
         self._origins()
+        self._players_now = self._players()
         self._publish_rows([self._row(s) for s in listed])
         query = (self.video_search_var.get() or "").strip().lower()
         slots = [s for s in listed
@@ -3698,16 +3764,37 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         info = slot.info
         if not (facts.get("width") and info and info.width and info.height):
             return None
+        from ...plugins.stern import video_sizes
+        stock = self._stock_dims(slot) or (int(info.width), int(info.height))
         mine = (int(facts["width"]), int(facts["height"]), float(facts.get("fps") or 0.0))
-        want = (int(info.width), int(info.height), float(info.fps or 0.0))
-        same_fps = not (mine[2] and want[2]) or abs(mine[2] - want[2]) < 0.5
-        if mine[:2] == want[:2] and same_fps:
+        fps = float(info.fps or 0.0)
+        players = getattr(self, "_players_now", None)
+        player = video_sizes.player_of(players, rel) if players else None
+        most = video_sizes.shown_size(stock, player)
+        wri = video_sizes.written_size(stock, mine[:2], player)
+        same_fps = not (mine[2] and fps) or abs(mine[2] - fps) < 0.5
+        if mine[:2] == tuple(wri) and same_fps:
             return None
+
         def words(v):
-            return "%d×%d" % v[:2] + (" at %g fps" % round(v[2], 2) if v[2] else "")
-        return {"kind": "info", "text": (
-            "Your video is %s. This slot plays %s: PAD will convert it to that, since the machine can't show "
-            "more. Your own file stays as it is." % (words(mine), words(want)))}
+            return "%d×%d" % tuple(v[:2])
+        rate = "" if same_fps else " at %g fps" % round(fps, 2)
+        mine_w = words(mine) + (" at %g fps" % round(mine[2], 2) if mine[2] and not same_fps else "")
+        if tuple(wri) == tuple(stock):
+            why = ("the game never shows it bigger" if tuple(most) == tuple(stock) or mine[0] <= stock[0]
+                   else "the machine can't play more")
+            text = ("Your video is %s. The original is %s: PAD will convert it to %s%s, since %s. Your own file "
+                    "stays as it is." % (mine_w, words(stock), words(stock), rate, why))
+        else:
+            cap = tuple(wri) != tuple(most) and (wri[0] >= video_sizes.DECODER_MAX[0] - 1
+                                                 or wri[1] >= video_sizes.DECODER_MAX[1] - 1)
+            why = ("the most the machine's video decoder plays" if cap
+                   else "the most the game shows this slot (its zoom included)" if wri[0] < mine[0] - 1
+                   else "your file's own size, in the slot's shape")
+            text = ("Your video is %s. The original is %s, and the game shows this slot at up to %s: PAD will "
+                    "write it at %s%s, %s. Your own file stays full size in the project."
+                    % (mine_w, words(stock), words(most), words(wri), rate, why))
+        return {"kind": "info", "text": text}
 
     def _reselect(self, rels):
         self._sel_seq += 1
@@ -3893,8 +3980,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
     # content; the page fits the others, as _autosize_tree_columns did)
     # ==================================================================
     _WIDTHS_KEY = "video_web"
-    _WIDTH_COLS = ("rel", "len", "res", "fmt", "aud", "org", "rep", "fit", "col",
-                   "conv")
+    _WIDTH_COLS = ("rel", "len", "res", "imp", "cur", "wri", "fmt", "aud", "org", "rep", "fit",
+                   "col", "conv")
 
     def _all_widths(self):
         s = getattr(self.app, "_settings", None) if self.app else None

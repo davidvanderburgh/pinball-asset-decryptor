@@ -710,6 +710,25 @@ class SternManufacturer(Manufacturer):
         (PAD-1090 stage 5, PAD-1186)."""
         return ("h264", "hevc") if self._era == "spike3" else ("h264",)
 
+    def video_sizes(self, assets_dir, slots_by_rel, assignments):
+        """Spike 2 (Simon, 2026-11-21, "Same as pictures"): a clip bigger than
+        its slot goes on at the most the game shows the slot - its player's
+        box times its biggest zoom, at most what the i.MX6's VPU decodes
+        (plugins/stern/video_sizes.py).  Spike 3 keeps every clip at its
+        slot's size."""
+        if self._era == "spike3":
+            return {}
+        from . import video_sizes
+        return video_sizes.sizes_for(assets_dir, slots_by_rel, assignments)
+
+    def video_players(self, assets_dir):
+        """Spike 2: the scenes' video players (plugins/stern/video_sizes.py);
+        Spike 3 keeps every clip at its slot's size."""
+        if self._era == "spike3":
+            return None
+        from . import video_sizes
+        return video_sizes.player_zooms(assets_dir)
+
     def colour_profile_on_display(self):
         """Spike 2: the Write patches the game's drawing shaders
         (shader_profile.py), which reach every picture, clip and line of

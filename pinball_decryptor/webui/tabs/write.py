@@ -1043,6 +1043,17 @@ class WriteTab(TabService):
                 "%d picture(s) will be reduced for the screen on the card (your files in the project stay full "
                 "size). Keep your own artwork and this project: extracting the written card later gives the "
                 "reduced pictures, not your originals." % n)})
+        # Simon (2026-11-21, "Same as pictures"): a clip bigger than the screen shows its slot
+        try:
+            vpend = self.window.pending_video_assignments(assets)
+            vred = write_scan.video_size_notes(assets, self.mfr, vpend[0], vpend[1]) if vpend else {}
+        except Exception:                               # noqa: BLE001
+            vred = {}
+        n = sum(1 for v in vred.values() if "(reduced:" in v)
+        if n:
+            infos.append({"kind": "", "text": (
+                "%d video(s) will be reduced for the screen on the card (your files in the project stay full "
+                "size). Keep your own videos: extracting the written card later gives the reduced clips." % n)})
         return errs + warns + infos
 
     def _refresh_prebuild_notes(self):

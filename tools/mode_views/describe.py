@@ -127,6 +127,7 @@ SAY = {
     "score": lambda b: "Score %s" % points(b.get("points")),
     "set": lambda b: "Set %s to %s" % (b.get("var"), val(b.get("value"))),
     "change": lambda b: "Add %s to %s" % (val(b.get("by")), b.get("var")),
+    "online_add": lambda b: "Add %s to the online count %s" % (val(b.get("by")), b.get("count")),   # PAD-1479
     "set_hits": lambda b: "Set the hits of %s to %s" % (b.get("shot"), val(b.get("value"))),
     "timer_start": lambda b: "Start the %s timer: %s" % (b.get("timer"), _ms(b.get("ms"))),
     "timer_stop": lambda b: "Stop the %s timer" % b.get("timer"),
@@ -156,7 +157,7 @@ SAY = {
     "menu_close": lambda b: "Close the menu %s" % (b.get("menu") or "?"),
 }
 #: the block's family, as the page colours it (modes_blocks.js STMT_CLASS)
-FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "set_hits": "var", "end_mode": "mode",
+FAMILY = {"start_mode": "mode", "light_mode": "mode", "unlight_mode": "mode", "set_hits": "var", "online_add": "var", "end_mode": "mode",
           "add_time": "mode", "set_time": "mode", "multiball": "mode", "ball_save": "mode", "drain_to_one": "mode", "game_wizard": "mode", "score": "score",
           "flippers": "mech", "pulse": "mech", "device": "mech", "kickback": "mech", "toy": "mech",
           "set": "var", "change": "var", "if": "flow", "callout": "show", "words": "show", "fade": "show", "light_shot": "show",

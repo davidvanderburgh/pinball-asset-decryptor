@@ -102,7 +102,7 @@ export function countBlocks(sc) {
 
 // ------------------------------------------------------------------ a block in words (PAD-614)
 // The block's family, as the Blocks tab colors it: modes_blocks.js STMT_CLASS (a test keeps the two the same)
-export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", end_mode: "mode",
+export const FAMILY = { start_mode: "mode", light_mode: "mode", unlight_mode: "mode", set_hits: "var", online_add: "var", end_mode: "mode",
   add_time: "mode", set_time: "mode", multiball: "mode", ball_save: "mode", drain_to_one: "mode", game_wizard: "mode", score: "score", set: "var", change: "var",
   if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show",
   log: "show", clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
@@ -194,6 +194,7 @@ export function stmtWords(b, ch = {}) {
     case "score": return `Score ${valWords(b.points)} points`;
     case "set": return `Set ${b.var || "?"} to ${valWords(b.value)}`;
     case "change": return `Change ${b.var || "?"} by ${valWords(b.by)}`;
+    case "online_add": return `Add ${valWords(b.by)} to the online count ${b.count || "?"}`;   // PAD-1479
     case "set_hits": return `Set the hits of ${b.shot || "?"} to ${valWords(b.value)}`;
     case "timer_start": return `Start timer ${b.timer || "?"} at ${msWords(b.ms)}`;
     case "menu_open": return `Open the menu ${b.menu || "?"}`;
@@ -335,7 +336,7 @@ const LANE_OF = { start_mode: "clock", end_mode: "clock", add_time: "clock", set
   timer_stop: "clock", multiball: "clock", ball_save: "clock", drain_to_one: "clock", game_wizard: "clock", light_mode: "lights", unlight_mode: "lights",
   light_shot: "lights", lights_off: "lights", gi: "lights", show: "shows", game_show: "shows", callout: "sound", sound: "sound",
   words: "screen", clip: "screen", hud_text: "screen", hud_counter: "screen", hud_gauge: "screen", fade: "screen", hud_award: "screen", hud_progress: "screen", roster_progress: "screen", menu_open: "screen", menu_close: "screen",
-  score: "score", set: "score", change: "score", set_hits: "score" };
+  score: "score", set: "score", change: "score", set_hits: "score", online_add: "score" };
 export const laneOf = (op) => LANE_OF[op] || "other";
 const TRACK_PX = 640;           // about how wide the Timeline's track is drawn, to keep its clips apart
 

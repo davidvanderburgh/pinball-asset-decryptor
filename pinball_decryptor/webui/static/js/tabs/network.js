@@ -137,7 +137,7 @@ function OnlineCoop({ n }) {
       </div>
       <div class="lbl">Teams</div>
       ${(d.teams || []).map((t, i) => html`<div class="net-oc-row" key=${"t" + i}>
-        <input type="color" class="net-oc-colour" value=${t.colour} title="The team's colour on the map"
+        <input type="color" class="net-oc-colour" value=${t.colour} title="The team's color on the map"
           onInput=${(e) => edit((c) => { c.teams[i].colour = e.target.value; })} />
         <${Field} value=${t.name} width=${180} maxLength=${lim.word} onChange=${(v) => edit((c) => { c.teams[i].name = v; })} />
         <${Button} size="sm" title="Remove this team" disabled=${(d.teams || []).length < 2} onClick=${() => edit((c) => { c.teams.splice(i, 1); })}>×<//>

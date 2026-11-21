@@ -287,7 +287,7 @@ lacks a function switches off only its own flag (the boot log's `armed: ... can 
 Kinds, for `pm_stock_mode_running()` (item 140): `PM_STOCK_ANY`, `PM_STOCK_MULTIBALL`,
 `PM_STOCK_BATTLE`.
 
-The 214 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
+The 217 calls. "Used by": T = `template_mode.c`, P = `examples/powerline_blitz.c`,
 F = `mode_file.c`, R = the runtime's own stock-rules section (item 160).
 
 | Call | What | Used by | Measured |

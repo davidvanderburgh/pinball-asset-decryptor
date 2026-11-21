@@ -464,17 +464,32 @@ class SternWritePipeline(BasePipeline):
 
     def _run(self):
         self._set_phase(0)  # Detect
-        from ...core import ssh_card
+        from ...core import remote_buttons, ssh_card, wifi_card
         from ...core.card_extras import ExtrasError
         try:
             ssh_config = ssh_card.validate_request(self.original_path, self.assets_dir)
             recovering_ssh = ssh_card.pending_marker(self.output_path).exists()
-            if ssh_config is not None or recovering_ssh:
+        except ExtrasError as e:
+            raise PipelineError('Remote access', str(e)) from e
+        try:
+            # PAD-1467: the project's Wi-Fi start-up choice goes on the system partition the same checked way
+            wifi_config = wifi_card.validate_request(self.original_path, self.assets_dir)
+        except ExtrasError as e:
+            raise PipelineError('Wi-Fi', str(e)) from e
+        try:
+            # PAD-1467: and its remote-buttons choice (core/remote_buttons.py)
+            buttons_config = remote_buttons.validate_request(self.original_path, self.assets_dir)
+        except ExtrasError as e:
+            raise PipelineError('Remote buttons', str(e)) from e
+        extras_on = ssh_config is not None or wifi_config is not None or buttons_config is not None
+        try:
+            if extras_on or recovering_ssh:
                 ssh_card.validate_output(self.original_path, self.output_path)
             if recovering_ssh:
                 self.update = False
         except ExtrasError as e:
-            raise PipelineError('Remote access', str(e)) from e
+            raise PipelineError('Remote access' if ssh_config is not None or not extras_on else 'Wi-Fi',
+                                str(e)) from e
         key = detect_game(self.original_path)
         if key is None:
             raise PipelineError("Detect", _not_a_card(
@@ -500,7 +515,7 @@ class SternWritePipeline(BasePipeline):
                 log=self._log, progress=self._progress,
                 cancel=lambda: self._cancelled,
                 label=display_for_key(key, self.original_path),
-                update=self.update, **({'allow_empty': True} if ssh_config is not None or recovering_ssh else {}))
+                update=self.update, **({'allow_empty': True} if extras_on or recovering_ssh else {}))
         except CardSizeError as e:
             # the SD card size option's refusal is an answer, not a crash:
             # its sentence, without the traceback an unexpected error gets.
@@ -538,18 +553,32 @@ class SternWritePipeline(BasePipeline):
                         if _mw.preview_on() else
                         "the original card with the last build's preview content taken "
                         "out (%s)") % ", ".join(had_modes))
-        ssh_note = ''
-        if ssh_config is not None:
+        ssh_note = wifi_note = buttons_note = ''
+        if extras_on:
             marker = str(ssh_card.pending_marker(self.output_path))
+            step = 'Remote access'
             try:
                 with open(marker, 'w', encoding='utf-8') as mark:
                     mark.write('Incomplete SSH preparation; do not flash this image.\n')
                 # The marker protects flash-only paths, while this worker
                 # is the sole owner allowed to prepare the output.
-                ssh_note = ssh_card.apply_to_build(
-                    self.original_path, self.output_path, ssh_config,
-                    log=self._log, cancel=lambda: self._cancelled)
-                self._check_cancel()
+                if ssh_config is not None:
+                    ssh_note = ssh_card.apply_to_build(
+                        self.original_path, self.output_path, ssh_config,
+                        log=self._log, cancel=lambda: self._cancelled)
+                    self._check_cancel()
+                if wifi_config is not None:
+                    step = 'Wi-Fi'
+                    wifi_note = wifi_card.apply_to_build(
+                        self.original_path, self.output_path, wifi_config,
+                        log=self._log, cancel=lambda: self._cancelled)
+                    self._check_cancel()
+                if buttons_config is not None:
+                    step = 'Remote buttons'
+                    buttons_note = remote_buttons.apply_to_build(
+                        self.original_path, self.output_path, buttons_config,
+                        log=self._log, cancel=lambda: self._cancelled)
+                    self._check_cancel()
                 ssh_card.note_build(self.output_path, self.assets_dir)
                 os.remove(marker)
             except Exception as e:
@@ -560,10 +589,15 @@ class SternWritePipeline(BasePipeline):
                         os.replace(self.output_path, self.output_path + '.ssh-incomplete')
                     except OSError:
                         pass  # pending marker continues to refuse flashes
-                raise PipelineError('Remote access', str(e)) from e
-        if ssh_note and summary == 'no changes':
-            summary = 'remote access (SSH)'
-        if recovering_ssh and ssh_config is None:
+                raise PipelineError(step, str(e)) from e
+        if summary == 'no changes' and (ssh_note or wifi_note or buttons_note):
+            named = [name for name, said in (('remote access (SSH)', ssh_note), ('Wi-Fi start-up', wifi_note),
+                                             ('remote buttons', buttons_note)) if said]
+            summary = named[0] if len(named) == 1 else ', '.join(named[:-1]) + ' and ' + named[-1]
+        for extra in (wifi_note, buttons_note):
+            if extra:
+                ssh_note = (ssh_note + '\n' + extra) if ssh_note else extra
+        if recovering_ssh and not extras_on:
             self._check_cancel()
             if not after.get('complete'):
                 raise PipelineError('Remote access', 'The rebuilt image has no complete build record; the previous failure marker was retained.')
@@ -749,9 +783,13 @@ class SternFlashImagePipeline(BasePipeline):
 
     def __init__(self, image_path, device_path,
                  log_cb, phase_cb, progress_cb, done_cb, menu_only=False,
-                 verify=True, keep_data=False):
+                 verify=True, keep_data=False, network_from=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image_path = image_path
+        #: PAD-1467 "Keep my network settings": the project whose remote access, Wi-Fi and remote-buttons
+        #: options go onto a COPY of the image, which is what gets written (core/network_keep.py)
+        self.network_from = network_from or None
+        self._inner = None
         self.device_path = device_path
         #: False = the dialog's "Skip verify" was ticked: no read-back
         self.verify = bool(verify)
@@ -779,12 +817,70 @@ class SternFlashImagePipeline(BasePipeline):
                 "Image file not found: %r" % self.image_path)
         self._check_cancel()
 
+        staged = None
+        if self.network_from and not self.menu_only:
+            staged = self._with_network()
+        try:
+            self._flash(staged or self.image_path)
+        finally:
+            if staged:
+                from ...core import network_keep
+                network_keep.clean(staged)
+
+    def cancel(self):
+        super().cancel()
+        inner = self._inner
+        if inner is not None:
+            inner.cancel()
+
+    def _with_network(self):
+        """PAD-1467: a copy of the image with the project's network options on it; its path, or None when the
+        project has none.  A build from a project that holds nothing but them, so everything a build checks is
+        checked (the card can take them, the files read back) before the card is touched."""
+        import shutil
+        import tempfile
+        from ...core import network_keep
+        from ...core.card_extras import ExtrasError
+        if not network_keep.options(self.network_from):
+            return None
+        out = network_keep.staged_path(self.image_path)
+        network_keep.clean(out)
+        need = os.path.getsize(self.image_path)
+        if shutil.disk_usage(os.path.dirname(out)).free < need + (512 << 20):
+            raise PipelineError(
+                "Check card",
+                "Keeping your network settings needs room for a copy of the image (%.1f GB) beside it, and that "
+                "drive has not got it. Free some space, or untick Keep my network settings." % (need / 1e9))
+        folder = tempfile.mkdtemp(prefix="pad-network-")
+        ok = False
+        try:
+            try:
+                kept = network_keep.stage_project(self.network_from, folder)
+            except ExtrasError as e:
+                raise PipelineError("Check card", str(e)) from e
+            self._log("Keeping your network settings (%s): putting them on a copy of the image first..."
+                      % network_keep.said(self.network_from), "info")
+            inner = SternWritePipeline(self.image_path, folder, out, self._log, lambda *a, **k: None,
+                                       self._progress, lambda *a, **k: None)
+            self._inner = inner
+            inner._run()
+            self._check_cancel()
+            ok = True
+            self._log("The copy has %s on it; writing it to the card." % ", ".join(kept), "info")
+            return out
+        finally:
+            self._inner = None
+            shutil.rmtree(folder, ignore_errors=True)
+            if not ok:
+                network_keep.clean(out)
+
+    def _flash(self, image_path):
         self._set_phase(1)  # Write image
         if not self.verify:
             self._log(SKIP_VERIFY_LOG, "warning")
         try:
             written = flash_image_with_privileges(
-                self.image_path, self.device_path,
+                image_path, self.device_path,
                 log=self._log, progress=self._progress,
                 cancel=lambda: self._cancelled, verify=self.verify,
                 on_verify_start=lambda: self._set_phase(2),  # Verify card

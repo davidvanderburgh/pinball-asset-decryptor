@@ -95,3 +95,49 @@ def test_complete_rebuild_without_extras_clears_stale_marker(tmp_path, monkeypat
     assert events[-1][0] is True
     assert not marker.exists()
     assert pipe.update is False
+
+
+def test_wifi_choice_alone_is_applied_and_named_in_the_summary(tmp_path, monkeypatch):
+    # PAD-1467: a project with only the Wi-Fi start-up choice still gets its system partition prepared
+    from pinball_decryptor.core import wifi_card
+    pipe, events, out = setup_pipeline(tmp_path, monkeypatch)
+    monkeypatch.setattr(ssh_card, 'validate_request', lambda *a: None)
+    monkeypatch.setattr(wifi_card, 'validate_request', lambda *a: {'enabled': True})
+    monkeypatch.setattr(ssh_card, 'apply_to_build', lambda *a, **kw: events.append('ssh') or 'no')
+    monkeypatch.setattr(wifi_card, 'apply_to_build', lambda *a, **kw: events.append('wifi') or 'Wi-Fi start-up: on.')
+    monkeypatch.setattr(ssh_card, 'note_build', lambda *a: events.append('noted'))
+    pipe.run()
+    assert events[:3] == ['engine', 'wifi', 'noted']
+    ok, msg = events[-1]
+    assert ok is True and msg.startswith('Wrote Wi-Fi start-up to ') and msg.endswith('\nWi-Fi start-up: on.')
+    assert not Path(str(out) + '.ssh-pending').exists()
+
+
+def test_wifi_goes_on_after_remote_access_and_its_failure_quarantines_the_build(tmp_path, monkeypatch):
+    from pinball_decryptor.core import wifi_card
+    pipe, events, out = setup_pipeline(tmp_path, monkeypatch)
+    monkeypatch.setattr(wifi_card, 'validate_request', lambda *a: {'enabled': True})
+    monkeypatch.setattr(ssh_card, 'apply_to_build', lambda *a, **kw: events.append('ssh') or 'SSH enabled.')
+    monkeypatch.setattr(ssh_card, 'note_build', lambda *a: None)
+    monkeypatch.setattr(wifi_card, 'apply_to_build', lambda *a, **kw: events.append('wifi') or 'Wi-Fi start-up: on.')
+    pipe.run()
+    assert events[:3] == ['engine', 'ssh', 'wifi']
+    assert events[-1][0] is True and events[-1][1].endswith('SSH enabled.\nWi-Fi start-up: on.')
+    assert 'remote access (SSH) and Wi-Fi start-up' in events[-1][1]
+
+    def fail(*a, **kw):
+        raise card_extras.ExtrasError('the card cannot take it')
+    monkeypatch.setattr(wifi_card, 'apply_to_build', fail)
+    events.clear()
+    pipe.run()
+    assert events[-1] == (False, 'the card cannot take it')
+    assert not out.exists() and Path(str(out) + '.ssh-incomplete').exists()
+
+
+def test_wifi_request_a_card_cannot_take_stops_before_the_engine(tmp_path, monkeypatch):
+    from pinball_decryptor.core import wifi_card
+    pipe, events, out = setup_pipeline(tmp_path, monkeypatch)
+    monkeypatch.setattr(wifi_card, 'validate_request',
+                        lambda *a: (_ for _ in ()).throw(card_extras.ExtrasError(wifi_card.NO_HOOK)))
+    pipe.run()
+    assert events == [(False, wifi_card.NO_HOOK)] and not out.exists()

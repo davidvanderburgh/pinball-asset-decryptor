@@ -134,12 +134,88 @@ def configuration(project):
 
 def digest(project):
     rec = configuration(project)
+    wifi = load_wifi(project)
+    buttons = load_buttons(project)
+    if rec is None and wifi is None and buttons is None:
+        return None
+    record = None
+    if rec is not None:
+        record = dict(rec)
+        if not record['enabled']:
+            record['public_keys'] = ''
+    if wifi is not None:
+        # PAD-1467: a project that also sets the Wi-Fi start-up; one that never has keeps the digest it had
+        record = {'ssh': record, 'wifi': wifi}
+    if buttons is not None:
+        # PAD-1467: and one that sets remote buttons; again, a project that never has keeps its digest
+        record = {'base': record, 'buttons': buttons}
+    return hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
+
+
+def load_wifi(project):
+    """PAD-1467: the saved Wi-Fi choices ``{'enabled': bool, 'band5': bool}``, or None when this project never
+    set them (``extras.wifi`` in the project's ``.staged_changes.json``; core/wifi_card.py puts them on the card).
+    ``enabled`` is the Wi-Fi start-up, ``band5`` the newer adapter driver and 5 GHz, which needs the first."""
+    if not project or not os.path.isdir(project):
+        return None
+    extras = staged_changes.load(project).get('extras')
+    if extras is None:
+        return None
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    rec = extras.get('wifi')
     if rec is None:
         return None
-    record = dict(rec)
-    if not record['enabled']:
-        record['public_keys'] = ''
-    return hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
+    if (not isinstance(rec, dict) or type(rec.get('enabled')) is not bool
+            or type(rec.get('band5', False)) is not bool):
+        raise ExtrasError('The project Wi-Fi configuration is invalid.')
+    return {'enabled': rec['enabled'], 'band5': bool(rec['enabled'] and rec.get('band5', False))}
+
+
+def load_buttons(project):
+    """PAD-1467: the saved remote-buttons choice ``{'enabled': bool}``, or None when this project never set it
+    (``extras.buttons`` in the project's ``.staged_changes.json``; core/remote_buttons.py puts it on the card)."""
+    if not project or not os.path.isdir(project):
+        return None
+    extras = staged_changes.load(project).get('extras')
+    if extras is None:
+        return None
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    rec = extras.get('buttons')
+    if rec is None:
+        return None
+    if not isinstance(rec, dict) or type(rec.get('enabled')) is not bool:
+        raise ExtrasError('The project remote-buttons configuration is invalid.')
+    return {'enabled': rec['enabled']}
+
+
+def save_buttons(project, enabled):
+    if not project or not os.path.isdir(project):
+        raise ExtrasError('Select a project folder before changing the remote-buttons option.')
+    if type(enabled) is not bool:
+        raise ExtrasError('The remote-buttons option must be a checkbox value.')
+    data = staged_changes.load(project)
+    extras = data.setdefault('extras', {})
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    extras['buttons'] = {'enabled': enabled}
+    _persist(project, data)
+    return dict(extras['buttons'])
+
+
+def save_wifi(project, enabled, band5=False):
+    if not project or not os.path.isdir(project):
+        raise ExtrasError('Select a project folder before changing the Wi-Fi option.')
+    if type(enabled) is not bool or type(band5) is not bool:
+        raise ExtrasError('The Wi-Fi option must be a checkbox value.')
+    data = staged_changes.load(project)
+    extras = data.setdefault('extras', {})
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    extras['wifi'] = {'enabled': enabled, 'band5': bool(enabled and band5)}
+    _persist(project, data)
+    return dict(extras['wifi'])
 
 
 def save(project, enabled, public_keys):
@@ -188,4 +264,4 @@ def _persist(project, data):
     try:
         staged_changes.save(project, data, strict=True)
     except OSError:
-        raise ExtrasError('SSH options could not be saved to this project. Check folder permissions and free space before building.') from None
+        raise ExtrasError('Network options could not be saved to this project. Check folder permissions and free space before building.') from None

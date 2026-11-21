@@ -122,6 +122,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._sse(query)
         if path == "/media":
             return self._media((query.get("p") or [""])[0])
+        if path == "/screen":
+            return self._screen()
         return self._send(HTTPStatus.NOT_FOUND, b'{"error":"not found"}')
 
     do_HEAD = do_GET
@@ -209,6 +211,41 @@ class _Handler(BaseHTTPRequestHandler):
             pass
         finally:
             self.app.client_disconnected()
+
+    def _screen(self):
+        """PAD-1467: the Network tab's live view of the machine's screen, as a picture that keeps changing
+        (``multipart/x-mixed-replace``: an ordinary ``<img>`` plays it).  The frames are the Network service's
+        (``live_frame``); this only hands each new one on, and ends when the live view does or the page goes."""
+        svc = None
+        try:
+            svc = self.app.window.service("network")
+        except Exception:                           # noqa: BLE001 - no such tab: nothing to show
+            pass
+        if svc is None or not hasattr(svc, "live_frame"):
+            return self._send(HTTPStatus.NOT_FOUND, b'{"error":"not found"}')
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=padframe")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        seq = 0
+        try:
+            while not self.app.bus.closed:
+                got = svc.live_frame(seq, 5.0)
+                if got is None:
+                    break
+                new, jpeg = got
+                if jpeg is None or new == seq:
+                    continue
+                seq = new
+                self.wfile.write(b"--padframe\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n"
+                                 % len(jpeg))
+                self.wfile.write(jpeg)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
 
     def _media(self, raw_path):
         path = os.path.normpath(unquote(raw_path or ""))

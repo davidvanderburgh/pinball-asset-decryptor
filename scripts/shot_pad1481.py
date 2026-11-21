@@ -27,6 +27,9 @@ import shot_pad312 as base  # noqa: E402
 import shot_pad360 as saved  # noqa: E402
 import shot_pad463 as imgs  # noqa: E402
 
+#: the scene picture theme 2 gives its own (an ordinary one: a font sheet never offers Keep size)
+THEME_PIC = imgs.TEX + "radimg_310x310_031445cf.png"
+
 
 def main():
     repo, out_dir = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
@@ -42,14 +45,14 @@ def main():
     sys.path.insert(0, repo)
     from PIL import Image
     from pinball_decryptor.plugins.stern import scene_variants as SV
-    with Image.open(os.path.join(project, *base.PORTRAIT.split("/"))) as im:
+    with Image.open(os.path.join(project, *THEME_PIC.split("/"))) as im:
         r, g, b, a = im.convert("RGBA").split()
         dark = Image.merge("RGBA", (r.point(lambda v: v // 3), g.point(lambda v: v // 3), b, a)).resize((640, 480))
     mine = os.path.join(scratch, "dark_theme_picture.png")
     dark.save(mine)
     SV.set_themes_on(project, True)
     SV.add_set(project, "Dark")
-    SV.set_picture(project, 2, base.PORTRAIT, mine)
+    SV.set_picture(project, 2, THEME_PIC, mine)
     side = os.path.join(project, ".staged_changes.json")
     with open(side, encoding="utf-8") as f:
         data = json.load(f)
@@ -100,11 +103,11 @@ def main():
             api("ui.select_tab", "images")
             time.sleep(2)
             base._wait_scan(state, "images")
-            api("ui.set", "images", "search", base.PORTRAIT.split("_")[-1][:8])
+            api("ui.set", "images", "search", THEME_PIC.split("_")[-1][:8])
             time.sleep(2)
             api("imgsets.pick", 2)
             time.sleep(2.5)
-            page.locator(".img-tbl .tr:has-text('%s')" % base.PORTRAIT.split("_")[-1][:8]).first.click()
+            page.locator(".img-tbl .tr:has-text('%s')" % THEME_PIC.split("_")[-1][:8]).first.click()
             time.sleep(2.5)
             settle(page)
             st = state()
@@ -115,13 +118,13 @@ def main():
             # 3. the Scenes tab on the picture's scene, its layer selected (theme 1 shown)
             api("imgsets.pick", 1)
             time.sleep(1.5)
-            print("open scenes:", api("images.open_scenes", base.PORTRAIT), flush=True)
+            print("open scenes:", api("images.open_scenes", THEME_PIC), flush=True)
             end = time.time() + 40
             while time.time() < end and not tv().get("hits"):
                 time.sleep(1)
             layers = tv().get("layers") or []
             bitmaps = [ly for ly in layers if ly.get("kind") == "Bitmap" and ly.get("pics")]
-            pics = [ly for ly in bitmaps if base.PORTRAIT in ly["pics"]] or bitmaps
+            pics = [ly for ly in bitmaps if THEME_PIC in ly["pics"]] or bitmaps
             print("layers with the picture:", [(ly["id"], ly["name"], ly["kind"]) for ly in pics][:5], flush=True)
             if pics:
                 api("text_scenes.tree_select", pics[0]["id"])

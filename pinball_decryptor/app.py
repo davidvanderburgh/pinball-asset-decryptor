@@ -1041,6 +1041,10 @@ class App:
             value = settings.get(key)
             if var is not None and value in allowed(key):
                 var.set(value)
+        # PAD-1487: Hold the ball in the shooter lane
+        var = getattr(self.window, "emulate_launch_hold_var", None)
+        if var is not None and isinstance(settings.get("emulate_launch_hold"), bool):
+            var.set(settings["emulate_launch_hold"])
 
     def _restore_emulate_card(self, project_folder, startup=True):
         """Put the per-project fields (:data:`PROJECT_FIELDS`: the Emulate
@@ -7212,6 +7216,12 @@ class App:
                     self._settings[key] = var.get()
                 except Exception:
                     pass
+        var = getattr(self.window, "emulate_launch_hold_var", None)
+        if var is not None:
+            try:
+                self._settings["emulate_launch_hold"] = bool(var.get())
+            except Exception:
+                pass
         # Remember the window size + position for next launch, and whether it
         # was maximized — a maximized window has to come back maximized, not
         # as a loose window of the same size (a tester, after every auto

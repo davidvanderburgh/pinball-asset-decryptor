@@ -409,6 +409,7 @@ def test_start_launches_watch_with_the_machine_env(tmp_path, monkeypatch):
         w.call("ui.set", NS, "country", "Denmark")
         w.call("ui.set", NS, "power", "50 Hz mains, US machine")
         w.call("ui.set", NS, "topper", False)
+        w.call("ui.set", NS, "launch_hold", True)       # PAD-1487
         w.call(NS + ".set_select", True)
         serial = svc._launch_serial
         w.call(NS + ".toggle")
@@ -418,6 +419,7 @@ def test_start_launches_watch_with_the_machine_env(tmp_path, monkeypatch):
         cmd = next(c for c in rec.calls if "watch.sh" in " ".join(c))
         assert any(a.startswith("PAD_CARD=") for a in cmd)
         assert "PAD_TOPPER=0" in cmd
+        assert "PAD_LAUNCH_HOLD=1" in cmd
         assert "PAD_CAB_DIP=9" in cmd and "PAD_COUNTRY=9" in cmd
         assert "PAD_MAINS_HZ=50" in cmd and "PAD_FACTORY_HZ=60" in cmd
         assert "PAD_SELECT=1" in cmd

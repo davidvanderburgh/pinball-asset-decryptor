@@ -254,7 +254,7 @@ class EmulateTab(EmulateLogMixin, TabService):
     icon = "emulate"
     exports = (
         "emulate_card_var", "emulate_savestates_var", "emulate_overrides_var",
-        "emulate_country_var", "emulate_power_var",
+        "emulate_country_var", "emulate_power_var", "emulate_launch_hold_var",
     )
 
     BACKSTOP_MIN = rig.BACKSTOP_MIN
@@ -289,6 +289,10 @@ class EmulateTab(EmulateLogMixin, TabService):
                                             rig.COUNTRY_GAME)
         self.emulate_power_var = self.var("power", "str",
                                           rig.POWER_CHOICES[0][0])
+        # PAD-1487 (DragonRR): keep a served ball in the shooter lane - the
+        # game's TIMED PLUNGER held at Off for the run (mechguard.py).
+        # Remembered, like the rest of the machine row.
+        self.emulate_launch_hold_var = self.var("launch_hold", "bool", False)
         # PAD-519: which model the board says the machine is (Premium, LE,
         # SLE ...); "" is the card's own.  Not remembered: the choices are the
         # card's, so each session starts on the card's own model.
@@ -446,6 +450,7 @@ class EmulateTab(EmulateLogMixin, TabService):
             edition_tip=rig.EDITION_TIP, editions=[], editions_on=False,
             edition_note="",
             topper_tip=rig.TOPPER_TIP, states_tip=rig.STATES_TIP,
+            launch_hold_tip=rig.LAUNCH_HOLD_TIP,
             launch_tip=rig.LAUNCH_TIP, select_tip=rig.SELECT_TIP_IDLE,
             vals=dict(self._vals), state_kind="", state_tip="", host_tip="",
             hint="",
@@ -2501,6 +2506,8 @@ class EmulateTab(EmulateLogMixin, TabService):
         env = ["PAD_CARD=%s" % rig.wsl_path(path)]
         if not self._topper_var.get():
             env.append("PAD_TOPPER=0")
+        if self.emulate_launch_hold_var.get():
+            env.append("PAD_LAUNCH_HOLD=1")     # PAD-1487
         return env
 
     def _prepare_overrides(self, card, assets, selector=False):

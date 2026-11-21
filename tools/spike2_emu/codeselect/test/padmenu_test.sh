@@ -14,6 +14,8 @@
 #   dead    an all-zero word the whole run   -> no restart (PAD-1490: every service
 #           button "pressed" at once is a read the chain did not drive, not a finger)
 #   busy    BACK held with MINUS held too    -> no restart (only BACK on its own counts)
+#   gap     one BACK read, then a 600 ms stall, again and again -> no restart (a
+#           hold is samples in a row: a quiet spell between reads starts it again)
 #   rig-no-standin  held in an emulator with no CODESELECT_REBOOT -> no restart
 set -e
 ROOT=$1
@@ -72,7 +74,7 @@ int main(int argc, char **argv)
         p = (uintptr_t)rx; memcpy(x + 8, &p, 8);
         memcpy(x + 16, &len, 4);
         ioctl(fd, 0x40206b00UL, x);            /* SPI_IOC_MESSAGE(1) */
-        usleep(1000);
+        usleep(strcmp(mode, "gap") ? 1000 : 600000);
     }
     return 0;
 }
@@ -118,6 +120,7 @@ run pulse spidev1.0 0
 run i2c i2c-1 0
 run dead spidev1.0 0
 run busy spidev1.0 0
+run gap spidev1.0 0
 # in an emulator (its shims' variables set) with no CODESELECT_REBOOT: never a real reboot
 run rig-no-standin spidev1.0 0 PAD_AUDIO_OUT=/dump/audio.raw
 grep -q "not restarting" "$T/err" || { echo "padmenu_test: FAIL rig-no-standin: nothing said"; cat "$T/err"; fail=1; }

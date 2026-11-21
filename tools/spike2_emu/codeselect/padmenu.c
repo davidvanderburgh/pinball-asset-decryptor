@@ -532,17 +532,27 @@ static void fd_reset(int fd) { (void)fd; }
  * anything else counts as released and starts the hold again. */
 #define SERVICE_MASK   0x0fu
 #define BACK_ONLY      (SERVICE_MASK & ~(1u << BACK_BIT))
+/* AND UNBROKEN IN TIME.  The game reads the word in a loop with no sleep, an
+ * 8-byte transfer at 100 kHz every ~640 us, so a real hold is thousands of
+ * samples in a row.  Two stray "BACK" reads with a quiet spell between them
+ * (the loop stalled, the device not answering) are not a hold: a gap of more
+ * than GAP_MS between samples starts the hold again. */
+#define GAP_MS         250
+static long long last_sample = -1;
 static void sample(const unsigned char *rx)
 {
     int back = (rx[BACK_BYTE] & SERVICE_MASK) == BACK_ONLY;
     long long t;
     if (fired)
         return;
+    t = now_ms();
+    if (last_sample >= 0 && t - last_sample > GAP_MS)
+        held_since = -1;
+    last_sample = t;
     if (!back) {
         held_since = -1;
         return;
     }
-    t = now_ms();
     if (held_since < 0) {
         held_since = t;
         return;

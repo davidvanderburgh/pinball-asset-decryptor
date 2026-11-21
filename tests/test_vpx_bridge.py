@@ -8712,14 +8712,22 @@ def test_turtle_faces_on_the_shooter_lane_plaque_light_by_the_turtle_leds(vpxfil
         retro = m["retrofit_lights"]["lights"]
         assert {k: retro[k]["leds"] for k in want} == {k: [[8, i]] for k, i in want.items()}
         assert not any("TURTLE MICHEALANGELO" in s for s in m["unmapped"]["stern_leds_without_light"])
-        # front (Michelangelo, by the player) to back: the sign is highest at the
-        # FRONT (297 down to 198), so each glow is lower than the one before it.
-        # PAD-1489: the other way up buried all but Leonardo's glow in the sign
+        # front (Michelangelo, by the player) to back: the sign tilts up to the
+        # player, 123 high at the front and 222 at the back, so each glow is
+        # higher than the one before it. PAD-1489: v1.561.2 had it the other
+        # way up (295..234): a glow far over the sign shows further up the
+        # table than its face, and Michelangelo's landed between Donatello's
+        # and Raphael's (Mike's video). Each is now 4 over the sign and its
+        # flash overlays under its 50-unit outline (157/177/198/218).
         ys = [retro[k]["at"][1] for k in want]
         halos = [retro[k]["fields"]["BHHI"] for k in want]
-        assert ys == sorted(ys, reverse=True) and halos == sorted(halos, reverse=True)
-        assert halos == [295.0, 275.0, 254.0, 234.0]
+        assert ys == sorted(ys, reverse=True) and halos == sorted(halos)
+        assert halos == [161.0, 181.0, 202.0, 222.0]
+        sign = lambda y: 123 + (1158 - y) * (222 - 123) / (1158 - 799)     # its top along the column
+        for y, h in zip(ys, halos):
+            assert 0 < h - sign(y - 50) <= 8, (key, y, h)     # clear of the sign, but only just
         lamps = "\n".join(P.gen_lamp_lines(m))
+        assert P.FACE_MARK in P.pad_subs(m) and any(r["absent"] == P.FACE_MARK for r in m["repatch"])
         for k, i in want.items():
             assert "NFadeL %d, %s" % (1800 + i, k) in lamps
 

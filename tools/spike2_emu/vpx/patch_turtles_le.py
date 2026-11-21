@@ -290,9 +290,12 @@ def pad_subs(m):
     for k, n in enumerate(up):
         up_sw += ["\tIf padVanUp >= %d Then" % (k + 1), "\t\tController.Switch(%d) = 1" % n,
                   "\tElse", "\t\tController.Switch(%d) = 0" % n, "\tEnd If"]
+    faces = [FACE_MARK] if any(k.startswith("PadTurtle") for k in m["retrofit_lights"]["lights"]) else []
     return [
         "",
         "'---- PAD: what the Spike 2 machine drives that Data East's ROM did not ----",
+    ] + faces + [    # PAD-1489: a copy without it gets Patch again
+
         "' GI: the machine's GI LEDs; SolGi(True) puts the table's GI OUT",
         "Sub PadGiTick",
         "\tDim lit",
@@ -448,6 +451,9 @@ def pad_subs(m):
 #: the line the table's exit sub carries; a table patched before PAD-1489 lacks
 #: it (the maps' `repatch`)
 EXIT_MARK = "' PAD: closing the table stops the game, its backglass and DOF"
+#: the line the lamp sub carries once the turtle faces glow just over the sign
+#: (PAD-1489: v1.561.2 floated them far above it, each showing up the table)
+FACE_MARK = "' PAD: the turtle faces glow just over the sign, which tilts up to the player"
 
 
 def exit_sub(text):

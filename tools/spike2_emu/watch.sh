@@ -2549,7 +2549,11 @@ launch_game() {
     # TURNTABLE MOTOR DISABLED) is set back Off - the emulator's mechs cannot
     # break, and with it On the turntable never left the TV. It says so in the
     # game log; PAD_MECHGUARD=0 leaves the settings alone.
-    PAD_GAME="$GAME" python3 "$RIG/mechguard.py" "$GAMEPG" >> "$LOG" 2>&1 < /dev/null &
+    # PAD-1487: PAD_LAUNCH_HOLD=1 (the Emulate tab's "Hold the ball in the
+    # shooter lane") also holds TIMED PLUNGER at Off; the machine's own value
+    # waits in PAD_ADJ_KEEP beside its NVRAM for the next run without it.
+    PAD_GAME="$GAME" PAD_LAUNCH_HOLD="${PAD_LAUNCH_HOLD:-0}" PAD_ADJ_KEEP="$ROOT/data/padkeep-$GAME.json" \
+        python3 "$RIG/mechguard.py" "$GAMEPG" >> "$LOG" 2>&1 < /dev/null &
     if [ -n "${PAD_PIVOT:-}" ] && { [ -z "$GAMEOUTTAIL" ] || ! kill -0 "$GAMEOUTTAIL" 2>/dev/null; }; then
         # -F retries until the guest creates the file a few seconds into the boot.
         # Direct (not a subshell) so $! is the tail itself and teardown's kill hits

@@ -215,6 +215,8 @@ function CardSource({ s }) {
       <${Check} checked=${s.select} label="Boot selector" title=${s.select_tip}
         onChange=${(v) => call("emulate.set_select", v)} />
       <${Check} ns="emulate" k="topper" checked=${s.topper} label="Topper" title=${s.topper_tip} />
+      ${era3 ? null : html`<${Check} ns="emulate" k="launch_hold" checked=${!!s.launch_hold}
+        label="Hold the ball in the shooter lane" title=${s.launch_hold_tip} />`}
       <${Check} ns="emulate" k="machine_screen" checked=${!!s.machine_screen}
         label="Show it through the machine's screen"
         title="Draws the game window through your project's Machine screen (Color profile tab), the way the Scenes preview does, so this PC shows the colors the machine's own screen will. Works on any card, a card you already wrote included, with or without your replaced assets. Off: you see the colors exactly as they go on the card, which on a PC look darker or brighter where your color profiles correct for the machine. Only the emulator's window: the card is never changed. Takes effect at the next Start." />

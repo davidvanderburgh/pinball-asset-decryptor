@@ -418,12 +418,14 @@ def test_the_machine_row_is_saved_globally(tmp_path, monkeypatch):
             _last_browse_dirs=None,
             emulate_card_var=_Var(""),
             emulate_country_var=_Var("France"),
-            emulate_power_var=_Var("50 Hz mains, European machine")),
+            emulate_power_var=_Var("50 Hz mains, European machine"),
+            emulate_launch_hold_var=_Var(True)),
     )
     stub.multiboot_state = lambda: App.multiboot_state(stub)
     App._save_settings(stub)
     assert settings["emulate_country"] == "France"
     assert settings["emulate_power"] == "50 Hz mains, European machine"
+    assert settings["emulate_launch_hold"] is True          # PAD-1487
 
 
 def test_the_machine_row_comes_back_whatever_the_project(tmp_path):
@@ -433,20 +435,26 @@ def test_the_machine_row_comes_back_whatever_the_project(tmp_path):
     from pinball_decryptor.app import App
     from pinball_decryptor.webui.tabs.emulate import EmulateTab
     country, power = _Var("As set in the game"), _Var("60 Hz mains")
+    hold = _Var(False)
     svc = object.__new__(EmulateTab)        # machine_choices reads no state
     stub = SimpleNamespace(
         _settings={"emulate_country": "Germany",
-                   "emulate_power": "50 Hz mains, US machine"},
+                   "emulate_power": "50 Hz mains, US machine",
+                   "emulate_launch_hold": True},
         window=SimpleNamespace(emulate_country_var=country,
                                emulate_power_var=power,
+                               emulate_launch_hold_var=hold,
                                service=lambda name: svc))
     App._restore_emulate_machine(stub)
     assert (country.get(), power.get()) == ("Germany",
                                             "50 Hz mains, US machine")
-    stub._settings = {"emulate_country": "Atlantis", "emulate_power": "400 Hz"}
+    assert hold.get() is True                       # PAD-1487
+    stub._settings = {"emulate_country": "Atlantis", "emulate_power": "400 Hz",
+                      "emulate_launch_hold": "yes"}
     App._restore_emulate_machine(stub)
     assert (country.get(), power.get()) == ("Germany",
                                             "50 Hz mains, US machine")
+    assert hold.get() is True
 
 
 # --------------------------------------------------------------------------

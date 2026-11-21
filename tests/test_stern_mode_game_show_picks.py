@@ -26,7 +26,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SDK = ROOT / "tools" / "spike2_emu" / "modes" / "sdk"
 LE = MP.profile_from_port(str(SDK / "ports" / "godzilla_le-1.16.port"))
 PRO = MP.profile_from_port(str(SDK / "ports" / "godzilla_pro-1.16.port"))
-OLD_PRO = MP.GODZILLA_PRO_1_15                  # a port that names none of the game's shows
+OLD_PRO = MP.GODZILLA_PRO_1_15                  # a port that names none of the game's shows (PAD-1476: plays them by number)
 
 
 @pytest.fixture(autouse=True)
@@ -61,14 +61,18 @@ def test_the_profile_lists_the_ports_shows_in_order():
 
 
 def test_titles_without_shows_cannot_and_say_why():
-    assert not OLD_PRO.can("shows") and "Godzilla Pro 1.15" in OLD_PRO.why_not("shows") and OLD_PRO.game_shows == ()
+    # PAD-1476: the Pro 1.15 names none, but plays any of the game's shows by the game's own number
+    assert OLD_PRO.game_shows == () and OLD_PRO.show_numbers == 361 and OLD_PRO.can("shows")
+    port = MP.read_port(str(SDK / "ports" / "godzilla_pro-1.15.port"))
+    del port["site"]["show_stop_number"]                      # a port with neither: greyed, and says why
+    assert MP._show_numbers(port) == 0 and "Godzilla Pro 1.15" in MP._shows_cannot("Godzilla Pro 1.15", port)[0][1]
     # PAD-420: the Pro 1.16 plays eight of the Premium/LE's shows by the same names, and four of its own
     assert PRO.can("shows") and len(PRO.game_shows) == 12
     assert {"Strobe burst", "Strobe storm", "Blue fade", "Cyan flick"} <= {n for n, _k, _s in PRO.game_shows}
     assert "Insert chase" not in {n for n, _k, _s in PRO.game_shows}     # its match crashed the game: left out
     for key, p in MP.profiles(MP.PORTS_DIR).items():
-        assert p.can("shows") == bool(p.game_shows), key
-        if not p.game_shows:
+        assert p.can("shows") == bool(p.game_shows or p.show_numbers), key
+        if not p.can("shows"):
             assert p.label in p.why_not("shows"), key
 
 
@@ -89,8 +93,11 @@ def test_the_lines_and_their_refusals():
     bad = MP.validate_shows(_spec(LE, show_end="Nope"), LE)
     assert bad == ["Godzilla Premium/LE 1.16 has no light show called 'Nope' to play at the mode's end."]
     pro = MP.validate_shows(_spec(OLD_PRO, show_start="Strobe burst"), OLD_PRO)
-    assert pro == ["A light show of the game's is not on Godzilla Pro 1.15 (Lights says why)."]
+    assert pro == ["Godzilla Pro 1.15 has no light show called 'Strobe burst' to play at the mode's start."]
     assert MP.show_lines(_spec(OLD_PRO, show_start="Strobe burst"), OLD_PRO) == []
+    # PAD-1476: one of the game's own by its number plays there
+    assert MP.validate_shows(_spec(OLD_PRO, show_start="#148"), OLD_PRO) == []
+    assert MP.show_lines(_spec(OLD_PRO, show_start="#148"), OLD_PRO) == ["show_start     #148"]
     assert MP.validate_shows(_spec(PRO, show_start="Strobe burst"), PRO) == []          # PAD-420
     from pinball_decryptor.webui.tabs.modes import problem_pages
     assert problem_pages(bad) == problem_pages(pro) == ["lights"]
@@ -254,16 +261,18 @@ def test_the_tab_offers_them_where_the_port_names_them_and_greys_them_where_none
             assert not st["dis"]["shows"] and "shows" not in st["reasons"]
             names = [s["name"] for s in st["profile"]["game_shows"]]
             assert len(names) == 12 and {"Strobe burst", "Strobe storm", "Blue fade", "Cyan flick"} <= set(names)
-        # a port that names none (the Pro's older 1.15) greys them and says why
+        # a port that names none (the Pro's older 1.15) plays them by the game's own number (PAD-1476): the
+        # section is open, and the picks are the shows its own modes start, read off the card
         proj = _card_project(tmp_path / "old", "godzilla_pro-1_15_0.raw")
         with web_app(tmp_path, mfr="stern") as w:
             _project(w, proj)
             w.call("modes.new")
             st = w.state("modes")
-            assert st["dis"]["shows"] and "Godzilla Pro 1.15" in st["reasons"]["shows"]
+            assert not st["dis"]["shows"] and st["profile"]["show_numbers"] == 361
             assert st["profile"]["game_shows"] == []
+            assert st["mode_shows"] == []                     # no card on this PC to read them off
             w.call("modes.new_blocks_mode", "Shows")
             ch = w.state("modes")["code"]["blocks"]["choices"]
-            assert ch["game_shows_off"].startswith("Not on this game: The app has not found Godzilla Pro 1.15's own")
+            assert ch["game_shows_off"] == "" and ch["show_numbers"] == 361
     finally:
         preview.enabled = old

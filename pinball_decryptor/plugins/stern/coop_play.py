@@ -1381,6 +1381,12 @@ def _characters(got):
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
     if got.get("intro"):                                # PAD-1114: the co-op and team games' intro video
         out["intro"] = str(got["intro"])
+    try:                                                # PAD-1476: the game's light show with it, by its number
+        show = int(got.get("intro_show") or 0)
+    except (TypeError, ValueError):
+        show = 0
+    if 0 < show <= 4096:
+        out["intro_show"] = show
     if got.get("ceremony"):                             # PAD-1219: the awards ceremony's background video
         out["ceremony"] = str(got["ceremony"])
     if got.get("ceremony_sound"):                       # PAD-1317: the awards ceremony's own music
@@ -1408,6 +1414,20 @@ def save_characters(project, characters):
     return chars
 
 
+def intro_show_number(characters, sites=(), values=None):
+    """PAD-1476: the intro's light show (the characters record's ``intro_show``, the game's own number for a show
+    one of its modes starts) where the card's port can start and stop it by that number (``site show_start``,
+    ``site show_stop_number``, ``value show_count``: pad_mode_runtime.c ci_show_start), else 0."""
+    n = int((characters or {}).get("intro_show") or 0)
+    try:
+        count = int((values or {}).get("show_count", 0))
+    except (TypeError, ValueError, AttributeError):
+        count = 0
+    if not n or not all(s in (sites or ()) for s in ("show_start", "show_stop_number")):
+        return 0
+    return n if 0 < n < count else 0
+
+
 def character_lines(game_elf, characters=None, sites=(), values=None):
     """coop.cfg's character lines: ``pick on``, ``left``/``action`` (the buttons the pick and the save use), ``lane``
     (the shooter lane: the save's presses count once the ball is out of it, PAD-1045) and
@@ -1431,6 +1451,9 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
         hold = timed_plunger(game_elf)
         if hold is not None:
             out.append("intro_hold %d" % hold)      # PAD-1114: no auto-launch while the intro holds the ball
+        show = intro_show_number(chars, sites, values)
+        if show:
+            out.append("intro_show %d" % show)      # PAD-1476: the game's light show with it
     from .handicap import start_button
     start = start_button(game_elf)
     if start is not None:                           # round 3: a Start while ball 1 waits adds a teammate; PAD-1215:

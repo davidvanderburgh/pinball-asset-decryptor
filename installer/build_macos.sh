@@ -307,6 +307,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.video_bank" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_files" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_modes" \
+    --hidden-import "pinball_decryptor.plugins.stern.clip_shows" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_sounds" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_seen" \
     --hidden-import "pinball_decryptor.plugins.stern.clip_static" \

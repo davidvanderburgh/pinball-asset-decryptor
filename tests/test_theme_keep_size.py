@@ -26,8 +26,8 @@ def _gate(monkeypatch):
     monkeypatch.setattr(mode_write, "lookup", lambda reader, card: dict(NODE) if card == RAD_PATH else None)
 
 
-def _setup(tmp_path, size=(32, 16), colour=(0, 0, 255, 255)):
-    data, fill_off, icon_off = _scene()
+def _setup(tmp_path, size=(32, 16), colour=(0, 0, 255, 255), zoom=1.0):
+    data, fill_off, icon_off = _scene(zoom=zoom)
     p = tmp_path / "project"
     (p / "images" / "scene_textures").mkdir(parents=True)
     (p / "images" / "scene_textures" / "radium_images.txt").write_text(
@@ -77,7 +77,8 @@ def test_keep_size_off_the_theme_picture_is_fitted_in_place(tmp_path):
 
 
 def test_keep_size_on_the_theme_picture_keeps_its_own_size(tmp_path):
-    p, data, _fill, _icon = _setup(tmp_path)
+    # the scene shows the icon at twice its box, so a picture twice its size is all used (Simon, 2026-11-21)
+    p, data, _fill, _icon = _setup(tmp_path, zoom=2.0)
     SV.set_keep_size(p, 2, TREL, True)
     assert SV.keeps_size(p, 2, TREL) is True
     assert SV.keeps_size(p, 1, TREL) is False                       # theme 1's own tick is untouched
@@ -145,3 +146,14 @@ def test_a_colour_only_change_follows_theme_1s_tick(tmp_path):
     side["image_keep_size"] = [TREL]
     staged_changes.save(p, side)
     assert SV.keeps_size(p, 2, TREL) is True
+
+
+def test_a_theme_picture_is_written_at_the_most_the_scene_shows_it(tmp_path):
+    """Simon (2026-11-21): "We should be optimising for the actual screen" - a theme's own picture kept at its own
+    size is written at the size the game shows it at most, like theme 1's: here its 16x8 box at 1x."""
+    p, data, _fill, _icon = _setup(tmp_path, size=(160, 80))
+    SV.set_keep_size(p, 2, TREL, True)
+    out, said = _build(tmp_path, p, data)
+    pics = _pictures(out)
+    assert (160, 80) not in pics and ICON in pics
+    assert any("shows it at most 16x8" in m for m in said)

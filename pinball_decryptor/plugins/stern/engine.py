@@ -5207,11 +5207,18 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
                 if assets_dir:
                     # PAD-981: a layout made over the picture at its own size stays so;
                     # PAD-1301: in that picture's box once another has taken its place
-                    from . import scene_edit as _scene_edit
+                    from . import scene_edit as _scene_edit, scene_tree as _scene_tree
                     own = _scene_edit.own_size_nodes(assets_dir, card_path)
                     boxes = _scene_edit.own_boxes(assets_dir, card_path)
+                    # Simon (2026-11-21): a picture picked since is drawn at its own size from the
+                    # original's origin
+                    own = own | _scene_edit.placed_nodes(assets_dir, card_path,
+                                                         _scene_tree.parse(bytes(buf)))
+                # the pictures' own sizes, where the Write wrote them smaller for the screen
+                natural = {off: v[3] for off, v in images.items() if len(v) > 3}
                 new, n_fit, n_box, n_left = radium_grow.keep_boxes(bytes(buf), new,
-                                                                    got["images"], own, boxes)
+                                                                    got["images"], own, boxes,
+                                                                    natural)
             except Exception as e:                          # noqa: BLE001
                 n_fit = n_box = n_left = 0
                 log("Scene %s: its resized picture(s) couldn't be fitted to the original's "
@@ -6925,32 +6932,63 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                  else None)
         return max(fills, key=lambda s: s[0] * s[1]) if fills else None
 
-    def _kept_size(radium_path, data_off, w, h, pad_w, pad_h):
-        """``(w, h)`` the picture kept at its own size at *data_off* is written at
-        (PAD-1200, :func:`radium_grow.kept_texture_size`): shrunk once, properly, to twice
-        the box the game fits it into, when every place that draws it is fitted (so its
-        place on the glass stays put), else its own *w* x *h*."""
+    seen_scenes = {}               # card path -> its scene with the Scenes tab's edits on
+
+    def _seen_scene(radium_path, node, sc):
+        """*sc* (the card's scene, parsed) with the Scenes tab's edits applied, as the Write will write it: the
+        layout a picture's size on the glass is measured on (Simon, 2026-11-21: what "you have set by scaling
+        for the asset in the scenes")."""
+        if radium_path in seen_scenes:
+            return seen_scenes[radium_path]
+        got = sc
+        try:
+            from . import scene_edit as _scene_edit, scene_tree as _scene_tree
+            ops = _scene_edit.load(assets_dir).get(radium_path) if assets_dir else None
+            if ops and node is not None:
+                trees = _load_scene_trees(assets_dir)
+                names = _scene_edit.names_of(trees[radium_path]) if radium_path in trees else {}
+                new, n = _apply_tree_ops(_scene(radium_path, node), radium_path, ops, names, assets_dir,
+                                         lambda *_a, **_k: None)
+                if n:
+                    got = _scene_tree.parse(new)
+        except Exception:                                   # noqa: BLE001 - measured on the card's own
+            got = sc
+        seen_scenes[radium_path] = got
+        return got
+
+    def _kept_size(radium_path, data_off, w, h, pad_w, pad_h, node=None):
+        """``((w, h), scale)``: the size the picture kept at its own size at *data_off* is written at, and the
+        biggest scale the game shows it at (None when it could not be measured).
+
+        Simon (2026-11-21): written at the most the game ever shows it on the glass - its box times its biggest
+        zoom, with the Scenes tab's layout on (:func:`radium_grow.shown_scale`) - shrunk once, properly; never
+        enlarged.  A scene that can't be measured keeps PAD-1200's rule: twice the box the game fits it into,
+        when every place that draws it is fitted, else its own *w* x *h*."""
         from . import radium_grow as _rg
         facts = scenes.get(radium_path)
         sc = facts[2] if facts else None
         if sc is None or os.environ.get("PAD_KEEP_SIZE_FULL") == "1":
-            return w, h
+            return (w, h), None
         how = facts[1].get(data_off) or {}
-        own, boxes = (), {}
+        own, boxes = frozenset(), {}
         if assets_dir:
             from . import scene_edit as _scene_edit
             own = _scene_edit.own_size_nodes(assets_dir, radium_path)
             boxes = _scene_edit.own_boxes(assets_dir, radium_path)
+            own = own | _scene_edit.placed_nodes(assets_dir, radium_path, sc)
         tids = {tid for tid, t in sc.textures.items() if t.get("data_off") == data_off}
+        scale, left = _rg.shown_scale(_seen_scene(radium_path, node, sc), tids, (w, h), own, boxes)
+        if scale is not None and not left:
+            return _rg.shown_size((w, h), scale), scale
         # PAD-1301: an own-size node with its box (scene_edit.own_boxes) is fitted too
         mine = _rg.nodes_drawing(sc, tids) & set(boxes)
         want = _rg.kept_texture_size(w, h, [(pad_w, pad_h)] + list(how.get("fills") or ())
                                      + [boxes[n] for n in mine])
         if want is None:
-            return w, h
+            return (w, h), None
         if not _rg.every_draw_fitted(sc, tids, set(own) - mine):
-            return w, h
-        return want
+            return (w, h), None
+        return want, None
 
     moved = {}                     # card path -> outputs whose record isn't there
     # The block encodes run on a pool (PAD-599): a BC3 encode of a screen
@@ -7021,8 +7059,8 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                         why = _resize_refusal(radium_path, node, data_off)
                         ok = not why
                     if ok:
-                        tw, th = _kept_size(radium_path, data_off, w, h, pad_w,
-                                            pad_h)
+                        (tw, th), shown = _kept_size(radium_path, data_off, w, h,
+                                                     pad_w, pad_h, node)
                         got = resized.get((staged, fmt, tw, th))
                         if got is None:
                             src = im
@@ -7032,12 +7070,22 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                                 # edges
                                 src = im.convert("RGBa").resize(
                                     (tw, th), Image.LANCZOS).convert("RGBA")
-                                log("Radium image %s is %dx%d, far bigger than "
-                                    "the %dx%d place the game draws it in, which "
-                                    "it would shrink unsmoothed (grainy, jagged): "
-                                    "written at %dx%d instead, smoothed, in the "
-                                    "same place and size on the screen."
-                                    % (output, w, h, pad_w, pad_h, tw, th), "info")
+                                if shown is not None:
+                                    log("Radium image %s is %dx%d; the game shows "
+                                        "it at most %dx%d (%.2fx its own size, "
+                                        "measured from the scene with its "
+                                        "layout): written at %dx%d, smoothed. A "
+                                        "bigger picture would not look sharper "
+                                        "on this screen." % (
+                                            output, w, h, tw, th, shown, tw, th),
+                                        "info")
+                                else:
+                                    log("Radium image %s is %dx%d, far bigger than "
+                                        "the %dx%d place the game draws it in, which "
+                                        "it would shrink unsmoothed (grainy, jagged): "
+                                        "written at %dx%d instead, smoothed, in the "
+                                        "same place and size on the screen."
+                                        % (output, w, h, pad_w, pad_h, tw, th), "info")
                             grid = Image.new("RGBA", (_padded4(tw), _padded4(th)),
                                              (0, 0, 0, 0))
                             grid.paste(src, (0, 0))
@@ -7045,9 +7093,11 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                                 np.asarray(grid, dtype=np.uint8), output,
                                 radium_path, node, data_off, length, pad_w,
                                 pad_h, fmt)
+                            # the fourth: the picture's own size, for the places
+                            # that draw it at that size (radium_grow.keep_boxes)
                             got = resized[(staged, fmt, tw, th)] = (
                                 tw, th, _dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
-                                else _dds.encode_bc3(arr))
+                                else _dds.encode_bc3(arr), (w, h))
                         grown.setdefault(radium_path, (node, {}))[1][data_off] = got
                         patched_outputs.add(output)
                         log("Radium image %s is %dx%d, not the original %dx%d: "

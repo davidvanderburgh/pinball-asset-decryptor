@@ -45,6 +45,7 @@ images -- all at stock offsets) into the stock bytes BEFORE growing, so
 their offsets stay valid.
 """
 
+import math
 import struct
 
 #: ``[dispW][dispH][handle][texW][texH][fmt][0][0][u32 length]`` -- the
@@ -157,7 +158,8 @@ def regrow(data, texts=None, images=None):
     if images:
         parsed = parse_radium_images(data)
         known = {im["data_off"]: im for im in parsed}
-        for off, (w, h, payload) in sorted(images.items()):
+        for off, rec4 in sorted(images.items()):
+            w, h, payload = rec4[:3]             # a fourth: the picture's own size (keep_boxes)
             im = known.get(off)
             if im is None:
                 raise ValueError("no embedded image starts at %#x" % off)
@@ -248,6 +250,88 @@ def kept_texture_size(w, h, boxes, headroom=KEEP_HEADROOM):
     return max(1, int(round(w * s))), max(1, int(round(h * s)))
 
 
+# Simon (2026-11-21): "high res = better ... is not the case. We should be optimising for the actual screen" - a
+# picture kept at its own size is written at the most the game ever shows it on the glass, not at twice its box:
+# Godzilla 1.16's Battle Select cards are drawn at two thirds of their 527x725 box at most (346x476), its earth
+# map zooms in to 2x its 1360x768 box (2734x1544).  The box alone also grew on every Write onto a card PAD had
+# already written (DragonRR's V2.3: 632x828 -> 1264x904 -> 2528x1808), since that card's box was the last
+# Write's picture; the box times its zoom is the same on every such card (keep_boxes takes the growth back out of
+# the node's tracks).
+def _track_scale(m):
+    """The biggest of the two axes' scales of a node's track *m* (16 floats, column-major)."""
+    return max(math.hypot(m[0], m[1]), math.hypot(m[4], m[5]))
+
+
+def node_zooms(scene):
+    """``{node id: the biggest scale it is ever drawn at}`` for a parsed scene: its own tracks' biggest times its
+    groups', down from the root.  Each level's biggest is taken whatever the frame, so it is an upper bound where
+    a group and its node peak at different moments.  A node whose timeline never shows it (and what is under it)
+    is left out: the game's code can hide a node, never reveal one its timeline hides."""
+    out = {}
+
+    def run(kids, up, path):
+        for n in kids:
+            if n.keyframes and not any(v for _f, v in n.keyframes):
+                continue
+            z = up * max((_track_scale(m) for _f, m in n.tracks or ()), default=1.0)
+            out[n.id] = max(out.get(n.id, 0.0), z)
+            for c in n.components:
+                if c.obj.kind in ("Sprite", "StreamingFlipbook") and c.obj.id not in path:
+                    run(c.obj.body["kids"], z, path | {c.obj.id})
+    run(scene.root["kids"], 1.0, frozenset())
+    return out
+
+
+def shown_scale(scene, tids, natural, own=(), own_boxes=None):
+    """How big the game shows a picture of *natural* ``(w, h)`` drawn as the textures *tids* of *scene* (parsed,
+    the card's scene with the Scenes tab's edits on): the biggest, over every place that draws it, of the
+    picture's scale on the glass (1.0 = one pixel of the picture to one pixel of the screen).  ``(scale, left)``,
+    *left* True when a node draws it together with something else (its size can't follow the picture's), or
+    ``(None, left)`` when nothing that shows draws it.
+
+    A Bitmap's node draws the picture fitted into its box (:func:`keep_boxes`, PAD-865) - the Bitmap's own
+    ``[w][h]`` - or, in *own* (laid out over it at its own size, PAD-981; a picture placed pixel for pixel,
+    Simon 2026-11-21), at its own size, or fitted into its *own_boxes* box (PAD-1301).  A Shape squeezes it into
+    the Shape's box, narrowed to its shape."""
+    zooms = node_zooms(scene)
+    iw, ih = natural
+    if not (iw and ih):
+        return None, False
+    best, left = None, False
+    from .scene_edit import _tree_index
+    for n, _sibs in _tree_index(scene).values():
+        z = zooms.get(n.id)
+        if z is None:
+            continue
+        for c in n.components:
+            o = c.obj
+            if o.kind == "Bitmap" and o.body.get("tex") in tids:
+                if len(n.components) != 1:
+                    left = True
+                box = (own_boxes or {}).get(n.id) if n.id in own else (o.body["w"], o.body["h"])
+                u = (1.0 if n.id in own and not box
+                     else min(box[0] / float(iw), box[1] / float(ih)) if box and box[0] and box[1] else 1.0)
+            elif o.kind == "Shape" and o.body.get("bitmap") is not None \
+                    and o.body["bitmap"].body.get("tex") in tids:
+                left_, top, right, bottom = o.body["rect"]
+                rw, rh = abs(right - left_), abs(bottom - top)
+                if not (rw and rh):
+                    continue
+                u = min(rw / float(iw), rh / float(ih))
+            else:
+                continue
+            s = u * z
+            best = s if best is None else max(best, s)
+    return best, left
+
+
+def shown_size(natural, scale):
+    """``(w, h)``: a picture of *natural* size at *scale* (:func:`shown_scale`), never bigger than itself."""
+    iw, ih = natural
+    s = min(1.0, scale)
+    return max(1, int(math.ceil(iw * s - 1e-6))), max(1, int(math.ceil(ih * s - 1e-6)))
+
+
 def nodes_drawing(scene, tids):
     """The ids of the nodes of *scene* (parsed) with a Bitmap of one of the textures *tids*."""
     from .scene_edit import _tree_index
@@ -270,7 +354,7 @@ def every_draw_fitted(scene, tids, own=()):
     return True
 
 
-def keep_boxes(stock, grown, offs, own=(), own_boxes=None):
+def keep_boxes(stock, grown, offs, own=(), own_boxes=None, natural=None):
     """*grown* (a scene :func:`regrow` resized the pictures at the stock offsets *offs* in)
     with each of those pictures shown in its stock place and size, fitted and centred:
     ``(bytes, n nodes, n shapes, n left)``.  The nodes in *own* were moved or resized in the
@@ -288,7 +372,11 @@ def keep_boxes(stock, grown, offs, own=(), own_boxes=None):
     that also draws something else (another picture over its timeline, text, a group) is
     left as it was and counted in *n left*.  A node of *own* that *own_boxes* (``{node: (w,
     h)}``, :func:`scene_edit.own_boxes`) gives a box is fitted into that box instead: the size
-    of the picture its layout was made over, since replaced (PAD-1301)."""
+    of the picture its layout was made over, since replaced (PAD-1301).
+
+    *natural* ``{stock data_off: (w, h)}`` (Simon, 2026-11-21) is each picture's own size where the Write wrote it
+    smaller, for the screen (:func:`shown_scale`): a node of *own* with no box draws it at that size still, its
+    tracks scaled by the picture's own size over the written one."""
     from . import scene_tree
     from .scene_edit import _composed, _m16_with, _m6_of16, _tree_index
     sc0 = scene_tree.parse(stock)
@@ -296,6 +384,7 @@ def keep_boxes(stock, grown, offs, own=(), own_boxes=None):
     tids = {tid for tid, t in sc0.textures.items() if t.get("data_off") in set(offs)}
     if not tids:
         return grown, 0, 0, 0
+    nat_of = {tid: (natural or {}).get(t.get("data_off")) for tid, t in sc0.textures.items() if tid in tids}
 
     def box_of(o):
         was = sc0.objects.get(o.id)
@@ -319,9 +408,15 @@ def keep_boxes(stock, grown, offs, own=(), own_boxes=None):
         if n.id in own:
             box = (own_boxes or {}).get(n.id)
             w, h = mine[0].body["w"], mine[0].body["h"]
-            if not box or not (w and h) or (w, h) == tuple(box):
+            nat = nat_of.get(mine[0].body.get("tex"))
+            if not box and nat and w and h and tuple(nat) != (w, h):
+                # its own size, from a texture written smaller for the screen
+                k = nat[0] / float(w)
+                fit = (k, 0.0, 0.0, k, 0.0, 0.0)
+            elif not box or not (w and h) or (w, h) == tuple(box):
                 continue
-            fit = fit_box(w, h, box[0], box[1])
+            else:
+                fit = fit_box(w, h, box[0], box[1])
         elif fit is None:
             continue
         tracks = n.tracks or [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])]

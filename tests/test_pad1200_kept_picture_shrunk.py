@@ -47,17 +47,17 @@ def _checker(w, h):
 
 def _kept(tmp_path, monkeypatch, off, size, pic, name):
     monkeypatch.setattr(engine, "_image_grow_gate", lambda d: (True, ""))
-    data = _scene()[0]
+    data = _scene(zoom=2.0)[0]          # the scene shows it at twice its box at most
     png = _project(tmp_path, data, off, *size, name=name)
     pic.save(png)
     writes, n, _ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
     assert writes == [] and n == 1
     (_node, imgs), = grown.values()
-    return data, imgs[off], msgs
+    return data, imgs[off][:3], msgs
 
 
 def test_a_picture_ten_times_its_box_is_written_smoothed_at_twice_it(tmp_path, monkeypatch):
-    _data, _fill, icon = _scene()
+    _data, _fill, icon = _scene(zoom=2.0)
     data, (w, h, payload), msgs = _kept(tmp_path, monkeypatch, icon, ICON,
                                         _checker(160, 80), "icon")
     assert (w, h) == (32, 16)
@@ -65,7 +65,8 @@ def test_a_picture_ten_times_its_box_is_written_smoothed_at_twice_it(tmp_path, m
     # every texel is the checkerboard's average grey, not black or white
     rgb = dds.decode_bc3(payload, 32, 16)[..., :3].astype(int)
     assert abs(rgb.mean() - 127.5) < 8 and rgb.std() < 12
-    said = [m for _l, m in msgs if "written at 32x16 instead, smoothed" in m]
+    # Simon (2026-11-21): the most the game shows it, measured from the scene (its box, zoomed 2x)
+    said = [m for _l, m in msgs if "shows it at most 32x16" in m and "written at 32x16, smoothed" in m]
     assert len(said) == 1 and "160x80" in said[0]
     # and it shows where the stock icon did: the fit of a 32x16 picture into 16x8 is a half
     grown = radium_grow.regrow(data, images={icon: (w, h, payload)})["data"]
@@ -76,7 +77,7 @@ def test_a_picture_ten_times_its_box_is_written_smoothed_at_twice_it(tmp_path, m
 def test_a_clear_edge_does_not_darken_or_bleed(tmp_path, monkeypatch):
     """Resized in premultiplied colour: the clear half's (black) colour does not darken the
     opaque half, and the opaque half's colour does not tint the clear half."""
-    _data, _fill, icon = _scene()
+    _data, _fill, icon = _scene(zoom=2.0)
     arr = np.zeros((80, 160, 4), dtype=np.uint8)
     arr[:, :80] = (255, 255, 255, 255)
     arr[:, 80:] = (0, 0, 0, 0)
@@ -90,14 +91,14 @@ def test_a_clear_edge_does_not_darken_or_bleed(tmp_path, monkeypatch):
 
 
 def test_up_to_twice_its_box_is_written_as_it_is(tmp_path, monkeypatch):
-    _data, _fill, icon = _scene()
+    _data, _fill, icon = _scene(zoom=2.0)
     _d, (w, h, _p), msgs = _kept(tmp_path, monkeypatch, icon, ICON, _checker(32, 16), "icon")
     assert (w, h) == (32, 16)
     assert not any("smoothed" in m for _l, m in msgs)
 
 
 def test_a_fill_is_shrunk_to_twice_its_shape_box(tmp_path, monkeypatch):
-    _data, fill, _icon = _scene()
+    _data, fill, _icon = _scene(zoom=2.0)
     _d, (w, h, _p), msgs = _kept(tmp_path, monkeypatch, fill, FILL, _checker(640, 320), "fill")
     assert (w, h) == (128, 64)
     said = [m for _l, m in msgs if "box keeps its size" in m]
@@ -107,7 +108,7 @@ def test_a_fill_is_shrunk_to_twice_its_shape_box(tmp_path, monkeypatch):
 def test_a_layout_made_over_its_own_size_keeps_it_whole(tmp_path, monkeypatch):
     """PAD-981: a node laid out over the picture at its own size draws it at that size, so a
     smaller texture would shrink it on the glass."""
-    _data, _fill, icon = _scene()
+    _data, _fill, icon = _scene(zoom=2.0)
     monkeypatch.setattr(scene_edit, "own_size_nodes", lambda d, c: frozenset({52}))
     _d, (w, h, _p), _m = _kept(tmp_path, monkeypatch, icon, ICON, _checker(160, 80), "icon")
     assert (w, h) == (160, 80)
@@ -115,7 +116,7 @@ def test_a_layout_made_over_its_own_size_keeps_it_whole(tmp_path, monkeypatch):
 
 def test_the_full_size_can_still_be_asked_for(tmp_path, monkeypatch):
     monkeypatch.setenv("PAD_KEEP_SIZE_FULL", "1")
-    _data, _fill, icon = _scene()
+    _data, _fill, icon = _scene(zoom=2.0)
     _d, (w, h, _p), _m = _kept(tmp_path, monkeypatch, icon, ICON, _checker(160, 80), "icon")
     assert (w, h) == (160, 80)
 

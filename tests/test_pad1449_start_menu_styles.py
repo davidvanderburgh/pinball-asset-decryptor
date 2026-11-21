@@ -218,7 +218,9 @@ int main(void)
                         "unsigned s0)")
     assert wrap.index("if (sty_menu_held()) return 0;") < wrap.index("sty_menu_begin();") < wrap.index("lb_start_game(")
     held = R._lift(src, "static int sty_menu_held(void)\n{")
-    assert "smn.go_ms != 0" in held and "smn.hold_ms = 0;" in held and "smn.act = 1;" not in held
+    assert "smn.go_ms != 0" in held and "smn.hold_ms = 0;" in held
+    # (the drain's edge opened the step; only round 6's Home Team hand-back opens it here)
+    assert "smn.act = 1;" not in held.split("if (smn.home_ms) {")[0]
     # Action on the live menu's chooser entries never reaches the game (the drain hides it), unless a Start came first
     assert "id == coop_action && sty_menu_owns_action()" in R._lift(src, "static int coop_hides(unsigned id)\n{")
     takes = R._lift(src, "static int sty_menu_owns_action(void)\n{")
@@ -406,8 +408,20 @@ int main(void)
 }
 """)
     assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "10000"
-    assert "!smn.go_ms && !smn.home_ms && sty_menu_kind() != 0u" in R._lift(src, "static int sty_menu_owns_action(void)\n{")
-    assert "smn.go_ms != 0 || smn.home_ms != 0," in R._lift(src, "static int sty_menu_held(void)\n{")
+    assert "!smn.go_ms && (!smn.home_ms || smn.home_walk) && sty_menu_kind() != 0u" in R._lift(
+        src, "static int sty_menu_owns_action(void)\n{")
+    # round 6 (DoomWalrus666: the game's reset - the left flipper with Start - brings the Home Team screen with the mode
+    # list under it): walking the mode list after the hold gives Action on a mode back to the step
+    frame = R._lift(src, "static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, unsigned index)")
+    assert "smn.home_ms && smn.entry >= 0 && !smn.home_walk" in frame and "smn.home_walk = 1;" in frame
+    assert "smn.home_walk = 0;" in R._lift(src, "static void sty_home_tick(void)")
+    # round 6 (DoomWalrus666: "Selecting a mode no longer brings up the other options"): the hand-back never lets
+    # Action begin a game from a mode entry - the start is held back, the hand-back ends and the step opens
+    held = R._lift(src, "static int sty_menu_held(void)\n{")
+    assert "smn.go_ms != 0," in held and "smn.home_ms != 0," not in held
+    assert "smn.home_ms = 0;" in held and "smn.act = 1;" in held
+    edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
+    assert edge.index("smn.home_ms && !smn.home_walk && !smn.go_ms && sty_menu_kind() != 0u") < edge.index("sty_menu_owns_action()")
     assert "sty_home_tick();" in R._lift(src, "static void coop_tick(void)\n{")
     # a game begun with the game's own Action (the Home Team screen's) plays NORMAL: no version card at ball 1
     norm = R._lift(src, "static int sty_default_normal(int preset, int menu_steps)")

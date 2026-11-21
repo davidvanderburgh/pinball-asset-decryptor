@@ -445,6 +445,30 @@ def pad_subs(m):
     ]
 
 
+#: the line the table's exit sub carries; a table patched before PAD-1489 lacks
+#: it (the maps' `repatch`)
+EXIT_MARK = "' PAD: closing the table stops the game, its backglass and DOF"
+
+
+def exit_sub(text):
+    """The table's exit sub stops the game, B2S.Server and DOF (PADSPIKE2.vbs's
+    PadStopB2S). PAD-1489: the tribute table has no exit sub, so closing it
+    told nothing to stop - the cabinet's DOF toys (LED strips) kept the last
+    colours the game gave them, even with Visual Pinball closed. A cut of
+    the table with an exit sub of its own gets the calls at its top."""
+    have = re.search(r"(?im)^[ \t]*Sub[ \t]+\w+_Exit\b[^\n]*\n", text)
+    if have:
+        end = re.compile(r"(?im)^[ \t]*End[ \t]+Sub\b").search(text, have.end())
+        stops = re.search(r"(?i)\bController\.Stop\b", text[have.end():end.start() if end else len(text)])
+        body = ["\t" + EXIT_MARK, "\tOn Error Resume Next"] + ([] if stops else ["\tController.Stop"]) + ["\tPadStopB2S"]
+        return text[:have.end()] + "\n".join(body) + "\n" + text[have.end():], "its exit sub also stops B2S and DOF"
+    key = re.search(r"(?im)^[ \t]*Sub[ \t]+(\w+)_KeyDown\b", text)
+    table = key.group(1) if key else "table1"
+    body = ["", "Sub %s_Exit" % table, "\t" + EXIT_MARK, "\tOn Error Resume Next",
+            "\tController.Stop", "\tPadStopB2S", "End Sub", ""]
+    return text + "\n".join(body), "%s_Exit stops the game, B2S and DOF" % table
+
+
 def patch_script(src, m):
     """The table script, rewired. Returns (text, report lines)."""
     rep = []
@@ -713,6 +737,8 @@ def patch_script(src, m):
 
     text = "\n".join(out)
     text += "\n".join(pad_subs(m))
+    text, how = exit_sub(text)
+    rep.append("on close: %s" % how)
     rep.append("switch edges dropped (no Stern switch): %d; edges added: %d" % (dropped, edges))
     return text, rep
 

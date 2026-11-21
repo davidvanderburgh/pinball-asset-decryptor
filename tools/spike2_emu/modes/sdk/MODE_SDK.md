@@ -6832,6 +6832,15 @@ alone began the game. The step is now the menu's own and the game start never wa
   without logging in). Where the drain cannot hide it, `coop_start_game_wrap` holds back the start Action began
   (`sty_menu_held`, `sty_menu_hold_back`: Action in the last 0.6 s on the live menu, no Start since) and returns
   without starting; the game's callers loop on whatever it answers.
+- Round 6 (DoomWalrus666: "Selecting a mode no longer brings up the other options"; "after I used left flipper and
+  start button to reset the game, the options are no longer available"; "it never works in the home team screen"): a
+  left flipper held alone out of a game (`sty_home_tick`) gives Action to the game - the Home Team screen's, and the
+  game's reset (left flipper + Start) ends the game under that hold and brings the Home Team screen too, with the mode
+  list under it (his videos). Round 5 kept it so until a game began, where Godzilla's Action on a mode begins the game:
+  NORMAL, never a step. Now the mode list's cursor walking after the hold (`smn.home_walk`, from `sty_menu_frame`; a
+  login or GAME MODE SELECT walks no mode) gives Action on a mode back to the step, and before that `sty_menu_edge`
+  notes the Action (`smn.hold_ms`) so a game it begins from a mode entry is held back (`sty_menu_held`, only a Start on
+  the menu - `go` - lets it through) and the step opens on it.
 - With no step up the entry's line says the style taken and START TO PLAY, or its name and ACTION TO CHOOSE
   (`sty_menu_rest_words`); leaving the entry forgets the choice.
 - Start on the live menu (`sty_menu_go`) keeps what the line says - the style taken, the one shown while a step is up,

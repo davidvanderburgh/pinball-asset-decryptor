@@ -183,3 +183,78 @@ def test_a_blocks_mode_adds_to_an_online_count():
         sim.shot("Left ramp")
         sim.shot("Right ramp")
         assert sim.online.get("rescued") == 2
+
+
+# ---- the Modes tab and the Network tab ------------------------------------------------------------------------------
+def test_the_modes_scoring_page_keeps_a_modes_online_counts(tmp_path):
+    from tests.test_webui_modes import _card_project, _project, _wait
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import preview
+    old = preview.enabled
+    preview.enabled = lambda feature: feature == "modes"
+    try:
+        proj = _card_project(tmp_path / "le", "godzilla_le-1_16_0.raw")
+        with web_app(tmp_path, mfr="stern") as w:
+            _project(w, proj)
+            slug = w.call("modes.new")
+            st = w.state("modes")
+            assert st["form"]["online_on_start"] is False and st["form"]["online_n_won"] == "1"
+            path = proj / "modes" / slug / "mode.json"
+            w.call("ui.set", "modes", "f:online_on_won", True)
+            w.call("ui.set", "modes", "f:online_count_won", "cities_saved")
+            w.call("ui.set", "modes", "f:online_on_shot", True)
+            w.call("ui.set", "modes", "f:online_shot", "Left ramp")
+            w.call("ui.set", "modes", "f:online_count_shot", "kaiju_hits")
+            w.call("ui.set", "modes", "f:online_n_shot", "2")
+            assert _wait(w, lambda: json.loads(path.read_text("utf-8")).get("online")
+                         == [["shot", "kaiju_hits", 2, "Left ramp"], ["won", "cities_saved", 1, ""]])
+            w.call("ui.set", "modes", "f:online_count_won", "two words")
+            assert _wait(w, lambda: "count's name" in w.state("modes")["status"])
+    finally:
+        preview.enabled = old
+
+
+def test_the_network_tab_sets_up_online_coop(tmp_path):
+    from tests.test_webui_modes import _card_project, _project
+    from tests.webui_harness import web_app
+    from pinball_decryptor.plugins.stern import online_coop as OC
+    proj = _card_project(tmp_path / "le", "godzilla_le-1_16_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, proj)
+        w.call("ui.select_tab", "network")
+        o = w.state("network")["online"]
+        assert o["on"] is False and o["teams"] == ["Everyone"] and ["kaiju_war", "Kaiju War"] in o["examples"]
+        assert w.call("network.online_on", True) is False                     # nothing set up yet: why, in red
+        assert w.state("network")["online"]["kind"] == "err"
+        assert w.call("network.online_example", "kaiju_war") is True
+        o = w.state("network")["online"]
+        assert o["campaign"] == "Kaiju War" and o["teams"] == ["Team Godzilla", "Team King Ghidorah"]
+        assert w.call("network.online_set", {"url": "http://203.0.113.10:8090/", "machine": "Dave",
+                                             "team": "Team Godzilla"}) is True
+        assert w.call("network.online_on", True) is True
+        o = w.state("network")["online"]
+        assert o["on"] and o["kind"] == "ok" and "Team Godzilla" in o["note"]
+        assert OC.wanted(str(proj))["team"] == "Team Godzilla"
+        assert w.call("network.online_set", {"url": "https://x/"}) is False
+        out = tmp_path / "kaiju.json"
+        assert w.call("network.online_save_campaign", str(out)) == str(out)
+        c = json.loads(out.read_text(encoding="utf-8"))
+        assert c["campaign"] == "Kaiju War" and c["source"] == "PAD online co-op campaign"
+        # another owner joins: their project loads the campaign file
+        c["key"] = "monster-island"
+        out.write_text(json.dumps(c), encoding="utf-8")
+        assert w.call("network.online_load_campaign", str(out)) is True
+        assert OC.load(str(proj))["key"] == "monster-island"
+        d = dict(OC.load(str(proj))["design"])
+        d["regions"] = d["regions"][:2]
+        assert w.call("network.online_design", d) is True
+        assert len(w.state("network")["online"]["design"]["regions"]) == 2
+
+
+def test_the_docs_name_the_line_the_field_and_the_calls():
+    import re
+    doc = (SDK / "MODE_PARAMETERS.md").read_text(encoding="utf-8")
+    for name in ("online", "pm_online_add", "pm_online_count", "pm_online"):
+        assert re.search(r"`%s(?:[ (][^`]*)?`" % re.escape(name), doc), name
+    assert "## Online co-op (PAD-1479)" in (SDK / "MODE_SDK.md").read_text(encoding="utf-8")
+    assert "| Count toward an online co-op campaign |" in (SDK / "MODE_LIMITS.md").read_text(encoding="utf-8")

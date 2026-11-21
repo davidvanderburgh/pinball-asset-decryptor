@@ -82,6 +82,100 @@ function ScoreFeed({ s, n }) {
   <//>`;
 }
 
+// PAD-1479: online co-op - machines in different places playing toward one shared goal (plugins/stern/online_coop.py).
+// The campaign's design (teams, what counts, regions) is edited here and saved with the project; the campaign file
+// is what its server runs and what the other machines' owners load to join.
+function OnlineCoop({ n }) {
+  const o = n.online;
+  const [d, setD] = useState(o ? o.design : null);
+  const [dirty, setDirty] = useState(false);
+  const designKey = o ? JSON.stringify(o.design) : "";
+  useEffect(() => { if (o) { setD(o.design); setDirty(false); } }, [designKey]);
+  if (!o || !d) return null;
+  const lim = o.limits || {};
+  const edit = (fn) => { const c = JSON.parse(JSON.stringify(d)); fn(c); setD(c); setDirty(true); };
+  const set = (k) => (v) => call("network.online_set", { [k]: v });
+  const goal = d.goal || { kind: "score" };
+  const unit = goal.kind === "score" ? "points" : (goal.count || "count");
+  const teams = (o.teams || []).map((t) => ({ value: t, label: t }));
+  return html`<${Card} cls="net-opt" title="Online co-op">
+    <p class="net-does">Machines in different places play toward one shared goal. At the end of every game this
+      machine posts its score, and any online counts its modes add to, to the campaign's server, which adds every
+      machine's games up for its team and posts the campaign's map to Discord.</p>
+    <${Check} checked=${o.on} wrap label="Play in an online co-op campaign" onChange=${(v) => call("network.online_on", v)} />
+    <div class="net-field"><span class="lbl">The campaign's server</span>
+      <${Field} value=${o.url} mono placeholder=${o.placeholder} bad=${o.on && !o.url}
+        title="The server's address: http://, its public IP address, its port. The machine looks no names up and does not do https."
+        onChange=${() => {}} onCommit=${set("url")} /></div>
+    <div class="net-field"><span class="lbl">Campaign</span>
+      <${Field} value=${o.campaign} maxLength=${lim.word} placeholder="Kaiju War" title="The campaign's name, the same on every machine in it (the campaign file has it)"
+        onChange=${() => {}} onCommit=${set("campaign")} /></div>
+    <div class="net-field"><span class="lbl">This machine's team</span>
+      <${Select} value=${o.team} options=${[{ value: "", label: "(pick a team)" }, ...teams]} onChange=${set("team")}
+        title="Every game on this machine counts for this team" /></div>
+    <div class="net-field"><span class="lbl">This machine's name</span>
+      <${Field} value=${o.machine} maxLength=${lim.word} placeholder="Dave's Godzilla LE" title="How the server and the map name this machine"
+        onChange=${() => {}} onCommit=${set("machine")} /></div>
+    <div class="net-field"><span class="lbl">Join key</span>
+      <${Field} value=${o.key} mono maxLength=${lim.key} placeholder="(none)" title="The campaign's join key, when its server asks for one: the server counts no game without it"
+        onChange=${() => {}} onCommit=${set("key")} /></div>
+    <${Said} text=${o.note} kind=${o.kind} />
+    <${Advanced} title="Campaign design: teams, what counts, regions">
+      <div class="net-oc-row">
+        <span class="lbl">Start from</span>
+        ${(o.examples || []).map(([k, t]) => html`<${Button} key=${k} size="sm" onClick=${() => call("network.online_example", k)}>${t}<//>`)}
+      </div>
+      <div class="net-field"><span class="lbl">Title on the map</span>
+        <${Field} value=${d.title} maxLength=${63} onChange=${(v) => edit((c) => { c.title = v; })} /></div>
+      <div class="net-oc-row"><span class="lbl">What counts</span>
+        <${Select} value=${goal.kind} options=${[{ value: "score", label: "each game's score" }, { value: "count", label: "an online count" }]}
+          onChange=${(v) => edit((c) => { c.goal = v === "score" ? { kind: "score" } : { kind: "count", count: (o.counts || [])[0] || "rescued" }; })} />
+        ${goal.kind === "count" ? html`<${Field} value=${goal.count} mono width=${150} maxLength=${lim.count} list="net-oc-counts"
+          title=${"The name a mode of yours adds to (the Modes tab's Scoring page or a blocks mode's Add to online count)" + ((o.counts || []).length ? ": " + o.counts.join(", ") : "")}
+          onChange=${(v) => edit((c) => { c.goal = { kind: "count", count: v }; })} />
+          <datalist id="net-oc-counts">${(o.counts || []).map((x) => html`<option key=${x} value=${x} />`)}</datalist>` : null}
+      </div>
+      <div class="lbl">Teams</div>
+      ${(d.teams || []).map((t, i) => html`<div class="net-oc-row" key=${"t" + i}>
+        <input type="color" class="net-oc-colour" value=${t.colour} title="The team's colour on the map"
+          onInput=${(e) => edit((c) => { c.teams[i].colour = e.target.value; })} />
+        <${Field} value=${t.name} width=${220} maxLength=${lim.word} onChange=${(v) => edit((c) => { c.teams[i].name = v; })} />
+        <${Button} size="sm" disabled=${(d.teams || []).length < 2} onClick=${() => edit((c) => { c.teams.splice(i, 1); })}>Remove<//>
+      </div>`)}
+      <${Button} size="sm" disabled=${(d.teams || []).length >= lim.teams} onClick=${() => edit((c) => {
+        c.teams.push({ name: "Team " + (c.teams.length + 1), colour: (o.colours || [])[c.teams.length % 8] || "#888888" }); })}>Add a team<//>
+      <div class="lbl">Regions, taken in this order (the first team to reach a region's target takes it)</div>
+      ${(d.regions || []).map((r, i) => html`<div class="net-oc-row" key=${"r" + i}>
+        <${Field} value=${r.name} width=${180} maxLength=${31} onChange=${(v) => edit((c) => { c.regions[i].name = v; })} />
+        <${Field} value=${String(r.target)} mono width=${150} title=${"How many " + unit + " take it"}
+          onChange=${(v) => edit((c) => { c.regions[i].target = parseInt(String(v).replace(/[^0-9]/g, "") || "0", 10); })} />
+        <span class="small muted">${unit}</span>
+        <${Button} size="sm" disabled=${(d.regions || []).length < 2} onClick=${() => edit((c) => { c.regions.splice(i, 1); })}>Remove<//>
+      </div>`)}
+      <${Button} size="sm" disabled=${(d.regions || []).length >= lim.regions} onClick=${() => edit((c) => {
+        const last = c.regions[c.regions.length - 1];
+        c.regions.push({ name: "Region " + (c.regions.length + 1), target: last ? last.target * 2 : 1000000 }); })}>Add a region<//>
+      <div class="net-oc-row">
+        <${Button} kind="primary" size="sm" disabled=${!dirty} onClick=${() => call("network.online_design", d)}>Save the design<//>
+        ${dirty ? html`<${Button} size="sm" onClick=${() => { setD(o.design); setDirty(false); }}>Undo changes<//>` : null}
+      </div>
+    <//>
+    <div class="net-oc-row">
+      <${Button} size="sm" onClick=${() => call("network.online_save_campaign")}>Save campaign file…<//>
+      <${Button} size="sm" onClick=${() => call("network.online_load_campaign")}>Load campaign file…<//>
+    </div>
+    <${Advanced} title="Run the campaign's server">
+      <p class="small">One computer runs the campaign's server for every machine in it: a small cloud server, or a
+        computer at home with the port forwarded from the router. It needs a fixed public IPv4 address, because the
+        machines look no names up. Save the campaign file, then run (Python 3.9 or newer, with Pillow for the map):</p>
+      <pre class="mono net-pre">${o.server}</pre>
+      <p class="small muted">The webhook is a Discord channel's (Edit Channel, Integrations, Webhooks). The server posts
+        the map there as a region is taken and when the campaign is won; its own page shows the map at any time.</p>
+    <//>
+    <${Ways} n=${n} panel="score_feed" />
+  <//>`;
+}
+
 // PAD-1427: what the friendly path leaves out, folded away (the score feed's API contract does the same)
 function Advanced({ title = "Advanced", children }) {
   const [open, setOpen] = useState(false);
@@ -420,6 +514,7 @@ export default function NetworkTab() {
           network by itself. Saved with this project and put on the card when you write it</span></div>
         <div class="net-col">
           ${n.project && s.feed_shown ? html`<${ScoreFeed} s=${s} n=${n} />` : null}
+          ${n.project && s.feed_shown ? html`<${OnlineCoop} n=${n} />` : null}
           ${n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
         </div>
       </section>` : null}

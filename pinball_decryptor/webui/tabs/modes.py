@@ -57,6 +57,7 @@ _BOOL_FIELDS = ("screen", "countdown", "lights", "advanced", "stack", "light_sho
                 "coil_wait_0", "coil_wait_1", "coil_wait_2",                       # PAD-621
                 "shield",                                                          # PAD-392
                 "shake_on_start", "shake_on_shot", "shake_on_end",                 # PAD-414
+                "online_on_start", "online_on_shot", "online_on_won", "online_on_end",   # PAD-1479
                 "seq_reset_any",                                                   # PAD-314
                 "layer", "layer_pause", "layer_shots")                             # PAD-1401
 _STR_FIELDS = (
@@ -81,6 +82,8 @@ _STR_FIELDS = (
     "layer_priority", "inside",                                                       # PAD-1401
     "shake_what_start", "shake_what_shot", "shake_what_end",                          # PAD-414
     "shake_s_start", "shake_s_shot", "shake_s_end", "shake_shot",
+    "online_count_start", "online_count_shot", "online_count_won", "online_count_end",    # PAD-1479
+    "online_n_start", "online_n_shot", "online_n_won", "online_n_end", "online_shot",
     "show_start", "show_end", "show_hit",                                             # PAD-418; PAD-642
     "game_wizard", "wizard_how",                                                      # PAD-436
     "building_floor", "building_shot", "roster_slot",                                 # PAD-589
@@ -114,6 +117,10 @@ _DEFAULTS = {
     "shake_on_start": False, "shake_on_shot": False, "shake_on_end": False,
     "shake_what_start": "hard", "shake_what_shot": "game:jackpot", "shake_what_end": "soft",
     "shake_s_start": "0.5", "shake_s_shot": "0.5", "shake_s_end": "1", "shake_shot": "",
+    # PAD-1479: online co-op counts - as it starts, on a shot, when it is won, as it ends
+    "online_on_start": False, "online_on_shot": False, "online_on_won": False, "online_on_end": False,
+    "online_count_start": "", "online_count_shot": "", "online_count_won": "", "online_count_end": "",
+    "online_n_start": "1", "online_n_shot": "1", "online_n_won": "1", "online_n_end": "1", "online_shot": "",
     "coil_on_0": False, "coil_on_1": False, "coil_on_2": False, "coil_s_0": "2", "coil_s_1": "2", "coil_s_2": "2",
     "coil_when_0": "(when it starts)", "coil_when_1": "(when it starts)", "coil_when_2": "(when it starts)",
     "coil_wait_0": False, "coil_wait_1": False, "coil_wait_2": False,                 # PAD-621
@@ -2530,6 +2537,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         shot = getattr(spec, "building_shot", "")
         f["building_shot"] = shot if isinstance(shot, str) and shot else self.MB_ON_START
         self._load_shakes(f, spec)                                                 # PAD-414
+        self._load_online(f, spec)                                                 # PAD-1479
         # PAD-381: the other mechanisms, one row each in the profile's held_coils order
         rows = {r[0]: r for r in (getattr(spec, "coil_holds", None) or []) if r}
         held = list(getattr(self._shown or self._profile, "held_coils", ()) or ())
@@ -2566,6 +2574,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         shot = str(self.f["building_shot"]).strip()
         spec.building_shot = "" if not spec.building_floor or shot == self.MB_ON_START else shot
         spec.shakes = self._collect_shakes()                                                 # PAD-414
+        spec.online = self._collect_online()                                                 # PAD-1479
         held = list(getattr(self._shown or self._profile, "held_coils", ()) or ())      # PAD-381
         spec.coil_holds = []
         for i, (name, _label) in enumerate(held[:self.COIL_ROWS]):
@@ -2593,6 +2602,32 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         if when == "shot" and games:
             return games[0]
         return own[-1] if when == "end" else own[0]
+
+    def _load_online(self, f, spec):
+        """PAD-1479: the first online count of each kind (start, shot, won, end) onto the form's four rows."""
+        rows = {}
+        for r in (getattr(spec, "online", None) or []):
+            if isinstance(r, (list, tuple)) and len(r) == 4 and r[0] in MP.ONLINE_WHEN and r[0] not in rows:
+                rows[r[0]] = r
+        for when in MP.ONLINE_WHEN:
+            row = rows.get(when)
+            f["online_on_" + when] = row is not None
+            f["online_count_" + when] = str(row[1]) if row else _DEFAULTS["online_count_" + when]
+            f["online_n_" + when] = str(row[2]) if row else _DEFAULTS["online_n_" + when]
+            if when == "shot":
+                f["online_shot"] = (row[3] or "") if row else ""
+
+    def _collect_online(self):
+        """PAD-1479: the form's ticked online count rows as the mode's ``online``."""
+        out = []
+        for when in MP.ONLINE_WHEN:
+            if not self.f["online_on_" + when]:
+                continue
+            t = str(self.f["online_n_" + when]).replace(",", "").strip()
+            n = int(t) if t.isdigit() else t                  # validate_online names what is not a number
+            out.append([when, str(self.f["online_count_" + when]).strip(), n,
+                        str(self.f["online_shot"]).strip() if when == "shot" else ""])
+        return out
 
     def _load_shakes(self, f, spec):
         """PAD-414: the first shake of each kind (start, shot, end) onto the form's three rows."""

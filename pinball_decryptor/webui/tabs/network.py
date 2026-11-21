@@ -198,6 +198,7 @@ class NetworkTab(TabService):
     def publish(self):
         self._publish_feed()
         project = self._project()
+        self._publish_online(project)                       # PAD-1479
         info = self._inspect()
         enabled, keys, error = info.get('enabled', False), info.get('public_keys', ''), ''
         try:
@@ -238,6 +239,123 @@ class NetworkTab(TabService):
                  reason=info['reason'] if project else 'Select a project folder on the Extract tab first.',
                  enabled=enabled, public_keys=keys, error=error, offered=ssh_card.offered(self.mfr),
                  known=self._known())
+
+    # ---- PAD-1479: online co-op - machines in different places, one shared goal (plugins/stern/online_coop.py)
+    def _publish_online(self, project, note='', kind=''):
+        from ...plugins.stern import online_coop as OC
+        if not project or not os.path.isdir(project):
+            self.set(online=None)
+            return
+        st = OC.load(project)
+        why = OC.problems(st) if st['on'] else []
+        if st['on'] and not why and not note:
+            note = 'Every game played on this machine is posted to %s for %s in campaign %s.' % (
+                st['url'], st['team'], st['campaign'])
+        d = st['design']
+        unit = 'points' if d.get('goal', {}).get('kind') == 'score' else (d.get('goal', {}).get('count') or '')
+        self.set(online=dict(
+            on=st['on'], url=st['url'], campaign=st['campaign'], team=st['team'], machine=st['machine'],
+            key=st['key'], design=d, teams=[t['name'] for t in d.get('teams', [])], unit=unit,
+            problems=why, note=note or (why[0] if why else ''), kind=kind or ('err' if why else 'ok' if st['on'] else ''),
+            examples=[[k, v['title']] for k, v in OC.EXAMPLES.items()], counts=OC.counts_in_modes(project),
+            colours=list(OC.COLOURS), placeholder=OC.PLACEHOLDER, tip=OC.NOTE,
+            limits=dict(teams=OC.TEAMS_MAX, regions=OC.REGIONS_MAX, word=OC.WORD_MAX, key=OC.KEY_MAX,
+                        count=OC.COUNT_NAME_MAX),
+            server='python -m pinball_decryptor.online_coop_server --campaign "<the campaign file>" --port 8090 '
+                   '--webhook "<your Discord channel\'s webhook>"'))
+
+    def _online_save(self, **changes):
+        from ...plugins.stern import online_coop as OC
+        project = self._project()
+        if not project or not os.path.isdir(project):
+            return False
+        try:
+            OC.save(project, **changes)
+        except OC.OnlineCoopError as e:
+            self._publish_online(project, str(e), 'err')
+            return False
+        self._publish_online(project)
+        self._publish_feed()
+        return True
+
+    @rpc
+    def online_on(self, on):
+        """PAD-1479: switch online co-op on or off for cards written from this project."""
+        return self._online_save(on=bool(on))
+
+    @rpc
+    def online_set(self, fields):
+        """PAD-1479: change the server's address, the campaign's name, the machine's team or name, the join key."""
+        keep = ('url', 'campaign', 'team', 'machine', 'key')
+        return self._online_save(**{k: v for k, v in (fields or {}).items() if k in keep})
+
+    @rpc
+    def online_design(self, design):
+        """PAD-1479: the campaign's design as the editor has it (teams, what counts, regions)."""
+        return self._online_save(design=design)
+
+    @rpc
+    def online_example(self, name):
+        """PAD-1479: start the design from one of the examples (the campaign's name too, when it has none)."""
+        from ...plugins.stern import online_coop as OC
+        if name not in OC.EXAMPLES:
+            return False
+        project = self._project()
+        changes = dict(design=OC.EXAMPLES[name])
+        if project and os.path.isdir(project) and not OC.load(project)['campaign']:
+            changes['campaign'] = OC.EXAMPLES[name]['title']
+        return self._online_save(**changes)
+
+    @rpc
+    def online_save_campaign(self, path=None):
+        """PAD-1479: the campaign file - what the server runs, and what the other machines' owners load to join."""
+        import json as _json
+        from ...plugins.stern import online_coop as OC
+        project = self._project()
+        if not project or not os.path.isdir(project):
+            return None
+        st = OC.load(project)
+        why = OC.design_problems(st['design']) + ([OC.word_problem('campaign', st['campaign'])]
+                                                  if OC.word_problem('campaign', st['campaign']) else [])
+        if why:
+            self._publish_online(project, why[0], 'err')
+            return None
+        if not path:
+            stem = ''.join(c if c.isalnum() or c in ' -_' else '_' for c in st['campaign']).strip() or 'campaign'
+            path = self.window.ask_save('online_campaign', 'Save the campaign file', initialfile=stem + '.json',
+                                        filetypes=[('PAD online co-op campaign', '*.json')], defaultextension='.json')
+        if not path:
+            return None
+        with open(path, 'w', encoding='utf-8') as f:
+            _json.dump(OC.campaign_file(st), f, indent=2)
+        self._publish_online(project, 'Campaign file saved to %s: run the server with it, and give it to the other '
+                                      "machines' owners to load." % path, 'ok')
+        return path
+
+    @rpc
+    def online_load_campaign(self, path=None):
+        """PAD-1479: join a campaign - its design, name and join key from the campaign file its server runs."""
+        import json as _json
+        from ...plugins.stern import online_coop as OC
+        project = self._project()
+        if not project or not os.path.isdir(project):
+            return False
+        if not path:
+            path = self.window.ask_open('online_campaign', 'Load a campaign file',
+                                        filetypes=[('PAD online co-op campaign', '*.json'), ('All files', '*.*')])
+        if not path:
+            return False
+        try:
+            with open(path, encoding='utf-8') as f:
+                c = _json.load(f)
+        except (OSError, ValueError) as e:
+            self._publish_online(project, 'That file cannot be read as a campaign file: %s' % e, 'err')
+            return False
+        if not isinstance(c, dict) or c.get('source') != 'PAD online co-op campaign':
+            self._publish_online(project, 'That is not a PAD online co-op campaign file.', 'err')
+            return False
+        design = {k: c.get(k) for k in ('title', 'teams', 'goal', 'regions')}
+        return self._online_save(design=design, campaign=c.get('campaign') or '', key=c.get('key') or '')
 
     # ---- PAD-1427: remote access on a card with one button
     @rpc

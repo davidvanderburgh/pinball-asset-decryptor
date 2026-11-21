@@ -7484,6 +7484,49 @@ panel showed them, both marker ids in player order; game 2 with the server down:
 apart, dropped, and the machine played on; game 3, server back: posted as game_number 3.
 Elvira 3 1.13 (its port names no game_over), one player, three balls: after the last drain nothing was pressed, and 30 s later `game 1 over (play stopped with no new ball)` posted 2,269,300, the score the game's own end-of-game screen showed; one report, none between balls. An earlier run whose job pressed Start inside the 30 s sent the finished game's 500,100 at the next game's first ball (`the next game started`).
 
+## Online co-op (PAD-1479)
+
+Captain Gordon (Discord): "A peer to peer mode for spike 2 co op mode, where asynchronous gameplay effects a shared
+target like a high score" - machines in different places, teams (Team Godzilla against Team King Ghidorah, taking over
+cities as their scores pass the targets), a Pokemon island that fills up with every Pokemon rescued. It rides on the
+score feed above: the Network tab's **Online co-op** points the card's feed at the campaign's server and adds four lines
+to `scorefeed.cfg`:
+
+    online Kaiju War                  the campaign the machine plays in
+    team Team Godzilla                its team in it
+    machine Dave's Godzilla LE        its own name
+    key monster-island                the campaign's join key (when the server asks for one)
+
+and each game's report then carries them, and the game's online COUNTS, after `insider`:
+
+    ...,"insider":[null],"campaign":"Kaiju War","team":"Team Godzilla","machine":"Dave's Godzilla LE",
+    "key":"monster-island","counts":{"cities_saved":2,"kaiju_hits":14}}
+
+A count is a number a mode of yours adds to through the game - up to 8 names a game, each letters, digits and `_ - .`
+(up to 23): `pm_online_add(name, n)` from C, a blocks mode's **Add to online count**, or a mode file's `online` lines
+(the Modes tab's Scoring page, **Online co-op counts**):
+
+    online start <count> <n>            as the mode starts
+    online shot <count> <n> <mask>      on every hit of <mask> while it runs
+    online won <count> <n>              as it ends won: its end shot made, or its clock run out when it has none
+    online end <count> <n>              as it ends, however it ends
+
+`pm_online_count(name)` is this game's count so far; `pm_online()` is 1 when the card plays in a campaign. The counts
+start from nothing at each game's start and are counted only while a game is played (and only with the score feed or
+online co-op on: a card with neither counts nothing). A card whose modes count but which plays in no campaign still
+sends `counts` on its score feed.
+
+**The server** (`python -m pinball_decryptor.online_coop_server --campaign campaign.json`) adds every machine's games
+up per team: the campaign's goal is each game's score (a co-op game's team score once, every player's otherwise) or one
+named count, and the teams race for one region at a time - the first whose progress reaches the region's target takes
+it, and every team starts again on the next. It answers 200 for a game counted, 202 for one it takes without counting
+(a resend), 400 / 403 for what it refuses (another campaign, a wrong join key, a team the campaign has not), serves
+its page, `map.png` and `state.json`, and posts the map to a Discord webhook as regions fall. The **vanilla** campaign
+needs nothing designed: one team, every game's score, five rising goals - one shared high score for every machine.
+The campaign file (the Network tab's **Save campaign file**) is what the server runs and what the other machines'
+owners load (**Load campaign file**) to join it. The machines post plain http:// to an IPv4 address and look no names
+up, so the server needs a fixed public IPv4 address (a small cloud server, or a home computer with the port forwarded).
+
 ## Records of your own on the high scores (PAD-1280)
 
 The Modes tab's **High scores…** keeps the project's records (`plugins/stern/mode_records.py`, the project sidecar's

@@ -514,6 +514,9 @@ export default function NetworkTab() {
         <div class="net-col">
           ${n.project && s.feed_shown ? html`<${ScoreFeed} s=${s} n=${n} />` : null}
           ${n.project && s.feed_shown ? html`<${OnlineCoop} n=${n} />` : null}
+          ${!(n.project && s.feed_shown) && n.online_missing ? html`<${Card} cls="net-opt" title="Score feed and Online co-op">
+            <${Note}>${n.online_missing}<//>
+          <//>` : null}
           ${n.wifi_offered ? html`<${WifiStartup} n=${n} />` : null}
         </div>
       </section>` : null}

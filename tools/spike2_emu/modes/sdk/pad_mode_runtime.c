@@ -21449,6 +21449,7 @@ static struct {
                                           * step's again (a login or GAME MODE SELECT walks no mode) */
     volatile int ov;                     /* round 7: the game's Insider overlay on the menu, read at its frame
                                           * (sty_overlay_read): STY_OV_* (0: the port names none - rounds 5/6's guess) */
+    volatile unsigned ov_sub;            /* round 8: its sub-state word as read (4: the mode list is up) */
 } smn = { .entry = -1 };
 
 /* PAD-1449 round 7 (DoomWalrus666, on v1.561.1: "other times the action button does nothing on the home team screen,
@@ -21482,6 +21483,7 @@ static void sty_overlay_read(void)
     int was = smn.ov;
     if (!sa || !ua) return;                                   /* (0 stays: rounds 5/6's left flipper guess) */
     smn.ov = sty_overlay_kind(*(volatile unsigned *)sa, *(volatile unsigned *)ua);
+    smn.ov_sub = *(volatile unsigned *)ua;
     if (!smn.ov) smn.ov = STY_OV_LOGIN;                       /* (an overlay state we do not know: the game's) */
     if (smn.ov != was) {
         static const char *const OV_SAYS[] = { "", "the plain menu: Action on a mode is the style step's",
@@ -21670,6 +21672,20 @@ static void sty_menu_go(void)
         STY_NAMES[smn.go_style - 1], smn.taken || (smn.open && !smn.shaping) ? "" : " (none chosen: NORMAL)");
 }
 
+/* PAD-1449 round 8 (DoomWalrus666, on v1.561.7: "Once a version selection is made, version selection is no longer
+ * available until a game is started and ended ... User selected a mode and version, then went to add a user"): a Start
+ * on the menu arms `go` until a game begins, and rounds 4-6 gave the menu's Action to the game while it was armed - the
+ * Home Team screen that Start brought has its own Action. A Start that adds a player begins no game, and the menu draws
+ * on under the Home Team screens, so `go` stayed armed and the plain mode list's Action never opened the step again
+ * until a game was played. Where the game's overlay is read the Home Team screens say so themselves: an armed Start
+ * keeps Action from the step only where the overlay is not known, or the plain menu is not on its mode list (sub-state
+ * 4). (tests lift it verbatim) */
+static int sty_go_keeps_action(int ov, unsigned sub, int go)
+{
+    if (!go) return 0;
+    return !ov || !(ov == STY_OV_PLAIN && sub == 4u);
+}
+
 /* from the switch drain (coop_edge): on the live menu, Action works the step (the menu's frame does it), Start keeps
  * the entry's pick for the game it begins */
 /* Action is the step's, not the game's (coop_hides keeps it from the game at the drain, so it begins no game and
@@ -21680,7 +21696,8 @@ static int sty_menu_owns_action(void)
     if (!sty_menu_live() || sty_menu_kind() == 0u) return 0;
     if (smn.ov == STY_OV_MODES) return !smn.open || smn.shaping;   /* round 7: the Action that takes the style goes
                                                                      * on to the game too - it takes the mode there */
-    if (smn.ov) return smn.ov == STY_OV_PLAIN && !smn.go_ms;    /* round 7: the overlay's own screens: the game's */
+    if (smn.ov) return smn.ov == STY_OV_PLAIN               /* round 7: the overlay's own screens: the game's */
+                       && !sty_go_keeps_action(smn.ov, smn.ov_sub, smn.go_ms != 0);   /* round 8: a Start before */
     return !smn.go_ms && (!smn.home_ms || smn.home_walk);       /* (a port without the overlay: rounds 5/6) */
 }
 
@@ -21774,7 +21791,8 @@ static int sty_menu_hold_back(unsigned long since_frame, unsigned long since_act
 static int sty_menu_held(void)
 {
     unsigned long since = smn.hold_ms ? pm_ms() - (smn.hold_ms & ~1ul) : ~0ul;
-    if (!sty_menu_hold_back(smn.frame_ms ? pm_ms() - smn.frame_ms : ~0ul, since, smn.go_ms != 0,
+    if (!sty_menu_hold_back(smn.frame_ms ? pm_ms() - smn.frame_ms : ~0ul, since,
+                            sty_go_keeps_action(smn.ov, smn.ov_sub, smn.go_ms != 0),   /* round 8 */
                             sty_menu_kind() != 0u))
         return 0;
     smn.hold_ms = 0;                                          /* (the drain's edge gave the step its Action) */
@@ -21892,6 +21910,11 @@ static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, un
         smn.open = 0;
         smn.walk_ms = pm_ms();
         say("styles: %s %s taken on the start menu - Start begins it", sty_label(smn.kind), STY_NAMES[smn.at]);
+        if (smn.go_ms) {                                      /* round 8: a Start before it (a player added - no game
+                                                              * begun) kept the last pick: this one goes in instead */
+            say("styles: a Start was pressed on the menu before - the game it begins takes this pick");
+            sty_menu_go();
+        }
         break;
     }
     if (!teams && smn.team) kind = smn.team;

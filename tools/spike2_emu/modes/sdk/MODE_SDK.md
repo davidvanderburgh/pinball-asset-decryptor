@@ -6854,6 +6854,16 @@ alone began the game. The step is now the menu's own and the game start never wa
   the step is kept from the game and the one that takes the style reaches it too - Action there takes the mode and goes
   back to the roster (it begins no game); at PRESS ACTION TO START GAME Action keeps the pick as Start does
   (`sty_menu_go`). A port without the two values keeps rounds 5/6's left-flipper guess.
+- Round 8 (DoomWalrus666, on v1.561.7: "Once a version selection is made, version selection is no longer available
+  until a game is started and ended"; he took a version, then added a player): a Start on the live menu arms `go`
+  until a game begins, and rounds 4-7 gave the plain menu's Action to the game while it was armed (the Home Team
+  screen a Start brings has its own Action). A Start that adds a player begins no game and the menu draws on under the
+  Home Team screens, so `go` stayed armed and the plain mode list never opened the step again until a game was played.
+  With the overlay read, an armed Start keeps Action from the step only where the overlay is not known, or the plain
+  menu is off its mode list (`sty_go_keeps_action`; sub-state 4 is the mode list, kept as `smn.ov_sub`); a style taken
+  while it is armed re-arms it with the new pick. Emulator, Godzilla LE 1.16, the overlay forced to the plain menu
+  after a Start in the Home Team mode select: v1.561.7 began the game on that Action (NORMAL, no step), round 8 opened
+  the step and the game began as the style taken. Godzilla Pro 1.16 (his title) reads 1/4 on its plain menu.
 - With no step up the entry's line says the style taken and START TO PLAY, or its name and ACTION TO CHOOSE
   (`sty_menu_rest_words`); leaving the entry forgets the choice.
 - Start on the live menu (`sty_menu_go`) keeps what the line says - the style taken, the one shown while a step is up,

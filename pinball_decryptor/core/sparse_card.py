@@ -496,6 +496,105 @@ def _last_data_end(f, size):
     return r[-1][0] + r[-1][1] if r else 0
 
 
+# ---------------------------------------------------------------- expand
+
+
+class NoRoom(OSError):
+    """The drive has not got the room a full-size card needs."""
+
+
+def _need_room(folder, need):
+    import shutil
+    free = shutil.disk_usage(folder).free
+    if free < need:
+        raise NoRoom("%s has %.1f GB free; the full-size card needs %.1f GB "
+                     "more" % (folder, free / 1e9, need / 1e9))
+
+
+def hole_ranges(f, size):
+    """The ``(offset, length)`` holes of open file *f* (the complement of
+    :func:`allocated_ranges`)."""
+    out = []
+    pos = 0
+    for off, n in allocated_ranges(f, size):
+        if off > pos:
+            out.append((pos, off - pos))
+        pos = max(pos, off + n)
+    if pos < size:
+        out.append((pos, size - pos))
+    return out
+
+
+def is_compact(path):
+    """True when *path* has holes (it is stored compact)."""
+    size = os.path.getsize(path)
+    with open(path, "rb") as f:
+        return bool(hole_ranges(f, size))
+
+
+def expand_copy(src, dst, *, progress=None, cancel=None):
+    """Write a FULL-SIZE copy of card *src* at *dst*: every byte on disk, the
+    form a drive without sparse files (exFAT, FAT32) or another program's
+    plain copy wants.  Written as ``.part`` and renamed when whole."""
+    size = os.path.getsize(src)
+    _need_room(os.path.dirname(os.path.abspath(dst)) or ".", size)
+    part = dst + ".part"
+    done = 0
+    try:
+        with open(src, "rb", buffering=0) as fi, \
+                open(part, "wb", buffering=0) as fo:
+            while True:
+                if cancel:
+                    cancel()
+                b = fi.read(CHUNK)
+                if not b:
+                    break
+                fo.write(b)
+                done += len(b)
+                if progress:
+                    progress(done, size)
+            _flush(fo)
+        os.replace(part, dst)
+    except BaseException:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        raise
+    return dst
+
+
+def expand_file(path, *, progress=None, cancel=None):
+    """Make the compact card at *path* full size again where it is: its
+    holes are written out as zeros and (Windows) the sparse mark cleared.
+    The bytes do not change.  Returns the bytes filled in."""
+    size = os.path.getsize(path)
+    with open(path, "r+b", buffering=0) as f:
+        holes = hole_ranges(f, size)
+        need = sum(n for _o, n in holes)
+        if need:
+            _need_room(os.path.dirname(os.path.abspath(path)) or ".", need)
+        done = 0
+        for off, n in holes:
+            f.seek(off)
+            left = n
+            while left:
+                if cancel:
+                    cancel()
+                k = min(CHUNK, left)
+                f.write(_ZERO_CHUNK[:k])
+                left -= k
+                done += k
+                if progress:
+                    progress(done, need)
+        _flush(f)
+        if sys.platform == "win32":
+            # FILE_SET_SPARSE_BUFFER.SetSparse = FALSE: allowed once no hole
+            # is left
+            rd._win_fsctl(f, rd._FSCTL_SET_SPARSE, ctypes.c_ubyte(0))
+    return need
+
+
 # ---------------------------------------------------------------- the library
 
 
@@ -564,7 +663,8 @@ def main(argv=None):
         description="Store card images compact (sparse): the same .raw files, "
                     "the same bytes, only the data on disk.  Give folders or "
                     "images to compact them in place; --into DIR to import "
-                    "new images (or .zip/.xz/.gz downloads) compact.")
+                    "new images (or .zip/.xz/.gz downloads) compact; "
+                    "--expand / --expand-to DIR for full size again.")
     ap.add_argument("paths", nargs="+")
     ap.add_argument("--into", metavar="DIR",
                     help="import PATHS into DIR compact instead")
@@ -573,8 +673,25 @@ def main(argv=None):
                          "library's 'older versions' stays as it is)")
     ap.add_argument("--replace", action="store_true",
                     help="with --into: replace an image already there")
+    ap.add_argument("--expand", action="store_true",
+                    help="make PATHS full size again where they are")
+    ap.add_argument("--expand-to", metavar="DIR",
+                    help="write a full-size copy of PATHS into DIR")
     a = ap.parse_args(argv)
     meter = _meter()
+    if a.expand or a.expand_to:
+        for p in a.paths:
+            prog = (lambda d, t, _n=os.path.basename(p): meter(_n, d, t))
+            if a.expand_to:
+                dst = expand_copy(p, os.path.join(a.expand_to,
+                                                  os.path.basename(p)),
+                                  progress=prog)
+                print("full-size copy: %s" % dst)
+            else:
+                n = expand_file(p, progress=prog)
+                print("%s: full size (%.2f GB filled in)"
+                      % (os.path.basename(p), n / 1e9))
+        return 0
     freed = 0
     for p in a.paths:
         if a.into:

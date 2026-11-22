@@ -164,3 +164,19 @@ def test_folder_tool_imports_with_into(tmp_path, capsys):
     lib.mkdir()
     assert sc.main([str(src), "--into", str(lib)]) == 0
     assert _sha(lib / "new.raw") == _sha(src)
+
+
+def test_expand_back_to_full_size(tmp_path, capsys):
+    p = _card(tmp_path / "a.raw")
+    h = _sha(p)
+    if not sc.compact_file(str(p)).sparse_ok:
+        pytest.skip("this filesystem keeps no holes")
+    assert sc.is_compact(str(p))
+    out = tmp_path / "out"
+    out.mkdir()
+    assert sc.main([str(p), "--expand-to", str(out)]) == 0
+    assert _sha(out / "a.raw") == h and not sc.is_compact(str(out / "a.raw"))
+    assert sc.main([str(p), "--expand"]) == 0
+    assert "full size" in capsys.readouterr().out
+    assert _sha(p) == h and not sc.is_compact(str(p))
+    assert sc.on_disk_size(str(p)) >= os.path.getsize(p)

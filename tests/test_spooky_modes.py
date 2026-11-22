@@ -67,8 +67,8 @@ def test_every_key_the_checker_takes_is_one_the_runtime_reads(mk):
     with open(CS, encoding="utf-8") as f:
         src = f.read()
     read = set(re.findall(r'(?:Get\(|SwitchList\(m, |Sound\(m, |Coil\(m, |Lines\(m, )"([a-z_]+)"', src))
-    # PAD-1508: penalty runs only where the game's score call takes points away (the check refuses it here)
-    refused = {"penalty"} if "unity" not in mk.PENALTY_ENGINES else set()
+    # PAD-1508: keys the check refuses on every Unity title (penalty, in_place_of) are not read
+    refused = mk.keys_not_here({"engine": "unity"})
     assert set(mk.KEYS) - {"name", "title"} - refused <= read, set(mk.KEYS) - read - refused
     # and every other JJP key is refused by name
     assert "code" in mk.NOT_YET and "game_modes" in mk.NOT_YET and "points" not in mk.NOT_YET

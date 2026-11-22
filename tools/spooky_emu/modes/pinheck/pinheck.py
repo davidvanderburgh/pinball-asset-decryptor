@@ -269,7 +269,7 @@ def spike2_rules(m, port, fn):
     out += struct.pack("<BBBB", rules, min(_int(m.get("sound_shot_every")), 255), min(_int(m.get("start_max")), 255),
                        min(_int(m.get("cooldown")), 255))
     out += struct.pack("<BBBB", PATTERNS.get(pat, 0), m.get("_needs", 0), len(sp), len(also))
-    out += struct.pack("<B", len(at)) + b"\0\0\0"
+    out += struct.pack("<BB", len(at), m.get("_inside", 0)) + b"\0\0"
     out += b"".join(sp).ljust(8 * 12, b"\0") + b"".join(also).ljust(3 * 12, b"\0") + b"".join(at).ljust(8 * 8, b"\0")
     return out + b"\0" * 8
 
@@ -306,6 +306,10 @@ def pack_data(modes, port, off=False):
         m["_needs"] = (names_of.index(need) + 1) if need and need in names_of and names_of.index(need) != i else 0
         if need and not m["_needs"]:
             raise Refused("%s: start_needs %s: no other mode of ours has that name" % (m.get("file", "?"), need))
+        inside = (m.get("inside") or "").strip().lower()
+        m["_inside"] = (names_of.index(inside) + 1) if inside and inside in names_of and names_of.index(inside) != i else 0
+        if inside and not m["_inside"]:
+            raise Refused("%s: inside %s: no other mode of ours has that name" % (m.get("file", "?"), inside))
     body = b"".join(pack_mode(m, port) for m in modes).ljust(MAX_MODES * MODE_SIZE, b"\0")
     return struct.pack("<IBB", DATA_MAGIC, len(modes), 1 if off else 0) + title_head(port) + names + body
 

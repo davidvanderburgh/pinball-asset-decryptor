@@ -205,6 +205,16 @@ def load_modes(game, d):
             m["complete"], m["complete_points"]))
     names = {m["name"].lower(): m for m in out}
     for m in out:
+        if m["inside"]:
+            m["inside_mode"] = names.get(m["inside"].lower())
+            if m["inside_mode"] is None or m["inside_mode"] is m:
+                m["inside_mode"] = None
+                log("%s: inside %s: no other mode of ours has that name; it can never start" % (m["file"], m["inside"]))
+            else:
+                log("%s: runs inside %s (starts only while it runs, ends with it)" % (m["file"], m["inside_mode"]["name"]))
+        if m["in_place_of"]:
+            log("%s: in place of the game's %s" % (m["file"], " ".join(sorted(m["in_place_of"]))))
+    for m in out:
         if m["needs"]:
             m["needs_mode"] = names.get(m["needs"].lower())
             if m["needs_mode"] is None or m["needs_mode"] is m:
@@ -279,6 +289,9 @@ def spike2_rules(game, fn, m, cfg):
     m["shot_every"] = max(0, to_int(cfg.get("sound_shot_every"), 0))
     m["lamp_pattern"] = (cfg.get("lamp_pattern") or "").lower()
     m.update(runs_game=0, ended_at=0.0)
+    # PAD-1508 (run 2): a mode inside another of ours, and a mode in a game mode's place
+    m["inside"], m["inside_mode"] = (cfg.get("inside") or "").strip(), None
+    m["in_place_of"] = set(w.lower() for w in (cfg.get("in_place_of") or "").replace(",", " ").split())
     if any((m["shot_points"], m["penalty"], m["ladder_rising"], m["end_shots"], m["start_max"], m["cooldown"],
             m["start_also"], m["needs"], m["sound_at"], m["shot_every"], m["lamp_pattern"])):
         log("mode %s Spike 2 rules: %d shot_points, %d penalty, ladder %s, end shots %s, start_max %d, "
@@ -456,6 +469,32 @@ def _runtime_class(base):
                         self.add_switch_handler(name=n, event_type="active", delay=None, handler=self.pad_switch)
             self.layer = None
             log("switch handlers on %s" % (" ".join(seen) or "-"))
+            if any(m.get("in_place_of") for m in modes):
+                self.pad_hook_queue()
+
+        def pad_hook_queue(self):
+            """in_place_of (PAD-1508): every mode the game starts goes through game.modes.add
+            (SkeletonGame's mode queue); ours looks at it first."""
+            q = getattr(self.game, "modes", None)
+            orig = getattr(q, "add", None)
+            if orig is None or getattr(orig, "pad_hooked", False):
+                log("in_place_of cannot work: the game's mode queue has no add()")
+                return
+            rt = self
+
+            def add(mode, *a, **k):
+                try:
+                    if mode is not rt and rt.pad_in_place(mode):
+                        return None
+                except Exception:
+                    log("in_place_of failed: %s" % traceback.format_exc())
+                return orig(mode, *a, **k)
+            add.pad_hooked = True
+            try:
+                q.add = add
+                log("in_place_of: the game's mode queue is ours to look at first")
+            except Exception:
+                log("in_place_of cannot work: the game's mode queue cannot be wrapped")
 
         # ------------------------------------------------------------ the game's events
         def mode_started(self):
@@ -572,7 +611,31 @@ def _runtime_class(base):
                     return "start_needs names no mode of ours"
                 if not (n.get("ran_ball") if m.get("needs_ball") else n.get("ran_game")):
                     return "%s has not run this %s (start_needs)" % (n["name"], "ball" if m.get("needs_ball") else "game")
+            if m.get("inside"):
+                p = m.get("inside_mode")
+                if p is None:
+                    return "inside names no mode of ours"
+                if not p["running"]:
+                    return "it runs inside %s, which is not running" % p["name"]
             return None
+
+        def pad_in_place(self, mode):
+            """in_place_of (PAD-1508): the game is starting one of its modes; a mode of ours that
+            takes its place starts instead, and the game's is not added.  True when taken."""
+            name = type(mode).__name__.lower()
+            for m in self.pad_modes:
+                if name not in m.get("in_place_of", ()) or m["running"]:
+                    continue
+                if not self.pad_playing():
+                    return False
+                no = self.pad_blocked(m)
+                if no:
+                    log("%s: the game's %s started as it always does - ours not started (%s)" % (m["name"], type(mode).__name__, no))
+                    return False
+                log("%s: the game's %s held off - ours starts in its place" % (m["name"], type(mode).__name__))
+                self.pad_start(m)
+                return True
+            return False
 
         def pad_also(self, m, name):
             """start_also (PAD-1508): a hit of one of its lines' switches counts, any order."""
@@ -743,6 +806,9 @@ def _runtime_class(base):
                 return
             m["running"] = False
             m["ended_at"] = time.time()           # cooldown (PAD-1508)
+            for x in self.pad_modes:              # a mode inside this one ends with it (PAD-1508)
+                if x.get("inside_mode") is m and x["running"]:
+                    self.pad_stop(x, "the mode it runs inside ended")
             if why:
                 log("%s: ended (%s), %d shot(s), total %d" % (m["name"], why, m["made"], m["total"]))
                 self.pad_sound(m, "sound_end")

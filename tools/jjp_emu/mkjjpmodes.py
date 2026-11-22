@@ -313,6 +313,8 @@ KEYS = collections.OrderedDict([
     ("penalty", "penalty"), ("start_max", "int"), ("cooldown", "int"), ("start_also", "start_also"),
     ("start_needs", "needs"), ("sound_at", "sound_at"), ("sound_shot_every", "int"),
     ("lamp_pattern", ("solid", "blink", "pulse", "chase")),
+    # PAD-1508 run 2: a mode in a game mode's place; a mode inside another (Spooky only)
+    ("in_place_of", "in_place"), ("inside", "no_inside"),
 ])
 #: keys a mode file may give on several lines, and how many lines the runtime takes (PAD-1508)
 REPEATABLE = {"shot_points": 8, "start_also": 3, "sound_at": 8}
@@ -323,7 +325,7 @@ START_EVENTS = collections.OrderedDict([
     ("extra_ball", "HookExtraBallAwarded_"), ("multiball_end", "HookMultiballEnd_"),
 ])
 #: keys that start a mode on their own
-START_RULES = ("start", "start_on", "start_after", "start_score", "start_combo")
+START_RULES = ("start", "start_on", "start_after", "start_score", "start_combo", "in_place_of")
 
 
 def start_text(m):
@@ -465,6 +467,15 @@ def check_value(kind, v, port=None):
         if len(parts) < 2 or not _INT.match(parts[0]):
             return "must be <seconds left> <sound>"
         return _int_in(parts[0], 1, 600, "seconds left") or check_value("sound_or_file", parts[1].strip(), port)
+    if kind == "in_place":        # the game's modes (globals or classes), as start_after without "any"
+        if not words or "any" in words:
+            return "must name the game's modes (any is start_after's)"
+        return check_value("after", v, port)
+    if kind == "inside":          # one of the folder's modes, checked against the folder (Spooky)
+        return None if v.strip() else "must name one of the folder's modes"
+    if kind == "no_inside":
+        return ("cannot work on JJP: our modes run one at a time there (game_modes), so one cannot run "
+                "inside another")
     if kind == "penalty":
         return ("cannot work on JJP: the game's engine has no call that takes points away "
                 "(it only adds them), so the runtime ignores it")
@@ -577,6 +588,27 @@ def spike2_rule_problems(fn, m, mode_dir=None):
     return out
 
 
+def inside_problems(modes):
+    """PAD-1508: an inside must name another mode of the folder, and no ring of them."""
+    out = []
+    by = {(m.get("name") or "").strip().lower(): m for m in modes}
+    for m in modes:
+        seen, cur = [], m
+        while (cur.get("inside") or "").strip():
+            nxt = by.get(cur["inside"].strip().lower())
+            if nxt is None or nxt is cur:
+                out.append("%s: inside %s: no other mode in the folder has that name (it would never start)"
+                           % (cur["file"], cur["inside"].strip()))
+                break
+            if nxt is m or nxt in seen:
+                out.append("%s: inside %s: the modes run inside each other in a ring (none could start)"
+                           % (m["file"], m["inside"].strip()))
+                break
+            seen.append(nxt)
+            cur = nxt
+    return sorted(set(out))
+
+
 def start_needs_problems(modes):
     """PAD-1508: a start_needs must name another mode of the folder."""
     out = []
@@ -662,6 +694,9 @@ def check_modes(mode_dir, port=None):
         m.setdefault("name", fn[:-5])
         for k in ("start", "shots", "start_combo", "multiball_on", "add_ball", "coil_hold_on"):
             shot_switches.update(t for t in _names(m.get(k, "")) if t.startswith(("switch_", "dswitch_")))
+        if m.get("in_place_of") and port is not None and port.get("engine") == "proc":
+            problems.append("%s: in_place_of: %s has no Mode class whose start could be held off, so a mode "
+                            "cannot take a game mode's place there" % (fn, port.get("title", "this game")))
         if (m.get("game_modes") or "").strip().lower() == "hold" and port is not None and port.get("engine") == "proc":
             problems.append("%s: game_modes = hold, but %s has no Mode class to hold off: use pause (hold "
                             "runs as pause there)" % (fn, port.get("title", "this game")))

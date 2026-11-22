@@ -276,3 +276,106 @@ def test_pinheck_packs_the_rules_after_the_parity_bytes(heck):
     assert struct.unpack_from("<I", a, 148 + 8)[0] == 3000 and a[148 + (11 >> 3)] == 1 << (11 & 7)
     assert a[244 + 8] == 2 and struct.unpack_from("<H", a, 280)[0] == 25 and a[282:286] == b"EB0\0"
     assert modes[1]["_needs"] == 1 and data[:4] == b"PHM3"
+
+
+# ============================================================================ inside / in_place_of (run 2)
+class _Queue(list):
+    """SkeletonGame's mode queue as far as in_place_of sees it: add() starts a game mode."""
+    def add(self, mode):
+        self.append(mode)
+
+
+class AdventureRoy(object):
+    pass
+
+
+class AdventurePurge(object):
+    pass
+
+
+def test_proc_in_place_of_starts_ours_and_the_game_mode_never_runs(proc):
+    import types
+    r = proc("name = Roy\nin_place_of = AdventureRoy\nseconds = 10\nshots = slingRight\n")
+    roy, = r.pad_modes
+    assert "start_also" not in roy or True
+    # the runtime was made over a plain list: give it the game's queue and hook it as join() does
+    r.game.modes = _Queue()
+    r.pad_hook_queue()
+    r.game.modes.add(AdventurePurge())                    # another game mode: the game's as always
+    assert [type(x).__name__ for x in r.game.modes] == ["AdventurePurge"] and not roy["running"]
+    r.game.modes.add(AdventureRoy())
+    assert roy["running"] and "AdventureRoy" not in [type(x).__name__ for x in r.game.modes]
+    assert "the game's AdventureRoy held off - ours starts in its place" in r.log.read_text()
+    r.pad_stop(roy, "done")
+    r.ball_live = False                                   # between balls: the game's own runs
+    r.game.modes.add(AdventureRoy())
+    assert "AdventureRoy" in [type(x).__name__ for x in r.game.modes] and not roy["running"]
+
+
+def test_proc_inside_starts_only_within_its_parent_and_ends_with_it(proc):
+    r = proc("name = Outer\nstart = leftInlane\nseconds = 30\nend_shots = spinner\n",
+             "name = Inner\nstart = rightInlane\ninside = Outer\nseconds = 30\n")
+    outer, inner = r.pad_modes
+    _hit(r, proc.Sw, "rightInlane")
+    assert not inner["running"] and "it runs inside Outer, which is not running" in r.log.read_text()
+    _hit(r, proc.Sw, "leftInlane", "rightInlane")
+    assert outer["running"] and inner["running"]
+    _hit(r, proc.Sw, "spinner")
+    assert not outer["running"] and not inner["running"]
+    assert "Inner: ended (the mode it runs inside ended)" in r.log.read_text()
+
+
+@pytest.mark.parametrize("files,says", [
+    ({"a__mode": "name = A\nstart = switch_target_tv\ninside = Nobody\n"}, "inside Nobody: no other mode"),
+    ({"a__mode": "name = A\nstart = switch_target_tv\ninside = B\n",
+      "b__mode": "name = B\nstart = switch_target_tv\ninside = A\n"}, "run inside each other in a ring"),
+])
+def test_spooky_check_names_a_bad_inside(tmp_path, files, says):
+    spec = importlib.util.spec_from_file_location("mkspk_t1508b", os.path.join(HERE, "tools", "spooky_emu", "modes", "mkspkmodes.py"))
+    mk = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mk)
+    for name, text in files.items():
+        (tmp_path / name.replace("__", ".")).write_text(text.replace("switch_target_tv", "right_inlane"))
+    (tmp_path / "title.cfg").write_text("game = scooby_doo\n")
+    _, problems = mk.check_modes(str(tmp_path), mk.load_port("scooby_doo-2025.12.01.09"))
+    assert says in "\n".join(problems), problems
+
+
+def test_spooky_check_takes_in_place_of_only_where_the_runtime_sees_starts(tmp_path):
+    spec = importlib.util.spec_from_file_location("mkspk_t1508c", os.path.join(HERE, "tools", "spooky_emu", "modes", "mkspkmodes.py"))
+    mk = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mk)
+    (tmp_path / "title.cfg").write_text("game = x\n")
+    (tmp_path / "a.mode").write_text("name = A\nin_place_of = AdventureRoy\n")
+    _, problems = mk.check_modes(str(tmp_path), mk.load_port("rick_and_morty-2022.09.02"))
+    assert problems == [], problems
+    (tmp_path / "a.mode").write_text("name = A\nin_place_of = AdventureNobody\n")
+    _, problems = mk.check_modes(str(tmp_path), mk.load_port("rick_and_morty-2022.09.02"))
+    assert "not a game mode or Mode class of" in "\n".join(problems)
+    (tmp_path / "a.mode").write_text("name = A\nstart = right_inlane\nin_place_of = SKILLSHOT\n")
+    _, problems = mk.check_modes(str(tmp_path), mk.load_port("scooby_doo-2025.12.01.09"))
+    assert "in_place_of is not on Scooby-Doo" in "\n".join(problems)
+
+
+def test_jjp_check_takes_in_place_of_and_refuses_inside(mm, tmp_path):
+    _, problems = _check(mm, tmp_path, a__mode="name = A\nin_place_of = cl_mode CandyLaneMode\n",
+                         b__mode="name = B\nstart = switch_target_tv\ninside = A\n")
+    text = "\n".join(problems)
+    assert "a.mode" not in text and "inside cannot work on JJP" in text
+    _, problems = _check(mm, tmp_path, a__mode="name = A\nin_place_of = any\n")
+    assert "must name the game's modes" in "\n".join(problems)
+
+
+def test_pinheck_inside_on_the_compiled_runtime(heck):
+    mod, ph, port = heck
+    g = mod._game(ph, port, [dict(file="1_o.mode", name="Outer", title="O", start="switch_20", seconds="30",
+                                  end_shots="switch_12"),
+                             dict(file="2_i.mode", name="Inner", title="I", start="switch_21", inside="Outer",
+                                  seconds="30")])
+    mod._ball(g)
+    g.switch(21)
+    assert "the mode it runs inside is not running" in g.log
+    g.switch(20); g.switch(21)
+    assert "1_o: STARTED" in g.log and "2_i: STARTED" in g.log
+    g.switch(12)
+    assert "2_i: ended (the mode it runs inside ended)" in g.log

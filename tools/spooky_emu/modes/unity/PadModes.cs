@@ -131,8 +131,8 @@ public class CMode {
     public int StartMax, Cooldown, RunsGame, ShotEvery;
     public float EndedAt;
     public List<Also> StartAlso = new List<Also>();
-    public string Needs = "", Pattern = "";
-    public CMode NeedsMode;
+    public string Needs = "", Pattern = "", Inside = "";
+    public CMode NeedsMode, InsideMode;      // start_needs; inside: the mode of ours it runs inside
     public List<At> SoundAt = new List<At>();
 
     public string Get(string k, string dflt) {
@@ -217,6 +217,12 @@ public class PadRuntime {
                 " (+" + m.CompletePoints + ")");
         }
         foreach (var m in All) {
+            if (m.Inside.Length == 0) continue;
+            m.InsideMode = All.FirstOrDefault(x => x != m && string.Equals(x.Name, m.Inside, StringComparison.OrdinalIgnoreCase));
+            Loader.Log(m.File + (m.InsideMode == null ? ": inside " + m.Inside + ": no other mode of ours has that name; it can never start"
+                                                      : ": runs inside " + m.InsideMode.Name + " (starts only while it runs, ends with it)"));
+        }
+        foreach (var m in All) {
             if (m.Needs.Length == 0) continue;
             m.NeedsMode = All.FirstOrDefault(x => x != m && string.Equals(x.Name, m.Needs, StringComparison.OrdinalIgnoreCase));
             if (m.NeedsMode == null) Loader.Log(m.File + ": start_needs " + m.Needs + ": no other mode of ours has that name; it can never start");
@@ -264,6 +270,7 @@ public class PadRuntime {
         }
         m.ShotEvery = Math.Max(0, Int(m.Get("sound_shot_every", "0")));
         m.Pattern = m.Get("lamp_pattern", "").ToLowerInvariant();
+        m.Inside = m.Get("inside", "").Trim();
         if (m.ShotPoints.Count + m.EndShots.Count + m.StartAlso.Count + m.SoundAt.Count + m.StartMax + m.Cooldown + m.ShotEvery > 0
             || m.Rising || m.Needs.Length > 0 || m.Pattern.Length > 0)
             Loader.Log("mode " + m.File + " Spike 2 rules: " + m.ShotPoints.Count + " shot_points, ladder " + (m.Rising ? "rising" : "fixed") +
@@ -419,6 +426,10 @@ public class PadRuntime {
             if (m.NeedsMode == null) return "start_needs names no mode of ours";
             if (!(m.NeedsBall ? m.NeedsMode.RanThisBall : m.NeedsMode.RanThisGame))
                 return m.NeedsMode.Name + " has not run this " + (m.NeedsBall ? "ball" : "game") + " (start_needs)";
+        }
+        if (m.Inside.Length > 0) {
+            if (m.InsideMode == null) return "inside names no mode of ours";
+            if (!m.InsideMode.Running) return "it runs inside " + m.InsideMode.Name + ", which is not running";
         }
         return null;
     }
@@ -623,6 +634,8 @@ public class PadRuntime {
         if (!m.Running) return;
         m.Running = false;
         m.EndedAt = Time.unscaledTime;           // cooldown (PAD-1508)
+        foreach (var x in All)                   // a mode inside this one ends with it (PAD-1508)
+            if (x.InsideMode == m && x.Running) Stop(x, "the mode it runs inside ended");
         if (why != null) {
             Loader.Log(m.Name + ": ended (" + why + "), " + m.Made + " shot(s), total " + m.Total);
             Sound(m, "sound_end");

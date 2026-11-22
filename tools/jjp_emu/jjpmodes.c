@@ -267,6 +267,8 @@ typedef struct {
     int nat; struct { int secs; char name[96]; void *se; unsigned char own, done; } at[MAX_AT];   /* sound_at */
     int shot_every;                       /* sound_shot_every: the shot sound on every Nth scoring shot */
     int lamp_pattern;                     /* LP_*: lamp_pattern */
+    char inplace[512];                    /* in_place_of: " name name " the game's mode globals / classes */
+    const char *volatile inplace_hit;     /* the gate refused one of them: start ours (starts_tick) */
 } pm_t;
 
 static pm_t pms[MAX_MODES];
@@ -553,7 +555,7 @@ static void apply_kv(pm_t *m, const char *k, char *v)
         m->hold_multiballs = !(!strcmp(v, "no") || !strcmp(v, "0") || !strcmp(v, "off") || !strcmp(v, "false"));
     else if (!strcmp(k, "allow_game_modes")) {
         char *o = m->allow; size_t room = sizeof m->allow; o[0] = ' '; o[1] = 0;
-        for (char *t = strtok(buf, " ,	"); t; t = strtok(NULL, " ,	")) {
+        for (char *t = strtok(buf, " ,\t"); t; t = strtok(NULL, " ,\t")) {
             size_t L = strlen(o);
             if (L + strlen(t) + 2 < room) snprintf(o + L, room - L, "%s ", t);
         }
@@ -672,6 +674,15 @@ static void apply_kv(pm_t *m, const char *k, char *v)
     else if (!strcmp(k, "lamp_pattern"))
         m->lamp_pattern = !strcmp(v, "solid") ? LP_SOLID : !strcmp(v, "blink") ? LP_BLINK : !strcmp(v, "pulse") ? LP_PULSE
                         : !strcmp(v, "chase") ? LP_CHASE : LP_AUTO;
+    else if (!strcmp(k, "in_place_of")) {          /* the game's modes ours starts in place of (PAD-1508) */
+        snprintf(m->inplace, sizeof m->inplace, " ");
+        for (char *t = strtok(buf, " ,\t"); t; t = strtok(NULL, " ,\t")) {
+            size_t L = strlen(m->inplace);
+            if (L + strlen(t) + 2 < sizeof m->inplace) snprintf(m->inplace + L, sizeof m->inplace - L, "%s ", t);
+        }
+    }
+    else if (!strcmp(k, "inside"))
+        lg("%s: inside: our modes run one at a time on JJP (game_modes), so one cannot run inside another; ignored", m->file);
     else if (!strcmp(k, "penalty"))
         lg("%s: penalty: this game's engine has no call that takes points away (only score_add_to_player_up); ignored", m->file);
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : !strcmp(v, "none") ? 3 : 0;
@@ -847,7 +858,8 @@ static void load_modes(void)
         }
         if (m->nalso && !m->nstart) { lg("%s: start_also adds to start, and there is no start line: ignored", m->file); m->nalso = 0; }
         if (*m->code && !load_code(m)) { lg("%s: mode skipped (its code)", m->file); continue; }
-        if (!m->nstart && !m->start_on && !m->after[1] && m->start_score <= 0 && m->ncombo < 2 && !(m->cm && m->cm->idle)) {
+        if (!m->nstart && !m->start_on && !m->after[1] && m->start_score <= 0 && m->ncombo < 2 && !(m->cm && m->cm->idle)
+            && !m->inplace[1]) {
             lg("%s: no start rule (start, start_on, start_after, start_score, start_combo or its code's idle); mode skipped", m->file);
             continue;
         }
@@ -1293,9 +1305,41 @@ static hvt_t *hvt_of(uintptr_t vt)
 }
 
 /* 1 = refuse this start/restart now (and log it, once a second per class). */
+/* in_place_of (PAD-1508): the mode of ours that takes this game mode's place now, or NULL.  Only
+ * a flag is set here: the gate can run inside our own lock (our multiball start goes through it),
+ * so starts_tick, on the game's proc thread, makes the start. */
+static const char *start_blocked(pm_t *m);
+static int in_game(void);
+static int any_ours_running(void);
+static pm_t *taker(void *self, hvt_t *h)
+{
+    char k1[200], k2[200];
+    snprintf(k1, sizeof k1, " %s ", object_name(self));
+    snprintf(k2, sizeof k2, " %s ", class_name(h->vt));
+    for (int i = 0; i < npm; i++) {
+        pm_t *m = &pms[i];
+        if (!m->inplace[1] || running(m) || m->pending || !(strstr(m->inplace, k1) || strstr(m->inplace, k2))) continue;
+        const char *no = start_blocked(m);
+        if (no) { lg("\"%s\": the game's %s starts as it always does - ours not started (%s)", m->name, object_name(self), no); return NULL; }
+        return m;
+    }
+    return NULL;
+}
+
 static int refuse(void *self, hvt_t *h, const char *what)
 {
     if (!installed || is_ours(self) || game_mode_bg(self)) return 0;
+    if (in_game() && !any_ours_running()) {
+        pm_t *t = taker(self, h);
+        if (t) {
+            static char why[MAX_MODES][160];
+            snprintf(why[t - pms], sizeof why[0], "in place of the game's %s", object_name(self));
+            t->inplace_hit = why[t - pms];
+            lg("HELD OFF the game's %s %s (%s): \"%s\" starts in its place", h->mb ? "multiball" : "mode",
+               object_name(self), what, t->name);
+            return 1;
+        }
+    }
     pm_t *m = holder(h->mb);
     if (!m || allowed(m, self, h->vt)) return 0;
     h->refused++;
@@ -1374,7 +1418,7 @@ static void types_init(void)
 
 static void install_hold(void)
 {
-    for (int i = 0; i < npm; i++) if (pms[i].game_modes == POLICY_HOLD) hold_wanted = 1;
+    for (int i = 0; i < npm; i++) if (pms[i].game_modes == POLICY_HOLD || pms[i].inplace[1]) hold_wanted = 1;
     if (!hold_wanted) { lg("hold: no mode holds the game off (game_modes pause/end/ignore); the game's starts untouched"); return; }
     types_init();
     mode_start_fn = (uintptr_t)sym("_ZN4Mode5startEv");
@@ -3178,6 +3222,17 @@ static void starts_tick(const char *via, int force)
             }
         }
     }
+    /* in_place_of (PAD-1508): a game start the gate refused for one of ours: start ours now */
+    for (int k = 0; k < npm; k++) {
+        pm_t *m = &pms[k];
+        const char *why = m->inplace_hit;
+        if (!why) continue;
+        m->inplace_hit = NULL;
+        if (!ig || running(m) || any_ours_running()) continue;
+        lg("\"%s\" starting: %s", m->name, why);
+        m->count = 0;
+        start_mode(m, k);
+    }
     /* do one raised start, if the moment is free */
     if (ig && !any_ours_running())
         for (int k = 0; k < npm; k++) {
@@ -3281,7 +3336,7 @@ static void install_rules(void)
     for (int k = 0; k < npm; k++) {
         pm_t *m = &pms[k];
         if (m->start_on || m->after[1] || m->start_score > 0 || m->start_once || m->count_reset_ball || m->ncombo >= 2
-            || (m->cm && m->cm->idle) || m->start_max || m->cooldown_s || m->nalso || *m->needs)
+            || (m->cm && m->cm->idle) || m->start_max || m->cooldown_s || m->nalso || *m->needs || m->inplace[1])
             rules_on = 1;
         if (!m->after[1]) continue;
         int any = strstr(m->after, " any ") != NULL, hit = 0;

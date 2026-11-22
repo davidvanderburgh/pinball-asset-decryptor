@@ -139,6 +139,9 @@ KEYS = collections.OrderedDict([
     ("penalty", "shot_points"), ("start_max", "int"), ("cooldown", "int"), ("start_also", "start_also"),
     ("start_needs", "needs"), ("sound_at", "sound_at"), ("sound_shot_every", "int"),
     ("lamp_pattern", ("solid", "blink", "pulse", "chase")),
+    # PAD-1508 run 2: a mode inside another of ours (every engine: ours run side by side); a mode
+    # in a game mode's place (where the runtime sees the game start its modes)
+    ("inside", "inside"), ("in_place_of", "in_place"),
 ])
 #: PAD-1508: Spike 2's rules, and the engines whose runtime runs them so far
 SPIKE2_KEYS = ("shot_points", "points_ladder", "end_shots", "penalty", "start_max", "cooldown", "start_also",
@@ -147,6 +150,10 @@ SPIKE2_ENGINES = ("proc", "unity", "godot", "pinheck")
 #: penalty takes points away through the game's own score call: SkeletonGame's game.score does; the
 #: other engines' award calls are not known to (Unity's titles each have their own)
 PENALTY_ENGINES = ("proc",)
+#: in_place_of needs the game's own mode starts to pass through the runtime first: SkeletonGame's
+#: mode queue does (game.modes.add); Unity's, Godot's and pinHeck's runtimes only see a game mode
+#: once it is running
+IN_PLACE_ENGINES = ("proc",)
 #: keys a mode file may give on several lines, and how many the runtimes take
 REPEATABLE = dict(MJ.REPEATABLE, penalty=8)
 #: what each engine's runtime plays from a file of the mode's own: Unity's AudioClip loader and
@@ -254,6 +261,8 @@ def keys_not_here(port):
         out.update(SPIKE2_KEYS)                  # PAD-1508: not in this engine's runtime yet
     if port is not None and engine(port) not in PENALTY_ENGINES:
         out.add("penalty")
+    if port is not None and engine(port) not in IN_PLACE_ENGINES:
+        out.add("in_place_of")
     return out
 
 
@@ -262,6 +271,9 @@ def _not_here(k, port, v=""):
     if k not in keys_not_here(port):
         return None
     t = port.get("title", "this game")
+    if k == "in_place_of":
+        return ("in_place_of is not on %s: its runtime sees a game mode only once it runs, so ours cannot "
+                "start in its place; start_after starts a mode when one ends" % t)
     if k == "penalty" and engine(port) in SPIKE2_ENGINES:
         return ("penalty is not on %s: its game's own score call only adds points, so a mode cannot take "
                 "them away" % t)
@@ -500,6 +512,7 @@ def check_modes(mode_dir, port=None):
                 problems.append("%s: %s must not be below 0" % (fn, k))
         modes.append(m)
     problems.extend(MJ.start_needs_problems(modes))
+    problems.extend(MJ.inside_problems(modes))
     return modes, problems
 
 

@@ -85,8 +85,8 @@ def test_every_key_the_checker_takes_is_one_the_runtime_reads(mk):
     # keys read in a loop: for k in ["coil_start", ...]: ... cfg.get(k
     for group in re.findall(r'for k in \[([^\]]+)\]:\s+var w := _words\(cfg\.get\(k', src):
         read |= set(re.findall(r'"([a-z_]+)"', group))
-    # PAD-1508: penalty runs only where the game's score call takes points away (the check refuses it here)
-    refused = {"penalty"} if "godot" not in mk.PENALTY_ENGINES else set()
+    # PAD-1508: keys the check refuses on every Godot title (penalty, in_place_of) are not read
+    refused = mk.keys_not_here({"engine": "godot"})
     assert set(mk.KEYS) - read - refused == set(), set(mk.KEYS) - read - refused
 
 

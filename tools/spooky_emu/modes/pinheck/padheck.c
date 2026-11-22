@@ -122,7 +122,7 @@ struct pad_mode {               /* 352 bytes, written by pinheck.py (pack_mode) 
     u8 end_shots[8];            /* switch bitmap: a hit ends the mode */
     u8 rules, shot_every, start_max, cooldown;      /* RULE_ bits; every Nth shot sound; starts a game; s */
     u8 pattern, needs, sp_n, also_n;                /* PAT_; 1 + the mode of ours it needs (0 none) */
-    u8 at_n, pad3[3];
+    u8 at_n, inside, pad3[2];                      /* inside: 1 + the mode of ours it runs inside (0 none) */
     struct { u8 sw[8]; u32 points; } sp[8];         /* shot_points: these switches pay these points */
     struct { u8 sw[8]; u8 count, pad[3]; } also[3]; /* start_also: these switches, this many hits */
     struct { u16 secs; char sound[4]; u8 pad[2]; } at[8];   /* sound_at: at this many seconds left */
@@ -663,6 +663,12 @@ static void stop(int i, const char *why)
         return;
     R.m[i].running = 0;
     R.m[i].ended_at = now | 1;                      /* cooldown (PAD-1508): never 0 */
+    {
+        int k;                                      /* a mode inside this one ends with it */
+        for (k = 0; k < D.count; k++)
+            if (D.mode[k].inside == i + 1 && R.m[k].running)
+                stop(k, "the mode it runs inside ended)");
+    }
     if (R.m[i].save_until > now && GAME_save_timer <= R.m[i].save_until - now + 20) {
         /* our ball save ends with the mode: the game's own save gets what it had left */
         u32 left = R.m[i].game_save_until > now ? R.m[i].game_save_until - now : 0;
@@ -761,6 +767,8 @@ static const char *blocked(int i, u32 now)
         if (k >= D.count || !(R.m[k].once & ((m->rules & RULE_NEEDS_BALL) ? 1 : 2)))
             return "its start_needs mode has not run";
     }
+    if (m->inside && (m->inside - 1 >= D.count || !R.m[m->inside - 1].running))
+        return "the mode it runs inside is not running";
     return 0;
 }
 

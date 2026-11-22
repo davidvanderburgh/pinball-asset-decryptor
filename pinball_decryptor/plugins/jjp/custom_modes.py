@@ -70,11 +70,12 @@ FORM_GROUPS = (
     ("Coils", ("coil_start", "coil_shot", "coil_complete", "coil_hold", "coil_hold_on")),     # PAD-1353
     # PAD-1508: Spike 2's rules (tools/jjp_emu/MODES.md "Spike 2's rules")
     ("Rules from Spike 2", ("shot_points", "points_ladder", "end_shots", "start_also", "start_max",
-                            "cooldown", "start_needs", "sound_at", "sound_shot_every", "lamp_pattern")),
+                            "cooldown", "start_needs", "sound_at", "sound_shot_every", "lamp_pattern",
+                            "in_place_of")),
 )
 #: mode keys the form does not show: ``code`` is set when a mode is made with blocks or in C++
 #: (the New mode window, PAD-1384) and shown as how the mode is made
-NOT_ON_FORM = ("code", "penalty")     # penalty: no JJP engine can take points away (PAD-1508)
+NOT_ON_FORM = ("code", "penalty", "inside")   # PAD-1508: JJP cannot take points away, and runs ours one at a time
 #: the runtime's defaults (MODES.md "Mode keys"): what an empty key means
 DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
@@ -117,6 +118,7 @@ LABELS = {
     "cooldown": "Seconds before it can start again", "start_needs": "Only after my mode (name [ball|game])",
     "sound_at": "Sounds at seconds left (one a line: seconds sound)", "sound_shot_every": "Shot sound every Nth shot",
     "lamp_pattern": "Lamp pattern",
+    "in_place_of": "Starts in place of the game's mode", "inside": "Runs inside my mode (name)",
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",

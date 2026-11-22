@@ -50,7 +50,8 @@ FORM_GROUPS = (
     ("Coils", ("coil_start", "coil_shot", "coil_complete", "coil_hold", "coil_hold_on")),
     # PAD-1508: Spike 2's rules (tools/jjp_emu/MODES.md "Spike 2's rules")
     ("Rules from Spike 2", ("shot_points", "points_ladder", "end_shots", "penalty", "start_also", "start_max",
-                            "cooldown", "start_needs", "sound_at", "sound_shot_every", "lamp_pattern")),
+                            "cooldown", "start_needs", "sound_at", "sound_shot_every", "lamp_pattern",
+                            "inside", "in_place_of")),
 )
 TITLE_FORM = ("panel", "font_title", "font_value", "font_timer", "title_color", "value_color",
               "timer_color", "panel_color", "lamp_color", "lamp_blink", "coil_holds")
@@ -117,6 +118,7 @@ LABELS = {
     "cooldown": "Seconds before it can start again", "start_needs": "Only after my mode (name [ball|game])",
     "sound_at": "Sounds at seconds left (one a line: seconds sound)", "sound_shot_every": "Shot sound every Nth shot",
     "lamp_pattern": "Lamp pattern",
+    "in_place_of": "Starts in place of the game's mode", "inside": "Runs inside my mode (name)",
 }
 
 

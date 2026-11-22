@@ -146,6 +146,16 @@ func load_modes() -> void:
 			("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends",
 			m["complete"], m["complete_points"]])
 	for m in all:
+		if m["inside"] == "":
+			continue
+		for x in all:
+			if x != m and str(x["name"]).to_lower() == m["inside"].to_lower():
+				m["inside_mode"] = x
+		if m["inside_mode"] == null:
+			plog("%s: inside %s: no other mode of ours has that name; it can never start" % [m["file"], m["inside"]])
+		else:
+			plog("%s: runs inside %s (starts only while it runs, ends with it)" % [m["file"], m["inside_mode"]["name"]])
+	for m in all:
 		m["needs_mode"] = null
 		if m["needs"] == "":
 			continue
@@ -226,6 +236,8 @@ func _spike2_rules(fn: String, m: Dictionary, cfg: Dictionary) -> void:
 		m["sound_at"].append({"secs": secs, "sound": ln.substr(sp + 1).strip_edges(), "done": false})
 	m["shot_every"] = maxi(0, to_int(cfg.get("sound_shot_every", "0")))
 	m["pattern"] = str(cfg.get("lamp_pattern", "")).to_lower()
+	m["inside"] = str(cfg.get("inside", "")).strip_edges()
+	m["inside_mode"] = null
 	m["runs_game"] = 0
 	m["ended_at"] = 0.0
 	if not (m["shot_points"].is_empty() and m["end_shots"].is_empty() and m["start_also"].is_empty() \
@@ -641,6 +653,12 @@ func _blocked(m: Dictionary) -> String:
 			return "start_needs names no mode of ours"
 		if not (n["ran_ball"] if m["needs_ball"] else n["ran_game"]):
 			return "%s has not run this %s (start_needs)" % [n["name"], "ball" if m["needs_ball"] else "game"]
+	if m["inside"] != "":
+		var p = m["inside_mode"]
+		if p == null:
+			return "inside names no mode of ours"
+		if not p["running"]:
+			return "it runs inside %s, which is not running" % p["name"]
 	return ""
 
 
@@ -1024,6 +1042,9 @@ func _stop(m: Dictionary, why: String) -> void:
 		return
 	m["running"] = false
 	m["ended_at"] = Time.get_ticks_msec() / 1000.0     # cooldown (PAD-1508)
+	for x in all:     # a mode inside this one ends with it (PAD-1508)
+		if x["inside_mode"] == m and x["running"]:
+			_stop(x, "the mode it runs inside ended")
 	if why != "":
 		plog("%s: ended (%s), %d shot(s), total %d" % [m["name"], why, m["made"], m["total"]])
 		_sound(m, "sound_end")

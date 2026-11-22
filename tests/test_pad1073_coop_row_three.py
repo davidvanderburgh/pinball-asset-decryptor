@@ -101,6 +101,7 @@ static unsigned sty_challenge_indices(unsigned *ch) { (void)ch; return 0; }
 static void sty_menu_own(unsigned own) { tm.own = own; }
 static void sty_menu_walk(pm_reg *b, unsigned l, unsigned r) { (void)b; (void)l; (void)r; }   /* PAD-1449 round 2 */
 static void sty_menu_frame(unsigned c, int t, int o, unsigned m, unsigned i) { (void)c; (void)t; (void)o; (void)m; (void)i; }   /* round 4 */
+static void sty_overlay_read(void) {}                  /* round 7: the game's Insider overlay */
 static unsigned long pm_ms(void) { return 7; }
 static void say(const char *f, ...) { (void)f; }
 static const char *lettered = "-", *captioned = "-";   /* PAD-1449 round 3: the name line's and the caption's */

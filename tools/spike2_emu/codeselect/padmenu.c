@@ -175,12 +175,14 @@ static int is_cab_path(const char *p)
 }
 
 static void fd_reset(int fd);              /* a reader's per-fd state, afresh */
+static void nb_forget(int fd);             /* the node bus watcher's, afresh (Spike 2) */
 
 static void note_open(int fd, const char *path)
 {
     if (fd >= 0 && fd < MAX_FD) {
         fd_kind[fd] = is_cab_path(path) ? 1 : 0;
         fd_reset(fd);
+        nb_forget(fd);
     }
 }
 
@@ -248,6 +250,7 @@ int close(int fd)
     if (fd >= 0 && fd < MAX_FD) {
         fd_kind[fd] = 0;
         fd_reset(fd);
+        nb_forget(fd);
     }
     return next(fd);
 }
@@ -256,7 +259,9 @@ int close(int fd)
  * process, so the game goes on until the reboot stops it as it stops
  * everything.  vfork+exec: the game is many threads, and a child that only
  * execs is the one thing that is safe to make from any of them. */
-static void ask_for_reboot(void)
+static void ask_for_reboot_why(const char *why);
+static void ask_for_reboot(void) { ask_for_reboot_why("padmenu: BACK held - restarting the machine into the boot menu\n"); }
+static void ask_for_reboot_why(const char *why)
 {
     const char *cmd = getenv("PADMENU_CMD");
     char *argv[4] = { NULL, NULL, NULL, NULL };
@@ -294,7 +299,7 @@ static void ask_for_reboot(void)
         argv[2] = REBOOT_SH;
         argv[3] = NULL;
     }
-    say("padmenu: BACK held - restarting the machine into the boot menu\n");
+    say(why);
     pid = vfork();
     if (pid == 0) {
         setsid();
@@ -608,6 +613,239 @@ int ioctl(int fd, unsigned long req, ...)
 }
 #endif
 
+#if !defined(PADMENU_FAST) && !defined(PADMENU_S3)
+/* ---- THE RIGHT FLIPPER, HELD, WITH NO GAME ON (Simon, 2026-11-22) ------------------------------
+ * Simon: "get back to the multiboot menu from a running game", then: "This should not run during
+ * gameplay at all. Just when no game is running" and "Right flipper held on - 5 seconds for
+ * activation."  FEASIBILITY BUILD: PADMENU_FLIP_MS=<ms> turns it on (off without it), and it only
+ * restarts with PADMENU_FLIP_FIRE=1 - otherwise it writes what it would do to PADMENU_TRACE=<file>.
+ *
+ * THE BUTTON.  The flipper buttons are on the node bus (/dev/ttymxc1), node 8, not the cabinet
+ * SPI word: the game sends { 0x88, n, 0x11, [key], ck, 12 } and reads 10 bytes + ck + status;
+ * bytes 0..7 are the switch bits, XORed with rol8(key, c) when n is 3 (hwshim.c "COMMAND 0x11"),
+ * RIGHT FLIPPER BUTTON byte 3 bit 0, LEFT bit 1, active low (input_hw.c scan_node).  As with BACK,
+ * only the game's own exchange is read, after it returns; not a byte is sent.
+ *
+ * NO GAME ON, WITHOUT ANY TITLE'S ADDRESSES.  The boards fire the flippers themselves, from their
+ * own switch, under a rule the game hands them with command 0x41 (hwshim.c "PAD-775"): power at
+ * byte 4, a rule cleared by power 0 or the short form `41 <coil>`.  A machine with any rule live
+ * is a game in play; none live is attract, a tilt, the bonus or the end of a game.  The last few
+ * are still a game, so the hold also needs the rules to have been off for PADMENU_FLIP_QUIET_MS. */
+#define NB_DEV        "/dev/ttymxc1"
+#define NB_NODE_FLIP  8
+static unsigned char nb_kind[MAX_FD];      /* 0 unknown, 1 the node bus, 2 anything else */
+static int nb_want[MAX_FD], nb_got[MAX_FD], nb_is_scan[MAX_FD];
+static unsigned char nb_key[MAX_FD], nb_rx[MAX_FD][16];
+static unsigned char rule_on[64][32];      /* 1: a live rule fired by a FLIPPER BUTTON (node 8 input 24/25) */
+static int rules_live;
+static long long rules_off_since;          /* set at start: a game starts with none live */
+static long flip_ms, flip_quiet_ms;
+static int flip_fire, flip_fired;
+static long long flip_since = -1, flip_last = -1;
+static int flip_was = -1;
+static FILE *trace;
+
+static void tr(const char *fmt, ...)
+{
+    va_list ap;
+    if (!trace)
+        return;
+    fprintf(trace, "%lld ", now_ms());
+    va_start(ap, fmt);
+    vfprintf(trace, fmt, ap);
+    va_end(ap);
+    fputc('\n', trace);
+    fflush(trace);
+}
+
+static void nb_forget(int fd)
+{
+    if (fd >= 0 && fd < MAX_FD) {
+        nb_kind[fd] = 0;
+        nb_want[fd] = nb_got[fd] = nb_is_scan[fd] = 0;
+    }
+}
+
+static int is_nb(int fd)
+{
+    char link[32], path[128];
+    ssize_t n;
+    size_t k = strlen(NB_DEV), m;
+    if (fd < 0 || fd >= MAX_FD)
+        return 0;
+    if (!nb_kind[fd]) {
+        snprintf(link, sizeof link, "/proc/self/fd/%d", fd);
+        n = readlink(link, path, sizeof path - 1);
+        path[n > 0 ? n : 0] = 0;
+        m = strlen(path);
+        nb_kind[fd] = (m >= k && !strcmp(path + m - k, NB_DEV)) ? 1 : 2;
+    }
+    return nb_kind[fd] == 1;
+}
+
+static void rule_set(unsigned node, unsigned coil, int on, int input)
+{
+    int i, j, live = 0;
+    /* only the flippers' own rules: the game keeps others (Godzilla's node 9 coil 2, input 0, for
+     * 10 s at a time in attract) that say nothing about a game.  A rule's input byte is 0x40 | the
+     * board input; the flipper buttons are node 8 inputs 24 and 25 on every Spike 2 title. */
+    if (on && !(node == NB_NODE_FLIP && (input == 0x58 || input == 0x59))) {
+        tr("rule node %u coil %u ON input 0x%02x (not a flipper's)", node, coil, input);
+        return;
+    }
+    if (node >= 64 || coil >= 32 || rule_on[node][coil] == (on ? 1 : 0))
+        return;
+    rule_on[node][coil] = on ? 1 : 0;
+    for (i = 0; i < 64 && !live; i++)
+        for (j = 0; j < 32; j++)
+            if (rule_on[i][j]) { live = 1; break; }
+    tr("rule node %u coil %u %s input 0x%02x (rules live: %d)", node, coil, on ? "ON" : "off", input, live);
+    if (live != rules_live) {
+        rules_live = live;
+        if (!live)
+            rules_off_since = now_ms();
+        tr("FLIPPERS %s", live ? "LIVE (a game is in play)" : "DEAD (no rule live)");
+    }
+}
+
+/* one right flipper sample, from a good node 8 scan reply */
+static void flip_sample(int pressed)
+{
+    long long t = now_ms();
+    if (!pressed && flip_fired && !flip_fire)
+        flip_fired = 0;                        /* log only: every hold is a try */
+    if (pressed != flip_was) {
+        tr("right flipper %s (rules live %d, off for %lld ms)", pressed ? "PRESSED" : "released",
+           rules_live, rules_live ? 0 : t - rules_off_since);
+        flip_was = pressed;
+    }
+    if (flip_fired || flip_ms <= 0)
+        return;
+    if (flip_last >= 0 && t - flip_last > 500)
+        flip_since = -1;                       /* the scans stopped for a while: not a hold */
+    flip_last = t;
+    if (!pressed || rules_live || t - rules_off_since < flip_quiet_ms) {
+        if (pressed && flip_since >= 0)
+            tr("hold broken: %s", rules_live ? "a game is in play" : "the flippers went off too lately");
+        flip_since = -1;
+        return;
+    }
+    if (flip_since < 0) {
+        flip_since = t;
+        return;
+    }
+    if (t - flip_since >= flip_ms) {
+        flip_fired = 1;
+        tr("RIGHT FLIPPER HELD %ld ms with no game on - %s", flip_ms,
+           flip_fire ? "restarting into the boot menu" : "would restart (PADMENU_FLIP_FIRE not set)");
+        if (flip_fire)
+            ask_for_reboot_why("padmenu: right flipper held - restarting the machine into the boot menu\n");
+    }
+}
+
+/* the game's frames out: rules, and which reply is the node 8 scan's */
+static void nb_wrote(int fd, const unsigned char *b, ssize_t n)
+{
+    ssize_t i = 0;
+    nb_want[fd] = nb_got[fd] = nb_is_scan[fd] = 0;
+    while (i + 3 <= n && (b[i] & 0x80)) {
+        unsigned len = b[i + 1], node = b[i] & 0x3fu, size = len + 3, k, sum = 0;
+        if (i + (ssize_t)size > n)
+            break;
+        for (k = 0; k < size - 1; k++)
+            sum += b[i + k];
+        if ((sum & 0xff) == 0) {
+            unsigned cmd = b[i + 2], rl = b[i + size - 1];
+            if (cmd == 0x41 && len >= 3)
+                rule_set(node, b[i + 3], size > 6 && b[i + 4] != 0, size > 26 ? b[i + 26] : -1);
+            if (rl && rl <= sizeof nb_rx[0]) {
+                nb_want[fd] = (int)rl;
+                nb_is_scan[fd] = cmd == 0x11 && node == NB_NODE_FLIP && rl == 12;
+                nb_key[fd] = len == 3 ? b[i + 3] : 0;
+            }
+        }
+        i += size;
+    }
+}
+
+static void nb_read(int fd, const unsigned char *b, ssize_t n)
+{
+    ssize_t i;
+    for (i = 0; i < n && nb_got[fd] < nb_want[fd]; i++)
+        nb_rx[fd][nb_got[fd]++] = b[i];
+    if (nb_want[fd] && nb_got[fd] == nb_want[fd]) {
+        if (nb_is_scan[fd]) {
+            unsigned sum = 0, k, key = nb_key[fd];
+            for (k = 0; k <= 10; k++)
+                sum += nb_rx[fd][k];
+            if ((sum & 0xff) == 0 && !(nb_rx[fd][11] & 0x0c)) {
+                unsigned r3 = nb_rx[fd][3] ^ (((key << 3) | (key >> 5)) & 0xffu);
+                flip_sample(!(r3 & 1));
+            }
+        }
+        nb_want[fd] = nb_got[fd] = nb_is_scan[fd] = 0;
+    }
+}
+
+typedef ssize_t (*write_fn)(int, const void *, size_t);
+typedef ssize_t (*rd_fn)(int, void *, size_t);
+typedef ssize_t (*rdchk_fn)(int, void *, size_t, size_t);
+
+ssize_t write(int fd, const void *buf, size_t n)
+{
+    static write_fn next;
+    ssize_t r;
+    if (!next && !(next = (write_fn)dlsym(RTLD_NEXT, "write"))) { errno = ENOSYS; return -1; }
+    r = next(fd, buf, n);
+    if (r > 0 && (flip_ms > 0 || trace) && fd > 2 && is_nb(fd))
+        nb_wrote(fd, buf, r);
+    return r;
+}
+
+ssize_t read(int fd, void *buf, size_t n)
+{
+    static rd_fn next;
+    ssize_t r;
+    if (!next && !(next = (rd_fn)dlsym(RTLD_NEXT, "read"))) { errno = ENOSYS; return -1; }
+    r = next(fd, buf, n);
+    if (r > 0 && fd >= 0 && fd < MAX_FD && nb_want[fd])
+        nb_read(fd, buf, r);
+    return r;
+}
+
+ssize_t __read_chk(int fd, void *buf, size_t n, size_t buflen)
+{
+    static rdchk_fn next;
+    ssize_t r;
+    if (!next && !(next = (rdchk_fn)dlsym(RTLD_NEXT, "__read_chk"))) { errno = ENOSYS; return -1; }
+    r = next(fd, buf, n, buflen);
+    if (r > 0 && fd >= 0 && fd < MAX_FD && nb_want[fd])
+        nb_read(fd, buf, r);
+    return r;
+}
+
+static void flip_init(void)
+{
+    const char *v = getenv("PADMENU_FLIP_MS"), *q = getenv("PADMENU_FLIP_QUIET_MS"),
+               *f = getenv("PADMENU_FLIP_FIRE"), *t = getenv("PADMENU_TRACE");
+    flip_ms = v && *v ? strtol(v, NULL, 10) : 0;
+    flip_quiet_ms = q && *q ? strtol(q, NULL, 10) : 0;
+    flip_fire = f && *f == '1';
+    rules_off_since = now_ms();
+    if (t && *t)
+        trace = fopen(t, "a");
+    tr("padmenu flipper watcher: hold %ld ms, quiet %ld ms, %s", flip_ms, flip_quiet_ms,
+       flip_fire ? "restarts" : "log only");
+    unsetenv("PADMENU_FLIP_MS");
+    unsetenv("PADMENU_FLIP_QUIET_MS");
+    unsetenv("PADMENU_FLIP_FIRE");
+    unsetenv("PADMENU_TRACE");
+}
+#else
+static void nb_forget(int fd) { (void)fd; }
+static void flip_init(void) { }
+#endif
+
 /* back_hold=<seconds> in an images.conf -> ms, or -1 when the file or the line is not there */
 static long conf_hold_ms(const char *path)
 {
@@ -663,6 +901,7 @@ static void padmenu_init(void)
     if (h && *h)
         back_sw = (int)strtol(h, NULL, 10);
 #endif
+    flip_init();
     /* the game's own children (system()) inherit LD_PRELOAD: nothing here for them */
     unsetenv("PADMENU_HOLD_MS");
     unsetenv("PADMENU_CONF");

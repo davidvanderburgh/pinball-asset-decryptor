@@ -33,6 +33,7 @@ from ... import __version__
 from ...core import session_log
 from .. import compat
 from ..picker_data import MFR_VISUALS, peek_text, tooltip_text
+from ..shellx_cards import CardsMixin
 from ..shellx_disk import DiskMixin
 from ..shellx_machines import MachinesMixin
 from ..shellx_donations import DonationsMixin
@@ -116,7 +117,7 @@ def _visuals():
     return dict(MFR_VISUALS)
 
 
-class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin,
+class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, CardsMixin, ResetMixin, TeamMixin,
                   DonationsMixin, ReportMixin, GettingStartedMixin, TabService):
     ns = "shellx"
     key = ""

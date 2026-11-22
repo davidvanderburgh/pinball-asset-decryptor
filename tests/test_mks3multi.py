@@ -204,3 +204,38 @@ def test_dmcrypt_maps_a_source_card_read_only(monkeypatch):
         dmcrypt.open_crypt("t", "/dev/loop9", 32768, 1000, b"\0" * 64, readonly=ro)
         load = [f for nr, f in calls if nr == dmcrypt._TABLE_LOAD]
         assert load and bool(load[0] & dmcrypt._READONLY_FLAG) is ro
+
+
+# PAD-1507: a card written onto a Windows drive is made sparse first
+
+
+def test_windows_sparse_file_only_for_windows_drives(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(mk.subprocess, "run",
+                        lambda a, **k: calls.append(a) or SimpleNamespace(returncode=0))
+    assert mk._windows_sparse_file("/var/tmp/pad_s3multi/x.raw", 10) is False
+    assert calls == []
+
+
+def test_windows_sparse_file_asks_fsutil(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(mk.subprocess, "run",
+                        lambda a, **k: calls.append(a) or SimpleNamespace(returncode=0))
+    out = tmp_path / "card.multi.raw"
+    monkeypatch.setattr(mk.os.path, "abspath", lambda p: "/mnt/d/Pinball/out/card.multi.raw")
+    real_open = open
+    monkeypatch.setattr("builtins.open", lambda p, m="r", *a, **k: real_open(out, m, *a, **k))
+    assert mk._windows_sparse_file("/mnt/d/Pinball/out/card.multi.raw", 4096) is True
+    assert calls[0][-2:] == ["setflag", r"D:\Pinball\out\card.multi.raw"]
+    assert calls[1][-3:] == [r"D:\Pinball\out\card.multi.raw", "0", "4096"]
+    assert out.stat().st_size == 4096
+
+
+def test_windows_sparse_file_refused_falls_back(monkeypatch, tmp_path):
+    monkeypatch.setattr(mk.subprocess, "run",
+                        lambda a, **k: SimpleNamespace(returncode=1))
+    out = tmp_path / "c.raw"
+    monkeypatch.setattr(mk.os.path, "abspath", lambda p: "/mnt/c/x/c.raw")
+    real_open = open
+    monkeypatch.setattr("builtins.open", lambda p, m="r", *a, **k: real_open(out, m, *a, **k))
+    assert mk._windows_sparse_file("/mnt/c/x/c.raw", 4096) is False

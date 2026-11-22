@@ -1867,7 +1867,20 @@ def sparse_truncate(fileobj, size):
         fileobj.truncate(size)
         return True
     ok = _win_fsctl(fileobj, _FSCTL_SET_SPARSE)
-    fileobj.truncate(size)
+    if not ok or size <= 0:
+        fileobj.truncate(size)
+        return False if size > 0 else ok
+    # PAD-1507: grown by writing the LAST byte, not by ``truncate``.  On a
+    # sparse file SetEndOfFile still allocates the whole extent, and the
+    # SET_ZERO_DATA below then has to free it again: 74-92 s for a 62 GB
+    # Spike 3 card, measured, before a single byte of data was copied.  A
+    # write past the end of a sparse file allocates only the cluster it
+    # lands on, so the file is at full length at once and the hole below
+    # costs nothing.
+    fileobj.truncate(min(size, fileobj.seek(0, os.SEEK_END)))
+    fileobj.seek(size - 1)
+    fileobj.write(b"\0")
+    fileobj.seek(0)
     return _win_fsctl(fileobj, _FSCTL_SET_ZERO_DATA,
                       _ZeroDataInformation(0, size)) and ok
 

@@ -380,6 +380,7 @@ function DiskSpaceDialog({ close }) {
   if (dup) return null;
   const rows = (d && d.rows) || [];
   const busy = !d || d.busy;
+  const cards = (d && d.cards) || {};
   const leaves = () => {
     const out = [];
     for (const r of rows) if (sel.has(r.id)) out.push(...r.leaves);
@@ -450,6 +451,20 @@ function DiskSpaceDialog({ close }) {
       <span class="small muted wrap">${d ? d.move_note : ""}</span>
       ${d && d.move_where ? html`<div class="mono small sx-pre">${d.move_where}</div>` : null}
       <div><${Button} onClick=${startMove} disabled=${!(d && d.can_move)}>Move to another drive…<//></div>
+    </div>
+    <hr class="sx-hr" />
+    <div class="stack" style="gap:4px">
+      <span class="h2">Card images</span>
+      <span class="small muted wrap">${cards.note || ""}</span>
+      <div class="row wrap">
+        <${Button} onClick=${() => call("shellx.cards_compact_folder")} disabled=${busy}>Compact a folder…<//>
+        <${Button} onClick=${() => call("shellx.cards_compact_files")} disabled=${busy}>Compact cards…<//>
+        <${Button} onClick=${() => call("shellx.cards_add")} disabled=${busy}>Add a card compact…<//>
+        <${Button} onClick=${() => call("shellx.cards_expand")} disabled=${busy}>Expand to full size…<//>
+      </div>
+      ${cards.pct != null ? html`<div class="sx-usage"><span class="small">${cards.status}</span>
+        <div class="sx-bar"><i style=${`width:${cards.pct}%`}></i></div></div>`
+        : cards.status ? html`<span class="small wrap">${cards.status}</span>` : null}
     </div>
     ${move ? html`<${MovePrompt} spec=${move} onDone=${(letter) => { setMove(null); if (letter) call("shellx.disk_move", letter); }} />` : null}
     ${resize ? html`<${ResizePrompt} spec=${resize} onDone=${(gib) => { setResize(null); if (gib) call("shellx.disk_resize", gib); }} />` : null}

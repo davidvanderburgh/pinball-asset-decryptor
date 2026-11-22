@@ -308,7 +308,14 @@ KEYS = collections.OrderedDict([
     ("start_count_reset", ("game", "ball")), ("start_once", ("no", "ball", "game")),
     # PAD-1384: its own C++ - <name>.cpp, built to <name>.so in the mode folder (modes/sdk/jjp_mode.h)
     ("code", "code"),
+    # PAD-1508: Spike 2's rules, carried over (MODES.md "Spike 2's rules")
+    ("shot_points", "shot_points"), ("points_ladder", ("fixed", "rising")), ("end_shots", "switches"),
+    ("penalty", "penalty"), ("start_max", "int"), ("cooldown", "int"), ("start_also", "start_also"),
+    ("start_needs", "needs"), ("sound_at", "sound_at"), ("sound_shot_every", "int"),
+    ("lamp_pattern", ("solid", "blink", "pulse", "chase")),
 ])
+#: keys a mode file may give on several lines, and how many lines the runtime takes (PAD-1508)
+REPEATABLE = {"shot_points": 8, "start_also": 3, "sound_at": 8}
 #: start_on words -> the game's Hook<...>::list each one needs (jjpmodes.c EVENTS)
 START_EVENTS = collections.OrderedDict([
     ("ball_start", "HookBallStart_"), ("first_ball", "HookFirstBall_"), ("last_ball", "HookLastBall_"),
@@ -438,6 +445,29 @@ def check_value(kind, v, port=None):
                 or _coil_problem(words[0], "hold", port))
     if kind == "hold_on":
         return None if v in ("start", "shots") else check_value("switches", v, port)
+    if kind in ("shot_points", "start_also"):   # <switches> <points> / <switches> [count 1-99] (PAD-1508)
+        parts = v.split()                     # the last word by spaces: points may be written 3,000,000
+        last = parts[-1] if parts else ""
+        if kind == "shot_points":
+            if len(parts) < 2 or not _INT.match(last):
+                return "must be <switches> <points>"
+            return check_value("switches", " ".join(parts[:-1]), port)
+        if _INT.match(last):
+            p = _int_in(last, 1, 99, "count")
+            if p:
+                return p
+            parts = parts[:-1]
+        return check_value("switches", " ".join(parts), port) if parts else "must name a switch"
+    if kind == "needs":           # <a mode of ours> [ball|game]; the name is checked against the folder
+        return None if v.strip() and v.strip() not in ("ball", "game") else "must name one of the folder's modes"
+    if kind == "sound_at":        # <seconds left> <sound or file>
+        parts = v.split(None, 1)
+        if len(parts) < 2 or not _INT.match(parts[0]):
+            return "must be <seconds left> <sound>"
+        return _int_in(parts[0], 1, 600, "seconds left") or check_value("sound_or_file", parts[1].strip(), port)
+    if kind == "penalty":
+        return ("cannot work on JJP: the game's engine has no call that takes points away "
+                "(it only adds them), so the runtime ignores it")
     if isinstance(kind, tuple):
         return None if v in kind else "must be one of %s" % ", ".join(kind)
     if kind == "int":
@@ -524,6 +554,29 @@ def check_value(kind, v, port=None):
     return None if not missing else "not in %s: %s" % (port.get("title", "this game"), " ".join(missing))
 
 
+def _whole(v, default=0):
+    v = (v or "").replace(",", "").replace("_", "").strip()
+    return int(v) if _INT.match(v) else default
+
+
+def spike2_rule_problems(fn, m, mode_dir=None):
+    """PAD-1508: what Spike 2's rules need of the rest of a mode file."""
+    out = []
+    for line in (m.get("sound_at") or "").split("\n"):
+        w = line.split(None, 1)
+        if mode_dir and len(w) == 2 and is_sound_file(w[1].strip()) and not os.path.isfile(os.path.join(mode_dir, w[1].strip())):
+            out.append("%s: sound_at = %s, but there is no %s in the mode folder" % (fn, line, w[1].strip()))
+    if m.get("start_also") and not m.get("start"):
+        out.append("%s: start_also adds to start, and there is no start line (it is ignored)" % fn)
+    secs = _whole(m.get("seconds"), 20)
+    for line in (m.get("sound_at") or "").split("\n"):
+        w = line.split()
+        if w and _INT.match(w[0]) and secs and _whole(w[0]) >= secs:
+            out.append("%s: sound_at %s: the mode runs %d s, so it would never play (seconds left must be below that)"
+                       % (fn, w[0], secs))
+    return out
+
+
 def check_modes(mode_dir, port=None):
     """A mode folder checked the way jjpmodes.c will read it -> (modes, problems):
     modes = [{file, name, start, ...}], problems = ["file:line: ..."]."""
@@ -567,6 +620,11 @@ def check_modes(mode_dir, port=None):
                 problems.append("%s:%d: %s %s" % (fn, n, k, p))
             if kind in ("switches", "lamps") and len(_names(v)) > MAX_LIST:
                 problems.append("%s:%d: %s lists %d; the runtime takes %d" % (fn, n, k, len(_names(v)), MAX_LIST))
+            if k in REPEATABLE and m.get(k):
+                if m[k].count("\n") + 1 >= REPEATABLE[k]:
+                    problems.append("%s:%d: more than %d %s lines; the runtime takes %d" % (fn, n, REPEATABLE[k], k, REPEATABLE[k]))
+                m[k] = m[k] + "\n" + v   # every line, newline-joined (PAD-1508)
+                continue
             m[k] = v
         for k in ("sound_start", "sound_shot", "sound_end", "sound_complete", "music", "picture", "video"):
             v = m.get(k, "")
@@ -593,12 +651,21 @@ def check_modes(mode_dir, port=None):
         if (m.get("game_modes") or "").strip().lower() == "hold" and port is not None and port.get("engine") == "proc":
             problems.append("%s: game_modes = hold, but %s has no Mode class to hold off: use pause (hold "
                             "runs as pause there)" % (fn, port.get("title", "this game")))
+        problems.extend(spike2_rule_problems(fn, m, mode_dir))
         if m.get("multiball_on") and not m.get("multiball"):
             problems.append("%s: multiball_on without a multiball line (it is ignored)" % fn)
         if m.get("coil_hold") and title.get("coil_holds") != "on":
             problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
                             "(after a check on the machine)" % fn)
         modes.append(m)
+    names = {(m.get("name") or "").strip().lower() for m in modes}
+    for m in modes:
+        need = (m.get("start_needs") or "").split()
+        if need and need[-1] in ("ball", "game"):
+            need = need[:-1]
+        if need and " ".join(need).lower() not in names - {(m.get("name") or "").strip().lower()}:
+            problems.append("%s: start_needs %s: no other mode in the folder has that name (it would never start)"
+                            % (m["file"], " ".join(need)))
     if stocks and port is not None and port.get("engine") == "proc":
         problems.append("%s: %s has no Mode class, so its own modes cannot be changed (.stock files are "
                         "ignored there)" % (" ".join(stocks), port.get("title", "this game")))

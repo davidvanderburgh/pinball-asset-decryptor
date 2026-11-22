@@ -80,3 +80,53 @@ def test_the_rig_runs_a_test_card_as_its_menu():
     assert "(media|font)" in tc and "--rootfs-dir /usr/local/codeselect/media" in tc
     # ...and a test card never falls back to booting a game that is not there
     assert 'a test card boots no game' in run
+
+
+def test_the_emulator_runs_the_test_cards_own_menu_program():
+    """Simon (2026-11-22): "PAD runs the test card as a normal image. That way it will always be
+    version independent".  The emulator ran PAD's own build of the menu in place of the card's,
+    so a card made by a newer PAD showed an older menu (a test video it did not know was dropped
+    without a word).  Now the card's /usr/local/codeselect comes over and its program runs, with
+    its own font; PAD's build stands in only for a card that carries none."""
+    run = (RIG / "run_game.sh").read_text(encoding="utf-8")
+    tc = run[run.index("sel_testcard() {"):]
+    tc = tc[:tc.index("\n}\n")]
+    assert '--rootfs-dir /usr/local/codeselect "$R/dump/cardmenu" "$PAD_CARD"' in tc
+    assert 'SEL_BIN=/dump/cardmenu/codeselect/codeselect' in tc
+    assert 'SEL_FONT="--font /dump/cardmenu/codeselect/font.ttf"' in tc
+    assert "the card's own menu program runs" in tc
+    assert "PAD's own build stands in" in tc
+    # every other card keeps PAD's build: the default is set before any card is read
+    top = run[:run.index('if [ -n "${PAD_CARD:-}" ]; then')]
+    assert "SEL_BIN=/usr/local/codeselect/codeselect" in top and 'SEL_FONT=""' in top
+    # ...and exported: the menu runs inside run_game.sh's `bash -s`, which a plain variable does
+    # not reach (the first emulator run of this change got an empty program name: chroot's usage)
+    assert "export SEL_BIN SEL_FONT" in top
+    inner = run[run.index("<<'INNER'"):]
+    assert 'SEL_BIN="${SEL_BIN:-/usr/local/codeselect/codeselect}"' in inner
+    line = next(ln for ln in run.splitlines() if "--conf /dump/codeselect.conf --out" in ln)
+    assert line.strip().startswith('chroot "$R" $SEL_BIN --conf') and "$SEL_FONT" in line
+
+
+def test_a_card_menu_that_does_not_know_an_option_gets_pads_build():
+    """PR #44 review: the menu exits on an option it does not know, and a test card's menu
+    ending ends the run, so the next option the rig passes would have stopped every older
+    test card emulating.  sel_testcard checks the card's program for every option in
+    SEL_OPTS and lets PAD's build stand in when one is missing; the list must name every
+    option the launch line can pass, its own and those in SEL_FONT / SEL_INV / SEL_PICK."""
+    import re
+    run = (RIG / "run_game.sh").read_text(encoding="utf-8")
+    opts = set(re.search(r'^SEL_OPTS="([^"]*)"', run, re.M).group(1).split())
+    line = next(ln for ln in run.splitlines() if "--conf /dump/codeselect.conf --out" in ln)
+    passed = set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", line))
+    for var in ("SEL_FONT", "SEL_INV", "SEL_PICK"):
+        for m in re.finditer(r'\b%s="([^"$]*)' % var, run):
+            passed |= set(re.findall(r"--[a-z][a-z-]*", m.group(1)))
+    assert {"--conf", "--font", "--no-invert", "--pick"} <= passed
+    assert passed <= opts, "options the rig passes but sel_testcard does not check: %s" % (passed - opts)
+    tc = run[run.index("sel_testcard() {"):]
+    tc = tc[:tc.index("\n}\n")]
+    assert 'for f in $SEL_OPTS; do' in tc and 'grep -aqF -- "$f"' in tc
+    assert "does not know$miss: PAD's own build stands in" in tc
+    # SEL_OPTS is set before any card is read, so sel_testcard sees it
+    assert run.index('SEL_OPTS="') < run.index('if [ -n "${PAD_CARD:-}" ]; then')

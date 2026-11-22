@@ -46,12 +46,55 @@ sel_testcard() {
         o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
         [ -n "$o" ] && [ "$o" != root ] && chown -R "$o" "$R/dump/media" 2>/dev/null
     fi
+    # ★ AND ITS MENU PROGRAM IS THE CARD'S OWN TOO (Simon, 2026-11-22: "PAD runs the test
+    # card as a normal image. That way it will always be version independent"). The
+    # emulator used to run PAD's own build of the menu (buildselect.sh, from the sources
+    # of whichever PAD started the run) in place of the one on the card, so a card made
+    # by a newer PAD showed an older menu: a test video it did not know was dropped
+    # without a word, and the buttons on the glass were not the card's. The card's
+    # /usr/local/codeselect comes over beside its media and that program runs; PAD's
+    # build stands in only when the card has none.
+    #   ONLY A PROGRAM THAT KNOWS EVERY OPTION THE RIG GIVES IT (PR #44 review): the menu
+    # refuses an option it does not know and exits, and a test card's menu ending ends the
+    # run. Every option in SEL_OPTS predates test cards (2026-11-16), but the next one the
+    # rig passes would stop every older card emulating; such a card gets PAD's build.
+    local f miss=""
+    rm -rf "$R/dump/cardmenu" 2>/dev/null
+    if python3 "$S/parts.py" --rootfs-dir /usr/local/codeselect "$R/dump/cardmenu" "$PAD_CARD" >/dev/null 2>&1 \
+        && [ -s "$R/dump/cardmenu/codeselect/codeselect" ]; then
+        for f in $SEL_OPTS; do
+            grep -aqF -- "$f" "$R/dump/cardmenu/codeselect/codeselect" || miss="$miss $f"
+        done
+    fi
+    if [ -n "$miss" ]; then
+        echo "[select] this test card's menu program does not know$miss: PAD's own build stands in"
+    elif [ -s "$R/dump/cardmenu/codeselect/codeselect" ]; then
+        chmod 755 "$R/dump/cardmenu/codeselect/codeselect"
+        SEL_BIN=/dump/cardmenu/codeselect/codeselect
+        [ -s "$R/dump/cardmenu/codeselect/font.ttf" ] && SEL_FONT="--font /dump/cardmenu/codeselect/font.ttf"
+        if [ "$(id -u)" = 0 ]; then
+            local u
+            u=$(stat -c %U "$PAD_HOME" 2>/dev/null)
+            [ -n "$u" ] && [ "$u" != root ] && chown -R "$u" "$R/dump/cardmenu" 2>/dev/null
+        fi
+        echo "[select] the card's own menu program runs: $(grep -a -o -m1 'codeselect [0-9][0-9.]* - ' "$R$SEL_BIN" | sed 's/ - $//')"
+    else
+        echo "[select] this test card carries no menu program of its own: PAD's own build stands in"
+    fi
     SEL_N=1
     SEL_DIRS="testcard"$'\t'"$CARD_SRC"$'\n'
     echo "[select] a PAD test card: its own menu, $(grep -cE '^[[:space:]]*test_(image|video|scene|sound)[[:space:]]*=' "$R/dump/codeselect.conf") file(s) of its own in /games/testcard, $( [ -d "$R/dump/media" ] && ls "$R/dump/media" | wc -l || echo 0) media file(s)"
 }
 
 CARD_SRC=""
+# the menu program the boot selector runs: PAD's own build, or a test card's own (sel_testcard).
+# Exported: the selector runs inside `bash -s` below, which a plain variable does not reach.
+SEL_BIN=/usr/local/codeselect/codeselect
+SEL_FONT=""
+export SEL_BIN SEL_FONT
+# every option the selector's launch line can pass (sel_testcard checks that a card's own
+# program knows them all; tests/test_pad1279_test_card_emulate.py keeps the list whole)
+SEL_OPTS="--conf --out --input --timeout --log --media --font --no-invert --pick"
 if [ -n "${PAD_CARD:-}" ]; then
     CARD_SRC=$(bash "$S/cardmount.sh" "$PAD_CARD" | tail -1)
     [ -d "$CARD_SRC" ] || { echo "[run] could not mount $PAD_CARD" >&2; exit 1; }
@@ -674,6 +717,8 @@ OVERRIDE_SRC="$7"
 # `<partition idx><TAB><mounted title directory>`. Empty on every run that
 # did not ask for the selector, and then nothing below reads it.
 SEL_DIRS="$8"
+# the menu program (sel_testcard: a test card's own), through the environment
+SEL_BIN="${SEL_BIN:-/usr/local/codeselect/codeselect}"
 # The rig's own directory (item 107): codeselect/materialize.py lives there, and
 # the plain variable does not cross into `bash -s`.
 S="$9"
@@ -861,7 +906,7 @@ if [ -n "$SEL_DIRS" ]; then
     # this keyboard, and its own on-screen footer names both - a log that
     # named only "1" sent the person at the PC looking for the wrong key.
     echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) or ACTION (Space) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
-    chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_INV $SEL_PICK </dev/null
+    chroot "$R" $SEL_BIN --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_FONT $SEL_INV $SEL_PICK </dev/null
     SEL_RC=$?
     # ★ A KILLED SELECTOR IS A STOP, NOT A CHOICE (item 90, 2026-09-02).
     #

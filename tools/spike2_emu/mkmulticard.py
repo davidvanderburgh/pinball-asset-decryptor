@@ -3763,9 +3763,12 @@ def testcard_layout(geom, p3_mib=None):
     return prims, ext, end - ext, logs, end * SECTOR
 
 
-def build_testcard(primary, out, selector_dir, media_dir=None, colour=None, workdir=None):
+def build_testcard(primary, out, selector_dir, media_dir=None, colour=None, workdir=None, p3_mib=None):
     """Write the TEST CARD `out` from `primary`'s boot and rootfs, inject the selector with
     testcard=on, the media set's test pictures and `colour` (parse_testcard_colour's dict).
+    `p3_mib`: the test files partition at least this big (Simon, 2026-11-22: room for test
+    files sent later over the network - "the user can make it whatever size they want,
+    completely unfettered"); never smaller than its own files need.
     -> the conf text written."""
     need_tools("mke2fs", "debugfs", "e2fsck")
     geom = Geometry.from_file(primary)
@@ -3773,7 +3776,7 @@ def build_testcard(primary, out, selector_dir, media_dir=None, colour=None, work
     # for whole videos); the menu's own media stay with the menu
     media = plan_media(media_dir, 1, tests_apart=True) if media_dir else None
     test_files = media["test_files"] if media else {}
-    p3_mib = testcard_p3_mib(media["test_bytes"] if media else 0)
+    p3_mib = max(testcard_p3_mib(media["test_bytes"] if media else 0), int(p3_mib or 0))
     prims, ext, ext_count, logs, total = testcard_layout(geom, p3_mib)
     tmp = tempfile.mkdtemp(prefix="mkmulticard.testcard.", dir=workdir)
     try:
@@ -10288,6 +10291,9 @@ def main(argv=None):
     s.add_argument("--color", default="", help="the profile Color correction starts from, "
                                                "'gamma r g b|gain r g b|lift r g b|saturation[|name]' "
                                                "(default: No change)")
+    s.add_argument("--p3-mib", type=int, default=0,
+                   help="make the test files partition (p3) at least this many MiB: room for test "
+                        "files sent later over the network (default: just what its own files need)")
     s.add_argument("--workdir")
     s = sub.add_parser("inject", help="redo only the p2 injection on an existing multi card (idempotent)")
     s.add_argument("--card", required=True, help="the multi card to modify IN PLACE")
@@ -10499,8 +10505,10 @@ def main(argv=None):
             if conf:
                 print(conf.rstrip())
         elif a.cmd == "testcard":
+            if a.p3_mib < 0:
+                raise Refused("--p3-mib %d: a size is 0 or more MiB" % a.p3_mib)
             build_testcard(a.primary, a.out, a.selector_dir, a.media_dir,
-                           parse_testcard_colour(a.color), a.workdir)
+                           parse_testcard_colour(a.color), a.workdir, p3_mib=a.p3_mib)
             return 0
         elif a.cmd == "inject":
             check_output_path(a.card, [a.conf, a.selector_dir, a.media_dir, a.primary] + list(a.extra), must_exist=True)

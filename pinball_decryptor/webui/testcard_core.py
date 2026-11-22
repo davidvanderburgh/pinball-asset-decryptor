@@ -36,6 +36,36 @@ LABEL_MAX = 199
 
 _LOCK = threading.RLock()
 
+#: Simon (2026-11-22): a test card updated over the network.  The card is kept small so it
+#: writes fast; "Allow additional space on the test card for network updates?" makes its
+#: test files partition bigger (ROOM_GB_DEFAULT, or any size: "the user can make it whatever
+#: size they want, completely unfettered"), and remote access / Wi-Fi start-up go on it as on a
+#: game card (Network tab), so Send to machine can reach it.
+ROOM_GB_DEFAULT = 2
+NETWORK_DEFAULTS = {"room": False, "room_gb": ROOM_GB_DEFAULT, "ssh": False, "wifi": False, "band5": False}
+
+
+def clean_network(d):
+    """The tab's network settings, each of its own type (a bad value falls back)."""
+    out = dict(NETWORK_DEFAULTS)
+    if isinstance(d, dict):
+        for k in ("room", "ssh", "wifi", "band5"):
+            if isinstance(d.get(k), bool):
+                out[k] = d[k]
+        try:
+            gb = float(d.get("room_gb", ROOM_GB_DEFAULT))
+            if gb > 0:
+                out["room_gb"] = round(gb, 2)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def room_mib(net):
+    """--p3-mib for the build: the extra space asked for, or 0 (just what the files need)."""
+    net = clean_network(net)
+    return int(net["room_gb"] * 1024) if net["room"] else 0
+
 
 def store_path():
     """Where the list is kept: beside the app's settings (PAD_TESTCARD_STORE for the tests)."""
@@ -119,6 +149,7 @@ class TestCardList(object):
         self.items = []
         self.source = ""          # the Spike 2 card image the boot and system come from
         self.out = ""             # where the last test card was written
+        self.network = dict(NETWORK_DEFAULTS)   # space for network updates, remote access, Wi-Fi
         self.load()
 
     # -- the file
@@ -136,10 +167,12 @@ class TestCardList(object):
                     self.items.append(it)
             self.source = str(d.get("source") or "")
             self.out = str(d.get("out") or "")
+            self.network = clean_network(d.get("network"))
 
     def save(self):
         with _LOCK:
-            d = {"items": [it.to_json() for it in self.items], "source": self.source, "out": self.out}
+            d = {"items": [it.to_json() for it in self.items], "source": self.source, "out": self.out,
+                 "network": self.network}
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             tmp = self.path + ".part"
             with open(tmp, "w", encoding="utf-8") as f:

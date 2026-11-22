@@ -4183,7 +4183,7 @@ def testcard_colour_arg(form):
         return []
 
 
-def testcard_commands(form, out, media_dir, cwd=None, test_specs=None):
+def testcard_commands(form, out, media_dir, cwd=None, test_specs=None, p3_mib=0):
     """'Build test card…': the selector, the test pictures (``prepare`` with
     nothing else to render: no art, no clips, no sounds), then ``testcard``.
     The first image on the list is only where the boot and rootfs come from."""
@@ -4195,7 +4195,9 @@ def testcard_commands(form, out, media_dir, cwd=None, test_specs=None):
             "--volume", str(int(form.volume))]
     tc = [MKMULTICARD, "testcard", "--primary", primary, "--out", wsl(out),
           "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
-          "--media-dir", wsl(media_dir)] + testcard_colour_arg(form)
+          "--media-dir", wsl(media_dir)] + testcard_colour_arg(form) + (
+              # Simon (2026-11-22): room for test files sent later over the network
+              ["--p3-mib", str(int(p3_mib))] if p3_mib else [])
     return install_selector_commands(form, cwd) + [
         ("prepare", step_command("prepare", prep, form, cwd)),
         (TESTCARD_LABEL, step_command(TESTCARD_LABEL, tc, form, cwd))]

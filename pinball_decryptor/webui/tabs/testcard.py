@@ -61,7 +61,40 @@ class TestCardTab(TabService):
         self.set(rows=rows, counts=lst.counts(), source=lst.source,
                  source_ok=bool(lst.source) and os.path.isfile(lst.source), out=lst.out,
                  busy=self._busy, log=self._lines[-400:], pct=self._pct, step=self._step,
-                 msg=list(self._msg), max=tc.MAX_ITEMS, full=len(lst.items) >= tc.MAX_ITEMS)
+                 msg=list(self._msg), max=tc.MAX_ITEMS, full=len(lst.items) >= tc.MAX_ITEMS,
+                 network=dict(lst.network), room_mib=tc.room_mib(lst.network), address=self._address())
+
+    # ------------------------------------------------------------ network updates
+    # Simon (2026-11-22): "we need the same feature on the test card... even more important" - a test card
+    # updated over the network, like a game card (Network tab: remote access, Wi-Fi start-up, Send to machine)
+    def _address(self):
+        """The machine's address, as the Network tab has it (else the last one used), or ''."""
+        try:
+            addr = self.window.service("network").get("address")
+            if addr:
+                return str(addr)
+        except Exception:                                       # noqa: BLE001
+            pass
+        try:
+            from ...core import pad_ssh_key
+            return pad_ssh_key.last_address() or ""
+        except Exception:                                       # noqa: BLE001
+            return ""
+
+    @rpc
+    def set_network(self, key, value):
+        """One of the tab's network settings: room / room_gb / ssh / wifi / band5."""
+        lst = tc.shared()
+        if key not in tc.NETWORK_DEFAULTS:
+            raise RpcError("no such setting: %s" % key)
+        net = dict(lst.network)
+        net[key] = value
+        if key == "wifi" and not value:
+            net["band5"] = False
+        lst.network = tc.clean_network(net)
+        lst.save()
+        self._pub()
+        return True
 
     def _say(self, line):
         self._lines.append(line)
@@ -134,8 +167,31 @@ class TestCardTab(TabService):
 
     # ------------------------------------------------------------ the build
     @rpc
-    def build(self):
-        """Build test card…"""
+    def send(self):
+        """Send to machine…: build the test card, then send it to the machine over the network (the Network
+        tab's machine): only the files that differ go, and the machine restarts into its test card menu."""
+        if self._busy:
+            return False
+        lst = tc.shared()
+        address = self._address()
+        if not lst.network.get("ssh"):
+            raise RpcError("Tick Remote access first: the test card you send must let this computer in again")
+        if not address:
+            raise RpcError("Find the machine on the Network tab first: the test card goes to the machine there")
+        if self.window.cb.get("on_send_image") is None:
+            raise RpcError("Send to machine is not available here")
+        if not compat.messagebox.askyesno(
+                "Send test card to machine",
+                "Build the test card and send it to the machine at %s?\n\nThe machine must be running a PAD "
+                "test card already (a game card is refused: its game would be deleted). Only the files that "
+                "differ are copied, then the machine restarts into the test card menu; leave it switched on "
+                "until then." % address, icon="warning"):
+            return False
+        return self.build(send_to=address)
+
+    @rpc
+    def build(self, send_to=""):
+        """Build test card… (and, from Send to machine…, send it to *send_to* once built)"""
         if self._busy:
             return False
         lst = tc.shared()
@@ -157,7 +213,8 @@ class TestCardTab(TabService):
         self._lines, self._pct, self._step = [], 0, "Getting the files ready"
         self._msg = ("", "")
         self._pub()
-        threading.Thread(target=self._run, args=(lst.source, out, items), daemon=True,
+        self._send_to = str(send_to or "")
+        threading.Thread(target=self._run, args=(lst.source, out, items, dict(lst.network)), daemon=True,
                          name="testcard").start()
         return True
 
@@ -194,7 +251,7 @@ class TestCardTab(TabService):
                                        "from when it was ticked goes" % (it.label, exc))
         lst.save()
 
-    def _run(self, source, out, items):
+    def _run(self, source, out, items, net=None):
         from .. import multiboot_core as mbc
         work = tempfile.mkdtemp(prefix="pad_testcard_")
         ok, why = False, ""
@@ -211,13 +268,53 @@ class TestCardTab(TabService):
                                          tests=[],
                                          platform="stern", colour_profiles={})
             media = os.path.join(work, "media")
-            cmds = mbc.testcard_commands(form, out, media, test_specs=tc.test_specs(staged, mbc.wsl))
+            cmds = mbc.testcard_commands(form, out, media, test_specs=tc.test_specs(staged, mbc.wsl),
+                                         p3_mib=tc.room_mib(net))
             ok, why = self._steps(mbc, cmds)
+            if ok and not self._cancel:
+                ok, why = self._extras(source, out, tc.clean_network(net))
         except Exception as exc:                                # noqa: BLE001
             why = str(exc)
         finally:
             shutil.rmtree(work, ignore_errors=True)
             self._finish(ok, why, out)
+
+    def _extras(self, source, out, net):
+        """Remote access and Wi-Fi start-up onto the built card, as a game card gets them (pipeline.py): a
+        marker beside the image says it is unfinished until both are on."""
+        from ...core import card_extras, ssh_card, wifi_card
+        marker = str(ssh_card.pending_marker(out))
+        if not net["ssh"] and not net["wifi"]:
+            # an earlier build's marker (its remote access failed) would refuse this card, written afresh
+            # without either, as unfinished
+            if os.path.exists(marker):
+                os.remove(marker)
+            return True, ""
+        step = "Remote access"
+        try:
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write("Incomplete SSH preparation; do not flash this image.\n")
+            if net["ssh"]:
+                self._step = "Adding remote access"
+                self._pub_soon()
+                note = ssh_card.apply_to_build(
+                    source, out, {"enabled": True,
+                                  "public_keys": card_extras.validate_keys(card_extras.with_pad_key(""))},
+                    log=self._say, cancel=lambda: self._cancel)
+                if note:
+                    self._say("test card: " + note)
+            if net["wifi"]:
+                step = "Wi-Fi start-up"
+                self._step = "Adding Wi-Fi start-up"
+                self._pub_soon()
+                note = wifi_card.apply_to_build(source, out, {"enabled": True, "band5": bool(net["band5"])},
+                                                log=self._say, cancel=lambda: self._cancel)
+                if note:
+                    self._say("test card: " + note)
+        except Exception as exc:                                # noqa: BLE001
+            return False, "%s could not be added: %s" % (step.lower(), exc)
+        os.remove(marker)
+        return True, ""
 
     STEP_WORDS = {"selector": "Getting the menu program ready", "prepare": "Converting the files",
                   "testcard": "Writing the card"}
@@ -267,6 +364,17 @@ class TestCardTab(TabService):
     def _finish(self, ok, why, out):
         self._busy, self._proc, self._pct, self._step = False, None, (100 if ok else None), ""
         self._last_pub = 0.0
+        send_to, self._send_to = getattr(self, "_send_to", ""), ""
+        if ok and send_to:
+            # the app's own Send (the Network tab's): its progress, log and finish are the app's
+            self._msg = ("ok", "Test card built: %s. Sending it to the machine at %s: the status bar and the "
+                               "log follow it, and the machine restarts into the test card menu when it is done."
+                         % (out, send_to))
+            self._pub_soon()
+            fn = self.window.cb.get("on_send_image")
+            if fn is not None:
+                fn(out, send_to)
+            return
         if ok:
             size = os.path.getsize(out) / float(1 << 30) if os.path.exists(out) else 0
             self._msg = ("ok", "Test card built: %s (%.2f GB). Write it to a card like any card image; "

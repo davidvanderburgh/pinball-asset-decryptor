@@ -108,6 +108,30 @@ def scan_image_slots(assets_dir: str, roots=None, exts=None,
     return slots
 
 
+def _same_bytes(a, b):
+    """True when *a* and *b* are both files holding the same bytes.
+
+    Never :func:`filecmp.cmp`: it remembers its answers by each file's size
+    and modification time, even with ``shallow=False``, and the staging file
+    is written afresh each time with the same size and, on Windows, often
+    the same clock tick, so a NEW picture of the same size was taken for the
+    one staged a moment before and dropped (PAD-1502)."""
+    try:
+        if not (os.path.isfile(a) and os.path.isfile(b)):
+            return False
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            while True:
+                x = fa.read(1 << 20)
+                if x != fb.read(1 << 20):
+                    return False
+                if not x:
+                    return True
+    except OSError:
+        return False
+
+
 def stage_replacement(slot: ImageSlot, replacement_path: str,
                       keep_size: bool = False,
                       original_info: Optional[ImageInfo] = None,
@@ -148,9 +172,7 @@ def stage_replacement(slot: ImageSlot, replacement_path: str,
                 except OSError:
                     pass
             return False, detail
-        import filecmp
-        if os.path.isfile(slot.abs_path) and filecmp.cmp(
-                tmp, slot.abs_path, shallow=False):
+        if _same_bytes(tmp, slot.abs_path):
             os.remove(tmp)
         else:
             replace_with_retry(tmp, slot.abs_path)

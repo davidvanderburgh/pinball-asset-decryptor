@@ -248,7 +248,13 @@ def test_a_scene_picture_unchanged_since_the_last_build_is_not_encoded_again(
     generate_checksums(str(tmp_path))
     baseline = read_checksums(str(tmp_path))
     Image.new("RGBA", (pw, ph), (240, 0, 240, 255)).save(tex / "img01.png")
-    scene = (b"\x7f" * 8 + struct.pack("<9I", pw, ph, 0x80000002, pw, ph, 5,
+    # the edit is the same size as the stock picture, and written in the same clock
+    # tick as the baseline scan above it can share its mtime: the change scan's
+    # size+mtime hash cache then takes it for the stock picture (PAD-1502, about 1
+    # run in 7).  A real edit comes later than its extract's scan.
+    st = os.stat(tex / "img01.png")
+    os.utime(tex / "img01.png", ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    scene =(b"\x7f" * 8 + struct.pack("<9I", pw, ph, 0x80000002, pw, ph, 5,
                                         0, 0, length) + bytes(length))
 
     class Reader:
@@ -347,3 +353,51 @@ def test_watch_stages_the_set_before_the_window_opens():
     # run_game.sh still stages (and refuses a set it cannot): watch.sh only goes first
     with open(os.path.join(RIG, "run_game.sh"), encoding="utf-8", errors="replace") as f:
         assert 'OVERRIDE_SRC=$(bash "$S/overrides.sh" "$PAD_OVERRIDE_DIR"' in f.read()
+
+
+def test_a_new_picture_staged_in_the_same_clock_tick_still_lands(tmp_path, monkeypatch):
+    """PAD-1502: the "unchanged?" check used filecmp.cmp, which remembers its
+    answer by each file's size and modification time even with shallow=False.
+    The staging file is the same size every time and, on Windows, often gets the
+    same timestamp, so a new picture staged a moment after the last one was taken
+    for it and dropped.  Every staging file here carries the same timestamp."""
+    from pinball_decryptor.core import image_slots
+    from pinball_decryptor.core.image import detect_image_info
+    real = image_slots.transcode_image_to
+
+    def same_tick(src, dst, *a, **k):
+        out = real(src, dst, *a, **k)
+        os.utime(dst, ns=(2_000_000_000, 2_000_000_000))
+        return out
+
+    monkeypatch.setattr(image_slots, "transcode_image_to", same_tick)
+    slot_file = tmp_path / "slot.png"
+    Image.new("RGB", (16, 4), (0, 0, 0)).save(slot_file)
+    slot = image_slots.ImageSlot(rel_path="slot.png", abs_path=str(slot_file),
+                                 ext=".png", info=detect_image_info(str(slot_file)),
+                                 size=os.path.getsize(slot_file), probed=True)
+    rep = tmp_path / "mine.png"
+    for colour in ((200, 30, 30), (200, 30, 30), (30, 200, 30), (30, 30, 200)):
+        Image.new("RGB", (16, 4), colour).save(rep)
+        assert image_slots.stage_replacement(slot, str(rep))[0]
+        os.utime(slot_file, ns=(1_000_000_000, 1_000_000_000))
+        with Image.open(slot_file) as im:
+            assert im.getpixel((0, 0)) == colour
+
+
+def test_the_rig_table_drawing_check_is_not_fooled_by_a_same_size_same_time_copy(tmp_path):
+    """The same filecmp memory in the rig's table builder (PAD-1502)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "mktables_1502", os.path.join(RIG, "mktables.py"))
+    mk = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mk)
+    src, dest = tmp_path / "a.png", tmp_path / "b.png"
+    src.write_bytes(b"AAAA")
+    dest.write_bytes(b"AAAA")
+    for p in (src, dest):
+        os.utime(p, ns=(1_000_000_000, 1_000_000_000))
+    assert not mk._art_differs(str(src), str(dest))
+    src.write_bytes(b"BBBB")
+    os.utime(src, ns=(1_000_000_000, 1_000_000_000))
+    assert mk._art_differs(str(src), str(dest))

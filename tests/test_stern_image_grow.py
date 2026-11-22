@@ -22,6 +22,7 @@ width, same scale and same top-left corner.
 """
 import hashlib
 import hmac
+import os
 import struct
 
 import pytest
@@ -352,6 +353,10 @@ def test_a_picture_is_not_written_where_this_card_has_no_such_record(tmp_path):
     data, banner, icon = _scene()
     png = _project(tmp_path, data, icon, 16, 16, name="icon")
     Image.new("RGBA", (16, 16), (0, 200, 0, 255)).save(png)
+    # same size as the stock picture: in the baseline scan's clock tick the size+
+    # mtime hash cache would take it for the stock one (PAD-1502)
+    st = os.stat(png)
+    os.utime(png, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
     writes, n, ov, grown, msgs = _writes(tmp_path, _Reader(RAD_PATH, data))
     assert n == 1 and [w[0] for w in writes] == [icon]     # the stock card
 

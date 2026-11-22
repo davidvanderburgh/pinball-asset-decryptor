@@ -40,7 +40,6 @@ checkout, and no table is written into a title's own directory. A card is opened
 read only and stays that way.
 """
 import argparse
-import filecmp
 import os
 import re
 import shutil
@@ -159,7 +158,18 @@ def _art_differs(src, dest):
     if not os.path.exists(dest):
         return True
     try:
-        return not filecmp.cmp(src, dest, shallow=False)
+        # (filecmp.cmp remembers answers by size and mtime even with
+        # shallow=False: a rewritten table of the same size in the same clock
+        # tick read as unchanged, PAD-1502)
+        if os.path.getsize(src) != os.path.getsize(dest):
+            return True
+        with open(src, "rb") as fa, open(dest, "rb") as fb:
+            while True:
+                x = fa.read(1 << 20)
+                if x != fb.read(1 << 20):
+                    return True
+                if not x:
+                    return False
     except OSError:
         return True
 

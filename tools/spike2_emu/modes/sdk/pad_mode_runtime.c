@@ -21600,7 +21600,9 @@ static void sty_home_tick(void)
     static unsigned long left_at;
     unsigned long now = pm_ms();
     int l = coop_left && switch_held(coop_left), r = coop.button && switch_held(coop.button);
-    if (smn.ov) {                                             /* round 7: the game says where Action goes */
+    if (smn.ov || (pm_port_value("comp_menu_overlay_state", 0) && pm_port_value("comp_menu_overlay_sub", 0))) {
+                                                              /* round 7: the game says where Action goes (even
+                                                               * before the menu's first frame read it) */
         smn.home_ms = 0;
         left_at = 0;
         return;

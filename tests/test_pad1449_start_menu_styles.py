@@ -460,7 +460,7 @@ int main(void)
     edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
     assert edge.index("smn.ov == STY_OV_START") < edge.index("sty_menu_owns_action()")
     assert "smn.ov == STY_OV_MODES && smn.open && !smn.shaping" in edge
-    assert "if (smn.ov) {" in R._lift(src, "static void sty_home_tick(void)")
+    assert "if (smn.ov || (pm_port_value(\"comp_menu_overlay_state\", 0)" in R._lift(src, "static void sty_home_tick(void)")
     read = R._lift(src, "static void sty_overlay_read(void)")
     assert "smn.open && !smn.act" in read
     hook = R._lift(src, "static void team_menu_frame(pm_reg *r)")

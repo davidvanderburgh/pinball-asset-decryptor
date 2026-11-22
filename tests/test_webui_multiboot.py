@@ -1856,3 +1856,47 @@ def test_a_plain_folder_keeps_the_card_beside_the_image(tmp_path):
         _add(w, card)
         assert os.path.normpath(_panel(w)._out_var.get()) == os.path.normpath(
             str(tmp_path / "multi" / "godzilla_pro-1_16_0.multi.raw"))
+
+
+# PAD-1498 (pb_lawww, Pinside): "multiples of the same image to have
+# different scores and settings for different events" - the second copy was
+# refused as 'listed twice' and the preview stopped following the list.
+def test_the_same_image_twice_on_a_stern_card_keeps_its_own_store(tmp_path):
+    a = _raw(tmp_path, "godzilla_pro-1_16_0.Release.8G.sdcard.raw")
+    b = _raw(tmp_path, "godzilla_pro-1_16_0.Heisei.8G.sdcard.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, a)
+        _add(w, b)
+        _add(w, a)
+        s = _st(w)
+        assert len(s["rows"]) == 3
+        checks = {c["key"]: c for c in s["checks"]}
+        assert checks["images"]["state"] == "ok", checks["images"]
+        assert checks["images"]["label"] == "3 images"
+        # the preview follows the list: the third card is drawn
+        assert [c["title"] for c in s["preview"]["sketch"]["cards"]] == [
+            "godzilla_pro-1_16_0"] * 3
+        rows = _panel(w)._rows
+        assert mt.validate_form(_panel(w).form()) == []
+        # the copy keeps settings, audits and high scores apart from the first
+        assert not mt.row_own_settings(rows[0]) and not mt.row_own_settings(rows[1])
+        assert mt.row_own_settings(rows[2]) and mt.row_own_hiscores(rows[2])
+        assert mt.row_store(rows[2]) == "godzilla-pro-1-16-0"
+        args = mt.own_scores_args(_panel(w).form())
+        assert args == ["--own-scores", ";;godzilla-pro-1-16-0"]
+        # a third copy gets a store of its own again, not the second's
+        _add(w, a)
+        rows = _panel(w)._rows
+        assert len(rows) == 4
+        assert mt.row_store(rows[3]) not in ("", mt.row_store(rows[2]))
+
+
+def test_the_same_build_twice_is_refused_where_copies_cannot_be_kept_apart(tmp_path):
+    a = _raw(tmp_path, "one.fun")
+    with web_app(tmp_path, mfr="bof") as w:
+        _add(w, a)
+        _add(w, a)
+        s = _st(w)
+        assert len(s["rows"]) == 1
+        assert "one.fun is already on the update" in s["message"]
+        assert "cannot keep two copies of one game apart" in s["message"]

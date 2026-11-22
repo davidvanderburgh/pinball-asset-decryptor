@@ -753,6 +753,24 @@ def row_paths(row):
     return [(row.path or "").strip().strip(chr(34))]
 
 
+def repeats_allowed(be):
+    """PAD-1498: may one image file sit on the card MORE THAN ONCE?
+
+    On a Stern Spike 2 card, yes: every image is its own games tree (the
+    compact build shares the files between the copies, so a second copy
+    costs next to nothing), and each image can keep settings, audits and
+    high scores of its own on the machine - which is the whole reason to
+    list one game twice (pb_lawww, Pinside: "multiples of the same image
+    to have different scores and settings for different events").  The
+    form refused it as "listed twice", and the preview, which only draws a
+    form that validates, stopped following the list: no logo or clip for
+    the new card and no more cards shown.
+
+    Every other platform keeps one store per game and no way to tell two
+    copies apart, so a second copy would be the same card twice: refused."""
+    return getattr(be, "key", "") == "stern"
+
+
 def form_trees(form):
     """Every GAME the form will write, in image order:
     ``[(image_index, path, row_index, member_index_or_None), ...]``.
@@ -1779,6 +1797,7 @@ def validate_form(form, sources=True):
         if _path:
             games_on_card.add(_norm(_path))
     seen = set()
+    repeats = repeats_allowed(be)         # PAD-1498
     for i, row in enumerate(form.images):
         if is_group(row):
             if len(row.members) < 2:
@@ -1802,11 +1821,14 @@ def validate_form(form, sources=True):
                                     "on this card: %s" % (i, mi + 1, mp))
                 else:
                     key = _norm(mp)
-                    if key in seen:
+                    if key in seen and not repeats:
                         errs.append("Image %d, game %d is listed twice: %s"
                                     % (i, mi + 1, mp))
                     seen.add(key)
-            if row.keep and len(set(_norm(q) for q in row_paths(row))) != len(row.members):
+            # ONE RANDOM CARD ROLLING BETWEEN TWO COPIES OF ONE GAME is the
+            # same game with twice the odds, never what was meant - on any
+            # platform, repeats or not (PAD-1498 allows them across cards).
+            if len(set(_norm(q) for q in row_paths(row))) != len(row.members):
                 errs.append("Image %d names the same game twice." % i)
             if row.keep and sources:
                 # A GROUP'S MEMBERS MUST BE ONE RUN of image indexes - the
@@ -1840,7 +1862,7 @@ def validate_form(form, sources=True):
             errs.append("Image %d: no such file: %s" % (i, p))
         else:
             key = _norm(p)
-            if key in seen:
+            if key in seen and not repeats:
                 errs.append("Image %d is listed twice: %s" % (i, p))
             seen.add(key)
         for what, text in (("title", row.title), ("subtitle", row.subtitle)):
@@ -5314,7 +5336,7 @@ CHECK_TONES = {"ok": "success", "now": "accent", "no": "gray", "bad": "error"}
 
 
 def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
-                  card="none", built_changes=None, running=""):
+                  card="none", built_changes=None, running="", repeats=True):
     """THE WHOLE OF THE STATUS ROW, decided here: ``[(key, label, state,
     detail)]`` in :data:`STATUS_CHECKS` order.
 
@@ -5407,7 +5429,8 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
                     why = "%s is not on this machine: %s" % (where, q)
                 elif keeping:
                     continue
-                elif _norm(q) in seen:
+                elif _norm(q) in seen and not repeats:
+                    # PAD-1498: a Spike 2 card may carry one game twice
                     why = "%s is listed twice: %s" % (where, q)
                 else:
                     seen.add(_norm(q))
@@ -8715,7 +8738,8 @@ class MultibootPanel:
             card = "none"
         return status_checks(self._rows, state, self._loaded_card, menu,
                              rebuild, card, built,
-                             self._run_kind if self._busy else "")
+                             self._run_kind if self._busy else "",
+                             repeats=repeats_allowed(self._backend))
 
     def check_detail(self, key):
         """The sentence behind one check - what the row's second line used to
@@ -9190,8 +9214,24 @@ class MultibootPanel:
             self._error("At most %d images fit one %s."
                         % (min(MAX_IMAGES, be.max_cards), be.out_noun))
             return
+        # PAD-1498: THE SAME FILE AGAIN.  A copy of a game is only worth
+        # having apart from the first, so on a card that can keep it apart it
+        # gets settings, audits and high scores of its own from the start
+        # (the Edit dialog's two ticks, already ticked; 'Share with' undoes
+        # it).  Anywhere else it is the same card twice: said now, not as a
+        # preview that quietly stops following the list.
+        again = any(_norm(q) == _norm(path) for r in self._rows
+                    if not (is_group(r) and r.keep) for q in row_paths(r))
+        if again and not repeats_allowed(be):
+            self._error("%s is already on the %s. A %s %s cannot keep two "
+                        "copies of one game apart, so it is listed once."
+                        % (os.path.basename(path), be.out_noun, be.label,
+                           be.out_noun))
+            return
         title, subtitle = suggest_title(path, be.key)
         row = ImageRow(path=path, title=title, subtitle=subtitle)
+        if again:
+            set_row_scores(row, True, True, self._rows, title=title)
         if be.key == "bof":
             # PAD-342: the build's own title or attract clip, moving, as the
             # card, and its own music while it is highlighted (mkbofmulti.py

@@ -3221,10 +3221,18 @@ def test_the_form_refuses_a_group_that_cannot_be_built(tmp_path):
     first.images = [first.images[2], first.images[0], first.images[1]]
     assert any("primary and cannot be a random group" in e
                for e in validate_form(first))
-    # the same .raw twice, once plain and once as a member
+    # the same .raw twice, once plain and once as a member: a Stern card
+    # carries both copies (PAD-1498); a platform that cannot keep them apart
+    # refuses it
     dup = _group_form(tmp_path)[0]
     dup.images[1].path = dup.images[2].members[0].path
+    assert validate_form(dup) == []
+    dup.platform = "spooky"
     assert any("listed twice" in e for e in validate_form(dup))
+    # ...but one random card rolling between two copies of one game, never
+    twice = _group_form(tmp_path)[0]
+    twice.images[2].members[1].path = twice.images[2].members[0].path
+    assert any("names the same game twice" in e for e in validate_form(twice))
     # a member file that is not there
     gone = _group_form(tmp_path)[0]
     gone.images[2].members[1].path = str(tmp_path / "nope.raw")
@@ -3669,3 +3677,22 @@ def test_default_output_is_the_projects_with_one_open(tmp_path):
         os.path.join("multi", "Godzilla two.multi.iso"))
     assert os.path.normpath(default_output_path("D:/x/lab.fun", "bof", project=str(a))) \
         == os.path.normpath(str(a / "multi" / "lab.fun"))
+
+
+def test_one_image_listed_twice_is_a_menu_on_stern_only(tmp_path):
+    """PAD-1498: the same .raw twice is a card on Spike 2 (each copy its own
+    settings and high scores), and the status row says so; elsewhere it is
+    refused, by the form and by the status row alike."""
+    form = _form(tmp_path, 2)
+    form.images.append(ImageRow(path=form.images[0].path, title="IMG 0 AGAIN",
+                                own_scores="img-0-again"))
+    assert validate_form(form) == []
+    assert "--extra" in build_args(form)
+    assert build_args(form).count(multiboot_core.wsl(form.images[0].path)) == 2
+    st = {c[0]: c for c in status_checks(form.images, ("missing", "x", "gray", False), "")}
+    assert st["images"][2] == "ok", st["images"]
+    st = {c[0]: c for c in status_checks(form.images, ("missing", "x", "gray", False), "",
+                                         repeats=False)}
+    assert st["images"][2] == "bad" and "listed twice" in st["images"][3]
+    form.platform = "jjp"
+    assert any("Image 2 is listed twice" in e for e in validate_form(form))

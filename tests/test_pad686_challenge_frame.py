@@ -82,8 +82,9 @@ int main(void)
 
 def test_the_frame_hook_appends_the_entry_and_names_the_mode():
     frame = _lift(_rt(), "static void challenge_menu_frame(")
-    assert "list[ours_at] = entry" in frame and "*count = ours_at + 1" in frame
-    assert "*count >= cap" in frame                                 # never past the game's room
+    # PAD-1504: counted through cnt, the game's count slot written back less one where it holds the last index
+    assert "list[ours_at] = entry" in frame and "cnt = ours_at + 1" in frame and "*count = cnt - clast" in frame
+    assert "cnt >= cap" in frame                                    # never past the game's room
     assert "pm_message_set((unsigned)msg, own_challenge[own[frame_sub]].name)" in frame
     assert "pm_message_restore((unsigned)msg)" in frame             # off the entry: the game's own name again
     assert "own_pending = own[frame_sub]" in frame and "own_pending = -1" in frame

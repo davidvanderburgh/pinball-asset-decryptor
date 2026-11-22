@@ -68,7 +68,7 @@ def test_every_shipped_build_but_turtles_pro_158_has_a_route():
     # PAD-1271 .. PAD-1293: the Spike 3 ports had no route; Star Wars ELG's has the clip v2 route ("surface") since
     # PAD-1323, and PAD-1380 named every drafted port's play bank, each one's clip seen on the glass in the emulator
     spike3 = [p for p in MP.profiles().values() if p.arch == "a64"]
-    assert len(spike3) == 7
+    assert len(spike3) == 8                                   # PAD-1504: Pokemon LE 0.87
     assert {CV.title_key(p): CV.route_of(p) for p in spike3 if CV.route_of(p) != "surface"} == {}
     routes = {CV.title_key(p): CV.route_of(p) for p in MP.profiles().values() if p.arch != "a64"}
     assert {k for k, r in routes.items() if not r} == {"turtles_pro-1.58"}

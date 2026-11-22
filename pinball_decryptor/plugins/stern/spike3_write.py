@@ -835,24 +835,38 @@ def _write_record(output_path, original_path, complete, counts=None, send_ranges
 
 
 class _Copier:
-    """The card image copied to the output on a thread of its own, with the
-    OS's own copy (shutil.copyfile: CopyFileEx on Windows), while the edits
-    are worked out - :func:`write_card` waits for it before the first write."""
+    """The card image copied to the output on a thread of its own while the
+    edits are worked out - :func:`write_card` waits for it before the first
+    write.
+
+    PAD-1507: the copy is SPARSE (core.sparse_card.sparse_copy).  A Spike 3
+    card is the whole 64 GB card and only 3-4 GB of it is data; the OS's
+    own copy (CopyFileEx) wrote all 62 GB back out, zeros and all, so every
+    build took 62 GB of the user's drive and minutes of writing.  Now only
+    the source's allocated ranges are read (a compact library card is read
+    in seconds) and only blocks with data are written; the build reads the
+    same bytes either way.  The destination is full length from the start,
+    so progress is the copy's own count, not the file's size."""
 
     def __init__(self, src, dst):
         import threading
         self.src, self.dst = src, dst
         self.error = None
         self.total = os.path.getsize(src)
+        self.done = 0
         self.t0 = time.monotonic()
         self.thread = threading.Thread(target=self._run, daemon=True,
                                        name="spike3-card-copy")
         self.thread.start()
 
+    def _progress(self, done, total):
+        self.done = done
+
     def _run(self):
-        import shutil
+        from pinball_decryptor.core import sparse_card
         try:
-            shutil.copyfile(self.src, self.dst)
+            sparse_card.sparse_copy(self.src, self.dst,
+                                    progress=self._progress)
         except BaseException as e:          # noqa: BLE001 - raised by wait()
             self.error = e
 
@@ -866,13 +880,10 @@ class _Copier:
         while self.thread.is_alive():
             check()
             if progress:
-                try:
-                    done = os.path.getsize(self.dst)
-                except OSError:
-                    done = 0
-                progress(min(done, self.total), self.total,
+                done = min(self.done, self.total)
+                progress(done, self.total,
                          "Copying the card %d%%"
-                         % (min(done, self.total) * 100 // max(self.total, 1)))
+                         % (done * 100 // max(self.total, 1)))
             self.thread.join(1.0)
         if self.error is not None:
             raise OSError("Could not copy the card image to the build's "

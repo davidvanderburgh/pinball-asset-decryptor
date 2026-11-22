@@ -41,7 +41,9 @@ def test_build_independent_values_are_pro_116s():
     p15, p16 = _entries("godzilla_pro-1.15"), _entries("godzilla_pro-1.16")
     # masks (the battles are rules 12-18 on both builds), fields, counts and the menu's indices and messages
     for k, v in p16.items():
-        if k[0] == "value" and k[1].startswith(("coop_", "comp_menu_")) and not k[1].endswith("_obj"):
+        # (PAD-1449 round 7's comp_menu_overlay_* are the overlay singleton's words: addresses, each build's own)
+        if k[0] == "value" and k[1].startswith(("coop_", "comp_menu_")) and not k[1].endswith("_obj") \
+                and not k[1].startswith("comp_menu_overlay_"):
             assert p15[k] == v, k
     for name in ("intro_scene", "start_logo_scene", "bonus_loop_crop"):
         assert p15[("text", name)] == p16[("text", name)]

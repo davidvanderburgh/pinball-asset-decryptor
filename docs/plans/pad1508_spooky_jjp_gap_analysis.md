@@ -54,7 +54,7 @@ Modes tab's one JJP/Spooky editor offers them everywhere. A key a runtime cannot
 refused by its check by name, never silently ignored.
 
 Proofs: each Spooky runtime in its emulator; P-ROC by its stand-in SkeletonGame in the tests;
-JJP on Wonka 03.03 once the Sentinel key is in this PC.
+JJP on Wonka 03.03 with its own key.
 
 ## Progress
 
@@ -66,4 +66,5 @@ JJP on Wonka 03.03 once the Sentinel key is in this PC.
 * Run 2: `inside` on the four Spooky runtimes (proven on Scooby-Doo, Looney Tunes, Jetsons and
   P-ROC's stand-in), `in_place_of` on JJP and P-ROC (proven on Rick and Morty's rig: its Skillshot
   held off, ours in its place). pinHeck now packs an empty `points`/`seconds` as the documented
-  1,000,000 and 20 s, as every other runtime does. Left: the JJP emulator run, which needs the key.
+  1,000,000 and 20 s, as every other runtime does. Then, with Wonka's key attached, the JJP run on Wonka 03.03: every rule and `in_place_of`
+  (Candy Lane held off, ours in its place) proven (`tools/jjp_emu/proof/pad1508`).

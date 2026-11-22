@@ -207,9 +207,16 @@ Tunes (Godot) on their rigs, Jetsons (pinHeck) in the PIC32 emulator from a PAD-
 by the stand-in SkeletonGame in `tests/test_pad1508_spike2_rules.py` (and pinHeck's compiled runtime
 on Unicorn there). `inside` the same way on all four Spooky engines (run 2), and `in_place_of` on Rick and Morty's
 rig: the game's `Skillshot` held off at the ball's start, ours started and scored in its place, the
-game played on. JJP's runtime takes the same keys and its check passes them; its emulator run
-(every rule, and `in_place_of` on Candy Lane through `JJP_MODS_TEST_GAMEMODE`) waits for the
-purple Sentinel key in this PC (Wonka 03.03, `C:\tmp\PAD-1508\run.sh`).
+game played on. **JJP, Wonka 03.03 with its own key** (hidden, muted, 2026-11-22; `proof/pad1508`, driven by
+`jjpdrive.py`, the switch matrix's ball feeder run headless): RULES B refused until RULES A had run
+(`start_needs`); A's start shot waited for its two `start_also` hits; the ladder paid 1,000,000,
+2,000,000, then the left ramp's `shot_points` 3,000,000 x 3 through the game's own scoring;
+`sound_at` played at 25 and 22 s left; the factory target ended it (`end shot`); `cooldown`
+refused a restart (`8 s left`); B then started and pulsed its lamp (levels rising and falling once
+a second); the untimed combo started C across a 7 s gap; A ran a second time and `start_max`
+refused a third; and when the test switch started Candy Lane the gate held it off (`HELD OFF the
+game's mode cl_mode`) and RULES D started in its place. A's lamps chased 0, 1, 2. Wonka is not on
+free play: a rig game needs coins before Start, once the game is in attract.
 
 ## A mode's own rules: C++ and blocks (PAD-1384)
 

@@ -38,6 +38,7 @@ import io
 import json
 import os
 import posixpath
+import re
 import shlex
 import stat
 import threading
@@ -3129,12 +3130,45 @@ def _also_on_screen(machine, progress):
     return both
 
 
+#: a PAD TEST CARD (PAD-1279; mkmulticard testcard): its boot menu's conf says testcard=on, and it runs no game
+TESTCARD_CONF = "/usr/local/codeselect/images.conf"
+_TESTCARD_ON = re.compile(rb"^[ \t]*testcard[ \t]*=[ \t]*on[ \t]*\r?$", re.M)
+TESTCARD_ONLY = ("This is a PAD test card, and the machine isn't running one: a Send makes the machine's "
+                 "/games what the image has, so its game would be deleted. Write this test card to an SD card "
+                 "for that machine; once it runs one, its test card can be sent over the network.")
+
+
+def is_test_card(target):
+    """Is *target* a PAD test card image: its menu's conf says testcard=on?"""
+    tree = target.trees.get(ROOT)
+    ent = tree.entries.get(TESTCARD_CONF) if tree is not None else None
+    if not ent or ent[0] != "file":
+        return False
+    try:
+        return bool(_TESTCARD_ON.search(bytes(tree.reader.read_file_bytes(ent[1]))))
+    except Exception:                                   # noqa: BLE001 - unreadable: not one we know
+        return False
+
+
+def check_test_card_target(target, machine):
+    """Simon (2026-11-22): a test card updated over the network.  Sending one to a machine running a GAME card
+    would delete the game (a full Send makes /games the image's), so a test card goes only to a machine that runs
+    a test card already."""
+    if not is_test_card(target):
+        return
+    _rc, text = machine.sh("grep -qE '^[[:space:]]*testcard[[:space:]]*=[[:space:]]*on[[:space:]]*$' %s "
+                           "&& echo PAD_TESTCARD" % TESTCARD_CONF, check=False)
+    if "PAD_TESTCARD" not in (text or ""):
+        raise SendError(TESTCARD_ONLY)
+
+
 def send_image(image, machine, log=None, progress=None, cancel=None):
     """Send *image* to *machine*: the quick Send when it is a build of the card the machine runs, else the full
     one.  Returns a summary line."""
     log = log or (lambda *a, **k: None)
     with open_target(image, log) as target:
         check_layout(target, machine.layout())
+        check_test_card_target(target, machine)
         # PAD-1427 (David: "I'm concerned about letting the game run while we are doing updates and I want to make
         # sure we have a clean isolated update path"): the game is held, the machine's screen saying PAD is updating
         # it, before the Send reads or changes anything of the card - nothing of a Send runs beside a game

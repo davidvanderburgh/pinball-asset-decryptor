@@ -236,8 +236,8 @@ def test_the_build_runs_each_step_and_says_where_the_card_is(tmp_path, monkeypat
     from pinball_decryptor.webui import multiboot_core as mbc
     seen = {}
 
-    def fake(form, out, media, cwd=None, test_specs=None):
-        seen["specs"], seen["source"] = test_specs, form.images[0].path
+    def fake(form, out, media, cwd=None, test_specs=None, p3_mib=0):
+        seen["specs"], seen["source"], seen["p3"] = test_specs, form.images[0].path, p3_mib
         with open(out, "wb") as f:
             f.truncate(1 << 20)
         return [("prepare", [sys.executable, "-c", "print('converted')"]),

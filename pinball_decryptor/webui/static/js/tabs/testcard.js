@@ -2,7 +2,7 @@
 // One list - what is ticked TEST in the Images, Video, Scenes and Audio tabs, and files
 // added here - and one button that makes a small card booting any Stern Spike 2 machine
 // into the TEST CARD menu.  The default PAD test card is always on it.
-import { html, PageHead, Card, Button, Field, Note, Progress, tip, call, cx } from "../core/ui.js";
+import { html, PageHead, Card, Button, Check, Field, Note, Progress, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 const NS = "testcard";
@@ -48,6 +48,50 @@ function List({ s }) {
   </div>`;
 }
 
+// Simon (2026-11-22): a test card updated over the network - the card stays small to write fast, with
+// room asked for here ("Allow additional space on the test card for network updates?"), and remote
+// access / Wi-Fi start-up on it as on a game card, so Send to machine can reach it
+const ROOM_TIP = { head: "Space for network updates", lines: [
+  "The card is kept small so it writes fast: its test files area is just big enough for what is on the list now.",
+  "Tick this to give it more room, so test files you send later over the network fit. Any size you like: it has to fit on your SD card, and the image grows by the same amount, so it takes longer to write.",
+  "A test card can also be grown later over the network, but that needs the machine to restart." ] };
+const SSH_TIP = { head: "Remote access", lines: [
+  "Puts the same remote access on the test card as the Network tab puts on a game card: this computer can reach the machine over your home network.",
+  "Needed for Send to machine." ] };
+const WIFI_TIP = { head: "Wi-Fi start-up", lines: [
+  "For a machine on Wi-Fi: the test card starts its Wi-Fi the way the Network tab sets it up on a game card.",
+  "Not needed when the machine is connected by cable." ] };
+
+function NetworkBits({ s }) {
+  const n = s.network || {};
+  const busy = !!s.busy;
+  return html`<div class="stack">
+    <div class="row">
+      <${Check} checked=${n.room} disabled=${busy} label="Allow additional space on the test card for network updates?"
+        title=${ROOM_TIP} onChange=${(v) => call("testcard.set_network", "room", v)} />
+      <${Field} sm type="number" width="80px" min="0.1" step="0.5" value=${n.room_gb} disabled=${busy || !n.room}
+        suffix="GB" title="How much more room the test files area gets, in GB" onCommit=${(v) => call("testcard.set_network", "room_gb", Number(v))} />
+    </div>
+    <div class="row">
+      <${Check} checked=${n.ssh} disabled=${busy} label="Remote access" title=${SSH_TIP}
+        onChange=${(v) => call("testcard.set_network", "ssh", v)} />
+      <${Check} checked=${n.wifi} disabled=${busy} label="Wi-Fi start-up" title=${WIFI_TIP}
+        onChange=${(v) => call("testcard.set_network", "wifi", v)} />
+      <${Check} checked=${n.band5} disabled=${busy || !n.wifi} label="5 GHz"
+        title=${n.wifi ? "Wi-Fi on the 5 GHz band, as the Network tab offers it" : "Tick Wi-Fi start-up first"}
+        onChange=${(v) => call("testcard.set_network", "band5", v)} />
+    </div>
+  </div>`;
+}
+
+function sendWhy(s) {
+  const n = s.network || {};
+  if (!s.source_ok) return "Pick a Spike 2 card image first";
+  if (!n.ssh) return "Tick Remote access first: the test card you send must let this computer in again";
+  if (!s.address) return "Find the machine on the Network tab first";
+  return "";
+}
+
 function Build({ s }) {
   const msg = s.msg || ["", ""];
   return html`<div class="stack">
@@ -57,11 +101,14 @@ function Build({ s }) {
         ${s.source ? s.source + (s.source_ok ? "" : " (not there any more)") : "no card image picked yet"}</span>
       <${Button} drop disabled=${s.busy} onClick=${() => call("testcard.pick_source")}>Pick a Spike 2 card image…<//>
     </div>
+    <${NetworkBits} s=${s} />
     <div class="row">
       ${s.busy
         ? html`<${Button} kind="danger" onClick=${() => call("testcard.cancel")}>Cancel<//>`
-        : html`<${Button} kind="primary" disabled=${!s.source_ok} onClick=${() => call("testcard.build")}>Build test card…<//>`}
-      <span class="small muted">Under 1 GB plus your videos, built in seconds. Write it to an SD card like any card image.</span>
+        : html`<${Button} kind="primary" disabled=${!s.source_ok} onClick=${() => call("testcard.build")}>Build test card…<//>
+          <${Button} disabled=${!!sendWhy(s)} onClick=${() => call("testcard.send")}
+            title=${sendWhy(s) || ("Build the test card and send it to the machine at " + s.address + ": only the files that differ go, then it restarts into the test card menu. The machine must be running a PAD test card already.")}>Send to machine…<//>`}
+      <span class="small muted">${s.room_mib ? "Your videos plus " + (s.network.room_gb) + " GB of room, built in seconds. Write it to an SD card like any card image." : "Under 1 GB plus your videos, built in seconds. Write it to an SD card like any card image."}</span>
     </div>
     ${s.busy ? html`<div class="stack"><${Progress} pct=${s.pct} busy=${s.pct == null} /><span class="small">${s.step}</span></div>` : null}
     ${msg[1] ? html`<${Note} kind=${msg[0] === "ok" ? "ok" : msg[0] === "warn" ? "warn" : msg[0] === "bad" ? "err" : ""}>${msg[1]}<//>` : null}

@@ -200,8 +200,9 @@ card you start from matters:
 - **The same image more than once** is fine: add it again, say one copy
   per league or event. Each copy you add after the first comes in with
   its own settings, audits and high scores already ticked. Give each copy
-  its own title so the menu tells them apart. With **Compact build** the
-  copies take no extra room on the card. (Spike 2 only: the other
+  its own title so the menu tells them apart.
+- **Copies of one image** take no extra room on the card with **Compact
+  build**. (Spike 2 only: the other
   platforms keep one set of settings per game, so they take each image
   once.)
 

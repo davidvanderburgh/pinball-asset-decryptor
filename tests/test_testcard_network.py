@@ -157,6 +157,12 @@ def test_a_failed_remote_access_leaves_the_card_marked_unfinished(tmp_path, monk
     tab._run(src, out, [], {"ssh": True})
     assert tab.state["msg"][0] == "bad" and "remote access could not be added" in tab.state["msg"][1]
     assert os.path.exists(str(ssh_card.pending_marker(out))), "Send and flashing refuse it"
+    # the next build, without remote access or Wi-Fi, writes the card afresh: the old marker goes with it
+    monkeypatch.setattr(ssh_card, "apply_to_build", lambda *a, **k: pytest.fail("remote access is off"))
+    tab = _tab()
+    tab._run(src, out, [], {"ssh": False, "wifi": False})
+    assert tab.state["msg"][0] == "ok", tab.state["msg"]
+    assert not os.path.exists(str(ssh_card.pending_marker(out))), "a good card is not refused as unfinished"
 
 
 def test_send_needs_remote_access_and_the_machine(monkeypatch):

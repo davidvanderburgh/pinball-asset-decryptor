@@ -282,10 +282,14 @@ class TestCardTab(TabService):
     def _extras(self, source, out, net):
         """Remote access and Wi-Fi start-up onto the built card, as a game card gets them (pipeline.py): a
         marker beside the image says it is unfinished until both are on."""
-        if not net["ssh"] and not net["wifi"]:
-            return True, ""
         from ...core import card_extras, ssh_card, wifi_card
         marker = str(ssh_card.pending_marker(out))
+        if not net["ssh"] and not net["wifi"]:
+            # an earlier build's marker (its remote access failed) would refuse this card, written afresh
+            # without either, as unfinished
+            if os.path.exists(marker):
+                os.remove(marker)
+            return True, ""
         step = "Remote access"
         try:
             with open(marker, "w", encoding="utf-8") as f:

@@ -3234,9 +3234,78 @@ def test_munsters_mod_magnet_takes_every_ball():
                         "    mHMagnet.AddBall ActiveBall", "End Sub", "Sub sw45_Hit", "\tHermanShake", "End Sub"])
     gen, _ = vs.patch(script, m)
     assert "    'PAD neutered: If Not BallAtHerman Then Exit Sub\n    mHMagnet.AddBall ActiveBall" in gen
-    # the Herman opto and the magnet coil are the 1.05's (PAD-1117, PAD-1121)
-    assert "\tController.Switch(1082) = (PadIn_sw45 > 0) And Not CBool(PadKnocked_sw45)" in gen
+    # the Herman opto (the 1.05's hold and knock, on the magnet's own trigger:
+    # PAD-1497) and the magnet coil are the 1.05's (PAD-1117, PAD-1121)
+    assert "\tController.Switch(1082) = (PadIn_HMagnet > 0) And Not CBool(PadKnocked_HMagnet)" in gen
     assert "\tmHMagnet.MagnetOn = e\n" in gen
+
+
+_MUNSTERS_MOD_HERMAN = "\n".join([
+    "Dim mHMagnet, BallAtHerman", "Sub HMagnet_Hit", "    If Not BallAtHerman Then Exit Sub",
+    "    mHMagnet.AddBall ActiveBall", "    If mHMagnet.MagnetOn = True Then", "        DOF 135, DOFOn",
+    "    End If", "End Sub", "Sub HMagnet_UnHit:mHMagnet.RemoveBall ActiveBall:End Sub",
+    "Sub sw45_hit ' Herman Opto", "\tHermanShake", "\tBallAtHerman=True", "\tmHMagnet.AddBall ActiveBall",
+    "End Sub"])
+
+
+def test_munsters_mod_herman_opto_is_the_magnets_trigger():
+    # PAD-1497: the MOD made sw45 a solid wall at Herman's face (the 1.05's is
+    # the trigger under the magnet). A wall never un-hits, so the held opto
+    # latched closed on the first touch and the game, reading a ball caught
+    # on the magnet, started the hurry-up with no ball there. HMagnet, where
+    # the 1.05's sw45 was, is the opto; the wall's own rules are quieted.
+    vs = pytest.importorskip("vpxshadow")
+    _, base, m = _munsters_mod_map()
+    assert "sw45" not in m["switches"] and m["switches"]["HMagnet"]["id"] == 82
+    assert m["switches"]["HMagnet"]["event"] == "hold"
+    assert m["switches"]["HMagnet"]["knock"] == base["switches"]["sw45"]["knock"]
+    assert "sw45" in base["switches"] and "HMagnet" not in base["switches"], "the 1.05's is unchanged"
+    gen, rep = vs.patch(_MUNSTERS_MOD_HERMAN, m)
+    assert "Sub sw45_Hit() : End Sub   ' PAD: quiet; the machine runs this now" in gen
+    assert "PadIn_sw45" not in gen
+    assert "\tController.Switch(1082) = Not CBool(PadKnocked_HMagnet)\n\tHMagnet_Hit_orig\n" in gen
+    assert "HMagnet_UnHit_orig" in gen[gen.index("Sub HMagnet_UnHit\n"):]
+    marks = [r["old"] for r in m["repatch"] if r["since"].startswith("PAD-1497")]
+    assert marks == ["Dim PadIn_sw45, PadKnocked_sw45"] and not any(k in gen for k in marks)
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_munsters_mod_herman_opto_under_vbscript(tmp_path):
+    vs = pytest.importorskip("vpxshadow")
+    _, _, m = _munsters_mod_map()
+    gen, _ = vs.patch(_MUNSTERS_MOD_HERMAN, m)
+    i = gen.index("Dim PadIn_HMagnet")
+    subs = gen[i:gen.index("End Sub", gen.index("Sub HMagnet_UnHit\n")) + 7]
+    j = gen.index("Sub HMagnet_Hit_orig")
+    orig = gen[j:gen.index("End Sub", j) + 7] + "\n" + gen[gen.index("Sub HMagnet_UnHit_orig"):].split("\n")[0]
+    quiet = "Sub sw45_Hit() : End Sub"
+    assert quiet in gen
+    mag = gen[gen.index("Sub PadMagnet(e)"):gen.index("End Sub", gen.index("Sub PadMagnet(e)")) + 7]
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Class Ctl", "Public sw",
+        "Private Sub Class_Initialize : Set sw = CreateObject(\"Scripting.Dictionary\") : sw(1082) = False : End Sub",
+        "Public Property Let Switch(n, v) : sw(n) = CBool(v) : End Property",
+        "Public Property Get Switch(n) : Switch = sw(n) : End Property", "End Class",
+        "Class Mag", "Public MagnetOn, Held",
+        "Public Sub AddBall(b) : Held = Held + 1 : End Sub",
+        "Public Sub RemoveBall(b) : Held = Held - 1 : End Sub", "End Class",
+        "Dim Controller, mHMagnet, BallAtHerman, ActiveBall, Log",
+        "Set Controller = New Ctl : Set mHMagnet = New Mag : mHMagnet.Held = 0",
+        "Const DOFOff = 0", "Const DOFOn = 1",
+        "Sub DOF(n, s) : End Sub", "Sub GIOn : End Sub",
+        "Sub S : Log = Log & Controller.Switch(1082) & \" \" : End Sub",
+        subs, orig, quiet, mag,
+        "mHMagnet.MagnetOn = False",
+        "sw45_Hit : S : sw45_Hit : S",                # the ball strikes the wall at Herman's face: no opto
+        "HMagnet_Hit : S",                            # the ball on the magnet: closed, and the magnet has it
+        "Log = Log & mHMagnet.Held & \" \"",
+        "PadMagnet 1 : sw45_Hit : HMagnet_Hit : S",   # the next ball knocks it loose
+        "PadMagnet 0 : HMagnet_UnHit : S : HMagnet_UnHit : S",
+        "WScript.Echo Log"]).replace("\n", "\r\n"), encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.split() == ["False", "False", "True", "1", "False", "False", "False"], r.stdout + r.stderr
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),

@@ -17,6 +17,9 @@ what the mod changed:
   only the table's own sw45_Hit sets - its rules, which the machine replaces:
   the magnet never caught a ball. That guard is neutered, so the magnet takes
   every ball as the 1.05's did (and the machine's MAGNET coil decides);
+* the HERMAN OPTO (PAD-1497): the mod's sw45 is a wall at Herman's face, not
+  the 1.05's trigger under the magnet, so HMagnet (where the 1.05's sw45 was)
+  is the opto, and the wall's own sw45_hit is quieted;
 * the flippers: the machine's flipper coils call PadLFlip / PadRFlip, and the
   flipper keys never reach the table's own key handler, which is where the
   mod calls nFozzy's FlipperActivate / FlipperDeactivate (end-of-stroke
@@ -108,6 +111,30 @@ def build(base):
                   "by": "burger (from Allknowing2012)", "where": "VPUniverse",
                   "url": "https://vpuniverse.com/files/file/33195-the-munsters-prooriginal-2020-mod/"}
     m["neuter"] = list(base["neuter"]) + ["If Not BallAtHerman Then Exit Sub"]
+    # PAD-1497: the HERMAN OPTO. In the 1.05, sw45 is a trigger the magnet
+    # holds the ball inside (PAD-1117 holds it closed, PAD-1121 knocks it
+    # open). The mod made sw45 an invisible solid WALL at Herman's face, the
+    # end of the shot, and moved the old trigger aside as sw45_old: a wall
+    # has a Hit and never an UnHit, so the held switch latched closed on the
+    # first touch and the game read a ball caught on the magnet - the
+    # hurry-up started with no ball on it. The ball the magnet holds sits in
+    # HMagnet, the 60-unit square where the 1.05's sw45 was: that trigger is
+    # the opto here, with the 1.05's hold and knock, and the table's own
+    # HMagnet_Hit / _UnHit (the catch, the shaker, the GI) still run. The
+    # wall's sw45_hit is the table's rules (scores, its own Herman awards,
+    # MagnetStop), which the machine runs now: quieted.
+    sw = dict(m["switches"].pop("sw45"))
+    sw["why"] = ("PAD-1497: burger's mod made sw45 a solid wall at Herman's face, which never "
+                 "un-hits, so the opto latched closed and the hurry-up started by itself; the ball "
+                 "the magnet holds sits in HMagnet, where the 1.05's sw45 trigger was. "
+                 + sw["why"])
+    m["switches"]["HMagnet"] = sw
+    m["orig_keep"] = list(base.get("orig_keep", [])) + ["HMagnet"]
+    m["quiet_subs"] = list(base.get("quiet_subs", [])) + ["sw45_Hit"]
+    m["repatch"] = list(base.get("repatch", [])) + [{
+        "old": "Dim PadIn_sw45, PadKnocked_sw45",
+        "why": "Herman's hurry-up started by itself: the opto was the mod's sw45 wall, which latched closed",
+        "since": "PAD-1497: the MOD's Herman opto is the magnet's own trigger"}]
     x = base["extra_vbs"]
     for side in ("L", "R"):
         if x.count(FLIP_105[side]) != 1:

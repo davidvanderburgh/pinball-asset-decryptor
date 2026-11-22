@@ -84,7 +84,8 @@ def test_the_tab_is_the_spooky_editor_on_a_spooky_update(tmp_path):
         assert s["check"]["ok"] and s["check"]["n"] == 2
         # the form is the keys the Spooky runtime runs, each once
         keys = [k for g in s["groups"] for k in g["keys"]]
-        assert sorted(keys) == sorted(SM.mk().KEYS) and len(keys) == len(set(keys))
+        here = set(SM.mk().KEYS) - SM.mk().keys_not_here(SM.mk().load_port(LABEL))   # PAD-1508: penalty is P-ROC's
+        assert sorted(keys) == sorted(here) and len(keys) == len(set(keys)) and "shot_points" in keys
         assert s["fields"]["panel"]["choices"] == ["middle", "bottom", "top", "none"]
         assert "right_inlane" in s["names"]["switches"] and "daphne_jackpot" in s["names"]["sound"]
         assert s["points_scale"] == 10

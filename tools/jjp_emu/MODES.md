@@ -174,6 +174,38 @@ The port report lists every named coil with what a mode may do (`coils`:
 `COIL_HOLDABLE`, `COIL_ANYWAY`; a test keeps them equal to the runtime's), and
 `mkjjpmodes.py check --port` refuses a coil the mode may not use.
 
+## Spike 2's rules (PAD-1508)
+
+What Spike 2 modes could do that these could not, now the same words on every runtime: JJP
+(`jjpmodes.c`) and Spooky's four (Unity, Godot, P-ROC, pinHeck; `docs/plans/spooky_modes.md`).
+The gap analysis: `docs/plans/pad1508_spooky_jjp_gap_analysis.md`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `shot_points` | none | `<switches> <points>`, a line each (up to 8): a hit of one of these switches pays these points instead of `points`, and scores even when it is not in `shots`. The first line holding the switch wins |
+| `points_ladder` | fixed | `rising`: the Nth scoring shot pays N x its value (Spike 2's rising award) |
+| `end_shots` | none | switches whose hit ends the mode (scoring first if it is a scoring shot) |
+| `penalty` | none | `<switches> <points>`, a line each: a hit takes the points away, never below 0. Only where the game's own score call takes points away: Spooky's P-ROC titles. JJP's engine exports only `score_add_to_player_up` and Spooky's Unity, Godot and pinHeck award calls only add, so the check refuses it there by name |
+| `start_max` | 0 (no limit) | starts at most this many times a game |
+| `cooldown` | 0 | seconds after its end before it can start again; a new game clears it |
+| `start_also` | none | `<switches> [hits]`, a line each (up to 3), on top of `start`: these too must be hit (`hits` times, 1 when absent), in any order, before the start shots start it. Counted like the start count (`start_count_reset`) |
+| `start_needs` | none | `<a mode of ours> [ball|game]`: its starts count only once that mode (by its `name`) has run this ball or this game (game when absent) |
+| `combo_seconds` | 5 | `0` now means no time limit: the `start_combo` switches in order, however long between them |
+| `sound_at` | none | `<seconds left> <sound>`, a line each (up to 8): plays when the time left reaches that number, once a run (a countdown). The game's sound or a file of the mode's own, as the other `sound_*` keys |
+| `sound_shot_every` | 0 (every shot) | the shot sound on every Nth scoring shot only |
+| `lamp_pattern` | blink, or solid with `lamp_blink = 0` | `solid`, `blink`, `pulse` (the colour rising and falling) or `chase` (one lamp at a time, in the `lamps` line's order); `lamp_blink` is its rate (flashes, pulses or chase steps a second) |
+
+Each refusal says why: `start_max`, `cooldown`, `start_needs` and `start_once` log `not counted -
+<why>`, and a start whose `start_also` lines are not met yet logs `waiting for N start_also
+line(s)`. A proof run can log what a `pulse` or `chase` puts: `JJP_MODS_TRACE_LAMPS=1` (JJP), or a
+`trace_lamps` file in the mode folder (Unity, Godot).
+
+**Proven** 2026-11-22, the same three modes on each (hidden, muted): Scooby-Doo (Unity) and Looney
+Tunes (Godot) on their rigs, Jetsons (pinHeck) in the PIC32 emulator from a PAD-built update, P-ROC
+by the stand-in SkeletonGame in `tests/test_pad1508_spike2_rules.py` (and pinHeck's compiled runtime
+on Unicorn there). JJP's runtime takes the same keys and its check passes them; its emulator run
+waits for the purple Sentinel key in this PC (Wonka 03.03, `C:\tmp\PAD-1508\run.sh`).
+
 ## A mode's own rules: C++ and blocks (PAD-1384)
 
 A mode file's keys are its settings. Rules of its own (a bonus that grows, a shot

@@ -4,6 +4,7 @@ check takes them and names every bad value, and the runtime reads the same keys 
 import importlib.util
 import os
 import re
+import struct
 import sys
 
 import pytest
@@ -194,3 +195,84 @@ def test_proc_repeated_lines_add_to_title_cfg(proc, tmp_path):
     r = proc("name = A\nstart = leftInlane\nshot_points = spinner 10\nshot_points = rightInlane 20\n")
     a, = r.pad_modes
     assert [pts for _sw, pts in a["shot_points"]] == [10, 20]
+
+
+# ============================================================================ the pinHeck runtime
+# The compiled MIPS runtime (prebuilt/padheck_JET_V004.bin) against the stand-in Jetsons of
+# test_spooky_modes_pinheck.py (Unicorn): every rule through the game's own score and lamps.
+@pytest.fixture(scope="module")
+def heck():
+    pytest.importorskip("unicorn")
+    spec = importlib.util.spec_from_file_location(
+        "heck_t1508", os.path.join(HERE, "tests", "test_spooky_modes_pinheck.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    ph = mod._load("t1508_pinheck", os.path.join(mod.PH_DIR, "pinheck.py"))
+    mk = mod._load("t1508_mkspk", os.path.join(mod.MODES, "mkspkmodes.py"))
+    return mod, ph, mk.load_port("jetsons-V004")
+
+
+A = dict(file="1_a.mode", name="A", title="A", start="switch_20", start_also="switch_21 2", start_max="2",
+         cooldown="8", shots="switch_10", shot_points="switch_11 3000", points="1000", points_ladder="rising",
+         end_shots="switch_12", seconds="30", sound_at="25 EB0", sound_shot="C01", sound_shot_every="2",
+         lamps="lamp_10 lamp_11 lamp_12", lamp_color="ffffff", lamp_pattern="chase", lamp_blink="2")
+B = dict(file="2_b.mode", name="B", title="B", start="switch_40", start_needs="A game", seconds="6",
+         lamps="lamp_20", lamp_color="ffffff", lamp_pattern="pulse", lamp_blink="1")
+C = dict(file="3_c.mode", name="C", title="C", start_combo="switch_1 switch_2", combo_seconds="0", seconds="4")
+
+
+def test_pinheck_runs_every_rule_on_the_compiled_runtime(heck):
+    mod, ph, port = heck
+    g = mod._game(ph, port, [dict(A), dict(B), dict(C)])
+    t = ph.H.HOOKS["JET_V004"]
+    lamp = lambda n: g.get8(t["lamp_ram"] + n)
+    mod._ball(g)
+    g.switch(40)                                           # B needs A this game: not counted
+    g.switch(20)                                           # A's start shot: waits for start_also
+    g.switch(21)
+    assert "waiting for start_also" in g.log and "RULES" not in g.log
+    s0 = g.score
+    g.switch(21)
+    assert "1_a: STARTED" in g.log
+    g.switch(10); g.switch(10); g.switch(11)               # 1000, 2 x 1000, 3 x 3000
+    assert g.score - s0 == 1000 + 2000 + 9000
+    assert g.calls(1) == 1                                 # the shot sound on the 2nd shot only
+    lit = set()
+    for _ in range(24):                                    # the chase: one lamp at a time, 2 steps a second
+        g.tick(250)
+        lit.add((lamp(10) > 0, lamp(11) > 0, lamp(12) > 0))
+    assert lit == {(True, False, False), (False, True, False), (False, False, True)}
+    assert "seconds left 25" in g.log and "sound_at EB0" in g.log
+    g.switch(12)                                           # the end shot
+    assert "ended (end shot)" in g.log
+    g.switch(20)
+    assert "not counted: cooling down" in g.log
+    g.switch(40)                                           # A ran: B starts, its lamp pulsing
+    assert "2_b: STARTED" in g.log
+    levels = set()
+    for _ in range(20):
+        g.tick(50)
+        levels.add(lamp(20))
+    assert len(levels) >= 4 and 0 in levels and max(levels) >= 7     # rising and falling to 8 of 8
+    g.tick(6000)                                           # B times out
+    g.switch(1)
+    g.tick(7000)                                           # 7 s between: no time limit on C's combo
+    g.switch(2)
+    assert "3_c: STARTED" in g.log
+    g.tick(5000)
+    for _ in range(2):                                     # A again (cooldown long past), then start_max
+        g.switch(20); g.switch(21); g.switch(21); g.switch(12)
+    assert g.log.count("1_a: STARTED") == 2 and "started its start_max times this game" in g.log
+
+
+def test_pinheck_packs_the_rules_after_the_parity_bytes(heck):
+    _mod, ph, port = heck
+    modes = [dict(A), dict(B), dict(C)]
+    data = ph.pack_data(modes, port)
+    a = ph.pack_mode(modes[0], port)
+    assert len(a) == 352 and a[128 + (12 >> 3)] == 1 << (12 & 7)          # end_shots 12
+    rules, every, smax, cool, pat, needs, sp_n, also_n = struct.unpack_from("<8B", a, 136)
+    assert (rules, every, smax, cool, pat, needs, sp_n, also_n) == (1, 2, 2, 8, 4, 0, 1, 1)
+    assert struct.unpack_from("<I", a, 148 + 8)[0] == 3000 and a[148 + (11 >> 3)] == 1 << (11 & 7)
+    assert a[244 + 8] == 2 and struct.unpack_from("<H", a, 280)[0] == 25 and a[282:286] == b"EB0\0"
+    assert modes[1]["_needs"] == 1 and data[:4] == b"PHM3"

@@ -66,8 +66,10 @@ def test_every_key_the_checker_takes_is_one_the_runtime_reads(mk):
     """A key the check accepts but PadModes.cs never reads would be silently ignored."""
     with open(CS, encoding="utf-8") as f:
         src = f.read()
-    read = set(re.findall(r'(?:Get\(|SwitchList\(m, |Sound\(m, |Coil\(m, )"([a-z_]+)"', src))
-    assert set(mk.KEYS) - {"name", "title"} <= read, set(mk.KEYS) - read
+    read = set(re.findall(r'(?:Get\(|SwitchList\(m, |Sound\(m, |Coil\(m, |Lines\(m, )"([a-z_]+)"', src))
+    # PAD-1508: penalty runs only where the game's score call takes points away (the check refuses it here)
+    refused = {"penalty"} if "unity" not in mk.PENALTY_ENGINES else set()
+    assert set(mk.KEYS) - {"name", "title"} - refused <= read, set(mk.KEYS) - read - refused
     # and every other JJP key is refused by name
     assert "code" in mk.NOT_YET and "game_modes" in mk.NOT_YET and "points" not in mk.NOT_YET
     assert "lamps" not in mk.NOT_YET and "multiball" not in mk.NOT_YET and "start_on" not in mk.NOT_YET

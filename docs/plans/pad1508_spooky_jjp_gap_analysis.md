@@ -33,7 +33,7 @@ So one gap list covers both: whatever Spike 2 has that the shared JJP/Spooky key
 | Callouts at seconds left (`callout_at`, `callout_count`) | sounds at start / shot / complete / end only | **Built**: `sound_at = <seconds left> <sound>`, up to 8 lines (the game's sound or a file of the mode's own) |
 | Shot sound every Nth shot (`sound_shot ... every`) | every shot | **Built**: `sound_shot_every = N` |
 | Light patterns (`light ... solid/blink/pulse/chase`) | blink at a rate, or solid | **Built**: `lamp_pattern = solid / blink / pulse / chase`, `lamp_blink` its rate |
-| Shot penalty (`shot_penalty`) | none | **Built where the game can take points away.** JJP's engine exports only `score_add_to_player_up` (Wonka 03.03, read 2026-11-22): no subtract, no set, so JJP's check refuses `penalty` and says why. Spooky's runtimes take it where their game's own score call does |
+| Shot penalty (`shot_penalty`) | none | **Built where the game can take points away**: Spooky's P-ROC titles (SkeletonGame's `game.score` subtracts). JJP's engine exports only `score_add_to_player_up` (Wonka 03.03, read 2026-11-22), and the Unity, Godot and pinHeck award calls only add, so their checks refuse `penalty` and say why |
 | Light the shots that score (`light_shots`) | `lamps` by name | Not built: needs a switch-to-insert map per title, which no JJP or Spooky port report has. `lamps` names them by hand |
 | Modes layered over modes (`layer`, `inside`) | ours run one at a time | Later in this ticket (keep_going): a runtime change in each of the six runtimes |
 | Take the place of a game mode (`in_place_of`, `roster_slot`, `challenge`) | `game_modes = hold` refuses the game's starts; `.stock` changes a game mode | Later in this ticket where the runtime already intercepts the game's start (JJP's hold gate): the refused start starts ours |
@@ -53,10 +53,15 @@ The new keys are the same words on every runtime, read by the same check
 Modes tab's one JJP/Spooky editor offers them everywhere. A key a runtime cannot do is
 refused by its check by name, never silently ignored.
 
-Proofs: JJP on the emulator (Wonka 03.03, below); P-ROC by its stand-in SkeletonGame in
-the tests, then each Spooky runtime on its rig.
+Proofs: each Spooky runtime in its emulator; P-ROC by its stand-in SkeletonGame in the tests;
+JJP on Wonka 03.03 once the Sentinel key is in this PC.
 
 ## Progress
 
-* Run 1 (2026-11-22): the analysis; the eleven rule keys in `jjpmodes.c` and
-  `mkjjpmodes.py`, proven on Wonka 03.03 in the emulator.
+* Run 1 (2026-11-22): the analysis; the rule keys on all six runtimes, both checks and both
+  editors (a "Rules from Spike 2" section; the keys given a line each get a multi-line box).
+  Proven: Scooby-Doo (Unity) and Looney Tunes (Godot) on their rigs, Jetsons (pinHeck) in the
+  PIC32 emulator, P-ROC and pinHeck's compiled runtime in the tests. JJP's emulator run needs the
+  purple Sentinel key plugged into this PC; it was not (`usbipd list` shows no 0529:0001).
+* Next: modes layered over modes (`layer`, `inside`) and taking a game mode's place
+  (`in_place_of`), where each runtime can intercept the game's own start.

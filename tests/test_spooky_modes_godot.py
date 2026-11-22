@@ -81,11 +81,13 @@ def test_every_key_the_checker_takes_is_one_the_runtime_reads(mk):
     """A key the check accepts but pad_modes.gd never reads would be silently ignored."""
     with open(GD, encoding="utf-8") as f:
         src = f.read()
-    read = set(re.findall(r'(?:cfg\.get\(|_sound\(m, )"([a-z_]+)"', src))
+    read = set(re.findall(r'(?:cfg\.get\(|_sound\(m, |_lines\(cfg, )"([a-z_]+)"', src))
     # keys read in a loop: for k in ["coil_start", ...]: ... cfg.get(k
     for group in re.findall(r'for k in \[([^\]]+)\]:\s+var w := _words\(cfg\.get\(k', src):
         read |= set(re.findall(r'"([a-z_]+)"', group))
-    assert set(mk.KEYS) - read == set(), set(mk.KEYS) - read
+    # PAD-1508: penalty runs only where the game's score call takes points away (the check refuses it here)
+    refused = {"penalty"} if "godot" not in mk.PENALTY_ENGINES else set()
+    assert set(mk.KEYS) - read - refused == set(), set(mk.KEYS) - read - refused
 
 
 def test_make_port_takes_the_runtimes_report(mk):

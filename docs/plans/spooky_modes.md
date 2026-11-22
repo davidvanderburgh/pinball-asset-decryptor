@@ -727,6 +727,16 @@ proof is the add_ball: our ask, the game's load coil 80 ms later and its plunger
 Tests: `tests/test_spooky_modes_pinheck.py` runs the shipped runtime on Unicorn against a stand-in
 game for every rule (no game files).
 
+## PAD-1508: Spike 2's rules on every runtime
+
+The gap analysis of Spike 2's mode features against this key set
+(`docs/plans/pad1508_spooky_jjp_gap_analysis.md`) brought eleven rules to all four runtimes, with
+JJP's: `shot_points`, `points_ladder`, `end_shots`, `start_max`, `cooldown`, `start_also`,
+`start_needs`, `sound_at`, `sound_shot_every`, `lamp_pattern` and `combo_seconds = 0`, plus `penalty`
+on P-ROC only (`mkspkmodes.PENALTY_ENGINES`). Keys and meanings: `tools/jjp_emu/MODES.md` "Spike
+2's rules". pinHeck's mode record grew to 352 bytes for them (data `PHM3`). Proven in each engine's
+emulator: Scooby-Doo, Looney Tunes, Jetsons; P-ROC by the stand-in game.
+
 ## Rig fix made on the way
 
 Both Spooky rigs now stub `sync` (logging no-op on the game's PATH): WSL's

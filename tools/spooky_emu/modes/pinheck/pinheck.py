@@ -187,9 +187,9 @@ def pack_mode(m, port):
     flags = ((1 if (m.get("start_count_reset") or "game").strip() == "ball" else 0) |
              {"ball": 2, "game": 4}.get((m.get("start_once") or "no").strip(), 0))
     body = struct.pack("<16s8s8sHHHBBII", title.encode("ascii"), start, shots,
-                       min(_int(m.get("start_count"), 1), 0xFFFF), min(_int(m.get("seconds")), 0xFFFF),
+                       min(_int(m.get("start_count"), 1), 0xFFFF), min(_int(m.get("seconds"), 20), 0xFFFF),   # PAD-1508: empty = the documented 20 s
                        min(_int(m.get("complete")), 0xFFFF), panel, flags,
-                       _int(m.get("points")), _int(m.get("complete_points"))) + sounds
+                       _int(m.get("points"), 1000000), _int(m.get("complete_points"))) + sounds
     # PAD-1469: start rules, lamps, balls, coils
     ev = 0
     for w in _words(m.get("start_on")):

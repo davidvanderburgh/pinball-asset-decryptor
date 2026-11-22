@@ -69,7 +69,7 @@ function NetworkBits({ s }) {
     <div class="row">
       <${Check} checked=${n.room} disabled=${busy} label="Allow additional space on the test card for network updates?"
         title=${ROOM_TIP} onChange=${(v) => call("testcard.set_network", "room", v)} />
-      <${Field} sm type="number" width="80px" min="0.1" step="0.5" value=${n.room_gb} disabled=${busy || !n.room}
+      <${Field} sm type="number" width="130px" min="0.1" step="any" selectAll value=${n.room_gb} disabled=${busy || !n.room}
         suffix="GB" title="How much more room the test files area gets, in GB" onCommit=${(v) => call("testcard.set_network", "room_gb", Number(v))} />
     </div>
     <div class="row">

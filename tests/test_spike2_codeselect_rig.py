@@ -616,7 +616,7 @@ def test_the_selector_runs_without_the_shim_and_with_stdin_closed():
     script from stdin, so a child that reads stdin eats the rest of it."""
     text = _read("run_game.sh")
     line = next(ln for ln in text.splitlines()
-                if 'chroot "$R" /usr/local/codeselect/codeselect' in ln)
+                if 'chroot "$R" $SEL_BIN --conf /dump/codeselect.conf' in ln)
     assert "LD_PRELOAD" not in line
     assert "</dev/null" in line
     assert "--input padsw" in line
@@ -689,7 +689,7 @@ def test_pad_select_pick_reaches_the_selector_and_nothing_else_does():
     the roll."""
     text = _read("run_game.sh")
     line = next(ln for ln in text.splitlines()
-                if 'chroot "$R" /usr/local/codeselect/codeselect' in ln)
+                if 'chroot "$R" $SEL_BIN --conf /dump/codeselect.conf' in ln)
     assert "$SEL_PICK" in line
     assert "--seed" not in text, "there is no rig knob for the seed, on purpose"
     guard = text[text.index('SEL_PICK=""'):text.index("$SEL_PICK", text.index('SEL_PICK=""') + 20)]

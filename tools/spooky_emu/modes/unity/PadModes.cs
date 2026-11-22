@@ -124,6 +124,16 @@ public class CMode {
     // a mode's own files (PAD-1424)
     public bool MusicOn;
     public List<GameObject> Media = new List<GameObject>();
+    // Spike 2's rules (PAD-1508; tools/jjp_emu/MODES.md "Spike 2's rules")
+    public List<KeyValuePair<List<int>, long>> ShotPoints = new List<KeyValuePair<List<int>, long>>();
+    public bool Rising, NeedsBall;
+    public List<int> EndShots = new List<int>();
+    public int StartMax, Cooldown, RunsGame, ShotEvery;
+    public float EndedAt;
+    public List<Also> StartAlso = new List<Also>();
+    public string Needs = "", Pattern = "", Inside = "";
+    public CMode NeedsMode, InsideMode;      // start_needs; inside: the mode of ours it runs inside
+    public List<At> SoundAt = new List<At>();
 
     public string Get(string k, string dflt) {
         string v;
@@ -131,12 +141,21 @@ public class CMode {
     }
 }
 
+// start_also: one line's switches, the hits it wants and has (PAD-1508)
+public class Also { public List<int> Sw; public int Count = 1, Got; }
+// sound_at: a sound at N seconds left, once a run (PAD-1508)
+public class At { public int Secs; public string Sound; public bool Done; }
+
 public class PadRuntime {
+    // keys a mode file may give on several lines (PAD-1508), newline-joined as the check reads them
+    static readonly Dictionary<string, int> Repeatable = new Dictionary<string, int> {
+        { "shot_points", 8 }, { "start_also", 3 }, { "sound_at", 8 } };
     public const int ModeId = 9001;
     public string Dir;
     public List<CMode> All = new List<CMode>();
     public Dictionary<string, string> Title = new Dictionary<string, string>();
     public long Scale = 1;
+    bool traceLamps;          // PAD-1508 proof runs: what a lamp_pattern puts, in the log
     bool ballLive;
     float ballAt;
     CMode shown;
@@ -158,11 +177,17 @@ public class PadRuntime {
         if (System.IO.File.Exists(tp))
             foreach (var kv in Parse(System.IO.File.ReadAllText(tp))) Title[kv.Key] = kv.Value;
         long.TryParse(Get(Title, "points_scale", "1"), out Scale);
+        traceLamps = System.IO.File.Exists(Path.Combine(Dir, "trace_lamps"));
         if (Scale < 1) Scale = 1;
         foreach (var f in Directory.GetFiles(Dir, "*.mode").OrderBy(x => x, StringComparer.Ordinal)) {
             var m = new CMode { File = Path.GetFileName(f) };
             foreach (var kv in Title) m.K[kv.Key] = kv.Value;
-            foreach (var kv in Parse(System.IO.File.ReadAllText(f))) m.K[kv.Key] = kv.Value;
+            foreach (var kv in Parse(System.IO.File.ReadAllText(f))) {
+                string had;
+                if (Repeatable.ContainsKey(kv.Key) && Title.TryGetValue(kv.Key, out had) && had.Length > 0)
+                    m.K[kv.Key] = had + "\n" + kv.Value;     // title.cfg's lines and the mode's add up
+                else m.K[kv.Key] = kv.Value;
+            }
             m.Name = m.Get("name", m.File.Substring(0, m.File.Length - 5));
             m.Title = m.Get("title", m.Name);
             m.Start = SwitchList(m, "start");
@@ -173,13 +198,14 @@ public class PadRuntime {
             m.Complete = Int(m.Get("complete", "0"));
             m.CompletePoints = Long(m.Get("complete_points", "0"));
             m.Combo = SwitchList(m, "start_combo");
-            m.ComboSeconds = Math.Max(1, Int(m.Get("combo_seconds", "5")));
+            m.ComboSeconds = Math.Max(0, Int(m.Get("combo_seconds", "5")));     // 0: no time limit (PAD-1508)
             m.StartScore = Long(m.Get("start_score", "0"));
             foreach (var w in Words(m.Get("start_on", ""))) m.StartOn.Add(w.ToLowerInvariant());
             foreach (var w in Words(m.Get("start_after", ""))) m.StartAfter.Add(w.ToLowerInvariant());
             m.Once = m.Get("start_once", "no");
             m.ResetEachBall = m.Get("start_count_reset", "game") == "ball";
             LampsCoilsBalls(m);
+            Spike2Rules(m);
             All.Add(m);
             if (m.StartOn.Count + m.StartAfter.Count + m.Combo.Count > 0 || m.StartScore > 0)
                 Loader.Log("mode " + m.File + " start rules: on " + string.Join(" ", m.StartOn.ToArray()) +
@@ -190,7 +216,67 @@ public class PadRuntime {
                 ", shots " + Names(m.Shots) + " " + m.Points + " each, " + m.Seconds + " s, complete " + m.Complete +
                 " (+" + m.CompletePoints + ")");
         }
+        foreach (var m in All) {
+            if (m.Inside.Length == 0) continue;
+            m.InsideMode = All.FirstOrDefault(x => x != m && string.Equals(x.Name, m.Inside, StringComparison.OrdinalIgnoreCase));
+            Loader.Log(m.File + (m.InsideMode == null ? ": inside " + m.Inside + ": no other mode of ours has that name; it can never start"
+                                                      : ": runs inside " + m.InsideMode.Name + " (starts only while it runs, ends with it)"));
+        }
+        foreach (var m in All) {
+            if (m.Needs.Length == 0) continue;
+            m.NeedsMode = All.FirstOrDefault(x => x != m && string.Equals(x.Name, m.Needs, StringComparison.OrdinalIgnoreCase));
+            if (m.NeedsMode == null) Loader.Log(m.File + ": start_needs " + m.Needs + ": no other mode of ours has that name; it can never start");
+        }
         Loader.Log(All.Count + " custom mode(s) from " + Dir + "; points scale " + Scale);
+    }
+
+    static string[] Lines(CMode m, string key) {
+        return m.Get(key, "").Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
+    }
+
+    // PAD-1508: Spike 2's rules, the JJP runtime's keys
+    void Spike2Rules(CMode m) {
+        foreach (var ln in Lines(m, "shot_points")) {
+            var w = ln.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            long pts;
+            if (w.Length < 2 || !long.TryParse(w[w.Length - 1].Replace(",", "").Replace("_", ""), out pts)) {
+                Loader.Log(m.File + ": shot_points " + ln + ": wants <switches> <points>; skipped"); continue;
+            }
+            m.K["pad_sp"] = string.Join(" ", w.Take(w.Length - 1).ToArray());
+            m.ShotPoints.Add(new KeyValuePair<List<int>, long>(SwitchList(m, "pad_sp"), pts));
+        }
+        m.Rising = m.Get("points_ladder", "fixed") == "rising";
+        m.EndShots = SwitchList(m, "end_shots");
+        m.StartMax = Math.Max(0, Int(m.Get("start_max", "0")));
+        m.Cooldown = Math.Max(0, Int(m.Get("cooldown", "0")));
+        foreach (var ln in Lines(m, "start_also")) {
+            var w = ln.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+            int count = 1, c;
+            if (w.Count > 1 && int.TryParse(w[w.Count - 1], out c) && c > 0) { count = Math.Min(99, c); w.RemoveAt(w.Count - 1); }
+            m.K["pad_also"] = string.Join(" ", w.ToArray());
+            m.StartAlso.Add(new Also { Sw = SwitchList(m, "pad_also"), Count = count });
+        }
+        if (m.StartAlso.Count > 0 && m.Start.Count == 0) {
+            Loader.Log(m.File + ": start_also adds to start, and there is no start line: ignored"); m.StartAlso.Clear();
+        }
+        var nw = Words(m.Get("start_needs", "")).ToList();
+        m.NeedsBall = nw.Count > 0 && nw[nw.Count - 1] == "ball";
+        if (nw.Count > 0 && (nw[nw.Count - 1] == "ball" || nw[nw.Count - 1] == "game")) nw.RemoveAt(nw.Count - 1);
+        m.Needs = string.Join(" ", nw.ToArray());
+        foreach (var ln in Lines(m, "sound_at")) {
+            int sp = ln.IndexOfAny(new[] { ' ', '\t' }), secs = sp > 0 ? Int(ln.Substring(0, sp)) : 0;
+            if (secs <= 0) { Loader.Log(m.File + ": sound_at " + ln + ": wants <seconds left> <sound>; skipped"); continue; }
+            m.SoundAt.Add(new At { Secs = secs, Sound = ln.Substring(sp + 1).Trim() });
+        }
+        m.ShotEvery = Math.Max(0, Int(m.Get("sound_shot_every", "0")));
+        m.Pattern = m.Get("lamp_pattern", "").ToLowerInvariant();
+        m.Inside = m.Get("inside", "").Trim();
+        if (m.ShotPoints.Count + m.EndShots.Count + m.StartAlso.Count + m.SoundAt.Count + m.StartMax + m.Cooldown + m.ShotEvery > 0
+            || m.Rising || m.Needs.Length > 0 || m.Pattern.Length > 0)
+            Loader.Log("mode " + m.File + " Spike 2 rules: " + m.ShotPoints.Count + " shot_points, ladder " + (m.Rising ? "rising" : "fixed") +
+                ", end shots " + Names(m.EndShots) + ", start_max " + m.StartMax + ", cooldown " + m.Cooldown + " s, " +
+                m.StartAlso.Count + " start_also, start_needs " + (m.Needs.Length > 0 ? m.Needs + (m.NeedsBall ? " (this ball)" : " (this game)") : "-") +
+                ", " + m.SoundAt.Count + " sound_at, shot sound every " + m.ShotEvery + ", lamp pattern " + (m.Pattern.Length > 0 ? m.Pattern : "-"));
     }
 
     // PAD-1424: the game's lamps on a layer of ours, its coils, its balls (MODES.md "Balls and coils")
@@ -235,7 +321,13 @@ public class PadRuntime {
             if (line.Length == 0 || line[0] == '#' || line[0] == ';') continue;
             int eq = line.IndexOf('=');
             if (eq <= 0) continue;
-            d[line.Substring(0, eq).Trim().ToLowerInvariant()] = line.Substring(eq + 1).Trim();
+            string k = line.Substring(0, eq).Trim().ToLowerInvariant(), v = line.Substring(eq + 1).Trim(), had;
+            int hash = v.IndexOf(" #");
+            if (hash >= 0) v = v.Substring(0, hash).Trim();
+            int most;
+            if (Repeatable.TryGetValue(k, out most) && d.TryGetValue(k, out had) && had.Length > 0) {
+                if (had.Split('\n').Length < most) d[k] = had + "\n" + v;     // a line each (PAD-1508)
+            } else d[k] = v;
         }
         return d;
     }
@@ -289,6 +381,8 @@ public class PadRuntime {
         foreach (var m in All) {
             Stop(m, null);
             m.Hits = 0; m.ComboAt = 0; m.RanThisGame = false; m.ScoreFired.Clear();
+            m.RunsGame = 0; m.EndedAt = 0f;
+            foreach (var a in m.StartAlso) a.Got = 0;
         }
         extraSeen = -1;
         Loader.Log("new_game_started: start counts reset");
@@ -305,7 +399,7 @@ public class PadRuntime {
         Loader.Log("ball_start (ball " + ball + " of " + of + ", player " + (Glue.Player() + 1) + ")");
         foreach (var m in All) {
             m.RanThisBall = false; m.ComboAt = 0;
-            if (m.ResetEachBall) m.Hits = 0;
+            if (m.ResetEachBall) { m.Hits = 0; foreach (var a in m.StartAlso) a.Got = 0; }
         }
         GameEvent("ball_start");
         if (ball == 1) GameEvent("first_ball");
@@ -318,13 +412,56 @@ public class PadRuntime {
     HashSet<string> lastRunning;
     int extraSeen = -1;
 
+    // Why m may not start (or count toward a start) now, or null: start_once, and Spike 2's
+    // start_max, cooldown and start_needs (PAD-1508).
+    string Blocked(CMode m) {
+        if (m.Once == "ball" && m.RanThisBall) return "already ran this ball (start_once)";
+        if (m.Once == "game" && m.RanThisGame) return "already ran this game (start_once)";
+        if (m.StartMax > 0 && m.RunsGame >= m.StartMax) return "started " + m.RunsGame + " time(s) this game, its start_max";
+        if (m.Cooldown > 0 && m.EndedAt > 0f) {
+            float left = m.Cooldown - (Time.unscaledTime - m.EndedAt);
+            if (left > 0f) return "cooling down, " + (int)Math.Ceiling(left) + " s left";
+        }
+        if (m.Needs.Length > 0) {
+            if (m.NeedsMode == null) return "start_needs names no mode of ours";
+            if (!(m.NeedsBall ? m.NeedsMode.RanThisBall : m.NeedsMode.RanThisGame))
+                return m.NeedsMode.Name + " has not run this " + (m.NeedsBall ? "ball" : "game") + " (start_needs)";
+        }
+        if (m.Inside.Length > 0) {
+            if (m.InsideMode == null) return "inside names no mode of ours";
+            if (!m.InsideMode.Running) return "it runs inside " + m.InsideMode.Name + ", which is not running";
+        }
+        return null;
+    }
+
+    // start_also (PAD-1508): a hit of one of its lines' switches counts, in any order
+    bool AlsoHit(CMode m, int sw) {
+        bool hit = false;
+        for (int i = 0; i < m.StartAlso.Count; i++) {
+            var a = m.StartAlso[i];
+            if (!a.Sw.Contains(sw) || a.Got >= a.Count) continue;
+            string no = Blocked(m);
+            if (no != null) { Loader.Log(m.Name + ": start_also " + Glue.SwitchName(sw) + " not counted - " + no); return false; }
+            a.Got++;
+            hit = true;
+            Loader.Log(m.Name + ": start_also " + (i + 1) + ", " + Glue.SwitchName(sw) + ": " + a.Got + " of " + a.Count);
+        }
+        return hit;
+    }
+
     // A start rule fired for m: one more toward its start_count.
-    void Fire(CMode m, string why) {
+    void Fire(CMode m, string why, bool isSwitch = false, bool count = true) {
         if (m.Running || !Playing()) return;
-        if ((m.Once == "ball" && m.RanThisBall) || (m.Once == "game" && m.RanThisGame)) return;
-        m.Hits++;
-        Loader.Log(m.Name + ": " + why + " (" + m.Hits + " of " + m.StartCount + ")");
-        if (m.Hits >= m.StartCount) StartMode(m);
+        string no = Blocked(m);
+        if (no != null) { Loader.Log(m.Name + ": " + why + " - not counted (" + no + ")"); return; }
+        if (count && m.Hits < m.StartCount) {
+            m.Hits++;
+            Loader.Log(m.Name + ": " + why + " (" + m.Hits + " of " + m.StartCount + ")");
+        }
+        if (m.Hits < m.StartCount) return;
+        int waiting = m.StartAlso.Count(a => a.Got < a.Count);
+        if (isSwitch && waiting > 0) { Loader.Log(m.Name + ": start shots made - waiting for " + waiting + " start_also line(s)"); return; }
+        StartMode(m);
     }
 
     // start_on: ball_start, first_ball, last_ball, valid_playfield, ball_saved, extra_ball, multiball_end
@@ -352,7 +489,7 @@ public class PadRuntime {
 
     void Combo(CMode m, int sw, float now) {
         if (m.Combo.Count < 2 || m.Running) return;
-        if (m.ComboAt > 0 && now - m.ComboTime > m.ComboSeconds) m.ComboAt = 0;
+        if (m.ComboAt > 0 && m.ComboSeconds > 0 && now - m.ComboTime > m.ComboSeconds) m.ComboAt = 0;
         if (m.Combo[m.ComboAt] == sw) { m.ComboAt++; m.ComboTime = now; }
         else if (m.Combo[0] == sw) { m.ComboAt = 1; m.ComboTime = now; }
         if (m.ComboAt >= m.Combo.Count) { m.ComboAt = 0; Fire(m, "start_combo made"); }
@@ -427,11 +564,15 @@ public class PadRuntime {
         foreach (var m in All) {
             if (m.Running) {
                 RunningSwitch(m, sw);
-                if (m.Running && m.Shots.Contains(sw)) Shot(m, sw);
+                long value;
+                if (m.Running && Value(m, sw, out value)) Shot(m, sw, value);
+                if (m.Running && m.EndShots.Contains(sw)) Stop(m, "end shot " + Glue.SwitchName(sw));
                 continue;
             }
             Combo(m, sw, now);
-            if (!m.Running && m.Start.Contains(sw)) Fire(m, "start switch " + Glue.SwitchName(sw) + " hit");
+            bool also = AlsoHit(m, sw);
+            if (!m.Running && m.Start.Contains(sw)) Fire(m, "start switch " + Glue.SwitchName(sw) + " hit", true);
+            else if (also && !m.Running && m.Hits >= m.StartCount) Fire(m, "start_also met on " + Glue.SwitchName(sw), true, false);
         }
     }
 
@@ -439,6 +580,9 @@ public class PadRuntime {
         m.Hits = 0;
         m.ComboAt = 0;
         m.RanThisBall = m.RanThisGame = true;
+        m.RunsGame++;
+        foreach (var a in m.StartAlso) a.Got = 0;
+        foreach (var a in m.SoundAt) a.Done = false;
         m.Running = true;
         m.Made = 0;
         m.Total = 0;
@@ -456,13 +600,21 @@ public class PadRuntime {
         Draw();
     }
 
-    void Shot(CMode m, int sw) {
-        long got = Score(m.Points);
+    // What a hit of sw pays while m runs: the first shot_points line holding it, else points when
+    // it is one of the shots; false when it does not score (PAD-1508).
+    bool Value(CMode m, int sw, out long value) {
+        foreach (var kv in m.ShotPoints) if (kv.Key.Contains(sw)) { value = kv.Value; return true; }
+        value = m.Points;
+        return m.Shots.Contains(sw);
+    }
+
+    void Shot(CMode m, int sw, long value) {
+        long got = Score(m.Rising ? value * (m.Made + 1) : value);
         m.Made++;
         m.Total += got;
         Loader.Log(m.Name + ": shot " + m.Made + (m.Complete > 0 ? " of " + m.Complete : "") + " on " +
             Glue.SwitchName(sw) + ": " + got + " points (player score " + Glue.PlayerScore() + ")");
-        Sound(m, "sound_shot");
+        if (m.ShotEvery == 0 || m.Made % m.ShotEvery == 0) Sound(m, "sound_shot");
         Coil(m, "coil_shot");
         if (m.HoldWhen == "shots") Hold(m);
         shown = m;
@@ -481,6 +633,9 @@ public class PadRuntime {
     void Stop(CMode m, string why) {
         if (!m.Running) return;
         m.Running = false;
+        m.EndedAt = Time.unscaledTime;           // cooldown (PAD-1508)
+        foreach (var x in All)                   // a mode inside this one ends with it (PAD-1508)
+            if (x.InsideMode == m && x.Running) Stop(x, "the mode it runs inside ended");
         if (why != null) {
             Loader.Log(m.Name + ": ended (" + why + "), " + m.Made + " shot(s), total " + m.Total);
             Sound(m, "sound_end");
@@ -507,6 +662,13 @@ public class PadRuntime {
         foreach (var m in All) {
             if (!m.Running) continue;
             if (m.MbServed && m.MbOn.Count > 0) m.EndsAt = 0f;      // the balls came: the clock stops
+            if (m.EndsAt > 0)                     // sound_at (PAD-1508): a sound at N seconds left
+                foreach (var a in m.SoundAt)
+                    if (!a.Done && a.Secs < m.Seconds && m.EndsAt - now <= a.Secs) {
+                        a.Done = true;
+                        Loader.Log(m.Name + ": " + a.Secs + " s left - sound_at " + a.Sound);
+                        Sound(m, "sound_at", a.Sound);
+                    }
             if (m.EndsAt > 0 && now >= m.EndsAt) { Stop(m, "time ran out"); continue; }
             try { BallsTick(m, now); LampsTick(m, now); } catch (Exception e) { Loader.Log(m.Name + ": " + e.Message); }
             if (m.Held && now >= m.HeldUntil) Unhold(m);
@@ -535,18 +697,32 @@ public class PadRuntime {
 
     // Our colour on the mode's lamps, blinking lamp_blink times a second; set again four times a
     // second (the game's own lighting writes the same lamps on titles with no layer of ours).
+    // PAD-1508: lamp_pattern solid / blink / pulse (the colour rising and falling, ten steps a
+    // second) / chase (one lamp at a time, in the lamps line's order), lamp_blink its rate.
     void LampsTick(CMode m, float now) {
         if (m.Lamps.Count == 0) return;
-        int phase = m.LampBlink > 0 ? (int)((now - m.StartedAt) * m.LampBlink * 2f) % 2 : 0;
+        string pat = m.Pattern.Length > 0 ? m.Pattern : (m.LampBlink > 0 ? "blink" : "solid");
+        float rate = m.LampBlink > 0 ? m.LampBlink : 4f, t = now - m.StartedAt;
+        int phase = pat == "blink" ? (int)(t * rate * 2f) % 2
+                  : pat == "chase" ? (int)(t * rate) % m.Lamps.Count
+                  : pat == "pulse" ? (int)(t * 10f) : 0;
         if (phase == m.LampPhase && now - m.LampAt < 0.25f) return;
         bool first = m.LampPhase < 0;
         m.LampPhase = phase; m.LampAt = now;
-        var c = phase == 0 ? m.LampColor : new Color32(0, 0, 0, 255);
+        var off = new Color32(0, 0, 0, 255);
+        var c = pat == "blink" && phase != 0 ? off : m.LampColor;
+        if (pat == "pulse") {
+            float ph = (t * rate) % 1f, lv = ph < 0.5f ? ph * 2f : (1f - ph) * 2f;
+            c = new Color32((byte)(m.LampColor.r * lv), (byte)(m.LampColor.g * lv), (byte)(m.LampColor.b * lv), 255);
+        }
         var missing = new List<string>();
-        foreach (var l in m.Lamps) if (!Glue.LampSet(l, c)) missing.Add(l);
+        for (int i = 0; i < m.Lamps.Count; i++)
+            if (!Glue.LampSet(m.Lamps[i], pat == "chase" && i != phase ? off : c)) missing.Add(m.Lamps[i]);
+        if (traceLamps && (pat == "pulse" || pat == "chase"))      // proof runs: a trace_lamps file in the mode folder
+            Loader.Log(m.Name + ": lamps " + pat + (pat == "chase" ? " lit " + phase : " level " + c.r + "," + c.g + "," + c.b));
         if (first)
             Loader.Log(m.Name + ": lamps " + string.Join(" ", m.Lamps.Where(x => !missing.Contains(x)).ToArray()) + " lit #" +
-                m.Get("lamp_color", "ffffff") + (m.LampBlink > 0 ? ", " + m.LampBlink + " flashes a second" : "") +
+                m.Get("lamp_color", "ffffff") + ", " + pat + (pat != "solid" ? " at " + rate + " a second" : "") +
                 (missing.Count > 0 ? "; not this game's lamps: " + string.Join(" ", missing.ToArray()) : ""));
     }
 
@@ -611,8 +787,8 @@ public class PadRuntime {
     }
 
     // ------------------------------------------------------------------ the game's callouts
-    void Sound(CMode m, string key) {
-        string name = m.Get(key, "");
+    void Sound(CMode m, string key, string name = null) {
+        if (name == null) name = m.Get(key, "");
         if (name.Length == 0) return;
         if (Files.IsSound(name)) { Files.PlaySound(this, m, key, name); return; }
         string how;

@@ -55,6 +55,7 @@ var mb_was := false
 var last_running = null
 var extra_seen := -1
 var rules_at := 0.0
+var trace_lamps := false   # PAD-1508 proof runs: what a lamp_pattern puts, in the log
 # the priority of our LED commands: above the game's shows and modes (5 .. ~400), below its system
 # modes (9500+) and the service menu (9750)
 const LED_PRI := 1000
@@ -112,6 +113,7 @@ func load_modes() -> void:
 	if FileAccess.file_exists(dir.path_join("off")):
 		plog("%s/off is there: custom modes are off" % dir)
 		return
+	trace_lamps = FileAccess.file_exists(dir.path_join("trace_lamps"))
 	var title := {}
 	if FileAccess.file_exists(dir.path_join("title.cfg")):
 		title = parse(FileAccess.get_file_as_string(dir.path_join("title.cfg")))
@@ -121,8 +123,7 @@ func load_modes() -> void:
 			files.append(fn)
 	files.sort()
 	for fn in files:
-		var cfg := title.duplicate()
-		cfg.merge(parse(FileAccess.get_file_as_string(dir.path_join(fn))), true)
+		var cfg := parse(FileAccess.get_file_as_string(dir.path_join(fn)), title)   # title.cfg's lines and the mode's add up
 		var m := {
 			"file": fn, "cfg": cfg,
 			"name": cfg.get("name", fn.get_basename()),
@@ -137,19 +138,39 @@ func load_modes() -> void:
 		}
 		m["title"] = cfg.get("title", m["name"])
 		_start_rules(fn, m, cfg)
+		_spike2_rules(fn, m, cfg)
 		_lamps_coils_balls(fn, m, cfg)
 		all.append(m)
 		plog("mode %s \"%s\": start %s x%d, shots %s, %d points, %s, complete %d (+%d)" % [fn, m["name"],
 			names(m["start"]), m["start_count"], names(m["shots"]), m["points"],
 			("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends",
 			m["complete"], m["complete_points"]])
+	for m in all:
+		if m["inside"] == "":
+			continue
+		for x in all:
+			if x != m and str(x["name"]).to_lower() == m["inside"].to_lower():
+				m["inside_mode"] = x
+		if m["inside_mode"] == null:
+			plog("%s: inside %s: no other mode of ours has that name; it can never start" % [m["file"], m["inside"]])
+		else:
+			plog("%s: runs inside %s (starts only while it runs, ends with it)" % [m["file"], m["inside_mode"]["name"]])
+	for m in all:
+		m["needs_mode"] = null
+		if m["needs"] == "":
+			continue
+		for x in all:
+			if x != m and str(x["name"]).to_lower() == m["needs"].to_lower():
+				m["needs_mode"] = x
+		if m["needs_mode"] == null:
+			plog("%s: start_needs %s: no other mode of ours has that name; it can never start" % [m["file"], m["needs"]])
 	plog("%d custom mode(s) from %s" % [all.size(), dir])
 
 
 # PAD-1424: JJP's start rules (MODES.md "Start rules from the game's hook lists")
 func _start_rules(fn: String, m: Dictionary, cfg: Dictionary) -> void:
 	m["combo"] = switches(fn, "start_combo", cfg.get("start_combo", ""))
-	m["combo_seconds"] = maxi(1, to_int(cfg.get("combo_seconds", "5")))
+	m["combo_seconds"] = maxi(0, to_int(cfg.get("combo_seconds", "5")))     # 0: no time limit (PAD-1508)
 	m["start_score"] = to_int(cfg.get("start_score", "0"))
 	m["start_on"] = _words(cfg.get("start_on", ""))
 	m["start_after"] = _words(cfg.get("start_after", ""))
@@ -165,6 +186,68 @@ func _start_rules(fn: String, m: Dictionary, cfg: Dictionary) -> void:
 		plog("mode %s start rules: on %s; after %s; score %d; combo %s within %d s; once %s; count reset %s" % [
 			fn, " ".join(m["start_on"]), " ".join(m["start_after"]), m["start_score"], names(m["combo"]),
 			m["combo_seconds"], m["once"], "ball" if m["reset_ball"] else "game"])
+
+
+static func _lines(cfg: Dictionary, key: String) -> Array:
+	var out := []
+	for ln in str(cfg.get(key, "")).split("\n"):
+		if ln.strip_edges() != "":
+			out.append(ln.strip_edges())
+	return out
+
+
+# PAD-1508: Spike 2's rules, the JJP runtime's keys (tools/jjp_emu/MODES.md "Spike 2's rules")
+func _spike2_rules(fn: String, m: Dictionary, cfg: Dictionary) -> void:
+	m["shot_points"] = []
+	for ln in _lines(cfg, "shot_points"):
+		var w: Array = Array(ln.replace("\t", " ").split(" ", false))
+		var last: String = w[w.size() - 1].replace(",", "").replace("_", "") if w.size() > 1 else ""
+		if not last.is_valid_int():
+			plog("%s: shot_points %s: wants <switches> <points>; skipped" % [fn, ln])
+			continue
+		m["shot_points"].append([switches(fn, "shot_points", " ".join(w.slice(0, w.size() - 1))), int(last)])
+	m["rising"] = cfg.get("points_ladder", "fixed") == "rising"
+	m["end_shots"] = switches(fn, "end_shots", cfg.get("end_shots", ""))
+	m["start_max"] = maxi(0, to_int(cfg.get("start_max", "0")))
+	m["cooldown"] = maxi(0, to_int(cfg.get("cooldown", "0")))
+	m["start_also"] = []
+	for ln in _lines(cfg, "start_also"):
+		var w: Array = Array(ln.replace("\t", " ").split(" ", false))
+		var count := 1
+		if w.size() > 1 and str(w[w.size() - 1]).is_valid_int() and int(w[w.size() - 1]) > 0:
+			count = mini(99, int(w[w.size() - 1]))
+			w = w.slice(0, w.size() - 1)
+		m["start_also"].append({"sw": switches(fn, "start_also", " ".join(w)), "count": count, "got": 0})
+	if not m["start_also"].is_empty() and m["start"].is_empty():
+		plog("%s: start_also adds to start, and there is no start line: ignored" % fn)
+		m["start_also"] = []
+	var nw: Array = Array(str(cfg.get("start_needs", "")).split(" ", false))
+	m["needs_ball"] = nw.size() > 0 and nw[nw.size() - 1] == "ball"
+	if nw.size() > 0 and (nw[nw.size() - 1] == "ball" or nw[nw.size() - 1] == "game"):
+		nw = nw.slice(0, nw.size() - 1)
+	m["needs"] = " ".join(nw)
+	m["sound_at"] = []
+	for ln in _lines(cfg, "sound_at"):
+		var sp: int = ln.find(" ")
+		var secs := to_int(ln.substr(0, sp)) if sp > 0 else 0
+		if secs <= 0:
+			plog("%s: sound_at %s: wants <seconds left> <sound>; skipped" % [fn, ln])
+			continue
+		m["sound_at"].append({"secs": secs, "sound": ln.substr(sp + 1).strip_edges(), "done": false})
+	m["shot_every"] = maxi(0, to_int(cfg.get("sound_shot_every", "0")))
+	m["pattern"] = str(cfg.get("lamp_pattern", "")).to_lower()
+	m["inside"] = str(cfg.get("inside", "")).strip_edges()
+	m["inside_mode"] = null
+	m["runs_game"] = 0
+	m["ended_at"] = 0.0
+	if not (m["shot_points"].is_empty() and m["end_shots"].is_empty() and m["start_also"].is_empty() \
+			and m["sound_at"].is_empty()) or m["rising"] or m["start_max"] > 0 or m["cooldown"] > 0 \
+			or m["needs"] != "" or m["shot_every"] > 0 or m["pattern"] != "":
+		plog("mode %s Spike 2 rules: %d shot_points, ladder %s, end shots %s, start_max %d, cooldown %d s, %d start_also, start_needs %s, %d sound_at, shot sound every %d, lamp pattern %s" % [
+			fn, m["shot_points"].size(), "rising" if m["rising"] else "fixed", names(m["end_shots"]),
+			m["start_max"], m["cooldown"], m["start_also"].size(),
+			(m["needs"] + (" (this ball)" if m["needs_ball"] else " (this game)")) if m["needs"] != "" else "-",
+			m["sound_at"].size(), m["shot_every"], m["pattern"] if m["pattern"] != "" else "-"])
 
 
 # PAD-1424: the game's LEDs at a priority of ours, its coils, its balls (MODES.md "Balls and coils")
@@ -408,8 +491,12 @@ static func _words(v: String) -> Array:
 	return out
 
 
-static func parse(text: String) -> Dictionary:
-	var d := {}
+# keys a mode file may give on several lines (PAD-1508), newline-joined as the check reads them
+const REPEATABLE := {"shot_points": 8, "start_also": 3, "sound_at": 8}
+
+
+static func parse(text: String, into: Dictionary = {}) -> Dictionary:
+	var d := into.duplicate()
 	for raw in text.split("\n"):
 		var s := raw.strip_edges()
 		if s == "" or s[0] == "#" or s[0] == ";" or s.find("=") < 0:
@@ -418,7 +505,11 @@ static func parse(text: String) -> Dictionary:
 		var v := s.substr(s.find("=") + 1).strip_edges()
 		if v.find(" #") >= 0:
 			v = v.substr(0, v.find(" #")).strip_edges()
-		d[k] = v
+		if REPEATABLE.has(k) and d.has(k) and str(d[k]) != "":
+			if str(d[k]).split("\n").size() < REPEATABLE[k]:
+				d[k] = str(d[k]) + "\n" + v
+		else:
+			d[k] = v
 	return d
 
 
@@ -465,6 +556,10 @@ func _on_game_started() -> void:
 		m["combo_at"] = 0
 		m["ran_game"] = false
 		m["score_fired"] = {}
+		m["runs_game"] = 0
+		m["ended_at"] = 0.0
+		for a in m["start_also"]:
+			a["got"] = 0
 	plog("game_started: start counts reset")
 
 
@@ -482,6 +577,8 @@ func _on_ball_started(shoot_again) -> void:
 		m["combo_at"] = 0
 		if m["reset_ball"]:
 			m["hits"] = 0
+			for a in m["start_also"]:
+				a["got"] = 0
 	_event("ball_start")
 	if Game.ball == 1 and not shoot_again:
 		_event("first_ball")
@@ -522,25 +619,88 @@ func _on_switch(sw) -> void:
 	for m in all:
 		if m["running"]:
 			_running_switch(m, sw)
-			if m["running"] and sw in m["shots"]:
-				_shot(m, sw)
+			var value = _value(m, sw)
+			if m["running"] and value != null:
+				_shot(m, sw, value)
+			if m["running"] and sw in m["end_shots"]:
+				_stop(m, "end shot %s" % Switches.items[sw].name)
 			continue
 		_combo(m, sw, now)
+		var also := _also_hit(m, sw)
 		if not m["running"] and sw in m["start"]:
-			_fire(m, "start switch %s hit" % Switches.items[sw].name)
+			_fire(m, "start switch %s hit" % Switches.items[sw].name, true)
+		elif also and not m["running"] and m["hits"] >= m["start_count"]:
+			_fire(m, "start_also met on %s" % Switches.items[sw].name, true, false)
 
 
 # ------------------------------------------------------------------ start rules (PAD-1424)
+# Why m may not start (or count toward a start) now, or "": start_once, and Spike 2's start_max,
+# cooldown and start_needs (PAD-1508).
+func _blocked(m: Dictionary) -> String:
+	if m["once"] == "ball" and m["ran_ball"]:
+		return "already ran this ball (start_once)"
+	if m["once"] == "game" and m["ran_game"]:
+		return "already ran this game (start_once)"
+	if m["start_max"] > 0 and m["runs_game"] >= m["start_max"]:
+		return "started %d time(s) this game, its start_max" % m["runs_game"]
+	if m["cooldown"] > 0 and m["ended_at"] > 0.0:
+		var left: float = m["cooldown"] - (Time.get_ticks_msec() / 1000.0 - m["ended_at"])
+		if left > 0.0:
+			return "cooling down, %d s left" % int(ceil(left))
+	if m["needs"] != "":
+		var n = m["needs_mode"]
+		if n == null:
+			return "start_needs names no mode of ours"
+		if not (n["ran_ball"] if m["needs_ball"] else n["ran_game"]):
+			return "%s has not run this %s (start_needs)" % [n["name"], "ball" if m["needs_ball"] else "game"]
+	if m["inside"] != "":
+		var p = m["inside_mode"]
+		if p == null:
+			return "inside names no mode of ours"
+		if not p["running"]:
+			return "it runs inside %s, which is not running" % p["name"]
+	return ""
+
+
+# start_also (PAD-1508): a hit of one of its lines' switches counts, in any order
+func _also_hit(m: Dictionary, sw) -> bool:
+	var hit := false
+	var i := 0
+	for a in m["start_also"]:
+		i += 1
+		if not (sw in a["sw"]) or a["got"] >= a["count"]:
+			continue
+		var no := _blocked(m)
+		if no != "":
+			plog("%s: start_also %s not counted - %s" % [m["name"], Switches.items[sw].name, no])
+			return false
+		a["got"] += 1
+		hit = true
+		plog("%s: start_also %d, %s: %d of %d" % [m["name"], i, Switches.items[sw].name, a["got"], a["count"]])
+	return hit
+
+
 # A start rule fired for m: one more toward its start_count.
-func _fire(m: Dictionary, why: String) -> void:
+func _fire(m: Dictionary, why: String, is_switch := false, count := true) -> void:
 	if m["running"] or not playing():
 		return
-	if (m["once"] == "ball" and m["ran_ball"]) or (m["once"] == "game" and m["ran_game"]):
+	var no := _blocked(m)
+	if no != "":
+		plog("%s: %s - not counted (%s)" % [m["name"], why, no])
 		return
-	m["hits"] += 1
-	plog("%s: %s (%d of %d)" % [m["name"], why, m["hits"], m["start_count"]])
-	if m["hits"] >= m["start_count"]:
-		_start(m)
+	if count and m["hits"] < m["start_count"]:
+		m["hits"] += 1
+		plog("%s: %s (%d of %d)" % [m["name"], why, m["hits"], m["start_count"]])
+	if m["hits"] < m["start_count"]:
+		return
+	var waiting := 0
+	for a in m["start_also"]:
+		if a["got"] < a["count"]:
+			waiting += 1
+	if is_switch and waiting > 0:
+		plog("%s: start shots made - waiting for %d start_also line(s)" % [m["name"], waiting])
+		return
+	_start(m)
 
 
 # start_on: ball_start, first_ball, last_ball, valid_playfield, ball_saved, extra_ball, multiball_end
@@ -570,7 +730,7 @@ func _combo(m: Dictionary, sw, now: float) -> void:
 	var c: Array = m["combo"]
 	if c.size() < 2 or m["running"]:
 		return
-	if m["combo_at"] > 0 and now - m["combo_time"] > m["combo_seconds"]:
+	if m["combo_at"] > 0 and m["combo_seconds"] > 0 and now - m["combo_time"] > m["combo_seconds"]:
 		m["combo_at"] = 0
 	if c[m["combo_at"]] == sw:
 		m["combo_at"] += 1
@@ -746,20 +906,39 @@ func _unhold(m: Dictionary) -> void:
 func _lamps_tick(m: Dictionary, now: float) -> void:
 	if m["lamps"].is_empty():
 		return
-	var phase := int((now - m["started_at"]) * m["lamp_blink"] * 2.0) % 2 if m["lamp_blink"] > 0 else 0
+	# PAD-1508: lamp_pattern solid / blink / pulse (the colour rising and falling, ten steps a
+	# second) / chase (one lamp at a time, in the lamps line's order), lamp_blink its rate
+	var pat: String = m["pattern"] if m["pattern"] != "" else ("blink" if m["lamp_blink"] > 0 else "solid")
+	var rate: float = m["lamp_blink"] if m["lamp_blink"] > 0 else 4.0
+	var t: float = now - m["started_at"]
+	var phase := 0
+	if pat == "blink":
+		phase = int(t * rate * 2.0) % 2
+	elif pat == "chase":
+		phase = int(t * rate) % m["lamps"].size()
+	elif pat == "pulse":
+		phase = int(t * 10.0)
 	if phase == m["lamp_phase"] and now - m["lamp_at"] < 0.25:
 		return
 	var first: bool = m["lamp_phase"] < 0
 	m["lamp_phase"] = phase
 	m["lamp_at"] = now
-	var rgb: Array = m["lamp_rgb"] if phase == 0 else [0, 0, 0]
+	var rgb: Array = m["lamp_rgb"] if (pat != "blink" or phase == 0) else [0, 0, 0]
+	if pat == "pulse":
+		var ph: float = fmod(t * rate, 1.0)
+		var lv: float = ph * 2.0 if ph < 0.5 else (1.0 - ph) * 2.0
+		rgb = [int(m["lamp_rgb"][0] * lv), int(m["lamp_rgb"][1] * lv), int(m["lamp_rgb"][2] * lv)]
 	# blend false: the game's controller blends a command with the ones under it by default, and
 	# black then shows them (the ball-save lamp stayed lit through our flashes)
+	var i := 0
 	for n in m["lamps"]:
-		Leds.enable(n, LED_PRI, Warden.OPCODE_SET_LED, rgb, 0, false)
+		Leds.enable(n, LED_PRI, Warden.OPCODE_SET_LED, [0, 0, 0] if (pat == "chase" and i != phase) else rgb, 0, false)
+		i += 1
+	if trace_lamps and (pat == "pulse" or pat == "chase"):     # proof runs: a trace_lamps file in the mode folder
+		plog("%s: lamps %s %s" % [m["name"], pat, ("lit %d" % phase) if pat == "chase" else ("level %s" % [rgb])])
 	if first:
-		plog("%s: lamps %s lit %s at priority %d%s" % [m["name"], m["lamps"], m["lamp_rgb"], LED_PRI,
-			(", %d flashes a second" % m["lamp_blink"]) if m["lamp_blink"] > 0 else ""])
+		plog("%s: lamps %s lit %s at priority %d, %s%s" % [m["name"], m["lamps"], m["lamp_rgb"], LED_PRI, pat,
+			(" at %d a second" % rate) if pat != "solid" else ""])
 
 
 func _lamps_off(m: Dictionary) -> void:
@@ -797,6 +976,11 @@ func _start(m: Dictionary) -> void:
 	m["combo_at"] = 0
 	m["ran_ball"] = true
 	m["ran_game"] = true
+	m["runs_game"] += 1
+	for a in m["start_also"]:
+		a["got"] = 0
+	for a in m["sound_at"]:
+		a["done"] = false
 	m["running"] = true
 	m["made"] = 0
 	m["total"] = 0
@@ -821,13 +1005,23 @@ func _start(m: Dictionary) -> void:
 	draw()
 
 
-func _shot(m: Dictionary, sw) -> void:
-	var got := _award(m["points"])
+# What a hit of sw pays while m runs: the first shot_points line holding it, else points when it is
+# one of the shots; null when it does not score (PAD-1508).
+func _value(m: Dictionary, sw):
+	for sp in m["shot_points"]:
+		if sw in sp[0]:
+			return sp[1]
+	return m["points"] if sw in m["shots"] else null
+
+
+func _shot(m: Dictionary, sw, value: int) -> void:
+	var got := _award(value * (m["made"] + 1) if m["rising"] else value)
 	m["made"] += 1
 	m["total"] += got
 	plog("%s: shot %d%s on %s: %d points (player score %s)" % [m["name"], m["made"],
 		(" of %d" % m["complete"]) if m["complete"] > 0 else "", Switches.items[sw].name, got, _score()])
-	_sound(m, "sound_shot")
+	if m["shot_every"] == 0 or m["made"] % m["shot_every"] == 0:
+		_sound(m, "sound_shot")
 	_coil(m, "coil_shot")
 	if m["hold_on"] == "shots":
 		_hold(m)
@@ -847,6 +1041,10 @@ func _stop(m: Dictionary, why: String) -> void:
 	if not m["running"]:
 		return
 	m["running"] = false
+	m["ended_at"] = Time.get_ticks_msec() / 1000.0     # cooldown (PAD-1508)
+	for x in all:     # a mode inside this one ends with it (PAD-1508)
+		if x["inside_mode"] == m and x["running"]:
+			_stop(x, "the mode it runs inside ended")
 	if why != "":
 		plog("%s: ended (%s), %d shot(s), total %d" % [m["name"], why, m["made"], m["total"]])
 		_sound(m, "sound_end")
@@ -909,6 +1107,11 @@ func _process(delta: float) -> void:
 			continue
 		if m["seconds"] > 0 and not (m["mb_served"] and not m["mb_on"].is_empty()):
 			m["left"] -= delta
+			for a in m["sound_at"]:     # PAD-1508: a sound at N seconds left
+				if not a["done"] and a["secs"] < m["seconds"] and m["left"] <= a["secs"]:
+					a["done"] = true
+					plog("%s: %d s left - sound_at %s" % [m["name"], a["secs"], a["sound"]])
+					_sound(m, "sound_at", a["sound"])
 			if m["left"] <= 0.0:
 				_stop(m, "time ran out")
 				continue
@@ -933,8 +1136,8 @@ func _award(points: int) -> int:
 
 
 # ------------------------------------------------------------------ the game's sounds
-func _sound(m: Dictionary, key: String) -> void:
-	var name: String = m["cfg"].get(key, "")
+func _sound(m: Dictionary, key: String, which: String = "") -> void:
+	var name: String = which if which != "" else m["cfg"].get(key, "")
 	if name != "" and _is_file(name):
 		_sound_file(m, key, name)
 		return

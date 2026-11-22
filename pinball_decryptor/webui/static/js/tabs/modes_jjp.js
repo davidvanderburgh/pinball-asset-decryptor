@@ -212,6 +212,14 @@ function HoldOn({ k, value, names }) {
   </div>`;
 }
 const BALL_COIL = new Set(["multiball", "ball_save", "add_ball", "coil_pulse", "coil_hold", "hold_on"]);
+// PAD-1508: keys given on several lines (one rule a line), and what a line looks like
+const LINES = { shot_points: "switch_name 5000000", start_also: "switch_name 2", sound_at: "10 sound_name" };
+function Lines({ k, kind, value }) {
+  const lines = (value || "").split("\n").length;
+  return html`<textarea class="jjpm-lines mono" rows=${Math.max(2, lines + 1)} spellcheck="false"
+    placeholder=${"one a line, e.g. " + LINES[kind]}
+    onBlur=${(e) => { if (e.target.value !== (value || "")) set(k, e.target.value); }}>${value || ""}</textarea>`;
+}
 
 // one key of a mode (or of title.cfg: prefix "title:")
 function Row({ k, prefix = "", meta, value, j, have }) {
@@ -222,10 +230,12 @@ function Row({ k, prefix = "", meta, value, j, have }) {
   const names = j.names || {};
   let input;
   if (BALL_COIL.has(m.kind)) input = html`<${BallCoil} k=${key} kind=${m.kind} value=${value} j=${j} />`;
+  else if (LINES[m.kind]) input = html`<${Lines} k=${key} kind=${m.kind} value=${value} />`;
   else if (m.kind === "switches") input = html`<${NamePick} k=${key} value=${value} names=${names.switches} multi title="The game's switches" />`;
   else if (m.kind === "lamps") input = html`<${NamePick} k=${key} value=${value} names=${names.lamps} multi title="The game's lamps (lp_) and lamp groups (ls_)" />`;
   else if (m.kind === "events") input = html`<${NamePick} k=${key} value=${value} names=${names.events || []} multi title="The game's own events (its hook lists)" />`;
   else if (m.kind === "after") input = html`<${NamePick} k=${key} value=${value} names=${names.after || []} multi title="The game's own modes (a global or a class), or any" />`;
+  else if (m.kind === "in_place") input = html`<${NamePick} k=${key} value=${value} names=${(names.after || []).filter((n) => n !== "any")} multi title="The game's own modes this one starts in place of (PAD-1508)" />`;
   else if (m.kind === "sound") input = html`<${NamePick} k=${key} value=${value} names=${names.sound} sound have=${have} title="The game's sounds" inherit=${inherit} />`;
   else if (m.kind === "sound_or_file") input = html`<${NamePick} k=${key} value=${value} names=${names.sound_or_file} sound have=${have} title="The game's sounds, or a sound file of yours in this game's mode folder" inherit=${inherit} />`;
   else if (m.kind === "sound_file" || m.kind === "picture_file" || m.kind === "video_file") input = html`<${NamePick} k=${key} value=${value} names=${names[m.kind] || []} title="A file of yours in this game's mode folder (Open the mode folder, put it there, then pick it)" inherit=${inherit} />`;

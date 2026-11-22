@@ -29,11 +29,11 @@ PREBUILT = os.path.join(HERE, "prebuilt")
 MAX_MODES = 24
 TITLE_MAX = 16
 NAME_MAX = 20
-DATA_MAGIC = 0x324D4850         # "PHM2" (PAD-1469: 128-byte modes; PHM1 was 64)
+DATA_MAGIC = 0x334D4850         # "PHM3" (PAD-1508: 352-byte modes; PHM2 was 128, PHM1 64)
 HEAD_MAGIC = 0x48444150         # "PADH"
 PANELS = {"none": 0, "middle": 1, "bottom": 2, "top": 3}
 SOUND_KEYS = ("sound_start", "sound_shot", "sound_complete", "sound_end")
-MODE_SIZE = 128
+MODE_SIZE = 352
 #: start_on words -> padheck.c's EV_ bits (every one the runtime reads off the game, PAD-1469)
 EVENTS = {"ball_start": 1, "first_ball": 2, "last_ball": 4, "valid_playfield": 8, "ball_saved": 16,
           "extra_ball": 32, "multiball_end": 64}
@@ -172,7 +172,7 @@ def lamp_level(rgb, port=None):
 
 
 def pack_mode(m, port):
-    """One struct pad_mode (128 bytes) from a checked mode dict."""
+    """One struct pad_mode (352 bytes) from a checked mode dict."""
     fn = m.get("file", "?")
     title = screen_text(m.get("title") or m.get("name") or fn[:-5])[:title_max((port or {}).get("prg") or "")]
     start = _bits(_words(m.get("start")), port, "start", fn)
@@ -187,9 +187,9 @@ def pack_mode(m, port):
     flags = ((1 if (m.get("start_count_reset") or "game").strip() == "ball" else 0) |
              {"ball": 2, "game": 4}.get((m.get("start_once") or "no").strip(), 0))
     body = struct.pack("<16s8s8sHHHBBII", title.encode("ascii"), start, shots,
-                       min(_int(m.get("start_count"), 1), 0xFFFF), min(_int(m.get("seconds")), 0xFFFF),
+                       min(_int(m.get("start_count"), 1), 0xFFFF), min(_int(m.get("seconds"), 20), 0xFFFF),   # PAD-1508: empty = the documented 20 s
                        min(_int(m.get("complete")), 0xFFFF), panel, flags,
-                       _int(m.get("points")), _int(m.get("complete_points"))) + sounds
+                       _int(m.get("points"), 1000000), _int(m.get("complete_points"))) + sounds
     # PAD-1469: start rules, lamps, balls, coils
     ev = 0
     for w in _words(m.get("start_on")):
@@ -224,13 +224,54 @@ def pack_mode(m, port):
     body += struct.pack("<IBBBB", _int(m.get("start_score")), ev, lamp_level(m.get("lamp_color"), port),
                         min(blink, 10), len(combo))
     body += bytes(combo).ljust(6, b"\0")
-    body += struct.pack("<BB", min(_int(m.get("combo_seconds"), 5) or 5, 255), int(mb[0]) if mb else 0)
+    cs = _int(m.get("combo_seconds"), 5) if (m.get("combo_seconds") or "").strip() else 5   # 0: no limit (PAD-1508)
+    body += struct.pack("<BB", min(cs, 255), int(mb[0]) if mb else 0)
     body += struct.pack("<BBBB", min(int(mb[1]), 120) if len(mb) > 1 else 10, min(times, 6),
                         min(_int(m.get("ball_save")), 120), hold_mode)
     body += bytes(c for c, _t in coils) + bytes(min(t, 255) for _c, t in coils)
     body += struct.pack("<BBH", hold[0], hold[1], min(hold[2], 5000)) + b"\0\0"
+    body += spike2_rules(m, port, fn)
     assert len(body) == MODE_SIZE, len(body)
     return body
+
+
+def _rule_lines(m, key):
+    return [ln.strip() for ln in (m.get(key) or "").split("\n") if ln.strip()]
+
+
+PATTERNS = {"": 0, "solid": 1, "blink": 2, "pulse": 3, "chase": 4}
+
+
+def spike2_rules(m, port, fn):
+    """PAD-1508: the 224 bytes after the PAD-1469 ones (struct pad_mode in padheck.c)."""
+    sp = []
+    for ln in _rule_lines(m, "shot_points")[:8]:
+        w = ln.split()
+        sp.append(_bits(w[:-1], port, "shot_points", fn) + struct.pack("<I", _int(w[-1])))
+    also = []
+    for ln in _rule_lines(m, "start_also")[:3]:
+        w = ln.split()
+        count = 1
+        if len(w) > 1 and w[-1].isdigit():
+            count, w = min(int(w[-1]), 99), w[:-1]
+        also.append(_bits(w, port, "start_also", fn) + struct.pack("<B", max(1, count)) + b"\0\0\0")
+    at = []
+    for ln in _rule_lines(m, "sound_at")[:8]:
+        secs, _sp, snd = ln.partition(" ")
+        snd = snd.strip().upper()
+        if len(snd) != 3 or not snd.isalnum():
+            raise Refused("%s: sound_at %s is not a sound of this game (three letters/digits, SFX/_F?/xxx.wav)" % (fn, snd))
+        at.append(struct.pack("<H", min(_int(secs), 0xFFFF)) + snd.encode("ascii").ljust(4, b"\0") + b"\0\0")
+    pat = (m.get("lamp_pattern") or "").strip().lower()
+    rules = (1 if (m.get("points_ladder") or "").strip() == "rising" else 0) | \
+        (2 if (m.get("start_needs") or "").split()[-1:] == ["ball"] else 0)
+    out = _bits(_words(m.get("end_shots")), port, "end_shots", fn)
+    out += struct.pack("<BBBB", rules, min(_int(m.get("sound_shot_every")), 255), min(_int(m.get("start_max")), 255),
+                       min(_int(m.get("cooldown")), 255))
+    out += struct.pack("<BBBB", PATTERNS.get(pat, 0), m.get("_needs", 0), len(sp), len(also))
+    out += struct.pack("<BB", len(at), m.get("_inside", 0)) + b"\0\0"
+    out += b"".join(sp).ljust(8 * 12, b"\0") + b"".join(also).ljust(3 * 12, b"\0") + b"".join(at).ljust(8 * 8, b"\0")
+    return out + b"\0" * 8
 
 
 def title_head(port):
@@ -256,6 +297,19 @@ def pack_data(modes, port, off=False):
     names = b"".join(os.path.splitext(m.get("file", "mode"))[0].encode("ascii", "replace")[:NAME_MAX - 1].ljust(NAME_MAX, b"\0")
                      for m in modes)
     names = names.ljust(MAX_MODES * NAME_MAX, b"\0")
+    names_of = [(m.get("name") or os.path.splitext(m.get("file", ""))[0]).strip().lower() for m in modes]
+    for i, m in enumerate(modes):            # start_needs (PAD-1508): 1 + the other mode's place
+        w = (m.get("start_needs") or "").split()
+        if w and w[-1] in ("ball", "game"):
+            w = w[:-1]
+        need = " ".join(w).lower()
+        m["_needs"] = (names_of.index(need) + 1) if need and need in names_of and names_of.index(need) != i else 0
+        if need and not m["_needs"]:
+            raise Refused("%s: start_needs %s: no other mode of ours has that name" % (m.get("file", "?"), need))
+        inside = (m.get("inside") or "").strip().lower()
+        m["_inside"] = (names_of.index(inside) + 1) if inside and inside in names_of and names_of.index(inside) != i else 0
+        if inside and not m["_inside"]:
+            raise Refused("%s: inside %s: no other mode of ours has that name" % (m.get("file", "?"), inside))
     body = b"".join(pack_mode(m, port) for m in modes).ljust(MAX_MODES * MODE_SIZE, b"\0")
     return struct.pack("<IBB", DATA_MAGIC, len(modes), 1 if off else 0) + title_head(port) + names + body
 

@@ -265,7 +265,7 @@ def test_start_rules_fire_on_the_games_events(ph, port):
     g.switch(44)
     g.tick(3000)                                           # e9 runs out
     g.switch(44)
-    assert g.log.count("e9: STARTED") == 1 and "e9: not started: start_once" in g.log
+    assert g.log.count("e9: STARTED") == 1 and "e9:   not counted: already ran this game (start_once)" in g.log
     g.set8(g.t["ball_active"], 0)
     g.tick(3)
     _ball(g, 2)
@@ -367,7 +367,7 @@ def test_pack_mode_parity_layout(ph, port):
                           multiball="2 7", multiball_on="switch_9", add_ball="switch_8 2", ball_save="12",
                           coil_start="KNOCKER", coil_shot="SHAKER 40", coil_hold="SHAKER 900 6",
                           coil_hold_on="start"), port)
-    assert len(b) == ph.MODE_SIZE == 128 and b[39] == 1 | 2       # flags: reset ball, once ball
+    assert len(b) == ph.MODE_SIZE == 352 and b[39] == 1 | 2       # flags: reset ball, once ball (PAD-1508: 352)
     assert b[64] == 1 and b[71] == 0x80                    # lamps 0 and 63
     assert b[72 + 1] == 1 << 1 and b[80 + 1] == 1          # multiball_on 9, add_ball 8
     score, ev, level, blink, cn = struct.unpack_from("<IBBBB", b, 96)

@@ -189,6 +189,24 @@ def _flush(f):
         pass
 
 
+def _times(path):
+    st = os.stat(path)
+    return (st.st_atime_ns, st.st_mtime_ns)
+
+
+def _put_times(path, times):
+    """Give *path* back the (atime, mtime) of :func:`_times` (PAD-1510).
+    Compacting or expanding changes no byte, so the card keeps its date: the
+    Spike 2 library matches a D: original to its library copy by name, size
+    AND modified time, and a library tool sorting by date should not see
+    every card as new.  Called after the file is closed: Windows can stamp
+    the time again when a written handle closes."""
+    try:
+        os.utime(path, ns=times)
+    except OSError:
+        pass
+
+
 # ---------------------------------------------------------------- the scan
 
 
@@ -257,8 +275,19 @@ class CompactResult:
 
 
 def compact_file(path, *, min_hole=MIN_HOLE, progress=None, log=None):
-    """Make the image at *path* sparse in place; the bytes do not change.
-    Returns a :class:`CompactResult`."""
+    """Make the image at *path* sparse in place; the bytes do not change,
+    nor does its modified time.  Returns a :class:`CompactResult`."""
+    times = _times(path)
+    try:
+        res = _compact_open(path, min_hole=min_hole, progress=progress)
+    finally:
+        _put_times(path, times)
+    if log:
+        log(describe(res))
+    return res
+
+
+def _compact_open(path, *, min_hole, progress):
     t0 = time.monotonic()
     size = os.path.getsize(path)
     with open(path, "r+b", buffering=0) as f:
@@ -285,8 +314,6 @@ def compact_file(path, *, min_hole=MIN_HOLE, progress=None, log=None):
         _flush(f)
     res.after = on_disk_size(path)
     res.seconds = time.monotonic() - t0
-    if log:
-        log(describe(res))
     return res
 
 
@@ -416,6 +443,7 @@ def import_card(src, dest_dir, *, progress=None, log=None, replace=False):
     try:
         if stream is None:
             sparse_copy(src, part, progress=progress)
+            _put_times(part, _times(src))
         else:
             _unpack_sparse(stream, part, size, progress)
         os.replace(part, dst)
@@ -554,6 +582,7 @@ def expand_copy(src, dst, *, progress=None, cancel=None):
                 if progress:
                     progress(done, size)
             _flush(fo)
+        _put_times(part, _times(src))
         os.replace(part, dst)
     except BaseException:
         try:
@@ -567,7 +596,16 @@ def expand_copy(src, dst, *, progress=None, cancel=None):
 def expand_file(path, *, progress=None, cancel=None):
     """Make the compact card at *path* full size again where it is: its
     holes are written out as zeros and (Windows) the sparse mark cleared.
-    The bytes do not change.  Returns the bytes filled in."""
+    The bytes do not change, nor does its modified time.  Returns the bytes
+    filled in."""
+    times = _times(path)
+    try:
+        return _expand_open(path, progress=progress, cancel=cancel)
+    finally:
+        _put_times(path, times)
+
+
+def _expand_open(path, *, progress, cancel):
     size = os.path.getsize(path)
     with open(path, "r+b", buffering=0) as f:
         holes = hole_ranges(f, size)

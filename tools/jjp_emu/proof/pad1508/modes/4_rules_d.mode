@@ -1,0 +1,4 @@
+name = RULES D
+in_place_of = cl_mode CandyLaneMode
+seconds = 6
+game_modes = ignore

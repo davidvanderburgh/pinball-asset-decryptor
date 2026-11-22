@@ -1,0 +1,7 @@
+name = RULES C
+start_combo = switch_target_bank_3 switch_target_l_loop
+combo_seconds = 0
+seconds = 5
+lamps = lp_gi_tv
+lamp_pattern = solid
+game_modes = ignore

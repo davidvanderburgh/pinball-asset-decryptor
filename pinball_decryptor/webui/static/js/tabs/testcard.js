@@ -55,7 +55,12 @@ function List({ s }) {
 const ROOM_TIP = { head: "Space for network updates", lines: [
   "The card is kept small so it writes fast: its test files area is just big enough for what is on the list now.",
   "Tick this to give it more room, so test files you send later over the network fit. Any size you like: it has to fit on your SD card, and the image grows by the same amount, so it takes longer to write.",
-  "A test card can also be grown later over the network, but that needs the machine to restart." ] };
+  "A test card can also be grown later over the network to fill its SD card (Grow on the machine), but that needs the machine to restart." ] };
+// Simon (2026-11-22): the test card "can be grown remotely but will require reboots"
+const GROW_TIP = { head: "Grow the test card on the machine", lines: [
+  "Makes the test files area of the test card the machine is running as big as its SD card allows.",
+  "The machine restarts once and its test files area comes back empty; Send to machine then puts the test files back. Its remote access and settings are kept.",
+  "Only a PAD test card is grown; a game card is refused." ] };
 const SSH_TIP = { head: "Remote access", lines: [
   "Puts the same remote access on the test card as the Network tab puts on a game card: this computer can reach the machine over your home network.",
   "Needed for Send to machine." ] };
@@ -103,6 +108,12 @@ function sendWhy(s) {
   return "";
 }
 
+function growWhy(s) {
+  if (s.s3) return "Growing over the network is for a Spike 2 test card";
+  if (!s.address) return "Find the machine on the Network tab first";
+  return "";
+}
+
 function Build({ s }) {
   const msg = s.msg || ["", ""];
   return html`<div class="stack">
@@ -121,7 +132,9 @@ function Build({ s }) {
         ? html`<${Button} kind="danger" onClick=${() => call("testcard.cancel")}>Cancel<//>`
         : html`<${Button} kind="primary" disabled=${!s.source_ok} onClick=${() => call("testcard.build")}>Build test card…<//>
           <${Button} disabled=${!!sendWhy(s)} onClick=${() => call("testcard.send")}
-            title=${sendWhy(s) || ("Build the test card and send it to the machine at " + s.address + ": only the files that differ go, then it restarts into the test card menu. The machine must be running a PAD test card already.")}>Send to machine…<//>`}
+            title=${sendWhy(s) || ("Build the test card and send it to the machine at " + s.address + ": only the files that differ go, then it restarts into the test card menu. The machine must be running a PAD test card already.")}>Send to machine…<//>
+          <${Button} disabled=${!!growWhy(s)} onClick=${() => call("testcard.grow")}
+            title=${growWhy(s) || GROW_TIP}>Grow on the machine…<//>`}
       <span class="small muted">${s.s3 ? "The size of the card it is made from (64 GB): the copy takes a while. Write it to an SD card like any card image." : s.room_mib ? "Your videos plus " + (s.network.room_gb) + " GB of room, built in seconds. Write it to an SD card like any card image." : "Under 1 GB plus your videos, built in seconds. Write it to an SD card like any card image."}</span>
     </div>
     ${s.busy ? html`<div class="stack"><${Progress} pct=${s.pct} busy=${s.pct == null} /><span class="small">${s.step}</span></div>` : null}

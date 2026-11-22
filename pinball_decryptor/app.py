@@ -509,6 +509,7 @@ class App:
             on_build_flash=self._on_build_flash_request,
             on_build_send=self._on_build_send_request,
             on_send_image=self._start_send,
+            on_grow_test_card=self._start_grow,
             on_save_project=self._save_project,
             on_load_project=self._load_project,
             on_new_project=self._new_project,
@@ -3261,6 +3262,26 @@ class App:
         self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb,
                                                  backup_keep=keep)
         threading.Thread(target=self.pipeline.run, daemon=True, name="pad-send").start()
+
+    def _start_grow(self, address):
+        """Simon (2026-11-22): grow the test card the machine at *address* runs to fill its SD card
+        (core/testcard_grow.py), as a run of its own like a Send: the log, the progress bar, the footer's chips."""
+        from .core import testcard_grow
+        if self.window._running:
+            return
+        self._save_settings()
+        self._active_mode = "write"
+        self._cancel_requested = False
+        self._send_active = True
+        self._send_kind = "grow"
+        self.window.set_write_phases(testcard_grow.GROW_PHASES)
+        self.window.show_phase_row("write", borrow=True)
+        self.window.set_running(True, mode="write")
+        self.window._set_footer(run_label="Growing")
+        self.window.reset_steps(mode="write")
+        log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        self.pipeline = testcard_grow.GrowPipeline(address, log_cb, phase_cb, progress_cb, done_cb)
+        threading.Thread(target=self.pipeline.run, daemon=True, name="pad-grow").start()
 
     def _start_read_card(self, device_path, image_path):
         """Save a whole card into a raw image file (the inverse of a flash).
@@ -6207,6 +6228,23 @@ class App:
         if getattr(self, "_send_active", False):
             self._send_active = False
             self.window.set_running(False, mode="write")
+            if getattr(self, "_send_kind", "") == "grow":
+                # a test card grown on the machine (core/testcard_grow.py): its own words
+                self._send_kind = ""
+                from .core import testcard_grow
+                if self._cancel_requested:
+                    self._cancel_requested = False
+                    self.window.set_status("Canceled")
+                    self.window.append_log("Grow canceled.", "info")
+                elif success:
+                    self.window.set_phase(len(testcard_grow.GROW_PHASES), mode="write")
+                    self.window.set_status("Grown")
+                    messagebox.showinfo("Test card grown", summary)
+                else:
+                    self.window.set_status("Grow failed")
+                    self.window.append_log(summary, "error")
+                    messagebox.showerror("Grow the test card", summary)
+                return
             if self._cancel_requested:
                 self._cancel_requested = False
                 self.window.set_status("Canceled")

@@ -233,6 +233,45 @@ class TestCardTab(TabService):
         return self.build(send_to=address)
 
     @rpc
+    def grow(self):
+        """Grow on the machine…: the test card the machine runs grows to fill its SD card (core/testcard_grow.py).
+        Simon (2026-11-22): it "can be grown remotely but will require reboots".  The machine is read first, so
+        the question says how big it gets; nothing changes until the user says yes."""
+        if self._busy:
+            return False
+        address = self._address()
+        if not address:
+            raise RpcError("Find the machine on the Network tab first: the test card it runs is the one grown")
+        fn = self.window.cb.get("on_grow_test_card")
+        if fn is None:
+            raise RpcError("Grow on the machine is not available here")
+        from ...core import remote_send as rs, testcard_grow as tg
+        try:
+            machine = rs.connect(address)
+        except rs.SendError as e:
+            raise RpcError(str(e)) from None
+        try:
+            p, need, free = tg.survey(machine)
+        except rs.SendError as e:
+            raise RpcError(str(e)) from None
+        finally:
+            machine.close()
+        if need > free:
+            raise RpcError("The machine's system partition has %s free, and /data and /dump need %s to be kept "
+                           "safe while the card grows." % (rs._human(free), rs._human(need)))
+        if not compat.messagebox.askyesno(
+                "Grow the test card on the machine",
+                "Grow the test card on the machine at %s to fill its %s SD card?\n\nIts test files area goes from "
+                "%s to %s. The machine restarts once, and while it starts up it makes the new partitions; leave it "
+                "switched on until PAD says the grow is done.\n\nThe test files on the machine are cleared: press "
+                "Send to machine afterwards to put them back. Its remote access and settings are kept."
+                % (address, rs._human(p.card * tg.SECTOR), rs._human(p.old[3][1] * tg.SECTOR),
+                   rs._human(p.p3[1] * tg.SECTOR)), icon="warning"):
+            return False
+        fn(address)
+        return True
+
+    @rpc
     def build(self, send_to=""):
         """Build test card… (and, from Send to machine…, send it to *send_to* once built)"""
         if self._busy:

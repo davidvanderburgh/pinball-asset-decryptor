@@ -65,3 +65,26 @@ touching the disk, so reads also get faster.
   and read nothing.
 * drvfs: a WSL write into a Windows-made sparse file keeps its holes (128 KB on
   disk for a 300 MB file with two 64 KB writes).
+
+## In the app (David, 2026-11-22: "compact the images from the app and then also expand them from the app")
+
+Settings > Manage disk space > **Card images** (`webui/shellx_cards.py`, the
+dialog in `static/js/shellx_dialogs.js`):
+
+* **Compact a folder…** compacts every card image in a folder, but not its
+  subfolders. **Compact cards…** compacts the picked files.
+* **Add a card compact…** adds a .raw/.img or a .zip/.xz/.gz/.bz2 download to
+  a folder. It is never full size on disk.
+* **Expand to full size…** answers Yes with a full-size copy elsewhere (needed
+  for exFAT/FAT32 drives such as most USB sticks, or for a program that copies
+  the whole file), and No by making the card itself full size again. Both check
+  that the drive has room first.
+
+Nothing has to be expanded before building: builds, the emulator, extracting
+and flashing read compact cards as they are. The CLI has the same operations
+as `--expand` and `--expand-to DIR`.
+
+Proof: on a real 8 GB Pokemon card slice, compacting took it from 8.59 GB to
+0.66 GB. `expand_copy` (17 s) and `expand_file` (12 s, 7.93 GB filled in) both
+hash identical to the original, are not compact, and the sparse flag is
+cleared.

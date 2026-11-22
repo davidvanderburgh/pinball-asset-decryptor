@@ -9318,6 +9318,85 @@ static int show_hangs(int num)
     return 0;
 }
 
+/* PAD-1476 reopened (DoomWalrus666: "I selected a light show mode (tank multiball) and assigned it to the co-op video
+ * intro. It did not appear to play"): the game's start film runs a show of its own over the whole playfield - Godzilla
+ * LE 1.16's 305 at priority 145, two records, the lamps dark but for ~19 - and the game layers its shows by the
+ * priority in their table row (+0xa, copied into the record at +0x98), so Tank Attack Multiball's 319 (priority 5)
+ * started and played under it unseen (emulator: the LED view the same as with no show at all). The intro's show is
+ * started a step above every show of the game's running then: its row's priority lifted for the start and put back
+ * at once (the record keeps its own copy). Where the starter and stopper are found, read off their code: the running
+ * shows' list head (the stopper's first movw/movt: `ldr r4, [rH]`, next at +0x84, number at +0x96) and the table (the
+ * starter's `add rX, rT, rN, lsl #2`); armed only where the starter's words read the offsets above (`ldrb r2, [r4,
+ * #0x98]`, `ldrbne r3, [r4, #0xa]`, `strbne r3, [r0, #0x98]`) and the stopper's (`ldr r4, [r4, #0x84]`, `ldrh r3, [r4,
+ * #0x96]`): every Spike 2 port's starter has the same prologue, and a build that reads otherwise keeps the table's
+ * own priority. (tests lift it verbatim) */
+static int show_lay_words(const unsigned *start, const unsigned *stop, unsigned *head, unsigned *table)
+{
+    unsigned lo[16] = {0}, val[16] = {0}, k, w, seen = 0;
+    int have[16] = {0};
+    *head = *table = 0;
+    for (k = 0; k < 16 && !*head; k++) {                  /* the stopper: its first movw/movt pair is the list head */
+        w = stop[k];
+        if ((w & 0x0ff00000u) == 0x03000000u) lo[(w >> 12) & 15u] = ((w >> 4) & 0xf000u) | (w & 0xfffu);
+        else if ((w & 0x0ff00000u) == 0x03400000u)
+            *head = lo[(w >> 12) & 15u] | ((((w >> 4) & 0xf000u) | (w & 0xfffu)) << 16);
+    }
+    for (k = 0; k < 40; k++) {
+        if (stop[k] == 0xe5944084u) seen |= 1u;          /* ldr r4, [r4, #0x84] */
+        if (stop[k] == 0xe1d439b6u) seen |= 2u;          /* ldrh r3, [r4, #0x96] */
+    }
+    for (k = 0; k < 16; k++) lo[k] = 0;
+    for (k = 0; k < 120; k++) {
+        unsigned rd;
+        w = start[k];
+        rd = (w >> 12) & 15u;
+        if ((w & 0x0ff00000u) == 0x03000000u) { lo[rd] = ((w >> 4) & 0xf000u) | (w & 0xfffu); have[rd] = 1; val[rd] = lo[rd]; }
+        else if ((w & 0x0ff00000u) == 0x03400000u && have[rd]) val[rd] = lo[rd] | ((((w >> 4) & 0xf000u) | (w & 0xfffu)) << 16);
+        else if ((w & 0xfff00ff0u) == 0xe0800100u && !*table && have[(w >> 16) & 15u])
+            *table = val[(w >> 16) & 15u];               /* add rX, rT, rN, lsl #2: the row */
+        if (w == 0xe5d42098u) seen |= 4u;                 /* ldrb r2, [r4, #0x98] */
+        if (w == 0x15d4300au) seen |= 8u;                 /* ldrbne r3, [r4, #0xa] */
+        if (w == 0x15c03098u) seen |= 16u;                /* strbne r3, [r0, #0x98] */
+    }
+    return *head && *table && seen == 31u;
+}
+
+static unsigned show_head, show_table;
+static int show_lay = -1;                                 /* -1 not looked, 0 not this build's, 1 armed */
+
+static int show_layout(void)
+{
+    if (show_lay < 0) {
+        const unsigned *a = (const unsigned *)(unsigned long)fn("show_start");
+        const unsigned *b = (const unsigned *)(unsigned long)fn("show_stop_number");
+        show_lay = a && b && show_lay_words(a, b, &show_head, &show_table);
+        if (a && b) {
+            if (show_lay)
+                say("shows by number: the running shows' list at 0x%08x, the table at 0x%08x - an intro's show "
+                    "starts over the game's own", show_head, show_table);
+            else say("shows by number: the starter's list and table not read on this build - each show keeps its "
+                     "table's priority");
+        }
+    }
+    return show_lay;
+}
+
+/* the highest priority of the game's shows running now, and whether one numbered *num* is among them (-1: not known) */
+static int show_running(int num, int *top)
+{
+    unsigned rec, k;
+    int found = 0;
+    *top = 0;
+    if (show_layout() != 1) return -1;
+    for (rec = *(const unsigned *)(unsigned long)show_head, k = 0; rec && k < 64;
+         rec = *(const unsigned *)(unsigned long)(rec + 0x84), k++) {
+        if (!(*(const unsigned short *)(unsigned long)(rec + 2) & 0x20)) continue;
+        if (*(const unsigned short *)(unsigned long)(rec + 0x96) == (unsigned)num) found = 1;
+        if (*(const unsigned char *)(unsigned long)(rec + 0x98) > *top) *top = *(const unsigned char *)(unsigned long)(rec + 0x98);
+    }
+    return found;
+}
+
 static int show_number_start(int num, unsigned long limit_ms, const char *who)
 {
     void *rec = 0;
@@ -9347,6 +9426,26 @@ static int show_number_start(int num, unsigned long limit_ms, const char *who)
     show_now.limit = limit_ms ? limit_ms : SHOW_MAX_MS;
     say("show #%d: the game's own light show, started by its own number for %s", num, who);
     return 1;
+}
+
+/* PAD-1476 reopened: show_number_start a step over the game's shows running now (above: the intro's start film runs
+ * one of its own over the playfield); its table row's priority lifted for the start only */
+static int show_number_start_over(int num, unsigned long limit_ms, const char *who)
+{
+    volatile unsigned char *pri;
+    int top, own, want, ok;
+    if (num < 1 || num >= shownum_n || show_hangs(num) || show_running(num, &top) < 0)
+        return show_number_start(num, limit_ms, who);
+    pri = (volatile unsigned char *)(unsigned long)(show_table + 12u * (unsigned)num + 0xau);
+    own = *pri;
+    want = top < 255 ? top + 1 : 255;
+    if (want <= own) return show_number_start(num, limit_ms, who);
+    *pri = (unsigned char)want;
+    ok = show_number_start(num, limit_ms, who);
+    *pri = (unsigned char)own;
+    if (ok) say("show #%d: at priority %d, over the game's own shows playing (the highest %d; its own %d)", num, want,
+                top, own);
+    return ok;
 }
 
 int pm_game_show_number(int num)
@@ -23432,13 +23531,51 @@ static int ci_prio_lifted;
 
 /* PAD-1476: the intro's light show (coop.cfg `intro_show <n>`, one the game's own modes play, picked on the co-op
  * intro's dialog): started with the intro, by the game's own number for it, and stopped as the intro ends - played,
- * skipped, or the game over - or once it has played the intro's length; one that ends sooner is not started again */
+ * skipped, or the game over - or once it has played the intro's length. PAD-1476 reopened: started over the game's
+ * own shows of the start film (show_number_start_over), and one that ends sooner - Tank Attack Multiball's 319 plays
+ * ~2.5 s - is started again while more than CI_SHOW_AGAIN_MS of the intro is left, so it plays for all of it */
+#define CI_SHOW_AGAIN_MS 1000ul
+static unsigned long ci_show_first, ci_show_looked;
+static unsigned ci_show_plays;
+
 static void ci_show_start(void)
 {
     ci.show_on = 0;
     if (!ci.show) return;
-    ci.show_on = show_number_start(ci.show, ci.ms ? ci.ms + 500ul : SHOW_MAX_MS, "the co-op intro");
+    if (show_now.n == -ci.show && show_now.call == 2) {      /* already playing for this intro */
+        ci.show_on = 1;
+        return;
+    }
+    ci.show_on = show_number_start_over(ci.show, ci.ms ? ci.ms + 500ul : SHOW_MAX_MS, "the co-op intro");
+    ci_show_first = pm_ms();
+    ci_show_plays = 1;
     if (!ci.show_on) say("co-op intro: its light show %d not played (the line above says why)", ci.show);
+}
+
+/* every tick: the intro's show started again once it has ended by itself, while the intro has more to play */
+static void ci_show_again(unsigned long now)
+{
+    unsigned long played, left;
+    int top;
+    if (!ci.show_on || (ci.phase != CI_FILM && ci.phase != CI_PLAY) || now - ci_show_looked < 100ul) return;
+    ci_show_looked = now;
+    if (show_now.n != -ci.show || show_now.call != 2) {      /* another of ours took over: it is theirs now */
+        ci.show_on = 0;
+        return;
+    }
+    if (show_running(ci.show, &top) != 0) return;            /* playing, or not known on this build */
+    played = now - ci_show_first;
+    left = ci.ms > played ? ci.ms - played : 0;
+    if (left <= CI_SHOW_AGAIN_MS) return;
+    show_now.n = 0;                                           /* over by itself: nothing of it to stop */
+    if (show_number_start_over(ci.show, left + 500ul, "the co-op intro, again")) {
+        ci_show_plays++;
+        if (ci_show_plays <= 3 || ci_show_plays % 10 == 0)
+            say("co-op intro: its light show %d over after one play - started again (%u plays, %lu ms of the intro "
+                "left)", ci.show, ci_show_plays, left);
+    } else {
+        ci.show_on = 0;
+    }
 }
 
 static void ci_show_stop(const char *how)
@@ -23692,6 +23829,7 @@ static void coop_intro_tick(void)
 {
     unsigned long now = pm_ms();
     int w;
+    ci_show_again(now);                                       /* PAD-1476 reopened */
     ci_sound_settle();
     if (!pm_player() && !ci.phase && ci_language_word(1)) {   /* attract only: not while ball 1's serve waits */
         ci.lang_before = (int)(*ci_language_word(1) & 1u);    /* attract: the language the next game starts in */

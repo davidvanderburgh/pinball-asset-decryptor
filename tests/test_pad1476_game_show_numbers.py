@@ -281,3 +281,77 @@ def test_the_port_writer_puts_the_verdict_in_the_pad1476_block(tmp_path, monkeyp
     assert text.count("the show reel (emulator)") == 1
     assert text.index("the show reel (emulator)") < text.index("text show_lit")
     assert MP._show_lit(MP.read_port(str(tmp_path / "x-1.0.port"))) == (210, 211)
+
+
+# ---- PAD-1476 reopened: the intro's show over the game's own start-film show -----------------------------------
+#: Godzilla LE 1.16's show starter (0x1f34d4, 120 words) and its "stop every show numbered n" (0x3f3bd8, 40 words)
+GZ_STARTER = """
+    0xe92d47f0, 0xe2508000, 0x0a000054, 0xe30c3158, 0xe340305f, 0xe5933000, 0xe1580003, 0x2a00004f,
+    0xe3069278, 0xe340907d, 0xe5994000, 0xe3540000, 0x0a000030, 0xe0885088, 0xe30b6c40, 0xe306727c,
+    0xe3406072, 0xe340707d, 0xe0865105, 0xea000002, 0xe5944084, 0xe3540000, 0x0a00001a, 0xe1d430b2,
+    0xe3130020, 0x0afffff9, 0xe1d439b6, 0xe30bac40, 0xe1d510b6, 0xe340a072, 0xe0833083, 0xe0863103,
+    0xe1d300b6, 0xeb07d2be, 0xe3500000, 0x0a000037, 0xe5d42098, 0xe5d5300a, 0xe1520003, 0x8a00003f,
+    0x0a000056, 0xe5973000, 0xe1540003, 0x0a00003b, 0xe1d439ba, 0xe3833010, 0xe1c439ba, 0xe5944084,
+    0xe3540000, 0x1affffe4, 0xe5994000, 0xe3540000, 0x13a05001, 0x0a000007, 0xe1d439ba, 0xe3130010,
+    0x1a000033, 0xe5944084, 0xe3540000, 0x1a000037, 0xe3550000, 0x0a000045, 0xe1a03088, 0xe30b1c40,
+    0xe0832008, 0xe3401072, 0xe0812102, 0xe1d220b4, 0xe3120004, 0x13a02022, 0x1a000003, 0xe3120001,
+    0xe3020022, 0xe3002122, 0x01a02000, 0xe0833008, 0xe3a00004, 0xe1a03103, 0xe0814003, 0xe7911003,
+    0xeb07fe71, 0xe3500000, 0x11c089b6, 0x15d4300a, 0x15c03098, 0x11d430b4, 0x11c039ba, 0xe8bd87f0,
+    0xe3a0002d, 0xeb02e9c6, 0xe3a00000, 0xe8bd87f0, 0xe1d439b6, 0xe1d510b8, 0xe0833083, 0xe08aa103,
+    0xe1da00b8, 0xeb07d27e, 0xe3500000, 0x0affffaf, 0xe5d42098, 0xe5d5300a, 0xe1520003, 0x9affffbf,
+    0xe5994000, 0xe3540000, 0x13a05000, 0x1a000007, 0xea000016, 0xe3550000, 0xe3c33010, 0x1a000009,
+    0xe1c439ba, 0xe5944084, 0xe3540000, 0x0affffc7, 0xe1d439ba, 0xe3130010, 0x0affffc1, 0xe3550000
+"""
+GZ_STOPPER = """
+    0xe92d4070, 0xe3066278, 0xe340607d, 0xe5964000, 0xe3540000, 0x0a000018, 0xe1a05000, 0xe3a02000,
+    0xea000002, 0xe5944084, 0xe3540000, 0x0a000010, 0xe1d439b6, 0xe1530005, 0x1afffff9, 0xe1d430b2,
+    0xe3130020, 0x0afffff6, 0xe5963004, 0xe1a00004, 0xe1540003, 0x0afffff2, 0xebfffc72, 0xe1a00004,
+    0xebfffc33, 0xe3a02001, 0xe1a04000, 0xe3540000, 0x1affffee, 0xe1a00002, 0xe8bd8070, 0xe1a02004,
+    0xeafffffb, 0xe12fff1e, 0xe92d4008, 0xebf087aa, 0xe304361c, 0xe3403071, 0xe5933000, 0xe0630000
+"""
+
+
+def test_the_intro_reads_the_running_list_and_table_off_the_starter_and_stopper(tmp_path):
+    """DoomWalrus666: "I selected a light show mode (tank multiball) and assigned it to the co-op video intro. It did
+    not appear to play". The start film runs the game's own show 305 at priority 145 and Tank Attack's 319 (priority 5)
+    played under it unseen (emulator). The runtime reads the running shows' list head and the table off the two sites'
+    code, and arms the lift only where the words prove the offsets it uses."""
+    from tests import test_spike2_mode_roster as R
+    src = RUNTIME
+    code = (r"""
+#include <stdio.h>
+static const unsigned starter[] = {""" + GZ_STARTER + r"""};
+static const unsigned stopper[] = {""" + GZ_STOPPER + r"""};
+""" + R._lift(src, "static int show_lay_words(const unsigned *start, const unsigned *stop, unsigned *head, unsigned *table)")
+            + r"""
+int main(void)
+{
+    unsigned h, t, a[120], b[40], k;
+    int ok = show_lay_words(starter, stopper, &h, &t);
+    printf("%d %08x %08x|", ok, h, t);
+    for (k = 0; k < 120; k++) a[k] = starter[k] == 0x15c03098u ? 0xe1a00000u : starter[k];   /* no record copy */
+    printf("%d|", show_lay_words(a, stopper, &h, &t));
+    for (k = 0; k < 40; k++) b[k] = stopper[k] == 0xe5944084u ? 0xe1a00000u : stopper[k];    /* another next */
+    printf("%d\n", show_lay_words(starter, b, &h, &t));
+    return 0;
+}
+""")
+    whole, copy, nxt = R._host_run(tmp_path, code).strip().split("|")
+    assert whole == "1 007d6278 0072bc40"
+    assert copy == "0" and nxt == "0"
+
+
+def test_the_intros_show_starts_over_the_games_and_plays_for_all_of_the_intro():
+    body = RUNTIME[RUNTIME.index("static void ci_show_start("):]
+    body = body[:body.index("\n}\n")]
+    assert "show_number_start_over(ci.show" in body
+    again = RUNTIME[RUNTIME.index("static void ci_show_again("):]
+    again = again[:again.index("\n}\n")]
+    assert "show_running(ci.show, &top) != 0" in again and "CI_SHOW_AGAIN_MS" in again
+    tick = RUNTIME[RUNTIME.index("static void coop_intro_tick("):]
+    assert "ci_show_again(now);" in tick[:tick.index("\n}\n")]
+    over = RUNTIME[RUNTIME.index("static int show_number_start_over("):]
+    over = over[:over.index("\n}\n")]
+    # the row's priority lifted for the start only, and put back whatever the start said
+    assert over.index("*pri = (unsigned char)want;") < over.index("ok = show_number_start(") \
+        < over.index("*pri = (unsigned char)own;")

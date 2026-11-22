@@ -197,6 +197,13 @@ card you start from matters:
 - An image starts from a copy of the shared settings, or of the shared
   table, so reset its high scores once in the service menu when it gets a
   table of its own.
+- **The same image more than once** is fine: add it again, say one copy
+  per league or event. Each copy you add after the first comes in with
+  its own settings, audits and high scores already ticked. Give each copy
+  its own title so the menu tells them apart. With **Compact build** the
+  copies take no extra room on the card. (Spike 2 only: the other
+  platforms keep one set of settings per game, so they take each image
+  once.)
 
 Flashing the whole card writes the image's copy over the machine's,
 unless you tick **Keep the SD card's settings, audits and high scores**

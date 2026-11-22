@@ -418,7 +418,7 @@ int main(void)
     # round 6 (DoomWalrus666: "Selecting a mode no longer brings up the other options"): the hand-back never lets
     # Action begin a game from a mode entry - the start is held back, the hand-back ends and the step opens
     held = R._lift(src, "static int sty_menu_held(void)\n{")
-    assert "smn.go_ms != 0," in held and "smn.home_ms != 0," not in held
+    assert "smn.go_ms != 0)," in held and "smn.home_ms != 0," not in held
     assert "smn.home_ms = 0;" in held and "smn.act = 1;" in held
     edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
     assert edge.index("!smn.ov && smn.home_ms && !smn.home_walk && !smn.go_ms && sty_menu_kind() != 0u") < edge.index("sty_menu_owns_action()")
@@ -456,7 +456,7 @@ int main(void)
     assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "1 222 33 2 4 2 2 0"
     owns = R._lift(src, "static int sty_menu_owns_action(void)\n{")
     assert "if (smn.ov == STY_OV_MODES) return !smn.open || smn.shaping;" in owns
-    assert "if (smn.ov) return smn.ov == STY_OV_PLAIN && !smn.go_ms;" in owns
+    assert "if (smn.ov) return smn.ov == STY_OV_PLAIN" in owns
     edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
     assert edge.index("smn.ov == STY_OV_START") < edge.index("sty_menu_owns_action()")
     assert "smn.ov == STY_OV_MODES && smn.open && !smn.shaping" in edge
@@ -465,3 +465,39 @@ int main(void)
     assert "smn.open && !smn.act" in read
     hook = R._lift(src, "static void team_menu_frame(pm_reg *r)")
     assert hook.index("sty_overlay_read();") < hook.index("sty_menu_walk(&r[breg]")
+
+
+def test_round8_a_start_that_begins_no_game_leaves_the_mode_list_its_step(tmp_path):
+    """PAD-1449 round 8 (DoomWalrus666, on v1.561.7: "Once a version selection is made, version selection is no longer
+    available until a game is started and ended ... User selected a mode and version, then went to add a user"): a
+    Start that adds a player arms the menu's Start until a game begins; on the plain mode list Action is the step's
+    all the same"""
+    src = _src()
+    code = r"""#include <stdio.h>
+#define STY_OV_PLAIN 1
+#define STY_OV_LOGIN 2
+#define STY_OV_MODES 3
+#define STY_OV_START 4
+""" + R._lift(src, "static int sty_go_keeps_action(int ov, unsigned sub, int go)") + r"""
+int main(void)
+{
+    /* no Start: never; the plain mode list (1/4) after a Start: the step's; the plain menu off its mode list; a port
+     * with no overlay words (rounds 4-6: the Home Team screen a Start brought is the game's); the overlay's screens */
+    printf("%d%d%d %d %d %d%d%d\n", sty_go_keeps_action(0, 4, 0), sty_go_keeps_action(STY_OV_PLAIN, 4, 0),
+           sty_go_keeps_action(STY_OV_LOGIN, 0, 0), sty_go_keeps_action(STY_OV_PLAIN, 4, 1),
+           sty_go_keeps_action(STY_OV_PLAIN, 3, 1), sty_go_keeps_action(0, 4, 1), sty_go_keeps_action(STY_OV_LOGIN, 0, 1),
+           sty_go_keeps_action(STY_OV_MODES, 4, 1));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "000 0 1 111"
+    owns = R._lift(src, "static int sty_menu_owns_action(void)\n{")
+    assert "!sty_go_keeps_action(smn.ov, smn.ov_sub, smn.go_ms != 0)" in owns
+    assert "return !smn.go_ms && (!smn.home_ms || smn.home_walk);" in owns      # (no overlay words: as before)
+    held = R._lift(src, "static int sty_menu_held(void)\n{")
+    assert "sty_go_keeps_action(smn.ov, smn.ov_sub, smn.go_ms != 0)" in held
+    assert "smn.ov_sub = *(volatile unsigned *)ua;" in R._lift(src, "static void sty_overlay_read(void)")
+    # a version taken after that Start is the one the game it begins takes
+    frame = R._lift(src, "static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, unsigned index)")
+    case4 = frame[frame.index("    case 4:"):]
+    assert case4.index("if (smn.go_ms) {") < case4.index("sty_menu_go();") < case4.index("break;")

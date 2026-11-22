@@ -151,5 +151,7 @@ int testpics_kind(const char *file)
     if (!strcasecmp(dot, ".gif")) return TF_ANIM;
     if (!strcasecmp(dot, ".wav")) return TF_SOUND;
     if (!strcasecmp(dot, ".padv")) return TF_VIDEO;
+    /* a clip for the machine's own decoder (gstclip.h): the same player API */
+    if (!strcasecmp(dot, ".mp4") || !strcasecmp(dot, ".mov") || !strcasecmp(dot, ".m4v")) return TF_VIDEO;
     return TF_UNKNOWN;
 }

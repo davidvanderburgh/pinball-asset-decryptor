@@ -115,6 +115,10 @@ struct state {
     struct audio_clip *t_vsound;             /* ...and its sound */
     int t_vloops;                            /* its loops so far: a new one restarts the sound */
     long long t_vstart;                      /* when it last started */
+    /* Simon (2026-11-22): on a moving test item "quick press to freeze, long press to back
+     * out" with the button that backs out of a test (ACTION on a test card) */
+    int t_frozen;                            /* the frame shown is held */
+    long long t_act_down;                    /* when ACTION went down on a moving item, 0: not */
     /* the TEST CARD menu and its lists (PAD-1279) */
     int menu_sel;
     int pick_sel, pick_top;
@@ -410,6 +414,8 @@ static const char *test_name(const struct state *st, int k)
     return st->t_from == S_COLOR ? "Back to color correction" : "Back to settings";
 }
 
+static int test_moves(const struct state *st);
+
 static void test_unload(struct state *st)
 {
     if (st->t_img) { art_image_free(st->t_img); st->t_img = NULL; }
@@ -451,6 +457,8 @@ static void test_load(struct state *st, long long now)
     const struct conf_test *t = test_own(st, st->t_item);
     char path[2 * CONF_STR + 2];
     test_unload(st);
+    st->t_frozen = 0;
+    st->t_act_down = 0;
     if (t) {
         snprintf(path, sizeof path, "%s/%s", e->media_dir && *e->media_dir ? e->media_dir : ".",
                  t->file);
@@ -492,7 +500,7 @@ static void test_load(struct state *st, long long now)
             break;
         }
         default:
-            snprintf(st->t_err, sizeof st->t_err, "%s is not a PNG, GIF, PADV or WAV", t->file);
+            snprintf(st->t_err, sizeof st->t_err, "%s is not a PNG, GIF, PADV, MP4/MOV or WAV", t->file);
         }
     }
     sel_say("test: %d/%d %s%s%s%s", st->t_pos + 1, test_count(st), test_name(st, st->t_item),
@@ -546,6 +554,7 @@ static void test_close(struct state *st)
 static int test_tick(struct state *st, long long now)
 {
     int changed = 0;
+    if (st->t_frozen) return 0;              /* held: nothing moves on the screen */
     if (st->t_vid) {
         int k;
         if (vid_frame(st->t_vid, now, &k)) changed = 1;
@@ -822,9 +831,12 @@ static void draw_test(struct state *st)
             int shown = 0, dropped = 0;
             long long el = sel_now_ms() - st->t_vstart;
             vid_stats(st->t_vid, &shown, &dropped);
-            snprintf(buf, sizeof buf, "%d / %d   %s   %.1f of %.0f fps", st->t_pos + 1, test_count(st),
-                     test_name(st, k), el > 500 ? shown * 1000.0 / (double)el : (double)vid_fps(st->t_vid),
-                     (double)vid_fps(st->t_vid));
+            if (st->t_frozen)
+                snprintf(buf, sizeof buf, "%d / %d   %s   FROZEN", st->t_pos + 1, test_count(st), test_name(st, k));
+            else
+                snprintf(buf, sizeof buf, "%d / %d   %s   %.1f of %.0f fps", st->t_pos + 1, test_count(st),
+                         test_name(st, k), el > 500 ? shown * 1000.0 / (double)el : (double)vid_fps(st->t_vid),
+                         (double)vid_fps(st->t_vid));
         } else {
             snprintf(buf, sizeof buf, "%d / %d   %s", st->t_pos + 1, test_count(st), test_name(st, k));
         }
@@ -834,7 +846,9 @@ static void draw_test(struct state *st)
                  0xF0C040);
         if (e->testcard) {
             static char tk[200];
-            snprintf(tk, sizeof tk, K_MOVE ": previous / next      %s      " K_BACK ": back",
+            snprintf(tk, sizeof tk, test_moves(st)
+                     ? K_MOVE ": previous / next      %s      " K_BACK ": freeze / play, hold: back"
+                     : K_MOVE ": previous / next      %s      " K_BACK ": back",
                      kind == TF_SOUND || st->t_err[0] ? (kind == TF_SOUND ? K_GO ": play again" : "")
                      : c->ncolour > 0 ? K_GO ": corrected / not" : "");
             keys = tk;
@@ -1054,6 +1068,12 @@ static void activate(struct state *st)
     }
 }
 
+/* a test item that moves (a video, a moving GIF): ACTION freezes it on a quick press */
+static int test_moves(const struct state *st)
+{
+    return st->t_vid || (st->t_anim && st->t_anim->n > 1);
+}
+
 static void key(struct state *st, int ev, long long now)
 {
     int dir = (ev == EV_LEFT || ev == EV_MINUS) ? -1 : (ev == EV_RIGHT || ev == EV_PLUS) ? 1 : 0;
@@ -1093,6 +1113,9 @@ static void key(struct state *st, int ev, long long now)
             test_load(st, now);
         } else if (go) {
             activate(st);
+        } else if (back && test_moves(st)) {
+            /* how long it is held decides: settings_run watches it */
+            st->t_act_down = now;
         } else if (back) {
             test_close(st);
             pick_scroll(st);
@@ -1182,6 +1205,26 @@ void settings_run(struct settings_env *e)
                 st.next_rep = now - st.next_rep > REPEAT_EVERY_MS ? now + REPEAT_EVERY_MS
                                                                    : st.next_rep + REPEAT_EVERY_MS;
                 last = now;
+            }
+        }
+        /* ACTION on a moving item: let go soon = freeze / play on, held = back */
+        if (st.screen == S_TEST && st.t_act_down) {
+            if (input_held(e->in, EV_ACTION)) {
+                if (now - st.t_act_down >= TEST_HOLD_BACK_MS) {
+                    st.t_act_down = 0;
+                    sel_say("test: ACTION held: back");
+                    test_close(&st);
+                    pick_scroll(&st);
+                    dirty = 1;
+                }
+            } else {
+                st.t_act_down = 0;
+                st.t_frozen = !st.t_frozen;
+                if (st.t_frozen && st.t_voice >= 0) { audio_stop(e->au, st.t_voice); st.t_voice = -1; }
+                sel_say("test: %s", st.t_frozen ? "frozen" : "playing on");
+                st.t_caption = 1;
+                st.t_caption_until = now + TEST_CAPTION_MS;
+                dirty = 1;
             }
         }
         if (st.screen == S_TEST && !dirty) {

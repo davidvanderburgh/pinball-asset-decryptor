@@ -49,6 +49,9 @@
 /* ...and inside Test pictures, where looking without pressing is the point */
 #define TEST_IDLE_MS 600000
 #define TEST_CAPTION_MS 5000
+/* ACTION held this long on a moving test item backs out; let go sooner, it freezes
+ * the picture or plays on (Simon, 2026-11-22: "quick press to freeze, long press to back out") */
+#define TEST_HOLD_BACK_MS 700
 
 struct settings_env {
     struct gfx *g;

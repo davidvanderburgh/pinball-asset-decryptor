@@ -2542,6 +2542,14 @@ def check_media_file(path, kind):
     size = os.path.getsize(path)
     if kind == "test" and name.lower().endswith(".padv"):
         return padv_check(path, name), size        # never read whole: hundreds of MB
+    if kind == "test" and name.lower().rsplit(".", 1)[-1] in ("mp4", "mov", "m4v"):
+        # a test clip as it is, for the machine's own decoder (Simon, 2026-11-22;
+        # codeselect/gstclip.c): its container's first box, never read whole
+        with open(path, "rb") as f:
+            head = f.read(12)
+        if len(head) < 8 or head[4:8] not in (b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip"):
+            raise Refused("media %s: not an MP4 / QuickTime file" % name)
+        return "clip %s" % name.rsplit(".", 1)[-1].lower(), size
     with open(path, "rb") as f:
         data = f.read()
     if kind == "art":
@@ -2577,7 +2585,7 @@ def check_media_file(path, kind):
         ext = name.lower().rsplit(".", 1)[-1]
         if ext in ("png", "gif", "wav"):
             return check_media_file(path, {"png": "art", "gif": "anim", "wav": "wav"}[ext])
-        raise Refused("media %s: a test picture is a .png, .gif, .padv or .wav" % name)
+        raise Refused("media %s: a test picture is a .png, .gif, .padv, .mp4/.mov/.m4v or .wav" % name)
     raise Refused("media %s: unknown kind %r" % (name, kind))
 
 

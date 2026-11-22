@@ -929,7 +929,17 @@ if [ -n "$SEL_DIRS" ]; then
     # this keyboard, and its own on-screen footer names both - a log that
     # named only "1" sent the person at the PC looking for the wrong key.
     echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) or ACTION (Space) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
-    chroot "$R" $SEL_BIN --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_FONT $SEL_INV $SEL_PICK </dev/null
+    # A TEST CARD's clips play through the game's own video chain (Simon, 2026-11-22;
+    # codeselect/gstclip.c), which here is the PC's decoder behind padgst.so - the
+    # video bridge alone, never hwshim (see "NO LD_PRELOAD" above).  The same for a
+    # card with the TEST CARD entry (2026-11-23).
+    SEL_ENV=""
+    if { [ "${PAD_TESTCARD:-0}" = 1 ] || grep -qE '^image=testcard\|' "$R/dump/codeselect.conf" 2>/dev/null; } \
+        && [ "${PAD_VID:-0}" = 1 ] && [ -f "$R/lib/padgst.so" ]; then
+        SEL_ENV="LD_PRELOAD=/lib/padgst.so"
+        echo "[select] test card: clips play through the video host (padgst.so)"
+    fi
+    chroot "$R" /usr/bin/env $SEL_ENV $SEL_BIN --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_FONT $SEL_INV $SEL_PICK </dev/null
     SEL_RC=$?
     # ★ A KILLED SELECTOR IS A STOP, NOT A CHOICE (item 90, 2026-09-02).
     #

@@ -138,6 +138,10 @@ GIF_DEFAULT_DELAY_MS = 100                  # what the selector uses when a fram
 TEST_MAX = 64                               # codeselect conf.h CONF_MAX_TESTS
 #: THE TEST CARD's lists (PAD-1279, DragonRR): what --test KIND:PATH puts an item under
 TEST_KINDS = ("image", "video", "scene", "sound")
+#: Simon (2026-11-22): --test clip:PATH puts a video on the card AS IT IS (.mp4/.mov/.m4v),
+#: for the menu to play through the machine's own decoder (codeselect/gstclip.c) - in the
+#: Videos list, beside the .padv ones
+TEST_CLIP_EXTS = (".mp4", ".mov", ".m4v")
 #: a test video plays WHOLE on the machine (codeselect video.h, a .padv: JPEG frames, 4:4:4)
 #: - up to this long, at its own rate up to this fast; its sound is a WAV beside it
 TEST_VIDEO_MAX_SECONDS = 300
@@ -1858,6 +1862,14 @@ def check_media_dir(d, log=say):
         if ext == "padv":
             padv_info(p)                          # refuses a broken one; never read whole
             continue
+        if "." + ext in TEST_CLIP_EXTS:
+            # a clip as it is (Simon, 2026-11-22): an MP4 / QuickTime box at its head is
+            # all this checks; the machine's decoder says the rest on the test screen
+            with open(p, "rb") as f:
+                head = f.read(12)
+            if len(head) < 8 or head[4:8] not in (b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip"):
+                raise Refused("%s is not an MP4 / QuickTime file" % name)
+            continue
         with open(p, "rb") as f:
             data = f.read()
         if ext == "png":
@@ -1874,7 +1886,7 @@ def check_media_dir(d, log=say):
             if why:
                 raise Refused("%s: %s" % (name, why))
         else:
-            raise Refused("%s: only png/gif/wav/padv belong in a media set" % name)
+            raise Refused("%s: only png/gif/wav/padv (and a test clip's mp4/mov/m4v) belong in a media set" % name)
     # A TEST CARD's own items (a kind said: PAD-1279) go on the card's own p3, sized to
     # them - mkmulticard.py testcard; they are not the menu's budget
     apart = test_card_files(m)
@@ -2943,7 +2955,7 @@ def parse_test_spec(spec):
     spec = str(spec)
     kind = None
     head, colon, rest = spec.partition(":")
-    if colon and head in TEST_KINDS:
+    if colon and (head in TEST_KINDS or head == "clip"):
         kind, spec = head, rest
     path, sep, label = spec.partition("|")
     path = path.strip()
@@ -2955,9 +2967,13 @@ def parse_test_spec(spec):
                       % (spec, TEST_LABEL_MAX))
     if not os.path.isfile(path):
         raise Refused("--test %s: not a file" % path)
+    if kind == "clip" and os.path.splitext(path)[1].lower() not in TEST_CLIP_EXTS:
+        raise Refused("--test %s: a clip for the machine's own decoder is a %s file"
+                      % (path, " / ".join(TEST_CLIP_EXTS)))
     if kind:
         got = test_kind(path)
-        fits = {"image": ("picture",), "scene": ("picture",), "video": ("anim",), "sound": ("sound",)}[kind]
+        fits = {"image": ("picture",), "scene": ("picture",), "video": ("anim",), "sound": ("sound",),
+                "clip": ("anim",)}[kind]
         if got not in fits:
             raise Refused("--test %s: a %s is asked for, but it is a %s"
                           % (path, kind, {"picture": "picture", "anim": "video", "sound": "sound"}[got]))
@@ -3017,27 +3033,35 @@ def _prepare_test(k, path, out, work, log=say, want=None):
     kind = test_kind(path)
     if want == "video":
         kind = "padv"
-    ext = {"picture": ".png", "anim": ".gif", "sound": ".wav", "padv": ".padv"}[kind]
+    if want == "clip":
+        kind = "clip"
+    ext = {"picture": ".png", "anim": ".gif", "sound": ".wav", "padv": ".padv",
+           "clip": os.path.splitext(path)[1].lower()}[kind]
     name = "test%d%s" % (k, ext)
     target = os.path.join(out, name)
-    snd = os.path.join(out, "test%d.wav" % k) if kind == "padv" else None
+    snd = os.path.join(out, "test%d.wav" % k) if kind in ("padv", "clip") else None
     stamp = source_stamp(path)
     params = {"test": kind}
     if os.path.isfile(target) and cache_matches(read_sidecar(target), stamp, params):
         side = read_sidecar(target) or {}
         sound = side.get("params", {}).get("sound") if isinstance(side.get("params"), dict) else None
-        if kind == "padv":
+        if kind in ("padv", "clip"):
             sound = os.path.basename(snd) if os.path.isfile(snd) else None
         log("  test %d: %s (kept, %s unchanged)" % (k, name, os.path.basename(path)))
         return {"file": name, "sound": sound}
-    for other in (".png", ".gif", ".wav", ".padv"):
+    for other in (".png", ".gif", ".wav", ".padv") + TEST_CLIP_EXTS:
         stale = os.path.join(out, "test%d%s" % (k, other))
         if other != ext and os.path.exists(stale) and not (snd and stale == snd):
             os.remove(stale)
             drop_sidecar(stale)
     sound = None
-    if kind == "padv":
-        how = _test_padv(path, target, work, log=log)
+    if kind in ("padv", "clip"):
+        if kind == "clip":
+            # as it is: the machine's decoder reads the file the game would
+            shutil.copyfile(path, target)
+            how = "the clip as it is, %s" % fmt_bytes(os.path.getsize(target))
+        else:
+            how = _test_padv(path, target, work, log=log)
         if snd and os.path.exists(snd):
             os.remove(snd)
         try:
@@ -3340,7 +3364,7 @@ def cmd_prepare(a):
                 got = _prepare_test(k, path, out, work, want=kind)
                 ent = {"file": got["file"], "label": label, "source": path}
                 if kind:
-                    ent["kind"] = kind
+                    ent["kind"] = "video" if kind == "clip" else kind
                 if got.get("sound"):
                     ent["sound"] = got["sound"]
                 tests_out.append(ent)

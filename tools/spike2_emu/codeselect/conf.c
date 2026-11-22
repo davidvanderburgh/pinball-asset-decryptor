@@ -55,11 +55,13 @@ static int test_kind_of(const char *key, const char *file)
     const char *dot = strrchr(file, '.');
     int png = dot && !strcasecmp(dot, ".png"), gif = dot && !strcasecmp(dot, ".gif");
     int padv = dot && !strcasecmp(dot, ".padv"), wav = dot && !strcasecmp(dot, ".wav");
+    /* Simon (2026-11-22): a clip as it is, for the machine's own decoder (gstclip.h) */
+    int clip = dot && (!strcasecmp(dot, ".mp4") || !strcasecmp(dot, ".mov") || !strcasecmp(dot, ".m4v"));
     if (!strcmp(key, "test_image")) return png ? TK_IMAGE : TK_NONE;
     if (!strcmp(key, "test_scene")) return png ? TK_SCENE : TK_NONE;
-    if (!strcmp(key, "test_video")) return gif || padv ? TK_VIDEO : TK_NONE;
+    if (!strcmp(key, "test_video")) return gif || padv || clip ? TK_VIDEO : TK_NONE;
     if (!strcmp(key, "test_sound")) return wav ? TK_SOUND : TK_NONE;
-    return png ? TK_IMAGE : gif || padv ? TK_VIDEO : wav ? TK_SOUND : TK_NONE;
+    return png ? TK_IMAGE : gif || padv || clip ? TK_VIDEO : wav ? TK_SOUND : TK_NONE;
 }
 
 static void split_fields(char *val, char *fld[7])
@@ -575,7 +577,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 if (c->test[c->ntest].kind == TK_NONE && strcmp(key, "test"))
                     conf_warn(c, "%s:%d: %s=%s: not a file that list shows (%s): dropped", path,
                               lineno, key, fld[0], !strcmp(key, "test_sound") ? "a .wav"
-                              : !strcmp(key, "test_video") ? "a .padv or .gif"
+                              : !strcmp(key, "test_video") ? "a .padv, .gif or .mp4/.mov"
                               : "a .png");
                 else {
                     if (!strcmp(key, "test")) c->ntest_flat++;

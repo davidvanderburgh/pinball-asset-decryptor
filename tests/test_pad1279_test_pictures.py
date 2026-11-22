@@ -142,7 +142,7 @@ def test_plan_media_refuses_a_test_file_the_menu_cannot_show(mk, tmp_path):
     sub.mkdir()
     d3 = _media_dir(sub, [{"file": "notes.txt", "label": ""}])
     open(os.path.join(d3, "notes.txt"), "w").write("x")
-    with pytest.raises(mk.Refused, match="png, .gif, .padv or .wav"):
+    with pytest.raises(mk.Refused, match="png, .gif, .padv, .mp4/.mov/.m4v or .wav"):
         mk.plan_media(d3, 1)
 
 

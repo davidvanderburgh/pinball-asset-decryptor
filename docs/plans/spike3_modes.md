@@ -991,6 +991,52 @@ ended on its clock. Not proven, so not offered: stacking on the game's own multi
 multiball is not known yet), held coils (no coil_take / coil_give), the game's own modes (place / done), lamps,
 screens, clips and own sounds (this title's own content). Tests: tests/test_pad1289_pokemon_spike3_port.py.
 
+### Pokemon LE 0.87 (PAD-1504)
+
+`ports/spike3/pokemon_le-0.87.port` (program sha1 4ea25811..., 53.4 MB to 0.82's 52.7), carried from the proven 0.82
+port: `s3port.py <0.82 game> pokemon_le-0.82.port <0.87 game> --game pokemon_le --version 0.87` placed every core
+entry and its switch, shot, lamp, cabinet and event lines came out identical to 0.82's; the port is 0.82's file with
+every address swapped for the draft's and the lines the drafter cannot place found by hand on 0.87's own code
+(C:/tmp/PAD-1504 carry.py: a site's code around it, adrp / b / bl immediates masked, matched once in 0.87; a global by
+the loads of it in the lined-up code):
+- `coil_off` 0x983f50: 0.87 put the board's OFF (`8n 02 4d`, outputs up to 15 now, 8 on 0.82) second of its two
+  functions, so the code match first found the other one (`8n 02 40`).
+- `challenge_scores_gate` 0x835748 (its bl, bus id 91 as before), `message_table` 0x3269368 (3605 messages to 3500),
+  `challenge_scores_table` 0x325af58.
+- **The start menu was rebuilt** for a new entry, TOURNAMENT ("PLAY IN TOPS TOURNAMENT", "PLAY BUMP 'N' WIN"): the
+  game-mode indices run 0-13 (0-11 on 0.82) and Competition is 7 (6: the Competition adjustment preselects it). The
+  frame point is `ldr w26, [x23, w20, sxtw #2]` 0x4e2e18 just after the press moved the cursor (w20); the list is at
+  sp+0xd0 (room for 14 to the next object at sp+0x108), and the count is computed once before the frame loop and kept
+  only as the LAST index, at sp+140 (`sub w1, w22, #1; str w1, [sp, #0x8c]`; w22 holds the buttons by the frame
+  point). So `comp_menu_frame_count_at 140` with `_count_last 1`, and the challenge menu learned the same
+  (`challenge_menu_frame_count_last`, pad_mode_runtime.c: its count is the entries either way).
+- Message ids after the menu's moved by 4-7 (STANDARD 1915, NORMAL PLAY 1916, COMPETITION 1920, ALL RANDOMNESS REMOVED
+  1921, CHALLENGE 1922; comp.cfg reads 17 / 1920 / 1915, Fallout's and Transformers' numbers), and the FG_ names grew
+  to 38: FG_PLAYER_CHALLENGE_MODE_ACTIVE is 18 (17), Competition 17 (16); the auto-plunger flags stay 12 / 13.
+- The attract table has 63 pages (51). The clip bank is the framework's 60ed7e50 again, its scene.radium changed
+  (md5 32eb5f81...).
+
+Proof (2026-11-22, Spike 3 rig slots 150-154, hidden and MUTED, this build's mode64.so, the 0.87 card):
+- POKE TEST started on the third Berry target left hit, scored 6 shots through score_add (+21,000,000) and ended on
+  its 20 s clock; SAVE TEST's 15 s save served the drain inside it back (trough eject, auto plunger), 3 shots on that
+  ball, the drain after it ended the ball; SAVE CONTROL ended the ball on its first drain (5.9 s); MB TEST served 3
+  balls, 3 -> 2 in play, its clock ended it and "ours is over" at one ball.
+- PAD CHALLENGE (`challenge new`): `MODE CHALLENGE appended (entry 3 of 3, the game-mode index 1)`, shown and picked;
+  START (challenge pick) as the ball started, the ball launched for the player, its 30 s clock ended the ball, one ball
+  (balls-per-game 1), the extra ball refused, its own high score filed. With comp.cfg beside it: both appended
+  (3 of 3, `on the start menu as entry 4 of 4 (game-mode index 7, UNTIL POWERED OFF)`), UNTIL POWERED OFF picked,
+  `game 1 plays as Competition (flag 17 was 1)`, at its end flag 17 still 1.
+- Spare I/O (spare_sweep_mode.c, PROOF=spare): the struct checked out (98 switches), spare input 8:13 came as the
+  mode's shot twice, outputs 1:1 9:1 10:0 13:1 each on the bus as the pulse, the held command and one OFF - as 0.82.
+- CLIP TEST (a Try it set from spike3_modes.plan): its magenta title clip covered 72-75% of the glass from 1.7 s to
+  9.5 s after the trigger, 0% before and after. An attract photo item after entry 3's page (the 63-entry table): 88% of
+  the glass for its 8 s, twice, no dispatch timeout.
+- Not proven, so not offered: 0.87's operator menu can take EDITION and MUSIC MODE (0.82's could not: AD_GI / AD_LED
+  MAX BRIGHTNESS are live there); both need their own rig runs (spike3_music.PROVEN, editions.SPIKE3_PROVEN), as
+  Fallout's and Transformers' had.
+Tests: tests/test_pad1504_pokemon_087_port.py (with PAD_S3_PROGRAMS holding pokemon_le-0.87.game for the program's
+own words).
+
 ### Star Wars 2025 LE 0.96 (PAD-1290)
 
 `ports/spike3/star_wars_2025_le-0.96.port` (program sha1 91fb0281...), drafted from ELG's Spike 3 port: every core site

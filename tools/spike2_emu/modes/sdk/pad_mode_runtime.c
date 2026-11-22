@@ -17266,6 +17266,9 @@ static void challenge_menu_frame(pm_reg *r)
     unsigned creg = (unsigned)pm_port_value("challenge_menu_frame_cursor_reg", 6);
     unsigned breg = (unsigned)pm_port_value("challenge_menu_frame_buttons_reg", 0);
     long last_at = pm_port_value("challenge_menu_frame_last_at", -1);
+    /* PAD-1504: the count slot holds the LAST index (`value challenge_menu_frame_count_last 1`, Pokemon LE 0.87, as
+     * Prolonged Competition's comp_menu_frame_count_last): cnt is the entries either way */
+    unsigned clast = pm_port_value("challenge_menu_frame_count_last", 0) ? 1u : 0u, cnt;
     /* PAD-1369: the name message lettered with the mode's name - the game challenge's own (Godzilla), or on a plain
      * index menu, whose entry is Standard's index again, Standard's (`challenge_menu_frame_name_msg`); a plain menu
      * also letters Standard's caption (`challenge_menu_frame_caption_msg`) with the game's own CHALLENGE
@@ -17280,6 +17283,7 @@ static void challenge_menu_frame(pm_reg *r)
     int own[N_OWN_CHALLENGE], n = 0, k, on, prev_sub = frame_sub;
     unsigned cursor, eat;
     if (creg > FULL_REG_LAST || breg > FULL_REG_LAST || !challenge_frame_list(r, &list, &count)) return;
+    cnt = *count + clast;
     if (slot >= 0) {
         char key[24];
         pm_snprintf(key, sizeof key, "challenge_flag_%ld", slot);
@@ -17288,29 +17292,30 @@ static void challenge_menu_frame(pm_reg *r)
     cursor = (unsigned)r[creg];
     for (k = 0; k < N_OWN_CHALLENGE; k++)
         if (own_challenge[k].fn) own[n++] = k;
-    if (!n || *count > cap) return;
-    if ((unsigned long)sp != frame_sp || ours_at >= *count || list[ours_at] != entry) {   /* a new menu: append ours */
+    if (!n || cnt > cap) return;
+    if ((unsigned long)sp != frame_sp || ours_at >= cnt || list[ours_at] != entry) {   /* a new menu: append ours */
         frame_sp = (unsigned long)sp;
         frame_on = 0;
         frame_cursor_was = cursor;
-        if (*count >= cap) {
+        if (cnt >= cap) {
             if (!room_said++) say("challenge menu: no room for MODE CHALLENGE - the game's menu holds %u entries", cap);
             return;
         }
-        ours_at = *count;
+        ours_at = cnt;
         list[ours_at] = entry;
-        *count = ours_at + 1;
+        cnt = ours_at + 1;
+        *count = cnt - clast;
         if (last_at > 0) *(unsigned *)(sp + last_at) = ours_at;     /* the loop's copy of the last index (Pokemon) */
         if (n != said_n)
             say("challenge menu: MODE CHALLENGE appended (entry %u of %u, the game-mode index %u) - its flippers step "
-                "through %d mode(s)", ours_at + 1, *count, entry, n);
+                "through %d mode(s)", ours_at + 1, cnt, entry, n);
         said_n = n;
     }
     if (moved) {
         /* PAD-1369: the press already moved the cursor. A press away from our entry while a mode is left to step to
          * puts the cursor back (the entry steps to the next or previous mode instead); arriving, the first mode shows
          * from before it, the last from after it */
-        cursor = challenge_frame_moved(frame_cursor_was, cursor, *count, ours_at, frame_on, n, &frame_sub);
+        cursor = challenge_frame_moved(frame_cursor_was, cursor, cnt, ours_at, frame_on, n, &frame_sub);
         r[creg] = cursor;
         frame_cursor_was = cursor;
         on = cursor == ours_at;
@@ -17344,15 +17349,15 @@ static void challenge_menu_frame(pm_reg *r)
             if (frame_caption_msg) pm_message_restore(frame_caption_msg);
             frame_caption_msg = 0;
             own_pending = -1;
-            if (cursor < *count && list[cursor] == entry) {     /* onto the game's own entry: its pick again */
+            if (cursor < cnt && list[cursor] == entry) {     /* onto the game's own entry: its pick again */
                 if (gpm) *gpm = entry;
                 if (flag > 0) game_flag_set((unsigned)flag);
             }
         }
         /* this frame's press moves the cursor after this point: onto ours from before it, or from after it (a wrap) */
-        if (!moved && (r[breg] & rbit) && (cursor + 1 == ours_at || (ours_at == 0 && cursor + 1 == *count)))
+        if (!moved && (r[breg] & rbit) && (cursor + 1 == ours_at || (ours_at == 0 && cursor + 1 == cnt)))
             frame_sub = challenge_frame_arrive(n, 1);
-        else if (!moved && (r[breg] & lbit) && (cursor == ours_at + 1 || (cursor == 0 && ours_at + 1 == *count)))
+        else if (!moved && (r[breg] & lbit) && (cursor == ours_at + 1 || (cursor == 0 && ours_at + 1 == cnt)))
             frame_sub = challenge_frame_arrive(n, 0);
     }
     frame_on = on;

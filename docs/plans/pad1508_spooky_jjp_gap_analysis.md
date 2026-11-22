@@ -35,8 +35,8 @@ So one gap list covers both: whatever Spike 2 has that the shared JJP/Spooky key
 | Light patterns (`light ... solid/blink/pulse/chase`) | blink at a rate, or solid | **Built**: `lamp_pattern = solid / blink / pulse / chase`, `lamp_blink` its rate |
 | Shot penalty (`shot_penalty`) | none | **Built where the game can take points away**: Spooky's P-ROC titles (SkeletonGame's `game.score` subtracts). JJP's engine exports only `score_add_to_player_up` (Wonka 03.03, read 2026-11-22), and the Unity, Godot and pinHeck award calls only add, so their checks refuse `penalty` and say why |
 | Light the shots that score (`light_shots`) | `lamps` by name | Not built: needs a switch-to-insert map per title, which no JJP or Spooky port report has. `lamps` names them by hand |
-| Modes layered over modes (`layer`, `inside`) | ours run one at a time | Later in this ticket (keep_going): a runtime change in each of the six runtimes |
-| Take the place of a game mode (`in_place_of`, `roster_slot`, `challenge`) | `game_modes = hold` refuses the game's starts; `.stock` changes a game mode | Later in this ticket where the runtime already intercepts the game's start (JJP's hold gate): the refused start starts ours |
+| Modes inside modes (`inside`; `layer` priorities) | ours run one at a time | **Built** on Spooky (`inside = <my mode>`: starts only while it runs, ends with it); Spooky's runtimes already run ours side by side, so Spike 2's `layer` priorities have nothing to order. JJP's check refuses it: ours run one at a time there (PAD-1348) |
+| Take the place of a game mode (`in_place_of`; Stern's `roster_slot`, `challenge`) | `game_modes = hold` refuses the game's starts; `.stock` changes a game mode | **Built** where the runtime sees the game's start before it happens: JJP (its hold gate) and Spooky's P-ROC (SkeletonGame's mode queue). Unity, Godot and pinHeck only see a game mode once it runs: refused there by name, `start_after` offered. The roster and challenge menus are Stern's own |
 | Mode survives a drain (`ends_on clock`) | the ball's end ends it | Not built: on JJP the game stops every mode's run proc at the ball's end whatever we do (MODES.md); a carried-over clock is a different feature |
 | The game's own light shows (`show_start/end/hit`) | none | Not built: Stern's show table has no counterpart found in JJP's or Spooky's engines yet |
 | Cabinet light shows, shaker (`cab_show`, `shake`) | `coil_hold` on a shaker motor coil (`coil_motor_shaker` on GnR LE, Dialed In) | Already covered for the shaker; cabinet expression lights are Stern hardware |
@@ -63,5 +63,7 @@ JJP on Wonka 03.03 once the Sentinel key is in this PC.
   Proven: Scooby-Doo (Unity) and Looney Tunes (Godot) on their rigs, Jetsons (pinHeck) in the
   PIC32 emulator, P-ROC and pinHeck's compiled runtime in the tests. JJP's emulator run needs the
   purple Sentinel key plugged into this PC; it was not (`usbipd list` shows no 0529:0001).
-* Next: modes layered over modes (`layer`, `inside`) and taking a game mode's place
-  (`in_place_of`), where each runtime can intercept the game's own start.
+* Run 2: `inside` on the four Spooky runtimes (proven on Scooby-Doo, Looney Tunes, Jetsons and
+  P-ROC's stand-in), `in_place_of` on JJP and P-ROC (proven on Rick and Morty's rig: its Skillshot
+  held off, ours in its place). pinHeck now packs an empty `points`/`seconds` as the documented
+  1,000,000 and 20 s, as every other runtime does. Left: the JJP emulator run, which needs the key.

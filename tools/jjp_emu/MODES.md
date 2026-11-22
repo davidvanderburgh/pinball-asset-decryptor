@@ -193,6 +193,8 @@ The gap analysis: `docs/plans/pad1508_spooky_jjp_gap_analysis.md`.
 | `combo_seconds` | 5 | `0` now means no time limit: the `start_combo` switches in order, however long between them |
 | `sound_at` | none | `<seconds left> <sound>`, a line each (up to 8): plays when the time left reaches that number, once a run (a countdown). The game's sound or a file of the mode's own, as the other `sound_*` keys |
 | `sound_shot_every` | 0 (every shot) | the shot sound on every Nth scoring shot only |
+| `in_place_of` | none | the game's modes (as `start_after` names them, without `any`): when the game starts one of them, this mode starts instead and the game's never runs (Spike 2's `in_place_of`). It is a start rule of its own. JJP: the hold gate refuses the game's start and the start tick starts ours (not on The Wizard of Oz's proc engine, which has no Mode class). Spooky: P-ROC only, where every game mode goes through SkeletonGame's `game.modes.add` first; Unity, Godot and pinHeck see a game mode only once it runs, so their check refuses it |
+| `inside` | none | `<a mode of ours>`: starts only while that mode runs and ends when it ends (`the mode it runs inside ended`), Spike 2's `inside`. Spooky only: ours run side by side there. JJP runs ours one at a time, so its check refuses it |
 | `lamp_pattern` | blink, or solid with `lamp_blink = 0` | `solid`, `blink`, `pulse` (the colour rising and falling) or `chase` (one lamp at a time, in the `lamps` line's order); `lamp_blink` is its rate (flashes, pulses or chase steps a second) |
 
 Each refusal says why: `start_max`, `cooldown`, `start_needs` and `start_once` log `not counted -
@@ -203,8 +205,11 @@ line(s)`. A proof run can log what a `pulse` or `chase` puts: `JJP_MODS_TRACE_LA
 **Proven** 2026-11-22, the same three modes on each (hidden, muted): Scooby-Doo (Unity) and Looney
 Tunes (Godot) on their rigs, Jetsons (pinHeck) in the PIC32 emulator from a PAD-built update, P-ROC
 by the stand-in SkeletonGame in `tests/test_pad1508_spike2_rules.py` (and pinHeck's compiled runtime
-on Unicorn there). JJP's runtime takes the same keys and its check passes them; its emulator run
-waits for the purple Sentinel key in this PC (Wonka 03.03, `C:\tmp\PAD-1508\run.sh`).
+on Unicorn there). `inside` the same way on all four Spooky engines (run 2), and `in_place_of` on Rick and Morty's
+rig: the game's `Skillshot` held off at the ball's start, ours started and scored in its place, the
+game played on. JJP's runtime takes the same keys and its check passes them; its emulator run
+(every rule, and `in_place_of` on Candy Lane through `JJP_MODS_TEST_GAMEMODE`) waits for the
+purple Sentinel key in this PC (Wonka 03.03, `C:\tmp\PAD-1508\run.sh`).
 
 ## A mode's own rules: C++ and blocks (PAD-1384)
 

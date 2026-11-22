@@ -331,7 +331,8 @@ START_RULES = ("start", "start_on", "start_after", "start_score", "start_combo",
 def start_text(m):
     """What starts a mode, for a summary line: its start switches and any start rules."""
     parts = [m["start"]] if m.get("start") else []
-    for k, label in (("start_on", "on"), ("start_after", "after"), ("start_score", "score"), ("start_combo", "combo")):
+    for k, label in (("start_on", "on"), ("start_after", "after"), ("start_score", "score"), ("start_combo", "combo"),
+                     ("in_place_of", "in place of")):
         if m.get(k):
             parts.append("%s %s" % (label, m[k]))
     return "; ".join(parts)

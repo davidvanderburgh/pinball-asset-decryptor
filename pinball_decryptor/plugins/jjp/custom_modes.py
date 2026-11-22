@@ -68,10 +68,13 @@ FORM_GROUPS = (
                 "panel_color", "panel")),
     ("Balls", ("multiball", "multiball_on", "add_ball", "ball_save")),                       # PAD-1353
     ("Coils", ("coil_start", "coil_shot", "coil_complete", "coil_hold", "coil_hold_on")),     # PAD-1353
+    # PAD-1508: Spike 2's rules (tools/jjp_emu/MODES.md "Spike 2's rules")
+    ("Rules from Spike 2", ("shot_points", "points_ladder", "end_shots", "start_also", "start_max",
+                            "cooldown", "start_needs", "sound_at", "sound_shot_every", "lamp_pattern")),
 )
 #: mode keys the form does not show: ``code`` is set when a mode is made with blocks or in C++
 #: (the New mode window, PAD-1384) and shown as how the mode is made
-NOT_ON_FORM = ("code",)
+NOT_ON_FORM = ("code", "penalty")     # penalty: no JJP engine can take points away (PAD-1508)
 #: the runtime's defaults (MODES.md "Mode keys"): what an empty key means
 DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
@@ -81,6 +84,7 @@ DEFAULTS = {
     "video_at": "0 0 100 100", "video_loop": "yes",
     "coil_hold_on": "shots", "coil_holds": "off",
     "combo_seconds": "5", "start_count_reset": "game", "start_once": "no",
+    "points_ladder": "fixed",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
@@ -106,6 +110,13 @@ LABELS = {
     "start_score": "Starts at a score", "start_combo": "Starts on a combo (in order)",
     "combo_seconds": "Combo seconds between shots", "start_count_reset": "Start count resets every",
     "start_once": "Starts at most once a", "code": "Its own code",
+    # PAD-1508
+    "shot_points": "Points per shot (one a line: switches points)", "points_ladder": "Each shot pays",
+    "end_shots": "Shots that end it", "penalty": "Shots that take points (one a line: switches points)",
+    "start_also": "Also needed to start (one a line: switches [hits])", "start_max": "Starts at most, a game",
+    "cooldown": "Seconds before it can start again", "start_needs": "Only after my mode (name [ball|game])",
+    "sound_at": "Sounds at seconds left (one a line: seconds sound)", "sound_shot_every": "Shot sound every Nth shot",
+    "lamp_pattern": "Lamp pattern",
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
@@ -273,7 +284,11 @@ def read_cfg(path):
             text = f.read()
     except OSError:
         return collections.OrderedDict()
-    return collections.OrderedDict((k, v) for _n, k, v in mk().parse_cfg(text))
+    out = collections.OrderedDict()
+    rep = getattr(mk(), "REPEATABLE", {})
+    for _n, k, v in mk().parse_cfg(text):
+        out[k] = out[k] + "\n" + v if k in rep and out.get(k) else v   # PAD-1508: every line of a repeated key
+    return out
 
 
 def write_cfg(path, values, header=""):
@@ -286,8 +301,9 @@ def write_cfg(path, values, header=""):
         lines.append("# " + header)
     for k in order:
         v = str(values.get(k) if values.get(k) is not None else "").strip()
-        if v != "":
-            lines.append("%s = %s" % (k, v))
+        for one in v.splitlines():            # a repeated key (PAD-1508): a line each
+            if one.strip():
+                lines.append("%s = %s" % (k, one.strip()))
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")

@@ -133,7 +133,19 @@ KEYS = collections.OrderedDict([
     ("sound_channel", ("fanfare", "fx", "speech", "music")),
     ("music", "sound_file"), ("picture", "picture_file"), ("picture_at", "box"),
     ("video", "video_file"), ("video_at", "box"), ("video_loop", ("yes", "no")),
+    # PAD-1508: Spike 2's rules (JJP's keys, MODES.md "Spike 2's rules"); penalty runs where the
+    # game's own score call takes points away
+    ("shot_points", "shot_points"), ("points_ladder", ("fixed", "rising")), ("end_shots", "switches"),
+    ("penalty", "shot_points"), ("start_max", "int"), ("cooldown", "int"), ("start_also", "start_also"),
+    ("start_needs", "needs"), ("sound_at", "sound_at"), ("sound_shot_every", "int"),
+    ("lamp_pattern", ("solid", "blink", "pulse", "chase")),
 ])
+#: PAD-1508: Spike 2's rules, and the engines whose runtime runs them so far
+SPIKE2_KEYS = ("shot_points", "points_ladder", "end_shots", "penalty", "start_max", "cooldown", "start_also",
+               "start_needs", "sound_at", "sound_shot_every", "lamp_pattern")
+SPIKE2_ENGINES = ("proc",)
+#: keys a mode file may give on several lines, and how many the runtimes take
+REPEATABLE = dict(MJ.REPEATABLE, penalty=8)
 #: what each engine's runtime plays from a file of the mode's own: Unity's AudioClip loader and
 #: VideoPlayer on Linux (VP8 webm only), Godot 4.1 (PCM wav: it has no Ogg loader for a file;
 #: Theora ogv),
@@ -234,7 +246,10 @@ def _int(v):
 def keys_not_here(port):
     """Every key *port*'s runtime cannot do: its port's ``keys_not_here`` (a pinHeck DMD: no fonts,
     no colours, no files of a mode's own, no game modes to start after; PAD-1469 runs the rest)."""
-    return set((port or {}).get("keys_not_here") or ())
+    out = set((port or {}).get("keys_not_here") or ())
+    if port is not None and engine(port) not in SPIKE2_ENGINES:
+        out.update(SPIKE2_KEYS)                  # PAD-1508: not in this engine's runtime yet
+    return out
 
 
 def _not_here(k, port, v=""):
@@ -242,6 +257,8 @@ def _not_here(k, port, v=""):
     if k not in keys_not_here(port):
         return None
     t = port.get("title", "this game")
+    if k in SPIKE2_KEYS and engine(port) not in SPIKE2_ENGINES:
+        return "%s is not on %s yet: its runtime does not run Spike 2's rules" % (k, t)
     if k == "start_after":
         return ("start_after is not on %s: the game has no modes of its own a mode could watch; "
                 "start_on, start_score or start_combo can start it" % t)
@@ -326,6 +343,11 @@ def check_value(kind, v, port):
             return "%s: %s's runtime cannot see that event (it can: %s)" % (
                 " ".join(bad), port.get("title", "this game"), ", ".join(can) or "none")
         return None
+    if kind == "sound_at":        # <seconds left> <sound> (PAD-1508), the sound as this title takes one
+        parts = v.split(None, 1)
+        if len(parts) < 2 or not MJ._INT.match(parts[0]):
+            return "must be <seconds left> <sound>"
+        return MJ._int_in(parts[0], 1, 600, "seconds left") or check_value("sound_or_file", parts[1].strip(), port)
     if kind == "sound":
         known = set(port.get("sounds") or ()) if port else set()
         if known and v not in known:
@@ -409,8 +431,16 @@ def check_modes(mode_dir, port=None):
             p = check_value(kind, v, port)
             if p:
                 problems.append("%s:%d: %s %s" % (fn, n, k, p))
+            if k in REPEATABLE and m.get(k):          # every line, newline-joined (PAD-1508)
+                if m[k].count("\n") + 1 >= REPEATABLE[k]:
+                    problems.append("%s:%d: more than %d %s lines; the runtime takes %d" % (
+                        fn, n, REPEATABLE[k], k, REPEATABLE[k]))
+                else:
+                    m[k] = m[k] + "\n" + v
+                continue
             m[k] = v
         m["file"] = fn
+        problems.extend(MJ.spike2_rule_problems(fn, m, mode_dir))
         m.setdefault("name", fn[:-5])
         if not any(m.get(k) for k in MJ.START_RULES):
             problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo): "
@@ -421,8 +451,9 @@ def check_modes(mode_dir, port=None):
         if v is not None and v <= 0:
             problems.append("%s: start_score must be above 0" % fn)
         v = _int(m.get("combo_seconds") or "")
-        if v is not None and not 1 <= v <= 60:
-            problems.append("%s: combo_seconds must be 1-60" % fn)
+        lo = 0 if engine(port) in SPIKE2_ENGINES else 1        # PAD-1508: 0 = no time limit
+        if v is not None and not lo <= v <= 60:
+            problems.append("%s: combo_seconds must be %d-60%s" % (fn, lo, " (0: no time limit)" if lo == 0 else ""))
         for k in MEDIA_KEYS:
             v = m.get(k, "")
             if v and "." in v and "/" not in v and (k in ("music", "picture", "video") or
@@ -460,6 +491,7 @@ def check_modes(mode_dir, port=None):
             if v is not None and v < 0:
                 problems.append("%s: %s must not be below 0" % (fn, k))
         modes.append(m)
+    problems.extend(MJ.start_needs_problems(modes))
     return modes, problems
 
 

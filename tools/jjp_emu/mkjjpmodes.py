@@ -577,6 +577,20 @@ def spike2_rule_problems(fn, m, mode_dir=None):
     return out
 
 
+def start_needs_problems(modes):
+    """PAD-1508: a start_needs must name another mode of the folder."""
+    out = []
+    names = {(m.get("name") or "").strip().lower() for m in modes}
+    for m in modes:
+        need = (m.get("start_needs") or "").split()
+        if need and need[-1] in ("ball", "game"):
+            need = need[:-1]
+        if need and " ".join(need).lower() not in names - {(m.get("name") or "").strip().lower()}:
+            out.append("%s: start_needs %s: no other mode in the folder has that name (it would never start)"
+                       % (m["file"], " ".join(need)))
+    return out
+
+
 def check_modes(mode_dir, port=None):
     """A mode folder checked the way jjpmodes.c will read it -> (modes, problems):
     modes = [{file, name, start, ...}], problems = ["file:line: ..."]."""
@@ -658,14 +672,7 @@ def check_modes(mode_dir, port=None):
             problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
                             "(after a check on the machine)" % fn)
         modes.append(m)
-    names = {(m.get("name") or "").strip().lower() for m in modes}
-    for m in modes:
-        need = (m.get("start_needs") or "").split()
-        if need and need[-1] in ("ball", "game"):
-            need = need[:-1]
-        if need and " ".join(need).lower() not in names - {(m.get("name") or "").strip().lower()}:
-            problems.append("%s: start_needs %s: no other mode in the folder has that name (it would never start)"
-                            % (m["file"], " ".join(need)))
+    problems.extend(start_needs_problems(modes))
     if stocks and port is not None and port.get("engine") == "proc":
         problems.append("%s: %s has no Mode class, so its own modes cannot be changed (.stock files are "
                         "ignored there)" % (" ".join(stocks), port.get("title", "this game")))

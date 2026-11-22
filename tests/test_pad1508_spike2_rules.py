@@ -88,3 +88,109 @@ def test_runtime_reads_the_rules_with_the_checkers_limits(mm):
     # combo_seconds 0 = no time limit; a cooldown is timed from the end the runtime saw
     assert "m->combo_ms > 0 && t - m->combo_t > m->combo_ms" in src
     assert "m->ended_at = now_ms() | 1" in src
+
+
+# ============================================================================ the P-ROC runtime
+def _parity():
+    spec = importlib.util.spec_from_file_location(
+        "parity_t1508", os.path.join(HERE, "tests", "test_spooky_modes_parity.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.fixture
+def proc(tmp_path, monkeypatch):
+    par = _parity()
+    monkeypatch.setenv("PAD_MODES_LOG", str(tmp_path / "padmodes.log"))
+    pm = par._load("pad_padmodes_proc_t1508", os.path.join(par.MODES, "proc", "padmodes_proc.py"))
+
+    def make(*modes):
+        r = par._runtime(pm, tmp_path, monkeypatch, list(modes))
+        r.evt_ball_starting()
+        return r
+    make.Sw = par._Sw
+    return make
+
+
+def _hit(r, Sw, *names):
+    for n in names:
+        r.pad_switch(Sw(n))
+
+
+def test_proc_shot_points_ladder_end_shot_and_shot_sound_every(proc):
+    r = proc("name = A\nstart = leftInlane\nshots = slingRight\npoints = 1000\nseconds = 30\n"
+             "shot_points = spinner 3,000\npoints_ladder = rising\nend_shots = rightInlane\n"
+             "sound_shot = se_hit\nsound_shot_every = 2\n")
+    played = []
+    r.game.sound.sounds["se_hit"] = {}
+    r.game.sound.play = played.append
+    a, = r.pad_modes
+    _hit(r, proc.Sw, "leftInlane")
+    assert a["running"]
+    p = r.game.current_player()
+    _hit(r, proc.Sw, "slingRight", "slingRight", "spinner")    # 1000, 2 x 1000, 3 x 3000
+    assert p.score == 1000 + 2000 + 9000 and len(played) == 1  # the shot sound on the 2nd only
+    _hit(r, proc.Sw, "rightInlane")
+    assert not a["running"] and "ended (end shot rightInlane)" in r.log.read_text()
+
+
+def test_proc_start_also_max_cooldown_and_needs(proc):
+    r = proc("name = A\nstart = leftInlane\nstart_also = spinner 2\nstart_max = 2\ncooldown = 8\n"
+             "seconds = 30\nend_shots = rightInlane\n",
+             "name = B\nstart = slingRight\nstart_needs = A game\nseconds = 5\n")
+    a, b = r.pad_modes
+    _hit(r, proc.Sw, "slingRight")
+    assert not b["running"] and "A has not run this game (start_needs)" in r.log.read_text()
+    _hit(r, proc.Sw, "leftInlane", "spinner")
+    assert not a["running"] and "waiting for 1 start_also" in r.log.read_text()
+    _hit(r, proc.Sw, "spinner")
+    assert a["running"]
+    _hit(r, proc.Sw, "rightInlane")
+    _hit(r, proc.Sw, "leftInlane")
+    assert not a["running"] and "cooling down, 8 s left" in r.log.read_text()
+    _hit(r, proc.Sw, "slingRight")
+    assert b["running"]
+    r.clock[0] += 9
+    _hit(r, proc.Sw, "leftInlane", "spinner", "spinner")
+    assert a["running"] and a["runs_game"] == 2
+    _hit(r, proc.Sw, "rightInlane")
+    r.clock[0] += 9
+    _hit(r, proc.Sw, "leftInlane", "spinner", "spinner")
+    assert not a["running"] and "started 2 time(s) this game, its start_max" in r.log.read_text()
+
+
+def test_proc_sound_at_combo_without_a_time_limit_and_penalty(proc):
+    r = proc("name = A\nstart = leftInlane\nseconds = 10\nsound_at = 5 se_hurry\nsound_at = 2 se_last\n"
+             "penalty = spinner 5000\n",
+             "name = C\nstart_combo = rightInlane slingRight\ncombo_seconds = 0\nseconds = 3\n")
+    played = []
+    r.game.sound.sounds.update(se_hurry={}, se_last={})
+    r.game.sound.play = played.append
+    a, c = r.pad_modes
+    p = r.game.current_player()
+    p.score = 3000
+    _hit(r, proc.Sw, "leftInlane")
+    _hit(r, proc.Sw, "spinner")
+    assert p.score == 0 and "penalty shot spinner: -3000 (asked 5000)" in r.log.read_text()
+    for _ in range(30):
+        _tick(r)
+    assert played == ["se_hurry"]
+    for _ in range(25):
+        _tick(r)
+    assert played == ["se_hurry", "se_last"] and not a["running"]
+    _hit(r, proc.Sw, "rightInlane")
+    r.clock[0] += 60                                           # a minute between: still the combo
+    _hit(r, proc.Sw, "slingRight")
+    assert c["running"]
+
+
+def _tick(r, secs=0.2):
+    r.clock[0] += secs
+    r.mode_tick()
+
+
+def test_proc_repeated_lines_add_to_title_cfg(proc, tmp_path):
+    r = proc("name = A\nstart = leftInlane\nshot_points = spinner 10\nshot_points = rightInlane 20\n")
+    a, = r.pad_modes
+    assert [pts for _sw, pts in a["shot_points"]] == [10, 20]

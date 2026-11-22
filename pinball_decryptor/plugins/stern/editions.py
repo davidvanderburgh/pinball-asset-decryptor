@@ -141,18 +141,19 @@ def in_program(elf_bytes):
 #: ``<game>-<version>`` of the Spike 3 builds whose game program takes EDITION (a setting the game
 #: says it no longer uses, and the menu copy :func:`.menu_settings.grow_wide_program` grows), each
 #: seen working in the emulator: the row on Attract Mode, the value stored, and a multi-boot card of
-#: two editions booting the one it names. The other Spike 3 builds (Pokemon 0.82, both Star Wars
-#: 2025, Walking Dead 0.92) still use all three settings EDITION and its siblings could take.
+#: two editions booting the one it names. The other Spike 3 builds (Pokemon 0.82 - 0.87 has the
+#: spare setting, PAD-1505 - both Star Wars 2025, Walking Dead 0.92) still use all three settings EDITION and its siblings could take.
 SPIKE3_PROVEN = frozenset({
     "star_wars_elg-1.10",
     "fallout_le-0.81",
     "fallout_le-0.82",
     "transformers_mtmte_le-0.96",
+    "pokemon_le-0.87",               # PAD-1505: 0.87's menu has the spare setting 0.82's lacks
 })
 SPIKE3_NO_SPARE = ("Editions are not offered on %s: its game program uses every setting EDITION "
                    "could take, so its operator menu cannot take EDITION.")
 SPIKE3_NOT_PROVEN = ("Editions are not offered on %s yet: they work on Star Wars ELG 1.10, Fallout "
-                     "0.81 and 0.82 and Transformers 0.96 (Spike 3).")
+                     "0.81 and 0.82, Transformers 0.96 and Pokemon 0.87 (Spike 3).")
 #: the Spike 3 builds read and found to have no setting to spare
 SPIKE3_FULL = frozenset({"pokemon_le-0.82", "star_wars_2025_le-0.96", "star_wars_2025_pro-0.84",
                          "walking_dead_remastered_le-0.92"})

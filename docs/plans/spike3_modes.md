@@ -65,8 +65,8 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live, and the Insider logins since PAD-1326 (`coop_play.insider_users_a64`; the runtime reads the tables pointer-sized, the manager moved by the PIE's load address) |
 | random clips | clips.cfg, clips in the video bank | **goes on (PAD-1323)** | done: the clip v2 route asks for no `string_new` (the runtime builds the name), the name read as an 8-byte pointer, surfaces compared at full width. A port with the clip v2 lines: Star Wars ELG's today |
 | screen times | `stime` lines in clips.cfg | **goes on (PAD-1323)** | done: the slot read and written as 8 bytes, moved by the PIE's load address; screen_time.py reads 64-bit programs (Fallout LE, Pokemon LE, Transformers LE have the screens) |
-| music modes | sounds.cfg, bank records, MUSIC MODE row | **goes on (PAD-1324)** | done: the files appended to image.bin (a music-bank song's to its own bank, PAD-1358), the record key swapped at the lookup while the setting says the mode (`mswap`), MUSIC MODE on Audio Content (found by name) in game.pad, which the hook runs; Star Wars ELG 1.10, Fallout LE 0.82 and Transformers LE 0.96 (PAD-1359) (below) |
-| editions | EDITION row, codeselect's `edition=` | **goes on (PAD-1325)** | done: `spike3_menu` grows the 64-bit program's menu (Attract Mode, found by its name); `mks3multi --editions`; nvm.c reads the Spike 3 store (tools/spike3_emu/MULTIBOOT.md). ELG 1.10, Fallout 0.81/0.82, Transformers 0.96 take it |
+| music modes | sounds.cfg, bank records, MUSIC MODE row | **goes on (PAD-1324)** | done: the files appended to image.bin (a music-bank song's to its own bank, PAD-1358), the record key swapped at the lookup while the setting says the mode (`mswap`), MUSIC MODE on Audio Content (found by name) in game.pad, which the hook runs; Star Wars ELG 1.10, Fallout LE 0.82, Transformers LE 0.96 (PAD-1359) and Pokemon LE 0.87 (PAD-1505) (below) |
+| editions | EDITION row, codeselect's `edition=` | **goes on (PAD-1325)** | done: `spike3_menu` grows the 64-bit program's menu (Attract Mode, found by its name); `mks3multi --editions`; nvm.c reads the Spike 3 store (tools/spike3_emu/MULTIBOOT.md). ELG 1.10, Fallout 0.81/0.82, Transformers 0.96, Pokemon 0.87 (PAD-1505) take it |
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
@@ -1031,11 +1031,26 @@ Proof (2026-11-22, Spike 3 rig slots 150-154, hidden and MUTED, this build's mod
 - CLIP TEST (a Try it set from spike3_modes.plan): its magenta title clip covered 72-75% of the glass from 1.7 s to
   9.5 s after the trigger, 0% before and after. An attract photo item after entry 3's page (the 63-entry table): 88% of
   the glass for its 8 s, twice, no dispatch timeout.
-- Not proven, so not offered: 0.87's operator menu can take EDITION and MUSIC MODE (0.82's could not: AD_GI / AD_LED
-  MAX BRIGHTNESS are live there); both need their own rig runs (spike3_music.PROVEN, editions.SPIKE3_PROVEN), as
-  Fallout's and Transformers' had.
+- EDITION and MUSIC MODE: 0.87's operator menu can take them (0.82's could not: AD_GI / AD_LED MAX BRIGHTNESS are
+  live there); offered since PAD-1505 (spike3_music.PROVEN, editions.SPIKE3_PROVEN), below.
 Tests: tests/test_pad1504_pokemon_087_port.py (with PAD_S3_PROGRAMS holding pokemon_le-0.87.game for the program's
 own words).
+
+**Editions and Music Mode on 0.87 (PAD-1505)**, Spike 3 rig slot 155, hidden and muted (2026-11-22):
+- Music Mode: the Try it set of a 0.87 audio extract (2491 sounds, 1030 of 1040 requests mapped) giving its 37 stereo
+  songs of 20 s or more a 700 Hz tone for mode 2 and 1100 Hz for mode 3: 74 records, the program grown into game.pad,
+  the setting at the program's 0x32e1ee8. Adjustments > Machine Settings (Pricing, Game Play Settings, Machine
+  Settings) > Audio Content (its sixth row) listed Music Mode alone, help `1 = Standard, 2 = Custom A, 3 = Custom B`,
+  read back 2, 3, 1 as set, the runtime saying `mode 2/3/1 from here on`; with the PCM kept, request 64 (idx1907) in
+  mode 2 took mode 2's record (`46000220000020c0 plays mode 2's, 46000220000030c0`) and played 99% 700 Hz, request 66
+  (idx0488) in mode 3 99% 1100 Hz, request 67 (idx1531) in mode 1 the game's own song (no swap, no tone).
+- Editions: the real Spike 3 Write of 0.87 with editions "Standard, Dark Side" (119 s) put EDITION on Attract Mode
+  (its seventh row, `Edition (*)`, help `1 = Standard, 2 = Dark Side`); the written card booted, set to 2 in the menu,
+  read back 2, and codeselect's nvm.c read 2 off the game's own store (`/data/nv/pokemon_le/NVM/00000003`).
+  `mks3multi.edition_contract` took two such cards' programs as two editions (`/data/nv/pokemon_le/NVM`,
+  SHA1("EDITION"), 2 values). The card of both was not built (its 62 GB work copy did not fit the rig's Linux disk);
+  booting the image a stored EDITION names is PAD-1325's, proven on ELG.
+Tests: tests/test_pad1505_pokemon_087_editions_music.py.
 
 ### Star Wars 2025 LE 0.96 (PAD-1290)
 

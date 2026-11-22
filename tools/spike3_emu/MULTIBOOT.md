@@ -134,7 +134,7 @@ picks the image at the next power-up, as on a Spike 2 card (PAD-495).
   category table grown so the Attract Mode page lists it (`menu_settings.grow_wide_program`,
   PAD-1321; the page found by its name, `menu_settings.wide_category`), read
   back, and the program put on the card whole. Takers: Star Wars ELG 1.10, Fallout 0.81 / 0.82,
-  Transformers 0.96. Pokemon 0.82, both Star Wars 2025 and Walking Dead 0.92 use every setting
+  Transformers 0.96, Pokemon 0.87 (PAD-1505). Pokemon 0.82, both Star Wars 2025 and Walking Dead 0.92 use every setting
   EDITION could take and are refused with a sentence.
 - **`mks3multi.py build|inject --editions`** reads every image's program (a card's through PAD's
   own decryptor; an existing card's trees on inject; a modes card through `pad/padmode/game.target`)

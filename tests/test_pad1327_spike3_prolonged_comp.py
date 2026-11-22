@@ -400,7 +400,7 @@ def test_walking_dead_remastered_takes_star_wars_elgs_route(tmp_path):
 
 
 #: the Spike 3 titles Prolonged Competition goes on (Transformers LE has no port yet)
-OFFERED3 = {"star_wars_elg_1_10_spike3", "fallout_le_0_82_spike3", "pokemon_le_0_82_spike3",   # each emulator-proven
+OFFERED3 = {"star_wars_elg_1_10_spike3", "fallout_le_0_82_spike3", "pokemon_le_0_82_spike3", "pokemon_le_0_87_spike3",   # each emulator-proven
             "star_wars_2025_le_0_96_spike3", "walking_dead_remastered_le_0_92_spike3", "star_wars_2025_pro_0_84_spike3",
             "transformers_mtmte_le_0_96_spike3"}
 

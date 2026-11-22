@@ -205,7 +205,7 @@ int main(void) {
 # ---- the ports --------------------------------------------------------------------------------------------------
 def test_every_spike3_port_carries_the_lines():
     ports = sorted(PORTS.glob("*.port"))
-    assert len(ports) == 7
+    assert len(ports) == 8                                     # PAD-1504: Pokemon LE 0.87
     for path in ports:
         p = _port(path)
         assert all(n in p for n in NAMES + ("coil_table", "coil_count")), path.name

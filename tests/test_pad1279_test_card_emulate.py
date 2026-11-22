@@ -106,3 +106,27 @@ def test_the_emulator_runs_the_test_cards_own_menu_program():
     assert 'SEL_BIN="${SEL_BIN:-/usr/local/codeselect/codeselect}"' in inner
     line = next(ln for ln in run.splitlines() if "--conf /dump/codeselect.conf --out" in ln)
     assert line.strip().startswith('chroot "$R" $SEL_BIN --conf') and "$SEL_FONT" in line
+
+
+def test_a_card_menu_that_does_not_know_an_option_gets_pads_build():
+    """PR #44 review: the menu exits on an option it does not know, and a test card's menu
+    ending ends the run, so the next option the rig passes would have stopped every older
+    test card emulating.  sel_testcard checks the card's program for every option in
+    SEL_OPTS and lets PAD's build stand in when one is missing; the list must name every
+    option the launch line can pass, its own and those in SEL_FONT / SEL_INV / SEL_PICK."""
+    import re
+    run = (RIG / "run_game.sh").read_text(encoding="utf-8")
+    opts = set(re.search(r'^SEL_OPTS="([^"]*)"', run, re.M).group(1).split())
+    line = next(ln for ln in run.splitlines() if "--conf /dump/codeselect.conf --out" in ln)
+    passed = set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", line))
+    for var in ("SEL_FONT", "SEL_INV", "SEL_PICK"):
+        for m in re.finditer(r'\b%s="([^"$]*)' % var, run):
+            passed |= set(re.findall(r"--[a-z][a-z-]*", m.group(1)))
+    assert {"--conf", "--font", "--no-invert", "--pick"} <= passed
+    assert passed <= opts, "options the rig passes but sel_testcard does not check: %s" % (passed - opts)
+    tc = run[run.index("sel_testcard() {"):]
+    tc = tc[:tc.index("\n}\n")]
+    assert 'for f in $SEL_OPTS; do' in tc and 'grep -aqF -- "$f"' in tc
+    assert "does not know$miss: PAD's own build stands in" in tc
+    # SEL_OPTS is set before any card is read, so sel_testcard sees it
+    assert run.index('SEL_OPTS="') < run.index('if [ -n "${PAD_CARD:-}" ]; then')

@@ -54,9 +54,21 @@ sel_testcard() {
     # without a word, and the buttons on the glass were not the card's. The card's
     # /usr/local/codeselect comes over beside its media and that program runs; PAD's
     # build stands in only when the card has none.
+    #   ONLY A PROGRAM THAT KNOWS EVERY OPTION THE RIG GIVES IT (PR #44 review): the menu
+    # refuses an option it does not know and exits, and a test card's menu ending ends the
+    # run. Every option in SEL_OPTS predates test cards (2026-11-16), but the next one the
+    # rig passes would stop every older card emulating; such a card gets PAD's build.
+    local f miss=""
     rm -rf "$R/dump/cardmenu" 2>/dev/null
     if python3 "$S/parts.py" --rootfs-dir /usr/local/codeselect "$R/dump/cardmenu" "$PAD_CARD" >/dev/null 2>&1 \
         && [ -s "$R/dump/cardmenu/codeselect/codeselect" ]; then
+        for f in $SEL_OPTS; do
+            grep -aqF -- "$f" "$R/dump/cardmenu/codeselect/codeselect" || miss="$miss $f"
+        done
+    fi
+    if [ -n "$miss" ]; then
+        echo "[select] this test card's menu program does not know$miss: PAD's own build stands in"
+    elif [ -s "$R/dump/cardmenu/codeselect/codeselect" ]; then
         chmod 755 "$R/dump/cardmenu/codeselect/codeselect"
         SEL_BIN=/dump/cardmenu/codeselect/codeselect
         [ -s "$R/dump/cardmenu/codeselect/font.ttf" ] && SEL_FONT="--font /dump/cardmenu/codeselect/font.ttf"
@@ -80,6 +92,9 @@ CARD_SRC=""
 SEL_BIN=/usr/local/codeselect/codeselect
 SEL_FONT=""
 export SEL_BIN SEL_FONT
+# every option the selector's launch line can pass (sel_testcard checks that a card's own
+# program knows them all; tests/test_pad1279_test_card_emulate.py keeps the list whole)
+SEL_OPTS="--conf --out --input --timeout --log --media --font --no-invert --pick"
 if [ -n "${PAD_CARD:-}" ]; then
     CARD_SRC=$(bash "$S/cardmount.sh" "$PAD_CARD" | tail -1)
     [ -d "$CARD_SRC" ] || { echo "[run] could not mount $PAD_CARD" >&2; exit 1; }

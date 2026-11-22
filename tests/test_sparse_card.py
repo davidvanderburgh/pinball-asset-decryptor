@@ -180,3 +180,49 @@ def test_expand_back_to_full_size(tmp_path, capsys):
     assert "full size" in capsys.readouterr().out
     assert _sha(p) == h and not sc.is_compact(str(p))
     assert sc.on_disk_size(str(p)) >= os.path.getsize(p)
+
+
+# PAD-1510: the Spike 2 library matches a D: original to its library copy by
+# name, size AND modified time, so nothing here may move a card's date
+
+
+OLD = (1_700_000_000_000_000_000, 1_600_000_000_000_000_000)   # atime, mtime
+
+
+def _dated(path):
+    os.utime(path, ns=OLD)
+    return path
+
+
+def test_compact_and_expand_keep_the_cards_date(tmp_path):
+    p = _dated(_card(tmp_path / "a.raw"))
+    r = sc.compact_file(str(p))
+    assert os.stat(p).st_mtime_ns == OLD[1]
+    if not r.sparse_ok:
+        pytest.skip("this filesystem keeps no holes")
+    assert r.holes
+    sc.expand_file(str(p))
+    assert os.stat(p).st_mtime_ns == OLD[1]
+
+
+def test_copies_carry_the_cards_date(tmp_path):
+    p = _dated(_card(tmp_path / "a.raw"))
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    got = sc.import_card(str(p), str(lib))
+    assert os.stat(got).st_mtime_ns == OLD[1]
+    full = sc.expand_copy(str(p), str(tmp_path / "full.raw"))
+    assert os.stat(full).st_mtime_ns == OLD[1]
+
+
+def test_a_cancelled_expand_still_keeps_the_date(tmp_path):
+    p = _dated(_card(tmp_path / "a.raw"))
+    if not sc.compact_file(str(p)).sparse_ok:
+        pytest.skip("this filesystem keeps no holes")
+
+    def stop():
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        sc.expand_file(str(p), cancel=stop)
+    assert os.stat(p).st_mtime_ns == OLD[1]

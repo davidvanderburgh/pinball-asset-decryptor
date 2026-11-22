@@ -21343,7 +21343,56 @@ static struct {
                                           * Home Team screen's: Action is the game's until a game begins (0: none) */
     int home_walk;                       /* round 6: the mode list's cursor walked since then - its Action is the
                                           * step's again (a login or GAME MODE SELECT walks no mode) */
+    volatile int ov;                     /* round 7: the game's Insider overlay on the menu, read at its frame
+                                          * (sty_overlay_read): STY_OV_* (0: the port names none - rounds 5/6's guess) */
 } smn = { .entry = -1 };
+
+/* PAD-1449 round 7 (DoomWalrus666, on v1.561.1: "other times the action button does nothing on the home team screen,
+ * and sometimes the version options do not appear"): rounds 5/6 guessed the Home Team screen from a left flipper held
+ * - wrong both ways (a Start brings it too, a walk outlived it). The game says it: its NetLoginOverlay's state word
+ * (port value comp_menu_overlay_state, an address; LE 1.16 0x7c9904 = singleton 0x7c9868 + 0x9c, set as the menu
+ * opens, forced to 1 each frame with no network) - 1 the plain menu, 2 attract, 3 Insider player boxes, 4 = 3 + its
+ * game-mode select, 5 the Home Team roster, 6 = 5 + its game-mode select - and its sub-state word
+ * (comp_menu_overlay_sub, + 0x4c): 4 the game-mode select is up, 5 PRESS ACTION TO START GAME. Action in that
+ * game-mode select takes the mode and goes back to the roster (0x29ba4c) - it begins no game; the game begins on Start
+ * (or Action at sub-state 5). Both words keep their values after the menu, so they are read only at its frame. */
+#define STY_OV_PLAIN 1                   /* the plain menu: Action on a mode begins the game (held back: the step) */
+#define STY_OV_LOGIN 2                   /* the overlay's own screen (logins, roster, dialogs): Action is the game's */
+#define STY_OV_MODES 3                   /* the overlay's game-mode select: Action on a mode is the step's */
+#define STY_OV_START 4                   /* the overlay's PRESS ACTION TO START GAME: Action begins it, as Start */
+
+/* the overlay's state and sub-state words to STY_OV_* (tests lift it verbatim; 0: not a state we know) */
+static int sty_overlay_kind(unsigned state, unsigned sub)
+{
+    if (state == 1u) return STY_OV_PLAIN;
+    if (state < 2u || state > 6u) return 0;
+    if ((state == 4u || state == 6u) && sub == 4u) return STY_OV_MODES;
+    if (state >= 3u && sub == 5u) return STY_OV_START;
+    return STY_OV_LOGIN;
+}
+
+static void sty_overlay_read(void)
+{
+    unsigned long sa = (unsigned long)pm_port_value("comp_menu_overlay_state", 0),
+                  ua = (unsigned long)pm_port_value("comp_menu_overlay_sub", 0);
+    int was = smn.ov;
+    if (!sa || !ua) return;                                   /* (0 stays: rounds 5/6's left flipper guess) */
+    smn.ov = sty_overlay_kind(*(volatile unsigned *)sa, *(volatile unsigned *)ua);
+    if (!smn.ov) smn.ov = STY_OV_LOGIN;                       /* (an overlay state we do not know: the game's) */
+    if (smn.ov != was) {
+        static const char *const OV_SAYS[] = { "", "the plain menu: Action on a mode is the style step's",
+            "the Insider/Home Team screen: Action is the game's", "the Home Team game-mode select: Action on a mode "
+            "opens the style step, the one that takes a style takes the mode too",
+            "PRESS ACTION TO START GAME: Action begins it, as Start" };
+        say("styles: the start menu shows %s (overlay %u/%u)", OV_SAYS[smn.ov], *(volatile unsigned *)sa,
+            *(volatile unsigned *)ua);
+    }
+    if (smn.open && !smn.act && smn.ov != STY_OV_MODES && smn.ov != STY_OV_PLAIN) {   /* the game left its game-mode
+                                                              * select (the press that took the style takes it after) */
+        smn.open = smn.shaping = 0;
+        say("styles: the Home Team game-mode select closed - the style step with it");
+    }
+}
 
 /* PAD-1449 round 3 (DoomWalrus666: "There should not be a single entry for each type, as that is too many. There
  * should be: Standard, Challenge, Co-op, Teams ... And when choosing one, the dialog opens to select Regular,
@@ -21524,7 +21573,11 @@ static void sty_menu_go(void)
  * Start that brought the Home Team screen leaves that screen its own Action, to go on without logging in) */
 static int sty_menu_owns_action(void)
 {
-    return sty_menu_live() && !smn.go_ms && (!smn.home_ms || smn.home_walk) && sty_menu_kind() != 0u;
+    if (!sty_menu_live() || sty_menu_kind() == 0u) return 0;
+    if (smn.ov == STY_OV_MODES) return !smn.open || smn.shaping;   /* round 7: the Action that takes the style goes
+                                                                     * on to the game too - it takes the mode there */
+    if (smn.ov) return smn.ov == STY_OV_PLAIN && !smn.go_ms;    /* round 7: the overlay's own screens: the game's */
+    return !smn.go_ms && (!smn.home_ms || smn.home_walk);       /* (a port without the overlay: rounds 5/6) */
 }
 
 /* PAD-1449 round 5 (DoomWalrus666: "If you hold the left flipper to enter the home team screen, however, no user or
@@ -21547,6 +21600,13 @@ static void sty_home_tick(void)
     static unsigned long left_at;
     unsigned long now = pm_ms();
     int l = coop_left && switch_held(coop_left), r = coop.button && switch_held(coop.button);
+    if (smn.ov || (pm_port_value("comp_menu_overlay_state", 0) && pm_port_value("comp_menu_overlay_sub", 0))) {
+                                                              /* round 7: the game says where Action goes (even
+                                                               * before the menu's first frame read it) */
+        smn.home_ms = 0;
+        left_at = 0;
+        return;
+    }
     if (!l || r) left_at = 0;
     else if (!left_at) left_at = now | 1ul;
     if (smn.home_ms && (pm_in_game() || now - (smn.home_ms & ~1ul) >= STY_MENU_GO_MS
@@ -21569,7 +21629,17 @@ static void sty_menu_edge(unsigned id, int press)
 {
     if (!press || !id || !sty_menu_live()) return;
     if (id == coop_action) {
-        if (smn.home_ms && !smn.home_walk && !smn.go_ms && sty_menu_kind() != 0u) {   /* round 6: the Home Team screen's Action is the
+        if (smn.ov == STY_OV_START) {                         /* round 7: PRESS ACTION TO START GAME - as Start */
+            smn.start_ms = pm_ms() | 1ul;
+            sty_menu_go();
+            return;
+        }
+        if (smn.ov == STY_OV_MODES && smn.open && !smn.shaping) {   /* round 7: the style taken - and the game takes
+                                                                     * the mode on the same press (not kept from it) */
+            smn.act = 1;
+            return;
+        }
+        if (!smn.ov && smn.home_ms && !smn.home_walk && !smn.go_ms && sty_menu_kind() != 0u) {   /* round 6: the Home Team screen's Action is the
                                                               * game's, but a game it begins from a mode entry is held
                                                               * back (sty_menu_held) and the step opens there */
             smn.hold_ms = pm_ms() | 1ul;
@@ -27779,6 +27849,7 @@ static void team_menu_frame(pm_reg *r)
         say("teams: %s%s on the start menu as entries %u-%u (Standard's game-mode index %u; cursor %" PMU ")",
             team_kind_name(kinds[0]), j > 1 ? " and TEAM PLAY" : "", n + 1, n + j, idx, r[creg]);
     }
+    sty_overlay_read();                                 /* PAD-1449 round 7: the game's Insider overlay */
     sty_menu_walk(&r[breg], 4u, 2u);                    /* PAD-1449 round 2: the style step has the flippers */
     /* as Prolonged Competition's: the press read just now moves the cursor after this point */
     c = comp_frame_cursor(r[creg], *count + last, r[breg] & 4u, r[breg] & 2u);

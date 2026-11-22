@@ -1268,6 +1268,8 @@ value comp_menu_frame_count_last 0
 value comp_menu_frame_cap        9   # the game-mode table's entries
 value comp_menu_frame_cursor_reg 6
 value comp_menu_frame_buttons_reg 5
+value comp_menu_overlay_state 0x007c9904   # PAD-1449 round 7: NetLoginOverlay's state word (singleton + 0x9c)
+value comp_menu_overlay_sub   0x007c98b4   # ... its sub-state word (+ 0x4c)
 value comp_menu_index            3   # COMPETITION
 value comp_menu_index_msg        1920
 value comp_menu_end_index        1   # STANDARD

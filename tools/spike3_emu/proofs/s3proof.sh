@@ -19,7 +19,8 @@ if [ -n "${TITLE:-}" ]; then
     set -a; . "$HERE/titles/$TITLE.env"; set +a        # exported: play.sh reads the switch names
 fi
 MODES=${MODES:-$HERE/modes}
-CARD=/mnt/d/Pinball/images/Stern/spike3/${CARD:-star_wars_elg-1_10_0_spike3.Release.64G.sdcard-secure.raw}
+CARD=${CARD:-star_wars_elg-1_10_0_spike3.Release.64G.sdcard-secure.raw}
+case $CARD in /*) ;; *) CARD=/mnt/d/Pinball/images/Stern/spike3/$CARD ;; esac   # PAD-1504: or a card's full path
 PORTNAME=${PORTNAME:-star_wars_elg-1.10.port}
 # the title's switch names for play.sh (titles/<game>.env; Star Wars ELG's are play.sh's defaults)
 if [ -n "${TITLE:-}" ]; then set -a; . "$HERE/titles/$TITLE.env"; set +a; fi

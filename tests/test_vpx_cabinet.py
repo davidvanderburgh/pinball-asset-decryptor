@@ -329,6 +329,62 @@ def test_controller_com_hands_the_backglass_over(tmp_path):
     assert seen == ["b2s", "finish"]
 
 
+def test_controller_statement_calls_leave_the_scripts_variables_alone():
+    # PAD-1496: pywin32 writes a call's return value into the first variable a
+    # VBScript statement call passes (by reference). `Controller.PadB2S PadB2S`
+    # left PadB2S = True, so an original table's DOF went to PAD.Controller and
+    # was dropped; `Controller.PadDOF "E", DOFevent, 1` left DOFevent Null.
+    # Proven under cscript against the registered controller: an empty tuple
+    # writes nothing back, and VBScript sets PROPERTYGET when it uses the result.
+    pc = pytest.importorskip("padcontroller")
+    ctl = pc.PadController.__new__(pc.PadController)
+    ctl.bridge = pc.Bridge()
+    ctl.props = {}
+    ctl.bridge.b2s_attach = lambda obj: True
+    M, G, P = pc.DISPATCH_METHOD, pc.DISPATCH_PROPERTYGET, pc.DISPATCH_PROPERTYPUT
+    assert ctl._dynamic_("PadB2S", 0, M, ["b2s"]) == ()                # Controller.PadB2S PadB2S
+    assert ctl._dynamic_("PadB2S", 0, M | G, ["b2s"]) is True          # ok = Controller.PadB2S(PadB2S)
+    assert ctl._dynamic_("PadDOF", 0, M, ["E", 141, 1]) == ()
+    assert ctl._dynamic_("Switch", 0, P, [1062, True]) == ()           # Controller.Switch(sw) = True
+    assert ctl._dynamic_("Switch", 0, M | G, [1062]) is True           # x = Controller.Switch(1062)
+    anything = pc._Anything()
+    assert anything._dynamic_("Value", 0, P, ["volume", 5]) == ()
+    assert anything._dynamic_("Value", 0, M | G, ["volume"]) == 0
+    assert anything._dynamic_("Value", 0, M, ["volume"]) == ()
+
+
+def test_controller_release_lets_go_of_the_run_b2s_and_dof():
+    # PAD-1496: a table released without PadB2SFinish (no exit sub) kept the
+    # controller process up for good, B2S.Server's thread a live COM reference,
+    # and any DOF it hosted held the cabinet's devices for the next table
+    pc = pytest.importorskip("padcontroller")
+    ctl = pc.PadController.__new__(pc.PadController)
+    ctl.bridge = b = pc.Bridge()
+    ctl.props = {}
+    got = []
+
+    class FakeB2S:
+        def B2SSetData(self, n, v):
+            got.append(("data", n, v))
+
+    class FakeDof:
+        up = True
+
+        def finish(self):
+            got.append("dof finish")
+
+    assert b.b2s_attach(FakeB2S(), direct=True)
+    b.dof = FakeDof()
+    b.running = True
+    b.stop = lambda: got.append("stop") or setattr(b, "running", False)
+    host = b.b2s
+    ctl.__del__()
+    assert got == ["stop", "dof finish"]
+    assert b.b2s is None and b.dof is None and not host.up
+    ctl.__del__()                                   # a second release does nothing more
+    assert got == ["stop", "dof finish"]
+
+
 def test_patch_and_setup_write_the_res(tmp_path, monkeypatch):
     import padlaunch
     import padvpx

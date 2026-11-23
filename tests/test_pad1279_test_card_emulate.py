@@ -58,10 +58,14 @@ def test_the_selector_makes_its_screen_texture_before_the_test_card_loop():
     src = (RIG / "codeselect" / "codeselect.c").read_text(encoding="utf-8")
     branch = src[src.index("if (c.testcard) {"):]
     branch = branch[:branch.index("goto testcard_done;")]
-    tex = branch.find("egl_stern_texture(")
+    # screen_texture(): made once, since the menu can come up twice in a run (the TEST CARD
+    # entry, 2026-11-23); it calls egl_stern_texture the first time
+    tex = branch.find("screen_texture(")
     loop = branch.find("settings_run(&se)")
     assert tex != -1, "the test card branch never creates the screen texture: a black glass"
     assert tex < loop
+    helper = src[src.index("static void screen_texture("):]
+    assert "egl_stern_texture(" in helper[:helper.index("\n}\n")]
 
 
 def test_the_rig_runs_a_test_card_as_its_menu():

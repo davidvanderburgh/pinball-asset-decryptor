@@ -280,6 +280,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     int lineno = 0;
     int gpos[CONF_MAX_GROUPS];    /* the image index each group= line sits before */
     int gline[CONF_MAX_GROUPS];   /* and the line it was on, for the warnings */
+    int has_tile_tests;           /* test lines that are the SETTINGS tile's to show */
 
     memset(c, 0, sizeof *c);
     memset(gpos, 0, sizeof gpos);
@@ -576,8 +577,10 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                               lineno, key, fld[0], !strcmp(key, "test_sound") ? "a .wav"
                               : !strcmp(key, "test_video") ? "a .padv or .gif"
                               : "a .png");
-                else
+                else {
+                    if (!strcmp(key, "test")) c->ntest_flat++;
                     c->ntest++;
+                }
             }
         } else if (!strcmp(key, "settings")) {
             if (!*val || !strcmp(val, "on")) c->settings = 1;
@@ -689,7 +692,16 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     /* the tile, when it has something on it: a game to correct, or the
      * card's own test pictures (PAD-1279) - and, once it is there, the built-in
      * test patterns always ride along under Test pictures */
-    if (c->settings && (c->ncolour > 0 || c->ntest > 0)) {
+    /* ...but on a card with the TEST CARD entry, the test card's own lists
+     * (test_<kind>=) are the entry's, and a SETTINGS tile for them alone would
+     * be the same screens twice */
+    {
+        int i, entry = 0;
+        for (i = 0; i < c->n; i++) if (conf_image_is_testcard(c, i)) entry = 1;
+        if (entry && c->ncolour == 0 && c->ntest_flat == 0) has_tile_tests = 0;
+        else has_tile_tests = c->ntest > 0;
+    }
+    if (c->settings && (c->ncolour > 0 || has_tile_tests)) {
         c->settings_card = c->ncards;
         c->cards[c->ncards].image = -1;
         c->cards[c->ncards].group = -1;

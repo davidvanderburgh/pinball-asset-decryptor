@@ -339,6 +339,8 @@ struct conf {
     int ncolour;                     /* images with a usable color_profile= line */
     struct conf_test test[CONF_MAX_TESTS];   /* test= lines, in order (PAD-1279) */
     int ntest;
+    int ntest_flat;                  /* ...of them plain test= lines (Settings > Test pictures);
+                                        the rest, test_<kind>=, are the test card's own lists */
     int testcard;                    /* testcard=on: a TEST CARD, no menu, nothing boots (PAD-1279) */
     int boot_menu;                   /* boot_menu= BOOT_MENU_* (Simon, 2026-11-22) */
     int flip_hold;                   /* flip_hold= seconds (5) */

@@ -106,16 +106,19 @@ def main():
     last_mid = open(last).read().strip() if os.path.exists(last) else None
     press(sw, "right")                                # a row of the test card menu
     press(sw, "action", after=1.6)                    # back to the games
-    press(sw, "left")                                 # STERN STOCK
+    # RIGHT wraps to STERN STOCK: two cards, no SETTINGS tile - the entry's own lists
+    # (test_image=) are not the tile's, which would show the same screens twice
+    press(sw, "right")
     press(sw, "start")
     o, e = finish(p, "menu")
     for want in ("highlight 1 (TEST CARD) from conf default",
+                 "-> 0 (STERN STOCK), card 1/2 - wrap",
                  "[select] testcard entry: card 2 (TEST CARD): the test card screens",
                  "[select] settings: the test card menu",
                  "[select] test card: back to the games",
                  "[select] testcard entry: back to the menu",
                  "[select] chose 0 STERN STOCK"):
-        if want not in o:
+        if want not in o + e:                         # the highlight moves are the log's (stderr)
             fail("(menu) no %r" % want, o, e)
     if last_mid != "1":
         fail("(menu) the last-choice file held %r inside the test card, expected 1" % last_mid, o, e)

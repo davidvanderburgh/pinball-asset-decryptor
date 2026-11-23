@@ -248,6 +248,16 @@ if [ -n "${PAD_CARD:-}" ]; then
             echo "[select] menu: $SEL_N = $tok ${t%%|*} ($d)"
             SEL_N=$((SEL_N + 1))
         done <<< "$SEL_LIST"
+        # THE TEST CARD ENTRY (Simon, 2026-11-23: "a 1.16 vanilla plus the test card"): the
+        # card's image=testcard line is a menu entry with no games tree, always the last
+        # line, so it goes over as it is and counts toward a menu - one game and the entry
+        # is a menu.  SEL_TESTENTRY carries its test_dir= / test_*= lines below.
+        SEL_TESTENTRY=$(printf '%s\n' "$SEL_CARDCONF" | grep -m1 -E '^[[:space:]]*image[[:space:]]*=[[:space:]]*testcard[[:space:]]*\|')
+        if [ -z "$SEL_GIVEUP" ] && [ -n "$SEL_TESTENTRY" ]; then
+            SEL_IMAGES="${SEL_IMAGES}$(printf '%s' "$SEL_TESTENTRY" | sed 's/^[[:space:]]*//')"$'\n'
+            echo "[select] menu: $SEL_N = the TEST CARD entry (files in /games/padtest)"
+            SEL_N=$((SEL_N + 1))
+        fi
         fi
         # ★ THE DECISION AND THE MENU ARE COUNTED FROM DIFFERENT THINGS, so
         # reconcile them HERE (2026-09-02). "Does this card boot into a menu"
@@ -369,6 +379,10 @@ if [ -n "${PAD_CARD:-}" ]; then
             # which this menu (the start-up screen, the right flipper's line) and padmenu.so both read.
             printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|back_hold|boot_menu|flip_hold|flip_guard|color_[a-z_]+)[[:space:]]*=' \
                 | grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true
+            # ...and the TEST CARD entry's lists, which it is nothing without
+            if [ -n "${SEL_TESTENTRY:-}" ]; then
+                printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(test_dir|test|test_image|test_video|test_scene|test_sound)[[:space:]]*=' || true
+            fi
             # ★ PAD-307: EACH IMAGE'S BUILT COLOR PROFILE, the lines that put the SETTINGS tile
             # in the menu. They name IMAGE INDEXES, so they ride on the group lines' gate: only
             # when the card's image lines and what resolved here are the same count, or a line
@@ -817,6 +831,13 @@ for m in games data dump; do mount --bind "$R/$m" "$R/$m"; done
 if [ -n "$CARD_SRC" ]; then
     mount --bind "$CARD_SRC" "$R/games/$GAME" \
         || { echo "[run] could not bind the card at $CARD_SRC" >&2; exit 1; }
+    # THE TEST CARD ENTRY's files (Simon, 2026-11-23): /games/padtest on the card's games
+    # partition, beside the title directory, which is all the bind above shows
+    if [ -n "$SEL_DIRS" ] && [ -d "$(dirname "$CARD_SRC")/padtest" ]; then
+        mkdir -p "$R/games/padtest" \
+            && mount --bind "$(dirname "$CARD_SRC")/padtest" "$R/games/padtest" \
+            || echo "[run] could not show the TEST CARD entry's files at /games/padtest" >&2
+    fi
 fi
 
 # real host char devices

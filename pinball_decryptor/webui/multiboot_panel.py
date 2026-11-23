@@ -852,6 +852,7 @@ class WebMultibootPanel(_Base):
             "build_tip": self.BUILD_FLASH_TIP,
             "cancel_tip": self.CANCEL_TIP,
             "play_tip": mt.PLAY_TIP,
+            "stop_tip": mt.STOP_TIP,
             "row_hint": self.ROW_HINT,
             "row_actions": dict((k, t) for k, t in self.ROW_ACTIONS),
             "cancel_text": self.CANCEL_TEXT,

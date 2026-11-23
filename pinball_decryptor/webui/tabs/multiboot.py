@@ -725,6 +725,11 @@ class MultibootTab(TabService):
         return bool(panel.play_sound_choice(label, getattr(panel, attr),
                                             image=image))
 
+    @rpc
+    def stop_sound(self):
+        """Stop beside ▶ Play: silence what Play started."""
+        return bool(self._live().stop_sound_choice())
+
     def _sound(self, field):
         entry = self._SOUNDS.get(field)
         if entry is None:

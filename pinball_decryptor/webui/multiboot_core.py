@@ -6757,9 +6757,19 @@ def sound_choices(paths):
 #: control anybody presses.  PLAY_NAME is how the notes beside it refer to it.
 PLAY_NAME = "Play"
 PLAY_LABEL = "\u25b6 " + PLAY_NAME
-PLAY_TIP = ("Hear this sound now, through the preview's own volume and Mute.\n"
+PLAY_TIP = ("Hear this sound now, at the preview's volume, even with the "
+            "preview muted. The preview's music stops while this window is "
+            "open.\n"
             "A word (auto, synth, menu) plays the file the menu has ready for "
             "it; pick or type a WAV and it plays that.")
+
+
+#: ...and the Stop beside it (David, PAD-1530: "I should also have the
+#: option to stop the music that is playing. There are some really long
+#: music files and I don't need to hear them the whole time I have the menu
+#: open").
+STOP_NAME = "Stop"
+STOP_TIP = "Stop the sound Play started."
 
 
 #: What a video shows, STATED rather than offered as controls (David:
@@ -10205,6 +10215,7 @@ class MultibootPanel:
         self._edit_backup = (i, replace(self._rows[i]))
         self._image_dialog = ImageEditorDialog(self, i, self._rows[i])
         self._sync_editor_states()
+        self._music_aside()
         return self._image_dialog.show()
 
     def _image_editor_ok(self):
@@ -10229,6 +10240,7 @@ class MultibootPanel:
         self._clip_widgets = ()
         self._roll_repeat_box = None
         self._roll_norepeat_free = None
+        self._music_back()
 
     def open_menu_settings(self):
         """'Menu settings…': the sounds, volume, countdown, default image
@@ -10255,6 +10267,7 @@ class MultibootPanel:
                              self._tests_var.get(),
                              self._back_hold_var.get())
         self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
+        self._music_aside()
         return self._menu_dialog.show()
 
     def _menu_settings_ok(self):
@@ -10307,6 +10320,32 @@ class MultibootPanel:
         self._theme_tip = None
         self._color_entries = {}
         self._color_swatches = {}
+        self._music_back()
+
+    def _sub_menu_open(self):
+        """Edit image… or Menu settings… is up: the two windows with sound
+        rows and a Play beside each."""
+        return (getattr(self, "_image_dialog", None) is not None
+                or getattr(self, "_menu_dialog", None) is not None)
+
+    def _music_aside(self):
+        """A sub-menu with sounds in it opened: the preview's music bed
+        stops while it is up (David, PAD-1530: "the music from the preview
+        always overplays when i have the sub-menus open"), so the sound a
+        Play there names is heard on its own.  Nothing is opened for it."""
+        if getattr(self, "_audio", None) is not None:
+            self._audio.loop(None)
+            self._audio.set_volume(self._effective_volume())
+
+    def _music_back(self):
+        """The sub-menu closed: the preview plays what the menu plays again
+        (silence while Sound is off or the tab is hidden), at the preview's
+        own volume and Mute."""
+        if (getattr(self, "_stopped", False) or self._sub_menu_open()
+                or getattr(self, "_audio", None) is None):
+            return
+        self._audio.set_volume(self._effective_volume())
+        self._sound_follow()
 
     # -- the theme ---------------------------------------------------------
 
@@ -12513,9 +12552,9 @@ class MultibootPanel:
         yet and nothing has rendered.  A row holding one of the WORDS (auto,
         synth, menu) has no file of its own until a prepare has made one, so
         the media directory's WAV for THAT row is played instead - the sound
-        the card will actually carry.  Either way it goes out through the
-        preview's own volume and Mute, so what comes out is what the strip's
-        knob says.
+        the card will actually carry.  Either way it goes out at the
+        preview's own volume, and Mute does not silence it while the dialog
+        is up (PAD-1530): the preview's music steps aside instead.
 
         *image* IS THE ROW THE BUTTON BELONGS TO, and Edit image… passes it:
         a word on ONE image's Music or Confirm row resolves to that image's
@@ -12569,11 +12608,22 @@ class MultibootPanel:
         audio = self._audio_player()
         audio.set_volume(self._effective_volume())
         audio.play(path)
-        self._write("%s: playing %s (%.2f s)%s"
-                    % (label, os.path.basename(path), head["seconds"],
-                       " - Mute is on, so nothing will be heard"
-                       if self._pv_mute_var.get() else ""))
+        self._write("%s: playing %s (%.2f s)"
+                    % (label, os.path.basename(path), head["seconds"]))
         return True
+
+    def stop_sound_choice(self):
+        """The Stop beside a sound row: silence what Play started, now.
+
+        The preview's music is already stopped while Edit image… or Menu
+        settings… is up, so this is the one sound there is; the device is
+        given back, and closing the window brings the preview's music back
+        as before (:meth:`_music_back`)."""
+        playing = self._audio is not None
+        self._stop_sound()
+        if playing:
+            self._write("Sound stopped.")
+        return playing
 
     def _sound_choice_path(self, label, value, image=None):
         """``(path, why)`` for one sound row: the WAV to play, or '' and the
@@ -12793,6 +12843,8 @@ class MultibootPanel:
         every highlight change may call it."""
         if not self._sound_var.get() or self._pv_hidden:
             return False
+        if self._sub_menu_open():
+            return False                # its music waits for it to close
         music = self.menu_sounds()["music"]
         if not music and self._audio is None:
             return False                # nothing to play: open nothing
@@ -12804,8 +12856,15 @@ class MultibootPanel:
     def _effective_volume(self):
         """What the player is told: the menu's volume (0-100, the machine's
         own loudness, media.json's number) scaled by the preview's knob,
-        and 0 while Mute is ticked."""
-        if self._pv_mute_var.get():
+        and 0 while Mute is ticked.
+
+        MUTE IS THE PREVIEW'S, NOT THE SUB-MENUS' (David, PAD-1530: "when
+        I'm muting music from the preview, i still want to be able to hear
+        the music or audio selected from specific game image menu").  While
+        Edit image… or Menu settings… is up the preview's music is stopped
+        (:meth:`_music_aside`) and the only sound is the one its Play asked
+        for, so Mute does not silence it; the knob still sets how loud."""
+        if self._pv_mute_var.get() and not self._sub_menu_open():
             return 0
         try:
             gain = max(0.0, min(1.0, float(self._pv_gain_var.get()) / 100.0))

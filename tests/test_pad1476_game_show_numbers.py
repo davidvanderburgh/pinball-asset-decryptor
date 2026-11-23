@@ -348,6 +348,8 @@ def test_the_intros_show_starts_over_the_games_and_plays_for_all_of_the_intro():
     again = RUNTIME[RUNTIME.index("static void ci_show_again("):]
     again = again[:again.index("\n}\n")]
     assert "show_running(ci.show, &top) != 0" in again and "CI_SHOW_AGAIN_MS" in again
+    # round 3: an intro with no length on its card (`intro <clip> 0`) still has its show for all of it
+    assert "!ci.ms ? SHOW_MAX_MS" in again
     tick = RUNTIME[RUNTIME.index("static void coop_intro_tick("):]
     assert "ci_show_again(now);" in tick[:tick.index("\n}\n")]
     over = RUNTIME[RUNTIME.index("static int show_number_start_over("):]

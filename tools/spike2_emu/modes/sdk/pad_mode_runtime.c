@@ -23698,14 +23698,22 @@ static void ci_show_again(unsigned long now)
     }
     if (show_running(ci.show, &top) != 0) return;            /* playing, or not known on this build */
     played = now - ci_show_first;
-    left = ci.ms > played ? ci.ms - played : 0;
+    /* round 3: an intro whose length the card does not carry (`intro <clip> 0`: its video's length unread) has its
+     * show started again for as long as it plays - ci_show_stop ends it with the intro */
+    left = !ci.ms ? SHOW_MAX_MS : ci.ms > played ? ci.ms - played : 0;
     if (left <= CI_SHOW_AGAIN_MS) return;
     show_now.n = 0;                                           /* over by itself: nothing of it to stop */
     if (show_number_start_over(ci.show, left + 500ul, "the co-op intro, again")) {
         ci_show_plays++;
         if (ci_show_plays <= 3 || ci_show_plays % 10 == 0)
-            say("co-op intro: its light show %d over after one play - started again (%u plays, %lu ms of the intro "
-                "left)", ci.show, ci_show_plays, left);
+        {
+            if (ci.ms)
+                say("co-op intro: its light show %d over after one play - started again (%u plays, %lu ms of the "
+                    "intro left)", ci.show, ci_show_plays, left);
+            else
+                say("co-op intro: its light show %d over after one play - started again (%u plays; the intro's "
+                    "length not on the card: until it ends)", ci.show, ci_show_plays);
+        }
     } else {
         ci.show_on = 0;
     }

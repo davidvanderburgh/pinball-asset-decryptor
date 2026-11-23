@@ -49,7 +49,7 @@ def test_association_command_runs_the_launcher_with_the_file():
     app_dir = r"C:\Program Files\Pinball Asset Decryptor"
     rows = oi.association_values(app_dir)
     cmd = dict(((k, n), d) for k, n, d in rows)[
-        (oi.PROGID + r"\shell\open\command", "")]
+        (oi.PROGID + oi.OPEN_KEY + r"\command", "")]
     assert cmd == ('wscript.exe "%s\\launcher.vbs" "%%1"' % app_dir)
     for ext in oi.IMAGE_EXTENSIONS:
         assert (ext + r"\OpenWithProgids", oi.PROGID, "") in rows
@@ -214,7 +214,7 @@ def test_register_and_unregister_round_trip():
             winreg.SetValueEx(k, "", 0, winreg.REG_SZ, "SomeViewer.raw")
         assert oi.register_association(app_dir, classes=classes) is True
         assert oi.is_registered(classes) is True
-        assert _get(oi.PROGID + r"\shell\open\command").endswith('"%1"')
+        assert _get(oi.PROGID + oi.OPEN_KEY + r"\command").endswith('"%1"')
         assert _get(r".iso\OpenWithProgids", oi.PROGID) == ""
         assert _get(r"SystemFileAssociations\.img\shell\%s\command"
                     % oi.VERB) is not None
@@ -255,7 +255,7 @@ def test_open_with_names_pad_not_the_script_host():
     (PAD-1518)."""
     from pinball_decryptor.webui import open_image as oi
     rows = {(k, n): d for k, n, d in oi.association_values(r"C:\PAD")}
-    assert rows[(oi.PROGID + r"\shell\open", "FriendlyAppName")] == \
+    assert rows[(oi.PROGID + oi.OPEN_KEY, "FriendlyAppName")] == \
         "Pinball Asset Decryptor"
     assert rows[(oi.PROGID + r"\Application", "ApplicationName")] == \
         "Pinball Asset Decryptor"

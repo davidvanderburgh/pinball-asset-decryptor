@@ -15,6 +15,12 @@ if __name__ == "__main__":
         from .core.disk_giveback import helper_main
         sys.exit(helper_main(sys.argv))
 
+    # PAD-1522: Explorer's right-click > Compact with PAD on a card image.
+    # A small window of its own; the app is not started.
+    if len(sys.argv) > 1 and sys.argv[1] == "--compact":
+        from .webui.compact_window import main as _compact
+        sys.exit(_compact(sys.argv[2:]))
+
     # Dev-only: when /next item worktrees exist, offer to run one of them
     # instead of this checkout (no-op everywhere else — see worktree_picker).
     from .worktree_picker import dev_pick_checkout

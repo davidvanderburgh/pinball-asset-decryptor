@@ -29,6 +29,19 @@ params = """" & appDir & "\Pinball Asset Decryptor.pyw"""
 For Each a In WScript.Arguments
     params = params & " """ & a & """"
 Next
+' One launch is NOT elevated (PAD-1522): "--compact" as the first argument,
+' Explorer's right-click > Compact with PAD on a card image.  It only makes
+' the user's own file sparse, in a small window of its own, so it starts
+' with the plain "open" verb and no UAC prompt.
+compacting = False
+If WScript.Arguments.Count > 0 Then
+    If WScript.Arguments(0) = "--compact" Then compacting = True
+End If
 On Error Resume Next
+If compacting Then
+    CreateObject("Shell.Application").ShellExecute _
+        appDir & "\python\pythonw.exe", params, appDir, "open", 1
+    WScript.Quit
+End If
 CreateObject("Shell.Application").ShellExecute _
     appDir & "\python\pythonw.exe", params, appDir, "runas", 1

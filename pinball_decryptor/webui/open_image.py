@@ -10,10 +10,18 @@ A PAD already running takes the image itself: the new launch hands the path
 to it through :func:`link_path` (the running app's port and session token,
 the same shape as the agent link, PAD-844) and exits, so two copies of the
 app never fight over the settings file.
+
+PAD-1522 adds two things to the same registration.  A ``.raw`` / ``.img``
+has "Compact with PAD" on its right-click menu, which stores that card
+compact where it is in a small window of its own (webui/compact_window.py;
+no app window, no Administrator prompt).  And a card's icon says whether it
+is already compact: Explorer asks PAD's icon handler per file
+(webui/shell_icon.py).
 """
 
 import json
 import logging
+import ntpath
 import os
 import sys
 import time
@@ -153,6 +161,38 @@ VERB = "PinballAssetDecryptor.Write"
 #: belong to Windows' own "Mount" for every other disc image, so PAD only
 #: joins their Open with list and right-click menu there.
 DEFAULT_FOR = (".raw",)
+#: the right-click verb that stores a card compact where it is (PAD-1522),
+#: on the extensions core.sparse_card calls a card image
+COMPACT_VERB = "PinballAssetDecryptor.Compact"
+COMPACT_LABEL = "Compact with PAD"
+COMPACT_EXTENSIONS = (".raw", ".img")
+#: the launcher's flag for it; launcher.vbs starts this one without the
+#: Administrator prompt
+COMPACT_FLAG = "--compact"
+#: the double-click verb's key under the ProgID, and what it was before
+#: PAD-1522 gave it VERB's name (registrations from v1.573 on have that one)
+OPEN_KEY = "\\shell\\" + VERB
+LEGACY_OPEN_KEY = r"\shell\open"
+
+
+def _del_tree(root, path):
+    """Delete registry key *path* and everything under it; True when there
+    was one and it is gone.  Never raises."""
+    import winreg
+    try:
+        with winreg.OpenKey(root, path, 0,
+                            winreg.KEY_READ | winreg.KEY_WRITE) as k:
+            while True:
+                try:
+                    child = winreg.EnumKey(k, 0)
+                except OSError:
+                    break
+                if not _del_tree(root, path + "\\" + child):
+                    break
+        winreg.DeleteKey(root, path)
+        return True
+    except OSError:
+        return False
 #: what Explorer's Open with calls PAD
 APP_NAME = "Pinball Asset Decryptor"
 #: where Explorer keeps each user's own "Always use this app" per extension
@@ -169,24 +209,47 @@ def install_dir():
     return None
 
 
-def association_values(app_dir):
-    r"""``[(key under HKCU\Software\Classes, value name, data)]``."""
-    command = 'wscript.exe "%s" "%%1"' % os.path.join(app_dir, "launcher.vbs")
-    icon = os.path.join(app_dir, "pinball_decryptor", "icon.ico")
+def association_values(app_dir, icon_dll=None):
+    r"""``[(key under HKCU\Software\Classes, value name, data)]``.
+
+    With *icon_dll* (the staged icon handler, shell_icon.stage) a card's
+    icon is asked per file, so a compact card shows its own; without it
+    every card has the one plain icon."""
+    from . import shell_icon
+    # an install folder is a Windows path, and its rows are Windows paths
+    # whatever builds them (a test on Linux, say)
+    windows = bool(ntpath.splitdrive(app_dir)[0]) or chr(92) in app_dir
+    join = ntpath.join if windows else os.path.join
+    launcher = join(app_dir, "launcher.vbs")
+    command = 'wscript.exe "%s" "%%1"' % launcher
+    compact = 'wscript.exe "%s" "%s" "%%1"' % (launcher, COMPACT_FLAG)
+    icon = join(app_dir, "pinball_decryptor", "icon.ico")
     # a card image gets a file's icon (an SD card), never the app's own: a
     # desktop of .raw files read as a row of PAD shortcuts (PAD-1518)
-    file_icon = os.path.join(app_dir, "pinball_decryptor", "card_image.ico")
-    if not os.path.isfile(file_icon) and os.path.isfile(icon):
+    def _there(name):
+        return os.path.isfile(os.path.join(app_dir, "pinball_decryptor",
+                                           name))
+
+    file_icon = join(app_dir, "pinball_decryptor", "card_image.ico")
+    if not _there("card_image.ico") and _there("icon.ico"):
         file_icon = icon
+    compact_icon = join(app_dir, "pinball_decryptor",
+                        shell_icon.ICON_COMPACT)
+    if not _there(shell_icon.ICON_COMPACT):
+        compact_icon = icon
     rows = [
         (PROGID, "", "Pinball card image"),
         (PROGID + r"\DefaultIcon", "", file_icon),
-        (PROGID + r"\shell", "", "open"),
-        (PROGID + r"\shell\open", "", "Write to a card with PAD"),
+        # the double-click verb carries the right-click verb's own NAME:
+        # Windows lists a verb once per name, and named "open" here a .raw
+        # that opens with PAD showed "Write to a card with PAD" twice
+        # (PAD-1522)
+        (PROGID + r"\shell", "", VERB),
+        (PROGID + OPEN_KEY, "", "Write to a card with PAD"),
         # the command is wscript.exe, so without these Explorer's Open with
         # lists PAD as "Microsoft Windows Based Script Host" (PAD-1518)
-        (PROGID + r"\shell\open", "FriendlyAppName", APP_NAME),
-        (PROGID + r"\shell\open\command", "", command),
+        (PROGID + OPEN_KEY, "FriendlyAppName", APP_NAME),
+        (PROGID + OPEN_KEY + r"\command", "", command),
         (PROGID + r"\Application", "ApplicationName", APP_NAME),
         (PROGID + r"\Application", "ApplicationIcon", icon),
         (PROGID + r"\Application", "ApplicationDescription",
@@ -198,6 +261,15 @@ def association_values(app_dir):
         rows += [(base, "", "Write to a card with PAD"),
                  (base, "Icon", icon),
                  (base + r"\command", "", command)]
+    for ext in COMPACT_EXTENSIONS:
+        base = r"SystemFileAssociations\%s\shell\%s" % (ext, COMPACT_VERB)
+        rows += [(base, "", COMPACT_LABEL),
+                 (base, "Icon", compact_icon),
+                 (base + r"\command", "", compact)]
+    if icon_dll:
+        # after the plain DefaultIcon above: the later row is the one kept
+        rows += shell_icon.handler_values(PROGID)
+        rows += shell_icon.class_values(icon_dll)
     return rows
 
 
@@ -267,9 +339,36 @@ def windows_choice(ext=".raw", fileexts=None):
     return ""
 
 
+def _machine_class(dll):
+    r"""The icon handler's class under HKEY_LOCAL_MACHINE as well, when this
+    run may write there (the installed app runs as Administrator).  Windows
+    hides a user's own classes from elevated programs, PAD among them, so
+    without this PAD's own file pickers would draw a card with no icon.
+    Never raises; a run without the rights leaves it."""
+    from . import shell_icon
+    try:
+        import winreg
+        for sub, name, data in shell_icon.class_values(dll):
+            path = CLASSES + "\\" + sub
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as k:
+                    if winreg.QueryValueEx(k, name)[0] == data:
+                        continue
+            except OSError:
+                pass
+            with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0,
+                                    winreg.KEY_SET_VALUE) as k:
+                winreg.SetValueEx(k, name, 0, winreg.REG_SZ, data)
+    except (ImportError, OSError):
+        pass
+
+
 def register_association(app_dir=None, take_raw=False, classes=None,
-                         fileexts=None):
+                         fileexts=None, icon_dll=None):
     """Write the association for this user; True when anything changed.
+
+    *icon_dll* is the icon handler to register (tests name their own); left
+    out, the real registration stages the shipped one (shell_icon.stage).
 
     ``.raw`` becomes PAD's double-click when nothing else has it, or with
     *take_raw* (the user ticked it in the gear menu) whatever had it,
@@ -286,6 +385,12 @@ def register_association(app_dir=None, take_raw=False, classes=None,
     classes = classes or CLASSES
     root = winreg.HKEY_CURRENT_USER
     changed = False
+    if icon_dll is None and classes == CLASSES:
+        from . import shell_icon
+        if shell_icon.supported():
+            icon_dll = shell_icon.stage()
+        if icon_dll:
+            _machine_class(icon_dll)
 
     def _put(sub, name, data):
         nonlocal changed
@@ -301,8 +406,13 @@ def register_association(app_dir=None, take_raw=False, classes=None,
         changed = True
 
     try:
-        for sub, name, data in association_values(app_dir):
+        values = association_values(app_dir, icon_dll or None)
+        # one value per (key, name): a later row replaces an earlier one
+        last = {(sub, name): data for sub, name, data in values}
+        for (sub, name), data in last.items():
             _put(sub, name, data)
+        if _del_tree(root, classes + "\\" + PROGID + LEGACY_OPEN_KEY):
+            changed = True
         for ext in DEFAULT_FOR:
             try:
                 if classes == CLASSES:
@@ -336,19 +446,8 @@ def unregister_association(classes=None):
     classes = classes or CLASSES
     root = winreg.HKEY_CURRENT_USER
 
-    def _del_tree(path):
-        try:
-            with winreg.OpenKey(root, path, 0,
-                                winreg.KEY_READ | winreg.KEY_WRITE) as k:
-                while True:
-                    try:
-                        child = winreg.EnumKey(k, 0)
-                    except OSError:
-                        break
-                    _del_tree(path + "\\" + child)
-            winreg.DeleteKey(root, path)
-        except OSError:
-            pass
+    def _del(path):
+        _del_tree(root, path)
 
     for ext in IMAGE_EXTENSIONS:
         try:
@@ -357,8 +456,9 @@ def unregister_association(classes=None):
                 winreg.DeleteValue(k, PROGID)
         except OSError:
             pass
-        _del_tree(r"%s\SystemFileAssociations\%s\shell\%s"
-                  % (classes, ext, VERB))
+        for verb in (VERB, COMPACT_VERB):
+            _del(r"%s\SystemFileAssociations\%s\shell\%s"
+                      % (classes, ext, verb))
         try:
             with winreg.OpenKey(root, classes + "\\" + ext, 0,
                                 winreg.KEY_READ | winreg.KEY_SET_VALUE) as k:
@@ -366,9 +466,20 @@ def unregister_association(classes=None):
                     winreg.DeleteValue(k, "")
         except OSError:
             pass
-    _del_tree(classes + "\\" + PROGID)
+    _del(classes + "\\" + PROGID)
+    from . import shell_icon
+    _del(classes + r"\CLSID" + "\\" + shell_icon.CLSID)
     if classes == CLASSES:
+        try:
+            winreg.DeleteKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                CLASSES + r"\CLSID" + "\\" + shell_icon.CLSID + r"\InprocServer32")
+            winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE,
+                             CLASSES + r"\CLSID" + "\\" + shell_icon.CLSID)
+        except OSError:
+            pass
         _notify()
+        shell_icon.unstage()
     return True
 
 
@@ -378,12 +489,17 @@ def is_registered(classes=None):
         return False
     try:
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                            (classes or CLASSES) + "\\" + PROGID
-                            + r"\shell\open\command"):
-            return True
-    except (ImportError, OSError):
+    except ImportError:
         return False
+    for key in (OPEN_KEY, LEGACY_OPEN_KEY):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                (classes or CLASSES) + "\\" + PROGID
+                                + key + r"\command"):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def raw_chosen_elsewhere(ext=".raw", fileexts=None):

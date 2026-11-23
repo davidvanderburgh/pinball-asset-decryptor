@@ -20,7 +20,7 @@
 import { html, useEffect, useRef, useState, PageHead, Card, Button, Field, Select, Check, Chip, Note, Empty, Spinner,
          tip, cx, call, openMenu, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { compileStep, showColours, gameColour, srcOf } from "./cabfx.js";
+import { compileStep, showColours, gameColour, recColour, CX_REC, srcOf } from "./cabfx.js";
 
 export const css = true;
 
@@ -30,6 +30,12 @@ const TIP = {
   copySame: "A copy of this show in this project, with the song it goes with.",
   copyOther: "A copy of this show in this project. Its song is the other game's, so pick the song it goes with here.",
   noOthers: "None of the other projects the app knows has expression light shows of its own yet.",
+  record: "Record what the game in the emulator shows on this cabinet's lights now (attract, or a game): start this project's card with Run in emulator first. The recording stays in this project and plays on any cabinet's lights, this one's or another game's.",
+  recPick: "A recording of this game's own lights: play it here, then make it a show of yours.",
+  fromRec: "A show of yours that plays this recording, over and over: pick its song, cut it, or copy it to another game's project.",
+  recDel: "Delete this recording from the project (shows that play it go dark).",
+  recName: "The recording this step plays.",
+  recFrom: "Where in the recording the step starts.",
   del: "Take this show out of the project.",
   name: "The show's name, for you (the log names it too).",
   song: "The song this show plays with: the game starts the show whenever it plays this sound, from the song's start. A song you replaced plays here as you replaced it.",
@@ -101,6 +107,23 @@ function useFrames(stock) {
 }
 
 // ------------------------------------------------------------------ the clock: the song's, or its own
+// PAD-1516: a recording's frames, fetched once, when a show plays it
+function useRecFrames(recs) {
+  const got = useRef({});
+  const [, bump] = useState(0);
+  return (name) => {
+    const x = (recs || []).find((y) => y.name === name);
+    if (!x) return null;
+    const key = `${x.name}|${x.frames}|${x.lights}`;
+    if (got.current[key] !== undefined) return got.current[key];
+    got.current[key] = null;
+    fetch(mediaUrl(x.file)).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => {
+      if (b) { got.current[key] = new Uint8Array(b, 20); bump((n) => n + 1); }
+    }).catch(() => {});
+    return null;
+  };
+}
+
 function useClock(total, audioRef, src) {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -133,9 +156,11 @@ function useClock(total, audioRef, src) {
 }
 
 // ------------------------------------------------------------------ the cabinet, playing the show
-function Cabinet({ lights, show, t, meta, frames }) {
+function Cabinet({ lights, show, t, meta, frames, recs, recFrames }) {
   const lanes = LANES.map((k) => (show[k] || []).map(compileStep));
-  const game = (st, L, at) => gameColour(st, srcOf(L.name), at, meta, frames(st.a, st.b ? "remix" : "original"));
+  const game = (st, L, at, k) => (st.fx === CX_REC
+    ? recColour(st, k, at, (recs || []).find((r) => r.name === st.rec), recFrames ? recFrames(st.rec) : null)
+    : gameColour(st, srcOf(L.name), at, meta, frames(st.a, st.b ? "remix" : "original")));
   const cols = showColours(lights, lanes, !!show.loop, Math.floor(t), game);
   const ring = lights.filter((l) => l.lane === 1);
   const blade = lights.filter((l) => l.lane === 0);
@@ -186,8 +211,9 @@ function Lane({ s, lane, steps, total, sel, onSel, onSeek, t }) {
     ${steps.map((st, i) => {
       const left = (at / total) * 100, w = ((Number(st.ms) || 0) / total) * 100;
       at += Number(st.ms) || 0;
-      const g = st.fx === "game";
-      const head = g ? `${i + 1}. the game's show: ${stockName(s, (s.stock || []).find((x) => x.req === st.req))} (${SET_WORD[st.set] || ""})`
+      const g = st.fx === "game" || st.fx === "rec";
+      const head = st.fx === "rec" ? `${i + 1}. the recording ${st.rec}`
+        : g ? `${i + 1}. the game's show: ${stockName(s, (s.stock || []).find((x) => x.req === st.req))} (${SET_WORD[st.set] || ""})`
         : `${i + 1}. ${st.fx.replace(/_/g, " ")}`;
       return html`<button type="button" key=${i} class=${cx("xl-bar", g && "xl-bar-game", sel && sel.lane === lane && sel.i === i && "sel")}
         style=${{ left: `${left}%`, width: `${w}%`, background: g ? undefined : `linear-gradient(90deg, ${st.a}, ${st.b})` }}
@@ -261,12 +287,16 @@ function StepCard({ s, show, sel, edit }) {
   const setK = (k, v) => edit((d) => { d[LANES[sel.lane]][sel.i][k] = v; });
   // PAD-1063: a step of the game's own show names its song, its set and where in it it starts
   const stock = s.stock || [];
+  const recs = s.recs || [];
   const setFx = (v) => edit((d) => {
     const x = d[LANES[sel.lane]][sel.i];
     x.fx = v;
     if (v === "game" && !stock.some((y) => y.req === x.req) && stock.length) {
       const own = stock.find((y) => y.slot === show.slot) || stock[0];
       Object.assign(x, { req: own.req, set: "original", from: 0 });
+    }
+    if (v === "rec" && !recs.some((y) => y.name === x.rec) && recs.length) {   // PAD-1516
+      Object.assign(x, { rec: recs[0].name, from: 0, ms: Math.min(600000, recs[0].period * recs[0].frames) });
     }
   });
   const move = (dir) => edit((d) => { const l = d[LANES[sel.lane]]; const [x] = l.splice(sel.i, 1); l.splice(sel.i + dir, 0, x); }, { lane: sel.lane, i: sel.i + dir });
@@ -282,7 +312,7 @@ function StepCard({ s, show, sel, edit }) {
     </div>
     <div class="xl-grid">
       <span class="lbl" ...${tip(TIP.fx)}>Pattern</span>
-      <${Select} sm value=${st.fx} options=${stock.length ? fxOpts : fxOpts.filter((o) => o.value !== "game")} width=${190} onChange=${setFx} />
+      <${Select} sm value=${st.fx} options=${fxOpts.filter((o) => (o.value !== "game" || stock.length) && (o.value !== "rec" || recs.length))} width=${190} onChange=${setFx} />
       <span class="lbl" ...${tip(TIP.ms)}>Lasts</span>
       <span class="row xl-inl"><${NumBox} value=${st.ms} min=${(lim.ms || [20])[0]} max=${(lim.ms || [0, 600000])[1]} title=${TIP.ms} onChange=${(v) => setK("ms", v)} /><span class="small muted">ms</span>
         <span class="small muted" ...${tip(TIP.blend)}>· blends in over</span><${NumBox} value=${st.blend || 0} min=${0} max=${st.ms} title=${TIP.blend} onChange=${(v) => setK("blend", v)} /><span class="small muted">ms</span></span>
@@ -295,6 +325,12 @@ function StepCard({ s, show, sel, edit }) {
           options=${[{ value: "original", label: "Original" }, { value: "remix", label: "Remix" }]} onChange=${(v) => setK("set", v)} />
         <span class="lbl" ...${tip(TIP.gameFrom)}>Starts at</span>
         <span class="row xl-inl"><${NumBox} value=${st.from || 0} min=${0} max=${1200000} title=${TIP.gameFrom} onChange=${(v) => setK("from", v)} /><span class="small muted">ms into the game's show</span></span>` : null}
+      ${st.fx === "rec" ? html`<span class="lbl" ...${tip(TIP.recName)}>Recording</span>
+        <${Select} sm value=${st.rec || ""} width=${260} title=${TIP.recName}
+          options=${recs.map((x) => ({ value: x.name, label: `${x.name} (${secs(x.seconds * 1000)})` }))}
+          onChange=${(v) => setK("rec", v)} />
+        <span class="lbl" ...${tip(TIP.recFrom)}>Starts at</span>
+        <span class="row xl-inl"><${NumBox} value=${st.from || 0} min=${0} max=${1200000} title=${TIP.recFrom} onChange=${(v) => setK("from", v)} /><span class="small muted">ms into the recording</span></span>` : null}
       ${uses.includes("a") ? html`<span class="lbl" ...${tip(TIP.a)}>Color</span><${ColorBox} value=${st.a} title=${TIP.a} onChange=${(v) => setK("a", v)} />` : null}
       ${uses.includes("b") ? html`<span class="lbl" ...${tip(TIP.b)}>Second color</span><${ColorBox} value=${st.b} title=${TIP.b} onChange=${(v) => setK("b", v)} />` : null}
       ${uses.includes("r") ? html`<span class="lbl" ...${tip(TIP.rate)}>Pace</span>
@@ -309,7 +345,9 @@ export default function LightsTab() {
   const shows = s.shows || [];
   const [pick, setPick] = useState(0);
   const [stockPick, setStockPick] = useState(null);   // PAD-1063: { req, set } - a show of the game's on the stage
+  const [recPick, setRecPick] = useState(null);       // PAD-1516: a recording's name - on the stage
   const frames = useFrames(s.stock);
+  const recFrames = useRecFrames(s.recs);
   const [sel, setSel] = useState(null);
   const [draft, setDraft] = useState(null);           // the show being edited, saved a moment after each change
   const timer = useRef(0);
@@ -320,7 +358,13 @@ export default function LightsTab() {
   const gameShow = stockShow ? { name: stockName(s, stockShow), slot: stockShow.slot, loop: false,
     blades: [{ fx: "game", ms: stockShow.ms, req: stockShow.req, set: stockPick.set, from: 0, blend: 0 }],
     speakers: [{ fx: "game", ms: stockShow.ms, req: stockShow.req, set: stockPick.set, from: 0, blend: 0 }] } : null;
-  const show = gameShow || (draft && draft.si === si ? draft.show : saved);
+  // PAD-1516: a recording on the stage: it plays whole on each lane it has lights for here
+  const rec = recPick && (s.recs || []).find((x) => x.name === recPick);
+  const recLanes = rec ? new Set((s.lights || []).filter((L, k) => (rec.map || [])[k] >= 0).map((L) => L.lane)) : null;
+  const recStep = rec ? { fx: "rec", ms: Math.min(600000, rec.period * rec.frames), rec: rec.name, from: 0, blend: 0 } : null;
+  const recShow = !gameShow && rec ? { name: rec.name, slot: null, loop: true, blades: recLanes.has(0) ? [recStep] : [],
+    speakers: recLanes.has(1) ? [recStep] : [] } : null;
+  const show = gameShow || recShow || (draft && draft.si === si ? draft.show : saved);
   useEffect(() => { setDraft(null); setSel(null); }, [si, shows.length]);
   const song = show && (s.songs || []).find((x) => x.slot === show.slot);
   useEffect(() => { if (song) call("lights.song_peaks", song.slot); }, [song && song.slot, song && song.path]);
@@ -372,6 +416,9 @@ export default function LightsTab() {
     return items.length ? { label: "From another project", submenu: items }
                         : { label: "From another project", disabled: true, title: TIP.noOthers };
   };
+  const recMenu = (e) => openMenu(e.currentTarget, [{ header: "Record the game's lights for" },
+    ...[[30, "30 seconds"], [60, "1 minute"], [120, "2 minutes"]].map(([n, label]) => ({ label, title: TIP.record,
+      onClick: () => call("lights.record", n) }))]);
   const newMenu = (e) => {
     const at = e.currentTarget;
     call("lights.other_shows").catch(() => []).then((others) => openMenu(at, [
@@ -418,19 +465,30 @@ export default function LightsTab() {
           <div class="list xl-stock" role="listbox" aria-label="The game's own expression light shows">
             ${s.stock.map((x) => html`<button type="button" key=${x.req} role="option" aria-selected=${!!stockPick && stockPick.req === x.req}
               class=${cx("li xl-li xl-li-game", stockPick && stockPick.req === x.req && "sel")} ...${tip(TIP.stock)}
-              onClick=${() => { setStockPick({ req: x.req, set: (stockPick && stockPick.set) || "original" }); setSel(null); clock.stop(); }}>
+              onClick=${() => { setStockPick({ req: x.req, set: (stockPick && stockPick.set) || "original" }); setRecPick(null); setSel(null); clock.stop(); }}>
               <span class="xl-li-name ellip">${stockName(s, x)}</span>
               <span class="small muted ellip">the game's · ${secs(x.ms)}</span>
             </button>`)}
           </div>` : s.stock_why ? html`<div class="small muted xl-stock-hd">${s.stock_why}</div>` : null}
+        ${(s.recs || []).length ? html`<div class="xl-stock-hd small muted">Recorded</div>
+          <div class="list xl-stock" role="listbox" aria-label="Recordings of the game's own lights">
+            ${s.recs.map((x) => html`<button type="button" key=${x.name} role="option" aria-selected=${recPick === x.name}
+              class=${cx("li xl-li xl-li-game", recPick === x.name && "sel")} ...${tip(TIP.recPick)}
+              onClick=${() => { setRecPick(x.name); setStockPick(null); setSel(null); clock.stop(); }}>
+              <span class="xl-li-name ellip">${x.name}</span>
+              <span class="small muted ellip">recorded · ${secs(x.seconds * 1000)}</span>
+            </button>`)}
+          </div>` : null}
+        ${s.rec_note ? html`<div class="small muted xl-stock-hd">${s.rec_note}</div>` : null}
         <div class="row xl-list-acts">
           <${Button} size="sm" kind="primary" icon="plus" iconRight="down" disabled=${shows.length >= s.max} title=${TIP.newShow} onClick=${newMenu}>New show<//>
-          <${Button} size="sm" disabled=${!saved || !!gameShow} title=${TIP.dup} onClick=${() => call("lights.duplicate", si).then((i) => { if (i >= 0) setPick(i); })}>Duplicate<//>
-          <${Button} size="sm" kind="ghost" icon="trash" disabled=${!saved || !!gameShow} title=${TIP.del} onClick=${() => call("lights.delete", si)} />
+          <${Button} size="sm" icon=${s.recording ? undefined : "video"} disabled=${!!s.recording || !s.lights || !s.lights.length} title=${TIP.record} onClick=${recMenu}>${s.recording ? html`<${Spinner} /> Recording` : "Record"}<//>
+          <${Button} size="sm" disabled=${!saved || !!gameShow || !!recShow} title=${TIP.dup} onClick=${() => call("lights.duplicate", si).then((i) => { if (i >= 0) setPick(i); })}>Duplicate<//>
+          <${Button} size="sm" kind="ghost" icon="trash" disabled=${!saved || !!gameShow || !!recShow} title=${TIP.del} onClick=${() => call("lights.delete", si)} />
         </div>
       <//>
       ${show ? html`<${Card} title="The cabinet" cls="xl-stage">
-        <${Cabinet} lights=${s.lights || []} show=${show} t=${clock.t} meta=${s.stock_meta} frames=${frames} />
+        <${Cabinet} lights=${s.lights || []} show=${show} t=${clock.t} meta=${s.stock_meta} frames=${frames} recs=${s.recs} recFrames=${recFrames} />
         <audio ref=${audioRef} src=${src || undefined} preload="auto" />
         <div class="row xl-transport">
           <${Button} size="sm" kind="primary" icon=${clock.playing ? "pause" : "play"} title=${TIP.play}
@@ -461,6 +519,16 @@ export default function LightsTab() {
             <${Lane} s=${s} lane=${lane} steps=${show[k] || []} total=${total} sel=${null} t=${clock.t} onSel=${() => {}} onSeek=${clock.seek} />
           </div>`)}
         </div>
+      <//>` : recShow ? html`<${Card} title="A recording of the game's lights" cls="xl-edit">
+        <div class="xl-grid">
+          <span class="lbl">Recorded</span><span>${rec.source || "the game"}: ${rec.speakers} speaker light(s), ${rec.blades} blade pixel(s)</span>
+          <span class="lbl">Lasts</span><span>${secs(rec.seconds * 1000)}</span>
+          <span class="lbl"></span>
+          <span class="row xl-inl"><${Button} size="sm" kind="primary" icon="plus" disabled=${shows.length >= s.max} title=${TIP.fromRec}
+            onClick=${() => call("lights.from_rec", rec.name).then((i) => { if (i >= 0) { setRecPick(null); setPick(i); clock.stop(); } })}>Make it a show of mine<//>
+            <${Button} size="sm" kind="ghost" icon="trash" title=${TIP.recDel} onClick=${() => call("lights.delete_rec", rec.name).then(() => setRecPick(null))}>Delete<//></span>
+        </div>
+        <${Note}>What the game showed on its cabinet lights while it was recorded in the emulator, played here on this cabinet's lights. Make it a show of yours to put it with a song, cut it or mix it with patterns of your own; copied to another game's project, it plays on that cabinet's lights.<//>
       <//>` : html`<${Card} title="Show" cls="xl-edit">
         <div class="xl-grid">
           <span class="lbl" ...${tip(TIP.name)}>Name</span>
@@ -499,7 +567,7 @@ export default function LightsTab() {
         </div>
         ${sel ? html`<${StepCard} s=${s} show=${show} sel=${sel} edit=${edit} />`
           : html`<span class="small muted">Press a step to change it, or + to add one.</span>`}
-      <//>`}` : html`<${Card} title="The cabinet" cls="xl-stage"><${Cabinet} lights=${s.lights || []} show=${{ blades: [], speakers: [] }} t=${0} meta=${s.stock_meta} frames=${frames} /><//>`}
+      <//>`}` : html`<${Card} title="The cabinet" cls="xl-stage"><${Cabinet} lights=${s.lights || []} show=${{ blades: [], speakers: [] }} t=${0} meta=${s.stock_meta} frames=${frames} recs=${s.recs} recFrames=${recFrames} /><//>`}
     </div>
   </div>`;
 }

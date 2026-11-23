@@ -62,8 +62,13 @@ FX = {
     "meter": ("Level meter", "Color", "abr"),
     # PAD-1063: the game's own show of one of its songs (cab_stock): req, set and from, no colours
     "game": ("The game's own show", "The game's", ""),
+    # PAD-1516: a recording of a game's own cabinet lights (cab_rec): rec (its name) and from, no colours
+    "rec": ("A recording of a game's lights", "The game's", ""),
 }
 GAME = "game"
+REC = "rec"
+#: a recording's name: what the project's cab_rec folder keeps it under
+REC_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.()-]{0,47}$")
 #: where in the game's show a step may start: its longest is under nine minutes
 FROM_MAX = 1200000
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -125,7 +130,15 @@ def norm_step(st):
     if fx == GAME:                                      # PAD-1063: which of the game's shows, and from where in it
         out.update(req=_int(st.get("req"), 0, 65535, 0), set=st.get("set") if st.get("set") == "remix" else "original",
                    **{"from": _int(st.get("from"), 0, FROM_MAX, 0)})
+    if fx == REC:                                       # PAD-1516: which recording, and from where in it
+        name = str(st.get("rec") or "")
+        out.update(rec=name if REC_NAME_RE.match(name) else "", **{"from": _int(st.get("from"), 0, FROM_MAX, 0)})
     return out
+
+
+def recs_of(show):
+    """PAD-1516: the names of the recordings *show*'s steps play."""
+    return sorted({st["rec"] for lane in LANES for st in show.get(lane) or [] if st["fx"] == REC and st.get("rec")})
 
 
 def game_step(req, ms, which="original", start=0):
@@ -222,6 +235,9 @@ def added_cfg_text(port, added):
     return _LM.added_cabinet_cfg(cab) if cab else ""
 
 
+#: PAD-1516: the recordings a card carries at most (pad_mode_runtime.c CAB_RECS)
+REC_FILES_MAX = 8
+
 #: PAD-1516: why a show of another project's stays behind when its game is another
 GAME_ONLY = "it plays %s's own show from its program, which another game does not have"
 
@@ -287,11 +303,13 @@ def _hex(c):
     return "0x" + c[1:].lower()
 
 
-def cfg_text(shows, sids_of, only, stock=None):
+def cfg_text(shows, sids_of, only, stock=None, recs=None):
     """``cabshow.cfg``: each show with a song this build plays (*sids_of*: ``{slot: [sid, ...]}``), its two lanes.
     *only*: the card carries no modes (the runtime arms the shows and nothing else). *stock*: the game's own shows on
     this build (:func:`.cab_stock.read`), for a step that plays one (``songs`` / ``songspk``: the runtime reads their
-    frames from the game's memory); a show with such a step on a build without them is left out. Returns (text,
+    frames from the game's memory); a show with such a step on a build without them is left out. PAD-1516 *recs*:
+    ``{name: {file, period, frames, lights, map}}``, the recordings staged beside the file (``map``: each of this
+    cabinet's lights' source light in it, -1 none); a show playing one not there is left out. Returns (text,
     [skipped names])."""
     lines = ["# PAD-1040: the card's expression light shows (pad_mode_runtime.c \"SONG SHOWS\")"]
     if only:
@@ -301,7 +319,8 @@ def cfg_text(shows, sids_of, only, stock=None):
     for s in shows:
         sids = list(sids_of.get(s["slot"], ())) if s["slot"] is not None else []
         game_ok = all(st["req"] in reqs for lane in LANES for st in s[lane] if st["fx"] == GAME)
-        if not sids or not (s["blades"] or s["speakers"]) or not game_ok:
+        rec_ok = all(r in (recs or {}) for r in recs_of(s))
+        if not sids or not (s["blades"] or s["speakers"]) or not game_ok or not rec_ok:
             skipped.append(s["name"])
             continue
         keep.append((s, sids))
@@ -309,13 +328,26 @@ def cfg_text(shows, sids_of, only, stock=None):
         lines.append("songs 0x%x %d %d" % (stock["table"], len(stock["rows"]), stock["pixels"]))
         if stock.get("speakers"):
             lines.append("songspk %s" % " ".join(",".join(str(p) for p in g) for g in stock["speakers"]))
+    used = sorted({r for s, _sids in keep for r in recs_of(s)})
+    rec_ix = {r: i for i, r in enumerate(used[:REC_FILES_MAX])}
+    for r, i in rec_ix.items():
+        x = recs[r]
+        lines.append("rec %d %d %d %d %s" % (i, x["period"], x["frames"], x["lights"], x["file"]))
+        lines.append("recmap %d %s" % (i, ",".join(str(int(m)) for m in x["map"])))
     for s, sids in keep:
+        if any(r not in rec_ix for r in recs_of(s)):
+            skipped.append(s["name"])
+            continue
         lines.append("show %s %d %s" % (",".join(str(x) for x in sids), 1 if s["loop"] else 0, s["name"]))
         for lane in LANES:
             for st in s[lane]:
                 if st["fx"] == GAME:
                     lines.append("%s game %d %d %d %d %d" % (lane, st["ms"], st["req"], 1 if st["set"] == "remix"
                                                              else 0, st["from"], st["blend"]))
+                    continue
+                if st["fx"] == REC:
+                    lines.append("%s rec %d %d 0 %d %d" % (lane, st["ms"], rec_ix[st["rec"]], st["from"],
+                                                          st["blend"]))
                     continue
                 lines.append("%s %s %d %s %s %d %d" % (lane, st["fx"], st["ms"], _hex(st["a"]), _hex(st["b"]),
                                                        st["rate"], st["blend"]))

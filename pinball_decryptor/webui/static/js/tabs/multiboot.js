@@ -18,6 +18,14 @@ const noColon = (t) => String(t || "").replace(/:\s*$/, "");
 // A dialog field's id names its store key, so Enter can send what is in the
 // box before it presses OK (see okOnEnter).
 const FID = "mb-f-";
+// Simon, 2026-11-22: "1. Multiboot menu alone 2. Multiboot menu plus facility to reinvoke the flippers 3. No menu
+// appears, available only through flippers" (images.conf boot_menu=; After a game = flip_guard=)
+const BOOT_MENU_OPTS = [
+  { value: "menu", label: "At power-up" },
+  { value: "flipper", label: "At power-up + right flipper 5 s in attract" },
+  { value: "hidden", label: "Only by the right flipper (no menu at power-up)" },
+];
+const FLIP_GUARD_OPTS = [{ value: "20", label: "20 s" }, { value: "60", label: "60 s" }];
 const fid = (k) => FID + k;
 
 // ------------------------------------------------- Tk's _Modal, on the page
@@ -635,6 +643,15 @@ function MenuDialog({ s, w }) {
         <label class="k" for=${fid("back_hold")}>Hold BACK (s):</label>
         <div class="row wrap"><${Field} id=${fid("back_hold")} ns=${NS} k="back_hold" value=${s.back_hold} ...${num} max=${60} />
           <span class="small muted">in a game, holding the coin door's BACK (EXIT on some machines) this long restarts into this menu; 0 = off</span></div>`}
+        ${md.flip_ok && html`
+        <label class="k" for=${fid("boot_menu")}>Boot menu:</label>
+        <div class="row wrap"><${Select} id=${fid("boot_menu")} ns=${NS} k="boot_menu" value=${s.boot_menu} width=${330} options=${BOOT_MENU_OPTS}
+            title="How this menu is reached. With the right flipper, it works only when no game is being played (attract), and the menu screen says so." /></div>
+        <label class="k" for=${fid("flip_guard")}>After a game:</label>
+        <div class="row wrap"><${Select} id=${fid("flip_guard")} ns=${NS} k="flip_guard" value=${String(s.flip_guard)} width=${120}
+            disabled=${(s.boot_menu || "menu") === "menu"} options=${FLIP_GUARD_OPTS}
+            title=${(s.boot_menu || "menu") === "menu" ? "Only with the right flipper back to the menu" : "A tilt, the bonus between balls and the initials after a game switch the flippers off too, so the right flipper only counts once they have been off this long"} />
+          <span class="small muted">the flippers must have been off this long before the right flipper's hold counts</span></div>`}
       </div>
     <//>
     </div>

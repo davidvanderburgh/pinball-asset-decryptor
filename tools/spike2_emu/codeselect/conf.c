@@ -287,6 +287,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     c->def = -1;
     c->def_card = -1;
     c->timeout = -1;
+    c->flip_hold = FLIP_HOLD_DEFAULT;
+    c->flip_guard = FLIP_GUARD_DEFAULT;
     c->volume = -1;
     c->volume_machine = 0;
     c->mv_store[0] = 0;
@@ -527,6 +529,25 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 snprintf(c->colour[idx].name, sizeof c->colour[idx].name, "%s",
                          fld[5] ? fld[5] : "");
             }
+        } else if (!strcmp(key, "boot_menu")) {
+            if (!*val || !strcmp(val, "menu")) c->boot_menu = BOOT_MENU_MENU;
+            else if (!strcmp(val, "flipper")) c->boot_menu = BOOT_MENU_FLIPPER;
+            else if (!strcmp(val, "hidden")) c->boot_menu = BOOT_MENU_HIDDEN;
+            else {
+                c->boot_menu = BOOT_MENU_MENU;
+                conf_warn(c, "%s:%d: boot_menu=%s is not 'menu', 'flipper' or 'hidden': read as 'menu'",
+                          path, lineno, val);
+            }
+        } else if (!strcmp(key, "flip_hold")) {
+            int v = atoi(val);
+            if (v >= 1 && v <= 30) c->flip_hold = v;
+            else conf_warn(c, "%s:%d: flip_hold=%s is not 1..30 seconds: %d is used",
+                           path, lineno, val, c->flip_hold);
+        } else if (!strcmp(key, "flip_guard")) {
+            int v = atoi(val);
+            if (*val >= '0' && *val <= '9' && v <= 600) c->flip_guard = v;
+            else conf_warn(c, "%s:%d: flip_guard=%s is not 0..600 seconds: %d is used",
+                           path, lineno, val, c->flip_guard);
         } else if (!strcmp(key, "testcard")) {
             if (!strcmp(val, "on")) c->testcard = 1;
             else if (!*val || !strcmp(val, "off")) c->testcard = 0;

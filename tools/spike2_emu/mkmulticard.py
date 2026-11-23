@@ -337,8 +337,14 @@ CONF_LINE_MAX = 1000
 CONF_STR_MAX = 199
 #: PAD-1309: images.conf back_hold= - the longest hold (seconds) the builders write
 BACK_HOLD_MAX = 60
+#: images.conf boot_menu= (Simon, 2026-11-22): how the menu is reached - at power-up ('menu', the selector's own
+#: default), also by the right flipper held in attract with no game on ('flipper', padmenu.so), or only that way
+#: ('hidden': a short screen at power-up, the right flipper held opens the menu); flip_guard= how long the
+#: flippers must have been off (no game on) before the hold counts
+BOOT_MENUS = ("menu", "flipper", "hidden")
+FLIP_GUARD_MAX = 600
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
-CONF_KEYS = ("default", "timeout", "back_hold", "heading", "text_size", "counter", "countdown_word", "footer", "font",
+CONF_KEYS = ("default", "timeout", "back_hold", "boot_menu", "flip_guard", "heading", "text_size", "counter", "countdown_word", "footer", "font",
              "sound_move", "sound_confirm", "volume",
              "mixer_volume", "media", "theme", "machine_volume")
 
@@ -1955,7 +1961,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        groups=None, default_card=None, heading=None, text_size=None,
                        counter=None, countdown_word=None, footer=None, scores=None,
                        colours=None, settings=None, edition=None, hiscores=None, tests=None,
-                       testcard=False, back_hold=None, test_dir=None):
+                       testcard=False, back_hold=None, test_dir=None, boot_menu=None, flip_guard=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -2015,6 +2021,11 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     # which the selector reads as its own 3 s, so a card that never asked is what it was
     if back_hold is not None:
         back_hold = _int_range(back_hold, "back_hold", 0, BACK_HOLD_MAX)
+    # boot_menu= / flip_guard= (Simon, 2026-11-22): None = no key, the selector's own 'menu' and padmenu's 60 s
+    if boot_menu is not None and boot_menu not in BOOT_MENUS:
+        raise Refused("images.conf: boot_menu must be one of %s, not %r" % (", ".join(BOOT_MENUS), boot_menu))
+    if flip_guard is not None:
+        flip_guard = _int_range(flip_guard, "flip_guard", 0, FLIP_GUARD_MAX)
     if volume is not None:
         volume = _int_range(volume, "volume", 0, 100)
     machine_volume = check_machine_volume(machine_volume)
@@ -2079,6 +2090,10 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     out.append("timeout=%d" % int(timeout))
     if back_hold is not None:
         out.append("back_hold=%d" % back_hold)
+    if boot_menu is not None:
+        out.append("boot_menu=%s" % boot_menu)
+    if flip_guard is not None:
+        out.append("flip_guard=%d" % flip_guard)
     # THE HEADING.  None leaves the key out, so a card that never asked for one
     # is byte for byte what it always was and an older selector reads it; '' is
     # a CHOICE and writes 'heading=', which the selector reads as no line at all.
@@ -2197,7 +2212,8 @@ def parse_images_conf(text):
     if isinstance(text, bytes):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "groups": [], "default": 0, "default_card": None,
-            "timeout": 15, "back_hold": None, "heading": None, "text_size": None,
+            "timeout": 15, "back_hold": None, "boot_menu": None, "flip_guard": None,
+            "heading": None, "text_size": None,
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {}, "hiscores": {},
@@ -2241,11 +2257,14 @@ def parse_images_conf(text):
                 conf["default_card"] = int(val.strip())
             except ValueError:
                 raise Refused("images.conf: bad default_card=%r" % val)
-        elif key in ("default", "timeout", "back_hold"):
+        elif key in ("default", "timeout", "back_hold", "flip_guard"):
             try:
                 conf[key] = int(val.strip())
             except ValueError:
                 raise Refused("images.conf: bad %s=%r" % (key, val))
+        elif key == "boot_menu":
+            # the selector reads a word it does not know as 'menu' (and says so): so does this
+            conf["boot_menu"] = val.strip() if val.strip() in BOOT_MENUS else "menu"
         elif key == "heading":
             # NOT `or None`: 'heading=' is a card that asked for no line across
             # the top, which is a different answer from a card that never said
@@ -4216,7 +4235,7 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
         return text
     ex = existing or {"images": [], "media": [], "groups": [], "default": None,
                       "default_card": None, "timeout": None, "back_hold": None,
-                      "heading": None, "text_size": None,
+                      "boot_menu": None, "flip_guard": None, "heading": None, "text_size": None,
                       "counter": None, "countdown_word": None, "footer": None,
                       "font": None, "sound_move": None, "sound_confirm": None,
                       "volume": None, "mixer_volume": None, "theme": None, "colors": {}}
@@ -4247,6 +4266,12 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
     back_hold = getattr(args, "back_hold", None)
     if back_hold is None:
         back_hold = ex.get("back_hold")
+    boot_menu = getattr(args, "boot_menu", None)
+    if boot_menu is None:
+        boot_menu = ex.get("boot_menu")
+    flip_guard = getattr(args, "flip_guard", None)
+    if flip_guard is None:
+        flip_guard = ex.get("flip_guard")
     font = SELECT_DIR + "/font.ttf"
     sel = getattr(args, "selector_dir", None)
     if sel and not os.path.isfile(os.path.join(sel, "font.ttf")) and not os.path.isfile(HOST_FONT):
@@ -4370,7 +4395,7 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
                               text_size=text_size, counter=counter,
                               countdown_word=countdown_word, footer=footer, scores=scores,
                               colours=colours, settings=settings, edition=edition, hiscores=hiscores,
-                              tests=tests, back_hold=back_hold)
+                              tests=tests, back_hold=back_hold, boot_menu=boot_menu, flip_guard=flip_guard)
 
 
 # ============================================================================= the JSON sidecars
@@ -4430,6 +4455,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("images", rows),
         ("timeout", conf["timeout"]),
         ("back_hold", conf.get("back_hold")),
+        ("boot_menu", conf.get("boot_menu")), ("flip_guard", conf.get("flip_guard")),
         ("default", conf["default"]),
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
         ("edition", conf.get("edition")),
@@ -6610,7 +6636,8 @@ def render_images_conf_text(conf):
         footer=conf.get("footer"), scores=conf.get("scores"),
         colours=conf.get("colours"), settings=conf.get("settings"), hiscores=conf.get("hiscores"),
         tests=conf.get("tests"), testcard=bool(conf.get("testcard")),
-        back_hold=conf.get("back_hold"), test_dir=conf.get("test_dir"))
+        back_hold=conf.get("back_hold"), test_dir=conf.get("test_dir"),
+        boot_menu=conf.get("boot_menu"), flip_guard=conf.get("flip_guard"))
 
 
 # ============================================================================= reading a card back
@@ -8345,8 +8372,12 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
                   % (d, t, s, "".join(" | %s" % x for x in m) if any(m) else ""))
         print("    default=%d timeout=%d font=%s log=%s%s" % (conf["default"], conf["timeout"], conf["font"],
                                                               conf.get("debug_log") or "off",
-                                                              "" if conf.get("back_hold") is None
-                                                              else " back_hold=%d" % conf["back_hold"]))
+                                                              ("" if conf.get("back_hold") is None
+                                                               else " back_hold=%d" % conf["back_hold"])
+                                                              + ("" if conf.get("boot_menu") is None
+                                                                 else " boot_menu=%s" % conf["boot_menu"])
+                                                              + ("" if conf.get("flip_guard") is None
+                                                                 else " flip_guard=%d" % conf["flip_guard"])))
         print("    sound_move=%s sound_confirm=%s volume=%s mixer_volume=%s media=%s"
               % (conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"], conf["media_dir"]))
         print("    heading=%s text_size=%s counter=%s countdown_word=%s"
@@ -8626,7 +8657,8 @@ def inspect_card(card, media_out=None):
             ("music", g["media"][2] or None), ("confirm", g["media"][3] or None)])
             for gi, g in enumerate(conf.get("groups") or [])]),
         ("default_card", conf.get("default_card")),
-        ("timeout", conf["timeout"]), ("back_hold", conf.get("back_hold")), ("default", conf["default"]),
+        ("timeout", conf["timeout"]), ("back_hold", conf.get("back_hold")),
+        ("boot_menu", conf.get("boot_menu")), ("flip_guard", conf.get("flip_guard")), ("default", conf["default"]),
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
         ("edition", conf.get("edition")),
         ("mixer_volume", conf["mixer_volume"]),
@@ -8694,7 +8726,9 @@ def print_inspect(rep):
     print("menu       default=%s timeout=%s volume=%s mixer_volume=%s sound_move=%s sound_confirm=%s font=%s log=%s%s"
           % (rep["default"], rep["timeout"], rep["volume"], rep["mixer_volume"],
              rep["sound_move"], rep["sound_confirm"], rep["font"], rep.get("debug_log") or "off",
-             "" if rep.get("back_hold") is None else " back_hold=%s" % rep["back_hold"]))
+             ("" if rep.get("back_hold") is None else " back_hold=%s" % rep["back_hold"])
+             + ("" if rep.get("boot_menu") is None else " boot_menu=%s" % rep["boot_menu"])
+             + ("" if rep.get("flip_guard") is None else " flip_guard=%s" % rep["flip_guard"])))
     head = rep.get("heading")
     print("heading    %s" % ("(the selector's own SELECT GAME CODE)" if head is None
                              else "(none - the top of the menu is bare)" if not head
@@ -10380,6 +10414,13 @@ def _add_conf_flags(s):
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
     s.add_argument("--back-hold", dest="back_hold", type=int, default=None,
                    help="seconds BACK held in a game restarts into the menu (0 = off; card default 3)")
+    s.add_argument("--boot-menu", dest="boot_menu", choices=BOOT_MENUS, default=None,
+                   help="how the menu is reached: 'menu' at power-up (the default), 'flipper' also by the right "
+                        "flipper held 5 s in attract with no game on, 'hidden' only that way (a short screen at "
+                        "power-up: hold the right flipper for the menu). Kept from an existing card when absent")
+    s.add_argument("--flip-guard", dest="flip_guard", type=int, default=None,
+                   help="seconds the flippers must have been off (no game on) before the right flipper's hold "
+                        "counts (0-%d; card default 60)" % FLIP_GUARD_MAX)
     s.add_argument("--heading", metavar="TEXT",
                    help="images.conf heading=TEXT - the line across the top of the menu (the selector's "
                         "own '%s' when no card ever set one; --heading '' leaves the top bare); an "

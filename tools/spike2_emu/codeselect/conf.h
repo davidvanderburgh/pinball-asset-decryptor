@@ -32,6 +32,24 @@
  *                            useless for an unattended power-up - which is the
  *                            whole point of the card.  Wins over default=.
  *   timeout=<seconds>        0 = wait for ever
+ *   boot_menu=<word>         HOW THE MENU IS REACHED (Simon, 2026-11-22: "1. Multiboot
+ *                            menu alone 2. Multiboot menu plus facility to reinvoke
+ *                            [it with] the flippers 3. No menu appears, available only
+ *                            through flippers"): 'menu' (the default) = at power-up,
+ *                            as always; 'flipper' = at power-up, and the RIGHT
+ *                            FLIPPER held flip_hold= seconds in attract (no game on)
+ *                            comes back to it (padmenu.so, in the game); 'hidden' =
+ *                            no menu: a short screen names the image about to start
+ *                            and says to hold the right flipper, which opens the
+ *                            menu; otherwise that image boots, and the flipper
+ *                            comes back to the menu from attract as with 'flipper'.
+ *                            An unknown word is warned about and read as 'menu'
+ *   flip_hold=<seconds>      the right flipper's hold for boot_menu=flipper|hidden
+ *                            (default 5; 1..30)
+ *   flip_guard=<seconds>     ...and how long the flippers must have been off - no
+ *                            game on - before a hold counts: a tilt, the bonus
+ *                            between balls and the initials after a game switch them
+ *                            off too (default 60; 0..600).  Read by padmenu.so.
  *   heading=<text>           the line across the top (default "SELECT GAME
  *                            CODE"); free UTF-8 text, shrunk and then cut to
  *                            the glass, and a line of nothing but spaces
@@ -210,6 +228,12 @@
  * menu walks is sized off this. */
 #define CONF_MAX_MENU (CONF_MAX_CARDS + 1)
 #define CONF_STR 200
+/* boot_menu= (Simon, 2026-11-22) */
+#define BOOT_MENU_MENU    0          /* the menu at power-up, as always */
+#define BOOT_MENU_FLIPPER 1          /* ...and the right flipper back to it from attract */
+#define BOOT_MENU_HIDDEN  2          /* no menu unless the right flipper is held */
+#define FLIP_HOLD_DEFAULT 5
+#define FLIP_GUARD_DEFAULT 60
 
 /* dropped members, dropped groups and the like: never fatal, so they are
  * collected here and the caller logs them */
@@ -305,6 +329,9 @@ struct conf {
     struct conf_test test[CONF_MAX_TESTS];   /* test= lines, in order (PAD-1279) */
     int ntest;
     int testcard;                    /* testcard=on: a TEST CARD, no menu, nothing boots (PAD-1279) */
+    int boot_menu;                   /* boot_menu= BOOT_MENU_* (Simon, 2026-11-22) */
+    int flip_hold;                   /* flip_hold= seconds (5) */
+    int flip_guard;                  /* flip_guard= seconds (60; padmenu.so's) */
     int settings;                    /* settings=: 1 = offer the tile when it has something to set */
     int settings_card;               /* the tile's card index (always the last), or -1 */
     struct conf_image settings_face; /* what the tile draws */

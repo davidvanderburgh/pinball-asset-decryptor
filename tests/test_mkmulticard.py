@@ -1033,7 +1033,8 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
          "group": None}]
     # it is JSON, and exactly the keys contract A names
     d = json.loads(json.dumps(man))
-    assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "back_hold", "default",
+    assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "back_hold",
+                      "boot_menu", "flip_guard", "default",
                       "volume", "machine_volume", "edition", "mixer_volume", "sound_move",
                       "sound_confirm", "heading", "text_size", "counter", "settings",
                       "countdown_word", "footer", "theme", "colors", "groups"}

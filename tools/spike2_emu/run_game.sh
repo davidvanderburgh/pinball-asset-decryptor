@@ -365,7 +365,9 @@ if [ -n "${PAD_CARD:-}" ]; then
             # ...and counter= / countdown_word= / footer= (PAD-190), same reason:
             # a card whose counter line is off and whose countdown says
             # 'Launching' must preview as that card, not as the default menu.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|back_hold|color_[a-z_]+)[[:space:]]*=' \
+            # ...and boot_menu= / flip_hold= / flip_guard= (Simon, 2026-11-22): how the card's menu is reached,
+            # which this menu (the start-up screen, the right flipper's line) and padmenu.so both read.
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|back_hold|boot_menu|flip_hold|flip_guard|color_[a-z_]+)[[:space:]]*=' \
                 | grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true
             # ★ PAD-307: EACH IMAGE'S BUILT COLOR PROFILE, the lines that put the SETTINGS tile
             # in the menu. They name IMAGE INDEXES, so they ride on the group lines' gate: only

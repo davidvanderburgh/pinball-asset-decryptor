@@ -1262,6 +1262,9 @@ class WebMultibootPanel(_Base):
             # PAD-1309: Jersey Jack and The Big Lebowski have no BACK hold (Version Select
             # is The Big Lebowski's way back), so the row is not shown for them
             "back_hold_ok": self._backend.key not in ("jjp", "dp"),
+            # Simon, 2026-11-22: the right flipper back to the menu reads a Spike 2 game's node bus (padmenu.so),
+            # so the Boot menu choice is a Stern Spike 2 card's alone
+            "flip_ok": self._backend.key == "stern",
             "own_note": own,
             "sounds_note": (
                 "auto = a click and a stinger pulled from the primary "

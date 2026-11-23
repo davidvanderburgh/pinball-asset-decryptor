@@ -613,12 +613,14 @@ int ioctl(int fd, unsigned long req, ...)
 }
 #endif
 
+static int conf_word(const char *path, const char *key, char *out, size_t outlen);
 #if !defined(PADMENU_FAST) && !defined(PADMENU_S3)
 /* ---- THE RIGHT FLIPPER, HELD, WITH NO GAME ON (Simon, 2026-11-22) ------------------------------
  * Simon: "get back to the multiboot menu from a running game", then: "This should not run during
  * gameplay at all. Just when no game is running" and "Right flipper held on - 5 seconds for
- * activation."  FEASIBILITY BUILD: PADMENU_FLIP_MS=<ms> turns it on (off without it), and it only
- * restarts with PADMENU_FLIP_FIRE=1 - otherwise it writes what it would do to PADMENU_TRACE=<file>.
+ * activation."  On when the card's images.conf says boot_menu=flipper or hidden (the Multi-boot tab),
+ * for flip_hold= seconds after flip_guard= seconds with no game on (flip_init); PADMENU_TRACE=<file>
+ * says what it saw.
  *
  * THE BUTTON.  The flipper buttons are on the node bus (/dev/ttymxc1), node 8, not the cabinet
  * SPI word: the game sends { 0x88, n, 0x11, [key], ck, 12 } and reads 10 bytes + ck + status;
@@ -824,43 +826,63 @@ ssize_t __read_chk(int fd, void *buf, size_t n, size_t buflen)
     return r;
 }
 
-static void flip_init(void)
+/* THE CARD SAYS (images.conf, the Multi-boot tab's Menu settings): boot_menu=flipper|hidden turns it on,
+ * flip_hold=<s> (5) and flip_guard=<s> (60).  PADMENU_FLIP_MS / PADMENU_FLIP_GUARD_MS (ms) are the tests'
+ * and the rig's, and win; PADMENU_FLIP_LOG=1 only says what it would do (the feasibility runs). */
+static void flip_init(const char *conf)
 {
-    const char *v = getenv("PADMENU_FLIP_MS"), *q = getenv("PADMENU_FLIP_QUIET_MS"),
-               *f = getenv("PADMENU_FLIP_FIRE"), *t = getenv("PADMENU_TRACE");
-    flip_ms = v && *v ? strtol(v, NULL, 10) : 0;
-    flip_quiet_ms = q && *q ? strtol(q, NULL, 10) : 0;
-    flip_fire = f && *f == '1';
+    const char *v = getenv("PADMENU_FLIP_MS"), *q = getenv("PADMENU_FLIP_GUARD_MS"),
+               *f = getenv("PADMENU_FLIP_LOG"), *t = getenv("PADMENU_TRACE");
+    char w[32];
+    long hold_s = 0, guard_s = 60;
+    if (conf_word(conf, "boot_menu", w, sizeof w) && (!strcmp(w, "flipper") || !strcmp(w, "hidden")))
+        hold_s = 5;
+    if (hold_s && conf_word(conf, "flip_hold", w, sizeof w) && atol(w) >= 1 && atol(w) <= 30)
+        hold_s = atol(w);
+    if (conf_word(conf, "flip_guard", w, sizeof w) && w[0] >= '0' && w[0] <= '9' && atol(w) <= 600)
+        guard_s = atol(w);
+    flip_ms = v && *v ? strtol(v, NULL, 10) : hold_s * 1000;
+    flip_quiet_ms = q && *q ? strtol(q, NULL, 10) : guard_s * 1000;
+    flip_fire = !(f && *f == '1');
     rules_off_since = now_ms();
     if (t && *t)
         trace = fopen(t, "a");
-    tr("padmenu flipper watcher: hold %ld ms, quiet %ld ms, %s", flip_ms, flip_quiet_ms,
-       flip_fire ? "restarts" : "log only");
+    tr("padmenu flipper watcher: hold %ld ms (0 = off), after the flippers are off %ld ms, %s", flip_ms,
+       flip_quiet_ms, flip_fire ? "restarts" : "log only");
+    if (flip_ms > 0) {
+        char m[160];
+        snprintf(m, sizeof m, "padmenu: the right flipper held %ld s with no game on restarts into the boot menu"
+                 " (the flippers off %ld s first)\n", flip_ms / 1000, flip_quiet_ms / 1000);
+        say(m);
+    }
     unsetenv("PADMENU_FLIP_MS");
-    unsetenv("PADMENU_FLIP_QUIET_MS");
-    unsetenv("PADMENU_FLIP_FIRE");
+    unsetenv("PADMENU_FLIP_GUARD_MS");
+    unsetenv("PADMENU_FLIP_LOG");
     unsetenv("PADMENU_TRACE");
 }
 #else
 static void nb_forget(int fd) { (void)fd; }
-static void flip_init(void) { }
+static void flip_init(const char *conf) { (void)conf; }
 #endif
 
-/* back_hold=<seconds> in an images.conf -> ms, or -1 when the file or the line is not there */
-static long conf_hold_ms(const char *path)
+/* <key>=<value> in an images.conf (the last one wins): 1 and the value, trimmed; 0 when the file or the line
+ * is not there */
+static int conf_word(const char *path, const char *key, char *out, size_t outlen)
 {
     FILE *f;
     char line[256];
-    long ms = -1;
+    size_t k = strlen(key);
+    int got = 0;
     if (!path || !*path || !(f = fopen(path, "r")))
-        return -1;
+        return 0;
     while (fgets(line, sizeof line, f)) {
         const char *p = line;
+        size_t n = 0;
         while (*p == ' ' || *p == '\t')
             p++;
-        if (strncmp(p, "back_hold", 9))
+        if (strncmp(p, key, k))
             continue;
-        p += 9;
+        p += k;
         while (*p == ' ' || *p == '\t')
             p++;
         if (*p != '=')
@@ -868,15 +890,28 @@ static long conf_hold_ms(const char *path)
         p++;
         while (*p == ' ' || *p == '\t')
             p++;
-        if (*p >= '0' && *p <= '9') {
-            long v = 0;
-            while (*p >= '0' && *p <= '9' && v < 1000)
-                v = v * 10 + (*p++ - '0');
-            ms = v * 1000;
+        while (p[n] && p[n] != '\r' && p[n] != '\n' && p[n] != ' ' && p[n] != '\t' && n + 1 < outlen) {
+            out[n] = p[n];
+            n++;
         }
+        out[n] = 0;
+        got = 1;
     }
     fclose(f);
-    return ms;
+    return got;
+}
+
+/* back_hold=<seconds> in an images.conf -> ms, or -1 when the file or the line is not there */
+static long conf_hold_ms(const char *path)
+{
+    char w[32];
+    long v = 0;
+    const char *p = w;
+    if (!conf_word(path, "back_hold", w, sizeof w) || *p < '0' || *p > '9')
+        return -1;
+    while (*p >= '0' && *p <= '9' && v < 1000)
+        v = v * 10 + (*p++ - '0');
+    return v * 1000;
 }
 
 __attribute__((constructor))
@@ -901,7 +936,7 @@ static void padmenu_init(void)
     if (h && *h)
         back_sw = (int)strtol(h, NULL, 10);
 #endif
-    flip_init();
+    flip_init(c && *c ? c : CONF_PATH);
     /* the game's own children (system()) inherit LD_PRELOAD: nothing here for them */
     unsetenv("PADMENU_HOLD_MS");
     unsetenv("PADMENU_CONF");

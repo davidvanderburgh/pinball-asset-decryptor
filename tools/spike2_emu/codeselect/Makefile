@@ -527,6 +527,7 @@ else
 check: $(BIN) capbin $(PADMENU)
 > bash test/check_elf.sh "$(CROSS)" "$(BIN)"
 > bash test/padmenu_test.sh "$(ROOT)" "$(PADMENU)"
+> bash test/padmenu_flip_test.sh "$(ROOT)" "$(PADMENU)"
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > python3 test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
 > python3 test/settings_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"

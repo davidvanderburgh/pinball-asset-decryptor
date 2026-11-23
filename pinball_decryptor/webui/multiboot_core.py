@@ -975,6 +975,11 @@ class MultibootForm:
     # PAD-1309: seconds the coin door's BACK (EXIT on some machines) held in a game restarts
     # the machine into the menu; 0 = off.  images.conf back_hold= (not on JJP / DP)
     back_hold: int = 3
+    # Simon, 2026-11-22: how the menu is reached (images.conf boot_menu=, Spike 2): "menu" at power-up,
+    # "flipper" also by the right flipper held 5 s in attract with no game on, "hidden" only that way -
+    # and flip_guard=, the seconds the flippers must have been off (no game on) before that hold counts
+    boot_menu: str = "menu"
+    flip_guard: int = 60
     #: The line across the top of the menu (C FB, PAD-135: "Can there be an
     #: option to change this text?").  '' is a real answer and means no line at
     #: all, so the field always names what the card will say - the selector's
@@ -1942,6 +1947,10 @@ def validate_form(form, sources=True):
         errs.append("The countdown cannot be negative (0 = wait for START).")
     if not 0 <= int(form.back_hold) <= 60:
         errs.append("Hold BACK to restart takes 0 to 60 seconds (0 = off).")
+    if form.boot_menu not in BOOT_MENUS:
+        errs.append("Boot menu must be one of: %s." % ", ".join(BOOT_MENUS))
+    if int(form.flip_guard) not in FLIP_GUARDS:
+        errs.append("After a game takes %s seconds." % " or ".join(str(g) for g in FLIP_GUARDS))
     head = (form.heading or "").strip()
     # A NEWLINE WOULD END THE KEY in images.conf and turn the rest of the line
     # into an unknown one, so it is refused here rather than half-written; the
@@ -2975,6 +2984,17 @@ def _bof_build_args(form):
     return args
 
 
+#: images.conf boot_menu= words (mkmulticard.BOOT_MENUS) and the After a game choices (flip_guard=, seconds)
+BOOT_MENUS = ("menu", "flipper", "hidden")
+FLIP_GUARDS = (20, 60)
+
+
+def flip_args(form):
+    """mkmulticard's ``--boot-menu`` / ``--flip-guard`` (Simon, 2026-11-22: "Multiboot menu alone ... plus facility
+    to reinvoke the flippers ... No menu appears, available only through flippers")."""
+    return ["--boot-menu", str(form.boot_menu or "menu"), "--flip-guard", str(int(form.flip_guard))]
+
+
 def build_args(form):
     """``mkmulticard.py build``.  ``--layout auto`` = today's p7 layout for
     one extra image, the img1/img2/... partition for more.  A JJP form goes
@@ -2991,6 +3011,7 @@ def build_args(form):
         "--titles", ";".join(titles),
         "--timeout", str(int(form.timeout)),
         "--back-hold", str(int(form.back_hold)),
+    ] + flip_args(form) + [
         # --default names an IMAGE (so does the choice file, and so does the
         # menu's own memory); the tab's number is the highlighted ROW.  A row
         # that is a consuming group is named by its first member, and the
@@ -3113,7 +3134,7 @@ def inject_args(form, card):
             "--titles", ";".join(titles),
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
-            "--back-hold", str(int(form.back_hold)),
+            "--back-hold", str(int(form.back_hold))] + flip_args(form) + [
             "--default", str(row_first_image(form, int(form.default))),
             "--volume", str(int(form.volume))]
     args += default_card_args(form)
@@ -3144,7 +3165,7 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
             "--titles", ";".join(titles),
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
-            "--back-hold", str(int(form.back_hold)),
+            "--back-hold", str(int(form.back_hold))] + flip_args(form) + [
             # an IMAGE, as build's is (the tab's number is the ROW)
             "--default", str(row_first_image(form, int(form.default))),
             "--volume", str(int(form.volume))]
@@ -4028,6 +4049,10 @@ def write_preview_conf(form):
         lines.append("footer=")
     elif (form.footer or "").strip():
         lines.append("footer=%s" % (form.footer or "").strip())
+    # ...and the right flipper's line along the bottom (Simon, 2026-11-22): the menu draws it for a card whose
+    # menu the right flipper comes back to, so the preview does too
+    if be.key == "stern" and (form.boot_menu or "menu") != "menu":
+        lines.append("boot_menu=%s" % form.boot_menu)
     # ...and the SETTINGS card, as the card will carry it (PAD-307): the
     # images' built profiles, which are what put the card in the menu, and
     # the owner's switch
@@ -5036,6 +5061,8 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
         images=rows, out=card, sound_move=move, sound_confirm=confirm,
         volume=_int_of("volume", 50), timeout=_int_of("timeout", 15),
         back_hold=_int_of("back_hold", 3),
+        boot_menu=(info.get("boot_menu") if info.get("boot_menu") in BOOT_MENUS else "menu"),
+        flip_guard=(_int_of("flip_guard", 60) if _int_of("flip_guard", 60) in FLIP_GUARDS else 60),
         machine_volume=(info.get("volume") == "machine"),
         compact=(info.get("layout") == "store"),
         # THE CARD'S OWN HEADING.  null in the report = the card never set
@@ -5138,11 +5165,14 @@ def _menu_fields(before, after):
                         after.machine_volume),
                        ("countdown", before.timeout, after.timeout),
                        ("hold BACK", before.back_hold, after.back_hold),
+                       ("after a game", before.flip_guard, after.flip_guard),
                        ("default", before.default, after.default)):
         if int(b) != int(a):
             changed.add(name)
     if (before.heading or "").strip() != (after.heading or "").strip():
         changed.add("heading")
+    if (before.boot_menu or "menu") != (after.boot_menu or "menu"):
+        changed.add("boot menu")
     if bool(before.same_text_size) != bool(after.same_text_size):
         changed.add("text size")
     if bool(before.show_counter) != bool(after.show_counter):
@@ -5783,6 +5813,8 @@ def menu_from_state(menu):
             "compact": bool(menu.get("compact", False)),
             "timeout": max(0, _as_int("timeout", 15)),
             "back_hold": max(0, _as_int("back_hold", 3)),
+            "boot_menu": menu.get("boot_menu") if menu.get("boot_menu") in BOOT_MENUS else "menu",
+            "flip_guard": _as_int("flip_guard", 60) if _as_int("flip_guard", 60) in FLIP_GUARDS else 60,
             # A STATE WRITTEN BEFORE THE FIELD EXISTED has no key, and the
             # menu it describes said SELECT GAME CODE - so the absent key is
             # that, not "no heading" (PAD-135).
@@ -7583,6 +7615,8 @@ class MultibootPanel:
         self._machine_vol_var = tk.BooleanVar(value=True)
         self._timeout_var = tk.StringVar(value="15")
         self._back_hold_var = tk.StringVar(value="3")
+        self._boot_menu_var = tk.StringVar(value="menu")
+        self._flip_guard_var = tk.StringVar(value="60")
         #: The line across the top of the menu (PAD-135).  It STARTS as the
         #: selector's own wording rather than empty, because the box has to
         #: read as what the menu says: emptying it is how somebody asks for
@@ -7679,6 +7713,7 @@ class MultibootPanel:
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var, self._back_hold_var,
+                    self._boot_menu_var, self._flip_guard_var,
                     self._heading_var, self._same_text_var, self._counter_var,
                     self._settings_var, self._editions_var,
                     self._countdown_word_var, self._footer_var,
@@ -7876,7 +7911,8 @@ class MultibootPanel:
                     self._ed_confirm, self._ed_roll,
                     self._ed_roll_norepeat) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
-                    self._timeout_var, self._back_hold_var, self._heading_var, self._same_text_var,
+                    self._timeout_var, self._back_hold_var, self._boot_menu_var, self._flip_guard_var,
+                    self._heading_var, self._same_text_var,
                     self._counter_var, self._settings_var, self._editions_var,
                     self._tests_var, self._countdown_word_var,
                     self._footer_var, self._footer_text_var,
@@ -9869,6 +9905,8 @@ class MultibootPanel:
             self._machine_vol_var.set(True)
             self._timeout_var.set("15")
             self._back_hold_var.set("3")
+            self._boot_menu_var.set("menu")
+            self._flip_guard_var.set("60")
             self._heading_var.set(DEF_HEADING)
             self._same_text_var.set(True)
             self._counter_var.set(True)
@@ -10448,7 +10486,8 @@ class MultibootPanel:
                              {role: var.get()
                               for role, var in self._color_vars.items()},
                              self._tests_var.get(),
-                             self._back_hold_var.get())
+                             self._back_hold_var.get(),
+                             self._boot_menu_var.get(), self._flip_guard_var.get())
         self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
         self._music_aside()
         return self._menu_dialog.show()
@@ -10463,7 +10502,7 @@ class MultibootPanel:
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, heading, same_text,
              counter, settings, editions, word, foot_on, foot_text, default, selector,
-             theme, colors, tests, back_hold) = self._menu_backup
+             theme, colors, tests, back_hold, boot_menu, flip_guard) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
             self._confirm_var.set(confirm)
@@ -10471,6 +10510,8 @@ class MultibootPanel:
             self._machine_vol_var.set(machine)
             self._timeout_var.set(timeout)
             self._back_hold_var.set(back_hold)
+            self._boot_menu_var.set(boot_menu)
+            self._flip_guard_var.set(flip_guard)
             self._heading_var.set(heading)
             self._same_text_var.set(same_text)
             self._counter_var.set(counter)
@@ -10671,6 +10712,8 @@ class MultibootPanel:
             compact=bool(self._compact_var.get()),
             timeout=_int(self._timeout_var, 15),
             back_hold=_int(self._back_hold_var, 3),
+            boot_menu=(self._boot_menu_var.get() if self._boot_menu_var.get() in BOOT_MENUS else "menu"),
+            flip_guard=_int(self._flip_guard_var, 60),
             # NOT `or DEF_HEADING`: an empty box is a menu with no heading,
             # which is a thing somebody can ask for (PAD-135)
             heading=self._heading_var.get().strip(),
@@ -10864,6 +10907,8 @@ class MultibootPanel:
                      "compact": bool(self._compact_var.get()),
                      "timeout": _int(self._timeout_var, 15),
                      "back_hold": _int(self._back_hold_var, 3),
+                     "boot_menu": self._boot_menu_var.get(),
+                     "flip_guard": _int(self._flip_guard_var, 60),
                      "heading": self._heading_var.get().strip(),
                      "same_text_size": bool(self._same_text_var.get()),
                      "show_counter": bool(self._counter_var.get()),
@@ -10991,6 +11036,8 @@ class MultibootPanel:
             self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
             self._back_hold_var.set(str(menu.get("back_hold", 3)))
+            self._boot_menu_var.set(str(menu.get("boot_menu", "menu")))
+            self._flip_guard_var.set(str(menu.get("flip_guard", 60)))
             self._heading_var.set(menu["heading"])
             # a document written before the tick existed is a menu the
             # selector drew at one size anyway, so it comes back ticked
@@ -11697,6 +11744,8 @@ class MultibootPanel:
             self._compact_var.set(bool(form.compact))
             self._timeout_var.set(str(int(form.timeout)))
             self._back_hold_var.set(str(int(form.back_hold)))
+            self._boot_menu_var.set(str(form.boot_menu or "menu"))
+            self._flip_guard_var.set(str(int(form.flip_guard)))
             self._heading_var.set(form.heading)
             self._same_text_var.set(bool(form.same_text_size))
             self._counter_var.set(bool(form.show_counter))
@@ -11854,6 +11903,8 @@ class MultibootPanel:
             self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
             self._back_hold_var.set(str(menu.get("back_hold", 3)))
+            self._boot_menu_var.set(str(menu.get("boot_menu", "menu")))
+            self._flip_guard_var.set(str(menu.get("flip_guard", 60)))
             self._heading_var.set(menu["heading"])
             self._same_text_var.set(bool(menu.get("same_text_size", True)))
             self._counter_var.set(bool(menu.get("show_counter", True)))
@@ -11956,6 +12007,10 @@ class MultibootPanel:
                         "START).")
         if not 0 <= int(form.back_hold) <= 60:
             errs.append("Hold BACK to restart takes 0 to 60 seconds (0 = off).")
+        if form.boot_menu not in BOOT_MENUS:
+            errs.append("Boot menu must be one of: %s." % ", ".join(BOOT_MENUS))
+        if int(form.flip_guard) not in FLIP_GUARDS:
+            errs.append("After a game takes %s seconds." % " or ".join(str(g) for g in FLIP_GUARDS))
         if n and not 0 <= int(form.default) < n:
             errs.append("The default image must be one of 0..%d." % (n - 1))
         return errs

@@ -531,6 +531,7 @@ check: $(BIN) capbin $(PADMENU)
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > python3 test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
 > python3 test/settings_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> python3 test/testcard_entry_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > bash -n select.sh && bash test/select_sh_test.sh
 > @echo "check: OK"
 

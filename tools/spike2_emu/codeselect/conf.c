@@ -707,6 +707,11 @@ int conf_card_is_settings(const struct conf *c, int k)
     return k >= 0 && k == c->settings_card;
 }
 
+int conf_image_is_testcard(const struct conf *c, int i)
+{
+    return i >= 0 && i < c->n && !strcmp(c->img[i].device, CONF_TESTCARD_DEVICE);
+}
+
 int conf_has_art(const struct conf *c)
 {
     int i;

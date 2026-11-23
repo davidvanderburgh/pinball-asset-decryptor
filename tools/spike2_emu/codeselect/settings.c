@@ -906,7 +906,8 @@ static void draw_menu(struct state *st)
         text_fit(e, sub, 22 * s, 14 * s, rw - (int)(60 * s), W / 2, y + (int)(66 * s), 0,
                  on ? TH(e, SUBTITLE_HL) : TH(e, SUBTITLE));
     }
-    draw_footer(e, K_MOVE ": choose      " K_GO ": open");
+    draw_footer(e, e->leave ? K_MOVE ": choose      " K_GO ": open      " K_BACK ": back to the games"
+                            : K_MOVE ": choose      " K_GO ": open");
 }
 
 /* ONE LIST: its items by name, PICK_ROWS at a time */
@@ -1064,6 +1065,7 @@ static void key(struct state *st, int ev, long long now)
         int n = menu_count(st);
         if (dir) { st->menu_sel = (st->menu_sel + n + dir) % n; click(st); }
         else if (go) activate(st);
+        else if (back && st->e->leave) { st->screen = S_DONE; sel_say("test card: back to the games"); }
         return;
     }
     if (st->screen == S_PICK) {

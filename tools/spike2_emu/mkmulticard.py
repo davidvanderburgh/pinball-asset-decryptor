@@ -306,6 +306,15 @@ TEST_LABEL_MAX = 199
 TEST_KINDS = ("image", "video", "scene", "sound")
 #: where a TEST CARD's own files go: its p3, mounted at /games before the menu runs
 TESTCARD_TEST_SUBDIR = "testcard"
+#: THE TEST CARD ENTRY on a game card (Simon, 2026-11-23: "a 1.16 vanilla plus the test card"):
+#: one more menu entry, `image=testcard|<title>|<subtitle>`, that opens the test card screens
+#: (codeselect conf.h).  Its files go in a folder of the primary's games partition - the
+#: kernel opens only 7 partitions, so they cannot have one of their own - which the games
+#: never look in.
+TEST_ENTRY_DEVICE = "testcard"
+TEST_ENTRY_TITLE = "TEST CARD"
+TEST_ENTRY_SUBTITLE = "test pictures, videos, scenes and sounds"
+TEST_ENTRY_SUBDIR = "padtest"
 PADV_MAGIC = b"PADVJPG1"
 P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
 #: images.conf v2: a device is '/dev/mmcblk0pN' (parts layout),
@@ -1718,6 +1727,55 @@ def conf_test_lines(tests):
     return out
 
 
+def check_test_entry(entry):
+    """None, or the TEST CARD entry's (title, subtitle) - each one line, no '|'."""
+    if not entry:
+        return None
+    title, sub = (tuple(entry) + ("", ""))[:2]
+    title = (title or "").strip() or TEST_ENTRY_TITLE
+    sub = (sub or "").strip()
+    for s in (title, sub):
+        if "|" in s or "\n" in s or "\r" in s:
+            raise Refused("images.conf: the TEST CARD entry's title/subtitle %r may not contain '|' or a "
+                          "newline" % s)
+    return (title, sub)
+
+
+def put_test_entry_files(card, test_files):
+    """THE TEST CARD ENTRY's files into /games/<TEST_ENTRY_SUBDIR> on the card's p3 (the primary's
+    games partition): the folder is emptied first, so an inject leaves exactly these.  Refused
+    when p3 has no room - a whole card of video is the user's to size, not this writer's."""
+    need_tools("debugfs", "e2fsck")
+    geom = Geometry.from_file(card)
+    t3, s3, c3 = geom.part(3)
+    if t3 != 0x83:
+        raise Refused("%s: p3 is type 0x%02x, not the games partition" % (card, t3))
+    ref = fs_ref(card, s3 * SECTOR)
+    want = sum(os.path.getsize(p) for p in test_files.values())
+    used, total = ext_used_bytes(card, s3 * SECTOR)
+    if want + (16 << 20) > total - used:
+        raise Refused("the TEST CARD entry's files are %s; the games partition has %s free"
+                      % (_gb(want), _gb(total - used)))
+    d = "/" + TEST_ENTRY_SUBDIR
+    cmds = []
+    if debugfs_exists(ref, d):
+        for ent in debugfs_ls(ref, d):
+            if ent[4] not in (".", ".."):
+                cmds.append("rm %s" % dq(d + "/" + ent[4]))
+    else:
+        cmds.append("mkdir %s" % dq(d))
+        cmds += ["sif %s %s" % (dq(d), f) for f in ("mode 040755", "uid 0", "gid 0")]
+    for nm, src in sorted(test_files.items()):
+        cmds.append("write %s %s" % (dq(src), dq(d + "/" + nm)))
+        cmds += ["sif %s %s" % (dq(d + "/" + nm), f) for f in ("mode 0100644", "uid 0", "gid 0")]
+    debugfs_write_script(ref, cmds)
+    rc, txt = e2fsck(ref)
+    if rc not in (0, 1):
+        raise Refused("p3 after the TEST CARD files: e2fsck says\n%s" % txt.strip())
+    say("TEST CARD entry: %d file%s in /games/%s (%s)" % (len(test_files), "" if len(test_files) == 1 else "s",
+                                                         TEST_ENTRY_SUBDIR, _gb(want)))
+
+
 def _media_name_ok(name, what):
     """A media file name as it goes into a conf field: flat, ^[A-Za-z0-9._-]+$ (so never a '|',
     a ':' or a '/'), or empty."""
@@ -1961,7 +2019,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        groups=None, default_card=None, heading=None, text_size=None,
                        counter=None, countdown_word=None, footer=None, scores=None,
                        colours=None, settings=None, edition=None, hiscores=None, tests=None,
-                       testcard=False, back_hold=None, test_dir=None, boot_menu=None, flip_guard=None):
+                       testcard=False, back_hold=None, test_dir=None, boot_menu=None, flip_guard=None,
+                       test_entry=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -2013,8 +2072,15 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         rows.append(tuple(_media_name_ok(x or "", what) for x, what in zip(m, MEDIA_FIELDS)))
     sound_move = _media_name_ok(sound_move or "", "sound_move")
     sound_confirm = _media_name_ok(sound_confirm or "", "sound_confirm")
-    if not (0 <= int(default) < len(devices)):
-        raise Refused("images.conf: default=%s is not an image index (0..%d)" % (default, len(devices) - 1))
+    # THE TEST CARD ENTRY (`test_entry` = (title, subtitle)) is the last image line, so
+    # default= may name it: "default to the test card on first boot" (Simon, 2026-11-23)
+    test_entry = check_test_entry(test_entry)
+    nlines = len(devices) + (1 if test_entry else 0)
+    if nlines > MAX_IMAGES:
+        raise Refused("images.conf: %d images and the TEST CARD entry; the selector takes at most %d lines"
+                      % (len(devices), MAX_IMAGES))
+    if not (0 <= int(default) < nlines):
+        raise Refused("images.conf: default=%s is not an image index (0..%d)" % (default, nlines - 1))
     if int(timeout) < 0:
         raise Refused("images.conf: timeout must be >= 0")
     # PAD-1309: seconds BACK held in a game restarts into the menu (0 = off); None = no key,
@@ -2082,6 +2148,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     # a group whose place is past the last image: its card is the last one
     for g in at.get(len(devices), ()):
         out.append(group_line(g))
+    if test_entry:
+        out.append("image=%s|%s|%s" % (TEST_ENTRY_DEVICE, test_entry[0], test_entry[1]))
     out.append("default=%d" % int(default))
     if default_card is not None:
         # THE ONLY WAY TO NAME A KEEPING GROUP'S CARD: once its members keep cards of
@@ -2217,7 +2285,8 @@ def parse_images_conf(text):
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {}, "hiscores": {},
-            "colours": {}, "settings": None, "edition": None, "tests": [], "testcard": False}
+            "colours": {}, "settings": None, "edition": None, "tests": [], "testcard": False,
+            "test_entry": None}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -2230,6 +2299,11 @@ def parse_images_conf(text):
                 raise Refused("images.conf: image line has %d fields (at most %d): %r"
                               % (len(f), 3 + len(MEDIA_ROW), raw))
             f += [""] * (3 + len(MEDIA_ROW) - len(f))
+            if f[0] == TEST_ENTRY_DEVICE:
+                # THE TEST CARD ENTRY is not an image of the card's: kept apart, so every
+                # count, record and source list stays the games'
+                conf["test_entry"] = (f[1], f[2])
+                continue
             parse_device(f[0])
             conf["images"].append((f[0], f[1], f[2]))
             conf["media"].append(tuple(_media_name_ok(x, what)
@@ -4388,6 +4462,16 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
             % (edition["store"], edition["values"]))
     elif not getattr(args, "no_editions", False) and ex.get("edition") and same_n:
         edition = ex["edition"]
+    # THE TEST CARD ENTRY (Simon, 2026-11-23): --test-entry adds it, --no-test-entry takes it
+    # off, neither keeps what the card has.  Its files are in /games/padtest whenever it is there.
+    test_entry = ex.get("test_entry")
+    if getattr(args, "test_entry", False):
+        test_entry = (TEST_ENTRY_TITLE, TEST_ENTRY_SUBTITLE)
+    if getattr(args, "no_test_entry", False):
+        test_entry = None
+    if test_entry and edition:
+        raise Refused("the TEST CARD entry is a menu entry, and an editions card has no menu")
+    test_dir = "/games/" + TEST_ENTRY_SUBDIR if test_entry else None
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
                               rows, move, confirm, volume, mixer, theme=theme, colors=colors,
                               machine_volume=mv, debug_log=bool(getattr(args, "debug_log", False)),
@@ -4395,7 +4479,8 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
                               text_size=text_size, counter=counter,
                               countdown_word=countdown_word, footer=footer, scores=scores,
                               colours=colours, settings=settings, edition=edition, hiscores=hiscores,
-                              tests=tests, back_hold=back_hold, boot_menu=boot_menu, flip_guard=flip_guard)
+                              tests=tests, back_hold=back_hold, boot_menu=boot_menu, flip_guard=flip_guard,
+                              test_entry=test_entry, test_dir=test_dir)
 
 
 # ============================================================================= the JSON sidecars
@@ -6637,7 +6722,8 @@ def render_images_conf_text(conf):
         colours=conf.get("colours"), settings=conf.get("settings"), hiscores=conf.get("hiscores"),
         tests=conf.get("tests"), testcard=bool(conf.get("testcard")),
         back_hold=conf.get("back_hold"), test_dir=conf.get("test_dir"),
-        boot_menu=conf.get("boot_menu"), flip_guard=conf.get("flip_guard"))
+        boot_menu=conf.get("boot_menu"), flip_guard=conf.get("flip_guard"),
+        test_entry=conf.get("test_entry"))
 
 
 # ============================================================================= reading a card back
@@ -10421,6 +10507,12 @@ def _add_conf_flags(s):
     s.add_argument("--flip-guard", dest="flip_guard", type=int, default=None,
                    help="seconds the flippers must have been off (no game on) before the right flipper's hold "
                         "counts (0-%d; card default 60)" % FLIP_GUARD_MAX)
+    s.add_argument("--test-entry", dest="test_entry", action="store_true",
+                   help="add a TEST CARD entry to the menu: the test card screens, its files (the media "
+                        "set's test items with a kind) in /games/%s on the primary's games partition. "
+                        "It is the last image line, so --default can name it" % TEST_ENTRY_SUBDIR)
+    s.add_argument("--no-test-entry", dest="no_test_entry", action="store_true",
+                   help="take the TEST CARD entry off (without either flag a card keeps what it has)")
     s.add_argument("--heading", metavar="TEXT",
                    help="images.conf heading=TEXT - the line across the top of the menu (the selector's "
                         "own '%s' when no card ever set one; --heading '' leaves the top bare); an "
@@ -10658,7 +10750,8 @@ def main(argv=None):
             trees = None
             if not a.no_inject:
                 if a.media_dir:
-                    media = plan_media(a.media_dir, len(plan.trees))
+                    # the TEST CARD entry's own files go to p3, not with the menu's media
+                    media = plan_media(a.media_dir, len(plan.trees), tests_apart=bool(a.test_entry))
                     for name in media["files"]:
                         say("media %s: %s" % (name, media["kinds"][name]))
                     say("media: %d files, %s" % (len(media["files"]), _gb(media["total"])))
@@ -10718,6 +10811,8 @@ def main(argv=None):
                 if done:
                     say("%s holds the patched game and .sidx of image%s %s" % (
                         TREES_MANIFEST, "s" if len(done) > 1 else "", ", ".join(str(i) for i in done)))
+            if a.test_entry and media and media.get("test_files"):
+                put_test_entry_files(a.out, media["test_files"])
             if not a.no_inject:
                 t1 = time.monotonic()
                 PROGRESS.step("writing the menu into the card")
@@ -10750,8 +10845,12 @@ def main(argv=None):
                 say("WARNING: %s holds no extra images (p7...); injecting a one-image selector" % a.card)
             check_reachable(plan, a.allow_unreachable)       # an images.conf naming p8 is one the machine cannot honour
             media = None
+            # the TEST CARD entry (asked for, or already on the card and not taken off): its
+            # files go to p3, not with the menu's media
+            entry_on = bool(a.test_entry) or (bool((card_conf(a.card, select_ref(a.card)) or {}).get("test_entry"))
+                                              and not a.no_test_entry)
             if a.media_dir:
-                media = plan_media(a.media_dir, len(plan.trees))
+                media = plan_media(a.media_dir, len(plan.trees), tests_apart=entry_on)
                 for name in media["files"]:
                     say("media %s: %s" % (name, media["kinds"][name]))
             # read the card's own sidecars BEFORE touching it: an inject that is given no source
@@ -10778,6 +10877,8 @@ def main(argv=None):
                                                         else "absent")))
             print("== images.conf to inject\n" + conf.rstrip())
             print("== %s\n%s" % (BUILD_MANIFEST, manifests[BUILD_MANIFEST].rstrip()))
+            if entry_on and media and media.get("test_files"):
+                put_test_entry_files(a.card, media["test_files"])
             written = inject_card(a.card, a.selector_dir, conf, workdir=os.path.dirname(os.path.abspath(a.card)),
                                   media_files=media["files"] if media else None, replace_media=bool(a.media_dir),
                                   manifests=manifests)

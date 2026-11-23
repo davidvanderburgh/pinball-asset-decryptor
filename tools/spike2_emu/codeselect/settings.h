@@ -62,6 +62,8 @@ struct settings_env {
     const char *media_dir;               /* where test= files are (PAD-1279), or NULL */
     int testcard;                        /* a TEST CARD (conf testcard=on): no way back to
                                             a menu, no idle exit, TEST CARD as the heading */
+    int leave;                           /* with testcard: the TEST CARD ENTRY on a game card -
+                                            ACTION on the top screen goes back to the menu */
     int first_image;                     /* the image Color correction opens on, or -1 */
     void (*present)(void *ctx);          /* upload what is dirty and swap */
     void *ctx;

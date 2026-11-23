@@ -78,6 +78,22 @@ jobs:
           name: windows-installer
           path: installer/Output/*.exe
 
+      # PAD-1519: the file list and pack an installed copy updates from
+      # without downloading the setup exe (installer/make_delta.py).
+      # BEFORE the exe is attached - the app offers a release the moment
+      # its exe is up, and must find the file list there by then - and
+      # never in its way: a failure here only means this release updates
+      # the old way.  Healthy: ~20 s (a pack of the changed files only).
+      - name: Build and attach delta-update assets
+        id: delta
+        if: startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
+        timeout-minutes: 6
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/build_delta_assets.sh "$GITHUB_REF_NAME"
+
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         timeout-minutes: 10
@@ -85,6 +101,67 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/attach_release_asset.sh "$GITHUB_REF_NAME" installer/Output/*.exe
+
+  # PAD-1519 tripwire: install the REAL setup exe the way the in-app update
+  # does (/STAGED=2, into a scratch folder) and compare what lands with the
+  # release's file list.  They are made from the same [Files] section by two
+  # readers - Inno Setup and installer/make_delta.py - and a copy updated
+  # from a file list that disagrees with the installer is missing a file
+  # until the next release.  So a difference takes the file list and pack
+  # off the release (the app then uses the setup exe) and turns this job
+  # red.  Its own job, after the build: it is not on the release's critical
+  # path and never reddens the installer build.
+  check-delta:
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the setup exe and compare it with the file list
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $dl = Join-Path $env:RUNNER_TEMP 'pad-delta-check'
+          New-Item -ItemType Directory -Force -Path $dl | Out-Null
+          gh release download $tag --pattern '*_Windows.delta.json.gz' --dir $dl
+          $list = Get-ChildItem $dl -Filter '*.delta.json.gz' | Select-Object -First 1
+          if (-not $list) {
+            Write-Host "::notice::$tag has no delta file list (its build step did not attach one) - nothing to check"
+            exit 0
+          }
+          gh release download $tag --pattern '*_Windows.exe' --dir $dl
+          $exe = Get-ChildItem $dl -Filter '*_Windows.exe' | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP 'pad-delta-install'
+          $problem = ''
+          if (-not $exe) { $problem = 'the setup exe could not be downloaded' }
+          else {
+            $p = Start-Process -FilePath $exe.FullName -Wait -PassThru -ArgumentList @(
+              '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCLOSEAPPLICATIONS',
+              '/STAGED=2', '/MERGETASKS="!runprereqs,!desktopicon"', "/DIR=`"$dir`"")
+            if ($p.ExitCode -ne 0) { $problem = "the setup exe stopped with code $($p.ExitCode)" }
+            else {
+              python installer/make_delta.py --verify $dir --manifest $list.FullName
+              if ($LASTEXITCODE -ne 0) { $problem = 'the file list does not match what the setup exe installs' }
+            }
+          }
+          if ($problem) {
+            # unproven is treated as wrong: the app falls back to the exe
+            $pack = $list.Name -replace '\.delta\.json\.gz$', '.delta.pack'
+            gh release delete-asset $tag $list.Name --yes
+            gh release delete-asset $tag $pack --yes
+            Write-Host "::error::$problem - the delta assets were taken off $tag; in-app updates to it use the setup exe"
+            exit 1
+          }
+          Write-Host "the file list matches the setup exe"
 
   build-macos:
     # PyInstaller builds for the host arch only and macos-latest has been

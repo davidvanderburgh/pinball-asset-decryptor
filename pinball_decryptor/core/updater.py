@@ -223,8 +223,15 @@ def _pick_installer_asset(assets, platform=None, machine=None):
     digest = asset.get("digest") or ""
     sha256 = (digest[len("sha256:"):]
               if digest.startswith("sha256:") else None)
-    return {"name": asset["name"], "url": asset["browser_download_url"],
-            "size": asset.get("size") or 0, "sha256": sha256, "kind": kind}
+    picked = {"name": asset["name"], "url": asset["browser_download_url"],
+              "size": asset.get("size") or 0, "sha256": sha256, "kind": kind}
+    if kind == "windows-installer":
+        # PAD-1519: the release's file list, when it publishes one - an
+        # installed copy then updates from the changed files alone
+        # (core/update_delta.py) and never downloads the setup exe
+        from .update_delta import pick_manifest_asset
+        picked["delta"] = pick_manifest_asset(assets, asset["name"])
+    return picked
 
 
 def check_for_update(current_version, repo=None, not_ready_cb=None):

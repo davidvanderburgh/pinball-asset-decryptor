@@ -27,6 +27,13 @@ the app closed if it happens somewhere else.  So:
   controller from the new folder and starts the app through ``launcher.vbs``
   as the shortcuts do.  The shortcuts never change: they name ``<app>``.
 
+THE STAGED FOLDER NEED NOT COME FROM THE SETUP EXE (PAD-1519).  A release
+that publishes a file list is staged from the files already installed plus
+the changed ones (core/update_delta.py, :func:`stage_delta_install`): a few
+seconds instead of unpacking 710 MB.  Everything after the folder is filled
+- the layout check, what is carried over, the ACL repair, the marker, the
+swap - is the same code.
+
 ANY FAILURE FALLS BACK TO THE INSTALLER.  Staging that fails leaves Restart to
 update running the downloaded setup exe the way the app always has.  A swap
 that cannot rename (something still has a file open in the app's folder)
@@ -221,6 +228,26 @@ def _repair_acls(folder, run):
             pass
 
 
+def _grant_before_fill(target, run):
+    """The same permissions as :func:`_repair_acls` leaves, for a folder
+    about to be filled by this process (PAD-1519): make ``<target>/python``
+    empty and give it the grant, and every file then written under it
+    inherits it.  ``icacls /reset /T`` then ``/grant /T`` over the finished
+    tree walks 8,500 files twice - 9 of the 13 seconds a delta took - to
+    arrive at what new files under a folder have anyway: nothing but
+    inherited entries, and the Users read grant."""
+    py = os.path.join(target, "python")
+    os.makedirs(py)
+    icacls = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                          "System32", "icacls.exe")
+    try:
+        run([icacls, py, "/grant", "*S-1-5-32-545:(OI)(CI)RX", "/C", "/Q"],
+            capture_output=True, timeout=120,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 #: one background install at a time: a newer release found while one runs
 #: cancels it, but its setup exe finishes its copy before the cancel is seen,
 #: and the next must not clear the folder under it
@@ -257,6 +284,90 @@ def _stage_install(setup_path, app_dir, version, run=None, cancel_cb=None,
     if not ok:
         shutil.rmtree(target, ignore_errors=True)
     return ok, info
+
+
+#: how the bar is shared out while a delta fills the folder
+#: (:func:`stage_delta_install`): copying, then compiling
+DELTA_COPY_SHARE = 70
+
+
+def stage_delta_install(fill, app_dir, version, run=None, cancel_cb=None,
+                        progress_cb=None):
+    """Stage *version* into ``<app>.next`` from the running install's own
+    files plus the changed ones, without the setup exe (PAD-1519).
+
+    ``fill(target, progress)`` makes the folder (core.update_delta
+    ``build_tree``; ``progress`` takes 0-100 of the copy) and returns the
+    command that compiles what changed, or None.  What follows is what
+    follows the setup exe in :func:`_stage_into`.  Returns ``(True,
+    carried)`` or ``(False, reason)`` like :func:`stage_install`; whatever
+    *fill* raises is the caller's to read (DeltaUnavailable says why the
+    setup exe is needed), with the folder already removed.
+    """
+    run = run or subprocess.run
+    progress_cb = progress_cb or (lambda pct: None)
+    with _STAGE_LOCK:
+        if cancel_cb and cancel_cb():
+            raise InterruptedError("staging canceled")
+        target = next_dir(app_dir)
+        shutil.rmtree(target, ignore_errors=True)
+        if os.path.exists(target):
+            return False, "%s could not be cleared" % target
+        try:
+            progress_cb(0)
+            _grant_before_fill(target, run)
+            compile_cmd = fill(target, lambda pct: progress_cb(
+                min(DELTA_COPY_SHARE, int(pct * DELTA_COPY_SHARE / 100))))
+            if cancel_cb and cancel_cb():
+                raise InterruptedError("staging canceled")
+            problem = _layout_problem(target, version)
+            if problem:
+                shutil.rmtree(target, ignore_errors=True)
+                return False, problem
+            progress_cb(DELTA_COPY_SHARE)
+            if compile_cmd:
+                try:
+                    # best effort, as in the installer: an uncompiled
+                    # module is compiled by its first import
+                    run(compile_cmd, cwd=target, capture_output=True,
+                        timeout=600, creationflags=getattr(
+                            subprocess, "CREATE_NO_WINDOW", 0))
+                except Exception:                       # noqa: BLE001
+                    pass
+            if cancel_cb and cancel_cb():
+                raise InterruptedError("staging canceled")
+            progress_cb(COPY_SHARE)
+            carried = carry_over(app_dir, target)
+            with open(os.path.join(target, MARKER), "w",
+                      encoding="utf-8") as f:
+                json.dump({"version": version, "setup": None,
+                           "delta": True}, f)
+            progress_cb(100)
+            return True, carried
+        except BaseException:
+            shutil.rmtree(target, ignore_errors=True)
+            raise
+
+
+#: where the swap helper notes a swap it could not do and had no setup exe
+#: to hand over to (PAD-1519): the version it was for.  The app then gets
+#: that version's setup exe instead of staging from changed files again.
+SWAP_FAILED_NOTE = "pad_update_swap_failed.txt"
+
+
+def swap_failed_note_path():
+    return os.path.join(tempfile.gettempdir(), SWAP_FAILED_NOTE)
+
+
+def swap_failed_version(path=None):
+    """The version whose swap failed with no installer to fall back on, or
+    None."""
+    try:
+        with open(path or swap_failed_note_path(),
+                  encoding="utf-8-sig") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
 
 
 def folder_bytes(folder):
@@ -466,7 +577,16 @@ function KeepUsers($from, $to) {
 function Fallback($why) {
   Say ('swap not done: ' + $why + ' - running the installer instead')
   if (%(setup)s -and (Test-Path -LiteralPath %(setup)s)) { Start-Process -FilePath %(setup)s -ArgumentList %(setup_args)s }
-  else { Say 'the installer is not there to run' }
+  else {
+    # staged from changed files (PAD-1519): no setup exe was downloaded.
+    # Note the version, so the app fetches its installer this time, and
+    # bring the version in place back up - closing and never reopening is
+    # the one outcome nobody can act on
+    Say 'the installer is not there to run - starting the version in place again'
+    try { Set-Content -LiteralPath %(failed_note)s -Value %(version_q)s -Encoding UTF8 } catch {}
+    $vbs = Join-Path $app 'launcher.vbs'
+    if (%(launch)s -and (Test-Path -LiteralPath $vbs)) { Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + $vbs + '"') -WorkingDirectory $app }
+  }
   exit 1
 }
 Say 'waiting for the app (pid %(pid)d) to close'
@@ -498,6 +618,7 @@ catch {
 }
 Remove-Item -LiteralPath (Join-Path $app %(marker)s) -Force -ErrorAction SilentlyContinue
 Say 'swapped in v%(version)s'
+Remove-Item -LiteralPath %(failed_note)s -Force -ErrorAction SilentlyContinue
 foreach ($k in @(%(keys)s)) {
   try {
     # only the entry of THIS install: Inno writes its folder as InstallLocation
@@ -537,7 +658,7 @@ Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 
 
 def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
-                register=True, setup_args=None):
+                register=True, setup_args=None, failed_note=None):
     """The PowerShell text of the swap (see module docstring)."""
     from .updater import INSTALLER_ARGS
     keys = ", ".join(_psq("HKLM:\\" + k) for k in (
@@ -551,6 +672,7 @@ def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
         "log": _psq(log_path), "app": _psq(app_dir), "tag_q": _psq(tag),
         "next": _psq(next_dir(app_dir)), "old": _psq(old_dir(app_dir)),
         "setup": _psq(setup_path or ""),
+        "failed_note": _psq(failed_note or swap_failed_note_path()),
         "setup_args": _psq(setup_args if setup_args is not None
                            else INSTALLER_ARGS),
         "pid": int(pid), "marker": _psq(MARKER), "version": version,
@@ -561,7 +683,7 @@ def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
 
 
 def start_swap(app_dir, version, setup_path, pid=None, popen=None,
-               launch=True, register=True, log_path=None):
+               launch=True, register=True, log_path=None, failed_note=None):
     """Write the swap script to the temp folder and start it detached.
     Returns ``(True, log_path)`` or ``(False, reason)``.
 
@@ -584,7 +706,8 @@ def start_swap(app_dir, version, setup_path, pid=None, popen=None,
     with os.fdopen(fd, "w", encoding="utf-8-sig", newline="\r\n") as f:
         f.write(swap_script(app_dir, version, setup_path,
                             pid if pid is not None else os.getpid(),
-                            log_path, launch=launch, register=register))
+                            log_path, launch=launch, register=register,
+                            failed_note=failed_note))
     flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
              | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     try:

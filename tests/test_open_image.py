@@ -247,9 +247,10 @@ def _card_images_item(w):
 
 @pytest.mark.skipif(os.name != "nt", reason="a Windows menu")
 def test_gear_toggle_sets_up_and_takes_away(tmp_path, monkeypatch):
-    """⚙ > Card images > Open card images with PAD: on by default; off takes
-    the association away and is remembered; on again takes .raw even from
-    another program, and says when Windows' own choice still wins."""
+    """⚙ > Card images > Open card images with PAD: off until the user ticks
+    it (David, 2026-11-23); on takes .raw even from another program and
+    says when Windows' own choice still wins; off again takes the
+    association away; each is remembered."""
     import json
     from pinball_decryptor.webui import open_image as oi
     calls = []
@@ -263,16 +264,29 @@ def test_gear_toggle_sets_up_and_takes_away(tmp_path, monkeypatch):
     with web_app(tmp_path, mfr="stern") as w:
         item = _card_images_item(w)
         assert item["label"] == "Open card images with PAD"
-        assert item["checked"] is True and not item.get("disabled")
+        assert item["checked"] is False and not item.get("disabled")
+
+        def _saved():
+            return json.loads((tmp_path / "cfg" / "settings.json")
+                              .read_text(encoding="utf-8"))["card_images"]
         w.call("ui.settings_action", "toggle_card_images")
-        assert calls == ["off"]
-        assert _card_images_item(w)["checked"] is False
-        settings = json.loads((tmp_path / "cfg" / "settings.json")
-                              .read_text(encoding="utf-8"))
-        assert settings["card_images"] is False
-        w.call("ui.settings_action", "toggle_card_images")
-        assert calls == ["off", ("on", True)]
+        assert calls == [("on", True)]
         assert _card_images_item(w)["checked"] is True
+        assert _saved() is True
+        w.call("ui.settings_action", "toggle_card_images")
+        assert calls == [("on", True), "off"]
+        assert _card_images_item(w)["checked"] is False
+        assert _saved() is False
+
+
+def test_start_up_registers_only_when_ticked():
+    """host.build sets the association up at start-up only for a user who
+    ticked the gear switch: a new install leaves Explorer alone."""
+    with open(os.path.join(ROOT, "pinball_decryptor", "webui", "host.py"),
+              encoding="utf-8") as f:
+        src = f.read()
+    at = src.index("open_image.register_association")
+    assert '.get("card_images", False)' in src[at - 400:at]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="a Windows menu")

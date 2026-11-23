@@ -86,7 +86,8 @@ AGENT_ACCESS_TIP = (
 CARD_IMAGES_TIP = (
     "Double-click a .raw card image, or right-click a .raw, .img or .iso "
     "and pick Write to a card with PAD: PAD opens on that machine's write "
-    "dialog with the image in it. .img and .iso still mount on a "
+    "dialog with the image in it. Off until you tick it. .img and .iso "
+    "still mount on a "
     "double-click, as Windows does for every disc image.")
 
 
@@ -177,7 +178,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, CardsMixin, ResetMixi
         # PAD-1514: Explorer opens card images on PAD's write dialog
         self.card_images_var = self.var(
             "card_images", "bool",
-            bool(cb.get("initial_card_images", True)))
+            bool(cb.get("initial_card_images", False)))
         self._update_check_busy = False
         self._update_available = None       # (version, url, installer|None)
         self._update_stage = None           # None | "downloading" | "ready"

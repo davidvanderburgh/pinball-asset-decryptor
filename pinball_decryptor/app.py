@@ -489,7 +489,7 @@ class App:
             on_scenes_own_colours_change=self._on_scenes_own_colours_change,
             initial_agent_access=bool(s.get("agent_access", False)),
             on_agent_access_change=self._on_agent_access_change,
-            initial_card_images=bool(s.get("card_images", True)),
+            initial_card_images=bool(s.get("card_images", False)),
             on_card_images_change=self._on_card_images_change,
             initial_look_switches=s.get("look_switches") or {},
             on_look_switches_change=self._on_look_switches_change,

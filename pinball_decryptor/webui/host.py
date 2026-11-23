@@ -348,8 +348,8 @@ def build(ctx=None, meanwhile=None):
         # Explorer's double-click and right-click "Write to a card with
         # PAD" for card images: per user, so an in-app update (whose staged
         # installer writes no shortcuts or registry) gets it too
-        # (the gear's "Open card images with PAD", on unless turned off)
-        if (getattr(app, "_settings", None) or {}).get("card_images", True):
+        # (the gear's "Open card images with PAD": off until ticked)
+        if (getattr(app, "_settings", None) or {}).get("card_images", False):
             threading.Thread(target=open_image.register_association,
                              daemon=True).start()
     if (getattr(app, "_settings", None) or {}).get("agent_access"):

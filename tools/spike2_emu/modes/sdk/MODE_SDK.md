@@ -5235,6 +5235,10 @@ static void on_ball_end(void)
   of ball goes on.
 - Never on a tilted ball: the port's `tilt` event counted since the last ball ended refuses the ask, and a tilt
   during a hold ends it.
+- The flippers are off for the hold (PAD-1521), as at the game's own end of ball: the hold runs before the game
+  switches them off, so they stayed live through the total. The runtime switches them off through the game's own
+  all-flippers off (`site flippers_off`, PAD-1406) at the hold's start and each tick, and answers the game's flipper
+  policy "off" meanwhile; never back on - the game's next ball brings them back, as after any ball.
 - The held coils (magnet, building, shield, shaker) still let go at the drain, before the hold; the display
   priority's ending and the backdrop are given back after it.
 

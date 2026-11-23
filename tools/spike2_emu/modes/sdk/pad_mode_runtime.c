@@ -12443,7 +12443,10 @@ static struct {
     volatile int holding;                   /* from the ask until the game's end of ball goes on */
     int asking;                             /* the modes' .ball_end are running: they may ask */
     unsigned tilts;                         /* the tilt event's count when the last ball ended */
+    volatile int flippers_off;              /* PAD-1521: the flippers are off for the hold */
 } beh;
+
+static int fl_hold(int off);                /* PAD-1521: PAD-1406's flippers, below */
 
 static unsigned event_count(int id);        /* the events section, below */
 
@@ -12477,8 +12480,17 @@ static void ball_end_hold_run(void)
     if (!beh.ms) return;
     until = t0 + beh.ms;
     say("ball end: held up to %u ms for a mode's total - then the game's end of ball goes on", beh.ms);
-    while (!beh.release && !ball_tilted() && pm_ms() < until)
+    /* PAD-1521 (luvthatapex, Bond LE): the hold runs before the game's end of ball switches the flippers off, so they
+     * stayed live through the whole total. Off now, through the game's own all-flippers off (PAD-1406's pair), and
+     * the game's flipper policy answered "off" meanwhile; never back on here: the game's next ball brings them back,
+     * as after any ball (a challenge game's end, its game over). */
+    if ((beh.flippers_off = fl_hold(1)))
+        say("ball end: the flippers are off for the hold, as at the game's own end of ball");
+    while (!beh.release && !ball_tilted() && pm_ms() < until) {
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+        if (beh.flippers_off) fl_hold(1);       /* again each tick: a listener of the game's may have said on */
+    }
+    beh.flippers_off = fl_hold(0);
     why = beh.release ? "the mode let go" : ball_tilted() ? "the ball tilted" : "its time ran out";
     say("ball end: let go after %lu ms (%s)", pm_ms() - t0, why);
 }
@@ -18450,6 +18462,7 @@ static void dto_ball_end(void)
  *     the game's own next ball brings them back, as after any ball; a tilt leaves them to the game. */
 static struct {
     int off;                            /* 1 = this route switched them off */
+    volatile int held;                  /* PAD-1521: off for a mode's total at the ball's end (fl_hold) */
     unsigned long since;
     char by[40];
 } fl;
@@ -18459,7 +18472,7 @@ static int fl_query_armed;               /* 0 not yet, 1 the call wrapped, -1 no
 
 static unsigned long fl_query(unsigned long id, unsigned long args, unsigned long a2, unsigned long a3)
 {
-    if (id == 0x40u && fl.off && args) {
+    if (id == 0x40u && (fl.off || fl.held) && args) {
         ((volatile unsigned *)args)[1] = 1u;         /* off: the policy switches this flipper off */
         return 1u;
     }
@@ -18533,6 +18546,18 @@ int pm_flippers(int on)
 }
 
 int pm_flippers_off(void) { return fl.off; }
+
+/* PAD-1521: the flippers off while a mode's total holds the game's end of ball (ball_end_hold_run), as the game's
+ * own end of ball has them; 1 = off (the port names the pair). fl_hold(0) only stops the policy's "off" answer:
+ * never back on here - the game's next ball brings them back, as after any ball. */
+static int fl_hold(int off)
+{
+    if (!off || !fl_sites()) return fl.held = 0;
+    fl_query_arm();
+    fl.held = 1;
+    ((void (*)(void))(unsigned long)fn("flippers_off"))();
+    return 1;
+}
 
 /* PAD-1406: the calling mode has the whole game (pm_own_game) */
 static int og_has_it(void)

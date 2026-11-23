@@ -935,7 +935,8 @@ int pm_ball_launch_known(void);                                      /* 1 = the 
  * Your tick goes on meanwhile, so the total you show then is drawn. The hold ends at its time, on
  * pm_ball_end_release (from your tick), or at once on a tilted ball. 1 = it will hold; 0 = not from .ball_end, a
  * tilted ball, or no PM_CAN_BALL_END_HOLD (the port's `site proc_sleep`). pm_ball_end_holding: 1 from the ask until
- * the game's end of ball goes on (watch it from your tick to take the total down then). */
+ * the game's end of ball goes on (watch it from your tick to take the total down then). The flippers are off for the
+ * hold, as at the game's own end of ball (PAD-1521; the port's flippers_off), and the game's next ball brings them back. */
 #define PM_CAN_BALL_END_HOLD 0x0800u  /* pm_ball_end_hold / pm_ball_end_release / pm_ball_end_holding */
 int pm_ball_end_hold(unsigned ms);
 void pm_ball_end_release(void);

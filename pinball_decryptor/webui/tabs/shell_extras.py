@@ -683,8 +683,9 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, CardsMixin, ResetMixi
         open_image.register_association(take_raw=True)
         other = open_image.raw_chosen_elsewhere()
         if other:
-            self.log("Card images: .raw files still open with %s, which "
-                     "you chose in Windows. To change it, right-click a "
+            self.log("Card images: .raw files still open with %s, and "
+                     "Windows would not let PAD change that. To change it "
+                     "yourself, right-click a "
                      ".raw, then Open with > Choose another app > Pinball "
                      "Asset Decryptor > Always. Right-click > Write to a "
                      "card with PAD works either way." % other, "warning")

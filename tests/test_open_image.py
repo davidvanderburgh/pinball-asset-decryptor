@@ -239,6 +239,75 @@ def test_register_and_unregister_round_trip():
         _drop(root)
 
 
+def test_open_with_names_pad_not_the_script_host():
+    """The command is wscript.exe, so the ProgID says the app's own name and
+    icon or Open with lists "Microsoft Windows Based Script Host"
+    (PAD-1518)."""
+    from pinball_decryptor.webui import open_image as oi
+    rows = {(k, n): d for k, n, d in oi.association_values(r"C:\PAD")}
+    assert rows[(oi.PROGID + r"\shell\open", "FriendlyAppName")] == \
+        "Pinball Asset Decryptor"
+    assert rows[(oi.PROGID + r"\Application", "ApplicationName")] == \
+        "Pinball Asset Decryptor"
+    assert rows[(oi.PROGID + r"\Application", "ApplicationIcon")].endswith(
+        "icon.ico")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows registry")
+def test_the_switch_takes_raw_from_windows_own_choice(monkeypatch):
+    """Ticking the switch forgets the "Always use this app" another app has
+    for .raw, both keys Windows keeps it in, so PAD's default opens it with
+    nothing to do in Explorer (PAD-1518); a start-up registration, or a
+    choice that is already PAD, touches nothing."""
+    import uuid
+    import winreg
+    from pinball_decryptor.webui import open_image as oi
+    monkeypatch.setattr(oi, "_assoc_friendly_app_name", lambda p: "")
+    base = r"Software\PADTest-%s" % uuid.uuid4().hex
+    classes, fileexts = base + r"\Classes", base + r"\FileExts"
+    hk = winreg.HKEY_CURRENT_USER
+
+    def _choose(prog):
+        for sub in ("UserChoice", r"UserChoiceLatest\ProgId"):
+            with winreg.CreateKeyEx(hk, fileexts + "\\.raw\\" + sub) as k:
+                winreg.SetValueEx(k, "ProgId", 0, winreg.REG_SZ, prog)
+
+    def _has(sub):
+        try:
+            with winreg.OpenKey(hk, fileexts + "\\.raw\\" + sub):
+                return True
+        except OSError:
+            return False
+    try:
+        _choose("AppXphotos")
+        assert oi.raw_chosen_elsewhere(".raw", fileexts) == "AppXphotos"
+        oi.register_association(r"C:\PAD", classes=classes, fileexts=fileexts)
+        assert _has("UserChoice")                 # start-up: left alone
+        oi.register_association(r"C:\PAD", take_raw=True, classes=classes,
+                                fileexts=fileexts)
+        assert not _has("UserChoice") and not _has("UserChoiceLatest")
+        assert oi.raw_chosen_elsewhere(".raw", fileexts) == ""
+        _choose(oi.PROGID)
+        assert oi.release_windows_choice(".raw", fileexts) is True
+        assert _has("UserChoice")                 # PAD's own: kept
+    finally:
+        def _drop(path):
+            try:
+                with winreg.OpenKey(hk, path) as k:
+                    kids = []
+                    while True:
+                        try:
+                            kids.append(winreg.EnumKey(k, len(kids)))
+                        except OSError:
+                            break
+                for c in kids:
+                    _drop(path + "\\" + c)
+                winreg.DeleteKey(hk, path)
+            except OSError:
+                pass
+        _drop(base)
+
+
 def test_app_name_says_what_windows_calls_the_choice(monkeypatch):
     """The warning names the app the user chose, never a Store app's
     "AppX..." ProgId (PAD-1518: it printed AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h
@@ -277,7 +346,8 @@ def test_gear_toggle_sets_up_and_takes_away(tmp_path, monkeypatch):
     monkeypatch.setattr(oi, "unregister_association",
                         lambda classes=None: calls.append("off") or True)
     monkeypatch.setattr(oi, "register_association",
-                        lambda app_dir=None, take_raw=False, classes=None:
+                        lambda app_dir=None, take_raw=False, classes=None,
+                        fileexts=None:
                         calls.append(("on", take_raw)) or True)
     monkeypatch.setattr(oi, "raw_chosen_elsewhere", lambda: "Photos")
     with web_app(tmp_path, mfr="stern") as w:

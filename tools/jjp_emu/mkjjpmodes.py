@@ -298,6 +298,9 @@ KEYS = collections.OrderedDict([
     ("game_modes", ("hold", "pause", "end", "ignore")),
     ("hold_multiballs", ("yes", "no")), ("allow_game_modes", "text"),
     ("panel", ("middle", "bottom", "top", "none")),
+    # PAD-1515: the layout editor's places: the panel's box (% of the screen; it takes the panel word's
+    # place) and its three lines' boxes (% of the panel), each line fitted into its box
+    ("panel_at", "box"), ("title_at", "box"), ("value_at", "box"), ("timer_at", "box"),
     # PAD-1353: balls and coils
     ("multiball", "multiball"), ("multiball_on", "switches"), ("add_ball", "add_ball"), ("ball_save", "ball_save"),
     ("coil_start", "coil_pulse"), ("coil_shot", "coil_pulse"), ("coil_complete", "coil_pulse"),
@@ -351,6 +354,8 @@ TITLE_KEYS = collections.OrderedDict([
     ("game_type_hint_color", "rgba"),
     ("game_type_font_title", "font"), ("game_type_font_item", "font"), ("game_type_font_hint", "font"),
     ("game_type_picture", "picture_file"), ("game_type_picture_at", "box"),
+    # PAD-1515: the menu's heading, its lines and its hint, each a box in % of the menu's box
+    ("game_type_title_at", "box"), ("game_type_lines_at", "box"), ("game_type_hint_at", "box"),
 ])
 #: keys a .stock file takes (jjpmodes.c apply_stock_kv): one of the GAME's own modes, changed (PAD-1351)
 STOCK_KEYS = collections.OrderedDict([
@@ -429,6 +434,17 @@ def _int_in(v, lo, hi, what):
     return None if lo <= int(v.replace(",", "").replace("_", "")) <= hi else "%s must be %d-%d" % (what, lo, hi)
 
 
+def progress_box(words):
+    """A progress line's words -> (its words without a box, its box "x y w h" or None) (PAD-1515):
+    four numbers after its pictures are the pane's own box, % of the screen."""
+    if len(words) >= 6 and all(_NUMW.match(w) for w in words[-4:]):
+        return words[:-4], " ".join(words[-4:])
+    return words, None
+
+
+_NUMW = re.compile(r"^-?[0-9.]+%?$")
+
+
 def check_value(kind, v, port=None):
     """-> a problem string, or None."""
     words = _names(v)
@@ -501,9 +517,14 @@ def check_value(kind, v, port=None):
         # a class-like name (CamelCase) can be refused
         missing = [t for t in words if t not in known and (objects or t[:1].isupper())]
         return None if not missing else "not a game mode or multiball of %s: %s" % (port.get("title", "this game"), " ".join(missing))
-    if kind == "progress":        # <game mode> <picture> [<unlit picture>]
+    if kind == "progress":        # <game mode> <picture> [<unlit picture>] [x y w h]
+        words, box = progress_box(words)
+        if box is not None:
+            p = check_value("box", box)
+            if p:
+                return "its box " + p
         if not 2 <= len(words) <= 3:
-            return "must be <game mode> <picture> [<unlit picture>]"
+            return "must be <game mode> <picture> [<unlit picture>] [x y w h]"
         for w in words[1:]:
             p = check_value("picture_file", w, port)
             if p:

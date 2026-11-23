@@ -37,6 +37,7 @@ import threading
 import time
 
 from ..plugins.jjp import custom_modes as CM
+from ..plugins.jjp import screen_layout as SL
 from .tabs.base import rpc
 
 #: app settings key: {"iso": {label: path}, "out": {label: path},
@@ -136,6 +137,7 @@ class JjpModesMixin:
                     "switches", "lamps", "sound", "font", "events", "after", "played",
                     "sound_or_file", "sound_file", "picture_file", "video_file", "coil_pulse", "coil_hold")}
                 st["check"] = self._jjp_check_state()
+                st["layout"] = self._jjp_layout()
                 st["sounds"] = self._jjp_sounds_state(port)
                 st["build"] = self._jjp_build_state()
                 st["stick"] = self._jjp_stick_state()
@@ -416,7 +418,73 @@ class JjpModesMixin:
             CM.write_mode(label, self._jjp_file, vals)
         self._jjp_publish(form=dict(CM.read_mode(label, self._jjp_file)) if self._jjp_file else {},
                           title_cfg=dict(CM.read_title(label)), modes=CM.list_modes(label),
-                          check=self._jjp_check_state())
+                          check=self._jjp_check_state(), layout=self._jjp_layout())
+
+    # ------------------------------------------------------------------ the layout editor (PAD-1515)
+    def _jjp_layout(self):
+        """The layout editor's screens: the open mode's screen and progress board, and title.cfg's
+        mode screen (every mode's defaults) and attract game type menu (plugins/jjp/screen_layout.py)."""
+        label = self._jjp_label
+        if not label:
+            return {}
+        folder = CM.title_dir(label)
+        title = dict(CM.read_title(label))
+        form = dict(CM.read_mode(label, self._jjp_file)) if self._jjp_file else {}
+        types = []
+        for m in CM.list_modes(label):
+            gt = (CM.read_mode(label, m["file"]).get("game_type") or "").strip()
+            if gt:
+                types.append(gt)
+        out = {"size": list(SL.SCREEN),
+               "backdrops": SL.backdrops(folder, self._jjp_recall("layout_backdrops") or ()),
+               "title_mode": SL.mode_screen({}, title, folder, scope="title", defaults=CM.DEFAULTS),
+               "menu": SL.game_menu(title, types, folder, defaults=CM.DEFAULTS)}
+        if self._jjp_file:
+            out["mode"] = SL.mode_screen(form, title, folder, scope="mode", defaults=CM.DEFAULTS)
+            if (form.get("progress") or "").strip():
+                out["progress"] = SL.progress_board(form, folder)
+        return out
+
+    @rpc
+    def jjp_place(self, scope, key, box):
+        """A box dragged in the layout editor: ``key`` of the open mode (``scope`` "mode") or of
+        title.cfg ("title") set to ``box`` ([x, y, w, h], % of its parent); ``box`` None puts the
+        default place back.  ``progress#<i>`` is progress line i's own box."""
+        label = self._jjp_need()
+        b = SL.clamp_box(box) if box is not None else None
+        if key.startswith("progress#"):
+            if scope != "mode" or not self._jjp_file:
+                raise ValueError("no mode open")
+            old = CM.read_mode(label, self._jjp_file).get("progress")
+            return self.jjp_set("progress", SL.progress_with_box(old, int(key[9:]), b))
+        if key not in SL.BOX_KEYS:
+            raise ValueError("not a place the layout editor sets: %s" % key)
+        return self.jjp_set(("title:" if scope == "title" else "") + key, SL.box_text(b) if b else "")
+
+    @rpc
+    def jjp_backdrop_browse(self):
+        """A picture or video from anywhere to lay out over (a frame of an extracted attract video, a
+        photo of the machine's screen): remembered for the title, its path returned."""
+        self._jjp_need()
+        p = self.window.ask_open("jjp_layout_backdrop", "Pick a picture or video to lay out over",
+                                 filetypes=[("Pictures and videos", " ".join("*" + e for e in SL.PICTURE_EXTS + SL.VIDEO_EXTS)),
+                                            ("All files", "*.*")])
+        if not p:
+            return ""
+        have = [x for x in (self._jjp_recall("layout_backdrops") or []) if x != p]
+        self._jjp_remember("layout_backdrops", [p] + have[:7])
+        self._jjp_publish(layout=self._jjp_layout())
+        return p
+
+    @rpc
+    def jjp_panel_word(self, scope, word):
+        """A panel place picked in the layout editor (middle, bottom, top, none): the panel goes
+        there, its own box (panel_at) taken away; its text keeps its places in it."""
+        if word not in SL.PANEL_PLACES and word != "none":
+            raise ValueError("no panel place %s" % word)
+        pre = "title:" if scope == "title" else ""
+        self.jjp_set(pre + "panel_at", "")
+        return self.jjp_set(pre + "panel", word)
 
     @rpc
     def jjp_check(self):

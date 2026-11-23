@@ -211,6 +211,9 @@ typedef struct {
     void *font_title, *font_value, *font_timer;
     unsigned title_rgba, value_rgba, timer_rgba, panel_rgba;
     int game_modes, panel;     /* panel: 0 middle, 1 bottom, 2 top, 3 none */
+    /* PAD-1515: the layout editor's places: panel_at (% of the screen; set, it takes the panel word's
+     * place) and title_at / value_at / timer_at (% of the panel), each text fitted into its box */
+    float panel_at[4]; int has_panel_at; float txt_at[3][4]; int has_txt_at[3];
     int hold_multiballs;       /* with game_modes = hold: refuse the game's multiball starts too (default yes) */
     char allow[1024];          /* allow_game_modes: " name name " the game may still start while ours holds */
     /* own media (PAD-1352): files in the mode folder */
@@ -276,7 +279,8 @@ typedef struct {
     int nall; char all_name[MAX_ALL][64]; /* start_all: the game's modes / multiballs (globals or classes) */
     int all_need;                         /* start_all_count: how many of them start it (0 = every one) */
     unsigned all_got[MAX_PLAYERS + 1];    /* bit a: player p played all_name[a] toward the next start */
-    int nprog; struct { int a; char mode[64], lit[160], unlit[160]; void *bl, *bu; int wl, hl, wu, hu; } prog[MAX_ALL];
+    int nprog; struct { int a; char mode[64], lit[160], unlit[160]; void *bl, *bu; int wl, hl, wu, hu;
+                        float at[4]; int has_at; } prog[MAX_ALL];   /* at: its own box (PAD-1515) */
     float prog_at[4]; int prog_secs;      /* progress_at, progress_seconds */
     long prog_until;                      /* ms clock the board shows to */
     const void *prog_lit_by;              /* the running game mode that lit a pane: the board shows at its end */
@@ -304,9 +308,11 @@ static struct {
     unsigned panel, bar, title, item, pick, pick_bar, hint_rgba;
     void *font_title, *font_item, *font_hint;
     char pic_file[160]; float pic_at[4]; void *pic_bmp; int pic_w, pic_h;
+    /* PAD-1515: its heading, its lines and its hint, each a box in % of the menu's box */
+    float t_at[4], l_at[4], h_at[4]; int has_t, has_l, has_h;
 } gtl = { "FLIPPERS TO CHOOSE - START TO PLAY", {0, 0, 0, 0}, 0,
           0x000000e0, 0xffdc00ff, 0xffdc00ff, 0x9a9a9aff, 0xffffffff, 0xffffff38, 0xc8c8c8ff,
-          NULL, NULL, NULL, "", {0, 0, 100, 100}, NULL, 0, 0 };
+          NULL, NULL, NULL, "", {0, 0, 100, 100}, NULL, 0, 0, {0}, {0}, {0}, 0, 0, 0 };
 
 /* ---- config parsing -------------------------------------------------------- */
 static char *trim(char *s)
@@ -367,13 +373,15 @@ static float fnum(const char **pv)
     return neg ? -x : x;
 }
 
-/* `x y w h`, percent of the screen; a bad box leaves the default. */
-static void parse_box(const char *v, float *out)
+/* `x y w h`, percent of the screen (or of the panel the box is in); a bad box leaves the default.
+ * 1 when the box was taken. */
+static int parse_box(const char *v, float *out)
 {
     float b[4]; const char *p = v;
-    for (int i = 0; i < 4; i++) { const char *q = p; b[i] = fnum(&p); if (p == q) return; }
-    if (b[2] <= 0 || b[3] <= 0) return;
+    for (int i = 0; i < 4; i++) { const char *q = p; b[i] = fnum(&p); if (p == q) return 0; }
+    if (b[2] <= 0 || b[3] <= 0) return 0;
     memcpy(out, b, sizeof b);
+    return 1;
 }
 
 /* A sound value that names a file of ours (by its extension) rather than a game se_*. */
@@ -717,13 +725,25 @@ static void apply_kv(pm_t *m, const char *k, char *v)
         }
     }
     else if (!strcmp(k, "start_all_count")) m->all_need = (int)num(v);
-    else if (!strcmp(k, "progress")) {               /* <game mode> <lit picture> [<unlit picture>], a line each */
-        char *a = strtok(buf, " \t"), *b = strtok(NULL, " \t"), *c = strtok(NULL, " \t");
-        if (!a || !b || m->nprog >= MAX_ALL) lg("%s: progress %s: wants <game mode> <picture> [<unlit picture>], up to %d lines; skipped", m->file, v, MAX_ALL);
+    else if (!strcmp(k, "progress")) {   /* <game mode> <lit picture> [<unlit picture>] [x y w h], a line each */
+        char *w[8]; int nw = 0;
+        for (char *t = strtok(buf, " \t"); t && nw < 8; t = strtok(NULL, " \t")) w[nw++] = t;
+        /* PAD-1515: a box of its own after the pictures (4 numbers, % of the screen) */
+        float at[4]; int has_at = 0;
+        if (nw >= 6) {
+            char box[96]; snprintf(box, sizeof box, "%s %s %s %s", w[nw - 4], w[nw - 3], w[nw - 2], w[nw - 1]);
+            const char *q = w[nw - 4];
+            if ((*q >= '0' && *q <= '9') || *q == '-' || *q == '.') has_at = parse_box(box, at);
+            if (has_at) nw -= 4;
+        }
+        if (nw < 2 || nw > 3 || m->nprog >= MAX_ALL)
+            lg("%s: progress %s: wants <game mode> <picture> [<unlit picture>] [x y w h], up to %d lines; skipped", m->file, v, MAX_ALL);
         else {
-            snprintf(m->prog[m->nprog].mode, sizeof m->prog[0].mode, "%s", a);
-            snprintf(m->prog[m->nprog].lit, sizeof m->prog[0].lit, "%s", b);
-            snprintf(m->prog[m->nprog].unlit, sizeof m->prog[0].unlit, "%s", c ? c : "");
+            snprintf(m->prog[m->nprog].mode, sizeof m->prog[0].mode, "%s", w[0]);
+            snprintf(m->prog[m->nprog].lit, sizeof m->prog[0].lit, "%s", w[1]);
+            snprintf(m->prog[m->nprog].unlit, sizeof m->prog[0].unlit, "%s", nw > 2 ? w[2] : "");
+            m->prog[m->nprog].has_at = has_at;
+            if (has_at) memcpy(m->prog[m->nprog].at, at, sizeof at);
             m->nprog++;
         }
     }
@@ -747,6 +767,14 @@ static void apply_kv(pm_t *m, const char *k, char *v)
     else if (!strcmp(k, "game_type_picture")) snprintf(gtl.pic_file, sizeof gtl.pic_file, "%s", v);
     else if (!strcmp(k, "game_type_picture_at")) parse_box(v, gtl.pic_at);
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : !strcmp(v, "none") ? 3 : 0;
+    /* PAD-1515: the layout editor's places (an empty value puts the default place back) */
+    else if (!strcmp(k, "panel_at")) m->has_panel_at = parse_box(v, m->panel_at);
+    else if (!strcmp(k, "title_at")) m->has_txt_at[0] = parse_box(v, m->txt_at[0]);
+    else if (!strcmp(k, "value_at")) m->has_txt_at[1] = parse_box(v, m->txt_at[1]);
+    else if (!strcmp(k, "timer_at")) m->has_txt_at[2] = parse_box(v, m->txt_at[2]);
+    else if (!strcmp(k, "game_type_title_at")) gtl.has_t = parse_box(v, gtl.t_at);
+    else if (!strcmp(k, "game_type_lines_at")) gtl.has_l = parse_box(v, gtl.l_at);
+    else if (!strcmp(k, "game_type_hint_at")) gtl.has_h = parse_box(v, gtl.h_at);
     else if (!strcmp(k, "code")) snprintf(m->code, sizeof m->code, "%s", v);
     else if (!strcmp(k, "ingame_state")) { ingame_state = (int)num(v); ingame_explicit = 1; }
     else if (!strcmp(k, "game")) snprintf(game_name, sizeof game_name, "%s", v);
@@ -4315,14 +4343,50 @@ static void gx_text(unsigned rgba, float x, float y, float scale, int align, con
     gx.ident_xf(&t); gx.use_xf(&t);
 }
 
+/* PAD-1515: `s` fitted into a box (pixels): as tall as the box, narrower when it would overflow its
+ * width, centred in it; in the game's font `f` when there is one, else the built-in font. */
+static void gx_text_box(void *f, unsigned rgba, float bx, float by, float bw, float bh, const char *s)
+{
+    static int (*line_h)(const void *);
+    static int (*text_w)(const void *, const char *);
+    if (!line_h) line_h = sym("al_get_font_line_height");
+    if (!text_w) text_w = sym("al_get_text_width");
+    if (!gx.scale_xf || !gx.trans_xf || !*s) return;
+    if (!(plot_os && f) && !gx.bfont && gx.builtin_font) gx.bfont = gx.builtin_font();
+    void *font = plot_os && f ? f : gx.bfont;
+    if (!font) return;
+    float lh = line_h ? (float)line_h(font) : 8, tw = text_w ? (float)text_w(font, s) : 8.0f * strlen(s);
+    if (lh <= 0) lh = 8;
+    float sc = bh / lh;
+    if (tw > 0 && tw * sc > bw) sc = bw / tw;
+    ALLEGRO_TRANSFORM t; gx.ident_xf(&t); gx.scale_xf(&t, sc, sc);
+    gx.trans_xf(&t, bx + bw / 2, by + (bh - lh * sc) / 2); gx.use_xf(&t);
+    ALLEGRO_COLOR black = { 0, 0, 0, 1 };
+    if (font == f) plot_os(f, col(rgba), black, 2, black, 3, 0, 0, 1, s);
+    else gx.draw_text(font, col(rgba), 0, 0, 1, s);
+    gx.ident_xf(&t); gx.use_xf(&t);
+}
+
+/* The mode panel's box in pixels: panel_at, else the panel word's place (PAD-1515) */
+static void panel_box(const pm_t *m, float W, float H, float *x0, float *y0, float *x1, float *y1)
+{
+    if (m->has_panel_at) {
+        *x0 = m->panel_at[0] * W / 100; *y0 = m->panel_at[1] * H / 100;
+        *x1 = *x0 + m->panel_at[2] * W / 100; *y1 = *y0 + m->panel_at[3] * H / 100;
+        return;
+    }
+    *y0 = m->panel == 1 ? H * 0.70f : m->panel == 2 ? H * 0.03f : H * 0.36f;
+    *x0 = W * 0.16f; *x1 = W * 0.84f; *y1 = *y0 + H * 0.27f;
+}
+
 static void draw_screen(pm_t *m)
 {
     if (!gx_begin()) return;
     float W = gx.W, H = gx.H;
     draw_media(m, W, H);                          /* the mode's video, then its picture, under the panel */
-    if (m->panel == 3) { gx_end(); return; }
-    float ph = H * 0.27f, y0 = m->panel == 1 ? H * 0.70f : m->panel == 2 ? H * 0.03f : H * 0.36f;
-    float x0 = W * 0.16f, x1 = W * 0.84f, y1 = y0 + ph;
+    if (m->panel == 3) { gx_end(); return; }          /* none: no panel and no text, a box or not */
+    float x0, y0, x1, y1;
+    panel_box(m, W, H, &x0, &y0, &x1, &y1);
     gx.fill_rect(x0, y0, x1, y1, col(m->panel_rgba));
     char total[48], secs[16];
     {   /* 12,345,678 */
@@ -4337,15 +4401,23 @@ static void draw_screen(pm_t *m)
     void *ft = m->font_title && jfont ? jfont(m->font_title) : NULL;
     void *fv = m->font_value && jfont ? jfont(m->font_value) : NULL;
     void *fm = m->font_timer && jfont ? jfont(m->font_timer) : NULL;
-    float cx = W / 2;
+    float cx = (x0 + x1) / 2, pw = x1 - x0, ph = y1 - y0;
     const char *title = *m->ctitle ? m->ctitle : m->title;     /* its code's jm_title (PAD-1384) */
-    if (plot_os && ft) plot_os(ft, col(m->title_rgba), black, 2, black, 3, cx, y0 + H * 0.01f, 1, title);
-    if (plot_os && fv) plot_os(fv, col(m->value_rgba), black, 2, black, 3, cx, y0 + H * 0.10f, 1, total);
-    if (plot_os && fm) plot_os(fm, col(m->timer_rgba), black, 2, black, 3, x1 - W * 0.05f, y0 + H * 0.06f, 1, secs);
-    /* the built-in font for whatever has no game font */
-    if (!(plot_os && ft)) gx_text(m->title_rgba, cx, y0 + H * 0.02f, 4, 1, title);
-    if (!(plot_os && fv)) gx_text(m->value_rgba, cx, y0 + H * 0.12f, 4, 1, total);
-    if (!(plot_os && fm)) gx_text(m->timer_rgba, x1 - W * 0.05f, y0 + H * 0.07f, 4, 1, secs);
+    const char *str[3] = { title, total, secs };
+    void *fnt[3] = { ft, fv, fm };
+    unsigned rgba[3] = { m->title_rgba, m->value_rgba, m->timer_rgba };
+    for (int i = 0; i < 3; i++) {
+        if (m->has_txt_at[i]) {                  /* PAD-1515: its own box, % of the panel */
+            const float *b = m->txt_at[i];
+            gx_text_box(fnt[i], rgba[i], x0 + b[0] * pw / 100, y0 + b[1] * ph / 100, b[2] * pw / 100, b[3] * ph / 100, str[i]);
+            continue;
+        }
+        /* the default places: the game font at its own size, else the built-in font 4 times its 8 px */
+        float x = i == 2 ? x1 - W * 0.05f : cx;
+        static const float gy[3] = { 0.01f, 0.10f, 0.06f }, by[3] = { 0.02f, 0.12f, 0.07f };
+        if (plot_os && fnt[i]) plot_os(fnt[i], col(rgba[i]), black, 2, black, 3, x, y0 + H * gy[i], 1, str[i]);
+        else gx_text(rgba[i], x, y0 + H * by[i], 4, 1, str[i]);
+    }
     gx_end();
 }
 
@@ -4379,14 +4451,32 @@ static void draw_menu(void)
 #define GT_TEXT(f, rgba, mid, sc, str) do { \
         if (plot_os && (f)) plot_os((f), col(rgba), black, 2, black, 3, cx, (mid) - (line_h ? line_h(f) : 0) / 2.0f, 1, (str)); \
         else gx_text((rgba), cx, (mid) - 4 * (sc) * s, (sc) * s, 1, (str)); } while (0)
-    GT_TEXT(ft, gtl.title, y0 + H * 0.055f * s, 5, gt_title);
-    for (int i = 0; i < n; i++) {
+    /* PAD-1515: a box of the menu's (% of it) -> pixels */
+#define GT_BOX(b, X, Y, BW, BH) float X = x0 + (b)[0] * (x1 - x0) / 100, Y = y0 + (b)[1] * ph / 100, \
+        BW = (b)[2] * (x1 - x0) / 100, BH = (b)[3] * ph / 100
+    if (gtl.has_t) { GT_BOX(gtl.t_at, bx, by, bw, bh); gx_text_box(ft, gtl.title, bx, by, bw, bh, gt_title); }
+    else GT_TEXT(ft, gtl.title, y0 + H * 0.055f * s, 5, gt_title);
+    if (gtl.has_l) {                          /* the lines share the box's height, a row each */
+        GT_BOX(gtl.l_at, bx, by, bw, bh);
+        float rh = bh / n;
+        for (int i = 0; i < n; i++) {
+            float top = by + i * rh, bot = top + rh * 0.867f;
+            const char *str = i ? pms[gt_idx[i - 1]].gtype : gt_normal;
+            if (i == gt_sel && (gtl.pick_bar & 0xff)) gx.fill_rect(bx, top, bx + bw, bot, col(gtl.pick_bar));
+            float th = rh * 0.555f;
+            gx_text_box(fi, i == gt_sel ? gtl.pick : gtl.item, bx + bw * 0.02f, (top + bot - th) / 2, bw * 0.96f, th, str);
+        }
+    } else for (int i = 0; i < n; i++) {
         float y = y0 + H * 0.13f * s + i * rowh, top = y - H * 0.012f * s, bot = y + rowh - H * 0.022f * s;
         const char *str = i ? pms[gt_idx[i - 1]].gtype : gt_normal;
         if (i == gt_sel && (gtl.pick_bar & 0xff)) gx.fill_rect(x0 + in, top, x1 - in, bot, col(gtl.pick_bar));
         GT_TEXT(fi, i == gt_sel ? gtl.pick : gtl.item, (top + bot) / 2, 4, str);
     }
-    if (*gtl.hint) GT_TEXT(fh, gtl.hint_rgba, y1 - H * 0.065f * s, 2.5f, gtl.hint);
+    if (*gtl.hint) {
+        if (gtl.has_h) { GT_BOX(gtl.h_at, bx, by, bw, bh); gx_text_box(fh, gtl.hint_rgba, bx, by, bw, bh, gtl.hint); }
+        else GT_TEXT(fh, gtl.hint_rgba, y1 - H * 0.065f * s, 2.5f, gtl.hint);
+    }
+#undef GT_BOX
 #undef GT_TEXT
     gx_end();
 }
@@ -4400,7 +4490,8 @@ static void draw_progress(pm_t *m)
     for (int i = 0; i < m->nprog; i++) {
         int lit = (m->all_got[p] >> m->prog[i].a) & 1;
         void *b = lit ? m->prog[i].bl : m->prog[i].bu;
-        if (b) draw_fit(b, lit ? m->prog[i].wl : m->prog[i].wu, lit ? m->prog[i].hl : m->prog[i].hu, m->prog_at, gx.W, gx.H);
+        if (b) draw_fit(b, lit ? m->prog[i].wl : m->prog[i].wu, lit ? m->prog[i].hl : m->prog[i].hu,
+                        m->prog[i].has_at ? m->prog[i].at : m->prog_at, gx.W, gx.H);
     }
     gx_end();
 }

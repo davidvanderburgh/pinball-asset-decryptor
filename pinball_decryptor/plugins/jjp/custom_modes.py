@@ -65,7 +65,7 @@ FORM_GROUPS = (
     ("Picture and video", ("picture", "picture_at", "video", "video_at", "video_loop")),
     ("Lamps", ("lamps", "lamp_color", "lamp_blink")),
     ("Screen", ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
-                "panel_color", "panel")),
+                "panel_color", "panel", "panel_at", "title_at", "value_at", "timer_at")),   # PAD-1515: places
     ("Balls", ("multiball", "multiball_on", "add_ball", "ball_save")),                       # PAD-1353
     ("Coils", ("coil_start", "coil_shot", "coil_complete", "coil_hold", "coil_hold_on")),     # PAD-1353
     # PAD-1508: Spike 2's rules (tools/jjp_emu/MODES.md "Spike 2's rules")
@@ -106,6 +106,13 @@ LABELS = {
     "font_title": "Title font", "font_value": "Total font", "font_timer": "Timer font",
     "title_color": "Title color", "value_color": "Total color", "timer_color": "Timer color",
     "panel_color": "Panel color", "panel": "Panel place",
+    # PAD-1515: the layout editor's places
+    "panel_at": "Panel box (x y w h, % of screen; empty = the panel place)",
+    "title_at": "Title box (x y w h, % of the panel)", "value_at": "Total box (x y w h, % of the panel)",
+    "timer_at": "Timer box (x y w h, % of the panel)",
+    "game_type_title_at": "Attract menu: heading box (x y w h, % of the menu)",
+    "game_type_lines_at": "Attract menu: lines box (x y w h, % of the menu)",
+    "game_type_hint_at": "Attract menu: hint box (x y w h, % of the menu)",
     "sound_channel": "Channel for our sound files", "sound_like": "Our sounds set like",
     "music": "Music (a file of ours)", "music_like": "Our music set like",
     "picture": "Picture (a file of ours)", "picture_at": "Picture box (x y w h, % of screen)",
@@ -130,7 +137,8 @@ LABELS = {
     "in_place_of": "Starts in place of the game's mode", "inside": "Runs inside my mode (name)",
     # PAD-1512
     "start_all": "Starts once the player has played all of these game modes",
-    "start_all_count": "...or this many of them", "progress": "Progress pictures (one a line: game mode picture [unlit picture])",
+    "start_all_count": "...or this many of them",
+    "progress": "Progress pictures (one a line: game mode picture [unlit picture] [x y w h])",
     "progress_at": "Progress box (x y w h, % of screen)", "progress_seconds": "Progress shows for (seconds)",
     "game_type": "Game type on the attract menu (its line)",
     "game_type_normal": "Attract menu: the normal game's line", "game_type_title": "Attract menu: its heading",
@@ -147,12 +155,14 @@ LABELS = {
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
-              "panel_color", "panel", "game_modes", "hold_multiballs", "ingame_state", "coil_holds",
+              "panel_color", "panel", "panel_at", "title_at", "value_at", "timer_at",
+              "game_modes", "hold_multiballs", "ingame_state", "coil_holds",
               "game_type_normal", "game_type_title", "game_type_hint", "game_type_at",
               "game_type_panel_color", "game_type_bar_color", "game_type_title_color", "game_type_item_color",
               "game_type_pick_color", "game_type_pick_bar_color", "game_type_hint_color",
               "game_type_font_title", "game_type_font_item", "game_type_font_hint",
-              "game_type_picture", "game_type_picture_at")
+              "game_type_picture", "game_type_picture_at",
+              "game_type_title_at", "game_type_lines_at", "game_type_hint_at")
 
 
 # ============================================================================ where things are

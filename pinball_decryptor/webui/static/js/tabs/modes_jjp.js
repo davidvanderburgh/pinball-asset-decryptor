@@ -19,6 +19,7 @@ import { html, useEffect, useRef, useState, Button, Field, PathField, Select, Ch
 import { KindTiles, EnterKey, NameField } from "./modes_new.js";
 import { useModeProgram, useEd, Palette, Variables, Script, ProgramBar } from "./modes_blocks.js";
 import { CEditor, CodeView } from "./modes_script.js";
+import { LayoutEditor } from "./modes_layout.js";
 
 // PAD-1417: the page serves Spooky too (webui/modes_spooky.py): its calls go to modes.<ns>_*, the
 // namespace of the page on screen (JjpModes: jjp, SpookyModes: spk)
@@ -341,14 +342,37 @@ function ModeList({ j, onNew }) {
   </section>`;
 }
 
+// PAD-1515: the places the layout editor sets are not form rows: the editor shows their numbers
+const MODE_PLACES = new Set(["panel", "panel_at", "title_at", "value_at", "timer_at", "picture_at", "video_at", "progress_at"]);
+const TITLE_PLACES = new Set(["panel", "panel_at", "title_at", "value_at", "timer_at", "game_type_at", "game_type_picture_at",
+  "game_type_title_at", "game_type_lines_at", "game_type_hint_at"]);
+
+// the layout editor's backdrop list, with Choose a file... (any picture or video, remembered)
+function useBackdrops(j) {
+  const lay = j.layout || {};
+  return lay.backdrops || [];
+}
+
+export function ModeLayout({ j, screen, title, hint }) {
+  const lay = (j.layout || {})[screen];
+  if (!lay || !(lay.elements || []).length) return null;
+  return html`<${LayoutEditor} key=${screen + (j.open || "")} lay=${lay} size=${(j.layout || {}).size} backdrops=${useBackdrops(j)}
+    title=${title} hint=${hint} onBrowse=${() => call(R("backdrop_browse"))} />`;
+}
+
 function FormGroups({ j, have }) {
   const f = j.form || {};
   const meta = j.fields || {};
+  const editor = NS === "jjp" && j.layout && j.layout.mode;
   // a group whose every key the title cannot do (Picture and video on Alice Cooper and the pinHeck
   // DMD games, PAD-1469) is not drawn at all
   return (j.groups || []).filter((g) => g.keys.length).map((g) => html`<div class="jjpm-group" key=${g.title}>
     <div class="jjpm-gt">${g.title}</div>
-    ${g.keys.map((k) => html`<${Row} key=${k} k=${k} meta=${meta[k]} value=${f[k]} j=${j} have=${have} />`)}
+    ${editor && g.keys.includes("panel_at") ? html`<${ModeLayout} j=${j} screen="mode" title="Its screen"
+      hint="Its panel, title, total and timer, and its picture and video, over the game's screen: drag them where you want them." />` : null}
+    ${g.keys.filter((k) => !(editor && MODE_PLACES.has(k))).map((k) => html`<${Row} key=${k} k=${k} meta=${meta[k]} value=${f[k]} j=${j} have=${have} />`)}
+    ${editor && g.keys.includes("progress_at") ? html`<${ModeLayout} j=${j} screen="progress" title="Its progress board"
+      hint="Each progress picture's place: in the shared box, or a box of its own." />` : null}
   </div>`);
 }
 
@@ -426,7 +450,12 @@ function TitleSettings({ j, have }) {
   return html`<section class="card jjpm-title-card">
     <div class="hd" style="cursor:pointer" onClick=${() => setOpen(!open)}><span class="h2">${open ? "▾" : "▸"} Every mode of this game</span>
       <span class="muted small">defaults a mode's own settings override: ${(j.title_keys || []).some((k) => k.startsWith("font") || k.endsWith("color")) ? "fonts, colors, the panel" : "the panel"}${(j.title_keys || []).includes("game_type_at") ? ", and the attract menu's game type picker" : ""}${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
-    ${open ? html`<div class="bd">${(j.title_keys || []).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
+    ${open ? html`<div class="bd">
+      ${NS === "jjp" && j.layout ? html`<${ModeLayout} j=${j} screen="title_mode" title="Every mode's screen"
+        hint="Where every mode's panel, title, total and timer go, unless a mode places its own." />
+        <${ModeLayout} j=${j} screen="menu" title="The attract game type menu"
+        hint="The menu a player opens in attract (both flipper buttons held a second), with its lines as the game lists them." />` : null}
+      ${(j.title_keys || []).filter((k) => !(NS === "jjp" && j.layout && TITLE_PLACES.has(k))).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
   </section>`;
 }
 

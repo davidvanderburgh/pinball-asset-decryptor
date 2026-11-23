@@ -3527,8 +3527,10 @@ HELP_CONTENT = {
         ]),
         ("Sounds",
          "Every sound row (the menu's move and confirm, an image's music and "
-         "confirm) has a **▶ Play** beside **Browse…**, played through the "
-         "preview's volume and Mute.\n\n"
+         "confirm) has a **▶ Play** beside **Browse…**, played at the "
+         "preview's volume even when the preview is muted. The preview's music "
+         "stops while Edit image or Menu settings is open, so you hear only the "
+         "sound you picked.\n\n"
          "- A WAV file plays straight off disk. A word (auto, synth, menu) plays "
          "what the last preview made for THAT row. If nothing plays, tick **Sound** "
          "under the preview to make it; the Log says why.\n"

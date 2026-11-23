@@ -1323,6 +1323,93 @@ def test_hidden_tab_plays_nothing(tmp_path):
         assert panel._pv_hidden
 
 
+class _FakeAudio(object):
+    """The preview's player, as calls: (what, arg) per call."""
+    status = ""
+
+    def __init__(self):
+        self.calls = []
+
+    def loop(self, path):
+        self.calls.append(("loop", path))
+
+    def play(self, path):
+        self.calls.append(("play", path))
+
+    def set_volume(self, volume):
+        self.calls.append(("vol", volume))
+
+    def stop(self):
+        self.calls.append(("stop", None))
+
+    def last(self, what):
+        return [a for k, a in self.calls if k == what][-1]
+
+
+def _wav(path, seconds=0.1):
+    import wave
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(2)
+        f.setsampwidth(2)
+        f.setframerate(44100)
+        f.writeframes(b"\0\0\0\0" * int(44100 * seconds))
+    return str(path)
+
+
+@pytest.mark.parametrize("dialog", ["edit", "menu_settings"])
+def test_a_sub_menu_plays_its_sound_past_the_preview_mute(tmp_path, dialog):
+    """David, PAD-1530: "when I'm muting music from the preview, i still want
+    to be able to hear the music or audio selected from specific game image
+    menu. Right now, the music from the preview always overplays when i have
+    the sub-menus open."  The preview's music steps aside while Edit image…
+    or Menu settings… is up, and that window's Play is heard with the
+    preview muted; closing it brings the bed back, muted again."""
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, _raw(tmp_path, "a.raw"))
+        panel = _panel(w)
+        bed = _wav(tmp_path / "bed.wav")
+        clip = _wav(tmp_path / "pick.wav")
+        panel.menu_sounds = lambda highlight=None: {
+            "music": bed, "confirm": "", "move": ""}
+        fake = _FakeAudio()
+        panel._audio = fake
+        w.call("multiboot.visible", True)
+        w.run(lambda: panel._volume_var.set(80))
+        w.run(lambda: panel._pv_mute_var.set(True))
+        w.run(panel._sound_follow)
+        assert fake.last("loop") == bed and fake.last("vol") == 0
+
+        if dialog == "edit":
+            w.call("multiboot.edit")
+            field = "ed_music"
+            w.run(lambda: panel._ed_music.set(clip))
+        else:
+            w.call("multiboot.menu_settings")
+            field = "move"
+            w.run(lambda: panel._move_var.set(clip))
+        assert panel._image_dialog is not None or \
+            panel._menu_dialog is not None
+        # the bed is stopped the moment the window opens...
+        assert fake.last("loop") is None
+        # ...and a highlight change under it does not bring it back
+        w.run(panel._sound_follow)
+        assert fake.last("loop") is None
+        # Play: heard at the menu's volume, Mute or not
+        n = len(fake.calls)
+        assert w.call("multiboot.play", field) is True
+        assert fake.last("play") == clip
+        assert ("vol", 80) in fake.calls[n:]
+
+        if dialog == "edit":
+            w.call("multiboot.edit_cancel")
+        else:
+            w.call("multiboot.menu_cancel")
+        assert panel._image_dialog is None and panel._menu_dialog is None
+        # closed: the bed plays again, through the preview's Mute
+        assert fake.last("loop") == bed
+        assert fake.last("vol") == 0
+
+
 # ------------------------------------------ PAD-188: the restore's own read
 def _pad188_card(tmp_path):
     from pinball_decryptor.webui.multiboot_core import loaded_media_dir

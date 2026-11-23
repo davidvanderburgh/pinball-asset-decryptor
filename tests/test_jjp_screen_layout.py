@@ -287,3 +287,29 @@ def test_the_tab_lays_out_the_games_own_screen(tmp_path, preview_on):
         assert _jjp(w)["title_cfg"]["screen_hide"] == "font_balls_in_play"
         w.call("modes.jjp_screen_part", "sp_brat_charlie", "back")
         assert not _jjp(w)["title_cfg"].get("screen_move")
+
+
+def test_show_it_in_the_game_opens_the_menu_and_starts_the_mode(tmp_path, preview_on, monkeypatch):
+    from pinball_decryptor.webui import modes_jjp
+    # never the real stock ISO on this PC: the button must not start a game from a test
+    monkeypatch.setattr(modes_jjp.JjpModesMixin, "_jjp_build_state", lambda self: {"iso": "", "out": ""})
+    monkeypatch.setattr(modes_jjp.JjpModesMixin, "jjp_screens_argv", lambda self, iso, rt: pytest.fail("a game was started"))
+    with web_app(tmp_path, mfr="jjp") as w:
+        j = _open_wonka(w)
+        label, fn = j["label"], j["open"]
+        to = lambda p: "/L" + p.replace("\\", "/")
+        argv = CM.screens_args(r"D:\Wonka-v03.03.iso", r"C:\rt.so", label, to)
+        assert argv[0] == "tools/jjp_emu/jjpscreens.sh" and "--menu" not in argv and "--start" not in argv
+        assert argv[argv.index("--out") + 1].endswith("/" + SL.FRAMES_DIR)
+        w.call("modes.jjp_set", "game_type", "PAD GAME")
+        w.call("modes.jjp_set", "start", "switch_target_tv switch_spinner")
+        w.call("modes.jjp_set", "start_count", "3")
+        argv = CM.screens_args(r"D:\Wonka-v03.03.iso", r"C:\rt.so", label, to, fn)
+        assert "--menu" in argv and argv[argv.index("--start") + 1] == "switch_target_tv 3"
+        sh = open(os.path.join(RIG, "jjpscreens.sh"), encoding="utf-8").read()
+        assert "PAD_HIDDEN=1 PAD_AUDIO=0" in sh                # hidden and muted, always
+        for step in ("census attract", "census game", "in_game_menu.png", "in_game_mode.png"):
+            assert step in sh, step
+        # no ISO under Build: the button says what it waits for
+        with pytest.raises(Exception):
+            w.call("modes.jjp_show_in_game")

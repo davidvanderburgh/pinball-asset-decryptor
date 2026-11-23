@@ -534,7 +534,7 @@ class JjpModesMixin:
     def jjp_screens_argv(self, iso, runtime):
         """The screens run's argv, as root in the app's Linux (see jjp_build_argv)."""
         from . import multiboot_core as MC
-        return MC.root_command(CM.screens_args(iso, runtime, self._jjp_label, MC.wsl), exe="bash")
+        return MC.root_command(CM.screens_args(iso, runtime, self._jjp_label, MC.wsl, self._jjp_file), exe="bash")
 
     def _jjp_screens_state(self):
         s = dict(getattr(self, "_jjp_screens", None) or {})

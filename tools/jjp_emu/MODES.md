@@ -158,7 +158,56 @@ lamp_blink = 4
 | `background_modes` | game modes that are always on and must not make a custom mode yield. Without it, the game modes already running two seconds into a ball count as always-on |
 | `game_type_normal`, `game_type_title` | the attract menu's line for a normal game (`NORMAL GAME`) and its heading (`GAME TYPE`) (PAD-1512) |
 | `game_type_hint`, `game_type_at`, `game_type_*_color`, `game_type_font_*`, `game_type_picture`, `game_type_picture_at` | the attract menu's look (PAD-1512): "The game type menu's look" below |
+| `screen_move`, `screen_hide` | the game's OWN screen changed (PAD-1515): a part it draws moved, scaled or hidden, a line each (up to 64): "The game's own screen" below |
 | `coil_holds` | `on` lets this title's modes hold coils (`coil_hold`). Off by default: a hold is a coil kept energised, so it is turned on per title once it has been watched on that machine. `mkjjpmodes.py check` names a `coil_hold` without it |
+
+## The game's own screen (PAD-1515)
+
+A JJP game draws its screens in code, so there is no scene file to change; but every picture and line
+of text it draws goes through Allegro's draw calls, and the runtime defines those (passing each one
+on). It names what is drawn by the game's own exported object that holds it: a sprite (`sp_*`), an
+animation or atlas (`atlas_playerup`: Wonka's PLAYER 1 score box), a movie, a font (`font_*`, and
+every line of text drawn in it), a displayable; else by the picture file it was loaded from. title.cfg
+then changes them:
+
+    screen_move = atlas_playerup 1.32 -27.89 1.15 54.67 84.9   # <name> <dx> <dy> [<scale> [<ax> <ay>]]
+    screen_hide = sp_candy_gumdrops_01                         # <name>
+
+`dx dy` move it, in percent of the screen; `scale` sizes it about `(ax, ay)` (percent of the screen:
+the part's centre, which the layout editor writes; without it each draw scales about its own centre).
+A move changes where the part is drawn, nothing else: it is drawn at its own moment, so what the game
+draws later can cover it, and what was behind it shows. Some HUD pieces are several parts (on Wonka the
+PLAYER 1 box's label, digits, sign and ball tube are `atlas_playerup`; its orange body is the bottom
+bar's picture `sp_ui_bg`): move them together (Shift-click in the editor).
+
+**How the game draws, as the runtime follows it.** Wonka (and the engine) draws its screen into a
+canvas bitmap and puts that on the display; parts are drawn into the canvas, into screen-sized layers
+composited into it, and into small pieces (a score box's digits) composited whole. Each bitmap the
+game draws into and then draws is mapped to the screen by that draw; a small piece is ONE part, named
+by its own object or by the first named part drawn into it, and moves whole. Text glyphs (Allegro's
+glyph cache, drawn from inside a text draw) go with their text. What no object names is shown in the
+editor as "bitmap WxH" or "piece WxH" and cannot be moved.
+
+**A census.** A file `request` holding a label in `JJP_MODS_SCREEN_DIR` (default `/tmp/padmodes/layout`)
+makes the runtime write the next frame as `<label>.png` (the game's frame, before anything of ours)
+and `<label>.json`: every part drawn, `{name, kind (picture, font, movie, unnamed), box, draws, text,
+rects}` in screen pixels, `rects` each draw's own box. `jjpdrive.py`'s `census <label> [<copy to>]`
+step asks for one; `jjpscreens.sh` (the Modes tab's **Show it in the game**) boots the stock ISO hidden
+and muted with the title's modes and takes `attract` and `game` (a ball in play), and when the folder
+has game types or the open mode has start switches, grabs the menu and the mode as the screen shows
+them (`in_game_menu.png`, `in_game_mode.png`, ours drawn) into the mode folder's `.layout/`.
+
+**In the app.** Every mode of this game > **The game's own screen**: the census frame with each named
+part a box. Drag to move, a corner to scale (its shape kept), Shift-click for a group (moved alike,
+scaled about the group's centre), **Hide it** / **Show it** / **Put it back**; a moved or hidden part
+leaves a striped ghost where the game draws it, and the preview shows its own pieces (its draws' boxes)
+cut from the frame. Each change writes its `screen_move` / `screen_hide` line at once.
+
+Proven on Wonka 03.03 (2026-11-23, `proof/pad1515/screen`, `verify_screen.py`): the game drew
+`atlas_playerup` moved up and 15 % bigger 0,0 px from where the editor shows it, the SHOOT G.U.M.
+TARGETS line (`violet_ui_info_font`) moved and 1.5x at 0,-1 px, and the gumdrops hidden. A census of
+Wonka's in-game screen names 12 to 19 of its 30 or so parts: the HUD bar, the score box, the masking
+tape notes, the candy jar, every font with its text.
 
 ## Balls and coils (PAD-1353)
 

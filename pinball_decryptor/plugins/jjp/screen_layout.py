@@ -268,7 +268,9 @@ def backdrops(folder, extra=()):
     if fr and os.path.isdir(fr):
         for f in sorted(os.listdir(fr), key=lambda f: -os.path.getmtime(os.path.join(fr, f))):
             if f.lower().endswith(PICTURE_EXTS):
-                add(os.path.join(fr, f), "The game's screen: " + os.path.splitext(f)[0].replace("_", " "))
+                stem = os.path.splitext(f)[0]
+                add(os.path.join(fr, f), ("In the game, ours drawn: " + stem[8:].replace("_", " ")) if stem.startswith("in_game_")
+                    else "The game's screen: " + stem.replace("_", " "))
     if folder and os.path.isdir(folder):
         for f in sorted(os.listdir(folder)):
             if f.lower().endswith(PICTURE_EXTS + VIDEO_EXTS):

@@ -774,13 +774,24 @@ def runtime_path(iso):
     return os.path.join(modes_root(), ".runtime", "%s-%s.so" % (stem, h.hexdigest()[:12]))
 
 
-def screens_args(iso, runtime, label, to_linux):
+def screens_args(iso, runtime, label, to_linux, open_mode=""):
     """PAD-1515: the jjpscreens.sh argv ("Show it in the game": the game's own screens, each part named,
-    into the mode folder's .layout/ for the layout editor), as root from the checkout root, run by bash."""
+    into the mode folder's .layout/ for the layout editor), as root from the checkout root, run by bash.
+    The attract game type menu is opened too when a mode has a game type, and ``open_mode`` (a .mode
+    file) is started when it has start switches: each grabbed with ours drawn, the true look."""
     from . import screen_layout as SL
     folder = title_dir(label)
-    return ["tools/jjp_emu/jjpscreens.sh", "--iso", to_linux(iso), "--so", to_linux(runtime),
+    argv = ["tools/jjp_emu/jjpscreens.sh", "--iso", to_linux(iso), "--so", to_linux(runtime),
             "--modes", to_linux(folder), "--out", to_linux(os.path.join(folder, SL.FRAMES_DIR))]
+    if any((read_mode(label, m["file"]).get("game_type") or "").strip() for m in list_modes(label)):
+        argv.append("--menu")
+    if open_mode:
+        m = read_mode(label, open_mode)
+        sw = (m.get("start") or "").split()
+        count = (m.get("start_count") or "1").strip()
+        if sw and re.match(r"^[A-Za-z0-9_]+$", sw[0]) and count.isdigit():
+            argv += ["--start", "%s %d" % (sw[0], min(int(count), 20))]
+    return argv
 
 
 #: the screens run's command line, for stopping it inside Linux (see BUILD_PATTERN)

@@ -23,7 +23,7 @@ import webui_shot  # noqa: E402
 ISO = r"D:\Pinball\images\JJP\Wonka-v03.03.iso"
 LABEL = "Wonka-v03.03"
 RIG_FRAMES = r"C:\tmp\PAD-1515\rig"
-CENSUS = os.environ.get("PAD1515_CENSUS", r"C:\tmp\PAD-1515\census2")
+CENSUS = os.environ.get("PAD1515_CENSUS", r"C:\tmp\PAD-1515\show")
 PANES = ("CandyLaneMode", "DotsMode", "FactoryTourMode", "MikeTeaveeMode")
 
 
@@ -72,8 +72,9 @@ def main():
             shutil.copy(src, frames[n])
     if kind == "after" and os.path.isfile(os.path.join(CENSUS, "game.json")):
         os.makedirs(os.path.join(mine, ".layout"), exist_ok=True)
-        for ext in (".json", ".png"):
-            shutil.copy(os.path.join(CENSUS, "game" + ext), os.path.join(mine, ".layout", "game" + ext))
+        for f in os.listdir(CENSUS):                  # what Show it in the game left: censuses and grabs
+            if f.endswith((".json", ".png")):
+                shutil.copy(os.path.join(CENSUS, f), os.path.join(mine, ".layout", f))
     import site
     proc, url = webui_shot.start_server(settings, scratch, app_cmd=None,
                                         extra_env={"PYTHONPATH": site.getusersitepackages(),

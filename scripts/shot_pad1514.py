@@ -31,12 +31,16 @@ import webui_shot  # noqa: E402
 GEAR_LAUNCHER = r'''
 import sys
 sys.path.insert(0, %r)
-from pinball_decryptor.webui import open_image
-open_image.install_dir = lambda: r"C:\Program Files\Pinball Asset Decryptor"
-# the menu as installed, but never the association itself: a shot must not
-# write this PC's registry
-open_image.register_association = lambda *a, **k: False
-open_image.unregister_association = lambda *a, **k: False
+try:
+    from pinball_decryptor.webui import open_image
+except ImportError:            # main before PAD-1514: the "before" shot
+    open_image = None
+if open_image is not None:
+    open_image.install_dir = lambda: r"C:\Program Files\Pinball Asset Decryptor"
+    # the menu as installed, but never the association itself: a shot must
+    # not write this PC's registry
+    open_image.register_association = lambda *a, **k: False
+    open_image.unregister_association = lambda *a, **k: False
 from pinball_decryptor.webui import host
 sys.exit(host.main(sys.argv[1:]))
 '''
@@ -67,7 +71,10 @@ def gear(out_dir, name):
             time.sleep(3)
             page.mouse.click(1370, 25)
             time.sleep(1)
-            page.get_by_text("Card images", exact=True).first.hover()
+            hover = page.get_by_text("Card images", exact=True)
+            if not hover.count():   # main before PAD-1514: no such submenu
+                hover = page.get_by_text("AI agents", exact=True)
+            hover.first.hover()
             time.sleep(1)
             page.screenshot(path=os.path.join(out_dir, name + ".png"))
             browser.close()

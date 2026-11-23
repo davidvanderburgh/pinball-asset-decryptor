@@ -19699,6 +19699,12 @@ static struct {
     unsigned long join_at;               /* ... when that line went up (join_n 0: none up) */
 } coop;
 #define COOP_SOLO_MS 1500ul              /* PAD-1054: the button held this close before a game's start is "held at Start" */
+#define COOP_GO_GAP_MS 20000ul           /* PAD-1449 round 9: a Start out of a game this soon before a game's start began it
+                                          * (at once from attract or the match draw; a menu or a login may come between) */
+static volatile unsigned long coop_go_ms;   /* PAD-1449 round 9: pm_ms() | 1 of the last Start out of a game (0: none) */
+static volatile int coop_go_held;           /* ... the button was down at that press */
+static int coop_start_held(unsigned long go, int go_held, int now_held, unsigned long held, unsigned long start,
+                           unsigned long window);
 #define COOP_JOIN_MS 2000ul             /* PAD-1052: each "PLAYERS ADDED" line on the top line */
 #define COOP_JOIN_ROUNDS 3u              /* ... said three times over: Godzilla LE 1.16's game-start film (not a display
                                           * effect) hid the first five, about 10 s (emulator) */
@@ -22163,6 +22169,15 @@ static int coop_launch_press(unsigned long now)
     return !coop_turn_waited || now - coop_waited_ms < COOP_LAUNCH_MS;
 }
 
+/* PAD-1449 round 9: a Start pressed out of a game (coop.cfg `intro_start`) - the one that begins the next game - and
+ * whether the button was down AT it (coop_start_held) */
+static void coop_go_edge(unsigned id, int press)
+{
+    if (!press || !id || id != ci.start_sw || pm_in_game()) return;
+    coop_go_held = coop_button_held();
+    coop_go_ms = pm_ms() | 1ul;
+}
+
 /* every edge of the switch drain (the game's thread): the pick's flippers and Action, the save's double press */
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)
 {
@@ -22180,6 +22195,7 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
         }
         return;
     }
+    coop_go_edge(id, (level & 1u) == closed);                 /* PAD-1449 round 9: a Start out of a game */
     sty_menu_edge(id, (level & 1u) == closed);                /* PAD-1449 round 4: Action and Start on the menu */
     if (sty.open && sty.ready && coop_teammates()) {          /* PAD-1449: the style chooser has them */
         if ((level & 1u) != closed) return;
@@ -23509,7 +23525,8 @@ static int ci_film_held(int chars, int held, int switched_on)
 static int ci_film_due(void)
 {
     int held = ci_film_held(coop_ch_n && coop_pick_on,
-                            coop_button_held() || (coop.held_ms && pm_ms() - (coop.held_ms & ~1ul) <= CI_HELD_MS),
+                            coop_start_held(coop_go_ms, coop_go_held, coop_button_held(), coop.held_ms, pm_ms(),
+                                            CI_HELD_MS),       /* PAD-1449 round 9: at the Start that began it */
                             coop_switched_on() || coop_teams_switched_on() != 0);
     if (sty.open && (sty.kind == STY_STANDARD || sty.kind == STY_CHALLENGE)) return 0;   /* PAD-1449: its style
                                                               * first: NORMAL is the game's own film */
@@ -24307,6 +24324,23 @@ static int coop_solo_held(unsigned long held, unsigned long start)
     return held && start - held <= COOP_SOLO_MS;
 }
 
+/* PAD-1449 round 9 (DoomWalrus666, on v1.564.1: "When on Standard Regular (started via Start Button default), if Start
+ * button is pressed during the Match screen, co-op intro plays and Enhanced mode is started"): "held at Start" was the
+ * button down at the game's start (`now_held`) or let go at most `window` ms before it (`held`, pm_ms() | 1; 0 never),
+ * so a right flipper tapped to hurry the match draw along and let go just before the Start (Godzilla LE 1.16 begins
+ * the game on that Start at once, emulator) made a co-op game of one: the co-op intro, then a character with its
+ * ability. PAD-1054 asked for the button "held when start button is pressed". Where the Start switch is known (coop.cfg
+ * `intro_start`) its press out of a game is kept (`go`, pm_ms() | 1, with `go_held`: the button down AT that press),
+ * and a game that starts within COOP_GO_GAP_MS of it is the button's only when it was down at that press or is down
+ * at the start (both pressed together); with no such press, as before (tests lift it verbatim) */
+static int coop_start_held(unsigned long go, int go_held, int now_held, unsigned long held, unsigned long start,
+                           unsigned long window)
+{
+    if (now_held) return 1;
+    if (go && start - (go & ~1ul) <= COOP_GO_GAP_MS) return go_held;
+    return held && start - (held & ~1ul) <= window;
+}
+
 /* PAD-1054: that game, now playing: a team of one with the game's one player, CO-OP PLAY (or a team mode) on and
  * characters to pick (tests lift it verbatim) */
 static int coop_solo_takes(unsigned players, int switched_on, int chars)
@@ -24322,7 +24356,11 @@ static void coop_solo_check(void)
     g = chg_game_now();
     if (g != coop.started) {                                  /* before this tick's poll: the held time AT the start */
         coop.started = g;
-        coop.solo_ask = g && coop_solo_held(coop.held_ms, pm_ms());
+        coop.solo_ask = g && coop_start_held(coop_go_ms, coop_go_held, coop_button_held(), coop.held_ms, pm_ms(),
+                                             COOP_SOLO_MS);
+        if (g && !coop.solo_ask && coop_solo_held(coop.held_ms, pm_ms()))   /* PAD-1449 round 9 */
+            say("co-op: the right flipper was let go %lu ms before this game began and was up at the Start that began it "
+                "(%lu ms before) - the game's own start", pm_ms() - (coop.held_ms & ~1ul), pm_ms() - (coop_go_ms & ~1ul));
         coop_fresh_ms = g ? pm_ms() | 1ul : 0ul;              /* PAD-1078: no ball in play until its first waits */
     }
     if (coop_button_held()) coop.held_ms = pm_ms() | 1ul;

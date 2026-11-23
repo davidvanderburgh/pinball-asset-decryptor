@@ -6864,6 +6864,16 @@ alone began the game. The step is now the menu's own and the game start never wa
   while it is armed re-arms it with the new pick. Emulator, Godzilla LE 1.16, the overlay forced to the plain menu
   after a Start in the Home Team mode select: v1.561.7 began the game on that Action (NORMAL, no step), round 8 opened
   the step and the game began as the style taken. Godzilla Pro 1.16 (his title) reads 1/4 on its plain menu.
+- Round 9 (DoomWalrus666, on v1.564.1: "When on Standard Regular (started via Start Button default), if Start button
+  is pressed during the Match screen, co-op intro plays and Enhanced mode is started"): PAD-1054's "held at Start" was
+  the right flipper down at the game's start or let go at most 1.5 s before it, and Godzilla LE 1.16 begins the game on
+  a Start in the match draw at once (emulator), so a right flipper tapped to hurry the draw along and let go just
+  before the Start made a co-op game of one: the co-op intro, then a character with its ability. Where coop.cfg names
+  the Start switch (`intro_start`) the drain keeps each Start out of a game and whether the button was down AT it
+  (`coop_go_edge`: `coop_go_ms`, `coop_go_held`); a game that starts within `COOP_GO_GAP_MS` (20 s) of that press is
+  the button's only when it was down at the press or is down at the start, for the co-op game of one
+  (`coop_solo_check`) and the intro's film (`ci_film_due`) both (`coop_start_held`). No such press (a port without
+  `intro_start`), as before.
 - With no step up the entry's line says the style taken and START TO PLAY, or its name and ACTION TO CHOOSE
   (`sty_menu_rest_words`); leaving the entry forgets the choice.
 - Start on the live menu (`sty_menu_go`) keeps what the line says - the style taken, the one shown while a step is up,
@@ -7167,7 +7177,8 @@ LE's shooter lane level byte reads the opposite sense to its flippers', so the l
 a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.
 
 PAD-1054 (DoomWalrus666): a player alone picks too. A game whose start (`game_start`) comes with `button` held, or
-let go of at most 1.5 s before, is a co-op game of ONE when it plays one player, CO-OP PLAY is not Off (any of Co-op,
+let go of at most 1.5 s before (PAD-1449 round 9: where the Start switch is known, down AT the Start that began it, or
+at the start itself), is a co-op game of ONE when it plays one player, CO-OP PLAY is not Off (any of Co-op,
 Team 2v2, Team 2v1; always, with no `setting`) and there is a pick: player 1 picks at once and the ability holds as a
 teammate's. Its score goes on the game's own boards, no co-op awards follow it and the top line stays the game's own
 `BALL n`. A Start in its first ball still adds a teammate (any Start, button held or not, as in a co-op game), or with

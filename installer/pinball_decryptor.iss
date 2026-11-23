@@ -55,6 +55,13 @@ DisableProgramGroupPage=auto
 ; (the one in place stays, and its uninstaller is copied across by the app).
 Uninstallable=not IsStaged
 VersionInfoVersion={#AppVersion}.0
+; PAD-1534: file times are stored and restored in UTC. The default keeps
+; the compiling machine's LOCAL wall clock and installs it as the user's
+; local time, and the release runner's local time IS UTC - so on a PC five
+; hours west every installed file was five hours in the future, and make
+; (the Multi-boot preview's menu build) recompiled everything, every time,
+; warning "Clock skew detected".
+TimeStampsInUTC=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

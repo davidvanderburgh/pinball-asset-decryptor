@@ -48,6 +48,8 @@ cloned from `clone` and given a `shape` (drag points), drawn as nothing; the
 switches map names them like any other object. On a ramp (`surface`), with a
 `radius`, one is also where a magnet the table lacks goes (Rush's time
 machine, a cvpmMagnet in `extra_vbs` that its coil turns on and off).
+`retrofit_items` copy any other kind of object (a kicker, a wall) the same
+way, moved to `at` or laid along a `shape`, with `fields` of their own.
 
 The map (<title>.shadow.json) says which object is which switch; see
 rush_le.shadow.json for the fields. The patched table is re-signed and gets
@@ -1856,9 +1858,46 @@ def flipper_warnings(m, had, lines):
         return ["WARNING: the machine's flipper coils move nothing: the table has no "
                 "SolLFlipper/SolRFlipper and the map names no `flippers`"]
     extra = (m.get("extra_vbs") or "").split("\n")
-    return ["WARNING: the map's flipper sub %s is in neither the table's script nor extra_vbs"
-            % sub for sub in dict.fromkeys(flips.values())
-            if not has_sub(lines, sub) and not has_sub(extra, sub)]
+    out = ["WARNING: the map's flipper sub %s is in neither the table's script nor extra_vbs"
+           % sub for sub in dict.fromkeys(flips.values())
+           if not has_sub(lines, sub) and not has_sub(extra, sub)]
+    # PAD-1511: the machine's upper flipper coil (core.vbs's sURFlipper 34 /
+    # sULFlipper 36) calls only a sub the map names for it: RebelB's JP 30th
+    # flips its third bat in SolRFlipper2, which no default picks, and that
+    # bat never moved. A table whose lower flipper's sub moves the upper bat
+    # too (JPSalas's JP 4.02: RightFlipper and RightFlipper1) needs none
+    sols = {str(k) for k in m.get("solenoids", {})}
+    for num, const, lower in (("34", "sURFlipper", "sLRFlipper"), ("36", "sULFlipper", "sLLFlipper")):
+        if num in sols and const not in flips and len(bats_moved(lines + extra, flips.get(lower))) < 2:
+            out.append("WARNING: the machine's %s coil (%s) moves nothing: the map's `flippers` "
+                       "names no sub for %s" % (m["solenoids"][num].get("name", num), num, const))
+    return out
+
+
+def bats_moved(lines, sub, seen=None):
+    """The flipper objects `sub` turns up (`X.RotateToEnd`, `X.Fire`), and
+    those of the subs it hands on to (Bond's map: PadLFlip calls the table's
+    SolLFlipper)."""
+    seen = set() if seen is None else seen
+    if not sub or sub.lower() in seen:
+        return set()
+    seen.add(sub.lower())
+    start = re.compile(r"^\s*(?:Public\s+|Private\s+)?Sub\s+%s\b" % re.escape(sub), re.I)
+    bats, inside, calls = set(), False, set()
+    for ln in lines:
+        if not inside:
+            inside = bool(start.match(ln))
+            if not inside:
+                continue
+            ln = start.sub("", ln)
+        bats |= {b.lower() for b in re.findall(r"(\w+)\.(?:RotateToEnd|Fire)\b", ln, re.I)}
+        calls |= set(re.findall(r"(?:^|:|\bThen\b|\bElse\b)\s*(\w+)(?=\s|$)", ln, re.I))
+        if re.search(r"(?:^|:)\s*End\s+Sub\b", ln, re.I):
+            break
+    for c in calls:
+        if has_sub(lines, c):
+            bats |= bats_moved(lines, c, seen)
+    return bats
 
 
 def flipper_flag(m):
@@ -2086,6 +2125,23 @@ def retrofit_items(table, m):
         if v.get("fields"):
             item = vpxfile.set_fields(item, {tag: _field_bytes(x) for tag, x in v["fields"].items()})
         items.append(item)
+    # PAD-1511: any other object the table lacks - a copy of its own `clone`
+    # (which must be there, of the `kind` given), moved to `at` [x, y] or laid
+    # along drag points of its own (`shape`), and given `fields` as item_fields
+    # does. RebelB's JP 30th has its Newton ball only painted on the playfield:
+    # two kickers hold real balls there and a wall round them takes the hit.
+    for name, v in m.get("retrofit_items", {}).items():
+        if name == "_":
+            continue
+        k, src = by_name.get(v["clone"].lower(), ("", None))
+        assert k == v["kind"], "%s: the table has no %s named %s to copy" % (name, v["kind"], v["clone"])
+        if "shape" in v:
+            item = vpxfile.reshape_item(vpxfile.clone_item(src, name, 0, 0), v["shape"])
+        else:
+            item = vpxfile.clone_item(src, name, *v["at"])
+        if v.get("fields"):
+            item = vpxfile.set_fields(item, {tag: _field_bytes(x) for tag, x in v["fields"].items()})
+        items.append(item)
     for name, v in m.get("retrofit_timers", {}).items():
         if name == "_":
             continue
@@ -2274,7 +2330,8 @@ def main(argv):
     info = [table.item_info(d) for d in table.items]
     names = {n.lower() for _, n, _ in info} | {n.lower() for n in m.get("retrofit_triggers", {})} \
         | {n.lower() for n in m.get("retrofit_lights", {}).get("lights", {})} \
-        | {n.lower() for n in m.get("retrofit_targets", {})}
+        | {n.lower() for n in m.get("retrofit_targets", {})} \
+        | {n.lower() for n in m.get("retrofit_items", {})}
     unlit = drop_missing_lights(m, names)
     for name in list(m["switches"]) + list(saucers(m)):
         if name != "_" and name.lower() not in names:

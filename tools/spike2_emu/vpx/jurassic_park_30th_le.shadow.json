@@ -16,9 +16,14 @@
     "Its posts and the raptor pen's door are droppable walls that stand UP until the table's own",
     "game drops them, and that game never starts: they drop once its init is done (after_init),",
     "the subs of its rules that raise them are quieted, and plock (left return lane) and plock2",
-    "(control room) are the machine's two up posts. The door stays down: the Pro has none.",
-    "The jeep (jptruck) is drawn at 100 (was 130, too big) and turns round once when the ball hits",
-    "it (its hit event on, PadJeepTimer steps it). RebelB's own copies of the game's effects",
+    "(control room) with plock3 (the raptor pen's lock) are the machine's two up posts it has here (UP POST-TOP, at the top centre, has none). The door stays down: the Pro has none.",
+    "The jeep (jptruck) is drawn at 100 (was 130, too big). Its Newton ball is only painted on the",
+    "playfield, smaller than a ball: two kickers hold real balls there (retrofit_items), the front one",
+    "and the one under the jeep's bumper, and a wall round both takes the knock: it pulses both Newton",
+    "optos and turns the jeep round once (PadJeepTimer); the car itself turns nothing. The third",
+    "flipper is SolRFlipper2 (`flippers`). The control room roof's picture (Wall022) is lifted to 60,",
+    "over a ball's top, and the wireforms RebelB drew over the photographed ones are hidden (RVIS 0)",
+    "but still carry the ball. SHOOT AGAIN is the table's own light. RebelB's own copies of the game's effects",
     "(\"LEFT BALL LOST\", \"SUPPLY DROP 1\" ...) are muted: the machine plays the real ones."
   ],
   "title": "jurassic_park_30th_le",
@@ -237,16 +242,16 @@
       "event": "hit",
       "name": "TARGET CONTROL ROOM (the trigger at the control room, behind plock2 (its up post))"
     },
-    "Target9": {
-      "id": 97,
-      "event": "hit",
-      "name": "NEWTON BALL-RIGHT OPTO (the centre shot under the jeep; it pulses both Newton ball optos)",
-      "also": "vpmTimer.PulseSw 1096"
-    },
     "helitarget": {
       "id": 49,
       "event": "hit",
       "name": "HELICOPTOR OPTO (the trigger under the helicopter)"
+    },
+    "PadNewtonWall": {
+      "id": 97,
+      "event": "hit",
+      "name": "NEWTON BALL-RIGHT OPTO (the Newton ball takes a knock; it pulses both Newton ball optos and turns the jeep)",
+      "also": "PlaySoundAtBall \"fx_collide\" : vpmTimer.PulseSw 1096 : PadJeepTurn"
     }
   },
   "plunger": {
@@ -376,7 +381,7 @@
     "BallRelease.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "'---- PAD (PAD-1511): the machine's up posts are the table's plock and plock2\nSub PadReturnPost(e) : plock.IsDropped = Not e : End Sub\nSub PadControlRoomPost(e) : plock2.IsDropped = Not e : End Sub\n'---- PAD (PAD-1511): the jeep turns round once when the ball hits it\nDim PadJeepStep : PadJeepStep = -1\nDim PadJeepA : PadJeepA = Array(-9.11, 49.54, 67.6, 74.11, 77.09, 78.5, 78.97, 78.68, 77.53, 75.03, 69.7, 56, 9.11, -49.54, -67.6, -74.11, -77.09, -78.5, -78.97, -78.68, -77.53, -75.03, -69.7, 124)\nDim PadJeepB : PadJeepB = Array(-78.83, -72.86, -59.88, -45.68, -31.14, -16.47, -1.76, 12.96, 27.64, 42.22, 56.54, 70, 78.83, 72.86, 59.88, 45.68, 31.14, 16.47, 1.76, -12.96, -27.64, -42.22, -56.54, 250)\nDim PadJeepC : PadJeepC = Array(-131.65, -71.54, -51.99, -43.88, -39.13, -35.67, -32.71, -29.8, -26.51, -22.18, -15.22, 0, 48.35, 108.46, 128.01, 136.12, 140.87, 144.33, 147.29, 150.2, 153.49, 157.82, 164.78, 0)\nSub jptruck_Hit\n\tIf PadJeepStep >= 0 Then Exit Sub\n\tPadJeepStep = 0 : PadJeepTimer.Enabled = True\nEnd Sub\nSub PadJeepTimer_Timer\n\tIf PadJeepStep > UBound(PadJeepA) Then\n\t\tPadJeepStep = -1 : PadJeepTimer.Enabled = False : Exit Sub\n\tEnd If\n\tjptruck.RotAndTra0 = PadJeepA(PadJeepStep)\n\tjptruck.RotAndTra1 = PadJeepB(PadJeepStep)\n\tjptruck.RotAndTra2 = PadJeepC(PadJeepStep)\n\tPadJeepStep = PadJeepStep + 1\nEnd Sub\n",
+  "extra_vbs": "'---- PAD (PAD-1511): the machine's up posts are the table's plock, plock2 and plock3\nSub PadReturnPost(e) : plock.IsDropped = Not e : End Sub\n' the machine's control room post stands at its raptor pit's foot and holds a captured raptor\n' ball (6 s on the rig): RebelB split it in two, plock2 in the control room lane and plock3 in\n' the raptor pen, the post his own rules raise for a capture; both rise with it\nSub PadControlRoomPost(e) : plock2.IsDropped = Not e : plock3.IsDropped = Not e : End Sub\n'---- PAD (PAD-1511): the jeep turns round once when the ball knocks the Newton ball\nDim PadJeepStep : PadJeepStep = -1\nDim PadJeepA : PadJeepA = Array(-9.11, 49.54, 67.6, 74.11, 77.09, 78.5, 78.97, 78.68, 77.53, 75.03, 69.7, 56, 9.11, -49.54, -67.6, -74.11, -77.09, -78.5, -78.97, -78.68, -77.53, -75.03, -69.7, 124)\nDim PadJeepB : PadJeepB = Array(-78.83, -72.86, -59.88, -45.68, -31.14, -16.47, -1.76, 12.96, 27.64, 42.22, 56.54, 70, 78.83, 72.86, 59.88, 45.68, 31.14, 16.47, 1.76, -12.96, -27.64, -42.22, -56.54, 250)\nDim PadJeepC : PadJeepC = Array(-131.65, -71.54, -51.99, -43.88, -39.13, -35.67, -32.71, -29.8, -26.51, -22.18, -15.22, 0, 48.35, 108.46, 128.01, 136.12, 140.87, 144.33, 147.29, 150.2, 153.49, 157.82, 164.78, 0)\nSub PadJeepTurn\n\tIf PadJeepStep >= 0 Then Exit Sub\n\tPadJeepStep = 0 : PadJeepTimer.Enabled = True\nEnd Sub\nSub PadJeepTimer_Timer\n\tIf PadJeepStep > UBound(PadJeepA) Then\n\t\tPadJeepStep = -1 : PadJeepTimer.Enabled = False : Exit Sub\n\tEnd If\n\tjptruck.RotAndTra0 = PadJeepA(PadJeepStep)\n\tjptruck.RotAndTra1 = PadJeepB(PadJeepStep)\n\tjptruck.RotAndTra2 = PadJeepC(PadJeepStep)\n\tPadJeepStep = PadJeepStep + 1\nEnd Sub\n",
   "quiet_subs": [
     "trextimer_Timer",
     "trextimer2_Timer",
@@ -387,7 +392,8 @@
     "CloseDoor",
     "plockup",
     "plockup2",
-    "plockup3"
+    "plockup3",
+    "Target9_Hit"
   ],
   "orig_hits": false,
   "orig_keep": [
@@ -3212,6 +3218,15 @@
         ]
       ],
       "name": "4X4 LEFT DIRECTION (PAD-859: beside it, 2 px)"
+    },
+    "LightShootAgain": {
+      "leds": [
+        [
+          8,
+          5
+        ]
+      ],
+      "name": "SHOOT AGAIN (the table's own light, on the insert)"
     }
   },
   "retrofit_lights": {
@@ -3337,20 +3352,6 @@
           301
         ]
       },
-      "PadShootAgain": {
-        "leds": [
-          [
-            8,
-            5
-          ]
-        ],
-        "name": "SHOOT AGAIN",
-        "clone": "Light75",
-        "at": [
-          451,
-          1868
-        ]
-      },
       "PadSpinner100k": {
         "leds": [
           [
@@ -3406,7 +3407,6 @@
     "Light707",
     "Light71",
     "Light803",
-    "LightShootAgain",
     "NublarHeli3",
     "NublarLight2",
     "NublarLight6",
@@ -3440,7 +3440,9 @@
     "plock.IsDropped = 1",
     "plock2.IsDropped = 1",
     "plock3.IsDropped = 1",
-    "PadJeepTimer.Enabled = False"
+    "PadJeepTimer.Enabled = False",
+    "PadNewtonFront.CreateSizedBallWithMass BallSize / 2, BallMass",
+    "PadNewtonRear.CreateSizedBallWithMass BallSize / 2, BallMass"
   ],
   "item_fields": {
     "jptruck": {
@@ -3450,7 +3452,53 @@
         100.0,
         0.0
       ],
-      "HTEV": 1
+      "HTEV": 0
+    },
+    "wall65": {
+      "CLDW": 0
+    },
+    "Wall022": {
+      "HTBT": 60.0,
+      "HTTP": 60.0
+    },
+    "Ramp001": {
+      "RVIS": 0
+    },
+    "Ramp002": {
+      "RVIS": 0
+    },
+    "Ramp003": {
+      "RVIS": 0
+    },
+    "Ramp007": {
+      "RVIS": 0
+    },
+    "Ramp008": {
+      "RVIS": 0
+    },
+    "Ramp009": {
+      "RVIS": 0
+    },
+    "Ramp010": {
+      "RVIS": 0
+    },
+    "Ramp011": {
+      "RVIS": 0
+    },
+    "Ramp012": {
+      "RVIS": 0
+    },
+    "Ramp013": {
+      "RVIS": 0
+    },
+    "Ramp015": {
+      "RVIS": 0
+    },
+    "Ramp018": {
+      "RVIS": 0
+    },
+    "Ramp36": {
+      "RVIS": 0
     }
   },
   "mute_sounds": [
@@ -3491,5 +3539,111 @@
       "why": "the plunger key pressed the Action Button: only the auto plunger launched, and the manual plunger never pulled",
       "since": "PAD-1128: the plunger key pulls the table's plunger, the Action Button is the lockbar key"
     }
-  ]
+  ],
+  "flippers": {
+    "_": "PAD-1511: the table flips its third bat (RightFlipper2) in SolRFlipper2, which no default names",
+    "sLLFlipper": "SolLFlipper",
+    "sLRFlipper": "SolRFlipper",
+    "sURFlipper": "SolRFlipper2"
+  },
+  "retrofit_items": {
+    "_": "PAD-1511: the Newton ball is only painted on RebelB's playfield (a ball smaller than the real one, an unseen post round it); two invisible kickers hold real balls there, the front one the ball hits and the one behind it under the jeep's bumper, as the machine's are, and a wall round both takes the knock",
+    "PadNewtonFront": {
+      "kind": "Kicker",
+      "clone": "k11",
+      "at": [
+        514.0,
+        725.0
+      ]
+    },
+    "PadNewtonRear": {
+      "kind": "Kicker",
+      "clone": "k11",
+      "at": [
+        514.0,
+        675.0
+      ]
+    },
+    "PadNewtonWall": {
+      "kind": "Wall",
+      "clone": "wall65",
+      "shape": [
+        [
+          514.0,
+          649.0
+        ],
+        [
+          504.05,
+          650.98
+        ],
+        [
+          495.62,
+          656.62
+        ],
+        [
+          489.98,
+          665.05
+        ],
+        [
+          488.0,
+          725.0
+        ],
+        [
+          489.98,
+          734.95
+        ],
+        [
+          495.62,
+          743.38
+        ],
+        [
+          504.05,
+          749.02
+        ],
+        [
+          514.0,
+          751.0
+        ],
+        [
+          523.95,
+          749.02
+        ],
+        [
+          532.38,
+          743.38
+        ],
+        [
+          538.02,
+          734.95
+        ],
+        [
+          540.0,
+          675.0
+        ],
+        [
+          538.02,
+          665.05
+        ],
+        [
+          532.38,
+          656.62
+        ],
+        [
+          523.95,
+          650.98
+        ]
+      ],
+      "fields": {
+        "HTBT": 0.0,
+        "HTTP": 50.0,
+        "VSBL": 0,
+        "SVBL": 0,
+        "CLDW": 1,
+        "DSPT": 0,
+        "HTEV": 1,
+        "THRS": 2.0,
+        "ELAS": 0.3
+      }
+    }
+  }
 }

@@ -82,6 +82,35 @@ class TabService:
         self.window.bind_var(self.ns, key, v)
         return v
 
+    # PAD-1176 / PAD-1209 (PAD-1527: shared with the Video tab): choices kept
+    # app-wide in settings.json
+    def _pref(self, key, kind):
+        """The value *key* was last set to (of type *kind*), this session
+        or an earlier one; None when it never was."""
+        app = self.app
+        s = getattr(app, "_settings", None) if app is not None else None
+        got = s.get(key) if isinstance(s, dict) else None
+        if not isinstance(got, kind):
+            got = getattr(self, "_prefs_local", {}).get(key)
+        return got if isinstance(got, kind) else None
+
+    def _remember_pref(self, key, value):
+        """Keep *value* for *key* in settings.json (saved straight away, so
+        it is there next session whatever way the app is closed)."""
+        if not hasattr(self, "_prefs_local"):
+            self._prefs_local = {}
+        if self._prefs_local.get(key) == value and self._pref(
+                key, type(value)) == value:
+            return
+        self._prefs_local[key] = value
+        app = self.app
+        if app is not None and isinstance(getattr(app, "_settings", None), dict):
+            app._settings[key] = value
+            try:
+                app._save_settings()
+            except Exception:                              # noqa: BLE001
+                pass
+
     def log(self, text, level="info"):
         self.window.append_log(text, level)
 

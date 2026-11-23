@@ -29,6 +29,7 @@ const T = {
   clear: "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.",
   show: "Narrow the list by what you've already done to it. Changed = the slots with a pending replacement or already changed on disk by a previous build. Unchanged = everything you haven't touched yet, so a part-finished pass is what's left in front of you instead of something to scroll past.",
   noconv: "Use my files as-is — never re-encode (all slots)",
+  seq: "When a clip finishes, select and play the next row in the list, following whatever sort, search, Show and mode filter are showing.\n\nIt plays on the same side: under Replacement, a row with no replacement plays its original.\n\nStops at the end of the list, on ■, on a click on another row, or when you go to another tab.",
   noconvTip: "Applies to every replacement you have picked, not just the selected one — tick or untick it any time and the Convert column re-answers for the whole list. Nothing has to be picked again.\n\nOn: replacements are copied in byte-for-byte, so each one has to already be the clip's container, codec, resolution and frame rate. Lossless and fast, but the file has to be game-ready — a clip the machine can't decode plays its sound over a black picture, and the Convert column says \"✗ wrong format\" when it can see that coming.\n\nOff: anything that isn't already a match is converted to suit the slot, at full size — and a clip that is already this slot's video in the wrong container is repackaged rather than re-encoded, so it loses nothing either.\n\nFor a single clip, right-click its row and use \"This clip's conversion\" — that setting wins over this box, either way, so one hand-encoded clip can go on untouched in a project that converts everything else.",
   trim: "Trim / pad to the original clip length",
   specIntro: "A replacement matching this goes onto the card untouched, at full quality. Anything else has to be converted first — untick \"Use my files as-is\" and the app will do it.",
@@ -441,7 +442,7 @@ export function FullButton({ fv, size = "sm" }) {
     onClick=${(e) => { e.stopPropagation(); fv.toggle(); }} />`;
 }
 
-function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
+function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look, onFinished }) {
   const vref = useRef(null);
   const [glLive, setGlLive] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -503,6 +504,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     wantPlay.current = 0;
     setPlaying(false);
     setPos(0);
+    call("video.stopped");      // PAD-1527: a queued "Play sequentially" step is dropped
     if (!v) return;
     songFollow(v, "stop");
     v.pause();
@@ -516,6 +518,8 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     const v = e.currentTarget;
     songFollow(v, "stop");
     if (v && src) v.load();
+    // PAD-1527: "Play sequentially" moves the list on to the next row
+    if (onFinished && pane.path) onFinished(side, pane.path);
   };
   const onError = () => {
     if (!pane.proxy && src) { setFailed(true); asked.current = 0; }
@@ -1062,6 +1066,7 @@ export default function VideoTab() {
     setSel(new Set([rel])); anchor.current = rel;
     choose(rel);
   };
+  const clipFinished = (side, path) => call("video.clip_finished", side, path);
   const playRow = (rel, side = "orig") => {
     setSel(new Set([rel])); anchor.current = rel;
     clearTimeout(selectJob.current);
@@ -1421,6 +1426,7 @@ export default function VideoTab() {
           : md.why ? html`<span class="small muted nw vid-modes-why" ...${tip(md.why.tip)}>${md.why.line}</span>` : null}
         <span class="sp"></span>
         <span class="vid-opts">
+          <${Check} cls="small" ns="video" k="play_through" checked=${s.play_through} label="Play sequentially" title=${T.seq} />
           <${Check} checked=${s.no_conversion} label=${T.noconv} title=${T.noconvTip} cls="small"
             onChange=${(v) => call("video.set_no_conversion", v)} />
           <${Check} checked=${s.trim} label=${T.trim} title=${s.trim_tip} cls="small" disabled=${!s.trim_enabled}
@@ -1475,9 +1481,11 @@ export default function VideoTab() {
         <div class="lookbar-row">${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
           <${UnlockBox} /></div>
         <div class="vid-panes">
-          <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />
+          <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look}
+            onFinished=${s.play_through ? clipFinished : null} />
           <span class="vid-vsep"></span>
-          <${Pane} pane=${rep} side="rep" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${repHead} look=${look} />
+          <${Pane} pane=${rep} side="rep" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${repHead} look=${look}
+            onFinished=${s.play_through ? clipFinished : null} />
         </div>
       </div>
     </section>

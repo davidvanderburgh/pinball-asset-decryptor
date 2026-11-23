@@ -151,6 +151,16 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self.video_trim_var = self.var("trim", "bool", False)
         self.video_no_conversion_var = self.var("no_conversion", "bool", False)
         self.video_best_quality_var = self.var("best_quality", "bool", False)
+        # PAD-1527: "Play sequentially", as on the Audio tab: a clip that plays
+        # to its end moves the list on to the next row and plays that; the
+        # box comes back as the last session left it
+        self.video_play_through_var = self.var("play_through", "bool", False)
+        self.video_play_through_var.set(
+            self._pref("video_play_through", bool) is True)
+        self.video_play_through_var.trace_add(
+            "write", lambda *a: self._remember_pref(
+                "video_play_through", bool(self.video_play_through_var.get())))
+        self._advance_job = None
         self._slots = []                 # [VideoSlot] from the last scan
         self._by_rel = {}                # rel -> VideoSlot
         self._reveal_after_scan = ""     # PAD-1274: a jump waiting on the scan
@@ -659,7 +669,9 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             self._scan_async()
 
     def stop_all_preview_playback(self):
-        """Stop both preview panes (the page pauses its players)."""
+        """Stop both preview panes (the page pauses its players), and
+        drop a queued "Play sequentially" step (PAD-1527)."""
+        self._cancel_advance()
         self._stop_seq += 1
         self.set(stop_seq=self._stop_seq)
 
@@ -3406,9 +3418,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         return orig
 
     def _load_track(self, rel, autoplay=None):
-        """MainWindow._video_load_track."""
+        """MainWindow._video_load_track.  Any row loading (a click, ▶, a
+        pick) drops a queued "Play sequentially" step (PAD-1527)."""
         if rel not in self._by_rel:
             return
+        self._cancel_advance()
         self._current = rel
         orig = self._orig_pane(rel)
         pv = dict(self.get("preview") or self._empty_preview())
@@ -3424,6 +3438,66 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             self.set(play={"side": autoplay, "seq": self._play_seq})
         self._update_note(rel)
         self.publish_look()
+
+    # -- "Play sequentially" (PAD-1527) ------------------------------------
+    def _cancel_advance(self):
+        job, self._advance_job = self._advance_job, None
+        if job:
+            self.ctx.loop.after_cancel(job)
+
+    @rpc
+    def stopped(self):
+        """■ on a pane: drop a queued "Play sequentially" step."""
+        self._cancel_advance()
+        return True
+
+    def on_tab_changed(self, ns):
+        """Another tab was picked: the next clip does not start behind it."""
+        if ns != self.ns:
+            self._cancel_advance()
+
+    def _visible_rels(self):
+        """The rows as the list shows them: its sort, search, Show and mode
+        filter."""
+        rows = self._rows
+        return [rows[i].get("rel") for i in (self.get("view") or [])
+                if 0 <= i < len(rows)]
+
+    @rpc
+    def clip_finished(self, side, path=None):
+        """A pane's clip played to its end on its own: with "Play
+        sequentially" ticked, select the next row the list shows and play it
+        on the same pane (Original when that row has no replacement).  It
+        stops at the end of the list."""
+        pane = (self.get("preview") or {}).get(side)
+        if not isinstance(pane, dict) or (path and pane.get("path") != path):
+            return False
+        if not self.video_play_through_var.get():
+            return False
+        rel = self._current
+        rels = self._visible_rels()
+        if rel not in rels:
+            return False
+        i = rels.index(rel)
+        if i + 1 >= len(rels):
+            self.log("Replace Video: played through to the end of the list.",
+                     "info")
+            return False
+        nxt = rels[i + 1]
+        if side != "orig" and not (self._assign.get(nxt)
+                                   or self._stock_coloured(nxt)):
+            side = "orig"
+
+        def _advance():
+            self._advance_job = None
+            if self._current != rel or not self.video_play_through_var.get():
+                return
+            self._reselect([nxt])
+            self._load_track(nxt, side)
+
+        self._cancel_advance()
+        self._advance_job = self.ctx.loop.after(120, _advance)
+        return True
 
     def _pick_state(self, rel):
         return {"can_clear": bool(rel and self._targets([rel])),

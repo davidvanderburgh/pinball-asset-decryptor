@@ -1119,3 +1119,113 @@ def test_gap_words():
     assert _gap_words(10.02, 10.0) == "same length"
     assert _gap_words(30.0, 15.0) == "+15.0 s • 100% faster"
     assert _gap_words(100.0, 200.0) == "−1:40 • 50% slower"
+
+
+# ------------------------------------------- PAD-1527: Play sequentially
+def _svc(w):
+    return w.window._by_ns["video"]
+
+
+def _finish(w, side="orig"):
+    """The page reports the pane's clip played to its end."""
+    st = w.state("video")
+    return w.call("video.clip_finished", side, st["preview"][side]["path"])
+
+
+def test_play_sequentially_steps_down_the_list(tmp_path):
+    proj = _project(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        st = _wait(w, lambda s: s["preview"]["rel"] == "video/attract.mp4")
+        assert st["play_through"] is False
+        # off: a clip ending changes nothing
+        assert _finish(w) is False
+        time.sleep(0.3)
+        assert w.state("video")["preview"]["rel"] == "video/attract.mp4"
+        w.call("ui.set", "video", "play_through", True)
+        play = w.state("video")["play"]["seq"]
+        assert _finish(w) is True
+        st = _wait(w, lambda s: s["preview"]["rel"] == "video/intro.mp4")
+        assert st["select"]["rels"] == ["video/intro.mp4"]
+        assert st["play"] == {"side": "orig", "seq": play + 1}
+        # a stale report (the pane has moved on) is ignored
+        assert w.call("video.clip_finished", "orig", "C:/elsewhere.mp4") is False
+
+
+def test_play_sequentially_follows_the_sort_and_stops_at_the_end(tmp_path):
+    proj = _project(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        w.call("ui.set", "video", "play_through", True)
+        w.call("video.sort", "#0")                     # Z-A
+        order = _rels(w.state("video"))
+        assert order[0] == "video/sub/boss.mp4"
+        w.call("video.select", order[0], None)
+        _finish(w)
+        _wait(w, lambda s: s["preview"]["rel"] == order[1])
+        w.call("video.select", order[-1], None)
+        lines = []
+        w.run(lambda: setattr(_svc(w), "log", lambda m, *a, **k: lines.append(m)))
+        play = w.state("video")["play"]["seq"]
+        assert _finish(w) is False
+        time.sleep(0.3)
+        w.drain()
+        st = w.state("video")
+        assert st["preview"]["rel"] == order[-1] and st["play"]["seq"] == play
+        assert any("end of the list" in m for m in lines)
+
+
+def test_play_sequentially_on_replacement_falls_back_to_original(tmp_path):
+    proj = _project(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        w.call("ui.set", "video", "play_through", True)
+        svc = _svc(w)
+        mine = str(_mine(tmp_path))
+        # Replacement on attract and boss, none on intro (the list: attract, intro, boss)
+        w.run(lambda: svc._assign.update({"video/attract.mp4": mine,
+                                          "video/sub/boss.mp4": mine}))
+        w.run(lambda: svc._load_track("video/attract.mp4", None))
+        assert _finish(w, "rep") is True
+        st = _wait(w, lambda s: s["preview"]["rel"] == "video/intro.mp4")
+        assert st["play"]["side"] == "orig"
+        # a next row that has a replacement plays it there
+        w.run(lambda: svc._assign.update({"video/intro.mp4": mine}))
+        w.run(lambda: svc._load_track("video/intro.mp4", None))
+        assert _finish(w, "rep") is True
+        st = _wait(w, lambda s: s["preview"]["rel"] == "video/sub/boss.mp4")
+        assert st["play"]["side"] == "rep"
+
+
+@pytest.mark.parametrize("how", ["stop", "click", "tab"])
+def test_play_sequentially_step_is_dropped(tmp_path, how):
+    """■, a click on another row, or another tab drops the queued step."""
+    proj = _project(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        w.call("ui.set", "video", "play_through", True)
+        svc = _svc(w)
+
+        def _race():
+            assert svc.clip_finished("orig", svc.get("preview")["orig"]["path"]) is True
+            if how == "stop":
+                svc.stopped()
+            elif how == "click":
+                svc.select("video/sub/boss.mp4")
+            else:
+                svc.on_tab_changed("audio")
+        w.run(_race)
+        time.sleep(0.4)
+        w.drain()
+        want = "video/sub/boss.mp4" if how == "click" else "video/attract.mp4"
+        assert w.state("video")["preview"]["rel"] == want
+
+
+def test_play_sequentially_is_remembered(tmp_path):
+    proj = _project(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        w.call("ui.set", "video", "play_through", True)
+        svc = _svc(w)
+        assert svc._pref("video_play_through", bool) is True
+        assert w.app._settings.get("video_play_through") is True

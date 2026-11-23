@@ -1980,6 +1980,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             if col == "seen":                   # PAD-827: the seen clips first
                 c = self._m_seen_row(s.rel_path)["seen"]
                 return ((0, c.lower()) if c else (1, ""), s.rel_path.lower())
+            if col == "modes":                  # PAD-1524: the named modes A-Z, then the rest
+                return self._m_sort_key(s.rel_path)
             if col == "rep":
                 rep = self._assign.get(s.rel_path)
                 if rep:
@@ -2013,6 +2015,10 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             slots = [s for s in slots if ok(s.rel_path)]
         slots = [s for s in slots if self._m_keep(s.rel_path)]
         col, desc = self._sort
+        if col == "modes":
+            # PAD-1524: rows that share a Played in stay in file name order either way
+            # (a reversed sort keeps equal rows in the order they came in)
+            slots.sort(key=lambda s: s.rel_path.lower())
         slots.sort(key=self._sort_key(col), reverse=desc)
         view = [self._index[s.rel_path] for s in slots
                 if s.rel_path in self._index]

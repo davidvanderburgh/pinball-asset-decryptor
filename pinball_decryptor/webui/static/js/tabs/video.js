@@ -39,7 +39,7 @@ const T = {
   // PAD-444: which of the game's modes plays each clip, read off the card's game program
   // PAD-827
   seen: "What the emulator saw the game do with this clip: the switch made just before it started, and \"loops\" when the game starts it again each time it ends. It fills in as you play games on the Emulate tab, where the playfield window lists the clips as they play. The words the game draws over a clip are on the game's screen there. Beside it, what the card's game program says: a clip the game plays in turn with others, one of a set it picks from, or one it asks for as a loop.",
-  modes: "Which of the game's battles, multiballs and other modes play this clip, read from the card's game program. A clip two modes share has a row for each: choose a replacement in one mode's row to change it for that mode only. Not played: nothing in the game asks for the clip, so the machine never shows it.",
+  modes: "Which of the game's battles, multiballs and other modes play this clip, read from the card's game program. A clip two modes share has a row for each: choose a replacement in one mode's row to change it for that mode only. Not played: nothing in the game asks for the clip, so the machine never shows it. Click the header to sort by it: the clips of one mode together, the ones not played after them.",
   modeFilter: "List only the clips one mode of the game plays.",
   modesBusy: "Reading which mode plays each clip…",
   // PAD-453 (DragonRR)
@@ -1275,7 +1275,7 @@ export default function VideoTab() {
         ? html`<span class=${cx("vid-fit", r.fit_cls === "on" ? "acc-ink" : "dim")}
             ...${tip(r.fit_tip || r.fit)}>${r.fit}</span>`
         : "") },
-    modesCol && { key: "modes", label: "Played in", width: width("modes"), title: T.modes,
+    modesCol && { key: "modes", label: "Played in", width: width("modes"), sort: "modes", title: T.modes,
       render: (r) => (r.unplayed
         ? html`<span class="vid-modes-cell unplayed" ...${tip({ head: "Not played", lines: [
             "Nothing in the game's program asks for this clip, so the machine never shows it."] })}>${modesText(r)}</span>`

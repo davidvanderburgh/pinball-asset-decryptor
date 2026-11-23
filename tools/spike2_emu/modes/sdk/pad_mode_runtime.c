@@ -6862,17 +6862,31 @@ static void gm_seen(unsigned id, int stop, const char *how)
     say("follow: the game's %s (mode %u) %s (%s)", nm ? nm : "?", id, stop ? "stopped" : "started", how);
 }
 
-/* from done_tick: a START entered on a C++ title - the mode runs for the player now (not stopped, its start count up
- * where the port names it), or the game's START ran and left it (Deadpool 1.16's Disco Loops a second time in a ball) */
+/* from done_tick: a START entered on a C++ title - the mode runs for the player now, or the game's START ran and left
+ * it (Deadpool 1.16's Disco Loops a second time in a ball). Running: the mode object's own ACTIVE virtual where the
+ * runtime knows its slot (the one the game's "a mode is active" query calls, PAD-768), else not stopped for the player
+ * and its start count up where the port names it */
+static long mode_query_slot(int kind_slot);
+static unsigned place_vfn_at(unsigned obj, long slot);
+static int gm_active(unsigned obj)
+{
+    long a = pm_port_value("mode_slot_active", -1);
+    unsigned f;
+    if (a < 0) a = mode_query_slot(0);
+    if (a < 0 || !(f = place_vfn_at(obj, a))) return -1;
+    return (int)(((unsigned (*)(unsigned))(unsigned long)f)(obj) & 0xffu);
+}
+
 static void gm_check_tick(void)
 {
     unsigned id;
     for (id = 0; id < BLOCK_IDS; id++) {
         unsigned obj = block_obj[id], p = gm_chk[id].p;
-        int on;
+        int on, act;
         if (!gm_chk[id].at) continue;
-        on = obj && !place_stopped(obj, p)
-            && (pm_port_value("mode_starts_at", -1) < 0 || place_starts(obj, p) != gm_chk[id].starts);
+        act = obj ? gm_active(obj) : -1;
+        on = obj && (act >= 0 ? act != 0 : !place_stopped(obj, p)
+                     && (pm_port_value("mode_starts_at", -1) < 0 || place_starts(obj, p) != gm_chk[id].starts));
         if (on) {
             gm_chk[id].at = 0;
             gm_starts[id]++;
@@ -6884,7 +6898,9 @@ static void gm_check_tick(void)
             gm_chk[id].at = 0;
             if (gm_said[id] < 6) {
                 gm_said[id]++;
-                say("follow: the game's %s (mode %u): its START ran but did not start it - not a start", pm_game_mode_name(id), id);
+                say("follow: the game's %s (mode %u): its START ran but did not start it - not a start (active %d, "
+                    "stopped %u, starts %u -> %u)", pm_game_mode_name(id), id, act, obj ? place_stopped(obj, p) : 0u,
+                    gm_chk[id].starts, obj ? place_starts(obj, p) : 0u);
             }
         }
     }

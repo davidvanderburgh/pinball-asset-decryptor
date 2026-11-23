@@ -151,6 +151,12 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self.video_trim_var = self.var("trim", "bool", False)
         self.video_no_conversion_var = self.var("no_conversion", "bool", False)
         self.video_best_quality_var = self.var("best_quality", "bool", False)
+        # PAD-1532: "Show unused", as on the Audio tab: unticked, the clips the
+        # game never plays (Played in: Not played) leave the list; remembered
+        # between sessions. The store holds the opposite (hide_unused).
+        self.video_hide_unused_var = self.var("hide_unused", "bool", False)
+        self.video_hide_unused_var.set(
+            self._pref("video_hide_unused", bool) is True)
         # PAD-1527: "Play sequentially", as on the Audio tab: a clip that plays
         # to its end moves the list on to the next row and plays that; the
         # box comes back as the last session left it
@@ -235,7 +241,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._m_init()                  # PAD-444: Played in (video_modes.py)
         self._u_init()                  # PAD-453: Undo / Redo (video_undo.py)
         self._m_select_after = []
-        for v in (self.video_search_var, self.video_change_filter_var):
+        for v in (self.video_search_var, self.video_change_filter_var,
+                  self.video_hide_unused_var):
             v.trace_add("write", lambda *_a: self._refresh_list())
         for v in (self.video_trim_var, self.video_no_conversion_var):
             v.trace_add("write", lambda *_a: self._on_option_var())
@@ -742,6 +749,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         if i is None or i not in set(self.get("view") or []):
             self.video_search_var.set("")
             self.video_change_filter_var.set("All")
+            self.video_hide_unused_var.set(False)
             self._refresh_list()
         self._reselect([rel])
         self._load_track(rel)
@@ -902,6 +910,10 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                 elif "video_changed_only" in staged:
                     self.video_change_filter_var.set(
                         "Changed" if staged["video_changed_only"] else "All")
+                hide = self._pref("video_hide_unused", bool)
+                if hide is None:
+                    hide = bool(staged.get("video_hide_unused"))
+                self.video_hide_unused_var.set(hide)
             finally:
                 self._restoring = False
             self._update_trim_enabled()
@@ -939,6 +951,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         if after and self._index[after[0]] not in view:
             self.video_search_var.set("")
             self._m_filter = ""
+            self.video_hide_unused_var.set(False)
             self._refresh_list()
             view = self.get("view") or []
         if after:
@@ -2026,6 +2039,9 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         if ok is not None:
             slots = [s for s in slots if ok(s.rel_path)]
         slots = [s for s in slots if self._m_keep(s.rel_path)]
+        hide_unused = self._m_hiding_unused()
+        if hide_unused:
+            slots = [s for s in slots if not self._m_unused(s.rel_path)]
         col, desc = self._sort
         if col == "modes":
             # PAD-1524: rows that share a Played in stay in file name order either way
@@ -2052,9 +2068,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                                 + (vh.CHANGE_SCAN_NOTE if self._change_running
                                    else ""))
             values["empty"] = "" if shown else (
-                "No slots match the search, the Show filter and the mode."
+                "No slots match the search, the Show filter and the mode%s."
+                % (" or Show unused" if hide_unused else "")
                 if self._m_filter else
-                "No slots match the search and the Show filter.")
+                "No slots match the search and the Show filter%s."
+                % (" or Show unused" if hide_unused else ""))
         values["counts"] = {"changed": changed_total, "total": total,
                             "shown": len(view)}
         values["color_offered"] = bool(total and self._per_file_colour())
@@ -2124,6 +2142,16 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._sort = ((col, not cur[1]) if cur and cur[0] == col
                       else (col, default[col]))
         self._refresh_list()
+        return True
+
+    @rpc
+    def set_hide_unused(self, on):
+        """PAD-1532: leave out the clips the game never plays (the "Show
+        unused" tick, which sends the opposite of what it shows, as the Audio
+        tab's does; remembered between sessions)."""
+        self.video_hide_unused_var.set(bool(on))
+        self._remember_pref("video_hide_unused", bool(on))
+        self._save_staged()
         return True
 
     @rpc
@@ -2241,6 +2269,10 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         else:
             data.pop("video_color_slots", None)
         data["video_change_filter"] = self.video_change_filter_var.get()
+        if self.video_hide_unused_var.get():
+            data["video_hide_unused"] = True
+        else:
+            data.pop("video_hide_unused", None)
         names = dict(data.get("replacement_names") or {})
         for rel, path in self._assign.items():
             if isinstance(path, str) and path.strip():

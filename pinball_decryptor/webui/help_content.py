@@ -816,7 +816,8 @@ HELP_CONTENT = {
             "build (a direct-SD write leaves it out); the other mode keeps the clip it had.\n"
             "- Clear the replacement and the row is the **Same clip as** the first again.\n"
             "- **Not played**: nothing in the game asks for the clip, so the machine never "
-            "shows it; a replacement there changes nothing.",
+            "shows it; a replacement there changes nothing. Untick **Show unused** in the "
+            "toolbar to leave those clips out of the list.",
             "**Sounds with a clip** (Spike 2): under the panes, the sounds the game plays "
             "with the clip, read from its program: kept with the clip, asked for right after "
             "it, or named after it. Each is named by its file in the project's audio folder; "

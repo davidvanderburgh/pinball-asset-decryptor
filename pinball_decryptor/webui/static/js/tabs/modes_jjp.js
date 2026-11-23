@@ -425,7 +425,7 @@ function TitleSettings({ j, have }) {
   const t = j.title_cfg || {};
   return html`<section class="card jjpm-title-card">
     <div class="hd" style="cursor:pointer" onClick=${() => setOpen(!open)}><span class="h2">${open ? "▾" : "▸"} Every mode of this game</span>
-      <span class="muted small">defaults a mode's own settings override: ${(j.title_keys || []).some((k) => k.startsWith("font") || k.endsWith("color")) ? "fonts, colors, the panel" : "the panel"}${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
+      <span class="muted small">defaults a mode's own settings override: ${(j.title_keys || []).some((k) => k.startsWith("font") || k.endsWith("color")) ? "fonts, colors, the panel" : "the panel"}${(j.title_keys || []).includes("game_type_at") ? ", and the attract menu's game type picker" : ""}${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
     ${open ? html`<div class="bd">${(j.title_keys || []).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
   </section>`;
 }

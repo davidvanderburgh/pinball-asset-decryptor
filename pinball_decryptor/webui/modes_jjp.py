@@ -145,7 +145,7 @@ class JjpModesMixin:
         """{key: {label, kind, default, choices}} for every key the form shows."""
         out = {}
         port = (CM.load_port(self._jjp_label) if self._jjp_label else None) or {}
-        for k in list(CM.mk().KEYS) + ["ingame_state", "background_modes"]:
+        for k in list(CM.mk().KEYS) + [t for t in CM.mk().TITLE_KEYS if t != "game"]:
             kind = CM.key_kind(k)
             choices = list(kind) if isinstance(kind, tuple) else []
             default = CM.DEFAULTS.get(k, "")

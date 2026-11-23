@@ -297,6 +297,16 @@ static int background_explicit;                 /* title.cfg named them */
 static char game_name[64];                      /* title.cfg `game`: GAMENAME these modes are for */
 static char background_names[1024];
 static char gt_normal[48] = "NORMAL GAME", gt_title[48] = "GAME TYPE";   /* title.cfg game_type_normal / game_type_title */
+/* PAD-1512: the menu's look, all title.cfg (MODES.md "The game type menu's look"): its box (empty =
+ * centred, sized to its lines), colors, the game's fonts, a hint line, a picture of ours under it */
+static struct {
+    char hint[96]; float at[4]; int has_at;
+    unsigned panel, bar, title, item, pick, pick_bar, hint_rgba;
+    void *font_title, *font_item, *font_hint;
+    char pic_file[160]; float pic_at[4]; void *pic_bmp; int pic_w, pic_h;
+} gtl = { "FLIPPERS TO CHOOSE - START TO PLAY", {0, 0, 0, 0}, 0,
+          0x000000e0, 0xffdc00ff, 0xffdc00ff, 0x9a9a9aff, 0xffffffff, 0xffffff38, 0xc8c8c8ff,
+          NULL, NULL, NULL, "", {0, 0, 100, 100}, NULL, 0, 0 };
 
 /* ---- config parsing -------------------------------------------------------- */
 static char *trim(char *s)
@@ -722,6 +732,20 @@ static void apply_kv(pm_t *m, const char *k, char *v)
     else if (!strcmp(k, "game_type")) snprintf(m->gtype, sizeof m->gtype, "%s", v);
     else if (!strcmp(k, "game_type_normal")) snprintf(gt_normal, sizeof gt_normal, "%s", v);
     else if (!strcmp(k, "game_type_title")) snprintf(gt_title, sizeof gt_title, "%s", v);
+    else if (!strcmp(k, "game_type_hint")) snprintf(gtl.hint, sizeof gtl.hint, "%s", strcmp(v, "none") ? v : "");
+    else if (!strcmp(k, "game_type_at")) { parse_box(v, gtl.at); gtl.has_at = gtl.at[2] > 0; }
+    else if (!strcmp(k, "game_type_panel_color")) gtl.panel = parse_rgba(v, gtl.panel);
+    else if (!strcmp(k, "game_type_bar_color")) gtl.bar = parse_rgba(v, gtl.bar);
+    else if (!strcmp(k, "game_type_title_color")) gtl.title = parse_rgba(v, gtl.title);
+    else if (!strcmp(k, "game_type_item_color")) gtl.item = parse_rgba(v, gtl.item);
+    else if (!strcmp(k, "game_type_pick_color")) gtl.pick = parse_rgba(v, gtl.pick);
+    else if (!strcmp(k, "game_type_pick_bar_color")) gtl.pick_bar = parse_rgba(v, gtl.pick_bar);
+    else if (!strcmp(k, "game_type_hint_color")) gtl.hint_rgba = parse_rgba(v, gtl.hint_rgba);
+    else if (!strcmp(k, "game_type_font_title")) gtl.font_title = sym(v);
+    else if (!strcmp(k, "game_type_font_item")) gtl.font_item = sym(v);
+    else if (!strcmp(k, "game_type_font_hint")) gtl.font_hint = sym(v);
+    else if (!strcmp(k, "game_type_picture")) snprintf(gtl.pic_file, sizeof gtl.pic_file, "%s", v);
+    else if (!strcmp(k, "game_type_picture_at")) parse_box(v, gtl.pic_at);
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : !strcmp(v, "none") ? 3 : 0;
     else if (!strcmp(k, "code")) snprintf(m->code, sizeof m->code, "%s", v);
     else if (!strcmp(k, "ingame_state")) { ingame_state = (int)num(v); ingame_explicit = 1; }
@@ -2004,7 +2028,7 @@ static void load_pictures(void)
     done = 1;
     int any = 0;
     for (int i = 0; i < npm; i++) any |= *pms[i].pic_file || *pms[i].vid_file || pms[i].nprog;
-    if (!any) return;
+    if (!any && !*gtl.pic_file) return;
     al_media_resolve();
     if (!al.ok) { lg("screen: Allegro bitmap calls missing; pictures and video off"); return; }
     av_resolve();
@@ -2032,6 +2056,13 @@ static void load_pictures(void)
                 else { m->prog[k].bl = b; m->prog[k].wl = al.bw(b); m->prog[k].hl = al.bh(b); }
             }
         }
+    if (*gtl.pic_file) {                          /* the game type menu's picture (PAD-1512) */
+        char path[700];
+        snprintf(path, sizeof path, "%s%s%s", *gtl.pic_file == '/' ? "" : moddir, *gtl.pic_file == '/' ? "" : "/", gtl.pic_file);
+        gtl.pic_bmp = al.load(path);
+        if (gtl.pic_bmp) { gtl.pic_w = al.bw(gtl.pic_bmp); gtl.pic_h = al.bh(gtl.pic_bmp); lg("game type menu: picture %s %dx%d", gtl.pic_file, gtl.pic_w, gtl.pic_h); }
+        else lg("title.cfg: game_type_picture: Allegro could not read %s (png or jpg)", path);
+    }
     al.set_flags(fl);
 }
 
@@ -4324,18 +4355,39 @@ static void draw_menu(void)
     if (!gx_begin()) return;
     float W = gx.W, H = gx.H, rowh = H * 0.075f;
     int n = ngt + 1;
-    float ph = H * 0.24f + n * rowh, y0 = (H - ph) / 2, x0 = W * 0.22f, x1 = W * 0.78f, y1 = y0 + ph, cx = W / 2;
-    gx.fill_rect(x0, y0, x1, y1, col(0x000000e0));
-    gx.fill_rect(x0, y0, x1, y0 + H * 0.006f, col(0xffdc00ff));
-    gx.fill_rect(x0, y1 - H * 0.006f, x1, y1, col(0xffdc00ff));
-    gx_text(0xffdc00ff, cx, y0 + H * 0.035f, 5, 1, gt_title);
-    for (int i = 0; i < n; i++) {
-        float y = y0 + H * 0.13f + i * rowh;
-        const char *s = i ? pms[gt_idx[i - 1]].gtype : gt_normal;
-        if (i == gt_sel) gx.fill_rect(x0 + W * 0.03f, y - H * 0.012f, x1 - W * 0.03f, y + rowh - H * 0.022f, col(0xffffff38));
-        gx_text(i == gt_sel ? 0xffffffff : 0x9a9a9aff, cx, y, 4, 1, s);
+    /* its own size: centred, as tall as its lines; a game_type_at box scales the whole layout into it */
+    float ph = H * 0.24f + n * rowh, y0 = (H - ph) / 2, x0 = W * 0.22f, x1 = W * 0.78f, s = 1;
+    if (gtl.has_at) {
+        x0 = gtl.at[0] * W / 100; x1 = x0 + gtl.at[2] * W / 100; y0 = gtl.at[1] * H / 100;
+        s = gtl.at[3] * H / 100 / ph; ph *= s; rowh *= s;
     }
-    gx_text(0xc8c8c8ff, cx, y1 - H * 0.075f, 2.5f, 1, "FLIPPERS TO CHOOSE - START TO PLAY");
+    float y1 = y0 + ph, cx = (x0 + x1) / 2, in = (x1 - x0) * 0.054f;
+    if (gtl.pic_bmp && al.ok) draw_fit(gtl.pic_bmp, gtl.pic_w, gtl.pic_h, gtl.pic_at, W, H);   /* under the panel */
+    if (gtl.panel & 0xff) gx.fill_rect(x0, y0, x1, y1, col(gtl.panel));
+    if (gtl.bar & 0xff) {
+        gx.fill_rect(x0, y0, x1, y0 + H * 0.006f * s, col(gtl.bar));
+        gx.fill_rect(x0, y1 - H * 0.006f * s, x1, y1, col(gtl.bar));
+    }
+    ALLEGRO_COLOR black = { 0, 0, 0, 1 };
+    void *ft = gtl.font_title && jfont ? jfont(gtl.font_title) : NULL;
+    void *fi = gtl.font_item && jfont ? jfont(gtl.font_item) : NULL;
+    void *fh = gtl.font_hint && jfont ? jfont(gtl.font_hint) : NULL;
+    static int (*line_h)(const void *);
+    if (!line_h) line_h = sym("al_get_font_line_height");
+    /* a game font when title.cfg names one, else the built-in font at `sc` times its 8 px; either
+     * one centred on `mid`, so a game font of any size sits where the built-in one does */
+#define GT_TEXT(f, rgba, mid, sc, str) do { \
+        if (plot_os && (f)) plot_os((f), col(rgba), black, 2, black, 3, cx, (mid) - (line_h ? line_h(f) : 0) / 2.0f, 1, (str)); \
+        else gx_text((rgba), cx, (mid) - 4 * (sc) * s, (sc) * s, 1, (str)); } while (0)
+    GT_TEXT(ft, gtl.title, y0 + H * 0.055f * s, 5, gt_title);
+    for (int i = 0; i < n; i++) {
+        float y = y0 + H * 0.13f * s + i * rowh, top = y - H * 0.012f * s, bot = y + rowh - H * 0.022f * s;
+        const char *str = i ? pms[gt_idx[i - 1]].gtype : gt_normal;
+        if (i == gt_sel && (gtl.pick_bar & 0xff)) gx.fill_rect(x0 + in, top, x1 - in, bot, col(gtl.pick_bar));
+        GT_TEXT(fi, i == gt_sel ? gtl.pick : gtl.item, (top + bot) / 2, 4, str);
+    }
+    if (*gtl.hint) GT_TEXT(fh, gtl.hint_rgba, y1 - H * 0.065f * s, 2.5f, gtl.hint);
+#undef GT_TEXT
     gx_end();
 }
 

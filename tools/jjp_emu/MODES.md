@@ -135,6 +135,7 @@ lamp_blink = 4
 | `ingame_state` | the `jjpe_state_get()` value meaning "a ball is in play" (5 on Guns N' Roses). Without it the runtime learns it on the first ball: the state that holds for a second while the game's own ball-in-play flag is set (logged) |
 | `background_modes` | game modes that are always on and must not make a custom mode yield. Without it, the game modes already running two seconds into a ball count as always-on |
 | `game_type_normal`, `game_type_title` | the attract menu's line for a normal game (`NORMAL GAME`) and its heading (`GAME TYPE`) (PAD-1512) |
+| `game_type_hint`, `game_type_at`, `game_type_*_color`, `game_type_font_*`, `game_type_picture`, `game_type_picture_at` | the attract menu's look (PAD-1512): "The game type menu's look" below |
 | `coil_holds` | `on` lets this title's modes hold coils (`coil_hold`). Off by default: a hold is a coil kept energised, so it is turned on per title once it has been watched on that machine. `mkjjpmodes.py check` names a `coil_hold` without it |
 
 ## Balls and coils (PAD-1353)
@@ -268,6 +269,27 @@ sound_start = se_VO_GF_Narrator_KissTheRing1
   `jjpe_is_right_flipper_pressed`, the calls its own menus use, and the menu is attract's only
   (the state its `HookAttractModeStart_` list ran in; its `HookDiagStart_` list turns it off for
   the service menu). A game type game is a game like any other: its scores and audits count.
+* **The menu's look** is the title's, all in title.cfg (the Modes tab's title settings), so every
+  game type folder can dress it as its game: JJP games draw their screens in code, so there is no
+  scene file for an editor to open, and these keys are what a mode's own screen has (`panel_color`,
+  `font_title`, `picture`, `picture_at`).
+
+  | title.cfg key | Default | Meaning |
+  |---|---|---|
+  | `game_type_title`, `game_type_normal` | GAME TYPE, NORMAL GAME | its heading and the normal game's line |
+  | `game_type_hint` | FLIPPERS TO CHOOSE - START TO PLAY | the line under the choices; `none` hides it |
+  | `game_type_at` | centred, as tall as its lines | its box, `x y w h` in percent of the screen; the whole layout (text too, in the built-in font) scales into it |
+  | `game_type_panel_color` | 000000e0 | the panel; `00000000` for none (a picture of ours can be the frame) |
+  | `game_type_bar_color` | ffdc00 | the bars along its top and bottom; `00000000` for none |
+  | `game_type_title_color`, `game_type_item_color`, `game_type_pick_color`, `game_type_hint_color` | ffdc00, 9a9a9a, ffffff, c8c8c8 | the heading, the lines, the picked line, the hint |
+  | `game_type_pick_bar_color` | ffffff38 | the bar behind the picked line; `00000000` for none |
+  | `game_type_font_title`, `game_type_font_item`, `game_type_font_hint` | the built-in font | one of the game's own fonts (the same names as `font_title`), drawn outlined as the game draws them |
+  | `game_type_picture`, `game_type_picture_at` | none, 0 0 100 100 | a picture of ours (png or jpg in the mode folder) drawn under the panel, fitted into its box: a full-screen backdrop, a logo, a frame |
+
+  Proven on Wonka 03.03 (2026-11-23, `proof/pad1512/look`): the menu moved to the right in a frame
+  picture of ours with the panel and bars off, in Wonka's own menu fonts and new colors and words;
+  every line, in a game font or the built-in one, is centred in its row.
+
 * **In C++** (API 2): `game_mode(name, cls, started)` is called whenever one of the game's modes
   or multiballs starts or ends in a game, whether the mode runs or not (`jm_start()` works there),
   and `jm_player()`, `jm_played(name)` and `jm_all_played()` say who is up, whether they have

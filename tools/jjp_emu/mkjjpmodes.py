@@ -344,6 +344,13 @@ TITLE_KEYS = collections.OrderedDict([
     ("game", "text"), ("ingame_state", "int"), ("background_modes", "modes"),
     ("coil_holds", ("on", "off")),
     ("game_type_normal", "text"), ("game_type_title", "text"),     # PAD-1512: the attract menu's lines
+    # PAD-1512: the attract menu's look (MODES.md "The game type menu's look")
+    ("game_type_hint", "text"), ("game_type_at", "box"),
+    ("game_type_panel_color", "rgba"), ("game_type_bar_color", "rgba"), ("game_type_title_color", "rgba"),
+    ("game_type_item_color", "rgba"), ("game_type_pick_color", "rgba"), ("game_type_pick_bar_color", "rgba"),
+    ("game_type_hint_color", "rgba"),
+    ("game_type_font_title", "font"), ("game_type_font_item", "font"), ("game_type_font_hint", "font"),
+    ("game_type_picture", "picture_file"), ("game_type_picture_at", "box"),
 ])
 #: keys a .stock file takes (jjpmodes.c apply_stock_kv): one of the GAME's own modes, changed (PAD-1351)
 STOCK_KEYS = collections.OrderedDict([
@@ -719,6 +726,9 @@ def check_modes(mode_dir, port=None):
                 if p:
                     problems.append("title.cfg:%d: %s %s" % (n, k, p))
                 title[k] = v
+    pic = title.get("game_type_picture", "")
+    if pic and media_kind(pic) and "/" not in pic and not os.path.isfile(os.path.join(mode_dir, pic)):
+        problems.append("title.cfg: game_type_picture = %s, but there is no %s in the mode folder" % (pic, pic))
     files = sorted(f for f in os.listdir(mode_dir) if f.endswith(".mode"))
     stocks = sorted(f for f in os.listdir(mode_dir) if f.endswith(".stock"))
     if not files and not stocks:

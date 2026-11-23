@@ -55,6 +55,16 @@ def main():
             page.get_by_text(group, exact=True).first.evaluate("e => e.scrollIntoView({block: 'start'})")
             time.sleep(1)
             page.screenshot(path=os.path.join(out_dir, kind + "_mode_form.png"))
+            if kind == "after":                # the title settings: the game type menu's look
+                page.get_by_text("Every mode of this game", exact=False).first.click()
+                time.sleep(2)
+                hint = page.get_by_text("Attract menu: the normal game's line", exact=False)
+                if hint.count():
+                    hint.first.evaluate("e => e.scrollIntoView({block: 'start'})")
+                time.sleep(1)
+                page.screenshot(path=os.path.join(out_dir, kind + "_menu_look.png"))
+                page.get_by_text("Every mode of this game", exact=False).first.click()
+                time.sleep(1)
             if kind == "after":
                 fn = webui_shot.api(url, "modes.jjp_new", "Wizard Blocks", "blocks")
                 fn = fn.get("result", fn) if isinstance(fn, dict) else fn

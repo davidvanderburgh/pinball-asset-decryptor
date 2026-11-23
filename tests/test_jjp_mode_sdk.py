@@ -808,6 +808,35 @@ def test_the_menu_shows_nine_game_types(tmp_path):
     assert "#define MAX_ALL 32 " in src and mm.MAX_ALL == 32 and mm.REPEATABLE["progress"] == 32
 
 
+def test_the_menus_look_is_title_cfgs_and_checked(tmp_path):
+    """PAD-1512: the game type menu's box, colors, fonts, hint and picture are title.cfg keys the
+    runtime reads and the checker knows: a font the game lacks or a picture not in the folder is
+    caught, a mode file may not set them, and the app's title settings show every one."""
+    mm = _load("mkjjpmodes")
+    port = json.load(open(os.path.join(RIG, "modes", "ports", "Wonka-v03.03.json"), encoding="utf-8"))
+    look = ("game_type_at = 58 10 38 76\ngame_type_panel_color = 00000000\ngame_type_hint = none\n"
+            "game_type_font_title = font_player_menu_title\ngame_type_picture = frame.png\n")
+    mode = {"a.mode": "game_type = X\nstart = switch_target_tv\n"}
+    for sub in ("ok", "bad", "m"):
+        (tmp_path / sub).mkdir()
+    d = _folder(tmp_path / "ok", dict(mode, **{"title.cfg": look}))
+    with open(os.path.join(d, "frame.png"), "wb") as f:
+        f.write(b"\x89PNG")
+    assert mm.check_modes(d, port)[1] == []
+    bad = look.replace("font_player_menu_title", "font_nope").replace("38 76", "38 0")
+    text = "\n".join(mm.check_modes(_folder(tmp_path / "bad", dict(mode, **{"title.cfg": bad})), port)[1])
+    assert "game_type_font_title" in text and "game_type_at" in text
+    assert "game_type_picture = frame.png, but there is no frame.png in the mode folder" in text
+    m2 = {"a.mode": "game_type = X\nstart = switch_target_tv\ngame_type_hint = HI\n"}
+    assert "game_type_hint belongs in title.cfg" in "\n".join(mm.check_modes(_folder(tmp_path / "m", m2), port)[1])
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    menu = src[src.index("static void draw_menu("):src.index("static void draw_progress(")]
+    assert "FLIPPERS TO CHOOSE" not in menu and "gtl.hint" in menu and "gtl.pic_bmp" in menu
+    from pinball_decryptor.plugins.jjp import custom_modes as CM
+    assert {k for k in mm.TITLE_KEYS if k.startswith("game_type")} <= set(CM.TITLE_FORM)
+    assert all(k in CM.LABELS for k in CM.TITLE_FORM)
+
+
 def test_the_c_api_grew_at_its_end_and_api_1_still_loads():
     """jjp_mode.h API 2 added game_mode after idle (a library built for 1 is read only up to it),
     and the runtime takes 1 or 2; every read of game_mode checks the api first."""

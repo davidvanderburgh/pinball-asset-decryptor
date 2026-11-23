@@ -91,6 +91,10 @@ DEFAULTS = {
     "points_ladder": "fixed",
     "progress_at": "0 0 100 100", "progress_seconds": "5",
     "game_type_normal": "NORMAL GAME", "game_type_title": "GAME TYPE",
+    "game_type_hint": "FLIPPERS TO CHOOSE - START TO PLAY", "game_type_panel_color": "000000e0",
+    "game_type_bar_color": "ffdc00", "game_type_title_color": "ffdc00", "game_type_item_color": "9a9a9a",
+    "game_type_pick_color": "ffffff", "game_type_pick_bar_color": "ffffff38", "game_type_hint_color": "c8c8c8",
+    "game_type_picture_at": "0 0 100 100",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
@@ -130,11 +134,25 @@ LABELS = {
     "progress_at": "Progress box (x y w h, % of screen)", "progress_seconds": "Progress shows for (seconds)",
     "game_type": "Game type on the attract menu (its line)",
     "game_type_normal": "Attract menu: the normal game's line", "game_type_title": "Attract menu: its heading",
+    "game_type_hint": "Attract menu: the hint line (none hides it)",
+    "game_type_at": "Attract menu box (x y w h, % of screen; empty = centred)",
+    "game_type_panel_color": "Attract menu: panel color", "game_type_bar_color": "Attract menu: top and bottom bars",
+    "game_type_title_color": "Attract menu: heading color", "game_type_item_color": "Attract menu: line color",
+    "game_type_pick_color": "Attract menu: picked line color", "game_type_pick_bar_color": "Attract menu: picked line's bar",
+    "game_type_hint_color": "Attract menu: hint color",
+    "game_type_font_title": "Attract menu: heading font", "game_type_font_item": "Attract menu: line font",
+    "game_type_font_hint": "Attract menu: hint font",
+    "game_type_picture": "Attract menu: picture under it (a file of ours)",
+    "game_type_picture_at": "Attract menu picture box (x y w h, % of screen)",
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
               "panel_color", "panel", "game_modes", "hold_multiballs", "ingame_state", "coil_holds",
-              "game_type_normal", "game_type_title")
+              "game_type_normal", "game_type_title", "game_type_hint", "game_type_at",
+              "game_type_panel_color", "game_type_bar_color", "game_type_title_color", "game_type_item_color",
+              "game_type_pick_color", "game_type_pick_bar_color", "game_type_hint_color",
+              "game_type_font_title", "game_type_font_item", "game_type_font_hint",
+              "game_type_picture", "game_type_picture_at")
 
 
 # ============================================================================ where things are

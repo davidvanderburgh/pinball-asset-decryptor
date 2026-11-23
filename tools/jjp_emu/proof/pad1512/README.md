@@ -20,3 +20,13 @@ What it shows (MODES.md "A wizard mode and a game type"):
   toward it start again from none.
 * **The C++ callback.** `probe.cpp` (API 2) logs every start and end with `jm_player` and `jm_played`
   by global and by class.
+
+## The menu's look (`look/`)
+
+    bash look/run.sh   # rc 0 = the restyled menu opened and moved; shots look_menu*.png in /var/tmp/pad1512
+
+`look/modes/title.cfg` restyles the game type menu with title.cfg keys alone: its box on the right
+(`game_type_at = 58 10 38 76`), a frame picture of ours under it (`menu_frame.png`, made by
+`look/make_frame.py`) with the panel and bars off, Wonka's own menu fonts (`font_player_menu_title`,
+`..._item`, `..._small`), its own colors, heading, normal line and hint. Run 2026-11-23: every wait met,
+`game type menu: picture menu_frame.png 520x584` in the log, each line centred in its row.

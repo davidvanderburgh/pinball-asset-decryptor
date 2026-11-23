@@ -511,3 +511,29 @@ def test_the_page_draws_played_in_the_filter_and_the_mode_rows():
                 '"Not played"', '"Other parts of the game"', "vid-pairmark"):
         assert bit in js, bit
     assert "own_copy" not in js and "Own copy" not in js
+
+
+def test_played_in_sorts_by_mode_blanks_last_and_ties_by_file_name_both_ways(tmp_path, monkeypatch):
+    """PAD-1524 (Peanutsfr): a header click sorts by Played in, A-Z then Z-A."""
+    blank = "video/aaa_blank.mp4"                  # a clip the reading knows nothing of: an empty cell
+    proj = _project(tmp_path, names=(SHARED, SOLO, OTHER, MAIN, blank))
+    _stub_reading(monkeypatch, tmp_path, proj)
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        st = _ready(w)
+        assert not _row(st, blank)["modes"] and not _row(st, blank)["other"] and not _row(st, blank)["unplayed"]
+        assert w.call("video.sort", "modes") is True
+        st = w.state("video")
+        assert st["sort"] == {"key": "modes", "desc": False}
+        # Battle vs Ghidorah and Gigan, the two Battle vs Gigan rows by file name, Other, Not played, empty
+        assert _rels(st) == [SHARED, FOLLOW, SOLO, MAIN, OTHER, blank]
+        assert w.call("video.sort", "modes") is True
+        st = w.state("video")
+        assert st["sort"] == {"key": "modes", "desc": True}
+        assert _rels(st) == [blank, OTHER, MAIN, FOLLOW, SOLO, SHARED]     # the tie keeps its file name order
+
+
+def test_the_played_in_header_sorts():
+    js = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui",
+                           "static", "js", "tabs", "video.js"), encoding="utf-8").read()
+    assert 'key: "modes", label: "Played in", width: width("modes"), sort: "modes"' in js

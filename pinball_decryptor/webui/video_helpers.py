@@ -62,7 +62,8 @@ SORT_CFG = (("#0", "Original Video", False), ("len", "Length", True),
             ("rep", "Replacement", False),
             ("fit", "Vs stock", False),                # PAD-1232
             ("conv", "Convert", False),
-            ("seen", "When it plays", False))      # PAD-827
+            ("seen", "When it plays", False),      # PAD-827
+            ("modes", "Played in", False))         # PAD-1524
 
 
 # ---------------------------------------------------------------------------

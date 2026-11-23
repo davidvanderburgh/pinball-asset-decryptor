@@ -349,7 +349,7 @@ def test_the_intros_show_starts_over_the_games_and_plays_for_all_of_the_intro():
     again = again[:again.index("\n}\n")]
     assert "show_running(ci.show, &top) != 0" in again and "CI_SHOW_AGAIN_MS" in again
     # round 3: an intro with no length on its card (`intro <clip> 0`) still has its show for all of it
-    assert "!ci.ms ? SHOW_MAX_MS" in again
+    assert "!ci.ms || played >= ci.ms ? SHOW_MAX_MS" in again
     tick = RUNTIME[RUNTIME.index("static void coop_intro_tick("):]
     assert "ci_show_again(now);" in tick[:tick.index("\n}\n")]
     over = RUNTIME[RUNTIME.index("static int show_number_start_over("):]
@@ -357,3 +357,56 @@ def test_the_intros_show_starts_over_the_games_and_plays_for_all_of_the_intro():
     # the row's priority lifted for the start only, and put back whatever the start said
     assert over.index("*pri = (unsigned char)want;") < over.index("ok = show_number_start(") \
         < over.index("*pri = (unsigned char)own;")
+
+
+def test_the_intros_show_is_its_only_lighting_with_the_gi_dark(tmp_path):
+    """DoomWalrus666: "Can we replace the intro lighting with the chosen lighting? Typically the GI gets dark during
+    tank multiball intro". With a show picked, the game's own shows running as the intro starts (and any it starts
+    meanwhile) are ended, the GI strings held dark, and the GI given back however the intro ends."""
+    from tests import test_spike2_mode_roster as R
+    code = (r"""
+#include <stdio.h>
+""" + R._lift(RUNTIME, "static int ci_name_gi(const char *s)") + r"""
+int main(void)
+{
+    const char *n[] = {"LOWER PLAYFIELD GI-RED(X4)", "UPPER PLAYFIELD GI-WHT(X12)", "GI", "GIGAN", "GHIDORAH LOGI",
+                       "TANK 1", "MAGI LAMP", 0};
+    int k;
+    for (k = 0; n[k]; k++) printf("%d", ci_name_gi(n[k]));
+    printf("\n");
+    return 0;
+}
+""")
+    assert R._host_run(tmp_path, code).strip() == "1110000"
+    start = RUNTIME[RUNTIME.index("static void ci_show_start("):]
+    start = start[:start.index("\n}\n")]
+    assert start.index("show_number_start_over(") < start.index("ci_quiet_game_shows();") < start.index("ci_gi_dark();")
+    again = RUNTIME[RUNTIME.index("static void ci_show_again("):]
+    again = again[:again.index("\n}\n")]
+    assert "ci_quiet_game_shows();" in again and "ci_gi_back();" not in again   # the GI back only as it ends
+    assert "played >= ci.ms ? SHOW_MAX_MS" in again                              # past its card's length too
+    stop = RUNTIME[RUNTIME.index("static void ci_show_stop("):]
+    stop = stop[:stop.index("\n}\n")]
+    assert stop.index("ci_gi_back();") < stop.index("if (!ci.show_on) return;")
+    quiet = RUNTIME[RUNTIME.index("static void ci_quiet_game_shows("):]
+    quiet = quiet[:quiet.index("\n}\n")]
+    assert "num == (unsigned)ci.show" in quiet and "show_layout() != 1" in quiet
+
+
+def test_a_lamp_named_but_for_its_led_count_is_still_placed():
+    """Round 4: a GI string is "LOWER PLAYFIELD GI-WHT(X9)" on Godzilla LE 1.16 and "(X8)" on the Pro, and the Pro 1.16
+    port lost it - its GI never went dark there."""
+    from pinball_decryptor.plugins.stern import portgen as PG
+    by = {"LOWER PLAYFIELD GI-WHT(X8)": "x8", "UPPER PLAYFIELD GI-WHT(X12)": "x12", "TANK 1": "t1"}
+    assert PG._same_but_count(by, "LOWER PLAYFIELD GI-WHT(X9)") == "x8"
+    assert PG._same_but_count(by, "TANK 2") is None                       # no count: names must match
+    assert PG._same_but_count(by, "UPPER PLAYFIELD GI-RED(X9)") is None   # another string
+    assert PG._same_but_count({"A(X1)": 1, "A(X2)": 2}, "A(X3)") is None  # two of them: neither
+
+
+@pytest.mark.parametrize("port", ["godzilla_le-1.16", "godzilla_pro-1.15", "godzilla_pro-1.16"])
+def test_every_godzilla_port_names_its_four_gi_strings(port):
+    text = (SDK / "ports" / (port + ".port")).read_text(encoding="utf-8")
+    gi = re.findall(r"^lamp \S+\s+\S+\s+((?:LOWER|UPPER) PLAYFIELD GI-(?:RED|WHT)\(X\d+\))", text, re.M)
+    assert sorted(g.split("(")[0] for g in gi) == ["LOWER PLAYFIELD GI-RED", "LOWER PLAYFIELD GI-WHT",
+                                                  "UPPER PLAYFIELD GI-RED", "UPPER PLAYFIELD GI-WHT"]

@@ -23671,6 +23671,65 @@ static int ci_prio_lifted;
 static unsigned long ci_show_first, ci_show_looked;
 static unsigned ci_show_plays;
 
+/* PAD-1476 round 4 (DoomWalrus666: "Can we replace the intro lighting with the chosen lighting? Typically the GI gets
+ * dark during tank multiball intro"): with a show picked, that show is the intro's lighting. The game's own shows
+ * running as it starts (the start film's - Godzilla's 305 over the whole playfield) are ended, and any the game starts
+ * while the intro plays, and the playfield's GI strings ("GI" a word of its own in the lamp's name) are held dark;
+ * the GI goes back to the game as the intro ends (played, skipped, the game over) */
+#define CI_GI_MAX 8
+static int ci_gi[CI_GI_MAX], ci_gi_n;
+static unsigned ci_quieted;
+
+static int ci_name_gi(const char *s)     /* "GI" a word of its own (tests lift it verbatim) */
+{
+    int i;
+    for (i = 0; s && s[i] && s[i + 1]; i++)
+        if (s[i] == 'G' && s[i + 1] == 'I' && (i == 0 || s[i - 1] < 'A' || s[i - 1] > 'Z')
+            && (s[i + 2] < 'A' || s[i + 2] > 'Z'))
+            return 1;
+    return 0;
+}
+
+/* the game's own shows running now, but the intro's: each number ended (the game's stopper ends every record of it) */
+static void ci_quiet_game_shows(void)
+{
+    unsigned rec, k, nums[16], n = 0, j;
+    pm_addr stop = fn("show_stop_number");
+    if (!stop || !ci.show || show_layout() != 1) return;
+    for (rec = *(const unsigned *)(unsigned long)show_head, k = 0; rec && k < 64 && n < 16;
+         rec = *(const unsigned *)(unsigned long)(rec + 0x84), k++) {
+        unsigned num;
+        if (!(*(const unsigned short *)(unsigned long)(rec + 2) & 0x20)) continue;
+        num = *(const unsigned short *)(unsigned long)(rec + 0x96);
+        if (!num || num == (unsigned)ci.show) continue;
+        for (j = 0; j < n && nums[j] != num; j++) ;
+        if (j == n) nums[n++] = num;
+    }
+    for (j = 0; j < n; j++) {
+        ((unsigned (*)(unsigned))(unsigned long)stop)(nums[j]);
+        if (ci_quieted < 8 && ++ci_quieted)
+            say("co-op intro: the game's own light show %u ended - the intro's show %d is its lighting", nums[j],
+                ci.show);
+    }
+}
+
+static void ci_gi_dark(void)
+{
+    int k;
+    ci_gi_n = 0;
+    if (!(can & PM_CAN_LAMPS)) return;
+    for (k = 0; k < n_lamps && ci_gi_n < CI_GI_MAX; k++)
+        if (ci_name_gi(lamps[k].name) && lamp_paint(k, 0)) ci_gi[ci_gi_n++] = k;
+    if (ci_gi_n) say("co-op intro: %d GI string(s) dark while its light show plays", ci_gi_n);
+}
+
+static void ci_gi_back(void)
+{
+    if (!ci_gi_n) return;
+    lamp_release_list(ci_gi, ci_gi_n, "the co-op intro's GI");
+    ci_gi_n = 0;
+}
+
 static void ci_show_start(void)
 {
     ci.show_on = 0;
@@ -23683,6 +23742,11 @@ static void ci_show_start(void)
     ci_show_first = pm_ms();
     ci_show_plays = 1;
     if (!ci.show_on) say("co-op intro: its light show %d not played (the line above says why)", ci.show);
+    if (ci.show_on) {                                         /* round 4: it alone lights the intro */
+        ci_quieted = 0;
+        ci_quiet_game_shows();
+        ci_gi_dark();
+    }
 }
 
 /* every tick: the intro's show started again once it has ended by itself, while the intro has more to play */
@@ -23692,16 +23756,21 @@ static void ci_show_again(unsigned long now)
     int top;
     if (!ci.show_on || (ci.phase != CI_FILM && ci.phase != CI_PLAY) || now - ci_show_looked < 100ul) return;
     ci_show_looked = now;
-    if (show_now.n != -ci.show || show_now.call != 2) {      /* another of ours took over: it is theirs now */
+    /* another of ours took over: it is theirs now (the GI stays dark until the intro ends: ci_show_stop). Round 4:
+     * show_now.n 0 is ours ended by its time (show_kill) - started again below like one over by itself */
+    if (show_now.n && (show_now.n != -ci.show || show_now.call != 2)) {
         ci.show_on = 0;
         return;
     }
-    if (show_running(ci.show, &top) != 0) return;            /* playing, or not known on this build */
+    ci_quiet_game_shows();                                    /* round 4: one the game started meanwhile */
+    if (show_now.n && show_running(ci.show, &top) != 0) return;   /* playing, or not known on this build */
     played = now - ci_show_first;
     /* round 3: an intro whose length the card does not carry (`intro <clip> 0`: its video's length unread) has its
-     * show started again for as long as it plays - ci_show_stop ends it with the intro */
-    left = !ci.ms ? SHOW_MAX_MS : ci.ms > played ? ci.ms - played : 0;
-    if (left <= CI_SHOW_AGAIN_MS) return;
+     * show started again for as long as it plays - ci_show_stop ends it with the intro. Round 4: so has one played
+     * past the length its card says (Godzilla Pro 1.16, emulator: the game's intro screen ran 10.8 s of a 9 s
+     * intro, and its show and dark GI went 1.2 s early) */
+    left = !ci.ms || played >= ci.ms ? SHOW_MAX_MS : ci.ms - played;
+    if (ci.ms && played < ci.ms && left <= CI_SHOW_AGAIN_MS) return;
     show_now.n = 0;                                           /* over by itself: nothing of it to stop */
     if (show_number_start_over(ci.show, left + 500ul, "the co-op intro, again")) {
         ci_show_plays++;
@@ -23721,6 +23790,7 @@ static void ci_show_again(unsigned long now)
 
 static void ci_show_stop(const char *how)
 {
+    ci_gi_back();                                             /* round 4 */
     if (!ci.show_on) return;
     ci.show_on = 0;
     if (show_now.n == -ci.show && show_now.call == 2) show_kill(how);

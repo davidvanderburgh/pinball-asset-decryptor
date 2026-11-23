@@ -479,7 +479,7 @@ export function CoopCharsDialog({ s, onClose }) {
     ${ch.intro ? html`<div class="row" style="margin-top:6px; gap:8px">
       <span class="small dim" style="white-space:nowrap">Light show with it</span>
       <${IntroShowPick} value=${ch.intro_show || ""} modeShows=${s.mode_shows || []} pick=${s.show_pick} disabled=${!!ch.intro_show_off}
-        title=${ch.intro_show_off || "One of the game's own light shows (the ones its modes play are listed under the mode, or pick any by its number), on the playfield while the intro plays; it stops when the intro ends or is skipped."} />
+        title=${ch.intro_show_off || "One of the game's own light shows (the ones its modes play are listed under the mode, or pick any by its number), the playfield's only lighting while the intro plays: the game's own start lighting goes out and the GI goes dark. It repeats until the intro ends or is skipped, then the game has the lights back."} />
       <span class="small dim wrap">${ch.intro_show_off || ((s.mode_shows || []).length ? "Each is listed under the game's mode that plays it (its How it works lists them too)." : "The game's modes' light shows are listed once the card has been read.")}</span>
     </div>` : null}
     <div class="row" style="margin-top:8px; gap:8px">

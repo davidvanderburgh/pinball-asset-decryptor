@@ -5,6 +5,8 @@ progress panes of ours, copied into a scratch modes folder; David's own folders 
   mode_screen     the example mode's Settings, at its screen (the layout editor, or the old form rows)
   progress_board  the wizard mode's progress board
   menu            Every mode of this game, at the attract game type menu
+  game_screen     Every mode of this game, at the game's own screen (a census of Wonka's in-game screen from
+                  the PAD-1515 rig run: its HUD's PLAYER 1 box moved and scaled, a part hidden)
 Needs Playwright (PAD_PWLIB / the user site) and Edge.
 """
 import json
@@ -21,6 +23,7 @@ import webui_shot  # noqa: E402
 ISO = r"D:\Pinball\images\JJP\Wonka-v03.03.iso"
 LABEL = "Wonka-v03.03"
 RIG_FRAMES = r"C:\tmp\PAD-1515\rig"
+CENSUS = os.environ.get("PAD1515_CENSUS", r"C:\tmp\PAD-1515\census2")
 PANES = ("CandyLaneMode", "DotsMode", "FactoryTourMode", "MikeTeaveeMode")
 
 
@@ -67,6 +70,10 @@ def main():
             os.makedirs(os.path.join(mine, ".layout"), exist_ok=True)
             frames[n] = os.path.join(mine, ".layout", n + ".png")
             shutil.copy(src, frames[n])
+    if kind == "after" and os.path.isfile(os.path.join(CENSUS, "game.json")):
+        os.makedirs(os.path.join(mine, ".layout"), exist_ok=True)
+        for ext in (".json", ".png"):
+            shutil.copy(os.path.join(CENSUS, "game" + ext), os.path.join(mine, ".layout", "game" + ext))
     import site
     proc, url = webui_shot.start_server(settings, scratch, app_cmd=None,
                                         extra_env={"PYTHONPATH": site.getusersitepackages(),
@@ -129,6 +136,32 @@ def main():
                 print("menu: form")
             time.sleep(1.5)
             page.screenshot(path=os.path.join(out_dir, kind + "_menu.png"))
+
+            g = page.locator(".jjpl[data-screen=game]")
+            if g.count():
+                # the PLAYER 1 box moved up and a little bigger, the gumdrops hidden: through the app's own calls
+                lay = ((webui_shot.state(url).get("modes") or {}).get("jjp") or {}).get("layout")
+                els = ((lay or {}).get("game") or {}).get("elements") or []
+                mv = next((e for e in els if e["name"] == "atlas_playerup"), None)
+                if mv:
+                    o = mv["orig"]
+                    webui_shot.api(url, "modes.jjp_place", "title", mv["key"], [o[0] + 18, o[1] - 30, o[2] * 1.15, o[3] * 1.15])
+                hd = next((e for e in els if e["name"].startswith("sp_candy_gumdrops")), None)
+                if hd:
+                    webui_shot.api(url, "modes.jjp_screen_part", hd["name"], "hide")
+                time.sleep(2)
+                g.first.evaluate("e => e.scrollIntoView({block: 'start'})")
+                time.sleep(1)
+                chip = page.locator(".jjpl[data-screen=game] .jjpl-pchip", has_text="atlas_playerup")
+                if chip.count():
+                    chip.first.click()
+                    time.sleep(1)
+                print("game_screen: editor", bool(mv), bool(hd))
+            else:
+                page.locator(".jjpm-title-card .bd").first.evaluate("e => e.scrollIntoView({block: 'end'})")
+                print("game_screen: form")
+            time.sleep(1.5)
+            page.screenshot(path=os.path.join(out_dir, kind + "_game_screen.png"))
             print("page errors:", errors)
             browser.close()
     finally:

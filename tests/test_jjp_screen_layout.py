@@ -179,3 +179,111 @@ def test_a_wizards_panes_and_the_backdrops(tmp_path, preview_on):
         assert j["check"]["ok"], j["check"]
         labels = [b["label"] for b in j["layout"]["backdrops"]]
         assert labels[0] == "The game's screen: attract" and {"a.png", "clip.webm"} <= set(labels)
+
+
+# ------------------------------------------------------------------ the game's own screen
+def _census(folder, label="game", parts=None):
+    import json
+    d = os.path.join(folder, SL.FRAMES_DIR)
+    os.makedirs(d, exist_ok=True)
+    parts = parts if parts is not None else [
+        {"name": "sp_brat_charlie", "kind": "picture", "box": [136, 76.8, 272, 153.6], "draws": 1, "text": ""},
+        {"name": "font_balls_in_play", "kind": "font", "box": [680, 600, 100, 40], "draws": 2, "text": "BALL 1"},
+        {"name": "bitmap 64x64", "kind": "unnamed", "box": [10, 10, 64, 64], "draws": 1, "text": ""},
+        {"name": "deff_backdrop", "kind": "picture", "box": [0, 0, 1360, 768], "draws": 1, "text": ""}]
+    with open(os.path.join(d, label + ".json"), "w") as f:
+        json.dump({"label": label, "size": [1360, 768], "picture": True, "parts": parts}, f)
+    open(os.path.join(d, label + ".png"), "wb").close()
+
+
+def test_a_census_lays_out_the_games_parts(tmp_path):
+    _census(str(tmp_path))
+    g = SL.game_screen(str(tmp_path), {"screen_move": "sp_brat_charlie 5 -2 1.5", "screen_hide": "font_balls_in_play"})
+    els = {e["name"]: e for e in g["elements"]}
+    assert g["label"] == "game" and g["censuses"] == ["game"]
+    assert "deff_backdrop" not in els                    # the whole screen: its backdrop, not a part to drag
+    assert els["bitmap 64x64"]["fixed"] and not els["sp_brat_charlie"]["fixed"]
+    c = els["sp_brat_charlie"]
+    assert c["orig"] == [10.0, 10.0, 20.0, 20.0] and c["set"]
+    assert c["box"] == [5.0 + 5, -2.0 + 5, 30.0, 30.0]     # its centre moved 5, -2; one and a half times its size
+    assert els["font_balls_in_play"]["hidden"] and els["font_balls_in_play"]["label"] == 'font_balls_in_play "BALL 1"'
+
+
+def test_a_dragged_part_becomes_its_move_and_back():
+    census = {"size": [1360, 768], "parts": [{"name": "sp_a", "box": [136, 76.8, 272, 153.6]}]}
+    assert SL.move_for(census, "sp_a", [15, 12, 20, 20]) == (5.0, 2.0, 1.0, 20.0, 20.0)
+    move = SL.move_for(census, "sp_a", [15, 12, 30, 30])
+    assert move == (10.0, 7.0, 1.5, 20.0, 20.0)          # scaled about its centre (20 %, 20 %)
+    t = SL.with_screen_line({"screen_move": "sp_b 1 1"}, "sp_a", move=move)
+    assert t["screen_move"] == "sp_b 1 1\nsp_a 10 7 1.5 20 20" and t["screen_hide"] == ""
+    assert SL.screen_lines(t)["sp_a"]["anchor"] == [20.0, 20.0]
+    # not scaled: no centre to scale about
+    assert SL.with_screen_line({}, "sp_a", move=(5.0, 2.0, 1.0, 20.0, 20.0))["screen_move"] == "sp_a 5 2"
+    assert SL.with_screen_line(t, "sp_a", move=(0, 0, 1), hide=False)["screen_move"] == "sp_b 1 1"
+    assert SL.with_screen_line(t, "sp_a", hide=True)["screen_hide"] == "sp_a"
+    with pytest.raises(ValueError):
+        SL.with_screen_line({}, "bitmap 64x64", hide=True)
+    with pytest.raises(ValueError):
+        SL.move_for(census, "sp_z", [1, 1, 1, 1])
+
+
+def test_the_checker_takes_screen_lines():
+    import json
+    mk = CM.mk()
+    port = json.load(open(os.path.join(RIG, "modes", "ports", "Wonka-v03.03.json")))
+    assert mk.check_value("screen_move", "sp_brat_charlie 5 -3", port) is None
+    assert mk.check_value("screen_move", "font_balls_in_play 1 2 1.5", port) is None
+    assert mk.check_value("screen_move", "atlas_playerup 1 2 1.15 54.67 84.9", port) is None
+    assert mk.check_value("screen_move", "atlas_playerup 1 2 1.15 54.67", port) is not None
+    assert "fonts" in mk.check_value("screen_move", "font_nope 1 2", port)
+    assert "off the screen" in mk.check_value("screen_move", "sp_x 120 0", port)
+    assert "scale" in mk.check_value("screen_move", "sp_x 1 1 20", port)
+    assert mk.check_value("screen_hide", "sp_x", port) is None
+    assert mk.check_value("screen_hide", "sp_x 1", port) is not None
+
+
+def test_screen_lines_in_title_cfg_are_counted_as_the_runtime_takes_them(tmp_path):
+    d = tmp_path / "m"
+    d.mkdir()
+    (d / "1.mode").write_text("name = A\nstart = switch_target_tv\n")
+    (d / "title.cfg").write_text("".join("screen_move = sp_x%d 1 1\n" % i for i in range(65)))
+    _modes, problems = CM.mk().check_modes(str(d))
+    assert any("more than 64 screen_move" in p for p in problems)
+    (d / "title.cfg").write_text("screen_move = sp_a 1 1\nscreen_hide = sp_b\nscreen_move = sp_c 2 2\n")
+    _modes, problems = CM.mk().check_modes(str(d))
+    assert not problems, problems
+    vals = CM.read_cfg(str(d / "title.cfg"))
+    assert vals["screen_move"] == "sp_a 1 1\nsp_c 2 2"
+
+
+def test_the_runtime_sees_the_games_draws_and_leaves_its_own_alone():
+    src = _src()
+    for fn in ("al_draw_bitmap", "al_draw_tinted_bitmap", "al_draw_bitmap_region", "al_draw_tinted_bitmap_region",
+               "al_draw_scaled_bitmap", "al_draw_tinted_scaled_bitmap", "al_draw_rotated_bitmap",
+               "al_draw_tinted_rotated_bitmap", "al_draw_scaled_rotated_bitmap", "al_draw_tinted_scaled_rotated_bitmap",
+               "al_draw_tinted_scaled_rotated_bitmap_region", "al_draw_text", "al_draw_ustr", "al_draw_justified_text"):
+        body = _body(src, "\nvoid %s(" % fn, "\n}\n")
+        assert 'gs_real("%s")' % fn in body and "gs_draw(" in body, fn
+    assert "gs_ours = 1;" in _body(src, "static int gx_begin(", "static void gx_end(")
+    assert "gs_ours = 0;" in _body(src, "static void gx_end(", "\n")
+    kv = _body(src, "static void apply_kv(", "static int load_file(")
+    assert 'strcmp(k, "screen_move")) gs_parse' in kv and 'strcmp(k, "screen_hide")) gs_parse' in kv
+    assert re.search(r"#define GS_MOVES (\d+)", src).group(1) == str(CM.mk().MAX_SCREEN_LINES)
+
+
+def test_the_tab_lays_out_the_games_own_screen(tmp_path, preview_on):
+    with web_app(tmp_path, mfr="jjp") as w:
+        j = _open_wonka(w)
+        assert j["layout"]["game"]["elements"] == []         # no census yet: the editor says how to take one
+        _census(j["folder"])
+        select_card(w, "Wonka-v03.03")
+        g = _jjp(w)["layout"]["game"]
+        key = next(e["key"] for e in g["elements"] if e["name"] == "sp_brat_charlie")
+        w.call("modes.jjp_place", "title", key, [15, 12, 30, 30])
+        j = _jjp(w)
+        assert j["title_cfg"]["screen_move"] == "sp_brat_charlie 10 7 1.5 20 20"
+        assert j["check"]["ok"], j["check"]
+        w.call("modes.jjp_screen_part", "font_balls_in_play", "hide")
+        assert _jjp(w)["title_cfg"]["screen_hide"] == "font_balls_in_play"
+        w.call("modes.jjp_screen_part", "sp_brat_charlie", "back")
+        assert not _jjp(w)["title_cfg"].get("screen_move")

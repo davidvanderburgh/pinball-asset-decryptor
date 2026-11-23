@@ -276,3 +276,156 @@ def backdrops(folder, extra=()):
     for p in extra or ():
         add(p, os.path.basename(p))
     return out
+
+
+# ---------------------------------------------------------------- the game's own screen (PAD-1515)
+# A census (jjpmodes.c gs_frame, asked for by "Show it in the game" or jjpdrive's census step) leaves
+# <label>.png (the game's frame, nothing of ours on it) and <label>.json (every part it drew, named by
+# the game's object that holds it, with its box in screen pixels) in FRAMES_DIR.  title.cfg moves them:
+#   screen_move = <name> <dx> <dy> [<scale> [<ax> <ay>]]   (percent of the screen; the scale is about
+#                 (ax, ay): the part's centre, written whenever it is scaled, so its pieces scale as one)
+#   screen_hide = <name>
+SCREEN_KEYS = ("screen_move", "screen_hide")
+_PART = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def censuses(folder):
+    """The game's screens a census has been taken of: [{label, json, png}], newest first."""
+    import os
+    d = os.path.join(folder, FRAMES_DIR) if folder else ""
+    if not d or not os.path.isdir(d):
+        return []
+    out = []
+    for f in os.listdir(d):
+        if f.endswith(".json"):
+            lab = f[:-5]
+            out.append({"label": lab, "json": os.path.join(d, f), "png": os.path.join(d, lab + ".png"),
+                        "t": os.path.getmtime(os.path.join(d, f))})
+    out.sort(key=lambda c: -c["t"])
+    return [{k: c[k] for k in ("label", "json", "png")} for c in out]
+
+
+def read_census(path):
+    """A census file -> {label, size, parts: [{name, kind, box (px), draws, text}]} ({} unreadable)."""
+    import json
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            c = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return c if isinstance(c, dict) and isinstance(c.get("parts"), list) else {}
+
+
+def screen_lines(title):
+    """title.cfg's screen_move / screen_hide lines -> {name: {"dx", "dy", "scale", "hide"}}."""
+    out = {}
+    for key in SCREEN_KEYS:
+        for line in (title.get(key) or "").split("\n"):
+            w = line.split()
+            if not w:
+                continue
+            e = out.setdefault(w[0], {"dx": 0.0, "dy": 0.0, "scale": 1.0, "hide": False, "anchor": None})
+            if key == "screen_hide":
+                e["hide"] = True
+            else:
+                try:
+                    e["dx"], e["dy"] = float(w[1].rstrip("%")), float(w[2].rstrip("%"))
+                    e["scale"] = float(w[3].rstrip("%")) if len(w) > 3 else 1.0
+                    e["anchor"] = [float(w[4].rstrip("%")), float(w[5].rstrip("%"))] if len(w) > 5 else None
+                except (IndexError, ValueError):
+                    pass
+    return out
+
+
+def with_screen_line(title, name, move=None, hide=None):
+    """title.cfg's {screen_move, screen_hide} values with ``name``'s lines changed: ``move`` (dx, dy,
+    scale[, ax, ay]) or None to leave it; (0, 0, 1) takes it away; ``hide`` True / False / None (left as
+    it is)."""
+    if not _PART.match(name or ""):
+        raise ValueError("%s is not a part's name" % name)
+    out = {}
+    for key in SCREEN_KEYS:
+        keep = [ln for ln in (title.get(key) or "").split("\n") if ln.split() and ln.split()[0] != name]
+        had = any(ln.split() and ln.split()[0] == name for ln in (title.get(key) or "").split("\n"))
+        if key == "screen_move" and move is not None:
+            dx, dy, sc = move[:3]
+            words = [name, _n(dx), _n(dy)] + ([_n(sc, 3)] if abs(sc - 1) > 0.0005 else [])
+            if len(words) > 3 and len(move) >= 5:     # scaled: about the part's centre
+                words += [_n(move[3]), _n(move[4])]
+            if abs(dx) > 0.004 or abs(dy) > 0.004 or len(words) > 3:
+                keep.append(" ".join(words))
+        if key == "screen_hide" and (hide or (hide is None and had)):
+            keep.append(name)
+        out[key] = "\n".join(keep)
+    return out
+
+
+def _n(v, places=2):
+    t = ("%.*f" % (places, round(float(v), places))).rstrip("0").rstrip(".")
+    return "0" if t in ("-0", "") else t
+
+
+def _part_boxes(census):
+    """{name: its biggest box (px)} over a census's parts (a font drawn in several places: each)."""
+    best = {}
+    for p in census.get("parts", []):
+        b = p.get("box") or [0, 0, 0, 0]
+        n = p.get("name", "")
+        if n not in best or b[2] * b[3] > best[n][2] * best[n][3]:
+            best[n] = b
+    return best
+
+
+def move_for(census, name, box):
+    """A part dragged to ``box`` (% of the screen) -> its move (dx, dy, scale) against where the
+    game draws it (the census's box): the centre's shift in percent of the screen, the width's ratio."""
+    W, H = (census.get("size") or SCREEN)[:2]
+    o = _part_boxes(census).get(name)
+    if not o:
+        raise ValueError("%s is not drawn on that screen" % name)
+    ox, oy, ow, oh = o[0] * 100.0 / W, o[1] * 100.0 / H, o[2] * 100.0 / W, o[3] * 100.0 / H
+    sc = box[2] / ow if ow > 0 else 1.0
+    dx = (box[0] + box[2] / 2) - (ox + ow / 2)
+    dy = (box[1] + box[3] / 2) - (oy + oh / 2)
+    return round(dx, 2), round(dy, 2), round(sc, 3), round(ox + ow / 2, 2), round(oy + oh / 2, 2)
+
+
+def game_screen(folder, title, label=""):
+    """The game's own screen, as the layout editor lays it out: the census ``label`` (else the newest)
+    with each part's box where the game draws it (``orig``) and where title.cfg moves it (``box``)."""
+    cs = censuses(folder)
+    if not cs:
+        return {"screen": "game", "scope": "title", "elements": [], "censuses": [], "label": ""}
+    c = next((c for c in cs if c["label"] == label), cs[0])
+    census = read_census(c["json"])
+    W, H = (census.get("size") or SCREEN)[:2]
+    moves = screen_lines(title)
+    els, seen = [], {}
+    for p in census.get("parts", []):
+        n = p.get("name", "")
+        b = p.get("box") or [0, 0, 0, 0]
+        if b[2] < 2 or b[3] < 2 or b[2] * b[3] > W * H * 0.97:     # a speck, or the whole screen (its backdrop)
+            continue
+        named = p.get("kind") != "unnamed" and bool(_PART.match(n))
+        i = seen[n] = seen.get(n, -1) + 1
+        orig = [b[0] * 100.0 / W, b[1] * 100.0 / H, b[2] * 100.0 / W, b[3] * 100.0 / H]
+        mv = moves.get(n) if named else None
+        box = list(orig)
+        if mv:
+            sc = mv["scale"]
+            cx, cy = orig[0] + orig[2] / 2 + mv["dx"], orig[1] + orig[3] / 2 + mv["dy"]
+            box = [cx - orig[2] * sc / 2, cy - orig[3] * sc / 2, orig[2] * sc, orig[3] * sc]
+        label_ = n + ((' "%s"' % p["text"]) if p.get("text") else "")
+        # its pieces: each draw's own box, in percent of the part's box (the editor moves them, not what is between)
+        pieces = []
+        for r in (p.get("rects") or [])[:24]:
+            if b[2] > 0 and b[3] > 0 and r[2] > 0 and r[3] > 0:
+                pieces.append([round((r[0] - b[0]) * 100.0 / b[2], 3), round((r[1] - b[1]) * 100.0 / b[3], 3),
+                               round(r[2] * 100.0 / b[2], 3), round(r[3] * 100.0 / b[3], 3)])
+        els.append({"key": "screen#%s#%s#%d" % (c["label"], n, i), "kind": "part", "part": p.get("kind", ""),
+                    "pieces": pieces,
+                    "name": n, "label": label_, "parent": "", "set": bool(mv), "where": "own" if mv else "",
+                    "box": [round(t, 3) for t in box], "orig": [round(t, 3) for t in orig], "file": c["png"],
+                    "fixed": not named, "hidden": bool(mv and mv["hide"]), "draws": p.get("draws", 1)})
+    return {"screen": "game", "scope": "title", "elements": els, "label": c["label"], "png": c["png"],
+            "size": [W, H], "censuses": [x["label"] for x in cs]}

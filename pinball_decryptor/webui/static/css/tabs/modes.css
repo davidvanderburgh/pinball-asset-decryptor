@@ -816,3 +816,16 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .jjpl-num { display: inline-flex; gap: 4px; align-items: center; }
 .jjpl-num span { color: var(--ink-2); font-size: 12px; }
 .jjpl-num input { width: 70px; }
+.jjpl-part { position: absolute; inset: 0; background-repeat: no-repeat; pointer-events: none; }
+.jjpl-ghost { position: absolute; box-sizing: border-box; pointer-events: none; outline: 1px dashed rgba(255, 60, 200, .8);
+  background: repeating-linear-gradient(45deg, rgba(0, 0, 0, .55) 0 6px, rgba(255, 60, 200, .25) 6px 12px); }
+.jjpl-el.k-part { outline: 1px solid rgba(120, 200, 255, .35); }
+.jjpl-el.k-part.dflt { outline-style: dotted; }
+.jjpl-el.fixed { cursor: default; outline: 1px dotted rgba(160, 160, 160, .35); }
+.jjpl-el.hid { outline: 1px dashed rgba(255, 60, 60, .8); }
+.jjpl-parts { display: flex; flex-wrap: wrap; gap: 4px; max-width: 960px; align-items: center; }
+.jjpl-pchip { font: 11px var(--mono); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line); background: var(--bg-2);
+  color: var(--ink-2); cursor: pointer; }
+.jjpl-pchip.moved { border-color: rgba(255, 60, 200, .7); color: var(--ink); }
+.jjpl-pchip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--ink); }
+.jjpl-show { gap: 8px; align-items: center; margin: -6px 0 14px; }

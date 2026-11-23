@@ -62,6 +62,9 @@
 #include <strings.h>
 #include <stddef.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
+#include <sys/uio.h>
+#include <ctype.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -290,6 +293,10 @@ typedef struct {
 static pm_t pms[MAX_MODES];
 static int npm;
 static void code_started(pm_t *m), code_tick(pm_t *m), code_over(pm_t *m, const char *why);   /* PAD-1384 */
+static int gs_ours;                                   /* PAD-1515: below, "the game's own screen" */
+static void gs_parse(const char *k, const char *v);
+static int gs_nfiles;
+static const char *gs_file_of(const void *b);
 static int load_code(pm_t *m);
 
 typedef struct { char name[96]; void *obj; void *orig; } wsw_t;
@@ -775,6 +782,8 @@ static void apply_kv(pm_t *m, const char *k, char *v)
     else if (!strcmp(k, "game_type_title_at")) gtl.has_t = parse_box(v, gtl.t_at);
     else if (!strcmp(k, "game_type_lines_at")) gtl.has_l = parse_box(v, gtl.l_at);
     else if (!strcmp(k, "game_type_hint_at")) gtl.has_h = parse_box(v, gtl.h_at);
+    else if (!strcmp(k, "screen_move")) gs_parse(k, v);       /* PAD-1515: the game's own screen */
+    else if (!strcmp(k, "screen_hide")) gs_parse(k, v);
     else if (!strcmp(k, "code")) snprintf(m->code, sizeof m->code, "%s", v);
     else if (!strcmp(k, "ingame_state")) { ingame_state = (int)num(v); ingame_explicit = 1; }
     else if (!strcmp(k, "game")) snprintf(game_name, sizeof game_name, "%s", v);
@@ -4329,9 +4338,10 @@ static int gx_begin(void)
     gx.get_blender(&gx.bop, &gx.bsrc, &gx.bdst);
     gx.set_blender(0 /*ADD*/, 1 /*ONE*/, 3 /*INVERSE_ALPHA*/);
     ALLEGRO_TRANSFORM t; gx.copy_xf(&gx.old, gx.cur_xf()); gx.ident_xf(&t); gx.use_xf(&t);
+    gs_ours = 1;                                  /* PAD-1515: our drawing is never named, moved or counted */
     return 1;
 }
-static void gx_end(void) { gx.use_xf(&gx.old); gx.set_blender(gx.bop, gx.bsrc, gx.bdst); }
+static void gx_end(void) { gx.use_xf(&gx.old); gx.set_blender(gx.bop, gx.bsrc, gx.bdst); gs_ours = 0; }
 
 /* Text in the built-in font, `scale` times its 8 px, x as Allegro aligns it (1 = centred). */
 static void gx_text(unsigned rgba, float x, float y, float scale, int align, const char *s)
@@ -4496,12 +4506,718 @@ static void draw_progress(pm_t *m)
     gx_end();
 }
 
+/* ==== PAD-1515: the game's own screen - what it draws, by name, moved =========================
+ *
+ * A JJP game draws its screens in code (Allegro), so there is no scene file to change. But every
+ * picture and every line of text it draws goes through Allegro's draw calls, which the game
+ * resolves by name like al_flip_display: the runtime defines them, and so sees each draw. A drawn
+ * bitmap or font is named by the game's own exported object that holds it - a sprite (sp_*), an
+ * animation, an atlas, a movie, a font (font_*), a displayable - found by a reverse index over those
+ * objects' words (and one pointer down: an animation's frame list). title.cfg then moves them:
+ *
+ *   screen_move = <name> <dx> <dy> [<scale> [<ax> <ay>]]   dx dy in percent of the screen; the scale is about
+ *                                               (ax, ay), percent of the screen (the part's centre; the
+ *                                               layout editor writes it), else about each draw's own centre
+ *   screen_hide = <name>                        not drawn at all
+ *
+ * A move applies only to what is drawn on the screen itself (the display's backbuffer), never to
+ * what the game draws into a bitmap of its own first. A census (JJP_MODS_SCREEN_DIR, the layout
+ * editor's "the game's own screen"): a file `request` there holding a label makes the runtime save
+ * the next frame as <label>.png (the game's frame, before anything of ours is drawn) and every named
+ * part drawn in it, with its boxes, as <label>.json. Our own drawing (draw_screen, draw_menu, ...)
+ * passes through untouched: `gs_ours` is set between gx_begin and gx_end.
+ */
+#define GS_NAMES 4096
+#define GS_CACHE 16384
+#define GS_MOVES 64
+#define GS_REC 512
+static char (*gs_names)[64];                         /* interned part names */
+static int gs_nnames;
+static signed char *gs_kind;                         /* per name: 0 unnamed, 1 sprite/picture, 2 font, 3 movie */
+static short *gs_move;                               /* per name: its screen_move index, -1 none */
+static struct { const void *p; int id; long t; } *gs_cache;
+static struct { char name[64]; float dx, dy, sc, ax, ay; int hide, anchored; } gs_moves[GS_MOVES];
+static int gs_nmoves;
+static int gs_any_moves;
+static char gs_dir[512];                             /* the census folder */
+static int gs_rec;                                   /* 1: this frame is recorded */
+static int gs_depth;                                 /* inside one of the game's draws: a text's glyphs */
+static char gs_label[64];
+#define GS_RECTS 24
+/* a part's box (the union of its draws nearby) and each draw's own box: the layout editor moves those
+ * pieces of the frame, not the background between them */
+static struct { int id; float x0, y0, x1, y1; char text[48]; int n, nr; float r[GS_RECTS][4]; } gs_recs[GS_REC];
+static int gs_nrec;
+static long gs_index_t;                              /* when the reverse index was last built (ms) */
+static struct { uintptr_t v; int obj, depth; } *gs_idx;
+static int gs_nidx, gs_capidx;
+static struct { char name[64]; uintptr_t addr; size_t size; int kind; } *gs_objs;
+static int gs_nobjs, gs_capobjs;
+static uintptr_t gs_vts[96]; static int gs_vkind[96]; static int gs_nvts;
+
+static struct {
+    int ok;
+    const ALLEGRO_TRANSFORM *(*cur)(void);
+    void (*copy)(ALLEGRO_TRANSFORM *, const ALLEGRO_TRANSFORM *);
+    void (*compose)(ALLEGRO_TRANSFORM *, const ALLEGRO_TRANSFORM *);
+    void (*use)(const ALLEGRO_TRANSFORM *);
+    void (*ident)(ALLEGRO_TRANSFORM *);
+    void (*translate)(ALLEGRO_TRANSFORM *, float, float);
+    void (*scale)(ALLEGRO_TRANSFORM *, float, float);
+    void *(*target)(void);
+    void *(*backbuffer)(void *);
+    void *(*display)(void);
+    int (*bw)(void *), (*bh)(void *);
+    void *(*parent)(void *);
+    int (*text_w)(const void *, const char *);
+    int (*ustr_w)(const void *, const void *);
+    int (*line_h)(const void *);
+    const char *(*cstr)(const void *);
+    int (*save)(const char *, void *);
+} ga;
+
+static int gs_setup(void)
+{
+    static int tried;
+    if (tried) return ga.ok;
+    tried = 1;
+    ga.cur = sym("al_get_current_transform"); ga.copy = sym("al_copy_transform");
+    ga.compose = sym("al_compose_transform"); ga.use = sym("al_use_transform");
+    ga.ident = sym("al_identity_transform"); ga.translate = sym("al_translate_transform");
+    ga.scale = sym("al_scale_transform"); ga.target = sym("al_get_target_bitmap");
+    ga.backbuffer = sym("al_get_backbuffer"); ga.display = sym("al_get_current_display");
+    ga.bw = sym("al_get_bitmap_width"); ga.bh = sym("al_get_bitmap_height");
+    ga.parent = sym("al_get_parent_bitmap"); ga.text_w = sym("al_get_text_width");
+    ga.ustr_w = sym("al_get_ustr_width"); ga.line_h = sym("al_get_font_line_height");
+    ga.cstr = sym("al_cstr"); ga.save = sym("al_save_bitmap");
+    ga.ok = ga.cur && ga.copy && ga.compose && ga.use && ga.ident && ga.translate && ga.scale && ga.target
+            && ga.backbuffer && ga.display && ga.bw && ga.bh;
+    gs_names = calloc(GS_NAMES, sizeof *gs_names);
+    gs_kind = calloc(GS_NAMES, 1);
+    gs_move = malloc(GS_NAMES * sizeof *gs_move);
+    gs_cache = calloc(GS_CACHE, sizeof *gs_cache);
+    if (!gs_names || !gs_kind || !gs_move || !gs_cache) ga.ok = 0;
+    lg("screen: the game's own drawing %s", ga.ok ? "seen" : "NOT seen (allegro calls missing)");
+    return ga.ok;
+}
+
+static int gs_intern(const char *n, int kind)
+{
+    for (int i = 0; i < gs_nnames; i++) if (!strcmp(gs_names[i], n)) return i;
+    if (gs_nnames >= GS_NAMES) return -1;
+    snprintf(gs_names[gs_nnames], 64, "%s", n);
+    gs_kind[gs_nnames] = (signed char)kind;
+    gs_move[gs_nnames] = -1;
+    for (int m = 0; m < gs_nmoves; m++) if (!strcmp(gs_moves[m].name, n)) gs_move[gs_nnames] = (short)m;
+    return gs_nnames++;
+}
+
+/* the game's classes whose objects hold what it draws, by their vtable symbols */
+static void cb_gs_vts(const char *name, uintptr_t addr, size_t size)
+{
+    (void)size;
+    if (strncmp(name, "_ZTV", 4) || gs_nvts >= 96) return;
+    int kind = strstr(name, "Font") ? 2 : strstr(name, "Movie") ? 3
+             : strstr(name, "Sprite") || strstr(name, "Anim") || strstr(name, "Atlas") || strstr(name, "Image")
+               || strstr(name, "Displayable") || strstr(name, "Bitmap") || strstr(name, "Asset") ? 1 : 0;
+    if (!kind) return;
+    gs_vts[gs_nvts] = addr + 16; gs_vkind[gs_nvts++] = kind;
+}
+static void cb_gs_objs(const char *name, uintptr_t addr, size_t size)
+{
+    if (size < 16 || size > 65536 || !strncmp(name, "_Z", 2)) return;
+    uintptr_t vt = *(const uintptr_t *)addr;
+    int kind = 0;
+    for (int i = 0; i < gs_nvts; i++) if (gs_vts[i] == vt) { kind = gs_vkind[i]; break; }
+    if (!kind) return;
+    if (gs_nobjs >= gs_capobjs) {
+        int cap = gs_capobjs ? gs_capobjs * 2 : 512;
+        void *p = realloc(gs_objs, cap * sizeof *gs_objs);
+        if (!p) return;
+        gs_objs = p; gs_capobjs = cap;
+    }
+    snprintf(gs_objs[gs_nobjs].name, 64, "%s", name);
+    gs_objs[gs_nobjs].addr = addr; gs_objs[gs_nobjs].size = size; gs_objs[gs_nobjs].kind = kind;
+    gs_nobjs++;
+}
+
+static void gs_idx_add(uintptr_t v, int obj, int depth)
+{
+    if (v < 0x10000 || (v & 7)) return;
+    if (gs_nidx >= gs_capidx) {
+        int cap = gs_capidx ? gs_capidx * 2 : 65536;
+        void *p = realloc(gs_idx, cap * sizeof *gs_idx);
+        if (!p) return;
+        gs_idx = p; gs_capidx = cap;
+    }
+    gs_idx[gs_nidx].v = v; gs_idx[gs_nidx].obj = obj; gs_idx[gs_nidx].depth = depth; gs_nidx++;
+}
+static int gs_idx_cmp(const void *a, const void *b)
+{
+    const uintptr_t x = *(const uintptr_t *)a, y = *(const uintptr_t *)b;
+    return x < y ? -1 : x > y;
+}
+/* a read that cannot fault: our own process through process_vm_readv */
+static int gs_peek(uintptr_t at, void *out, size_t n)
+{
+    struct iovec l = { out, n }, r = { (void *)at, n };
+    return syscall(SYS_process_vm_readv, getpid(), &l, 1UL, &r, 1UL, 0UL) == (long)n;
+}
+
+/* The reverse index: every word of every such object, and the words one pointer down (64 of them):
+ * a sprite's bitmap, an animation's frame list, a font's ALLEGRO_FONT. */
+static void gs_build_index(void)
+{
+    if (!gs_nvts) { walk_dynsym(cb_gs_vts); }
+    if (!gs_nobjs) { walk_dynsym(cb_gs_objs); lg("screen: %d of the game's objects hold what it draws (%d classes)", gs_nobjs, gs_nvts); }
+    gs_nidx = 0;
+    uintptr_t buf[64];
+    for (int o = 0; o < gs_nobjs; o++) {
+        const uintptr_t *w = (const uintptr_t *)gs_objs[o].addr;
+        size_t nw = gs_objs[o].size / 8;
+        if (nw > 512) nw = 512;
+        for (size_t i = 1; i < nw; i++) {
+            gs_idx_add(w[i], o, 0);
+            if (w[i] >= 0x10000 && !(w[i] & 7) && gs_peek(w[i], buf, sizeof buf))
+                for (int k = 0; k < 64; k++) gs_idx_add(buf[k], o, 1);
+        }
+    }
+    qsort(gs_idx, gs_nidx, sizeof *gs_idx, gs_idx_cmp);
+    gs_index_t = now_ms();
+}
+static int gs_lookup(uintptr_t v)
+{
+    int lo = 0, hi = gs_nidx - 1, best = -1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (gs_idx[mid].v < v) lo = mid + 1;
+        else { if (gs_idx[mid].v == v) best = mid; hi = mid - 1; }
+    }
+    if (best < 0) return -1;
+    int pick = best;                                  /* a direct hold wins over one pointer down */
+    for (int i = best; i < gs_nidx && gs_idx[i].v == v; i++) if (gs_idx[i].depth == 0) { pick = i; break; }
+    return gs_idx[pick].obj;
+}
+
+/* The part's name for a drawn bitmap or font: its interned id (>= 0) when a game object holds it;
+ * when none does, -2 - the id of a label ("bitmap 64x64", "unnamed font"): shown, never moved.
+ * -1: no name table. Unnamed answers are asked again after 3 s (the index is built again then). */
+static int gs_name_of(const void *p, int is_font)
+{
+    unsigned h = (unsigned)(((uintptr_t)p >> 4) * 2654435761u) % GS_CACHE, slot = GS_CACHE;
+    long t = now_ms();
+    for (int k = 0; k < 8; k++) {
+        unsigned j = (h + k) % GS_CACHE;
+        if (gs_cache[j].p == p) {
+            if (gs_cache[j].id >= 0 || t - gs_cache[j].t < 3000) return gs_cache[j].id;
+            slot = j; break;
+        }
+        if (slot == GS_CACHE && (!gs_cache[j].p || gs_cache[j].p == (void *)1)) slot = j;
+        if (!gs_cache[j].p) break;
+    }
+    int obj = -1;
+    const void *q = p;
+    if (!is_font && ga.parent) { void *par = ga.parent((void *)p); if (par) q = par; }
+    if (gs_nidx) obj = gs_lookup((uintptr_t)q);
+    if (obj < 0 && t - gs_index_t > 3000) { gs_build_index(); obj = gs_lookup((uintptr_t)q); }
+    int ret;
+    const char *file = obj < 0 && !is_font && gs_nfiles ? gs_file_of(q) : NULL;
+    if (obj >= 0) ret = gs_intern(gs_objs[obj].name, is_font ? 2 : gs_objs[obj].kind);
+    else if (file) ret = gs_intern(file, 1);
+    else {
+        char n[64];
+        if (is_font) snprintf(n, sizeof n, "unnamed font");
+        else snprintf(n, sizeof n, "bitmap %dx%d", ga.bw((void *)q), ga.bh((void *)q));
+        int id = gs_intern(n, is_font ? 2 : 0);
+        ret = id >= 0 ? -2 - id : -1;
+    }
+    if (slot == GS_CACHE) slot = h;                     /* a full run: take its first */
+    gs_cache[slot].p = p; gs_cache[slot].id = ret; gs_cache[slot].t = t;
+    return ret;
+}
+
+/* Where the game draws. Wonka (and its engine) draws its screen into bitmaps of its own - a canvas
+ * the size of the screen, and layers it draws into the canvas - and puts the canvas on the display in a
+ * draw or three. A SURFACE is a bitmap the game draws into and then draws, itself, onto the display or
+ * onto another surface: that draw maps the surface's pixels to the screen's (scale and offset, kept from
+ * frame to frame, since a surface is filled before it is composited). Every part drawn into a surface is
+ * a part of the screen. gs_where: 0 neither (a target not mapped yet), 1 the display, 2 a surface. */
+#define GS_SURF 48
+#define GS_TGT 96
+/* small: under half the screen - a piece of the HUD drawn whole and then placed (a score box's digits);
+ * it is one part, named by the first named part drawn into it (id), moved as a whole */
+static struct { void *bmp; float sx, sy, ox, oy; long t; int small, id; } gs_surf[GS_SURF];
+static int gs_nsurf_log;
+static struct { void *bmp; long t; } gs_tgt[GS_TGT];   /* bitmaps the game has drawn into lately */
+static int gs_disp_w, gs_disp_h;
+static int gs_where(int *c)
+{
+    void *d = ga.display();
+    if (!d) return 0;
+    void *t = ga.target();
+    if (t == ga.backbuffer(d)) return 1;
+    for (int i = 0; i < GS_SURF; i++) if (gs_surf[i].bmp && gs_surf[i].bmp == t) { *c = i; return 2; }
+    long now = now_ms();                              /* a target of the game's: remember it */
+    int old = 0;
+    for (int i = 0; i < GS_TGT; i++) {
+        if (gs_tgt[i].bmp == t) { gs_tgt[i].t = now; return 0; }
+        if (gs_tgt[i].t < gs_tgt[old].t) old = i;
+    }
+    gs_tgt[old].bmp = t; gs_tgt[old].t = now;
+    return 0;
+}
+/* A bitmap drawn onto the display or a surface, at (x0 y0)-(x1 y1) on the screen: when the game has
+ * drawn into it, it is a surface (its mapping kept); 1 then (it is not a part itself). */
+static int gs_surface_blit(const void *b, float bw, float bh, float x0, float y0, float x1, float y1)
+{
+    if (!gs_disp_w) { void *d = ga.display(); void *bb = d ? ga.backbuffer(d) : NULL; if (bb) { gs_disp_w = ga.bw(bb); gs_disp_h = ga.bh(bb); } }
+    if (!b || bw <= 0 || bh <= 0) return 0;
+    int k = -1, old = 0, is_tgt = 0;
+    for (int i = 0; i < GS_SURF; i++) {
+        if (gs_surf[i].bmp == b) { k = i; break; }
+        if (gs_surf[i].t < gs_surf[old].t) old = i;
+    }
+    if (k < 0) {
+        for (int i = 0; i < GS_TGT; i++) if (gs_tgt[i].bmp == b) { is_tgt = 1; break; }
+        if (!is_tgt) return 0;
+        k = old;
+        gs_surf[k].id = -1;
+        if (gs_nsurf_log++ < 12)
+            lg("screen: the game draws into a %dx%d bitmap and composites it at %.0f,%.0f %.0fx%.0f",
+               (int)bw, (int)bh, x0, y0, x1 - x0, y1 - y0);
+    }
+    gs_surf[k].bmp = (void *)b; gs_surf[k].sx = (x1 - x0) / bw; gs_surf[k].sy = (y1 - y0) / bh;
+    gs_surf[k].ox = x0; gs_surf[k].oy = y0; gs_surf[k].t = now_ms();
+    gs_surf[k].small = (x1 - x0) * (y1 - y0) < 0.5f * (gs_disp_w ? gs_disp_w : 1360) * (gs_disp_h ? gs_disp_h : 768);
+    return gs_surf[k].small ? 2 + k : 1;
+}
+
+/* One draw of the game's: its box on the screen (local x y w h through the current transform),
+ * recorded for a census and moved or hidden by a screen_move / screen_hide.  Returns 0 to skip
+ * the draw (hidden); else 1, with *saved holding the transform to put back when moved > 0. */
+static int gs_draw(const void *p, int is_font, float x, float y, float w, float h, const char *text,
+                   ALLEGRO_TRANSFORM *saved, int *moved)
+{
+    *moved = 0;
+    if (gs_ours || gs_depth || !installed || !(gs_rec || gs_any_moves) || !gs_setup()) return 1;
+    int c = -1, where = gs_where(&c);
+    if (!where) return 1;
+    const ALLEGRO_TRANSFORM *t = ga.cur();
+    float xs[4] = { x, x + w, x, x + w }, ys[4] = { y, y, y + h, y + h };
+    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;     /* its box where it is drawn */
+    for (int i = 0; i < 4; i++) {
+        float sx = xs[i] * t->m[0][0] + ys[i] * t->m[1][0] + t->m[3][0];
+        float sy = xs[i] * t->m[0][1] + ys[i] * t->m[1][1] + t->m[3][1];
+        x0 = sx < x0 ? sx : x0; x1 = sx > x1 ? sx : x1;
+        y0 = sy < y0 ? sy : y0; y1 = sy > y1 ? sy : y1;
+    }
+    float csx = 1, csy = 1;                           /* a surface's pixels on the screen */
+    if (where == 2) {
+        if (gs_surf[c].small) {                       /* drawn into a piece of the HUD: the piece is the part */
+            if (gs_surf[c].id < 0) { int i = gs_name_of(p, is_font); if (i >= 0) gs_surf[c].id = i; }
+            return 1;
+        }
+        csx = gs_surf[c].sx; csy = gs_surf[c].sy;
+        x0 = gs_surf[c].ox + x0 * csx; x1 = gs_surf[c].ox + x1 * csx;
+        y0 = gs_surf[c].oy + y0 * csy; y1 = gs_surf[c].oy + y1 * csy;
+    }
+    int sf = is_font ? 0 : gs_surface_blit(p, (float)ga.bw((void *)p), (float)ga.bh((void *)p), x0, y0, x1, y1);
+    if (sf == 1) return 1;                            /* a screen-sized layer: its parts are what is named */
+    int id = gs_name_of(p, is_font);                  /* a piece's own name first (an atlas the game draws into) */
+    if (sf >= 2 && id < 0) {                          /* else the first named part drawn into it */
+        if (gs_surf[sf - 2].id >= 0) id = gs_surf[sf - 2].id;
+        else {
+            char n[64]; snprintf(n, sizeof n, "piece %dx%d", ga.bw((void *)p), ga.bh((void *)p));
+            int i = gs_intern(n, 0);
+            id = i >= 0 ? -2 - i : -1;
+        }
+    }
+    int named = id >= 0;
+    if (id < -1) id = -2 - id;                        /* unnamed: recorded by its label, never moved */
+    if (gs_rec && id >= 0) {
+        int r = -1;                                   /* one record per name and nearby box: a union */
+        for (int i = 0; i < gs_nrec; i++)
+            if (gs_recs[i].id == id && x0 < gs_recs[i].x1 + 40 && x1 > gs_recs[i].x0 - 40
+                && y0 < gs_recs[i].y1 + 40 && y1 > gs_recs[i].y0 - 40) { r = i; break; }
+        if (r < 0 && gs_nrec < GS_REC) {
+            r = gs_nrec++;
+            gs_recs[r].id = id; gs_recs[r].x0 = x0; gs_recs[r].y0 = y0; gs_recs[r].x1 = x1; gs_recs[r].y1 = y1;
+            gs_recs[r].n = 0; gs_recs[r].text[0] = 0;
+        }
+        if (r >= 0 && gs_recs[r].n == 0) gs_recs[r].nr = 0;
+        if (r >= 0) {                                 /* this draw's own box, unless one like it is kept */
+            int same = 0;
+            for (int i = 0; i < gs_recs[r].nr && !same; i++)
+                same = x0 >= gs_recs[r].r[i][0] - 1 && y0 >= gs_recs[r].r[i][1] - 1 && x1 <= gs_recs[r].r[i][2] + 1 && y1 <= gs_recs[r].r[i][3] + 1;
+            if (!same && gs_recs[r].nr < GS_RECTS) {
+                float *q = gs_recs[r].r[gs_recs[r].nr++];
+                q[0] = x0; q[1] = y0; q[2] = x1; q[3] = y1;
+            }
+        }
+        if (r >= 0) {
+            gs_recs[r].x0 = x0 < gs_recs[r].x0 ? x0 : gs_recs[r].x0; gs_recs[r].y0 = y0 < gs_recs[r].y0 ? y0 : gs_recs[r].y0;
+            gs_recs[r].x1 = x1 > gs_recs[r].x1 ? x1 : gs_recs[r].x1; gs_recs[r].y1 = y1 > gs_recs[r].y1 ? y1 : gs_recs[r].y1;
+            gs_recs[r].n++;
+            if (text && !gs_recs[r].text[0]) snprintf(gs_recs[r].text, sizeof gs_recs[r].text, "%s", text);
+        }
+    }
+    if (!named || gs_move[id] < 0) return 1;
+    const typeof(gs_moves[0]) *mv = &gs_moves[gs_move[id]];
+    if (mv->hide) return 0;
+    /* the move, where the part is drawn: its centre there, the screen's percent in that bitmap's pixels */
+    float W = gs_disp_w ? gs_disp_w : 1360, H = gs_disp_h ? gs_disp_h : 768;
+    float cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    if (mv->anchored) { cx = mv->ax * W / 100; cy = mv->ay * H / 100; }   /* the whole part scales about one point */
+    if (where == 2) { cx = (cx - gs_surf[c].ox) / csx; cy = (cy - gs_surf[c].oy) / csy; }
+    ALLEGRO_TRANSFORM m, nt;
+    ga.copy(saved, t);
+    ga.ident(&m);
+    ga.translate(&m, -cx, -cy);
+    ga.scale(&m, mv->sc, mv->sc);
+    ga.translate(&m, cx + mv->dx * W / 100 / csx, cy + mv->dy * H / 100 / csy);
+    ga.copy(&nt, t);
+    ga.compose(&nt, &m);
+    ga.use(&nt);
+    *moved = 1;
+    return 1;
+}
+#define GS_DONE() do { if (moved) ga.use(&saved); } while (0)
+
+static void *gs_real(const char *n) { return dlsym(RTLD_NEXT, n); }
+
+/* The draw calls the game makes, each passed on to Allegro's own. */
+void al_draw_bitmap(void *b, float dx, float dy, int fl)
+{
+    static void (*r)(void *, float, float, int); if (!r) r = gs_real("al_draw_bitmap");
+    ALLEGRO_TRANSFORM saved; int moved;
+    if (!gs_draw(b, 0, dx, dy, b && ga.bw ? ga.bw(b) : 0, b && ga.bh ? ga.bh(b) : 0, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, dx, dy, fl); gs_depth--; GS_DONE();
+}
+void al_draw_tinted_bitmap(void *b, ALLEGRO_COLOR c, float dx, float dy, int fl)
+{
+    static void (*r)(void *, ALLEGRO_COLOR, float, float, int); if (!r) r = gs_real("al_draw_tinted_bitmap");
+    ALLEGRO_TRANSFORM saved; int moved;
+    if (!gs_draw(b, 0, dx, dy, b && ga.bw ? ga.bw(b) : 0, b && ga.bh ? ga.bh(b) : 0, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, c, dx, dy, fl); gs_depth--; GS_DONE();
+}
+void al_draw_bitmap_region(void *b, float sx, float sy, float sw, float sh, float dx, float dy, int fl)
+{
+    static void (*r)(void *, float, float, float, float, float, float, int); if (!r) r = gs_real("al_draw_bitmap_region");
+    ALLEGRO_TRANSFORM saved; int moved;
+    if (!gs_draw(b, 0, dx, dy, sw, sh, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, sx, sy, sw, sh, dx, dy, fl); gs_depth--; GS_DONE();
+}
+void al_draw_tinted_bitmap_region(void *b, ALLEGRO_COLOR c, float sx, float sy, float sw, float sh, float dx, float dy, int fl)
+{
+    static void (*r)(void *, ALLEGRO_COLOR, float, float, float, float, float, float, int);
+    if (!r) r = gs_real("al_draw_tinted_bitmap_region");
+    ALLEGRO_TRANSFORM saved; int moved;
+    if (!gs_draw(b, 0, dx, dy, sw, sh, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, c, sx, sy, sw, sh, dx, dy, fl); gs_depth--; GS_DONE();
+}
+void al_draw_scaled_bitmap(void *b, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh, int fl)
+{
+    static void (*r)(void *, float, float, float, float, float, float, float, float, int);
+    if (!r) r = gs_real("al_draw_scaled_bitmap");
+    ALLEGRO_TRANSFORM saved; int moved;
+    if (!gs_draw(b, 0, dx, dy, dw, dh, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, sx, sy, sw, sh, dx, dy, dw, dh, fl); gs_depth--; GS_DONE();
+}
+void al_draw_tinted_scaled_bitmap(void *b, ALLEGRO_COLOR c, float sx, float sy, float sw, float sh, float dx, float dy,
+                                  float dw, float dh, int fl)
+{
+    static void (*r)(void *, ALLEGRO_COLOR, float, float, float, float, float, float, float, float, int);
+    if (!r) r = gs_real("al_draw_tinted_scaled_bitmap");
+    ALLEGRO_TRANSFORM saved; int moved;
+    if (!gs_draw(b, 0, dx, dy, dw, dh, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, c, sx, sy, sw, sh, dx, dy, dw, dh, fl); gs_depth--; GS_DONE();
+}
+/* the rotated ones: their box is the unrotated one around (dx, dy), as wide as drawn */
+void al_draw_rotated_bitmap(void *b, float cx, float cy, float dx, float dy, float a, int fl)
+{
+    static void (*r)(void *, float, float, float, float, float, int); if (!r) r = gs_real("al_draw_rotated_bitmap");
+    ALLEGRO_TRANSFORM saved; int moved;
+    if (!gs_draw(b, 0, dx - cx, dy - cy, b && ga.bw ? ga.bw(b) : 0, b && ga.bh ? ga.bh(b) : 0, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, cx, cy, dx, dy, a, fl); gs_depth--; GS_DONE();
+}
+void al_draw_tinted_rotated_bitmap(void *b, ALLEGRO_COLOR c, float cx, float cy, float dx, float dy, float a, int fl)
+{
+    static void (*r)(void *, ALLEGRO_COLOR, float, float, float, float, float, int);
+    if (!r) r = gs_real("al_draw_tinted_rotated_bitmap");
+    ALLEGRO_TRANSFORM saved; int moved;
+    if (!gs_draw(b, 0, dx - cx, dy - cy, b && ga.bw ? ga.bw(b) : 0, b && ga.bh ? ga.bh(b) : 0, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, c, cx, cy, dx, dy, a, fl); gs_depth--; GS_DONE();
+}
+void al_draw_scaled_rotated_bitmap(void *b, float cx, float cy, float dx, float dy, float xs, float ys, float a, int fl)
+{
+    static void (*r)(void *, float, float, float, float, float, float, float, int);
+    if (!r) r = gs_real("al_draw_scaled_rotated_bitmap");
+    ALLEGRO_TRANSFORM saved; int moved;
+    float w = b && ga.bw ? ga.bw(b) * xs : 0, h = b && ga.bh ? ga.bh(b) * ys : 0;
+    if (!gs_draw(b, 0, dx - cx * xs, dy - cy * ys, w, h, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, cx, cy, dx, dy, xs, ys, a, fl); gs_depth--; GS_DONE();
+}
+void al_draw_tinted_scaled_rotated_bitmap(void *b, ALLEGRO_COLOR c, float cx, float cy, float dx, float dy, float xs, float ys,
+                                          float a, int fl)
+{
+    static void (*r)(void *, ALLEGRO_COLOR, float, float, float, float, float, float, float, int);
+    if (!r) r = gs_real("al_draw_tinted_scaled_rotated_bitmap");
+    ALLEGRO_TRANSFORM saved; int moved;
+    float w = b && ga.bw ? ga.bw(b) * xs : 0, h = b && ga.bh ? ga.bh(b) * ys : 0;
+    if (!gs_draw(b, 0, dx - cx * xs, dy - cy * ys, w, h, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, c, cx, cy, dx, dy, xs, ys, a, fl); gs_depth--; GS_DONE();
+}
+void al_draw_tinted_scaled_rotated_bitmap_region(void *b, float sx, float sy, float sw, float sh, ALLEGRO_COLOR c,
+                                                 float cx, float cy, float dx, float dy, float xs, float ys, float a, int fl)
+{
+    static void (*r)(void *, float, float, float, float, ALLEGRO_COLOR, float, float, float, float, float, float, float, int);
+    if (!r) r = gs_real("al_draw_tinted_scaled_rotated_bitmap_region");
+    ALLEGRO_TRANSFORM saved; int moved;
+    if (!gs_draw(b, 0, dx - cx * xs, dy - cy * ys, sw * xs, sh * ys, NULL, &saved, &moved)) return;
+    gs_depth++; r(b, sx, sy, sw, sh, c, cx, cy, dx, dy, xs, ys, a, fl); gs_depth--; GS_DONE();
+}
+/* text: its box from the font's width and line height, as Allegro aligns it (1 centre, 2 right) */
+static float gs_ax(float x, float w, int fl) { return (fl & 1) ? x - w / 2 : (fl & 2) ? x - w : x; }
+void al_draw_text(const void *f, ALLEGRO_COLOR c, float x, float y, int fl, const char *s)
+{
+    static void (*r)(const void *, ALLEGRO_COLOR, float, float, int, const char *); if (!r) r = gs_real("al_draw_text");
+    ALLEGRO_TRANSFORM saved; int moved = 0;
+    if (!gs_ours && installed && (gs_rec || gs_any_moves) && gs_setup()) {
+        float w = ga.text_w && s ? (float)ga.text_w(f, s) : 0, h = ga.line_h ? (float)ga.line_h(f) : 0;
+        if (!gs_draw(f, 1, gs_ax(x, w, fl), y, w, h, s, &saved, &moved)) return;
+    }
+    gs_depth++; r(f, c, x, y, fl, s); gs_depth--; GS_DONE();
+}
+void al_draw_ustr(const void *f, ALLEGRO_COLOR c, float x, float y, int fl, const void *u)
+{
+    static void (*r)(const void *, ALLEGRO_COLOR, float, float, int, const void *); if (!r) r = gs_real("al_draw_ustr");
+    ALLEGRO_TRANSFORM saved; int moved = 0;
+    if (!gs_ours && installed && (gs_rec || gs_any_moves) && gs_setup()) {
+        float w = ga.ustr_w && u ? (float)ga.ustr_w(f, u) : 0, h = ga.line_h ? (float)ga.line_h(f) : 0;
+        if (!gs_draw(f, 1, gs_ax(x, w, fl), y, w, h, ga.cstr && u ? ga.cstr(u) : NULL, &saved, &moved)) return;
+    }
+    gs_depth++; r(f, c, x, y, fl, u); gs_depth--; GS_DONE();
+}
+void al_draw_justified_text(const void *f, ALLEGRO_COLOR c, float x1, float x2, float y, float diff, int fl, const char *s)
+{
+    static void (*r)(const void *, ALLEGRO_COLOR, float, float, float, float, int, const char *);
+    if (!r) r = gs_real("al_draw_justified_text");
+    ALLEGRO_TRANSFORM saved; int moved = 0;
+    if (!gs_ours && installed && (gs_rec || gs_any_moves) && gs_setup()) {
+        float h = ga.line_h ? (float)ga.line_h(f) : 0;
+        if (!gs_draw(f, 1, x1, y, x2 - x1, h, s, &saved, &moved)) return;
+    }
+    gs_depth++; r(f, c, x1, x2, y, diff, fl, s); gs_depth--; GS_DONE();
+}
+void al_destroy_bitmap(void *b)
+{
+    static void (*r)(void *); if (!r) r = gs_real("al_destroy_bitmap");
+    if (gs_cache && b) {
+        unsigned h = (unsigned)(((uintptr_t)b >> 4) * 2654435761u) % GS_CACHE;
+        for (int k = 0; k < 8; k++) { unsigned j = (h + k) % GS_CACHE; if (gs_cache[j].p == b) { gs_cache[j].p = (void *)1; gs_cache[j].id = -1; } }
+    }
+    r(b);
+}
+
+/* The file a bitmap was loaded from. The game reads an asset through its own file manager (opened by
+ * path, decrypted, handed to Allegro as a memory file), so a load carries no path; the last path the
+ * loading thread opened does. Interposed: open/open64/fopen/fopen64 (the path, per thread id) and
+ * Allegro's loads (the bitmap). JJP_MODS_SCREEN_PROBE=1 logs the first of each. */
+#define GS_PATHS 64
+static struct { long tid, t; char path[160]; } gs_last[GS_PATHS];
+static struct { void *bmp; char name[64]; } *gs_files;
+static int gs_capfiles, gs_probe = -1, gs_nprobe[8];
+static long gs_tid(void) { return syscall(SYS_gettid); }
+static void gs_opened(const char *p, int which)
+{
+    if (!p || !installed) return;
+    const char *dot = strrchr(p, '.');
+    if (!dot || strchr(dot, '/')) return;
+    static const char *const ext[] = { ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tga", ".dds", ".webm", ".mp4", ".ogv", NULL };
+    int pic = 0;
+    for (int i = 0; ext[i]; i++) if (!strcasecmp(dot, ext[i])) pic = 1;
+    if (!pic || strstr(p, "/padmodes/") || !strstr(p, "/jjpe/")) return;     /* the game's own, never ours */
+    if (gs_probe < 0) { const char *e = getenv("JJP_MODS_SCREEN_PROBE"); gs_probe = e && *e == '1'; }
+    if (gs_probe && gs_nprobe[which]++ < 6) lg("screen probe: open%d %s", which, p);
+    long t = gs_tid();
+    int k = (int)(t % GS_PATHS);
+    gs_last[k].tid = t; gs_last[k].t = now_ms();
+    snprintf(gs_last[k].path, sizeof gs_last[k].path, "%s", p);
+}
+static void gs_loaded(void *b, int which)
+{
+    if (!b || !installed) return;
+    long t = gs_tid();
+    int k = (int)(t % GS_PATHS);
+    if (gs_last[k].tid != t || !*gs_last[k].path || now_ms() - gs_last[k].t > 500) return;
+    gs_last[k].tid = 0;                               /* one load per file opened */
+    const char *base = strrchr(gs_last[k].path, '/');
+    base = base ? base + 1 : gs_last[k].path;
+    char n[64]; int o = 0;
+    o = snprintf(n, sizeof n, "file_");
+    for (const char *c = base; *c && *c != '.' && o < 62; c++) n[o++] = isalnum((unsigned char)*c) ? *c : '_';
+    n[o] = 0;
+    if (gs_probe > 0 && gs_nprobe[4 + (which & 3)]++ < 6) lg("screen probe: load%d %s -> %s %dx%d", which, gs_last[k].path, n,
+                                                            ga.bw ? ga.bw(b) : 0, ga.bh ? ga.bh(b) : 0);
+    if (gs_nfiles >= gs_capfiles) {
+        int cap = gs_capfiles ? gs_capfiles * 2 : 1024;
+        void *q = realloc(gs_files, cap * sizeof *gs_files);
+        if (!q) return;
+        gs_files = q; gs_capfiles = cap;
+    }
+    gs_files[gs_nfiles].bmp = b;
+    snprintf(gs_files[gs_nfiles].name, sizeof gs_files[0].name, "%s", n);
+    gs_nfiles++;
+}
+static const char *gs_file_of(const void *b)
+{
+    for (int i = gs_nfiles - 1; i >= 0; i--) if (gs_files[i].bmp == b) return gs_files[i].name;
+    return NULL;
+}
+int open(const char *p, int fl, ...)
+{
+    static int (*r)(const char *, int, ...); if (!r) r = gs_real("open");
+    int mode = 0;
+    if (fl & (0100 | 020000000)) { va_list ap; va_start(ap, fl); mode = va_arg(ap, int); va_end(ap); }
+    gs_opened(p, 0);
+    return r(p, fl, mode);
+}
+int open64(const char *p, int fl, ...)
+{
+    static int (*r)(const char *, int, ...); if (!r) r = gs_real("open64");
+    int mode = 0;
+    if (fl & (0100 | 020000000)) { va_list ap; va_start(ap, fl); mode = va_arg(ap, int); va_end(ap); }
+    gs_opened(p, 1);
+    return r(p, fl, mode);
+}
+FILE *fopen(const char *p, const char *m)
+{
+    static FILE *(*r)(const char *, const char *); if (!r) r = gs_real("fopen");
+    gs_opened(p, 2);
+    return r(p, m);
+}
+FILE *fopen64(const char *p, const char *m)
+{
+    static FILE *(*r)(const char *, const char *); if (!r) r = gs_real("fopen64");
+    gs_opened(p, 3);
+    return r(p, m);
+}
+void *al_load_bitmap_flags_f(void *fp, const char *ident, int fl)
+{
+    static void *(*r)(void *, const char *, int); if (!r) r = gs_real("al_load_bitmap_flags_f");
+    void *b = r(fp, ident, fl); gs_loaded(b, 0); return b;
+}
+void *al_load_bitmap_f(void *fp, const char *ident)
+{
+    static void *(*r)(void *, const char *); if (!r) r = gs_real("al_load_bitmap_f");
+    void *b = r(fp, ident); gs_loaded(b, 1); return b;
+}
+void *al_load_bitmap_flags(const char *p, int fl)
+{
+    static void *(*r)(const char *, int); if (!r) r = gs_real("al_load_bitmap_flags");
+    gs_opened(p, 2);
+    void *b = r(p, fl); gs_loaded(b, 2); return b;
+}
+void *al_load_bitmap(const char *p)
+{
+    static void *(*r)(const char *); if (!r) r = gs_real("al_load_bitmap");
+    gs_opened(p, 2);
+    void *b = r(p); gs_loaded(b, 3); return b;
+}
+
+/* title.cfg: screen_move = <name> <dx> <dy> [<scale>]; screen_hide = <name> */
+static void gs_parse(const char *k, const char *v)
+{
+    char buf[256]; snprintf(buf, sizeof buf, "%s", v);
+    char *n = strtok(buf, " \t");
+    if (!n) return;
+    int m = -1;
+    for (int i = 0; i < gs_nmoves; i++) if (!strcmp(gs_moves[i].name, n)) m = i;
+    if (m < 0) {
+        if (gs_nmoves >= GS_MOVES) { lg("title.cfg: more than %d screen_move / screen_hide lines; %s ignored", GS_MOVES, n); return; }
+        m = gs_nmoves++;
+        memset(&gs_moves[m], 0, sizeof gs_moves[m]);
+        snprintf(gs_moves[m].name, sizeof gs_moves[m].name, "%s", n);
+        gs_moves[m].sc = 1;
+    }
+    if (!strcmp(k, "screen_hide")) gs_moves[m].hide = 1;
+    else {
+        const char *p = v + (n - buf) + strlen(n);
+        float a[5] = { 0, 0, 1, 0, 0 };
+        int got = 0;
+        for (int i = 0; i < 5; i++) { const char *q = p; float f = fnum(&p); if (p == q) break; a[i] = f; got++; }
+        gs_moves[m].dx = a[0]; gs_moves[m].dy = a[1]; gs_moves[m].sc = a[2] > 0 ? a[2] : 1;
+        gs_moves[m].anchored = got >= 5; gs_moves[m].ax = a[3]; gs_moves[m].ay = a[4];
+    }
+    gs_any_moves = 1;
+}
+
+/* At each flip, before anything of ours is drawn: a recorded frame is written (its picture and its
+ * parts); a request starts the next one. */
+static void gs_frame(void)
+{
+    if (!*gs_dir) {
+        const char *e = getenv("JJP_MODS_SCREEN_DIR");
+        snprintf(gs_dir, sizeof gs_dir, "%s", e && *e ? e : "/tmp/padmodes/layout");
+    }
+    char path[700];
+    if (gs_rec) {
+        gs_rec = 0;
+        if (!gs_setup()) return;
+        void *d = ga.display();
+        void *bb = d ? ga.backbuffer(d) : NULL;
+        if (bb) { gs_disp_w = ga.bw(bb); gs_disp_h = ga.bh(bb); }
+        snprintf(path, sizeof path, "%s/%s.png", gs_dir, gs_label);
+        int saved = bb && ga.save && ga.save(path, bb);
+        snprintf(path, sizeof path, "%s/%s.json", gs_dir, gs_label);
+        FILE *f = fopen(path, "w");
+        if (f) {
+            fprintf(f, "{\"label\": \"%s\", \"size\": [%d, %d], \"picture\": %s, \"parts\": [\n", gs_label,
+                    gs_disp_w, gs_disp_h, saved ? "true" : "false");
+            for (int i = 0; i < gs_nrec; i++) {
+                char t[100]; int o = 0;
+                for (const char *c = gs_recs[i].text; *c && o < 96; c++) if (*c >= 32 && *c != '"' && *c != '\\') t[o++] = *c;
+                t[o] = 0;
+                int id = gs_recs[i].id;
+                fprintf(f, "  {\"name\": \"%s\", \"kind\": \"%s\", \"box\": [%.1f, %.1f, %.1f, %.1f], \"draws\": %d, \"text\": \"%s\", \"rects\": [",
+                        gs_names[id], gs_kind[id] == 2 ? "font" : gs_kind[id] == 3 ? "movie" : gs_kind[id] ? "picture" : "unnamed",
+                        gs_recs[i].x0, gs_recs[i].y0, gs_recs[i].x1 - gs_recs[i].x0, gs_recs[i].y1 - gs_recs[i].y0,
+                        gs_recs[i].n, t);
+                for (int j = 0; j < gs_recs[i].nr; j++)
+                    fprintf(f, "%s[%.1f, %.1f, %.1f, %.1f]", j ? ", " : "", gs_recs[i].r[j][0], gs_recs[i].r[j][1],
+                            gs_recs[i].r[j][2] - gs_recs[i].r[j][0], gs_recs[i].r[j][3] - gs_recs[i].r[j][1]);
+                fprintf(f, "]}%s\n", i + 1 < gs_nrec ? "," : "");
+            }
+            fprintf(f, "]}\n");
+            fclose(f);
+        }
+        lg("screen census \"%s\": %d part(s) drawn, picture %s", gs_label, gs_nrec, saved ? "saved" : "NOT saved");
+        return;
+    }
+    snprintf(path, sizeof path, "%s/request", gs_dir);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char lab[64] = "";
+    if (!fgets(lab, sizeof lab, f)) lab[0] = 0;
+    fclose(f);
+    unlink(path);
+    char *t = trim(lab);
+    int o = 0;
+    for (char *c = t; *c && o < 60; c++) gs_label[o++] = (isalnum((unsigned char)*c) || *c == '_' || *c == '-') ? *c : '_';
+    gs_label[o] = 0;
+    if (!*gs_label) snprintf(gs_label, sizeof gs_label, "screen");
+    if (!gs_setup()) return;
+    gs_nrec = 0;
+    gs_rec = 1;
+}
+
 void al_flip_display(void)
 {
     if (!real_flip) real_flip = dlsym(RTLD_NEXT, "al_flip_display");
     if (++frames == 1) lg("al_flip_display interposed (first frame)");
     if (installed) {
         pthread_mutex_lock(&mu);
+        gs_frame();                               /* PAD-1515: a census of the game's own frame, before ours */
         if (!our_lb && npm) build_lamp_buffer();
         load_pictures();                          /* on the render thread: bitmaps are GL textures */
         per_frame();

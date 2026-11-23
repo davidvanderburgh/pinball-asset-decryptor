@@ -113,6 +113,8 @@ LABELS = {
     "game_type_title_at": "Attract menu: heading box (x y w h, % of the menu)",
     "game_type_lines_at": "Attract menu: lines box (x y w h, % of the menu)",
     "game_type_hint_at": "Attract menu: hint box (x y w h, % of the menu)",
+    "screen_move": "The game's own screen: parts moved (one a line: name dx dy [scale])",
+    "screen_hide": "The game's own screen: parts hidden (one a line: name)",
     "sound_channel": "Channel for our sound files", "sound_like": "Our sounds set like",
     "music": "Music (a file of ours)", "music_like": "Our music set like",
     "picture": "Picture (a file of ours)", "picture_at": "Picture box (x y w h, % of screen)",
@@ -162,7 +164,7 @@ TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_co
               "game_type_pick_color", "game_type_pick_bar_color", "game_type_hint_color",
               "game_type_font_title", "game_type_font_item", "game_type_font_hint",
               "game_type_picture", "game_type_picture_at",
-              "game_type_title_at", "game_type_lines_at", "game_type_hint_at")
+              "game_type_title_at", "game_type_lines_at", "game_type_hint_at", "screen_move", "screen_hide")
 
 
 # ============================================================================ where things are
@@ -327,7 +329,7 @@ def read_cfg(path):
     except OSError:
         return collections.OrderedDict()
     out = collections.OrderedDict()
-    rep = getattr(mk(), "REPEATABLE", {})
+    rep = set(getattr(mk(), "REPEATABLE", {})) | set(getattr(mk(), "TITLE_REPEATABLE", ()))
     for _n, k, v in mk().parse_cfg(text):
         out[k] = out[k] + "\n" + v if k in rep and out.get(k) else v   # PAD-1508: every line of a repeated key
     return out
@@ -770,6 +772,19 @@ def runtime_path(iso):
             h.update(f.read())
     stem = re.sub(r"\.iso$", "", os.path.basename(iso), flags=re.I)
     return os.path.join(modes_root(), ".runtime", "%s-%s.so" % (stem, h.hexdigest()[:12]))
+
+
+def screens_args(iso, runtime, label, to_linux):
+    """PAD-1515: the jjpscreens.sh argv ("Show it in the game": the game's own screens, each part named,
+    into the mode folder's .layout/ for the layout editor), as root from the checkout root, run by bash."""
+    from . import screen_layout as SL
+    folder = title_dir(label)
+    return ["tools/jjp_emu/jjpscreens.sh", "--iso", to_linux(iso), "--so", to_linux(runtime),
+            "--modes", to_linux(folder), "--out", to_linux(os.path.join(folder, SL.FRAMES_DIR))]
+
+
+#: the screens run's command line, for stopping it inside Linux (see BUILD_PATTERN)
+SCREENS_PATTERN = "tools/jjp_emu/jjp[s]creens.sh"
 
 
 def runtime_args(iso, out, to_linux):

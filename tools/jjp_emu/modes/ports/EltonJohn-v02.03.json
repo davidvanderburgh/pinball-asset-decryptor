@@ -39,6 +39,59 @@
   ]
  },
  "proc_modes": [],
+ "played": {
+  "can_watch": true,
+  "multiballs": true,
+  "names": [
+   "BackstageFrenzy",
+   "BennieAndTheSuperJets",
+   "CrocodileRockMultiball",
+   "EncoreMB",
+   "FinalTour",
+   "JMBash",
+   "JMHurryUp",
+   "JMPattern",
+   "PianoMultiball",
+   "PianoMultiball1",
+   "PianoMultiball2",
+   "PianoMultiball3",
+   "PianoMultiball4",
+   "PianoMultiballWM",
+   "PianoRampMode",
+   "RocketmanMultiball",
+   "SongBeat",
+   "SongBeatMode",
+   "SongBeatModeLoveLiesBleeding",
+   "SongMode",
+   "SongModeBennieJets",
+   "SongModeBitchBack",
+   "SongModeCrocRock",
+   "SongModeGoodbyeYBR",
+   "SongModeHonkyCat",
+   "SongModeLevon",
+   "SongModePhillyFreedom",
+   "SongModePinballWizard",
+   "SongModeRocketman",
+   "SongModeSaturdayNight",
+   "SongModeSisterTwist",
+   "SongModeStillStanding",
+   "SongModeTakePilot",
+   "SongModeTinyDancer",
+   "SongModeYourSong",
+   "StarFrenzy",
+   "SuperSpinnerMode",
+   "TinyDancerMode"
+  ],
+  "game_type": {
+   "can": true,
+   "buttons": {
+    "_Z28jjpe_is_left_flipper_pressedv": true,
+    "_Z29jjpe_is_right_flipper_pressedv": true
+   },
+   "attract_hook": true,
+   "diag_hook": true
+  }
+ },
  "media": {
   "can_play_own_media": true,
   "ok": {

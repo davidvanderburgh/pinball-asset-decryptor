@@ -883,3 +883,26 @@ def test_a_multiball_ends_when_one_ball_is_left():
     assert "} else multiball_since = 0;" in body and "else if (bip <= 1)" not in body
     busy = src[src.index("static const char *game_busy_except(const pm_t *m)"):]
     assert "return mb_busy();" in busy[:busy.index("static const char *game_busy(void)")]
+
+
+def test_every_title_that_runs_modes_can_count_plays_and_show_the_menu():
+    """PAD-1512, read off each title's own game program: the plays (Mode objects, and MultiballRules
+    where the engine has them) and the attract menu (the engine's flipper button calls and its attract
+    and service menu hooks) work on every JJP title that runs modes, and each has a wizard starter."""
+    ports = os.path.join(RIG, "modes", "ports")
+    can = 0
+    for fn in sorted(os.listdir(ports)):
+        if fn.endswith(".live.json"):
+            continue
+        p = json.load(open(os.path.join(ports, fn), encoding="utf-8"))
+        if not p["can_run_modes"]:
+            continue
+        can += 1
+        pl = p["played"]
+        assert pl["can_watch"] and pl["names"], fn
+        assert pl["multiballs"] == (p["engine"] == "mode"), fn       # The Wizard of Oz: mode procs only
+        assert pl["game_type"]["can"] and pl["game_type"]["attract_hook"] and pl["game_type"]["diag_hook"], fn
+        ex = os.path.join(RIG, "modes", "examples", fn[:-5])
+        assert any("game_type" in open(os.path.join(ex, f), encoding="utf-8").read()
+                   for f in os.listdir(ex) if f.endswith(".mode")), fn
+    assert can == 10

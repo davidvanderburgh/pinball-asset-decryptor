@@ -275,6 +275,13 @@ sound_start = se_VO_GF_Narrator_KissTheRing1
   next start. A library built for API 1 still loads. The Blocks editor has the same as **When the
   game starts / ends <mode>** and the value **the player's start_all modes played**.
 
+**Every title that runs modes** has all of it, read off its own game program 2026-11-22 (`played` in
+its port report): Guns N' Roses and CHAKA's LE, Elton John, Godfather, Pirates, Wonka, Dialed In, The
+Hobbit and Toy Story count their Mode classes and their multiballs (10 to 40 names each); The Wizard of
+Oz counts its 27 mode procs (no MultiballRule there). Every one exports the flipper button calls and the
+attract and service menu hook lists. Each starter folder has a `3_wizard.mode` (Godfather's is
+`3_kiss_the_ring.mode`): four of the title's own modes played, or PAD WIZARD on the menu.
+
 The Godfather example uses the game's own Kiss the Ring sounds, which the game still loads
 (`se_VO_GF_Narrator_KissTheRing1`-`3`, `...Champion1`-`2`, the two `BadGuyHit` fanfares); its art
 and music are files of the extract (`graphics/Attract Mode/Kiss the Ring Progress/`,

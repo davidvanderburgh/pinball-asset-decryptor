@@ -644,7 +644,8 @@ def write_multiball_example(p, folder, title_label):
 def wizard_picks(p, n=4):
     """Up to *n* of the title's own modes and multiballs a starter wizard asks for (PAD-1512): its
     mode classes first (the ones named ...Mode), then its multiballs, by name."""
-    names = (p.get("played") or {}).get("names") or []
+    # a mode proc's grace procs run after the mode itself (The Wizard of Oz): its run proc names it
+    names = [x for x in (p.get("played") or {}).get("names") or [] if "grace" not in x]
     modes = sorted(x for x in names if x.endswith("Mode") and not x.startswith("Job"))
     mbs = sorted(x for x in names if re.search(r"(MB|Multiball|MultiballRule)$", x))
     rest = sorted(x for x in names if x not in modes and x not in mbs)

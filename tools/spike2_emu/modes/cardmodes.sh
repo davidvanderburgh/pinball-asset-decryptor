@@ -73,7 +73,7 @@ forget() {
     [ -f "$MARK" ] || return 0
     rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP/game.port" \
           "$DUMP"/mode.start "$DUMP"/mode[1-7].start "$DUMP/mode.stop" "$DUMP/mode.clip" \
-          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$DUMP/sounds.cfg" "$DUMP/picture.cfg" "$DUMP/settings.cfg" "$DUMP/attract.cfg" "$DUMP/coop.cfg" "$DUMP/idle.cfg" "$DUMP/handicap.cfg" "$DUMP/comp.cfg" "$DUMP/cabshow.cfg" "$DUMP/addcab.cfg" "$DUMP/scorefeed.cfg" "$DUMP/records.cfg" "$DUMP/saved.cfg" "$DUMP/buttons.cfg" "$DUMP/scenes.cfg" "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
+          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$DUMP/sounds.cfg" "$DUMP/picture.cfg" "$DUMP/settings.cfg" "$DUMP/attract.cfg" "$DUMP/coop.cfg" "$DUMP/idle.cfg" "$DUMP/handicap.cfg" "$DUMP/comp.cfg" "$DUMP/cabshow.cfg" "$DUMP"/cabrec[0-7].bin "$DUMP/addcab.cfg" "$DUMP/scorefeed.cfg" "$DUMP/records.cfg" "$DUMP/saved.cfg" "$DUMP/buttons.cfg" "$DUMP/scenes.cfg" "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
     return 0
 }
 
@@ -271,7 +271,7 @@ fi
 if [ "$(id -u)" = 0 ]; then
     _o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
     [ -n "$_o" ] && [ "$_o" != root ] && chown "$_o" "$ROOT$OBJECT" "$DUMP/game.port" \
-        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$DUMP"/scenes.cfg "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
+        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/cabrec[0-7].bin "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$DUMP"/scenes.cfg "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
 fi
 say "$WHO carries $WHAT: their runtime runs in this game, as on the machine"
 echo "$OBJECT"

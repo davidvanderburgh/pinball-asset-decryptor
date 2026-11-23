@@ -7,9 +7,11 @@
 
 export const CX_NAMES = ["solid", "fade_in", "fade_out", "crossfade", "pulse", "strobe", "sweep_up", "sweep_down",
   "fill_up", "fill_down", "chase_up", "chase_down", "bounce", "center_out", "center_in", "alternate", "rainbow",
-  "sparkle", "fire", "meter", "game"];
+  "sparkle", "fire", "meter", "game", "rec"];
 // "game" (PAD-1063): the game's own show of a song, painted from its frames (gameColour), not by this arithmetic
 export const CX_GAME = CX_NAMES.indexOf("game");
+// "rec" (PAD-1516): a recording of a game's own cabinet lights, painted from its frames (recColour)
+export const CX_REC = CX_NAMES.indexOf("rec");
 
 const i32 = (v) => v | 0;
 const u32 = (v) => v >>> 0;
@@ -137,6 +139,19 @@ export function srcOf(name) {
 // The runtime's cab_game_colour: the colour the game's show of request st.a (set st.b) paints light `src` at
 // `t` ms into the step, which starts st.rate ms into the show. `meta` the page's stock_meta, `frames` that show's
 // frames (a Uint8Array; not loaded yet: dark).
+// PAD-1516: light k's colour in a recording (rec: {period, frames, lights, map}; px: its frames, after the file's
+// 20-byte head) at st.rate + t ms - the runtime's cab_rec_colour
+export function recColour(st, k, t, rec, px) {
+  if (!rec || !px) return 0;
+  const src = (rec.map || [])[k];
+  if (src == null || src < 0 || src >= rec.lights) return 0;
+  const f = udiv(st.rate + t, rec.period);
+  if (f >= rec.frames) return 0;
+  const at = (f * rec.lights + src) * 3;
+  if (at + 3 > px.length) return 0;
+  return u32((px[at] << 16) | (px[at + 1] << 8) | px[at + 2]);
+}
+
 export function gameColour(st, src, t, meta, frames) {
   const row = meta && meta.rows ? meta.rows[String(st.a)] : null;
   const px = meta ? meta.pixels | 0 : 0;
@@ -160,6 +175,7 @@ export function compileStep(st) {
   const hex = (c) => parseInt(String(c || "#000000").slice(1), 16) >>> 0;
   const ms = Math.max(1, st.ms | 0), blend = Math.min(st.blend | 0, ms);
   if (st.fx === "game") return { fx: CX_GAME, ms, a: st.req | 0, b: st.set === "remix" ? 1 : 0, rate: st.from | 0, blend };
+  if (st.fx === "rec") return { fx: CX_REC, ms, a: 0, b: 0, rate: st.from | 0, blend, rec: st.rec || "" };
   return { fx: CX_NAMES.indexOf(st.fx), ms, a: hex(st.a), b: hex(st.b), rate: st.rate | 0, blend };
 }
 
@@ -187,7 +203,8 @@ export function laneAt(steps, loop, el) {
 // gameColour; none given: dark), blended in as the runtime's cab_blend does.
 export function showColours(lights, lanes, loop, el, game) {
   const at = [laneAt(lanes[0], loop, el), laneAt(lanes[1], loop, el)];
-  const colour = (st, L, k, t) => (st.fx === CX_GAME ? (game ? game(st, L, t) : 0) : cxColour(st, L.side, L.u, k, t));
+  const colour = (st, L, k, t) => (st.fx === CX_GAME || st.fx === CX_REC ? (game ? game(st, L, t, k) : 0)
+    : cxColour(st, L.side, L.u, k, t));
   return lights.map((L, k) => {
     const a = at[L.lane];
     if (a.i < 0) return null;

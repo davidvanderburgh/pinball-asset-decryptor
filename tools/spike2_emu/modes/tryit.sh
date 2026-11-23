@@ -123,7 +123,7 @@ case "$cmd" in
         # have a later stock run take THOSE out.
         rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/mode.start "$DUMP"/mode[1-7].start \
               "$DUMP"/mode.stop "$DUMP"/mode.clip "$DUMP"/mode.log "$DUMP"/cardmodes.from \
-              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/scenes.cfg "$DUMP"/scn_*.radium "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$DUMP"/gamecheck.on \
+              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/scenes.cfg "$DUMP"/scn_*.radium "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/cabrec[0-7].bin "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$DUMP"/gamecheck.on \
               "$DUMP"/census.mark "$DUMP"/soundlog.only
         put "$S/pad_mode.so" "$LIB/pad_mode.so" || die "could not copy the mode object into $LIB"
         put "$S/game.port" "$DUMP/game.port" || die "could not copy the port into $DUMP"
@@ -190,6 +190,11 @@ case "$cmd" in
         if [ -f "$S/cabshow.cfg" ]; then
             put "$S/cabshow.cfg" "$DUMP/cabshow.cfg" || die "could not copy cabshow.cfg"
         fi
+        # PAD-1516: the recordings of a game's cabinet lights its shows play, beside it
+        for _rec in "$S"/cabrec[0-7].bin; do
+            [ -f "$_rec" ] || continue
+            put "$_rec" "$DUMP/$(basename "$_rec")" || die "could not copy $(basename "$_rec")"
+        done
         # PAD-1448: the cabinet lights the card adds (on the Cabinet Lights board, node 2), read beside them
         if [ -f "$S/addcab.cfg" ]; then
             put "$S/addcab.cfg" "$DUMP/addcab.cfg" || die "could not copy addcab.cfg"
@@ -229,7 +234,7 @@ case "$cmd" in
         # game reads them as root), so it is said, not fatal.
         if [ "$(id -u)" = 0 ]; then
             given=("$LIB/pad_mode.so" "$DUMP/game.port")
-            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/scenes.cfg "$DUMP"/scn_*.radium "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$DUMP"/gamecheck.on "$DUMP"/soundlog.only; do
+            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/scenes.cfg "$DUMP"/scn_*.radium "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/cabrec[0-7].bin "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$DUMP"/gamecheck.on "$DUMP"/soundlog.only; do
                 [ -f "$f" ] && given+=("$f")
             done
             pad_give_back "${given[@]}"

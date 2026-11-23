@@ -281,6 +281,22 @@ and music are files of the extract (`graphics/Attract Mode/Kiss the Ring Progres
 `sound/music/BG_WizardMode_KissTheRing.ogg`), copied into the mode folder for `progress`, `video`
 and `music`.
 
+**Proof, Wonka 03.03 in the emulator with Wonka's own key** (hidden, muted, 2026-11-22;
+`proof/pad1512`, `run.sh` and `steps.txt`, every wait met): in attract, both flipper buttons held 1.6 s
+opened the menu over the game's attract (`game type menu OPEN`); the right button went to WIZARD GAME
+and PRACTICE GAME, the left back and the right again; coins and Start started the game with `game type:
+PRACTICE GAME`, and PRACTICE started on player 1's first ball and ran its 6 s. Then the test hook started
+three of the game's own: Candy Lane (`cl_mode`, named by its global), Mike Teavee (`MikeTeaveeMode`, by
+its class) and the Gobstopper multiball (`gobstopper_mb`, a MultiballRule): each counted for player 1
+(`1 of 3`, `2 of 3`, `3 of 3`), the board (three panes, the played ones lit, the others grey) showed
+for 4 s as each game mode ended, and the third raised WIZARD's start, which waited for the multiball
+(`waiting for gobstopper_mb`). The rig's game counted the multiball's balls until the ball ended, so
+the start was dropped and raised again on the next ball (`a start not made last ball`), and WIZARD
+started there; player 1's plays toward it started again from none; a Candy Lane start while it ran was
+held off (`HELD OFF the game's mode cl_mode`); its 15 s ended it. The probe's code (API 2) logged every
+start and end with `jm_played` true by global and by class. The runtime found Wonka's 20 game modes and
+its 7 multiballs by name (`played: watching`).
+
 **Test hook** (proof runs only): `JJP_MODS_TEST_GAMEMODE=<global>,<global>...` with
 `JJP_MODS_TEST_SWITCH=<switch>,<switch>...` starts each of the game's modes or multiballs from its
 own switch, and `JJP_MODS_TEST_END_SWITCH` ends whichever runs.

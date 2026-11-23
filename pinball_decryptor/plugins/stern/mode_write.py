@@ -617,6 +617,8 @@ class ModePlan:
     cabshow_file: str = ""
     #: PAD-1448: ``addcab.cfg`` beside it, the cabinet lights the owner's cabinet adds ("" = none)
     addcab_file: str = ""
+    #: PAD-1516: the recordings of a game's cabinet lights its shows play (``cabrec<n>.bin``), beside it
+    cabrec_files: list = field(default_factory=list)
     #: PAD-1041: ``comp.cfg`` beside the mode files, Prolonged Competition on the start menu ("" = none)
     comp_file: str = ""
     #: PAD-1204: ``scorefeed.cfg`` beside the mode files, each game's final scores posted to the owner's server ("" = none)
@@ -1388,7 +1390,8 @@ def cabs_into(result, scratch, shows, sids_of, only, log=None, game_elf=None):
         except Exception as e:                          # noqa: BLE001 - those shows are left out, said below
             if log:
                 log("Expression lights: the game's own shows could not be read (%s)." % e, "warning")
-    text, skipped = CS.cfg_text(shows, sids_of, only, stock=stock)
+    recs = _cab_recs(result, scratch, shows, added, log)          # PAD-1516
+    text, skipped = CS.cfg_text(shows, sids_of, only, stock=stock, recs=recs)
     for name in skipped:
         if log:
             log("Expression lights: the show \"%s\" is left out: it has no song this game plays, no steps, or a "
@@ -1403,6 +1406,48 @@ def cabs_into(result, scratch, shows, sids_of, only, log=None, game_elf=None):
     result.lines.append("expression lights: %d show(s), each played with its song" % (len(shows) - len(skipped)))
     addcab_into(result, scratch, added)
     return result
+
+
+def _cab_recs(result, scratch, shows, added, log=None):
+    """PAD-1516: the recordings *shows* play, copied into *scratch* as ``cabrec<n>.bin`` (result.cabrec_files), each
+    with the map of THIS cabinet's lights (the port's ``cablamp`` order, or the lights the owner adds) onto its own:
+    ``{name: {file, period, frames, lights, map}}`` for :func:`.cab_shows.cfg_text`."""
+    from . import cab_rec as CR
+    from . import cab_shows as CS
+    from . import mode_project as MP
+    names = sorted({r for s in shows for r in CS.recs_of(s)})
+    if not names:
+        return {}
+    project = getattr(result, "project", "") or ""
+    try:
+        port = MP.read_port(MP.port_path(result.profile))
+    except (OSError, MP.ModeProjectError):
+        return {}
+    lights = CS.added_layout(port, added) if added and added.get("on") else CS.layout_from_port(port)
+    out = {}
+    os.makedirs(scratch, exist_ok=True)
+    for name in names:
+        r = CR.find(project, name)
+        if r is None:
+            if log:
+                log("Expression lights: the recording \"%s\" is not in this project any more." % name, "warning")
+            continue
+        if len(out) >= CS.REC_FILES_MAX:
+            if log:
+                log("Expression lights: a card carries %d recordings at most; \"%s\" is left out."
+                    % (CS.REC_FILES_MAX, name), "warning")
+            continue
+        if os.path.getsize(r["file"]) > CR.BYTES_MAX:
+            if log:
+                log("Expression lights: the recording \"%s\" is too long for the card." % name, "warning")
+            continue
+        fn = "cabrec%d.bin" % len(out)
+        dst = os.path.join(scratch, fn)
+        shutil.copyfile(r["file"], dst)
+        result.cabrec_files.append(dst)
+        out[name] = {"file": fn, "period": r["period"], "frames": r["frames"], "lights": r["lights"],
+                     "map": CR.source_map(r["places"], lights)}
+    return out
 
 
 def addcab_into(result, scratch, added):
@@ -2568,6 +2613,10 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             from . import cab_shows as CS
             dst = os.path.join(out_dir, CS.ADD_CFG)
             shutil.copyfile(result.addcab_file, dst)
+            extras.append(dst)
+        for src in getattr(result, "cabrec_files", None) or ():   # PAD-1516: the recordings the shows play
+            dst = os.path.join(out_dir, os.path.basename(src))
+            shutil.copyfile(src, dst)
             extras.append(dst)
         if getattr(result, "comp_file", ""):           # PAD-1041: comp.cfg, Prolonged Competition
             from . import prolonged_comp as PCo

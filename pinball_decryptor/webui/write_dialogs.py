@@ -103,6 +103,16 @@ def _enumerate(prefer):
     return drives, pick
 
 
+def _holds_windows(drive):
+    """True when *drive* carries this PC's Windows volume (its drive letters
+    include %SystemDrive%): never pre-selected as a write target."""
+    if sys.platform != "win32" or drive is None:
+        return False
+    sysdrive = (os.environ.get("SystemDrive") or "C:").rstrip("\\").upper()
+    letters = str(getattr(drive, "mount_label", "") or "").upper().split()
+    return sysdrive in (s.rstrip("\\") for s in letters)
+
+
 class FlashDialog:
     """The Build / flash dialog's state and logic (FlashImageDialog)."""
 
@@ -163,7 +173,7 @@ class FlashDialog:
                  publish=None, ask_open=None, ask_save=None,
                  build_size=None, build_size_hint="", build_refusal=None,
                  image_size_hint=None, original_size=None,
-                 original_path="", network_project=""):
+                 original_path="", network_project="", opened_file=False):
         self._host = host                  # the UI loop (post)
         #: (image path, its size, the card's size) -> what else the user can
         #: do when an image already built won't fit the card ("" for
@@ -191,7 +201,11 @@ class FlashDialog:
         self._mfr = manufacturer
         self._on_flash = on_flash
         self._on_build_flash = on_build_flash
-        self._handed_in = handed_in or ""
+        # PAD-1514: an image opened from Explorer is handed in like the
+        # Multi-boot tab's card (write it as it is, nothing builds), with
+        # its own wording
+        self._opened_file = bool(opened_file)
+        self._handed_in = handed_in or ("file" if self._opened_file else "")
         self._can_build = bool(can_build and on_build_flash is not None
                                and not self._handed_in)
         self._build_possible = on_build_flash is not None
@@ -529,7 +543,15 @@ class FlashDialog:
                  "build a fresh image, then put it straight onto the %s."
                  % noun)
         title = self.words["title"]
-        if self._handed_in:
+        if self._opened_file:
+            title = "Flash %s image" % noun
+            header = "Write %s onto the %s" % (
+                os.path.basename(self.image_path or "") or "this image", noun)
+            intro = ("The image you opened, as it is: nothing here builds "
+                     "or changes it. Pick the %s below and press %s; "
+                     "nothing is written until you confirm." % (
+                         noun, self.start_label()))
+        elif self._handed_in:
             title = "Flash %s image" % noun
             header = "Write the %s card onto the %s" % (self._handed_in,
                                                           noun)
@@ -782,6 +804,17 @@ class FlashDialog:
             self.publish()
             return
         chosen = best if (best and best in drives) else drives[0]
+        if _holds_windows(chosen):
+            # PAD-1514: with no card in the reader the only drive listed can
+            # be the PC's own disk, and an image opened from Explorer leaves
+            # one press before the erase question: never start on Windows'
+            # disk, the user picks
+            self.selected = None
+            self.drive_text = ("(pick the %s yourself: the drive found is "
+                               "this PC's Windows disk)"
+                               % self.words.get("noun", "drive"))
+            self.publish()
+            return
         self.selected = chosen
         self.drive_text = ""
         self.publish()

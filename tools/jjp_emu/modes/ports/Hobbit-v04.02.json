@@ -38,6 +38,60 @@
   ]
  },
  "proc_modes": [],
+ "played": {
+  "can_watch": true,
+  "multiballs": true,
+  "names": [
+   "ArkBarrelEscapeMultiball",
+   "ArkFiveArmiesMultiball",
+   "ArkIntoFireMultiball",
+   "BMAmbush",
+   "BMAzog",
+   "BMBait",
+   "BMBolg",
+   "BMContract",
+   "BMDolGuldur",
+   "BMDoorstep",
+   "BMDuel",
+   "BMErebor",
+   "BMEscape",
+   "BMEvil",
+   "BMFireWater",
+   "BMFlashback",
+   "BMFliesSpiders",
+   "BMGandalf",
+   "BMGathering",
+   "BMGiants",
+   "BMInterrogation",
+   "BMJailbreak",
+   "BMKili",
+   "BMLodgings",
+   "BMMirkwood",
+   "BMMoonRunes",
+   "BMMutton",
+   "BMOrcs",
+   "BMParty",
+   "BMRadagast",
+   "BMResurgence",
+   "BMRiddles",
+   "BMRing",
+   "BMThief",
+   "BeastMultiball",
+   "BookMode",
+   "BookModeMultiball",
+   "HobbitMultiballRule",
+   "SmaugMultiball"
+  ],
+  "game_type": {
+   "can": true,
+   "buttons": {
+    "_Z28jjpe_is_left_flipper_pressedv": true,
+    "_Z29jjpe_is_right_flipper_pressedv": true
+   },
+   "attract_hook": true,
+   "diag_hook": true
+  }
+ },
  "media": {
   "can_play_own_media": true,
   "ok": {

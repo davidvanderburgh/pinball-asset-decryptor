@@ -1,0 +1,14 @@
+# A wizard mode for ToyStory-v02.04: it starts once the player has played these 4 of the game's own
+# modes in one game, or when PAD WIZARD is picked on the attract menu (hold both flipper
+# buttons a second in attract).  Every key: tools/jjp_emu/MODES.md
+name = PAD Wizard
+title = PAD WIZARD
+start_all = BensonsMode BottleBlastMode CarnivalMode DragonZoneMode
+game_type = PAD WIZARD
+shots = switch_jet_target switch_left_ramp_diverted_made switch_right_ramp_made
+points = 3000000
+points_ladder = rising
+multiball = 3 20
+seconds = 0
+sound_start = se_Fanfare_WheelAward_Gabby_Start
+sound_shot = se_Fanfare_TAC_Jackpot

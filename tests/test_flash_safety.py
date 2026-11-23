@@ -148,3 +148,24 @@ def test_the_helpers_progress_callback_swallows_a_refused_rename(tmp_path,
     assert EF.run_helper_main(["--flash-helper", str(ipc)]) == 0
     assert json.load(open(ipc / "result.json")) == {"ok": True,
                                                      "written": 1234}
+
+
+def test_the_windows_disk_is_never_preselected(desk, monkeypatch):
+    """PAD-1514: no card in the reader, and the only drive listed is the
+    PC's own disk (C:): nothing is pre-selected, the user picks."""
+    from pinball_decryptor.webui import write_dialogs as wd
+    monkeypatch.setattr(wd.sys, "platform", "win32")
+    monkeypatch.setenv("SystemDrive", "C:")
+    own = D.PhysicalDrive(device_path=r"\.\PHYSICALDRIVE2",
+                          model="GIGABYTE AG514K2TB", size_bytes=int(2e12),
+                          bus_type="NVMe", mount_label="C:")
+    dlg = _dialog()
+    dlg.words = {"target_kind": "sd_card", "noun": "SD card"}
+    dlg._apply_drives(1, [own], (own, "low", "the only drive"))
+    assert dlg.selected is None
+    assert "Windows disk" in dlg.drive_text
+    # a card beside it is still picked
+    _stick, _empty, card = desk
+    dlg = _dialog()
+    dlg._apply_drives(1, [card], (card, "high", "a Stern SD card"))
+    assert dlg.selected is card

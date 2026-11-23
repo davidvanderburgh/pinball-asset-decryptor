@@ -1,0 +1,7 @@
+# PAD-1512 proof: a game type picked on the attract menu starts this on player 1's first ball.
+name = PRACTICE
+title = PRACTICE
+game_type = PRACTICE GAME
+shots = switch_target_tv
+points = 500000
+seconds = 6

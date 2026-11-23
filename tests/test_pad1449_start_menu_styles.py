@@ -571,3 +571,35 @@ int main(void)
     assert 'if (str_starts(s, "hold off")) { coop.hold = 2; return; }' in line
     arm = R._lift(src, "static void coop_arm(void)\n{")
     assert arm.index("team_menu_arm();") < arm.index("coop_hold_starts(coop.hold, tm.armed)")
+
+
+def test_round11_the_language_bar_stays_up_through_the_intro_screen_in_ball_1(tmp_path):
+    """PAD-1449 round 11 (DoomWalrus666: "Sometimes language selection did not appear during the intro ... sporadically"):
+    Godzilla's PLAYER LANGUAGE SELECT bar and its flipper toggle ask one play-begun check (`site language_begun`, their
+    only two callers); a ball launched, or a playfield switch, in the intro made it answer yes and the bar never came
+    (emulator, LE 1.16: 3 of 3 launches 1 s into the film). While the game's intro screen is up in ball 1 the check is
+    refused (answers 0)."""
+    src = _src()
+    code = r"""#include <stdio.h>
+""" + R._lift(src, "static int lang_bar_kept(int in_game, int film_up, unsigned ball)\n{") + r"""
+int main(void)
+{
+    /* up in ball 1 - kept; not in a game, screen down or unknown, ball 2 - the game's own answer */
+    printf("%d %d %d %d %d %d\n", lang_bar_kept(1, 1, 1), lang_bar_kept(1, 1, 0), lang_bar_kept(0, 1, 1),
+           lang_bar_kept(1, 0, 1), lang_bar_kept(1, -1, 1), lang_bar_kept(1, 1, 2));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "1 1 0 0 0 0"
+    on = R._lift(src, "static int on_language_begun(pm_reg *r, unsigned n)\n{")
+    assert "lang_bar_kept(pm_in_game(), ci_film_up(), coop_ball_byte ? *coop_ball_byte : 1u)" in on
+    assert "return 1;" in on.rstrip().splitlines()[-2]            # refused: the check answers 0, "not begun"
+    arm = R._lift(src, "static void coop_chars_arm(struct site *e)\n{")
+    assert 'hook_veto_n(fn("language_begun"), on_language_begun, 0, 0)' in arm   # refused = returns 0
+    for name, addr, flag in (("godzilla_le-1.16", "0x001712cc", "0x00712748"),
+                             ("godzilla_pro-1.15", "0x0016d8f4", "0x0070847c"),
+                             ("godzilla_pro-1.16", "0x0016d8f4", "0x007074a0")):
+        port = (PORTS / (name + ".port")).read_text(encoding="utf-8")
+        assert re.search(r"^site language_begun\s+%s 0xe5d00008 0xe3500000\s*$" % addr, port, re.M), name
+        assert re.search(r"^data language_play_begun %s\s*$" % flag, port, re.M), name
+        assert "site language_keys" in port

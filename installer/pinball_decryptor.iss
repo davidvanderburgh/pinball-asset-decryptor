@@ -526,12 +526,40 @@ begin
           True, True, True);
 end;
 
+{ PAD-1514: the app registers card images (.raw / .img / .iso) for its user  }
+{ when it starts (webui/open_image.py register_association, HKCU so an in-app  }
+{ update gets it too); the uninstall takes every key of it away again.  The    }
+{ names here are open_image.PROGID and VERB.                                   }
+procedure RemoveTheFileAssociation;
+var
+  Exts: array[0..2] of String;
+  I: Integer;
+  Cur: String;
+begin
+  Exts[0] := '.raw'; Exts[1] := '.img'; Exts[2] := '.iso';
+  for I := 0 to 2 do
+  begin
+    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Classes\' + Exts[I] +
+                   '\OpenWithProgids', 'PinballAssetDecryptor.CardImage');
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+      'Software\Classes\SystemFileAssociations\' + Exts[I] +
+      '\shell\PinballAssetDecryptor.Write');
+    if RegQueryStringValue(HKEY_CURRENT_USER, 'Software\Classes\' + Exts[I],
+                           '', Cur) and
+       (Cur = 'PinballAssetDecryptor.CardImage') then
+      RegDeleteValue(HKEY_CURRENT_USER, 'Software\Classes\' + Exts[I], '');
+  end;
+  RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+    'Software\Classes\PinballAssetDecryptor.CardImage');
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   HasRuntime, HasDisk: Boolean;
 begin
   if CurUninstallStep <> usPostUninstall then
     Exit;
+  RemoveTheFileAssociation();
   if UninstallSilent() then
     Exit;
 

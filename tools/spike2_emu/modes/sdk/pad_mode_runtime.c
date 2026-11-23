@@ -2959,12 +2959,13 @@ static int lamps_checked(void)
  * number k. */
 enum { CX_SOLID, CX_FADE_IN, CX_FADE_OUT, CX_CROSSFADE, CX_PULSE, CX_STROBE, CX_SWEEP_UP, CX_SWEEP_DOWN, CX_FILL_UP,
        CX_FILL_DOWN, CX_CHASE_UP, CX_CHASE_DOWN, CX_BOUNCE, CX_CENTER_OUT, CX_CENTER_IN, CX_ALTERNATE, CX_RAINBOW,
-       CX_SPARKLE, CX_FIRE, CX_METER, CX_GAME, CX_N };
+       CX_SPARKLE, CX_FIRE, CX_METER, CX_GAME, CX_REC, CX_N };
 /* CX_GAME (PAD-1063): the game's own show of a song, read from the game's memory - no arithmetic of this slice's
- * (cx_colour gives 0); SONG SHOWS' cab_colour paints it */
+ * (cx_colour gives 0); SONG SHOWS' cab_colour paints it. CX_REC (PAD-1516): a recording of a game's own cabinet
+ * lights (`rec` / `recmap`), likewise painted by cab_colour */
 static const char *const CX_NAMES[CX_N] = { "solid", "fade_in", "fade_out", "crossfade", "pulse", "strobe",
     "sweep_up", "sweep_down", "fill_up", "fill_down", "chase_up", "chase_down", "bounce", "center_out", "center_in",
-    "alternate", "rainbow", "sparkle", "fire", "meter", "game" };
+    "alternate", "rainbow", "sparkle", "fire", "meter", "game", "rec" };
 struct cx_step { int fx; unsigned ms, a, b, rate, blend; };
 
 static unsigned cx_mix(unsigned a, unsigned b, int f256)        /* a..b by f/256 */
@@ -3068,6 +3069,7 @@ static unsigned cx_colour(const struct cx_step *st, int side, unsigned u, unsign
         if (up >= p) return 0;
         return up > p - 90 ? st->b : st->a;
     case CX_GAME: break;                   /* PAD-1063: not this slice's arithmetic (cab_colour) */
+    case CX_REC: break;                    /* PAD-1516: likewise */
     }
     return 0;
 }
@@ -3121,6 +3123,8 @@ static int str_starts(const char *s, const char *prefix);   /* below */
 #define CAB_STEPS    128
 #define CABS_REQS    8192
 static const char *const CABS_FILES[] = { "/usr/local/padmode/cabshow.cfg", "/dump/cabshow.cfg" };
+static const char *const CABS_DIRS[] = { "/usr/local/padmode/", "/dump/" };   /* PAD-1516: its recordings beside it */
+static const char *cabs_dir = "/dump/";
 #define CAB_SIDS     8
 struct cab_show { char name[32]; unsigned sid[CAB_SIDS]; int n_sid, loop, n[2]; struct cx_step st[2][CAB_STEPS]; };
 static struct cab_show cabs[CABS_MAX];
@@ -3134,6 +3138,12 @@ static int cab_side[N_CAB], cab_lane[N_CAB];         /* -1 left blade, 1 right, 
 static unsigned cab_songs, cab_songs_rows, cab_songs_px;
 static unsigned short cab_spk[CAB_SPK_MAX][CAB_SPK_PX];
 static int cab_spk_n[CAB_SPK_MAX], n_cab_spk, cab_src[N_CAB];
+/* PAD-1516: recordings of a game's own cabinet lights (cab_rec.py: the emulator sampled them), each a file beside
+ * cabshow.cfg - "PADCREC1", u32 period ms, u32 frames, u32 lights, then frames x lights x RGB - and each of THIS
+ * cabinet's lights' source in it (`recmap`, worked out by the app from both cabinets' places; -1 none: dark) */
+#define CAB_RECS     8
+#define CAB_REC_MAX  (8u << 20)
+static struct { const unsigned char *px; unsigned period, frames, lights; short map[N_CAB]; } cab_rec[CAB_RECS];
 static volatile unsigned cabs_pending;               /* the request the worker took last (0 = none since) */
 static const struct pm_mode cab_owner = { "the card's expression light show", 0, 0, 0, 0, 0 };
 #define CAB_GONE_MS  250
@@ -3237,16 +3247,32 @@ static unsigned cab_game_colour(const struct cx_step *st, int k, unsigned t)
     return (unsigned)sum[0] << 16 | (unsigned)sum[1] << 8 | (unsigned)sum[2];
 }
 
+/* PAD-1516: light k's colour in recording st->a at st->rate + t ms: its source light's in that frame; 0 (dark) past the
+ * recording's end, for a light with no source, or a recording that did not load */
+static unsigned cab_rec_colour(const struct cx_step *st, int k, unsigned t)
+{
+    unsigned f, at;
+    int src;
+    if (st->a >= CAB_RECS || !cab_rec[st->a].px || k < 0 || k >= N_CAB) return 0;
+    src = cab_rec[st->a].map[k];
+    if (src < 0 || (unsigned)src >= cab_rec[st->a].lights) return 0;
+    f = (st->rate + t) / cab_rec[st->a].period;
+    if (f >= cab_rec[st->a].frames) return 0;
+    at = (f * cab_rec[st->a].lights + (unsigned)src) * 3u;
+    return (unsigned)cab_rec[st->a].px[at] << 16 | (unsigned)cab_rec[st->a].px[at + 1] << 8 | cab_rec[st->a].px[at + 2];
+}
+
 static unsigned cab_colour(const struct cx_step *st, int k, unsigned t)
 {
-    return st->fx == CX_GAME ? cab_game_colour(st, k, t) : cx_colour(st, cab_side[k], cab_u[k], (unsigned)k, t);
+    return st->fx == CX_GAME ? cab_game_colour(st, k, t) : st->fx == CX_REC ? cab_rec_colour(st, k, t)
+           : cx_colour(st, cab_side[k], cab_u[k], (unsigned)k, t);
 }
 
 /* cx_blend with the game's own shows among the steps */
 static unsigned cab_blend(const struct cx_step *st, const struct cx_step *prev, int k, unsigned t)
 {
     unsigned c;
-    if (st->fx != CX_GAME && (!prev || prev->fx != CX_GAME))   /* the slice's own patterns: its own blend */
+    if (st->fx != CX_GAME && st->fx != CX_REC && (!prev || (prev->fx != CX_GAME && prev->fx != CX_REC)))
         return cx_blend(st, prev, cab_side[k], cab_u[k], (unsigned)k, t);
     c = cab_colour(st, k, t);
     if (st->blend && t < st->blend)
@@ -3429,6 +3455,33 @@ int pm_cab_show_stop(void)
     return was;
 }
 
+/* PAD-1516: recording r from <dir><name>, checked against its `rec` line; said either way */
+static void cab_rec_load(unsigned r, unsigned per, unsigned fr, unsigned li, const char *name, unsigned len,
+                         const char *dir)
+{
+    char path[160];
+    unsigned long want = (unsigned long)fr * li * 3u + 20u;
+    char *buf;
+    long got;
+    unsigned d = 0, m;
+    for (m = 0; dir[m] && d < sizeof path - 1; m++) path[d++] = dir[m];
+    for (m = 0; m < len && d < sizeof path - 1; m++) path[d++] = name[m];
+    path[d] = 0;
+    buf = (char *)mmap(0, want + 1, 3 /* PROT_READ | PROT_WRITE */, 0x22 /* MAP_PRIVATE | MAP_ANONYMOUS */, -1, 0);
+    if (!buf || buf == (char *)-1) return;          /* never malloc in the game (MODE_SDK.md rule 2) */
+    got = pm_read_file(path, buf, want + 1);
+    if (got != (long)want || buf[0] != 'P' || buf[7] != '1' || *(unsigned *)(buf + 8) != per
+        || *(unsigned *)(buf + 12) != fr || *(unsigned *)(buf + 16) != li) {
+        say("expression lights: recording %u (%s) did not load: %ld byte(s), %lu wanted", r, path, got, want);
+        return;
+    }
+    cab_rec[r].px = (const unsigned char *)buf + 20;
+    cab_rec[r].period = per;
+    cab_rec[r].frames = fr;
+    cab_rec[r].lights = li;
+    say("expression lights: recording %u, %u frame(s) of %u light(s) every %u ms (%s)", r, fr, li, per, path);
+}
+
 /* cabshow.cfg, read before the gate; the lights' sides and lanes from their places */
 static void cabs_arm(void)
 {
@@ -3437,7 +3490,7 @@ static void cabs_arm(void)
     unsigned k;
     int c = -1;
     for (k = 0; k < sizeof CABS_FILES / sizeof CABS_FILES[0] && n < 0; k++)
-        n = pm_read_file(CABS_FILES[k], raw, sizeof raw - 1);
+        if ((n = pm_read_file(CABS_FILES[k], raw, sizeof raw - 1)) >= 0) cabs_dir = CABS_DIRS[k];
     if (n <= 0) return;
     raw[n] = 0;
     for (i = 0; i <= n; i++) {
@@ -3470,6 +3523,41 @@ static void cabs_arm(void)
                 }
                 cab_spk_n[n_cab_spk] = m;
                 if (!m) break;
+            }
+            continue;
+        }
+        if (str_starts(s, "rec ")) {                    /* PAD-1516: rec <i> <period> <frames> <lights> <file> */
+            int ok[4];
+            unsigned r, per, fr, li;
+            s += 4;
+            r = (unsigned)number(&s, &ok[0]);
+            per = (unsigned)number(&s, &ok[1]);
+            fr = (unsigned)number(&s, &ok[2]);
+            li = (unsigned)number(&s, &ok[3]);
+            while (*s == ' ' || *s == '\t') s++;
+            for (e = s; *e && *e != '\r' && *e != ' ' && *e != '#'; e++) ;
+            if (ok[0] && ok[1] && ok[2] && ok[3] && r < CAB_RECS && per && fr && li && li <= 1024
+                && (unsigned long)fr * li * 3u + 20u <= CAB_REC_MAX)
+                cab_rec_load(r, per, fr, li, s, (unsigned)(e - s), cabs_dir);
+            continue;
+        }
+        if (str_starts(s, "recmap ")) {                 /* PAD-1516: recmap <i> <src of light 0>,<src of light 1>,... */
+            int ok1, m;
+            unsigned r;
+            s += 7;
+            r = (unsigned)number(&s, &ok1);
+            if (!ok1 || r >= CAB_RECS) continue;
+            for (m = 0; m < N_CAB; m++) cab_rec[r].map[m] = -1;
+            while (*s == ' ') s++;
+            for (m = 0; m < N_CAB && *s && *s != '\r' && *s != '#'; m++) {
+                int neg = *s == '-', ok2;
+                long v;
+                if (neg) s++;
+                v = number(&s, &ok2);
+                if (!ok2) break;
+                cab_rec[r].map[m] = (short)(neg ? -1 : v);
+                if (*s != ',') break;
+                s++;
             }
             continue;
         }
@@ -22171,6 +22259,40 @@ static int on_language_keys(pm_reg *r)
     return 1;
 }
 
+/* PAD-1449 round 11 (DoomWalrus666: "Sometimes language selection did not appear during the intro ... sporadically"):
+ * Godzilla's PLAYER LANGUAGE SELECT bar asks one check each frame, and so does its flipper toggle (`site
+ * language_begun`, LE 1.16 0x1712cc, Pro 1.15/1.16 0x16d8f4; these two are its only callers): has play begun? It
+ * answers the rule's own cached byte (+8), else a global one (`data language_play_begun`, LE 0x712748) that the game
+ * clears at a Start; a launched ball sets the answer (emulator, LE 1.16: launched 1 s into a Standard game's film, the
+ * bar never came; the global byte poked alone did not do it). Once that byte is set the bar's two lines are written empty and a flipper flips nothing. A ball
+ * still rolling or kicked out of the playfield after a reset or a quick restart sets it during the intro, so the bar never
+ * came. While the game's intro screen is up in ball 1 (ci_film_up), the check answers "not yet", so the bar and its flips
+ * last as long as the intro (ours swapped in, or the game's own film). After that the game's answer is used again
+ * (tests lift it verbatim) */
+static int lang_bar_kept(int in_game, int film_up, unsigned ball)
+{
+    return in_game && film_up == 1 && ball <= 1;
+}
+
+static int on_language_begun(pm_reg *r, unsigned n)
+{
+    static unsigned said_game;
+    pm_addr flag = data("language_play_begun");
+    int begun;
+    (void)n;
+    if (!lang_bar_kept(pm_in_game(), ci_film_up(), coop_ball_byte ? *coop_ball_byte : 1u)) return 0;
+    /* the game's own answer, for the log: the rule's cached byte (+8, what a launch sets; emulator: the global byte
+     * poked alone changed nothing), else the global one */
+    begun = (r[0] >= 0x10000u && *(volatile unsigned char *)(unsigned long)(r[0] + 8u))
+            || (flag && *(volatile unsigned char *)(unsigned long)flag);
+    if (begun && said_game != chg_game_now() + 1) {
+        said_game = chg_game_now() + 1;
+        say("language: play began (the ball launched, or a playfield switch) while the game's intro screen is up in ball 1 - its PLAYER "
+            "LANGUAGE SELECT bar and flips are kept until that screen closes");
+    }
+    return 1;                                                 /* refused: the check returns 0, "not begun" */
+}
+
 /* PAD-1045: an Action press at a launch - the turn's ball not served yet, waiting, or just out - is the launch's, not
  * half of the save's double press. PAD-1051: from the game's plunger flags where the port names them (Godzilla LE's
  * shooter lane switch reads the opposite sense to its flippers, so its level said "out" while the ball waited), else
@@ -23399,6 +23521,15 @@ static void coop_chars_arm(struct site *e)
         else if (!lang_hooked)
             say("co-op characters: the game's language select (language_keys) could not be hooked - it sees the "
                 "pick's flippers");
+    }
+    if (fn("language_begun")) {                               /* PAD-1449 round 11 */
+        static int begun_hooked;
+        if (!begun_hooked && (begun_hooked = hook_veto_n(fn("language_begun"), on_language_begun, 0, 0)) != 0)
+            say("language: the game's PLAYER LANGUAGE SELECT bar stays up through the intro screen in ball 1, whatever "
+                "the playfield switches do");
+        else if (!begun_hooked)
+            say("language: the game's play-begun check (language_begun) could not be hooked - a playfield switch in "
+                "the intro still clears its language bar");
     }
     if (coop_pick_on && (!coop_left || !coop_action))
         say("co-op characters: the pick walks with %s and takes with %s", coop_left ? "both flippers" : "the right flipper",

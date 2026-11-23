@@ -329,6 +329,10 @@ value roster_select_ms      13000
 # up between English and Japanese at each release of a flipper BUTTON, the cabinet inputs 137 (left) / 139 (right);
 # the co-op pick keeps them from it while it has the flippers (coop.cfg's left / button)
 site language_keys       0x0013c3b8 0xe92d40f8 0xe1a04001
+# PAD-1449 round 11: the play-begun check its PLAYER LANGUAGE SELECT bar and flipper toggle ask (their only two callers);
+# its byte is cleared at a Start and set at the first playfield switch the game counts as play
+site language_begun     0x0016d8f4 0xe5d00008 0xe3500000
+data language_play_begun 0x007074a0
 value language_keys_left   137
 value language_keys_right  139
 # PAD-1114: PLAYER LANGUAGE SELECT (adjustment 14: the bar over the start film) and each player's language

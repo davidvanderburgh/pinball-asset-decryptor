@@ -82,6 +82,11 @@ if [ -n "${JJP_MODS_SO:-}" ]; then
     MODS_ENV='export PADMODES_RIG=1; export JJP_MODS_DIR=/tmp/padmodes/modes; export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD }/tmp/padmodes/jjpmodes.so"'
     # proof runs only: start a game mode from a switch (jjpmodes.c, test_hook)
     [ -n "${JJP_MODS_TEST_GAMEMODE:-}" ] && MODS_ENV="$MODS_ENV; export JJP_MODS_TEST_GAMEMODE='$JJP_MODS_TEST_GAMEMODE' JJP_MODS_TEST_SWITCH='${JJP_MODS_TEST_SWITCH:-}'"
+    # ...and end it from another (PAD-1354; passed into the game since PAD-1512)
+    [ -n "${JJP_MODS_TEST_END_SWITCH:-}" ] && MODS_ENV="$MODS_ENV; export JJP_MODS_TEST_END_SWITCH='$JJP_MODS_TEST_END_SWITCH'"
+    # PAD-1515: the game's own screen: where a census goes, and the load probe
+    [ -n "${JJP_MODS_SCREEN_DIR:-}" ] && MODS_ENV="$MODS_ENV; export JJP_MODS_SCREEN_DIR='$JJP_MODS_SCREEN_DIR'"
+    [ -n "${JJP_MODS_SCREEN_PROBE:-}" ] && MODS_ENV="$MODS_ENV; export JJP_MODS_SCREEN_PROBE='$JJP_MODS_SCREEN_PROBE'"
     # proof runs only: log what a lamp_pattern puts (PAD-1508)
     [ -n "${JJP_MODS_TRACE_LAMPS:-}" ] && MODS_ENV="$MODS_ENV; export JJP_MODS_TRACE_LAMPS=1"
 fi

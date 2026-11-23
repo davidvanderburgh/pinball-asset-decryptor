@@ -19,6 +19,7 @@ import { html, useEffect, useRef, useState, Button, Field, PathField, Select, Ch
 import { KindTiles, EnterKey, NameField } from "./modes_new.js";
 import { useModeProgram, useEd, Palette, Variables, Script, ProgramBar } from "./modes_blocks.js";
 import { CEditor, CodeView } from "./modes_script.js";
+import { LayoutEditor } from "./modes_layout.js";
 
 // PAD-1417: the page serves Spooky too (webui/modes_spooky.py): its calls go to modes.<ns>_*, the
 // namespace of the page on screen (JjpModes: jjp, SpookyModes: spk)
@@ -213,7 +214,9 @@ function HoldOn({ k, value, names }) {
 }
 const BALL_COIL = new Set(["multiball", "ball_save", "add_ball", "coil_pulse", "coil_hold", "hold_on"]);
 // PAD-1508: keys given on several lines (one rule a line), and what a line looks like
-const LINES = { shot_points: "switch_name 5000000", start_also: "switch_name 2", sound_at: "10 sound_name" };
+const LINES = { shot_points: "switch_name 5000000", start_also: "switch_name 2", sound_at: "10 sound_name",
+  screen_move: "sp_brat_charlie 5 -3 1.2", screen_hide: "sp_camera_disabled",
+  progress: "BoxingMode pane_boxing.png pane_boxing_grey.png" };
 function Lines({ k, kind, value }) {
   const lines = (value || "").split("\n").length;
   return html`<textarea class="jjpm-lines mono" rows=${Math.max(2, lines + 1)} spellcheck="false"
@@ -235,6 +238,7 @@ function Row({ k, prefix = "", meta, value, j, have }) {
   else if (m.kind === "lamps") input = html`<${NamePick} k=${key} value=${value} names=${names.lamps} multi title="The game's lamps (lp_) and lamp groups (ls_)" />`;
   else if (m.kind === "events") input = html`<${NamePick} k=${key} value=${value} names=${names.events || []} multi title="The game's own events (its hook lists)" />`;
   else if (m.kind === "after") input = html`<${NamePick} k=${key} value=${value} names=${names.after || []} multi title="The game's own modes (a global or a class), or any" />`;
+  else if (m.kind === "played") input = html`<${NamePick} k=${key} value=${value} names=${names.played || []} multi title="The game's own modes and multiballs a player must have played (PAD-1512)" />`;
   else if (m.kind === "in_place") input = html`<${NamePick} k=${key} value=${value} names=${(names.after || []).filter((n) => n !== "any")} multi title="The game's own modes this one starts in place of (PAD-1508)" />`;
   else if (m.kind === "sound") input = html`<${NamePick} k=${key} value=${value} names=${names.sound} sound have=${have} title="The game's sounds" inherit=${inherit} />`;
   else if (m.kind === "sound_or_file") input = html`<${NamePick} k=${key} value=${value} names=${names.sound_or_file} sound have=${have} title="The game's sounds, or a sound file of yours in this game's mode folder" inherit=${inherit} />`;
@@ -339,14 +343,56 @@ function ModeList({ j, onNew }) {
   </section>`;
 }
 
+// PAD-1515: the places the layout editor sets are not form rows: the editor shows their numbers
+const MODE_PLACES = new Set(["panel", "panel_at", "title_at", "value_at", "timer_at", "picture_at", "video_at", "progress_at"]);
+const TITLE_PLACES = new Set(["panel", "panel_at", "title_at", "value_at", "timer_at", "game_type_at", "game_type_picture_at",
+  "game_type_title_at", "game_type_lines_at", "game_type_hint_at", "screen_move", "screen_hide"]);
+
+// PAD-1515: the game's own screen: its parts (named by the game's objects) moved, scaled or hidden
+function GameScreen({ j }) {
+  const g = (j.layout || {}).game;
+  if (!g) return null;
+  const sc = j.screens || {};
+  const bar = html`<div class="row wrap jjpl-show">
+    <${Button} size="sm" icon="play" disabled=${sc.running || !sc.iso} onClick=${() => call(R("show_in_game"))}
+      title=${sc.iso ? "Runs the game from the stock ISO on this PC's emulator, hidden and muted, with these modes; takes its attract and in-game screens with every part named" : "Pick the stock install ISO under Build first"}>
+      ${(g.censuses || []).length ? "Take the game's screens again" : "Show it in the game"}<//>
+    ${sc.running ? html`<${Button} size="sm" kind="ghost" onClick=${() => call(R("screens_cancel"))}>Stop<//>` : null}
+    <span class=${cx("small", sc.done && !sc.ok ? "err" : "muted")}>${sc.msg || ""}</span>
+  </div>`;
+  if (!(g.censuses || []).length) return html`<div class="jjpl" data-screen="game"><div class="jjpl-hd row"><span class="jjpl-title">The game's own screen</span></div>
+    <div class="small muted">Its HUD, pictures, animations and videos, moved where you want them. Take the game's screens first:
+      the game runs hidden and muted, and each part it draws comes back named, to drag.</div>${bar}</div>`;
+  return html`<div><${ModeLayout} j=${j} screen="game" title="The game's own screen"
+    hint="The parts the game draws, each named by the game's own object: drag one to move it, a corner to size it. A moved part leaves a striped ghost where the game draws it." />${bar}</div>`;
+}
+
+// the layout editor's backdrop list, with Choose a file... (any picture or video, remembered)
+function useBackdrops(j) {
+  const lay = j.layout || {};
+  return lay.backdrops || [];
+}
+
+export function ModeLayout({ j, screen, title, hint }) {
+  const lay = (j.layout || {})[screen];
+  if (!lay || !(lay.elements || []).length) return null;
+  return html`<${LayoutEditor} key=${screen + (j.open || "")} lay=${lay} size=${(j.layout || {}).size} backdrops=${useBackdrops(j)}
+    title=${title} hint=${hint} onBrowse=${() => call(R("backdrop_browse"))} />`;
+}
+
 function FormGroups({ j, have }) {
   const f = j.form || {};
   const meta = j.fields || {};
+  const editor = NS === "jjp" && j.layout && j.layout.mode;
   // a group whose every key the title cannot do (Picture and video on Alice Cooper and the pinHeck
   // DMD games, PAD-1469) is not drawn at all
   return (j.groups || []).filter((g) => g.keys.length).map((g) => html`<div class="jjpm-group" key=${g.title}>
     <div class="jjpm-gt">${g.title}</div>
-    ${g.keys.map((k) => html`<${Row} key=${k} k=${k} meta=${meta[k]} value=${f[k]} j=${j} have=${have} />`)}
+    ${editor && g.keys.includes("panel_at") ? html`<${ModeLayout} j=${j} screen="mode" title="Its screen"
+      hint="Its panel, title, total and timer, and its picture and video, over the game's screen: drag them where you want them." />` : null}
+    ${g.keys.filter((k) => !(editor && MODE_PLACES.has(k))).map((k) => html`<${Row} key=${k} k=${k} meta=${meta[k]} value=${f[k]} j=${j} have=${have} />`)}
+    ${editor && g.keys.includes("progress_at") ? html`<${ModeLayout} j=${j} screen="progress" title="Its progress board"
+      hint="Each progress picture's place: in the shared box, or a box of its own." />` : null}
   </div>`);
 }
 
@@ -423,8 +469,14 @@ function TitleSettings({ j, have }) {
   const t = j.title_cfg || {};
   return html`<section class="card jjpm-title-card">
     <div class="hd" style="cursor:pointer" onClick=${() => setOpen(!open)}><span class="h2">${open ? "▾" : "▸"} Every mode of this game</span>
-      <span class="muted small">defaults a mode's own settings override: ${(j.title_keys || []).some((k) => k.startsWith("font") || k.endsWith("color")) ? "fonts, colors, the panel" : "the panel"}${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
-    ${open ? html`<div class="bd">${(j.title_keys || []).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
+      <span class="muted small">defaults a mode's own settings override: ${(j.title_keys || []).some((k) => k.startsWith("font") || k.endsWith("color")) ? "fonts, colors, the panel" : "the panel"}${(j.title_keys || []).includes("game_type_at") ? ", and the attract menu's game type picker" : ""}${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
+    ${open ? html`<div class="bd">
+      ${NS === "jjp" && j.layout ? html`<${ModeLayout} j=${j} screen="title_mode" title="Every mode's screen"
+        hint="Where every mode's panel, title, total and timer go, unless a mode places its own." />
+        <${ModeLayout} j=${j} screen="menu" title="The attract game type menu"
+        hint="The menu a player opens in attract (both flipper buttons held a second), with its lines as the game lists them." />
+        <${GameScreen} j=${j} />` : null}
+      ${(j.title_keys || []).filter((k) => !(NS === "jjp" && j.layout && TITLE_PLACES.has(k))).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
   </section>`;
 }
 

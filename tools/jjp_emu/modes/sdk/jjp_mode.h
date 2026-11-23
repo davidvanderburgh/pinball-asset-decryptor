@@ -37,7 +37,7 @@
 #include <stdio.h>     /* snprintf - plain C library calls a mode may make (build_code.sh lists them) */
 #include <string.h>
 
-#define JM_API 1
+#define JM_API 2        /* 2 (PAD-1512): game_mode, jm_player, jm_played, jm_all_played; a library built for 1 still loads */
 #define JM_GO_ON 0      /* shot(): the form's own handling goes on (points, sounds, completion) */
 #define JM_TAKEN 1      /* shot(): this hit is the code's alone - the form scores nothing for it */
 
@@ -55,6 +55,10 @@ struct jm_mode {
     void (*tick)(void);                   /* ten times a second while it runs (not while paused) */
     void (*end)(const char *why);         /* it is over: "time", "completion", "its code", "ball end"... */
     void (*idle)(const char *sw);         /* any switch hit in a game while it is NOT running: jm_start() starts it */
+    /* API 2 (PAD-1512): one of the GAME's modes or multiballs started (1) or ended (0), with a ball
+     * in play, whether this mode runs or not.  name is its global ("boxing_mode"), cls its class
+     * ("BoxingMode"; on The Wizard of Oz both are its mode proc's name).  jm_start() starts this mode. */
+    void (*game_mode)(const char *name, const char *cls, int started);
 };
 
 /* -- points and time -------------------------------------------------------- */
@@ -78,6 +82,10 @@ void jm_lamp_off(const char *name);     /* back to the game */
 int jm_coil(const char *name, int ms);  /* pulse a coil the form may fire (0 ms = its own pulse) */
 int jm_multiball(int balls, int ball_save_seconds);
 int jm_ball_save(int seconds);
+/* -- the game's own modes, this game (PAD-1512) -------------------------------- */
+int jm_player(void);                    /* the player up, 1-8 (0: no game) */
+int jm_played(const char *name);        /* the player up has played that game mode or multiball (global or class) this game */
+int jm_all_played(void);                /* how many of this mode's start_all modes the player up has played toward its next start */
 void jm_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 /* sw is the game's name for a switch: jm_is(sw, "switch_target_tv") */
 static inline int jm_is(const char *a, const char *b)

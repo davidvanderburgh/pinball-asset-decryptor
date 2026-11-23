@@ -38,6 +38,52 @@
   ]
  },
  "proc_modes": [],
+ "played": {
+  "can_watch": true,
+  "multiballs": true,
+  "names": [
+   "BratMultiballRule",
+   "CandyLaneMode",
+   "CaptiveBallAwardModes",
+   "DotsMode",
+   "FactoryTourMisc",
+   "FactoryTourMode",
+   "FactoryTour_2XWonkaBar",
+   "FactoryTour_CollectBonus",
+   "FactoryTour_FizzyRoom",
+   "FactoryTour_GoldenEgg",
+   "FactoryTour_InventionRoom",
+   "FactoryTour_StartQuickMB",
+   "FactoryTour_SuperSpinner",
+   "FactoryTour_WelcomeToFactory",
+   "GobstopperMultiballRule",
+   "MikeTeaveeMode",
+   "OompaHurryUp",
+   "OompaLoompaSearchMultiballRule",
+   "PureImaginationMultiballRule",
+   "QuickMBRule",
+   "StoreRoom",
+   "TheMostSecretMachine",
+   "UnlimitedKickback",
+   "WonkaBarAwardModes",
+   "WonkaBarCraze",
+   "WonkaBarRansom",
+   "WonkaOfficeMode",
+   "WonkaWashFrenzy",
+   "WonkataniaMania1",
+   "WonkavatorMultiball",
+   "WorldRecordGumChewing"
+  ],
+  "game_type": {
+   "can": true,
+   "buttons": {
+    "_Z28jjpe_is_left_flipper_pressedv": true,
+    "_Z29jjpe_is_right_flipper_pressedv": true
+   },
+   "attract_hook": true,
+   "diag_hook": true
+  }
+ },
  "media": {
   "can_play_own_media": true,
   "ok": {

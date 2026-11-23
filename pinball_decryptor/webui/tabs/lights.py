@@ -126,7 +126,7 @@ class LightsTab(TabService):
         from ...plugins.stern import cab_shows as CS
         self.set(project="", available=False, why="", reading=False, lights=[], songs=[], shows=[], intro=INTRO,
                  insider=INSIDER, running=False, peaks={}, problems=[], max=CS.SHOWS_MAX, making=False, auto_note="",
-                 stock=[], stock_meta={}, stock_why="", song_missing={},
+                 stock=[], stock_meta={}, stock_why="", song_missing={}, recs=[], recording=False, rec_note="",
                  fx=[{"key": k, "label": v[0], "group": v[1], "uses": v[2]} for k, v in CS.FX.items()],
                  presets=[{"key": p[0], "label": p[1]} for p in CS.PRESETS],
                  styles=[{"key": k, "label": v[0]} for k, v in _auto_styles().items()],
@@ -265,7 +265,147 @@ class LightsTab(TabService):
         reqs = ({x["req"] for x in self.get("stock") or []} if self.get("stock") or self.get("stock_why")
                 else None)
         self.set(shows=[dict(s, length=CS.length_ms(s)) for s in self._shows],
-                 problems=[CS.problems(s, slots if slots else None, reqs) for s in self._shows])
+                 problems=[CS.problems(s, slots if slots else None, reqs) + self._rec_problems(s) for s in self._shows],
+                 recs=self._recs())
+
+    # -- PAD-1516: recordings of a game's own cabinet lights ----------------------------------------------------------
+    def _recs(self):
+        """The project's recordings for the page, each with its map onto THIS cabinet's lights (the preview's)."""
+        from ...plugins.stern import cab_rec as CR
+        lights = self.get("lights") or []
+        out = []
+        for r in CR.listing(self._project):
+            out.append({"name": r["name"], "source": r["source"], "seconds": r["seconds"], "period": r["period"],
+                        "frames": r["frames"], "lights": r["lights"], "file": r["file"],
+                        "speakers": sum(1 for p in r["places"] if p.get("lane") == 1),
+                        "blades": sum(1 for p in r["places"] if p.get("lane") == 0),
+                        "map": CR.source_map(r["places"], lights)})
+        return out
+
+    def _rec_problems(self, show):
+        from ...plugins.stern import cab_rec as CR
+        from ...plugins.stern import cab_shows as CS
+        return ["It plays the recording \"%s\", which this project no longer has." % n
+                for n in CS.recs_of(show) if CR.find(self._project, n) is None]
+
+    @rpc
+    def record(self, seconds=60):
+        """Record what the game in the emulator shows on its cabinet lights now, for *seconds*, as a recording of
+        this project's: the card's own lights (its program's), sampled beside the game (cab_rec, cabrec.sh)."""
+        from ...plugins.stern import cab_rec as CR
+        if not self._project or self.get("recording"):
+            return False
+        emu = self.window.service("emulate")
+        try:
+            running = bool(emu is not None and (getattr(emu, "_last_up", False) or emu._launched()))
+        except Exception:                               # noqa: BLE001 - not known: say so below
+            running = False
+        if not running:
+            self.set(rec_note="Start this project's card in the emulator first (Run in emulator), let it reach "
+                              "what you want to record (attract, or a game), then record.")
+            return False
+        seconds = max(5, min(CR.SECONDS_MAX, int(seconds or 60)))
+        folder = self._project
+        self.set(recording=True, rec_note="Recording the cabinet's lights for %d s..." % seconds)
+
+        def work():
+            note, made = "", None
+            try:
+                made = self._record(folder, seconds)
+                note = "Recorded \"%s\": %.0f s of %d light(s). Make a show of it to play it." % (
+                    made["name"], made["seconds"], made["lights"])
+            except CR.RecError as e:
+                note = "Not recorded: %s." % e
+            except Exception as e:                      # noqa: BLE001 - said on the page
+                note = "Not recorded: %s" % e
+            self.ctx.loop.post(lambda: self._record_done(folder, note, made))
+
+        threading.Thread(target=work, daemon=True, name="cab-record").start()
+        return True
+
+    @staticmethod
+    def _record(folder, seconds):
+        import subprocess
+        import tempfile
+        from ...core import rigslot
+        from ...plugins.stern import cab_rec as CR
+        from ...plugins.stern import cab_shows as CS
+        from ...plugins.stern import lampmap as LM
+        from ...plugins.stern import mode_project as MP
+        from ...plugins.stern import title_reader as TR
+        from .. import emulate_core as EC
+        got = MP.project_card(folder)
+        card = getattr(got, "image", "") if got is not None else ""
+        if not card or not os.path.isfile(card):
+            raise CR.RecError("the card this project was extracted from is not on this PC")
+        elf = LM.Elf(TR.game_program(card)[2], "the game program")
+        places = CS.layout(elf)
+        if not places:
+            raise CR.RecError("this game has no cabinet lights of its own to record")
+        chans = CR.channels(elf)
+        prof = CS.project_title(folder, probe=True)
+        fd, tmp = tempfile.mkstemp(prefix="pad_cabrec_", suffix=".bin")
+        os.close(fd)
+        try:
+            env = ["PAD_SLOT=%d" % rigslot.slot()] if rigslot.slot() else []
+            cmd = EC.rig_cmd("cabrec.sh", EC._wsl_path(tmp), seconds, CR.PERIOD, CR.map_arg(chans), env=env)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=seconds + 120,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            last = ((r.stdout or "").strip().splitlines() or [""])[-1]
+            if r.returncode != 0:
+                raise CR.RecError(last or (r.stderr or "").strip()[-200:] or "the rig said nothing")
+            with open(tmp, "rb") as f:
+                data = f.read()
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        label = prof.label if prof is not None else "The game"
+        return CR.save(folder, CR.free_name(folder, label), label, places, data)
+
+    def _record_done(self, folder, note, made):
+        self.set(recording=False, rec_note=note)
+        if folder == self._project:
+            if made:
+                self.log("Expression lights: recorded \"%s\" (%.0f s)." % (made["name"], made["seconds"]), "info")
+            self._paint()
+
+    @rpc
+    def from_rec(self, name):
+        """A new show of the project's that plays recording *name* whole, over and over, on each lane it has
+        lights for here; returns its index."""
+        from ...plugins.stern import cab_rec as CR
+        from ...plugins.stern import cab_shows as CS
+        r = CR.find(self._project, str(name)) if self._project else None
+        if r is None or len(self._shows) >= CS.SHOWS_MAX:
+            return -1
+        mp = CR.source_map(r["places"], self.get("lights") or [])
+        lanes = {L["lane"] for L, m in zip(self.get("lights") or [], mp) if m >= 0}
+        ms = max(CS.STEP_MS_MIN, min(CS.STEP_MS_MAX, r["period"] * r["frames"]))
+        st = {"fx": CS.REC, "ms": ms, "rec": r["name"], "from": 0}
+        cur = self.get("songs") or []
+        s = CS.norm_show({"name": r["name"][:CS.NAME_MAX], "slot": None, "loop": True,
+                          "blades": [st] if 0 in lanes else [], "speakers": [st] if 1 in lanes else []})
+        names = {x["name"] for x in self._shows}
+        base, n = s["name"], 2
+        while s["name"] in names:
+            s["name"] = ("%s %d" % (base[:CS.NAME_MAX - 3], n))[:CS.NAME_MAX]
+            n += 1
+        _ = cur
+        self._shows.append(s)
+        self._save("show \"%s\" added from the recording" % s["name"])
+        return len(self._shows) - 1
+
+    @rpc
+    def delete_rec(self, name):
+        from ...plugins.stern import cab_rec as CR
+        if not self._project or CR.find(self._project, str(name)) is None:
+            return False
+        CR.remove(self._project, str(name))
+        self.log("Expression lights: recording \"%s\" deleted." % name, "info")
+        self._paint()
+        return True
 
     def _save(self, what=""):
         from ...core import history_log, staged_changes
@@ -358,6 +498,86 @@ class LightsTab(TabService):
         self._shows.append(s)
         self._save("show \"%s\" added from the game's own" % s["name"])
         return len(self._shows) - 1
+
+    # -- PAD-1516: shows from another project ------------------------------------------------------------------------
+    def _other_folders(self):
+        from ...core import project_registry
+        settings = getattr(self.app, "_settings", None) or {}
+        try:
+            folders = [e.get("folder") or "" for e in project_registry.entries(settings)]
+        except Exception:                               # noqa: BLE001 - no registry: no other projects
+            folders = []
+        own = os.path.normcase(os.path.normpath(self._project)) if self._project else ""
+        out, seen = [], {own}
+        for f in folders:
+            k = os.path.normcase(os.path.normpath(f)) if f else ""
+            if k and k not in seen and os.path.isdir(f):
+                seen.add(k)
+                out.append(f)
+        return out
+
+    @staticmethod
+    def _title_of(folder):
+        from ...plugins.stern import cab_shows as CS
+        try:
+            return CS.project_title(folder)
+        except Exception:                               # noqa: BLE001 - unreadable: no title
+            return None
+
+    @rpc
+    def other_shows(self):
+        """PAD-1516: the shows of the other projects the app knows, for New show's From another project:
+        ``[{folder, name, game, same, shows: [{i, name, stays}]}]`` (``stays``: why that show cannot come here, or
+        ""), only the projects that have shows."""
+        from ...plugins.stern import cab_shows as CS
+        if not self._project:
+            return []
+        mine = self._title_of(self._project)
+        out = []
+        for f in self._other_folders():
+            shows = CS.load(f)
+            if not shows:
+                continue
+            prof = self._title_of(f)
+            same = bool(mine is not None and prof is not None and prof.key == mine.key)
+            label = prof.label if prof is not None else "another game"
+            out.append({"folder": f, "name": os.path.basename(os.path.normpath(f)) or f, "game": label, "same": same,
+                        "shows": [{"i": i, "name": s["name"],
+                                   "stays": "" if same or not CS.uses_game(s) else CS.GAME_ONLY % label}
+                                  for i, s in enumerate(shows)]})
+        return out
+
+    @rpc
+    def copy_in(self, folder, which=None):
+        """PAD-1516: copies of another project's shows (*which*: their indexes, None = every one) added to this
+        project's; on another game each comes without its song. Returns the first copy's index, -1 for none."""
+        from ...plugins.stern import cab_shows as CS
+        if not self._project or not folder or folder not in self._other_folders():
+            return -1
+        shows = CS.load(folder)
+        if which is not None:
+            idx = {int(x) for x in which if isinstance(x, int) and not isinstance(x, bool)}
+            shows = [s for i, s in enumerate(shows) if i in idx]
+        mine, prof = self._title_of(self._project), self._title_of(folder)
+        same = bool(mine is not None and prof is not None and prof.key == mine.key)
+        copied, left = CS.copy_shows(shows, same, [x["name"] for x in self._shows], CS.SHOWS_MAX - len(self._shows),
+                                     prof.label if prof is not None else "its game")
+        from ...plugins.stern import cab_rec as CR
+        for s in copied:                                # PAD-1516: a recording a show plays comes along with it
+            for lane in CS.LANES:
+                for st in s[lane]:
+                    if st["fx"] == CS.REC and st.get("rec"):
+                        st["rec"] = CR.copy_into(folder, self._project, st["rec"]) or st["rec"]
+        src = os.path.basename(os.path.normpath(folder)) or folder
+        for name, why in left:
+            self.log("Expression lights: \"%s\" from %s was not copied: %s." % (name, src, why), "warning")
+        if not copied:
+            return -1
+        first = len(self._shows)
+        self._shows.extend(copied)
+        self._save("%d show(s) copied from %s%s" % (len(copied), src,
+                                                       "" if same else ", each to have its song picked here"))
+        return first
 
     @rpc
     def duplicate(self, i):
@@ -501,8 +721,8 @@ def _card_key(card):
 
 
 #: the page's word for a game whose program keeps no shows of its own the app can read
-NO_STOCK = ("This game keeps no expression light shows of its own the app can read (Led Zeppelin and Rush do): "
-            "the shows here are the project's.")
+NO_STOCK = ("This game keeps no expression light shows of its own the app can read (Led Zeppelin and Rush do). "
+            "To use what it shows on these lights, run the card in the emulator and Record it.")
 
 
 def project_stock(project):

@@ -40,6 +40,31 @@
   ]
  },
  "proc_modes": [],
+ "played": {
+  "can_watch": true,
+  "multiballs": true,
+  "names": [
+   "AtWorldsEndMultiball",
+   "BlackPearlMultiball",
+   "DeadMansChestMultiball",
+   "DeadMenTellNoTalesMultiball",
+   "OnStrangerTidesMultiball",
+   "PirateMode",
+   "PirateMovieMultiball",
+   "PirateMultiball",
+   "RagettiMultiball",
+   "TortugaMultiball"
+  ],
+  "game_type": {
+   "can": true,
+   "buttons": {
+    "_Z28jjpe_is_left_flipper_pressedv": true,
+    "_Z29jjpe_is_right_flipper_pressedv": true
+   },
+   "attract_hook": true,
+   "diag_hook": true
+  }
+ },
  "media": {
   "can_play_own_media": true,
   "ok": {

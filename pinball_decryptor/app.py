@@ -489,6 +489,8 @@ class App:
             on_scenes_own_colours_change=self._on_scenes_own_colours_change,
             initial_agent_access=bool(s.get("agent_access", False)),
             on_agent_access_change=self._on_agent_access_change,
+            initial_card_images=bool(s.get("card_images", False)),
+            on_card_images_change=self._on_card_images_change,
             initial_look_switches=s.get("look_switches") or {},
             on_look_switches_change=self._on_look_switches_change,
             initial_compare_row_limit=s.get("compare_row_limit"),
@@ -587,6 +589,63 @@ class App:
             # captures and tests never delete the PC's real files
             self.root.after(2500, self._prune_old_versions, True)
         self._schedule_autosave()
+        # PAD-1514: a card image double-clicked in Explorer started this run
+        pending = getattr(self.ctx, "open_image", None) if getattr(
+            self, "ctx", None) is not None else None
+        if pending:
+            self.ctx.open_image = None
+            self.root.after(0, self.open_image, pending)
+
+    def open_image(self, path):
+        """A card image handed in from outside (Explorer's double-click,
+        PAD-1514): switch to the manufacturer and era it belongs to and open
+        the Flash image dialog with it in, so a card and Write are all that is
+        left.  Before the first-launch disclaimer is answered it waits for
+        the session.  Returns whether the image was taken."""
+        path = os.path.abspath(str(path or ""))
+        if not os.path.isfile(path):
+            messagebox.showerror("Open image",
+                                 "This file is not there any more:\n" + path)
+            return False
+        if not getattr(self, "_session_started", False):
+            self.ctx.open_image = path
+            return True
+        try:
+            if self.ctx.host is not None:
+                self.ctx.host.bring_to_front()
+        except Exception:                               # noqa: BLE001
+            pass
+        from .webui import open_image as _oi
+        mfr, game = _oi.detect(self._manufacturers, path)
+        name = os.path.basename(path)
+        if mfr is None:
+            mfr = self._current_mfr
+            if mfr is None or not mfr.capabilities.flash_image:
+                messagebox.showerror(
+                    "Open image",
+                    "PAD does not recognize %s as a card image of a machine "
+                    "it can write. Pick the manufacturer, then use Write's "
+                    "Flash image to write it anyway." % name)
+                return False
+            self.window.append_log(
+                "[open] %s is not an image PAD recognizes; it opens for %s "
+                "as it is." % (name, mfr.display))
+        if not mfr.capabilities.flash_image:
+            messagebox.showinfo(
+                "Open image",
+                "%s is a %s image, and PAD does not write %s cards." % (
+                    name, mfr.display, mfr.display))
+            return False
+        if self._current_mfr is not mfr:
+            self._on_manufacturer_change(mfr)
+        era = getattr(game, "era", "") if game is not None else ""
+        if (era and hasattr(mfr, "set_era")
+                and getattr(mfr, "current_era", "") != era):
+            self.window.set_era(era)
+        opener = getattr(self.window, "_open_flash_dialog", None)
+        if opener is None:
+            return False
+        return bool(opener(initial_image=path, opened_file=True))
 
     def accept_disclaimer(self, accepted):
         """The first-launch disclaimer, answered on the page.  Declining
@@ -7679,6 +7738,11 @@ class App:
     def _on_agent_access_change(self, on):
         """Persist the ⚙ "Let AI agents control PAD" toggle (PAD-844)."""
         self._settings["agent_access"] = bool(on)
+        self._save_settings()
+
+    def _on_card_images_change(self, on):
+        """Persist the gear's "Open card images with PAD" toggle (PAD-1514)."""
+        self._settings["card_images"] = bool(on)
         self._save_settings()
 
     def _on_look_switches_change(self, switches):

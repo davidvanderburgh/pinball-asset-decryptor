@@ -39,6 +39,48 @@
   "witch_hurryup_proc",
   "witch_melt_run_proc"
  ],
+ "played": {
+  "can_watch": true,
+  "multiballs": false,
+  "names": [
+   "cbm_grace_proc",
+   "cbm_proc",
+   "ecmb_grace_grace_proc",
+   "ecmb_grace_proc",
+   "ecmb_run_proc",
+   "fireball_frenzy_run_proc",
+   "haunted_grace_proc",
+   "haunted_run_proc",
+   "hurry_build_run_proc",
+   "mmf_proc",
+   "mml_proc",
+   "mmm_grace_grace_proc",
+   "mmm_grace_proc",
+   "mmm_proc",
+   "mmw_proc",
+   "rescue_mb_grace_grace_proc",
+   "rescue_mb_grace_proc",
+   "rescue_mb_run_proc",
+   "sotr_grace_grace_proc",
+   "sotr_grace_proc",
+   "sotr_run_proc",
+   "tnplh_proc",
+   "twister_mode_proc_grace",
+   "twister_mode_proc_grace_grace",
+   "twister_mode_proc_run",
+   "witch_hurryup_proc",
+   "witch_melt_run_proc"
+  ],
+  "game_type": {
+   "can": true,
+   "buttons": {
+    "_Z28jjpe_is_left_flipper_pressedv": true,
+    "_Z29jjpe_is_right_flipper_pressedv": true
+   },
+   "attract_hook": true,
+   "diag_hook": true
+  }
+ },
  "media": {
   "can_play_own_media": true,
   "ok": {

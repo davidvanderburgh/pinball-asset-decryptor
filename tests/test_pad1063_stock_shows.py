@@ -110,7 +110,7 @@ def test_the_build_reads_the_table_off_the_cards_own_program(tmp_path, monkeypat
 
 def test_the_runtime_paints_a_game_step_from_the_games_memory():
     rt = _read(os.path.join(SDK, "pad_mode_runtime.c"))
-    assert '"meter", "game" };' in rt and "case CX_GAME: break;" in rt
+    assert '"meter", "game", "rec" };' in rt and "case CX_GAME: break;" in rt
     for frag in ('str_starts(s, "songs ")', 'str_starts(s, "songspk ")', "cab_src[k] = cab_src_of(x->name);",
                  "frames = *(const unsigned *)(row + (st->b ? 16 : 12));", "f = (st->rate + t) / per;",
                  "if (!maps_has((unsigned long)fr, cab_songs_px * 3u, MAP_R)) return 0;"):

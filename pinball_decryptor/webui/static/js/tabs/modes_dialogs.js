@@ -316,6 +316,9 @@ function CoopLook({ look }) {
           onClick=${() => call("modes.coop_chars_look", c.key, "")} />` : null}
       </span>`)}
     </div>
+    <${Check} checked=${!!look.match} label="Name and corners in each character's frame color"
+      title="Each character's cards draw its name, corners and arrows in its own frame color (the color well on its row, or Frame and lights), so every character has a color of its own. Off: the Name and Corners and arrows colors above, the same on every card."
+      onChange=${(v) => call("modes.coop_chars_look", "match", !!v)} />
     <div class="row" style="gap:8px">
       <${Button} size="sm" kind="ghost" icon="image" onClick=${() => call("modes.coop_chars_backdrop", false)}
         title=${look.backdrop ? "The picture behind every pick card and award card: choose another." : "A picture of your own behind every pick card and award card, in place of the panel (the panel's color then goes unused)."}>

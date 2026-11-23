@@ -41,7 +41,13 @@ sleep 2
 press switch_target_bank_3
 wait "WIZARD": player 1 played gobstopper_mb - 3 of 3 10
 wait "WIZARD" start raised 10
+note it waits for the game's multiball, then for its extra balls to drain
+wait "WIZARD" start .* waiting for gobstopper_mb 10
 press switch_target_l_loop
+sleep 2
+drain
+sleep 1
+drain
 wait "WIZARD" STARTED 40
 sleep 1
 shot /var/tmp/pad1512/wizard.png

@@ -621,6 +621,7 @@ def write_example(p, folder, title_label):
         if d.get("lamps"):
             f.write("lamps = %s\nlamp_color = ff2000\nlamp_blink = 4\n" % d["lamps"])
     write_multiball_example(p, folder, title_label)
+    write_wizard_example(p, folder, title_label)
 
 
 def write_multiball_example(p, folder, title_label):
@@ -638,6 +639,42 @@ def write_multiball_example(p, folder, title_label):
             f.write("coil_shot = %s\n" % d["coil_shot"])
         if d.get("sound_shot"):
             f.write("sound_shot = %s\n" % d["sound_shot"])
+
+
+def wizard_picks(p, n=4):
+    """Up to *n* of the title's own modes and multiballs a starter wizard asks for (PAD-1512): its
+    mode classes first (the ones named ...Mode), then its multiballs, by name."""
+    names = (p.get("played") or {}).get("names") or []
+    modes = sorted(x for x in names if x.endswith("Mode") and not x.startswith("Job"))
+    mbs = sorted(x for x in names if re.search(r"(MB|Multiball|MultiballRule)$", x))
+    rest = sorted(x for x in names if x not in modes and x not in mbs)
+    out = []
+    for group in (modes, mbs, rest):
+        for x in group:
+            if len(out) < n and x not in out:
+                out.append(x)
+    return out
+
+
+def write_wizard_example(p, folder, title_label):
+    """A third starter (PAD-1512): a wizard mode of the title's own - every one of a few of its own
+    modes played starts it - also picked as a game type on the attract menu."""
+    pl, d = p.get("played") or {}, p["defaults"]
+    picks = wizard_picks(p)
+    if not (pl.get("can_watch") and (pl.get("game_type") or {}).get("can") and len(picks) >= 2):
+        return None
+    path = os.path.join(folder, "3_wizard.mode")
+    lines = ["# A wizard mode for %s: it starts once the player has played these %d of the game's own" % (title_label, len(picks)),
+             "# modes in one game, or when PAD WIZARD is picked on the attract menu (hold both flipper",
+             "# buttons a second in attract).  Every key: tools/jjp_emu/MODES.md",
+             "name = PAD Wizard", "title = PAD WIZARD",
+             "start_all = %s" % " ".join(picks), "game_type = PAD WIZARD",
+             "shots = %s" % d["shots"], "points = 3000000", "points_ladder = rising"]
+    lines += ["multiball = 3 20", "seconds = 0"] if p.get("can_balls") else ["seconds = 40"]
+    lines += ["%s = %s" % (k, d[k]) for k in ("sound_start", "sound_shot") if d.get(k)]
+    with open(path, "w", newline=chr(10)) as f:
+        f.write(chr(10).join(lines) + chr(10))
+    return path
 
 
 def write_stock_example(p, folder, title_label):
@@ -674,6 +711,7 @@ def main(argv=None):
     ap.add_argument("--label", help="title label for the example's comments")
     ap.add_argument("--multiball-example", help="write only the multiball starter (2_multiball.mode) here")
     ap.add_argument("--stock-example", help="write a starter .stock folder here")
+    ap.add_argument("--wizard-example", help="write only the wizard starter (3_wizard.mode, PAD-1512) here")
     ap.add_argument("--live", help="a running game's mode globals and shot table (jjpstock.py live) to fold in")
     a = ap.parse_args(argv)
     live = json.load(open(a.live)) if a.live else None
@@ -686,6 +724,8 @@ def main(argv=None):
         write_example(p, a.example, a.label or a.gamename or p["elf"])
     if a.multiball_example:
         write_multiball_example(p, a.multiball_example, a.label or a.gamename or p["elf"])
+    if a.wizard_example:
+        print("  starter wizard: %s" % write_wizard_example(p, a.wizard_example, a.label or a.gamename or p["elf"]))
     if a.stock_example:
         print("  starter .stock: %s" % write_stock_example(p, a.stock_example, a.label or a.gamename or p["elf"]))
     print("%s: %s; %d exported, %d switches, %d lamps, %d sounds, %d fonts, %d Mode classes%s" % (

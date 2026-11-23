@@ -1201,6 +1201,7 @@ static void find_proc_modes(void)
 
 /* What a custom mode would be yielding to right now, or NULL. */
 static long multiball_since;     /* ms clock when more than one ball came into play, 0 = not */
+static const char *mb_busy(void);     /* PAD-1512: a game multiball (MultiballRule) running, by its own word */
 static const char *game_busy_except(const pm_t *m)
 {
     /* A multiball is more than one ball for half a second: the count blips
@@ -1209,7 +1210,7 @@ static const char *game_busy_except(const pm_t *m)
     if (multiball_since && now_ms() - multiball_since >= 500 && !(m && (m->mb_served || m->adds))) return "multiball";
     for (int i = 0; i < ngm; i++)
         if (!gmode_bg[i] && !is_ours(gmodes[i]) && gm_running(i)) return gmode_sym[i];
-    return NULL;
+    return mb_busy();
 }
 static const char *game_busy(void) { return game_busy_except(NULL); }
 
@@ -3168,7 +3169,8 @@ static void test_init(void)
     static char gb[512], wb[512];
     snprintf(gb, sizeof gb, "%s", g); snprintf(wb, sizeof wb, "%s", w);
     char *gs = NULL, *ws = NULL;
-    t_mb_start = byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule5startEv");
+    /* the hold gate may have pointed MultiballRule's own start slot at itself already: its slot */
+    t_mb_start = mb_start_slot >= 0 ? mb_start_slot : byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule5startEv");
     t_mb_end = byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule3endEv");
     t_mb_isr = byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule10is_runningEv");
     for (char *a = strtok_r(gb, ", ", &gs), *b = strtok_r(wb, ", ", &ws); a && b && ntest < MAX_TEST;
@@ -3715,7 +3717,7 @@ JMAPI int jm_ball_save(int s)
  * start menu is: hold both flipper buttons for a second, flippers to choose, Start to
  * play.  A game started with it picked starts that mode on each player's first ball.
  * The buttons are read through the engine's own jjpe_is_left/right_flipper_pressed. */
-typedef struct { void *o; const char *name, *cls; int gm; unsigned char mb, was; unsigned played; } trk_t;
+typedef struct { void *o; const char *name, *cls; int gm; unsigned char mb, was, bg; unsigned played; } trk_t;
 #define MAX_TRK 320
 static trk_t trk[MAX_TRK];
 static int ntrk, trk_on, trk_mbs;
@@ -3729,6 +3731,14 @@ static int trk_running(const trk_t *t)
     if (!t->mb) return gm_running(t->gm);
     if (*(uintptr_t *)t->o == 0) return 0;
     return ((vbool_t)vslot(t->o, mb_isr_off))(t->o) & 0xff;
+}
+/* A game multiball running (not one of the title's always-on ones), or NULL.  Before PAD-1512 a
+ * game multiball was seen only once a second ball came into play; its MultiballRule says so at once. */
+static const char *mb_busy(void)
+{
+    for (int i = 0; trk_on && i < ntrk; i++)
+        if (trk[i].mb && !trk[i].bg && trk_running(&trk[i])) return trk[i].name;
+    return NULL;
 }
 static int player_now(void) { int p = player_up ? player_up() : 0; return p >= 1 && p <= MAX_PLAYERS ? p : 0; }
 
@@ -3817,12 +3827,12 @@ static void track_tick(int ig)
     int p = player_now();
     for (int i = 0; i < ntrk; i++) {
         trk_t *t = &trk[i];
-        if (t->gm >= 0 && (is_ours(t->o) || gmode_bg[t->gm])) continue;     /* ours, or always on */
+        if (t->bg || (t->gm >= 0 && (is_ours(t->o) || gmode_bg[t->gm]))) continue;     /* ours, or always on */
         int r = trk_running(t);
         if (r == t->was) continue;
         /* a game mode up in a ball's first two seconds may be one of the title's always-on ones:
          * it is looked at again once per_frame has said (gmode_bg) */
-        if (r && t->gm >= 0 && bg_snapshot_at >= 0) continue;
+        if (r && bg_snapshot_at >= 0) continue;
         t->was = (unsigned char)r;
         if (r && !ig) continue;              /* a start counts only with a ball in play (ends: the ball's end too) */
         if (r && p) t->played |= 1u << p;
@@ -4153,6 +4163,8 @@ static void per_frame(void)
                     if (pcount[i] > gmode_bgn[i]) { gmode_bgn[i] = pcount[i]; lg("always-on game mode: %s (x%d)", gmode_sym[i], pcount[i]); }
                 } else if (!gmode_bg[i] && gm_running(i)) { gmode_bg[i] = 1; lg("always-on game mode: %s", gmode_sym[i]); }
             }
+            for (int i = 0; i < ntrk; i++)       /* PAD-1512: the game's multiballs the same way */
+                if (trk[i].mb && !trk[i].bg && trk_running(&trk[i])) { trk[i].bg = 1; lg("always-on game multiball: %s", trk[i].name); }
         }
     }
     if ((frames & 7) == 0) log_running_set();

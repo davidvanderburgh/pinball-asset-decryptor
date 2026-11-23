@@ -621,12 +621,12 @@ class App:
             if mfr is None or not mfr.capabilities.flash_image:
                 messagebox.showerror(
                     "Open image",
-                    "PAD does not recognise %s as a card image of a machine "
+                    "PAD does not recognize %s as a card image of a machine "
                     "it can write. Pick the manufacturer, then use Write's "
                     "Flash image to write it anyway." % name)
                 return False
             self.window.append_log(
-                "[open] %s is not an image PAD recognises; it opens for %s "
+                "[open] %s is not an image PAD recognizes; it opens for %s "
                 "as it is." % (name, mfr.display))
         if not mfr.capabilities.flash_image:
             messagebox.showinfo(

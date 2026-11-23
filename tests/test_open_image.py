@@ -239,6 +239,25 @@ def test_register_and_unregister_round_trip():
         _drop(root)
 
 
+def test_app_name_says_what_windows_calls_the_choice(monkeypatch):
+    """The warning names the app the user chose, never a Store app's
+    "AppX..." ProgId (PAD-1518: it printed AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h
+    for Photos)."""
+    from pinball_decryptor.webui import open_image as oi
+    names = {"AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h": "Photos"}
+    monkeypatch.setattr(oi, "_assoc_friendly_app_name",
+                        lambda p: names.get(p, ""))
+    assert oi.app_name("AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h") == "Photos"
+    assert oi.app_name(r"Applications\IrfanView.exe") == "IrfanView.exe"
+    assert oi.app_name("SomeApp.raw") == "SomeApp.raw"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows' own lookup")
+def test_friendly_app_name_never_raises_on_an_unknown_progid():
+    from pinball_decryptor.webui import open_image as oi
+    assert oi._assoc_friendly_app_name("NoSuch.ProgId.PAD1518") == ""
+
+
 def _card_images_item(w):
     menu = [i for i in w.state("shell")["settings_items"]
             if i.get("label") == "Card images"][0]["submenu"]

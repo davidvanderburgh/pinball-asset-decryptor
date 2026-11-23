@@ -327,4 +327,40 @@ def raw_chosen_elsewhere():
             prog = winreg.QueryValueEx(k, "ProgId")[0]
     except (ImportError, OSError):
         return ""
-    return "" if prog == PROGID else str(prog or "")
+    if not prog or prog == PROGID:
+        return ""
+    return app_name(str(prog))
+
+
+def app_name(prog):
+    """What Windows calls the app behind *prog*, a UserChoice ProgId: a Store
+    app's is ``AppX`` and 32 letters ("AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h"
+    is Photos), which says nothing to a reader (PAD-1518).  Falls back to the
+    exe of an ``Applications\\foo.exe`` choice, then to *prog* itself."""
+    name = _assoc_friendly_app_name(prog)
+    if name:
+        return name
+    if prog.lower().startswith("applications\\"):
+        return prog.split("\\", 1)[1]
+    return prog
+
+
+def _assoc_friendly_app_name(prog):
+    if sys.platform != "win32":
+        return ""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        fn = ctypes.windll.shlwapi.AssocQueryStringW
+        fn.argtypes = [ctypes.c_uint, ctypes.c_int, wintypes.LPCWSTR,
+                       wintypes.LPCWSTR, wintypes.LPWSTR,
+                       ctypes.POINTER(wintypes.DWORD)]
+        fn.restype = ctypes.c_long
+        size = wintypes.DWORD(512)
+        buf = ctypes.create_unicode_buffer(size.value)
+        # 4 = ASSOCSTR_FRIENDLYAPPNAME
+        if fn(0, 4, prog, None, buf, ctypes.byref(size)) != 0:
+            return ""
+        return buf.value.strip()
+    except Exception:                                   # noqa: BLE001
+        return ""

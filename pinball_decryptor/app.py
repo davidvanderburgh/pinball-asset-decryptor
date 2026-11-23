@@ -489,6 +489,8 @@ class App:
             on_scenes_own_colours_change=self._on_scenes_own_colours_change,
             initial_agent_access=bool(s.get("agent_access", False)),
             on_agent_access_change=self._on_agent_access_change,
+            initial_card_images=bool(s.get("card_images", True)),
+            on_card_images_change=self._on_card_images_change,
             initial_look_switches=s.get("look_switches") or {},
             on_look_switches_change=self._on_look_switches_change,
             initial_compare_row_limit=s.get("compare_row_limit"),
@@ -7736,6 +7738,11 @@ class App:
     def _on_agent_access_change(self, on):
         """Persist the ⚙ "Let AI agents control PAD" toggle (PAD-844)."""
         self._settings["agent_access"] = bool(on)
+        self._save_settings()
+
+    def _on_card_images_change(self, on):
+        """Persist the gear's "Open card images with PAD" toggle (PAD-1514)."""
+        self._settings["card_images"] = bool(on)
         self._save_settings()
 
     def _on_look_switches_change(self, switches):

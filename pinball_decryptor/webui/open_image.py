@@ -185,9 +185,25 @@ def association_values(app_dir):
     return rows
 
 
-def register_association(app_dir=None):
+#: where the association lives under HKEY_CURRENT_USER (tests use their own)
+CLASSES = r"Software\Classes"
+
+
+def _notify():
+    try:
+        import ctypes
+        # SHCNE_ASSOCCHANGED: Explorer re-reads the associations
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def register_association(app_dir=None, take_raw=False, classes=None):
     """Write the association for this user; True when anything changed.
-    ``.raw`` is made PAD's only when nothing else has it.  Never raises."""
+
+    ``.raw`` becomes PAD's double-click when nothing else has it, or with
+    *take_raw* (the user ticked it in the gear menu) whatever had it.
+    Never raises."""
     if sys.platform != "win32":
         return False
     app_dir = app_dir or install_dir()
@@ -197,12 +213,13 @@ def register_association(app_dir=None):
         import winreg
     except ImportError:
         return False
+    classes = classes or CLASSES
     root = winreg.HKEY_CURRENT_USER
     changed = False
 
     def _put(sub, name, data):
         nonlocal changed
-        path = r"Software\Classes" + "\\" + sub
+        path = classes + "\\" + sub
         try:
             with winreg.OpenKey(root, path) as k:
                 if winreg.QueryValueEx(k, name)[0] == data:
@@ -218,18 +235,96 @@ def register_association(app_dir=None):
             _put(sub, name, data)
         for ext in DEFAULT_FOR:
             try:
-                current = winreg.QueryValue(winreg.HKEY_CLASSES_ROOT, ext)
+                if classes == CLASSES:
+                    current = winreg.QueryValue(winreg.HKEY_CLASSES_ROOT, ext)
+                else:
+                    current = winreg.QueryValue(root, classes + "\\" + ext)
             except OSError:
                 current = ""
-            if not current or current == PROGID:
+            if take_raw or not current or current == PROGID:
                 _put(ext, "", PROGID)
     except OSError:
         log.warning("file association not written", exc_info=True)
-    if changed:
-        try:
-            import ctypes
-            # SHCNE_ASSOCCHANGED: Explorer re-reads the associations
-            ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
-        except Exception:                               # noqa: BLE001
-            pass
+    if changed and classes == CLASSES:
+        _notify()
     return changed
+
+
+def unregister_association(classes=None):
+    """Take every key :func:`register_association` wrote away again (the
+    uninstaller's RemoveTheFileAssociation does the same).  Never raises."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+    except ImportError:
+        return False
+    classes = classes or CLASSES
+    root = winreg.HKEY_CURRENT_USER
+
+    def _del_tree(path):
+        try:
+            with winreg.OpenKey(root, path, 0,
+                                winreg.KEY_READ | winreg.KEY_WRITE) as k:
+                while True:
+                    try:
+                        child = winreg.EnumKey(k, 0)
+                    except OSError:
+                        break
+                    _del_tree(path + "\\" + child)
+            winreg.DeleteKey(root, path)
+        except OSError:
+            pass
+
+    for ext in IMAGE_EXTENSIONS:
+        try:
+            with winreg.OpenKey(root, classes + "\\" + ext + r"\OpenWithProgids",
+                                0, winreg.KEY_SET_VALUE) as k:
+                winreg.DeleteValue(k, PROGID)
+        except OSError:
+            pass
+        _del_tree(r"%s\SystemFileAssociations\%s\shell\%s"
+                  % (classes, ext, VERB))
+        try:
+            with winreg.OpenKey(root, classes + "\\" + ext, 0,
+                                winreg.KEY_READ | winreg.KEY_SET_VALUE) as k:
+                if winreg.QueryValueEx(k, "")[0] == PROGID:
+                    winreg.DeleteValue(k, "")
+        except OSError:
+            pass
+    _del_tree(classes + "\\" + PROGID)
+    if classes == CLASSES:
+        _notify()
+    return True
+
+
+def is_registered(classes=None):
+    """Whether this user's Explorer has PAD's association."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            (classes or CLASSES) + "\\" + PROGID
+                            + r"\shell\open\command"):
+            return True
+    except (ImportError, OSError):
+        return False
+
+
+def raw_chosen_elsewhere():
+    """The program the user picked in Windows' own "Always use this app"
+    for ``.raw`` when it is not PAD, else "".  Windows keeps that choice
+    above anything an app writes, so only the user can hand it to PAD."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import winreg
+        with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer"
+                r"\FileExts\.raw\UserChoice") as k:
+            prog = winreg.QueryValueEx(k, "ProgId")[0]
+    except (ImportError, OSError):
+        return ""
+    return "" if prog == PROGID else str(prog or "")

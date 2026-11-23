@@ -146,7 +146,10 @@ def test_gear_menu_groups_and_no_top_level_checks(tmp_path):
                   (it.get("label") + " ▸") if it.get("submenu") is not None
                   else it.get("id")) for it in top]
         want = ["Updates ▸", "Save automatically ▸", "Logs ▸",
-                "AI agents ▸", "sep"]
+                "AI agents ▸"]
+        if sys.platform == "win32":
+            want.append("Card images ▸")        # PAD-1514
+        want.append("sep")
         if sys.platform == "win32":
             want.append("disk_space")
         want += ["Prerequisites ▸", "clear_voice_models", "sep"]

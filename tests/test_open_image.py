@@ -179,3 +179,107 @@ def test_second_launch_hands_the_image_to_the_open_app(tmp_path,
             assert oi.hand_to_running(str(image)) is False
         finally:
             server.stop()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows registry")
+def test_register_and_unregister_round_trip():
+    """Under a throwaway key of this user's registry: everything PAD writes,
+    .raw taken only when free (or when the user asks), and all of it gone
+    again - an .raw default that is someone else's is left alone."""
+    import uuid
+    import winreg
+    from pinball_decryptor.webui import open_image as oi
+    classes = r"Software\PADTest-%s\Classes" % uuid.uuid4().hex
+    app_dir = r"C:\Program Files\Pinball Asset Decryptor"
+    hk = winreg.HKEY_CURRENT_USER
+
+    def _get(sub, name=""):
+        try:
+            with winreg.OpenKey(hk, classes + "\\" + sub) as k:
+                return winreg.QueryValueEx(k, name)[0]
+        except OSError:
+            return None
+    try:
+        with winreg.CreateKeyEx(hk, classes + r"\.raw") as k:
+            winreg.SetValueEx(k, "", 0, winreg.REG_SZ, "SomeViewer.raw")
+        assert oi.register_association(app_dir, classes=classes) is True
+        assert oi.is_registered(classes) is True
+        assert _get(oi.PROGID + r"\shell\open\command").endswith('"%1"')
+        assert _get(r".iso\OpenWithProgids", oi.PROGID) == ""
+        assert _get(r"SystemFileAssociations\.img\shell\%s\command"
+                    % oi.VERB) is not None
+        assert _get(".raw") == "SomeViewer.raw"          # not taken
+        assert oi.register_association(app_dir, classes=classes) is False
+        oi.register_association(app_dir, take_raw=True, classes=classes)
+        assert _get(".raw") == oi.PROGID                  # the user asked
+        assert oi.unregister_association(classes) is True
+        assert oi.is_registered(classes) is False
+        assert _get(".raw") is None
+        assert _get(r".iso\OpenWithProgids", oi.PROGID) is None
+        assert _get(r"SystemFileAssociations\.img\shell\%s" % oi.VERB) is None
+    finally:
+        root = classes.rsplit("\\", 1)[0]
+
+        def _drop(path):
+            try:
+                with winreg.OpenKey(hk, path) as k:
+                    kids = []
+                    i = 0
+                    while True:
+                        try:
+                            kids.append(winreg.EnumKey(k, i))
+                            i += 1
+                        except OSError:
+                            break
+                for c in kids:
+                    _drop(path + "\\" + c)
+                winreg.DeleteKey(hk, path)
+            except OSError:
+                pass
+        _drop(root)
+
+
+def _card_images_item(w):
+    menu = [i for i in w.state("shell")["settings_items"]
+            if i.get("label") == "Card images"][0]["submenu"]
+    return [i for i in menu if i.get("id") == "toggle_card_images"][0]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="a Windows menu")
+def test_gear_toggle_sets_up_and_takes_away(tmp_path, monkeypatch):
+    """⚙ > Card images > Open card images with PAD: on by default; off takes
+    the association away and is remembered; on again takes .raw even from
+    another program, and says when Windows' own choice still wins."""
+    import json
+    from pinball_decryptor.webui import open_image as oi
+    calls = []
+    monkeypatch.setattr(oi, "install_dir", lambda: r"C:\PAD")
+    monkeypatch.setattr(oi, "unregister_association",
+                        lambda classes=None: calls.append("off") or True)
+    monkeypatch.setattr(oi, "register_association",
+                        lambda app_dir=None, take_raw=False, classes=None:
+                        calls.append(("on", take_raw)) or True)
+    monkeypatch.setattr(oi, "raw_chosen_elsewhere", lambda: "Photos")
+    with web_app(tmp_path, mfr="stern") as w:
+        item = _card_images_item(w)
+        assert item["label"] == "Open card images with PAD"
+        assert item["checked"] is True and not item.get("disabled")
+        w.call("ui.settings_action", "toggle_card_images")
+        assert calls == ["off"]
+        assert _card_images_item(w)["checked"] is False
+        settings = json.loads((tmp_path / "cfg" / "settings.json")
+                              .read_text(encoding="utf-8"))
+        assert settings["card_images"] is False
+        w.call("ui.settings_action", "toggle_card_images")
+        assert calls == ["off", ("on", True)]
+        assert _card_images_item(w)["checked"] is True
+
+
+@pytest.mark.skipif(os.name != "nt", reason="a Windows menu")
+def test_gear_toggle_is_greyed_in_a_checkout(tmp_path, monkeypatch):
+    from pinball_decryptor.webui import open_image as oi
+    monkeypatch.setattr(oi, "install_dir", lambda: None)
+    with web_app(tmp_path, mfr="stern") as w:
+        item = _card_images_item(w)
+        assert item["disabled"] is True
+        assert "installed app" in item["title"]

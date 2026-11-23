@@ -1071,13 +1071,17 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         from ...plugins.stern import coop_play as _CP
         th = _CP.theme_of(chars.get("theme"))
         own = chars.get("theme") or {}
+        match = bool(th["match"])
         colours = [{"key": k, "label": label, "value": th[k] or (_CP.PANEL_STOCK if k == "panel" else th["accent"]),
                     "own": bool(own.get(k)), "follows": not th[k],
-                    "hint": ("the stock dark panel until you pick one" if k == "panel"
-                             else "the frame's color until you pick one") if not th[k] else ""}
+                    # PAD-1513: with match on, a character's cards take its frame color here; this one is RANDOM's
+                    "hint": ("each character's cards use its frame color; this one is for the RANDOM card"
+                             if match and k in _CP.MATCH_ROLES else
+                             ("the stock dark panel until you pick one" if k == "panel"
+                              else "the frame's color until you pick one") if not th[k] else "")}
                    for k, label in _CP.COLOUR_ROLES]
         return {"title": th["title"], "colours": colours, "backdrop": bool(_CP.backdrop_path(project, th)),
-                "dim": th["dim"], "dims": list(_CP.DIMS)}
+                "dim": th["dim"], "dims": list(_CP.DIMS), "match": match}
 
     def _save_coop_chars(self, project, chars, what, was, now):
         from ...core import history_log
@@ -1191,8 +1195,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
 
     @rpc
     def coop_chars_look(self, key, value=None):
-        """PAD-1079: one part of the pick's look: its title, a colour (``#rrggbb``; ``""`` the default again) or how
-        dark its background picture is drawn."""
+        """PAD-1079: one part of the pick's look: its title, a colour (``#rrggbb``; ``""`` the default again), how
+        dark its background picture is drawn, or (PAD-1513, ``match``) whether each character's name and corners take
+        its frame colour."""
         from ...core import history_log
         from ...plugins.stern import coop_play as _CP
         project = self.project()

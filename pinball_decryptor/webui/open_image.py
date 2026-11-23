@@ -153,6 +153,10 @@ VERB = "PinballAssetDecryptor.Write"
 #: belong to Windows' own "Mount" for every other disc image, so PAD only
 #: joins their Open with list and right-click menu there.
 DEFAULT_FOR = (".raw",)
+#: what Explorer's Open with calls PAD
+APP_NAME = "Pinball Asset Decryptor"
+#: where Explorer keeps each user's own "Always use this app" per extension
+FILEEXTS = r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts"
 
 
 def install_dir():
@@ -169,12 +173,24 @@ def association_values(app_dir):
     r"""``[(key under HKCU\Software\Classes, value name, data)]``."""
     command = 'wscript.exe "%s" "%%1"' % os.path.join(app_dir, "launcher.vbs")
     icon = os.path.join(app_dir, "pinball_decryptor", "icon.ico")
+    # a card image gets a file's icon (an SD card), never the app's own: a
+    # desktop of .raw files read as a row of PAD shortcuts (PAD-1518)
+    file_icon = os.path.join(app_dir, "pinball_decryptor", "card_image.ico")
+    if not os.path.isfile(file_icon) and os.path.isfile(icon):
+        file_icon = icon
     rows = [
         (PROGID, "", "Pinball card image"),
-        (PROGID + r"\DefaultIcon", "", icon),
+        (PROGID + r"\DefaultIcon", "", file_icon),
         (PROGID + r"\shell", "", "open"),
         (PROGID + r"\shell\open", "", "Write to a card with PAD"),
+        # the command is wscript.exe, so without these Explorer's Open with
+        # lists PAD as "Microsoft Windows Based Script Host" (PAD-1518)
+        (PROGID + r"\shell\open", "FriendlyAppName", APP_NAME),
         (PROGID + r"\shell\open\command", "", command),
+        (PROGID + r"\Application", "ApplicationName", APP_NAME),
+        (PROGID + r"\Application", "ApplicationIcon", icon),
+        (PROGID + r"\Application", "ApplicationDescription",
+         "Write a pinball card image to an SD card"),
     ]
     for ext in IMAGE_EXTENSIONS:
         rows.append((ext + r"\OpenWithProgids", PROGID, ""))
@@ -198,12 +214,66 @@ def _notify():
         pass
 
 
-def register_association(app_dir=None, take_raw=False, classes=None):
+def release_windows_choice(ext, fileexts=None):
+    """Forget the app the user once picked for *ext* in Windows' "Always use
+    this app" when it is not PAD, so the extension's own default (PAD, once
+    registered) opens it again.  Windows signs that choice, so no app can
+    write its own name there; taking the stale one away is what is left, and
+    only the gear switch does it (the user asked PAD to take the files).
+    True when no other app's choice remains.  Never raises."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+    except ImportError:
+        return False
+    root = winreg.HKEY_CURRENT_USER
+    base = (fileexts or FILEEXTS) + "\\" + ext
+    prog = windows_choice(ext, fileexts)
+    if not prog or prog == PROGID:
+        return True
+    for sub in (r"UserChoiceLatest\ProgId", "UserChoiceLatest", "UserChoice"):
+        try:
+            winreg.DeleteKey(root, base + "\\" + sub)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            log.warning("Windows' own choice for %s not released (%s)",
+                        ext, sub, exc_info=True)
+    return not windows_choice(ext, fileexts)
+
+
+def windows_choice(ext=".raw", fileexts=None):
+    """The ProgID of the user's own "Always use this app" for *ext*, or "".
+    Newer Windows 11 builds record it under ``UserChoiceLatest\\ProgId`` and
+    may write no ``UserChoice`` at all (seen on build 26300, PAD-1518);
+    older ones only under ``UserChoice``."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import winreg
+    except ImportError:
+        return ""
+    base = (fileexts or FILEEXTS) + "\\" + ext
+    for sub in (r"UserChoiceLatest\ProgId", "UserChoice"):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                base + "\\" + sub) as k:
+                prog = winreg.QueryValueEx(k, "ProgId")[0]
+        except OSError:
+            continue
+        if prog:
+            return str(prog)
+    return ""
+
+
+def register_association(app_dir=None, take_raw=False, classes=None,
+                         fileexts=None):
     """Write the association for this user; True when anything changed.
 
     ``.raw`` becomes PAD's double-click when nothing else has it, or with
-    *take_raw* (the user ticked it in the gear menu) whatever had it.
-    Never raises."""
+    *take_raw* (the user ticked it in the gear menu) whatever had it,
+    Windows' own remembered choice included.  Never raises."""
     if sys.platform != "win32":
         return False
     app_dir = app_dir or install_dir()
@@ -245,6 +315,10 @@ def register_association(app_dir=None, take_raw=False, classes=None):
                 _put(ext, "", PROGID)
     except OSError:
         log.warning("file association not written", exc_info=True)
+    if take_raw and (classes == CLASSES or fileexts):
+        for ext in DEFAULT_FOR:
+            if raw_chosen_elsewhere(ext, fileexts):
+                changed = release_windows_choice(ext, fileexts) or changed
     if changed and classes == CLASSES:
         _notify()
     return changed
@@ -312,19 +386,93 @@ def is_registered(classes=None):
         return False
 
 
-def raw_chosen_elsewhere():
+def raw_chosen_elsewhere(ext=".raw", fileexts=None):
     """The program the user picked in Windows' own "Always use this app"
     for ``.raw`` when it is not PAD, else "".  Windows keeps that choice
-    above anything an app writes, so only the user can hand it to PAD."""
+    above anything an app writes; the gear switch takes it away
+    (:func:`release_windows_choice`), so this names one only when that
+    failed."""
+    prog = windows_choice(ext, fileexts)
+    if not prog or prog == PROGID:
+        return ""
+    return app_name(prog)
+
+
+def raw_is_pads(ext=".raw", fileexts=None):
+    """Whether Windows' own choice for *ext* is PAD: the double-click and the
+    file's icon are PAD's only then, when any other app also opens *ext*."""
+    return windows_choice(ext, fileexts) == PROGID
+
+
+def ask_windows(ext=".raw"):
+    """Open Windows' own "Select an app to open this file" for *ext* and
+    wait for it to close.  Windows signs the choice it records there, so the
+    user's click on PAD > Always is the one step no app can take for them;
+    this brings that question up from PAD's own switch instead of leaving
+    it for the next double-click in Explorer (PAD-1518).  Nothing is opened.
+    Never raises."""
+    if sys.platform != "win32":
+        return False
+    import tempfile
+    folder = tempfile.mkdtemp(prefix="pad-card-")
+    path = os.path.join(folder, "Pinball card image" + ext)
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class OPENASINFO(ctypes.Structure):
+            _fields_ = [("pcszFile", wintypes.LPCWSTR),
+                        ("pcszClass", wintypes.LPCWSTR),
+                        ("oaifInFlags", ctypes.c_int)]
+        with open(path, "wb"):
+            pass
+        # ALLOW_REGISTRATION | REGISTER_EXT | FORCE_REGISTRATION, never EXEC
+        info = OPENASINFO(path, None, 0x1 | 0x2 | 0x8)
+        fn = ctypes.windll.shell32.SHOpenWithDialog
+        fn.argtypes = [wintypes.HWND, ctypes.POINTER(OPENASINFO)]
+        fn.restype = ctypes.c_long
+        fn(None, ctypes.byref(info))
+        return True
+    except Exception:                                   # noqa: BLE001
+        log.warning("Windows' app picker not shown", exc_info=True)
+        return False
+    finally:
+        for p, rm in ((path, os.remove), (folder, os.rmdir)):
+            try:
+                rm(p)
+            except OSError:
+                pass
+
+
+def app_name(prog):
+    """What Windows calls the app behind *prog*, a UserChoice ProgId: a Store
+    app's is ``AppX`` and 32 letters ("AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h"
+    is Photos), which says nothing to a reader (PAD-1518).  Falls back to the
+    exe of an ``Applications\\foo.exe`` choice, then to *prog* itself."""
+    name = _assoc_friendly_app_name(prog)
+    if name:
+        return name
+    if prog.lower().startswith("applications\\"):
+        return prog.split("\\", 1)[1]
+    return prog
+
+
+def _assoc_friendly_app_name(prog):
     if sys.platform != "win32":
         return ""
     try:
-        import winreg
-        with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Explorer"
-                r"\FileExts\.raw\UserChoice") as k:
-            prog = winreg.QueryValueEx(k, "ProgId")[0]
-    except (ImportError, OSError):
+        import ctypes
+        from ctypes import wintypes
+        fn = ctypes.windll.shlwapi.AssocQueryStringW
+        fn.argtypes = [ctypes.c_uint, ctypes.c_int, wintypes.LPCWSTR,
+                       wintypes.LPCWSTR, wintypes.LPWSTR,
+                       ctypes.POINTER(wintypes.DWORD)]
+        fn.restype = ctypes.c_long
+        size = wintypes.DWORD(512)
+        buf = ctypes.create_unicode_buffer(size.value)
+        # 4 = ASSOCSTR_FRIENDLYAPPNAME
+        if fn(0, 4, prog, None, buf, ctypes.byref(size)) != 0:
+            return ""
+        return buf.value.strip()
+    except Exception:                                   # noqa: BLE001
         return ""
-    return "" if prog == PROGID else str(prog or "")

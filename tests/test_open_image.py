@@ -24,6 +24,16 @@ def _no_real_flash(monkeypatch):
     monkeypatch.setattr(app_mod.App, "_start_flash_image", _refuse)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_app_picker(monkeypatch):
+    """No test may bring Windows' "Select an app" dialog onto the desktop."""
+    from pinball_decryptor.webui import open_image as oi
+
+    def _refuse(ext=".raw"):
+        raise AssertionError("an open-image test opened Windows' app picker")
+    monkeypatch.setattr(oi, "ask_windows", _refuse)
+
+
 def test_image_arg_takes_the_first_existing_file(tmp_path):
     from pinball_decryptor.webui.open_image import image_arg
     img = tmp_path / "Game 1.0.raw"
@@ -239,6 +249,117 @@ def test_register_and_unregister_round_trip():
         _drop(root)
 
 
+def test_open_with_names_pad_not_the_script_host():
+    """The command is wscript.exe, so the ProgID says the app's own name and
+    icon or Open with lists "Microsoft Windows Based Script Host"
+    (PAD-1518)."""
+    from pinball_decryptor.webui import open_image as oi
+    rows = {(k, n): d for k, n, d in oi.association_values(r"C:\PAD")}
+    assert rows[(oi.PROGID + r"\shell\open", "FriendlyAppName")] == \
+        "Pinball Asset Decryptor"
+    assert rows[(oi.PROGID + r"\Application", "ApplicationName")] == \
+        "Pinball Asset Decryptor"
+    assert rows[(oi.PROGID + r"\Application", "ApplicationIcon")].endswith(
+        r"\icon.ico")
+
+
+def test_a_card_image_has_a_files_icon_not_the_apps():
+    """A .raw on the desktop shows an SD card, not PAD's own tile: with the
+    app's icon they read as a row of PAD shortcuts (PAD-1518).  The icon is
+    in the package the installer copies whole."""
+    from pinball_decryptor.webui import open_image as oi
+    rows = {(k, n): d for k, n, d in oi.association_values(ROOT)}
+    icon = rows[(oi.PROGID + r"\DefaultIcon", "")]
+    assert icon == os.path.join(ROOT, "pinball_decryptor", "card_image.ico")
+    assert os.path.isfile(icon)
+    assert rows[(oi.PROGID + r"\Application", "ApplicationIcon")] != icon
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows registry")
+def test_the_switch_takes_raw_from_windows_own_choice(monkeypatch):
+    """Ticking the switch forgets the "Always use this app" another app has
+    for .raw, both keys Windows keeps it in, so PAD's default opens it with
+    nothing to do in Explorer (PAD-1518); a start-up registration, or a
+    choice that is already PAD, touches nothing."""
+    import uuid
+    import winreg
+    from pinball_decryptor.webui import open_image as oi
+    monkeypatch.setattr(oi, "_assoc_friendly_app_name", lambda p: "")
+    base = r"Software\PADTest-%s" % uuid.uuid4().hex
+    classes, fileexts = base + r"\Classes", base + r"\FileExts"
+    hk = winreg.HKEY_CURRENT_USER
+
+    def _choose(prog):
+        for sub in ("UserChoice", r"UserChoiceLatest\ProgId"):
+            with winreg.CreateKeyEx(hk, fileexts + "\\.raw\\" + sub) as k:
+                winreg.SetValueEx(k, "ProgId", 0, winreg.REG_SZ, prog)
+
+    def _has(sub):
+        try:
+            with winreg.OpenKey(hk, fileexts + "\\.raw\\" + sub):
+                return True
+        except OSError:
+            return False
+    try:
+        _choose("AppXphotos")
+        assert oi.raw_chosen_elsewhere(".raw", fileexts) == "AppXphotos"
+        oi.register_association(r"C:\PAD", classes=classes, fileexts=fileexts)
+        assert _has("UserChoice")                 # start-up: left alone
+        oi.register_association(r"C:\PAD", take_raw=True, classes=classes,
+                                fileexts=fileexts)
+        assert not _has("UserChoice") and not _has("UserChoiceLatest")
+        assert oi.raw_chosen_elsewhere(".raw", fileexts) == ""
+        _choose(oi.PROGID)
+        assert oi.release_windows_choice(".raw", fileexts) is True
+        assert _has("UserChoice")                 # PAD's own: kept
+        # Windows 11 build 26300 records the pick ONLY under
+        # UserChoiceLatest\ProgId: still PAD's, and another app's is seen
+        winreg.DeleteKey(hk, fileexts + r"\.raw\UserChoice")
+        assert oi.raw_is_pads(".raw", fileexts) is True
+        with winreg.CreateKeyEx(
+                hk, fileexts + r"\.raw\UserChoiceLatest\ProgId") as k:
+            winreg.SetValueEx(k, "ProgId", 0, winreg.REG_SZ, "AppXphotos")
+        assert oi.raw_is_pads(".raw", fileexts) is False
+        assert oi.raw_chosen_elsewhere(".raw", fileexts) == "AppXphotos"
+        assert oi.release_windows_choice(".raw", fileexts) is True
+        assert not _has("UserChoiceLatest")
+    finally:
+        def _drop(path):
+            try:
+                with winreg.OpenKey(hk, path) as k:
+                    kids = []
+                    while True:
+                        try:
+                            kids.append(winreg.EnumKey(k, len(kids)))
+                        except OSError:
+                            break
+                for c in kids:
+                    _drop(path + "\\" + c)
+                winreg.DeleteKey(hk, path)
+            except OSError:
+                pass
+        _drop(base)
+
+
+def test_app_name_says_what_windows_calls_the_choice(monkeypatch):
+    """The warning names the app the user chose, never a Store app's
+    "AppX..." ProgId (PAD-1518: it printed AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h
+    for Photos)."""
+    from pinball_decryptor.webui import open_image as oi
+    names = {"AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h": "Photos"}
+    monkeypatch.setattr(oi, "_assoc_friendly_app_name",
+                        lambda p: names.get(p, ""))
+    assert oi.app_name("AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h") == "Photos"
+    assert oi.app_name(r"Applications\IrfanView.exe") == "IrfanView.exe"
+    assert oi.app_name("SomeApp.raw") == "SomeApp.raw"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows' own lookup")
+def test_friendly_app_name_never_raises_on_an_unknown_progid():
+    from pinball_decryptor.webui import open_image as oi
+    assert oi._assoc_friendly_app_name("NoSuch.ProgId.PAD1518") == ""
+
+
 def _card_images_item(w):
     menu = [i for i in w.state("shell")["settings_items"]
             if i.get("label") == "Card images"][0]["submenu"]
@@ -258,9 +379,15 @@ def test_gear_toggle_sets_up_and_takes_away(tmp_path, monkeypatch):
     monkeypatch.setattr(oi, "unregister_association",
                         lambda classes=None: calls.append("off") or True)
     monkeypatch.setattr(oi, "register_association",
-                        lambda app_dir=None, take_raw=False, classes=None:
+                        lambda app_dir=None, take_raw=False, classes=None,
+                        fileexts=None:
                         calls.append(("on", take_raw)) or True)
     monkeypatch.setattr(oi, "raw_chosen_elsewhere", lambda: "Photos")
+    # another app also opens .raw: Windows' own question comes up from the
+    # switch (PAD-1518), never a real dialog in a test
+    monkeypatch.setattr(oi, "raw_is_pads", lambda: False)
+    monkeypatch.setattr(oi, "ask_windows",
+                        lambda ext=".raw": calls.append(("ask", ext)) or True)
     with web_app(tmp_path, mfr="stern") as w:
         item = _card_images_item(w)
         assert item["label"] == "Open card images with PAD"
@@ -270,6 +397,8 @@ def test_gear_toggle_sets_up_and_takes_away(tmp_path, monkeypatch):
             return json.loads((tmp_path / "cfg" / "settings.json")
                               .read_text(encoding="utf-8"))["card_images"]
         w.call("ui.settings_action", "toggle_card_images")
+        wait_for(w, lambda: ("ask", ".raw") in calls)
+        calls.remove(("ask", ".raw"))
         assert calls == [("on", True)]
         assert _card_images_item(w)["checked"] is True
         assert _saved() is True

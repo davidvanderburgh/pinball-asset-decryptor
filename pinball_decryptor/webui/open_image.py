@@ -21,6 +21,7 @@ is already compact: Explorer asks PAD's icon handler per file
 
 import json
 import logging
+import ntpath
 import os
 import sys
 import time
@@ -215,18 +216,26 @@ def association_values(app_dir, icon_dll=None):
     icon is asked per file, so a compact card shows its own; without it
     every card has the one plain icon."""
     from . import shell_icon
-    launcher = os.path.join(app_dir, "launcher.vbs")
+    # an install folder is a Windows path, and its rows are Windows paths
+    # whatever builds them (a test on Linux, say)
+    windows = bool(ntpath.splitdrive(app_dir)[0]) or chr(92) in app_dir
+    join = ntpath.join if windows else os.path.join
+    launcher = join(app_dir, "launcher.vbs")
     command = 'wscript.exe "%s" "%%1"' % launcher
     compact = 'wscript.exe "%s" "%s" "%%1"' % (launcher, COMPACT_FLAG)
-    icon = os.path.join(app_dir, "pinball_decryptor", "icon.ico")
+    icon = join(app_dir, "pinball_decryptor", "icon.ico")
     # a card image gets a file's icon (an SD card), never the app's own: a
     # desktop of .raw files read as a row of PAD shortcuts (PAD-1518)
-    file_icon = os.path.join(app_dir, "pinball_decryptor", "card_image.ico")
-    if not os.path.isfile(file_icon) and os.path.isfile(icon):
+    def _there(name):
+        return os.path.isfile(os.path.join(app_dir, "pinball_decryptor",
+                                           name))
+
+    file_icon = join(app_dir, "pinball_decryptor", "card_image.ico")
+    if not _there("card_image.ico") and _there("icon.ico"):
         file_icon = icon
-    compact_icon = os.path.join(app_dir, "pinball_decryptor",
-                                shell_icon.ICON_COMPACT)
-    if not os.path.isfile(compact_icon):
+    compact_icon = join(app_dir, "pinball_decryptor",
+                        shell_icon.ICON_COMPACT)
+    if not _there(shell_icon.ICON_COMPACT):
         compact_icon = icon
     rows = [
         (PROGID, "", "Pinball card image"),

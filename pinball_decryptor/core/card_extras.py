@@ -125,11 +125,87 @@ def with_pad_key(text):
 
 
 def configuration(project):
-    """The effective record a build uses: the saved keys plus this computer's own (:func:`with_pad_key`)."""
+    """The effective record a build uses: the saved keys plus this computer's own (:func:`with_pad_key`).
+
+    PAD-1531: a project built for sharing (:func:`load_share`) builds with remote access off whatever else is
+    saved, and ``share`` asks the build to empty the machine's own partitions too (core/share_build.py)."""
+    if load_share(project):
+        return {'enabled': False, 'public_keys': '', 'share': True}
     rec = load(project)
     if rec is not None and rec['enabled']:
         rec['public_keys'] = validate_keys(with_pad_key(rec['public_keys']))
     return rec
+
+
+def key_id(line):
+    """``(kind, base64)`` of an authorized_keys line, the part that is the key (its comment is not), or None."""
+    parts = (line or '').split()
+    if len(parts) < 2 or line.lstrip().startswith('#'):
+        return None
+    return parts[0], parts[1]
+
+
+def key_name(line):
+    """A short name for a key line a person can recognise: its comment (often user@computer), else the start of
+    its SHA256 fingerprint."""
+    from . import pad_ssh_key
+    parts = (line or '').split(None, 2)
+    try:
+        digest = hashlib.sha256(base64.b64decode(parts[1])).digest()
+        fp = 'key SHA256:' + base64.b64encode(digest).decode().rstrip('=')[:12]
+    except (IndexError, ValueError, binascii.Error):
+        fp = 'a key'
+    comment = parts[2].strip() if len(parts) == 3 else ''
+    if comment == pad_ssh_key.COMMENT:
+        # every PAD computer's key carries the same comment: the fingerprint tells them apart
+        return 'PAD on another computer (%s)' % fp
+    return comment[:60] or fp
+
+
+def others(text, own=''):
+    """PAD-1531: the key lines in *text* (a card's authorized_keys) that are neither this computer's own key nor
+    one of the lines in *own* (the project's saved keys of the user's own SSH programs): the computers a card lets
+    in that are not this one's owner's."""
+    from . import pad_ssh_key
+    mine = {key_id(line) for line in ((own or '') + '\n' + pad_ssh_key.public_line()).splitlines()}
+    out, seen = [], set()
+    for line in (text or '').splitlines():
+        ident = key_id(line.strip())
+        if ident is None or ident in mine or ident in seen:
+            continue
+        seen.add(ident)
+        out.append(line.strip())
+    return out
+
+
+def load_share(project):
+    """PAD-1531: True when cards and images built from this project are for sharing (``extras.share``): no remote
+    access, none of the machine's own data.  False when never set."""
+    if not project or not os.path.isdir(project):
+        return False
+    extras = staged_changes.load(project).get('extras')
+    if not isinstance(extras, dict):
+        return False
+    rec = extras.get('share')
+    if rec is None:
+        return False
+    if not isinstance(rec, dict) or type(rec.get('enabled')) is not bool:
+        raise ExtrasError('The project build-for-sharing setting is invalid.')
+    return rec['enabled']
+
+
+def save_share(project, enabled):
+    if not project or not os.path.isdir(project):
+        raise ExtrasError('Select a project folder before changing Build for sharing.')
+    if type(enabled) is not bool:
+        raise ExtrasError('Build for sharing must be a checkbox value.')
+    data = staged_changes.load(project)
+    extras = data.setdefault('extras', {})
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    extras['share'] = {'enabled': enabled}
+    _persist(project, data)
+    return enabled
 
 
 def digest(project):

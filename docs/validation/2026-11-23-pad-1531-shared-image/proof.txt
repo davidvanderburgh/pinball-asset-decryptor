@@ -1,0 +1,42 @@
+A builder card: True ['pinball-asset-decryptor']
+C shared build: Built for sharing: no remote access on it. Took the machine's own settings, scores, logs and network identity off it (/data, /dump), as a stock card has them.
+C reads back: remote on=False keys='' machine data=[]
+B before setup, look(): {'ok': True, 'platform': 'stern-spike2', 'enabled': True, 'lets_pad_in': False, 'others': ['pinball-asset-decryptor'], 'reason': ''}
+  setup [warning] B.raw also let in another computer: pinball-asset-decryptor. Taking it off, so only this computer can get in.
+  setup [info] Reading the system files on B.raw...
+  setup [info] Adding remote access...
+  setup [info] Writing the changes to B.raw...
+  setup [info] Checking what B.raw now holds...
+  setup [ok] Remote access is on B.raw now (2 MB of its system files changed).
+B after setup trusts: builder=False recipient=True
+=== A: the builder's card (remote access on, builder's key)
+  /tmp -> /var/tmp
+  /var/run -> /run
+  /var/tmp -> /var/volatile/tmp
+  boot hook on the card: /etc/rc5.d/S30sshd -> ../init.d/sshd; starting it
+  hook: Public key portion is:
+  hook: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFNkNC6NH8n5snoBxL3JvK+I3SUheIUh9uRxbCiK9tOz root@Eagle
+  hook: Fingerprint: SHA256:n5jLlRlWDA10BarBmnm+Mqmgk+/M7XMenywy1VbScVU
+  authorized_keys on the card: pinball-asset-decryptor 
+  builder's key: LOGGED-IN as uid 0 on stern-spike2
+  recipient's key: root@127.0.0.1: Permission denied (publickey).
+=== B: A on the recipient's machine after one-button setup
+  /tmp -> /var/tmp
+  /var/run -> /run
+  /var/tmp -> /var/volatile/tmp
+  boot hook on the card: /etc/rc5.d/S30sshd -> ../init.d/sshd; starting it
+  hook: Public key portion is:
+  hook: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDFWmuqOyL7E7Nz0F6mt6OvX+TWFBXzEJxO59PgObyDU root@Eagle
+  hook: Fingerprint: SHA256:IWSwsJWHCYW/KLwr4fMZ8BhZs5w7xoVDcv33NQRhIFk
+  authorized_keys on the card: pinball-asset-decryptor 
+  builder's key: root@127.0.0.1: Permission denied (publickey).
+  recipient's key: LOGGED-IN as uid 0 on stern-spike2
+=== C: the builder's build for sharing
+  /tmp -> /var/tmp
+  /var/run -> /run
+  /var/tmp -> /var/volatile/tmp
+  no boot hook on the card: nothing starts a server at boot
+  authorized_keys on the card: 
+  (no authorized_keys file)
+  builder's key: ssh: connect to host 127.0.0.1 port 22: Connection refused
+  recipient's key: ssh: connect to host 127.0.0.1 port 22: Connection refused

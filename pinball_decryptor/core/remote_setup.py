@@ -6,8 +6,12 @@ remote access tooling for them. then, they don't have to manually enter secrets 
 
 :func:`set_up` puts remote access (the key-only dropbear of PR #38, ``ssh_card``) straight onto the machine's SD card
 in the computer's reader, or onto a card image file, in place: no project, no build, no keys to paste. The card
-lets in this computer's own key (``pad_ssh_key``, kept beside settings.json, so it survives app updates) plus any
-keys the card already trusted. Stern Spike 2 and Spike 3 (the user's own board key, kept app-wide, opens a
+lets in this computer's own key (``pad_ssh_key``, kept beside settings.json, so it survives app updates) and the
+project's own saved keys (the user's own SSH programs).  PAD-1531: any other key the card trusts may be someone
+else's computer (a card written from an image another person built with remote access on) or the user's own other
+computer (every PAD key carries the same comment, so PAD cannot tell which).  So nothing is taken off unasked: with
+``keep_others`` None, :func:`set_up` stops before changing anything and answers :data:`ASK` + the keys, and the
+Network tab asks; then ``keep_others`` False takes them off, True keeps them. Stern Spike 2 and Spike 3 (the user's own board key, kept app-wide, opens a
 Spike 3 card).
 
 How: the system partition's plain filesystem is copied to a scratch file, ``ssh_card.prepare_rootfs`` adds the
@@ -107,16 +111,28 @@ def _readable_error(e):
     return text
 
 
-def look(path, key_source=None):
-    """``{'ok', 'platform', 'enabled', 'lets_pad_in', 'reason'}`` for the card or image at *path*."""
+def look(path, key_source=None, own=''):
+    """``{'ok', 'platform', 'enabled', 'lets_pad_in', 'others', 'reason'}`` for the card or image at *path*;
+    ``others`` names the keys on it that are neither this computer's nor in *own* (PAD-1531)."""
     try:
         with _Opened(path, key_source=key_source) as (info, _plain):
             line = pad_ssh_key.public_line().strip()
             keys = info.get('public_keys') or ''
             return dict(ok=True, platform=info['platform'], enabled=bool(info['enabled']),
-                        lets_pad_in=bool(line) and line.split()[1] in keys, reason='')
+                        lets_pad_in=bool(line) and line.split()[1] in keys,
+                        others=[card_extras.key_name(k) for k in card_extras.others(keys, own)], reason='')
     except (OSError, ValueError) as e:
-        return dict(ok=False, platform=None, enabled=False, lets_pad_in=False, reason=_readable_error(e))
+        return dict(ok=False, platform=None, enabled=False, lets_pad_in=False, others=[],
+                    reason=_readable_error(e))
+
+
+def _kept_keys(card_keys, pad_line, own='', keep_others=False):
+    """PAD-1531: the keys the card goes on trusting: this computer's, the card's keys that are also in *own* (the
+    project's saved keys), and the card's other keys only with *keep_others*."""
+    strangers = {card_extras.key_id(k) for k in card_extras.others(card_keys, own)}
+    lines = [k for k in (card_keys or '').splitlines()
+             if keep_others or card_extras.key_id(k.strip()) not in strangers]
+    return _merged_keys('\n'.join(lines), pad_line)
 
 
 def _merged_keys(card_keys, pad_line):
@@ -134,14 +150,35 @@ def _merged_keys(card_keys, pad_line):
     return card_extras.validate_keys('\n'.join(out) + '\n')
 
 
+#: what :func:`set_up` answers, followed by a JSON list of the key lines, when the card trusts other computers and
+#: nobody has said yet whether they stay (``keep_others`` None); the card is not changed
+ASK = 'others:'
+
+
+def asked(res):
+    """The key lines :func:`set_up` stopped to ask about, or None when *res* is not such an answer."""
+    import json
+    if isinstance(res, str) and res.startswith(ASK):
+        try:
+            lines = json.loads(res[len(ASK):])
+        except ValueError:
+            return None
+        return [str(x) for x in lines] if isinstance(lines, list) else None
+    return None
+
+
 def _cancelled(cancel):
     if cancel is not None and cancel():
         raise ExtrasError('Canceled. The card was not changed.')
 
 
-def set_up(path, *, pad_line=None, log=None, progress=None, cancel=None, key_source=None):
+def set_up(path, *, pad_line=None, log=None, progress=None, cancel=None, key_source=None, own='',
+           keep_others=None):
     """Put remote access on the card or card image at *path*, letting in this computer's key (*pad_line*, the
-    public key line; this computer's own when None).  Returns ``'done'``, or ``'already'`` when the card had it."""
+    public key line; this computer's own when None) and the card's keys that are in *own* (the project's saved
+    keys).  Any other key on the card: *keep_others* None stops and returns :data:`ASK` with them, the card
+    unchanged; False takes them off; True keeps them (PAD-1531).  Returns ``'done'``, or ``'already'`` when the
+    card had it and nothing was to come off."""
     say = log or (lambda *_a: None)
     tick = progress or (lambda *_a: None)
     pad_line = (pad_line or pad_ssh_key.public_line()).strip()
@@ -157,12 +194,25 @@ def set_up(path, *, pad_line=None, log=None, progress=None, cancel=None, key_sou
         part = work / 'rootfs.img'
         # 1. the card's state, and its plain system filesystem copied out
         with _Opened(path, key_source=key_source) as (info, plain):
-            if info['enabled'] and pad_body in (info.get('public_keys') or ''):
+            card_keys = info.get('public_keys') or ''
+            # a card whose remote access is off lets nobody in: its old key file is simply rewritten
+            strangers = [] if keep_others or not info['enabled'] else card_extras.others(card_keys, own)
+            if strangers and keep_others is None:
+                import json
+                return ASK + json.dumps(strangers)
+            if info['enabled'] and pad_body in card_keys and not strangers:
                 say('Remote access is already on %s, and it lets this computer in.' % what, 'ok')
                 return 'already'
+            if strangers:
+                # PAD-1531: named in the log before anything changes, so the user sees whose access goes
+                say('%s also let in %s: %s. Taking %s off, so only this computer can get in.'
+                    % (what[:1].upper() + what[1:], _count(len(strangers)),
+                       ', '.join(card_extras.key_name(k) for k in strangers),
+                       'it' if len(strangers) == 1 else 'them'), 'warning')
             platform, size = info['platform'], plain.size
             config = {'enabled': True,
-                      'public_keys': _merged_keys(info.get('public_keys') if info['enabled'] else '', pad_line)}
+                      'public_keys': _kept_keys(card_keys if info['enabled'] else '', pad_line, own,
+                                                keep_others)}
             if shutil.disk_usage(work_root).free < size + (64 << 20):
                 raise ExtrasError('Not enough free space on this computer (%d MB needed) to set up the card.'
                                   % ((size >> 20) + 64))
@@ -207,10 +257,17 @@ def set_up(path, *, pad_line=None, log=None, progress=None, cancel=None, key_sou
                     got.update(chunk)
                     done += len(chunk)
                     tick(2 * size + done, size * 3, 'Checking the card')
-    if got.hexdigest() != expected or not after['enabled'] or pad_body not in (after.get('public_keys') or ''):
+    left = after.get('public_keys') or ''
+    left_ids = {card_extras.key_id(x.strip()) for x in left.splitlines()}
+    if (got.hexdigest() != expected or not after['enabled'] or pad_body not in left
+            or any(card_extras.key_id(k) in left_ids for k in strangers)):
         raise ExtrasError("The card didn't read back as written. Try again, or try another card reader.")
     say('Remote access is on %s now (%d MB of its system files changed).' % (what, changed), 'ok')
     return 'done'
+
+
+def _count(n):
+    return 'another computer' if n == 1 else '%d other computers' % n
 
 
 def _device_guard(path, log):
@@ -232,20 +289,22 @@ def _opened_sync(plain):
     ssh_spike3.sync_stream(f)
 
 
-def set_up_with_privileges(path, *, log=None, progress=None, cancel=None):
+def set_up_with_privileges(path, *, log=None, progress=None, cancel=None, own='', keep_others=None):
     """:func:`set_up`, elevated for a plugged-in card when the app isn't (Windows UAC, macOS, pkexec)."""
     from . import elevated_flash as ef
     from .admin import is_admin
     pad_line = pad_ssh_key.public_line()
     if is_admin() or not is_device_path(str(path)):
-        return set_up(path, pad_line=pad_line, log=log, progress=progress, cancel=cancel)
+        return set_up(path, pad_line=pad_line, log=log, progress=progress, cancel=cancel, own=own,
+                      keep_others=keep_others)
     if log is not None:
         log('Changing the card needs administrator access: approve the prompt to continue.', 'info')
     ipc = ef._ipc_dir('pad_remote_')
     try:
         import json
         with open(os.path.join(ipc, ef._JOB), 'w', encoding='utf-8') as f:
-            json.dump({'mode': 'remote_access', 'device': path, 'pad_line': pad_line}, f)
+            json.dump({'mode': 'remote_access', 'device': path, 'pad_line': pad_line, 'own': own or '',
+                       'keep_others': None if keep_others is None else bool(keep_others)}, f)
         run = ef._spawn_elevated_helper(ipc)
         if run is None:
             raise ExtrasError('Could not ask for administrator access on this computer. Start PAD as '
@@ -266,4 +325,6 @@ def set_up_with_privileges(path, *, log=None, progress=None, cancel=None):
 
 def run_in_helper(job, log, progress, cancel):
     """The elevated helper's side of :func:`set_up_with_privileges`: ``{'ok', 'text'}`` (raises on failure)."""
-    return set_up(job['device'], pad_line=job.get('pad_line') or None, log=log, progress=progress, cancel=cancel)
+    return set_up(job['device'], pad_line=job.get('pad_line') or None, log=log, progress=progress, cancel=cancel,
+                  own=job.get('own') or '',
+                  keep_others=None if job.get('keep_others') is None else bool(job['keep_others']))

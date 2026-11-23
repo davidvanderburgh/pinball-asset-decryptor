@@ -2513,6 +2513,32 @@ class App:
     # Write
     # ------------------------------------------------------------------
 
+    def _strangers_ok(self, image_path):
+        """PAD-1531: an image that lets other computers than this one in over the network (someone else's image,
+        built with remote access on) is written only when the user says so: written onto the machine, it would let
+        that person in."""
+        from .core import card_extras, ssh_card
+        try:
+            state = ssh_card.inspect_image(image_path)
+            if not state.get('enabled'):
+                return True
+            rec = card_extras.load(self.window.write_assets_var.get().strip())
+            strangers = card_extras.others(state.get('public_keys', ''), (rec or {}).get('public_keys') or '')
+        except Exception:                               # noqa: BLE001 - nothing to say about an unreadable image
+            return True
+        if not strangers:
+            return True
+        many = len(strangers) > 1
+        return messagebox.askyesno(
+            'Remote access',
+            "This image lets %s in over the network: %s.\n\nA machine running a card written from it would let "
+            "%s in, with full control of the machine.\n\nWrite it anyway? To take %s off first, use \"Use a card "
+            "image file...\" under Remote access on the Network tab." % (
+                '%d other computers' % len(strangers) if many else 'another computer',
+                ', '.join(card_extras.key_name(k) for k in strangers),
+                'them' if many else 'it', 'them' if many else 'it'),
+            icon='warning')
+
     def _extras_form_problem(self):
         service = getattr(self.window, 'service', None)
         extras = service('network') if callable(service) else None
@@ -2989,6 +3015,8 @@ class App:
             except ExtrasError as e:
                 messagebox.showerror('Remote access', str(e))
                 return
+        if not menu_only and not self._strangers_ok(image_path):
+            return
         # ``target`` (item 123): the dialog's second place for the image - the
         # game's own disk in a dock, installed here.  On Windows that hands the
         # disk to WSL whole, which is the elevation gate Direct-SSD stands behind.

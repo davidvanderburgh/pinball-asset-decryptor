@@ -924,6 +924,8 @@ class Spike3WritePipeline(BasePipeline):
         if not spike3.is_spike3_card(self.original_path):
             raise PipelineError("Detect", "The original is not a Stern Spike 3 "
                                 "secure SD-card image.")
+        # PAD-1531: say who the card lets in over the network, before anything is built
+        ssh_card.say_who_gets_in(self.original_path, config, self._log, key_source=self.key_source)
         self._check_cancel()
         try:
             counts = write_card(self.original_path, self.assets_dir,

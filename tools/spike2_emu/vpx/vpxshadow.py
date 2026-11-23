@@ -2248,6 +2248,10 @@ def _field_bytes(v):
     if isinstance(v, list):
         # PAD-1366: a vector field, floats (a spinner's VCEN moved off the table)
         return struct.pack("<%df" % len(v), *[float(x) for x in v])
+    if isinstance(v, str):
+        # PAD-1511: a name (an image, a material), as VPX keeps one: its length, then its bytes
+        b = v.encode("latin1")
+        return struct.pack("<i", len(b)) + b
     return struct.pack("<f" if isinstance(v, float) else "<i", v)
 
 
@@ -2257,7 +2261,9 @@ def item_fields(table, m):
     300.0}} is Foo Fighters' kick target with a stronger slingshot kick. A
     JSON float is written as a float, an int as an int (VPX's bools are
     ints), a list as that many floats ({"VCEN": [-400.0, -400.0]}: JAWS
-    50th's spinner the machine has not, moved off the table, PAD-1366).
+    50th's spinner the machine has not, moved off the table, PAD-1366), a
+    string as a name ({"IMAG": "", "TOMA": "Metal"}: JP 30th's up posts with
+    no playfield photo on top, PAD-1511).
     GameItems are not in the MAC, so each stream is replaced."""
     want = {k.lower(): v for k, v in m.get("item_fields", {}).items() if k != "_"}
     rounds = {k.lower() for k in m.get("round_lights", []) if k != "_"}

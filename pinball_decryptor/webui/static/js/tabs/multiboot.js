@@ -419,7 +419,7 @@ function SizeStrip({ s, w }) {
 }
 
 // --------------------------------------------------------- shared pieces
-function SoundRow({ label, field, value, words, used, playTip }) {
+function SoundRow({ label, field, value, words, used, playTip, stopTip }) {
   const choose = (e) => openMenu(e.currentTarget, [
     ...(words || []).map((v) => ({ label: v, onClick: () => setField(NS, field, v, { flush: true }) })),
     ...((used || []).length ? [{ sep: true }, ...used.map((u) => ({ label: u.label, title: u.path,
@@ -431,6 +431,7 @@ function SoundRow({ label, field, value, words, used, playTip }) {
         suffix=${html`<button type="button" class="mb-drop" aria-label=${"Choose the " + noColon(label).toLowerCase()} onClick=${choose}>▾</button>`} />
       <${Button} drop onClick=${() => call("multiboot.sound_browse", field)}>Browse…<//>
       <${Button} icon="play" title=${playTip} onClick=${() => call("multiboot.play", field)}>Play<//>
+      <${Button} icon="stop" title=${stopTip} onClick=${() => call("multiboot.stop_sound")}>Stop<//>
     </div>`;
 }
 
@@ -488,8 +489,8 @@ function EditDialog({ s, w }) {
         <//>` : null}
         ${w.sound === false ? null : html`<${Box} legend="Sounds">
           <div class="kv mb-kv2">
-            <${SoundRow} label="Music:" field="ed_music" value=${s.ed_music} words=${ed.music_words} used=${ed.used} playTip=${w.play_tip} />
-            <${SoundRow} label="Confirm sound:" field="ed_confirm" value=${s.ed_confirm} words=${ed.confirm_words} used=${ed.used} playTip=${w.play_tip} />
+            <${SoundRow} label="Music:" field="ed_music" value=${s.ed_music} words=${ed.music_words} used=${ed.used} playTip=${w.play_tip} stopTip=${w.stop_tip} />
+            <${SoundRow} label="Confirm sound:" field="ed_confirm" value=${s.ed_confirm} words=${ed.confirm_words} used=${ed.used} playTip=${w.play_tip} stopTip=${w.stop_tip} />
             <span></span><span class="small dim">${ed.confirm_note}</span>
           </div>
           <span class="small muted">${ed.sounds_note}</span>
@@ -571,8 +572,8 @@ function MenuDialog({ s, w }) {
     <div class="stack mb-md" onKeyDown=${okOnEnter(ok)}>
     ${w.sound === false ? null : html`<${Box} legend="Sounds">
       <div class="kv mb-kv2">
-        <${SoundRow} label="Move sound:" field="move" value=${s.move} words=${md.sound_words} used=${md.used} playTip=${w.play_tip} />
-        <${SoundRow} label="Confirm sound:" field="confirm" value=${s.confirm} words=${md.sound_words} used=${md.used} playTip=${w.play_tip} />
+        <${SoundRow} label="Move sound:" field="move" value=${s.move} words=${md.sound_words} used=${md.used} playTip=${w.play_tip} stopTip=${w.stop_tip} />
+        <${SoundRow} label="Confirm sound:" field="confirm" value=${s.confirm} words=${md.sound_words} used=${md.used} playTip=${w.play_tip} stopTip=${w.stop_tip} />
         <label class="k" for=${fid("volume")}>Volume:</label>
         <div class="row"><${Field} id=${fid("volume")} ns=${NS} k="volume" value=${s.volume} ...${num} max=${w.volume_max} /><span class="small muted">0-${w.volume_max}</span></div>
       </div>

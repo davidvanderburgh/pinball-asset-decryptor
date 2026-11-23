@@ -6764,6 +6764,14 @@ PLAY_TIP = ("Hear this sound now, at the preview's volume, even with the "
             "it; pick or type a WAV and it plays that.")
 
 
+#: ...and the Stop beside it (David, PAD-1530: "I should also have the
+#: option to stop the music that is playing. There are some really long
+#: music files and I don't need to hear them the whole time I have the menu
+#: open").
+STOP_NAME = "Stop"
+STOP_TIP = "Stop the sound Play started."
+
+
 #: What a video shows, STATED rather than offered as controls (David:
 #: "remove the 'start', 'Length' and 'FPS' controls... just state [the
 #: limits]").  It loops the first 5 s AT THE VIDEO'S OWN FRAME RATE (David:
@@ -12603,6 +12611,19 @@ class MultibootPanel:
         self._write("%s: playing %s (%.2f s)"
                     % (label, os.path.basename(path), head["seconds"]))
         return True
+
+    def stop_sound_choice(self):
+        """The Stop beside a sound row: silence what Play started, now.
+
+        The preview's music is already stopped while Edit image… or Menu
+        settings… is up, so this is the one sound there is; the device is
+        given back, and closing the window brings the preview's music back
+        as before (:meth:`_music_back`)."""
+        playing = self._audio is not None
+        self._stop_sound()
+        if playing:
+            self._write("Sound stopped.")
+        return playing
 
     def _sound_choice_path(self, label, value, image=None):
         """``(path, why)`` for one sound row: the WAV to play, or '' and the

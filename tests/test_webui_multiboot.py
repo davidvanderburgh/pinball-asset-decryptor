@@ -1399,6 +1399,14 @@ def test_a_sub_menu_plays_its_sound_past_the_preview_mute(tmp_path, dialog):
         assert w.call("multiboot.play", field) is True
         assert fake.last("play") == clip
         assert ("vol", 80) in fake.calls[n:]
+        # Stop: a long clip is cut off without closing the window (David:
+        # "I should also have the option to stop the music that is playing")
+        assert w.call("multiboot.stop_sound") is True
+        assert fake.calls[-1] == ("stop", None)
+        assert panel._sub_menu_open()
+        # ...and the page offers it, with its own tip
+        st = _st(w)
+        assert st["w"]["stop_tip"] == mt.STOP_TIP
 
         if dialog == "edit":
             w.call("multiboot.edit_cancel")

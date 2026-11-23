@@ -86,6 +86,29 @@ class Host:
             except Exception:                           # noqa: BLE001
                 pass
 
+    def bring_to_front(self):
+        """Restore and raise the window (PAD-1514: an image double-clicked
+        while the app was already open).  Never raises."""
+        win = self.window
+        if win is None:
+            return
+        try:
+            win.restore()
+        except Exception:                               # noqa: BLE001
+            pass
+        if sys.platform == "win32":
+            try:
+                form = win.native
+                from System import Action
+
+                def _up():
+                    form.TopMost = True
+                    form.Activate()
+                    form.TopMost = False
+                form.BeginInvoke(Action(_up))
+            except Exception:                           # noqa: BLE001
+                pass
+
     def is_maximized(self):
         # full screen is not a size to keep: the window as it was before it
         return self._fs_was_max if self._fullscreen else self._maximized
@@ -314,6 +337,21 @@ def build(ctx=None, meanwhile=None):
     from . import agent_link
     ctx.server = server
     agent_link.register(ctx)
+    # PAD-1514: a second launch with an image hands it to this one
+    reg.register("shell.open_image", lambda path: app.open_image(path))
+    if ctx.host is not None:
+        from . import open_image
+        try:
+            open_image.write_link(ctx, server.port)
+        except OSError:
+            log.warning("instance link not written", exc_info=True)
+        # Explorer's double-click and right-click "Write to a card with
+        # PAD" for card images: per user, so an in-app update (whose staged
+        # installer writes no shortcuts or registry) gets it too
+        # (the gear's "Open card images with PAD": off until ticked)
+        if (getattr(app, "_settings", None) or {}).get("card_images", False):
+            threading.Thread(target=open_image.register_association,
+                             daemon=True).start()
     if (getattr(app, "_settings", None) or {}).get("agent_access"):
         agent_link.set_enabled(ctx, True, _app_version())
     # hot reload while developing (never in a frozen build): see devreload
@@ -343,6 +381,11 @@ def _close_app(ctx):
     try:
         from . import agent_link
         agent_link.remove_link(ctx)
+    except Exception:                                   # noqa: BLE001
+        pass
+    try:
+        from . import open_image
+        open_image.remove_link(ctx)
     except Exception:                                   # noqa: BLE001
         pass
     try:
@@ -782,8 +825,16 @@ def main(argv=None):
     args, _rest = parser.parse_known_args(argv)
 
     logging.basicConfig(level=logging.WARNING)
+    # PAD-1514: a card image double-clicked in Explorer.  A PAD already
+    # open takes it (its window comes forward on the write dialog) and this
+    # launch ends; otherwise this run opens on it.
+    from . import open_image
+    image = open_image.image_arg(_rest)
+    if image and open_image.hand_to_running(image):
+        return 0
     mode = "serve" if args.serve else "browser" if args.browser else "native"
     ctx = Context()
+    ctx.open_image = image
     host = Host(ctx, mode)
     ctx.host = host
     meanwhile = host.preload_window if mode == "native" else None

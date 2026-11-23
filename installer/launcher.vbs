@@ -19,10 +19,16 @@
 ' app's first window is its main window: 0 started v1.0.0 / v1.0.1 with the
 ' window created and never shown (the Tk app got away with 0 because its
 ' first window was an invisible root).
+'
+' Arguments are passed on (PAD-1514): Explorer starts this with a card
+' image's path when one is double-clicked, and the app opens on its write
+' dialog.  Each is quoted again, since WScript.Arguments has unquoted them.
 Set fso = CreateObject("Scripting.FileSystemObject")
 appDir = fso.GetParentFolderName(WScript.ScriptFullName)
+params = """" & appDir & "\Pinball Asset Decryptor.pyw"""
+For Each a In WScript.Arguments
+    params = params & " """ & a & """"
+Next
 On Error Resume Next
 CreateObject("Shell.Application").ShellExecute _
-    appDir & "\python\pythonw.exe", _
-    """" & appDir & "\Pinball Asset Decryptor.pyw""", _
-    appDir, "runas", 1
+    appDir & "\python\pythonw.exe", params, appDir, "runas", 1

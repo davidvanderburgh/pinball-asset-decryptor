@@ -61,7 +61,7 @@ def _one(repo, out, pre, after):
             if after:
                 api("video.set_hide_unused", False)       # start from the default: ticked
                 time.sleep(0.5)
-                page.locator(".toolbar >> text=Show unused").first.click()
+                page.locator(".vid-card .toolbar >> text=Show unused").first.click()
                 time.sleep(1)
             st = state().get("video") or {}
             md = st.get("modes") or {}

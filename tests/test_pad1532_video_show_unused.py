@@ -2,6 +2,10 @@
 never plays (Played in: Not played) leave the list."""
 import json
 import os
+import shutil
+import subprocess
+
+import pytest
 
 from tests.test_pad444_clip_modes import FOLLOW, MAIN, OTHER, SHARED, SOLO, _ready, _stub_reading
 from tests.test_webui_video import _project, _rels, _scan, _wait
@@ -50,3 +54,14 @@ def test_the_page_draws_the_tick_beside_show_once_the_card_is_read():
     assert src.index('call("video.set_change_filter", v)') < tick < src.index("vid-modefilter")
     assert 'md.ready ? html`<${Check} checked=${!s.hide_unused} label="Show unused"' in src
     assert 'call("video.set_hide_unused", !v)' in src
+
+
+def test_the_page_still_parses(tmp_path):
+    """A broken string in video.js leaves the whole tab reading "This tab could not load"."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on this PC")
+    mod = tmp_path / "video.mjs"
+    shutil.copyfile(JS, mod)
+    got = subprocess.run([node, "--check", str(mod)], capture_output=True, text=True, timeout=60)
+    assert got.returncode == 0, got.stderr

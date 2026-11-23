@@ -608,8 +608,7 @@ def test_the_dialog_shows_working_then_done_and_closes(tmp_path):
         else:
             win.close()
 
-    win = cw.TaskWindow(jobs, spool=spool, on_created=created, on_page=page,
-                        badge_waits=lambda: False)
+    win = cw.TaskWindow(jobs, spool=spool, on_created=created, on_page=page)
     jobs.add(a)
     assert win.run() is True
     sent[0].join(10)

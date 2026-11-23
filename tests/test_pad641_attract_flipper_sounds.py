@@ -529,3 +529,19 @@ def test_a_derived_port_gets_the_game_s_end_of_game_high_scores(monkeypatch):
     assert G.generated("site", "game_scores 0x004e87dc 0xe92d4ff0 0xe24dd0bc")   # never carried from a reference
     monkeypatch.setattr(PC, "_scores_fn", lambda e: None)
     assert PC.game_scores(PC.Elf.__new__(PC.Elf)) == []
+
+
+def test_they_never_play_during_the_match_at_the_end_of_a_game():
+    """PAD-1520 (an owner of a James Bond 007 LE: "it would be more polished if you couldn't hear the flipper button
+    speech if pressed during MATCH"). The game is over and the attract bit is up through MATCH, but it is not the
+    mask's only bit then (emulator, Bond LE 1.06: 0x98 through MATCH and its roulette wheel, 0x10 once attract runs):
+    a press plays only while the attract bit is all the mask holds."""
+    with open(RUNTIME, encoding="utf-8") as f:
+        c = f.read()
+    edge = c[c.index("static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity, "
+                     "unsigned mask)\n{"):]
+    edge = edge[:edge.index("\n}\n")]
+    gate = edge.index("if ((mask & 0xffffu) != att.attract_bit) {")
+    assert edge.index("if (!(mask & att.attract_bit) || pm_in_game()) return;") < gate
+    assert gate < edge.index("att.edge_at = now;") < edge.index("pm_sound(att.request);")
+    assert "while the game's end of game (MATCH) plays" in edge[gate:edge.index("att.edge_at = now;")]

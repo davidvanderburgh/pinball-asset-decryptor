@@ -733,7 +733,7 @@ def test_the_cards_sound_and_volume_keys_reach_the_emulator_conf_but_media_does_
     outer = _select_outer()
     assert ("grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|"
             "machine_volume|mixer_volume|heading|text_size|counter|countdown_word|"
-            "footer|theme|settings|back_hold|color_[a-z_]+)[[:space:]]*='") in outer
+            "footer|theme|settings|back_hold|boot_menu|flip_hold|flip_guard|color_[a-z_]+)[[:space:]]*='") in outer
     assert "media=" not in outer.replace("image=", ""), "media= is the card's path; the rig passes --media"
 
 

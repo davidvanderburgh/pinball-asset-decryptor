@@ -6644,7 +6644,8 @@ players 2..4 itself on the one Start; `team_play_get_player_score` makes players
   (`tm.kind`). The team fill takes its size from that pick (`tm.size`, read by `coop_teams_switched_on`); coop.cfg's
   `teams` still makes its one team game. A store an older card's 0-6 row left reads as near as it can
   (`coop_row_mode`: 3 Enhanced, 4-6 Classic). The right flipper held at Start still makes a co-op game (a team of one
-  alone) at 1 or 2, and a later Start in it adds a co-op teammate.
+  alone) at 1 or 2, and a later Start in it adds a co-op teammate - only on a build whose start menu the port does not
+  know (PAD-1449 round 10, below).
   Emulator-proven with Write-built override sets and their pinned runtime (rig kit `C:/tmp/PAD-1073`: tryset.py
   `<code> <card> <out> <default> <project> [chars]`, rig/job.sh steps the start menu entry by entry to `TARGET`; a
   fresh store so the row reads its default): Godzilla LE 1.16 (an index menu) at 1 Classic - entries 4-6 CO-OP PLAY,
@@ -7186,6 +7187,23 @@ a team mode on begins the team game, player 1 keeping the character.
 
     co-op: the right flipper was held at Start - one player with a character (the game's own boards; a Start in ball 1 still adds a teammate)
     co-op: the right flipper was held at Start - no character pick (CO-OP PLAY is Off)
+
+PAD-1449 round 10 (DoomWalrus666, on v1.566.1: "Please remove the function of starting Co-op when holding down right
+flipper, it is no longer necessary with the new mode options"): the button held at Start makes no co-op game where the
+start menu has CO-OP PLAY to pick one with (the start menu hooked, `tm.armed`). Every place the held button turned a
+Start into co-op reads `coop_start_button_held()` instead of the button itself: the team of one above, the co-op intro
+(`ci_film_due`, and TIMED PLUNGER answered off for it), the Start that began the game (`coop_go_edge`) and a held Start
+in ball 1 of a one-player game adding a co-op teammate (`coop_add_wrap`: now a competing player, as a plain Start). On
+a build whose start menu the port does not know the hold is the only way into co-op, and it stays. coop.cfg
+overrides either way:
+
+    hold on                   the button held at Start makes a co-op game even with the start menu's CO-OP PLAY
+    hold off                  never
+
+The button still walks the character pick and the menus; only its Start meaning goes. `mode.log` says which, once
+the start menu is armed:
+
+    co-op: the right flipper held at Start starts no co-op - the start menu's CO-OP PLAY does (the start menu has CO-OP PLAY)
 
 `mode.log`:
 

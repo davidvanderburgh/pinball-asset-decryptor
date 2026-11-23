@@ -531,9 +531,43 @@ int main(void)
     assert edge.index("coop_go_edge(id, (level & 1u) == closed);") < edge.index("sty_menu_edge(")
     rec = R._lift(src, "static void coop_go_edge(unsigned id, int press)\n{")
     assert "if (!press || !id || id != ci.start_sw || pm_in_game()) return;" in rec
-    assert rec.index("coop_go_held = coop_button_held();") < rec.index("coop_go_ms = pm_ms() | 1ul;")
+    assert rec.index("coop_go_held = coop_start_button_held();") < rec.index("coop_go_ms = pm_ms() | 1ul;")
     solo = R._lift(src, "static void coop_solo_check(void)\n{")
-    assert ("coop.solo_ask = g && coop_start_held(coop_go_ms, coop_go_held, coop_button_held(), coop.held_ms, pm_ms(),"
+    assert ("coop.solo_ask = g && coop_start_held(coop_go_ms, coop_go_held, coop_start_button_held(), coop.held_ms, pm_ms(),"
             in solo)
     film = R._lift(src, "static int ci_film_due(void)\n{")
-    assert "coop_start_held(coop_go_ms, coop_go_held, coop_button_held(), coop.held_ms, pm_ms()," in film
+    assert "coop_start_held(coop_go_ms, coop_go_held, coop_start_button_held(), coop.held_ms, pm_ms()," in film
+
+
+def test_round10_the_held_right_flipper_starts_no_coop_where_the_start_menu_has_it(tmp_path):
+    """PAD-1449 round 10 (DoomWalrus666, on v1.566.1: "Please remove the function of starting Co-op when holding down
+    right flipper, it is no longer necessary with the new mode options"): every place a held button turned a Start into
+    co-op reads coop_start_button_held(), which is the button only where the start menu has no CO-OP PLAY entry
+    (tm.armed 0); coop.cfg `hold on` / `hold off` overrides it."""
+    src = _src()
+    code = r"""#include <stdio.h>
+""" + R._lift(src, "static int coop_hold_starts(unsigned hold, int menu)\n{") + r"""
+int main(void)
+{
+    /* as the menu says: menu hooked - no, no menu - yes; `hold on`: yes either way; `hold off`: no either way */
+    printf("%d %d %d %d %d %d\n", coop_hold_starts(0, 1), coop_hold_starts(0, 0), coop_hold_starts(1, 1),
+           coop_hold_starts(1, 0), coop_hold_starts(2, 1), coop_hold_starts(2, 0));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "0 1 1 1 0 0"
+    gate = R._lift(src, "static int coop_start_button_held(void)\n{")
+    assert "coop_hold_starts(coop.hold, tm.armed) && coop_button_held()" in gate
+    assert "coop_go_held = coop_start_button_held();" in R._lift(src, "static void coop_go_edge(unsigned id, int press)\n{")
+    solo = R._lift(src, "static void coop_solo_check(void)\n{")
+    assert "if (coop_start_button_held()) coop.held_ms = pm_ms() | 1ul;" in solo
+    assert "coop_button_held()" not in solo
+    assert "coop_button_held()" not in R._lift(src, "static int ci_film_due(void)\n{")
+    add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)\n{")
+    assert "coop_switched_on() && coop_start_button_held()))" in add and "coop_button_held()" not in add
+    assert "int soon = ci.clip[0] && (coop_start_button_held() ||" in src
+    line = R._lift(src, "static void coop_line(const char *s)\n{")
+    assert 'if (str_starts(s, "hold on")) { coop.hold = 1; return; }' in line
+    assert 'if (str_starts(s, "hold off")) { coop.hold = 2; return; }' in line
+    arm = R._lift(src, "static void coop_arm(void)\n{")
+    assert arm.index("team_menu_arm();") < arm.index("coop_hold_starts(coop.hold, tm.armed)")

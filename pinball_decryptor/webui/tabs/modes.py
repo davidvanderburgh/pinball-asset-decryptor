@@ -992,7 +992,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         "and what it does, the flippers move to the next one (one another teammate has is skipped), the Action button "
         "takes it, and when the time to pick runs out (the seconds count down on the machine) the one shown is taken. "
         "RANDOM picks one nobody has. Its ability holds while that teammate is up. A player alone picks one too by "
-        "holding the right flipper button while pressing Start to begin the game.")
+        "choosing CHARACTERS or ENHANCED for their game on the start menu.")
 
     def _publish_coop_chars(self, project):
         from ...plugins.stern import coop_play as _CP

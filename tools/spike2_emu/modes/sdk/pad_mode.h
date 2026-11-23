@@ -992,6 +992,10 @@ int pm_game_modes_done(const unsigned char *ids, unsigned n);
  * its stop only when it is completed (a plain-C title's COMPLETED audit or flag); 0 = none, or not a mode the port
  * names. starts / stops (may be 0): how many of each this boot, counted on the game's thread - a change is the edge. */
 int pm_game_mode_follow(unsigned id, unsigned *starts, unsigned *stops);
+int pm_clip_swap_next(const char *ours, unsigned ms);   /* every one-shot clip the game plays in the next ms (400
+                                                          when 0) plays `ours`, a clip of the video bank; 1 = armed */
+int pm_game_mode_stop(unsigned id, int won);   /* for a test: the game's STOP of its mode id (C++ titles), as its clock
+                                                  running out calls it, while it runs for the player up; 1 = called */
 
 /* ---- spare switches and driver outputs (PAD-826; MODE_SDK.md "Spare switches and outputs") -------------------------
  * For hardware a mod ADDS: a switch wired to a node board input the game has no switch on, a coil, flasher or toy

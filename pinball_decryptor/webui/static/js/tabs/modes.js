@@ -92,6 +92,7 @@ const T = {
   codeMode: "A mode written in C, for what the form cannot do: a copy of the Mode SDK's template in this project's modes folder. Try it builds it in with the others.",
   challengeLaunch: "The challenge's ball waits in the shooter lane as the mode starts. The game launches it for the player once the mode's start clip is over (at once with no start clip), a set number of seconds after the mode starts, or not at all: the player launches it. Otherwise the ball starts as any other ball does: on James Bond, the left flipper button held at the launch opens the loop.",
   done: "The mode starts once the player has completed this many of the game's own modes in one game, counting only the ones ticked. A mode counts when the game itself records it completed (as its audits do), once a game, whichever ball it was. When the count is reached and something is in the way (another mode of yours, or one of the game's modes this one waits for), it starts as soon as nothing is, that game. A mode of yours running in a game mode's place counts as that mode when it ends completed. Use it for a mini-wizard after a few of the game's modes and a bigger wizard after all of them: two modes, each with its own count.",
+  with: "The mode runs with one of the game's own modes, for an intro and an outro of your own: when the game starts that mode (the player earned it, as in any game), this mode starts too, and when the game's mode ends, this one ends. The game's mode runs exactly as always. Give this mode a clip at its start and a sound for when it starts (the intro), and a clip at its end and a sound for when it ends (the outro). While those sounds play, the game's own music is turned down; where the game plays a clip of its own as its mode starts or ends, yours plays in its place. It takes no shots, scores nothing unless you give it shots, and holds none of the game's modes off.",
   place: "The mode runs in the place of one of the game's own modes: when the game starts that mode (the player earned it, as in any game), this mode starts instead and the game's own never runs. Where the app knows the game's mode framework, the game counts the mode as its own: the mode's start counts as the game's mode starting (its start count, its STARTED audit), and when the mode ends, its end shot ending it (or, with no end shot, its clock running out) counts as the game's mode completed - its COMPLETED audit, its wins, and the wizards and unlocks the game opens for it - and anything else counts as not completed. One mode per game mode.",
   challenge: "The mode is played in the game's own Player Challenge mode: a one-ball game, picked on the game's start menu (both flipper buttons held in attract) as a game starts, or every game when the service menu's Default Game Mode is set to a challenge. Pick one of the game's own challenges and this mode starts as the ball starts in its place, the game's own never running, and the start menu shows the mode's name there; or pick A new challenge of its own and the start menu lists the mode after the game's own entries. The game ends when the ball ends. A quick way to play a mode that is hard to reach in a normal game. One mode per challenge.",
   countsAs: "A shot of your choosing counts as one of this mode's own while it runs: a Left ramp can reach the battle vs Ebirah as a left spin (its points, and the count down by one). One ramp is one spin, so a ramp standing in for a spinner needs the spinner's count of hits. \"Instead of\" moves the mode's shot: yours counts, and the mode's own no longer does while it is lit (its insert stays dark, yours blinks): the battle vs Gigan can take the Big loop instead of the Left ramp. Saved with this project and put on the card by Write with the modes; with no rows the mode plays as it always did.",
@@ -442,6 +443,11 @@ function ModePage({ s, f, off, dis, rs, lim }) {
   const doneModes = prof.done_modes || [];
   const doneOff = off || dis.done || !doneModes.length;
   const doneSet = new Set(s.done_on || []);
+  const withOn = f.starts_kind === "with_game";                                  // PAD-1537
+  const follows = prof.follows || [];
+  const withOff = off || dis.with || !follows.length;
+  const withOpts = withValue([{ value: "", label: "(choose one of its modes)", disabled: true }, ...follows.map((x) => ({ value: x.name, label: x.name }))], f.with_mode);
+  const withEnds = (follows.find((x) => x.name === f.with_mode) || {}).ends;
   const END_PICK = "(these shots)";
   const endOpts = withValue((prof.end_shots || ["(no shot)"]).map((x) => ({ value: x, label: x })), f.end_shot);
   const endOn = new Set(s.end_shots_on || []);
@@ -538,6 +544,17 @@ function ModePage({ s, f, off, dis, rs, lim }) {
         </div>` : null}
         ${doneOn && !dis.done ? html`<div class="small muted wrap" style="padding-left:26px">It starts the moment the player has completed ${f.done_count || "?"} of the ${doneSet.size} ticked in one game. Each counts once, when the game records it completed.</div>` : null}
         ${rs.done ? html`<div class="small muted wrap" style="padding-left:26px">${rs.done}</div>` : null}`}
+        ${!prof.follow_found ? null : html`<div class="row wrap">
+          <${Radio} name="m-starts" value="with_game" label="with the game's" checked=${withOn} disabled=${withOff && !withOn} title=${T.with} onChange=${(v) => setF("starts_kind", v, true)} />
+          <${Select} value=${f.with_mode || ""} options=${withOpts} ns="modes" k="f:with_mode" disabled=${withOff || !withOn} width=${260} title=${T.with} />
+          <span class="dim nw">(its intro and outro)</span>
+        </div>
+        ${withOn && !dis.with && f.with_mode ? html`<div class="small muted wrap" style="padding-left:26px">${withEnds === "stop"
+          ? "It starts as the game starts that mode, and ends as the game's mode ends, completed or not. Its clip and sound for the start play as the intro, its clip and sound for the end as the outro, while the game's mode runs as always. Seconds is the longest it runs: 0 runs it until the game's mode ends."
+          : withEnds === "completed"
+          ? "It starts as the game starts that mode. The app sees that mode end only when the player completes it, so it ends then or when its own clock runs out, whichever is first: set its seconds to about how long the game's mode runs. Its clip and sound for the start play as the intro, its clip and sound for the end as the outro."
+          : "It starts as the game starts that mode. The app cannot see that mode end on this build, so its own clock ends it: set its seconds to about how long the game's mode runs. Its clip and sound for the start play as the intro, its clip and sound for the end as the outro."}</div>` : null}
+        ${rs.with ? html`<div class="small muted wrap" style="padding-left:26px">${rs.with}</div>` : null}`}
         ${[0, 1].map((i) => html`<div class="row wrap">
           <span class="dim nw">and also</span>
           <${Select} value=${f["also_shot_" + i]} options=${alsoOpts(f["also_shot_" + i])} ns="modes" k=${"f:also_shot_" + i} disabled=${off || !shots.length} width=${180} title=${T.alsoShot} />
@@ -910,7 +927,7 @@ function SoundsPage({ s, f, off, dis, rs, lim, labels, files }) {
       <${Sec} title="Sound" reason=${rs.sound} note=${rs.sound_limit}>
         <${Check} label="Count down the last seconds in the game's own voice" checked=${f.countdown} disabled=${off || dis.countdown} ns="modes" k="f:countdown" />
         <div class="row wrap">
-          <span class="lbl nw">When time is up</span>
+          <span class="lbl nw">${f.starts_kind === "with_game" ? "When it ends" : "When time is up"}</span>
           <${Radio} name="m-end" value="game" label="The game's own call" checked=${f.end_mode === "game"} disabled=${off || dis.end_game} onChange=${(v) => setF("end_mode", v, true)} />
           <${Radio} name="m-end" value="file" label="My sound…" checked=${f.end_mode === "file"} disabled=${off || dis.own_sound} onChange=${() => call("modes.choose", "end")} />
         </div>
@@ -1254,6 +1271,25 @@ function HowSec({ h, onClip }) {
   <//>`;
 }
 
+// PAD-1537: an intro and an outro of the player's own for one of the game's modes - a mode of theirs that runs with it
+function IntroOutroSec({ g }) {
+  const f = g.follow;
+  const mine = f.mine || [];
+  const ends = f.ends === "stop" ? "and its end clip and sound when the game's mode ends, completed or not"
+    : f.ends === "completed" ? "and its end clip and sound when the player completes it, or when its own clock runs out (the app cannot see this mode end any other way on this build)"
+    : "and its end clip and sound when its own clock runs out (the app cannot see this mode end on this build)";
+  return html`<${Sec} title="Intro and outro">
+    <div class="small muted wrap">A video and a sound of your own as ${g.name} starts, and another as it ends. The game's mode plays as always. While your sound plays, the game's music is turned down; where the game shows a clip of its own as the mode starts or ends, yours plays in its place, under the game's own words.</div>
+    ${mine.length ? html`<div class="row wrap">${mine.map((m) => html`<${Button} key=${m.slug} size="xs" kind="ghost"
+        title="Open this mode of yours: its clips and sounds are on its Show and Sounds pages" onClick=${() => call("modes.select", m.slug, "form")}>${m.name}<//>`)}</div>` : null}
+    <div class="row wrap">
+      <${Button} size="sm" disabled=${!f.can} title=${f.can ? `A new mode of yours that runs with ${g.name}: it plays its start clip and sound as the intro, ${ends}. Pick the clips and sounds on its Show and Sounds pages.` : f.why}
+        onClick=${() => call("modes.intro_outro")}>${mine.length ? "Add another…" : "Add an intro and outro…"}<//>
+    </div>
+    ${f.can ? null : html`<div class="small muted wrap">${f.why}</div>`}
+  <//>`;
+}
+
 function GameModePage({ g, s, onClip }) {
   const rows = g.rows || [];
   return html`<section class="card modes-editor">
@@ -1271,6 +1307,7 @@ function GameModePage({ g, s, onClip }) {
           : html`<div class="small muted">No numbers to show.</div>`}
         ${g.note ? html`<${Note} kind=${g.note.startsWith("Read-only") ? "" : "info"}>${g.note}<//>` : null}
       <//>
+      ${g.follow ? html`<${IntroOutroSec} g=${g} />` : null}
       ${g.rule ? html`<${CountsAsSec} s=${s} g=${g} />` : null}
       ${g.rule ? html`<${RewriteSec} s=${s} g=${g} />` : null}
       <div class="small muted wrap">To rename it, edit its title on the Text tab.</div>

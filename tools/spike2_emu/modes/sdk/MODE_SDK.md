@@ -4756,6 +4756,60 @@ When the player has completed 2 of the eight missions) on X-Men LE 0.98 did not 
 started on Mayhem in Midtown, the second mission (`C:\tmp\PAD-747\rig\run_bw.sh`). James Bond 60th keeps no books of its Villain
 Mode (nothing to count there).
 
+## An intro and an outro for one of the game's own modes (PAD-1537)
+
+A tester asked to "attach custom video clips, along with their accompanying audio, as Intros and Outros for the
+machine's native modes ... ideally ducking or pausing conflicting native audio". A mode file that runs WITH one of the
+game's own modes does it, with nothing new to learn about clips and sounds: its start clip and start sound are the
+intro, its end sound and end clip the outro.
+
+```
+name           JET INTRO
+starts_on      with_game 21          # Godzilla's Jet Fighter Attack (block_name_21)
+seconds        0                     # until the game's mode ends (where the runtime sees it end)
+shots          0x00000000
+award          0
+clip_start     PadMode_jet_intro_Clip
+clip_end       PadMode_jet_intro_Clip2
+sound_start    <request>
+sound_end      <request>
+```
+
+- **The edges.** The runtime counts each of the game's modes starting and stopping (`pm_game_mode_follow`): a start where
+  the game's START goes ahead (PAD-363's `block_start_<id>` hook, not one a mode of ours took the place of or held off;
+  a check's mode at its own start, PAD-715) - on a C++ title once the mode then runs for the player (not stopped, its
+  start count up where the port names it): a START the game enters and turns down (Deadpool 1.16's Disco Loops a
+  second time in a ball) is `follow: ... its START ran but did not start it - not a start`, and plays no intro - and
+  a stop where the mode's STOP is entered for a mode not stopped already,
+  any outcome (the PAD-747 hook, which before counted only a completed one). On a plain-C title there is no STOP of a
+  mode class: only the mode's completion (its COMPLETED audit or flag) is seen, so the follower's clock ends it when
+  the player does not complete it. Each edge is logged the first few times: `follow: the game's Jet Fighter Attack
+  (mode 21) started (its start)`, `... stopped (not completed)`.
+- **The mode.** It starts on the tick after the game's START (`START (the game's Jet Fighter Attack started)`) and ends
+  as the STOP is seen (`END (the game's Jet Fighter Attack stopped)`), its end sound played first as at a clock's
+  end. It always stacks with the game's modes and runs as a layer (`layer 0`), so it never holds a game mode off, takes
+  no shots from the modes under it, and runs over a mode of yours. `seconds 0` is valid where the stop is seen.
+- **The music.** While its start or end sound plays, every music request of the game's that plays is ducked
+  (`pm_sound_duck`, 28 steps over 150 ms) - including the music the game's mode starts a moment after its START - and
+  ramped back (400 ms) once the sound is over: `own sound: the game's music 78 turned down under call 1291`, then
+  `... back up (call 1291 over)`.
+- **The clips.** The game plays a clip of its own as many of its modes start and end, on the one surface, a moment
+  after ours (Godzilla 1.16 Jet Fighter Attack: "fighter_intro" 55 ms after the START, "fighter_total" 41 ms after the
+  STOP). The game's displays are never held back for a mode (PAD-353), so instead every one-shot clip the game plays
+  in the 400 ms after ours plays ours in its place (`pm_clip_swap_next`, the co-op intro's swap of the clip's name,
+  PAD-1114): the game's own start or TOTAL screen shows the user's video under its words. `clip swap: the game's own
+  clip "fighter_intro" plays "intro4" in its place`. A looped clip (a background's) is never swapped.
+- **Test path.** `/dump/game_mode.start` and `/dump/game_mode.stop` (the id in the file) call the game's own START and
+  STOP of that mode (`pm_game_mode_start`, `pm_game_mode_stop`: the function its clock running out calls).
+
+**Proven in the emulator** (hidden, muted; `C:\tmp\PAD-1537\job.sh`): Godzilla Premium/LE 1.16, a follower of Jet
+Fighter Attack with a start and an end clip and sound: started 50 ms after the game's START, its clip in the place of
+"fighter_intro", the game's music 78 ducked under its start sound and back up after it; ended on the game's STOP, its
+end sound with the game's music 67 ducked, its end clip; a second start and stop the same way. The other builds of the
+sweep (`mode_project.WITH_PROVEN`) followed the mode the PAD-710 sweep started there, twice. Not measured: a game mode
+that ends at a drain (the emulator's Godzilla did not end the ball on a lone drain): the follower ends with the ball,
+as every mode does, and plays no outro then; the plain-C titles (no STOP to see), which stay unoffered.
+
 ## A mode in the game's Challenge list (PAD-615)
 
 Stern's framework has a **Player Challenge** game on every Spike 2 title: the player picks it on the game's own

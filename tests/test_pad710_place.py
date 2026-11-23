@@ -280,7 +280,8 @@ def _src(name):
 
 def test_the_runtime_takes_the_start_and_counts_it():
     rt = _src("pad_mode_runtime.c")
-    hook = rt[rt.index("static int on_block_start(pm_reg *r, unsigned hook_n)"):]
+    # PAD-1537: on_block_start counts the starts that go ahead; what it refuses is block_start_veto's
+    hook = rt[rt.index("static int block_start_veto(pm_reg *r, unsigned hook_n)\n{"):]
     hook = hook[:hook.index("\n}\n")]
     assert "if (id < BLOCK_IDS && !place_check[id] && place_take(r, id)) return 1;" in hook
     assert hook.index("place_take") < hook.index("lit_hold_until")   # before the lit hold and the block

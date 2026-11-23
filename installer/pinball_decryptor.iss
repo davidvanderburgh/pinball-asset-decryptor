@@ -544,6 +544,9 @@ begin
     RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
       'Software\Classes\SystemFileAssociations\' + Exts[I] +
       '\shell\PinballAssetDecryptor.Write');
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+      'Software\Classes\SystemFileAssociations\' + Exts[I] +
+      '\shell\PinballAssetDecryptor.Compact');
     if RegQueryStringValue(HKEY_CURRENT_USER, 'Software\Classes\' + Exts[I],
                            '', Cur) and
        (Cur = 'PinballAssetDecryptor.CardImage') then
@@ -551,6 +554,17 @@ begin
   end;
   RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
     'Software\Classes\PinballAssetDecryptor.CardImage');
+  { PAD-1522: the card icon handler's class (shell_icon.CLSID), per user and
+    per machine, and its staged copy.  A copy Explorer still holds stays
+    until Explorer lets go; nothing points at it any more. }
+  RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+    'Software\Classes\CLSID\' + '{6E1B5C0A-52D4-4F0B-9C55-1A1522CA4D01}');
+  RegDeleteKeyIncludingSubkeys(HKEY_LOCAL_MACHINE,
+    'Software\Classes\CLSID\' + '{6E1B5C0A-52D4-4F0B-9C55-1A1522CA4D01}');
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\shell'),
+          True, True, True);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\compact_queue'),
+          True, True, True);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

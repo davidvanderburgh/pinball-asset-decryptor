@@ -86,7 +86,10 @@ AGENT_ACCESS_TIP = (
 CARD_IMAGES_TIP = (
     "Double-click a .raw card image, or right-click a .raw, .img or .iso "
     "and pick Write to a card with PAD: PAD opens on that machine's write "
-    "dialog with the image in it. Off until you tick it. .img and .iso "
+    "dialog with the image in it. Right-click a .raw or .img and pick "
+    "Compact with PAD to store that card compact where it is: a small "
+    "window shows it, and PAD itself does not start. A compact .raw has a "
+    "green badge on its icon. Off until you tick it. .img and .iso "
     "still mount on a "
     "double-click, as Windows does for every disc image.")
 
@@ -666,8 +669,9 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, CardsMixin, ResetMixi
     def _toggle_card_images(self):
         """⚙ → Card images → Open card images with PAD (PAD-1514): Explorer
         opens a .raw on its write dialog, and every .raw / .img / .iso has
-        "Write to a card with PAD" on its right-click menu.  Off takes all of
-        it away."""
+        "Write to a card with PAD" on its right-click menu.  PAD-1522: a
+        .raw / .img also has "Compact with PAD" there, and a compact .raw
+        its own icon.  Off takes all of it away."""
         from .. import open_image
         on = not bool(self.card_images_var.get())
         self.card_images_var.set(on)
@@ -714,7 +718,9 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, CardsMixin, ResetMixi
         else:
             self.log("Card images open with PAD: double-click a .raw, or "
                      "right-click a .raw, .img or .iso > Write to a card "
-                     "with PAD.", "info")
+                     "with PAD. Right-click a .raw or .img > Compact with "
+                     "PAD stores it compact where it is; a compact .raw "
+                     "has a green badge on its icon.", "info")
         return True
 
     def _toggle_agent_access(self):

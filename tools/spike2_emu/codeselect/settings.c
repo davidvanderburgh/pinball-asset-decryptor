@@ -11,6 +11,7 @@
 #include "testpics.h"
 #include "art.h"
 #include "video.h"
+#include "overlay.h"
 #include "log.h"
 
 /* PAD-1586: the buttons the footers name. A Spike 3 machine's menu reads only the coin door
@@ -115,6 +116,7 @@ struct state {
     struct audio_clip *t_vsound;             /* ...and its sound */
     int t_vloops;                            /* its loops so far: a new one restarts the sound */
     long long t_vstart;                      /* when it last started */
+    struct ovl *t_ovl;                       /* the scene over it (overlay.h), or NULL */
     /* Simon (2026-11-22): on a moving test item "quick press to freeze, long press to back
      * out" with the button that backs out of a test (ACTION on a test card) */
     int t_frozen;                            /* the frame shown is held */
@@ -421,6 +423,7 @@ static void test_unload(struct state *st)
     if (st->t_img) { art_image_free(st->t_img); st->t_img = NULL; }
     if (st->t_anim) { art_anim_free(st->t_anim); st->t_anim = NULL; }
     if (st->t_vid) { vid_close(st->t_vid); st->t_vid = NULL; }
+    if (st->t_ovl) { ovl_close(st->t_ovl); st->t_ovl = NULL; }
     if (st->t_vsound) {
         /* its voice fades out first: the clip is freed when that is over */
         long long until = sel_now_ms() + 200;
@@ -486,6 +489,22 @@ static void test_load(struct state *st, long long now)
                 char why[200] = "";
                 st->t_vsound = audio_load_wav(snd, why, sizeof why);
                 if (!st->t_vsound) sel_say("test: the video's sound: %s", why);
+            }
+            /* THE LAYERED TEST (overlay.h): a scene beside it with the same name */
+            if (dot) {
+                char why[200] = "";
+                strcpy(dot, ".pado");
+                if (access(snd, R_OK) == 0) {
+                    int cw, ch;
+                    st->t_ovl = ovl_open(snd, e->g->w, e->g->h, why, sizeof why);
+                    if (!st->t_ovl) sel_say("test: the scene over the video: %s", why);
+                    else {
+                        ovl_canvas(st->t_ovl, &cw, &ch);
+                        sel_say("test: a scene over it: %d frames at %.3f fps, %d picture%s, %dx%d",
+                                ovl_frames(st->t_ovl), ovl_fps(st->t_ovl), ovl_pictures(st->t_ovl),
+                                ovl_pictures(st->t_ovl) == 1 ? "" : "s", cw, ch);
+                    }
+                }
             }
             sel_say("test: video %d frames at %.3f fps, %d decoder%s%s", vid_frames(st->t_vid),
                     vid_fps(st->t_vid), vid_threads(st->t_vid), vid_threads(st->t_vid) == 1 ? "" : "s",
@@ -560,6 +579,7 @@ static int test_tick(struct state *st, long long now)
         if (vid_frame(st->t_vid, now, &k)) changed = 1;
         if (vid_loops(st->t_vid) != st->t_vloops) {
             st->t_vloops = vid_loops(st->t_vid);
+            st->t_vstart = now;                      /* the scene over it starts again too */
             if (st->t_vsound) test_play(st);         /* the clip started again: so does its sound */
         }
     }
@@ -762,6 +782,21 @@ static void draw_colour(struct state *st)
 
 /* THE TEST PICTURE UP, full screen, through the correction picked; then the
  * caption, which is never corrected */
+/* THE LAYERED TEST (overlay.h): the scene's frame for the clip's time, over the clip,
+ * after the colour correction - the scene is the game's own drawing, not the picture
+ * under test; the canvas is centred on the screen, as the clip is */
+static void draw_overlay(struct state *st, long long now)
+{
+    struct settings_env *e = st->e;
+    const struct art_image *im;
+    int x, y, cw, ch;
+    if (!st->t_ovl) return;
+    im = ovl_at(st->t_ovl, now - st->t_vstart, &x, &y);
+    if (!im) return;
+    ovl_canvas(st->t_ovl, &cw, &ch);
+    gfx_blit(e->g, (e->g->w - cw) / 2 + x, (e->g->h - ch) / 2 + y, im->rgba, im->w, im->h);
+}
+
 static void draw_test(struct state *st)
 {
     struct settings_env *e = st->e;
@@ -807,6 +842,7 @@ static void draw_test(struct state *st)
         colour_lut_build(&lut, &st->work[st->imgs[st->t_col]]);
         colour_lut_apply(&lut, e->g->px, W, H, W * 4);
     }
+    if (visual) draw_overlay(st, sel_now_ms());
     if (!st->t_caption) return;
 
     if (!visual) {
@@ -882,6 +918,7 @@ static void draw_test_frame(struct state *st)
         colour_lut_build(&lut, &st->work[st->imgs[st->t_col]]);
         colour_lut_apply(&lut, e->g->px + ((size_t)y * (size_t)W + (size_t)x) * 4, im->w, im->h, W * 4);
     }
+    draw_overlay(st, sel_now_ms());
     bottom = y + im->h;
     if (st->t_caption && bottom > H - (int)(96 * S(e))) draw_test(st);   /* under the caption: all of it */
 }

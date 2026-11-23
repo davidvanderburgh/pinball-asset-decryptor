@@ -1315,6 +1315,8 @@ EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  "colour.c", "colour.h", "settings.c", "settings.h", "testpics.c", "testpics.h", "video.c", "video.h",
                  # Simon (2026-11-22): a test clip through the machine's own decoder
                  "gstclip.c", "gstclip.h",
+                 # ...and the scene over it, the layered test (2026-11-23)
+                 "overlay.c", "overlay.h",
                  "theme.c", "theme.h", "themes.json", "gen_themes.py",
                  "gfx.c", "gfx.h",
                  "egl_stern.c", "egl_stern.h", "input.c", "input.h",

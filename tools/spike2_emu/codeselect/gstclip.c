@@ -184,6 +184,11 @@ struct gclip {
     int shown, dropped;
     struct art_image out;
     int have_out;
+    /* CLOSING: no handoff touches the buffers once it is set, and the close waits for
+     * one under way (in_cb).  The emulator's video bridge hands frames over from its own
+     * thread and was still doing so after set_state(NULL): backing out of a test clip
+     * crashed the menu (2026-11-23).  Real GStreamer stops its streaming thread first. */
+    int closing, in_cb;
     char err[200];
     char path[600];
 };
@@ -254,10 +259,13 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     (void)sink; (void)pad;
     if (!px || !g->ow) return;
     pthread_mutex_lock(&g->mu);
+    if (g->closing) { pthread_mutex_unlock(&g->mu); return; }
+    g->in_cb++;
     back = !g->front;
     pthread_mutex_unlock(&g->mu);
     convert(g, px, size, g->px[back]);
     pthread_mutex_lock(&g->mu);
+    g->in_cb--;
     if (g->made > g->taken) g->dropped++;   /* the one before was never shown */
     g->front = back;
     g->made++;
@@ -411,7 +419,20 @@ const char *gclip_error(const struct gclip *g) { return g->err; }
 
 void gclip_close(struct gclip *g)
 {
+    long long until;
     if (!g) return;
+    pthread_mutex_lock(&g->mu);
+    g->closing = 1;
+    pthread_mutex_unlock(&g->mu);
+    until = now_ms() + 2000;
+    for (;;) {                               /* a frame being converted finishes first */
+        int busy;
+        pthread_mutex_lock(&g->mu);
+        busy = g->in_cb;
+        pthread_mutex_unlock(&g->mu);
+        if (!busy || now_ms() > until) break;
+        usleep(2000);
+    }
     if (g->pipe) {
         G.set_state(g->pipe, GST_STATE_NULL);
         G.object_unref(g->pipe);            /* the bin's elements go with it */
@@ -420,10 +441,13 @@ void gclip_close(struct gclip *g)
         int i;
         for (i = 0; i < 5; i++) if (e[i]) G.object_unref(e[i]);
     }
+    pthread_mutex_lock(&g->mu);
     free(g->px[0]);
     free(g->px[1]);
-    pthread_mutex_destroy(&g->mu);
-    free(g);
+    g->px[0] = g->px[1] = NULL;
+    pthread_mutex_unlock(&g->mu);
+    /* the record itself stays (a few hundred bytes a clip): a handoff that still
+     * arrives after this - the emulator's bridge - finds `closing` and leaves */
 }
 
 #endif

@@ -2550,6 +2550,12 @@ def check_media_file(path, kind):
         if len(head) < 8 or head[4:8] not in (b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip"):
             raise Refused("media %s: not an MP4 / QuickTime file" % name)
         return "clip %s" % name.rsplit(".", 1)[-1].lower(), size
+    if kind == "pado":
+        # a layered test's scene overlay (Simon, 2026-11-23; codeselect/overlay.h)
+        with open(path, "rb") as f:
+            if f.read(8) != b"PADOVL01":
+                raise Refused("media %s: not a scene overlay (.pado)" % name)
+        return "scene overlay", size
     with open(path, "rb") as f:
         data = f.read()
     if kind == "art":
@@ -2684,6 +2690,14 @@ def plan_media(media_dir, n_images, tests_apart=False):
             raise Refused("%s: tests[%d].kind %r is not one of %s" % (MEDIA_MANIFEST, k, kind, ", ".join(TEST_KINDS)))
         if tests_apart and kind:
             names = []
+            # ...and a video's scene overlay, which the menu finds by the video's name
+            # (the layered test, Simon 2026-11-23): on p3 with it, never in the conf
+            if e.get("overlay"):
+                onm = _media_name_ok(e["overlay"], "tests[%d].overlay" % k)
+                if onm not in test_files:
+                    _word, size = check_media_file(os.path.join(media_dir, onm), "pado")
+                    test_files[onm] = os.path.join(media_dir, onm)
+                    test_bytes += size
             for key, ck in (("file", "test"), ("sound", "wav")):
                 nm = e.get(key)
                 if not nm:

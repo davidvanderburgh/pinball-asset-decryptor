@@ -2,8 +2,8 @@
 # hashing and compiling). tests/test_stern_mode_runtime.py compares them with the SDK.
 a3bbcdb2d77d9f8a583229c1d58badf3592d510f1568cd220c98601a2982f067  pad_mode.h
 9dd3264a8dab132e2879b224678c78e66536320a78d7f55606bb55f2eed9806e  pad_stock.h
-34fd81846a53fad87dd478351837b64c85230b4662dfaa5108d977994886ec86  pad_mode_runtime.c
+38eb8bf95e2e616629e753033c2ad668fb34a4fa2b5806c917c31cddd741f4b5  pad_mode_runtime.c
 8ed09db9d8f9cb9e2f8c536a1dd4d5ab86a2fdce8d75b5e48ff5ca7ec2f66a54  mode_file.c
 217ec41dc6f22d03c9ead76e2940e5ecc2e8360ac60a6aef9451d955aaff74ae  build_mode.sh
-390904dd1c2e17ddbf017577c13ff3d2b5b420fc88ab51f08ca6012dced8fb70  mode.so
+858085f1f2224c738a2a285c40843b7074904e4082d50d1810c862d564e37686  mode.so
 compiler arm-linux-gnueabihf-gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0

@@ -34,13 +34,15 @@ def _sha(path):
 
 
 def _sparse_fs(tmp_path):
-    """Can this test folder's filesystem hold holes at all?"""
+    """Can this test folder's filesystem hold holes at all?  The probe needs a
+    zero run long enough to punch: a file with none asks the drive nothing,
+    and macOS (no hole punch) then read as a drive that keeps holes."""
     p = tmp_path / "probe"
     with open(p, "wb") as f:
-        f.write(b"x")
+        f.write(b"x" + bytes(2 * sc.MIN_HOLE) + b"x")
     r = sc.compact_file(str(p))
     os.remove(p)
-    return r.sparse_ok
+    return r.sparse_ok and r.holes > 0
 
 
 def test_compact_in_place_keeps_every_byte(tmp_path):

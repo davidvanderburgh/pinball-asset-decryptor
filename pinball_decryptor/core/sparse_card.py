@@ -22,6 +22,11 @@ What is here:
   card copy; a plain CopyFileEx writes every zero back out).
 * :func:`move_card` - move an image to another folder or drive and keep it
   compact (Explorer's move to another drive writes the holes back out).
+* :func:`copy_card` - copy an image to another folder (or beside itself)
+  and keep the copy compact (Explorer's copy writes the holes back out).
+* :func:`zip_card` and :func:`zip_reason` - a folder that cannot hold a
+  compact card (Google Drive, a cloud folder, an exFAT stick) gets it as a
+  .zip the size of its data instead.
 * :func:`import_card` - bring a new image into a library folder compact,
   from a .raw/.img or straight out of a .zip/.xz/.gz/.bz2 download.
 * :func:`compact_folder` and :func:`main` - the library tool:
@@ -445,8 +450,9 @@ class MoveResult:
     after: int                  # bytes on disk where it is now
     renamed: bool = False       # the same drive: a rename, nothing copied
     sparse_ok: bool = True      # False: the new drive refused holes
-    kept: bool = False          # the original could not be removed
+    kept: bool = False          # the original is still there (always, a copy)
     seconds: float = 0.0
+    zipped: str = ""            # why it arrived as a .zip ("" = it did not)
 
 
 class SameFolder(ValueError):
@@ -460,20 +466,163 @@ def _same_volume(a, b):
         return False
 
 
-def move_card(src, dest_dir, *, progress=None, cancel=None, copy=None):
-    """Move card image *src* into folder *dest_dir* and keep it compact
-    (PAD-1535).  Explorer's own move to another drive is a copy
-    (CopyFileEx), which writes every hole back out as zeros: a 3 GB compact
-    card took its whole 62 GB on the new drive, and as long to write.  Here
-    a move on the same drive is a rename (instant, the file untouched); to
-    another drive only the card's data is copied (:func:`sparse_copy`),
-    written as ``.part``, given the card's dates and renamed when whole, and
-    only then is the original removed.  A full-size card arrives compact.
+_FILE_SUPPORTS_SPARSE_FILES = 0x40
 
-    *progress* is ``progress(done, total)``, *cancel* a callable that raises
-    to stop (the ``.part`` is removed, the original left as it was).
-    Raises :class:`SameFolder`, ``FileExistsError`` (a file of that name is
-    there already) or :class:`NoRoom`."""
+
+def volume_facts(folder):
+    """``(label, filesystem, holds sparse files)`` of the drive *folder* is
+    on; ``("", "", True)`` where that cannot be asked (not Windows)."""
+    if sys.platform != "win32":
+        return "", "", True
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    root = ctypes.create_unicode_buffer(300)
+    if not k32.GetVolumePathNameW(ctypes.c_wchar_p(os.path.abspath(folder)),
+                                  root, 300):
+        return "", "", True
+    label = ctypes.create_unicode_buffer(128)
+    fs = ctypes.create_unicode_buffer(64)
+    flags = wintypes.DWORD(0)
+    if not k32.GetVolumeInformationW(root, label, 128, None, None,
+                                     ctypes.byref(flags), fs, 64):
+        return "", "", True
+    return label.value, fs.value, bool(flags.value
+                                       & _FILE_SUPPORTS_SPARSE_FILES)
+
+
+def _under(folder, root):
+    folder = os.path.normcase(os.path.abspath(folder)).rstrip("\\/")
+    root = os.path.normcase(os.path.abspath(root)).rstrip("\\/")
+    return bool(root) and (folder == root
+                           or folder.startswith(root + os.sep))
+
+
+def cloud_roots():
+    """``[(folder, service name)]``: the folders on this PC's own drives
+    that a cloud service uploads (OneDrive, Dropbox, a mirrored Google
+    Drive).  A compact card in one is compact on the PC, yet uploaded and
+    counted at its whole size.  Best effort: what cannot be read is left
+    out."""
+    roots = []
+    for var in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        p = os.environ.get(var)
+        if p:
+            roots.append((p, "OneDrive"))
+    try:
+        import json
+        for var in ("APPDATA", "LOCALAPPDATA"):
+            info = os.path.join(os.environ.get(var, ""), "Dropbox",
+                                "info.json")
+            if os.path.isfile(info):
+                with open(info, encoding="utf-8") as f:
+                    for acct in json.load(f).values():
+                        if isinstance(acct, dict) and acct.get("path"):
+                            roots.append((acct["path"], "Dropbox"))
+    except (OSError, ValueError):
+        pass
+    try:
+        import sqlite3
+        db = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google",
+                          "DriveFS", "root_preference_sqlite.db")
+        if os.path.isfile(db):
+            con = sqlite3.connect("file:%s?mode=ro" % db.replace("\\", "/"),
+                                  uri=True, timeout=1)
+            try:
+                for path, last in con.execute(
+                        "select root_path, last_seen_absolute_path "
+                        "from roots"):
+                    p = last or path
+                    if p and os.path.isabs(p):
+                        roots.append((p, "Google Drive"))
+            finally:
+                con.close()
+    except Exception:                                   # noqa: BLE001
+        pass
+    return roots
+
+
+def zip_reason(dest_dir):
+    """Why a card put in *dest_dir* has to be a ``.zip`` to stay small
+    (PAD-1539), as the words the window says ("Google Drive", "this exFAT
+    drive"), or "" when the folder holds a compact card as it is.
+
+    Compact is NTFS's sparse file: the holes take no disk space.  A drive
+    without them (Google Drive's G:, which answers as FAT32; an exFAT or
+    FAT32 USB stick) stores the card's whole size, and a cloud folder on
+    C: uploads the whole size whatever the PC stores."""
+    label, fs, sparse = volume_facts(dest_dir)
+    if not sparse:
+        if "google drive" in label.lower():
+            return "Google Drive"
+        return "this %s drive" % fs if fs else "this drive"
+    for root, name in cloud_roots():
+        if _under(dest_dir, root):
+            return name
+    return ""
+
+
+def zip_card(src, dst, *, progress=None, cancel=None):
+    """Write card image *src* as the one member of a new ``.zip`` *dst*
+    (PAD-1539): the card's holes are zeros that deflate to next to nothing,
+    so the zip is about the size of the card's data, on any drive and in any
+    cloud.  Only *src*'s allocated ranges are read.  :func:`import_card`
+    (and any unzip) gives the same card back, byte for byte.  *progress* and
+    *cancel* are :func:`sparse_copy`'s.  Returns the bytes of data read."""
+    size = os.path.getsize(src)
+    read = 0
+    info = zipfile.ZipInfo(os.path.basename(src),
+                           time.localtime(os.path.getmtime(src))[:6])
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.external_attr = 0o644 << 16
+    with open(src, "rb", buffering=0) as fi, \
+            zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED, allowZip64=True,
+                            compresslevel=1) as z, \
+            z.open(info, "w", force_zip64=True) as out:
+        pos = 0
+        for off, n in list(allocated_ranges(fi, size)) + [(size, 0)]:
+            while pos < off:                    # a hole: zeros, unread
+                if cancel:
+                    cancel()
+                k = min(CHUNK, off - pos)
+                out.write(_ZERO_CHUNK[:k] if k < CHUNK else _ZERO_CHUNK)
+                pos += k
+            fi.seek(off)
+            end = off + n
+            while pos < end:
+                if cancel:
+                    cancel()
+                b = fi.read(min(CHUNK, end - pos))
+                if not b:
+                    raise OSError("%s ended early at %d" % (src, pos))
+                out.write(b)
+                pos += len(b)
+                read += len(b)
+                if progress:
+                    progress(pos, size)
+    if progress:
+        progress(size, size)
+    return read
+
+
+def copy_name(src, dest_dir, suffix=""):
+    """The path a copy of *src* gets in *dest_dir*: its own name (plus
+    *suffix*, ``.zip``), or, a plain copy beside the original, Explorer's
+    ``name - Copy.raw`` (then ``- Copy (2)``...)."""
+    name = os.path.basename(src)
+    if suffix or os.path.normcase(os.path.dirname(os.path.abspath(src))) \
+            != os.path.normcase(os.path.abspath(dest_dir)):
+        return os.path.join(dest_dir, name + suffix)
+    stem, ext = os.path.splitext(name)
+    n = 1
+    while True:
+        dst = os.path.join(dest_dir, "%s - Copy%s%s" % (
+            stem, "" if n == 1 else " (%d)" % n, ext))
+        if not os.path.exists(dst):
+            return dst
+        n += 1
+
+
+def _transfer(src, dest_dir, *, remove, progress, cancel, copy, zipped):
     t0 = time.monotonic()
     src = os.path.abspath(src)
     dest_dir = os.path.abspath(dest_dir)
@@ -481,25 +630,33 @@ def move_card(src, dest_dir, *, progress=None, cancel=None, copy=None):
         raise FileNotFoundError(src)
     if not os.path.isdir(dest_dir):
         raise FileNotFoundError(dest_dir)
-    dst = os.path.join(dest_dir, os.path.basename(src))
-    if os.path.normcase(os.path.dirname(src)) == os.path.normcase(dest_dir):
+    same = os.path.normcase(os.path.dirname(src)) \
+        == os.path.normcase(dest_dir)
+    if same and remove:
         raise SameFolder(dest_dir)
+    why = zip_reason(dest_dir) if zipped is None else (zipped or "")
+    dst = copy_name(src, dest_dir, ".zip" if why else "")
     if os.path.exists(dst):
         raise FileExistsError(dst)
     size = os.path.getsize(src)
     before = on_disk_size(src)
-    if _same_volume(os.path.dirname(src), dest_dir):
+    if remove and not why and _same_volume(os.path.dirname(src), dest_dir):
         os.rename(src, dst)
         shell_refresh(dst)
         return MoveResult(src, dst, size, before, on_disk_size(dst),
                           renamed=True, seconds=time.monotonic() - t0)
     with open(src, "rb", buffering=0) as f:
         data = sum(n for _o, n in allocated_ranges(f, size))
-    _need_room(dest_dir, data, "the card's data needs %.1f GB")
+    _need_room(dest_dir, data + (size // 512 if why else 0),
+               "the card's data needs %.1f GB")
     times = _times(src)
     part = dst + ".part"
     try:
-        (copy or sparse_copy)(src, part, progress=progress, cancel=cancel)
+        if why:
+            zip_card(src, part, progress=progress, cancel=cancel)
+        else:
+            (copy or sparse_copy)(src, part, progress=progress,
+                                  cancel=cancel)
         if os.path.exists(dst):
             raise FileExistsError(dst)
         os.replace(part, dst)
@@ -510,17 +667,57 @@ def move_card(src, dest_dir, *, progress=None, cancel=None, copy=None):
             pass
         raise
     _put_times(dst, times)
-    after = on_disk_size(dst)
-    kept = False
-    try:
-        os.remove(src)
-    except OSError:
-        kept = True                 # in use: both stay, nothing is lost
+    after = os.path.getsize(dst) if why else on_disk_size(dst)
+    kept = True
+    if remove:
+        try:
+            os.remove(src)
+            kept = False
+        except OSError:
+            pass                    # in use: both stay, nothing is lost
     shell_refresh(dst)
     return MoveResult(src, dst, size, before, after,
-                      sparse_ok=not (after >= size
-                                     and data + MIN_HOLE <= size),
-                      kept=kept, seconds=time.monotonic() - t0)
+                      sparse_ok=bool(why) or not (
+                          after >= size and data + MIN_HOLE <= size),
+                      kept=kept, seconds=time.monotonic() - t0, zipped=why)
+
+
+def move_card(src, dest_dir, *, progress=None, cancel=None, copy=None,
+              zipped=None):
+    """Move card image *src* into folder *dest_dir* and keep it compact
+    (PAD-1535).  Explorer's own move to another drive is a copy
+    (CopyFileEx), which writes every hole back out as zeros: a 3 GB compact
+    card took its whole 62 GB on the new drive, and as long to write.  Here
+    a move on the same drive is a rename (instant, the file untouched); to
+    another drive only the card's data is copied (:func:`sparse_copy`),
+    written as ``.part``, given the card's dates and renamed when whole, and
+    only then is the original removed.  A full-size card arrives compact.
+
+    A folder that cannot keep a card compact (:func:`zip_reason`: Google
+    Drive, a cloud folder, an exFAT stick) gets it as ``<name>.zip``
+    (:func:`zip_card`, PAD-1539); *zipped* forces that ("" never, a reason
+    always).
+
+    *progress* is ``progress(done, total)``, *cancel* a callable that raises
+    to stop (the ``.part`` is removed, the original left as it was).
+    Raises :class:`SameFolder`, ``FileExistsError`` (a file of that name is
+    there already) or :class:`NoRoom`."""
+    return _transfer(src, dest_dir, remove=True, progress=progress,
+                     cancel=cancel, copy=copy, zipped=zipped)
+
+
+def copy_card(src, dest_dir, *, progress=None, cancel=None, copy=None,
+              zipped=None):
+    """Copy card image *src* into folder *dest_dir* and keep the copy
+    compact (PAD-1539).  Explorer's copy (CopyFileEx) writes every hole back
+    out as zeros, on the same drive as much as on another: a 4 GB compact
+    card holding 180 MB made a 4 GB copy.  Here only the card's data is
+    copied, as :func:`move_card` does it, and the original is not touched.
+    A copy into the card's own folder is named as Explorer names one
+    (:func:`copy_name`); a folder that cannot keep a card compact gets
+    ``<name>.zip``.  Returns a :class:`MoveResult` (``kept`` always True)."""
+    return _transfer(src, dest_dir, remove=False, progress=progress,
+                     cancel=cancel, copy=copy, zipped=zipped)
 
 
 def _open_archive(src):

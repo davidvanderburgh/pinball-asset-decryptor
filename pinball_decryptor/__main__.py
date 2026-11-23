@@ -24,6 +24,10 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--move":
         from .webui.compact_window import main_move
         sys.exit(main_move(sys.argv[2:]))
+    # PAD-1539: > Copy with PAD, the copy compact too.
+    if len(sys.argv) > 1 and sys.argv[1] == "--copy":
+        from .webui.compact_window import main_copy
+        sys.exit(main_copy(sys.argv[2:]))
 
     # Dev-only: when /next item worktrees exist, offer to run one of them
     # instead of this checkout (no-op everywhere else — see worktree_picker).

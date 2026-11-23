@@ -1,8 +1,16 @@
 """Right-click a card image in Explorer > Compact with PAD (PAD-1522),
-or > Move with PAD (PAD-1535).
+> Move with PAD (PAD-1535) or > Copy with PAD (PAD-1539).
 
     pythonw "Pinball Asset Decryptor.pyw" --compact <card.raw> [more...]
     pythonw "Pinball Asset Decryptor.pyw" --move <card.raw> [more...] [--to DIR]
+    pythonw "Pinball Asset Decryptor.pyw" --copy <card.raw> [more...] [--to DIR]
+
+COPY: Explorer's copy writes a compact card's holes back out too, on the
+same drive as much as on another.  Copy with PAD is Move with PAD that
+leaves the original where it is (:class:`CopyJobs`,
+core.sparse_card.copy_card).  A folder that cannot keep a card compact
+(Google Drive, a cloud folder, an exFAT stick: sparse_card.zip_reason) gets
+the card as a .zip the size of its data, from a copy and from a move.
 
 MOVE: Explorer's move to another drive is a copy that writes a compact
 card's holes back out as zeros, so the card arrived full size and took as
@@ -62,6 +70,18 @@ MOVE_QUEUE = "move_queue"
 #: first one may still be showing the folder picker (its own thread takes
 #: cards meanwhile, so this is only a guard)
 MOVE_HAND_OVER_WAIT = 10.0
+
+COPY_FLAG = "--copy"
+COPY_TITLE = "Copy card image"
+COPY_NOTE = ("PAD copies only the card's data, so the copy of a compact "
+             "card is compact too and is written in a fraction of the time. "
+             "Explorer's own copy writes the card's whole size.")
+COPY_MUTEX = "Local\\PinballAssetDecryptor.CopyWindow"
+COPY_QUEUE = "copy_queue"
+#: what the window adds under a card that went in as a .zip
+ZIP_NOTE = ("%s cannot keep a card compact, so it is a zip there: the same "
+            "card, byte for byte, once unzipped or added to PAD's card "
+            "library.")
 
 WAITING, WORKING, DONE, FAILED, STOPPED = (
     "waiting", "working", "done", "failed", "stopped")
@@ -738,46 +758,57 @@ def _place(folder):
     return folder.rstrip("\\/") if len(folder) > 3 else folder
 
 
-def move_text(res):
-    """One line on what moving came to, from a sparse_card.MoveResult."""
+def move_text(res, copied=False):
+    """One line on what moving (or, *copied*, copying) came to, from a
+    sparse_card.MoveResult."""
     size, after = fmt(res.size), fmt(res.after)
-    if res.renamed:
+    did = "Copied" if copied else "Moved"
+    if res.zipped:
+        why = res.zipped[0].upper() + res.zipped[1:]
+        text = "%s as a zip: %s for a %s card. %s" % (
+            did, after, size, ZIP_NOTE % why)
+    elif res.renamed:
         text = ("Moved. On the same drive it is the very same file, "
                 "%s on disk." % after)
     elif not res.sparse_ok:
-        text = ("Moved, but full size: this drive cannot hold compact "
-                "files (exFAT or FAT32, like most USB sticks).")
+        text = ("%s, but full size: this drive cannot hold compact "
+                "files (exFAT or FAT32, like most USB sticks)." % did)
     elif res.after + sparse_card.MIN_HOLE > res.size:
-        text = "Moved. This %s card is full of data." % size
+        text = "%s. This %s card is full of data." % (did, size)
     elif res.before + sparse_card.MIN_HOLE > res.size:
-        text = ("Moved and now compact: %s on disk for a %s card."
-                % (after, size))
+        text = ("%s and %s compact: %s on disk for a %s card."
+                % (did, "the copy is" if copied else "now", after, size))
+    elif copied:
+        text = "Copied, and the copy is compact too: %s on disk for a %s " \
+               "card." % (after, size)
     else:
         text = "Moved and still compact: %s on disk for a %s card." % (
             after, size)
-    if res.kept:
+    if res.kept and not copied:
         text += (" The original could not be removed (another program has "
                  "it open), so it is still in %s too."
                  % _place(os.path.dirname(res.src)))
     return text
 
 
-def move_error_text(err, dest=""):
+def move_error_text(err, dest="", copied=False):
+    did = "copied" if copied else "moved"
+    do = "copy" if copied else "move"
     if isinstance(err, sparse_card.SameFolder):
         return "It is already in that folder."
     if isinstance(err, FileExistsError):
-        return ("%s already has a file of that name. Nothing was moved."
-                % _place(dest))
+        return ("%s already has a file of that name. Nothing was %s."
+                % (_place(dest), did))
     if isinstance(err, sparse_card.NoRoom):
-        return "Not moved: %s." % str(err).rstrip(".")
+        return "Not %s: %s." % (did, str(err).rstrip("."))
     if isinstance(err, PermissionError):
-        return ("Could not move it: another program is using this card, or "
-                "it is read-only. Close that program and try again.")
+        return ("Could not %s it: another program is using this card, or "
+                "it is read-only. Close that program and try again." % do)
     if isinstance(err, FileNotFoundError):
         return "This file is no longer there."
     if isinstance(err, OSError) and err.strerror:
-        return "Could not move it: %s." % err.strerror.rstrip(".")
-    return "Could not move it: %s." % err
+        return "Could not %s it: %s." % (do, err.strerror.rstrip("."))
+    return "Could not %s it: %s." % (do, err)
 
 
 class MoveJobs(Jobs):
@@ -785,23 +816,29 @@ class MoveJobs(Jobs):
 
     title = MOVE_TITLE
     note = MOVE_NOTE
+    copied = False
+    #: the window's words: Moving / moved / "is in its new folder"
+    doing, did, there = "Moving", "moved", "is in its new folder"
 
     def __init__(self, dest, move=None):
         super().__init__()
         self.dest = os.path.abspath(dest)
-        self._move = move or sparse_card.move_card
+        self._move = move or self._engine()
+
+    def _engine(self):
+        return sparse_card.move_card
 
     def headline(self, j):
         if j.state in (WAITING, WORKING):
-            return "Moving %s" % j.name
+            return "%s %s" % (self.doing, j.name)
         if j.state == FAILED:
-            return "%s was not moved" % j.name
+            return "%s was not %s" % (j.name, self.did)
         if j.state == STOPPED:
             return "Stopped"
-        return "%s is in its new folder" % j.name
+        return "%s %s" % (j.name, self.there)
 
     def busy_headline(self, at, n):
-        return "Moving card image %d of %d" % (at, n)
+        return "%s card image %d of %d" % (self.doing, at, n)
 
     def where(self, j):
         came = getattr(j, "came_from", None) or j.path
@@ -814,15 +851,15 @@ class MoveJobs(Jobs):
         if len(jobs) <= 1:
             return ""
         done = sum(1 for j in jobs if j.state == DONE)
-        text = "%d of %d card images moved to %s." % (
-            done, len(jobs), _place(self.dest))
+        text = "%d of %d card images %s to %s." % (
+            done, len(jobs), self.did, _place(self.dest))
         failed = sum(1 for j in jobs if j.state == FAILED)
         if failed:
-            text += " %d could not be moved." % failed
+            text += " %d could not be %s." % (failed, self.did)
         return text
 
     def _one(self, job):
-        job.pct, job.text = 0, "Moving the card…"
+        job.pct, job.text = 0, "%s the card…" % self.doing
         self.events.put((job, "start"))
         last = [-1]
 
@@ -843,18 +880,36 @@ class MoveJobs(Jobs):
                              cancel=cancel)
         except Stopped:
             job.state, job.pct = STOPPED, None
-            job.text = "Stopped: the card is where it was."
+            job.text = ("Stopped: nothing was copied." if self.copied
+                        else "Stopped: the card is where it was.")
         except Exception as e:                          # noqa: BLE001
-            log.warning("move %s to %s", job.path, self.dest, exc_info=True)
+            log.warning("%s %s to %s", self.doing, job.path, self.dest,
+                        exc_info=True)
             job.state, job.pct = FAILED, None
-            job.text = move_error_text(e, self.dest)
+            job.text = move_error_text(e, self.dest, self.copied)
         else:
             job.state, job.pct = DONE, 100
-            job.text = move_text(res)
-            job.came_from, job.path = job.path, res.dst
+            job.text = move_text(res, self.copied)
+            job.came_from = job.path
+            if self.copied:
+                job.copy = res.dst
+            else:
+                job.path = res.dst
             if not res.sparse_ok:
                 job.state = FAILED
         self.events.put((job, "end"))
+
+
+class CopyJobs(MoveJobs):
+    """:class:`MoveJobs` that leaves every card where it is (PAD-1539)."""
+
+    title = COPY_TITLE
+    note = COPY_NOTE
+    copied = True
+    doing, did, there = "Copying", "copied", "has its copy"
+
+    def _engine(self):
+        return sparse_card.copy_card
 
 
 _FOS_NOCHANGEDIR, _FOS_PICKFOLDERS, _FOS_FORCEFILESYSTEM = 0x8, 0x20, 0x40
@@ -963,33 +1018,43 @@ class _Gatherer:
         return self.paths
 
 
-def main_move(argv=None, pick=None):
-    """The ``--move`` launch.  Returns the process's exit code."""
+def main_move(argv=None, pick=None, copy=False):
+    """The ``--move`` launch (*copy*: the ``--copy`` one).  Returns the
+    process's exit code."""
     argv = sys.argv[1:] if argv is None else argv
     paths = paths_arg(argv)
     dest = to_arg(argv)
     if not paths:
         return 2
+    make = CopyJobs if copy else MoveJobs
     if sys.platform != "win32":
         if not dest:
-            print("--move needs --to DIR here", file=sys.stderr)
+            print("--%s needs --to DIR here" % ("copy" if copy else "move"),
+                  file=sys.stderr)
             return 2
-        jobs = MoveJobs(dest)
+        jobs = make(dest)
         for p in paths:
             jobs.add(p)
         return run_plain(jobs)
-    spool = spool_dir(MOVE_QUEUE)
-    handle = claim(MOVE_MUTEX)
+    mutex = COPY_MUTEX if copy else MOVE_MUTEX
+    spool = spool_dir(COPY_QUEUE if copy else MOVE_QUEUE)
+    handle = claim(mutex)
     if handle is None:
         if hand_over(paths, spool, wait=MOVE_HAND_OVER_WAIT):
             return 0
-        handle = claim(MOVE_MUTEX) or object()
+        handle = claim(mutex) or object()
     try:
         _dpi_aware()
         if not dest:
             gather = _Gatherer(spool)
             try:
-                dest = (pick or pick_folder)(os.path.dirname(paths[0]))
+                picker = pick or pick_folder
+                if copy:
+                    dest = picker(os.path.dirname(paths[0]),
+                                  "Copy with PAD: choose the folder",
+                                  "Copy here")
+                else:
+                    dest = picker(os.path.dirname(paths[0]))
             finally:
                 for p in gather.stop():
                     p = os.path.abspath(p)
@@ -997,17 +1062,22 @@ def main_move(argv=None, pick=None):
                         paths.append(p)
             if not dest:
                 return 0                        # cancelled: nothing moved
-        jobs = MoveJobs(dest)
+        jobs = make(dest)
         for p in paths:
             jobs.add(p)
         if not TaskWindow(jobs, spool=spool).run():
             jobs.wait()
             v = view(jobs)
             _message("%s\n\n%s" % (v["instruction"], v["content"]),
-                     v["warn"], MOVE_TITLE)
+                     v["warn"], jobs.title)
     finally:
         release(handle)
     return 0
+
+
+def main_copy(argv=None, pick=None):
+    """The ``--copy`` launch (PAD-1539).  Returns the process's exit code."""
+    return main_move(argv, pick, copy=True)
 
 
 if __name__ == "__main__":

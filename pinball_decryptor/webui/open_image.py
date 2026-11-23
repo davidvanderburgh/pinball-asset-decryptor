@@ -175,6 +175,12 @@ COMPACT_FLAG = "--compact"
 MOVE_VERB = "PinballAssetDecryptor.Move"
 MOVE_LABEL = "Move with PAD…"
 MOVE_FLAG = "--move"
+#: the right-click verb that copies a card to another folder or drive and
+#: keeps the copy compact (PAD-1539): Explorer's own copy writes every hole
+#: back out, so the copy of a compact card took its whole size
+COPY_VERB = "PinballAssetDecryptor.Copy"
+COPY_LABEL = "Copy with PAD…"
+COPY_FLAG = "--copy"
 #: the double-click verb's key under the ProgID, and what it was before
 #: PAD-1522 gave it VERB's name (registrations from v1.573 on have that one)
 OPEN_KEY = "\\shell\\" + VERB
@@ -230,6 +236,7 @@ def association_values(app_dir, icon_dll=None):
     command = 'wscript.exe "%s" "%%1"' % launcher
     compact = 'wscript.exe "%s" "%s" "%%1"' % (launcher, COMPACT_FLAG)
     move = 'wscript.exe "%s" "%s" "%%1"' % (launcher, MOVE_FLAG)
+    copy = 'wscript.exe "%s" "%s" "%%1"' % (launcher, COPY_FLAG)
     icon = join(app_dir, "pinball_decryptor", "icon.ico")
     # a card image gets a file's icon (an SD card), never the app's own: a
     # desktop of .raw files read as a row of PAD shortcuts (PAD-1518)
@@ -277,6 +284,10 @@ def association_values(app_dir, icon_dll=None):
         rows += [(base, "", MOVE_LABEL),
                  (base, "Icon", compact_icon),
                  (base + r"\command", "", move)]
+        base = r"SystemFileAssociations\%s\shell\%s" % (ext, COPY_VERB)
+        rows += [(base, "", COPY_LABEL),
+                 (base, "Icon", compact_icon),
+                 (base + r"\command", "", copy)]
     if icon_dll:
         # after the plain DefaultIcon above: the later row is the one kept
         rows += shell_icon.handler_values(PROGID)
@@ -497,7 +508,7 @@ def unregister_association(classes=None):
                 winreg.DeleteValue(k, PROGID)
         except OSError:
             pass
-        for verb in (VERB, COMPACT_VERB, MOVE_VERB):
+        for verb in (VERB, COMPACT_VERB, MOVE_VERB, COPY_VERB):
             _del(r"%s\SystemFileAssociations\%s\shell\%s"
                       % (classes, ext, verb))
         try:

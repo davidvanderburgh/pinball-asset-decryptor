@@ -143,6 +143,11 @@ struct mode_cfg {
     int start_on_done;
     unsigned done_need, done_n;
     unsigned char done_ids[BLOCK_LIST_MAX];
+    /* PAD-1537: `starts_on with_game <id>` - it starts when the game's own mode id starts and ends when it stops: its
+     * start clip and sound are the game mode's intro, its end clip and sound its outro */
+    int start_with;
+    unsigned with_id;
+    int with_follow;                  /* pm_game_mode_follow's: 1 start, 2 every stop, 4 its completion only */
 };
 
 struct slot {
@@ -164,6 +169,8 @@ struct slot {
     unsigned seq_at[5], seq_done[5];      /* PAD-314: how far along the sequence each player is; it is complete */
     unsigned done_last[5];                /* PAD-747: the game's modes each player had completed, last looked */
     unsigned char done_pend[5];           /* ... the count was met: it starts the moment nothing is in its way */
+    unsigned with_starts, with_stops;     /* PAD-1537: the game's mode's starts and stops, last looked */
+    int with_seen;                        /* ... looked at least once (the counts so far are not an edge) */
     int done_said, done_wait_said;        /* ... it can never start here / what it waits on, said once */
 };
 static struct slot slots[MODES_MAX];
@@ -2228,8 +2235,12 @@ static int trigger_on_line(struct slot *M, const char *line)
                 if (v > 255) pm_log("starts_on completed: %u is not one of the game's mode ids (0-255) - skipped", v);
                 else if (cfg.done_n < BLOCK_LIST_MAX) cfg.done_ids[cfg.done_n++] = (unsigned char)v;
             }
+        } else if (key_is(how, "with_game")) {   /* PAD-1537: with one of the game's own modes, its intro + outro */
+            cfg.start_with = 1;
+            cfg.with_id = (unsigned)num(&a);
         } else if (!key_is(how, "shot")) {
-            pm_log("starts_on \"%.40s\" is not shot, sequence, event or completed - the mode starts on its shots", how);
+            pm_log("starts_on \"%.40s\" is not shot, sequence, event, completed or with_game - the mode starts on its "
+                   "shots", how);
         }
         return 1;
     }
@@ -2278,6 +2289,29 @@ static void trigger_on_validate(struct slot *M)
         cfg.valid = runs(M) && cfg.n_seq > 0;
         pm_log("starts on %u shots in order%s", cfg.n_seq, cfg.valid ? "" : "  - NOT VALID, it needs seconds and a trigger_seq line");
         seq_loaded(M);
+        return;
+    }
+    if (cfg.start_with) {                    /* PAD-1537: the game's mode starting stands in for the trigger count */
+        const char *nm = pm_game_mode_name(cfg.with_id);
+        cfg.start_on_event = cfg.start_on_done = 0;
+        if (cfg.trigger_bits) {
+            pm_log("starts_on with_game: the trigger shots are ignored");
+            cfg.trigger_bits = 0;
+        }
+        /* it plays with the game's mode, never instead of it: it stacks, and runs as a layer (over a mode of yours,
+         * beside the others) whose shots stay everyone's */
+        if (cfg.game_modes != GM_STACK || cfg.stack_no) pm_log("starts_on with_game: it stacks with the game's modes");
+        cfg.game_modes = GM_STACK;
+        cfg.stack_no = 0;
+        if (!cfg.layer_1) cfg.layer_1 = 1;
+        cfg.layer_pause = cfg.layer_shots = 0;
+        cfg.with_follow = cfg.with_id < 256 ? pm_game_mode_follow(cfg.with_id, 0, 0) : 0;
+        cfg.valid = runs(M) && (cfg.with_follow & 1);
+        pm_log("starts with the game's %s (mode %u) and ends %s%s", nm ? nm : "?", cfg.with_id,
+               cfg.with_follow & 2 ? "when it stops" : cfg.with_follow & 4 ? "when it is completed, or on its clock"
+               : "on its clock", cfg.valid ? "" : !(cfg.with_follow & 1) ? "  - NOT VALID, this game's port names no "
+               "start of that mode the runtime can see" : "  - NOT VALID, it needs seconds");
+        M->with_seen = 0;
         return;
     }
     if (cfg.start_on_done) {                 /* PAD-747: the game's modes completed stand in for the trigger count */
@@ -3586,6 +3620,50 @@ static void done_tick(void)
     }
 }
 
+/* ---- PAD-1537: `starts_on with_game <id>` -------------------------------------------------------------------------
+ * The mode follows one of the game's own modes: it starts as the game's START of it goes ahead (not one a mode of
+ * ours took the place of, nor one held off) and ends as the game's STOP of it runs, whatever the outcome - there its
+ * end sound plays as at its clock's end, then its end clip: the game mode's intro and outro. Where the runtime sees no
+ * stop (a plain-C title: only its completion), its clock ends it. Its own start rules (starts, cooldown, after, stack)
+ * hold as for a shot start; a layer (`layer`), it runs over a mode of yours and never holds the game's modes off. */
+static void with_tick(void)
+{
+    unsigned k;
+    for (k = 0; k < poll_n; k++) {
+        struct slot *M = &slots[k];
+        unsigned st = 0, sp = 0;
+        char why[80];
+        const char *nm;
+        int r;
+        if (!cfg.valid || !cfg.start_with) continue;
+        pm_game_mode_follow(cfg.with_id, &st, &sp);
+        if (!M->with_seen) {
+            M->with_seen = 1;
+            M->with_starts = st, M->with_stops = sp;
+            continue;
+        }
+        nm = pm_game_mode_name(cfg.with_id);
+        if (sp != M->with_stops) {
+            M->with_stops = sp;
+            if ((r = runner_of(M)) >= 0) {
+                int was = R_;
+                as_runner(r);
+                pm_snprintf(why, sizeof why, "the game's %s stopped", nm ? nm : "mode");
+                own_sounds_time_up(M);           /* its outro's sound, as at its clock's end */
+                mode_end(why);
+                as_runner(was);
+            }
+        }
+        if (st != M->with_starts) {
+            M->with_starts = st;
+            if (!running(M) && pm_in_game()) {
+                pm_snprintf(why, sizeof why, "the game's %s started", nm ? nm : "mode");
+                mode_start(M, why);
+            }
+        }
+    }
+}
+
 /* `ends_on clock`: the running mode goes on through the end of a ball. 1 = keep it running. */
 static int keeps_through_ball_end(void)
 {
@@ -3717,6 +3795,7 @@ static void on_tick(void)
     challenge_tick();                        /* PAD-615: a taken challenge pick starts */
     place_tick();                            /* PAD-710: a mode in the place of one of the game's starts */
     done_tick();                             /* PAD-747: the game's modes completed */
+    with_tick();                             /* PAD-1537: with one of the game's own modes */
     for (k = 0; k < MODES_MAX; k++) {
         M = &slots[k];
         if (ticks % POLL_TICKS == 0 && k < poll_n) {

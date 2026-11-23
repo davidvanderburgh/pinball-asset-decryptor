@@ -986,6 +986,13 @@ int pm_game_mode_done(unsigned id);
 int pm_game_mode_done_seen(unsigned id);                         /* 1 = its completion is seen here */
 int pm_game_modes_done(const unsigned char *ids, unsigned n);
 
+/* ---- a mode that runs WITH one of the game's own modes: its intro and outro (PAD-1537) -----------------------------
+ * pm_game_mode_follow(id, &starts, &stops): what the runtime sees of the game's mode id - 1 its start (the game's START
+ * going ahead: not taken by a mode in its place, not held off), 2 its every stop (a C++ title's STOP, any outcome), 4
+ * its stop only when it is completed (a plain-C title's COMPLETED audit or flag); 0 = none, or not a mode the port
+ * names. starts / stops (may be 0): how many of each this boot, counted on the game's thread - a change is the edge. */
+int pm_game_mode_follow(unsigned id, unsigned *starts, unsigned *stops);
+
 /* ---- spare switches and driver outputs (PAD-826; MODE_SDK.md "Spare switches and outputs") -------------------------
  * For hardware a mod ADDS: a switch wired to a node board input the game has no switch on, a coil, flasher or toy
  * wired to a driver output the game never fires. Both are named by the board's own numbers: the node (8, 9 ... as the

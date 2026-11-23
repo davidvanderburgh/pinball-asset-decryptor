@@ -6794,7 +6794,39 @@ static void lit_hold_check(unsigned id)
     for (k = 0; k < BLOCK_WORDS; k++) lit_said[k] = 0;
 }
 
+/* PAD-1537: the game's own modes seen starting and stopping, for a mode that runs WITH one (its intro and outro).
+ * A start is counted where the game's START goes ahead (nothing of ours took it or held it off), a stop where its
+ * STOP is entered for a mode not stopped already (any outcome) - on a plain-C title, with no STOP of a mode class,
+ * only its completion (the COMPLETED audit or flag PAD-747 watches). Counted on the game's thread, read on the tick. */
+static unsigned gm_starts[BLOCK_IDS], gm_stops[BLOCK_IDS];
+static unsigned gm_said[BLOCK_IDS];
+static void gm_seen(unsigned id, int stop, const char *how)
+{
+    char key[24];
+    const char *nm;
+    if (id >= BLOCK_IDS || !pm_in_game()) return;
+    if (stop) gm_stops[id]++;
+    else gm_starts[id]++;
+    if (gm_said[id] >= 6) return;                /* said the first few times only: a game starts its modes often */
+    gm_said[id]++;
+    pm_snprintf(key, sizeof key, "block_name_%u", id);
+    nm = pm_port_text(key);
+    say("follow: the game's %s (mode %u) %s (%s)", nm ? nm : "?", id, stop ? "stopped" : "started", how);
+}
+
+static int block_start_veto(pm_reg *r, unsigned hook_n);
 static int on_block_start(pm_reg *r, unsigned hook_n)
+{
+    unsigned id;
+    int v = block_start_veto(r, hook_n);
+    if (v) return v;
+    for (id = 0; id < BLOCK_IDS; id++)
+        if (block_hook_of[id] == hook_n + 1 && bm_has(block_named, id) && (!block_obj[id] || block_obj[id] == r[0])) break;
+    if (id < BLOCK_IDS && !place_check[id]) gm_seen(id, 0, "its start");   /* a check's mode: at its own start */
+    return 0;
+}
+
+static int block_start_veto(pm_reg *r, unsigned hook_n)
 {
     unsigned id;
     for (id = 0; id < BLOCK_IDS; id++)          /* this start's mode: its object, or the start is its own */
@@ -6832,7 +6864,9 @@ static int on_block_start(pm_reg *r, unsigned hook_n)
 /* PAD-715: the start a port names for a mode whose block_start is a check: a claimed place is taken here */
 static int on_place_start(pm_reg *r, unsigned id)
 {
-    return id < BLOCK_IDS && place_from[id] && place_take(r, id);
+    if (id < BLOCK_IDS && place_from[id] && place_take(r, id)) return 1;
+    if (id < BLOCK_IDS) gm_seen(id, 0, "its own start");          /* PAD-1537 */
+    return 0;
 }
 
 int pm_block_list(const unsigned char *ids, int n)
@@ -14852,6 +14886,7 @@ static void done_mark(unsigned id, unsigned p, const char *how)
     unsigned *b = done_of(p);
     if (!b || id >= DONE_IDS || !pm_in_game() || done_has(b, id)) return;
     b[id >> 5] |= 1u << (id & 31);
+    if (id < BLOCK_IDS && !block_obj[id]) gm_seen(id, 1, how);   /* PAD-1537: a plain-C mode's end is its completion */
     say("done: player %u completed the game's %s (mode %u, %s) - %u of the game's modes this game", p, done_name(id),
         id, how, done_count_of(p));
 }
@@ -14861,11 +14896,13 @@ static void done_stop_seen(pm_reg *r, const char *how)
 {
     pm_addr obj = r[0];
     unsigned id, p;
-    if (!r[1] || !obj || !pm_in_game()) return;
+    if (!obj || !pm_in_game()) return;
     for (id = 0; id < BLOCK_IDS && !(block_obj[id] == obj && bm_has(block_named, id)); id++) ;
     if (id >= BLOCK_IDS) return;
     if (!(p = place_player())) p = pm_player();
     if (place_stopped(obj, p)) return;              /* stopped already: the STOP returns at once */
+    gm_seen(id, 1, r[1] ? "completed" : "not completed");   /* PAD-1537: every outcome ends a mode that runs with it */
+    if (!r[1]) return;
     done_mark(id, p, how);
 }
 
@@ -15041,6 +15078,20 @@ static void done_arm(void)
     if (named)
         say("done: the runtime sees %d of the game's modes completed (%d of the %d it names a start of; %d through "
             "their COMPLETED audit)", named, bm_count(done_seen), bm_count(block_named), done_audits);
+}
+
+/* PAD-1537: what the runtime sees of the game's mode id (1 its start, 2 its every stop, 4 its stop only when it is
+ * completed), and the counts so far this boot */
+int pm_game_mode_follow(unsigned id, unsigned *starts, unsigned *stops)
+{
+    int f = 0;
+    if (id >= BLOCK_IDS || !bm_has(block_named, id)) return 0;
+    if (block_hook_of[id] && (!place_check[id] || place_from[id])) f |= 1;
+    if (block_obj[id] && done_has(done_seen, id)) f |= 2;
+    else if (done_has(done_seen, id)) f |= 4;
+    if (starts) *starts = gm_starts[id];
+    if (stops) *stops = gm_stops[id];
+    return f;
 }
 
 int pm_game_mode_done_seen(unsigned id)

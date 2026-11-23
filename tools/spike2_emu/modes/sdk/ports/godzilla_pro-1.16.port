@@ -656,6 +656,7 @@ lamp 397          0              SCOOP BB-BATTLE  # lamp 184, I/O group 6 index 
 lamp 398          0              SCOOP BB-GODZILLA PWR UP  # lamp 185, I/O group 6 index 15, at 254,346
 lamp 399          0              SCOOP BB-SUMMON ALLY  # lamp 186, I/O group 6 index 16, at 254,346
 lamp 401          0              LOWER PLAYFIELD GI-RED(X4)  # lamp 188, I/O group 6 index 0, at 0,0
+lamp 402          0              LOWER PLAYFIELD GI-WHT(X8)  # lamp 189, I/O group 6 index 1, at 0,0
 lamp 403          0              UPPER PLAYFIELD GI-RED(X9)  # lamp 190, I/O group 7 index 0, at 0,0
 lamp 404          0              UPPER PLAYFIELD GI-WHT(X12)  # lamp 191, I/O group 7 index 1, at 0,0
 lamp 405          0              MASER FIRE FLASH  # lamp 192, I/O group 6 index 48, at 91,438

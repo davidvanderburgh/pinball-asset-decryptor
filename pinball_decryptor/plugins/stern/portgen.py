@@ -1497,6 +1497,21 @@ def cabinet_draft(target):
         return []
 
 
+_LED_COUNT = re.compile(r"\s*\(X\d+\)\s*$")
+
+
+def _same_but_count(by_name, name):
+    """PAD-1476 round 4: the target's one insert named like *name* but for the LED count the name ends with: a GI
+    string is "LOWER PLAYFIELD GI-WHT(X9)" on Godzilla LE 1.16 and "(X8)" on the Pro - the Pro 1.16 port lost it, so
+    a block mode's GI dark and the co-op intro's left that string lit. None when the name carries no count, or more
+    than one insert matches."""
+    stem = _LED_COUNT.sub("", name or "")
+    if not stem or stem == name:
+        return None
+    hits = [i for n, i in by_name.items() if _LED_COUNT.sub("", n) == stem]
+    return hits[0] if len(hits) == 1 else None
+
+
 def lamp_draft(rest, target, other_title, report, cache):
     """One `lamp` line for the target (item mode-leds), placed by the insert's name in the target's own
     tables (lampmap), with the target's own shot tie where its shot table was read; or a comment."""
@@ -1515,7 +1530,7 @@ def lamp_draft(rest, target, other_title, report, cache):
         except SystemExit as e:
             cache["inserts"] = ({}, str(e))
     by_name, how = cache["inserts"]
-    ins = by_name.get(ref[3])
+    ins = by_name.get(ref[3]) or _same_but_count(by_name, ref[3])
     if ins is None:
         report["lamp missing"] += 1
         return "# lamp %-40s left out: the target names no insert %s (%s)" % (rest.split("#")[0].strip(), ref[3], how)

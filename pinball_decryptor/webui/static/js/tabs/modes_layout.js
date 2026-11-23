@@ -323,7 +323,7 @@ export function LayoutEditor({ lay, size, backdrops = [], title, hint, onBrowse 
 // the picked element's numbers: x y w h in % of its parent, and its pixels on the screen
 function Inspector({ e, sbox, pbox, W, H, onSet, onReset }) {
   if (!e) return html`<div class="jjpl-insp small muted">Click a box to pick it: drag it to move it, its handles to size it,
-    the arrow keys to nudge it a pixel (Shift: ten). Edges and centres snap to the screen, the panel and each other; hold Alt not to snap.</div>`;
+    the arrow keys to nudge it a pixel (Shift: ten). Edges and centers snap to the screen, the panel and each other; hold Alt not to snap.</div>`;
   const b = toParent(sbox, pbox).map(r2);
   const px = [sbox[0] * W / 100, sbox[1] * H / 100, sbox[2] * W / 100, sbox[3] * H / 100].map(Math.round);
   const of = e.parent ? (e.parent === "game_type_at" ? "% of the menu" : "% of the panel") : "% of the screen";

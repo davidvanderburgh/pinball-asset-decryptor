@@ -24,6 +24,16 @@ def _no_real_flash(monkeypatch):
     monkeypatch.setattr(app_mod.App, "_start_flash_image", _refuse)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_app_picker(monkeypatch):
+    """No test may bring Windows' "Select an app" dialog onto the desktop."""
+    from pinball_decryptor.webui import open_image as oi
+
+    def _refuse(ext=".raw"):
+        raise AssertionError("an open-image test opened Windows' app picker")
+    monkeypatch.setattr(oi, "ask_windows", _refuse)
+
+
 def test_image_arg_takes_the_first_existing_file(tmp_path):
     from pinball_decryptor.webui.open_image import image_arg
     img = tmp_path / "Game 1.0.raw"
@@ -350,6 +360,11 @@ def test_gear_toggle_sets_up_and_takes_away(tmp_path, monkeypatch):
                         fileexts=None:
                         calls.append(("on", take_raw)) or True)
     monkeypatch.setattr(oi, "raw_chosen_elsewhere", lambda: "Photos")
+    # another app also opens .raw: Windows' own question comes up from the
+    # switch (PAD-1518), never a real dialog in a test
+    monkeypatch.setattr(oi, "raw_is_pads", lambda: False)
+    monkeypatch.setattr(oi, "ask_windows",
+                        lambda ext=".raw": calls.append(("ask", ext)) or True)
     with web_app(tmp_path, mfr="stern") as w:
         item = _card_images_item(w)
         assert item["label"] == "Open card images with PAD"
@@ -359,6 +374,8 @@ def test_gear_toggle_sets_up_and_takes_away(tmp_path, monkeypatch):
             return json.loads((tmp_path / "cfg" / "settings.json")
                               .read_text(encoding="utf-8"))["card_images"]
         w.call("ui.settings_action", "toggle_card_images")
+        wait_for(w, lambda: ("ask", ".raw") in calls)
+        calls.remove(("ask", ".raw"))
         assert calls == [("on", True)]
         assert _card_images_item(w)["checked"] is True
         assert _saved() is True

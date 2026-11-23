@@ -386,6 +386,61 @@ def raw_chosen_elsewhere(ext=".raw", fileexts=None):
     return app_name(str(prog))
 
 
+def raw_is_pads(ext=".raw", fileexts=None):
+    """Whether Windows' own choice for *ext* is PAD: the double-click and the
+    file's icon are PAD's only then, when any other app also opens *ext*."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                (fileexts or FILEEXTS) + "\\" + ext + r"\UserChoice") as k:
+            return winreg.QueryValueEx(k, "ProgId")[0] == PROGID
+    except (ImportError, OSError):
+        return False
+
+
+def ask_windows(ext=".raw"):
+    """Open Windows' own "Select an app to open this file" for *ext* and
+    wait for it to close.  Windows signs the choice it records there, so the
+    user's click on PAD > Always is the one step no app can take for them;
+    this brings that question up from PAD's own switch instead of leaving
+    it for the next double-click in Explorer (PAD-1518).  Nothing is opened.
+    Never raises."""
+    if sys.platform != "win32":
+        return False
+    import tempfile
+    folder = tempfile.mkdtemp(prefix="pad-card-")
+    path = os.path.join(folder, "Pinball card image" + ext)
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class OPENASINFO(ctypes.Structure):
+            _fields_ = [("pcszFile", wintypes.LPCWSTR),
+                        ("pcszClass", wintypes.LPCWSTR),
+                        ("oaifInFlags", ctypes.c_int)]
+        with open(path, "wb"):
+            pass
+        # ALLOW_REGISTRATION | REGISTER_EXT | FORCE_REGISTRATION, never EXEC
+        info = OPENASINFO(path, None, 0x1 | 0x2 | 0x8)
+        fn = ctypes.windll.shell32.SHOpenWithDialog
+        fn.argtypes = [wintypes.HWND, ctypes.POINTER(OPENASINFO)]
+        fn.restype = ctypes.c_long
+        fn(None, ctypes.byref(info))
+        return True
+    except Exception:                                   # noqa: BLE001
+        log.warning("Windows' app picker not shown", exc_info=True)
+        return False
+    finally:
+        for p, rm in ((path, os.remove), (folder, os.rmdir)):
+            try:
+                rm(p)
+            except OSError:
+                pass
+
+
 def app_name(prog):
     """What Windows calls the app behind *prog*, a UserChoice ProgId: a Store
     app's is ``AppX`` and 32 letters ("AppX9rkaq77s0jzh1tyccadx9ghba15r6t3h"

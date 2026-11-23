@@ -28,6 +28,7 @@ from pinball_decryptor.webui import open_image
 open_image.install_dir = lambda: r"C:\Program Files\Pinball Asset Decryptor"
 open_image.register_association = lambda *a, **k: False
 open_image.unregister_association = lambda *a, **k: False
+open_image.ask_windows = lambda *a, **k: False   # never a real dialog
 from pinball_decryptor.webui import host
 sys.exit(host.main(sys.argv[1:]))
 '''

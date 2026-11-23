@@ -681,14 +681,36 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, CardsMixin, ResetMixi
                      "info")
             return True
         open_image.register_association(take_raw=True)
+        if open_image.raw_is_pads():
+            self._card_images_result()
+            return True
+        # another app also opens .raw, so Windows wants the user's own click
+        # once: bring its question up here, from the switch (PAD-1518)
+        self.log("Card images: Windows is asking which app opens .raw "
+                 "files. Pick Pinball Asset Decryptor, then Always.", "info")
+
+        def _ask():
+            open_image.ask_windows(".raw")
+            self.ctx.loop.post(self._card_images_result)
+        threading.Thread(target=_ask, name="pad-shellx-openwith",
+                         daemon=True).start()
+        return True
+
+    def _card_images_result(self):
+        from .. import open_image
         other = open_image.raw_chosen_elsewhere()
-        if other:
-            self.log("Card images: .raw files still open with %s, and "
-                     "Windows would not let PAD change that. To change it "
-                     "yourself, right-click a "
-                     ".raw, then Open with > Choose another app > Pinball "
-                     "Asset Decryptor > Always. Right-click > Write to a "
-                     "card with PAD works either way." % other, "warning")
+        if not other and not open_image.raw_is_pads():
+            self.log("Card images: Windows has no app chosen for .raw files "
+                     "yet. Double-click one and pick Pinball Asset Decryptor "
+                     "> Always, or untick and tick this switch to be asked "
+                     "again. Right-click > Write to a card with PAD works "
+                     "either way.", "warning")
+        elif other:
+            self.log("Card images: .raw files still open with %s. To change "
+                     "it, untick and tick this switch and pick Pinball "
+                     "Asset Decryptor > Always when Windows asks. "
+                     "Right-click > Write to a card with PAD works either "
+                     "way." % other, "warning")
         else:
             self.log("Card images open with PAD: double-click a .raw, or "
                      "right-click a .raw, .img or .iso > Write to a card "

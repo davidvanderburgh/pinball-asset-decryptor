@@ -431,6 +431,11 @@ def register_association(app_dir=None, take_raw=False, classes=None,
                 changed = release_windows_choice(ext, fileexts) or changed
     if changed and classes == CLASSES:
         _notify()
+    if classes == CLASSES:
+        # the same two verbs on Windows 11's short menu (PAD-1523), after
+        # the verbs it reads its label, icon and command from
+        from . import shell_menu
+        changed = shell_menu.register() or changed
     return changed
 
 
@@ -480,6 +485,8 @@ def unregister_association(classes=None):
             pass
         _notify()
         shell_icon.unstage()
+        from . import shell_menu
+        shell_menu.unregister()
     return True
 
 

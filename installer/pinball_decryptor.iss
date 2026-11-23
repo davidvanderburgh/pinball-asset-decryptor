@@ -267,6 +267,18 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /reset /T /C /Q"; StatusMsg: "Repairing Python file permissions..."; Flags: runhidden waituntilterminated
 Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /grant *S-1-5-32-545:(OI)(CI)RX /T /C /Q"; StatusMsg: "Repairing Python file permissions..."; Flags: runhidden waituntilterminated
 
+; --- Windows 11's short right-click menu (PAD-1523) ---------------------
+; "Write to a card with PAD" and "Compact with PAD" reach Windows 11's first
+; right-click menu only through a package (pinball_decryptor\shell\
+; padmenu.msix, which the app adds for its user: webui/shell_menu.py), and
+; Windows adds a package only when its signature is trusted on the machine.
+; It is signed with the app's own certificate; this puts that certificate's
+; public part in the machine's Trusted People, which trusts packages signed
+; with the app's key and nothing else.  Elevated, which this installer is.
+; Windows 10 has no such menu and is left alone.  The uninstaller takes it
+; away again (RemoveTheFileAssociation).
+Filename: "{sys}\certutil.exe"; Parameters: "-f -addstore TrustedPeople ""{app}\pinball_decryptor\shell\padmenu.cer"""; StatusMsg: "Adding the right-click menu..."; Flags: runhidden waituntilterminated; MinVersion: 10.0.22000
+
 ; --- Compile the app's Python once, here --------------------------------
 ; The app ships as source (the __pycache__ folders are excluded above), so
 ; the first start after every install or update compiled each of its ~400
@@ -535,6 +547,7 @@ var
   Exts: array[0..2] of String;
   I: Integer;
   Cur: String;
+  ResultCode: Integer;
 begin
   Exts[0] := '.raw'; Exts[1] := '.img'; Exts[2] := '.iso';
   for I := 0 to 2 do
@@ -564,6 +577,18 @@ begin
   DelTree(ExpandConstant('{localappdata}\pinball_decryptor\shell'),
           True, True, True);
   DelTree(ExpandConstant('{localappdata}\pinball_decryptor\compact_queue'),
+          True, True, True);
+  { PAD-1523: the short-menu package (shell_menu.NAME) for this user, its
+    staged handler, and the certificate the install trusted it by (the
+    thumbprint is shell/padmenu64.json's; a test holds the two together). }
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -NonInteractive -Command "Get-AppxPackage -Name ' +
+       'PinballAssetDecryptor.ShellMenu | Remove-AppxPackage"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\certutil.exe'),
+       '-delstore TrustedPeople 246D199E7D32A5CB4F446F74CC67829192237F88',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\shell_menu'),
           True, True, True);
 end;
 

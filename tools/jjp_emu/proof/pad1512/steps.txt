@@ -44,11 +44,11 @@ wait "WIZARD" start raised 10
 note it waits for the game's multiball, then for its extra balls to drain
 wait "WIZARD" start .* waiting for gobstopper_mb 10
 press switch_target_l_loop
-sleep 2
-drain
-sleep 1
-drain
-wait "WIZARD" STARTED 40
+note on this rig the game keeps counting the multiball's balls until they are home: the ball ends
+note first, and the start the ball's end dropped is raised again on the next ball
+wait "WIZARD" start .* dropped: the ball ended first 60
+wait "WIZARD" start raised: .*a start not made last ball 20
+wait "WIZARD" STARTED 30
 sleep 1
 shot /var/tmp/pad1512/wizard.png
 note while it runs the game's modes are held off

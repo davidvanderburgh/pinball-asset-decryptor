@@ -531,7 +531,8 @@ files.
   first moment that ball when the ball is in play, no other custom mode runs and
   nothing it yields to runs. A raised start not done by the end of the ball is
   dropped (logged). Several rules on one mode: any of them starts it.
-* A multiball is more than one ball in play for half a second (the count blips). Where a folder watches the game's modes (a `start_all` or a mode's code built for API 2, PAD-1512),
+* A multiball is more than one ball in play for half a second (the count blips); one ball left ends it
+  (PAD-1512: before, nothing ended it, and every start of ours waited for the game's end). Where a folder watches the game's modes (a `start_all` or a mode's code built for API 2, PAD-1512),
   one of the game's multiballs counts from the moment its MultiballRule says it runs, before a second ball
   comes; the ones running two seconds into a ball (a title's always-on ones) do not.
 * The mode's lamps live in a lamp layer of their own, above the game's mode

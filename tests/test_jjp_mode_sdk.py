@@ -871,3 +871,15 @@ def test_godfather_kiss_the_ring_is_its_sixteen_panes():
     assert {"CompoundMB", "FiveFamiliesMB", "SicilyMB", "TurfWarMB"} <= set(names)
     for k in ("sound_start", "sound_shot", "sound_end"):
         assert "KissTheRing" in ktr[k] and ktr[k] in port["sounds"]
+
+
+def test_a_multiball_ends_when_one_ball_is_left():
+    """PAD-1512: once a multiball had lasted half a second nothing cleared it, so every start of ours
+    yielded to "multiball" for the rest of the game.  One ball in play ends it now, and where the game's
+    modes are watched a running MultiballRule counts at once."""
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    body = src[src.index("int bip = balls_in_play ? balls_in_play() : -1;"):]
+    body = body[:body.index("for (int i = 0; i < npm; i++)")]
+    assert "} else multiball_since = 0;" in body and "else if (bip <= 1)" not in body
+    busy = src[src.index("static const char *game_busy_except(const pm_t *m)"):]
+    assert "return mb_busy();" in busy[:busy.index("static const char *game_busy(void)")]

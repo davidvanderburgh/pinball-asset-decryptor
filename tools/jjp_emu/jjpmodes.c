@@ -4172,9 +4172,12 @@ static void per_frame(void)
         static int last_bip = -1;
         int bip = balls_in_play ? balls_in_play() : -1;
         if (bip != last_bip) { lg("balls in play: %d", bip); last_bip = bip; }
-        if (bip > 1 && !multiball_since) multiball_since = now_ms();
-        if (multiball_since && now_ms() - multiball_since >= 500) multiball_seen = 1;
-        else if (bip <= 1) multiball_since = 0;
+        /* PAD-1512: back to one ball is the multiball's end.  Before, once it had lasted half a
+         * second nothing cleared it, so "multiball" held every start of ours to the game's end. */
+        if (bip > 1) {
+            if (!multiball_since) multiball_since = now_ms();
+            if (now_ms() - multiball_since >= 500) multiball_seen = 1;
+        } else multiball_since = 0;
     }
     for (int i = 0; i < npm; i++) {
         pm_t *m = &pms[i];

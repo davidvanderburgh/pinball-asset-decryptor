@@ -1,0 +1,13 @@
+# PAD-1512 proof: a wizard mode of ours on Wonka 03.03 - every one of three of the game's own modes
+# (two Mode objects, by global and by class, and a multiball) played by the player up starts it.
+name = WIZARD
+title = WIZARD
+start_all = cl_mode MikeTeaveeMode gobstopper_mb
+progress = cl_mode pane1.png pane1_grey.png
+progress = MikeTeaveeMode pane2.png pane2_grey.png
+progress = gobstopper_mb pane3.png pane3_grey.png
+progress_seconds = 4
+game_type = WIZARD GAME
+shots = switch_target_tv
+points = 1000000
+seconds = 15

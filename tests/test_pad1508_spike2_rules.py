@@ -82,8 +82,9 @@ def test_start_also_wants_a_start_line_and_repeats_have_a_limit(mm, tmp_path):
 
 def test_runtime_reads_the_rules_with_the_checkers_limits(mm):
     src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
-    limits = {k: int(re.search(r"#define MAX_%s (\d+)" % k, src).group(1)) for k in ("SP", "ALSO", "AT")}
-    assert mm.REPEATABLE == {"shot_points": limits["SP"], "start_also": limits["ALSO"], "sound_at": limits["AT"]}
+    limits = {k: int(re.search(r"#define MAX_%s (\d+)" % k, src).group(1)) for k in ("SP", "ALSO", "AT", "ALL")}
+    assert mm.REPEATABLE == {"shot_points": limits["SP"], "start_also": limits["ALSO"], "sound_at": limits["AT"],
+                             "progress": limits["ALL"]}     # PAD-1512: progress lines
     for word in ("solid", "blink", "pulse", "chase"):
         assert '!strcmp(v, "%s")' % word in src
     # combo_seconds 0 = no time limit; a cooldown is timed from the end the runtime saw

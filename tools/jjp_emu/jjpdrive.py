@@ -5,6 +5,8 @@ a scripted list of steps.  Run as root in WSL beside a hidden JJP run (PAD_HIDDE
 A game needs credits (Wonka is not on free play) and the game in attract first: wait for
 "game state 2 -> 4", give it a while, then coin up and press Start, holding each press 0.3 s.
 Steps, one a line:  press <switch>  |  sleep <s>  |  wait <regex> [timeout s]  |  plunge  |  drain  |  note <text>
+  |  hold <switch>[,<switch>...] <s> (PAD-1512: held together, e.g. both flipper buttons)
+  |  shot <png> (the game's screen, grab.sh)
 `wait` reads the runtime log (/var/tmp/jjp_run/jjpe/temp/jjpmodes.log by default)."""
 import heapq, json, os, re, sys, time  # noqa: E401
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -80,6 +82,21 @@ for raw in open(sys.argv[1]):
         k = by_name(arg)
         shm.set_switch(k[0], k[1], True); pump(0.3); shm.set_switch(k[0], k[1], False); pump(0.7)
         out("pressed " + arg)
+    elif op == "hold":                 # PAD-1512: switches held down together for a while
+        names, secs = arg.rsplit(None, 1)
+        ks = [by_name(n) for n in names.split(",")]
+        for k in ks:
+            shm.set_switch(k[0], k[1], True)
+        pump(float(secs))
+        for k in ks:
+            shm.set_switch(k[0], k[1], False)
+        pump(0.5)
+        out("held %s for %s s" % (names, secs))
+    elif op == "shot":                 # PAD-1512: the game's screen now (grab.sh)
+        import subprocess
+        r = subprocess.run(["bash", os.path.join(os.path.dirname(os.path.abspath(__file__)), "grab.sh"), arg],
+                           capture_output=True, text=True)
+        out("shot %s: %s" % (arg, "ok" if r.returncode == 0 else (r.stderr or r.stdout).strip()[-200:]))
     elif op == "sleep":
         pump(float(arg))
     elif op == "plunge":

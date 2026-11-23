@@ -1,0 +1,43 @@
+# Kiss the Ring for Godfather 02.03 (PAD-1512): the wizard mode JJP never finished.
+# Its sounds shipped in the game and are still loaded there (the se_*KissTheRing* below); its
+# rules were never written, so these are ours.  Every key: tools/jjp_emu/MODES.md
+#
+# How it starts:
+#   - play all 16 of the game's modes the 16 stained-glass panes stand for (the 12 jobs and the
+#     4 multiballs) in one game, as each player; or
+#   - pick KISS THE RING on the attract menu (hold both flipper buttons a second in attract,
+#     flippers to choose, Start to play): it starts on each player's first ball.
+name = Kiss the Ring
+title = KISS THE RING
+start_all = BoxingMode PursuitMode TributeMode DeliveryMode HungJuryMode TurnpikeMode MarketDayMode ShakedownMode WeddingFavorMode DinnerSpecialsMode TakeTheCannoliMode RaidMode CompoundMB FiveFamiliesMB SicilyMB TurfWarMB
+game_type = KISS THE RING
+# A 4-ball multiball with no clock: it runs until one ball is left.  The scoop adds a ball, twice.
+multiball = 4 30
+seconds = 0
+add_ball = switch_scoop 2
+# Every made shot pays more than the one before; the bad guy's drop target pays the most.
+shots = switch_l_ramp_made switch_u_loop_ramp_made switch_l_orbit_hi switch_r_orbit_hi switch_scoop
+points = 2000000
+points_ladder = rising
+shot_points = switch_drop_target 25000000
+sound_start = se_VO_GF_Narrator_KissTheRing1
+sound_shot = se_Fanfare_WizardMode_KissTheRing_BadGuyHit_1
+sound_end = se_VO_GF_Narrator_KissTheRingChampion1
+coil_start = coil_knocker_1
+coil_shot = coil_flash_bulb_topper
+lamps = lp_bad_guy_arrow_1 lp_bad_guy_arrow_2 lp_l_ramp_arrow_1_1 lp_upper_loop_arrow_1_1 lp_l_orbit_arrow_1_1 lp_r_orbit_arrow_1_1 lp_scoop_arrow_1_1
+lamp_color = ffd000
+lamp_pattern = chase
+lamp_blink = 6
+#
+# The game's own Kiss the Ring art and music are files of its extract, not of the game's code:
+# copy them into this folder (the app's Modes tab: Open the mode folder) and take the # off:
+#   graphics/Attract Mode/Kiss the Ring Progress/  - the 16 stained-glass panes (lit and grey)
+#   sound/music/BG_WizardMode_KissTheRing.ogg       - its own music
+# music = BG_WizardMode_KissTheRing.ogg
+# video = <one of its full-screen videos>.webm
+# The progress board: one line a pane, lit once that mode is played (renamed without spaces):
+# progress = BoxingMode pane_boxing.png pane_boxing_grey.png
+# progress = PursuitMode pane_pursuit.png pane_pursuit_grey.png
+# ... one for each start_all mode
+# progress_seconds = 5

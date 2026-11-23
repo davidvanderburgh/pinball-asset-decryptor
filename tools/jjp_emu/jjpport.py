@@ -316,6 +316,42 @@ def hold(e):
     ])
 
 
+def has_hook(e, hook):
+    """The game has a Hook<hook, ...>::list (jjpmodes.c hook_list)."""
+    pre = "_ZN4HookI%d%s" % (len(hook), hook)
+    return any(n.startswith(pre) and n.endswith("4listE") and s == 16 for n, (a, s) in e.syms.items())
+
+
+#: PAD-1512: the engine calls the attract game type menu reads its buttons through
+GAME_TYPE_BUTTONS = ("_Z28jjpe_is_left_flipper_pressedv", "_Z29jjpe_is_right_flipper_pressedv")
+
+
+def played(e, engine, proc_names):
+    """PAD-1512: start_all / game_mode / progress (the game's modes and multiballs a player has
+    played) and game_type (the attract menu), on the file, as jjpmodes.c's "played" reads them.
+    `names` are what start_all can name statically: the game's Mode and MultiballRule classes (a
+    mode global's name needs a live map, jjpstock.py), or on the proc engine its mode procs."""
+    game_start = has_hook(e, "HookGameStart_")
+    player = "_Z23game_flow_get_player_upv" in e.syms
+    if engine == "mode":
+        modes, mbs = derived_classes(e)
+        names = sorted(set(_demangled_class(c) for c in modes + mbs) - {"Mode", "MultiballRule"})
+        multiballs = "_ZN13MultiballRule10is_runningEv" in e.syms and "_ZTV13MultiballRule" in e.syms and bool(mbs)
+    else:
+        names, multiballs = sorted(proc_names), False
+    return collections.OrderedDict([
+        ("can_watch", bool(engine) and game_start and player),
+        ("multiballs", multiballs),
+        ("names", names),
+        ("game_type", collections.OrderedDict([
+            ("can", bool(engine) and game_start and player and all(b in e.syms for b in GAME_TYPE_BUTTONS)),
+            ("buttons", collections.OrderedDict((b, b in e.syms) for b in GAME_TYPE_BUTTONS)),
+            ("attract_hook", has_hook(e, "HookAttractModeStart_")),
+            ("diag_hook", has_hook(e, "HookDiagStart_")),
+        ])),
+    ])
+
+
 #: what a mode's own sounds, music, picture and video use (PAD-1352): the game's
 #: SoundEffect (a copy of one of its own plays our sample), its music list, and
 #: the Allegro / FFmpeg libraries the game links (found at run time by name)
@@ -542,6 +578,7 @@ def port(elf_path, gamename=None, live=None):
         ("mode_vtable", vt),
         ("hold", hold(e) if engine == "mode" else {"can_hold": False}),
         ("proc_modes", proc_modes(e) if engine == "proc" else []),
+        ("played", played(e, engine, proc_modes(e) if engine == "proc" else [])),
         ("media", media(e)),
         ("can_balls", all(sdk.get("balls", {}).values()) and bool(sdk.get("balls"))),
         ("can_coils", all(sdk.get("coils", {}).values()) and bool(sdk.get("coils"))),
@@ -668,6 +705,10 @@ def main(argv=None):
     sr = p["start_rules"]
     print("  start rules: %s; start_on %s%s" % ("yes" if sr["can_start_on_rules"] else "switches and combos only",
                                              " ".join(sr["start_on"]) or "-", "; start_score" if sr["start_score"] else ""))
+    pl = p["played"]
+    print("  played (start_all): %s, %d name(s)%s; game type menu: %s" % (
+        "yes" if pl["can_watch"] else "no", len(pl["names"]), ", multiballs too" if pl["multiballs"] else "",
+        "yes" if pl["game_type"]["can"] else "no"))
     st = p["stock"]
     if st.get("classes"):
         cl = st["classes"]

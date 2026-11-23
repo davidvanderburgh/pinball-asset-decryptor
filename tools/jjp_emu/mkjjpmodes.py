@@ -315,9 +315,12 @@ KEYS = collections.OrderedDict([
     ("lamp_pattern", ("solid", "blink", "pulse", "chase")),
     # PAD-1508 run 2: a mode in a game mode's place; a mode inside another (Spooky only)
     ("in_place_of", "in_place"), ("inside", "no_inside"),
+    # PAD-1512: the game's modes played (a wizard mode's rule), its progress board, a game type
+    ("start_all", "played"), ("start_all_count", "int"), ("progress", "progress"), ("progress_at", "box"),
+    ("progress_seconds", "int"), ("game_type", "game_type"),
 ])
 #: keys a mode file may give on several lines, and how many lines the runtime takes (PAD-1508)
-REPEATABLE = {"shot_points": 8, "start_also": 3, "sound_at": 8}
+REPEATABLE = {"shot_points": 8, "start_also": 3, "sound_at": 8, "progress": 32}
 #: start_on words -> the game's Hook<...>::list each one needs (jjpmodes.c EVENTS)
 START_EVENTS = collections.OrderedDict([
     ("ball_start", "HookBallStart_"), ("first_ball", "HookFirstBall_"), ("last_ball", "HookLastBall_"),
@@ -325,14 +328,14 @@ START_EVENTS = collections.OrderedDict([
     ("extra_ball", "HookExtraBallAwarded_"), ("multiball_end", "HookMultiballEnd_"),
 ])
 #: keys that start a mode on their own
-START_RULES = ("start", "start_on", "start_after", "start_score", "start_combo", "in_place_of")
+START_RULES = ("start", "start_on", "start_after", "start_score", "start_combo", "in_place_of", "start_all", "game_type")
 
 
 def start_text(m):
     """What starts a mode, for a summary line: its start switches and any start rules."""
     parts = [m["start"]] if m.get("start") else []
     for k, label in (("start_on", "on"), ("start_after", "after"), ("start_score", "score"), ("start_combo", "combo"),
-                     ("in_place_of", "in place of")):
+                     ("in_place_of", "in place of"), ("start_all", "after all of"), ("game_type", "game type")):
         if m.get(k):
             parts.append("%s %s" % (label, m[k]))
     return "; ".join(parts)
@@ -340,6 +343,7 @@ def start_text(m):
 TITLE_KEYS = collections.OrderedDict([
     ("game", "text"), ("ingame_state", "int"), ("background_modes", "modes"),
     ("coil_holds", ("on", "off")),
+    ("game_type_normal", "text"), ("game_type_title", "text"),     # PAD-1512: the attract menu's lines
 ])
 #: keys a .stock file takes (jjpmodes.c apply_stock_kv): one of the GAME's own modes, changed (PAD-1351)
 STOCK_KEYS = collections.OrderedDict([
@@ -347,6 +351,7 @@ STOCK_KEYS = collections.OrderedDict([
     ("shots_off", "shots"), ("shots_add", "shotadds"),
 ])
 MAX_MODES, MAX_LIST, MAX_SHOT_SWITCHES, MAX_STOCK = 24, 24, 96, 32
+MAX_ALL, MAX_GAME_TYPES = 32, 9     # jjpmodes.c: start_all names / progress lines; game types on the menu
 MODE_FILES = (".mode", ".stock")
 #: a mode's own files (PAD-1352): what the runtime's Allegro / FFmpeg read, by extension
 MEDIA_EXTS = {
@@ -472,6 +477,38 @@ def check_value(kind, v, port=None):
         if not words or "any" in words:
             return "must name the game's modes (any is start_after's)"
         return check_value("after", v, port)
+    if kind == "played":          # PAD-1512 start_all: the game's modes / multiballs (globals or classes)
+        if not words:
+            return "must name the game's modes or multiballs"
+        if len(words) > MAX_ALL:
+            return "names %d; the runtime takes %d" % (len(words), MAX_ALL)
+        pl = (port or {}).get("played")
+        if port is None or pl is None:
+            return None       # a report from before PAD-1512: the runtime says on the machine
+        if not pl.get("can_watch"):
+            return "cannot work on %s: it has no game start hook or player-up call to count plays by" % port.get("title", "this game")
+        st = port.get("stock") or {}
+        objects = set(st.get("objects") or ()) | set(port.get("game_modes") or ())
+        known = set(pl.get("names") or ()) | objects
+        # a mode global's name is known only from a live map (jjpstock.py live): without one, only
+        # a class-like name (CamelCase) can be refused
+        missing = [t for t in words if t not in known and (objects or t[:1].isupper())]
+        return None if not missing else "not a game mode or multiball of %s: %s" % (port.get("title", "this game"), " ".join(missing))
+    if kind == "progress":        # <game mode> <picture> [<unlit picture>]
+        if not 2 <= len(words) <= 3:
+            return "must be <game mode> <picture> [<unlit picture>]"
+        for w in words[1:]:
+            p = check_value("picture_file", w, port)
+            if p:
+                return p
+        return None
+    if kind == "game_type":       # its line on the attract menu
+        if not v.strip() or len(v) > 40:
+            return "must be its line on the attract menu (1-40 characters)"
+        gt = ((port or {}).get("played") or {}).get("game_type")
+        if gt is not None and not gt.get("can"):
+            return "cannot work on %s: it exports no flipper button calls (jjpe_is_left/right_flipper_pressed)" % port.get("title", "this game")
+        return None
     if kind == "inside":          # one of the folder's modes, checked against the folder (Spooky)
         return None if v.strip() else "must name one of the folder's modes"
     if kind == "no_inside":
@@ -589,6 +626,45 @@ def spike2_rule_problems(fn, m, mode_dir=None):
     return out
 
 
+def played_problems(fn, m, mode_dir=None):
+    """PAD-1512: what start_all, progress and game_type need of the rest of a mode file."""
+    out = []
+    names = _names(m.get("start_all", ""))
+    if m.get("start_all_count") and not names:
+        out.append("%s: start_all_count without a start_all line (it is ignored)" % fn)
+    elif names and m.get("start_all_count") and _whole(m["start_all_count"]) > len(names):
+        out.append("%s: start_all_count %s is more than the %d start_all names (every one is used)"
+                   % (fn, m["start_all_count"], len(names)))
+    for line in [l for l in (m.get("progress") or "").split("\n") if l.strip()]:
+        w = line.split()
+        if not names:
+            out.append("%s: progress lines need a start_all line (a pane lights for each start_all mode played)" % fn)
+            break
+        if w and w[0] not in names:
+            out.append("%s: progress %s: not one of its start_all modes (the line is skipped)" % (fn, w[0]))
+        for pic in w[1:3]:
+            if mode_dir and media_kind(pic) == "picture_file" and not os.path.isfile(os.path.join(mode_dir, pic)):
+                out.append("%s: progress %s: there is no %s in the mode folder" % (fn, w[0], pic))
+    if (m.get("progress_at") or m.get("progress_seconds")) and not m.get("progress"):
+        out.append("%s: progress_at / progress_seconds without a progress line (nothing to show)" % fn)
+    return out
+
+
+def game_type_problems(modes):
+    """PAD-1512: the attract menu shows MAX_GAME_TYPES game types, each line once."""
+    out, seen = [], {}
+    gts = [m for m in modes if (m.get("game_type") or "").strip()]
+    if len(gts) > MAX_GAME_TYPES:
+        out.append("%d modes have a game_type: the attract menu shows %d (%s left off)" % (
+            len(gts), MAX_GAME_TYPES, ", ".join(m["file"] for m in gts[MAX_GAME_TYPES:])))
+    for m in gts:
+        k = m["game_type"].strip().lower()
+        if k in seen:
+            out.append("%s: game_type %s is %s's too (two menu lines would read the same)" % (m["file"], m["game_type"], seen[k]))
+        seen.setdefault(k, m["file"])
+    return out
+
+
 def inside_problems(modes):
     """PAD-1508: an inside must name another mode of the folder, and no ring of them."""
     out = []
@@ -682,8 +758,9 @@ def check_modes(mode_dir, port=None):
         if code and CODE_NAME.match(code):
             problems.extend(code_problems(mode_dir, fn, code, port, shot_switches))
         if not any(m.get(k) for k in START_RULES) and not (code and code_starts_itself(mode_dir, code)):
-            problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo%s):"
-                            " the mode would never start" % (fn, ", or an idle() in its code that calls jm_start" if code else ""))
+            problems.append("%s: no start rule (start, start_on, start_after, start_score, start_combo, start_all or "
+                            "game_type%s): the mode would never start"
+                            % (fn, ", or an idle() or game_mode() in its code that calls jm_start" if code else ""))
         if m.get("start_combo") and len(_names(m["start_combo"])) < 2:
             problems.append("%s: start_combo needs two switches or more" % fn)
         if m.get("start_score") and _INT.match(m["start_score"]) and int(m["start_score"].replace(",", "").replace("_", "")) <= 0:
@@ -702,6 +779,7 @@ def check_modes(mode_dir, port=None):
             problems.append("%s: game_modes = hold, but %s has no Mode class to hold off: use pause (hold "
                             "runs as pause there)" % (fn, port.get("title", "this game")))
         problems.extend(spike2_rule_problems(fn, m, mode_dir))
+        problems.extend(played_problems(fn, m, mode_dir))
         if m.get("multiball_on") and not m.get("multiball"):
             problems.append("%s: multiball_on without a multiball line (it is ignored)" % fn)
         if m.get("coil_hold") and title.get("coil_holds") != "on":
@@ -709,6 +787,7 @@ def check_modes(mode_dir, port=None):
                             "(after a check on the machine)" % fn)
         modes.append(m)
     problems.extend(start_needs_problems(modes))
+    problems.extend(game_type_problems(modes))
     if stocks and port is not None and port.get("engine") == "proc":
         problems.append("%s: %s has no Mode class, so its own modes cannot be changed (.stock files are "
                         "ignored there)" % (" ".join(stocks), port.get("title", "this game")))
@@ -762,10 +841,10 @@ def code_source(mode_dir, code):
 
 
 def code_starts_itself(mode_dir, code):
-    """A mode whose C++ registers idle() starts itself (jm_start), so needs no start rule. With no
-    source here (a built .so alone), it is taken at its word."""
+    """A mode whose C++ registers idle() or game_mode() (PAD-1512) starts itself (jm_start), so needs
+    no start rule. With no source here (a built .so alone), it is taken at its word."""
     src = code_source(mode_dir, code)
-    return src is None or re.search(r"\.idle\s*=", src) is not None
+    return src is None or re.search(r"\.(idle|game_mode)\s*=", src) is not None
 
 
 def code_names(src):

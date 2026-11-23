@@ -1,0 +1,52 @@
+note wait for the game to come up
+wait installed: 240
+wait game state 2 -> 4 240
+wait played: watching 10
+sleep 30
+note the game type menu: both flipper buttons held a second in attract
+hold dswitch_l_flipper_lo,dswitch_l_flipper_hi,dswitch_r_flipper_lo,dswitch_r_flipper_hi 1.6
+wait game type menu OPEN 5
+hold dswitch_r_flipper_lo,dswitch_r_flipper_hi 0.3
+wait game type menu: WIZARD GAME 5
+hold dswitch_r_flipper_lo,dswitch_r_flipper_hi 0.3
+wait game type menu: PRACTICE GAME 5
+hold dswitch_l_flipper_lo,dswitch_l_flipper_hi 0.3
+hold dswitch_r_flipper_lo,dswitch_r_flipper_hi 0.3
+sleep 1
+shot /var/tmp/pad1512/menu.png
+sleep 2
+note coins and Start with PRACTICE GAME picked
+press dswitch_coin_1
+press dswitch_coin_1
+sleep 1
+press dswitch_start
+wait game type: PRACTICE GAME 30
+wait game state \d+ -> 5 90
+sleep 3
+plunge
+wait "PRACTICE" STARTED 20
+wait "PRACTICE" over 20
+note the wizard's three game modes, each started by its test switch and ended by the end switch
+press switch_target_bank_1
+wait "WIZARD": player 1 played cl_mode - 1 of 3 10
+press switch_target_l_loop
+wait "WIZARD": progress board 10
+sleep 0.5
+shot /var/tmp/pad1512/board1.png
+sleep 2
+press switch_target_bank_2
+wait "WIZARD": player 1 played MikeTeaveeMode - 2 of 3 10
+press switch_target_l_loop
+sleep 2
+press switch_target_bank_3
+wait "WIZARD": player 1 played gobstopper_mb - 3 of 3 10
+wait "WIZARD" start raised 10
+press switch_target_l_loop
+wait "WIZARD" STARTED 40
+sleep 1
+shot /var/tmp/pad1512/wizard.png
+note while it runs the game's modes are held off
+press switch_target_bank_1
+wait HELD OFF the game's mode cl_mode 10
+wait "WIZARD": player 1's start_all modes start again from none 5
+wait "WIZARD" over 40

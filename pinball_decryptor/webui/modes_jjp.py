@@ -133,7 +133,7 @@ class JjpModesMixin:
                 st["title_cfg"] = dict(CM.read_title(self._jjp_label))
                 st["folder"] = CM.title_dir(self._jjp_label)
                 st["names"] = {k: CM.names_for(port, k, st["folder"]) for k in (
-                    "switches", "lamps", "sound", "font", "events", "after",
+                    "switches", "lamps", "sound", "font", "events", "after", "played",
                     "sound_or_file", "sound_file", "picture_file", "video_file", "coil_pulse", "coil_hold")}
                 st["check"] = self._jjp_check_state()
                 st["sounds"] = self._jjp_sounds_state(port)

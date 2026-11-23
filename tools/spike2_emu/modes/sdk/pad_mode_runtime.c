@@ -29475,8 +29475,8 @@ static void bsid_line(const char *ms, const char *slot, const char *ids, const c
  * the game's mode mask holds the attract bit (value mode_mask_attract, 0x10 measured on Godzilla and
  * Bond) and no game is played, plays the carrier with the next file's key swapped in where the game
  * looks its record up (att_lookup) - once the last one has had its length (+ATT_GAP): a press while
- * one still plays is not another sound. The files go round in turn. PAD-1520: only while the attract bit
- * is the mask's ONLY bit - the game's end of game (MATCH) holds it with others (0x98 on Bond LE 1.06).
+ * one still plays is not another sound. The files go round in turn. PAD-1520: not while the mask holds the
+ * game's end-of-game bits too (value mode_mask_game_end, 0x88: MATCH is 0x98 on Bond LE 1.06).
  * PAD-645: most games play a sound of their own at a flipper button in attract (Deadpool LE 1.14: its
  * request 179 at every release). With
  *   aquiet  <a silent record's key>                             the build's own short silence
@@ -29509,6 +29509,7 @@ static struct {
     volatile unsigned long menu_ms;         /* round 2: the game's start menu was last seen running then */
     unsigned menu_skips;
     unsigned end_skips;                     /* PAD-1520: presses while the game's end of game (MATCH) played */
+    unsigned end_bits;                      /* PAD-1520: its mode mask bits (value mode_mask_game_end, 0x88) */
 } att = { .cur = -1 };
 static int att_bad;
 
@@ -29629,10 +29630,11 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     int k;
     if (id != att.sw[0] && id != att.sw[1]) return;
     if (!(mask & att.attract_bit) || pm_in_game()) return;   /* attract only: not a game, a tilt, a menu */
-    if ((mask & 0xffffu) != att.attract_bit) {
-        /* PAD-1520: the game's end of game keeps more bits beside the attract one while it plays out (James Bond
-         * LE 1.06 in the emulator: 0x98 through MATCH and its roulette wheel, then 0x10 once attract runs; a
-         * game's own attract is 0x10 alone) - a press there is not one in attract */
+    if (mask & att.end_bits) {
+        /* PAD-1520: the game's end of game holds two more bits beside the attract one while it plays out (James
+         * Bond LE 1.06 in the emulator: 0x98 through MATCH and its roulette wheel, then 0x10 once attract runs).
+         * Only those two: a game's own attract may hold others (0x110 on Bond 60th LE 1.11, now and then on John
+         * Wick LE 1.02) - a press there is one in attract */
         if (att.end_skips++ < 4)
             say("attract flipper sounds: switch %u while the game's end of game (MATCH) plays, mode mask 0x%x - no "
                 "sound", id, mask & 0xffffu);
@@ -29722,6 +29724,7 @@ static void att_arm(void)
         return;
     }
     att.attract_bit = (unsigned)pm_port_value("mode_mask_attract", 0x10);
+    att.end_bits = (unsigned)pm_port_value("mode_mask_game_end", 0x88);
     if (!edge_hook(e)) {
         say("attract flipper sounds: off - switch_edge 0x%08" PMA " cannot be hooked", e->addr);
         return;

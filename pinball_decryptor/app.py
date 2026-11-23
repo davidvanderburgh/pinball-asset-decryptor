@@ -6441,6 +6441,21 @@ class App:
 
         def _run():
             reused = False
+            if bg["how"] == "windows" and installer.get("delta"):
+                # PAD-1519: from the changed files alone when the release
+                # publishes its file list; anything in the way of that is
+                # the setup exe's turn, below
+                try:
+                    staged, note = self._stage_update_from_changes(bg, _post)
+                except InterruptedError:
+                    return
+                if staged:
+                    _post(self._background_update_ready, bg, False, staged,
+                          None, note)
+                    return
+                if bg["cancel"].is_set():
+                    return
+                _post(self._background_update_downloading, bg, note)
             try:
                 if staged_update_ok(dest, installer):
                     reused = True
@@ -6510,6 +6525,91 @@ class App:
         ok, info = stage_update_macos(bg["path"])
         return (info, None) if ok else (None, info)
 
+    def _stage_update_from_changes(self, bg, post):
+        """Worker thread (PAD-1519): get *bg*'s version ready from the files
+        already installed plus the ones the release changed, with no setup
+        exe.  Returns ``(staged folder, what it took)`` or ``(None, why
+        not)``; the caller then downloads the installer as before.
+
+        The banner says Downloading while the folder is filled (the copy of
+        the unchanged files is a few seconds; the bar is the changed files
+        coming down) and Installing for the compile and the rest."""
+        from .core import update_delta
+        version, installer = bg["version"], bg["installer"]
+        app_dir = update_slots.installed_app_dir()
+        if not app_dir:
+            return None, "this copy was not installed by the setup program"
+        if update_slots.staged_install_ok(app_dir, version):
+            return update_slots.next_dir(app_dir), "it was ready already"
+        if update_slots.swap_failed_version() == version:
+            return None, "switching to it in place did not work last time"
+        cancel = bg["cancel"].is_set
+        took = {}
+        started = time.time()
+        lst = os.path.join(update_slots.next_dir(app_dir), ".pad_compile.lst")
+
+        def _fill(target, _copy_progress):
+            manifest = update_delta.fetch_manifest(installer["delta"],
+                                                   version)
+            last = [-5]
+
+            def _progress(stage, done, total):
+                if stage != "download" or not total:
+                    return
+                pct = min(100, int(done * 100 / total))
+                if pct >= last[0] + 5:     # the banner redraws every 5 %
+                    last[0] = pct
+                    post(self._background_update_progress, bg, pct)
+            took.update(update_delta.build_tree(
+                manifest, app_dir, target, cancel_cb=cancel,
+                progress_cb=_progress,
+                max_download=int(installer.get("size") or 0) or None))
+            post(self._background_update_installing, bg)
+            return update_delta.compile_args(target, took["changed"], lst)
+
+        def _installed(pct):
+            # dropped by _background_update_progress until the banner is
+            # on Installing
+            post(self._background_update_progress, bg, pct, "installing")
+        try:
+            ok, info = update_slots.stage_delta_install(
+                _fill, app_dir, version, cancel_cb=cancel,
+                progress_cb=_installed)
+        except InterruptedError:
+            raise
+        except update_delta.DeltaUnavailable as e:
+            return None, str(e)
+        except Exception as e:                              # noqa: BLE001
+            return None, f"{type(e).__name__}: {e}"
+        if not ok:
+            return None, info
+        try:
+            os.unlink(lst)
+        except OSError:
+            pass
+
+        def _mb(n):
+            return ("%.1f MB" if n < 10e6 else "%.0f MB") % (n / 1e6)
+        whole = int(installer.get("size") or 0)
+        note = "%d changed file%s, %s downloaded%s, ready in %.0f s" % (
+            took["fetched"], "" if took["fetched"] == 1 else "s",
+            _mb(took["fetched_bytes"]),
+            " instead of the %s installer" % _mb(whole) if whole else "",
+            time.time() - started)
+        return update_slots.next_dir(app_dir), note
+
+    def _background_update_downloading(self, bg, why):
+        """The changed-files route gave up (PAD-1519), possibly after its
+        banner had moved on to Installing: say why, and show the installer's
+        download."""
+        if getattr(self, "_bg_update", None) is not bg:
+            return
+        bg["stage"], bg["pct"] = "downloading", None
+        self.window.append_log(
+            f"v{bg['version']} can't be made from the changed files alone "
+            f"({why}) - downloading its installer instead.", "info")
+        self._show_background_update(bg)
+
     def _background_update_installing(self, bg):
         if getattr(self, "_bg_update", None) is not bg:
             return
@@ -6519,7 +6619,7 @@ class App:
         self._show_background_update(bg)
 
     def _background_update_ready(self, bg, reused=False, staged=None,
-                                 err=None):
+                                 err=None, note=None):
         if getattr(self, "_bg_update", None) is not bg:
             return
         bg["stage"], bg["pct"], bg["staged"] = "ready", None, staged
@@ -6532,6 +6632,7 @@ class App:
             f"Update v{bg['version']} is "
             + ("installed" if staged
                else "already downloaded" if reused else "downloaded")
+            + (f" ({note})" if note else "")
             + (" - restarting into it." if getattr(
                 self, "_restart_pending", None)
                else " - press Restart to update whenever you're ready."),

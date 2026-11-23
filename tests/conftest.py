@@ -7,6 +7,54 @@ import sys
 
 import pytest
 
+from tests import _worker_budget
+
+
+# ---------------------------------------------------------------------------
+# PAD-1536: `-n auto` takes a share of one machine-wide worker budget, so
+# two tickets testing at once share the CPU instead of each taking every
+# core.  A run alone still gets the full count.  tests/_worker_budget.py.
+# ---------------------------------------------------------------------------
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_xdist_auto_num_workers(config):
+    if hasattr(config, "workerinput") or not _worker_budget.enabled():
+        return None                  # None: xdist's own count
+    from xdist.plugin import pytest_xdist_auto_num_workers as xdist_count
+    total = _worker_budget.budget(xdist_count(config))
+    capman = config.pluginmanager.getplugin("capturemanager")
+
+    def say(msg):
+        if capman is not None:
+            with capman.global_and_fixture_disabled():
+                sys.stderr.write(msg + "\n")
+                sys.stderr.flush()
+        else:
+            sys.stderr.write(msg + "\n")
+
+    n = _worker_budget.claim(
+        total, where=_worker_budget.where_label(config.rootpath), say=say)
+    if n < total:
+        say("test workers: %d of %d (sharing the machine with other runs)"
+            % (n, total))
+    config._pad_budget_claimed = True
+    return n
+
+
+def pytest_configure(config):
+    if hasattr(config, "workerinput") or not _worker_budget.enabled():
+        return
+    n = getattr(config.option, "numprocesses", None)
+    if (isinstance(n, int) and n > 0
+            and not getattr(config, "_pad_budget_claimed", False)):
+        _worker_budget.record_fixed(
+            n, where=_worker_budget.where_label(config.rootpath))
+
+
+def pytest_unconfigure(config):
+    if not hasattr(config, "workerinput"):
+        _worker_budget.release()
+
 
 # ---------------------------------------------------------------------------
 # Capability probes

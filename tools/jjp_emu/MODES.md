@@ -22,6 +22,26 @@ No game code is patched. How and why it works: `docs/plans/jjp_custom_modes.md`.
 
 ## In the app (PAD-1350)
 
+**The layout editor** (PAD-1515). JJP games draw their screens in code, so there is no scene file to
+open as on Stern; what our runtime draws over the game, though, is ours, and its places are the keys
+above. The Modes tab lays them out by dragging: a mode's **Screen** group opens with its screen (its
+panel, title, total and timer, its picture and its video), the **Wizard mode and game type** group
+with its progress board (lit or unlit), and **Every mode of this game** with every mode's screen and
+the attract game type menu (its lines as the folder's game types list them). Every element is a box
+on a 1360x768 screen: drag it to move it, its handles to size it, the arrow keys to nudge it a pixel
+(Shift: ten); its edges and centre snap to the screen's, its panel's and every other box's (Alt: no
+snap); its numbers show and can be typed; **Default place** takes its key away. Each move writes its
+key at once through the form's own save, so the check runs. The panel's places are buttons (Middle,
+Bottom, Top, None), and taking one takes the panel's own box away. Under the layout goes a backdrop:
+black, a picture or video of the mode folder (a video's first frame), the game's own screen
+(`.layout/` frames in the mode folder) or any picture or video picked from disk, an extracted attract
+clip say. The preview draws what the runtime draws: pictures and videos fitted as `draw_fit` fits
+them, text fitted into its box, the built-in font as its 8 px cells; a game font in a stand-in face
+(the browser cannot draw the game's font objects), named beside the box's numbers.
+Proven on Wonka 03.03 (`proof/pad1515`, 2026-11-23): a mode screen, a menu and a progress board laid
+out with every new key, drawn by the runtime in a hidden muted run; `compare.py` measures the same
+boxes in the editor's preview and in the game's frames.
+
 On a Jersey Jack game the app's **Modes** tab is this SDK's editor. It lists every
 title whose port report is in `modes/ports/`, the ones that can run modes first
 (the others greyed, with why). Picking one opens the person's own mode folder for
@@ -116,6 +136,8 @@ lamp_blink = 4
 | `title_color`, `value_color`, `timer_color` | ffffff, ffdc00, ffffff | rrggbb or rrggbbaa |
 | `panel_color` | 000000b0 | the panel behind the text, rrggbbaa |
 | `panel` | middle | `middle`, `bottom` or `top` (the game's score panel is at the bottom on most titles), or `none` (no text panel: the mode's picture or video says it) |
+| `panel_at` | the `panel` place | the panel's own box, `x y w h` in percent of the screen (PAD-1515); it takes the place of `middle` / `bottom` / `top`, and `panel = none` still hides the panel and its text |
+| `title_at`, `value_at`, `timer_at` | where the panel puts them | the title's, the total's and the timer's own boxes, `x y w h` in percent of the PANEL (so they move with it). Set, the text is fitted into its box: as tall as the box, narrower when it would overflow its width, centred in it; in the game's font when one is set (scaled to the box), else the built-in font. Unset, the text sits where it always did (the game's font at its own size) |
 | `game_modes` | hold | `hold` (PAD-1348): while this mode runs, a start of the game's that goes through its class's start or restart (on Wonka 03.03: the multiballs, proven with the Gobstopper multiball) is refused and the game carries on as if it was not asked. Some game modes start another way (Wonka's Oompa hurry-up, Wonka Wash Frenzy) and are not held: this mode pauses for them, as `pause` does, and resumes after. Or the older choices for when a game mode or multiball runs: `pause` (timer held, shots not scored, panel hidden, lamps handed back), `end`, or `ignore` (none of these refuse the game's starts) |
 | `hold_multiballs` | yes | with `hold`: `no` lets the game's multiballs start (and pause this mode) |
 | `allow_game_modes` | none | with `hold`: the game's mode globals or classes (e.g. `mtv_mode`, `OompaHurryUp`) that may still start |
@@ -136,7 +158,56 @@ lamp_blink = 4
 | `background_modes` | game modes that are always on and must not make a custom mode yield. Without it, the game modes already running two seconds into a ball count as always-on |
 | `game_type_normal`, `game_type_title` | the attract menu's line for a normal game (`NORMAL GAME`) and its heading (`GAME TYPE`) (PAD-1512) |
 | `game_type_hint`, `game_type_at`, `game_type_*_color`, `game_type_font_*`, `game_type_picture`, `game_type_picture_at` | the attract menu's look (PAD-1512): "The game type menu's look" below |
+| `screen_move`, `screen_hide` | the game's OWN screen changed (PAD-1515): a part it draws moved, scaled or hidden, a line each (up to 64): "The game's own screen" below |
 | `coil_holds` | `on` lets this title's modes hold coils (`coil_hold`). Off by default: a hold is a coil kept energised, so it is turned on per title once it has been watched on that machine. `mkjjpmodes.py check` names a `coil_hold` without it |
+
+## The game's own screen (PAD-1515)
+
+A JJP game draws its screens in code, so there is no scene file to change; but every picture and line
+of text it draws goes through Allegro's draw calls, and the runtime defines those (passing each one
+on). It names what is drawn by the game's own exported object that holds it: a sprite (`sp_*`), an
+animation or atlas (`atlas_playerup`: Wonka's PLAYER 1 score box), a movie, a font (`font_*`, and
+every line of text drawn in it), a displayable; else by the picture file it was loaded from. title.cfg
+then changes them:
+
+    screen_move = atlas_playerup 1.32 -27.89 1.15 54.67 84.9   # <name> <dx> <dy> [<scale> [<ax> <ay>]]
+    screen_hide = sp_candy_gumdrops_01                         # <name>
+
+`dx dy` move it, in percent of the screen; `scale` sizes it about `(ax, ay)` (percent of the screen:
+the part's centre, which the layout editor writes; without it each draw scales about its own centre).
+A move changes where the part is drawn, nothing else: it is drawn at its own moment, so what the game
+draws later can cover it, and what was behind it shows. Some HUD pieces are several parts (on Wonka the
+PLAYER 1 box's label, digits, sign and ball tube are `atlas_playerup`; its orange body is the bottom
+bar's picture `sp_ui_bg`): move them together (Shift-click in the editor).
+
+**How the game draws, as the runtime follows it.** Wonka (and the engine) draws its screen into a
+canvas bitmap and puts that on the display; parts are drawn into the canvas, into screen-sized layers
+composited into it, and into small pieces (a score box's digits) composited whole. Each bitmap the
+game draws into and then draws is mapped to the screen by that draw; a small piece is ONE part, named
+by its own object or by the first named part drawn into it, and moves whole. Text glyphs (Allegro's
+glyph cache, drawn from inside a text draw) go with their text. What no object names is shown in the
+editor as "bitmap WxH" or "piece WxH" and cannot be moved.
+
+**A census.** A file `request` holding a label in `JJP_MODS_SCREEN_DIR` (default `/tmp/padmodes/layout`)
+makes the runtime write the next frame as `<label>.png` (the game's frame, before anything of ours)
+and `<label>.json`: every part drawn, `{name, kind (picture, font, movie, unnamed), box, draws, text,
+rects}` in screen pixels, `rects` each draw's own box. `jjpdrive.py`'s `census <label> [<copy to>]`
+step asks for one; `jjpscreens.sh` (the Modes tab's **Show it in the game**) boots the stock ISO hidden
+and muted with the title's modes and takes `attract` and `game` (a ball in play), and when the folder
+has game types or the open mode has start switches, grabs the menu and the mode as the screen shows
+them (`in_game_menu.png`, `in_game_mode.png`, ours drawn) into the mode folder's `.layout/`.
+
+**In the app.** Every mode of this game > **The game's own screen**: the census frame with each named
+part a box. Drag to move, a corner to scale (its shape kept), Shift-click for a group (moved alike,
+scaled about the group's centre), **Hide it** / **Show it** / **Put it back**; a moved or hidden part
+leaves a striped ghost where the game draws it, and the preview shows its own pieces (its draws' boxes)
+cut from the frame. Each change writes its `screen_move` / `screen_hide` line at once.
+
+Proven on Wonka 03.03 (2026-11-23, `proof/pad1515/screen`, `verify_screen.py`): the game drew
+`atlas_playerup` moved up and 15 % bigger 0,0 px from where the editor shows it, the SHOOT G.U.M.
+TARGETS line (`violet_ui_info_font`) moved and 1.5x at 0,-1 px, and the gumdrops hidden. A census of
+Wonka's in-game screen names 12 to 19 of its 30 or so parts: the HUD bar, the score box, the masking
+tape notes, the candy jar, every font with its text.
 
 ## Balls and coils (PAD-1353)
 
@@ -243,8 +314,8 @@ sound_start = se_VO_GF_Narrator_KissTheRing1
 |---|---|---|
 | `start_all` | none | the game's modes and multiballs (their globals, e.g. `cl_mode`, or their classes, e.g. `CandyLaneMode`, `GobstopperMultiballRule`; on The Wizard of Oz its mode procs), up to 32: the mode starts once the player up has played every one of them this game. It is a start rule of its own |
 | `start_all_count` | every one | how many of them start it (`12`: any 12 of 16) |
-| `progress` | none | `<one of its start_all modes> <picture> [<unlit picture>]`, a line each (up to 32): the progress board. Each line's picture is drawn when the player up has played that mode toward the next start, else its unlit picture (if it has one), in the lines' order, all in one box |
-| `progress_at` | 0 0 100 100 | the board's box, `x y w h` in percent of the screen, as `picture_at` |
+| `progress` | none | `<one of its start_all modes> <picture> [<unlit picture>] [x y w h]`, a line each (up to 32): the progress board. Each line's picture is drawn when the player up has played that mode toward the next start, else its unlit picture (if it has one), in the lines' order, in the line's own box (four numbers after its pictures, percent of the screen; PAD-1515) or else the shared `progress_at` box |
+| `progress_at` | 0 0 100 100 | the shared box of every line without its own, `x y w h` in percent of the screen, as `picture_at` |
 | `progress_seconds` | 5 | how long the board shows: when a game mode that lit a picture ends, and at a ball's start once one is lit |
 | `game_type` | none | the mode's line on the attract menu (up to 9 a folder): a game started with it picked starts this mode on each player's first ball. It is a start rule of its own |
 
@@ -285,6 +356,7 @@ sound_start = se_VO_GF_Narrator_KissTheRing1
   | `game_type_pick_bar_color` | ffffff38 | the bar behind the picked line; `00000000` for none |
   | `game_type_font_title`, `game_type_font_item`, `game_type_font_hint` | the built-in font | one of the game's own fonts (the same names as `font_title`), drawn outlined as the game draws them |
   | `game_type_picture`, `game_type_picture_at` | none, 0 0 100 100 | a picture of ours (png or jpg in the mode folder) drawn under the panel, fitted into its box: a full-screen backdrop, a logo, a frame |
+  | `game_type_title_at`, `game_type_lines_at`, `game_type_hint_at` | where the menu puts them | the heading's, the lines' and the hint's own boxes, `x y w h` in percent of the MENU's box (PAD-1515). The lines share their box's height, a row each, the picked line's bar across the box; each text is fitted into its place as `title_at` is |
 
   Proven on Wonka 03.03 (2026-11-23, `proof/pad1512/look`): the menu moved to the right in a frame
   picture of ours with the panel and bars off, in Wonka's own menu fonts and new colors and words;

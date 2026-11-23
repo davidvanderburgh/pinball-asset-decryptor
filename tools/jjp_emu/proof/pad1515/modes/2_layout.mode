@@ -1,0 +1,19 @@
+# PAD-1515 proof: every place of a mode's screen moved. The panel at the top left; in it the total at
+# its top left (the game's font), the timer at its right (the built-in font) and the title along its
+# bottom (the game's font); a picture of ours at the bottom right of the screen. Opaque, exact colors
+# (the panel ff00ff, the picture 00ff00) so a frame of the game can be measured against the keys.
+name = LAYOUT
+title = LAYOUT
+game_type = LAYOUT GAME
+shots = switch_target_tv
+points = 750000
+seconds = 14
+panel_color = ff00ffff
+panel_at = 3 5 34 40
+value_at = 5 8 60 30
+timer_at = 70 8 25 40
+title_at = 5 70 90 22
+font_title = font_wba_title
+font_value = font_wba_mode_totals
+picture = layout_pic.png
+picture_at = 60 55 35 40

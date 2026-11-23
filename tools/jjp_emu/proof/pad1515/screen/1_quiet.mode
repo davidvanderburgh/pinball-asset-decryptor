@@ -1,0 +1,4 @@
+# PAD-1515 proof: a mode that never starts here (the runtime loads with a mode in the folder)
+name = QUIET
+start = switch_target_tv
+start_count = 99

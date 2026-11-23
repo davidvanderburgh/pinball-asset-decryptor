@@ -97,6 +97,30 @@ for raw in open(sys.argv[1]):
         r = subprocess.run(["bash", os.path.join(os.path.dirname(os.path.abspath(__file__)), "grab.sh"), arg],
                            capture_output=True, text=True)
         out("shot %s: %s" % (arg, "ok" if r.returncode == 0 else (r.stderr or r.stdout).strip()[-200:]))
+    elif op == "census":               # PAD-1515: the game's own frame and the parts it drew, named
+        label, _, dest = arg.partition(" ")
+        d = os.path.join(os.environ.get("JJP_JAIL", "/var/tmp/jjp_run"), "tmp/padmodes/layout")
+        os.makedirs(d, exist_ok=True)
+        js = os.path.join(d, label + ".json")
+        if os.path.exists(js):
+            os.unlink(js)
+        with open(os.path.join(d, "request"), "w") as f:
+            f.write(label + "\n")
+        end = time.monotonic() + 15
+        while time.monotonic() < end and not os.path.exists(js):
+            pump(0.2)
+        if not os.path.exists(js):
+            out("census %s: no answer in 15 s" % label)
+        else:
+            pump(0.5)
+            parts = json.load(open(js)).get("parts", [])
+            if dest.strip():
+                import shutil
+                os.makedirs(dest.strip(), exist_ok=True)
+                for ext in (".json", ".png"):
+                    if os.path.exists(os.path.join(d, label + ext)):
+                        shutil.copy(os.path.join(d, label + ext), dest.strip())
+            out("census %s: %d part(s), %d named" % (label, len(parts), sum(1 for x in parts if x.get("kind") != "unnamed")))
     elif op == "sleep":
         pump(float(arg))
     elif op == "plunge":

@@ -1,0 +1,43 @@
+note wait for the game to come up
+wait installed: 240
+wait game state 2 -> 4 240
+sleep 30
+shot /var/tmp/pad1515/attract.png
+note the game type menu, laid out by title.cfg: both flipper buttons held a second in attract
+hold dswitch_l_flipper_lo,dswitch_l_flipper_hi,dswitch_r_flipper_lo,dswitch_r_flipper_hi 1.6
+wait game type menu OPEN 5
+hold dswitch_r_flipper_lo,dswitch_r_flipper_hi 0.3
+wait game type menu: WIZARD GAME 5
+hold dswitch_r_flipper_lo,dswitch_r_flipper_hi 0.3
+wait game type menu: LAYOUT GAME 5
+sleep 1
+shot /var/tmp/pad1515/menu.png
+note coins and Start with LAYOUT GAME picked: it starts on player 1's first ball
+press dswitch_coin_1
+press dswitch_coin_1
+sleep 1
+press dswitch_start
+wait game type: LAYOUT GAME 30
+wait game state \d+ -> 5 90
+sleep 3
+plunge
+wait "LAYOUT" STARTED 20
+sleep 2
+shot /var/tmp/pad1515/mode.png
+wait "LAYOUT" over 30
+sleep 2
+shot /var/tmp/pad1515/game.png
+note the wizard's two game modes, each started by its test switch and ended by the end switch
+press switch_target_bank_1
+wait "WIZARD": player 1 played cl_mode - 1 of 2 10
+press switch_target_l_loop
+wait "WIZARD": progress board 10
+sleep 0.5
+shot /var/tmp/pad1515/board1.png
+sleep 7
+press switch_target_bank_2
+wait "WIZARD": player 1 played MikeTeaveeMode - 2 of 2 10
+press switch_target_l_loop
+wait "WIZARD": progress board 10
+sleep 0.5
+shot /var/tmp/pad1515/board2.png

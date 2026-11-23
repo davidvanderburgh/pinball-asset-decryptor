@@ -1,0 +1,17 @@
+note PAD-1515: the game's own screen moved by title.cfg; a census of the moved frame
+wait installed: 240
+wait game state 2 -> 4 240
+sleep 25
+census attract /var/tmp/pad1515/screen
+press dswitch_coin_1
+press dswitch_coin_1
+sleep 1
+press dswitch_start
+wait game state \d+ -> 5 90
+sleep 3
+plunge
+sleep 6
+census game /var/tmp/pad1515/screen
+press switch_target_bank_1
+sleep 4
+census candy_lane /var/tmp/pad1515/screen

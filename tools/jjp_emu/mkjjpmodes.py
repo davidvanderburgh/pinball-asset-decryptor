@@ -298,6 +298,9 @@ KEYS = collections.OrderedDict([
     ("game_modes", ("hold", "pause", "end", "ignore")),
     ("hold_multiballs", ("yes", "no")), ("allow_game_modes", "text"),
     ("panel", ("middle", "bottom", "top", "none")),
+    # PAD-1515: the layout editor's places: the panel's box (% of the screen; it takes the panel word's
+    # place) and its three lines' boxes (% of the panel), each line fitted into its box
+    ("panel_at", "box"), ("title_at", "box"), ("value_at", "box"), ("timer_at", "box"),
     # PAD-1353: balls and coils
     ("multiball", "multiball"), ("multiball_on", "switches"), ("add_ball", "add_ball"), ("ball_save", "ball_save"),
     ("coil_start", "coil_pulse"), ("coil_shot", "coil_pulse"), ("coil_complete", "coil_pulse"),
@@ -321,6 +324,8 @@ KEYS = collections.OrderedDict([
 ])
 #: keys a mode file may give on several lines, and how many lines the runtime takes (PAD-1508)
 REPEATABLE = {"shot_points": 8, "start_also": 3, "sound_at": 8, "progress": 32}
+#: title.cfg keys given on several lines (PAD-1515)
+TITLE_REPEATABLE = ("screen_move", "screen_hide")
 #: start_on words -> the game's Hook<...>::list each one needs (jjpmodes.c EVENTS)
 START_EVENTS = collections.OrderedDict([
     ("ball_start", "HookBallStart_"), ("first_ball", "HookFirstBall_"), ("last_ball", "HookLastBall_"),
@@ -351,7 +356,14 @@ TITLE_KEYS = collections.OrderedDict([
     ("game_type_hint_color", "rgba"),
     ("game_type_font_title", "font"), ("game_type_font_item", "font"), ("game_type_font_hint", "font"),
     ("game_type_picture", "picture_file"), ("game_type_picture_at", "box"),
+    # PAD-1515: the menu's heading, its lines and its hint, each a box in % of the menu's box
+    ("game_type_title_at", "box"), ("game_type_lines_at", "box"), ("game_type_hint_at", "box"),
+    # PAD-1515: the game's own screen: a part it draws (a sprite, an animation, a movie, a font: the game's
+    # object that holds it, by its exported name) moved, scaled or hidden (MODES.md "The game's own screen")
+    ("screen_move", "screen_move"), ("screen_hide", "screen_hide"),
 ])
+#: how many screen_move + screen_hide lines the runtime takes (jjpmodes.c GS_MOVES)
+MAX_SCREEN_LINES = 64
 #: keys a .stock file takes (jjpmodes.c apply_stock_kv): one of the GAME's own modes, changed (PAD-1351)
 STOCK_KEYS = collections.OrderedDict([
     ("mode", "stockmode"), ("seconds", "int"), ("points", "int"), ("points_x", "decimal"),
@@ -429,6 +441,18 @@ def _int_in(v, lo, hi, what):
     return None if lo <= int(v.replace(",", "").replace("_", "")) <= hi else "%s must be %d-%d" % (what, lo, hi)
 
 
+def progress_box(words):
+    """A progress line's words -> (its words without a box, its box "x y w h" or None) (PAD-1515):
+    four numbers after its pictures are the pane's own box, % of the screen."""
+    if len(words) >= 6 and all(_NUMW.match(w) for w in words[-4:]):
+        return words[:-4], " ".join(words[-4:])
+    return words, None
+
+
+_NUMW = re.compile(r"^-?[0-9.]+%?$")
+_PART = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def check_value(kind, v, port=None):
     """-> a problem string, or None."""
     words = _names(v)
@@ -501,9 +525,14 @@ def check_value(kind, v, port=None):
         # a class-like name (CamelCase) can be refused
         missing = [t for t in words if t not in known and (objects or t[:1].isupper())]
         return None if not missing else "not a game mode or multiball of %s: %s" % (port.get("title", "this game"), " ".join(missing))
-    if kind == "progress":        # <game mode> <picture> [<unlit picture>]
+    if kind == "progress":        # <game mode> <picture> [<unlit picture>] [x y w h]
+        words, box = progress_box(words)
+        if box is not None:
+            p = check_value("box", box)
+            if p:
+                return "its box " + p
         if not 2 <= len(words) <= 3:
-            return "must be <game mode> <picture> [<unlit picture>]"
+            return "must be <game mode> <picture> [<unlit picture>] [x y w h]"
         for w in words[1:]:
             p = check_value("picture_file", w, port)
             if p:
@@ -535,6 +564,23 @@ def check_value(kind, v, port=None):
     if kind in MEDIA_EXTS:
         ok = media_kind(v) == kind and "/" not in v and "\\" not in v
         return None if ok else "must be a file in the mode folder ending .%s" % ", .".join(MEDIA_EXTS[kind])
+    if kind in ("screen_move", "screen_hide"):   # PAD-1515: <name> [<dx> <dy> [<scale>]]
+        w = v.split()
+        if not w or not _PART.match(w[0]):
+            return "must start with the name of a part the game draws (its object's name, e.g. sp_brat_charlie or font_score)"
+        if kind == "screen_hide":
+            return None if len(w) == 1 else "must be the part's name alone"
+        if len(w) not in (3, 4, 6) or not all(_NUMW.match(t) for t in w[1:]):
+            return "must be <name> <dx> <dy> [<scale> [<ax> <ay>]]: percent of the screen"
+        dx, dy = float(w[1].rstrip("%")), float(w[2].rstrip("%"))
+        if abs(dx) > 100 or abs(dy) > 100:
+            return "moves it off the screen (dx and dy are percent of the screen, -100 to 100)"
+        if len(w) == 4 and not 0.05 <= float(w[3].rstrip("%")) <= 10:
+            return "scale must be between 0.05 and 10"
+        fonts = (port or {}).get("fonts")
+        if w[0].startswith("font_") and fonts and w[0] not in fonts:
+            return "%s is not one of this game's fonts" % w[0]
+        return None
     if kind == "box":
         if not _BOX.match(v):
             return "must be x y w h, percent of the screen"
@@ -713,7 +759,7 @@ def check_modes(mode_dir, port=None):
     problems, modes = [], []
     if not os.path.isdir(mode_dir):
         raise Refused("%s is not a folder" % mode_dir)
-    title = {}
+    title, screen = {}, []
     tpath = os.path.join(mode_dir, "title.cfg")
     if os.path.isfile(tpath):
         with open(tpath, encoding="utf-8", errors="replace") as f:
@@ -725,6 +771,12 @@ def check_modes(mode_dir, port=None):
                 p = check_value(kind, v, port)
                 if p:
                     problems.append("title.cfg:%d: %s %s" % (n, k, p))
+                if k in TITLE_REPEATABLE:               # PAD-1515: a line each, up to the runtime's count
+                    screen.append(v)
+                    if len(screen) == MAX_SCREEN_LINES + 1:
+                        problems.append("title.cfg:%d: more than %d screen_move / screen_hide lines; the runtime takes %d"
+                                        % (n, MAX_SCREEN_LINES, MAX_SCREEN_LINES))
+                    continue
                 title[k] = v
     pic = title.get("game_type_picture", "")
     if pic and media_kind(pic) and "/" not in pic and not os.path.isfile(os.path.join(mode_dir, pic)):

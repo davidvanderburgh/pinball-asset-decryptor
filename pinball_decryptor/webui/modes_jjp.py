@@ -37,6 +37,7 @@ import threading
 import time
 
 from ..plugins.jjp import custom_modes as CM
+from ..plugins.jjp import screen_layout as SL
 from .tabs.base import rpc
 
 #: app settings key: {"iso": {label: path}, "out": {label: path},
@@ -136,6 +137,8 @@ class JjpModesMixin:
                     "switches", "lamps", "sound", "font", "events", "after", "played",
                     "sound_or_file", "sound_file", "picture_file", "video_file", "coil_pulse", "coil_hold")}
                 st["check"] = self._jjp_check_state()
+                st["layout"] = self._jjp_layout()
+                st["screens"] = self._jjp_screens_state()
                 st["sounds"] = self._jjp_sounds_state(port)
                 st["build"] = self._jjp_build_state()
                 st["stick"] = self._jjp_stick_state()
@@ -416,7 +419,217 @@ class JjpModesMixin:
             CM.write_mode(label, self._jjp_file, vals)
         self._jjp_publish(form=dict(CM.read_mode(label, self._jjp_file)) if self._jjp_file else {},
                           title_cfg=dict(CM.read_title(label)), modes=CM.list_modes(label),
-                          check=self._jjp_check_state())
+                          check=self._jjp_check_state(), layout=self._jjp_layout())
+
+    # ------------------------------------------------------------------ the layout editor (PAD-1515)
+    def _jjp_layout(self):
+        """The layout editor's screens: the open mode's screen and progress board, and title.cfg's
+        mode screen (every mode's defaults) and attract game type menu (plugins/jjp/screen_layout.py)."""
+        label = self._jjp_label
+        if not label:
+            return {}
+        folder = CM.title_dir(label)
+        title = dict(CM.read_title(label))
+        form = dict(CM.read_mode(label, self._jjp_file)) if self._jjp_file else {}
+        types = []
+        for m in CM.list_modes(label):
+            gt = (CM.read_mode(label, m["file"]).get("game_type") or "").strip()
+            if gt:
+                types.append(gt)
+        out = {"size": list(SL.SCREEN),
+               "backdrops": SL.backdrops(folder, self._jjp_recall("layout_backdrops") or ()),
+               "title_mode": SL.mode_screen({}, title, folder, scope="title", defaults=CM.DEFAULTS),
+               "game": SL.game_screen(folder, title, self.__dict__.get("_jjp_screen_label", "")),
+               "menu": SL.game_menu(title, types, folder, defaults=CM.DEFAULTS)}
+        if self._jjp_file:
+            out["mode"] = SL.mode_screen(form, title, folder, scope="mode", defaults=CM.DEFAULTS)
+            if (form.get("progress") or "").strip():
+                out["progress"] = SL.progress_board(form, folder)
+        return out
+
+    @rpc
+    def jjp_place(self, scope, key, box):
+        """A box dragged in the layout editor: ``key`` of the open mode (``scope`` "mode") or of
+        title.cfg ("title") set to ``box`` ([x, y, w, h], % of its parent); ``box`` None puts the
+        default place back.  ``progress#<i>`` is progress line i's own box."""
+        label = self._jjp_need()
+        b = SL.clamp_box(box) if box is not None else None
+        if key.startswith("screen#"):                 # a part of the game's own screen: screen#<census>#<name>#<i>
+            _, census, name, _i = key.split("#", 3)
+            if b is None:
+                return self.jjp_screen_part(name, "back")
+            c = next((c for c in SL.censuses(CM.title_dir(label)) if c["label"] == census), None)
+            if not c:
+                raise ValueError("no census of the game's screen called %s" % census)
+            move = SL.move_for(SL.read_census(c["json"]), name, b)
+            return self._jjp_screen_write(SL.with_screen_line(CM.read_title(label), name, move=move))
+        if key.startswith("progress#"):
+            if scope != "mode" or not self._jjp_file:
+                raise ValueError("no mode open")
+            old = CM.read_mode(label, self._jjp_file).get("progress")
+            return self.jjp_set("progress", SL.progress_with_box(old, int(key[9:]), b))
+        if key not in SL.BOX_KEYS:
+            raise ValueError("not a place the layout editor sets: %s" % key)
+        return self.jjp_set(("title:" if scope == "title" else "") + key, SL.box_text(b) if b else "")
+
+    @rpc
+    def jjp_backdrop_browse(self):
+        """A picture or video from anywhere to lay out over (a frame of an extracted attract video, a
+        photo of the machine's screen): remembered for the title, its path returned."""
+        self._jjp_need()
+        p = self.window.ask_open("jjp_layout_backdrop", "Pick a picture or video to lay out over",
+                                 filetypes=[("Pictures and videos", " ".join("*" + e for e in SL.PICTURE_EXTS + SL.VIDEO_EXTS)),
+                                            ("All files", "*.*")])
+        if not p:
+            return ""
+        have = [x for x in (self._jjp_recall("layout_backdrops") or []) if x != p]
+        self._jjp_remember("layout_backdrops", [p] + have[:7])
+        self._jjp_publish(layout=self._jjp_layout())
+        return p
+
+    @rpc
+    def jjp_place_many(self, scope, items):
+        """Several dragged boxes at once ([[key, box], ...]): a group of the game's parts in one write."""
+        label = self._jjp_need()
+        parts = [(k, b) for k, b in items if str(k).startswith("screen#")]
+        for k, b in items:
+            if not str(k).startswith("screen#"):
+                self.jjp_place(scope, k, b)
+        if not parts:
+            return
+        title = CM.read_title(label)
+        lines = {k: title.get(k, "") for k in SL.SCREEN_KEYS}
+        cs = {c["label"]: c for c in SL.censuses(CM.title_dir(label))}
+        for key, box in parts:
+            _, census, name, _i = key.split("#", 3)
+            if census not in cs:
+                raise ValueError("no census of the game's screen called %s" % census)
+            move = SL.move_for(SL.read_census(cs[census]["json"]), name, SL.clamp_box(box))
+            lines = SL.with_screen_line(lines, name, move=move)
+        self._jjp_screen_write(lines)
+
+    def _jjp_screen_write(self, lines):
+        label = self._jjp_need()
+        vals = CM.read_title(label)
+        vals.update(lines)
+        CM.write_title(label, vals)
+        self._jjp_publish(title_cfg=dict(CM.read_title(label)), check=self._jjp_check_state(), layout=self._jjp_layout())
+
+    @rpc
+    def jjp_screen_part(self, name, action):
+        """A part of the game's own screen: ``hide`` it, ``show`` it again, or put it ``back`` where the
+        game draws it (its move and its hide taken away)."""
+        title = CM.read_title(self._jjp_need())
+        if action == "hide":
+            lines = SL.with_screen_line(title, name, hide=True)
+        elif action == "show":
+            lines = SL.with_screen_line(title, name, hide=False)
+        elif action == "back":
+            lines = SL.with_screen_line(title, name, move=(0, 0, 1), hide=False)
+        else:
+            raise ValueError("no such action %s" % action)
+        self._jjp_screen_write(lines)
+
+    # ---------------------------------------------- Show it in the game (PAD-1515)
+    def jjp_screens_argv(self, iso, runtime):
+        """The screens run's argv, as root in the app's Linux (see jjp_build_argv)."""
+        from . import multiboot_core as MC
+        return MC.root_command(CM.screens_args(iso, runtime, self._jjp_label, MC.wsl, self._jjp_file), exe="bash")
+
+    def _jjp_screens_state(self):
+        s = dict(getattr(self, "_jjp_screens", None) or {})
+        s["running"] = self._jjp_job == "screens"
+        s["iso"] = (self._jjp_build_state() or {}).get("iso") or ""
+        return s
+
+    @rpc
+    def jjp_show_in_game(self):
+        """The game's own screens for the layout editor: the stock ISO (Build's) booted hidden and
+        muted on the app's emulator with this title's modes; a census in attract and with a ball in
+        play names every part it draws (jjpmodes.c, tools/jjp_emu/jjpscreens.sh).  The runtime is
+        built for the ISO first when it has not been (the USB stick's, kept per ISO)."""
+        label = self._jjp_need()
+        if self._jjp_proc is not None:
+            raise ValueError("a build, a stick or a screens run is going")
+        iso = (self._jjp_build_state() or {}).get("iso") or ""
+        if not iso or not os.path.isfile(iso):
+            raise ValueError("Pick the stock install ISO of %s under Build first: the game runs from it"
+                             % CM.display_name(label))
+        runtime = CM.runtime_path(iso)
+        steps = []
+        if not os.path.isfile(runtime):
+            os.makedirs(os.path.dirname(runtime), exist_ok=True)
+            steps.append(("Building the runtime for %s..." % os.path.basename(iso), self.jjp_runtime_argv(iso, runtime)))
+        steps.append(("Running the game, hidden and muted...", self.jjp_screens_argv(iso, runtime)))
+        self._jjp_screens_lines = []
+        self._jjp_screens = {"lines": [], "done": False, "ok": False, "msg": steps[0][0], "started": time.time()}
+        self._jjp_proc = True
+        self._jjp_job = "screens"
+        self._jjp_publish(screens=self._jjp_screens_state())
+        threading.Thread(target=self._jjp_screens_worker, args=(steps,), daemon=True, name="jjp-screens").start()
+
+    def _jjp_screens_worker(self, steps):
+        ok, msg = False, ""
+        try:
+            for say, argv in steps:
+                self._jjp_screens_lines.append(say)
+                rc = self._jjp_stream(argv, self._jjp_screens_lines, self._jjp_screens_tick)
+                if getattr(self, "_jjp_cancelled", False):
+                    msg = "Stopped."
+                    break
+                if rc != 0:
+                    refused = [ln for ln in self._jjp_screens_lines if ln.startswith("refused:")]
+                    msg = (refused[-1][len("refused:"):].strip() if refused
+                           else "It stopped (exit %d): %s" % (rc, self._jjp_screens_lines[-1]))
+                    break
+            else:
+                ok, msg = True, "The game's screens are in: drag its parts where you want them."
+        except Exception as e:                              # noqa: BLE001
+            msg = "It could not start: %s" % e
+        self.ctx.loop.post(self._jjp_screens_end, ok, msg)
+
+    def _jjp_screens_tick(self):
+        if self._jjp_screens is None:
+            return
+        self._jjp_screens["lines"] = list(self._jjp_screens_lines[-10:])
+        self._jjp_screens["msg"] = self._jjp_screens_lines[-1] if self._jjp_screens_lines else ""
+        self._jjp_publish(screens=self._jjp_screens_state())
+
+    def _jjp_screens_end(self, ok, msg):
+        self._jjp_proc = None
+        self._jjp_job = ""
+        self._jjp_cancelled = False
+        self._jjp_screens = dict(self._jjp_screens or {})
+        self._jjp_screens.update({"lines": list((self._jjp_screens_lines or [])[-10:]), "done": True, "ok": ok, "msg": msg,
+                                  "secs": int(time.time() - self._jjp_screens.get("started", time.time()))})
+        if ok:
+            self.__dict__["_jjp_screen_label"] = "game"
+        self.log("JJP modes: " + msg, "info" if ok else "error")
+        self._jjp_publish(screens=self._jjp_screens_state(), layout=self._jjp_layout())
+
+    @rpc
+    def jjp_screens_cancel(self):
+        p = self._jjp_proc
+        if self._jjp_job != "screens" or p is None or p is True:
+            return
+        self._jjp_cancelled = True
+        threading.Thread(target=self._jjp_stop_linux, args=(p, CM.SCREENS_PATTERN), daemon=True).start()
+
+    @rpc
+    def jjp_screen_label(self, census):
+        """Which of the game's screens (a census) the editor lays out over."""
+        self.__dict__["_jjp_screen_label"] = census or ""
+        self._jjp_publish(layout=self._jjp_layout())
+
+    @rpc
+    def jjp_panel_word(self, scope, word):
+        """A panel place picked in the layout editor (middle, bottom, top, none): the panel goes
+        there, its own box (panel_at) taken away; its text keeps its places in it."""
+        if word not in SL.PANEL_PLACES and word != "none":
+            raise ValueError("no panel place %s" % word)
+        pre = "title:" if scope == "title" else ""
+        self.jjp_set(pre + "panel_at", "")
+        return self.jjp_set(pre + "panel", word)
 
     @rpc
     def jjp_check(self):

@@ -22171,6 +22171,40 @@ static int on_language_keys(pm_reg *r)
     return 1;
 }
 
+/* PAD-1449 round 11 (DoomWalrus666: "Sometimes language selection did not appear during the intro ... sporadically"):
+ * Godzilla's PLAYER LANGUAGE SELECT bar asks one check each frame, and so does its flipper toggle (`site
+ * language_begun`, LE 1.16 0x1712cc, Pro 1.15/1.16 0x16d8f4; these two are its only callers): has play begun? It
+ * answers the rule's own cached byte (+8), else a global one (`data language_play_begun`, LE 0x712748) that the game
+ * clears at a Start; a launched ball sets the answer (emulator, LE 1.16: launched 1 s into a Standard game's film, the
+ * bar never came; the global byte poked alone did not do it). Once that byte is set the bar's two lines are written empty and a flipper flips nothing. A ball
+ * still rolling or kicked out of the playfield after a reset or a quick restart sets it during the intro, so the bar never
+ * came. While the game's intro screen is up in ball 1 (ci_film_up), the check answers "not yet", so the bar and its flips
+ * last as long as the intro (ours swapped in, or the game's own film). After that the game's answer is used again
+ * (tests lift it verbatim) */
+static int lang_bar_kept(int in_game, int film_up, unsigned ball)
+{
+    return in_game && film_up == 1 && ball <= 1;
+}
+
+static int on_language_begun(pm_reg *r, unsigned n)
+{
+    static unsigned said_game;
+    pm_addr flag = data("language_play_begun");
+    int begun;
+    (void)n;
+    if (!lang_bar_kept(pm_in_game(), ci_film_up(), coop_ball_byte ? *coop_ball_byte : 1u)) return 0;
+    /* the game's own answer, for the log: the rule's cached byte (+8, what a launch sets; emulator: the global byte
+     * poked alone changed nothing), else the global one */
+    begun = (r[0] >= 0x10000u && *(volatile unsigned char *)(unsigned long)(r[0] + 8u))
+            || (flag && *(volatile unsigned char *)(unsigned long)flag);
+    if (begun && said_game != chg_game_now() + 1) {
+        said_game = chg_game_now() + 1;
+        say("language: play began (the ball launched, or a playfield switch) while the game's intro screen is up in ball 1 - its PLAYER "
+            "LANGUAGE SELECT bar and flips are kept until that screen closes");
+    }
+    return 1;                                                 /* refused: the check returns 0, "not begun" */
+}
+
 /* PAD-1045: an Action press at a launch - the turn's ball not served yet, waiting, or just out - is the launch's, not
  * half of the save's double press. PAD-1051: from the game's plunger flags where the port names them (Godzilla LE's
  * shooter lane switch reads the opposite sense to its flippers, so its level said "out" while the ball waited), else
@@ -23399,6 +23433,15 @@ static void coop_chars_arm(struct site *e)
         else if (!lang_hooked)
             say("co-op characters: the game's language select (language_keys) could not be hooked - it sees the "
                 "pick's flippers");
+    }
+    if (fn("language_begun")) {                               /* PAD-1449 round 11 */
+        static int begun_hooked;
+        if (!begun_hooked && (begun_hooked = hook_veto_n(fn("language_begun"), on_language_begun, 0, 0)) != 0)
+            say("language: the game's PLAYER LANGUAGE SELECT bar stays up through the intro screen in ball 1, whatever "
+                "the playfield switches do");
+        else if (!begun_hooked)
+            say("language: the game's play-begun check (language_begun) could not be hooked - a playfield switch in "
+                "the intro still clears its language bar");
     }
     if (coop_pick_on && (!coop_left || !coop_action))
         say("co-op characters: the pick walks with %s and takes with %s", coop_left ? "both flippers" : "the right flipper",

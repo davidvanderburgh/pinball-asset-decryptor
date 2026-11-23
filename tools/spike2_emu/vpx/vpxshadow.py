@@ -2287,7 +2287,8 @@ def main(argv):
     if unlit:
         rep.insert(0, "left out light(s) this copy of the table does not have: %s"
                    % ", ".join(unlit))
-    script, streams = vpxsounds.quiet(script, table.ole, rep)   # PAD-858
+    script, streams = vpxsounds.quiet(script, table.ole, rep,          # PAD-858
+                                      m.get("mute_sounds", ()))     # PAD-1511
     items = retrofit_items(table, m)
     streams.update(auto_plunger_item(table, m))
     streams.update(item_fields(table, m))

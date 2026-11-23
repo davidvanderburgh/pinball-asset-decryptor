@@ -123,22 +123,28 @@ def silent(snd):
     return out + WAVEFORMAT + s(pcm) + snd["trailer"]
 
 
-def survey(ole):
-    """[(stream, record or None, kept)] for every sound of an open table."""
+def survey(ole, mute=()):
+    """[(stream, record or None, kept)] for every sound of an open table.
+    `mute`: names a map mutes whatever the rule says (PAD-1511)."""
     out, i = [], 0
+    mute = {n.lower() for n in mute}
     while ole.exists("GameStg/Sound%d" % i):
         stream = "Sound%d" % i
         snd = read_sound(ole.openstream("GameStg/" + stream).read())
-        out.append((stream, snd, snd is None or mechanical(snd["name"], snd["trailer"][0])))
+        out.append((stream, snd, snd is None or (mechanical(snd["name"], snd["trailer"][0])
+                                                  and snd["name"].lower() not in mute)))
         i += 1
     return out
 
 
-def quiet_streams(ole, rep):
+def quiet_streams(ole, rep, mute=()):
     """{stream name under GameStg: new bytes} muting the table's own music,
-    voices and effects; a line for the patch report."""
+    voices and effects; a line for the patch report. `mute`: a map's
+    `mute_sounds`, a tribute's own copies of the game's effects whose names
+    read as the playfield's (RebelB's JP 30th "LEFT BALL LOST", "SUPPLY DROP
+    1", PAD-1511): the machine plays the real ones."""
     streams, muted, kept, odd = {}, [], 0, []
-    for stream, snd, keep in survey(ole):
+    for stream, snd, keep in survey(ole, mute):
         if snd is None:
             odd.append(stream)
         elif keep:
@@ -242,12 +248,12 @@ def quiet_music(lines, rep):
     return "\n".join(subs) + "\n"
 
 
-def quiet(script, ole, rep):
+def quiet(script, ole, rep, mute=()):
     """A patcher's one call: (the script with its PlayMusic quieted, the
-    sound streams to write_patched with)."""
+    sound streams to write_patched with). `mute`: the map's mute_sounds."""
     lines = script.split("\n")
     subs = quiet_music(lines, rep)
-    return "\n".join(lines) + subs, quiet_streams(ole, rep)
+    return "\n".join(lines) + subs, quiet_streams(ole, rep, mute)
 
 
 def quiet_in_place(path):

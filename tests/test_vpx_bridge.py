@@ -4973,9 +4973,10 @@ def test_jurassic_park_table_is_dropped(tmp_path, monkeypatch):
     # marty's "Jurassic Park Pro Le" 4.02 is the Jurassic Park table now
     vs = pytest.importorskip("vpxsetup")
     pv = pytest.importorskip("padvpx")
-    rows = [r for r in vs.known_tables("") if any("jurassic" in t for t in r["titles"])]
-    assert [r["output"] for r in rows] == ["Jurassic Park Pro Le (PAD).vpx"]
-    assert sorted(rows[0]["titles"]) == ["jurassic_park_le", "jurassic_park_pro"]
+    rows = {r["output"]: r for r in vs.known_tables("") if any("jurassic" in t for t in r["titles"])}
+    # PAD-1511: RebelB's JP 30th LE is listed beside it
+    assert sorted(rows) == ["Jurassic Park 30TH LE (Stern 2023) (PAD).vpx", "Jurassic Park Pro Le (PAD).vpx"]
+    assert sorted(rows["Jurassic Park Pro Le (PAD).vpx"]["titles"]) == ["jurassic_park_le", "jurassic_park_pro"]
 
     class Fake:
         text = "' Jurassic Parc Limited Edition\nSub TRexlockhaut_Hit\n"
@@ -4993,6 +4994,161 @@ def test_jurassic_park_table_is_dropped(tmp_path, monkeypatch):
     assert vs.patched_in(str(tmp_path)) == ["Rush LE 2.0.2 (PAD).vpx"]
     monkeypatch.setattr(vs, "find_vpx", lambda: str(tmp_path))
     assert "no longer supported" in vs.open_table("Jurassic Park Limited Edition (PAD).vpx")
+
+
+# ------------------------------------- PAD-1511: RebelB's JP 30th LE -----
+
+JP30 = "' Jurassic Park 30TH LE\n'   Created by Rebel B\n' Based on JPSalas,Nailbuster & Marcade Script\n"
+
+
+def _jp30_map(model):
+    return json.load(open(os.path.join(VPX, "jurassic_park_30th_%s.shadow.json" % model), encoding="utf-8"))
+
+
+def test_jp30th_is_its_own_table_beside_the_402(monkeypatch):
+    # Mike St P: RebelB's "Jurassic Park 30TH LE (Stern 2023)" 2.0 (VPU 20485)
+    # is truer to Stern's playfield than the 4.02. It gets maps of its own,
+    # playing the Pro (preferred) or LE code; the 4.02 keeps its maps
+    pv = pytest.importorskip("padvpx")
+    vs = pytest.importorskip("vpxsetup")
+    row = [r for r in vs.known_tables("") if r["output"] == "Jurassic Park 30TH LE (Stern 2023) (PAD).vpx"][0]
+    assert sorted(row["titles"]) == ["jurassic_park_30th_le", "jurassic_park_30th_pro"]
+    assert "20485" in row["url"]
+    for model in ("pro", "le"):
+        m = _jp30_map(model)
+        assert m["title"] == "jurassic_park_30th_" + model and m["game"] == "jurassic_park_" + model
+    assert _jp30_map("pro")["preferred"] and not _jp30_map("le")["preferred"]
+
+    class Fake:
+        text = JP30 + "Const BallsPerGame = 3   ' usually 3 or 5\n"
+
+        def script(self):
+            return self.text
+
+    monkeypatch.setattr(pv.vpxfile, "VpxTable", lambda p: Fake())
+    assert pv.recognise("x.vpx")[0] == "jurassic_park_30th_pro"
+    assert pv.recognise("x.vpx", title="jurassic_park_30th_le")[0] == "jurassic_park_30th_le"
+    # the download's Escape Nublar Challenge copy: the same playfield with a
+    # one-ball rule set of the table's own, which the machine replaces; kept
+    # off the map so its patched copy cannot take the main table's name
+    Fake.text = JP30 + "Const BallsPerGame = 1   ' usually 3 or 5\n"
+    assert pv.recognise("x.vpx") == (None, None)
+    Fake.text = "'                 Jurassic Park Le Script JPSalas & marty\n"
+    assert pv.recognise("x.vpx")[0] == "jurassic_park_pro"           # the 4.02, as before
+
+
+@pytest.mark.parametrize("model", ["pro", "le"])
+def test_jp30th_ids_are_the_machines_by_name(model):
+    # every switch and coil was looked up by the machine's own name in that
+    # model's tables (the LE numbers most switches one or more higher); the
+    # name each entry carries is the one its id has on that model
+    sw = {"pro": {"LEFT OUTLANE": 51, "SPINNER": 78, "LEFT RAMP EXIT OPTO": 79, "TARGET-POPS": 92,
+                  "RIGHT ORBIT ENTER OPTO": 46, "NEWTON BALL-RIGHT OPTO": 86, "TARGET CONTROL ROOM": 87},
+          "le": {"LEFT OUTLANE": 52, "SPINNER": 85, "LEFT RAMP EXIT OPTO": 87, "TARGET-POPS": 103,
+                 "RIGHT ORBIT ENTER OPTO": 46, "NEWTON BALL-RIGHT OPTO": 97, "TARGET CONTROL ROOM": 98,
+                 "HELICOPTOR OPTO": 49}}[model]
+    m = _jp30_map(model)
+    byname = {s["name"].split(" (")[0]: s["id"] for k, s in m["switches"].items() if k != "_"}
+    for name, sid in sw.items():
+        assert byname[name] == sid, name
+    assert ("HELICOPTOR OPTO" in byname) == (model == "le")
+    old = json.load(open(os.path.join(VPX, "jurassic_park_%s.shadow.json" % model), encoding="utf-8"))
+    assert m["cabinet"] == old["cabinet"] and m["trough"]["switches"] == old["trough"]["switches"]
+    assert m["plunger"]["lane_switch"] == old["plunger"]["lane_switch"]
+    for k, s in old["solenoids"].items():
+        assert m["solenoids"][k]["coil"] == s["coil"] and m["solenoids"][k]["name"] == s["name"]
+    # orbits and the Newton ball: one table trigger, both of the machine's optos
+    assert "PulseSw 1047" in m["switches"]["sw7"]["also"]
+    assert m["switches"]["Target9"]["also"].startswith("vpmTimer.PulseSw 10")
+
+
+def test_jp30th_quiets_the_trex_and_drops_what_its_own_game_would():
+    # Mike: the T-Rex head is the LE's; on the Pro it stays still. Its head
+    # only moves from the table's rules (trextimer), quieted. The table's own
+    # game drops its posts and the raptor pen's door; that game never starts
+    for model in ("pro", "le"):
+        m = _jp30_map(model)
+        assert {"trextimer_Timer", "trextimer2_Timer", "OpenDoor", "CloseDoor"} <= set(m["quiet_subs"])
+        assert {"door.IsDropped = 1", "plock.IsDropped = 1", "plock2.IsDropped = 1",
+                "plock3.IsDropped = 1"} <= set(m["after_init"])
+        assert m["solenoids"]["3"]["callback"] == "PadReturnPost"
+        assert m["solenoids"]["4"]["callback"] == "PadControlRoomPost"
+        assert m["item_fields"]["jptruck"] == {"VSIZ": [100.0, 100.0, 100.0, 0.0], "HTEV": 1}
+        assert "LEFT BALL LOST" in m["mute_sounds"] and "SUPPLY DROP 1" in m["mute_sounds"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the Windows VBScript engine")
+def test_jp30th_jeep_turns_round_once_on_the_playfields_vertical():
+    # Mike: the jeep "doesn't spin around when hit". Its hit event is on and
+    # each 25 ms step of PadJeepTimer sets its three turns; every step must be
+    # the jeep as it stands, turned about the playfield's vertical (VPX turns
+    # a primitive Z, then Y, then X: Rx Ry Rz), and the last puts it back
+    import math
+    np = pytest.importorskip("numpy")
+    pythoncom = pytest.importorskip("pythoncom")
+    axsite = pytest.importorskip("win32com.axscript.server.axsite")
+    from win32com.client import VARIANT
+    from win32com.server import policy, util
+
+    class Obj:
+        _public_methods_ = []
+
+        def __init__(self, **p):
+            self.p, self.log = dict(p), []
+
+        def _dynamic_(self, name, lcid, wFlags, args):
+            k = name.lower()
+            if wFlags & 4:
+                self.p[k] = args[0]
+                if k.startswith("rotandtra"):
+                    self.log.append((k, float(args[0])))
+                return None
+            v = self.p[k]
+            return VARIANT(pythoncom.VT_BOOL, v) if isinstance(v, bool) else VARIANT(pythoncom.VT_R4, float(v))
+
+    m = _jp30_map("pro")
+    jeep = Obj(rotandtra0=124.0, rotandtra1=250.0, rotandtra2=0.0)
+    timer, plock, plock2 = Obj(enabled=False), Obj(isdropped=True), Obj(isdropped=True)
+    objs = {"jptruck": jeep, "PadJeepTimer": timer, "plock": plock, "plock2": plock2}
+    site = axsite.AXSite({k: util.wrap(v, usePolicy=policy.DynamicPolicy) for k, v in objs.items()})
+    eng = site.AddEngine("VBScript")
+    eng.AddCode(m["extra_vbs"] + "\nSub PadTest\n\tjptruck_Hit\n\tjptruck_Hit\n"
+                "\tDim i : For i = 1 To 30 : If PadJeepTimer.Enabled Then PadJeepTimer_Timer\n\tNext\n"
+                "\tPadReturnPost True : PadControlRoomPost False\nEnd Sub\n")
+    eng.Start()
+    sd = eng.GetScriptDispatch()
+    sd.Invoke(sd.GetIDsOfNames("PadTest"), 0, pythoncom.DISPATCH_METHOD, False)
+    eng.Close()
+    assert not plock.p["isdropped"] and plock2.p["isdropped"]        # coil on = post up
+
+    def R(ax, d):
+        a = math.radians(d)
+        c, s = math.cos(a), math.sin(a)
+        return [np.array([[1, 0, 0], [0, c, -s], [0, s, c]]), np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]]),
+                np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])][ax]
+    steps = [tuple(v for _, v in jeep.log[i:i + 3]) for i in range(0, len(jeep.log), 3)]
+    assert len(steps) == 24 and steps[-1] == (124.0, 250.0, 0.0) and timer.p["enabled"] is False
+    m0 = R(0, 124) @ R(1, 250)
+    for i, (a, b, c) in enumerate(steps[:-1], 1):
+        turned = R(0, a) @ R(1, b) @ R(2, c)
+        assert np.allclose(turned, R(2, 15.0 * i) @ m0, atol=1e-3), i
+        assert np.allclose((turned @ np.linalg.inv(m0))[2], [0, 0, 1], atol=1e-3)   # up stays up
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="writes through Windows structured storage")
+def test_a_maps_mute_sounds_go_whatever_their_names_say(tmp_path, vpxfile):
+    # PAD-1511: RebelB's own copies of the game's effects carry playfield
+    # words ("LEFT BALL LOST", "SUPPLY DROP 1"); a map names them to mute
+    vs = pytest.importorskip("vpxsounds")
+    p = tmp_path / "t.vpx"
+    _mini_vpx(p, vpxfile, [_snd("fx_flipperup", "C:/a.wav", bytes(400), 0, fmt=WAVFMT),
+                           _snd("LEFT BALL LOST", "C:/b.wav", bytes(400), 0, fmt=WAVFMT)], "")
+    t = vpxfile.VpxTable(str(p))
+    assert [k for _, _, k in vs.survey(t.ole)] == [True, True]
+    rep = []
+    assert sorted(vs.quiet_streams(t.ole, rep, ["left ball lost"])) == ["Sound1"]
+    assert "kept 1 " in rep[0] and "muted 1 " in rep[0]
+    t.ole.close()
 
 
 def test_player_resize_keeps_the_side_the_user_dragged():

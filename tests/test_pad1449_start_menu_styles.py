@@ -501,3 +501,39 @@ int main(void)
     frame = R._lift(src, "static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, unsigned index)")
     case4 = frame[frame.index("    case 4:"):]
     assert case4.index("if (smn.go_ms) {") < case4.index("sty_menu_go();") < case4.index("break;")
+
+
+def test_round9_the_right_flipper_counts_at_the_start_that_began_the_game(tmp_path):
+    """PAD-1449 round 9 (DoomWalrus666, on v1.564.1: "When on Standard Regular (started via Start Button default), if
+    Start button is pressed during the Match screen, co-op intro plays and Enhanced mode is started"): a right flipper
+    tapped in the match draw and let go just before the Start was "held at Start" (let go at most 1.5 s before the
+    game's start) and made a co-op game of one. The Start that began the game says it now: the button down at that
+    press, or down at the start."""
+    src = _src()
+    code = r"""#include <stdio.h>
+#define COOP_GO_GAP_MS 20000ul
+""" + R._lift(src, "static int coop_start_held(unsigned long go, int go_held, int now_held, unsigned long held, "
+                   "unsigned long start,\n                           unsigned long window)\n{") + r"""
+int main(void)
+{
+    /* a Start 0.5 s before the start, the flipper up at it, let go 1 s before the start: not held; down at it: held;
+     * down at the start (both pressed together): held; a Start 25 s before (none that began it): the old rule - let go
+     * 1 s before: held, 3 s before: not; no Start seen and never pressed: not */
+    printf("%d %d %d %d %d %d\n", coop_start_held(99500 | 1, 0, 0, 99000 | 1, 100000, 1500),
+           coop_start_held(99500 | 1, 1, 0, 0, 100000, 1500), coop_start_held(99500 | 1, 0, 1, 0, 100000, 1500),
+           coop_start_held(75000 | 1, 0, 0, 99000 | 1, 100000, 1500), coop_start_held(0, 0, 0, 97000 | 1, 100000, 1500),
+           coop_start_held(0, 0, 0, 0, 100000, 1500));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "0 1 1 1 0 0"
+    edge = R._lift(src, "static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)\n{")
+    assert edge.index("coop_go_edge(id, (level & 1u) == closed);") < edge.index("sty_menu_edge(")
+    rec = R._lift(src, "static void coop_go_edge(unsigned id, int press)\n{")
+    assert "if (!press || !id || id != ci.start_sw || pm_in_game()) return;" in rec
+    assert rec.index("coop_go_held = coop_button_held();") < rec.index("coop_go_ms = pm_ms() | 1ul;")
+    solo = R._lift(src, "static void coop_solo_check(void)\n{")
+    assert ("coop.solo_ask = g && coop_start_held(coop_go_ms, coop_go_held, coop_button_held(), coop.held_ms, pm_ms(),"
+            in solo)
+    film = R._lift(src, "static int ci_film_due(void)\n{")
+    assert "coop_start_held(coop_go_ms, coop_go_held, coop_button_held(), coop.held_ms, pm_ms()," in film

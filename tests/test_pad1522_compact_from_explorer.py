@@ -256,12 +256,13 @@ def test_stage_copies_once_and_drops_old_versions(tmp_path):
     (pkg / "shell" / si.DLL).write_bytes(b"dll-one")
     (pkg / si.ICON).write_bytes(b"ico")
     (pkg / si.ICON_COMPACT).write_bytes(b"ico-compact")
+    (pkg / si.ICON_BADGE).write_bytes(b"ico-badge")
     root = tmp_path / "stage"
     one = si.stage(str(pkg), str(root))
     assert os.path.basename(one) == si.DLL
     folder = os.path.dirname(one)
     assert sorted(os.listdir(folder)) == sorted(
-        [si.DLL, si.ICON, si.ICON_COMPACT])
+        [si.DLL, si.ICON, si.ICON_COMPACT, si.ICON_BADGE])
     assert si.stage(str(pkg), str(root)) == one        # the same files
     (pkg / "shell" / si.DLL).write_bytes(b"dll-two")
     two = si.stage(str(pkg), str(root))
@@ -334,6 +335,10 @@ def test_the_handler_names_the_compact_icon_for_a_compact_card(tmp_path):
     staged = si.stage(root=str(tmp_path / "stage"))
     assert staged
     dll = ctypes.WinDLL(staged)
+    # the icon carries the badge where Explorer has no overlay loaded
+    # (PAD-1526); a machine with the overlay listed must not change this
+    dll.PadIconOverlayLive.argtypes = [ctypes.c_int]
+    dll.PadIconOverlayLive(0)
     full = _card(tmp_path / "full.raw")
     compact = _card(tmp_path / "compact.raw")
     sc.compact_file(compact)
@@ -603,7 +608,8 @@ def test_the_dialog_shows_working_then_done_and_closes(tmp_path):
         else:
             win.close()
 
-    win = cw.TaskWindow(jobs, spool=spool, on_created=created, on_page=page)
+    win = cw.TaskWindow(jobs, spool=spool, on_created=created, on_page=page,
+                        badge_waits=lambda: False)
     jobs.add(a)
     assert win.run() is True
     sent[0].join(10)

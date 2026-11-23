@@ -2,7 +2,7 @@
 
     python tools/padicon/build.py [path to zig.exe]
 
-One C file that calls kernel32 only.  Zig is the compiler because it is one
+One C file that calls kernel32, and advapi32 for one registry read.  Zig is the compiler because it is one
 unzipped folder with the Windows headers in it (https://ziglang.org/download,
 0.17.1 built the committed DLL); ``zig`` on PATH or the ZIG environment
 variable works too.  The built DLL is committed, like the app's other
@@ -46,7 +46,7 @@ def main(argv):
            "-s",
            "-o", OUT,
            os.path.join(HERE, "padicon.c"), os.path.join(HERE, "padicon.def"),
-           "-lc", "-lkernel32"]
+           "-lc", "-lkernel32", "-ladvapi32"]
     subprocess.run(cmd, check=True, cwd=HERE)
     for junk in ("padicon.lib", "padicon64.lib", "padicon64.pdb"):
         try:

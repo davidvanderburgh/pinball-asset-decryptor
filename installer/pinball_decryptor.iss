@@ -574,6 +574,11 @@ begin
     'Software\Classes\CLSID\' + '{6E1B5C0A-52D4-4F0B-9C55-1A1522CA4D01}');
   RegDeleteKeyIncludingSubkeys(HKEY_LOCAL_MACHINE,
     'Software\Classes\CLSID\' + '{6E1B5C0A-52D4-4F0B-9C55-1A1522CA4D01}');
+  { PAD-1526: the same class listed as an icon overlay identifier
+    (shell_icon.OVERLAY_KEY, OVERLAY_NAME) }
+  RegDeleteKeyIncludingSubkeys(HKEY_LOCAL_MACHINE,
+    'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers\' +
+    '     PinballCardCompact');
   DelTree(ExpandConstant('{localappdata}\pinball_decryptor\shell'),
           True, True, True);
   DelTree(ExpandConstant('{localappdata}\pinball_decryptor\compact_queue'),

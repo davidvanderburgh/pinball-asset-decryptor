@@ -361,6 +361,31 @@ def _machine_class(dll):
                 winreg.SetValueEx(k, name, 0, winreg.REG_SZ, data)
     except (ImportError, OSError):
         pass
+    _machine_overlay()
+
+
+def _machine_overlay():
+    r"""List the icon handler's class as an icon overlay identifier
+    (PAD-1526): the compact badge is then drawn over the card and follows a
+    card being compacted at once.  Windows reads that list from
+    HKEY_LOCAL_MACHINE only, so this too takes an Administrator run.  A key
+    that is already right is left alone: the handler tells by the key's
+    date whether Explorer started with it.  Never raises."""
+    from . import shell_icon
+    try:
+        import winreg
+        for path, name, data in shell_icon.overlay_values():
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as k:
+                    if winreg.QueryValueEx(k, name)[0] == data:
+                        continue
+            except OSError:
+                pass
+            with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0,
+                                    winreg.KEY_SET_VALUE) as k:
+                winreg.SetValueEx(k, name, 0, winreg.REG_SZ, data)
+    except (ImportError, OSError):
+        pass
 
 
 def register_association(app_dir=None, take_raw=False, classes=None,
@@ -483,6 +508,11 @@ def unregister_association(classes=None):
                              CLASSES + r"\CLSID" + "\\" + shell_icon.CLSID)
         except OSError:
             pass
+        for path, _name, _data in shell_icon.overlay_values():
+            try:
+                winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, path)
+            except OSError:
+                pass
         _notify()
         shell_icon.unstage()
         from . import shell_menu

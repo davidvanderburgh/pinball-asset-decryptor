@@ -42,6 +42,23 @@ MUTEX = "Local\\PinballAssetDecryptor.CompactWindow"
 WAITING, WORKING, DONE, FAILED, STOPPED = (
     "waiting", "working", "done", "failed", "stopped")
 
+# The compact badge on a card's icon is drawn by Explorer, which learns of
+# it only when it starts (webui/shell_icon.py, PAD-1526).  Until it has
+# restarted since PAD listed the badge, the finished window offers to restart
+# it: nobody should have to know to sign out first.
+NO_OFFER, OFFER, RESTARTING, RESTARTED, NOT_RESTARTED = (
+    "", "offer", "restarting", "restarted", "failed")
+OFFER_BUTTON = "Restart Explorer"
+OFFER_TEXT = {
+    OFFER: ("To show the green compact badge on the card's icon, Windows "
+            "Explorer has to restart once. Your open folders come back."),
+    RESTARTING: "Restarting Explorer...",
+    RESTARTED: "Explorer restarted. The card's icon now shows the green "
+               "compact badge.",
+    NOT_RESTARTED: "Explorer could not be restarted. Sign out and back in "
+                   "to see the green compact badge.",
+}
+
 
 def fmt(n):
     """Binary sizes, as the app's Manage disk space shows them."""
@@ -324,10 +341,12 @@ MARK = {WAITING: "•", WORKING: "▸", DONE: "✓",
         FAILED: "✕", STOPPED: "•"}
 
 
-def view(jobs):
+def view(jobs, offer=NO_OFFER):
     """What the window shows now: ``{"busy", "instruction", "content",
-    "pct", "warn"}``.  One card reads as a sentence about that card; several
-    as a list, a mark and a line each."""
+    "pct", "warn", "offer"}``.  One card reads as a sentence about that
+    card; several as a list, a mark and a line each.  *offer* (OFFER,
+    RESTARTED, NOT_RESTARTED) adds the line about Explorer's restart once
+    the work is done."""
     with jobs._lock:
         cards = list(jobs.jobs)
     busy = any(j.state in (WAITING, WORKING) for j in cards)
@@ -357,8 +376,12 @@ def view(jobs):
             head = jobs.summary()
         body = "\n".join("%s  %s\n      %s" % (MARK[j.state], j.name, j.text)
                          for j in cards)
+    if busy:
+        offer = NO_OFFER
+    if offer:
+        body = "%s\n\n%s" % (body, OFFER_TEXT[offer])
     return {"busy": busy, "instruction": head, "content": body, "pct": pct,
-            "warn": warn and not busy}
+            "warn": warn and not busy, "offer": offer}
 
 
 # ----------------------------------------------------------------------
@@ -402,6 +425,7 @@ _TDF_CALLBACK_TIMER = 0x0800
 _TDF_CAN_BE_MINIMIZED = 0x8000
 _TD_WARNING_ICON = 0xFFFF           # MAKEINTRESOURCE(-1)
 _BUTTON = 100                       # Stop while working, Close after
+_OFFER_BUTTON = 101                 # Restart Explorer, on the finished page
 _S_OK, _S_FALSE = 0, 1
 
 
@@ -456,7 +480,12 @@ class TaskWindow:
     WIDTH = 300                     # dialog units
 
     def __init__(self, jobs, spool=None, poll_spool=True, on_created=None,
-                 on_page=None):
+                 on_page=None, badge_waits=None, restart=None):
+        from . import shell_icon
+        # asked once, when the work is done; tests pass their own
+        self.badge_waits = badge_waits or shell_icon.badge_waits_for_explorer
+        self.restart = restart or shell_icon.restart_explorer
+        self.offer = None               # None: not asked yet
         self.jobs = jobs
         self.spool = spool
         self.poll_spool = poll_spool
@@ -472,7 +501,11 @@ class TaskWindow:
         import ctypes
         Button, Config, _cb = self._types
         label = "Stop" if v["busy"] else "Close"
-        buttons = (Button * 1)(Button(_BUTTON, label))
+        if v["offer"] == OFFER:
+            buttons = (Button * 2)(Button(_OFFER_BUTTON, OFFER_BUTTON),
+                                   Button(_BUTTON, label))
+        else:
+            buttons = (Button * 1)(Button(_BUTTON, label))
         cfg = Config()
         cfg.cbSize = ctypes.sizeof(Config)
         cfg.dwFlags = (_TDF_ALLOW_DIALOG_CANCELLATION | _TDF_CALLBACK_TIMER
@@ -487,7 +520,7 @@ class TaskWindow:
         cfg.pszWindowTitle = TITLE
         cfg.pszMainInstruction = v["instruction"]
         cfg.pszContent = v["content"]
-        cfg.cButtons = 1
+        cfg.cButtons = len(buttons)
         cfg.pButtons = buttons
         cfg.nDefaultButton = _BUTTON
         cfg.pszFooter = NOTE
@@ -508,8 +541,9 @@ class TaskWindow:
         import ctypes
         old = self._shown
         if old is None or old["busy"] != v["busy"] or \
-                old["warn"] != v["warn"]:
-            # another kind of page (working <> done): build it anew
+                old["warn"] != v["warn"] or old["offer"] != v["offer"]:
+            # another kind of page (working <> done, a button more or
+            # less): build it anew
             cfg = self._config(v)
             self._shown = v
             self._send(_TDM_NAVIGATE_PAGE, 0, ctypes.addressof(cfg))
@@ -539,6 +573,16 @@ class TaskWindow:
                     self.on_page(hwnd, self._shown)
             elif msg == _TDN_TIMER:
                 self._tick()
+            elif msg == _TDN_BUTTON_CLICKED and wparam == _OFFER_BUTTON:
+                # off this thread: Windows may take a while to close
+                # Explorer, and the window must stay alive meanwhile (the
+                # timer draws what came of it)
+                if self.offer == OFFER:
+                    self.offer = RESTARTING
+                    threading.Thread(target=self._restart, daemon=True,
+                                     name="pad-restart-explorer").start()
+                    self._draw(self._view())
+                return _S_FALSE                 # the window stays
             elif msg == _TDN_BUTTON_CLICKED:
                 # Stop, Close, Esc and the X all end here
                 if self.jobs.busy:
@@ -561,7 +605,31 @@ class TaskWindow:
                 self.jobs.events.get_nowait()
             except queue.Empty:
                 break
-        self._draw(view(self.jobs))
+        self._draw(self._view())
+
+    def _restart(self):
+        try:
+            ok = self.restart()
+        except Exception:                               # noqa: BLE001
+            log.exception("restart Explorer")
+            ok = False
+        self.offer = RESTARTED if ok else NOT_RESTARTED
+
+    def _view(self):
+        """:func:`view`, with the offer to restart Explorer once the work is
+        done and a card came out compact."""
+        if self.jobs.busy:
+            # more cards were handed over: ask again when they are done
+            if self.offer == OFFER:
+                self.offer = None
+        elif self.offer is None:
+            done = any(j.state == DONE for j in self.jobs.jobs)
+            try:
+                waits = done and self.badge_waits()
+            except Exception:                           # noqa: BLE001
+                waits = False
+            self.offer = OFFER if waits else NO_OFFER
+        return view(self.jobs, self.offer or NO_OFFER)
 
     def _window_icon(self):
         if not self._icon:
@@ -606,7 +674,7 @@ class TaskWindow:
                              ctypes.c_int, ctypes.c_int, ctypes.c_uint]
             # IMAGE_ICON, LR_LOADFROMFILE | LR_DEFAULTSIZE
             self._icon = load(None, icon, 1, 0, 0, 0x10 | 0x40)
-        v = view(self.jobs)
+        v = self._view()
         cfg = self._config(v)
         self._shown = v
         fn.argtypes = [ctypes.POINTER(Config), ctypes.POINTER(ctypes.c_int),

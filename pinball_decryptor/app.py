@@ -6855,6 +6855,15 @@ class App:
             if not app_dir or not update_slots.staged_install_ok(app_dir,
                                                                  version):
                 return False
+            if update_slots.swap_failed_version() == version:
+                # PAD-1529: the helper could not switch to this version a
+                # moment ago and brought this one back up to fetch the
+                # installer.  Trying the same swap again cost another close,
+                # another wait and another failure before the installer ran
+                self.window.append_log(
+                    f"Switching to v{version} in place did not work last "
+                    "time - running its installer.", "info")
+                return False
             # the helper only renames once this process is gone, so the
             # state is written first, as for the installer (PAD-188)
             self._save_session_state()

@@ -759,6 +759,7 @@ def test_anything_in_the_way_is_the_installers_turn(tmp_path, delta, why):
         (nxt / us.MARKER).write_text('{"version": "2.0.0"}',
                                      encoding="utf-8")
         says = "did not work last time"
+        inst["size"] = 12000            # what the stand-in download writes
     with web_app(tmp_path, mfr="stern") as w:
         w.run(w.app._offer_update, "2.0.0", "u", inst)
         assert _until(w, lambda: _ready(w)), _log(w)
@@ -772,8 +773,14 @@ def test_anything_in_the_way_is_the_installers_turn(tmp_path, delta, why):
         assert said and says in said[0], texts
         assert "downloading its installer instead" in said[0]
         assert any("Update v2.0.0 is installed - press" in t for t in texts)
-        # Restart to update then has the setup exe to hand the swap
         w.call("ui.banner_action", "update", "install")
+        if why == "swap failed before":
+            # PAD-1529: the same swap is not tried a second time; Restart
+            # to update runs the setup exe that was fetched for this
+            assert _until(w, lambda: delta["launched"])
+            assert delta["launched"] == [dest] and delta["swaps"] == []
+            return
+        # Restart to update then has the setup exe to hand the swap
         assert _until(w, lambda: delta["closed"])
         assert delta["swaps"] == [(delta["app_dir"], "2.0.0", dest)]
 

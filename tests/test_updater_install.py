@@ -315,7 +315,11 @@ def test_launch_uses_unattended_inno_switches(tmp_path):
     # the prerequisites pass (Inno remembers a first-install "Install
     # prerequisites" tick per AppId and would re-run WSL2/partclone/gpg
     # on every silent update otherwise).
-    for switch in ("/SILENT", "/NORESTART",
+    # PAD-1529: no Setup window at all - the update splash is the wait, and
+    # /SUPPRESSMSGBOXES stays out so a stuck install can still say so
+    assert "/SILENT" not in args.split()
+    assert "/SUPPRESSMSGBOXES" not in args.split()
+    for switch in ("/VERYSILENT", "/NORESTART",
                    "/FORCECLOSEAPPLICATIONS", "/RELAUNCH=1",
                    '/MERGETASKS="!runprereqs"'):
         assert switch in args.split()

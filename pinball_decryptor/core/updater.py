@@ -392,7 +392,14 @@ def staged_update_ok(path, installer, check_digest=True):
 
 
 # Inno Setup switches for the unattended install-over-the-top:
-#   /SILENT                   progress window only, no wizard
+#   /VERYSILENT               no wizard and no progress window either
+#                             (PAD-1529, David: "why am i suddenly seeing
+#                             the setup window").  The update splash
+#                             (core/update_splash) is what the user watches
+#                             from the click to the new version's window; a
+#                             Setup window on top of it read as something
+#                             having gone wrong.  Not /SUPPRESSMSGBOXES: an
+#                             install that cannot go on still says so
 #   /NORESTART                never reboot out from under the user
 #   /FORCECLOSEAPPLICATIONS   let Setup close our python process if it's
 #                             somehow still holding files when the copy
@@ -409,7 +416,7 @@ def staged_update_ok(path, installer, check_digest=True):
 #                             "Install Missing" if any are actually gone);
 #                             MERGETASKS keeps the user's other remembered
 #                             choices (e.g. desktop icon) intact.
-INSTALLER_ARGS = ('/SILENT /NORESTART /FORCECLOSEAPPLICATIONS /RELAUNCH=1 '
+INSTALLER_ARGS = ('/VERYSILENT /NORESTART /FORCECLOSEAPPLICATIONS /RELAUNCH=1 '
                   '/MERGETASKS="!runprereqs"')
 
 

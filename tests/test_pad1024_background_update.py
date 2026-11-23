@@ -535,6 +535,105 @@ def test_more_than_one_restart_click_swaps_once(tmp_path, clicks):
     assert us.tree_version(str(app)) == "9.9.9"
 
 
+def _sitting_in(folder, code="import time; time.sleep(120)"):
+    """A live process whose working directory is *folder* (its exe is not in
+    it): the handle Explorer had on the install folder in PAD-1529."""
+    import subprocess
+    import sys
+    return subprocess.Popen([sys.executable, "-c", code], cwd=str(folder))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the swap helper is PowerShell")
+def test_a_program_sitting_in_the_app_folder_does_not_stop_the_swap(tmp_path):
+    """PAD-1529 (David: "i'm seeing this screen for far too long in between
+    updates ... why am i suddenly seeing the setup window").  Explorer, once
+    v1.578.1 had restarted it from the app, had the install folder as its
+    working directory; Windows renames no folder that is open, so every
+    Restart to update ended in the setup program.  The real helper, with a
+    live process sitting in the folder: the versions are switched one level
+    down, the user's own folder stays, and no installer is asked for."""
+    import subprocess
+    import sys
+    app = tmp_path / "Pinball Asset Decryptor"
+    _tree(app, "1.0.0")
+    (app / "My project").mkdir()
+    (app / "My project" / "notes.txt").write_text("mine", encoding="utf-8")
+    nxt = _tree(tmp_path / "Pinball Asset Decryptor.next", "9.9.9")
+    (nxt / us.MARKER).write_text('{"version": "9.9.9"}', encoding="utf-8")
+    sitter = _sitting_in(app)
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    log = tmp_path / "swap.log"
+    note = tmp_path / "failed.txt"
+    try:
+        time.sleep(1)                       # the sitter is up and in there
+        with pytest.raises(OSError):        # the case is real: no rename
+            os.rename(app, tmp_path / "renamed")
+        started = time.time()
+        ok, _ = us.start_swap(str(app), "9.9.9", "", pid=gone.pid,
+                              launch=False, register=False,
+                              log_path=str(log), failed_note=str(note))
+        assert ok
+        text = _swap_logs_done([log])[0]
+        took = time.time() - started
+        # the helper's last steps: the user's own entries go back in, then
+        # the old version is deleted
+        old = tmp_path / "Pinball Asset Decryptor.old"
+        end = time.time() + 30
+        while time.time() < end and old.exists():
+            time.sleep(0.25)
+        assert sitter.poll() is None        # it sat there throughout
+    finally:
+        sitter.kill()
+        sitter.wait()
+    assert "swapped in v9.9.9" in text, text
+    assert "switched what is inside it instead" in text, text
+    assert "swap not done" not in text, text
+    assert took < 20, took
+    assert us.tree_version(str(app)) == "9.9.9"
+    assert (app / "launcher.vbs").is_file()
+    assert not (app / us.MARKER).exists()
+    assert (app / "My project" / "notes.txt").read_text(
+        encoding="utf-8") == "mine"
+    assert not nxt.exists()
+    assert not note.exists()
+    assert not old.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the swap helper is PowerShell")
+def test_a_file_open_inside_the_app_folder_leaves_everything_as_it_was(
+        tmp_path):
+    """The swap one level down undoes itself when something inside the
+    folder really is open: the old version is whole and in place, the new
+    one still staged, and the helper says the installer is needed."""
+    import subprocess
+    import sys
+    app = tmp_path / "Pinball Asset Decryptor"
+    _tree(app, "1.0.0")
+    nxt = _tree(tmp_path / "Pinball Asset Decryptor.next", "9.9.9")
+    (nxt / us.MARKER).write_text('{"version": "9.9.9"}', encoding="utf-8")
+    before = sorted(os.listdir(app))
+    sitter = _sitting_in(app / "pinball_decryptor")
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    log = tmp_path / "swap.log"
+    note = tmp_path / "failed.txt"
+    try:
+        ok, _ = us.start_swap(str(app), "9.9.9", "", pid=gone.pid,
+                              launch=False, register=False,
+                              log_path=str(log), failed_note=str(note))
+        assert ok
+        text = _swap_logs_done([log], timeout=90)[0]
+    finally:
+        sitter.kill()
+        sitter.wait()
+    assert "swap not done" in text and "pinball_decryptor" in text, text
+    assert us.tree_version(str(app)) == "1.0.0"
+    assert sorted(os.listdir(app)) == before
+    assert us.staged_version(str(app)) == "9.9.9"
+    assert not (tmp_path / "Pinball Asset Decryptor.old").exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="the swap helper is PowerShell")
 def test_a_new_folder_without_launcher_keeps_the_old_one(tmp_path):
     """An antivirus that takes launcher.vbs out of the new folder must not
@@ -572,6 +671,10 @@ def slots(tmp_path, staged, monkeypatch):
     rec = dict(staged, stages=[], swaps=[], stage_ok=True, saved=0)
     rec["gate"].set()
     monkeypatch.setattr(us, "installed_app_dir", lambda *a, **k: app_dir)
+    # never this PC's own note of a swap that failed
+    rec["note"] = tmp_path / "swap_failed.txt"
+    monkeypatch.setattr(us, "swap_failed_note_path",
+                        lambda: str(rec["note"]))
 
     def _stage(setup, app, version, run=None, cancel_cb=None,
                progress_cb=None):
@@ -625,6 +728,23 @@ def test_installed_copy_installs_in_background_then_swaps(tmp_path, slots):
         assert slots["saved"] > saved           # state written before it
         assert w.app._restart_wsl_on_close
 
+
+
+def test_a_swap_that_failed_is_not_tried_twice(tmp_path, slots):
+    """PAD-1529: the helper could not switch to v9.9.9, noted it and brought
+    this version back up for the installer.  Restart to update then runs the
+    installer - not the same swap again, which cost a second close and a
+    second wait before the installer ran anyway."""
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(w.app._offer_update, "9.9.9", "u", _installer())
+        assert _until(w, lambda: _ready(w))
+        slots["note"].write_text("9.9.9", encoding="utf-8")
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: slots["launched"])
+        assert slots["swaps"] == []
+        # a note about another version changes nothing
+    slots["note"].write_text("9.9.8", encoding="utf-8")
+    assert us.swap_failed_version() == "9.9.8"
 
 
 def test_a_second_restart_click_starts_no_second_swap(tmp_path, slots):

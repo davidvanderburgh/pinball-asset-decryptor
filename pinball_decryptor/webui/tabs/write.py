@@ -457,6 +457,11 @@ def _ask_grow_here(then=None):
     return True
 
 
+#: PAD-1531: the Write tab's note for a project built for sharing (Network tab)
+SHARE_NOTE = ("Build for sharing is on (Network tab): cards and images from this project carry no remote access, "
+              "and none of the machine's own settings, scores or logs.")
+
+
 class WriteTab(TabService):
     ns = "write"
     key = "Write"
@@ -1061,6 +1066,19 @@ class WriteTab(TabService):
                 "WARNING: %d video(s) go on bigger than their slot on a machine where that has not been tested "
                 "yet: they may show oversized or cut off. Untick Imported size on the Video tab to convert them "
                 "to the slot's size." % n)})
+        # PAD-1531: who a card written from here lets in over the network (a shared image must let nobody in)
+        try:
+            from ...core import card_extras, ssh_card
+            if ssh_card.offered(mfr):
+                cfg = card_extras.configuration(assets)
+                if cfg is not None and cfg.get("share"):
+                    infos.append({"kind": "", "text": SHARE_NOTE})
+                else:
+                    said = ssh_card.who_gets_in((self.write_upd_var.get() or "").strip(), cfg)
+                    if said:
+                        warns.append({"kind": "warn", "text": said[1]})
+        except Exception:                               # noqa: BLE001 - the note just isn't shown
+            pass
         return errs + warns + infos
 
     def _refresh_prebuild_notes(self):

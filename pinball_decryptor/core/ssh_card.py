@@ -251,6 +251,46 @@ def validate_request(original, project, key_source=None):
     return config
 
 
+#: PAD-1531: said when a build or a write puts remote access on a card
+LETS_THIS_COMPUTER_IN = ('This image lets this computer in over the network (remote access). Keep it for your own '
+                         'machine: to give it to someone, turn on Build for sharing on the Network tab and build '
+                         'again.')
+
+
+def strangers_note(count, names):
+    """PAD-1531: the sentence for an image that lets in other computers than this one."""
+    who = 'another computer' if count == 1 else '%d other computers' % count
+    return ('The original image lets %s in over the network (%s), and a card built from it keeps %s. Take %s off '
+            'on the Network tab (Remote access), or turn on Build for sharing there.'
+            % (who, ', '.join(names), 'that access' if count == 1 else 'their access',
+               'it' if count == 1 else 'them'))
+
+
+def who_gets_in(original, config, key_source=None):
+    """PAD-1531: ``(level, sentence)`` saying who a card built from *original* with *config* (the project's
+    effective record, card_extras.configuration) lets in over the network, or None when nobody."""
+    if config is not None:
+        return ('warning', LETS_THIS_COMPUTER_IN) if config.get('enabled') else None
+    # a project that never set remote access keeps whatever the original trusts
+    state = inspect_image(original, key_source=key_source)
+    if not state.get('enabled'):
+        return None
+    strangers = card_extras.others(state.get('public_keys', ''))
+    if strangers:
+        return 'warning', strangers_note(len(strangers), [card_extras.key_name(k) for k in strangers])
+    return 'warning', LETS_THIS_COMPUTER_IN
+
+
+def say_who_gets_in(original, config, log, key_source=None):
+    try:
+        said = who_gets_in(original, config, key_source)
+    except (OSError, ValueError):
+        said = None
+    if said and log:
+        log(said[1], said[0])
+    return said
+
+
 def guard_flash(project, image):
     """Flash-only may consume a completed image, never omit pending intent."""
     ensure_not_incomplete(image)
@@ -266,6 +306,12 @@ def guard_flash(project, image):
     if (state['enabled'] != config['enabled'] or
             (config['enabled'] and state['public_keys'] != config['public_keys'])):
         raise ExtrasError('Build the complete image first to apply the pending remote access (SSH) change, then flash that build.')
+    if config.get('share'):
+        # PAD-1531: an image written for sharing has no trusted key and none of a machine's own data left on it
+        from . import share_build
+        if state['public_keys'].strip() or share_build.machine_data(image) != []:
+            raise ExtrasError('Build the image again with Build for sharing on, then flash that build: this one '
+                              'still carries remote access or a machine\'s own data.')
 
 
 def note_build(output, project):
@@ -307,6 +353,9 @@ def _verify_tree(reader, config, payload, platform='stern-spike2'):
     if not config['enabled']:
         if hook is not None:
             raise ExtrasError('The SSH startup hook could not be disabled.')
+        # PAD-1531: off is off - no trusted key and none of PAD's SSH programs stay behind on the card
+        if any(_node(reader, dest) is not None for dest in files.values()):
+            raise ExtrasError('Remote access could not be taken off the card completely.')
         return
     if (hook is None or (l['linked'] and (stat.S_IFMT(hook['mode']) != stat.S_IFLNK
             or reader.read_symlink(hook) != l['target']))):
@@ -371,6 +420,13 @@ def prepare_rootfs(part, work, config, platform='stern-spike2', cancel=None):
                 raise ExtrasError('An SSH destination is a symlink or hard-linked file.')
         if _node(r, hook) is not None and (l['linked'] or not config['enabled']):
             commands.append(f'rm {hook}')
+        if not config['enabled']:
+            # PAD-1531: off takes the trusted keys and PAD's SSH programs off as well, not only the boot hook: a
+            # card written "off" and handed on carries no login for anyone (inspect_root has already refused a
+            # card whose SSH files are not PAD's)
+            for dest_path in files.values():
+                if _node(r, dest_path) is not None:
+                    commands.append(f'rm {dest_path}')
         if config['enabled']:
             for name, dest_path in files.items():
                 staged = work / name
@@ -447,7 +503,26 @@ def apply_to_build(original, output, config, log=None, cancel=None, key_source=N
 
     Only a verified partition is written back. A failed/canceled write is
     reported to the pipeline, which must quarantine its incomplete output.
+
+    PAD-1531: a build for sharing (``config['share']``, card_extras.configuration) is remote access off, and then
+    the machine's own partitions emptied as a stock card ships them (core/share_build.py).
     """
+    if config is None:
+        return ''
+    text = _apply_ssh(original, output, config, log, cancel, key_source)
+    if config.get('share'):
+        from . import share_build
+        said = share_build.scrub(original, output, log=log, cancel=cancel, key_source=key_source)
+        text = SHARE_TEXT + ((' ' + said) if said else '')
+    return text
+
+
+#: what a build for sharing says it did (the Write summary and log)
+SHARE_TEXT = 'Built for sharing: no remote access on it.'
+OFF_TEXT = 'Remote access off: no SSH server and no trusted keys on the card.'
+
+
+def _apply_ssh(original, output, config, log=None, cancel=None, key_source=None):
     if config is None:
         return ''
     if type(config.get('enabled')) is not bool:
@@ -471,7 +546,7 @@ def apply_to_build(original, output, config, log=None, cancel=None, key_source=N
         raise ExtrasError('Not enough free space to prepare the SSH system partition.')
     rewrite_partition(output, start, size,
                       lambda part, work: prepare_rootfs(part, work, config, cancel=cancel), cancel)
-    text = 'SSH server enabled (key-only, port 22).' if config['enabled'] else 'SSH server disabled.'
+    text = 'SSH server enabled (key-only, port 22).' if config['enabled'] else OFF_TEXT
     if log:
         log(text, 'info')
     return text

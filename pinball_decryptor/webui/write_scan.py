@@ -452,7 +452,11 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     from ..core import card_extras, ssh_card
     try:
         ssh = card_extras.configuration(assets_path)
-        if ssh is not None:
+        if ssh is not None and ssh.get('share'):
+            # PAD-1531: every build for sharing does it (the machine's own data is checked as it builds)
+            rows.append(('Build for sharing — no remote access, none of the machine\'s own data', 'system',
+                         'Pending (Network tab)', 'pending'))
+        elif ssh is not None:
             source_var = _window_getter(window, 'write_upd_var')
             source = ssh_card.inspect_image(source_var.get()) if source_var is not None else {}
             changed = (not source.get('supported')

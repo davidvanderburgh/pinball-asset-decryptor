@@ -209,9 +209,16 @@ function ProjectRemote({ n }) {
   if (!n.project) return null;
   return html`<div class="net-sub">
     ${!n.supported ? html`<${Note}>${n.reason}<//>` : null}
-    <${Check} label="Keep remote access on cards I write from this project" checked=${enabled} disabled=${locked}
-      wrap onChange=${(on) => { setEnabled(on); save(on, keys); }} />
-    <span class="small muted">Writing a card without it takes remote access off the machine again.</span>
+    <${Check} label="Keep remote access on cards I write from this project" checked=${enabled && !n.share}
+      disabled=${locked || n.share} wrap onChange=${(on) => { setEnabled(on); save(on, keys); }} />
+    <span class="small muted">${n.share ? "Off while Build for sharing is on."
+      : "Writing a card without it takes remote access off the machine again."}</span>
+    ${(n.others || []).length ? html`<${Others} n=${n} locked=${locked} />` : null}
+    <${Check} label="Build for sharing" checked=${!!n.share} disabled=${n.running} wrap
+      onChange=${(on) => call("network.configure_share", on, n.project)} />
+    <span class="small muted">For an image you give to someone else. A card with remote access on lets this
+      computer into any machine that runs it, so a shared image must not have it: with this on, cards and images
+      from this project carry no remote access, and none of this machine's own settings, scores or logs.</span>
     <${Advanced} title="Advanced: let your own SSH programs in too">
       <p class="small">PAD needs nothing here: it keeps its own key. To log in with a program of your own as well,
         paste your SSH key's <b>public</b> half below (the line that starts${" "}
@@ -227,6 +234,21 @@ function ProjectRemote({ n }) {
     <//>
     ${n.error ? html`<p role="alert" class="err-ink">${n.error}</p>` : null}
   </div>`;
+}
+
+// PAD-1531: the original lets other computers in (someone else's image, built with remote access on), and a card
+// written from a project that never set remote access would keep them
+function Others({ n, locked }) {
+  const many = n.others.length > 1;
+  return html`<${Note} kind="warn">
+    <div>The original image lets ${many ? `${n.others.length} other computers` : "another computer"} in over the
+      network: <b>${n.others.join(", ")}</b>. Cards you write from this project would let ${many ? "them" : "it"} into
+      your machine too.</div>
+    <div class="row net-send-row">
+      <${Button} disabled=${locked} onClick=${() => call("network.take_others_off", n.project)}>
+        Take ${many ? "them" : "it"} off<//>
+    </div>
+  <//>`;
 }
 
 // PAD-1427 (David: "modify an attached SD card with the push of a button ... they don't have to manually enter

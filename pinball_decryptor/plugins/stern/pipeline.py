@@ -487,6 +487,8 @@ class SternWritePipeline(BasePipeline):
         except ExtrasError as e:
             raise PipelineError('Remote buttons', str(e)) from e
         extras_on = ssh_config is not None or wifi_config is not None or buttons_config is not None
+        # PAD-1531: say who the card lets in over the network, before anything is built
+        ssh_card.say_who_gets_in(self.original_path, ssh_config, self._log)
         try:
             if extras_on or recovering_ssh:
                 ssh_card.validate_output(self.original_path, self.output_path)

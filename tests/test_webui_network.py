@@ -120,12 +120,15 @@ def test_revert_all_resets_extras_to_source_and_clears_keys(tmp_path, monkeypatc
         assert any(row['key'] == 'extras' and row['n'] == 1 for row in rows)
         w.answers.extend(['yes', 'ok'])
         assert w.call('shellx.reset_run', [row['key'] for row in rows])
+        # PAD-1531: the key box never shows the card's own keys (they may be another person's computer, and the
+        # next save would copy them into the project); they are named apart, with a way to take them off
+        others = ['test machine'] if source_enabled else []
         assert wait_for(w, lambda: not w.window._running
                         and w.state('network')['enabled'] is source_enabled
-                        and w.state('network')['public_keys'] == source_keys)
+                        and w.state('network')['others'] == others)
         assert card_extras.load(str(project)) is None
         assert w.state('network')['enabled'] is source_enabled
-        assert w.state('network')['public_keys'] == source_keys
+        assert w.state('network')['public_keys'] == ''
         assert w.state('network')['error'] == ''
 
 

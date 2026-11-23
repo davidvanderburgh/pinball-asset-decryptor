@@ -90,6 +90,12 @@ def _careful_note(count):
             "more slowly, at the %d addresses that didn't answer (%s)..." % (count, when))
 
 
+def remote_setup_look(path, own=''):
+    """remote_setup.look, here so a test can stand in for it."""
+    from ...core import remote_setup
+    return remote_setup.look(path, own=own)
+
+
 class NetworkTab(TabService):
     ns = 'network'
     key = 'Network'
@@ -200,14 +206,24 @@ class NetworkTab(TabService):
         project = self._project()
         self._publish_online(project)                       # PAD-1479
         info = self._inspect()
-        enabled, keys, error = info.get('enabled', False), info.get('public_keys', ''), ''
+        # PAD-1531: the key box starts empty for a project that never saved one, never with the card's own keys:
+        # those may be another person's computer (an image they built with remote access on), and the first tick
+        # of the box would save their key into this project and so onto every card written from it
+        enabled, keys, error, rec = info.get('enabled', False), '', '', None
+        share = False
         try:
             rec = card_extras.load(project)
             if rec is not None:
                 enabled, keys = rec['enabled'], rec['public_keys']
                 card_extras.configuration(project)
+            share = card_extras.load_share(project)
         except card_extras.ExtrasError as e:
             error = str(e)
+        # PAD-1531: the computers other than this one the card lets in, kept by a build from a project that never
+        # set remote access (one that did writes its own keys in their place)
+        others = ([card_extras.key_name(k) for k in card_extras.others(info.get('public_keys', ''))]
+                  if rec is None and info.get('enabled') and not share else [])
+        self.set(share=share, others=others)
         wifi = self._inspect_wifi()
         wifi_on, wifi_band, wifi_error = wifi.get('enabled', False), wifi.get('band5', False), ''
         try:
@@ -425,7 +441,8 @@ class NetworkTab(TabService):
                 'Set up remote access',
                 "Put remote access on the card in %s?\n\nPAD adds a small program to the card's system files "
                 "that lets this computer in over your network, so Send to machine can reach the machine. The game, "
-                "its settings and high scores stay as they are.\n\nYour computer may ask for administrator "
+                "its settings and high scores stay as they are. If the card lets any other computer in, PAD takes "
+                "that off, so only this computer can get in.\n\nYour computer may ask for administrator "
                 "access to change the card." % shown, icon='warning'):
             return False
         return self._set_up(device)
@@ -439,6 +456,21 @@ class NetworkTab(TabService):
                                     filetypes=[('SD card images', '*.raw *.img'), ('All files', '*.*')])
         if not path:
             return False
+        others = remote_setup_look(path, self._own_keys()).get('others') or []
+        if others:
+            # PAD-1531: another person's computer on an image (one they built with remote access on): off by default
+            who = 'another computer' if len(others) == 1 else '%d other computers' % len(others)
+            ans = compat.messagebox.askyesnocancel(
+                'Set up remote access',
+                "Put remote access on %s?\n\nThis image already lets %s in over the network: %s. Whoever has "
+                "that computer could get into a machine running this card.\n\nYes: take %s off, so only this "
+                "computer can get in (recommended).\nNo: keep %s as well." % (
+                    os.path.basename(path), who, ', '.join(others),
+                    'it' if len(others) == 1 else 'them', 'it' if len(others) == 1 else 'them'),
+                icon='warning')
+            if ans is None:
+                return False
+            return self._set_up(path, keep_others=not ans)
         if not compat.messagebox.askyesno(
                 'Set up remote access',
                 "Put remote access on %s?\n\nThe image file itself is changed: write it to the machine's card "
@@ -446,13 +478,25 @@ class NetworkTab(TabService):
             return False
         return self._set_up(path)
 
-    def _set_up(self, path):
+    def _own_keys(self):
+        """The project's saved keys of the user's own SSH programs: one-button setup keeps them on the card."""
+        try:
+            rec = card_extras.load(self._project())
+        except card_extras.ExtrasError:
+            rec = None
+        return (rec or {}).get('public_keys') or ''
+
+    def _set_up(self, path, keep_others=False):
         from ...core import remote_setup
         self.set(setup_busy=True, setup_pct=0, setup_note='Starting...', setup_kind='')
         project = self._project()
+        own = self._own_keys()
         loop = self.ctx.loop
+        taken = []
 
         def log(text, level='info'):
+            if level == 'warning':
+                taken.append(text)                      # PAD-1531: whose access came off stays in the last word
             loop.post(self.log, text, level)
             loop.post(lambda: self.set(setup_note=text))
 
@@ -466,13 +510,16 @@ class NetworkTab(TabService):
 
         def work():
             try:
-                res = remote_setup.set_up_with_privileges(path, log=log, progress=progress)
+                res = remote_setup.set_up_with_privileges(path, log=log, progress=progress, own=own,
+                                                          keep_others=keep_others)
                 image = os.path.isfile(path)
                 where = os.path.basename(path) if image else 'The card'
                 text = ('%s already had remote access, and it lets this computer in.' % where if res == 'already'
                         else '%s has remote access now.' % where)
                 text += (" Write it to the machine's card, then use Find my machine." if image else
                          ' Put the card back in the machine, switch it on, then use Find my machine.')
+                if taken:
+                    text = taken[-1].replace('Taking', 'Took', 1) + ' ' + text
                 kind = 'ok'
             except Exception as e:                              # noqa: BLE001 - said, never raised into the UI
                 text, kind = str(e) or e.__class__.__name__, 'err'
@@ -1253,6 +1300,43 @@ class NetworkTab(TabService):
         if write is not None:
             write.reload_assets_tabs()
         return True
+
+    @rpc
+    def configure_share(self, on, project):
+        """PAD-1531: Build for sharing: cards and images built from this project carry no remote access and none of
+        the machine's own data (core/share_build.py)."""
+        if project != self._project() or self.get('running') or not os.path.isdir(project or ''):
+            return False
+        try:
+            card_extras.save_share(project, bool(on))
+        except card_extras.ExtrasError as e:
+            self.set(error=str(e))
+            return False
+        self._saved_extras()
+        return True
+
+    @rpc
+    def take_others_off(self, project):
+        """PAD-1531: the project saves its own remote access setting, so a card written from it no longer keeps the
+        other computers' keys the original trusts: on for this computer alone when the card let it in, else off."""
+        if project != self._project() or self.get('running') or not self._inspect()['supported']:
+            return False
+        try:
+            if card_extras.load(project) is None:
+                from ...core import remote_setup
+                lets_in = bool(remote_setup.look(self._source()).get('lets_pad_in'))
+                card_extras.save(project, lets_in, '')
+        except card_extras.ExtrasError as e:
+            self.set(error=str(e))
+            return False
+        self._saved_extras()
+        return True
+
+    def _saved_extras(self):
+        self.publish()
+        write = self.window.service('write')
+        if write is not None:
+            write.reload_assets_tabs()
 
     @rpc
     def configure_buttons(self, enabled, project):

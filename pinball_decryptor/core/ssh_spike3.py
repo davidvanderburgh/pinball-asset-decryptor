@@ -110,7 +110,18 @@ def key_for(path, key_source=None):
 @contextmanager
 def open_rootfs(path, writable=False, key_source=None):
     """A plaintext rootfs stream; never write headers or another partition."""
+    with open_volume(path, 'rootfs', writable=writable, key_source=key_source) as vol:
+        yield vol
+
+
+@contextmanager
+def open_volume(path, role, writable=False, key_source=None):
+    """A plaintext stream of the card's encrypted *role* partition (``rootfs``, ``data``, ``connectivity``);
+    never write headers or another partition.  PAD-1531: a build for sharing empties ``data`` and
+    ``connectivity`` the same way remote access changes ``rootfs``."""
     from . import ssh_card as S
+    what = {'rootfs': 'root filesystem', 'data': 'data partition',
+            'connectivity': 'connectivity partition'}.get(role, role)
     keys = key_for(path, key_source)
     f, size = open_stream(path, writable)
     try:
@@ -119,24 +130,24 @@ def open_rootfs(path, writable=False, key_source=None):
         validate_partitions(parts, size)
         if not spike3.is_spike3_card_parts(parts):
             raise ExtrasError('Not a recognized Spike 3 encrypted card layout.')
-        part = spike3.partition_for_role(parts, 'rootfs')
+        part = spike3.partition_for_role(parts, role)
         if part is None or not part.get('luks'):
-            raise ExtrasError('The Spike 3 root filesystem is not an encrypted partition.')
+            raise ExtrasError('The Spike 3 %s is not an encrypted partition.' % what)
         try:
             header = spike3.read_luks_header(f, part['start_lba'])
             header._pad_part_sectors = part['sectors']
         except Exception:
-            raise ExtrasError('The Spike 3 root filesystem has an unreadable LUKS header.') from None
+            raise ExtrasError('The Spike 3 %s has an unreadable LUKS header.' % what) from None
         validate_geometry(part, header)
         try:
-            master = keys.master_key(header, role='rootfs', part=part)
+            master = keys.master_key(header, role=role, part=part)
             if not spike3._luks_otp().verify_master_key(header, master):
                 raise ValueError()
         except Exception:
-            raise ExtrasError('The supplied Spike 3 key could not unlock the root filesystem.') from None
+            raise ExtrasError('The supplied Spike 3 key could not unlock the %s.' % what) from None
         vol = spike3_card.GamesVolume(f, part, header, master, writable=writable)
         if vol.size <= 0 or vol.segment_offset + vol.size > part['sectors'] * 512:
-            raise ExtrasError('The encrypted root filesystem lies outside its partition.')
+            raise ExtrasError('The encrypted %s lies outside its partition.' % what)
         yield vol
     finally:
         f.close()
@@ -217,6 +228,6 @@ def apply_to_build(original, output, config, log=None, cancel=None, key_source=N
                 got.update(chunk); left -= len(chunk)
         if got.hexdigest() != expected:
             raise ExtrasError('The re-encrypted Spike 3 filesystem failed read-back verification.')
-    text = 'SSH server enabled (key-only, port 22).' if config['enabled'] else 'SSH server disabled.'
+    text = 'SSH server enabled (key-only, port 22).' if config['enabled'] else S.OFF_TEXT
     if log: log(text, 'info')
     return text

@@ -19,6 +19,7 @@ patterns are the runtime's own (the slice "CAB FX"), made for strips: a light is
 blade's bottom, 999 at its top; a speaker ring from the top round). The Modes tab's Expression lights page plays a
 show on a drawing of the cabinet with the same arithmetic (webui/static/js/cabfx.js), and under the song's waveform.
 """
+import json
 import re
 
 from . import lampmap as _LM
@@ -219,6 +220,37 @@ def added_cfg_text(port, added):
     """addcab.cfg for the card, or "" when it adds none."""
     cab = added_lights(port, added)
     return _LM.added_cabinet_cfg(cab) if cab else ""
+
+
+#: PAD-1516: why a show of another project's stays behind when its game is another
+GAME_ONLY = "it plays %s's own show from its program, which another game does not have"
+
+
+def copy_shows(shows, same_title, names, room, source_label="its game"):
+    """PAD-1516 (Jim-Beam: "store/copy those animations to take it to other titles like Iron Maiden"): another
+    project's *shows* made ready for this one. ``(copied, left)``: the copies, named apart from *names* (the shows
+    this project has) and at most *room* of them, and ``[(name, why)]`` for those left behind. Steps are colours and
+    patterns over a lane, so they play on any cabinet; a show's song is its own project's sound, so on another game
+    (*same_title* false) a copy plays with no song until one is picked, and a show playing the game's own frames
+    (:func:`uses_game`) cannot go to another game at all."""
+    copied, left, taken = [], [], set(names)
+    for s in shows:
+        s = norm_show(json.loads(json.dumps(s)))
+        if not same_title and uses_game(s):
+            left.append((s["name"], GAME_ONLY % source_label))
+            continue
+        if len(copied) >= room:
+            left.append((s["name"], "this project has room for %d shows" % SHOWS_MAX))
+            continue
+        if not same_title:
+            s["slot"] = None
+        base, n = s["name"], 2
+        while s["name"] in taken:
+            s["name"] = ("%s %d" % (base, n))[:NAME_MAX]
+            n += 1
+        taken.add(s["name"])
+        copied.append(s)
+    return copied, left
 
 
 def length_ms(show):

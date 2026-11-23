@@ -359,6 +359,80 @@ class LightsTab(TabService):
         self._save("show \"%s\" added from the game's own" % s["name"])
         return len(self._shows) - 1
 
+    # -- PAD-1516: shows from another project ------------------------------------------------------------------------
+    def _other_folders(self):
+        from ...core import project_registry
+        settings = getattr(self.app, "_settings", None) or {}
+        try:
+            folders = [e.get("folder") or "" for e in project_registry.entries(settings)]
+        except Exception:                               # noqa: BLE001 - no registry: no other projects
+            folders = []
+        own = os.path.normcase(os.path.normpath(self._project)) if self._project else ""
+        out, seen = [], {own}
+        for f in folders:
+            k = os.path.normcase(os.path.normpath(f)) if f else ""
+            if k and k not in seen and os.path.isdir(f):
+                seen.add(k)
+                out.append(f)
+        return out
+
+    @staticmethod
+    def _title_of(folder):
+        from ...plugins.stern import cab_shows as CS
+        try:
+            return CS.project_title(folder)
+        except Exception:                               # noqa: BLE001 - unreadable: no title
+            return None
+
+    @rpc
+    def other_shows(self):
+        """PAD-1516: the shows of the other projects the app knows, for New show's From another project:
+        ``[{folder, name, game, same, shows: [{i, name, stays}]}]`` (``stays``: why that show cannot come here, or
+        ""), only the projects that have shows."""
+        from ...plugins.stern import cab_shows as CS
+        if not self._project:
+            return []
+        mine = self._title_of(self._project)
+        out = []
+        for f in self._other_folders():
+            shows = CS.load(f)
+            if not shows:
+                continue
+            prof = self._title_of(f)
+            same = bool(mine is not None and prof is not None and prof.key == mine.key)
+            label = prof.label if prof is not None else "another game"
+            out.append({"folder": f, "name": os.path.basename(os.path.normpath(f)) or f, "game": label, "same": same,
+                        "shows": [{"i": i, "name": s["name"],
+                                   "stays": "" if same or not CS.uses_game(s) else CS.GAME_ONLY % label}
+                                  for i, s in enumerate(shows)]})
+        return out
+
+    @rpc
+    def copy_in(self, folder, which=None):
+        """PAD-1516: copies of another project's shows (*which*: their indexes, None = every one) added to this
+        project's; on another game each comes without its song. Returns the first copy's index, -1 for none."""
+        from ...plugins.stern import cab_shows as CS
+        if not self._project or not folder or folder not in self._other_folders():
+            return -1
+        shows = CS.load(folder)
+        if which is not None:
+            idx = {int(x) for x in which if isinstance(x, int) and not isinstance(x, bool)}
+            shows = [s for i, s in enumerate(shows) if i in idx]
+        mine, prof = self._title_of(self._project), self._title_of(folder)
+        same = bool(mine is not None and prof is not None and prof.key == mine.key)
+        copied, left = CS.copy_shows(shows, same, [x["name"] for x in self._shows], CS.SHOWS_MAX - len(self._shows),
+                                     prof.label if prof is not None else "its game")
+        src = os.path.basename(os.path.normpath(folder)) or folder
+        for name, why in left:
+            self.log("Expression lights: \"%s\" from %s was not copied: %s." % (name, src, why), "warning")
+        if not copied:
+            return -1
+        first = len(self._shows)
+        self._shows.extend(copied)
+        self._save("%d show(s) copied from %s%s" % (len(copied), src,
+                                                       "" if same else ", each to have its song picked here"))
+        return first
+
     @rpc
     def duplicate(self, i):
         from ...plugins.stern import cab_shows as CS

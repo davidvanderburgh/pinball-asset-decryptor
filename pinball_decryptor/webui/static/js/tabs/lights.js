@@ -27,6 +27,9 @@ export const css = true;
 const TIP = {
   newShow: "A new show: blank, or starting from one of the ready-made ones.",
   dup: "A copy of this show, to change.",
+  copySame: "A copy of this show in this project, with the song it goes with.",
+  copyOther: "A copy of this show in this project. Its song is the other game's, so pick the song it goes with here.",
+  noOthers: "None of the other projects the app knows has expression light shows of its own yet.",
   del: "Take this show out of the project.",
   name: "The show's name, for you (the log names it too).",
   song: "The song this show plays with: the game starts the show whenever it plays this sound, from the song's start. A song you replaced plays here as you replaced it.",
@@ -353,9 +356,31 @@ export default function LightsTab() {
       d[LANES[sel.lane]].splice(i + 1, 0, b);
     }, { lane: sel.lane, i: i + 1 });
   };
-  const newMenu = (e) => openMenu(e.currentTarget, (s.presets || []).map((p) => ({
-    label: p.key === "blank" ? "Blank" : `From “${p.label}”`,
-    onClick: () => call("lights.new_show", p.key, show ? show.slot : null).then((i) => { if (i >= 0) setPick(i); }) })));
+  // PAD-1516: below the ready-made ones, the shows of the other projects the app knows, to copy in
+  const fromOthers = (others) => {
+    const copy = (f, which) => call("lights.copy_in", f, which).then((i) => { if (i >= 0) setPick(i); });
+    const items = [];
+    for (const p of others) {
+      const ok = p.shows.filter((x) => !x.stays);
+      items.push({ header: `${p.name} · ${p.game}` });
+      if (ok.length > 1) items.push({ label: `Every show (${ok.length})`, title: p.same ? TIP.copySame : TIP.copyOther,
+                                      onClick: () => copy(p.folder, null) });
+      for (const x of p.shows) items.push({ label: x.name, disabled: !!x.stays || shows.length >= s.max,
+                                            title: x.stays ? `Stays in ${p.name}: ${x.stays}.` : p.same ? TIP.copySame : TIP.copyOther,
+                                            onClick: () => copy(p.folder, [x.i]) });
+    }
+    return items.length ? { label: "From another project", submenu: items }
+                        : { label: "From another project", disabled: true, title: TIP.noOthers };
+  };
+  const newMenu = (e) => {
+    const at = e.currentTarget;
+    call("lights.other_shows").catch(() => []).then((others) => openMenu(at, [
+      ...(s.presets || []).map((p) => ({
+        label: p.key === "blank" ? "Blank" : `From “${p.label}”`,
+        onClick: () => call("lights.new_show", p.key, show ? show.slot : null).then((i) => { if (i >= 0) setPick(i); }) })),
+      { sep: true },
+      fromOthers(others || [])]));
+  };
 
   const head = html`<${PageHead} title="Expression lights" sub=${s.intro}>
     ${shows.length ? html`<${Chip} kind="acc">${shows.length} of ${s.max} shows<//>` : null}

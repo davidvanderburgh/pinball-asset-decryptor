@@ -36,6 +36,8 @@ Next
 compacting = False
 If WScript.Arguments.Count > 0 Then
     If WScript.Arguments(0) = "--compact" Then compacting = True
+    ' PAD-1535: Move with PAD moves the user's own card, no prompt either
+    If WScript.Arguments(0) = "--move" Then compacting = True
 End If
 On Error Resume Next
 If compacting Then

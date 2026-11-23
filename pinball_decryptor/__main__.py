@@ -20,6 +20,10 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--compact":
         from .webui.compact_window import main as _compact
         sys.exit(_compact(sys.argv[2:]))
+    # PAD-1535: > Move with PAD, the card moved and kept compact.
+    if len(sys.argv) > 1 and sys.argv[1] == "--move":
+        from .webui.compact_window import main_move
+        sys.exit(main_move(sys.argv[2:]))
 
     # Dev-only: when /next item worktrees exist, offer to run one of them
     # instead of this checkout (no-op everywhere else — see worktree_picker).

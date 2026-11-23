@@ -1,6 +1,17 @@
-"""Right-click a card image in Explorer > Compact with PAD (PAD-1522).
+"""Right-click a card image in Explorer > Compact with PAD (PAD-1522),
+or > Move with PAD (PAD-1535).
 
     pythonw "Pinball Asset Decryptor.pyw" --compact <card.raw> [more...]
+    pythonw "Pinball Asset Decryptor.pyw" --move <card.raw> [more...] [--to DIR]
+
+MOVE: Explorer's move to another drive is a copy that writes a compact
+card's holes back out as zeros, so the card arrived full size and took as
+long as a full one to write.  Move with PAD asks for the folder (the
+standard Windows folder picker), then moves each card with
+core.sparse_card.move_card: a rename on the same drive, only the card's
+data copied to another one.  The same window shows it (:class:`MoveJobs`
+carries the words), with a queue and a mutex of its own, so a move and a
+compact never land in one window.
 
 Stores the card compact WHERE IT IS (core.sparse_card.compact_file: the same
 file, the same bytes, only its data takes disk space) in a small window of
@@ -39,6 +50,19 @@ NOTE = ("A compact card is the same file with the same bytes: only the "
 HAND_OVER_WAIT = 4.0
 MUTEX = "Local\\PinballAssetDecryptor.CompactWindow"
 
+MOVE_FLAG = "--move"
+MOVE_TITLE = "Move card image"
+MOVE_NOTE = ("PAD copies only the card's data, so a compact card stays "
+             "compact on its new drive and is written in a fraction of the "
+             "time. Explorer's own move to another drive writes the card's "
+             "whole size.")
+MOVE_MUTEX = "Local\\PinballAssetDecryptor.MoveWindow"
+MOVE_QUEUE = "move_queue"
+#: a later launch waits this long for the window to take its card: the
+#: first one may still be showing the folder picker (its own thread takes
+#: cards meanwhile, so this is only a guard)
+MOVE_HAND_OVER_WAIT = 10.0
+
 WAITING, WORKING, DONE, FAILED, STOPPED = (
     "waiting", "working", "done", "failed", "stopped")
 
@@ -55,9 +79,17 @@ def fmt(n):
 
 
 def paths_arg(argv):
-    """The card images on a ``--compact`` command line, in order."""
+    """The card images on a ``--compact`` / ``--move`` command line, in
+    order (a ``--to DIR`` is not one)."""
     out = []
+    skip = False
     for a in argv or ():
+        if skip:
+            skip = False
+            continue
+        if a == "--to":
+            skip = True
+            continue
         if not a or a.startswith("-"):
             continue
         p = os.path.abspath(a.strip('"'))
@@ -109,9 +141,15 @@ class Job:
 class Jobs:
     """The list of cards and the one worker that compacts them in turn.
 
+    The window's words are the list's (:attr:`title`, :attr:`note`,
+    :meth:`headline`): :class:`MoveJobs` is the same window moving cards.
+
     Everything the worker finds goes on :attr:`events` as ``(job, what)``;
     whoever shows it (the window's timer, a test) drains that on its own
     thread and reads the job's fields."""
+
+    title = TITLE
+    note = NOTE
 
     def __init__(self, compact=None):
         self.jobs = []
@@ -169,6 +207,25 @@ class Jobs:
         if failed:
             text += " %d could not be compacted." % len(failed)
         return text
+
+    def headline(self, j):
+        """The headline when *j* is the only card."""
+        if j.state in (WAITING, WORKING):
+            return "Compacting %s" % j.name
+        if j.state == FAILED:
+            return "%s was not compacted" % j.name
+        if j.state == STOPPED:
+            return "Stopped"
+        if j.text.startswith("Nothing to free"):
+            return "%s stays as it is" % j.name
+        return "%s is stored compact" % j.name
+
+    def busy_headline(self, at, n):
+        return "Compacting card image %d of %d" % (at, n)
+
+    def where(self, j):
+        """The line under a lone card's headline: where it is."""
+        return os.path.dirname(j.path)
 
     # ------------------------------------------------------------------
     def _next(self):
@@ -230,12 +287,12 @@ class Jobs:
 # ----------------------------------------------------------------------
 # one window for every card picked: later launches hand theirs over
 # ----------------------------------------------------------------------
-def spool_dir():
+def spool_dir(name="compact_queue"):
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    return os.path.join(base, "pinball_decryptor", "compact_queue")
+    return os.path.join(base, "pinball_decryptor", name)
 
 
-def claim():
+def claim(mutex=MUTEX):
     """Become THE compact window; a handle to keep while it is open, or
     None when another one already is.  Only Windows has several launches
     (Explorer's one per file); elsewhere every run is its own window."""
@@ -247,7 +304,7 @@ def claim():
         k32.CreateMutexW.restype = ctypes.c_void_p
         k32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int,
                                      ctypes.c_wchar_p]
-        h = k32.CreateMutexW(None, False, MUTEX)
+        h = k32.CreateMutexW(None, False, mutex)
         if h and ctypes.get_last_error() == 183:        # ALREADY_EXISTS
             k32.CloseHandle(ctypes.c_void_p(h))
             return None
@@ -336,23 +393,13 @@ def view(jobs):
     pct = (now.pct or 0) if now is not None else (0 if busy else 100)
     if len(cards) == 1:
         j = cards[0]
-        if j.state in (WAITING, WORKING):
-            head = "Compacting %s" % j.name
-        elif j.state == FAILED:
-            head = "%s was not compacted" % j.name
-        elif j.state == STOPPED:
-            head = "Stopped"
-        elif j.text.startswith("Nothing to free"):
-            head = "%s stays as it is" % j.name
-        else:
-            head = "%s is stored compact" % j.name
-        body = "%s\n\n%s" % (os.path.dirname(j.path), j.text)
+        head = jobs.headline(j)
+        body = "%s\n\n%s" % (jobs.where(j), j.text)
     else:
         if busy:
             at = (cards.index(now) + 1) if now is not None else \
                 sum(1 for j in cards if j.state not in (WAITING,)) + 1
-            head = "Compacting card image %d of %d" % (min(at, len(cards)),
-                                                       len(cards))
+            head = jobs.busy_headline(min(at, len(cards)), len(cards))
         else:
             head = jobs.summary()
         body = "\n".join("%s  %s\n      %s" % (MARK[j.state], j.name, j.text)
@@ -484,13 +531,13 @@ class TaskWindow:
         else:
             cfg.dwFlags |= _TDF_USE_HICON_MAIN
             cfg.mainIcon = self._icon
-        cfg.pszWindowTitle = TITLE
+        cfg.pszWindowTitle = self.jobs.title
         cfg.pszMainInstruction = v["instruction"]
         cfg.pszContent = v["content"]
         cfg.cButtons = 1
         cfg.pButtons = buttons
         cfg.nDefaultButton = _BUTTON
-        cfg.pszFooter = NOTE
+        cfg.pszFooter = self.jobs.note
         cfg.pfCallback = self._callback
         cfg.cxWidth = self.WIDTH
         self._keep = [buttons, cfg]
@@ -546,7 +593,7 @@ class TaskWindow:
                     self.jobs.wait(15)
                 return _S_OK
         except Exception:                               # noqa: BLE001
-            log.exception("compact window")
+            log.exception("card window")
         return _S_OK if msg != _TDN_TIMER else _S_FALSE
 
     def _tick(self):
@@ -620,12 +667,12 @@ class TaskWindow:
         return True
 
 
-def _message(text, warn=False):
+def _message(text, warn=False, title=TITLE):
     """The fallback's one box, for a Windows with no task dialog."""
     try:
         import ctypes
         ctypes.windll.user32.MessageBoxW(
-            None, text, TITLE, 0x30 if warn else 0x40)
+            None, text, title, 0x30 if warn else 0x40)
     except Exception:                                   # noqa: BLE001
         pass
 
@@ -667,6 +714,297 @@ def main(argv=None):
             v = view(jobs)
             _message("%s\n\n%s" % (v["instruction"], v["content"]),
                      v["warn"])
+    finally:
+        release(handle)
+    return 0
+
+
+
+# ----------------------------------------------------------------------
+# Move with PAD (PAD-1535)
+# ----------------------------------------------------------------------
+def to_arg(argv):
+    """The folder a ``--to DIR`` names, or None."""
+    argv = list(argv or ())
+    if "--to" in argv:
+        i = argv.index("--to")
+        if i + 1 < len(argv):
+            return os.path.abspath(argv[i + 1].strip('"'))
+    return None
+
+
+def _place(folder):
+    """A folder as the window names it: ``D:\\Pinball\\cards``."""
+    return folder.rstrip("\\/") if len(folder) > 3 else folder
+
+
+def move_text(res):
+    """One line on what moving came to, from a sparse_card.MoveResult."""
+    size, after = fmt(res.size), fmt(res.after)
+    if res.renamed:
+        text = ("Moved. On the same drive it is the very same file, "
+                "%s on disk." % after)
+    elif not res.sparse_ok:
+        text = ("Moved, but full size: this drive cannot hold compact "
+                "files (exFAT or FAT32, like most USB sticks).")
+    elif res.after + sparse_card.MIN_HOLE > res.size:
+        text = "Moved. This %s card is full of data." % size
+    elif res.before + sparse_card.MIN_HOLE > res.size:
+        text = ("Moved and now compact: %s on disk for a %s card."
+                % (after, size))
+    else:
+        text = "Moved and still compact: %s on disk for a %s card." % (
+            after, size)
+    if res.kept:
+        text += (" The original could not be removed (another program has "
+                 "it open), so it is still in %s too."
+                 % _place(os.path.dirname(res.src)))
+    return text
+
+
+def move_error_text(err, dest=""):
+    if isinstance(err, sparse_card.SameFolder):
+        return "It is already in that folder."
+    if isinstance(err, FileExistsError):
+        return ("%s already has a file of that name. Nothing was moved."
+                % _place(dest))
+    if isinstance(err, sparse_card.NoRoom):
+        return "Not moved: %s." % str(err).rstrip(".")
+    if isinstance(err, PermissionError):
+        return ("Could not move it: another program is using this card, or "
+                "it is read-only. Close that program and try again.")
+    if isinstance(err, FileNotFoundError):
+        return "This file is no longer there."
+    if isinstance(err, OSError) and err.strerror:
+        return "Could not move it: %s." % err.strerror.rstrip(".")
+    return "Could not move it: %s." % err
+
+
+class MoveJobs(Jobs):
+    """:class:`Jobs` moving every card into :attr:`dest`."""
+
+    title = MOVE_TITLE
+    note = MOVE_NOTE
+
+    def __init__(self, dest, move=None):
+        super().__init__()
+        self.dest = os.path.abspath(dest)
+        self._move = move or sparse_card.move_card
+
+    def headline(self, j):
+        if j.state in (WAITING, WORKING):
+            return "Moving %s" % j.name
+        if j.state == FAILED:
+            return "%s was not moved" % j.name
+        if j.state == STOPPED:
+            return "Stopped"
+        return "%s is in its new folder" % j.name
+
+    def busy_headline(self, at, n):
+        return "Moving card image %d of %d" % (at, n)
+
+    def where(self, j):
+        came = getattr(j, "came_from", None) or j.path
+        return "From %s\nTo %s" % (_place(os.path.dirname(came)),
+                                    _place(self.dest))
+
+    def summary(self):
+        with self._lock:
+            jobs = list(self.jobs)
+        if len(jobs) <= 1:
+            return ""
+        done = sum(1 for j in jobs if j.state == DONE)
+        text = "%d of %d card images moved to %s." % (
+            done, len(jobs), _place(self.dest))
+        failed = sum(1 for j in jobs if j.state == FAILED)
+        if failed:
+            text += " %d could not be moved." % failed
+        return text
+
+    def _one(self, job):
+        job.pct, job.text = 0, "Moving the card…"
+        self.events.put((job, "start"))
+        last = [-1]
+
+        def progress(done, total):
+            pct = int(done * 100 // total) if total else 100
+            if pct != last[0]:
+                last[0] = pct
+                job.pct = pct
+                job.text = "Copying the card's data… %d%%" % pct
+                self.events.put((job, "progress"))
+
+        def cancel():
+            if self._stop:
+                raise Stopped()
+
+        try:
+            res = self._move(job.path, self.dest, progress=progress,
+                             cancel=cancel)
+        except Stopped:
+            job.state, job.pct = STOPPED, None
+            job.text = "Stopped: the card is where it was."
+        except Exception as e:                          # noqa: BLE001
+            log.warning("move %s to %s", job.path, self.dest, exc_info=True)
+            job.state, job.pct = FAILED, None
+            job.text = move_error_text(e, self.dest)
+        else:
+            job.state, job.pct = DONE, 100
+            job.text = move_text(res)
+            job.came_from, job.path = job.path, res.dst
+            if not res.sparse_ok:
+                job.state = FAILED
+        self.events.put((job, "end"))
+
+
+_FOS_NOCHANGEDIR, _FOS_PICKFOLDERS, _FOS_FORCEFILESYSTEM = 0x8, 0x20, 0x40
+_FOS_PATHMUSTEXIST = 0x800
+_SIGDN_FILESYSPATH = 0x80058000
+
+
+def pick_folder(start=None, title="Move with PAD: choose the folder",
+                ok="Move here"):
+    """The standard Windows folder picker (IFileOpenDialog, as Explorer's
+    own "Move to" > "Choose location" shows); the folder picked, or None
+    when it was cancelled or cannot be shown."""
+    import ctypes
+    from ctypes import wintypes
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("a", ctypes.c_ulong), ("b", ctypes.c_ushort),
+                    ("c", ctypes.c_ushort), ("d", ctypes.c_ubyte * 8)]
+
+    ole32 = ctypes.windll.ole32
+    shell32 = ctypes.windll.shell32
+
+    def guid(text):
+        g = GUID()
+        ole32.CLSIDFromString(ctypes.c_wchar_p(text), ctypes.byref(g))
+        return g
+
+    def method(ptr, index, *argtypes):
+        vtbl = ctypes.cast(ptr, ctypes.POINTER(ctypes.POINTER(
+            ctypes.c_void_p))).contents
+        proto = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, *argtypes)
+        fn = proto(vtbl[index])
+        return lambda *a: fn(ptr, *a)
+
+    def release(ptr):
+        if ptr:
+            method(ptr, 2)()
+
+    ole32.CoInitializeEx(None, 0x2)             # apartment threaded
+    dlg = ctypes.c_void_p()
+    hr = ole32.CoCreateInstance(
+        ctypes.byref(guid("{DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7}")), None,
+        1, ctypes.byref(guid("{D57C7288-D4AD-4768-BE02-9D969532D960}")),
+        ctypes.byref(dlg))
+    if hr != 0 or not dlg:
+        return None
+    item = ctypes.c_void_p()
+    try:
+        opts = ctypes.c_uint(0)
+        method(dlg, 10, ctypes.POINTER(ctypes.c_uint))(ctypes.byref(opts))
+        method(dlg, 9, ctypes.c_uint)(
+            opts.value | _FOS_PICKFOLDERS | _FOS_FORCEFILESYSTEM
+            | _FOS_PATHMUSTEXIST | _FOS_NOCHANGEDIR)
+        method(dlg, 17, ctypes.c_wchar_p)(title)
+        method(dlg, 18, ctypes.c_wchar_p)(ok)
+        if start and os.path.isdir(start):
+            there = ctypes.c_void_p()
+            fn = shell32.SHCreateItemFromParsingName
+            fn.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p,
+                           ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+            fn.restype = ctypes.c_long
+            if fn(start, None, ctypes.byref(guid(
+                    "{43826D1E-E718-42EE-BC55-A1E261C37BFE}")),
+                    ctypes.byref(there)) == 0:
+                method(dlg, 12, ctypes.c_void_p)(there)
+                release(there)
+        if method(dlg, 3, wintypes.HWND)(None) != 0:
+            return None                         # cancelled
+        if method(dlg, 20, ctypes.POINTER(ctypes.c_void_p))(
+                ctypes.byref(item)) != 0 or not item:
+            return None
+        name = ctypes.c_void_p()
+        if method(item, 5, ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p))(
+                _SIGDN_FILESYSPATH, ctypes.byref(name)) != 0:
+            return None
+        try:
+            return ctypes.wstring_at(name.value)
+        finally:
+            ole32.CoTaskMemFree(name)
+    finally:
+        release(item)
+        release(dlg)
+
+
+class _Gatherer:
+    """Takes the cards later launches hand over while the folder picker is
+    open (Explorer starts one launch per selected card), so they wait for
+    nothing and all go to the one folder."""
+
+    def __init__(self, spool):
+        self.spool = spool
+        self.paths = []
+        self._done = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True,
+                                   name="pad-move-gather")
+        self._t.start()
+
+    def _run(self):
+        while not self._done.wait(0.05):
+            self.paths += take_handed(self.spool)
+
+    def stop(self):
+        self._done.set()
+        self._t.join(2)
+        self.paths += take_handed(self.spool)
+        return self.paths
+
+
+def main_move(argv=None, pick=None):
+    """The ``--move`` launch.  Returns the process's exit code."""
+    argv = sys.argv[1:] if argv is None else argv
+    paths = paths_arg(argv)
+    dest = to_arg(argv)
+    if not paths:
+        return 2
+    if sys.platform != "win32":
+        if not dest:
+            print("--move needs --to DIR here", file=sys.stderr)
+            return 2
+        jobs = MoveJobs(dest)
+        for p in paths:
+            jobs.add(p)
+        return run_plain(jobs)
+    spool = spool_dir(MOVE_QUEUE)
+    handle = claim(MOVE_MUTEX)
+    if handle is None:
+        if hand_over(paths, spool, wait=MOVE_HAND_OVER_WAIT):
+            return 0
+        handle = claim(MOVE_MUTEX) or object()
+    try:
+        _dpi_aware()
+        if not dest:
+            gather = _Gatherer(spool)
+            try:
+                dest = (pick or pick_folder)(os.path.dirname(paths[0]))
+            finally:
+                for p in gather.stop():
+                    p = os.path.abspath(p)
+                    if p not in paths:
+                        paths.append(p)
+            if not dest:
+                return 0                        # cancelled: nothing moved
+        jobs = MoveJobs(dest)
+        for p in paths:
+            jobs.add(p)
+        if not TaskWindow(jobs, spool=spool).run():
+            jobs.wait()
+            v = view(jobs)
+            _message("%s\n\n%s" % (v["instruction"], v["content"]),
+                     v["warn"], MOVE_TITLE)
     finally:
         release(handle)
     return 0

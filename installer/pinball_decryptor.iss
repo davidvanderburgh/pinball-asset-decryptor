@@ -560,6 +560,9 @@ begin
     RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
       'Software\Classes\SystemFileAssociations\' + Exts[I] +
       '\shell\PinballAssetDecryptor.Compact');
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+      'Software\Classes\SystemFileAssociations\' + Exts[I] +
+      '\shell\PinballAssetDecryptor.Move');
     if RegQueryStringValue(HKEY_CURRENT_USER, 'Software\Classes\' + Exts[I],
                            '', Cur) and
        (Cur = 'PinballAssetDecryptor.CardImage') then
@@ -582,6 +585,8 @@ begin
   DelTree(ExpandConstant('{localappdata}\pinball_decryptor\shell'),
           True, True, True);
   DelTree(ExpandConstant('{localappdata}\pinball_decryptor\compact_queue'),
+          True, True, True);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\move_queue'),
           True, True, True);
   { PAD-1523: the short-menu package (shell_menu.NAME) for this user, its
     staged handler, and the certificate the install trusted it by (the

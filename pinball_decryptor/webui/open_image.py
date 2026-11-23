@@ -169,6 +169,12 @@ COMPACT_EXTENSIONS = (".raw", ".img")
 #: the launcher's flag for it; launcher.vbs starts this one without the
 #: Administrator prompt
 COMPACT_FLAG = "--compact"
+#: the right-click verb that moves a card to another folder or drive and
+#: keeps it compact (PAD-1535): Explorer's own move to another drive writes
+#: every hole back out, so a compact card arrived full size
+MOVE_VERB = "PinballAssetDecryptor.Move"
+MOVE_LABEL = "Move with PAD…"
+MOVE_FLAG = "--move"
 #: the double-click verb's key under the ProgID, and what it was before
 #: PAD-1522 gave it VERB's name (registrations from v1.573 on have that one)
 OPEN_KEY = "\\shell\\" + VERB
@@ -223,6 +229,7 @@ def association_values(app_dir, icon_dll=None):
     launcher = join(app_dir, "launcher.vbs")
     command = 'wscript.exe "%s" "%%1"' % launcher
     compact = 'wscript.exe "%s" "%s" "%%1"' % (launcher, COMPACT_FLAG)
+    move = 'wscript.exe "%s" "%s" "%%1"' % (launcher, MOVE_FLAG)
     icon = join(app_dir, "pinball_decryptor", "icon.ico")
     # a card image gets a file's icon (an SD card), never the app's own: a
     # desktop of .raw files read as a row of PAD shortcuts (PAD-1518)
@@ -266,6 +273,10 @@ def association_values(app_dir, icon_dll=None):
         rows += [(base, "", COMPACT_LABEL),
                  (base, "Icon", compact_icon),
                  (base + r"\command", "", compact)]
+        base = r"SystemFileAssociations\%s\shell\%s" % (ext, MOVE_VERB)
+        rows += [(base, "", MOVE_LABEL),
+                 (base, "Icon", compact_icon),
+                 (base + r"\command", "", move)]
     if icon_dll:
         # after the plain DefaultIcon above: the later row is the one kept
         rows += shell_icon.handler_values(PROGID)
@@ -486,7 +497,7 @@ def unregister_association(classes=None):
                 winreg.DeleteValue(k, PROGID)
         except OSError:
             pass
-        for verb in (VERB, COMPACT_VERB):
+        for verb in (VERB, COMPACT_VERB, MOVE_VERB):
             _del(r"%s\SystemFileAssociations\%s\shell\%s"
                       % (classes, ext, verb))
         try:

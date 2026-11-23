@@ -20,6 +20,8 @@ What is here:
   already-compact card is seconds, not a 62 GB read.
 * :func:`sparse_copy` - copy an image to a new sparse file (the build's
   card copy; a plain CopyFileEx writes every zero back out).
+* :func:`move_card` - move an image to another folder or drive and keep it
+  compact (Explorer's move to another drive writes the holes back out).
 * :func:`import_card` - bring a new image into a library folder compact,
   from a .raw/.img or straight out of a .zip/.xz/.gz/.bz2 download.
 * :func:`compact_folder` and :func:`main` - the library tool:
@@ -434,6 +436,93 @@ def sparse_copy(src, dst, *, progress=None, cancel=None):
     return written
 
 
+@dataclass
+class MoveResult:
+    src: str
+    dst: str
+    size: int
+    before: int                 # bytes on disk where it was
+    after: int                  # bytes on disk where it is now
+    renamed: bool = False       # the same drive: a rename, nothing copied
+    sparse_ok: bool = True      # False: the new drive refused holes
+    kept: bool = False          # the original could not be removed
+    seconds: float = 0.0
+
+
+class SameFolder(ValueError):
+    """The card is already in the folder it is to be moved to."""
+
+
+def _same_volume(a, b):
+    try:
+        return os.stat(a).st_dev == os.stat(b).st_dev
+    except OSError:
+        return False
+
+
+def move_card(src, dest_dir, *, progress=None, cancel=None, copy=None):
+    """Move card image *src* into folder *dest_dir* and keep it compact
+    (PAD-1535).  Explorer's own move to another drive is a copy
+    (CopyFileEx), which writes every hole back out as zeros: a 3 GB compact
+    card took its whole 62 GB on the new drive, and as long to write.  Here
+    a move on the same drive is a rename (instant, the file untouched); to
+    another drive only the card's data is copied (:func:`sparse_copy`),
+    written as ``.part``, given the card's dates and renamed when whole, and
+    only then is the original removed.  A full-size card arrives compact.
+
+    *progress* is ``progress(done, total)``, *cancel* a callable that raises
+    to stop (the ``.part`` is removed, the original left as it was).
+    Raises :class:`SameFolder`, ``FileExistsError`` (a file of that name is
+    there already) or :class:`NoRoom`."""
+    t0 = time.monotonic()
+    src = os.path.abspath(src)
+    dest_dir = os.path.abspath(dest_dir)
+    if not os.path.isfile(src):
+        raise FileNotFoundError(src)
+    if not os.path.isdir(dest_dir):
+        raise FileNotFoundError(dest_dir)
+    dst = os.path.join(dest_dir, os.path.basename(src))
+    if os.path.normcase(os.path.dirname(src)) == os.path.normcase(dest_dir):
+        raise SameFolder(dest_dir)
+    if os.path.exists(dst):
+        raise FileExistsError(dst)
+    size = os.path.getsize(src)
+    before = on_disk_size(src)
+    if _same_volume(os.path.dirname(src), dest_dir):
+        os.rename(src, dst)
+        shell_refresh(dst)
+        return MoveResult(src, dst, size, before, on_disk_size(dst),
+                          renamed=True, seconds=time.monotonic() - t0)
+    with open(src, "rb", buffering=0) as f:
+        data = sum(n for _o, n in allocated_ranges(f, size))
+    _need_room(dest_dir, data, "the card's data needs %.1f GB")
+    times = _times(src)
+    part = dst + ".part"
+    try:
+        (copy or sparse_copy)(src, part, progress=progress, cancel=cancel)
+        if os.path.exists(dst):
+            raise FileExistsError(dst)
+        os.replace(part, dst)
+    except BaseException:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        raise
+    _put_times(dst, times)
+    after = on_disk_size(dst)
+    kept = False
+    try:
+        os.remove(src)
+    except OSError:
+        kept = True                 # in use: both stay, nothing is lost
+    shell_refresh(dst)
+    return MoveResult(src, dst, size, before, after,
+                      sparse_ok=not (after >= size
+                                     and data + MIN_HOLE <= size),
+                      kept=kept, seconds=time.monotonic() - t0)
+
+
 def _open_archive(src):
     """``(stream, size or None, member name)`` for a compressed download."""
     low = src.lower()
@@ -565,12 +654,12 @@ class NoRoom(OSError):
     """The drive has not got the room a full-size card needs."""
 
 
-def _need_room(folder, need):
+def _need_room(folder, need, what="the full-size card needs %.1f GB more"):
     import shutil
     free = shutil.disk_usage(folder).free
     if free < need:
-        raise NoRoom("%s has %.1f GB free; the full-size card needs %.1f GB "
-                     "more" % (folder, free / 1e9, need / 1e9))
+        raise NoRoom(("%s has %.1f GB free; " + what)
+                     % (folder, free / 1e9, need / 1e9))
 
 
 def hole_ranges(f, size):

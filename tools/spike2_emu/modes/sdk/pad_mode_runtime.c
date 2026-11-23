@@ -19690,6 +19690,8 @@ static struct {
                                           * character pick (ENHANCED CO-OP is the one with the pick) */
     unsigned style;                      /* PAD-1449: the style the start menu's chooser took for this game - 1 NORMAL,
                                           * 2 CHARACTERS (a pick, no abilities), 3 ENHANCED; 0: none asked */
+    unsigned hold;                       /* PAD-1449 round 10: coop.cfg `hold on` (1) / `hold off` (2); 0: as the start
+                                          * menu says (coop_hold_starts) */
     unsigned round;                      /* PAD-1042: the round of turns on this ball (1..the larger team) */
     unsigned started;                    /* PAD-1054: the game_start count last seen */
     int solo_ask;                        /* PAD-1054: that game began with the button held: a team of one, once it plays */
@@ -20060,6 +20062,22 @@ static int switch_held(unsigned id);
 static int coop_button_held(void)
 {
     return switch_held(coop.button);
+}
+
+/* PAD-1449 round 10 (DoomWalrus666, on v1.566.1: "Please remove the function of starting Co-op when holding down right
+ * flipper, it is no longer necessary with the new mode options"): the button held at Start makes a co-op game (PAD-1017,
+ * PAD-1054's team of one, the co-op intro) only where the start menu has no CO-OP PLAY entry to pick one with (the
+ * port does not know this build's menu: tm.armed 0). coop.cfg `hold on` keeps it, `hold off` drops it everywhere (tests
+ * lift it verbatim) */
+static int coop_hold_starts(unsigned hold, int menu)
+{
+    return hold == 1u || (hold != 2u && !menu);
+}
+
+/* PAD-1449 round 10: the button held, as a Start's co-op button (0 where it starts no co-op) */
+static int coop_start_button_held(void)
+{
+    return coop_hold_starts(coop.hold, tm.armed) && coop_button_held();
 }
 
 /* PAD-1033: switch `id` held now (a flipper button, polled from the tick) */
@@ -20718,7 +20736,7 @@ static unsigned adj_chain(unsigned id)
         /* the game reads it at its Start (emulator, Godzilla LE 1.16: once, before the intro begins), so a Start that
          * is about to be a co-op or team game - the right flipper held, or the start menu's entry just picked - is
          * answered off too */
-        int soon = ci.clip[0] && (coop_button_held() || (tm.pending && pm_ms() - tm.seen_ms < TEAM_PICK_MS));
+        int soon = ci.clip[0] && (coop_start_button_held() || (tm.pending && pm_ms() - tm.seen_ms < TEAM_PICK_MS));
         static int said;
         if (v && (ci.phase >= CI_PLAY || soon)) {
             if (said < 8 && ++said)
@@ -22174,7 +22192,7 @@ static int coop_launch_press(unsigned long now)
 static void coop_go_edge(unsigned id, int press)
 {
     if (!press || !id || id != ci.start_sw || pm_in_game()) return;
-    coop_go_held = coop_button_held();
+    coop_go_held = coop_start_button_held();               /* PAD-1449 round 10 */
     coop_go_ms = pm_ms() | 1ul;
 }
 
@@ -23525,7 +23543,7 @@ static int ci_film_held(int chars, int held, int switched_on)
 static int ci_film_due(void)
 {
     int held = ci_film_held(coop_ch_n && coop_pick_on,
-                            coop_start_held(coop_go_ms, coop_go_held, coop_button_held(), coop.held_ms, pm_ms(),
+                            coop_start_held(coop_go_ms, coop_go_held, coop_start_button_held(), coop.held_ms, pm_ms(),
                                             CI_HELD_MS),       /* PAD-1449 round 9: at the Start that began it */
                             coop_switched_on() || coop_teams_switched_on() != 0);
     if (sty.open && (sty.kind == STY_STANDARD || sty.kind == STY_CHALLENGE)) return 0;   /* PAD-1449: its style
@@ -24356,14 +24374,14 @@ static void coop_solo_check(void)
     g = chg_game_now();
     if (g != coop.started) {                                  /* before this tick's poll: the held time AT the start */
         coop.started = g;
-        coop.solo_ask = g && coop_start_held(coop_go_ms, coop_go_held, coop_button_held(), coop.held_ms, pm_ms(),
+        coop.solo_ask = g && coop_start_held(coop_go_ms, coop_go_held, coop_start_button_held(), coop.held_ms, pm_ms(),
                                              COOP_SOLO_MS);
         if (g && !coop.solo_ask && coop_solo_held(coop.held_ms, pm_ms()))   /* PAD-1449 round 9 */
             say("co-op: the right flipper was let go %lu ms before this game began and was up at the Start that began it "
                 "(%lu ms before) - the game's own start", pm_ms() - (coop.held_ms & ~1ul), pm_ms() - (coop_go_ms & ~1ul));
         coop_fresh_ms = g ? pm_ms() | 1ul : 0ul;              /* PAD-1078: no ball in play until its first waits */
     }
-    if (coop_button_held()) coop.held_ms = pm_ms() | 1ul;
+    if (coop_start_button_held()) coop.held_ms = pm_ms() | 1ul;   /* PAD-1449 round 10 */
     if (!coop.solo_ask || !pm_in_game() || !pm_player()) return;
     coop.solo_ask = 0;
     if (coop_teammates()) return;                             /* the held Start made a team already */
@@ -25064,7 +25082,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     if (solo && *coop_players_byte == 1 && coop_teams_switched_on()) return coop_team_add(r0, r1, r2, r3);
     if (!n && *coop_players_byte == 1 && coop_teams_switched_on() && !tm.armed)
         return coop_team_fill(r0, r1, r2, r3);                /* PAD-1052: no start menu to pick it on */
-    if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_button_held()))
+    if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_start_button_held()))   /* PAD-1449 round 10 */
         return coop_add_game(r0, r1, r2, r3);
     if (n >= 4) {
         say("co-op: Start - the team is full (4)");
@@ -25523,6 +25541,8 @@ static void coop_line(const char *s)
     while (*s == ' ' || *s == '\t') s++;
     if (!*s || *s == '#') return;
     if (str_starts(s, "coop on")) { coop.on = 1; return; }
+    if (str_starts(s, "hold on")) { coop.hold = 1; return; }          /* PAD-1449 round 10: the held button's co-op */
+    if (str_starts(s, "hold off")) { coop.hold = 2; return; }
     if (str_starts(s, "teams on")) { coop.teams_always = 4; return; }   /* PAD-1042: Team 2v2 */
     if (str_starts(s, "teams 2v1")) { coop.teams_always = 3; return; }  /* ... Team 2v1 */
     if (str_starts(s, "teams 3v1")) { coop.teams_always = 5; return; }  /* PAD-1224: Team 3v1 */
@@ -25797,6 +25817,10 @@ static void coop_arm(void)
             coop.teams_always == 3u ? "2v1" : coop.teams_always == 5u ? "3v1" : "on",
             coop.teams_always == 3u ? "2" : coop.teams_always == 5u ? "2 (team 1: 1+3+4)" : "2+4");   /* PAD-1052 */
     team_menu_arm();                                          /* PAD-1052: TEAM PLAY / CO-OP PLAY on the start menu */
+    say("co-op: the right flipper held at Start %s (%s)", coop_hold_starts(coop.hold, tm.armed)
+        ? "makes a co-op game" : "starts no co-op - the start menu's CO-OP PLAY does",
+        coop.hold == 1u ? "coop.cfg `hold on`" : coop.hold == 2u ? "coop.cfg `hold off`"
+        : tm.armed ? "the start menu has CO-OP PLAY" : "no start menu entry for it");   /* PAD-1449 round 10 */
     coop_awards_arm();                                        /* PAD-1028 */
     if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */

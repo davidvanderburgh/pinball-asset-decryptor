@@ -18,6 +18,7 @@ static unsigned bpg = 3, game_no = 1, button = 0, max_players = 4, credits = 99;
 static void say(const char *f, ...) { va_list a; va_start(a, f); vprintf(f, a); va_end(a); printf("\n"); }
 static unsigned chg_game_now(void) { return game_no; }
 static int coop_button_held(void) { return button; }
+static int coop_start_button_held(void) { return button; }   /* PAD-1449 round 10: the hold rule is tested on its own */
 static struct { int on; unsigned button, game, n, turn; unsigned teams_always; unsigned teams, team_n[3], team_max, round;
                 int filling; unsigned join_n, join_step; unsigned long join_at;
                 unsigned team_kind; int standard, plain; unsigned style; } coop;   /* PAD-1052: the fill; PAD-1224: 3v1, Enhanced Standard */

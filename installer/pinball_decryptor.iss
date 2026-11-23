@@ -302,7 +302,7 @@ Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app
 
 ; --- In-app update relaunch ----------------------------------------------
 ; The app's "Install update" flow runs this installer silently
-; (/SILENT /RELAUNCH=1) and exits; the postinstall entry above is
+; (/VERYSILENT /RELAUNCH=1) and exits; the postinstall entry above is
 ; skipifsilent, so without this the silent upgrade would end with
 ; nothing on screen.  Routed through launcher.vbs like every other
 ; entry point (self-elevation), and gated on the /RELAUNCH=1 flag so a

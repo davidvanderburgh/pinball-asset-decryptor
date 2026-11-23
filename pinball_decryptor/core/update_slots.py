@@ -34,6 +34,16 @@ seconds instead of unpacking 710 MB.  Everything after the folder is filled
 - the layout check, what is carried over, the ACL repair, the marker, the
 swap - is the same code.
 
+A FOLDER THAT WILL NOT RENAME IS SWAPPED ONE LEVEL DOWN (PAD-1529).  A
+program whose working directory is ``<app>`` holds the folder itself open,
+and Windows renames no folder that is: Explorer, started from the app by
+v1.578.1's Restart Explorer button, sat in the install folder until the next
+sign-in, and every update on that PC took the installer route - twice over,
+since the old version came back up, fetched the setup exe and tried the same
+swap again.  The helper now moves what is inside instead (every entry of
+``<app>`` into ``<app>.old``, every entry of ``<app>.next`` into ``<app>``), which such a handle does
+not stop, and undoes it when a file inside really is open.
+
 ANY FAILURE FALLS BACK TO THE INSTALLER.  Staging that fails leaves Restart to
 update running the downloaded setup exe the way the app always has.  A swap
 that cannot rename (something still has a file open in the app's folder)
@@ -589,8 +599,49 @@ function Fallback($why) {
   }
   exit 1
 }
+# THE FOLDER ITSELF HELD OPEN (PAD-1529).  A program whose working directory
+# is the app's folder keeps a handle on it for as long as it runs, and
+# Windows will not rename a folder with one: Explorer, once v1.578.1's
+# Restart Explorer button had started it from the app, sat there until the
+# next sign-in, and every update on that PC ended in the setup program.  What
+# such a handle does NOT stop is renaming what is INSIDE the folder, so the
+# swap is then done one level down: every top-level entry of the app's
+# folder into .old, every one of .next into the app's folder.  Still renames
+# on one volume, a fraction of a second, and what follows finds the same
+# three folders either way.  MoveAll undoes itself when an entry will not
+# move (a file inside it really is open), leaving everything as it was
+$moveWhy = ''
+function MoveAll($from, $to) {
+  $done = @()
+  foreach ($e in @(Get-ChildItem -LiteralPath $from -Force)) {
+    try { Move-Item -LiteralPath $e.FullName -Destination (Join-Path $to $e.Name); $done += $e.Name }
+    catch {
+      $script:moveWhy = $e.Name + ': ' + $_
+      foreach ($n in $done) {
+        try { Move-Item -LiteralPath (Join-Path $to $n) -Destination (Join-Path $from $n) }
+        catch { Say ('could not put ' + $n + ' back in ' + $from + ': ' + $_) }
+      }
+      return $false
+    }
+  }
+  return $true
+}
+function SwapInside {
+  try { [void][System.IO.Directory]::CreateDirectory($old) } catch { $script:moveWhy = [string]$_; return $false }
+  if (-not (MoveAll $app $old)) { Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue; return $false }
+  if (-not (MoveAll $next $app)) {
+    $why = $script:moveWhy
+    if (MoveAll $old $app) { Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue }
+    $script:moveWhy = $why
+    return $false
+  }
+  Remove-Item -LiteralPath $next -Recurse -Force -ErrorAction SilentlyContinue
+  return $true
+}
 Say 'waiting for the app (pid %(pid)d) to close'
+$t0 = Get-Date
 try { Wait-Process -Id %(pid)d -Timeout 180 -ErrorAction SilentlyContinue } catch {}
+Say ('the app closed after ' + [int]((Get-Date) - $t0).TotalSeconds + ' s')
 if (-not (Test-Path -LiteralPath (Join-Path $next %(marker)s)) -and ((AppVersion) -eq %(version_q)s)) {
   Say 'already on v%(version)s - nothing to switch'
   exit 0
@@ -600,13 +651,18 @@ if (Test-Path -LiteralPath $old) {
 }
 if (Test-Path -LiteralPath $old) { Fallback ($old + ' is still there') }
 if (-not (Test-Path -LiteralPath (Join-Path $next %(marker)s))) { Fallback 'the new version is not staged' }
-$moved = $false
+$moved = $false; $inside = $false
 for ($i = 0; $i -lt 30 -and -not $moved; $i++) {
   try { Rename-Item -LiteralPath $app -NewName (Split-Path $old -Leaf); $moved = $true }
-  catch { Start-Sleep -Milliseconds 500 }
+  catch {
+    # a second for a straggler to let go, then the swap one level down
+    if ($i -ge 2 -and (SwapInside)) { $moved = $true; $inside = $true }
+    else { Start-Sleep -Milliseconds 500 }
+  }
 }
-if (-not $moved) { Fallback 'a file in the app folder is still in use' }
-try { Rename-Item -LiteralPath $next -NewName (Split-Path $app -Leaf) }
+if (-not $moved) { Fallback ('a file in the app folder is still in use (' + $moveWhy + ')') }
+if ($inside) { Say 'another program has the app folder itself open (its working directory is there) - switched what is inside it instead' }
+else { try { Rename-Item -LiteralPath $next -NewName (Split-Path $app -Leaf) }
 catch {
   $why = [string]$_
   # put the running version back, however long whatever holds .old takes:
@@ -615,7 +671,7 @@ catch {
     try { Rename-Item -LiteralPath $old -NewName (Split-Path $app -Leaf) } catch { Start-Sleep -Milliseconds 500 }
   }
   Fallback ('the new folder would not move: ' + $why)
-}
+} }
 Remove-Item -LiteralPath (Join-Path $app %(marker)s) -Force -ErrorAction SilentlyContinue
 Say 'swapped in v%(version)s'
 Remove-Item -LiteralPath %(failed_note)s -Force -ErrorAction SilentlyContinue

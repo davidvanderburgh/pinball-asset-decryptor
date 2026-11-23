@@ -316,6 +316,42 @@ def hold(e):
     ])
 
 
+def has_hook(e, hook):
+    """The game has a Hook<hook, ...>::list (jjpmodes.c hook_list)."""
+    pre = "_ZN4HookI%d%s" % (len(hook), hook)
+    return any(n.startswith(pre) and n.endswith("4listE") and s == 16 for n, (a, s) in e.syms.items())
+
+
+#: PAD-1512: the engine calls the attract game type menu reads its buttons through
+GAME_TYPE_BUTTONS = ("_Z28jjpe_is_left_flipper_pressedv", "_Z29jjpe_is_right_flipper_pressedv")
+
+
+def played(e, engine, proc_names):
+    """PAD-1512: start_all / game_mode / progress (the game's modes and multiballs a player has
+    played) and game_type (the attract menu), on the file, as jjpmodes.c's "played" reads them.
+    `names` are what start_all can name statically: the game's Mode and MultiballRule classes (a
+    mode global's name needs a live map, jjpstock.py), or on the proc engine its mode procs."""
+    game_start = has_hook(e, "HookGameStart_")
+    player = "_Z23game_flow_get_player_upv" in e.syms
+    if engine == "mode":
+        modes, mbs = derived_classes(e)
+        names = sorted(set(_demangled_class(c) for c in modes + mbs) - {"Mode", "MultiballRule"})
+        multiballs = "_ZN13MultiballRule10is_runningEv" in e.syms and "_ZTV13MultiballRule" in e.syms and bool(mbs)
+    else:
+        names, multiballs = sorted(proc_names), False
+    return collections.OrderedDict([
+        ("can_watch", bool(engine) and game_start and player),
+        ("multiballs", multiballs),
+        ("names", names),
+        ("game_type", collections.OrderedDict([
+            ("can", bool(engine) and game_start and player and all(b in e.syms for b in GAME_TYPE_BUTTONS)),
+            ("buttons", collections.OrderedDict((b, b in e.syms) for b in GAME_TYPE_BUTTONS)),
+            ("attract_hook", has_hook(e, "HookAttractModeStart_")),
+            ("diag_hook", has_hook(e, "HookDiagStart_")),
+        ])),
+    ])
+
+
 #: what a mode's own sounds, music, picture and video use (PAD-1352): the game's
 #: SoundEffect (a copy of one of its own plays our sample), its music list, and
 #: the Allegro / FFmpeg libraries the game links (found at run time by name)
@@ -542,6 +578,7 @@ def port(elf_path, gamename=None, live=None):
         ("mode_vtable", vt),
         ("hold", hold(e) if engine == "mode" else {"can_hold": False}),
         ("proc_modes", proc_modes(e) if engine == "proc" else []),
+        ("played", played(e, engine, proc_modes(e) if engine == "proc" else [])),
         ("media", media(e)),
         ("can_balls", all(sdk.get("balls", {}).values()) and bool(sdk.get("balls"))),
         ("can_coils", all(sdk.get("coils", {}).values()) and bool(sdk.get("coils"))),
@@ -584,6 +621,8 @@ def write_example(p, folder, title_label):
         if d.get("lamps"):
             f.write("lamps = %s\nlamp_color = ff2000\nlamp_blink = 4\n" % d["lamps"])
     write_multiball_example(p, folder, title_label)
+    # no wizard here: a starter folder is copied into the person's own the first time and every mode
+    # in it runs, so a wizard (and its attract menu) is an example to copy in, never a starter (PAD-1512)
 
 
 def write_multiball_example(p, folder, title_label):
@@ -601,6 +640,44 @@ def write_multiball_example(p, folder, title_label):
             f.write("coil_shot = %s\n" % d["coil_shot"])
         if d.get("sound_shot"):
             f.write("sound_shot = %s\n" % d["sound_shot"])
+
+
+def wizard_picks(p, n=4):
+    """Up to *n* of the title's own modes and multiballs a starter wizard asks for (PAD-1512): its
+    mode classes first (the ones named ...Mode), then its multiballs, by name."""
+    # a mode proc's grace procs run after the mode itself (The Wizard of Oz): its run proc names it
+    names = [x for x in (p.get("played") or {}).get("names") or [] if "grace" not in x]
+    modes = sorted(x for x in names if x.endswith("Mode") and not x.startswith("Job"))
+    mbs = sorted(x for x in names if re.search(r"(MB|Multiball|MultiballRule)$", x))
+    rest = sorted(x for x in names if x not in modes and x not in mbs)
+    out = []
+    for group in (modes, mbs, rest):
+        for x in group:
+            if len(out) < n and x not in out:
+                out.append(x)
+    return out
+
+
+def write_wizard_example(p, folder, title_label):
+    """An example (PAD-1512, modes/wizard_examples/<title>, never a starter): a wizard mode of the
+    title's own - every one of a few of its own modes played starts it - also picked as a game type
+    on the attract menu."""
+    pl, d = p.get("played") or {}, p["defaults"]
+    picks = wizard_picks(p)
+    if not (pl.get("can_watch") and (pl.get("game_type") or {}).get("can") and len(picks) >= 2):
+        return None
+    path = os.path.join(folder, "3_wizard.mode")
+    lines = ["# A wizard mode for %s: it starts once the player has played these %d of the game's own" % (title_label, len(picks)),
+             "# modes in one game, or when PAD WIZARD is picked on the attract menu (hold both flipper",
+             "# buttons a second in attract).  Every key: tools/jjp_emu/MODES.md",
+             "name = PAD Wizard", "title = PAD WIZARD",
+             "start_all = %s" % " ".join(picks), "game_type = PAD WIZARD",
+             "shots = %s" % d["shots"], "points = 3000000", "points_ladder = rising"]
+    lines += ["multiball = 3 20", "seconds = 0"] if p.get("can_balls") else ["seconds = 40"]
+    lines += ["%s = %s" % (k, d[k]) for k in ("sound_start", "sound_shot") if d.get(k)]
+    with open(path, "w", newline=chr(10)) as f:
+        f.write(chr(10).join(lines) + chr(10))
+    return path
 
 
 def write_stock_example(p, folder, title_label):
@@ -637,6 +714,7 @@ def main(argv=None):
     ap.add_argument("--label", help="title label for the example's comments")
     ap.add_argument("--multiball-example", help="write only the multiball starter (2_multiball.mode) here")
     ap.add_argument("--stock-example", help="write a starter .stock folder here")
+    ap.add_argument("--wizard-example", help="write only the wizard example (3_wizard.mode, PAD-1512) here, e.g. modes/wizard_examples/<title>")
     ap.add_argument("--live", help="a running game's mode globals and shot table (jjpstock.py live) to fold in")
     a = ap.parse_args(argv)
     live = json.load(open(a.live)) if a.live else None
@@ -649,6 +727,8 @@ def main(argv=None):
         write_example(p, a.example, a.label or a.gamename or p["elf"])
     if a.multiball_example:
         write_multiball_example(p, a.multiball_example, a.label or a.gamename or p["elf"])
+    if a.wizard_example:
+        print("  wizard example: %s" % write_wizard_example(p, a.wizard_example, a.label or a.gamename or p["elf"]))
     if a.stock_example:
         print("  starter .stock: %s" % write_stock_example(p, a.stock_example, a.label or a.gamename or p["elf"]))
     print("%s: %s; %d exported, %d switches, %d lamps, %d sounds, %d fonts, %d Mode classes%s" % (
@@ -668,6 +748,10 @@ def main(argv=None):
     sr = p["start_rules"]
     print("  start rules: %s; start_on %s%s" % ("yes" if sr["can_start_on_rules"] else "switches and combos only",
                                              " ".join(sr["start_on"]) or "-", "; start_score" if sr["start_score"] else ""))
+    pl = p["played"]
+    print("  played (start_all): %s, %d name(s)%s; game type menu: %s" % (
+        "yes" if pl["can_watch"] else "no", len(pl["names"]), ", multiballs too" if pl["multiballs"] else "",
+        "yes" if pl["game_type"]["can"] else "no"))
     st = p["stock"]
     if st.get("classes"):
         cl = st["classes"]

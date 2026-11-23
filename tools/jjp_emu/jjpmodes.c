@@ -188,6 +188,9 @@ static const struct { const char *word, *hook; } EVENTS[] = {
 #define LP_BLINK 2
 #define LP_PULSE 3
 #define LP_CHASE 4
+#define MAX_ALL 32              /* start_all names, progress lines (PAD-1512) */
+#define MAX_PLAYERS 8
+#define MAX_GAME_TYPES 9       /* lines on the attract menu besides the normal game */
 
 typedef struct {
     char file[64], name[48], title[64];
@@ -269,6 +272,15 @@ typedef struct {
     int lamp_pattern;                     /* LP_*: lamp_pattern */
     char inplace[512];                    /* in_place_of: " name name " the game's mode globals / classes */
     const char *volatile inplace_hit;     /* the gate refused one of them: start ours (starts_tick) */
+    /* the game's modes played, a progress board, a game type (PAD-1512; "played" below) */
+    int nall; char all_name[MAX_ALL][64]; /* start_all: the game's modes / multiballs (globals or classes) */
+    int all_need;                         /* start_all_count: how many of them start it (0 = every one) */
+    unsigned all_got[MAX_PLAYERS + 1];    /* bit a: player p played all_name[a] toward the next start */
+    int nprog; struct { int a; char mode[64], lit[160], unlit[160]; void *bl, *bu; int wl, hl, wu, hu; } prog[MAX_ALL];
+    float prog_at[4]; int prog_secs;      /* progress_at, progress_seconds */
+    long prog_until;                      /* ms clock the board shows to */
+    const void *prog_lit_by;              /* the running game mode that lit a pane: the board shows at its end */
+    char gtype[48];                       /* game_type: its line on the attract menu */
 } pm_t;
 
 static pm_t pms[MAX_MODES];
@@ -284,6 +296,17 @@ static char moddir[512];
 static int background_explicit;                 /* title.cfg named them */
 static char game_name[64];                      /* title.cfg `game`: GAMENAME these modes are for */
 static char background_names[1024];
+static char gt_normal[48] = "NORMAL GAME", gt_title[48] = "GAME TYPE";   /* title.cfg game_type_normal / game_type_title */
+/* PAD-1512: the menu's look, all title.cfg (MODES.md "The game type menu's look"): its box (empty =
+ * centred, sized to its lines), colors, the game's fonts, a hint line, a picture of ours under it */
+static struct {
+    char hint[96]; float at[4]; int has_at;
+    unsigned panel, bar, title, item, pick, pick_bar, hint_rgba;
+    void *font_title, *font_item, *font_hint;
+    char pic_file[160]; float pic_at[4]; void *pic_bmp; int pic_w, pic_h;
+} gtl = { "FLIPPERS TO CHOOSE - START TO PLAY", {0, 0, 0, 0}, 0,
+          0x000000e0, 0xffdc00ff, 0xffdc00ff, 0x9a9a9aff, 0xffffffff, 0xffffff38, 0xc8c8c8ff,
+          NULL, NULL, NULL, "", {0, 0, 100, 100}, NULL, 0, 0 };
 
 /* ---- config parsing -------------------------------------------------------- */
 static char *trim(char *s)
@@ -685,6 +708,44 @@ static void apply_kv(pm_t *m, const char *k, char *v)
         lg("%s: inside: our modes run one at a time on JJP (game_modes), so one cannot run inside another; ignored", m->file);
     else if (!strcmp(k, "penalty"))
         lg("%s: penalty: this game's engine has no call that takes points away (only score_add_to_player_up); ignored", m->file);
+    /* PAD-1512: the game's modes played (start_all), a progress board, a game type */
+    else if (!strcmp(k, "start_all")) {
+        m->nall = 0;
+        for (char *t = strtok(buf, " ,\t"); t; t = strtok(NULL, " ,\t")) {
+            if (m->nall >= MAX_ALL) { lg("%s: start_all: more than %d game modes; %s and after ignored", m->file, MAX_ALL, t); break; }
+            snprintf(m->all_name[m->nall++], sizeof m->all_name[0], "%s", t);
+        }
+    }
+    else if (!strcmp(k, "start_all_count")) m->all_need = (int)num(v);
+    else if (!strcmp(k, "progress")) {               /* <game mode> <lit picture> [<unlit picture>], a line each */
+        char *a = strtok(buf, " \t"), *b = strtok(NULL, " \t"), *c = strtok(NULL, " \t");
+        if (!a || !b || m->nprog >= MAX_ALL) lg("%s: progress %s: wants <game mode> <picture> [<unlit picture>], up to %d lines; skipped", m->file, v, MAX_ALL);
+        else {
+            snprintf(m->prog[m->nprog].mode, sizeof m->prog[0].mode, "%s", a);
+            snprintf(m->prog[m->nprog].lit, sizeof m->prog[0].lit, "%s", b);
+            snprintf(m->prog[m->nprog].unlit, sizeof m->prog[0].unlit, "%s", c ? c : "");
+            m->nprog++;
+        }
+    }
+    else if (!strcmp(k, "progress_at")) parse_box(v, m->prog_at);
+    else if (!strcmp(k, "progress_seconds")) m->prog_secs = (int)num(v);
+    else if (!strcmp(k, "game_type")) snprintf(m->gtype, sizeof m->gtype, "%s", v);
+    else if (!strcmp(k, "game_type_normal")) snprintf(gt_normal, sizeof gt_normal, "%s", v);
+    else if (!strcmp(k, "game_type_title")) snprintf(gt_title, sizeof gt_title, "%s", v);
+    else if (!strcmp(k, "game_type_hint")) snprintf(gtl.hint, sizeof gtl.hint, "%s", strcmp(v, "none") ? v : "");
+    else if (!strcmp(k, "game_type_at")) { parse_box(v, gtl.at); gtl.has_at = gtl.at[2] > 0; }
+    else if (!strcmp(k, "game_type_panel_color")) gtl.panel = parse_rgba(v, gtl.panel);
+    else if (!strcmp(k, "game_type_bar_color")) gtl.bar = parse_rgba(v, gtl.bar);
+    else if (!strcmp(k, "game_type_title_color")) gtl.title = parse_rgba(v, gtl.title);
+    else if (!strcmp(k, "game_type_item_color")) gtl.item = parse_rgba(v, gtl.item);
+    else if (!strcmp(k, "game_type_pick_color")) gtl.pick = parse_rgba(v, gtl.pick);
+    else if (!strcmp(k, "game_type_pick_bar_color")) gtl.pick_bar = parse_rgba(v, gtl.pick_bar);
+    else if (!strcmp(k, "game_type_hint_color")) gtl.hint_rgba = parse_rgba(v, gtl.hint_rgba);
+    else if (!strcmp(k, "game_type_font_title")) gtl.font_title = sym(v);
+    else if (!strcmp(k, "game_type_font_item")) gtl.font_item = sym(v);
+    else if (!strcmp(k, "game_type_font_hint")) gtl.font_hint = sym(v);
+    else if (!strcmp(k, "game_type_picture")) snprintf(gtl.pic_file, sizeof gtl.pic_file, "%s", v);
+    else if (!strcmp(k, "game_type_picture_at")) parse_box(v, gtl.pic_at);
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : !strcmp(v, "none") ? 3 : 0;
     else if (!strcmp(k, "code")) snprintf(m->code, sizeof m->code, "%s", v);
     else if (!strcmp(k, "ingame_state")) { ingame_state = (int)num(v); ingame_explicit = 1; }
@@ -712,6 +773,7 @@ static void defaults(pm_t *m)
     m->coil_start = m->coil_shot = m->coil_complete = m->coil_hold = -1;
     m->coil_hold_ms = 1000; m->coil_hold_power = 8; m->add_max = 1;
     m->combo_ms = 5000;
+    m->prog_at[2] = m->prog_at[3] = 100; m->prog_secs = 5;
 }
 
 /* ---- .stock files: the game's own modes, changed (PAD-1351; see below) ----- */
@@ -859,10 +921,28 @@ static void load_modes(void)
         if (m->nalso && !m->nstart) { lg("%s: start_also adds to start, and there is no start line: ignored", m->file); m->nalso = 0; }
         if (*m->code && !load_code(m)) { lg("%s: mode skipped (its code)", m->file); continue; }
         if (!m->nstart && !m->start_on && !m->after[1] && m->start_score <= 0 && m->ncombo < 2 && !(m->cm && m->cm->idle)
-            && !m->inplace[1]) {
-            lg("%s: no start rule (start, start_on, start_after, start_score, start_combo or its code's idle); mode skipped", m->file);
+            && !m->inplace[1] && !m->nall && !*m->gtype && !(m->cm && m->cm->api >= 2 && m->cm->game_mode)) {
+            lg("%s: no start rule (start, start_on, start_after, start_score, start_combo, start_all, game_type or its code); mode skipped", m->file);
             continue;
         }
+        /* PAD-1512: start_all_count of the start_all modes (every one when absent); a progress
+         * line names one of them (the board lights what counts toward the next start) */
+        if (m->nall && (m->all_need <= 0 || m->all_need > m->nall)) m->all_need = m->nall;
+        for (int p = 0; p < m->nprog; p++) {
+            int a = 0;
+            while (a < m->nall && strcmp(m->all_name[a], m->prog[p].mode)) a++;
+            if (a == m->nall) {
+                lg("%s: progress %s: not one of its start_all modes; line skipped", m->file, m->prog[p].mode);
+                memmove(&m->prog[p], &m->prog[p + 1], (size_t)(m->nprog - p - 1) * sizeof m->prog[0]);   /* keep the drawing order */
+                m->nprog--; p--;
+                continue;
+            }
+            m->prog[p].a = a;
+        }
+        if (m->prog_secs < 1) m->prog_secs = 1;
+        if (m->nall) lg("mode %d \"%s\": starts once %d of %d game mode(s) are played by the player up (start_all), %d progress picture(s)",
+                        npm, m->name, m->all_need, m->nall, m->nprog);
+        if (*m->gtype) lg("mode %d \"%s\": game type \"%s\" on the attract menu", npm, m->name, m->gtype);
         /* seconds = 0 on a multiball: no clock, one ball left ends it (Spike 2's item 167) */
         if (m->seconds < 1 && m->mb_balls) { m->no_clock = 1; m->seconds = 600; }
         if (m->seconds < 1) m->seconds = 1;
@@ -1145,6 +1225,7 @@ static void find_proc_modes(void)
 
 /* What a custom mode would be yielding to right now, or NULL. */
 static long multiball_since;     /* ms clock when more than one ball came into play, 0 = not */
+static const char *mb_busy(void);     /* PAD-1512: a game multiball (MultiballRule) running, by its own word */
 static const char *game_busy_except(const pm_t *m)
 {
     /* A multiball is more than one ball for half a second: the count blips
@@ -1153,7 +1234,7 @@ static const char *game_busy_except(const pm_t *m)
     if (multiball_since && now_ms() - multiball_since >= 500 && !(m && (m->mb_served || m->adds))) return "multiball";
     for (int i = 0; i < ngm; i++)
         if (!gmode_bg[i] && !is_ours(gmodes[i]) && gm_running(i)) return gmode_sym[i];
-    return NULL;
+    return mb_busy();
 }
 static const char *game_busy(void) { return game_busy_except(NULL); }
 
@@ -1946,8 +2027,8 @@ static void load_pictures(void)
     if (done) return;
     done = 1;
     int any = 0;
-    for (int i = 0; i < npm; i++) any |= *pms[i].pic_file || *pms[i].vid_file;
-    if (!any) return;
+    for (int i = 0; i < npm; i++) any |= *pms[i].pic_file || *pms[i].vid_file || pms[i].nprog;
+    if (!any && !*gtl.pic_file) return;
     al_media_resolve();
     if (!al.ok) { lg("screen: Allegro bitmap calls missing; pictures and video off"); return; }
     av_resolve();
@@ -1960,6 +2041,27 @@ static void load_pictures(void)
         m->pic_bmp = al.load(path);
         if (m->pic_bmp) { m->pic_w = al.bw(m->pic_bmp); m->pic_h = al.bh(m->pic_bmp); lg("%s: picture %s %dx%d", m->file, m->pic_file, m->pic_w, m->pic_h); }
         else { m->pic_failed = 1; lg("%s: Allegro could not read picture %s (png or jpg)", m->file, path); }
+    }
+    for (int i = 0; i < npm; i++)                 /* progress boards (PAD-1512) */
+        for (int k = 0; k < pms[i].nprog; k++) {
+            pm_t *m = &pms[i];
+            for (int u = 0; u < 2; u++) {
+                const char *f = u ? m->prog[k].unlit : m->prog[k].lit;
+                if (!*f) continue;
+                char path[700];
+                snprintf(path, sizeof path, "%s%s%s", *f == '/' ? "" : moddir, *f == '/' ? "" : "/", f);
+                void *b = al.load(path);
+                if (!b) { lg("%s: progress %s: Allegro could not read picture %s", m->file, m->prog[k].mode, path); continue; }
+                if (u) { m->prog[k].bu = b; m->prog[k].wu = al.bw(b); m->prog[k].hu = al.bh(b); }
+                else { m->prog[k].bl = b; m->prog[k].wl = al.bw(b); m->prog[k].hl = al.bh(b); }
+            }
+        }
+    if (*gtl.pic_file) {                          /* the game type menu's picture (PAD-1512) */
+        char path[700];
+        snprintf(path, sizeof path, "%s%s%s", *gtl.pic_file == '/' ? "" : moddir, *gtl.pic_file == '/' ? "" : "/", gtl.pic_file);
+        gtl.pic_bmp = al.load(path);
+        if (gtl.pic_bmp) { gtl.pic_w = al.bw(gtl.pic_bmp); gtl.pic_h = al.bh(gtl.pic_bmp); lg("game type menu: picture %s %dx%d", gtl.pic_file, gtl.pic_w, gtl.pic_h); }
+        else lg("title.cfg: game_type_picture: Allegro could not read %s (png or jpg)", path);
     }
     al.set_flags(fl);
 }
@@ -3057,22 +3159,63 @@ static pthread_mutex_t mu = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 static int in_list(const int *l, int n, int v) { for (int i = 0; i < n; i++) if (l[i] == v) return 1; return 0; }
 
 /* Test hook for the emulator, where no ball can reach a game mode's start:
- * JJP_MODS_TEST_GAMEMODE=<Mode global> JJP_MODS_TEST_SWITCH=<switch> starts
- * that game mode (its own Mode::start) when that switch is hit, so a proof run
- * can show a custom mode yielding to it.  Unset on a machine. */
-static void *test_gm; static int test_sw = -1, test_end_sw = -1;   /* JJP_MODS_TEST_END_SWITCH ends it (PAD-1354) */
+ * JJP_MODS_TEST_GAMEMODE=<global>[,<global>...] JJP_MODS_TEST_SWITCH=<switch>[,...]
+ * starts the game's mode (its own start, through its vtable) when its switch is
+ * hit, so a proof run can show a custom mode yielding to it, or a player playing
+ * it (PAD-1512: several, and MultiballRule objects too).  JJP_MODS_TEST_END_SWITCH
+ * ends whichever of them runs (PAD-1354).  Unset on a machine. */
+#define MAX_TEST 8
+static struct { void *o; int sw, mb; const char *name; } tests[MAX_TEST];
+static int ntest, test_end_sw = -1;
+static int t_mb_start = -1, t_mb_end = -1, t_mb_isr = -1;
+static int test_running(int i)
+{
+    int off = tests[i].mb ? t_mb_isr : VT_IS_RUNNING;
+    return off >= 0 && (((vbool_t)vslot(tests[i].o, off))(tests[i].o) & 0xff);
+}
 static void test_hook(int si)
 {
-    if (VT_START < 0 || VT_END < 0 || VT_IS_RUNNING < 0) return;    /* a title with no Mode class */
-    if (si == test_end_sw && test_gm && (((vbool_t)vslot(test_gm, VT_IS_RUNNING))(test_gm) & 0xff)) {
-        lg("TEST: ending game mode %s", getenv("JJP_MODS_TEST_GAMEMODE"));
-        ((vfn0_t)vslot(test_gm, VT_END))(test_gm);
-        return;
+    for (int i = 0; i < ntest; i++) {
+        int st = tests[i].mb ? t_mb_start : VT_START, en = tests[i].mb ? t_mb_end : VT_END;
+        if (st < 0 || en < 0) {                                      /* a title with no Mode class */
+            if (si == tests[i].sw) lg("TEST: %s: no start/end slot (%d, %d)", tests[i].name, st, en);
+            continue;
+        }
+        if (si == test_end_sw && test_running(i)) {
+            lg("TEST: ending game %s %s", tests[i].mb ? "multiball" : "mode", tests[i].name);
+            ((vfn0_t)vslot(tests[i].o, en))(tests[i].o);
+            continue;
+        }
+        if (si != tests[i].sw) continue;
+        if (test_running(i)) { lg("TEST: game %s %s is running already", tests[i].mb ? "multiball" : "mode", tests[i].name); continue; }
+        lg("TEST: starting game %s %s", tests[i].mb ? "multiball" : "mode", tests[i].name);
+        int ok = ((vbool_t)vslot(tests[i].o, st))(tests[i].o) & 0xff;
+        lg("TEST: %s's start said %d; running now %d", tests[i].name, ok, test_running(i));
     }
-    if (si != test_sw || !test_gm) return;
-    if (((vbool_t)vslot(test_gm, VT_IS_RUNNING))(test_gm) & 0xff) return;
-    lg("TEST: starting game mode %s", getenv("JJP_MODS_TEST_GAMEMODE"));
-    ((vbool_t)vslot(test_gm, VT_START))(test_gm);
+}
+static void test_init(void)
+{
+    const char *g = getenv("JJP_MODS_TEST_GAMEMODE"), *w = getenv("JJP_MODS_TEST_SWITCH");
+    if (!g || !w) return;
+    static char gb[512], wb[512];
+    snprintf(gb, sizeof gb, "%s", g); snprintf(wb, sizeof wb, "%s", w);
+    char *gs = NULL, *ws = NULL;
+    /* the hold gate may have pointed MultiballRule's own start slot at itself already: its slot */
+    t_mb_start = mb_start_slot >= 0 ? mb_start_slot : byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule5startEv");
+    t_mb_end = byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule3endEv");
+    t_mb_isr = byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule10is_runningEv");
+    for (char *a = strtok_r(gb, ", ", &gs), *b = strtok_r(wb, ", ", &ws); a && b && ntest < MAX_TEST;
+         a = strtok_r(NULL, ", ", &gs), b = strtok_r(NULL, ", ", &ws)) {
+        void *o = sym(a);
+        if (!o || !*(uintptr_t *)o) { lg("TEST hook: no game mode %s", a); continue; }
+        int mb = 0;
+        if (!ti_mode) types_init();
+        if (ti_mbr && derives(((uintptr_t *)*(uintptr_t *)o)[-1], ti_mbr, 0)) mb = 1;
+        tests[ntest].o = o; tests[ntest].sw = sw_index(b); tests[ntest].mb = mb; tests[ntest].name = a;
+        lg("TEST hook: %s starts game %s %s (%p)", b, mb ? "multiball" : "mode", a, o);
+        ntest++;
+    }
+    if (getenv("JJP_MODS_TEST_END_SWITCH")) test_end_sw = sw_index(getenv("JJP_MODS_TEST_END_SWITCH"));
 }
 
 /* ---- start rules (PAD-1354) ------------------------------------------------
@@ -3094,7 +3237,7 @@ static void test_hook(int si)
  * raised start not done by the ball's end is dropped. */
 typedef struct { void *fn; const char *name; } hdesc_t;
 typedef struct hnode { int prio, pad; hdesc_t *desc; const char *name; struct hnode *next; char room[64]; } hnode_t;
-#define MAX_HOOKS 16
+#define MAX_HOOKS 24
 static hnode_t hnodes[MAX_HOOKS];
 static hdesc_t hdescs[MAX_HOOKS];
 static int nhooks;
@@ -3182,6 +3325,11 @@ static void raise_start(pm_t *m, const char *why)
 
 static int ticking;
 static int multiball_seen;      /* a multiball ran since the last multiball_end (set in per_frame) */
+static void track_tick(int ig);                       /* PAD-1512: "played" below */
+static void played_game_start(void), played_ball_start(void);
+static int wants_played(void);
+static int ngt;                                       /* game types on the attract menu ("game type" below) */
+static int hk_attract(void *a), hk_diag(void *a);
 static void starts_tick(const char *via, int force)
 {
     static long last;
@@ -3193,6 +3341,7 @@ static void starts_tick(const char *via, int force)
     ticking = 1;
     if (!tick_via) { tick_via = via; lg("start rules: ticking on the game's proc thread (first via %s)", via); }
     int ig = in_game();
+    track_tick(ig);              /* the game's modes and multiballs that started or ended (start_all, game_mode) */
     /* a game mode that ended */
     for (int i = 0; i < ngm; i++) {
         if (is_ours(gmodes[i])) continue;
@@ -3302,6 +3451,7 @@ static int hk_game_start(void *a)
     }
     last_ball_done = -1;
     lg("game start: start counts, score marks and runs reset");
+    played_game_start();
     pthread_mutex_unlock(&mu);
     return 0;
 }
@@ -3316,6 +3466,7 @@ static int hk_ball_start(void *a)
         if (m->count_reset_ball && m->count) { lg("\"%s\": start count %d reset (new ball)", m->name, m->count); m->count = 0; }
         if (m->count_reset_ball) for (int a = 0; a < m->nalso; a++) m->also[a].got = 0;
     }
+    played_ball_start();
     pthread_mutex_unlock(&mu);
     /* last_ball: the game runs HookLastBall_ just before the last ball (Wonka
      * 03.03: a list with no node of the game's own); its own count backs that up
@@ -3338,6 +3489,7 @@ static void install_rules(void)
         if (m->start_on || m->after[1] || m->start_score > 0 || m->start_once || m->count_reset_ball || m->ncombo >= 2
             || (m->cm && m->cm->idle) || m->start_max || m->cooldown_s || m->nalso || *m->needs || m->inplace[1])
             rules_on = 1;
+        if (m->nall || *m->gtype || (m->cm && m->cm->api >= 2)) rules_on = 1;     /* PAD-1512 */
         if (!m->after[1]) continue;
         int any = strstr(m->after, " any ") != NULL, hit = 0;
         for (int i = 0; i < ngm; i++) {
@@ -3357,6 +3509,11 @@ static void install_rules(void)
     want_events = want;
     hook_add("HookGameStart_", (void *)hk_game_start, "pad game start");
     hook_add("HookBallStart_", (void *)hk_ball_start, "pad ball start");
+    if (ngt) {                     /* PAD-1512: the game type menu opens in attract only */
+        if (!hook_add("HookAttractModeStart_", (void *)hk_attract, "pad attract"))
+            lg("game type: no HookAttractModeStart_ list; attract is the state the game was in at install");
+        hook_add("HookDiagStart_", (void *)hk_diag, "pad diag");
+    }
     for (int e = 0; e < NEVENTS; e++)
         if (want & (1u << e)) {
             if (hook_add(EVENTS[e].hook, (void *)ev_fns[e], EVENTS[e].word)) events_hooked |= 1u << e;
@@ -3418,11 +3575,14 @@ static int load_code(pm_t *m)
     if (!h) { lg("%s: FAIL - its code %s.so did not load: %s", m->file, m->code, dlerror()); return 0; }
     const struct jm_mode **def = (const struct jm_mode **)dlsym(h, "jm_mode_def");
     if (!def || !*def) { lg("%s: FAIL - %s.so has no JM_REGISTER (jm_mode_def)", m->file, m->code); return 0; }
-    if ((*def)->api != JM_API) { lg("%s: FAIL - %s.so is for mode API %d, this runtime is %d", m->file, m->code, (*def)->api, JM_API); return 0; }
+    /* API 2 (PAD-1512) added game_mode at the struct's end: a library built for 1 has no such field
+     * and is read only up to idle (every read of game_mode checks api >= 2 first) */
+    if ((*def)->api < 1 || (*def)->api > JM_API) { lg("%s: FAIL - %s.so is for mode API %d, this runtime takes 1-%d", m->file, m->code, (*def)->api, JM_API); return 0; }
     m->cm = *def;
     code_names(m, path);
-    lg("%s: its code %s.so:%s%s%s%s%s%s", m->file, m->code, m->cm->start ? " start" : "", m->cm->shot ? " shot" : "",
-       m->cm->scored ? " scored" : "", m->cm->tick ? " tick" : "", m->cm->end ? " end" : "", m->cm->idle ? " idle" : "");
+    lg("%s: its code %s.so (API %d):%s%s%s%s%s%s%s", m->file, m->code, m->cm->api, m->cm->start ? " start" : "", m->cm->shot ? " shot" : "",
+       m->cm->scored ? " scored" : "", m->cm->tick ? " tick" : "", m->cm->end ? " end" : "", m->cm->idle ? " idle" : "",
+       m->cm->api >= 2 && m->cm->game_mode ? " game_mode" : "");
     return 1;
 }
 
@@ -3433,6 +3593,13 @@ static void code_started(pm_t *m)
 {
     m->ncl = 0; m->ctitle[0] = 0; m->started_at = m->code_tick_at = now_ms(); m->end_why = NULL;
     memset(m->sw_hits, 0, sizeof m->sw_hits);
+    if (m->nall && player_up) {   /* PAD-1512: a start the player up qualified for uses up their start_all modes */
+        int p = player_up();
+        if (p >= 1 && p <= MAX_PLAYERS && __builtin_popcount(m->all_got[p]) >= m->all_need) {
+            m->all_got[p] = 0;
+            lg("\"%s\": player %d's start_all modes start again from none", m->name, p);
+        }
+    }
     if (m->cm && m->cm->start) CODE_CALL(m, start);
 }
 static void code_tick(pm_t *m)
@@ -3562,6 +3729,260 @@ JMAPI int jm_ball_save(int s)
     m->ball_save = s > 120 ? 120 : s;
     ball_save_start(m);
     return 1;
+}
+
+/* ---- the game's modes played; a game type (PAD-1512) -----------------------------
+ * start_all: a mode starts once the player up has played every one of a list of the
+ * game's modes and multiballs this game (or start_all_count of them): the wizard-mode
+ * rule, as Godfather's cut Kiss the Ring meant it (its 16 stained-glass panes, the 12
+ * jobs and 4 multiballs).  Played = the game started it for that player: one of the
+ * game's Mode or MultiballRule objects whose is_running went from false to true with a
+ * ball in play (on the proc engine, one of its mode procs coming up).  They are read
+ * from the start-rule tick on the game's proc thread; nothing of the game's changes.
+ * A mode's code hears every such start and end (game_mode) and can ask what the
+ * player up has played (jm_played).  A progress board (progress lines: a picture per
+ * start_all mode, lit or not) shows for progress_seconds when a game mode that lit a
+ * new one ends, and at a ball's start once one is lit.
+ *
+ * A game type (game_type) is a mode picked on a menu of ours in attract, as Stern's
+ * start menu is: hold both flipper buttons for a second, flippers to choose, Start to
+ * play.  A game started with it picked starts that mode on each player's first ball.
+ * The buttons are read through the engine's own jjpe_is_left/right_flipper_pressed. */
+typedef struct { void *o; const char *name, *cls; int gm; unsigned char mb, was, bg; unsigned played; } trk_t;
+#define MAX_TRK 320
+static trk_t trk[MAX_TRK];
+static int ntrk, trk_on, trk_mbs;
+static long bg_snapshot_at;                  /* per_frame's always-on window (defined with it, below) */
+static int mb_isr_off = -1;                 /* MultiballRule::is_running's slot, from the vptr */
+static uintptr_t mb_vts[MAX_MODE_VTS]; static int nmbvt;
+
+static int trk_is(const trk_t *t, const char *name) { return !strcmp(t->name, name) || !strcmp(t->cls, name); }
+static int trk_running(const trk_t *t)
+{
+    if (!t->mb) return gm_running(t->gm);
+    if (*(uintptr_t *)t->o == 0) return 0;
+    return ((vbool_t)vslot(t->o, mb_isr_off))(t->o) & 0xff;
+}
+/* A game multiball running (not one of the title's always-on ones), or NULL.  Before PAD-1512 a
+ * game multiball was seen only once a second ball came into play; its MultiballRule says so at once. */
+static const char *mb_busy(void)
+{
+    for (int i = 0; trk_on && i < ntrk; i++)
+        if (trk[i].mb && !trk[i].bg && trk_running(&trk[i])) return trk[i].name;
+    return NULL;
+}
+static int player_now(void) { int p = player_up ? player_up() : 0; return p >= 1 && p <= MAX_PLAYERS ? p : 0; }
+
+static void cb_mb_vts(const char *name, uintptr_t a, size_t sz)
+{
+    if (strncmp(name, "_ZTV", 4) || sz < 32 || nmbvt >= MAX_MODE_VTS) return;
+    if (derives(((uintptr_t *)a)[1], ti_mbr, 0)) mb_vts[nmbvt++] = a + 16;
+}
+static void cb_mb_objs(const char *name, uintptr_t a, size_t sz)
+{
+    if (sz < 0x40 || ntrk >= MAX_TRK || !strncmp(name, "_ZT", 3)) return;
+    uintptr_t w = *(uintptr_t *)a;
+    for (int i = 0; i < nmbvt; i++)
+        if (w == mb_vts[i]) {
+            trk_t *t = &trk[ntrk++];
+            t->o = (void *)a; t->name = name; t->cls = class_name(w); t->gm = -1; t->mb = 1; trk_mbs++;
+            return;
+        }
+}
+
+static int wants_played(void)
+{
+    for (int i = 0; i < npm; i++) if (pms[i].nall || (pms[i].cm && pms[i].cm->api >= 2)) return 1;
+    return 0;
+}
+
+static void track_init(void)
+{
+    if (!wants_played()) return;
+    for (int i = 0; i < ngm && ntrk < MAX_TRK; i++) {
+        trk_t *t = &trk[ntrk++];
+        t->o = gmodes[i]; t->name = gmode_sym[i]; t->gm = i;
+        t->cls = gmode_isproc[i] ? gmode_sym[i] : class_name(*(uintptr_t *)gmodes[i]);
+    }
+    if (!engine_proc) {            /* the multiballs: MultiballRule objects, found by the game's typeinfo */
+        if (!ti_mode) types_init();
+        mb_isr_off = byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule10is_runningEv");
+        if (ti_mbr && si_ti_vt && mb_isr_off >= 0) { walk_dynsym(cb_mb_vts); walk_dynsym(cb_mb_objs); }
+        else lg("played: no MultiballRule::is_running on this title (typeinfo %p, slot %d): its multiballs are not watched",
+                (void *)ti_mbr, mb_isr_off);
+    }
+    trk_on = 1;
+    char names[2048]; size_t o = 0; names[0] = 0;
+    for (int i = 0; i < ntrk && o < sizeof names - 120; i++)
+        o += snprintf(names + o, sizeof names - o, " %s(%s)", trk[i].name, trk[i].cls);
+    lg("played: watching %d game mode(s) and %d multiball(s):%s", ntrk - trk_mbs, trk_mbs, names);
+    for (int k = 0; k < npm; k++)
+        for (int a = 0; a < pms[k].nall; a++) {
+            int hit = 0;
+            for (int i = 0; i < ntrk; i++) hit += trk_is(&trk[i], pms[k].all_name[a]);
+            if (!hit) lg("\"%s\": start_all %s is no game mode or multiball of this title: it can never be played",
+                         pms[k].name, pms[k].all_name[a]);
+        }
+}
+
+/* A start raised now, past start_count (start_all and game_type count on their own). */
+static int raise_now(pm_t *m, const char *why)
+{
+    const char *no = start_blocked(m);
+    if (no) { lg("\"%s\" %s: not started - %s", m->name, why, no); return 0; }
+    if (running(m) || m->pending) return 0;
+    m->pending = why; m->pending_log = 0;
+    lg("\"%s\" start raised: %s", m->name, why);
+    return 1;
+}
+
+static void show_progress(pm_t *m, const char *why)
+{
+    if (!m->nprog) return;
+    m->prog_until = now_ms() + m->prog_secs * 1000L;
+    lg("\"%s\": progress board for %d s (%s)", m->name, m->prog_secs, why);
+}
+
+static void all_check(pm_t *m, int p, const char *why)
+{
+    if (!m->nall || !p || __builtin_popcount(m->all_got[p]) < m->all_need) return;
+    static char w[MAX_MODES][96];
+    snprintf(w[m - pms], sizeof w[0], "player %d played %d of the %d start_all modes (%s)", p, m->all_need, m->nall, why);
+    raise_now(m, w[m - pms]);
+}
+
+/* mu held, on the game's proc thread (starts_tick) */
+static void track_tick(int ig)
+{
+    if (!trk_on) return;
+    int p = player_now();
+    for (int i = 0; i < ntrk; i++) {
+        trk_t *t = &trk[i];
+        if (t->bg || (t->gm >= 0 && (is_ours(t->o) || gmode_bg[t->gm]))) continue;     /* ours, or always on */
+        int r = trk_running(t);
+        if (r == t->was) continue;
+        /* a game mode up in a ball's first two seconds may be one of the title's always-on ones:
+         * it is looked at again once per_frame has said (gmode_bg) */
+        if (r && bg_snapshot_at >= 0) continue;
+        t->was = (unsigned char)r;
+        if (r && !ig) continue;              /* a start counts only with a ball in play (ends: the ball's end too) */
+        if (r && p) t->played |= 1u << p;
+        lg("game %s %s (%s) %s (player %d)", t->mb ? "multiball" : "mode", t->name, t->cls, r ? "started" : "ended", p);
+        for (int k = 0; k < npm; k++) {
+            pm_t *m = &pms[k];
+            if (m->cm && m->cm->api >= 2 && m->cm->game_mode) CODE_CALL(m, game_mode, t->name, t->cls, r);
+            if (!r) {
+                if (m->prog_lit_by == t) { m->prog_lit_by = NULL; show_progress(m, "a game mode that lit a pane ended"); }
+                continue;
+            }
+            if (!m->nall || !p) continue;
+            for (int a = 0; a < m->nall; a++) {
+                if (!trk_is(t, m->all_name[a]) || (m->all_got[p] & (1u << a))) continue;
+                m->all_got[p] |= 1u << a;
+                lg("\"%s\": player %d played %s - %d of %d (start_all)", m->name, p, m->all_name[a],
+                   __builtin_popcount(m->all_got[p]), m->all_need);
+                if (m->nprog) m->prog_lit_by = t;
+            }
+            all_check(m, p, t->name);
+        }
+    }
+}
+
+/* ---- the game type menu (render thread, mu held) ---- */
+static int gt_idx[MAX_MODES];              /* the modes with a game_type, in load order */
+static int gt_open, gt_sel, gt_wait, gt_l, gt_r, gt_pick = -1, gt_left_sel;
+static long gt_both_since, gt_input_at, gt_left_at;
+static unsigned gt_first;                  /* bit p: player p's first ball had its game type start */
+static volatile int attract_st = -1;       /* the game's state in attract (its HookAttractModeStart_) */
+static int (*btn_l)(void), (*btn_r)(void);
+
+static int hk_attract(void *a) { (void)a; if (state_get) attract_st = state_get(); return 0; }
+static int hk_diag(void *a) { (void)a; attract_st = -2; lg("game type: the service menu - no menu of ours until attract"); return 0; }
+
+static void menu_frame(void)
+{
+    if (!ngt || !btn_l || !btn_r || !state_get) return;
+    int st = state_get();
+    int attract = attract_st >= 0 && st == attract_st && !(ball_flag && ball_flag());
+    long t = now_ms();
+    int l = btn_l() & 0xff, r = btn_r() & 0xff;
+    if (!attract) {
+        if (gt_open) {      /* the game left attract: Start was pressed with the menu up */
+            gt_open = 0; gt_left_sel = gt_sel; gt_left_at = t;
+            lg("game type menu: the game left attract with %s picked", gt_sel ? pms[gt_idx[gt_sel - 1]].gtype : gt_normal);
+        }
+        gt_both_since = 0; gt_l = l; gt_r = r;
+        return;
+    }
+    if (!gt_open) {
+        if (l && r) {
+            if (!gt_both_since) gt_both_since = t;
+            else if (t - gt_both_since >= 1000) {
+                gt_open = 1; gt_wait = 1; gt_sel = 0; gt_input_at = t; gt_both_since = 0;
+                lg("game type menu OPEN (both flipper buttons held a second): %d game type(s)", ngt);
+            }
+        } else gt_both_since = 0;
+    } else {
+        if (gt_wait) { if (!l && !r) gt_wait = 0; }       /* let go of the hold first */
+        else {
+            int was = gt_sel;
+            if (l && !gt_l) gt_sel = (gt_sel + ngt) % (ngt + 1);
+            if (r && !gt_r) gt_sel = (gt_sel + 1) % (ngt + 1);
+            if (gt_sel != was) {
+                gt_input_at = t;
+                lg("game type menu: %s", gt_sel ? pms[gt_idx[gt_sel - 1]].gtype : gt_normal);
+            }
+        }
+        if (t - gt_input_at > 30000) { gt_open = 0; gt_sel = 0; lg("game type menu: no button for 30 s - closed (a normal game)"); }
+    }
+    gt_l = l; gt_r = r;
+}
+
+/* HookGameStart_ (mu held): the game type this game is, and every player's played modes from none */
+static void played_game_start(void)
+{
+    int sel = gt_open ? gt_sel : now_ms() - gt_left_at < 10000 ? gt_left_sel : 0;
+    gt_open = 0; gt_left_sel = 0; gt_sel = 0; gt_first = 0;
+    gt_pick = sel > 0 ? gt_idx[sel - 1] : -1;
+    if (ngt) lg("game type: %s", gt_pick >= 0 ? pms[gt_pick].gtype : gt_normal);
+    for (int i = 0; i < ntrk; i++) trk[i].played = 0;
+    for (int k = 0; k < npm; k++) {
+        memset(pms[k].all_got, 0, sizeof pms[k].all_got);
+        pms[k].prog_until = 0; pms[k].prog_lit_by = NULL;
+    }
+}
+
+/* HookBallStart_ (mu held) */
+static void played_ball_start(void)
+{
+    int p = player_now();
+    if (!p) return;
+    if (gt_pick >= 0 && !(gt_first & (1u << p))) {
+        gt_first |= 1u << p;
+        static char why[64]; snprintf(why, sizeof why, "game type, player %d's first ball", p);
+        raise_now(&pms[gt_pick], why);
+    }
+    for (int k = 0; k < npm; k++) {
+        pm_t *m = &pms[k];
+        if (!m->nall) continue;
+        if (m->all_got[p]) show_progress(m, "ball start");
+        all_check(m, p, "a start not made last ball");      /* a raised start the ball's end dropped */
+    }
+}
+
+JMAPI int jm_player(void) { return player_now(); }
+JMAPI int jm_played(const char *name)
+{
+    int p = player_now();
+    if (!name || !p) return 0;
+    for (int i = 0; i < ntrk; i++) if ((trk[i].played & (1u << p)) && trk_is(&trk[i], name)) return 1;
+    return 0;
+}
+JMAPI int jm_all_played(void)
+{
+    pm_t *m = jm("jm_all_played");
+    int p = player_now();
+    return m && p ? __builtin_popcount(m->all_got[p]) : 0;
 }
 
 static void on_switch(int si)
@@ -3773,6 +4194,8 @@ static void per_frame(void)
                     if (pcount[i] > gmode_bgn[i]) { gmode_bgn[i] = pcount[i]; lg("always-on game mode: %s (x%d)", gmode_sym[i], pcount[i]); }
                 } else if (!gmode_bg[i] && gm_running(i)) { gmode_bg[i] = 1; lg("always-on game mode: %s", gmode_sym[i]); }
             }
+            for (int i = 0; i < ntrk; i++)       /* PAD-1512: the game's multiballs the same way */
+                if (trk[i].mb && !trk[i].bg && trk_running(&trk[i])) { trk[i].bg = 1; lg("always-on game multiball: %s", trk[i].name); }
         }
     }
     if ((frames & 7) == 0) log_running_set();
@@ -3780,9 +4203,12 @@ static void per_frame(void)
         static int last_bip = -1;
         int bip = balls_in_play ? balls_in_play() : -1;
         if (bip != last_bip) { lg("balls in play: %d", bip); last_bip = bip; }
-        if (bip > 1 && !multiball_since) multiball_since = now_ms();
-        if (multiball_since && now_ms() - multiball_since >= 500) multiball_seen = 1;
-        else if (bip <= 1) multiball_since = 0;
+        /* PAD-1512: back to one ball is the multiball's end.  Before, once it had lasted half a
+         * second nothing cleared it, so "multiball" held every start of ours to the game's end. */
+        if (bip > 1) {
+            if (!multiball_since) multiball_since = now_ms();
+            if (now_ms() - multiball_since >= 500) multiball_seen = 1;
+        } else multiball_since = 0;
     }
     for (int i = 0; i < npm; i++) {
         pm_t *m = &pms[i];
@@ -3830,48 +4256,74 @@ static ALLEGRO_COLOR col(unsigned rgba)
     return c;
 }
 
-static void draw_screen(pm_t *m)
+/* The Allegro calls our screens draw with, resolved once (render thread). */
+static struct {
+    void (*fill_rect)(float, float, float, float, ALLEGRO_COLOR);
+    void (*draw_text)(const void *, ALLEGRO_COLOR, float, float, int, const char *);
+    void *(*builtin_font)(void);
+    const ALLEGRO_TRANSFORM *(*cur_xf)(void);
+    void (*copy_xf)(ALLEGRO_TRANSFORM *, const ALLEGRO_TRANSFORM *);
+    void (*ident_xf)(ALLEGRO_TRANSFORM *);
+    void (*scale_xf)(ALLEGRO_TRANSFORM *, float, float);
+    void (*trans_xf)(ALLEGRO_TRANSFORM *, float, float);
+    void (*use_xf)(const ALLEGRO_TRANSFORM *);
+    void (*get_blender)(int *, int *, int *);
+    void (*set_blender)(int, int, int);
+    void *(*cur_display)(void);
+    int (*disp_w)(void *), (*disp_h)(void *);
+    void *bfont;
+    int ready;
+    /* one drawing pass: the game's blender and transform, put back after */
+    int bop, bsrc, bdst; ALLEGRO_TRANSFORM old;
+    float W, H;
+} gx = { .ready = -1 };
+
+static int gx_begin(void)
 {
-    static void (*fill_rect)(float, float, float, float, ALLEGRO_COLOR);
-    static void (*draw_text)(const void *, ALLEGRO_COLOR, float, float, int, const char *);
-    static void *(*builtin_font)(void);
-    static const ALLEGRO_TRANSFORM *(*cur_xf)(void);
-    static void (*copy_xf)(ALLEGRO_TRANSFORM *, const ALLEGRO_TRANSFORM *);
-    static void (*ident_xf)(ALLEGRO_TRANSFORM *);
-    static void (*scale_xf)(ALLEGRO_TRANSFORM *, float, float);
-    static void (*trans_xf)(ALLEGRO_TRANSFORM *, float, float);
-    static void (*use_xf)(const ALLEGRO_TRANSFORM *);
-    static void (*get_blender)(int *, int *, int *);
-    static void (*set_blender)(int, int, int);
-    static void *(*cur_display)(void);
-    static int (*disp_w)(void *), (*disp_h)(void *);
-    static void *bfont;
-    static int ready = -1;
-    if (ready < 0) {
-        fill_rect = sym("al_draw_filled_rectangle"); draw_text = sym("al_draw_text");
-        builtin_font = sym("al_create_builtin_font"); cur_xf = sym("al_get_current_transform");
-        copy_xf = sym("al_copy_transform"); ident_xf = sym("al_identity_transform");
-        scale_xf = sym("al_scale_transform"); trans_xf = sym("al_translate_transform");
-        use_xf = sym("al_use_transform"); get_blender = sym("al_get_blender"); set_blender = sym("al_set_blender");
-        cur_display = sym("al_get_current_display"); disp_w = sym("al_get_display_width");
-        disp_h = sym("al_get_display_height");
+    if (gx.ready < 0) {
+        gx.fill_rect = sym("al_draw_filled_rectangle"); gx.draw_text = sym("al_draw_text");
+        gx.builtin_font = sym("al_create_builtin_font"); gx.cur_xf = sym("al_get_current_transform");
+        gx.copy_xf = sym("al_copy_transform"); gx.ident_xf = sym("al_identity_transform");
+        gx.scale_xf = sym("al_scale_transform"); gx.trans_xf = sym("al_translate_transform");
+        gx.use_xf = sym("al_use_transform"); gx.get_blender = sym("al_get_blender"); gx.set_blender = sym("al_set_blender");
+        gx.cur_display = sym("al_get_current_display"); gx.disp_w = sym("al_get_display_width");
+        gx.disp_h = sym("al_get_display_height");
         plot_os = (plot_os_t)sym("_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc");
         jfont = (jfont_t)sym("_ZN8JJPEFont4fontEv");
-        ready = fill_rect && draw_text && cur_xf && copy_xf && ident_xf && use_xf && set_blender && get_blender;
-        lg("screen: allegro %s, game text %s", ready ? "ok" : "MISSING", plot_os && jfont ? "ok" : "missing (built-in font)");
+        gx.ready = gx.fill_rect && gx.draw_text && gx.cur_xf && gx.copy_xf && gx.ident_xf && gx.use_xf && gx.set_blender
+                   && gx.get_blender;
+        lg("screen: allegro %s, game text %s", gx.ready ? "ok" : "MISSING", plot_os && jfont ? "ok" : "missing (built-in font)");
     }
-    if (!ready) return;
-    float W = 1360, H = 768;
-    void *d = cur_display ? cur_display() : NULL;
-    if (d && disp_w && disp_h) { W = (float)disp_w(d); H = (float)disp_h(d); }
-    int bop, bsrc, bdst; get_blender(&bop, &bsrc, &bdst);
-    set_blender(0 /*ADD*/, 1 /*ONE*/, 3 /*INVERSE_ALPHA*/);
-    ALLEGRO_TRANSFORM old, t; copy_xf(&old, cur_xf()); ident_xf(&t); use_xf(&t);
+    if (!gx.ready) return 0;
+    gx.W = 1360; gx.H = 768;
+    void *d = gx.cur_display ? gx.cur_display() : NULL;
+    if (d && gx.disp_w && gx.disp_h) { gx.W = (float)gx.disp_w(d); gx.H = (float)gx.disp_h(d); }
+    gx.get_blender(&gx.bop, &gx.bsrc, &gx.bdst);
+    gx.set_blender(0 /*ADD*/, 1 /*ONE*/, 3 /*INVERSE_ALPHA*/);
+    ALLEGRO_TRANSFORM t; gx.copy_xf(&gx.old, gx.cur_xf()); gx.ident_xf(&t); gx.use_xf(&t);
+    return 1;
+}
+static void gx_end(void) { gx.use_xf(&gx.old); gx.set_blender(gx.bop, gx.bsrc, gx.bdst); }
+
+/* Text in the built-in font, `scale` times its 8 px, x as Allegro aligns it (1 = centred). */
+static void gx_text(unsigned rgba, float x, float y, float scale, int align, const char *s)
+{
+    if (!gx.bfont && gx.builtin_font) gx.bfont = gx.builtin_font();
+    if (!gx.bfont || !gx.scale_xf || !gx.trans_xf) return;
+    ALLEGRO_TRANSFORM t; gx.ident_xf(&t); gx.scale_xf(&t, scale, scale); gx.trans_xf(&t, x, y); gx.use_xf(&t);
+    gx.draw_text(gx.bfont, col(rgba), 0, 0, align, s);
+    gx.ident_xf(&t); gx.use_xf(&t);
+}
+
+static void draw_screen(pm_t *m)
+{
+    if (!gx_begin()) return;
+    float W = gx.W, H = gx.H;
     draw_media(m, W, H);                          /* the mode's video, then its picture, under the panel */
-    if (m->panel == 3) { use_xf(&old); set_blender(bop, bsrc, bdst); return; }
+    if (m->panel == 3) { gx_end(); return; }
     float ph = H * 0.27f, y0 = m->panel == 1 ? H * 0.70f : m->panel == 2 ? H * 0.03f : H * 0.36f;
     float x0 = W * 0.16f, x1 = W * 0.84f, y1 = y0 + ph;
-    fill_rect(x0, y0, x1, y1, col(m->panel_rgba));
+    gx.fill_rect(x0, y0, x1, y1, col(m->panel_rgba));
     char total[48], secs[16];
     {   /* 12,345,678 */
         char raw[32]; snprintf(raw, sizeof raw, "%lld", m->total);
@@ -3890,20 +4342,67 @@ static void draw_screen(pm_t *m)
     if (plot_os && ft) plot_os(ft, col(m->title_rgba), black, 2, black, 3, cx, y0 + H * 0.01f, 1, title);
     if (plot_os && fv) plot_os(fv, col(m->value_rgba), black, 2, black, 3, cx, y0 + H * 0.10f, 1, total);
     if (plot_os && fm) plot_os(fm, col(m->timer_rgba), black, 2, black, 3, x1 - W * 0.05f, y0 + H * 0.06f, 1, secs);
-    if (!ft || !fv || !fm || !plot_os) {     /* the built-in font for whatever has no game font */
-        if (!bfont && builtin_font) bfont = builtin_font();
-        if (bfont && scale_xf && trans_xf) {
-            const char *s[3] = { ft ? NULL : title, fv ? NULL : total, fm ? NULL : secs };
-            float xs[3] = { cx, cx, x1 - W * 0.05f }, ys[3] = { y0 + H * 0.02f, y0 + H * 0.12f, y0 + H * 0.07f };
-            unsigned cs[3] = { m->title_rgba, m->value_rgba, m->timer_rgba };
-            for (int i = 0; i < 3; i++) if (s[i]) {
-                ident_xf(&t); scale_xf(&t, 4, 4); trans_xf(&t, xs[i], ys[i]); use_xf(&t);
-                draw_text(bfont, col(cs[i]), 0, 0, 1, s[i]);
-            }
-        }
+    /* the built-in font for whatever has no game font */
+    if (!(plot_os && ft)) gx_text(m->title_rgba, cx, y0 + H * 0.02f, 4, 1, title);
+    if (!(plot_os && fv)) gx_text(m->value_rgba, cx, y0 + H * 0.12f, 4, 1, total);
+    if (!(plot_os && fm)) gx_text(m->timer_rgba, x1 - W * 0.05f, y0 + H * 0.07f, 4, 1, secs);
+    gx_end();
+}
+
+/* PAD-1512: the game type menu, over the game's attract */
+static void draw_menu(void)
+{
+    if (!gx_begin()) return;
+    float W = gx.W, H = gx.H, rowh = H * 0.075f;
+    int n = ngt + 1;
+    /* its own size: centred, as tall as its lines; a game_type_at box scales the whole layout into it */
+    float ph = H * 0.24f + n * rowh, y0 = (H - ph) / 2, x0 = W * 0.22f, x1 = W * 0.78f, s = 1;
+    if (gtl.has_at) {
+        x0 = gtl.at[0] * W / 100; x1 = x0 + gtl.at[2] * W / 100; y0 = gtl.at[1] * H / 100;
+        s = gtl.at[3] * H / 100 / ph; ph *= s; rowh *= s;
     }
-    use_xf(&old);
-    set_blender(bop, bsrc, bdst);
+    float y1 = y0 + ph, cx = (x0 + x1) / 2, in = (x1 - x0) * 0.054f;
+    if (gtl.pic_bmp && al.ok) draw_fit(gtl.pic_bmp, gtl.pic_w, gtl.pic_h, gtl.pic_at, W, H);   /* under the panel */
+    if (gtl.panel & 0xff) gx.fill_rect(x0, y0, x1, y1, col(gtl.panel));
+    if (gtl.bar & 0xff) {
+        gx.fill_rect(x0, y0, x1, y0 + H * 0.006f * s, col(gtl.bar));
+        gx.fill_rect(x0, y1 - H * 0.006f * s, x1, y1, col(gtl.bar));
+    }
+    ALLEGRO_COLOR black = { 0, 0, 0, 1 };
+    void *ft = gtl.font_title && jfont ? jfont(gtl.font_title) : NULL;
+    void *fi = gtl.font_item && jfont ? jfont(gtl.font_item) : NULL;
+    void *fh = gtl.font_hint && jfont ? jfont(gtl.font_hint) : NULL;
+    static int (*line_h)(const void *);
+    if (!line_h) line_h = sym("al_get_font_line_height");
+    /* a game font when title.cfg names one, else the built-in font at `sc` times its 8 px; either
+     * one centred on `mid`, so a game font of any size sits where the built-in one does */
+#define GT_TEXT(f, rgba, mid, sc, str) do { \
+        if (plot_os && (f)) plot_os((f), col(rgba), black, 2, black, 3, cx, (mid) - (line_h ? line_h(f) : 0) / 2.0f, 1, (str)); \
+        else gx_text((rgba), cx, (mid) - 4 * (sc) * s, (sc) * s, 1, (str)); } while (0)
+    GT_TEXT(ft, gtl.title, y0 + H * 0.055f * s, 5, gt_title);
+    for (int i = 0; i < n; i++) {
+        float y = y0 + H * 0.13f * s + i * rowh, top = y - H * 0.012f * s, bot = y + rowh - H * 0.022f * s;
+        const char *str = i ? pms[gt_idx[i - 1]].gtype : gt_normal;
+        if (i == gt_sel && (gtl.pick_bar & 0xff)) gx.fill_rect(x0 + in, top, x1 - in, bot, col(gtl.pick_bar));
+        GT_TEXT(fi, i == gt_sel ? gtl.pick : gtl.item, (top + bot) / 2, 4, str);
+    }
+    if (*gtl.hint) GT_TEXT(fh, gtl.hint_rgba, y1 - H * 0.065f * s, 2.5f, gtl.hint);
+#undef GT_TEXT
+    gx_end();
+}
+
+/* PAD-1512: a mode's progress board: each progress line's picture, lit when the player up has
+ * played that start_all mode toward the next start, else its unlit picture (if it has one) */
+static void draw_progress(pm_t *m)
+{
+    int p = player_now();
+    if (!p || !al.ok || !gx_begin()) return;
+    for (int i = 0; i < m->nprog; i++) {
+        int lit = (m->all_got[p] >> m->prog[i].a) & 1;
+        void *b = lit ? m->prog[i].bl : m->prog[i].bu;
+        if (b) draw_fit(b, lit ? m->prog[i].wl : m->prog[i].wu, lit ? m->prog[i].hl : m->prog[i].hu, m->prog_at, gx.W, gx.H);
+    }
+    gx_end();
 }
 
 void al_flip_display(void)
@@ -3916,8 +4415,16 @@ void al_flip_display(void)
         load_pictures();                          /* on the render thread: bitmaps are GL textures */
         per_frame();
         stock_frame();
-        for (int i = 0; i < npm; i++)
-            if (running(&pms[i]) && !pms[i].paused) { draw_screen(&pms[i]); break; }
+        menu_frame();
+        int drew = 0;
+        for (int i = 0; i < npm && !drew; i++)
+            if (running(&pms[i]) && !pms[i].paused) { draw_screen(&pms[i]); drew = 1; }
+        if (gt_open) draw_menu();
+        else if (!drew && in_game()) {           /* a progress board, while no game mode is on the screen */
+            long t = now_ms();
+            for (int i = 0; i < npm; i++)
+                if (pms[i].nprog && t < pms[i].prog_until && !game_busy()) { draw_progress(&pms[i]); break; }
+        }
         pthread_mutex_unlock(&mu);
     }
     if (real_flip) real_flip();
@@ -4007,13 +4514,21 @@ static void *installer(void *arg)
             else lg("coils: FAIL - no watchdog thread; no holds");
         }
     }
-    install_rules();
-    if (getenv("JJP_MODS_TEST_GAMEMODE") && getenv("JJP_MODS_TEST_SWITCH")) {
-        test_gm = sym(getenv("JJP_MODS_TEST_GAMEMODE"));
-        test_sw = sw_index(getenv("JJP_MODS_TEST_SWITCH"));
-        if (getenv("JJP_MODS_TEST_END_SWITCH")) test_end_sw = sw_index(getenv("JJP_MODS_TEST_END_SWITCH"));
-        lg("TEST hook: %s starts game mode %s (%p)", getenv("JJP_MODS_TEST_SWITCH"), getenv("JJP_MODS_TEST_GAMEMODE"), test_gm);
+    /* PAD-1512: the game types on the attract menu, and the game's modes and multiballs watched */
+    for (int i = 0; i < npm; i++)
+        if (*pms[i].gtype) {
+            if (ngt < MAX_GAME_TYPES) gt_idx[ngt++] = i;
+            else lg("%s: game_type: the menu shows %d game types; this one is left off", pms[i].file, MAX_GAME_TYPES);
+        }
+    if (ngt) {
+        btn_l = (int (*)(void))sym("_Z28jjpe_is_left_flipper_pressedv");
+        btn_r = (int (*)(void))sym("_Z29jjpe_is_right_flipper_pressedv");
+        if (!btn_l || !btn_r) { lg("game type: FAIL - this game exports no jjpe_is_left/right_flipper_pressed: no menu"); ngt = 0; }
+        else lg("game type: %d on the attract menu (hold both flipper buttons a second there)", ngt);
     }
+    track_init();
+    install_rules();
+    test_init();
     int hooked = 0;
     for (int i = 0; i < nwsw; i++) {
         void **slot = (void **)((char *)wsw[i].obj + 0x10);
@@ -4028,6 +4543,7 @@ static void *installer(void *arg)
         hooked++;
     }
     attract_state = last_state = state_get();
+    if (attract_st == -1) attract_st = attract_state;   /* until the game's attract hook says (PAD-1512) */
     lg("installed: %d mode(s), %d changed game mode file(s), %d shot switch(es), ball-in-play state %d (now %d)", npm, nst,
        hooked, ingame_state, attract_state);
     installed = 1;
@@ -4105,6 +4621,19 @@ static void selftest(void)
     for (int i = 0; i < nst; i++) {
         char n[200]; snprintf(n, sizeof n, "_ZTV%zu%s", strlen(sts[i].mode), sts[i].mode);
         if (!sym(sts[i].mode) && !sym(n)) { lg("SELFTEST %s: no mode called %s", sts[i].file, sts[i].mode); bad++; }
+    }
+    for (int i = 0; i < npm; i++) {   /* PAD-1512 */
+        if (*pms[i].gtype && !(sym("_Z28jjpe_is_left_flipper_pressedv") && sym("_Z29jjpe_is_right_flipper_pressedv"))) {
+            lg("SELFTEST %s: game_type, but no jjpe_is_left/right_flipper_pressed", pms[i].file); bad++;
+        }
+        if (pms[i].nall && !hook_list("HookGameStart_")) { lg("SELFTEST %s: start_all needs HookGameStart_", pms[i].file); bad++; }
+        for (int k = 0; k < pms[i].nprog; k++)
+            for (int u = 0; u < 2; u++) {
+                const char *f = u ? pms[i].prog[k].unlit : pms[i].prog[k].lit;
+                char path[700];
+                snprintf(path, sizeof path, "%s/%s", moddir, f);
+                if (*f && access(path, R_OK)) { lg("SELFTEST %s: no file %s", pms[i].file, path); bad++; }
+            }
     }
     lg("SELFTEST %s: pid %d, GAMENAME %s, %d mode(s), %d changed game mode(s), %d shot switch(es), %d problem(s)",
        bad ? "FAIL" : "PASS", getpid(), getenv("GAMENAME") ? getenv("GAMENAME") : "?", npm, nst, nwsw, bad);

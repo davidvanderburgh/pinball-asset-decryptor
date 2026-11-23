@@ -1,0 +1,7 @@
+# PAD-1512 look proof: a wizard game type on the restyled attract menu (title.cfg).
+name = WIZARD
+title = WIZARD
+game_type = WIZARD GAME
+shots = switch_target_tv
+points = 1000000
+seconds = 15

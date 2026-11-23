@@ -108,8 +108,8 @@ def test_check_passes_a_good_folder_and_names_every_problem(tmp_path):
 def test_check_wants_a_start_rule(tmp_path):
     mm = _load("mkjjpmodes")
     _, problems = mm.check_modes(_folder(tmp_path, {"a.mode": "name = A\n"}))
-    assert problems == ["a.mode: no start rule (start, start_on, start_after, start_score or start_combo):"
-                        " the mode would never start"]
+    assert problems == ["a.mode: no start rule (start, start_on, start_after, start_score, start_combo, start_all or "
+                        "game_type): the mode would never start"]
 
 
 def test_start_rules_alone_start_a_mode(tmp_path):
@@ -747,3 +747,197 @@ def test_check_on_a_proc_engine_title(tmp_path):
     one.mkdir()
     _, problems = mm.check_modes(_folder(one, {"a.mode": "name = A\nstart = switch_ramp_made\ngame_modes = hold\n"}), port)
     assert not any("game_modes = hold" in p for p in problems)
+
+
+# ------------------------------------------------------------------ a wizard mode and a game type (PAD-1512)
+PLAYED_PORT = dict(PORT, played={"can_watch": True, "multiballs": True,
+                                 "names": ["BoxingMode", "RaidMode", "SicilyMB"],
+                                 "game_type": {"can": True}})
+
+
+def test_start_all_and_game_type_are_start_rules_of_their_own(tmp_path):
+    mm = _load("mkjjpmodes")
+    for f in ("p1.png", "p1_grey.png", "p2.png"):
+        (tmp_path / f).write_bytes(b"\x89PNG")
+    d = _folder(tmp_path, {
+        "1_wizard.mode": "start_all = BoxingMode RaidMode SicilyMB boxing_mode\nstart_all_count = 3\n"
+                         "progress = BoxingMode p1.png p1_grey.png\nprogress = SicilyMB p2.png\nprogress_seconds = 4\n"
+                         "game_type = WIZARD\nshots = switch_target_jam\n",
+        "2_practice.mode": "game_type = PRACTICE\nshots = switch_target_jam\n",
+        "title.cfg": "game_type_normal = REGULAR\ngame_type_title = PICK A GAME\n",
+    })
+    modes, problems = mm.check_modes(d, PLAYED_PORT)
+    assert problems == [], problems
+    assert "after all of BoxingMode" in mm.start_text(modes[0]) and "game type PRACTICE" in mm.start_text(modes[1])
+
+
+def test_start_all_problems_are_named(tmp_path):
+    mm = _load("mkjjpmodes")
+    d = _folder(tmp_path, {
+        "1.mode": "start_all = BoxingMode TypoMode\nstart_all_count = 5\nprogress = RaidMode r.png\n"
+                  "progress = BoxingMode gone.png\nprogress = BoxingMode notapicture\n",
+        "2.mode": "start_all_count = 2\nshots = switch_target_jam\nstart = switch_target_jam\n",
+        "3.mode": "game_type = SAME\nstart = switch_target_jam\nprogress_seconds = 3\n",
+        "4.mode": "game_type = same\nstart = switch_target_jam\n",
+    })
+    text = "\n".join(mm.check_modes(d, PLAYED_PORT)[1])
+    assert "1.mode:1: start_all not a game mode or multiball of Guns N' Roses: TypoMode" in text
+    assert "1.mode: start_all_count 5 is more than the 2 start_all names" in text
+    assert "1.mode: progress RaidMode: not one of its start_all modes" in text
+    assert "1.mode: progress BoxingMode: there is no gone.png in the mode folder" in text
+    assert "1.mode:5: progress must be a file in the mode folder ending .png" in text
+    assert "2.mode: start_all_count without a start_all line" in text
+    assert "3.mode: progress_at / progress_seconds without a progress line" in text
+    assert "4.mode: game_type same is 3.mode's too" in text
+    # a title whose engine cannot count plays, or has no flipper button calls, is refused by name
+    port = dict(PORT, played={"can_watch": False, "names": [], "game_type": {"can": False}})
+    d2 = tmp_path / "t2"
+    d2.mkdir()
+    (d2 / "a.mode").write_text("start_all = BoxingMode\ngame_type = X\n")
+    text = "\n".join(mm.check_modes(str(d2), port)[1])
+    assert "start_all cannot work on Guns N' Roses" in text and "game_type cannot work on Guns N' Roses" in text
+
+
+def test_the_menu_shows_nine_game_types(tmp_path):
+    mm = _load("mkjjpmodes")
+    files = {"%d.mode" % i: "game_type = TYPE %d\nstart = switch_target_jam\n" % i for i in range(10)}
+    text = "\n".join(mm.check_modes(_folder(tmp_path, files), PLAYED_PORT)[1])
+    assert "10 modes have a game_type: the attract menu shows 9 (9.mode left off)" in text
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    assert "#define MAX_GAME_TYPES 9 " in src and mm.MAX_GAME_TYPES == 9
+    assert "#define MAX_ALL 32 " in src and mm.MAX_ALL == 32 and mm.REPEATABLE["progress"] == 32
+
+
+def test_the_menus_look_is_title_cfgs_and_checked(tmp_path):
+    """PAD-1512: the game type menu's box, colors, fonts, hint and picture are title.cfg keys the
+    runtime reads and the checker knows: a font the game lacks or a picture not in the folder is
+    caught, a mode file may not set them, and the app's title settings show every one."""
+    mm = _load("mkjjpmodes")
+    port = json.load(open(os.path.join(RIG, "modes", "ports", "Wonka-v03.03.json"), encoding="utf-8"))
+    look = ("game_type_at = 58 10 38 76\ngame_type_panel_color = 00000000\ngame_type_hint = none\n"
+            "game_type_font_title = font_player_menu_title\ngame_type_picture = frame.png\n")
+    mode = {"a.mode": "game_type = X\nstart = switch_target_tv\n"}
+    for sub in ("ok", "bad", "m"):
+        (tmp_path / sub).mkdir()
+    d = _folder(tmp_path / "ok", dict(mode, **{"title.cfg": look}))
+    with open(os.path.join(d, "frame.png"), "wb") as f:
+        f.write(b"\x89PNG")
+    assert mm.check_modes(d, port)[1] == []
+    bad = look.replace("font_player_menu_title", "font_nope").replace("38 76", "38 0")
+    text = "\n".join(mm.check_modes(_folder(tmp_path / "bad", dict(mode, **{"title.cfg": bad})), port)[1])
+    assert "game_type_font_title" in text and "game_type_at" in text
+    assert "game_type_picture = frame.png, but there is no frame.png in the mode folder" in text
+    m2 = {"a.mode": "game_type = X\nstart = switch_target_tv\ngame_type_hint = HI\n"}
+    assert "game_type_hint belongs in title.cfg" in "\n".join(mm.check_modes(_folder(tmp_path / "m", m2), port)[1])
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    menu = src[src.index("static void draw_menu("):src.index("static void draw_progress(")]
+    assert "FLIPPERS TO CHOOSE" not in menu and "gtl.hint" in menu and "gtl.pic_bmp" in menu
+    from pinball_decryptor.plugins.jjp import custom_modes as CM
+    assert {k for k in mm.TITLE_KEYS if k.startswith("game_type")} <= set(CM.TITLE_FORM)
+    assert all(k in CM.LABELS for k in CM.TITLE_FORM)
+
+
+def test_the_c_api_grew_at_its_end_and_api_1_still_loads():
+    """jjp_mode.h API 2 added game_mode after idle (a library built for 1 is read only up to it),
+    and the runtime takes 1 or 2; every read of game_mode checks the api first."""
+    h = open(os.path.join(RIG, "modes", "sdk", "jjp_mode.h"), encoding="utf-8").read()
+    assert "#define JM_API 2 " in h
+    struct = h[h.index("struct jm_mode {"):h.index("};", h.index("struct jm_mode {"))]
+    fields = re.findall(r"\(\*([a-z_]+)\)", struct)
+    assert fields == ["start", "shot", "scored", "tick", "end", "idle", "game_mode"]
+    for fn in ("jm_player", "jm_played", "jm_all_played"):
+        assert re.search(r"\b%s\(" % fn, h)
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    assert "(*def)->api < 1 || (*def)->api > JM_API" in src
+    for m in re.finditer(r"cm->game_mode", src):
+        line = src[src.rindex("\n", 0, m.start()):src.index("\n", m.start())]
+        assert "api >= 2" in line, line
+    for fn in ("jm_player", "jm_played", "jm_all_played"):
+        assert "JMAPI int %s(" % fn in src
+
+
+def test_the_menu_reads_the_engines_own_flipper_calls_and_the_port_reports_them():
+    jp = _load("jjpport")
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    for b in jp.GAME_TYPE_BUTTONS:
+        assert 'sym("%s")' % b in src
+    assert 'hook_add("HookAttractModeStart_"' in src and 'hook_add("HookDiagStart_"' in src
+
+
+def test_blocks_hear_the_games_modes():
+    """The Blocks editor's When the game starts / ends <mode> is the C++ game_mode callback."""
+    sys.path.insert(0, HERE)
+    try:
+        from pinball_decryptor.plugins.jjp import block_modes as BM
+    finally:
+        sys.path.remove(HERE)
+    prog = {"vars": [{"name": "n", "reset": "kept"}], "scripts": [
+        {"hat": {"kind": "shot", "shot": "switch_target_jam", "when": "idle"}, "do": [{"op": "log", "text": "idle"}]},
+        {"hat": {"kind": "played", "mode": "BoxingMode", "when": "ended"}, "do": [
+            {"op": "change", "var": "n", "by": {"k": "num", "v": 1}},
+            {"op": "if", "cond": {"k": "cmp", "op": ">=", "a": {"k": "all_played"}, "b": {"k": "num", "v": 3}},
+             "then": [{"op": "start_mode"}]}]},
+    ]}
+    assert BM.problems(prog) == []
+    cpp = BM.to_cpp(prog, "Wizard", "wizard")
+    assert "static void game_mode(const char *name, const char *cls, int started)" in cpp
+    assert 'if (started == 0 && (jm_is(name, "BoxingMode") || jm_is(cls, "BoxingMode"))) {   // script 2' in cpp
+    assert "((long long)jm_all_played() >= 3LL)" in cpp and "jm_start();" in cpp
+    assert cpp.index(".idle = idle") < cpp.index(".game_mode = game_mode")     # C++20: the struct's order
+    assert BM.problems({"scripts": [{"hat": {"kind": "played"}, "do": []}]}) == [
+        "Script 1 (when the game starts a mode): no game mode picked"]
+
+
+def test_godfather_kiss_the_ring_is_its_sixteen_panes():
+    mm = _load("mkjjpmodes")
+    ex = os.path.join(RIG, "modes", "wizard_examples", "Godfather-v02.03")
+    port = json.load(open(os.path.join(RIG, "modes", "ports", "Godfather-v02.03.json"), encoding="utf-8"))
+    modes, problems = mm.check_modes(ex, port)
+    assert problems == []
+    ktr = next(m for m in modes if m.get("name") == "Kiss the Ring")
+    names = ktr["start_all"].split()
+    assert len(names) == 16 and ktr["game_type"] == "KISS THE RING"
+    assert {"CompoundMB", "FiveFamiliesMB", "SicilyMB", "TurfWarMB"} <= set(names)
+    for k in ("sound_start", "sound_shot", "sound_end"):
+        assert "KissTheRing" in ktr[k] and ktr[k] in port["sounds"]
+
+
+def test_a_multiball_ends_when_one_ball_is_left():
+    """PAD-1512: once a multiball had lasted half a second nothing cleared it, so every start of ours
+    yielded to "multiball" for the rest of the game.  One ball in play ends it now, and where the game's
+    modes are watched a running MultiballRule counts at once."""
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    body = src[src.index("int bip = balls_in_play ? balls_in_play() : -1;"):]
+    body = body[:body.index("for (int i = 0; i < npm; i++)")]
+    assert "} else multiball_since = 0;" in body and "else if (bip <= 1)" not in body
+    busy = src[src.index("static const char *game_busy_except(const pm_t *m)"):]
+    assert "return mb_busy();" in busy[:busy.index("static const char *game_busy(void)")]
+
+
+def test_every_title_that_runs_modes_can_count_plays_and_show_the_menu():
+    """PAD-1512, read off each title's own game program: the plays (Mode objects, and MultiballRules
+    where the engine has them) and the attract menu (the engine's flipper button calls and its attract
+    and service menu hooks) work on every JJP title that runs modes, and each has a wizard example (never a starter)."""
+    ports = os.path.join(RIG, "modes", "ports")
+    can = 0
+    for fn in sorted(os.listdir(ports)):
+        if fn.endswith(".live.json"):
+            continue
+        p = json.load(open(os.path.join(ports, fn), encoding="utf-8"))
+        if not p["can_run_modes"]:
+            continue
+        can += 1
+        pl = p["played"]
+        assert pl["can_watch"] and pl["names"], fn
+        assert pl["multiballs"] == (p["engine"] == "mode"), fn       # The Wizard of Oz: mode procs only
+        assert pl["game_type"]["can"] and pl["game_type"]["attract_hook"] and pl["game_type"]["diag_hook"], fn
+        ex = os.path.join(RIG, "modes", "wizard_examples", fn[:-5])
+        assert any("game_type" in open(os.path.join(ex, f), encoding="utf-8").read()
+                   for f in os.listdir(ex) if f.endswith(".mode")), fn
+        # never a starter: a starter folder is copied into the person's own and every mode in it runs
+        st = os.path.join(RIG, "modes", "examples", fn[:-5])
+        for f in os.listdir(st) if os.path.isdir(st) else ():
+            if f.endswith(".mode"):
+                text = open(os.path.join(st, f), encoding="utf-8").read()
+                assert "game_type" not in text and "start_all" not in text, (fn, f)
+    assert can == 10

@@ -1,0 +1,4 @@
+# PAD-1512 proof: its code hears the game's modes start and end (API 2 game_mode) and asks what the
+# player up has played (jm_played).  No start rule: it never runs, it listens.
+name = PROBE
+code = probe

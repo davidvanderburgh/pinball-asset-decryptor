@@ -213,7 +213,8 @@ function HoldOn({ k, value, names }) {
 }
 const BALL_COIL = new Set(["multiball", "ball_save", "add_ball", "coil_pulse", "coil_hold", "hold_on"]);
 // PAD-1508: keys given on several lines (one rule a line), and what a line looks like
-const LINES = { shot_points: "switch_name 5000000", start_also: "switch_name 2", sound_at: "10 sound_name" };
+const LINES = { shot_points: "switch_name 5000000", start_also: "switch_name 2", sound_at: "10 sound_name",
+  progress: "BoxingMode pane_boxing.png pane_boxing_grey.png" };
 function Lines({ k, kind, value }) {
   const lines = (value || "").split("\n").length;
   return html`<textarea class="jjpm-lines mono" rows=${Math.max(2, lines + 1)} spellcheck="false"
@@ -235,6 +236,7 @@ function Row({ k, prefix = "", meta, value, j, have }) {
   else if (m.kind === "lamps") input = html`<${NamePick} k=${key} value=${value} names=${names.lamps} multi title="The game's lamps (lp_) and lamp groups (ls_)" />`;
   else if (m.kind === "events") input = html`<${NamePick} k=${key} value=${value} names=${names.events || []} multi title="The game's own events (its hook lists)" />`;
   else if (m.kind === "after") input = html`<${NamePick} k=${key} value=${value} names=${names.after || []} multi title="The game's own modes (a global or a class), or any" />`;
+  else if (m.kind === "played") input = html`<${NamePick} k=${key} value=${value} names=${names.played || []} multi title="The game's own modes and multiballs a player must have played (PAD-1512)" />`;
   else if (m.kind === "in_place") input = html`<${NamePick} k=${key} value=${value} names=${(names.after || []).filter((n) => n !== "any")} multi title="The game's own modes this one starts in place of (PAD-1508)" />`;
   else if (m.kind === "sound") input = html`<${NamePick} k=${key} value=${value} names=${names.sound} sound have=${have} title="The game's sounds" inherit=${inherit} />`;
   else if (m.kind === "sound_or_file") input = html`<${NamePick} k=${key} value=${value} names=${names.sound_or_file} sound have=${have} title="The game's sounds, or a sound file of yours in this game's mode folder" inherit=${inherit} />`;
@@ -423,7 +425,7 @@ function TitleSettings({ j, have }) {
   const t = j.title_cfg || {};
   return html`<section class="card jjpm-title-card">
     <div class="hd" style="cursor:pointer" onClick=${() => setOpen(!open)}><span class="h2">${open ? "▾" : "▸"} Every mode of this game</span>
-      <span class="muted small">defaults a mode's own settings override: ${(j.title_keys || []).some((k) => k.startsWith("font") || k.endsWith("color")) ? "fonts, colors, the panel" : "the panel"}${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
+      <span class="muted small">defaults a mode's own settings override: ${(j.title_keys || []).some((k) => k.startsWith("font") || k.endsWith("color")) ? "fonts, colors, the panel" : "the panel"}${(j.title_keys || []).includes("game_type_at") ? ", and the attract menu's game type picker" : ""}${t.game ? ` - loads only into ${j.game_name || t.game}` : ""}</span></div>
     ${open ? html`<div class="bd">${(j.title_keys || []).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
   </section>`;
 }

@@ -40,6 +40,46 @@
   ]
  },
  "proc_modes": [],
+ "played": {
+  "can_watch": true,
+  "multiballs": true,
+  "names": [
+   "Armageddon",
+   "BettyQuickMultiball",
+   "DisasterMode",
+   "DisasterMode_AcidRain",
+   "DisasterMode_AlienAttack",
+   "DisasterMode_EMP",
+   "DisasterMode_Earthshaker",
+   "DisasterMode_Fire",
+   "DisasterMode_Meteor",
+   "DisasterMode_Singularity",
+   "DisasterMode_Sinkhole",
+   "DisasterMode_Tidalwave",
+   "DisasterMode_Tornado",
+   "DisasterMode_Volcano",
+   "DronesGoneWildQuickMultiball",
+   "FinalBattleMultiball",
+   "MMEmoji",
+   "MMLottery",
+   "MMSelfie",
+   "MiniMode",
+   "OnslaughtMultiball",
+   "QEDQuickMultiball",
+   "QuantumTheaterMB",
+   "QuickMultiball",
+   "UnderAttackMultiball"
+  ],
+  "game_type": {
+   "can": true,
+   "buttons": {
+    "_Z28jjpe_is_left_flipper_pressedv": true,
+    "_Z29jjpe_is_right_flipper_pressedv": true
+   },
+   "attract_hook": true,
+   "diag_hook": true
+  }
+ },
  "media": {
   "can_play_own_media": true,
   "ok": {

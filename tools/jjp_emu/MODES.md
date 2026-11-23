@@ -18,6 +18,7 @@ No game code is patched. How and why it works: `docs/plans/jjp_custom_modes.md`.
 | Starter `.stock` file per title | `modes/stock_examples/<title>/` |
 | Make, check and build them in the app | the **Modes** tab on a JJP game (`webui/modes_jjp.py`, PAD-1350) |
 | A mode's own rules in C++ (or blocks that write it) | `code = <name>`, `modes/sdk/jjp_mode.h`, `build_code.sh` (PAD-1384, below) |
+| A wizard mode (every one of the game's modes played) and a game type picked in attract | `start_all`, `progress`, `game_type` (PAD-1512, below) |
 
 ## In the app (PAD-1350)
 
@@ -133,6 +134,8 @@ lamp_blink = 4
 | `game` | the title's GAMENAME (e.g. `GunsNRoses`). The modes load only into that game: a mode ISO made from a multi-boot ISO hooks root A, which also starts image 1's game |
 | `ingame_state` | the `jjpe_state_get()` value meaning "a ball is in play" (5 on Guns N' Roses). Without it the runtime learns it on the first ball: the state that holds for a second while the game's own ball-in-play flag is set (logged) |
 | `background_modes` | game modes that are always on and must not make a custom mode yield. Without it, the game modes already running two seconds into a ball count as always-on |
+| `game_type_normal`, `game_type_title` | the attract menu's line for a normal game (`NORMAL GAME`) and its heading (`GAME TYPE`) (PAD-1512) |
+| `game_type_hint`, `game_type_at`, `game_type_*_color`, `game_type_font_*`, `game_type_picture`, `game_type_picture_at` | the attract menu's look (PAD-1512): "The game type menu's look" below |
 | `coil_holds` | `on` lets this title's modes hold coils (`coil_hold`). Off by default: a hold is a coil kept energised, so it is turned on per title once it has been watched on that machine. `mkjjpmodes.py check` names a `coil_hold` without it |
 
 ## Balls and coils (PAD-1353)
@@ -218,6 +221,121 @@ refused a third; and when the test switch started Candy Lane the gate held it of
 game's mode cl_mode`) and RULES D started in its place. A's lamps chased 0, 1, 2. Wonka is not on
 free play: a rig game needs coins before Start, once the game is in attract.
 
+## A wizard mode and a game type (PAD-1512)
+
+A JJP wizard mode is earned by playing the game's other modes: Godfather's cut Kiss the Ring
+was to come after all 16 of the modes its stained-glass panes stand for (the 12 jobs and 4
+multiballs). These keys make that rule, show the panes as they light, and let a player pick the
+wizard mode on an attract menu, as Stern's start menu offers a game type. They work on every JJP
+title that runs modes (each title's port report says so under `played`).
+
+```
+# 3_kiss_the_ring.mode - Godfather 02.03 (modes/wizard_examples/Godfather-v02.03)
+start_all = BoxingMode PursuitMode ... CompoundMB FiveFamiliesMB SicilyMB TurfWarMB
+game_type = KISS THE RING
+progress = BoxingMode pane_boxing.png pane_boxing_grey.png
+multiball = 4 30
+seconds = 0
+sound_start = se_VO_GF_Narrator_KissTheRing1
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `start_all` | none | the game's modes and multiballs (their globals, e.g. `cl_mode`, or their classes, e.g. `CandyLaneMode`, `GobstopperMultiballRule`; on The Wizard of Oz its mode procs), up to 32: the mode starts once the player up has played every one of them this game. It is a start rule of its own |
+| `start_all_count` | every one | how many of them start it (`12`: any 12 of 16) |
+| `progress` | none | `<one of its start_all modes> <picture> [<unlit picture>]`, a line each (up to 32): the progress board. Each line's picture is drawn when the player up has played that mode toward the next start, else its unlit picture (if it has one), in the lines' order, all in one box |
+| `progress_at` | 0 0 100 100 | the board's box, `x y w h` in percent of the screen, as `picture_at` |
+| `progress_seconds` | 5 | how long the board shows: when a game mode that lit a picture ends, and at a ball's start once one is lit |
+| `game_type` | none | the mode's line on the attract menu (up to 9 a folder): a game started with it picked starts this mode on each player's first ball. It is a start rule of its own |
+
+* **Played** means the game started it for that player: one of the game's `Mode` or
+  `MultiballRule` objects whose `is_running` went from false to true with a ball in play (on The
+  Wizard of Oz, one of its mode procs coming up). The runtime reads them from its start-rule tick
+  on the game's proc thread, as `start_after` does; nothing of the game's changes. Modes that run
+  from a ball's start (a title's always-on modes) are not counted. Each player's plays are their
+  own and a new game clears them all.
+* **The start.** When the player up has played `start_all_count` of them the start is raised
+  (`"<mode>" start raised: player N played ...`), and the mode starts at the first free moment of
+  the ball, as any start rule's does: usually as the last game mode ends. When it starts, that
+  player's plays toward it start again from none, so it can be earned again. A raised start the
+  ball's end dropped is raised again at that player's next ball.
+* **The board** is drawn while a ball is in play, no mode of ours runs and no game mode is on the
+  screen. A pane lit while a game mode ran shows when that game mode ends, not over its intro.
+* **The menu.** In attract, hold both flipper buttons a second: the menu opens over the game's
+  attract with the normal game first and every `game_type` after it. The flipper buttons move
+  through it; Start starts the game as Start always does (credits as the game asks), with the
+  picked line as its game type. Thirty seconds without a button closes it (a normal game). The
+  buttons are read through the engine's own `jjpe_is_left_flipper_pressed` /
+  `jjpe_is_right_flipper_pressed`, the calls its own menus use, and the menu is attract's only
+  (the state its `HookAttractModeStart_` list ran in; its `HookDiagStart_` list turns it off for
+  the service menu). A game type game is a game like any other: its scores and audits count.
+* **The menu's look** is the title's, all in title.cfg (the Modes tab's title settings), so every
+  game type folder can dress it as its game: JJP games draw their screens in code, so there is no
+  scene file for an editor to open, and these keys are what a mode's own screen has (`panel_color`,
+  `font_title`, `picture`, `picture_at`).
+
+  | title.cfg key | Default | Meaning |
+  |---|---|---|
+  | `game_type_title`, `game_type_normal` | GAME TYPE, NORMAL GAME | its heading and the normal game's line |
+  | `game_type_hint` | FLIPPERS TO CHOOSE - START TO PLAY | the line under the choices; `none` hides it |
+  | `game_type_at` | centred, as tall as its lines | its box, `x y w h` in percent of the screen; the whole layout (text too, in the built-in font) scales into it |
+  | `game_type_panel_color` | 000000e0 | the panel; `00000000` for none (a picture of ours can be the frame) |
+  | `game_type_bar_color` | ffdc00 | the bars along its top and bottom; `00000000` for none |
+  | `game_type_title_color`, `game_type_item_color`, `game_type_pick_color`, `game_type_hint_color` | ffdc00, 9a9a9a, ffffff, c8c8c8 | the heading, the lines, the picked line, the hint |
+  | `game_type_pick_bar_color` | ffffff38 | the bar behind the picked line; `00000000` for none |
+  | `game_type_font_title`, `game_type_font_item`, `game_type_font_hint` | the built-in font | one of the game's own fonts (the same names as `font_title`), drawn outlined as the game draws them |
+  | `game_type_picture`, `game_type_picture_at` | none, 0 0 100 100 | a picture of ours (png or jpg in the mode folder) drawn under the panel, fitted into its box: a full-screen backdrop, a logo, a frame |
+
+  Proven on Wonka 03.03 (2026-11-23, `proof/pad1512/look`): the menu moved to the right in a frame
+  picture of ours with the panel and bars off, in Wonka's own menu fonts and new colors and words;
+  every line, in a game font or the built-in one, is centred in its row.
+
+* **In C++** (API 2): `game_mode(name, cls, started)` is called whenever one of the game's modes
+  or multiballs starts or ends in a game, whether the mode runs or not (`jm_start()` works there),
+  and `jm_player()`, `jm_played(name)` and `jm_all_played()` say who is up, whether they have
+  played a game mode this game and how many of the mode's `start_all` modes they have toward its
+  next start. A library built for API 1 still loads. The Blocks editor has the same as **When the
+  game starts / ends <mode>** and the value **the player's start_all modes played**.
+
+**Every title that runs modes** has all of it, read off its own game program 2026-11-22 (`played` in
+its port report): Guns N' Roses and CHAKA's LE, Elton John, Godfather, Pirates, Wonka, Dialed In, The
+Hobbit and Toy Story count their Mode classes and their multiballs (10 to 40 names each); The Wizard of
+Oz counts its 27 mode procs (no MultiballRule there). Every one exports the flipper button calls and the
+attract and service menu hook lists.
+
+**Examples, not starters.** Nothing in the runtime or the app is written for one game: a wizard mode
+is a `.mode` file like any other. The wizard examples are in `modes/wizard_examples/<title>/`, one a
+title (`3_wizard.mode`: four of the title's own modes played, or PAD WIZARD on the menu; Godfather's
+is `3_kiss_the_ring.mode`, below). They are not in the starter folders (`modes/examples/`), which are
+copied into a person's own mode folder the first time and every mode in them runs: copy one into your
+mode folder (**Open the mode folder**) to use it.
+
+The Godfather example uses the game's own Kiss the Ring sounds, which the game still loads
+(`se_VO_GF_Narrator_KissTheRing1`-`3`, `...Champion1`-`2`, the two `BadGuyHit` fanfares); its art
+and music are files of the extract (`graphics/Attract Mode/Kiss the Ring Progress/`,
+`sound/music/BG_WizardMode_KissTheRing.ogg`), copied into the mode folder for `progress`, `video`
+and `music`.
+
+**Proof, Wonka 03.03 in the emulator with Wonka's own key** (hidden, muted, 2026-11-22;
+`proof/pad1512`, `run.sh` and `steps.txt`, every wait met): in attract, both flipper buttons held 1.6 s
+opened the menu over the game's attract (`game type menu OPEN`); the right button went to WIZARD GAME
+and PRACTICE GAME, the left back and the right again; coins and Start started the game with `game type:
+PRACTICE GAME`, and PRACTICE started on player 1's first ball and ran its 6 s. Then the test hook started
+three of the game's own: Candy Lane (`cl_mode`, named by its global), Mike Teavee (`MikeTeaveeMode`, by
+its class) and the Gobstopper multiball (`gobstopper_mb`, a MultiballRule): each counted for player 1
+(`1 of 3`, `2 of 3`, `3 of 3`), the board (three panes, the played ones lit, the others grey) showed
+for 4 s as each game mode ended, and the third raised WIZARD's start, which waited for the multiball
+(`waiting for gobstopper_mb`). The rig's game counted the multiball's balls until the ball ended, so
+the start was dropped and raised again on the next ball (`a start not made last ball`), and WIZARD
+started there; player 1's plays toward it started again from none; a Candy Lane start while it ran was
+held off (`HELD OFF the game's mode cl_mode`); its 15 s ended it. The probe's code (API 2) logged every
+start and end with `jm_played` true by global and by class. The runtime found Wonka's 20 game modes and
+its 7 multiballs by name (`played: watching`).
+
+**Test hook** (proof runs only): `JJP_MODS_TEST_GAMEMODE=<global>,<global>...` with
+`JJP_MODS_TEST_SWITCH=<switch>,<switch>...` starts each of the game's modes or multiballs from its
+own switch, and `JJP_MODS_TEST_END_SWITCH` ends whichever runs.
+
 ## A mode's own rules: C++ and blocks (PAD-1384)
 
 A mode file's keys are its settings. Rules of its own (a bonus that grows, a shot
@@ -245,10 +363,12 @@ JM_REGISTER({ .api = JM_API, .start = start, .shot = shot, .scored = scored });
 | `tick()` | ten times a second while it runs (not while paused) |
 | `end(why)` | it is over: `time`, `completion`, `its code`, `ball end`... |
 | `idle(sw)` | any switch in a game while it is NOT running: `jm_start()` starts it (no start rule needed) |
+| `game_mode(name, cls, started)` | API 2 (PAD-1512): one of the game's modes or multiballs started (1) or ended (0) in a game, whether it runs or not; `jm_start()` starts it |
 
 Calls: `jm_score`, `jm_total`, `jm_hits`, `jm_switch_hits`, `jm_seconds_left`,
 `jm_set_seconds`, `jm_add_seconds`, `jm_ms`, `jm_end`, `jm_start`, `jm_running`,
-`jm_title` (the panel's title this run), `jm_sound`, `jm_lamp` / `jm_lamp_off`
+`jm_title` (the panel's title this run), `jm_player`, `jm_played`, `jm_all_played` (PAD-1512),
+`jm_sound`, `jm_lamp` / `jm_lamp_off`
 (the mode's own lamp layer), `jm_coil` (the coils a mode may fire, with the
 form's limits), `jm_multiball`, `jm_ball_save`, `jm_log`. Each acts on the mode
 whose callback is running, on the game's proc thread.
@@ -462,7 +582,10 @@ files.
   first moment that ball when the ball is in play, no other custom mode runs and
   nothing it yields to runs. A raised start not done by the end of the ball is
   dropped (logged). Several rules on one mode: any of them starts it.
-* A multiball is more than one ball in play for half a second (the count blips).
+* A multiball is more than one ball in play for half a second (the count blips); one ball left ends it
+  (PAD-1512: before, nothing ended it, and every start of ours waited for the game's end). Where a folder watches the game's modes (a `start_all` or a mode's code built for API 2, PAD-1512),
+  one of the game's multiballs counts from the moment its MultiballRule says it runs, before a second ball
+  comes; the ones running two seconds into a ball (a title's always-on ones) do not.
 * The mode's lamps live in a lamp layer of their own, above the game's mode
   layers and below its award, tilt and diagnostic layers. When the mode ends,
   or pauses for a game mode, the lamps go back to the game.

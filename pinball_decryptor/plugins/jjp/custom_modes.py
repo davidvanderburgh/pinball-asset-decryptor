@@ -72,6 +72,9 @@ FORM_GROUPS = (
     ("Rules from Spike 2", ("shot_points", "points_ladder", "end_shots", "start_also", "start_max",
                             "cooldown", "start_needs", "sound_at", "sound_shot_every", "lamp_pattern",
                             "in_place_of")),
+    # PAD-1512: a wizard mode (every one of the game's modes played) and a game type picked in attract
+    ("Wizard mode and game type", ("start_all", "start_all_count", "progress", "progress_at", "progress_seconds",
+                                   "game_type")),
 )
 #: mode keys the form does not show: ``code`` is set when a mode is made with blocks or in C++
 #: (the New mode window, PAD-1384) and shown as how the mode is made
@@ -86,6 +89,12 @@ DEFAULTS = {
     "coil_hold_on": "shots", "coil_holds": "off",
     "combo_seconds": "5", "start_count_reset": "game", "start_once": "no",
     "points_ladder": "fixed",
+    "progress_at": "0 0 100 100", "progress_seconds": "5",
+    "game_type_normal": "NORMAL GAME", "game_type_title": "GAME TYPE",
+    "game_type_hint": "FLIPPERS TO CHOOSE - START TO PLAY", "game_type_panel_color": "000000e0",
+    "game_type_bar_color": "ffdc00", "game_type_title_color": "ffdc00", "game_type_item_color": "9a9a9a",
+    "game_type_pick_color": "ffffff", "game_type_pick_bar_color": "ffffff38", "game_type_hint_color": "c8c8c8",
+    "game_type_picture_at": "0 0 100 100",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
@@ -119,10 +128,31 @@ LABELS = {
     "sound_at": "Sounds at seconds left (one a line: seconds sound)", "sound_shot_every": "Shot sound every Nth shot",
     "lamp_pattern": "Lamp pattern",
     "in_place_of": "Starts in place of the game's mode", "inside": "Runs inside my mode (name)",
+    # PAD-1512
+    "start_all": "Starts once the player has played all of these game modes",
+    "start_all_count": "...or this many of them", "progress": "Progress pictures (one a line: game mode picture [unlit picture])",
+    "progress_at": "Progress box (x y w h, % of screen)", "progress_seconds": "Progress shows for (seconds)",
+    "game_type": "Game type on the attract menu (its line)",
+    "game_type_normal": "Attract menu: the normal game's line", "game_type_title": "Attract menu: its heading",
+    "game_type_hint": "Attract menu: the hint line (none hides it)",
+    "game_type_at": "Attract menu box (x y w h, % of screen; empty = centred)",
+    "game_type_panel_color": "Attract menu: panel color", "game_type_bar_color": "Attract menu: top and bottom bars",
+    "game_type_title_color": "Attract menu: heading color", "game_type_item_color": "Attract menu: line color",
+    "game_type_pick_color": "Attract menu: picked line color", "game_type_pick_bar_color": "Attract menu: picked line's bar",
+    "game_type_hint_color": "Attract menu: hint color",
+    "game_type_font_title": "Attract menu: heading font", "game_type_font_item": "Attract menu: line font",
+    "game_type_font_hint": "Attract menu: hint font",
+    "game_type_picture": "Attract menu: picture under it (a file of ours)",
+    "game_type_picture_at": "Attract menu picture box (x y w h, % of screen)",
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
-              "panel_color", "panel", "game_modes", "hold_multiballs", "ingame_state", "coil_holds")
+              "panel_color", "panel", "game_modes", "hold_multiballs", "ingame_state", "coil_holds",
+              "game_type_normal", "game_type_title", "game_type_hint", "game_type_at",
+              "game_type_panel_color", "game_type_bar_color", "game_type_title_color", "game_type_item_color",
+              "game_type_pick_color", "game_type_pick_bar_color", "game_type_hint_color",
+              "game_type_font_title", "game_type_font_item", "game_type_font_hint",
+              "game_type_picture", "game_type_picture_at")
 
 
 # ============================================================================ where things are
@@ -430,9 +460,11 @@ def blocks_to_cpp(label, fn):
 
 
 def blocks_names(port, folder):
-    """What the Blocks editor offers for this title: its switches, lamps, sounds and coils."""
+    """What the Blocks editor offers for this title: its switches, lamps, sounds and coils, and
+    the game's own modes and multiballs (PAD-1512)."""
     return {"kit": "jjp", "shots": names_for(port, "switches"), "lamps": names_for(port, "lamps"),
-            "sounds": names_for(port, "sound"), "coils": names_for(port, "coil_pulse")}
+            "sounds": names_for(port, "sound"), "coils": names_for(port, "coil_pulse"),
+            "played": names_for(port, "played")}
 
 
 def code_stale(label):
@@ -609,6 +641,10 @@ def names_for(port, kind, folder=None):
         return ["any"] + sorted(st.get("objects") or ()) + sorted(
             set(st.get("classes") or ()) | set(port.get("mode_classes") or ())
             | set(port.get("proc_modes") or ()))   # PAD-1365: the proc engine's game modes
+    if kind == "played":            # PAD-1512 start_all: the game's mode / multiball classes and globals
+        pl = port.get("played") or {}
+        st = port.get("stock") or {}
+        return sorted(st.get("objects") or ()) + sorted(set(pl.get("names") or ()) | set(port.get("proc_modes") or ()))
     return []
 
 

@@ -40,7 +40,7 @@ def _panes(folder):
                                 outline=(255, 255, 255, 255), width=5)
             d.text((20, 66), mode[:-4].upper(), fill=(0, 0, 0, 255) if lit else (150, 150, 150, 255))
             im.save(os.path.join(folder, "pane%d%s.png" % (i + 1, "" if lit else "_off")))
-        lines.append("%s pane%d.png pane%d_off.png" % (mode, i + 1, i + 1))
+        lines.append("%s pane%d.png pane%d_off.png %d 4 14 16" % (mode, i + 1, i + 1, 4 + i * 16))   # a row along the top
     return lines
 
 
@@ -122,6 +122,7 @@ def main():
             webui_shot.api(url, "modes.jjp_open", "3_wizard.mode")
             time.sleep(2)
             print("progress_board:", to(".jjpl[data-screen=progress]", "Wizard mode and game type"))
+            page.mouse.move(5, 500)                   # no tooltip in the shot
             time.sleep(1.5)
             page.screenshot(path=os.path.join(out_dir, kind + "_progress_board.png"))
 

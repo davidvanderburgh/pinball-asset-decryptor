@@ -182,3 +182,121 @@ def icon_for(path):
     in Python): what a test or a proof compares the DLL's answer with."""
     from ..core import sparse_card
     return ICON_COMPACT if sparse_card.takes_less(path) else ICON
+
+
+# ----------------------------------------------------------------------
+# is Explorer drawing the badge yet?  (PAD-1526)
+# ----------------------------------------------------------------------
+#: overlay identifiers Windows loads, in name order (padicon.c OVERLAY_SLOTS)
+OVERLAY_SLOTS = 11
+
+
+def _overlay_written():
+    """When our overlay key was last written, as a Windows file time (100 ns
+    since 1601), or None when it is not listed or sorts past the slots
+    Windows loads."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, OVERLAY_KEY) as k:
+            names = []
+            for i in range(winreg.QueryInfoKey(k)[0]):
+                names.append(winreg.EnumKey(k, i))
+        mine = OVERLAY_NAME.lower()
+        if mine not in [n.lower() for n in names]:
+            return None
+        if sum(1 for n in names if n.lower() < mine) >= OVERLAY_SLOTS:
+            return None
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            OVERLAY_KEY + "\\" + OVERLAY_NAME) as k:
+            return winreg.QueryInfoKey(k)[2]
+    except (ImportError, OSError):
+        return None
+
+
+def _explorer():
+    """``(pid, start as a Windows file time)`` of the Explorer that is the
+    desktop and taskbar, or None."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+        u32.GetShellWindow.restype = wintypes.HWND
+        hwnd = u32.GetShellWindow()
+        if not hwnd:
+            return None
+        pid = wintypes.DWORD(0)
+        u32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
+        if not pid.value:
+            return None
+        k32.OpenProcess.restype = wintypes.HANDLE
+        # PROCESS_QUERY_LIMITED_INFORMATION
+        h = k32.OpenProcess(0x1000, False, pid.value)
+        if not h:
+            return None
+        try:
+            made, a, b, c = (wintypes.FILETIME() for _ in range(4))
+            if not k32.GetProcessTimes(wintypes.HANDLE(h), ctypes.byref(made),
+                                       ctypes.byref(a), ctypes.byref(b),
+                                       ctypes.byref(c)):
+                return None
+            return pid.value, (made.dwHighDateTime << 32) | made.dwLowDateTime
+        finally:
+            k32.CloseHandle(wintypes.HANDLE(h))
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def badge_waits_for_explorer(written=None, explorer=None):
+    """True when the compact badge is listed for Explorer but the Explorer
+    that is running started before it was: it shows the badge live only once
+    it has restarted (it reads the list when it starts).  False when the
+    badge is live, when it is not listed at all, and off Windows."""
+    if sys.platform != "win32":
+        return False
+    written = _overlay_written() if written is None else written
+    if written is None:
+        return False
+    explorer = _explorer() if explorer is None else explorer
+    if not explorer:
+        return False
+    return explorer[1] < written
+
+
+def restart_explorer(explorer=None):
+    """Restart the Explorer that is the desktop and taskbar, the way an
+    installer does (Windows' Restart Manager): it is asked to close, comes
+    back as the same user and reopens the folder windows it had.  True when
+    it was restarted.  Never raises."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        explorer = explorer or _explorer()
+        if not explorer:
+            return False
+        pid, made = explorer
+
+        class Unique(ctypes.Structure):         # RM_UNIQUE_PROCESS
+            _fields_ = [("pid", wintypes.DWORD), ("made", wintypes.FILETIME)]
+
+        rm = ctypes.windll.rstrtmgr
+        session = wintypes.DWORD(0)
+        key = ctypes.create_unicode_buffer(33)  # CCH_RM_SESSION_KEY + 1
+        if rm.RmStartSession(ctypes.byref(session), 0, key) != 0:
+            return False
+        try:
+            who = Unique(pid, wintypes.FILETIME(made & 0xFFFFFFFF, made >> 32))
+            if rm.RmRegisterResources(session, 0, None, 1, ctypes.byref(who),
+                                      0, None) != 0:
+                return False
+            # RmForceShutdown: a folder window with a dialog open must not
+            # leave Explorer half closed
+            if rm.RmShutdown(session, 1, None) != 0:
+                return False
+            return rm.RmRestart(session, 0, None) == 0
+        finally:
+            rm.RmEndSession(session)
+    except Exception:                                   # noqa: BLE001
+        log.warning("Explorer not restarted", exc_info=True)
+        return False

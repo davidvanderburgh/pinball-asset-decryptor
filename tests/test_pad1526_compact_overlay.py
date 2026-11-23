@@ -12,10 +12,13 @@ import ctypes
 import os
 import re
 import sys
+import threading
+import time
 
 import pytest
 
 from pinball_decryptor.core import sparse_card as sc
+from pinball_decryptor.webui import compact_window as cw
 from pinball_decryptor.webui import open_image as oi
 from pinball_decryptor.webui import shell_icon as si
 
@@ -296,3 +299,120 @@ def test_the_overlay_row_is_written_once_and_taken_away(monkeypatch):
     monkeypatch.setattr(winreg, "CreateKeyEx", refused)
     oi._machine_overlay()
     assert store == {}
+
+
+# ------------------------------------------------- the offer to restart Explorer
+
+class _Res:
+    def __init__(self, size, before, after, sparse_ok=True):
+        self.size, self.before, self.after = size, before, after
+        self.sparse_ok = sparse_ok
+        self.saved = max(0, before - after)
+
+
+def _done_jobs(tmp_path, n=1):
+    jobs = cw.Jobs(compact=lambda p, progress=None: _Res(10 * MB, 10 * MB,
+                                                         4 * MB))
+    for i in range(n):
+        jobs.add(_card(tmp_path / ("card%d.raw" % i), zeros=MB))
+    jobs.wait(10)
+    return jobs
+
+
+def test_explorer_started_before_the_badge_was_listed_waits(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    explorer = (1234, 5000)
+    assert si.badge_waits_for_explorer(written=6000, explorer=explorer)
+    assert not si.badge_waits_for_explorer(written=4000, explorer=explorer)
+    # not listed (no Administrator run yet, or past the slots Windows
+    # loads): nothing a restart would change, so nothing is offered
+    monkeypatch.setattr(si, "_overlay_written", lambda: None)
+    assert not si.badge_waits_for_explorer(explorer=explorer)
+    monkeypatch.setattr(si, "_explorer", lambda: None)
+    assert not si.badge_waits_for_explorer(written=6000)
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert not si.badge_waits_for_explorer(written=6000, explorer=explorer)
+    assert si.restart_explorer(explorer=explorer) is False
+
+
+def test_the_finished_window_offers_the_restart_once(tmp_path):
+    jobs = _done_jobs(tmp_path)
+    plain = cw.view(jobs)
+    assert plain["offer"] == cw.NO_OFFER
+    v = cw.view(jobs, cw.OFFER)
+    assert v["offer"] == cw.OFFER
+    assert v["content"] == plain["content"] + "\n\n" + cw.OFFER_TEXT[cw.OFFER]
+    asked, restarted = [], []
+    win = cw.TaskWindow(jobs, poll_spool=False,
+                        badge_waits=lambda: asked.append(1) or True,
+                        restart=lambda: restarted.append(1) or True)
+    assert win._view()["offer"] == cw.OFFER
+    assert win._view()["offer"] == cw.OFFER
+    assert len(asked) == 1 and not restarted        # asked once, never run
+    # Explorer already has the badge: the window is as it always was
+    live = cw.TaskWindow(jobs, poll_spool=False, badge_waits=lambda: False)
+    assert live._view() == plain
+    # a question that fails offers nothing
+
+    def broken():
+        raise OSError("no registry")
+
+    assert cw.TaskWindow(jobs, poll_spool=False,
+                         badge_waits=broken)._view() == plain
+
+
+def test_no_offer_while_working_or_when_nothing_was_compacted(tmp_path):
+    gate = []
+
+    def slow(path, progress=None):
+        while not gate:
+            time.sleep(0.02)
+        raise OSError("held by another program")
+
+    jobs = cw.Jobs(compact=slow)
+    jobs.add(_card(tmp_path / "a.raw", zeros=MB))
+    win = cw.TaskWindow(jobs, poll_spool=False, badge_waits=lambda: True)
+    assert win._view()["offer"] == cw.NO_OFFER and win.offer is None
+    assert cw.view(jobs, cw.OFFER)["offer"] == cw.NO_OFFER
+    gate.append(1)
+    jobs.wait(10)
+    assert jobs.jobs[0].state == cw.FAILED
+    assert win._view()["offer"] == cw.NO_OFFER
+
+
+@pytest.mark.skipif(not WINDOWS, reason="the Windows task dialog")
+def test_the_restart_button_runs_the_restart_and_the_window_stays(tmp_path):
+    """The real dialog, off screen, with a stand-in restart: the finished
+    page has the second button, pressing it runs the restart once and the
+    window stays to say what came of it."""
+    jobs = _done_jobs(tmp_path)
+    pages, restarted = [], []
+
+    def created(hwnd):
+        ctypes.windll.user32.SetWindowPos(
+            ctypes.c_void_p(hwnd), None, -6000, 200, 0, 0, 0x1 | 0x4 | 0x10)
+
+    def page(_hwnd, v):
+        pages.append(v["offer"])
+        if v["offer"] == cw.OFFER:
+            threading.Thread(target=lambda: win._send(
+                cw._TDM_CLICK_BUTTON, cw._OFFER_BUTTON, 0)).start()
+        elif v["offer"] != cw.RESTARTING:
+            win.close()
+
+    def created_then_page(hwnd):
+        created(hwnd)
+        # the first page is drawn by run() itself, with no NAVIGATED
+        page(hwnd, win._shown)
+
+    win = cw.TaskWindow(jobs, poll_spool=False, on_created=created_then_page,
+                        on_page=page, badge_waits=lambda: True,
+                        restart=lambda: time.sleep(0.5) or restarted.append(1) or True)
+    assert win.run() is True
+    # the restart runs off the window's thread: it says so meanwhile
+    assert pages == [cw.OFFER, cw.RESTARTING, cw.RESTARTED]
+    assert restarted == [1]
+    assert cw.OFFER_TEXT[cw.RESTARTED] in win._shown["content"]
+    # a restart that fails says so and keeps the window too
+    assert cw.view(jobs, cw.NOT_RESTARTED)["content"].endswith(
+        cw.OFFER_TEXT[cw.NOT_RESTARTED])

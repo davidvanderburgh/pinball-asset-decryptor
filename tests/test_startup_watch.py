@@ -60,9 +60,12 @@ class _Fakes:
         self._stuck = stuck
         self._answers = list(answers)
         self.release = threading.Event()
+        self.stall_logged = threading.Event()
 
     def say(self, text):
         self.said.append(text)
+        if text.startswith("Start-up has taken"):
+            self.stall_logged.set()
 
     def stuck(self):
         return self._stuck and not self.release.is_set()
@@ -133,8 +136,10 @@ def test_no_asks_again_later_while_still_stuck(tmp_path):
 def test_a_stall_with_wsl_answering_only_logs(tmp_path):
     f = _Fakes(stuck=False)
     w = _watch(tmp_path, f).start()
-    assert _wait_for(lambda: any(s.startswith("Start-up has taken")
-                                 for s in f.said))
+    # Block in one wait while faulthandler's thread dumps this process: it
+    # walks every thread's frames without the GIL, and a _wait_for poll
+    # changing them under it froze a macOS worker for good (PAD-1540).
+    assert f.stall_logged.wait(10)
     time.sleep(0.3)
     w.done()
     assert f.asked == 0 and f.restarts == 0

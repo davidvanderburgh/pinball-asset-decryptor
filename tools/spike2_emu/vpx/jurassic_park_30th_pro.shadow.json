@@ -1,0 +1,3482 @@
+{
+  "_": [
+    "jurassic_park_30th_pro on RebelB's 'Jurassic Park 30TH LE (Stern 2023)' 2.0 (VPUniverse 20485, PAD-1511),",
+    "a SCRIPTED tribute (JPSalas's template, scripted by RebelB, JPSalas & Nailbuster; PuP pack) with",
+    "its own 3D toys (a moving T-Rex, the jeep, the helicopter). It sits beside JPSalas & marty's",
+    "4.02 (jurassic_park_pro.shadow.json): both are listed and either can be patched.",
+    "Fitted to the rig's drawing on seven anchors (outlanes, return lanes, the three pops) at an",
+    "rms of 16 table units: x = 2.939 dx + 0.035 dy -4.9, y = -0.029 dx + 3.027 dy +8.7.",
+    "Where the table has one trigger and the machine two optos (the orbits, the Newton ball)",
+    "the trigger pulses both (`also`). The table's teleport holes (k1->K2 halfpipe, k3->K4",
+    "right ramp, k11/k14->k12) keep their hop; Lock (the left ramp's end) passes its ball",
+    "straight on out of Kicker2. Its T-Rex head only moves from the table's own rules, so on",
+    "the machine's code it stays still; its timers are quieted too. The Escape Nublar Challenge",
+    "copy in the download is the same playfield with other table rules (one ball), which the",
+    "machine's code replaces: `detect_not` keeps it off this map (BallsPerGame = 1).",
+    "Its posts and the raptor pen's door are droppable walls that stand UP until the table's own",
+    "game drops them, and that game never starts: they drop once its init is done (after_init),",
+    "the subs of its rules that raise them are quieted, and plock (left return lane) and plock2",
+    "(control room) are the machine's two up posts. The door stays down: the Pro has none.",
+    "The jeep (jptruck) is drawn at 100 (was 130, too big) and turns round once when the ball hits",
+    "it (its hit event on, PadJeepTimer steps it). RebelB's own copies of the game's effects",
+    "(\"LEFT BALL LOST\", \"SUPPLY DROP 1\" ...) are muted: the machine plays the real ones."
+  ],
+  "title": "jurassic_park_30th_pro",
+  "game": "jurassic_park_pro",
+  "model": "Pro",
+  "preferred": true,
+  "detect": [
+    "Jurassic Park 30TH LE",
+    "Created by Rebel B"
+  ],
+  "detect_not": [
+    "BallsPerGame = 1 "
+  ],
+  "output": "Jurassic Park 30TH LE (Stern 2023) (PAD).vpx",
+  "table": {
+    "name": "Jurassic Park 30TH LE (Stern 2023) 2.0",
+    "by": "RebelB",
+    "where": "VPUniverse",
+    "url": "https://vpuniverse.com/files/file/20485-jurassic-park-30th-le-stern-2023-tribute/"
+  },
+  "solenoid_max": 68,
+  "game_on": {
+    "number": 40,
+    "coils": [
+      [
+        8,
+        5
+      ],
+      [
+        8,
+        0
+      ]
+    ]
+  },
+  "keys_skip_orig": [
+    "StartGameKey",
+    "AddCreditKey",
+    "AddCreditKey2",
+    "LockBarKey"
+  ],
+  "pup_stub": true,
+  "retrofit_timers": {
+    "PinMAMETimer": {
+      "clone": "PulseTimer",
+      "interval_ms": 1
+    },
+    "PadTestTimer": {
+      "clone": "PulseTimer",
+      "interval_ms": 100
+    },
+    "PadJeepTimer": {
+      "clone": "PulseTimer",
+      "interval_ms": 25
+    }
+  },
+  "cabinet": {
+    "start": 1036,
+    "launch": 1034,
+    "launch_key": "LockBarKey",
+    "tilt": 1038,
+    "slam": 1045,
+    "left_flipper": 1059,
+    "right_flipper": 1058,
+    "up_right_flipper": 1060,
+    "coin": 1039,
+    "coin_door_interlock": 1033
+  },
+  "switches": {
+    "_": "object -> Spike 2 switch id; event hit (pulse), hold (Hit/UnHit), spin, pass (a spinner as an opto: one pulse a pass), slingshot",
+    "sw2": {
+      "id": 51,
+      "event": "hit",
+      "name": "LEFT OUTLANE"
+    },
+    "sw4": {
+      "id": 52,
+      "event": "hit",
+      "name": "LEFT RETURN LANE"
+    },
+    "sw3": {
+      "id": 53,
+      "event": "hit",
+      "name": "RIGHT RETURN LANE"
+    },
+    "sw5": {
+      "id": 54,
+      "event": "hit",
+      "name": "RIGHT OUTLANE"
+    },
+    "LeftSlingShot": {
+      "id": 63,
+      "event": "slingshot",
+      "name": "LEFT SLINGSHOT"
+    },
+    "RightSlingShot": {
+      "id": 62,
+      "event": "slingshot",
+      "name": "RIGHT SLINGSHOT"
+    },
+    "Spinner1": {
+      "id": 78,
+      "event": "spin",
+      "name": "SPINNER"
+    },
+    "sw12": {
+      "id": 80,
+      "event": "hit",
+      "name": "POPS ENTER (the lane behind the spinner, into the pops)"
+    },
+    "Bumper1": {
+      "id": 89,
+      "event": "hit",
+      "name": "LEFT POP BUMPER"
+    },
+    "Bumper2": {
+      "id": 90,
+      "event": "hit",
+      "name": "RIGHT POP BUMPER"
+    },
+    "Bumper3": {
+      "id": 91,
+      "event": "hit",
+      "name": "TOP POP BUMPER"
+    },
+    "Target8": {
+      "id": 92,
+      "event": "hit",
+      "name": "TARGET-POPS (the target above the pops)"
+    },
+    "RightRampDone": {
+      "id": 48,
+      "event": "hit",
+      "name": "RIGHT RAMP EXIT (under K4, where the right ramp's ball comes back down)"
+    },
+    "sw7": {
+      "id": 46,
+      "event": "hit",
+      "name": "RIGHT ORBIT ENTER OPTO (the right orbit's one trigger; it also pulses the orbit's exit, which the table has no trigger for)",
+      "also": "vpmTimer.PulseSw 1047"
+    },
+    "sw8": {
+      "id": 74,
+      "event": "hit",
+      "name": "LEFT ORBIT ENTER (the left orbit's one trigger; it also pulses the orbit's exit opto)",
+      "also": "vpmTimer.PulseSw 1075"
+    },
+    "Lock": {
+      "id": 79,
+      "event": "hit",
+      "name": "LEFT RAMP EXIT OPTO (the hole at the left ramp's end (the table's lock); the ball goes on out of Kicker2 at once)",
+      "also": "bsKicker2.AddBall Me : vpmtimer.addtimer 400, \"LockExit '\""
+    },
+    "k1": {
+      "id": 72,
+      "event": "hit",
+      "name": "LEFT HALFPIPE OPTO (the hole the halfpipe shot drops in; the table hops it to K2 and back down)",
+      "also": "k1.destroyball : k2.createball : k2.kick 180,5"
+    },
+    "Target10": {
+      "id": 55,
+      "event": "hit",
+      "name": "RIGHT HALF PIPE (GUESS: the table's seventh map shot, at k11 beside the upper right flipper)"
+    },
+    "Target3": {
+      "id": 56,
+      "event": "hit",
+      "name": "TARGET-BOTTOM RIGHT"
+    },
+    "sw2a": {
+      "id": 57,
+      "event": "hit",
+      "name": "TARGET-LITE ESCAPE (its own sub lights ESCAPE)"
+    },
+    "sw11": {
+      "id": 73,
+      "event": "hit",
+      "name": "TARGET TOP LEFT"
+    },
+    "SW1": {
+      "id": 77,
+      "event": "hit",
+      "name": "4X4 TARGET LEFT"
+    },
+    "sw1a": {
+      "id": 76,
+      "event": "hit",
+      "name": "4X4 TARGET RIGHT"
+    },
+    "Target14": {
+      "id": 81,
+      "event": "hit",
+      "name": "TARGET RAPTOR PIT-UP L (the raptor bank's top target)"
+    },
+    "Target13": {
+      "id": 82,
+      "event": "hit",
+      "name": "TARGET RAPTOR PIT-LOW L (the raptor bank's low target)"
+    },
+    "Target13a": {
+      "id": 83,
+      "event": "hit",
+      "name": "TARGET RAPTOR PIT-RIGHT"
+    },
+    "RaptorTarget": {
+      "id": 88,
+      "event": "hit",
+      "name": "TARGET RAPTOR PIT-TOP (the raptor lock target)"
+    },
+    "sw10": {
+      "id": 84,
+      "event": "hit",
+      "name": "TARGET BOTTOM LEFT"
+    },
+    "Target12": {
+      "id": 87,
+      "event": "hit",
+      "name": "TARGET CONTROL ROOM (the trigger at the control room, behind plock2 (its up post))"
+    },
+    "Target9": {
+      "id": 86,
+      "event": "hit",
+      "name": "NEWTON BALL-RIGHT OPTO (the centre shot under the jeep; it pulses both Newton ball optos)",
+      "also": "vpmTimer.PulseSw 1085"
+    }
+  },
+  "plunger": {
+    "lane_trigger": "swPlungerRest",
+    "lane_switch": 61,
+    "autoplunge": "plungerIM"
+  },
+  "trough": {
+    "release": "BallRelease",
+    "drain": "Drain",
+    "switches": [
+      70,
+      69,
+      68,
+      67,
+      66,
+      65,
+      71
+    ],
+    "balls": 6,
+    "kick": [
+      90,
+      4
+    ]
+  },
+  "saucers": {},
+  "solenoids": {
+    "1": {
+      "coil": [
+        8,
+        1
+      ],
+      "name": "TROUGH",
+      "callback": "bsTrough.SolOut"
+    },
+    "2": {
+      "coil": [
+        8,
+        4
+      ],
+      "name": "AUTO PLUNGER",
+      "callback": "PadAutoPlunge"
+    },
+    "3": {
+      "coil": [
+        8,
+        6
+      ],
+      "name": "UP POST-L RETURN LANE",
+      "callback": "PadReturnPost"
+    },
+    "4": {
+      "coil": [
+        9,
+        6
+      ],
+      "name": "UP POST-CONTROL ROOM",
+      "callback": "PadControlRoomPost"
+    },
+    "5": {
+      "coil": [
+        9,
+        8
+      ],
+      "name": "UP POST-TOP",
+      "callback": null
+    },
+    "11": {
+      "coil": [
+        9,
+        2
+      ],
+      "name": "LEFT POP BUMPER",
+      "callback": null
+    },
+    "12": {
+      "coil": [
+        9,
+        3
+      ],
+      "name": "RIGHT POP BUMPER",
+      "callback": null
+    },
+    "13": {
+      "coil": [
+        9,
+        4
+      ],
+      "name": "TOP POP BUMPER",
+      "callback": null
+    },
+    "46": {
+      "coil": [
+        8,
+        0
+      ],
+      "name": "RIGHT FLIPPER",
+      "callback": null
+    },
+    "48": {
+      "coil": [
+        8,
+        5
+      ],
+      "name": "LEFT FLIPPER",
+      "callback": null
+    },
+    "34": {
+      "coil": [
+        8,
+        7
+      ],
+      "name": "UP RIGHT FLIPPER",
+      "callback": null
+    }
+  },
+  "neuter": [
+    "BallRelease.CreateSizedBallWithMass",
+    "BallRelease.Kick",
+    "PlungerIM.AutoFire"
+  ],
+  "extra_vbs": "'---- PAD (PAD-1511): the machine's up posts are the table's plock and plock2\nSub PadReturnPost(e) : plock.IsDropped = Not e : End Sub\nSub PadControlRoomPost(e) : plock2.IsDropped = Not e : End Sub\n'---- PAD (PAD-1511): the jeep turns round once when the ball hits it\nDim PadJeepStep : PadJeepStep = -1\nDim PadJeepA : PadJeepA = Array(-9.11, 49.54, 67.6, 74.11, 77.09, 78.5, 78.97, 78.68, 77.53, 75.03, 69.7, 56, 9.11, -49.54, -67.6, -74.11, -77.09, -78.5, -78.97, -78.68, -77.53, -75.03, -69.7, 124)\nDim PadJeepB : PadJeepB = Array(-78.83, -72.86, -59.88, -45.68, -31.14, -16.47, -1.76, 12.96, 27.64, 42.22, 56.54, 70, 78.83, 72.86, 59.88, 45.68, 31.14, 16.47, 1.76, -12.96, -27.64, -42.22, -56.54, 250)\nDim PadJeepC : PadJeepC = Array(-131.65, -71.54, -51.99, -43.88, -39.13, -35.67, -32.71, -29.8, -26.51, -22.18, -15.22, 0, 48.35, 108.46, 128.01, 136.12, 140.87, 144.33, 147.29, 150.2, 153.49, 157.82, 164.78, 0)\nSub jptruck_Hit\n\tIf PadJeepStep >= 0 Then Exit Sub\n\tPadJeepStep = 0 : PadJeepTimer.Enabled = True\nEnd Sub\nSub PadJeepTimer_Timer\n\tIf PadJeepStep > UBound(PadJeepA) Then\n\t\tPadJeepStep = -1 : PadJeepTimer.Enabled = False : Exit Sub\n\tEnd If\n\tjptruck.RotAndTra0 = PadJeepA(PadJeepStep)\n\tjptruck.RotAndTra1 = PadJeepB(PadJeepStep)\n\tjptruck.RotAndTra2 = PadJeepC(PadJeepStep)\n\tPadJeepStep = PadJeepStep + 1\nEnd Sub\n",
+  "quiet_subs": [
+    "trextimer_Timer",
+    "trextimer2_Timer",
+    "StartLightSeq",
+    "LightEffect",
+    "FlashEffect",
+    "OpenDoor",
+    "CloseDoor",
+    "plockup",
+    "plockup2",
+    "plockup3"
+  ],
+  "orig_hits": false,
+  "orig_keep": [
+    "LeftSlingShot",
+    "RightSlingShot"
+  ],
+  "lamps": {
+    "_": "table light -> Spike 2 LEDs [node, index] (an RGB insert's three: rgb); by PLACE through the fit, then vpxlamps suggest",
+    "Light16": {
+      "leds": [
+        [
+          8,
+          3
+        ]
+      ],
+      "name": "RIGHT OUTLANE (seed, 9 u)"
+    },
+    "Light15": {
+      "leds": [
+        [
+          8,
+          4
+        ]
+      ],
+      "name": "RIGHT RETURN LANE (seed, 11 u)"
+    },
+    "Light13": {
+      "leds": [
+        [
+          8,
+          7
+        ]
+      ],
+      "name": "LEFT OUTLANE (seed, 11 u)"
+    },
+    "Light1": {
+      "leds": [
+        [
+          8,
+          13
+        ]
+      ],
+      "name": "GALLIMIMUS (seed, 7 u)"
+    },
+    "Light75": {
+      "leds": [
+        [
+          8,
+          14
+        ]
+      ],
+      "name": "MAIN GATE (seed, 9 u)"
+    },
+    "Light2": {
+      "leds": [
+        [
+          8,
+          15
+        ]
+      ],
+      "name": "BRACHOSAURUS (seed, 3 u)"
+    },
+    "Light4": {
+      "leds": [
+        [
+          8,
+          16
+        ]
+      ],
+      "name": "SPITTER (seed, 12 u)"
+    },
+    "Light3": {
+      "leds": [
+        [
+          8,
+          17
+        ]
+      ],
+      "name": "ANKYLOSAURUS (seed, 7 u)"
+    },
+    "SCRLight3": {
+      "leds": [
+        [
+          8,
+          38
+        ]
+      ],
+      "name": "CHAOS (seed, 11 u)"
+    },
+    "Light17a": {
+      "leds": [
+        [
+          8,
+          40
+        ]
+      ],
+      "name": "4X4 RIGHT TARGET ARROW (seed, 4 u)"
+    },
+    "Light9a001": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (seed, 6 u)"
+    },
+    "gi001": {
+      "leds": [
+        [
+          8,
+          51
+        ]
+      ],
+      "name": "RIGHT HALFPIPE SIGN (seed, 11 u)"
+    },
+    "bumperlight1": {
+      "leds": [
+        [
+          9,
+          24
+        ]
+      ],
+      "name": "LEFT POP BUMPER (seed, 11 u)"
+    },
+    "bumperlight3": {
+      "leds": [
+        [
+          9,
+          26
+        ]
+      ],
+      "name": "TOP POP BUMPER (seed, 8 u)"
+    },
+    "Light5": {
+      "leds": [
+        [
+          8,
+          12
+        ]
+      ],
+      "name": "TRICERITOPS (PAD-859: the free light 1 px from it)"
+    },
+    "Light6": {
+      "leds": [
+        [
+          8,
+          21
+        ]
+      ],
+      "name": "T-REX PADDOCK (PAD-859: the free light 2 px from it)"
+    },
+    "Light9": {
+      "leds": [
+        [
+          8,
+          18
+        ]
+      ],
+      "name": "COMPSOGNATHUS (PAD-859: the free light 2 px from it)"
+    },
+    "Light11a": {
+      "leds": [
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "4X4 LEFT DIRECTION (PAD-859: the free light 2 px from it)"
+    },
+    "Light14": {
+      "leds": [
+        [
+          8,
+          6
+        ]
+      ],
+      "name": "LEFT RETURN LANE (PAD-859: the free light 3 px from it)"
+    },
+    "Light54": {
+      "leds": [
+        [
+          8,
+          62
+        ]
+      ],
+      "name": "LITE 2X (PAD-859: the free light 3 px from it)"
+    },
+    "shoottrucklight4": {
+      "leds": [
+        [
+          8,
+          42
+        ]
+      ],
+      "name": "ADVANCE T-REX (PAD-859: the free light 3 px from it)"
+    },
+    "Light25": {
+      "leds": [
+        [
+          8,
+          44
+        ]
+      ],
+      "name": "CH(A)OS (PAD-859: the free light 4 px from it)"
+    },
+    "Light33": {
+      "leds": [
+        [
+          8,
+          43
+        ]
+      ],
+      "name": "RIGHT RAMP RESCUE (PAD-859: the free light 4 px from it)"
+    },
+    "Light30": {
+      "leds": [
+        [
+          9,
+          43
+        ]
+      ],
+      "name": "LEFT HALFPIPE RESCUE (PAD-859: the free light 4 px from it)"
+    },
+    "Light8": {
+      "leds": [
+        [
+          8,
+          22
+        ]
+      ],
+      "name": "SPINOSAURUS (PAD-859: the free light 4 px from it)"
+    },
+    "Light10": {
+      "leds": [
+        [
+          8,
+          19
+        ]
+      ],
+      "name": "RAPTOR (PAD-859: the free light 4 px from it)"
+    },
+    "Light29": {
+      "leds": [
+        [
+          8,
+          61
+        ]
+      ],
+      "name": "RIGHT HALFPIPE RESCUE (PAD-859: the free light 4 px from it)"
+    },
+    "Light34": {
+      "leds": [
+        [
+          8,
+          48
+        ]
+      ],
+      "name": "RIGHT ORBIT RESCUE (PAD-859: the free light 4 px from it)"
+    },
+    "Light604": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: the free light 4 px from it)"
+    },
+    "Light26": {
+      "leds": [
+        [
+          8,
+          50
+        ]
+      ],
+      "name": "CHA(O)S (PAD-859: the free light 4 px from it)"
+    },
+    "Light7": {
+      "leds": [
+        [
+          8,
+          11
+        ]
+      ],
+      "name": "STEGOSAURUS (PAD-859: the free light 4 px from it)"
+    },
+    "VTMULTILIGHT": {
+      "leds": [
+        [
+          8,
+          20
+        ]
+      ],
+      "name": "VISITOR CENTER (PAD-859: the free light 4 px from it)"
+    },
+    "Light141": {
+      "leds": [
+        [
+          8,
+          9
+        ]
+      ],
+      "name": "SECURE CONTROL ROOM (PAD-859: the free light 4 px from it)"
+    },
+    "Light32": {
+      "leds": [
+        [
+          9,
+          13
+        ]
+      ],
+      "name": "SPINNER RESCUE (PAD-859: the free light 4 px from it)"
+    },
+    "Light11": {
+      "leds": [
+        [
+          8,
+          23
+        ]
+      ],
+      "name": "PTERANODON (PAD-859: the free light 4 px from it)"
+    },
+    "Light43b": {
+      "leds": [
+        [
+          8,
+          39
+        ]
+      ],
+      "name": "4X4 RIGHT TARGET (PAD-859: the free light 5 px from it)"
+    },
+    "Light100": {
+      "leds": [
+        [
+          8,
+          8
+        ]
+      ],
+      "name": "ESCAPE NUBLAR (PAD-859: the free light 5 px from it)"
+    },
+    "tchaselight6": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: the free light 5 px from it)"
+    },
+    "Light56": {
+      "leds": [
+        [
+          8,
+          10
+        ]
+      ],
+      "name": "2X PLAYFIELD (PAD-859: the free light 5 px from it)"
+    },
+    "SSDLIGHT": {
+      "leds": [
+        [
+          9,
+          53
+        ]
+      ],
+      "name": "SUPPLY DROP (PAD-859: the free light 5 px from it)"
+    },
+    "MMTRUCKLIGHT3": {
+      "leds": [
+        [
+          9,
+          14
+        ]
+      ],
+      "name": "4X4 TURN (PAD-859: the free light 5 px from it)"
+    },
+    "Light131": {
+      "leds": [
+        [
+          8,
+          24
+        ]
+      ],
+      "name": "MUSEUM MAYHEM (PAD-859: the free light 5 px from it)"
+    },
+    "maplight5": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: the free light 5 px from it)"
+    },
+    "VTlight5": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: the free light 5 px from it)"
+    },
+    "bumperlight2": {
+      "leds": [
+        [
+          9,
+          25
+        ]
+      ],
+      "name": "RIGHT POP BUMPER (PAD-859: the free light 5 px from it)"
+    },
+    "SLIGHT2": {
+      "leds": [
+        [
+          8,
+          60
+        ]
+      ],
+      "name": "CHAO(S) (PAD-859: the free light 5 px from it)"
+    },
+    "SCRLight2": {
+      "leds": [
+        [
+          8,
+          37
+        ]
+      ],
+      "name": "SMART MISSILE (PAD-859: the free light 5 px from it)"
+    },
+    "VC4light": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "rgb": true,
+      "name": "SPINNER ARROW (PAD-859: the free light 5 px from it)"
+    },
+    "Light22a": {
+      "leds": [
+        [
+          8,
+          25
+        ]
+      ],
+      "name": "RAPTOR PIT ENTER FLASH X2 (PAD-859: the free light 6 px from it)"
+    },
+    "Light53": {
+      "leds": [
+        [
+          8,
+          26
+        ]
+      ],
+      "name": "RAPTOR PIT GATE (PAD-859: the free light 6 px from it)"
+    },
+    "TMLight3": {
+      "leds": [
+        [
+          9,
+          16
+        ]
+      ],
+      "name": "LEFT RAMP RESCUE (PAD-859: the free light 6 px from it)"
+    },
+    "Light35": {
+      "leds": [
+        [
+          8,
+          29
+        ]
+      ],
+      "name": "CONTROL ROOM RESCUE (PAD-859: the free light 6 px from it)"
+    },
+    "VMlight3": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: the free light 6 px from it)"
+    },
+    "HLIGHT2": {
+      "leds": [
+        [
+          9,
+          23
+        ]
+      ],
+      "name": "C(H)AOS (PAD-859: the free light 6 px from it)"
+    },
+    "Light56a": {
+      "leds": [
+        [
+          9,
+          12
+        ]
+      ],
+      "name": "SPINNER 15K (PAD-859: the free light 6 px from it)"
+    },
+    "Light59": {
+      "leds": [
+        [
+          9,
+          10
+        ]
+      ],
+      "name": "SPINNER 50K (PAD-859: the free light 6 px from it)"
+    },
+    "Light13a": {
+      "leds": [
+        [
+          8,
+          35
+        ]
+      ],
+      "name": "LITE ESCAPE (PAD-859: the free light 6 px from it)"
+    },
+    "Light42": {
+      "leds": [
+        [
+          8,
+          31
+        ],
+        [
+          8,
+          32
+        ],
+        [
+          8,
+          33
+        ]
+      ],
+      "rgb": true,
+      "name": "CONTROL ROOM ARROW (PAD-859: the free light 7 px from it)"
+    },
+    "Light22b": {
+      "leds": [
+        [
+          8,
+          28
+        ]
+      ],
+      "name": "RAPTOR PIT ELECTRIC FENCE (PAD-859: the free light 7 px from it)"
+    },
+    "Light57": {
+      "leds": [
+        [
+          9,
+          11
+        ]
+      ],
+      "name": "SPINNER 30K (PAD-859: the free light 7 px from it)"
+    },
+    "Light19": {
+      "leds": [
+        [
+          9,
+          51
+        ]
+      ],
+      "name": "RAPTOR PIT FLASH (PAD-859: the free light 7 px from it)"
+    },
+    "NublartrapLight1": {
+      "leds": [
+        [
+          9,
+          9
+        ]
+      ],
+      "name": "4X4 LEFT TARGET ARROW (PAD-859: the free light 8 px from it)"
+    },
+    "Light43a": {
+      "leds": [
+        [
+          9,
+          8
+        ]
+      ],
+      "name": "4X4 LEFT TARGET (PAD-859: the free light 8 px from it)"
+    },
+    "Light31b": {
+      "leds": [
+        [
+          8,
+          27
+        ]
+      ],
+      "name": "RAPTOR PIT CAPTURE (PAD-859: the free light 8 px from it)"
+    },
+    "CLIGHT2": {
+      "leds": [
+        [
+          8,
+          34
+        ]
+      ],
+      "name": "(C)HAOS (PAD-859: the free light 8 px from it)"
+    },
+    "helicapture8": {
+      "leds": [
+        [
+          8,
+          57
+        ],
+        [
+          8,
+          58
+        ],
+        [
+          8,
+          59
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT HALFPIPE ARROW (PAD-859: the free light 8 px from it)"
+    },
+    "Light43": {
+      "leds": [
+        [
+          9,
+          32
+        ]
+      ],
+      "name": "LEFT HALFPIPE TARGET (PAD-859: the free light 8 px from it)"
+    },
+    "Light29d": {
+      "leds": [
+        [
+          8,
+          63
+        ]
+      ],
+      "name": "LITE 2X TARGET FLASH (PAD-859: the free light 9 px from it)"
+    },
+    "SJLIGHT1": {
+      "leds": [
+        [
+          8,
+          36
+        ]
+      ],
+      "name": "AMBER BONUS (PAD-859: the free light 9 px from it)"
+    },
+    "VMlight6": {
+      "leds": [
+        [
+          9,
+          49
+        ]
+      ],
+      "name": "RAPTOR PIT RIGHT TARGET (PAD-859: the free light 10 px from it)"
+    },
+    "f6": {
+      "leds": [
+        [
+          9,
+          30
+        ]
+      ],
+      "name": "SPINNER JACKPOT FLASH (PAD-859: the free light 10 px from it)"
+    },
+    "f8": {
+      "leds": [
+        [
+          9,
+          29
+        ]
+      ],
+      "name": "LEFT RAMP FLASH (PAD-859: the free light 12 px from it)"
+    },
+    "VTlight7": {
+      "leds": [
+        [
+          9,
+          44
+        ],
+        [
+          9,
+          45
+        ],
+        [
+          9,
+          46
+        ]
+      ],
+      "rgb": true,
+      "name": "RAPTOR PIT ARROW (PAD-859: the free light 13 px from it)"
+    },
+    "Light24": {
+      "leds": [
+        [
+          9,
+          23
+        ]
+      ],
+      "name": "C(H)AOS (PAD-859: beside it, 6 px)"
+    },
+    "Light27": {
+      "leds": [
+        [
+          8,
+          60
+        ]
+      ],
+      "name": "CHAO(S) (PAD-859: beside it, 6 px)"
+    },
+    "Light12": {
+      "leds": [
+        [
+          8,
+          20
+        ]
+      ],
+      "name": "VISITOR CENTER (PAD-859: beside it, 5 px)"
+    },
+    "Light31": {
+      "leds": [
+        [
+          9,
+          16
+        ]
+      ],
+      "name": "LEFT RAMP RESCUE (PAD-859: beside it, 6 px)"
+    },
+    "Light1a": {
+      "leds": [
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "4X4 LEFT DIRECTION (PAD-859: beside it, 3 px)"
+    },
+    "Light70": {
+      "leds": [
+        [
+          9,
+          53
+        ]
+      ],
+      "name": "SUPPLY DROP (PAD-859: beside it, 5 px)"
+    },
+    "Light56b": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "rgb": true,
+      "name": "SPINNER ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light41": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light28": {
+      "leds": [
+        [
+          8,
+          38
+        ]
+      ],
+      "name": "CHAOS (PAD-859: beside it, 3 px)"
+    },
+    "Light14a": {
+      "leds": [
+        [
+          8,
+          37
+        ]
+      ],
+      "name": "SMART MISSILE (PAD-859: beside it, 5 px)"
+    },
+    "Light49": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light48": {
+      "leds": [
+        [
+          9,
+          14
+        ]
+      ],
+      "name": "4X4 TURN (PAD-859: beside it, 5 px)"
+    },
+    "Light51": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light44": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light47": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 7 px)"
+    },
+    "Light45": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light2a": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (PAD-859: beside it, 0 px)"
+    },
+    "Light3a": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (PAD-859: beside it, 0 px)"
+    },
+    "Light4a": {
+      "leds": [
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "4X4 LEFT DIRECTION (PAD-859: beside it, 3 px)"
+    },
+    "Light5a": {
+      "leds": [
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "4X4 LEFT DIRECTION (PAD-859: beside it, 3 px)"
+    },
+    "Light6a": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (PAD-859: beside it, 0 px)"
+    },
+    "Light7a": {
+      "leds": [
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "4X4 LEFT DIRECTION (PAD-859: beside it, 3 px)"
+    },
+    "Light8a": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (PAD-859: beside it, 0 px)"
+    },
+    "Light9a": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (PAD-859: beside it, 0 px)"
+    },
+    "Light10a": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (PAD-859: beside it, 0 px)"
+    },
+    "Light103": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light102": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light101": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light201": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light202": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light203": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light204": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light205": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light305": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light304": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light303": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light302": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light301": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light405": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light404": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light403": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light402": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light401": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light108": {
+      "leds": [
+        [
+          8,
+          42
+        ]
+      ],
+      "name": "ADVANCE T-REX (PAD-859: beside it, 4 px)"
+    },
+    "Light504": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light503": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light603": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 7 px)"
+    },
+    "Light501": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light703": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 7 px)"
+    },
+    "Light505": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light502": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light602": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light109": {
+      "leds": [
+        [
+          8,
+          42
+        ]
+      ],
+      "name": "ADVANCE T-REX (PAD-859: beside it, 4 px)"
+    },
+    "Light701": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light702": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light605": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light903": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 7 px)"
+    },
+    "Light102R": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light103R": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "Light101R": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Light105": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "tchaselight4": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "tchaselight3": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "tchaselight2": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "tchaselight5": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Shiftlight4": {
+      "leds": [
+        [
+          8,
+          42
+        ]
+      ],
+      "name": "ADVANCE T-REX (PAD-859: beside it, 3 px)"
+    },
+    "Shiftlight3": {
+      "leds": [
+        [
+          9,
+          14
+        ]
+      ],
+      "name": "4X4 TURN (PAD-859: beside it, 5 px)"
+    },
+    "ShiftLight1": {
+      "leds": [
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "4X4 LEFT DIRECTION (PAD-859: beside it, 3 px)"
+    },
+    "Shiftlight2": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (PAD-859: beside it, 0 px)"
+    },
+    "Tchaselight8": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "rgb": true,
+      "name": "SPINNER ARROW (PAD-859: beside it, 6 px)"
+    },
+    "helicapture7": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "helicapture4": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 7 px)"
+    },
+    "helicapture2": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "helicapture6": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "helicapture5": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "rgb": true,
+      "name": "SPINNER ARROW (PAD-859: beside it, 6 px)"
+    },
+    "helicapture3": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "maplight6": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "maplight1": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "maplight4": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "rgb": true,
+      "name": "SPINNER ARROW (PAD-859: beside it, 6 px)"
+    },
+    "maplight2": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "maplight3": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "dinolight7": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "dinolight2": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "dinolight6": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "dinolight5": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "rgb": true,
+      "name": "SPINNER ARROW (PAD-859: beside it, 6 px)"
+    },
+    "dinolight3": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "dinolight4": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "Trexrampagelight": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "TrexEncounterLight3": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "TrexEncounterLight2": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "shoottrucklight3": {
+      "leds": [
+        [
+          9,
+          14
+        ]
+      ],
+      "name": "4X4 TURN (PAD-859: beside it, 5 px)"
+    },
+    "shoottrucklight1": {
+      "leds": [
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "4X4 LEFT DIRECTION (PAD-859: beside it, 3 px)"
+    },
+    "shoottrucklight2": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (PAD-859: beside it, 0 px)"
+    },
+    "TrexEncounterLight1": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "rgb": true,
+      "name": "SPINNER ARROW (PAD-859: beside it, 6 px)"
+    },
+    "TrexEncounterNudgeLight": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "TrexEncounterFinallIght": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "VC7light": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "VC6light": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "VC2light": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "VC5light": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "VC3light": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "VTlight2": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "VTlight6": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "VTlight3": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "VTlight4": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "VMlight4": {
+      "leds": [
+        [
+          9,
+          20
+        ],
+        [
+          9,
+          21
+        ],
+        [
+          9,
+          22
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT LOOP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "VMlight1": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "VMlight5": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "VMlight2": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "VMSJlight": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "light308": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "rgb": true,
+      "name": "SPINNER ARROW (PAD-859: beside it, 6 px)"
+    },
+    "VACRLIGHT": {
+      "leds": [
+        [
+          8,
+          31
+        ],
+        [
+          8,
+          32
+        ],
+        [
+          8,
+          33
+        ]
+      ],
+      "rgb": true,
+      "name": "CONTROL ROOM ARROW (PAD-859: beside it, 7 px)"
+    },
+    "SCRLight4": {
+      "leds": [
+        [
+          8,
+          29
+        ]
+      ],
+      "name": "CONTROL ROOM RESCUE (PAD-859: beside it, 6 px)"
+    },
+    "SCRLight5": {
+      "leds": [
+        [
+          8,
+          31
+        ],
+        [
+          8,
+          32
+        ],
+        [
+          8,
+          33
+        ]
+      ],
+      "rgb": true,
+      "name": "CONTROL ROOM ARROW (PAD-859: beside it, 7 px)"
+    },
+    "CHAOSLIGHT4": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "CHAOSLIGHT3": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "SJLIGHT3": {
+      "leds": [
+        [
+          8,
+          38
+        ]
+      ],
+      "name": "CHAOS (PAD-859: beside it, 3 px)"
+    },
+    "SJLIGHT2": {
+      "leds": [
+        [
+          8,
+          37
+        ]
+      ],
+      "name": "SMART MISSILE (PAD-859: beside it, 5 px)"
+    },
+    "CHAOSLIGHT2": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "HLIGHT": {
+      "leds": [
+        [
+          9,
+          23
+        ]
+      ],
+      "name": "C(H)AOS (PAD-859: beside it, 6 px)"
+    },
+    "ALIGHT": {
+      "leds": [
+        [
+          8,
+          44
+        ]
+      ],
+      "name": "CH(A)OS (PAD-859: beside it, 4 px)"
+    },
+    "OLIGHT": {
+      "leds": [
+        [
+          8,
+          50
+        ]
+      ],
+      "name": "CHA(O)S (PAD-859: beside it, 4 px)"
+    },
+    "SLIGHT": {
+      "leds": [
+        [
+          8,
+          60
+        ]
+      ],
+      "name": "CHAO(S) (PAD-859: beside it, 5 px)"
+    },
+    "TMlight2": {
+      "leds": [
+        [
+          9,
+          23
+        ]
+      ],
+      "name": "C(H)AOS (PAD-859: beside it, 6 px)"
+    },
+    "TMLight1": {
+      "leds": [
+        [
+          9,
+          17
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          9,
+          19
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "NublarLight1": {
+      "leds": [
+        [
+          9,
+          37
+        ],
+        [
+          9,
+          38
+        ],
+        [
+          9,
+          39
+        ]
+      ],
+      "rgb": true,
+      "name": "LEFT HALFPIPE ARROW (PAD-859: beside it, 5 px)"
+    },
+    "NublarLight5": {
+      "leds": [
+        [
+          8,
+          52
+        ],
+        [
+          8,
+          53
+        ],
+        [
+          8,
+          54
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT LOOP ARROW (PAD-859: beside it, 5 px)"
+    },
+    "NublarLight4": {
+      "leds": [
+        [
+          8,
+          45
+        ],
+        [
+          8,
+          46
+        ],
+        [
+          8,
+          47
+        ]
+      ],
+      "rgb": true,
+      "name": "RIGHT RAMP ARROW (PAD-859: beside it, 6 px)"
+    },
+    "NublarLight3": {
+      "leds": [
+        [
+          9,
+          40
+        ],
+        [
+          9,
+          41
+        ],
+        [
+          9,
+          42
+        ]
+      ],
+      "rgb": true,
+      "name": "SPINNER ARROW (PAD-859: beside it, 6 px)"
+    },
+    "NublarHeli2": {
+      "leds": [
+        [
+          8,
+          60
+        ]
+      ],
+      "name": "CHAO(S) (PAD-859: beside it, 5 px)"
+    },
+    "NublarHeli1": {
+      "leds": [
+        [
+          8,
+          61
+        ]
+      ],
+      "name": "RIGHT HALFPIPE RESCUE (PAD-859: beside it, 4 px)"
+    },
+    "NublartrapLight2": {
+      "leds": [
+        [
+          8,
+          40
+        ]
+      ],
+      "name": "4X4 RIGHT TARGET ARROW (PAD-859: beside it, 1 px)"
+    },
+    "ALIGHT2": {
+      "leds": [
+        [
+          8,
+          44
+        ]
+      ],
+      "name": "CH(A)OS (PAD-859: beside it, 4 px)"
+    },
+    "OLIGHT2": {
+      "leds": [
+        [
+          8,
+          50
+        ]
+      ],
+      "name": "CHA(O)S (PAD-859: beside it, 4 px)"
+    },
+    "MMTRUCKLIGHT2": {
+      "leds": [
+        [
+          8,
+          41
+        ]
+      ],
+      "name": "4X4 RIGHT DIRECTION (PAD-859: beside it, 0 px)"
+    },
+    "MMTRUCKLIGHT4": {
+      "leds": [
+        [
+          8,
+          42
+        ]
+      ],
+      "name": "ADVANCE T-REX (PAD-859: beside it, 4 px)"
+    },
+    "MMTRUCKLIGHT1": {
+      "leds": [
+        [
+          9,
+          15
+        ]
+      ],
+      "name": "4X4 LEFT DIRECTION (PAD-859: beside it, 2 px)"
+    }
+  },
+  "retrofit_lights": {
+    "_": "inserts with no table light: a new Light cloned from `clone`, at [x, y] (the led_io place through the fit, vpxlamps.py suggest)",
+    "lights": {
+      "PadControlRoom": {
+        "leds": [
+          [
+            9,
+            50
+          ]
+        ],
+        "name": "CONTROL ROOM",
+        "clone": "Light9a001",
+        "at": [
+          101,
+          954
+        ]
+      },
+      "PadEscapeFlash": {
+        "leds": [
+          [
+            8,
+            30
+          ]
+        ],
+        "name": "ESCAPE FLASH",
+        "clone": "Light13",
+        "at": [
+          110,
+          1305
+        ]
+      },
+      "PadLeftHalfpipeSpotlight": {
+        "leds": [
+          [
+            9,
+            52
+          ]
+        ],
+        "name": "LEFT HALFPIPE SPOTLIGHT",
+        "clone": "bumperlight1",
+        "at": [
+          113,
+          584
+        ]
+      },
+      "PadLeftRampSign1": {
+        "leds": [
+          [
+            9,
+            3
+          ],
+          [
+            9,
+            4
+          ]
+        ],
+        "name": "LEFT RAMP SIGN 1 + LEFT RAMP SIGN 2",
+        "clone": "bumperlight3",
+        "at": [
+          492,
+          293
+        ]
+      },
+      "PadRaptorPitLowerLeftTarget": {
+        "leds": [
+          [
+            9,
+            48
+          ]
+        ],
+        "name": "RAPTOR PIT LOWER LEFT TARGET",
+        "clone": "Light13",
+        "at": [
+          157,
+          1043
+        ]
+      },
+      "PadRaptorPitUpperLeftTarget": {
+        "leds": [
+          [
+            9,
+            47
+          ]
+        ],
+        "name": "RAPTOR PIT UPPER LEFT TARGET",
+        "clone": "Light9a001",
+        "at": [
+          154,
+          992
+        ]
+      },
+      "PadRightHalfpipeSpotlight": {
+        "leds": [
+          [
+            8,
+            49
+          ]
+        ],
+        "name": "RIGHT HALFPIPE SPOTLIGHT",
+        "clone": "Light17a",
+        "at": [
+          834,
+          745
+        ]
+      },
+      "PadRightRampSign1": {
+        "leds": [
+          [
+            8,
+            55
+          ],
+          [
+            8,
+            56
+          ]
+        ],
+        "name": "RIGHT RAMP SIGN 1 + RIGHT RAMP SIGN 2",
+        "clone": "bumperlight3",
+        "at": [
+          769,
+          301
+        ]
+      },
+      "PadShootAgain": {
+        "leds": [
+          [
+            8,
+            5
+          ]
+        ],
+        "name": "SHOOT AGAIN",
+        "clone": "Light75",
+        "at": [
+          451,
+          1868
+        ]
+      },
+      "PadSpinner100k": {
+        "leds": [
+          [
+            9,
+            31
+          ]
+        ],
+        "name": "SPINNER 100K",
+        "clone": "bumperlight1",
+        "at": [
+          398,
+          487
+        ]
+      }
+    }
+  },
+  "dark": [
+    "CHAOSLIGHT1",
+    "CHAOSLIGHT5",
+    "CLIGHT",
+    "FuelLight1",
+    "Light104",
+    "Light104R",
+    "Light105R",
+    "Light17",
+    "Light18",
+    "Light20",
+    "Light206",
+    "Light207",
+    "Light22",
+    "Light22c",
+    "Light23",
+    "Light29a",
+    "Light29b",
+    "Light29c",
+    "Light306",
+    "Light307",
+    "Light31a",
+    "Light38",
+    "Light39",
+    "Light40",
+    "Light406",
+    "Light407",
+    "Light50",
+    "Light506",
+    "Light507",
+    "Light58",
+    "Light601",
+    "Light607",
+    "Light61",
+    "Light62",
+    "Light63",
+    "Light707",
+    "Light71",
+    "Light803",
+    "LightShootAgain",
+    "NublarHeli3",
+    "NublarLight2",
+    "NublarLight6",
+    "NublarLight7",
+    "RaptorSJlight",
+    "SCRLight1",
+    "SCRLight6",
+    "STLight",
+    "TrexEncounterLight4",
+    "VC10light",
+    "VC11light",
+    "VC1light",
+    "VC8light",
+    "VC9light",
+    "VMlight7",
+    "VTlight1",
+    "dinolight1",
+    "dinolight8",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "helicapture1",
+    "light309",
+    "maplight7",
+    "tchaselight1",
+    "tchaselight7"
+  ],
+  "after_init": [
+    "door.IsDropped = 1",
+    "plock.IsDropped = 1",
+    "plock2.IsDropped = 1",
+    "plock3.IsDropped = 1",
+    "PadJeepTimer.Enabled = False"
+  ],
+  "item_fields": {
+    "jptruck": {
+      "VSIZ": [
+        100.0,
+        100.0,
+        100.0,
+        0.0
+      ],
+      "HTEV": 1
+    }
+  },
+  "mute_sounds": [
+    "AMBER TARGET",
+    "BUMPER",
+    "CR BALL RELEASE",
+    "ESCAPE LITE TARGET",
+    "HELI SPINNER",
+    "LEFT BALL LOST",
+    "LITE 2X TARGET",
+    "RAPTOR TARGET",
+    "RIGHT BALL LOST",
+    "SLINGS",
+    "SPITTER SPINNER",
+    "SPITTER SPINNER 2",
+    "SUPPLY DROP 1",
+    "SUPPLY DROP 2",
+    "SUPPLY DROP 3"
+  ],
+  "repatch": [
+    {
+      "old": "Sub swPlungerRest_UnHit : Controller.Switch(1061) = False : swPlungerRest_UnHit_orig : End Sub",
+      "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights",
+      "since": "PAD-1099: the plunger lane's own subs stay out of the way"
+    },
+    {
+      "old": "Sub swPlungerRest_Hit : Controller.Switch(1061) = True : swPlungerRest_Hit_orig : End Sub",
+      "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights",
+      "since": "PAD-1099: the plunger lane's own subs stay out of the way"
+    },
+    {
+      "old": "If o.ColorFull <> v Then o.ColorFull = v",
+      "why": "its colour inserts (the shot arrows and the like) never light",
+      "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"
+    },
+    {
+      "old": "If KeyCode = PlungerKey Then Controller.Switch(1034) = True",
+      "why": "the plunger key pressed the Action Button: only the auto plunger launched, and the manual plunger never pulled",
+      "since": "PAD-1128: the plunger key pulls the table's plunger, the Action Button is the lockbar key"
+    }
+  ]
+}

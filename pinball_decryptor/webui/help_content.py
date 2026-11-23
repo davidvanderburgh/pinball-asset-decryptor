@@ -537,7 +537,12 @@ HELP_CONTENT = {
             "- Picks are stored in the project folder, not the card: they survive "
             "closing the app or pointing Extract at another card image.\n"
             "- **Full screen:** the button at the right of a player's bar, or a "
-            "double-click on the picture, fills the window with it; Esc comes back.",
+            "double-click on the picture, fills the window with it; Esc comes back.\n"
+            "- **Play sequentially** plays down the list on its own, following your "
+            "sort, search, Show and mode filter, on the side you started it on "
+            "(under Replacement, a row with no replacement plays its original). It "
+            "stops at the end, on ■, on a click on another row, when you open a "
+            "replacement picker, or when you go to another tab.",
         ]),
         ("Replace from a folder", [
             "**Replace from folder…**, beside the project folder, picks each file in a "

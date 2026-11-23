@@ -397,10 +397,10 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         self.audio_play_subst_var.set(
             self._pref("audio_play_subst", bool) is True)
         self.audio_play_through_var.trace_add(
-            "write", lambda *a: self._remember(
+            "write", lambda *a: self._remember_pref(
                 "audio_play_through", bool(self.audio_play_through_var.get())))
         self.audio_play_subst_var.trace_add(
-            "write", lambda *a: self._remember(
+            "write", lambda *a: self._remember_pref(
                 "audio_play_subst", bool(self.audio_play_subst_var.get())))
         self.audio_search_var.trace_add("write",
                                         lambda *a: self._refresh_list())
@@ -1811,7 +1811,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         if value not in _CHANGE_FILTER_VALUES:
             return False
         self.audio_change_filter_var.set(value)
-        self._remember("audio_show", value)
+        self._remember_pref("audio_show", value)
         self._save_staged_changes()
         return True
 
@@ -1821,7 +1821,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         between sessions). PAD-1275: the tick reads "Show unused" now, so it
         sends the opposite of what it shows."""
         self.audio_hide_unused_var.set(bool(on))
-        self._remember("audio_hide_unused", bool(on))
+        self._remember_pref("audio_hide_unused", bool(on))
         self._save_staged_changes()
         return True
 
@@ -1830,7 +1830,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         if value != "All types" and value not in _TYPE_KEYS:
             return False
         self.audio_type_var.set(value)
-        self._remember("audio_type", value)
+        self._remember_pref("audio_type", value)
         self._refresh_list()
         return True
 
@@ -1866,33 +1866,6 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
     # PAD-1176 / PAD-1209: toolbar choices kept app-wide in settings.json
     _SHOW_COMMENTS_KEY = "audio_show_comments"
 
-    def _pref(self, key, kind):
-        """The value *key* was last set to (of type *kind*), this session
-        or an earlier one; None when it never was."""
-        app = self.app
-        s = getattr(app, "_settings", None) if app is not None else None
-        got = s.get(key) if isinstance(s, dict) else None
-        if not isinstance(got, kind):
-            got = getattr(self, "_prefs_local", {}).get(key)
-        return got if isinstance(got, kind) else None
-
-    def _remember(self, key, value):
-        """Keep *value* for *key* in settings.json (saved straight away, so
-        it is there next session whatever way the app is closed)."""
-        if not hasattr(self, "_prefs_local"):
-            self._prefs_local = {}
-        if self._prefs_local.get(key) == value and self._pref(
-                key, type(value)) == value:
-            return
-        self._prefs_local[key] = value
-        app = self.app
-        if app is not None and isinstance(getattr(app, "_settings", None), dict):
-            app._settings[key] = value
-            try:
-                app._save_settings()
-            except Exception:                              # noqa: BLE001
-                pass
-
     def _show_comments_pref(self):
         """True / False once "Show comments" was ticked or unticked; None
         before (the Comment column then shows once a sound has a comment)."""
@@ -1903,7 +1876,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         """PAD-1176: show or hide the Comment column, remembered between
         sessions; hiding the column the list is sorted by sorts by name."""
         on = bool(on)
-        self._remember(self._SHOW_COMMENTS_KEY, on)
+        self._remember_pref(self._SHOW_COMMENTS_KEY, on)
         if not on and self._sort and self._sort[0] == "cm":
             self._sort = ("#0", False)
         self._refresh_list()

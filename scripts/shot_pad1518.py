@@ -67,7 +67,7 @@ def main():
             page.get_by_text("Open card images with PAD",
                              exact=True).first.click()
             time.sleep(2)
-            line = page.get_by_text("still open with").first
+            line = page.get_by_text("Card images", exact=False).last
             line.scroll_into_view_if_needed()
             time.sleep(1)
             with open(os.path.join(out_dir, name + ".txt"), "w",

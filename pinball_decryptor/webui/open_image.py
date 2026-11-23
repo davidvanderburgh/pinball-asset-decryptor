@@ -229,11 +229,7 @@ def release_windows_choice(ext, fileexts=None):
         return False
     root = winreg.HKEY_CURRENT_USER
     base = (fileexts or FILEEXTS) + "\\" + ext
-    try:
-        with winreg.OpenKey(root, base + r"\UserChoice") as k:
-            prog = winreg.QueryValueEx(k, "ProgId")[0]
-    except OSError:
-        prog = ""
+    prog = windows_choice(ext, fileexts)
     if not prog or prog == PROGID:
         return True
     for sub in (r"UserChoiceLatest\ProgId", "UserChoiceLatest", "UserChoice"):
@@ -244,11 +240,31 @@ def release_windows_choice(ext, fileexts=None):
         except OSError:
             log.warning("Windows' own choice for %s not released (%s)",
                         ext, sub, exc_info=True)
+    return not windows_choice(ext, fileexts)
+
+
+def windows_choice(ext=".raw", fileexts=None):
+    """The ProgID of the user's own "Always use this app" for *ext*, or "".
+    Newer Windows 11 builds record it under ``UserChoiceLatest\\ProgId`` and
+    may write no ``UserChoice`` at all (seen on build 26300, PAD-1518);
+    older ones only under ``UserChoice``."""
+    if sys.platform != "win32":
+        return ""
     try:
-        with winreg.OpenKey(root, base + r"\UserChoice"):
-            return False
-    except OSError:
-        return True
+        import winreg
+    except ImportError:
+        return ""
+    base = (fileexts or FILEEXTS) + "\\" + ext
+    for sub in (r"UserChoiceLatest\ProgId", "UserChoice"):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                base + "\\" + sub) as k:
+                prog = winreg.QueryValueEx(k, "ProgId")[0]
+        except OSError:
+            continue
+        if prog:
+            return str(prog)
+    return ""
 
 
 def register_association(app_dir=None, take_raw=False, classes=None,
@@ -376,34 +392,16 @@ def raw_chosen_elsewhere(ext=".raw", fileexts=None):
     above anything an app writes; the gear switch takes it away
     (:func:`release_windows_choice`), so this names one only when that
     failed."""
-    if sys.platform != "win32":
-        return ""
-    try:
-        import winreg
-        with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                (fileexts or FILEEXTS) + "\\" + ext + r"\UserChoice") as k:
-            prog = winreg.QueryValueEx(k, "ProgId")[0]
-    except (ImportError, OSError):
-        return ""
+    prog = windows_choice(ext, fileexts)
     if not prog or prog == PROGID:
         return ""
-    return app_name(str(prog))
+    return app_name(prog)
 
 
 def raw_is_pads(ext=".raw", fileexts=None):
     """Whether Windows' own choice for *ext* is PAD: the double-click and the
     file's icon are PAD's only then, when any other app also opens *ext*."""
-    if sys.platform != "win32":
-        return False
-    try:
-        import winreg
-        with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                (fileexts or FILEEXTS) + "\\" + ext + r"\UserChoice") as k:
-            return winreg.QueryValueEx(k, "ProgId")[0] == PROGID
-    except (ImportError, OSError):
-        return False
+    return windows_choice(ext, fileexts) == PROGID
 
 
 def ask_windows(ext=".raw"):

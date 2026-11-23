@@ -312,6 +312,17 @@ def test_the_switch_takes_raw_from_windows_own_choice(monkeypatch):
         _choose(oi.PROGID)
         assert oi.release_windows_choice(".raw", fileexts) is True
         assert _has("UserChoice")                 # PAD's own: kept
+        # Windows 11 build 26300 records the pick ONLY under
+        # UserChoiceLatest\ProgId: still PAD's, and another app's is seen
+        winreg.DeleteKey(hk, fileexts + r"\.raw\UserChoice")
+        assert oi.raw_is_pads(".raw", fileexts) is True
+        with winreg.CreateKeyEx(
+                hk, fileexts + r"\.raw\UserChoiceLatest\ProgId") as k:
+            winreg.SetValueEx(k, "ProgId", 0, winreg.REG_SZ, "AppXphotos")
+        assert oi.raw_is_pads(".raw", fileexts) is False
+        assert oi.raw_chosen_elsewhere(".raw", fileexts) == "AppXphotos"
+        assert oi.release_windows_choice(".raw", fileexts) is True
+        assert not _has("UserChoiceLatest")
     finally:
         def _drop(path):
             try:

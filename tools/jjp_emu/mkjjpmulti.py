@@ -727,7 +727,13 @@ def sparse_copy(src, dst, meter=None):
     """cp --sparse=always (a 32 GiB declared root with ~8 GB used copies in about a minute)."""
     if os.path.exists(dst):
         os.unlink(dst)
-    _run(["cp", "--sparse=always", src, dst])
+    size = os.path.getsize(src)
+    if mkc.windows_sparse_file(dst, size):
+        # PAD-1533: the work folder sits beside the output, so on a Windows drive cp's holes
+        # would be zeros Windows writes out (all 32 GiB); a sparse-flagged file keeps them
+        mkc.copy_range(src, 0, dst, 0, size, progress=None)
+    else:
+        _run(["cp", "--sparse=always", src, dst])
     if meter is not None:
         meter.sample(os.path.getsize(src))
 

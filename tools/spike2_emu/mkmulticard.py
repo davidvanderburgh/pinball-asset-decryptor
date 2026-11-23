@@ -2782,8 +2782,106 @@ def check_card_writable(card):
     return card
 
 
+# ============================================================================= sparse outputs
+#: a Windows drive as WSL mounts it (drvfs): /mnt/c/..., /mnt/d/...  (/mnt/wsl is not one)
+_DRVFS = re.compile(r"^/mnt/([a-zA-Z])(/.*)?$")
+_FSUTIL = "/mnt/c/Windows/System32/fsutil.exe"
+
+
+def windows_drive_path(path):
+    """`path` as Windows names it when it is on a Windows drive (/mnt/x/...), else None."""
+    m = _DRVFS.match(os.path.abspath(path))
+    if not m:
+        return None
+    return m.group(1).upper() + ":" + (m.group(2) or "/").replace("/", "\\")
+
+
+def _fsutil_sparse(win, *args):
+    """`fsutil sparse <verb> <win> ...` run by Windows: True when it said yes."""
+    exe = shutil.which("fsutil.exe") or (_FSUTIL if os.path.exists(_FSUTIL) else None)
+    cmd = [exe] if exe else ["cmd.exe", "/c", "fsutil"]
+    try:
+        return subprocess.run(cmd + ["sparse", args[0], win] + list(args[1:]),
+                              cwd="/mnt/" + win[0].lower(), stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=60).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def windows_sparse_file(dst, size):
+    """PAD-1507 (Spike 3), PAD-1533 (Spike 2, JJP): a file written onto a Windows drive from
+    WSL comes out FULL SIZE - the file is not sparse on NTFS, so Windows fills every gap a seek
+    leaves with zeros, itself, before the write that lands past it (a 16G Spike 2 card of 5 GB
+    data took all 15.49 GB, and the fills stalled the copy).  Made sparse by Windows first
+    (fsutil, no elevation needed for the user's own file) and sized, the file keeps the holes:
+    writes through drvfs allocate only what they land on.  True when *dst* is ready that way
+    (open it r+b); False when it is not on a Windows drive or Windows said no - then the copy
+    is the plain one."""
+    win = windows_drive_path(dst)
+    if win is None:
+        return False
+    try:
+        open(dst, "wb").close()
+        if not _fsutil_sparse(win, "setflag"):
+            return False
+        with open(dst, "r+b") as f:
+            f.truncate(size)
+        if _fsutil_sparse(win, "setrange", "0", str(size)):
+            return True
+        open(dst, "wb").close()
+    except OSError:
+        pass
+    return False
+
+
+def set_windows_sparse(path):
+    """The sparse flag on an existing file on a Windows drive, so growing it leaves a hole rather
+    than zeros Windows writes out.  True when set; False off a Windows drive or when refused."""
+    win = windows_drive_path(path)
+    return bool(win) and _fsutil_sparse(win, "setflag")
+
+
+def fresh_sparse_file(path, size):
+    """`path` made anew as `size` bytes of holes: on a Windows drive through
+    :func:`windows_sparse_file`, elsewhere a truncate (every Linux filesystem leaves a hole).
+    -> True when it really is sparse; False when Windows would not mark it so - the file is
+    still the right size, but every zero a seek skips is written out."""
+    if windows_drive_path(path) is not None and windows_sparse_file(path, size):
+        return True
+    with open(path, "wb") as f:
+        f.truncate(size)
+    return windows_drive_path(path) is None
+
+
+def sparse_word(alloc, size):
+    """'sparse' when a file takes less of the disk than its size, else 'not sparse'."""
+    return "sparse" if alloc < size * 0.97 else "not sparse"
+
+
+def allocation_note(path):
+    """', 5.30 GB allocated (sparse)' - what the file really takes on the disk, and whether that
+    is less than its size; '' when the filesystem does not say."""
+    alloc = allocated_bytes(path)
+    if alloc is None:
+        return ""
+    return ", %s allocated (%s)" % (_gb(alloc), sparse_word(alloc, os.path.getsize(path)))
+
+
 # ============================================================================= copying
 ZERO = bytes(CHUNK)
+
+
+def slow_read_note(src, nbytes, read_s, span_s):
+    """PAD-1533: the sentence for an interval whose time went to READING the source at under
+    20 MB/s, else ''.  David's 16G build crawled at 4 MB/s for four minutes: the source's disk
+    (a spinning D:) was busy with another program's writes, which on one disk head starve a
+    sequential read to a few MB/s.  Nothing here can stop that; the log can say it."""
+    if span_s <= 0 or read_s < 0.8 * span_s or nbytes / 1e6 / max(read_s, 1e-9) >= 20:
+        return ""
+    win = windows_drive_path(src)
+    return ("reading the source has slowed to %.0f MB/s: its drive%s is busy with something else "
+            "(another program reading or writing it) or is slow; the copy goes on"
+            % (nbytes / 1e6 / max(read_s, 1e-9), (" " + win[:2]) if win else ""))
 
 
 def copy_range(src, soff, out, doff, length, label="", sparse=True, progress=say, meter=None):
@@ -2794,11 +2892,17 @@ def copy_range(src, soff, out, doff, length, label="", sparse=True, progress=say
     which are work this loop still has to READ."""
     t0 = last = time.monotonic()
     done = skipped = 0
+    rd = wr = 0.0                                  # PAD-1533: where each interval's time went
+    got, slow_said = 0, False
     with open(src, "rb") as s, open(out, "r+b") as o:
         s.seek(soff)
         left, pos = length, doff
         while left:
+            ta = time.monotonic()
             b = s.read(min(CHUNK, left))
+            tb = time.monotonic()
+            rd += tb - ta
+            got += len(b)
             if not b:
                 raise EOFError("%s: short read at byte %d" % (src, soff + length - left))
             if sparse and b == ZERO[:len(b)]:
@@ -2806,6 +2910,7 @@ def copy_range(src, soff, out, doff, length, label="", sparse=True, progress=say
             else:
                 o.seek(pos)
                 o.write(b)
+                wr += time.monotonic() - tb
             pos += len(b)
             left -= len(b)
             done += len(b)
@@ -2813,8 +2918,12 @@ def copy_range(src, soff, out, doff, length, label="", sparse=True, progress=say
                 meter.add(len(b))
             now = time.monotonic()
             if progress and label and now - last >= 2.0:
-                last = now
-                progress("  %s %s / %s  %.0f MB/s" % (label, _gb(done), _gb(length), done / 1e6 / max(now - t0, 1e-9)))
+                progress("  %s %s / %s  %.0f MB/s (last %.1f s: reading %.1f s, writing %.1f s)"
+                         % (label, _gb(done), _gb(length), done / 1e6 / max(now - t0, 1e-9), now - last, rd, wr))
+                if not slow_said and slow_read_note(src, got, rd, now - last):
+                    progress("  %s: %s" % (label, slow_read_note(src, got, rd, now - last)))
+                    slow_said = True
+                last, rd, wr, got = now, 0.0, 0.0, 0
         o.flush()
     dt = time.monotonic() - t0
     if progress and label:
@@ -2946,9 +3055,11 @@ def write_tables(plan, out):
 
 def build_image(plan, out, use_dd=False):
     """The sparse output: pre-p1 region verbatim, every partition range, then the tables."""
-    with open(out, "wb") as o:
-        o.truncate(plan.total_bytes)
-    say("output %s: %d bytes apparent (sparse), %d partition ranges to copy" % (out, plan.total_bytes, 3 + len(plan.logs)))
+    sparse = fresh_sparse_file(out, plan.total_bytes)
+    say("output %s: %d bytes apparent (%s), %d partition ranges to copy"
+        % (out, plan.total_bytes, "sparse" if sparse else
+           "NOT sparse: Windows would not mark it sparse, so its zeros are written out and take the disk space",
+           3 + len(plan.logs)))
     meter = PROGRESS if PROGRESS.on else None
     if meter is not None:
         meter.step("writing the card image")
@@ -3783,8 +3894,7 @@ def build_testcard(primary, out, selector_dir, media_dir=None, colour=None, work
         say("test card: boot + rootfs from %s, %s in all" % (os.path.basename(primary), _gb(total)))
         if os.path.exists(out):
             os.remove(out)
-        with open(out, "wb") as f:
-            f.truncate(total)
+        fresh_sparse_file(out, total)
         # the first sectors (u-boot sits in front of p1), p1 and p2, as they are
         p2_end = (prims[1][1] + prims[1][2]) * SECTOR
         copy_range(primary, 0, out, 0, p2_end, "boot + rootfs", sparse=True)
@@ -4951,6 +5061,7 @@ def grow_last_partition(card, new_sectors):
         raise Refused("p7 can only grow (%d -> %d sectors would shrink the image)" % (old_total // SECTOR, plan.total))
     say("growing p%d of %s to %d sectors (%s); the image becomes %s"
         % (p7.num, os.path.basename(card), p7.count, _gb(p7.count * SECTOR), _gb(plan.total_bytes)))
+    set_windows_sparse(card)                       # the growth a hole, not zeros Windows writes out
     with open(card, "r+b") as f:
         f.truncate(plan.total_bytes)
     write_tables(plan, card)
@@ -6578,8 +6689,7 @@ def mke2fs_games_tree(tree, img, sectors, owners, what, label=None, budget=0):
     """`tree` written into the fresh ext4 image `img` (`sectors` long) with the stock p3's
     feature set, ownership put back from `owners` ({relative path: (uid, gid)} - mke2fs -d
     records the running uid), e2fsck -fn before and after.  The scratch tree is removed."""
-    with open(img, "wb") as f:
-        f.truncate(sectors * SECTOR)
+    fresh_sparse_file(img, sectors * SECTOR)        # a workdir beside a Windows-drive output too
     say("mke2fs -d %s -> %s (%d MiB%s)" % (tree, img, sectors * SECTOR >> 20,
                                            (", label %s" % label) if label else ""))
     if PROGRESS.on:
@@ -7029,10 +7139,9 @@ def extract_image(card, index, out, workdir=None, force=False, clean=True, plan=
         if rc != 0:
             raise Refused("%s: p3 is not clean (e2fsck rc=%d):\n%s" % (out, rc, txt))
     rec = read_tree(out, source_part(out), None)
-    alloc = allocated_bytes(out)
     say("image %d recovered: %s - title %s, game code %s, %s apparent%s, %.0f s"
         % (index, out, rec.get("title"), rec.get("version") or "unknown", _gb(rplan.total_bytes),
-           (", %s allocated" % _gb(alloc)) if alloc is not None else "", time.monotonic() - t0))
+           allocation_note(out), time.monotonic() - t0))
     return rec
 
 
@@ -8249,7 +8358,8 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
     # card its owner chose, and verify's job is to say what is on it - build's is to refuse
     alloc = allocated_bytes(card)
     if alloc is not None:
-        print("allocated %s of %s apparent (sparse)" % (_gb(alloc), _gb(os.path.getsize(card))))
+        size = os.path.getsize(card)
+        print("allocated %s of %s apparent (%s)" % (_gb(alloc), _gb(size), sparse_word(alloc, size)))
     print("VERIFY %s %s" % (card, "PASS" if ok else "FAIL"))
     return ok
 
@@ -10499,9 +10609,8 @@ def main(argv=None):
                 # stock p2, still recorded: verify then has something to hold p2 against
                 say("p2 md5 %s recorded in %s" % (write_p2_sidecar(a.out), p2_sidecar_path(a.out)))
             PROGRESS.finish()
-            alloc = allocated_bytes(a.out)
             say("wrote %s: %d bytes apparent%s in %.0f s" % (a.out, plan.total_bytes,
-                (", %s allocated" % _gb(alloc)) if alloc is not None else "", time.monotonic() - t0))
+                allocation_note(a.out), time.monotonic() - t0))
             if conf:
                 print(conf.rstrip())
         elif a.cmd == "testcard":

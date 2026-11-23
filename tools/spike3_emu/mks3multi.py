@@ -580,40 +580,9 @@ def _tree_manifest(d):
     return out
 
 
-_DRVFS = re.compile(r"^/mnt/([a-zA-Z])(/.*)?$")
-
-
-def _windows_sparse_file(dst, size):
-    """PAD-1507: a card written onto a Windows drive (/mnt/X/...) from here
-    comes out FULL SIZE - drvfs zero-fills every gap a seek leaves, so a
-    62 GB Spike 3 card of 3-4 GB data took all 62.  Made sparse by Windows
-    first (fsutil, no elevation needed for the user's own file) and sized,
-    the file keeps the holes: writes through drvfs allocate only what they
-    land on.  True when *dst* is ready that way (open it r+b); False when
-    it is not on a Windows drive or Windows said no - then the copy is the
-    plain one."""
-    m = _DRVFS.match(os.path.abspath(dst))
-    if not m:
-        return False
-    win = m.group(1).upper() + ":" + (m.group(2) or "/").replace("/", "\\")
-    try:
-        open(dst, "wb").close()
-
-        def fs(*a):
-            return subprocess.run(["cmd.exe", "/c", "fsutil", "sparse", *a],
-                                  cwd="/mnt/" + m.group(1).lower(),
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                  timeout=60).returncode == 0
-        if not fs("setflag", win):
-            return False
-        with open(dst, "r+b") as f:
-            f.truncate(size)
-        if fs("setrange", win, "0", str(size)):
-            return True
-        open(dst, "wb").close()
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return False
+# PAD-1507: a card written onto a Windows drive is made sparse by Windows first;
+# the one definition is mkmulticard's (PAD-1533 gave Spike 2 and JJP the same)
+_windows_sparse_file = mkc.windows_sparse_file
 
 
 def _copy_image_file(src, dst, total):

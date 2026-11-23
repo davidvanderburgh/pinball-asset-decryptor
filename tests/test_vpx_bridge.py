@@ -5091,19 +5091,22 @@ def test_jp30th_mikes_second_round(vpxfile):
         # the machine's upper flipper coil is the table's SolRFlipper2
         assert vs.flipper_subs(m, {})["sURFlipper"] == "SolRFlipper2"
         assert vs.flipper_warnings(m, {}, ["Sub SolLFlipper(e)", "Sub SolRFlipper(e)", "Sub SolRFlipper2(e)"]) == []
-        # two real balls, ball-sized and touching, as the machine's: the front
-        # one on the painted one, the other under the jeep's bumper; a wall
-        # round both takes the knock (the painted ball's own post is off)
+        # two real balls, ball-sized, as the machine's: the front one on the
+        # painted one, the other on the jeep's own little ball at its bumper
+        # (round 3: it rides the jeep, the script lifts it there); a wall
+        # round the front one and the post behind it takes the knock (the
+        # painted ball's own post is off)
         ri = m["retrofit_items"]
         front, rear = ri["PadNewtonFront"], ri["PadNewtonRear"]
         assert front["kind"] == rear["kind"] == "Kicker" and front["at"] == [514.0, 725.0]
-        assert math.dist(front["at"], rear["at"]) == 50.0
+        assert rear["at"] == [532.0, 673.0]
         assert "PadNewtonFront.CreateSizedBallWithMass BallSize / 2, BallMass" in m["after_init"]
-        assert "PadNewtonRear.CreateSizedBallWithMass BallSize / 2, BallMass" in m["after_init"]
+        assert "Set PadJeepBall = PadNewtonRear.CreateSizedBallWithMass(BallSize / 2, BallMass) : " \
+            "PadJeepBallAt 532, 673" in m["after_init"]
         wall = ri["PadNewtonWall"]
         assert wall["kind"] == "Wall" and len(wall["shape"]) == 16       # wall65's drag points
         for p in wall["shape"]:
-            assert min(math.dist(p, front["at"]), math.dist(p, rear["at"])) >= 25.9
+            assert min(math.dist(p, front["at"]), math.dist(p, (514.0, 675.0))) >= 25.9
         assert wall["fields"]["HTEV"] == 1 and wall["fields"]["VSBL"] == 0
         assert m["item_fields"]["wall65"] == {"CLDW": 0}
         sw = m["switches"]["PadNewtonWall"]
@@ -5113,19 +5116,19 @@ def test_jp30th_mikes_second_round(vpxfile):
         assert m["item_fields"]["Wall022"]["HTBT"] > 50 and m["item_fields"]["Wall022"]["HTTP"] > 50
         # the wireforms drawn over the photographed ones: hidden, still the
         # ball's way; the plastic centre ramp (its own picture) stays
-        hidden = {k for k, v in m["item_fields"].items() if v.get("RVIS") == 0}
+        hidden = {k for k, v in m["item_fields"].items() if k != "_" and v.get("RVIS") == 0}
         assert {"Ramp003", "Ramp012", "Ramp013", "Ramp002", "Ramp010", "Ramp001"} <= hidden
         assert "Ramp014" not in m["item_fields"] and all(set(m["item_fields"][k]) == {"RVIS"} for k in hidden)
         # SHOOT AGAIN on the table's own light, on the insert
         assert m["lamps"]["LightShootAgain"]["leds"] == [[8, 5]]
         assert "LightShootAgain" not in m["dark"] and "PadShootAgain" not in m["retrofit_lights"]["lights"]
-        # the machine's control room post stands at its raptor pit's foot and
-        # holds a captured ball (coil 4 up 6 s on the rig): RebelB's pen holds
-        # one with plock3, so it rises with plock2; UP POST-TOP (the top
-        # centre) has no post on this table
+        # the machine's control room post stands at its raptor pit's foot
+        # (coil 4 up 6 s on the rig); round 3 (Mike): the Pro has no lock in
+        # the raptor pen, so RebelB's pen post (plock3) stays down. UP
+        # POST-TOP (the top centre) has no post on this table
         assert m["solenoids"]["4"]["callback"] == "PadControlRoomPost" and m["solenoids"]["5"]["callback"] is None
-        assert "Sub PadControlRoomPost(e) : plock2.IsDropped = Not e : plock3.IsDropped = Not e : End Sub" \
-            in m["extra_vbs"]
+        assert "Sub PadControlRoomPost(e) : plock2.IsDropped = Not e : End Sub" in m["extra_vbs"]
+        assert "plock3.IsDropped = Not" not in m["extra_vbs"] and "plock3.IsDropped = 1" in m["after_init"]
     # a map whose table flips its upper bat in a sub no default picks is told
     m = {"solenoids": {"34": {"name": "UP RIGHT FLIPPER"}}}
     lines = ["Sub SolLFlipper(e)", "Sub SolRFlipper(e)", "Sub SolRFlipper2(e)"]
@@ -5140,14 +5143,22 @@ def test_jp30th_mikes_second_round(vpxfile):
         b"".join(_rec("DPNT", b"") + _rec("VCEN", struct.pack("<ff", k, k)) + _rec("ENDB", b"") for k in range(16)) + \
         _rec("ENDB", b"")
 
+    trigger = struct.pack("<i", 6) + _rec("VCEN", struct.pack("<ff", 783, 952)) + \
+        _rec("RADI", struct.pack("<f", 23)) + _rec("VSBL", struct.pack("<i", 0)) + \
+        _rec("NAME", vpxfile.wide("Target10")) + _rec("ENDB", b"")
+
     class Table:
-        items = [kicker, wall]
+        items = [kicker, wall, trigger]
         item_info = staticmethod(vpxfile.VpxTable.item_info)
     m = _jp30_map("pro")
     items = vs.retrofit_items(Table, {"retrofit_items": m["retrofit_items"]})
     assert [vpxfile.VpxTable.item_info(i)[:2] for i in items] == \
-        [("Kicker", "PadNewtonFront"), ("Kicker", "PadNewtonRear"), ("Wall", "PadNewtonWall")]
-    assert vpxfile.VpxTable.item_info(items[1])[2] == (514.0, 675.0)
+        [("Kicker", "PadNewtonFront"), ("Kicker", "PadNewtonRear"), ("Wall", "PadNewtonWall"),
+         ("Trigger", "PadTowerGate"), ("Trigger", "PadHelipadGate")]
+    assert [vpxfile.VpxTable.item_info(i)[2] for i in items[3:]] == [(204.0, 651.0), (782.0, 952.0)]
+    gate = {t: p for t, p, _ in vpxfile.biff_records(items[3], 4)}
+    assert struct.unpack("<f", gate["RADI"]) == (50.0,) and struct.unpack("<i", gate["VSBL"]) == (0,)
+    assert vpxfile.VpxTable.item_info(items[1])[2] == (532.0, 673.0)
     recs = list(vpxfile.item_records(items[2], 4))
     assert [list(struct.unpack_from("<ff", p)) for t, p, _ in recs if t == "VCEN"] == \
         [[pytest.approx(c, abs=1e-3) for c in pt] for pt in m["retrofit_items"]["PadNewtonWall"]["shape"]]
@@ -5155,6 +5166,44 @@ def test_jp30th_mikes_second_round(vpxfile):
     assert struct.unpack("<i", top["HTEV"]) == (1,) and struct.unpack("<f", top["HTTP"]) == (50.0,)
     with pytest.raises(AssertionError, match="no Wall named"):
         vs.retrofit_items(Table, {"retrofit_items": {"X": {"kind": "Wall", "clone": "k11", "at": [0, 0]}}})
+
+
+def test_jp30th_mikes_third_round(vpxfile):
+    # PAD-1511 round 3 (Mike): the tower and helipad holes took a ball
+    # rolling past at any speed; the inlane's up post did not sit on its
+    # hole; the jeep's Newton ball did not ride the jeep (its own is too
+    # small); the Pro has no raptor pen lock (above, round 2's test)
+    vs = pytest.importorskip("vpxshadow")
+    for model in ("pro", "le"):
+        m = _jp30_map(model)
+        ri = m["retrofit_items"]
+        # an unseen ring round each hole, wider than the hole (25), so it
+        # times the ball before the hole takes it
+        for gate, at in (("PadTowerGate", [204.0, 651.0]), ("PadHelipadGate", [782.0, 952.0])):
+            g = ri[gate]
+            assert g["kind"] == "Trigger" and g["at"] == at
+            assert g["fields"]["RADI"] > 25 + 15 and g["fields"]["VSBL"] == 0
+            assert "Sub %s_Hit" % gate in m["extra_vbs"] and "Sub %s_UnHit" % gate in m["extra_vbs"]
+        assert m["switches"]["k1"]["name"].startswith("LEFT HALFPIPE OPTO")
+        assert m["switches"]["Target10"]["name"].startswith("RIGHT HALF PIPE")
+        # the up posts: a metal post a little over a ball high, not 240 high
+        # with the playfield's picture of its own hole on top
+        for post in ("plock", "plock2"):
+            f = m["item_fields"][post]
+            assert 50 < f["HTTP"] <= 70 and f["IMAG"] == "" and f["TOMA"] == f["SIMA"] == "Metal" and f["SVBL"] == 1
+        # the left side's lights: CONTROL ROOM lit beside its insert (a
+        # stand-in 27 units off it) while RAPTOR PIT FLASH had the insert's
+        # own light; the pit's two bulbs are its flash and upper left target
+        assert m["lamps"]["Light19"]["leds"] == [[9, 50]]
+        assert m["lamps"]["Light001"]["leds"] == [[9, 51]] and m["lamps"]["Light002"]["leds"] == [[9, 47]]
+        lights = m["retrofit_lights"]["lights"]
+        assert "PadControlRoom" not in lights and "PadRaptorPitUpperLeftTarget" not in lights
+        leds = [tuple(l) for k, v in m["lamps"].items() if k != "_" for l in v["leds"]] + \
+            [tuple(l) for v in lights.values() for l in v["leds"]]
+        assert [leds.count(l) for l in ((9, 50), (9, 51), (9, 47))] == [1, 1, 1]   # each lights only there
+    # item_fields writes a name as VPX keeps one: its length, then its bytes
+    assert vs._field_bytes("Metal") == struct.pack("<i", 5) + b"Metal"
+    assert vs._field_bytes("") == struct.pack("<i", 0)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the Windows VBScript engine")
@@ -5188,22 +5237,55 @@ def test_jp30th_jeep_turns_round_once_on_the_playfields_vertical():
             v = self.p[k]
             return VARIANT(pythoncom.VT_BOOL, v) if isinstance(v, bool) else VARIANT(pythoncom.VT_R4, float(v))
 
+    class Ball(Obj):
+        def _dynamic_(self, name, lcid, wFlags, args):
+            r = Obj._dynamic_(self, name, lcid, wFlags, args)
+            if wFlags & 4 and name.lower() == "z":
+                self.log.append((self.p["x"], self.p["y"], self.p["z"]))
+            return r
+
     m = _jp30_map("pro")
     jeep = Obj(rotandtra0=124.0, rotandtra1=250.0, rotandtra2=0.0)
     timer, plock, plock2 = Obj(enabled=False), Obj(isdropped=True), Obj(isdropped=True)
     plock3 = Obj(isdropped=True)
-    objs = {"jptruck": jeep, "PadJeepTimer": timer, "plock": plock, "plock2": plock2, "plock3": plock3}
+    ball = Ball(x=532.0, y=673.0, z=25.0, velx=0.0, vely=0.0, velz=0.0)
+    k1, k11, t10 = Obj(enabled=True), Obj(enabled=True), Obj(enabled=True)
+    rolling = Obj(velx=0.0, vely=0.0)
+    objs = {"jptruck": jeep, "PadJeepTimer": timer, "plock": plock, "plock2": plock2, "plock3": plock3,
+            "TheJeepBall": ball, "k1": k1, "k11": k11, "Target10": t10, "ActiveBall": rolling}
     site = axsite.AXSite({k: util.wrap(v, usePolicy=policy.DynamicPolicy) for k, v in objs.items()})
     eng = site.AddEngine("VBScript")
-    eng.AddCode(m["extra_vbs"] + "\nSub PadTest\n\tPadJeepTurn\n\tPadJeepTurn\n"
+    eng.AddCode(m["extra_vbs"] + "\nSub PadTest\n\tSet PadJeepBall = TheJeepBall : PadJeepBallAt 532, 673\n"
+                "\tPadJeepTurn\n\tPadJeepTurn\n"
                 "\tDim i : For i = 1 To 30 : If PadJeepTimer.Enabled Then PadJeepTimer_Timer\n\tNext\n"
-                "\tPadReturnPost True : PadControlRoomPost True\nEnd Sub\n")
+                "\tPadReturnPost True : PadControlRoomPost True\nEnd Sub\n"
+                "Sub PadGateTest(o)\n\tIf o = 0 Then PadTowerGate_Hit\n\tIf o = 1 Then PadTowerGate_UnHit\n"
+                "\tIf o = 2 Then PadHelipadGate_Hit\n\tIf o = 3 Then PadHelipadGate_UnHit\nEnd Sub\n")
     eng.Start()
     sd = eng.GetScriptDispatch()
     sd.Invoke(sd.GetIDsOfNames("PadTest"), 0, pythoncom.DISPATCH_METHOD, False)
+
+    def gate(o, vx, vy):
+        rolling.p.update(velx=vx, vely=vy)
+        sd.Invoke(sd.GetIDsOfNames("PadGateTest"), 0, pythoncom.DISPATCH_METHOD, False, o)
+        return k1.p["enabled"], k11.p["enabled"], t10.p["enabled"]
+    # the tower and helipad holes take a ball that comes in at a shot's
+    # speed; one rolling by slowly rolls on over them, and they are back on
+    # once it has left the ring
+    assert gate(0, 3.0, -4.0) == (False, True, True)
+    assert gate(1, 3.0, -4.0) == (True, True, True)
+    assert gate(0, 9.0, -12.0) == (True, True, True)
+    assert gate(2, -2.0, 6.0) == (True, False, False)
+    assert gate(3, -2.0, 6.0) == (True, True, True)
+    assert gate(2, -12.0, -20.0) == (True, True, True)
     eng.Close()
     assert not plock.p["isdropped"] and not plock2.p["isdropped"]    # coil on = post up
-    assert not plock3.p["isdropped"]                                 # the raptor pen's lock rises with it
+    assert plock3.p["isdropped"]                                     # the Pro has no raptor pen lock
+    # the jeep's Newton ball: on the jeep's own little ball (532, 673, 76 up)
+    # and carried round with it, step by step, back home at the end
+    home = np.array([532.0, 673.0, 76.0])
+    pivot = np.array([514.135, 622.537, 64.0])
+    assert ball.log[0] == pytest.approx(tuple(home)) and ball.log[-1] == pytest.approx(tuple(home))
 
     def R(ax, d):
         a = math.radians(d)
@@ -5217,6 +5299,8 @@ def test_jp30th_jeep_turns_round_once_on_the_playfields_vertical():
         turned = R(0, a) @ R(1, b) @ R(2, c)
         assert np.allclose(turned, R(2, 15.0 * i) @ m0, atol=1e-3), i
         assert np.allclose((turned @ np.linalg.inv(m0))[2], [0, 0, 1], atol=1e-3)   # up stays up
+        carried = (turned @ np.linalg.inv(m0)) @ (home - pivot) + pivot
+        assert np.allclose(ball.log[i], carried, atol=0.15), i
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="writes through Windows structured storage")

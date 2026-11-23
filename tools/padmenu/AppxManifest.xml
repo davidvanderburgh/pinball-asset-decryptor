@@ -33,18 +33,22 @@
     <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
   <Applications>
-    <Application Id="ShellMenu" Executable="padmenu.exe"
+    <!-- ONE entry: Windows folds every entry a package offers for a file
+         into one flyout named after it (PAD-1523, seen on the short menu),
+         and sorts packaged entries by name, so Write could not sit beside
+         Compact anyway.  Write to a card with PAD is a .raw card's default
+         verb, which Windows 11 already lists at the top of that menu. -->
+    <Application Id="Compact" Executable="padmenu.exe"
                  uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
       <uap:VisualElements AppListEntry="none"
-        DisplayName="Pinball Asset Decryptor right-click menu"
-        Description="Write to a card and Compact with PAD on the right-click menu"
+        DisplayName="Compact with PAD"
+        Description="Compact with PAD on the right-click menu"
         BackgroundColor="transparent"
         Square150x150Logo="logo.png" Square44x44Logo="logo.png" />
       <Extensions>
         <com:Extension Category="windows.comServer">
           <com:ComServer>
             <com:SurrogateServer DisplayName="Pinball Asset Decryptor right-click menu">
-              <com:Class Id="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D02" Path="padmenu64.dll" ThreadingModel="STA" />
               <com:Class Id="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D03" Path="padmenu64.dll" ThreadingModel="STA" />
             </com:SurrogateServer>
           </com:ComServer>
@@ -52,15 +56,10 @@
         <desktop4:Extension Category="windows.fileExplorerContextMenus">
           <desktop4:FileExplorerContextMenus>
             <desktop5:ItemType Type=".raw">
-              <desktop5:Verb Id="PadWrite" Clsid="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D02" />
               <desktop5:Verb Id="PadCompact" Clsid="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D03" />
             </desktop5:ItemType>
             <desktop5:ItemType Type=".img">
-              <desktop5:Verb Id="PadWrite" Clsid="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D02" />
               <desktop5:Verb Id="PadCompact" Clsid="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D03" />
-            </desktop5:ItemType>
-            <desktop5:ItemType Type=".iso">
-              <desktop5:Verb Id="PadWrite" Clsid="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D02" />
             </desktop5:ItemType>
           </desktop4:FileExplorerContextMenus>
         </desktop4:Extension>

@@ -71,6 +71,29 @@ $r = $e.Current.BoundingRectangle
 """
 
 
+UIA_ROOT_PS = r"""
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$c = New-Object Windows.Automation.PropertyCondition(
+  [Windows.Automation.AutomationElement]::NameProperty, '%s')
+$e = [Windows.Automation.AutomationElement]::RootElement.FindFirst(
+  [Windows.Automation.TreeScope]::Descendants, $c)
+$r = $e.Current.BoundingRectangle
+"$($r.Left) $($r.Top) $($r.Width) $($r.Height)"
+"""
+
+
+def _menu_point(label):
+    """Screen point of the open menu's entry *label*, or None"""
+    out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                          UIA_ROOT_PS % label.replace("'", "''")],
+                         capture_output=True, text=True).stdout.split()
+    try:
+        left, top, w, ht = (float(v) for v in out[:4])
+    except ValueError:
+        return None
+    return (int(left + w / 2), int(top + ht / 2)) if w > 0 else None
+
+
 def _item_point(h, name):
     """Screen point inside the card's name in Explorer's list."""
     stem = os.path.splitext(name)[0]        # the list hides .raw
@@ -123,6 +146,21 @@ def main(argv):
         _key(VK_SHIFT, True)
     user32.SetCursorPos(x + 600, y + 400)         # off the menu, unhovered
     time.sleep(2.5)                   # the short menu fades in
+    if "--hover" in argv:             # open an entry's flyout, to see in it
+        what = argv[argv.index("--hover") + 1]
+        pt = (tuple(int(v) for v in what.split(",")) if what[:1].isdigit()
+              else _menu_point(what))
+        print("hover", pt)
+        if pt:
+            user32.SetCursorPos(pt[0] - 40, pt[1])
+            for _ in range(8):        # a real move: a jump alone hovers nothing
+                user32.mouse_event(0x0001, 5, 0, 0, 0)
+                time.sleep(0.05)
+            time.sleep(2.0)
+            if "--click" in argv:      # and choose it, as a user would
+                user32.mouse_event(0x0002, 0, 0, 0, 0)
+                user32.mouse_event(0x0004, 0, 0, 0, 0)
+                time.sleep(3.0)
     menus = [w for w in _windows() if w[0] not in shown]
     for m in menus:
         print("menu window:", m[1], m[3])

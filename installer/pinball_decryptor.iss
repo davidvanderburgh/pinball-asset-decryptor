@@ -268,7 +268,7 @@ Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /reset /T /C /Q"; St
 Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /grant *S-1-5-32-545:(OI)(CI)RX /T /C /Q"; StatusMsg: "Repairing Python file permissions..."; Flags: runhidden waituntilterminated
 
 ; --- Windows 11's short right-click menu (PAD-1523) ---------------------
-; "Write to a card with PAD" and "Compact with PAD" reach Windows 11's first
+; "Compact with PAD" reaches Windows 11's first
 ; right-click menu only through a package (pinball_decryptor\shell\
 ; padmenu.msix, which the app adds for its user: webui/shell_menu.py), and
 ; Windows adds a package only when its signature is trusted on the machine.

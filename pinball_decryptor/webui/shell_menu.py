@@ -5,9 +5,16 @@ for card images (webui/open_image.py) but the file type's default one, so
 "Compact with PAD" was only under "Show more options".  What that menu does
 list are handlers a PACKAGE declares; ``pinball_decryptor/shell/padmenu.msix``
 (tools/padmenu) is a sparse package that declares ``padmenu64.dll``, a
-handler that shows "Write to a card with PAD" and "Compact with PAD" there
-and runs the same verbs the classic menu runs (it reads them from the
-registry, so the two menus cannot disagree).
+handler that shows "Compact with PAD" there, with its icon, on a card that
+is not compact yet, and runs the same verb the classic menu runs (it reads
+label, icon and command from the registry, so the two cannot disagree).
+"Write to a card with PAD" needs nothing: as a ``.raw``'s default verb it is
+already the first entry of that menu.
+
+Windows lists a packaged entry under "Show more options" too, so while the
+package is registered the classic Compact verb is marked
+``ProgrammaticAccessOnly`` (:func:`hide_classic`): out of every menu, still
+there for the handler to read.  Without the package it shows as before.
 
 Per user, like the verbs it bridges to: :func:`register` stages the DLL under
 ``%LOCALAPPDATA%\\pinball_decryptor\\shell_menu\\<hash>`` (the surrogate that
@@ -192,6 +199,28 @@ def _q(path):
     return "'" + path.replace("'", "''") + "'"
 
 
+def hide_classic(hide):
+    """Take the classic Compact verb off the menus (*hide*) or put it back.
+    Never raises."""
+    if sys.platform != "win32":
+        return
+    import winreg
+    from . import open_image
+    for ext in open_image.COMPACT_EXTENSIONS:
+        path = r"%s\SystemFileAssociations\%s\shell\%s" % (
+            open_image.CLASSES, ext, open_image.COMPACT_VERB)
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+                                winreg.KEY_SET_VALUE) as k:
+                if hide:
+                    winreg.SetValueEx(k, "ProgrammaticAccessOnly", 0,
+                                      winreg.REG_SZ, "")
+                else:
+                    winreg.DeleteValue(k, "ProgrammaticAccessOnly")
+        except OSError:
+            pass
+
+
 def register(pkg=None, root=None):
     """Put the app's entries on this user's short menu; True when it
     changed anything.  Never raises."""
@@ -204,22 +233,26 @@ def register(pkg=None, root=None):
 
 def _register(pkg, root):
     if not supported():
+        hide_classic(False)
         return False
     info = stamp(pkg)
     version = info.get("version")
     if not version or not trusted(info.get("thumbprint")):
         log.info("short-menu entries skipped: the package's certificate "
                  "is not trusted here (the installer adds it)")
+        hide_classic(bool(installed()))
         return False
     root = root or stage_root()
     folder = stage(pkg, root)
     if not folder:
+        hide_classic(bool(installed()))
         return False
     rec = _record(root)
     if (rec.get("version") == version
             and os.path.normcase(rec.get("folder", "")) ==
             os.path.normcase(folder)
             and installed(version)):
+        hide_classic(True)
         _sweep(root, keep=folder)
         return False
     msix = os.path.join(_shell_dir(pkg), MSIX)
@@ -232,7 +265,9 @@ def _register(pkg, root):
     ok, err = _ps(script)
     if not ok:
         log.warning("short-menu package not added: %s", err)
+        hide_classic(bool(installed()))
         return False
+    hide_classic(True)
     try:
         with open(os.path.join(root, RECORD), "w", encoding="utf-8") as f:
             json.dump({"version": version, "folder": folder}, f)
@@ -247,6 +282,7 @@ def unregister(root=None):
     """Take the package away for this user, and its staged copies.  Never
     raises; True when there was one."""
     root = root or stage_root()
+    hide_classic(False)
     had = bool(installed())
     if had:
         ok, err = _ps("Get-AppxPackage -Name %s | Remove-AppxPackage" % NAME)

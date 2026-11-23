@@ -1,5 +1,5 @@
-/* padmenu: "Write to a card with PAD" and "Compact with PAD" on the Windows 11
- * short right-click menu (PAD-1523).
+/* padmenu: "Compact with PAD" on the Windows 11 short right-click menu
+ * (PAD-1523).
  *
  * Windows 11's first right-click menu lists no verb from the registry but a
  * file type's default one: the app's verbs (webui/open_image.py) live only
@@ -15,6 +15,12 @@
  * says and does, an entry whose verb the app no longer registers (an app
  * uninstalled, a package left behind) is simply not shown, and nothing in
  * here knows where the app is installed.
+ *
+ * The package declares the Compact class only.  Windows folds every entry one
+ * package offers for a file into a flyout named after it, and a .raw card's
+ * default verb, "Write to a card with PAD", is already the first entry of
+ * that menu; the Write class stays here, proven by the tests, for a package
+ * that would list it.
  *
  * Compact is shown only for a card that takes its whole size on disk: one
  * already stored compact has nothing to gain (the rule is padicon.c's and the
@@ -38,7 +44,7 @@
 #include <shobjidl.h>
 
 /* {6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D02} Write, ...D03 Compact: the
- * package manifest (tools/padmenu/AppxManifest.xml) names the same two */
+ * package manifest (tools/padmenu/AppxManifest.xml) names Compact's */
 static const GUID CLSID_PadWrite =
     {0x6e1b5c0a, 0x52d4, 0x4f0b, {0x9c, 0x55, 0x1a, 0x15, 0x23, 0xca, 0x4d, 0x02}};
 static const GUID CLSID_PadCompact =

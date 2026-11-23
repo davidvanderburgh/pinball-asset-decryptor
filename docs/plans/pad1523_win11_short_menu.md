@@ -49,34 +49,35 @@ an IExplorerCommand handler for them.
 | Self-signed and trusted in the machine's Trusted People | This is the one the installer uses. It costs nothing. The key, "CN=Pinball Asset Decryptor", RSA 3072, valid to 2056, lives only in the maintainer's `Cert:\CurrentUser\My`. |
 | A commercial code-signing certificate | Not needed, and it costs money every year. |
 
-## Proven so far
+## Found on the real menu (after the certificate was trusted)
 
-- The real DLL, driven through COM in `tests/test_pad1523_short_menu.py`:
-  - it reads the title and icon from the verb;
-  - it shows on a full-size card and hides on a compact one;
-  - it hides where the app has no verb;
-  - Invoke runs the verb's command.
-- Windows accepts the hand-built package's format: deployment reads it, and
-  signtool signs it.
+- Windows adds the package per user without elevation, and does not need
+  `padmenu.exe` (the manifest's Executable) to exist. Explorer shows the
+  entry straight away; it does not need a restart.
+- Windows folds EVERY entry that one package offers for a file into a
+  single flyout named after the package. Putting each entry in its own
+  Application did not change that. Packaged entries are also sorted by
+  name, so Write and Compact could never sit side by side. So the package
+  declares only Compact, which shows as a flat entry with its icon. "Write
+  to a card with PAD" is a .raw's default verb, which Windows 11 already
+  lists first. An `Icon` value on that default verb does not show on the
+  short menu, so none is written.
+- Windows also lists packaged entries under Show more options, so Compact
+  appeared there twice. While the package is registered,
+  `shell_menu.hide_classic` marks the classic Compact verb
+  `ProgrammaticAccessOnly`: it is off every menu, but still readable by the
+  handler. It is visible again wherever the package is not registered.
+- End to end: clicking Compact on the short menu opened the installed app's
+  Compact window and compacted the card. On the card it compacted, Compact
+  is then hidden.
 
-## Left: needs one elevated step on David's PC
+## Proof
 
-This session may not elevate (the ticket guard refuses it), and Windows adds
-the package only once the certificate is in the machine's Trusted People. That
-is the installer's job. After that step, the work left is:
+`scripts/shot_pad1523.py` captures each menu with a real mouse right-click.
+`--classic` gives Show more options, and `--hover/--click` opens or chooses
+an entry. The shots are in pad-triage `work/artifacts/PAD-1523`.
 
-1. Add the package for this user (`shell_menu.register()`) and confirm that
-   Explorer lists both entries on the short menu (it may need an Explorer
-   restart).
-2. Shoot `after_short_menu.png` with `scripts/shot_pad1523.py` on
-   `D:\Pinball\images\Stern\spike2\custom\king_kong_le-1_00 (Jes).1.raw`, a
-   full-size card. Also shoot a compact card, where Compact must be hidden.
-3. Deduplicate Write. On a .raw whose default is PAD, the ProgID's default
-   verb already shows "Write to a card with PAD" at the top of the short
-   menu, and the packaged Write would add a second one. Try
-   `ProgrammaticAccessOnly` on the ProgID verb, which should keep the
-   double-click. Otherwise the packaged Write hides itself where the default
-   verb is PAD's.
-4. Check whether a sparse package needs `padmenu.exe` (the manifest's
-   Executable) to exist in the external location. If it does, ship a stub.
-5. Check that Show more options keeps the classic verbs, each listed once.
+Tests: `tests/test_pad1523_short_menu.py` checks the build stamp, the
+signature and block map, the manifest against the C code, the app verbs and
+the installer. It also checks registration and the classic-verb hiding, and
+drives the real DLL through COM.

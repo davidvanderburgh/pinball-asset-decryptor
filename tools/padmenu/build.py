@@ -57,7 +57,7 @@ ICON = os.path.join(ROOT, "pinball_decryptor", "icon.ico")
 SOURCES = ("padmenu.c", "padmenu.def", "AppxManifest.xml", "build.py")
 
 #: the package's version; webui/shell_menu.VERSION reads it from the stamp
-VERSION = "1.0.0.0"
+VERSION = "1.0.0.3"
 
 BLOCK = 65536
 EPOCH = (2026, 11, 23, 0, 0, 0)

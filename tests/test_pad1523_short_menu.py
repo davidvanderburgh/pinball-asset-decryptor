@@ -108,19 +108,16 @@ def test_manifest_names_the_certificate_the_dll_and_the_verbs():
     assert ident.get("Name") == shell_menu.NAME
     assert ident.get("Version") == shell_menu.stamp()["version"]
     assert ident.get("Publisher") == _build().SUBJECT
-    classes = [c.get("Id") for c in m.iter(
-        "{%s}Class" % NS["com"])]
-    assert sorted(classes) == sorted(_c_guids())
+    write, compact = _c_guids()
+    classes = [c.get("Id") for c in m.iter("{%s}Class" % NS["com"])]
+    # Compact only: two entries of one package fold into a flyout, and
+    # Write is a .raw card's default verb, first on the short menu already
+    assert classes == [compact]
     assert {c.get("Path") for c in m.iter("{%s}Class" % NS["com"])} == {
         shell_menu.DLL}
-    write, compact = _c_guids()
     types = {t.get("Type"): [v.get("Clsid") for v in t.findall("d5:Verb", NS)]
              for t in m.iter("{%s}ItemType" % NS["d5"])}
-    # Write wherever the app writes its verb, Compact where it compacts
-    assert set(types) == set(open_image.IMAGE_EXTENSIONS)
-    for ext, verbs in types.items():
-        assert verbs[0] == write
-        assert (compact in verbs) == (ext in open_image.COMPACT_EXTENSIONS)
+    assert types == {ext: [compact] for ext in open_image.COMPACT_EXTENSIONS}
 
 
 def test_dll_bridges_the_apps_own_verb_names():
@@ -147,7 +144,10 @@ def test_installer_trusts_and_removes_the_same_certificate_and_package():
 @pytest.fixture
 def fake(monkeypatch, tmp_path):
     calls = []
-    state = {"installed": [], "trusted": True, "build": 26100}
+    state = {"installed": [], "trusted": True, "build": 26100,
+             "hidden": None}
+    monkeypatch.setattr(shell_menu, "hide_classic",
+                        lambda hide: state.update(hidden=hide))
     monkeypatch.setattr(shell_menu, "windows_build", lambda: state["build"])
     monkeypatch.setattr("pinball_decryptor.webui.shell_icon.supported",
                         lambda: True)
@@ -177,9 +177,14 @@ def test_register_adds_the_package_from_a_staged_copy_once(fake):
     assert "Add-AppxPackage -Path '%s'" % os.path.join(
         SHELL, shell_menu.MSIX) in calls[0]
     assert "-ExternalLocation '%s'" % folder in calls[0]
+    # the classic Compact leaves the menus: Windows lists the packaged one
+    # under Show more options too
+    assert state["hidden"] is True
     # registered already: the next start changes nothing
+    state["hidden"] = None
     assert shell_menu.register(root=root) is False
     assert len(calls) == 1
+    assert state["hidden"] is True
     # taken away outside the app: it comes back
     state["installed"] = []
     assert shell_menu.register(root=root) is True
@@ -195,6 +200,7 @@ def test_register_leaves_the_package_alone_where_it_cannot_work(fake, what):
     assert shell_menu.register(root=root) is False
     assert calls == []
     assert not os.path.exists(root)
+    assert state["hidden"] is False         # the classic Compact stays
 
 
 def test_unregister_removes_the_package_and_its_copies(fake):
@@ -202,6 +208,7 @@ def test_unregister_removes_the_package_and_its_copies(fake):
     shell_menu.register(root=root)
     assert shell_menu.unregister(root=root) is True
     assert "Remove-AppxPackage" in calls[-1]
+    assert state["hidden"] is False
     assert not os.path.exists(root)
 
 
@@ -372,3 +379,29 @@ def test_entries_hide_where_the_app_has_no_verb(tmp_path):
     for compact in (False, True):
         _dll, cmd = _command(compact)
         assert _state(cmd, _items(other)) == 2           # ECS_HIDDEN
+
+
+@windows
+def test_hide_classic_marks_and_unmarks_the_compact_verb(monkeypatch):
+    import winreg
+    monkeypatch.setattr(open_image, "CLASSES",
+                        r"Software\Classes\PAD1523Test")
+    monkeypatch.setattr(open_image, "COMPACT_EXTENSIONS", (EXT,))
+    base = (r"Software\Classes\PAD1523Test\SystemFileAssociations\%s\shell"
+            r"\%s" % (EXT, open_image.COMPACT_VERB))
+    winreg.CloseKey(winreg.CreateKey(winreg.HKEY_CURRENT_USER, base))
+    try:
+        def flag():
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as k:
+                try:
+                    winreg.QueryValueEx(k, "ProgrammaticAccessOnly")
+                    return True
+                except OSError:
+                    return False
+        shell_menu.hide_classic(True)
+        assert flag()
+        shell_menu.hide_classic(False)
+        assert not flag()
+    finally:
+        open_image._del_tree(winreg.HKEY_CURRENT_USER,
+                             r"Software\Classes\PAD1523Test")

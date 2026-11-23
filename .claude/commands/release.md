@@ -420,11 +420,21 @@ foreground-block on a CI run, and never poll in a sleep loop.
        ```bash
        until gh release view vN.N.N --json assets \
                --jq '.assets[] | select(.state == "uploaded") | .name' \
-               2>/dev/null | grep -q .; do
+               2>/dev/null | grep -q -E '_Windows\.exe$|\.dmg$|\.AppImage$'; do
          sleep 15
        done
        gh release edit vN.N.N --draft=false
        ```
+       An INSTALLER, not any asset (PAD-1519): the Windows job attaches
+       the delta-update file list and pack (`*.delta.json.gz`,
+       `*.delta.pack`) a few seconds BEFORE its setup exe, so that a copy
+       offered the release finds them there, and those are not downloads
+       anybody can install from.  The same run's `check-delta` job then
+       installs the real setup exe and compares it with the file list; red
+       there means it took the two delta assets off the release again
+       (in-app updates to it use the setup exe) and
+       `installer/make_delta.py`'s reading of `[Files]` needs a look -
+       never a reason to yank.
     2. A **Windows-asset watcher WITH THE 5-MINUTE DEADLINE** — the
        primary tester is on Windows, so the moment `*_Windows.exe`
        attaches is the moment the final report + forward-to-tester

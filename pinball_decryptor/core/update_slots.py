@@ -228,6 +228,26 @@ def _repair_acls(folder, run):
             pass
 
 
+def _grant_before_fill(target, run):
+    """The same permissions as :func:`_repair_acls` leaves, for a folder
+    about to be filled by this process (PAD-1519): make ``<target>/python``
+    empty and give it the grant, and every file then written under it
+    inherits it.  ``icacls /reset /T`` then ``/grant /T`` over the finished
+    tree walks 8,500 files twice - 9 of the 13 seconds a delta took - to
+    arrive at what new files under a folder have anyway: nothing but
+    inherited entries, and the Users read grant."""
+    py = os.path.join(target, "python")
+    os.makedirs(py)
+    icacls = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                          "System32", "icacls.exe")
+    try:
+        run([icacls, py, "/grant", "*S-1-5-32-545:(OI)(CI)RX", "/C", "/Q"],
+            capture_output=True, timeout=120,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 #: one background install at a time: a newer release found while one runs
 #: cancels it, but its setup exe finishes its copy before the cancel is seen,
 #: and the next must not clear the folder under it
@@ -295,6 +315,7 @@ def stage_delta_install(fill, app_dir, version, run=None, cancel_cb=None,
             return False, "%s could not be cleared" % target
         try:
             progress_cb(0)
+            _grant_before_fill(target, run)
             compile_cmd = fill(target, lambda pct: progress_cb(
                 min(DELTA_COPY_SHARE, int(pct * DELTA_COPY_SHARE / 100))))
             if cancel_cb and cancel_cb():
@@ -317,8 +338,6 @@ def stage_delta_install(fill, app_dir, version, run=None, cancel_cb=None,
                 raise InterruptedError("staging canceled")
             progress_cb(COPY_SHARE)
             carried = carry_over(app_dir, target)
-            progress_cb(COPY_SHARE + 3)
-            _repair_acls(target, run)
             with open(os.path.join(target, MARKER), "w",
                       encoding="utf-8") as f:
                 json.dump({"version": version, "setup": None,
@@ -664,7 +683,7 @@ def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
 
 
 def start_swap(app_dir, version, setup_path, pid=None, popen=None,
-               launch=True, register=True, log_path=None):
+               launch=True, register=True, log_path=None, failed_note=None):
     """Write the swap script to the temp folder and start it detached.
     Returns ``(True, log_path)`` or ``(False, reason)``.
 
@@ -687,7 +706,8 @@ def start_swap(app_dir, version, setup_path, pid=None, popen=None,
     with os.fdopen(fd, "w", encoding="utf-8-sig", newline="\r\n") as f:
         f.write(swap_script(app_dir, version, setup_path,
                             pid if pid is not None else os.getpid(),
-                            log_path, launch=launch, register=register))
+                            log_path, launch=launch, register=register,
+                            failed_note=failed_note))
     flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
              | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     try:

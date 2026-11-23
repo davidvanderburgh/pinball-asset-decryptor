@@ -58,7 +58,9 @@ def test_pick_installer_asset_windows():
     assert got == {"name": "Pinball_Asset_Decryptor_v9.0.0_Windows.exe",
                    "url": "https://example.com/win.exe",
                    "size": 42, "sha256": "ab" * 32,
-                   "kind": "windows-installer"}
+                   "kind": "windows-installer",
+                   # PAD-1519: no file list on this release
+                   "delta": None}
 
 
 def test_pick_installer_asset_no_digest_is_ok():

@@ -255,7 +255,7 @@ def _read_exact(resp, n, cancel_cb, sink=None, count=None):
     left = n
     while left:
         if cancel_cb and cancel_cb():
-            raise InterruptedError("update canceled")
+            raise InterruptedError("download canceled")
         chunk = resp.read(min(_CHUNK, left))
         if not chunk:
             raise EOFError("the download ended early")
@@ -322,7 +322,7 @@ def _fetch_span(url, span, target, opener, cancel_cb, count):
 def build_tree(manifest, app_dir, target, *, opener=None, cancel_cb=None,
                progress_cb=None, max_download=None, repo=GITHUB_REPO):
     """Make *target* the manifest's version, from *app_dir*'s files and the
-    packs.  *target* must not exist yet; the caller removes it on any
+    packs.  *target* is new or empty; the caller removes it on any
     exception.  ``progress_cb(stage, done, total)`` with stage ``"copy"``
     (files) then ``"download"`` (bytes).  *max_download*: more packed bytes
     to fetch than this raises DeltaUnavailable before any is fetched.
@@ -331,14 +331,14 @@ def build_tree(manifest, app_dir, target, *, opener=None, cancel_cb=None,
     """
     opener = opener or net.urlopen
     rows = manifest["files"]
-    os.makedirs(target)
+    os.makedirs(target, exist_ok=True)
     missing = []
     done = [0]
     lock = threading.Lock()
 
     def _local(row):
         if cancel_cb and cancel_cb():
-            raise InterruptedError("update canceled")
+            raise InterruptedError("download canceled")
         path, size, sha = row[0], row[1], row[2]
         rel = path.replace("/", os.sep)
         took = _take_local(os.path.join(app_dir, rel),

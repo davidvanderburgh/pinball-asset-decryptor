@@ -6539,10 +6539,13 @@ class App:
         app_dir = update_slots.installed_app_dir()
         if not app_dir:
             return None, "this copy was not installed by the setup program"
+        if update_slots.swap_failed_version() == version:
+            # before the look for a staged copy: the one that would not
+            # swap in is still there, and without the setup exe on disk it
+            # would fail the same way again
+            return None, "switching to it in place did not work last time"
         if update_slots.staged_install_ok(app_dir, version):
             return update_slots.next_dir(app_dir), "it was ready already"
-        if update_slots.swap_failed_version() == version:
-            return None, "switching to it in place did not work last time"
         cancel = bg["cancel"].is_set
         took = {}
         started = time.time()

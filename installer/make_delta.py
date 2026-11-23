@@ -189,7 +189,12 @@ def iss_files(iss_path=ISS, defines=None):
         dest = dest[len("{app}"):].strip("\\")
         if "{" in dest:
             raise IssError("constant in DestDir: %s" % line)
-        src = os.path.normpath(os.path.join(base, _expand(p["source"])))
+        source = _expand(p["source"])
+        if os.sep != "\\":
+            # read on a host that is not Windows (the tests): the script's
+            # backslashes are its path separators
+            source = source.replace("\\", os.sep)
+        src = os.path.normpath(os.path.join(base, source))
         src_dir, mask = os.path.split(src)
         if "*" in src_dir or "?" in src_dir:
             raise IssError("wildcard in a Source folder: %s" % line)
@@ -207,13 +212,13 @@ def iss_files(iss_path=ISS, defines=None):
                 raise IssError("cannot read %s: %s"
                                % (os.path.join(src_dir, sub), e)) from None
             for e in entries:
-                rel = os.path.join(sub, e.name) if sub else e.name
-                rel = rel.replace("/", "\\")
+                here = os.path.join(sub, e.name) if sub else e.name
+                rel = here.replace("/", "\\")     # as Inno names it
                 if excl.match(rel) or _hidden(e):
                     continue
                 if e.is_dir():
                     if recurse:
-                        stack.append(rel)
+                        stack.append(here)
                     continue
                 if not mask_re.match(e.name.lower()):
                     continue
@@ -241,8 +246,7 @@ def drop_compiled(files):
     module docstring)."""
     lower = {k.lower() for k in files}
     return {k: v for k, v in files.items()
-            if (source_of_pyc(k) or "").lower() not in lower
-            or source_of_pyc(k) is None}
+            if (source_of_pyc(k) or "").lower() not in lower}
 
 
 def _sha_file(path):
@@ -381,7 +385,7 @@ def verify(folder, manifest):
         if "/" not in rel and (low.startswith("unins")
                                or low == ".pad_staged.json"):
             continue
-        if "__pycache__" in low.split("/"):
+        if "__pycache__" in low.split("/") and low not in want:
             continue            # compiled at install time (compileall)
         seen.add(low)
         if low not in want:
@@ -397,7 +401,9 @@ def verify(folder, manifest):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--version")
+    ap.add_argument("--version", help="default: the project's __version__")
+    ap.add_argument("--installer", help="the setup exe these assets go "
+                    "beside: they take its name")
     ap.add_argument("--python-dir", default=os.path.join(_HERE, "build",
                                                          "python"))
     ap.add_argument("--project-dir", default=os.path.dirname(_HERE))
@@ -420,7 +426,13 @@ def main(argv=None):
                  len(problems)))
         return 1 if problems else 0
     if not a.version:
-        ap.error("--version is required")
+        with open(os.path.join(a.project_dir, "pinball_decryptor",
+                               "__init__.py"), encoding="utf-8") as f:
+            m = re.search(r'^__version__\s*=\s*["\']([^"\']+)', f.read(),
+                          re.M)
+        if not m:
+            ap.error("no __version__ in the project; pass --version")
+        a.version = m.group(1)
     files = iss_files(a.iss, {"ProjectDir": os.path.abspath(a.project_dir),
                               "PythonDir": os.path.abspath(a.python_dir),
                               "AppVersion": a.version})
@@ -434,6 +446,11 @@ def main(argv=None):
             print("  previous manifest unreadable (%s) - packing every file"
                   % e)
     base = "Pinball_Asset_Decryptor_v%s_Windows" % a.version
+    if a.installer:
+        base = os.path.splitext(os.path.basename(a.installer))[0]
+        if ("v%s_" % a.version) not in base:
+            print("  %s is not v%s's installer" % (a.installer, a.version))
+            return 2
     mpath, ppath, st = build(files, a.version, a.out, base, previous, a.repo)
     print("delta assets for v%s: %d files (%.0f MB); %d new in this pack "
           "(%.1f MB); %d pack(s) referenced; manifest %.0f KB"

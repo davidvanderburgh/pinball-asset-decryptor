@@ -1,6 +1,8 @@
 """Draw the icons Explorer shows on a card image PAD opens
 (pinball_decryptor/card_image.ico + card_image.png, and
-card_image_compact.ico + card_image_compact.png for a card stored compact).
+card_image_compact.ico + card_image_compact.png for a card stored compact),
+and card_compact_badge.ico + .png: the compact badge alone, which Explorer
+draws OVER the plain card as an icon overlay (PAD-1526).
 
     python installer/make_card_icon.py
 
@@ -23,6 +25,8 @@ OUT_PNG = os.path.join(PKG, "card_image.png")
 OUT_ICO = os.path.join(PKG, "card_image.ico")
 OUT_COMPACT_PNG = os.path.join(PKG, "card_image_compact.png")
 OUT_COMPACT_ICO = os.path.join(PKG, "card_image_compact.ico")
+OUT_BADGE_PNG = os.path.join(PKG, "card_compact_badge.png")
+OUT_BADGE_ICO = os.path.join(PKG, "card_compact_badge.ico")
 
 S = 1024                              # drawn big, shrunk for smooth edges
 BODY = (226, 230, 238, 255)
@@ -80,9 +84,37 @@ def compact_card(size=S):
     corner holding two arrowheads squeezing a bar.  Big enough that the 16 px
     icon still shows a green corner."""
     im = card(size)
-    d = ImageDraw.Draw(im)
     u = size / 1024.0
-    cx, cy, r = 744 * u, 744 * u, 268 * u
+    _badge(ImageDraw.Draw(im), 744 * u, 744 * u, 268 * u)
+    return im
+
+
+#: overlay pictures up to this size are drawn the icon's own size, over
+#: all of it (a list's small icons); bigger ones are drawn small, in the
+#: icon's lower left corner
+BADGE_CORNER_UP_TO = 32
+
+
+def compact_badge(size=S, corner=False):
+    """The badge alone, for Explorer to draw over the plain card as an icon
+    overlay.  Explorer draws a big icon's overlay small, in the icon's lower
+    left corner, so there the whole picture is the disc.  A small icon's
+    overlay is drawn over all of it, and a disc that filled the picture hid
+    the card: *corner* keeps the disc to the lower left."""
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    if corner:
+        r = size * 0.32
+        _badge(d, r, size - r, r)
+    else:
+        _badge(d, size / 2.0, size / 2.0, size / 2.0 - 2)
+    return im
+
+
+def _badge(d, cx, cy, r):
+    """The green disc with its white ring and squeeze mark, radius *r*
+    about (*cx*, *cy*)."""
+    u = r / 268.0
     ring = 34 * u
     d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=BADGE_RING)
     d.ellipse([cx - r + ring, cy - r + ring, cx + r - ring, cy + r - ring],
@@ -94,7 +126,6 @@ def compact_card(size=S):
                (cx, cy - gap - bar)], fill=BADGE_MARK)
     d.polygon([(cx - w, cy + gap + bar + h), (cx + w, cy + gap + bar + h),
                (cx, cy + gap + bar)], fill=BADGE_MARK)
-    return im
 
 
 def main():
@@ -105,6 +136,13 @@ def main():
         big.resize((256, 256), Image.LANCZOS).save(
             ico, sizes=[(s, s) for s in sizes])
         print("wrote %s and %s" % (png, ico))
+    # the overlay: each size is its own picture (see compact_badge)
+    frames = [compact_badge(corner=s <= BADGE_CORNER_UP_TO).resize(
+        (s, s), Image.LANCZOS) for s in sizes]
+    frames[-1].save(OUT_BADGE_PNG)
+    frames[-1].save(OUT_BADGE_ICO, sizes=[(s, s) for s in sizes],
+                    append_images=frames[:-1])
+    print("wrote %s and %s" % (OUT_BADGE_PNG, OUT_BADGE_ICO))
 
 
 if __name__ == "__main__":

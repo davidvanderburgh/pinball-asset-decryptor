@@ -15,6 +15,19 @@ never run from the install folder (an open file there would stop an update):
 registered.  A new version gets a new folder; the old one goes once nothing
 holds it.
 
+The badge itself is an icon OVERLAY where Explorer has one loaded
+(PAD-1526).  Explorer keeps the icon it was given for a file for as long as
+the file's name, size and modified time stay the same, and compacting or
+expanding a card changes none of them, so an icon that carried the badge
+stayed wrong in an open window until Explorer restarted.  An overlay is
+asked again whenever Explorer is told the file changed
+(sparse_card.shell_refresh).  The same class is the overlay identifier
+(:func:`overlay_values`, one key under HKEY_LOCAL_MACHINE, so only an
+Administrator run can write it); Explorer reads that list when it starts, so
+a freshly registered overlay shows from the next sign-in.  Until then, and on
+a machine whose overlay slots other programs have filled, the icon carries
+the badge as before.
+
 Windows on ARM runs a native Explorer that cannot load this x64 DLL, and
 there the card keeps its one plain icon (:func:`supported`).
 """
@@ -33,6 +46,15 @@ CLSID = "{6E1B5C0A-52D4-4F0B-9C55-1A1522CA4D01}"
 DLL = "padicon64.dll"
 ICON = "card_image.ico"
 ICON_COMPACT = "card_image_compact.ico"
+#: the compact badge alone: the overlay Explorer draws over the plain card
+ICON_BADGE = "card_compact_badge.ico"
+#: where Windows lists icon overlay identifiers (HKEY_LOCAL_MACHINE only)
+OVERLAY_KEY = (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer"
+               r"\ShellIconOverlayIdentifiers")
+#: our name in that list.  Windows takes the list in name order and stops
+#: when its slots are full, so the leading spaces sort it early;
+#: tools/padicon/padicon.c OVERLAY_NAME says the same
+OVERLAY_NAME = "     PinballCardCompact"
 CLASS_NAME = "Pinball card image icon"
 
 
@@ -41,11 +63,12 @@ def _pkg():
 
 
 def sources(pkg=None):
-    """``[(name, path)]`` of the three files a staged handler is made of."""
+    """``[(name, path)]`` of the files a staged handler is made of."""
     pkg = pkg or _pkg()
     return [(DLL, os.path.join(pkg, "shell", DLL)),
             (ICON, os.path.join(pkg, ICON)),
-            (ICON_COMPACT, os.path.join(pkg, ICON_COMPACT))]
+            (ICON_COMPACT, os.path.join(pkg, ICON_COMPACT)),
+            (ICON_BADGE, os.path.join(pkg, ICON_BADGE))]
 
 
 def stage_root():
@@ -140,6 +163,12 @@ def class_values(dll):
     return [(base, "", CLASS_NAME),
             (base + r"\InprocServer32", "", dll),
             (base + r"\InprocServer32", "ThreadingModel", "Apartment")]
+
+
+def overlay_values():
+    """``[(key under HKEY_LOCAL_MACHINE, value name, data)]`` that list the
+    class as an icon overlay identifier."""
+    return [(OVERLAY_KEY + "\\" + OVERLAY_NAME, "", CLSID)]
 
 
 def handler_values(progid):

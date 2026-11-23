@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PAD-1523: the sparse package that gives the app's short-menu handler
+     (padmenu64.dll) an identity, which is what Windows 11 asks of an entry
+     on its first right-click menu.  Unsigned (the OID in Publisher), so no
+     certificate is trusted on anybody's machine for it.  Its files stay in
+     the folder the app registers it from (webui/shell_menu.py); the package
+     itself holds only this manifest and its logo.  Version: build.py. -->
+<Package IgnorableNamespaces="uap uap10 rescap com desktop4 desktop5"
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5">
+  <Identity Name="PinballAssetDecryptor.ShellMenu"
+            Publisher="CN=Pinball Asset Decryptor"
+            Version="@VERSION@" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Pinball Asset Decryptor right-click menu</DisplayName>
+    <PublisherDisplayName>Pinball Asset Decryptor</PublisherDisplayName>
+    <Logo>logo.png</Logo>
+    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+  </Properties>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+  <Applications>
+    <!-- ONE entry: Windows folds every entry a package offers for a file
+         into one flyout named after it (PAD-1523, seen on the short menu),
+         and sorts packaged entries by name, so Write could not sit beside
+         Compact anyway.  Write to a card with PAD is a .raw card's default
+         verb, which Windows 11 already lists at the top of that menu. -->
+    <Application Id="Compact" Executable="padmenu.exe"
+                 uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
+      <uap:VisualElements AppListEntry="none"
+        DisplayName="Compact with PAD"
+        Description="Compact with PAD on the right-click menu"
+        BackgroundColor="transparent"
+        Square150x150Logo="logo.png" Square44x44Logo="logo.png" />
+      <Extensions>
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:SurrogateServer DisplayName="Pinball Asset Decryptor right-click menu">
+              <com:Class Id="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D03" Path="padmenu64.dll" ThreadingModel="STA" />
+            </com:SurrogateServer>
+          </com:ComServer>
+        </com:Extension>
+        <desktop4:Extension Category="windows.fileExplorerContextMenus">
+          <desktop4:FileExplorerContextMenus>
+            <desktop5:ItemType Type=".raw">
+              <desktop5:Verb Id="PadCompact" Clsid="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D03" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".img">
+              <desktop5:Verb Id="PadCompact" Clsid="6E1B5C0A-52D4-4F0B-9C55-1A1523CA4D03" />
+            </desktop5:ItemType>
+          </desktop4:FileExplorerContextMenus>
+        </desktop4:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

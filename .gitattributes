@@ -47,3 +47,7 @@ pinball_decryptor/resources/remote/pad-buttons.so binary
 pinball_decryptor/resources/remote/pad-buttons.c text eol=lf
 pinball_decryptor/resources/remote/t_buttons.c text eol=lf
 pinball_decryptor/resources/remote/build.sh text eol=lf
+
+# the Windows 11 short-menu package and its certificate are built binaries (PAD-1523)
+*.msix binary
+*.cer binary

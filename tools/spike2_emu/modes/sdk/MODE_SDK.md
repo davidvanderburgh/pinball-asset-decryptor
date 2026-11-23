@@ -7205,6 +7205,21 @@ the start menu is armed:
 
     co-op: the right flipper held at Start starts no co-op - the start menu's CO-OP PLAY does (the start menu has CO-OP PLAY)
 
+PAD-1449 round 11 (DoomWalrus666: "Sometimes language selection did not appear during the intro. This happened
+sporadically"): Godzilla's PLAYER LANGUAGE SELECT bar and its flipper toggle both ask one check each time, has play
+begun (`site language_begun`, LE 1.16 0x1712cc, Pro 1.15/1.16 0x16d8f4, their only two callers). It answers the rule's
+own cached byte, else `data language_play_begun` (LE 0x712748), which the game clears at a Start. A ball launched, or a playfield
+switch the game counts as play, makes it answer yes, and from then on the bar's two lines are written empty and a
+flipper flips nothing. A ball still rolling or kicked out after a reset or a quick restart, or a launch, did that during
+the intro (emulator, LE 1.16: the ball launched 1 s into a Standard game's film, 3 of 3 games with no bar at all; the
+global byte poked alone changed nothing). While the game's intro screen is up in ball 1 (`ci_film_up`), the check is
+refused and answers 0 (`lang_bar_kept`), so the bar and its flips last as long as that screen, for our intro swapped in
+or the game's own film; after it the game's own answer counts again. Armed with the co-op characters or an intro on the
+card (`coop_chars_arm`), as the language keys' veto is:
+
+    language: the game's PLAYER LANGUAGE SELECT bar stays up through the intro screen in ball 1, whatever the playfield switches do
+    language: play began (the ball launched, or a playfield switch) while the game's intro screen is up in ball 1 - its PLAYER LANGUAGE SELECT bar and flips are kept until that screen closes
+
 `mode.log`:
 
     co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one (a launch the one shown), 30 s

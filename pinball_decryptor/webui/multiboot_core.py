@@ -292,6 +292,11 @@ CODESELECT_SRC = TOOL_DIR + "/codeselect"
 #: ``--selector-dir`` looks - ensurebuild.sh's own rules, called rather than
 #: copied (see :func:`install_selector_line`).
 ENSURESELECT = TOOL_DIR + "/ensureselect.sh"
+#: The PREVIEW's selector build: ``make all`` into a scratch directory, but
+#: only when a digest of the sources moved, and quiet unless it fails
+#: (PAD-1534: file times on an installed app could not be trusted, so every
+#: preview recompiled the whole menu program into the user's log).
+PREVIEWSELECT = TOOL_DIR + "/previewselect.sh"
 #: THE MENU'S COLOUR THEMES: the selector's own themes.json, one definition -
 #: the selector compiles it in, mkmulticard.py writes the keys, this tab shows
 #: the picker and the "make your own" colour grid.  Read once, on first use,
@@ -3578,12 +3583,13 @@ def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
     # (PAD-126).  Nothing about the emulator needs it, so a machine that runs
     # every title can still be this one.
     return (ensure
-            + "if make -C %s BUILD=%s ROOT=%s all; then echo %s %s; "
+            + "if bash %s %s %s %s; then echo %s %s; "
               "elif [ -x %s ]; then echo %s %s; "
               "elif [ ! -d %s ]; then echo %s; exit 1; "
               "elif ! command -v make >/dev/null 2>&1; then echo %s; exit 1; "
               "else echo %s; exit 1; fi"
-            % (_q(src_dir), _q(build_dir), _q(rootfs), tag, _q(built),
+            % (_q(PREVIEWSELECT), _q(src_dir), _q(build_dir), _q(rootfs),
+               tag, _q(built),
                _q(installed), tag, _q(installed), _q(lib),
                _q("[preview] error: no selector - the menu program is built "
                   "against the machine's own filesystem, and this PC has not "

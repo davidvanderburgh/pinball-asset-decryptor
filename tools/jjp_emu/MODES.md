@@ -230,7 +230,7 @@ wizard mode on an attract menu, as Stern's start menu offers a game type. They w
 title that runs modes (each title's port report says so under `played`).
 
 ```
-# 3_kiss_the_ring.mode - Godfather 02.03 (modes/examples/Godfather-v02.03)
+# 3_kiss_the_ring.mode - Godfather 02.03 (modes/wizard_examples/Godfather-v02.03)
 start_all = BoxingMode PursuitMode ... CompoundMB FiveFamiliesMB SicilyMB TurfWarMB
 game_type = KISS THE RING
 progress = BoxingMode pane_boxing.png pane_boxing_grey.png
@@ -301,8 +301,14 @@ sound_start = se_VO_GF_Narrator_KissTheRing1
 its port report): Guns N' Roses and CHAKA's LE, Elton John, Godfather, Pirates, Wonka, Dialed In, The
 Hobbit and Toy Story count their Mode classes and their multiballs (10 to 40 names each); The Wizard of
 Oz counts its 27 mode procs (no MultiballRule there). Every one exports the flipper button calls and the
-attract and service menu hook lists. Each starter folder has a `3_wizard.mode` (Godfather's is
-`3_kiss_the_ring.mode`): four of the title's own modes played, or PAD WIZARD on the menu.
+attract and service menu hook lists.
+
+**Examples, not starters.** Nothing in the runtime or the app is written for one game: a wizard mode
+is a `.mode` file like any other. The wizard examples are in `modes/wizard_examples/<title>/`, one a
+title (`3_wizard.mode`: four of the title's own modes played, or PAD WIZARD on the menu; Godfather's
+is `3_kiss_the_ring.mode`, below). They are not in the starter folders (`modes/examples/`), which are
+copied into a person's own mode folder the first time and every mode in them runs: copy one into your
+mode folder (**Open the mode folder**) to use it.
 
 The Godfather example uses the game's own Kiss the Ring sounds, which the game still loads
 (`se_VO_GF_Narrator_KissTheRing1`-`3`, `...Champion1`-`2`, the two `BadGuyHit` fanfares); its art

@@ -621,7 +621,8 @@ def write_example(p, folder, title_label):
         if d.get("lamps"):
             f.write("lamps = %s\nlamp_color = ff2000\nlamp_blink = 4\n" % d["lamps"])
     write_multiball_example(p, folder, title_label)
-    write_wizard_example(p, folder, title_label)
+    # no wizard here: a starter folder is copied into the person's own the first time and every mode
+    # in it runs, so a wizard (and its attract menu) is an example to copy in, never a starter (PAD-1512)
 
 
 def write_multiball_example(p, folder, title_label):
@@ -658,8 +659,9 @@ def wizard_picks(p, n=4):
 
 
 def write_wizard_example(p, folder, title_label):
-    """A third starter (PAD-1512): a wizard mode of the title's own - every one of a few of its own
-    modes played starts it - also picked as a game type on the attract menu."""
+    """An example (PAD-1512, modes/wizard_examples/<title>, never a starter): a wizard mode of the
+    title's own - every one of a few of its own modes played starts it - also picked as a game type
+    on the attract menu."""
     pl, d = p.get("played") or {}, p["defaults"]
     picks = wizard_picks(p)
     if not (pl.get("can_watch") and (pl.get("game_type") or {}).get("can") and len(picks) >= 2):
@@ -712,7 +714,7 @@ def main(argv=None):
     ap.add_argument("--label", help="title label for the example's comments")
     ap.add_argument("--multiball-example", help="write only the multiball starter (2_multiball.mode) here")
     ap.add_argument("--stock-example", help="write a starter .stock folder here")
-    ap.add_argument("--wizard-example", help="write only the wizard starter (3_wizard.mode, PAD-1512) here")
+    ap.add_argument("--wizard-example", help="write only the wizard example (3_wizard.mode, PAD-1512) here, e.g. modes/wizard_examples/<title>")
     ap.add_argument("--live", help="a running game's mode globals and shot table (jjpstock.py live) to fold in")
     a = ap.parse_args(argv)
     live = json.load(open(a.live)) if a.live else None
@@ -726,7 +728,7 @@ def main(argv=None):
     if a.multiball_example:
         write_multiball_example(p, a.multiball_example, a.label or a.gamename or p["elf"])
     if a.wizard_example:
-        print("  starter wizard: %s" % write_wizard_example(p, a.wizard_example, a.label or a.gamename or p["elf"]))
+        print("  wizard example: %s" % write_wizard_example(p, a.wizard_example, a.label or a.gamename or p["elf"]))
     if a.stock_example:
         print("  starter .stock: %s" % write_stock_example(p, a.stock_example, a.label or a.gamename or p["elf"]))
     print("%s: %s; %d exported, %d switches, %d lamps, %d sounds, %d fonts, %d Mode classes%s" % (

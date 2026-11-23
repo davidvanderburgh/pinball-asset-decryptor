@@ -28,6 +28,12 @@ def main():
         json.dump({"disclaimer_accepted": True, "last_manufacturer": "jjp",
                    "manufacturers": {"jjp": {"extract_input": GF_ISO, "write_original": GF_ISO,
                                              "write_output": scratch}}}, f)
+    if kind == "after":     # Kiss the Ring is an example (never a starter): copied in, as a person would
+        import shutil
+        modes = os.path.join(HERE, "..", "tools", "jjp_emu", "modes")
+        mine = os.path.join(scratch, "jjp_modes", "Godfather-v02.03")
+        shutil.copytree(os.path.join(modes, "examples", "Godfather-v02.03"), mine)
+        shutil.copy(os.path.join(modes, "wizard_examples", "Godfather-v02.03", "3_kiss_the_ring.mode"), mine)
     import site
     proc, url = webui_shot.start_server(settings, scratch,
                                         extra_env={"PYTHONPATH": site.getusersitepackages(),

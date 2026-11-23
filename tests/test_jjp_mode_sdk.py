@@ -890,7 +890,7 @@ def test_blocks_hear_the_games_modes():
 
 def test_godfather_kiss_the_ring_is_its_sixteen_panes():
     mm = _load("mkjjpmodes")
-    ex = os.path.join(RIG, "modes", "examples", "Godfather-v02.03")
+    ex = os.path.join(RIG, "modes", "wizard_examples", "Godfather-v02.03")
     port = json.load(open(os.path.join(RIG, "modes", "ports", "Godfather-v02.03.json"), encoding="utf-8"))
     modes, problems = mm.check_modes(ex, port)
     assert problems == []
@@ -917,7 +917,7 @@ def test_a_multiball_ends_when_one_ball_is_left():
 def test_every_title_that_runs_modes_can_count_plays_and_show_the_menu():
     """PAD-1512, read off each title's own game program: the plays (Mode objects, and MultiballRules
     where the engine has them) and the attract menu (the engine's flipper button calls and its attract
-    and service menu hooks) work on every JJP title that runs modes, and each has a wizard starter."""
+    and service menu hooks) work on every JJP title that runs modes, and each has a wizard example (never a starter)."""
     ports = os.path.join(RIG, "modes", "ports")
     can = 0
     for fn in sorted(os.listdir(ports)):
@@ -931,7 +931,13 @@ def test_every_title_that_runs_modes_can_count_plays_and_show_the_menu():
         assert pl["can_watch"] and pl["names"], fn
         assert pl["multiballs"] == (p["engine"] == "mode"), fn       # The Wizard of Oz: mode procs only
         assert pl["game_type"]["can"] and pl["game_type"]["attract_hook"] and pl["game_type"]["diag_hook"], fn
-        ex = os.path.join(RIG, "modes", "examples", fn[:-5])
+        ex = os.path.join(RIG, "modes", "wizard_examples", fn[:-5])
         assert any("game_type" in open(os.path.join(ex, f), encoding="utf-8").read()
                    for f in os.listdir(ex) if f.endswith(".mode")), fn
+        # never a starter: a starter folder is copied into the person's own and every mode in it runs
+        st = os.path.join(RIG, "modes", "examples", fn[:-5])
+        for f in os.listdir(st) if os.path.isdir(st) else ():
+            if f.endswith(".mode"):
+                text = open(os.path.join(st, f), encoding="utf-8").read()
+                assert "game_type" not in text and "start_all" not in text, (fn, f)
     assert can == 10

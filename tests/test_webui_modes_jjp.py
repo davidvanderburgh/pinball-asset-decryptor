@@ -97,7 +97,7 @@ def test_hidden_on_jjp_without_the_preview_switch(tmp_path, monkeypatch):
 def test_a_title_is_seeded_from_its_starter_and_checks_clean(tmp_path, preview_on):
     with web_app(tmp_path, mfr="jjp") as w:
         j = _open_wonka(w)
-        assert [m["file"] for m in j["modes"]] == ["1_example.mode", "2_multiball.mode", "3_wizard.mode"]   # PAD-1353, PAD-1512
+        assert [m["file"] for m in j["modes"]] == ["1_example.mode", "2_multiball.mode"]   # PAD-1353
         assert j["open"] == "1_example.mode"
         assert j["form"]["start"] == "switch_target_tv"
         assert j["title_cfg"]["game"] == "Wonka"
@@ -149,20 +149,19 @@ def test_new_duplicate_delete(tmp_path, preview_on):
         _open_wonka(w)
         fn = w.call("modes.jjp_new", "Fizzy Lifting")
         j = _jjp(w)
-        assert fn == "4_fizzy_lifting.mode" and j["open"] == fn
+        assert fn == "3_fizzy_lifting.mode" and j["open"] == fn
         assert j["form"]["name"] == "Fizzy Lifting" and j["form"]["start"]      # the port's starter picks
         assert j["check"]["ok"], j["check"]
         w.call("modes.jjp_duplicate")
         j = _jjp(w)
-        assert [m["name"] for m in j["modes"]] == ["PAD Mode", "PAD Multiball", "PAD Wizard", "Fizzy Lifting",
-                                                   "Fizzy Lifting copy"]
+        assert [m["name"] for m in j["modes"]] == ["PAD Mode", "PAD Multiball", "Fizzy Lifting", "Fizzy Lifting copy"]
         w.answers.append("no")
         w.call("modes.jjp_delete")
-        assert len(_jjp(w)["modes"]) == 5
+        assert len(_jjp(w)["modes"]) == 4
         w.answers.append("yes")
         w.call("modes.jjp_delete")
         j = _jjp(w)
-        assert [m["name"] for m in j["modes"]] == ["PAD Mode", "PAD Multiball", "PAD Wizard", "Fizzy Lifting"]
+        assert [m["name"] for m in j["modes"]] == ["PAD Mode", "PAD Multiball", "Fizzy Lifting"]
         assert j["open"] == "1_example.mode"
 
 

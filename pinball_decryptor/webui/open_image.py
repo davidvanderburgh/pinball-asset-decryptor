@@ -173,9 +173,14 @@ def association_values(app_dir):
     r"""``[(key under HKCU\Software\Classes, value name, data)]``."""
     command = 'wscript.exe "%s" "%%1"' % os.path.join(app_dir, "launcher.vbs")
     icon = os.path.join(app_dir, "pinball_decryptor", "icon.ico")
+    # a card image gets a file's icon (an SD card), never the app's own: a
+    # desktop of .raw files read as a row of PAD shortcuts (PAD-1518)
+    file_icon = os.path.join(app_dir, "pinball_decryptor", "card_image.ico")
+    if not os.path.isfile(file_icon) and os.path.isfile(icon):
+        file_icon = icon
     rows = [
         (PROGID, "", "Pinball card image"),
-        (PROGID + r"\DefaultIcon", "", icon),
+        (PROGID + r"\DefaultIcon", "", file_icon),
         (PROGID + r"\shell", "", "open"),
         (PROGID + r"\shell\open", "", "Write to a card with PAD"),
         # the command is wscript.exe, so without these Explorer's Open with

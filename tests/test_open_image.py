@@ -260,7 +260,19 @@ def test_open_with_names_pad_not_the_script_host():
     assert rows[(oi.PROGID + r"\Application", "ApplicationName")] == \
         "Pinball Asset Decryptor"
     assert rows[(oi.PROGID + r"\Application", "ApplicationIcon")].endswith(
-        "icon.ico")
+        r"\icon.ico")
+
+
+def test_a_card_image_has_a_files_icon_not_the_apps():
+    """A .raw on the desktop shows an SD card, not PAD's own tile: with the
+    app's icon they read as a row of PAD shortcuts (PAD-1518).  The icon is
+    in the package the installer copies whole."""
+    from pinball_decryptor.webui import open_image as oi
+    rows = {(k, n): d for k, n, d in oi.association_values(ROOT)}
+    icon = rows[(oi.PROGID + r"\DefaultIcon", "")]
+    assert icon == os.path.join(ROOT, "pinball_decryptor", "card_image.ico")
+    assert os.path.isfile(icon)
+    assert rows[(oi.PROGID + r"\Application", "ApplicationIcon")] != icon
 
 
 @pytest.mark.skipif(os.name != "nt", reason="the Windows registry")

@@ -43,6 +43,7 @@ _ZIP_CODES = {"lab": "labyrinth", "dune": "dune", "wmh": "winchester",
 STOCK = {
     "labyrinth-2026.01.30": "6e68bcabe3c17fbe11089c5d1c6dcffe",
     "dune-2026.05.13": "194a9bced9fbec66216bb2ce82568387",
+    "dune-2026.11.10": "4daf29118a6307f119b21d1aa58951f7",
     "winchester-2026.04.29": "14850a91a5e212380e93c7fe80ee31b2",
     "winchester-2026.05.27": "29626fc7806abd2b147293e19cad8a27",
     "bonjovi-2026.10.01": "c94bd4f8b63364d5b4d8d79bb19bcbb0",

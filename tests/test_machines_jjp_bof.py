@@ -426,7 +426,8 @@ def test_a_modded_iso_is_modified():
 @pytest.mark.skipif(not os.path.isdir(BOF_LIB), reason="no BoF library here")
 @pytest.mark.parametrize("name,sidx,official", [
     ("lab.fun", "labyrinth-2026.01.30", True),
-    ("dune.fun", "dune-2026.05.13", True),
+    ("dune.fun", "dune-2026.11.10", True),
+    (os.path.join("_older", "dune.fun"), "dune-2026.05.13", True),
     ("winchester.fun", "winchester-2026.04.29", True),
     (os.path.join("winchester 5-27", "winchester.fun"), "winchester-2026.05.27", True),
     ("bon-jovi_2026.10.01.fun", "bonjovi-2026.10.01", True),

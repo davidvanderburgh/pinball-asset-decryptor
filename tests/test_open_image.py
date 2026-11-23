@@ -1,0 +1,181 @@
+"""A card image double-clicked in Explorer opens PAD on its write dialog
+(PAD-1514, webui/open_image.py): the command line, the hand-off to a PAD
+already open, the per-user file association and its uninstall, and the app
+switching to the image's manufacturer and era with the Flash image dialog
+open on it.  No real card, drive or registry is touched."""
+
+import os
+import re
+
+import pytest
+
+from tests.webui_harness import web_app
+from tests.test_webui_write import DRIVE, fake_drives, recorder, wait_for
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_flash(monkeypatch):
+    from pinball_decryptor import app as app_mod
+
+    def _refuse(self, *a, **k):
+        raise AssertionError("an open-image test reached the real flash")
+    monkeypatch.setattr(app_mod.App, "_start_flash_image", _refuse)
+
+
+def test_image_arg_takes_the_first_existing_file(tmp_path):
+    from pinball_decryptor.webui.open_image import image_arg
+    img = tmp_path / "Game 1.0.raw"
+    img.write_bytes(b"\0")
+    assert image_arg([]) is None
+    assert image_arg(["--browser"]) is None
+    assert image_arg([str(tmp_path / "gone.raw")]) is None
+    assert image_arg(["-x", '"%s"' % img]) == str(img)
+
+
+def test_association_command_runs_the_launcher_with_the_file():
+    from pinball_decryptor.webui import open_image as oi
+    app_dir = r"C:\Program Files\Pinball Asset Decryptor"
+    rows = oi.association_values(app_dir)
+    cmd = dict(((k, n), d) for k, n, d in rows)[
+        (oi.PROGID + r"\shell\open\command", "")]
+    assert cmd == ('wscript.exe "%s\\launcher.vbs" "%%1"' % app_dir)
+    for ext in oi.IMAGE_EXTENSIONS:
+        assert (ext + r"\OpenWithProgids", oi.PROGID, "") in rows
+        assert any(k == r"SystemFileAssociations\%s\shell\%s\command"
+                   % (ext, oi.VERB) for k, _n, _d in rows)
+    # PAD takes the double-click only where Windows' own Mount is not it
+    assert oi.DEFAULT_FOR == (".raw",)
+
+
+def test_checkout_is_not_an_install():
+    """A checkout has launch.vbs at its root, never launcher.vbs: it never
+    registers itself (the installed app does)."""
+    from pinball_decryptor.webui import open_image as oi
+    if os.path.isfile(os.path.join(ROOT, "launcher.vbs")):
+        pytest.skip("running from an install")
+    assert oi.install_dir() is None
+    assert oi.register_association() is False
+
+
+def test_launcher_passes_the_file_on():
+    with open(os.path.join(ROOT, "installer", "launcher.vbs"),
+              encoding="utf-8") as f:
+        vbs = f.read()
+    assert "For Each a In WScript.Arguments" in vbs
+    assert re.search(r'ShellExecute _\s*\n\s*appDir & "\\python\\pythonw.exe", '
+                     r'params,', vbs)
+
+
+def test_uninstall_removes_what_the_app_registers():
+    from pinball_decryptor.webui import open_image as oi
+    with open(os.path.join(ROOT, "installer", "pinball_decryptor.iss"),
+              encoding="utf-8") as f:
+        iss = f.read()
+    body = iss.split("procedure RemoveTheFileAssociation;", 1)[1]
+    body = body.split("\nend;", 1)[0]
+    assert oi.PROGID in body and oi.VERB in body
+    for ext in oi.IMAGE_EXTENSIONS:
+        assert "'%s'" % ext in body
+    assert "'Software\\Classes\\' + Exts[I]" in body
+    # silent uninstalls (the update's swap) clean up too: before the Exit
+    step = iss.split("procedure CurUninstallStepChanged", 1)[1]
+    assert step.index("RemoveTheFileAssociation()") < step.index(
+        "if UninstallSilent() then")
+
+
+def _stern_spike2(monkeypatch, image):
+    from pinball_decryptor.core.registry import Game
+    from pinball_decryptor.plugins.stern.manufacturer import \
+        SternManufacturer
+    real = SternManufacturer.detect
+
+    def _detect(self, path):
+        if os.path.normcase(path) == os.path.normcase(str(image)):
+            return Game(key="godzilla", display="Godzilla",
+                        manufacturer_key="stern", era="spike2",
+                        notes="Spike 2 card image")
+        return real(self, path)
+    monkeypatch.setattr(SternManufacturer, "detect", _detect)
+
+
+def test_opened_image_switches_manufacturer_and_opens_write(tmp_path,
+                                                            monkeypatch):
+    """PAD on JJP, a Stern Spike 2 image double-clicked: Stern, Spike 2, the
+    Flash image dialog on that image, write only, Start writes it."""
+    fake_drives(monkeypatch)
+    image = tmp_path / "Godzilla Premium 1.16.raw"
+    image.write_bytes(b"\0" * 1024)
+    _stern_spike2(monkeypatch, image)
+    with web_app(tmp_path, mfr="jjp") as w:
+        assert w.app._current_mfr.key == "jjp"
+        flashes = recorder(w, "on_flash_image")
+        assert w.run(w.app.open_image, str(image)) is True
+        assert w.app._current_mfr.key == "stern"
+        assert w.app._current_mfr.current_era == "spike2"
+        assert w.state("shell")["tab"] == "write"
+        assert wait_for(w, lambda: (w.state("write")["flash_dlg"] or {})
+                        .get("drives"))
+        f = w.state("write")["flash_dlg"]
+        assert f["handed_in"] is True
+        assert f["build"] is False and f["write"] is True
+        assert f["image_path"] == str(image)
+        assert f["title"] == "Flash SD card image"
+        assert f["header"] == ("Write Godzilla Premium 1.16.raw onto the "
+                               "SD card")
+        assert "The image you opened" in f["intro"]
+        assert "press Flash image;" in f["intro"]
+        w.answers.append("yes")                     # Erase … and continue?
+        assert w.call("write.flash_start") is True
+        assert flashes[0][0] == (str(image), DRIVE)
+        # not the Write tab's own remembered choice
+        assert "stern" not in w.window.service("write")._saved_flash_choices
+
+
+def test_opened_image_waits_for_the_disclaimer(tmp_path, monkeypatch):
+    image = tmp_path / "card.raw"
+    image.write_bytes(b"\0")
+    with web_app(tmp_path, mfr="stern") as w:
+        w.app._session_started = False
+        assert w.run(w.app.open_image, str(image)) is True
+        assert w.ctx.open_image == str(image)
+        assert w.state("write").get("flash_dlg") is None
+
+
+def test_unrecognised_image_on_the_picker_says_so(tmp_path):
+    image = tmp_path / "holiday.raw"
+    image.write_bytes(b"\0" * 1024)
+    with web_app(tmp_path) as w:
+        assert w.app._current_mfr is None
+        assert w.run(w.app.open_image, str(image)) is False
+        assert w.asked and w.asked[-1]["title"] == "Open image"
+
+
+def test_second_launch_hands_the_image_to_the_open_app(tmp_path,
+                                                       monkeypatch):
+    """The link file + the server's /api: a second launch's
+    hand_to_running gives the path to this app, which opens it."""
+    from pinball_decryptor.webui import open_image as oi
+    from pinball_decryptor.webui.server import WebServer
+    fake_drives(monkeypatch)
+    image = tmp_path / "Godzilla Premium 1.16.raw"
+    image.write_bytes(b"\0" * 1024)
+    _stern_spike2(monkeypatch, image)
+    with web_app(tmp_path, mfr="jjp") as w:
+        w.ctx.registry.register("shell.open_image", w.app.open_image)
+        server = WebServer(w.ctx)
+        server.start()
+        try:
+            assert oi.hand_to_running(str(image)) is False   # no link yet
+            path = oi.write_link(w.ctx, server.port)
+            assert os.path.dirname(path) == str(tmp_path / "cfg")
+            assert oi.hand_to_running(str(image)) is True
+            w.drain()
+            assert w.app._current_mfr.key == "stern"
+            assert (w.state("write")["flash_dlg"] or {}).get(
+                "image_path") == str(image)
+            assert oi.remove_link(w.ctx) is True
+            assert oi.hand_to_running(str(image)) is False
+        finally:
+            server.stop()

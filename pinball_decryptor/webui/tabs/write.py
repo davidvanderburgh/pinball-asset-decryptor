@@ -2325,7 +2325,7 @@ class WriteTab(TabService):
     # the Build / flash dialog
     # ------------------------------------------------------------------
     def _open_flash_dialog(self, initial_image=None, fresh=False,
-                           image_titles=None):
+                           image_titles=None, opened_file=False):
         on_flash = self.window.cb.get("on_flash_image")
         if on_flash is None:
             return False
@@ -2355,7 +2355,9 @@ class WriteTab(TabService):
         handed_in = ""
         if initial_image and os.path.isfile(initial_image):
             initial = initial_image
-            handed_in = "Multi-boot"
+            # PAD-1514: an image double-clicked in Explorer, not a card the
+            # Multi-boot tab made
+            handed_in = "" if opened_file else "Multi-boot"
         if self._flash is not None:
             self._flash.close()
         # Tk opened the dialog over whatever tab was showing.  Once the shell
@@ -2411,6 +2413,7 @@ class WriteTab(TabService):
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(
                 k, c),
             handed_in=handed_in, fresh_image=bool(handed_in and fresh),
+            opened_file=bool(opened_file and initial_image),
             flashed_fn=self._image_was_flashed, image_titles=image_titles,
             publish=self._publish_flash,
             ask_open=self.window.ask_open, ask_save=self._ask_save)

@@ -274,6 +274,39 @@ class CompactResult:
         return max(0, self.before - self.after)
 
 
+def takes_less(path, min_hole=MIN_HOLE):
+    """True when the card at *path* is stored compact as Explorer can tell
+    without opening it: it is marked sparse and at least *min_hole* of it
+    has no disk space behind it.  This is the rule the card's icon goes by
+    (tools/padicon/padicon.c says the same in C, PAD-1522); False on any
+    error and for a file that is not there."""
+    try:
+        st = os.stat(path)
+        if sys.platform == "win32":
+            # FILE_ATTRIBUTE_SPARSE_FILE
+            if not getattr(st, "st_file_attributes", 0) & 0x200:
+                return False
+        return on_disk_size(path) + min_hole <= st.st_size
+    except OSError:
+        return False
+
+
+def shell_refresh(path):
+    """Tell Explorer the file changed, so its icon is asked for again (a
+    card just made compact, or full size, shows it at once).  Never raises."""
+    if sys.platform != "win32":
+        return
+    try:
+        fn = ctypes.windll.shell32.SHChangeNotify
+        fn.argtypes = [ctypes.c_long, ctypes.c_uint, ctypes.c_wchar_p,
+                       ctypes.c_void_p]
+        fn.restype = None
+        # SHCNE_UPDATEITEM, SHCNF_PATHW
+        fn(0x00002000, 0x0005, os.path.abspath(path), None)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 def compact_file(path, *, min_hole=MIN_HOLE, progress=None, log=None):
     """Make the image at *path* sparse in place; the bytes do not change,
     nor does its modified time.  Returns a :class:`CompactResult`."""
@@ -282,6 +315,7 @@ def compact_file(path, *, min_hole=MIN_HOLE, progress=None, log=None):
         res = _compact_open(path, min_hole=min_hole, progress=progress)
     finally:
         _put_times(path, times)
+        shell_refresh(path)
     if log:
         log(describe(res))
     return res
@@ -603,6 +637,7 @@ def expand_file(path, *, progress=None, cancel=None):
         return _expand_open(path, progress=progress, cancel=cancel)
     finally:
         _put_times(path, times)
+        shell_refresh(path)
 
 
 def _expand_open(path, *, progress, cancel):

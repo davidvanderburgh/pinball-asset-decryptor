@@ -1,0 +1,5 @@
+LIBRARY padicon64
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE
+    PadIconTakesLess

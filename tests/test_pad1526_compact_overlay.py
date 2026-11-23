@@ -332,7 +332,7 @@ def test_explorer_started_before_the_badge_was_listed_waits(monkeypatch):
     assert not si.badge_waits_for_explorer(written=6000)
     monkeypatch.setattr(sys, "platform", "linux")
     assert not si.badge_waits_for_explorer(written=6000, explorer=explorer)
-    assert si.restart_explorer(explorer=explorer) is False
+    assert si.restart_explorer() is False
 
 
 def test_the_finished_window_offers_the_restart_once(tmp_path):
@@ -416,3 +416,71 @@ def test_the_restart_button_runs_the_restart_and_the_window_stays(tmp_path):
     # a restart that fails says so and keeps the window too
     assert cw.view(jobs, cw.NOT_RESTARTED)["content"].endswith(
         cw.OFFER_TEXT[cw.NOT_RESTARTED])
+
+
+def _fake_shell(monkeypatch, back_by_itself, folders_back=()):
+    """restart_explorer against a stand-in desktop: returns what it did."""
+    did = {"asked": [], "started": 0, "opened": [], "calls": 0}
+    state = {"pid": 100, "lists": 0}
+
+    def explorer():
+        return (state["pid"], 5000) if state["pid"] else None
+
+    def ask(pid, wait):
+        did["asked"].append(pid)
+        state["pid"] = 200 if back_by_itself else 0
+        return True
+
+    def start():
+        did["started"] += 1
+        state["pid"] = 300
+
+    def folders():
+        state["lists"] += 1
+        if state["lists"] == 1:
+            return [r"C:\cards", "::{HOME}"]
+        return list(folders_back)
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(si, "_explorer", explorer)
+    monkeypatch.setattr(si, "_ask_explorer_to_exit", ask)
+    monkeypatch.setattr(si, "_start_explorer", start)
+    monkeypatch.setattr(si, "open_folders", folders)
+    monkeypatch.setattr(si, "_open_folder", did["opened"].append)
+    did["ok"] = si.restart_explorer(sleep=lambda s: None)
+    return did
+
+
+def test_restart_starts_explorer_only_when_windows_did_not(monkeypatch):
+    # Windows brought it back: starting another would open a stray window
+    did = _fake_shell(monkeypatch, back_by_itself=True)
+    assert did["ok"] is True and did["asked"] == [100]
+    assert did["started"] == 0
+    assert did["opened"] == [r"C:\cards", "::{HOME}"]
+    # it stayed away: started once, and the folders are opened again
+    did = _fake_shell(monkeypatch, back_by_itself=False)
+    assert did["ok"] is True and did["started"] == 1
+    assert did["opened"] == [r"C:\cards", "::{HOME}"]
+
+
+def test_restart_opens_only_the_folders_that_did_not_come_back(monkeypatch):
+    did = _fake_shell(monkeypatch, back_by_itself=True,
+                      folders_back=["::{HOME}"])
+    assert did["opened"] == [r"C:\cards"]
+
+
+def test_restart_that_cannot_close_explorer_says_so(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(si, "_explorer", lambda: (100, 5000))
+    monkeypatch.setattr(si, "open_folders", lambda: [])
+    monkeypatch.setattr(si, "_ask_explorer_to_exit", lambda pid, wait: False)
+    started = []
+    monkeypatch.setattr(si, "_start_explorer", lambda: started.append(1))
+    assert si.restart_explorer(sleep=lambda s: None) is False
+    assert not started
+
+    def broken(pid, wait):
+        raise OSError("access denied")
+
+    monkeypatch.setattr(si, "_ask_explorer_to_exit", broken)
+    assert si.restart_explorer(sleep=lambda s: None) is False

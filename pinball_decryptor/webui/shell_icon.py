@@ -262,41 +262,112 @@ def badge_waits_for_explorer(written=None, explorer=None):
     return explorer[1] < written
 
 
-def restart_explorer(explorer=None):
-    """Restart the Explorer that is the desktop and taskbar, the way an
-    installer does (Windows' Restart Manager): it is asked to close, comes
-    back as the same user and reopens the folder windows it had.  True when
-    it was restarted.  Never raises."""
-    if sys.platform != "win32":
+def open_folders():
+    """The folders Explorer has open in windows now, as paths it opens
+    again (a drive path, or ``::{...}`` for a place like Home).  Empty when
+    they cannot be listed (a Python without pywin32).  Never raises."""
+    out = []
+    try:
+        import win32com.client
+        for w in win32com.client.Dispatch("Shell.Application").Windows():
+            try:
+                path = w.Document.Folder.Self.Path
+            except Exception:                           # noqa: BLE001
+                continue
+            if path and path not in out:
+                out.append(path)
+    except Exception:                                   # noqa: BLE001
+        return []
+    return out
+
+
+#: how long Explorer gets to close when asked, then to be back, in seconds
+EXPLORER_CLOSE_WAIT = 6.0
+EXPLORER_BACK_WAIT = 20.0
+
+
+def _ask_explorer_to_exit(pid, wait):
+    """Ask the desktop's Explorer to close the way its own "Exit Explorer"
+    does (it saves its settings first); end it if it has not gone within
+    *wait* seconds.  True once the process is gone."""
+    import ctypes
+    from ctypes import wintypes
+    u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+    k32.OpenProcess.restype = wintypes.HANDLE
+    # SYNCHRONIZE | PROCESS_TERMINATE
+    h = k32.OpenProcess(0x00100000 | 0x0001, False, pid)
+    if not h:
         return False
     try:
-        import ctypes
-        from ctypes import wintypes
-        explorer = explorer or _explorer()
-        if not explorer:
-            return False
-        pid, made = explorer
+        u32.FindWindowW.restype = wintypes.HWND
+        tray = u32.FindWindowW("Shell_TrayWnd", None)
+        if tray:
+            # the taskbar's own "Exit Explorer" (WM_USER + 436)
+            u32.PostMessageW(wintypes.HWND(tray), 0x0400 + 436, 0, 0)
+        if k32.WaitForSingleObject(wintypes.HANDLE(h),
+                                   int(wait * 1000)) == 0:
+            return True
+        k32.TerminateProcess(wintypes.HANDLE(h), 1)
+        return k32.WaitForSingleObject(wintypes.HANDLE(h), 5000) == 0
+    finally:
+        k32.CloseHandle(wintypes.HANDLE(h))
 
-        class Unique(ctypes.Structure):         # RM_UNIQUE_PROCESS
-            _fields_ = [("pid", wintypes.DWORD), ("made", wintypes.FILETIME)]
 
-        rm = ctypes.windll.rstrtmgr
-        session = wintypes.DWORD(0)
-        key = ctypes.create_unicode_buffer(33)  # CCH_RM_SESSION_KEY + 1
-        if rm.RmStartSession(ctypes.byref(session), 0, key) != 0:
+def _start_explorer():
+    import subprocess
+    windir = os.environ.get("SystemRoot") or os.environ.get("WINDIR") \
+        or r"C:\Windows"
+    subprocess.Popen([os.path.join(windir, "explorer.exe")], close_fds=True)
+
+
+def _open_folder(path):
+    import ctypes
+    # SW_SHOWNOACTIVATE: the folders come back without taking the keyboard
+    ctypes.windll.shell32.ShellExecuteW(None, "open", path, None, None, 4)
+
+
+def restart_explorer(sleep=None):
+    """Restart the Explorer that is the desktop and taskbar, and open the
+    folder windows it had again.  It is asked to close (ended if it will
+    not), started again when Windows has not already done so, and each
+    folder that was open and did not come back by itself is opened.  True
+    when a new Explorer is the desktop.  Never raises.
+
+    Only for a run that is NOT elevated: an Explorer started by an
+    Administrator process would be one too."""
+    if sys.platform != "win32":
+        return False
+    import time
+    sleep = sleep or time.sleep
+    try:
+        old = _explorer()
+        if not old:
             return False
-        try:
-            who = Unique(pid, wintypes.FILETIME(made & 0xFFFFFFFF, made >> 32))
-            if rm.RmRegisterResources(session, 0, None, 1, ctypes.byref(who),
-                                      0, None) != 0:
-                return False
-            # RmForceShutdown: a folder window with a dialog open must not
-            # leave Explorer half closed
-            if rm.RmShutdown(session, 1, None) != 0:
-                return False
-            return rm.RmRestart(session, 0, None) == 0
-        finally:
-            rm.RmEndSession(session)
+        folders = open_folders()
+        if not _ask_explorer_to_exit(old[0], EXPLORER_CLOSE_WAIT):
+            return False
+        new, started, waited = None, False, 0.0
+        while waited < EXPLORER_BACK_WAIT:
+            new = _explorer()
+            if new and new[0] != old[0]:
+                break
+            new = None
+            # Windows brings a shell that was ended back itself; one that
+            # closed when asked stays away until it is started
+            if not started and waited >= 2.0:
+                _start_explorer()
+                started = True
+            sleep(0.25)
+            waited += 0.25
+        if not new:
+            return False
+        if folders:
+            sleep(2.0)                  # let it open what it restores itself
+            back = open_folders()
+            for path in folders:
+                if path not in back:
+                    _open_folder(path)
+        return True
     except Exception:                                   # noqa: BLE001
         log.warning("Explorer not restarted", exc_info=True)
         return False

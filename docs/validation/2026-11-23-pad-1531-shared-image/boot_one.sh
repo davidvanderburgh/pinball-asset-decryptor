@@ -26,7 +26,7 @@ else
 fi
 echo "  authorized_keys on the card: $(cat "$R/home/root/.ssh/authorized_keys" 2>/dev/null | awk '{print $NF}' | tr '\n' ' ' || true)"
 [ -e "$R/home/root/.ssh/authorized_keys" ] || echo "  (no authorized_keys file)"
-for who in builder recipient; do
+for who in ${4:-builder recipient}; do
   cp "$W/$who/pad_ed25519" "/tmp/k1531_$who"; chmod 600 "/tmp/k1531_$who"
   out=$(timeout 90 ssh -T -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o IdentitiesOnly=yes -o ConnectTimeout=30 -i "/tmp/k1531_$who" root@127.0.0.1 \

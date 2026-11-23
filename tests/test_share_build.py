@@ -176,12 +176,17 @@ def test_remote_access_off_takes_the_keys_and_programs_off_too(used_card, qualif
 
 
 # ---------------------------------------------------------------- one button: strangers' keys come off
-def test_one_button_setup_takes_another_computers_key_off_and_names_it(used_card, qualified, tmp_path):
+def test_one_button_setup_asks_then_takes_another_computers_key_off_and_names_it(used_card, qualified, tmp_path):
     theirs = _remote_on(used_card, tmp_path, STRANGER)         # an image someone else built, remote on
     look = remote_setup.look(str(theirs))
     assert look['enabled'] and not look['lets_pad_in'] and look['others'] == ['builder@far-away']
+    # nobody has said yet whether it stays: setup stops and asks, the card unchanged
+    before = theirs.read_bytes()
+    res = remote_setup.set_up(str(theirs))
+    assert remote_setup.asked(res) == [STRANGER] and theirs.read_bytes() == before
     notes = []
-    assert remote_setup.set_up(str(theirs), log=lambda t, l='info': notes.append((l, t))) == 'done'
+    assert remote_setup.set_up(str(theirs), log=lambda t, l='info': notes.append((l, t)),
+                               keep_others=False) == 'done'
     keys = S.inspect_image(str(theirs))['public_keys']
     assert keys.strip() == pad_ssh_key.public_line().strip()   # trusts only this computer's key
     assert any(l == 'warning' and 'builder@far-away' in t and 'Taking it off' in t for l, t in notes)
@@ -190,7 +195,8 @@ def test_one_button_setup_takes_another_computers_key_off_and_names_it(used_card
 
 def test_one_button_setup_is_not_already_done_while_a_stranger_is_on_the_card(used_card, qualified, tmp_path):
     both = _remote_on(used_card, tmp_path, pad_ssh_key.public_line().strip() + '\n' + STRANGER)
-    assert remote_setup.set_up(str(both)) == 'done'
+    assert remote_setup.asked(remote_setup.set_up(str(both))) == [STRANGER]
+    assert remote_setup.set_up(str(both), keep_others=False) == 'done'
     assert STRANGER.split()[1] not in S.inspect_image(str(both))['public_keys']
     assert remote_setup.set_up(str(both)) == 'already'
 
@@ -201,7 +207,7 @@ def test_one_button_setup_keeps_the_projects_own_keys_and_others_when_asked(used
     assert remote_setup.look(str(card), own=mine)['others'] == ['builder@far-away']
     kept = tmp_path / 'kept.raw'
     shutil.copyfile(card, kept)
-    remote_setup.set_up(str(card), own=mine)
+    remote_setup.set_up(str(card), own=mine, keep_others=False)
     keys = S.inspect_image(str(card))['public_keys']
     assert mine.split()[1] in keys and STRANGER.split()[1] not in keys
     remote_setup.set_up(str(kept), own=mine, keep_others=True)
@@ -282,23 +288,62 @@ def test_network_tab_never_copies_a_cards_keys_into_the_project(tmp_path, monkey
         assert card_extras.load_share(str(project)) and w.state('network')['share']
 
 
-def test_one_button_on_an_image_asks_before_taking_a_stranger_off(tmp_path, monkeypatch):
-    from pinball_decryptor.webui.tabs import network as network_tab
+def test_network_tab_keeps_the_users_own_other_computers_when_told(tmp_path, monkeypatch):
+    # PAD-1531, David: "I don't want to break existing remote access that people have set up for themselves"
     from tests.test_webui_network import ready
     from tests.webui_harness import web_app
+    laptop = key(seed=b'l').replace('test machine', pad_ssh_key.COMMENT)      # the user's own laptop with PAD
     with web_app(tmp_path, mfr='stern') as w:
         project, svc = ready(w, tmp_path, monkeypatch)
-        image = tmp_path / 'theirs.raw'; image.write_bytes(b'card')
-        monkeypatch.setattr(w.window, 'ask_open', lambda *a, **kw: str(image), raising=False)
-        monkeypatch.setattr(network_tab, 'remote_setup_look', lambda path, own='': {'others': ['builder@far-away']})
-        jobs = []
-        monkeypatch.setattr(svc, '_set_up', lambda path, keep_others=False: jobs.append((path, keep_others)) or True)
-        for answer, keep in ((True, False), (False, True)):
-            monkeypatch.setattr(network_tab.compat.messagebox, 'askyesnocancel', lambda *a, **kw: answer)
-            assert w.call('network.set_up_image')
-            assert jobs[-1] == (str(image), keep)
-        monkeypatch.setattr(network_tab.compat.messagebox, 'askyesnocancel', lambda *a, **kw: None)
-        assert w.call('network.set_up_image') is False and len(jobs) == 2
+        monkeypatch.setattr(S, 'inspect_image', lambda *a, **kw: dict(
+            supported=True, reason='', platform='stern-spike2', enabled=True,
+            public_keys=pad_ssh_key.public_line().strip() + '\n' + laptop + '\n'))
+        w.run(svc.on_show)
+        assert w.state('network')['others'][0].startswith('PAD on another computer')
+        assert w.call('network.keep_others', str(project))
+        rec = card_extras.load(str(project))
+        assert rec['enabled'] and laptop.split()[1] in rec['public_keys']
+        assert laptop.split()[1] in card_extras.configuration(str(project))['public_keys']   # builds keep it
+        assert w.state('network')['others'] == []
+
+
+@pytest.mark.parametrize('answer', [True, False, None])
+def test_one_button_on_a_plugged_in_card_asks_before_any_key_comes_off(tmp_path, monkeypatch, answer):
+    """Yes takes the other computer off; No keeps it on the card AND in the project, so builds keep it; Cancel
+    changes nothing.  The card is never changed before the answer."""
+    import json
+    from pinball_decryptor.webui.tabs import network as network_tab
+    from tests.test_remote_setup import _settle
+    from tests.test_webui_network import ready
+    from tests.webui_harness import web_app
+    laptop = key(seed=b'l').replace('test machine', pad_ssh_key.COMMENT)
+    with web_app(tmp_path, mfr='stern') as w:
+        project, svc = ready(w, tmp_path, monkeypatch)
+        svc.set(cards=[{'display': 'SD card', 'device': r'\\.\PhysicalDrive3'}], cards_state='ok')
+        w.call('network.pick_card', r'\\.\PhysicalDrive3')
+        monkeypatch.setattr(network_tab.compat.messagebox, 'askyesno', lambda *a, **k: True)
+        asked = []
+        monkeypatch.setattr(network_tab.compat.messagebox, 'askyesnocancel',
+                            lambda title, message, **k: asked.append(message) or answer)
+        calls = []
+
+        def fake(path, log=None, progress=None, cancel=None, own='', keep_others=None):
+            calls.append(keep_others)
+            if keep_others is None:
+                return remote_setup.ASK + json.dumps([laptop])
+            return 'done'
+        monkeypatch.setattr(remote_setup, 'set_up_with_privileges', fake)
+        assert w.call('network.set_up_card') is True
+        _settle(w, 'setup_busy')
+        st = w.state('network')
+        assert asked and 'PAD on another computer' in asked[0] and 'your own' in asked[0]
+        if answer is None:
+            assert calls == [None] and 'not changed' in st['setup_note']
+            assert card_extras.load(str(project)) is None
+            return
+        assert calls == [None, not answer] and st['setup_kind'] == 'ok'
+        saved = card_extras.load(str(project))['public_keys']
+        assert (laptop.split()[1] in saved) is (not answer)
 
 
 def test_writing_an_image_that_lets_a_stranger_in_asks_first(tmp_path, monkeypatch):

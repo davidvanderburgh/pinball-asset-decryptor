@@ -90,12 +90,6 @@ def _careful_note(count):
             "more slowly, at the %d addresses that didn't answer (%s)..." % (count, when))
 
 
-def remote_setup_look(path, own=''):
-    """remote_setup.look, here so a test can stand in for it."""
-    from ...core import remote_setup
-    return remote_setup.look(path, own=own)
-
-
 class NetworkTab(TabService):
     ns = 'network'
     key = 'Network'
@@ -441,8 +435,8 @@ class NetworkTab(TabService):
                 'Set up remote access',
                 "Put remote access on the card in %s?\n\nPAD adds a small program to the card's system files "
                 "that lets this computer in over your network, so Send to machine can reach the machine. The game, "
-                "its settings and high scores stay as they are. If the card lets any other computer in, PAD takes "
-                "that off, so only this computer can get in.\n\nYour computer may ask for administrator "
+                "its settings and high scores stay as they are. If the card already lets another computer in, PAD "
+                "asks you whether it stays.\n\nYour computer may ask for administrator "
                 "access to change the card." % shown, icon='warning'):
             return False
         return self._set_up(device)
@@ -456,21 +450,6 @@ class NetworkTab(TabService):
                                     filetypes=[('SD card images', '*.raw *.img'), ('All files', '*.*')])
         if not path:
             return False
-        others = remote_setup_look(path, self._own_keys()).get('others') or []
-        if others:
-            # PAD-1531: another person's computer on an image (one they built with remote access on): off by default
-            who = 'another computer' if len(others) == 1 else '%d other computers' % len(others)
-            ans = compat.messagebox.askyesnocancel(
-                'Set up remote access',
-                "Put remote access on %s?\n\nThis image already lets %s in over the network: %s. Whoever has "
-                "that computer could get into a machine running this card.\n\nYes: take %s off, so only this "
-                "computer can get in (recommended).\nNo: keep %s as well." % (
-                    os.path.basename(path), who, ', '.join(others),
-                    'it' if len(others) == 1 else 'them', 'it' if len(others) == 1 else 'them'),
-                icon='warning')
-            if ans is None:
-                return False
-            return self._set_up(path, keep_others=not ans)
         if not compat.messagebox.askyesno(
                 'Set up remote access',
                 "Put remote access on %s?\n\nThe image file itself is changed: write it to the machine's card "
@@ -486,7 +465,29 @@ class NetworkTab(TabService):
             rec = None
         return (rec or {}).get('public_keys') or ''
 
-    def _set_up(self, path, keep_others=False):
+    def _ask_others(self, path, lines):
+        """PAD-1531: the card trusts other computers than this one.  They may be someone else's (an image they
+        built with remote access on) or the user's own other computer with PAD (every PAD key looks alike), so the
+        user says: Yes takes them off, No keeps them (and saves them with the project, so builds keep them too)."""
+        names = [card_extras.key_name(k) for k in lines]
+        many = len(names) > 1
+        what = os.path.basename(path) if os.path.isfile(path) else 'The card'
+        ans = compat.messagebox.askyesnocancel(
+            'Set up remote access',
+            "%s already lets %s in over the network:\n\n%s\n\nIf %s your own (another computer of yours with PAD, "
+            "or your own SSH program), keep %s. If not, take %s off: whoever has %s could get into the machine.\n\n"
+            "Yes: take %s off, so only this computer can get in.\nNo: keep %s, mine." % (
+                what, '%d other computers' % len(names) if many else 'another computer',
+                '\n'.join('  ' + n for n in names), 'they are' if many else 'it is', 'them' if many else 'it',
+                'them' if many else 'it', 'them' if many else 'that computer', 'them' if many else 'it',
+                'them, they are' if many else 'it, it is'),
+            icon='warning')
+        if ans is None:
+            self.set(setup_busy=False, setup_pct=0, setup_kind='', setup_note='Canceled. The card was not changed.')
+            return False
+        return self._set_up(path, keep_others=not ans, kept=() if ans else tuple(lines))
+
+    def _set_up(self, path, keep_others=None, kept=()):
         from ...core import remote_setup
         self.set(setup_busy=True, setup_pct=0, setup_note='Starting...', setup_kind='')
         project = self._project()
@@ -512,6 +513,11 @@ class NetworkTab(TabService):
             try:
                 res = remote_setup.set_up_with_privileges(path, log=log, progress=progress, own=own,
                                                           keep_others=keep_others)
+                lines = remote_setup.asked(res)
+                if lines is not None:
+                    # nothing changed yet: the user says whether the other computers stay, then it runs again
+                    loop.post(self._ask_others, path, lines)
+                    return
                 image = os.path.isfile(path)
                 where = os.path.basename(path) if image else 'The card'
                 text = ('%s already had remote access, and it lets this computer in.' % where if res == 'already'
@@ -523,17 +529,21 @@ class NetworkTab(TabService):
                 kind = 'ok'
             except Exception as e:                              # noqa: BLE001 - said, never raised into the UI
                 text, kind = str(e) or e.__class__.__name__, 'err'
-            loop.post(self._set_up_done, text, kind, project)
+            loop.post(self._set_up_done, text, kind, project, kept)
         threading.Thread(target=work, daemon=True, name='pad-remote-setup').start()
         return True
 
-    def _set_up_done(self, text, kind, project):
+    def _set_up_done(self, text, kind, project, kept=()):
         if kind == 'ok' and project and project == self._project() and self._inspect().get('supported'):
-            # a card written later from this project keeps remote access, or the machine would lose it again
+            # a card written later from this project keeps remote access, or the machine would lose it again;
+            # PAD-1531: and keeps the other computers the user said were theirs
             try:
                 rec = card_extras.load(project)
-                if rec is None or not rec['enabled']:
-                    card_extras.save(project, True, rec['public_keys'] if rec else '')
+                keys = rec['public_keys'] if rec else ''
+                if kept:
+                    keys = (keys.rstrip('\n') + '\n' if keys.strip() else '') + '\n'.join(kept)
+                if rec is None or not rec['enabled'] or kept:
+                    card_extras.save(project, True, keys)
                     self.publish()
             except card_extras.ExtrasError:
                 pass
@@ -1326,6 +1336,22 @@ class NetworkTab(TabService):
                 from ...core import remote_setup
                 lets_in = bool(remote_setup.look(self._source()).get('lets_pad_in'))
                 card_extras.save(project, lets_in, '')
+        except card_extras.ExtrasError as e:
+            self.set(error=str(e))
+            return False
+        self._saved_extras()
+        return True
+
+    @rpc
+    def keep_others(self, project):
+        """PAD-1531: the other computers the original lets in are the user's own: the project saves them as its own
+        keys, so cards written from it keep letting them in (with this computer's added)."""
+        if project != self._project() or self.get('running') or not self._inspect()['supported']:
+            return False
+        try:
+            if card_extras.load(project) is None:
+                lines = card_extras.others(self._inspect().get('public_keys', ''))
+                card_extras.save(project, True, '\n'.join(lines))
         except card_extras.ExtrasError as e:
             self.set(error=str(e))
             return False

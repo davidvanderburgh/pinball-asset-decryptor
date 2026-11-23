@@ -243,10 +243,13 @@ function Others({ n, locked }) {
   return html`<${Note} kind="warn">
     <div>The original image lets ${many ? `${n.others.length} other computers` : "another computer"} in over the
       network: <b>${n.others.join(", ")}</b>. Cards you write from this project would let ${many ? "them" : "it"} into
-      your machine too.</div>
+      your machine too. Keep ${many ? "them" : "it"} only if ${many ? "they are" : "it is"} your own (another computer
+      of yours with PAD, or your own SSH program).</div>
     <div class="row net-send-row">
       <${Button} disabled=${locked} onClick=${() => call("network.take_others_off", n.project)}>
         Take ${many ? "them" : "it"} off<//>
+      <${Button} kind="ghost" disabled=${locked} onClick=${() => call("network.keep_others", n.project)}>
+        Keep ${many ? "them, they're" : "it, it's"} mine<//>
     </div>
   <//>`;
 }

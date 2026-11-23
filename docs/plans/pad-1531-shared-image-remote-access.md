@@ -16,8 +16,8 @@ on the other side of the world have access to the original user's machine? we do
 | A card with remote access on lets the builder in to any machine that runs it. Nothing warned. | The build log and the Write tab's "Before you build" say so (`ssh_card.who_gets_in`), naming any other computer the original lets in. Writing an image that lets someone else's computer in asks first (`app._strangers_ok`). |
 | No way to make a clean image for others. | **Build for sharing** (Network tab, project `extras.share`): remote access fully off, and the machine's own partitions emptied as a stock card ships them (core/share_build.py). Flash refuses an image that still carries keys or machine data while it is on. |
 | Remote access "off" only removed the boot hook: the key file and PAD's programs stayed on the card. | Off removes the hook, `authorized_keys`, dropbear, dropbearkey, sftp-server and the start script, checked after (`_verify_tree`). |
-| One-button setup kept every key the card already trusted, and said "already set up" while a stranger's key was there. | It takes other computers' keys off by default and names them (log + the last word on the Network tab); the project's own saved keys stay; for an image file it asks (Yes = take off, No = keep). |
-| A project that never set remote access: the Network tab pre-filled its key box with the card's keys, so the first tick saved a stranger's key into the project. | The box starts empty; the card's other keys are named apart with **Take it off** (saves the project's own setting: on for this computer alone if the card let it in, else off). |
+| One-button setup kept every key the card already trusted, and said "already set up" while a stranger's key was there. | It stops before changing anything and asks, naming each other key (card or image file): Yes takes them off, No keeps them and saves them with the project so builds keep them too; the project's own saved keys stay without asking. Every PAD key has the same comment, so PAD cannot tell a stranger from the user's own second computer: nothing comes off unasked (David, 2026-11-23: "I don't want to break existing remote access that people have set up for themselves"). |
+| A project that never set remote access: the Network tab pre-filled its key box with the card's keys, so the first tick saved a stranger's key into the project. | The box starts empty; the card's other keys are named apart with **Take it off** (saves the project's own setting: on for this computer alone if the card let it in, else off) or **Keep it, it's mine** (saves them as the project's own keys). |
 
 ## Where a machine's own data lives (the Wi-Fi question)
 
@@ -44,6 +44,11 @@ Read 2026-11-23 from the cards themselves:
   * B, A after the recipient's one-button setup (it named the builder's key and took it off): the **old builder's key
     is refused** (Permission denied (publickey)); the recipient's logs in.
   * C, A built for sharing: no boot hook, no authorized_keys, nothing listening; /data and /dump read back empty.
+* Existing remote access people set up for themselves (proof_existing_access.txt, run2.sh): one person with PAD
+  on a desktop and a laptop: the desktop sets the card up, the laptop's setup asks about the desktop's key (card
+  unchanged), Keep -> both log in, and a second press says already; Take it off -> the desktop is refused, the
+  laptop logs in. A card set up earlier from the desktop, rebuilt from its project with remote access kept on: the
+  desktop still logs in.
 * tests/test_share_build.py (real e2fsprogs under WSL): the shared build reads back with no keys, no programs, no
   hook and empty /data + /dump, boot and game partitions byte-identical; an already-empty build is left byte for
   byte; flash refuses an unshared image for a sharing project; off is off; setup takes strangers off, keeps the

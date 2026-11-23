@@ -63,7 +63,8 @@ def test_set_up_keeps_only_the_projects_own_keys_of_those_the_card_trusted(card,
     S.apply_to_build(str(card), str(out), {'enabled': True, 'public_keys': key()})
     kept = tmp_path / 'kept.raw'
     kept.write_bytes(out.read_bytes())
-    assert remote_setup.set_up(str(out)) == 'done'
+    assert remote_setup.asked(remote_setup.set_up(str(out))) == [key()]        # asked first, nothing changed
+    assert remote_setup.set_up(str(out), keep_others=False) == 'done'
     keys = S.inspect_image(str(out))['public_keys']
     assert key() not in keys and pad_ssh_key.public_line().split()[1] in keys
     assert remote_setup.set_up(str(kept), own=key()) == 'done'
@@ -157,7 +158,7 @@ def test_a_plugged_in_card_asks_for_administrator_access(monkeypatch):
     with pytest.raises(ExtrasError, match='administrator'):
         remote_setup.set_up_with_privileges(r'\\.\PhysicalDrive3')
     assert jobs == [{'mode': 'remote_access', 'device': r'\\.\PhysicalDrive3', 'pad_line': pad_ssh_key.public_line(),
-                     'own': '', 'keep_others': False}]
+                     'own': '', 'keep_others': None}]
 
 
 # ---------------------------------------------------------------- the scan, and the machine remembered
@@ -628,9 +629,9 @@ def test_network_tab_sets_up_the_picked_card_and_keeps_it_on_for_the_project(tmp
         asked, ran = [], []
         monkeypatch.setattr(compat.messagebox, 'askyesno', lambda *a, **k: asked.append(a[1]) or True)
 
-        def fake(path, log=None, progress=None, cancel=None, own='', keep_others=False):
+        def fake(path, log=None, progress=None, cancel=None, own='', keep_others=None):
             ran.append(path)
-            assert own == '' and keep_others is False
+            assert own == '' and keep_others is None
             log('The card also let in another computer: builder@far-away. Taking it off, so only this computer '
                 'can get in.', 'warning')
             log('Writing the changes to the card...', 'info')
@@ -641,7 +642,7 @@ def test_network_tab_sets_up_the_picked_card_and_keeps_it_on_for_the_project(tmp
         _settle(w, 'setup_busy')
         st = w.state('network')
         assert ran == [r'\\.\PhysicalDrive3'] and 'SD card (7.9 GB, External)' in asked[0]
-        assert 'other computer' in asked[0]                  # PAD-1531: the question says strangers come off
+        assert 'another computer' in asked[0]                # PAD-1531: the question says others are asked about
         assert st['setup_kind'] == 'ok' and 'has remote access now' in st['setup_note']
         assert 'Took it off' in st['setup_note'] and 'builder@far-away' in st['setup_note']
         assert 'Find my machine' in st['setup_note']

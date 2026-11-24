@@ -6915,6 +6915,13 @@ PREVIEW_NOTES = {
 }
 
 
+#: Replace image…'s tooltip, beside the image's file in Edit image…
+#: (PAD-1544).
+REPLACE_TIP = ("Put another build of this game here - a newer version, say. "
+               "Its place in the menu, title, picture, sounds, settings and "
+               "high scores all stay as they are.")
+
+
 class _PageDialog:
     """A dialog the PAGE draws.  This module keeps only what the panel and
     the page read off it (its words, its choices); the web panel
@@ -7452,6 +7459,9 @@ class MultibootPanel:
         self._menu_dialog = None
         self._buildflash_dialog = None
         self._edit_backup = None        # the row a cancelled edit restores
+        #: ...and the random cards' games a replaced file moved with it
+        #: (PAD-1544): ``(member, its path, its version)`` to put back.
+        self._edit_repath = []
         self._menu_backup = None
         #: Widgets that live only while a dialog is up: the Edit image…
         #: dialog's picture / video entries by kind, and its clip fields.
@@ -10219,20 +10229,136 @@ class MultibootPanel:
         if self._selected() != i:
             self._refresh_tree(select=i)
         self._edit_backup = (i, replace(self._rows[i]))
+        self._edit_repath = []
         self._image_dialog = ImageEditorDialog(self, i, self._rows[i])
         self._sync_editor_states()
         self._music_aside()
         return self._image_dialog.show()
+
+    # -- a newer build of ONE image, from Edit image… (PAD-1544) -----------
+    #: Under the image's file once it was changed in the dialog.
+    REPLACED_NOTE = ("Was %s. Only the game changes: this image keeps its "
+                     "place in the menu, its title, picture, sounds, "
+                     "settings and high scores.")
+
+    def replace_image(self, path, index=None):
+        """Row *index* (the open Edit image…'s row, else the selected one)
+        <- another image file, AND NOTHING ELSE ABOUT IT.  True when the row
+        changed.
+
+        A NEWER BUILD OF ONE GAME IS THE COMMON EDIT TO A FINISHED CARD
+        (David, 2026-11-24: "there's a new build of Heisei. I would expect
+        to be able to update it from the pencil menu. this will maintain my
+        multi-boot layout while just being able to change a single game
+        image").  The only way was to remove the row and add the new file,
+        which lost its place in the list, its title, its picture, its sounds
+        and - the one that costs - the store its settings and high scores
+        live in on the machine.  Here the row stays the row: its file moves
+        and every other field is left exactly as it was, so the names its
+        settings and scores are kept under do not move either.
+
+        Two things DO follow the file, because they were never the owner's:
+        a title or subtitle still reading what the OLD file's name suggested
+        becomes what the new one suggests (a subtitle of "V2.3" must not sit
+        under V2.4), and the version column is blanked until the tool reads
+        the new file.  A random card that rolls between the card's own images
+        keeps rolling to this one under its new file.
+
+        The dialog's Cancel puts all of it back."""
+        dlg_i = getattr(self._image_dialog, "_index", None)
+        i = index if index is not None else (
+            dlg_i if dlg_i is not None else self._selected())
+        if i is None or not 0 <= i < len(self._rows):
+            return False
+        row = self._rows[i]
+        path = (path or "").strip().strip('"')
+        if not path:
+            return False
+        if is_group(row):
+            self._error("A random card has no image file of its own - change "
+                        "its games in the list below.")
+            return False
+        old = (row.path or "").strip().strip('"')
+        if old and _norm(old) == _norm(path):
+            return False
+        be = self._backend
+        again = any(_norm(q) == _norm(path)
+                    for r in self._rows if r is not row
+                    and not (is_group(r) and r.keep) for q in row_paths(r))
+        if again and not repeats_allowed(be):
+            self._error("%s is already on the %s. A %s %s cannot keep two "
+                        "copies of one game apart, so it is listed once."
+                        % (os.path.basename(path), be.out_noun, be.label,
+                           be.out_noun))
+            return False
+        if old:
+            was_t, was_s = suggest_title(old, be.key)
+            new_t, new_s = suggest_title(path, be.key)
+            if (row.title or "").strip() == (was_t or "").strip():
+                row.title = new_t
+            if (row.subtitle or "").strip() == (was_s or "").strip():
+                row.subtitle = new_s
+        row.path = path
+        row.version = ""
+        # A RANDOM CARD OVER THE CARD'S OWN IMAGES names this game by its
+        # file.  Left alone it would name a game no row carries any more -
+        # unless another row still carries the old file (PAD-1498), in which
+        # case that copy is the one it goes on rolling to.
+        still = any(_norm(q) == _norm(old)
+                    for r in self._rows if r is not row
+                    and not (is_group(r) and r.keep) for q in row_paths(r))
+        if old and not still:
+            for r in self._rows:
+                if not (is_group(r) and r.keep):
+                    continue
+                for m in r.members:
+                    if _norm((m.path or "").strip().strip('"')) == _norm(old):
+                        if self._image_dialog is not None:
+                            self._edit_repath.append((m, m.path, m.version))
+                        m.path, m.version = path, ""
+        if self._selected() == i:
+            self._load_editor()
+        self._refresh_tree(select=self._selected())
+        self._sync_compact_lock()
+        if i == 0:
+            self._maybe_default_output()
+        self._warm_container()
+        self._sync_image_preview()
+        hook = getattr(self._image_dialog, "sync_source", None)
+        if hook is not None:
+            hook()
+        self._ok("")
+        return True
+
+    def replaced_note(self):
+        """The line under the open dialog's image file: what it was before
+        this sitting changed it, or "" while it is the file it opened with."""
+        if self._image_dialog is None or self._edit_backup is None:
+            return ""
+        i, was = self._edit_backup
+        if not 0 <= i < len(self._rows) or is_group(self._rows[i]):
+            return ""
+        old = (was.path or "").strip().strip('"')
+        new = (self._rows[i].path or "").strip().strip('"')
+        if _norm(old) == _norm(new):
+            return ""
+        return self.REPLACED_NOTE % (os.path.basename(old) or was.device
+                                     or "an image with no file recorded")
 
     def _image_editor_ok(self):
         self._forget_image_dialog()
         self._refresh_tree(select=self._edit_backup[0]
                            if self._edit_backup else None)
         self._edit_backup = None
+        self._edit_repath = []
         self.schedule_preview(now=True)
 
     def _image_editor_cancel(self):
         self._forget_image_dialog()
+        # PAD-1544: a replaced file took the random cards' claim on it along
+        for m, m_path, m_version in self._edit_repath:
+            m.path, m.version = m_path, m_version
+        self._edit_repath = []
         if self._edit_backup is not None:
             i, row = self._edit_backup
             if 0 <= i < len(self._rows):

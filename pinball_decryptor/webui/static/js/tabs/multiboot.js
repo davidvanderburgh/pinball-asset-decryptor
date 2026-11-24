@@ -449,7 +449,11 @@ function EditDialog({ s, w }) {
   return html`<${Modal} title=${ed.title} onClose=${grabbed("mb-dlg-edit", cancel)} xwide cls="mb-dlg mb-dlg-edit" footer=${footer}>
     <div class="mb-ed" onKeyDown=${okOnEnter(ok)}>
       <div class="stack mb-ed-main">
-        <span class="small muted mb-src">${ed.source}</span>
+        <div class="row mb-src-row">
+          <span class="small muted mb-src grow">${ed.source}</span>
+          ${ed.can_replace ? html`<${Button} drop title=${ed.replace_tip} onClick=${() => call("multiboot.edit_replace")}>Replace image…<//>` : null}
+        </div>
+        ${ed.replaced ? html`<span class="small ok-ink">${ed.replaced}</span>` : null}
         <div class="kv mb-kv2">
           <label class="k" for=${fid("ed_title")}>Title:</label>
           <${Field} id=${fid("ed_title")} ns=${NS} k="ed_title" value=${s.ed_title} autoFocus />

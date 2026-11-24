@@ -653,6 +653,24 @@ class MultibootTab(TabService):
             panel._ed_media.set(kind)
         return True
 
+    @rpc
+    def edit_replace(self):
+        """Replace image… beside the image's file (PAD-1544): another build
+        of this one image, with its place in the menu, its title, picture,
+        sounds, settings and high scores kept (MultibootPanel.replace_image).
+        Cancel puts the old file back."""
+        panel = self._live()
+        if panel._image_dialog is None or panel._dialog_group()[1] is not None:
+            return False
+        path = mbp._FILEDIALOG.askopenfilename(
+            title="Pick the image that replaces this one",
+            filetypes=list(panel._backend.image_types))
+        if not path or panel._image_dialog is None:
+            return False            # the dialog went while the picker was up
+        changed = panel.replace_image(path)
+        panel._dirty("rows", "checks", "preview", "editor")
+        return bool(changed)
+
     # -- the random card's games (PAD-239) --------------------------------
     @rpc
     def member_add(self):

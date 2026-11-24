@@ -128,6 +128,9 @@
 .mb-member { overflow: hidden; text-overflow: ellipsis; }
 .mb-member-n { min-width: 20px; text-align: right; margin-right: 4px; }
 .mb-src { overflow-wrap: anywhere; }
+/* PAD-1544: the image's file, and the button that puts a newer build there */
+.mb-src-row { align-items: center; gap: 10px; }
+.mb-src-row .mb-src { min-width: 0; }
 .mb-ed { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; align-items: start; }
 .mb-ed-main { gap: 12px; }
 .mb-ed-pv { align-items: stretch; }

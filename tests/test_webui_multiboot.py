@@ -839,6 +839,131 @@ def test_edit_random_card_over_the_cards_images_ticks_them(tmp_path):
         assert mc.validate_form(panel.form()) == []
 
 
+def test_replace_image_keeps_everything_but_the_file(tmp_path):
+    """PAD-1544: Replace image… in Edit image… puts a newer build in the
+    row.  Its place, the title and subtitle the owner typed, its picture,
+    its sounds and the store its settings and high scores live in stay; a
+    title still reading what the old file's name suggested follows the new
+    file; Cancel puts the old file back."""
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    b = _raw(tmp_path, "b_pro-1_59_0.V23.8G.sdcard.raw")
+    b2 = _raw(tmp_path, "b_pro-1_59_0.V24.8G.sdcard.raw")
+    c = _raw(tmp_path, "c_pro-1_59_0.Other.8G.sdcard.raw")
+    pic = tmp_path / "logo.png"
+    from PIL import Image
+    Image.new("RGB", (32, 18), (200, 30, 30)).save(pic)
+    with web_app(tmp_path, mfr="stern") as w:
+        for p in (a, b, c):
+            _add(w, p)
+        panel = _panel(w)
+        w.call("multiboot.edit", 1)
+        s = _st(w)
+        assert s["ed"]["can_replace"] is True and s["ed"]["replaced"] == ""
+        assert s["ed_sub"] == "V23"
+        w.call("ui.set", "multiboot", "ed_title", "HEISEI")
+        w.call("ui.set", "multiboot", "ed_own_settings", True)
+        w.call("ui.set", "multiboot", "ed_own_scores", True)
+        w.answers.append(str(pic))
+        w.call("multiboot.edit_browse", "picture")
+        w.call("multiboot.edit_ok")
+        panel._rows[1].version = "1.59.0"
+        store = panel._rows[1].own_scores
+        assert store == "heisei"
+
+        # the newer build, then Cancel: nothing moved
+        w.call("multiboot.edit", 1)
+        w.answers.append(b2)
+        assert w.call("multiboot.edit_replace") is True
+        s = _st(w)
+        assert s["ed"]["title"] == "Edit image 1 — " + os.path.basename(b2)
+        assert s["ed"]["source"] == b2
+        assert s["ed"]["replaced"].startswith(
+            "Was %s. Only the game changes" % os.path.basename(b))
+        w.call("multiboot.edit_cancel")
+        row = panel._rows[1]
+        assert (row.path, row.subtitle, row.version) == (b, "V23", "1.59.0")
+
+        # ...and OK: the file moved, and only what followed the file
+        w.call("multiboot.edit", 1)
+        w.answers.append(b2)
+        assert w.call("multiboot.edit_replace") is True
+        # the same file again is no change
+        w.answers.append(b2)
+        assert w.call("multiboot.edit_replace") is False
+        w.call("multiboot.edit_ok")
+        s = _st(w)
+        row = panel._rows[1]
+        assert [r.path for r in panel._rows] == [a, b2, c]
+        assert row.title == "HEISEI"            # typed: kept
+        assert row.subtitle == "V24"            # the old file's name: follows
+        assert row.version == ""                # read again off the new file
+        assert row.own_scores == store
+        assert s["rows"][1]["media"] == "logo.png"
+        assert s["rows"][1]["scores"] == "own"
+        assert mt.validate_form(panel.form()) == []
+
+
+def test_replace_image_is_a_list_change_the_update_carries(tmp_path):
+    """PAD-1544: against a loaded card, a replaced image is 'an image was
+    replaced' - what the in-place update writes (PAD-1386) - and the menu
+    fields do not move with it."""
+    a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
+    b = _raw(tmp_path, "b_pro-1_59_0.V23.8G.sdcard.raw")
+    b2 = _raw(tmp_path, "b_pro-1_59_0.V24.8G.sdcard.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        _add(w, a)
+        _add(w, b)
+        panel = _panel(w)
+        panel._rows[1].title, panel._rows[1].subtitle = "HEISEI", "Kaiju"
+        before = panel.form()
+        before = mt.replace(before, images=[mt.replace(r)
+                                            for r in before.images])
+        w.call("multiboot.edit", 1)
+        w.answers.append(b2)
+        assert w.call("multiboot.edit_replace") is True
+        w.call("multiboot.edit_ok")
+        assert mt.diff_forms(before, panel.form()) == (
+            [], ["an image was replaced"])
+
+
+def test_replace_image_takes_the_random_cards_claim_along(tmp_path):
+    """PAD-1544: a random card over the card's own images names its games by
+    file, so it follows a replaced one - and Cancel puts that back too.  A
+    random card itself has no file to replace."""
+    from pinball_decryptor.webui import multiboot_core as mc
+    paths = [_raw(tmp_path, "%s_pro-1_59_0.Release.8G.sdcard.raw" % n)
+             for n in "abc"]
+    new = _raw(tmp_path, "b_pro-1_60_0.Release.8G.sdcard.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        for p in paths:
+            _add(w, p)
+        w.call("multiboot.add_choice", "_add_random_over_existing")
+        panel = _panel(w)
+        w.call("multiboot.edit", 3)
+        assert _st(w)["ed"]["can_replace"] is False
+        w.answers.append(new)
+        assert w.call("multiboot.edit_replace") is False
+        assert w.answers == [new]               # the picker was never opened
+        w.answers.clear()
+        w.call("multiboot.edit_cancel")
+
+        w.call("multiboot.edit", 1)
+        w.answers.append(new)
+        assert w.call("multiboot.edit_replace") is True
+        assert mc.row_paths(panel._rows[3]) == [paths[0], new, paths[2]]
+        assert mc.validate_form(panel.form()) == []
+        w.call("multiboot.edit_cancel")
+        assert mc.row_paths(panel._rows[3]) == paths
+        assert panel._rows[1].path == paths[1]
+
+        w.call("multiboot.edit", 1)
+        w.answers.append(new)
+        w.call("multiboot.edit_replace")
+        w.call("multiboot.edit_ok")
+        assert mc.row_paths(panel._rows[3]) == [paths[0], new, paths[2]]
+        assert mc.validate_form(panel.form()) == []
+
+
 def test_picture_browse_picks_the_option(tmp_path):
     a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
     pic = tmp_path / "logo.png"

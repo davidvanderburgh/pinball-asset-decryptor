@@ -42,6 +42,8 @@ MAX_TEXT = 1 << 20                      # SHA256SUMS, the releases list
 TAG = re.compile(r'^v\d{1,4}(\.\d{1,4}){1,3}$')
 SUMS = 'SHA256SUMS'
 RECORD = 'installed.json'
+SOURCE = 'source.json'                  # the few text files kept from the release's source tree
+MAX_SOURCE = 48 << 20
 _NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
 
 
@@ -62,6 +64,9 @@ class Plugin:
         archives: ``{arch: file name}``, the release asset for each kind of machine.
         needs: ``{arch: (member, ...)}``, the files an archive must hold to be this plugin at all.
         tested: the tag this version of the app was proven with; the one Install offers first.
+        source_keep: paths (a file, or a folder ending in ``/``) in the project's source tree at the tag
+            whose text is kept beside the release when it is installed: what the app reads to tell the user
+            something the release archives do not say (for Bluetooth headphones, the game versions it knows).
         pinned: ``{tag: {file name: sha256}}`` for every tag the app has been tested with.
     """
     key: str
@@ -74,6 +79,7 @@ class Plugin:
     needs: Dict[str, Tuple[str, ...]]
     tested: str
     pinned: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    source_keep: Tuple[str, ...] = ()
 
 
 PLUGINS: Dict[str, Plugin] = {}
@@ -97,6 +103,12 @@ def plugin_dir(plugin):
 def asset_url(plugin, tag, name):
     """A release asset's permanent address: GitLab redirects it to wherever the author uploaded the file."""
     return '%s/-/releases/%s/downloads/%s' % (plugin.project, _tag(tag), name)
+
+
+def source_url(plugin, tag):
+    """The project's source tree at *tag*, as GitLab packs it."""
+    name = plugin.project.rstrip('/').rsplit('/', 1)[1]
+    return '%s/-/archive/%s/%s-%s.tar.gz' % (plugin.project, _tag(tag), name, tag)
 
 
 def releases_url(plugin):
@@ -231,6 +243,45 @@ def _check_release(plugin, tag, sums_text, blobs):
         unpack(plugin, arch, blobs[name])
 
 
+def source_keep_texts(plugin, data):
+    """``{path in the source tree: text}`` for the files :attr:`Plugin.source_keep` names, out of the source
+    archive *data*.  Only plain UTF-8 files of a sane size are kept; anything else is passed over."""
+    out = {}
+    try:
+        raw = gzip.GzipFile(fileobj=io.BytesIO(data)).read(MAX_SOURCE * 8 + 1)
+        if len(raw) > MAX_SOURCE * 8:
+            raise PluginError('The %s source archive unpacks to more than this app reads.' % plugin.name)
+        with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as tar:
+            for info in tar:
+                rel = info.name.split('/', 1)[1] if '/' in info.name else ''
+                if (not info.isreg() or info.size > (4 << 20) or '..' in rel.split('/') or len(out) >= 400
+                        or not any(rel == k or (k.endswith('/') and rel.startswith(k)) for k in plugin.source_keep)):
+                    continue
+                try:
+                    out[rel] = tar.extractfile(info).read().decode('utf-8')
+                except UnicodeDecodeError:
+                    continue
+    except PluginError:
+        raise
+    except (OSError, EOFError, tarfile.TarError, ValueError):
+        raise PluginError('The %s source archive is not a readable .tar.gz.' % plugin.name) from None
+    return out
+
+
+def source_texts(plugin):
+    """What was kept from the source tree of the release that is installed (``{path: text}``); {} when nothing
+    was (installed from files, the download failed, another release since)."""
+    rec = installed(plugin)
+    try:
+        with open(os.path.join(plugin_dir(plugin), SOURCE), encoding='utf-8') as f:
+            kept = json.load(f)
+        if rec is None or kept.get('tag') != rec['tag'] or not isinstance(kept.get('files'), dict):
+            return {}
+        return {k: v for k, v in kept['files'].items() if isinstance(k, str) and isinstance(v, str)}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
 # ------------------------------------------------------------------ the store
 def installed(plugin):
     """``dict(tag, tested, files={name: dict(sha256, size)})`` for the release that is installed, or None.
@@ -291,6 +342,16 @@ def install(plugin, tag=None, log=None, opener=None, progress=None):
         blobs[name] = _get(asset_url(plugin, tag, name), MAX_ARCHIVE, opener,
                            (lambda done, name=name: progress(name, done)) if progress else None)
     rec = _store(plugin, tag, sums_text, blobs)
+    if plugin.source_keep:
+        # not the release itself and not put on a card: its absence costs the user a sentence, never the install
+        try:
+            kept = source_keep_texts(plugin, _get(source_url(plugin, tag), MAX_SOURCE, opener))
+            with open(os.path.join(plugin_dir(plugin), SOURCE), 'w', encoding='utf-8') as f:
+                json.dump({'tag': tag, 'files': kept}, f)
+        except (PluginError, OSError) as exc:
+            if log:
+                log("%s is installed; its author's list of supported games could not be read (%s)."
+                    % (plugin.name, str(exc).split('\n')[0]))
     if log:
         log('%s %s installed%s.' % (plugin.name, tag, '' if rec['tested'] else
                                     ' (newer than this version of the app was tested with)'))

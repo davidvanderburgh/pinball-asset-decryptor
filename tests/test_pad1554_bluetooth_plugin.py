@@ -61,8 +61,8 @@ def release(mark=b'one'):
 class Web:
     """gitlab.com for the tests: the releases list and each release's assets."""
 
-    def __init__(self, releases):
-        self.releases, self.asked = releases, []
+    def __init__(self, releases, source=None):
+        self.releases, self.asked, self.source = releases, [], source
 
     def __call__(self, req, timeout):
         url = req.full_url
@@ -74,6 +74,10 @@ class Web:
             rows.append({'tag_name': 'nightly', 'assets': {'links': []}})
             rows.append({'tag_name': 'v9.9.9', 'assets': {'links': [{'name': ARMV7}]}})     # an asset short
             return io.BytesIO(json.dumps(rows).encode())
+        if '/-/archive/' in url:
+            if self.source is None:
+                raise OSError('no source archive')
+            return io.BytesIO(self.source)
         tag, name = url.split('/-/releases/')[1].split('/downloads/')
         blobs, sums = self.releases[tag]
         return io.BytesIO(sums if name == 'SHA256SUMS' else blobs[name])
@@ -662,3 +666,97 @@ def test_a_spike3_build_puts_the_plugin_on_after_remote_access(tmp_path, monkeyp
     events.clear()
     pipe.run()
     assert events == [(False, BT.NO_KEY)]
+
+
+# ------------------------------------------------------------------ which games the release knows
+def source_archive(games2, games3):
+    """The project's source tree as GitLab packs it: one top folder, the two places the game lists are."""
+    files = {'spike-pinball-bluetooth-v0.3.0/README.md': b'# readme\n',
+             'spike-pinball-bluetooth-v0.3.0/native/menu.c': b'int x;\n',
+             'spike-pinball-bluetooth-v0.3.0/profiles/supported-games.json': json.dumps(
+                 {'games': [{'id': 'g', 'title': t, 'version': '1', 'executable_sha256': h} for h, t in games2.items()]}
+             ).encode()}
+    for k, (h, t) in enumerate(games3.items()):
+        files['spike-pinball-bluetooth-v0.3.0/profiles/spike3/g%d.json' % k] = json.dumps(
+            {'title': t, 'version': '0.82.0', 'executable_sha256': h}).encode()
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w') as tar:
+        for name, data in sorted(files.items()):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return gzip.compress(buf.getvalue(), mtime=0)
+
+
+def test_install_keeps_the_authors_list_of_games_and_only_that(store, plugin):
+    fake, blobs, sums = plugin
+    fake = P.Plugin(**dict(fake.__dict__, source_keep=BT.PLUGIN.source_keep))
+    assert BT.PLUGIN.source_keep == ('profiles/supported-games.json', 'profiles/spike3/')
+    assert P.source_url(fake, 'v0.3.0') == (
+        'https://gitlab.com/mattlqx/spike-pinball-bluetooth/-/archive/v0.3.0/spike-pinball-bluetooth-v0.3.0.tar.gz')
+    src = source_archive({'a' * 64: 'Godzilla Pro'}, {'b' * 64: 'Fallout LE'})
+    P.install(fake, opener=Web({'v0.3.0': (blobs, sums)}, source=src))
+    kept = P.source_texts(fake)
+    assert sorted(kept) == ['profiles/spike3/g0.json', 'profiles/supported-games.json']    # no code, no readme
+    # a list that cannot be fetched costs a sentence, never the install
+    said = []
+    rec = P.install(fake, log=said.append, opener=Web({'v0.3.0': (blobs, sums)}))
+    assert rec['tag'] == 'v0.3.0' and P.source_texts(fake) == {}
+    assert any('list of supported games could not be read' in line for line in said)
+    assert said[-1] == 'Bluetooth headphones v0.3.0 installed.'
+
+
+def test_the_card_is_told_whether_the_release_knows_its_game(tmp_path, store, plugin, monkeypatch):
+    fake, blobs, sums = plugin
+    fake = P.Plugin(**dict(fake.__dict__, source_keep=BT.PLUGIN.source_keep))
+    monkeypatch.setattr(BT, 'PLUGIN', fake)
+    assert BT.game_check(str(tmp_path / 'nothing.raw')) == {'known': None, 'text': ''}       # not installed
+    game = b'\x7fELF the game program' * 100
+    digest = hashlib.sha256(game).hexdigest()
+    P.install(fake, opener=Web({'v0.3.0': (blobs, sums)},
+                               source=source_archive({digest: 'Godzilla Pro - v1.16.0'}, {'c' * 64: 'Fallout LE'})))
+    assert BT.known_games(BT.SPIKE2) == {digest: 'Godzilla Pro - v1.16.0'}
+    assert BT.known_games(BT.SPIKE3) == {'c' * 64: 'Fallout LE 0.82.0'}
+    monkeypatch.setattr(BT, 'game_program_sha256', lambda path, key_source=None: (BT.SPIKE2, digest))
+    got = BT.game_check('card.raw')
+    assert got['known'] is True and 'v0.3.0 knows: Godzilla Pro - v1.16.0.' in got['text']
+    monkeypatch.setattr(BT, 'game_program_sha256', lambda path, key_source=None: (BT.SPIKE2, 'd' * 64))
+    got = BT.game_check('card.raw')
+    assert got['known'] is False and 'with no Bluetooth entry' in got['text'] and 'this app has changed' in got['text']
+
+    def cannot(path, key_source=None):
+        raise ExtrasError('a multi-boot card starts several')
+    monkeypatch.setattr(BT, 'game_program_sha256', cannot)
+    assert BT.game_check('card.raw') == {'known': None, 'text': ''}
+    # installed without the list (from files, or the list could not be fetched): nothing is said either way
+    P.install(fake, opener=Web({'v0.3.0': (blobs, sums)}))
+    monkeypatch.setattr(BT, 'game_program_sha256', lambda path, key_source=None: (BT.SPIKE2, digest))
+    assert BT.known_games(BT.SPIKE2) is None and BT.game_check('card.raw')['known'] is None
+
+
+def test_a_spike2_cards_game_program_is_read_through_its_link(tmp_path):
+    import struct as _struct
+    import subprocess
+    from tests.test_wifi_card import TOOLS
+    import os as _os
+    mk = shutil.which('mke2fs') or TOOLS + '/mke2fs'
+    if not _os.path.exists(mk):
+        pytest.skip('real filesystem tools required')
+    image = _card(tmp_path)
+    game = b'\x7fELF game ' * 5000
+    tree = tmp_path / 'games'
+    (tree / 'godzilla_pro').mkdir(parents=True)
+    (tree / 'godzilla_pro' / 'game').write_bytes(game)
+    (tree / 'game').symlink_to('godzilla_pro/game')
+    fs = tmp_path / 'games.img'
+    with fs.open('wb') as f:
+        f.truncate(8 << 20)
+    subprocess.run([mk, '-q', '-t', 'ext4', '-F', '-d', str(tree), str(fs)], check=True)
+    data = bytearray(image.read_bytes()[:25 << 20])
+    _struct.pack_into('<B3sB3sII', data, 478, 0, b'\0' * 3, 0x83, b'\0' * 3, (26 << 20) // 512, (8 << 20) // 512)
+    card = tmp_path / 'both.raw'
+    with card.open('wb') as f:
+        f.write(data)
+        f.seek(26 << 20)
+        f.write(fs.read_bytes())
+    assert BT.game_program_sha256(str(card)) == (BT.SPIKE2, hashlib.sha256(game).hexdigest())

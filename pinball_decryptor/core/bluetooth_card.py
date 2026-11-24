@@ -34,6 +34,8 @@ his switched-off mark away again after exactly those three, and hands the code o
 
 Off takes everything back out: the folder gone, the script as the card had it without the plugin.
 """
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -63,6 +65,8 @@ PLUGIN = card_plugins.register(Plugin(
         'spike-pinball-bluetooth-armv7.tar.gz': '31433015ed0eccdac49b2625e799b0e5d64c51e28c0d0bb033fbd796e6b77f07',
         'spike-pinball-bluetooth-arm64.tar.gz': 'ff2da6232b156db30ab007937f597c0b3b73ce97dc17452ce998ce5216f46bbf',
     }},
+    # the game programs each release's menu knows, by the hash of the executable (not in the archives)
+    source_keep=('profiles/supported-games.json', 'profiles/spike3/'),
 ))
 
 SPIKE2, SPIKE3 = 'stern-spike2', 'stern-spike3'
@@ -271,6 +275,90 @@ def inspect_image(path, *, allow_pending=False, key_source=None):
         if 'before configuring SSH' in reason:
             reason = NO_KEY
         return {'supported': False, 'reason': reason, 'enabled': False, 'release': '', 'platform': platform}
+
+
+def known_games(platform):
+    """``{sha256 of a game program: its name}`` the installed release's menu knows for *platform*, or None when
+    the list was not kept at install (then the app says nothing either way)."""
+    texts = card_plugins.source_texts(PLUGIN)
+    out = {}
+    try:
+        if platform == SPIKE3:
+            rows = [json.loads(t) for p, t in sorted(texts.items()) if p.startswith('profiles/spike3/')]
+            for row in rows:
+                out[row['executable_sha256']] = '%s %s' % (row['title'], row.get('version', ''))
+        elif 'profiles/supported-games.json' in texts:
+            for row in json.loads(texts['profiles/supported-games.json'])['games']:
+                out[row['executable_sha256']] = row['title']
+    except (ValueError, KeyError, TypeError):
+        return None
+    return {k: v.strip() for k, v in out.items() if re.match(r'^[0-9a-f]{64}$', str(k))} or None
+
+
+def _hash_node(reader, node):
+    if node is None or stat.S_IFMT(node['mode']) != stat.S_IFREG or not 0 < node['size'] <= (512 << 20):
+        raise ExtrasError("The card's game program could not be read.")
+    digest = hashlib.sha256()
+    for _offset, chunk in reader.read_file_chunks(node):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def game_program_sha256(path, key_source=None):
+    """``(platform, sha256)`` of the game program the card at *path* starts: the file its menu would be loaded
+    into.  ExtrasError (or an OSError) when it cannot be told: a multi-boot card, a card that is not unlocked."""
+    with open(path, 'rb') as f:
+        parts = ssh_card._partitions(f)
+        p2 = next((p for p in parts if p[0] == 2), None)
+        if p2 is None:
+            raise ExtrasError(NOT_OFFERED)
+        f.seek(p2[2])
+        if f.read(6) != b'LUKS\xba\xbe':
+            p3 = next((p for p in parts if p[0] == 3 and p[1] == 0x83), None)
+            if p3 is None:
+                raise ExtrasError("The card's games partition was not found.")
+            reader = Ext4Reader(f, p3[2], p3[3])
+            node = ssh_card._node(reader, '/game')
+            hops = 0
+            while node is not None and stat.S_IFMT(node['mode']) == stat.S_IFLNK and hops < 4:
+                target = reader.read_symlink(node)
+                target = target.decode('utf-8', 'replace') if isinstance(target, bytes) else target
+                node = ssh_card._node(reader, target if target.startswith('/') else '/' + target)
+                hops += 1
+            return SPIKE2, _hash_node(reader, node)
+    from . import ssh_spike3
+    from ..plugins.stern import spike3_modes
+    with ssh_spike3.open_volume(path, 'games', key_source=key_source) as vol:
+        reader = Ext4Reader(vol, 0, vol.size)
+        state, target = spike3_modes.card_state(reader)
+        if state not in ('stock', 'modes') or not target:
+            raise ExtrasError("The card's game program could not be told (a multi-boot card starts several).")
+        node = None
+        if state == 'modes':                                # the program this app made for the card, when it did
+            node = ssh_card._node(reader, '/' + spike3_modes.MODE_DIR + '/game.pad')
+        return SPIKE3, _hash_node(reader, node or spike3_modes.game_program(reader, target))
+
+
+def game_check(path, key_source=None):
+    """Whether the installed release's menu knows the game program of the card at *path*:
+    ``dict(known, text)`` with *known* True, False, or None when it cannot be told.  Never raises."""
+    rec = card_plugins.installed(PLUGIN)
+    if rec is None:
+        return {'known': None, 'text': ''}
+    try:
+        platform, digest = game_program_sha256(path, key_source)
+    except (OSError, ValueError, Ext4Error, struct.error, KeyError, TypeError):
+        return {'known': None, 'text': ''}
+    games = known_games(platform)
+    if games is None:
+        return {'known': None, 'text': ''}
+    if digest in games:
+        return {'known': True, 'text': "This card's game is one %s %s knows: %s." % (
+            'spike-pinball-bluetooth', rec['tag'], games[digest])}
+    return {'known': False, 'text': (
+        "This card's game program is not one spike-pinball-bluetooth %s knows, so the game will run as it is, "
+        'with no Bluetooth entry. It knows exact game versions only (%d of them for this kind of machine), and a '
+        'game program this app has changed (Music Mode rows, editions) is not one of them.' % (rec['tag'], len(games)))}
 
 
 def describe(info):
@@ -507,6 +595,14 @@ def apply_to_build(original, output, config, log=None, cancel=None, key_source=N
     after = inspect_image(output, allow_pending=True, key_source=keys)
     if after.get('enabled') != on or (on and after.get('release') != tag):
         raise ExtrasError('The Bluetooth headphones choice on the built image did not read back as written.')
+    said = note(on, tag, platform)
     if log:
-        log(note(on, tag, platform), 'info')
-    return note(on, tag, platform)
+        log(said, 'info')
+    if on:
+        # the card as built: a build that changed the game program made one the menu does not know
+        check = game_check(output, keys)
+        if check['known'] is False:
+            if log:
+                log(check['text'], 'warning')
+            said += '\n' + check['text']
+    return said

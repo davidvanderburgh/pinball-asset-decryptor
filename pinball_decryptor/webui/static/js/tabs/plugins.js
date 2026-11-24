@@ -78,6 +78,7 @@ function OnYourCards({ p, s }) {
     ${p.hint ? html`<span class=${cx("small", p.enabled && !p.installed ? "err-ink" : "muted")}>${p.hint}</span>` : null}
     ${p.error ? html`<p role="alert" class="err-ink">${p.error}</p>` : null}
     <span class="small muted">${p.needs}</span>
+    ${p.game_note ? html`<${Note} kind=${p.game_kind === "warn" ? "warn" : "ok"}>${p.game_note}<//>` : null}
     <${Advanced} title="Exactly what it changes on the card">
       <table class="plg-fields">
         <tbody>${(p.details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>

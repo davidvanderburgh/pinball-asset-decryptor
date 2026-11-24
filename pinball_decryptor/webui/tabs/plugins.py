@@ -51,6 +51,8 @@ class PluginsTab(TabService):
         self._said = {}                 # key -> (text, kind)
         self._releases = {}             # key -> (state, rows): '' not asked, 'loading', 'ok', or the error
         self._pick = {}                 # key -> the version chosen in the list
+        self._games = {}                # (key, card, its size and time, release) -> game_check's answer
+        self._games_busy = set()
         self.set(intro=INTRO, project='', running=False, plugins=[], store=card_plugins.store_root())
 
     def rail_needs(self):
@@ -99,7 +101,9 @@ class PluginsTab(TabService):
         elif info.get('unpicked'):
             hint = 'No card image is picked yet: the card is checked when it is written.'
         text, kind = self._said.get(plugin.key, ('', ''))
+        game = self._game(plugin, card, rec) if can and info['supported'] and not info.get('unpicked') else {}
         return {
+            'game_note': game.get('text', ''), 'game_kind': {True: 'ok', False: 'warn'}.get(game.get('known'), ''),
             'key': plugin.key, 'name': plugin.name, 'what': plugin.what, 'author': plugin.author,
             'project_url': plugin.project, 'license': plugin.license, 'tested': plugin.tested,
             'installed': rec['tag'] if rec else '', 'installed_tested': bool(rec and rec['tested']),
@@ -111,6 +115,36 @@ class PluginsTab(TabService):
             'details': [list(r) for r in card.details(platform)],
             'now': '' if info.get('unpicked') or not info['supported'] else card.describe(info),
         }
+
+    def _game(self, plugin, card, rec):
+        """Whether the installed release knows the picked card's game program: read on a worker (a game program
+        is tens of MB, a Spike 3 one is decrypted first) and kept until the card or the release changes."""
+        source = self._source()
+        if rec is None or not hasattr(card, 'game_check'):
+            return {}
+        try:
+            st = os.stat(source)
+        except OSError:
+            return {}
+        key = (plugin.key, source, st.st_size, st.st_mtime_ns, rec['tag'])
+        if key in self._games:
+            return self._games[key]
+        if key not in self._games_busy:
+            self._games_busy.add(key)
+
+            def work():
+                try:
+                    got = card.game_check(source)
+                except Exception:                           # noqa: BLE001 - never raised into the UI
+                    got = {'known': None, 'text': ''}
+
+                def done():
+                    self._games_busy.discard(key)
+                    self._games[key] = got
+                    self.publish()
+                self.ctx.loop.post(done)
+            threading.Thread(target=work, daemon=True, name='pad-plugin-game').start()
+        return {}
 
     def publish(self):
         project = self._project()

@@ -1,0 +1,84 @@
+# PAD-1554: Bluetooth headphones as a plugin
+
+Matt Kulka's [spike-pinball-bluetooth](https://gitlab.com/mattlqx/spike-pinball-bluetooth) gives Stern Spike 2
+and Spike 3 machines Bluetooth headphones. David asked him whether PAD could integrate it. His answer, which is
+the design brief:
+
+> do you think you could have it pull the repo and use it from there rather than pulling all the code into the
+> PAD repo? maybe select a version tag or something. installation integration would be great.
+>
+> if any modifications are needed, create an MR or just let me know
+
+David on the screen: "maybe a new Plugins tab, where the user can choose optional plugins to install. they need
+to persist between PAD updates too."
+
+## What the plugin is, upstream
+
+Read from the v0.3.0 tag (commit `c21bfbd0`) and its release archives.
+
+- Release assets per tag: `spike-pinball-bluetooth-armv7.tar.gz` (Spike 2), `spike-pinball-bluetooth-arm64.tar.gz`
+  (Spike 3), `SHA256SUMS`. Permanent address:
+  `https://gitlab.com/mattlqx/spike-pinball-bluetooth/-/releases/<tag>/downloads/<name>`.
+- Each archive is a flat tar: `menu.so` (preloaded into the game, adds the Bluetooth menu; acts only on a game
+  executable whose hash it knows, any other runs as stock), `spikebt` (static Go helper), `run-live.sh` (the
+  launcher), `rollback.sh`, `LICENSE`, `NOTICE.md`, `menu-elf.txt`, its own `SHA256SUMS`; armv7 adds `btusb.ko`
+  and `radio-start.sh` (loads the USB driver only on kernel `3.14.28_1.0.0_ga-wandboard+g08f5291` and only when
+  the module's hash is the built one; starts BlueZ 4 with bind mounts, never rewrites the rootfs).
+- Install, per its README: the files in `/usr/local/spikebt`, an `enabled` file there, and the game's supervisor
+  running `/usr/local/spikebt/run-live.sh <game>` (Spike 3: with `SPIKEBT_BACKEND=bluez5`).
+- `run-live.sh` already preloads `/usr/local/padmode/mode.so` ahead of `menu.so` when it is there, runs the plain
+  game when anything is missing or fails, and creates `/dump/spikebt/disabled` after a game that exits non-zero.
+  It knows no other preload.
+- State on the machine: `/dump/spikebt/` (sockets, preferences, link keys). Never touched by a card build.
+- GPL-2.0. Nothing of it is in this repository.
+
+## Design
+
+1. **Plugin store** (`core/card_plugins.py`). A plugin is a descriptor (author, project, archives per kind of
+   machine, the tag PAD was tested with and its archive hashes). Installing downloads the release at a tag into
+   `<settings folder>/plugins/<key>/`, beside `settings.json` and outside the app folder, so an update keeps it.
+   A tested tag must match PAD's own hashes; a newer tag is taken on the release's `SHA256SUMS` and is labelled
+   untested. Archives must be flat tars of plain files that match their own `SHA256SUMS`. "Install from files"
+   covers a computer that cannot reach gitlab.com (tested tags only).
+2. **On the card** (`core/bluetooth_card.py`, Spike 2). Every archive file unchanged in `/usr/local/spikebt`,
+   plus `enabled` and `pad-release` (the tag). `game_monitor`'s game line becomes `BT_HOOK_LINES`: his launcher
+   when it and `enabled` are there, else exactly what the remote-buttons block did.
+3. **Other PAD preloads.** His launcher would drop `padmenu.so` (multi-boot) and `pad-buttons.so`. Rather than
+   change his file, the block hands the launcher `/usr/local/bin/pad-bt-game` in place of the game when either is
+   on the card: six lines of sh that put them in front of `LD_PRELOAD` and exec the game. `mode.so` and `menu.so`
+   load into that sh too and do nothing there (`hk_is_game_process`; unknown executable hash).
+   **Upstream ask worth sending** (not needed for this to work): let `run-live.sh` take extra preloads, e.g.
+   `SPIKEBT_PRELOAD`, so the wrapper can go.
+4. **Project choice.** `extras.bluetooth = {enabled}` in `.staged_changes.json`; the build digest carries the
+   installed release, so installing another version is a change to build.
+
+## Done (first run)
+
+- `card_plugins.py`, `bluetooth_card.py`, the block in `modehook.py` and `remote_buttons.py` (held equal by a
+  test), `card_extras.load_bluetooth/save_bluetooth/digest`.
+- `tests/test_pad1554_bluetooth_plugin.py`: 12 tests, 5 on a real ext filesystem (pass under WSL Ubuntu with
+  `PAD_E2FSPROGS_DIR=/sbin`). The real v0.3.0 archives were downloaded and match the pinned hashes.
+
+## Left, in order
+
+1. **Build pipeline**: `plugins/stern/pipeline.py` beside remote buttons (validate_request before the build,
+   apply_to_build after, summary line, guard_flash where the others are called); `tests/test_extras_pipeline.py`.
+2. **Plugins tab** (web UI): a card per plugin: what it is, author, project link, licence; version picker from
+   `card_plugins.releases` (tested one marked); Install / Update / Remove / Install from files; "Put on this
+   project's cards" tick; what the open card carries (`inspect_image`); `DETAILS` under "Exactly what it changes
+   on the card". Before/after screenshots (before = the tab bar without it).
+3. **Supported game check**: `profiles/supported-games.json` at the tag lists `executable_sha256` per Spike 2
+   build (Spike 3 profiles are one JSON each under `profiles/spike3/`). Fetch at install, keep in the store, and
+   tell the user on the tab whether this card's game version gets the Bluetooth entry.
+4. **Emulator proof**. The rig execs `./game` and never runs `game_monitor`, so: (a) run the card's real
+   `game_monitor` block + `run-live.sh` + `pad-bt-game` under the rig's ARM chroot with busybox sh, showing the
+   fall-back to the plain game with every preload kept (the rig has no radio, so `radio-start.sh` refuses there);
+   (b) the menu itself with his demo backend (`spikebt --backend=demo`, `scripts/cabinet/run-demo.sh` at the
+   tag): Service -> Bluetooth on a built card's game, glshot. Rig step like `modes/cardmodes.sh`.
+5. **Spike 3**: rootfs is LUKS; `ssh_spike3.apply_to_build` already rewrites it with the user's key. Same files
+   (arm64, no module), launcher with `SPIKEBT_BACKEND=bluez5`; Spike 3 mode hook is `/games/pad/padmode/padmode.sh`
+   and appends `mode.so` after `menu.so`, the opposite order to his launcher's: check before choosing the hook.
+6. **Direct routes**: `core/network_apply.py` (to an attached SD card, to a running machine) and
+   `mode_install.py`/`mkmulticard.py` paths that read `game_monitor` (they go through `modehook`, which knows the
+   block now); a "clear the switched-off mark" (`/dump/spikebt/disabled`) for Send to machine.
+7. Docs: `docs/guide/using-the-app.md` Plugins section, help text.

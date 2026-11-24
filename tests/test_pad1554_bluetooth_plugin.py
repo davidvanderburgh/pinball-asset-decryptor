@@ -1,0 +1,361 @@
+"""PAD-1554: the Bluetooth headphones plugin (Matt Kulka's spike-pinball-bluetooth): pulled from its author's
+project at a version tag, kept outside the app, and put on a Spike 2 card unchanged by a build."""
+import gzip
+import hashlib
+import importlib.util
+import io
+import json
+import shutil
+import tarfile
+from pathlib import Path
+
+import pytest
+
+from pinball_decryptor.core import bluetooth_card as BT, card_extras, card_plugins as P, remote_buttons as B
+from pinball_decryptor.core.card_extras import ExtrasError
+from pinball_decryptor.core.card_plugins import PluginError
+from tests.test_wifi_card import build, node, sha
+
+STOCK = ('#!/bin/sh\n\nulimit -c unlimited\n\nwhile [ true ] ;\ndo\n\t$1\n\t/usr/local/bin/boot_display&\n'
+         '\tsleep 1\n\tpkill boot_display\ndone\n')
+ROOT = Path(BT.__file__).resolve().parents[2]
+ARMV7, ARM64 = BT.PLUGIN.archives['armv7'], BT.PLUGIN.archives['arm64']
+
+
+def _modehook():
+    spec = importlib.util.spec_from_file_location('modehook_for_bt', ROOT / 'tools/spike2_emu/modehook.py')
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def archive(files, sums=True, extra=None):
+    """A release archive as the author's packaging makes one: a flat gzip tar with its own SHA256SUMS."""
+    files = dict(files)
+    if sums:
+        files['SHA256SUMS'] = ''.join('%s  %s\n' % (hashlib.sha256(d).hexdigest(), n)
+                                      for n, d in sorted(files.items())).encode()
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w') as tar:
+        for name, data in sorted(files.items()):
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(data), 0o755 if name.endswith('.sh') or name == 'spikebt' else 0o644
+            tar.addfile(info, io.BytesIO(data))
+        for info in extra or ():
+            tar.addfile(info)
+    return gzip.compress(buf.getvalue(), mtime=0)
+
+
+def release(mark=b'one'):
+    """The two archives and the release's SHA256SUMS of a made-up release."""
+    common = {'menu.so': b'\x7fELF menu ' + mark, 'spikebt': b'\x7fELF helper ' + mark * 4000,
+              'run-live.sh': b'#!/bin/sh\n# launcher ' + mark + b'\n', 'rollback.sh': b'#!/bin/sh\n',
+              'LICENSE': b'GPL 2\n', 'NOTICE.md': b'notice\n'}
+    blobs = {ARMV7: archive(dict(common, **{'radio-start.sh': b'#!/bin/sh\n# radio\n', 'btusb.ko': b'ko ' + mark})),
+             ARM64: archive(common)}
+    sums = ''.join('%s  %s\n' % (hashlib.sha256(d).hexdigest(), n) for n, d in blobs.items()).encode()
+    return blobs, sums
+
+
+class Web:
+    """gitlab.com for the tests: the releases list and each release's assets."""
+
+    def __init__(self, releases):
+        self.releases, self.asked = releases, []
+
+    def __call__(self, req, timeout):
+        url = req.full_url
+        self.asked.append(url)
+        if '/api/v4/projects/mattlqx%2Fspike-pinball-bluetooth/releases' in url:
+            rows = [{'tag_name': t, 'name': t + ' title', 'released_at': '2026-11-23T21:49:22.358Z',
+                     'assets': {'links': [{'name': n} for n in list(blobs) + ['SHA256SUMS', 'btusb.ko']]}}
+                    for t, (blobs, _s) in self.releases.items()]
+            rows.append({'tag_name': 'nightly', 'assets': {'links': []}})
+            rows.append({'tag_name': 'v9.9.9', 'assets': {'links': [{'name': ARMV7}]}})     # an asset short
+            return io.BytesIO(json.dumps(rows).encode())
+        tag, name = url.split('/-/releases/')[1].split('/downloads/')
+        blobs, sums = self.releases[tag]
+        return io.BytesIO(sums if name == 'SHA256SUMS' else blobs[name])
+
+
+@pytest.fixture
+def store(tmp_path, monkeypatch):
+    monkeypatch.setenv('PAD_PLUGIN_DIR', str(tmp_path / 'plugins'))
+    return tmp_path / 'plugins'
+
+
+@pytest.fixture
+def plugin(monkeypatch):
+    """The plugin with a made-up release as its tested one (the real one's archives are not in this repo)."""
+    blobs, sums = release()
+    pinned = {'v0.3.0': {n: hashlib.sha256(d).hexdigest() for n, d in blobs.items()}}
+    fake = P.Plugin(**dict(BT.PLUGIN.__dict__, pinned=pinned))
+    monkeypatch.setattr(BT, 'PLUGIN', fake)
+    return fake, blobs, sums
+
+
+# ------------------------------------------------------------------ the plugin and its store
+def test_the_plugin_names_its_author_project_and_the_release_it_was_tested_with():
+    p = BT.PLUGIN
+    assert P.PLUGINS['bluetooth'] is p and p.project == 'https://gitlab.com/mattlqx/spike-pinball-bluetooth'
+    assert 'Matt Kulka' in p.author and p.license == 'GPL-2.0' and p.tested == 'v0.3.0'
+    assert set(p.pinned['v0.3.0']) == {ARMV7, ARM64} and all(len(h) == 64 for h in p.pinned['v0.3.0'].values())
+    assert P.asset_url(p, 'v0.3.0', ARMV7) == (
+        'https://gitlab.com/mattlqx/spike-pinball-bluetooth/-/releases/v0.3.0/downloads/' + ARMV7)
+    assert 'projects/mattlqx%2Fspike-pinball-bluetooth/releases' in P.releases_url(p)
+    with pytest.raises(PluginError):
+        P.asset_url(p, '../../x', ARMV7)
+    # none of the author's code is in this repository: the app only knows where to get it
+    assert not [f for f in (ROOT / 'pinball_decryptor').rglob('*') if f.name in ('spikebt', 'btusb.ko', 'run-live.sh')]
+
+
+def test_install_keeps_the_release_outside_the_app_and_refuses_a_wrong_file(store, plugin):
+    fake, blobs, sums = plugin
+    web = Web({'v0.3.0': (blobs, sums)})
+    assert P.installed(fake) is None
+    said = []
+    rec = P.install(fake, log=said.append, opener=web)
+    assert rec['tag'] == 'v0.3.0' and rec['tested'] and P.installed(fake) == rec
+    assert sorted(f.name for f in (store / 'bluetooth').iterdir()) == sorted([ARMV7, ARM64, 'SHA256SUMS',
+                                                                               'installed.json'])
+    assert 'gitlab.com/mattlqx' in said[0] and said[-1] == 'Bluetooth headphones v0.3.0 installed.'
+    tag, members = P.files(fake, 'armv7')
+    assert tag == 'v0.3.0' and members['run-live.sh'][1] == 0o755 and members['menu.so'][1] == 0o644
+    assert 'btusb.ko' in members and 'btusb.ko' not in P.files(fake, 'arm64')[1]
+    # a file that is not the one the app was tested with is not installed, and what was there stays
+    bad = dict(blobs, **{ARMV7: archive({'menu.so': b'evil', 'spikebt': b'x', 'run-live.sh': b'x',
+                                         'radio-start.sh': b'x', 'btusb.ko': b'x'})})
+    bad_sums = ''.join('%s  %s\n' % (hashlib.sha256(d).hexdigest(), n) for n, d in bad.items()).encode()
+    with pytest.raises(PluginError, match='is not the file release v0.3.0 published'):
+        P.install(fake, opener=Web({'v0.3.0': (bad, bad_sums)}))
+    assert P.installed(fake) == rec
+    # the store changed behind the app's back: nothing is read from it
+    (store / 'bluetooth' / ARMV7).write_bytes(bad[ARMV7])
+    with pytest.raises(PluginError, match='Install it'):
+        P.files(fake, 'armv7')
+    P.remove(fake)
+    assert P.installed(fake) is None and not (store / 'bluetooth').exists()
+    with pytest.raises(PluginError, match='Install it on the Plugins tab first'):
+        P.files(fake, 'armv7')
+
+
+def test_a_newer_tag_is_taken_on_the_releases_own_checksums_and_said_to_be_untested(store, plugin):
+    fake, blobs, sums = plugin
+    newer = release(b'two')
+    web = Web({'v0.3.0': (blobs, sums), 'v0.4.0': newer})
+    assert [(r['tag'], r['tested'], r['date']) for r in P.releases(fake, opener=web)] == [
+        ('v0.4.0', False, '2026-11-23'), ('v0.3.0', True, '2026-11-23')]        # no nightly, no v9.9.9
+    said = []
+    rec = P.install(fake, 'v0.4.0', log=said.append, opener=web)
+    assert rec['tag'] == 'v0.4.0' and not rec['tested'] and 'newer than this version of the app' in said[-1]
+    assert b'launcher two' in P.files(fake, 'armv7')[1]['run-live.sh'][0]
+    # its checksum list is what is believed, so an archive that does not match it is refused
+    broken = (dict(newer[0], **{ARM64: blobs[ARM64]}), newer[1])
+    with pytest.raises(PluginError, match='is not the file release v0.5.0 published'):
+        P.install(fake, 'v0.5.0', opener=Web({'v0.5.0': broken}))
+    assert P.installed(fake)['tag'] == 'v0.4.0'
+
+    def down(req, timeout):
+        raise OSError('no route to host')
+    with pytest.raises(PluginError, match='Could not download .*gitlab.com'):
+        P.install(fake, opener=down)
+    with pytest.raises(PluginError, match='Could not download'):
+        P.releases(fake, opener=down)
+
+
+def test_install_from_files_takes_only_a_release_the_app_knows(store, plugin, tmp_path):
+    fake, blobs, sums = plugin
+    got = tmp_path / 'downloads'
+    got.mkdir()
+    for name, data in dict(blobs, SHA256SUMS=sums).items():
+        (got / name).write_bytes(data)
+    with pytest.raises(PluginError, match='Choose .*SHA256SUMS'):
+        P.install_from_files(fake, [str(got / ARMV7), str(got / ARM64)])
+    assert P.install_from_files(fake, [str(p) for p in got.iterdir()])['tag'] == 'v0.3.0'
+    (got / ARM64).write_bytes(release(b'two')[0][ARM64])
+    with pytest.raises(PluginError, match='not a Bluetooth headphones release this version of the app knows'):
+        P.install_from_files(fake, [str(p) for p in got.iterdir()])
+
+
+def test_an_archive_must_be_plain_files_that_match_their_own_checksums():
+    p = BT.PLUGIN
+    good = {'menu.so': b'm', 'spikebt': b's', 'run-live.sh': b'r'}
+    assert set(P.unpack(p, 'arm64', archive(good))) == set(good) | {'SHA256SUMS'}
+    with pytest.raises(PluginError, match='has no radio-start.sh, btusb.ko'):
+        P.unpack(p, 'armv7', archive(good))
+    with pytest.raises(PluginError, match='no SHA256SUMS of its own'):
+        P.unpack(p, 'arm64', archive(good, sums=False))
+    lying = dict(good, SHA256SUMS=b'%s  menu.so\n' % (b'0' * 64))
+    with pytest.raises(PluginError, match='do not match its own SHA256SUMS'):
+        P.unpack(p, 'arm64', archive(lying, sums=False))
+    link = tarfile.TarInfo('evil')
+    link.type, link.linkname = tarfile.SYMTYPE, '/etc/passwd'
+    path = tarfile.TarInfo('../up')
+    for extra in ([link], [path]):
+        with pytest.raises(PluginError, match='not a plain file at its top level'):
+            P.unpack(p, 'arm64', archive(good, extra=extra))
+    with pytest.raises(PluginError, match='not a readable .tar.gz'):
+        P.unpack(p, 'arm64', b'not an archive')
+    with pytest.raises(PluginError, match='does not read'):
+        P.parse_sums('rm -rf /\n')
+
+
+# ------------------------------------------------------------------ the start-up script
+def test_the_start_up_block_calls_the_authors_launcher_and_keeps_every_other_preload():
+    mh = _modehook()
+    assert (B.BT_HOOK_LINES, B.BT_RUN, B.BT_ENABLED, B.BT_GAME) == (
+        mh.BT_HOOK_LINES, mh.BT_RUN, mh.BT_ENABLED, mh.BT_GAME)                 # one definition, twice
+    assert B.BLOCKS[0] is B.BT_HOOK_LINES and mh.BLOCKS[0] is mh.BT_HOOK_LINES
+    on = B.monitor_text(STOCK, False, bluetooth=True)
+    text = '\n'.join(B.BT_HOOK_LINES)
+    assert text in on and '\t\t\t/usr/local/spikebt/run-live.sh $1\n' in on
+    assert 'PADGAME=$1 PADPRE=$PADPRE /usr/local/spikebt/run-live.sh /usr/local/bin/pad-bt-game' in on
+    # the launcher is used only when its files and its `enabled` file are there; else the block is the old one
+    assert '[ -f /usr/local/spikebt/enabled ] && [ -x /usr/local/spikebt/run-live.sh ]' in text
+    assert text.index('run-live.sh $1') < text.index('LD_PRELOAD=$PADPRE $1') < text.index('\t\t\t$1')
+    # every earlier form takes it, and it goes back to each
+    modes, menu = mh.hook_game_monitor(STOCK, menu=False), mh.hook_game_monitor(STOCK, menu=True)
+    buttons = B.monitor_text(STOCK, True)
+    for was in (modes, menu, buttons, on):
+        assert B.monitor_text(was, False, bluetooth=True) == on
+    assert B.monitor_text(on, False, bluetooth=False) == STOCK
+    assert B.monitor_text(on, False, mode=True, bluetooth=False) == modes
+    assert B.monitor_text(on, False, mode=True, menu=True, bluetooth=False) == menu
+    assert B.monitor_text(on, True, bluetooth=False) == buttons
+    # remote buttons going on or off, and a mode install, leave a Bluetooth card's block alone
+    assert B.monitor_text(on, True) == on == B.monitor_text(on, False) == mh.hook_game_monitor(on)
+    assert mh.has_bluetooth_hook(on) and mh.has_hook(on) and mh.strip_hook(on) == STOCK
+    assert 'Bluetooth hook present' in mh.describe(on) and not mh.has_bluetooth_hook(buttons)
+    # the file the launcher is handed in place of the game puts this app's objects first and starts the game
+    assert BT.WRAPPER_TEXT.startswith('#!/bin/sh\n') and BT.WRAPPER_TEXT.endswith('exec "$PADGAME"\n')
+    assert 'LD_PRELOAD="$PADPRE${LD_PRELOAD:+:$LD_PRELOAD}"\nexport LD_PRELOAD\n' in BT.WRAPPER_TEXT
+
+
+def test_project_choice_roundtrip_and_digest(tmp_path, store, plugin):
+    fake, blobs, sums = plugin
+    project = tmp_path / 'project'
+    project.mkdir()
+    assert card_extras.load_bluetooth(str(project)) is None and card_extras.digest(str(project)) is None
+    assert card_extras.save_bluetooth(str(project), True) == {'enabled': True}
+    assert card_extras.load_bluetooth(str(project)) == {'enabled': True}
+    not_installed = card_extras.digest(str(project))
+    P.install(fake, opener=Web({'v0.3.0': (blobs, sums)}))
+    with_release = card_extras.digest(str(project))
+    assert not_installed and with_release and with_release != not_installed      # the release is part of a build
+    card_extras.save_bluetooth(str(project), False)
+    assert card_extras.digest(str(project)) not in (not_installed, with_release)
+    with pytest.raises(ExtrasError):
+        card_extras.save_bluetooth(str(project), 'yes')
+    with pytest.raises(ExtrasError):
+        card_extras.save_bluetooth(str(tmp_path / 'nowhere'), True)
+
+
+# ------------------------------------------------------------------ the card (real filesystem tools)
+def _card(tmp_path, script=STOCK, extra=None):
+    files = {'etc/init.d/game_monitor': script.encode()}
+    files.update(extra or {})
+    return build(tmp_path, extra=files)
+
+
+def _installed(plugin, mark=None, tag='v0.3.0'):
+    fake, blobs, sums = plugin
+    if mark:
+        blobs, sums = release(mark)
+    P.install(fake, tag, opener=Web({tag: (blobs, sums)}))
+    return P.files(fake, 'armv7')[1]
+
+
+def test_on_puts_the_release_on_the_card_unchanged_and_off_takes_it_all_back(tmp_path, store, plugin):
+    image = _card(tmp_path)
+    assert BT.inspect_image(str(image)) == dict(BT.inspect_image(str(image)), supported=True, enabled=False,
+                                                release='')
+    out = tmp_path / 'out.raw'
+    shutil.copyfile(image, out)
+    before = sha(image)
+    with pytest.raises(ExtrasError, match='Install it on the Plugins tab first'):
+        BT.apply_to_build(str(image), str(out), {'enabled': True})
+    members = _installed(plugin)
+    text = BT.apply_to_build(str(image), str(out), {'enabled': True})
+    assert 'spike-pinball-bluetooth v0.3.0 is on the card' in text and 'USB Bluetooth adapter' in text
+    assert sha(image) == before
+    info = BT.inspect_image(str(out))
+    assert info['enabled'] and info['release'] == 'v0.3.0' and 'v0.3.0' in BT.describe(info)
+    for name, (data, mode) in members.items():                       # the author's files, byte for byte
+        got = node(out, BT.DIR + '/' + name)
+        assert got['data'] == data and got['mode'] & 0o7777 == mode and got['uid'] == 0, name
+    assert members['run-live.sh'][1] == members['spikebt'][1] == 0o755
+    assert node(out, BT.ENABLED)['data'] == b'' and node(out, BT.RELEASE)['data'] == b'v0.3.0\n'
+    wrapper, mon = node(out, BT.WRAPPER), node(out, BT.MONITOR)
+    assert wrapper['data'].decode() == BT.WRAPPER_TEXT and wrapper['mode'] & 0o7777 == 0o755
+    assert mon['data'].decode() == B.monitor_text(STOCK, False, bluetooth=True) and mon['mode'] & 0o7777 == 0o755
+    assert BT.apply_to_build(str(image), str(out), {'enabled': True}) == text          # already there: no rewrite
+    assert BT.apply_to_build(str(image), str(out), {'enabled': False}) == BT.note(False)
+    assert node(out, BT.DIR) is None and node(out, BT.WRAPPER) is None
+    assert node(out, BT.MONITOR)['data'].decode() == STOCK and not BT.inspect_image(str(out))['enabled']
+
+
+def test_another_release_replaces_the_one_on_the_card(tmp_path, store, plugin):
+    image = _card(tmp_path)
+    out = tmp_path / 'out.raw'
+    shutil.copyfile(image, out)
+    _installed(plugin)
+    BT.apply_to_build(str(image), str(out), {'enabled': True})
+    newer = _installed(plugin, mark=b'two', tag='v0.4.0')
+    assert 'v0.4.0' in BT.apply_to_build(str(image), str(out), {'enabled': True})
+    assert BT.inspect_image(str(out))['release'] == 'v0.4.0'
+    assert node(out, BT.DIR + '/menu.so')['data'] == newer['menu.so'][0]
+
+
+def test_bluetooth_and_remote_buttons_and_modes_share_the_one_block(tmp_path, store, plugin):
+    mh = _modehook()
+    image = _card(tmp_path, script=mh.hook_game_monitor(STOCK, menu=False),
+                  extra={'usr/local/padmode/mode.so': b'\x7fELF mode'})
+    out = tmp_path / 'out.raw'
+    shutil.copyfile(image, out)
+    _installed(plugin)
+    B.apply_to_build(str(image), str(out), {'enabled': True})
+    BT.apply_to_build(str(image), str(out), {'enabled': True})
+    both = B.inspect_image(str(out)), BT.inspect_image(str(out))
+    assert both[0]['enabled'] and both[1]['enabled']
+    assert node(out, BT.MONITOR)['data'].decode() == B.monitor_text(STOCK, False, bluetooth=True)
+    # buttons off: the shim goes, Bluetooth stays; and Bluetooth off on a card with buttons gives their block back
+    B.apply_to_build(str(image), str(out), {'enabled': False})
+    assert node(out, B.SO) is None and BT.inspect_image(str(out))['enabled']
+    B.apply_to_build(str(image), str(out), {'enabled': True})
+    BT.apply_to_build(str(image), str(out), {'enabled': False})
+    assert node(out, BT.MONITOR)['data'].decode() == B.monitor_text(STOCK, True)
+    assert B.inspect_image(str(out))['enabled'] and node(out, BT.DIR) is None
+    # and with neither, a card with modes has the mode block it started with
+    B.apply_to_build(str(image), str(out), {'enabled': False})
+    assert node(out, BT.MONITOR)['data'].decode() == mh.hook_game_monitor(STOCK, menu=False)
+
+
+def test_a_card_that_is_not_one_this_app_knows_is_left_alone(tmp_path, store, plugin):
+    image = _card(tmp_path, script='#!/bin/sh\nexec /games/game\n')
+    out = tmp_path / 'out.raw'
+    shutil.copyfile(image, out)
+    _installed(plugin)
+    assert not BT.inspect_image(str(image))['supported']
+    with pytest.raises(ExtrasError, match='not one this app knows'):
+        BT.apply_to_build(str(image), str(out), {'enabled': True})
+    assert BT.apply_to_build(str(image), str(out), {'enabled': False}) == ''
+    assert sha(out) == sha(image)
+    assert BT.offered(type('M', (), {'key': 'stern', '_era': 'spike2'})())
+    assert not BT.offered(type('M', (), {'key': 'jjp', '_era': ''})()) and not BT.offered(None)
+
+
+def test_flash_only_needs_a_build_that_carries_the_choice(tmp_path, store, plugin):
+    image = _card(tmp_path)
+    project = tmp_path / 'project'
+    project.mkdir()
+    BT.guard_flash(str(project), str(image))                         # never set: nothing to ask
+    card_extras.save_bluetooth(str(project), True)
+    with pytest.raises(ExtrasError, match='not installed on this computer'):
+        BT.guard_flash(str(project), str(image))
+    _installed(plugin)
+    with pytest.raises(ExtrasError, match='Build the complete image first'):
+        BT.guard_flash(str(project), str(image))
+    out = tmp_path / 'out.raw'
+    shutil.copyfile(image, out)
+    BT.apply_to_build(str(image), str(out), BT.validate_request(str(image), str(project)))
+    BT.guard_flash(str(project), str(out))

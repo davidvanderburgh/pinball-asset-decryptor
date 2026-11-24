@@ -23,7 +23,7 @@ PAD-1296), and its descriptors are 64-bit, so a Spike 3 card needs no descriptor
    (:data:`.spike3_modes.HOOK_SCRIPT`) runs it in the stock one's place, so taking the modes off
    (or a Write without them) gives the card its own program back.
 
-Emulator-proven on Star Wars ELG 1.10, Fallout LE 0.82, Transformers LE 0.96 and Pokemon LE 0.87 (the row on Audio Content, set in the menu;
+Emulator-proven on Star Wars ELG 1.10, Fallout LE 0.82, Transformers LE 0.96 and Pokemon LE and Pro 0.87 (the row on Audio Content, set in the menu;
 mode 2's and mode 3's records played, mode 1 the game's own) - docs/plans/spike3_modes.md "Music modes
 on Spike 3".
 
@@ -48,7 +48,9 @@ PROGRAM_NAME = "game.pad"
 #: a page table that grows). Each emulator-proven: the row read and set in the menu, mode 2's
 #: record played (Transformers LE 0.96 by PAD-1359, once PAD-1293 gave it its port; Pokemon LE 0.87 by
 #: PAD-1505, whose menu has the spare setting 0.82's lacks).
-PROVEN = frozenset({"star_wars_elg-1.10", "fallout_le-0.82", "transformers_mtmte_le-0.96", "pokemon_le-0.87"})
+#: Pokemon Pro 0.87 by PAD-1553 (the LE 0.87's menu, the same spare setting).
+PROVEN = frozenset({"star_wars_elg-1.10", "fallout_le-0.82", "transformers_mtmte_le-0.96", "pokemon_le-0.87",
+                    "pokemon_pro-0.87"})
 #: the Spike 3 builds with a port whose menu has no setting the game stopped using
 #: (:func:`.menu_settings.offered` refuses them: the siblings of ELG's DEPRECATED rows are live)
 NO_ROW = frozenset({"pokemon_le-0.82", "star_wars_2025_le-0.96", "star_wars_2025_pro-0.84",

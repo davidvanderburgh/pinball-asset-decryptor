@@ -38,7 +38,7 @@ from collections import namedtuple
 # 260-character limit — with an error that reads as "file not found" (a tester's
 # build failed until he shortened the path).  _lp() opts each call out of it.
 from ...core.longpath import ext as _lp
-from ...core.checksums import MUSIC_MODE_FILES_DIR, is_other_extract
+from ...core.checksums import MUSIC_MODE_FILES_DIR, NON_ASSET_DIRS, is_other_extract
 
 # The engine is wired; a missing unicorn/numpy is surfaced via the plugin's
 # prerequisite probe + a lazy import error, not by hiding the tabs.
@@ -3909,6 +3909,13 @@ def _select_changed_idx_wavs(assets_dir, baseline):
         # an edit here re-encoded every sound on the card from the wrong one.
         _dirs[:] = [d for d in _dirs if not d.startswith(".")
                     and not is_other_extract(os.path.join(root, d))]
+        if os.path.normcase(os.path.abspath(root)) == os.path.normcase(os.path.abspath(assets_dir)):
+            # PAD-1552: nor the folders that hold the user's OWN files for the card's slots ("Music mode
+            # files", the build output, ...): never slots of their own.  An Extract of a card with music
+            # modes brings their files back under the names the card recorded, and one named
+            # "idx0644 - Biollante Theme.wav" was taken for an edit of sound 644 - the next Write put a
+            # music mode's song over the game's own (Heisei V2.3: 15 sounds).
+            _dirs[:] = [d for d in _dirs if d not in NON_ASSET_DIRS]
         for fn in files:
             if not fn.lower().endswith(".wav"):
                 continue

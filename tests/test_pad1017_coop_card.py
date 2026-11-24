@@ -377,3 +377,38 @@ def test_the_gate_holds_back_only_while_co_op_play_is_on(tmp_path):
                    "next 0",                 # ... the next Standard game reports again
                    "join 1 1",               # ... a teammate joined: the rest of that game held
                    "after 1"]
+
+
+# ---- PAD-1552: the emulator knows every form of the card's hook ---------------------------------------------------
+def _hook_check(monitor):
+    """cardmodes.sh's own ``hooked`` run on a game_monitor's text: True when it says the card loads its modes."""
+    import shutil
+    import subprocess
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("no bash here")
+    text = _read(os.path.join(REPO, "tools", "spike2_emu", "modes", "cardmodes.sh")).replace("\r\n", "\n")
+    fn = text[text.index("hooked() {"):]
+    fn = fn[:fn.index("\n}\n") + 3]
+    script = ('CARD_DIR=/usr/local/padmode\nHOOK="LD_PRELOAD=$CARD_DIR/mode.so"\nMONITOR=$(cat)\n' + fn
+              + "hooked && echo yes || echo no\n")
+    out = subprocess.run([bash, "-c", script], input=monitor.encode(), capture_output=True, timeout=60)
+    return out.stdout.decode().strip() == "yes"
+
+
+def test_the_emulator_loads_the_modes_of_a_card_with_any_form_of_the_hook():
+    """A multi-boot card's game_monitor (PAD-1309) and a remote-buttons card's (PAD-1467) gather what they preload
+    into PADPRE; the emulator looked for the single card's line alone, so a multi-boot card booted there without
+    its modes - no co-op, no music modes - while a machine ran them."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "pad1552_modehook", os.path.join(REPO, "tools", "spike2_emu", "modehook.py"))
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    stock = "#!/bin/sh\nwhile [ true ] ;\ndo\n\t$1\n\t/usr/local/bin/boot_display&\ndone\n"
+    assert not _hook_check(stock)
+    for block in hook.BLOCKS:
+        assert _hook_check(stock.replace("\t$1\n", "\n".join(block) + "\n")), block[0]
+    # a card whose menu block has no mode object in it does not load one
+    menu_only = [line for line in hook.MENU_HOOK_LINES if hook.MODE_SO not in line]
+    assert not _hook_check(stock.replace("\t$1\n", "\n".join(menu_only) + "\n"))

@@ -252,3 +252,29 @@ def test_the_runtime_reads_the_clip_lines_and_plays_them_behind_the_card():
     assert "pm_backdrop(coop_clip[c])" in show and "pm_backdrop(0)" in show
     tick = src[src.index("static void coop_screens_tick(void)"):]
     assert "coop_clip_show(" in tick[:tick.index("\n}\n")]
+
+
+def test_a_clip_an_earlier_build_left_in_the_bank_takes_the_new_one(tmp_path, monkeypatch):
+    """PAD-1552: a card built over one that already has co-op clips (Heisei V2.3 under another project's co-op
+    characters). The bank cannot lose a clip, and adding one of the same name was refused ("the bank already has a
+    clip called 'PadCoopIntro'"): the build stopped. The old clip's entry and file take the new one."""
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    from pinball_decryptor.plugins.stern import video_bank as VB
+    made = tmp_path / "PadCoopIntro.mp4"
+    made.write_bytes(b"x" * 10)
+    entry = types.SimpleNamespace(name="PadCoopIntro")
+    monkeypatch.setattr(VB, "parse_scene", lambda data: types.SimpleNamespace(
+        library=types.SimpleNamespace(entries=[entry])))
+    sized = []
+    monkeypatch.setattr(VB, "set_clip_size", lambda data, name, size: (sized.append((name, size)) or data + b"!",
+                                                                         "2.asset/31.asset"))
+    monkeypatch.setattr(VB, "add_clip", lambda data, name, size: (data + name.encode(), {"path": "2.asset/99.asset"}))
+    result = types.SimpleNamespace(replaced=[], new=[])
+    bank = MW._coop_clip_put(result, b"BANK", "PadCoopIntro", str(made), "g/bank/scene.assets/")
+    assert bank == b"BANK!" and sized == [("PadCoopIntro", 10)]
+    assert result.replaced == [("g/bank/scene.assets/2.asset/31.asset", str(made))] and not result.new
+    # a clip the bank does not have yet is added, as it always was
+    result = types.SimpleNamespace(replaced=[], new=[])
+    bank = MW._coop_clip_put(result, b"BANK", "PadCoopBonus1", str(made), "g/bank/scene.assets/")
+    assert bank == b"BANKPadCoopBonus1"
+    assert result.new == [("g/bank/scene.assets/2.asset/99.asset", str(made))] and not result.replaced

@@ -237,8 +237,17 @@ if [ "$SCENES" != 0 ]; then
     else WHAT="$WHAT and image sets ($SCENES scene file(s))"; fi
 fi
 
-if ! python3 "$RIG/parts.py" --rootfs-file /etc/init.d/game_monitor "$CARD" 2>/dev/null \
-        | grep -qF "$HOOK"; then
+# PAD-1552: THREE forms of the hook load the runtime (modehook.py BLOCKS). A single card's names the object
+# on its LD_PRELOAD line ($HOOK); a multi-boot card's (PAD-1309) and a remote-buttons card's (PAD-1467)
+# gather what is there into PADPRE and preload that. Looking for the first form alone, every multi-boot
+# card booted here without its modes ("a machine would not run them either") while a machine ran them.
+MONITOR=$(python3 "$RIG/parts.py" --rootfs-file /etc/init.d/game_monitor "$CARD" 2>/dev/null)
+hooked() {
+    printf '%s\n' "$MONITOR" | grep -qF "$HOOK" && return 0
+    printf '%s\n' "$MONITOR" | grep -qF "PADPRE=\${PADPRE:+\$PADPRE:}$CARD_DIR/mode.so" \
+        && printf '%s\n' "$MONITOR" | grep -qF 'LD_PRELOAD=$PADPRE $1'
+}
+if ! hooked; then
     [ -n "${PAD_MODE_SO:-}" ] || forget
     say "$WHO holds $WHAT, but the card's game_monitor does not load them:"
     say "  a machine would not run them either, so this run does not"

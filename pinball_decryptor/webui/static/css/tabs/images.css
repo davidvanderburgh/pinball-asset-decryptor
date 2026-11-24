@@ -175,11 +175,11 @@ html.bp-1020 .icm-grid.n2, html.bp-1020 .icm-grid.n3, html.bp-1020 .icm-grid.n4 
 .pxe-stage { flex: 1; display: flex; justify-content: center; align-items: center; min-height: 280px;
   padding: 10px; border-radius: 8px; background: #17171a; overflow: auto; }
 .pxe-canvas { image-rendering: pixelated; cursor: crosshair; touch-action: none; }
-.pxe-side { width: 236px; display: flex; flex-direction: column; gap: 8px; }
+.pxe-side { width: 268px; display: flex; flex-direction: column; gap: 8px; }
 .pxe-led { width: 196px; image-rendering: auto; border-radius: 8px; border: 3px solid #b8892a;
   box-shadow: 0 0 0 2px #5a4310, 0 0 14px rgba(255,190,60,.25); align-self: flex-start; }
 .pxe-frames { display: flex; flex-direction: column; gap: 2px; }
-.pxe-fno { min-width: 104px; text-align: center; white-space: nowrap; }
+.pxe-fno { min-width: 92px; text-align: center; white-space: nowrap; }
 .pxe-pal { display: flex; flex-wrap: wrap; gap: 4px; max-height: 132px; overflow: auto; }
 .pxe-chip { width: 18px; height: 18px; border-radius: 3px; border: 1px solid rgba(255,255,255,.18); padding: 0; cursor: pointer; }
 .pxe-chip.on { outline: 2px solid var(--acc, #f5a524); outline-offset: 1px; }

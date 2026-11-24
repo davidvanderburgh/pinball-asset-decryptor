@@ -57,7 +57,42 @@ lamps and 6 events as the 0.97 port.
 
 ## Status
 
-See the commits on `ticket/PAD-1555`; the run log below is appended as each step lands.
+### Run 1 (2026-11-24)
+
+**The nine builds against the ones they replace** (`C:	mp\PAD-1555nalyze.py` over each card's `<title>/game`,
+`*.hex` names and `data/*release_notes.txt`; only King Kong carries release notes on the card, and Stern's site
+loads its notes by script, so the others' change lists are not readable here):
+
+| Build | Replaces | Node firmware | Node board images | Game program |
+|---|---|---|---|---|
+| King Kong LE 1.01 | 1.00 | 1.42 -> 1.42 | same 17 | +19 KB ("Holiday Hotfix", Nov 24: T-Rex gate, climb fixes, 7 Instant Info pages; System V4.41.0, OS V2.7.0) |
+| King Kong Pro 1.01 | 0.97 | 1.33 -> 1.42 | same 17 | -18 KB |
+| Avengers LE / Pro 1.12 | 1.10 | 1.33 -> 1.42 | same 17 | -207 / -228 KB |
+| Foo Fighters LE / Pro 1.05 | 1.04 | 1.33 -> 1.42 | same 17 | +397 / +367 KB |
+| D&D LE / Pro 1.11 | 1.10 | 1.37 -> 1.41 | same 17 | +7 / +18 KB |
+| Metallica Remastered 1.05 | 1.04 | 1.33 -> 1.42 | same 17 | +15 KB |
+
+So the node-board move is 1.33 (or 1.37) to 1.41/1.42 with no new board type. **Proven on the emulator: every
+new build re-derived its node identity from its own node directory ("N boards derived from <title>'s own node
+directory"), booted to attract and started a game** (`startcheck.sh` through rigbatch, stock cards, hidden, muted):
+King Kong LE 1.01 attract 30 s / game 34 s, King Kong Pro 1.01 54/92, Avengers LE 1.12 28/31, Avengers Pro 1.12
+40/44, Foo Fighters LE 1.05 40/157, Foo Fighters Pro 1.05 109/224; no node update walk, no version-mismatch alert.
+
+**Extract and Write** (the app's own `SternExtractPipeline` / `SternWritePipeline`, headless): King Kong LE 1.01
+extracted whole (2617 sounds, 6150 pictures, 469 videos, checksums); a Write with one sound and one scene picture
+replaced built a 15.5 GB card in 12 min: the sound bank re-encoded and grown, the firmware's sound-record count
+patch site found, 50 FINF validation records refreshed.
+
+**Ports**: `port_derive.ensure_port` derives every one of the nine with nothing missing (`C:	mp\PAD-1555\derive`);
+each greys the same 18 parts until proven. `tools/spike2_emu/modes/newbuild/checkjob.sh` is the Modes tab's Check
+this game as a rigbatch job (the first piece of the new-build kit).
+
+**Library**: the nine new cards are in `D:\Pinball\images\Stern\spike2`, the ten builds they replace (King Kong LE
+0.97 and 1.00 both) in `older versions`; the card store holds the nine (`cardstore.ps1 fill`). Non-library cards get
+only 25 GB of the store (`PAD_STORE_CACHE_MAX_GB`), so a sweep of cards outside the library re-copies them off D:
+for every job.
+
+**Rig 2** still has the stale `dump/ballfeed.off` (Oct 27): every batch parks it (`riglock.sh use 2 park-ballfeed`).
 
 ## Proving a new build's parts: what each proven set needs (gathered 2026-11-24)
 

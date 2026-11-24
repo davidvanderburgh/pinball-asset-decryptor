@@ -1052,6 +1052,49 @@ own words).
   booting the image a stored EDITION names is PAD-1325's, proven on ELG.
 Tests: tests/test_pad1505_pokemon_087_editions_music.py.
 
+### Pokemon Pro 0.87 (PAD-1506)
+
+`ports/spike3/pokemon_pro-0.87.port` (program sha1 6ef2e77c..., the card `pokemon_pro-0_87_0_spike3`), carried from the
+proven LE 0.87 port: the Pro is its own program but the same build, `s3port.py <LE 0.87 game> pokemon_le-0.87.port <Pro
+game> --game pokemon_pro --version 0.87` paired 111,066 functions and placed every core entry; the port is the LE's
+file with every address swapped for the draft's, and the three entries s3port cannot place found on the Pro's own code
+(its masked code around the LE's address, matched once; C:/tmp/PAD-1506 carry.py): the high-score gate's bl 0x7ec398
+(bus id 91, to hook_dispatch 0x724bb0), the message table 0x3258b58 (portcoop.message_lines_a64 gives the same) and the
+challenge high-score table 0x324a7d8 (through its two pointer slots; its slot sits 8 bytes before the count, as on the
+LE). The start menu is the LE's function line for line (only AD_DEFAULT_GAME_MODE's id moves, 0xb8 -> 0xb0: the Pro
+lacks eight Magikarp / Meowth mechanism settings, 279 AD_ names to 287); message ids, FG_ ids (challenge 18, Competition
+17) and every value are the LE's. The switch lines are its own (no Bowl opto, Subway enter or Left eject opto; a
+Psyduck target): the census (slot 170) measured 38 of 43 reaching the modes, each on its device-table rank
+(`titles/pokemon_pro-0.87.switch_ids`; the slingshots, pop bumpers and Right eject send none). The video bank is the
+LE's byte for byte (60ed7e50, scene.radium 32eb5f81). The card had no `spike3_games` row and read as an unknown card:
+it is `pokemon_pro`, "Pokemon PRO" now; it has no ALLOW INACTIVITY TO PAUSE TIMERS either (idle_pause).
+
+**Its start menu opens with both flipper buttons in attract**, not with Start: a Start with credits plays a Standard
+game straight away (gdb on the rig: the menu function 0x4e1b50 and its gate 0x7f3ea0 never ran at a Start). play.sh's
+`MENU_OPEN=flippers` (titles/pokemon_pro.env) holds both, waits for the runtime's menu line and steps to `MENU_PICK`.
+
+Proof (2026-11-24, Spike 3 rig slots 170-178, hidden and MUTED, this build's mode64.so, the Pro card in the shared
+store `/mnt/wsl/cards/spike3`):
+- POKE TEST started on the third Berry target left hit, scored 6 shots through score_add (+21,000,000) and ended on its
+  20 s clock; SAVE TEST's 15 s save served the drain inside it back (trough eject 1 s later, auto plunger), 3 shots on
+  that ball, the drain after it ended the ball; SAVE CONTROL ended the ball on its first drain (5.9 s); MB TEST served 3
+  balls, its clock ended it and "ours is over" at one ball.
+- Spare I/O (spare_sweep_mode.c, PROOF=spare): the switch struct checked out (96 switches), spare input 9:12 came as
+  the mode's shot twice, outputs 1:1 8:6 9:1 13:1 each as the pulse, the held command and its OFF.
+- PAD CHALLENGE (`challenge new`, PROOF=challenge): `MODE CHALLENGE appended (entry 3 of 3, the game-mode index 1)`,
+  shown and picked; START (challenge pick) as the ball started, launched for the player, its 30 s clock ended the ball,
+  one ball, the extra ball refused, its own high score filed. Prolonged Competition (comp.cfg 17 / 1920 / 1915): on the
+  menu as entry 4 of 4, UNTIL POWERED OFF picked, `game 1 plays as Competition`.
+- A Try it set from spike3_modes.plan (CLIP TEST + a photo attract item): the magenta title clip covered 72-75% of the
+  glass for its 6 s, 0% before; the photo 88% for its 8 s after entry 1's page.
+- Not proven, so not offered: Editions and Music Mode (as the LE's before PAD-1505).
+
+**The Spike 3 rig build on main** failed from f9962830a on: glbridge.c's new glPixelStorei (boot_display's one-byte
+glyph rows, repacked for the host) collided with s3gl.c's own, which includes it. s3gl.c now defines
+`PAD_GLBRIDGE_HOST_PIXELSTORE`: on Spike 3 the bridge keeps no alignment and sends an upload as it did before, and
+s3gl.c's glPixelStorei hands the alignment to its host (PADGL_PIXELSTORE), as it always had.
+Tests: tests/test_pad1506_pokemon_pro_port.py (with PAD_S3_PROGRAMS holding pokemon_pro-0.87.game).
+
 ### Star Wars 2025 LE 0.96 (PAD-1290)
 
 `ports/spike3/star_wars_2025_le-0.96.port` (program sha1 91fb0281...), drafted from ELG's Spike 3 port: every core site

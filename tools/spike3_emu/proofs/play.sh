@@ -11,6 +11,9 @@
 #   stackmb   start the game's own multiball, trigger a `stack no` mode inside it, drain until it starts
 #   edge      (PAD-1322) the flipper buttons in attract, then in play the trigger, the scoring shots, a slingshot, a
 #             pop bumper and the flipper buttons: with `value switch_edge_log N` in the port, every edge is logged
+#   challenge (PAD-1506) with MENU_PICK (a mode.log regex: the start-menu entry the right flipper steps to before the
+#             second Start): wait out the picked game's first ball, then DRAINS drains (a mode's own challenge, or
+#             Prolonged Competition's entry with EXTRA=comp.cfg)
 #   spare     (PAD-1329) with spare_sweep_mode.c in the runtime (SO=): close the input its `sweep:` line names on the
 #             board (s3press.py set) twice, 3 s each; its shot pulses the spare output it names (the bridge's nbtrace)
 # The title's switch names (Star Wars ELG 1.10's by default) - each list is `|`-separated:
@@ -42,12 +45,31 @@ if [ "${PROOF:-game}" = edge ]; then
   for s in "${fl[@]}"; do $P sw "$SLOT" "$s" 400; sleep 2; done
 fi
 [ "$COINS" -gt 0 ] && { $P coin "$SLOT" "$COINS"; sleep 3; }
+# PAD-1506: a start menu that opens in attract (MENU_OPEN=flippers: both flipper buttons held at once, as Bond's and
+# Pokemon's CHOOSE YOUR MODE OF PLAY): open it, step it to MENU_PICK, and the Start below picks it
+if [ -n "${MENU_PICK:-}" ] && [ "${MENU_OPEN:-}" = flippers ]; then
+  for t in 1 2 3; do
+    IFS='|' read -r -a fl <<< "$FLIP_SWS"; for s in "${fl[@]}"; do $P sw "$SLOT" "$s" 1500 & done; wait; sleep 3
+    for m in $(seq 1 10); do grep -aqE "${MENU_SEEN:-appended|on the start menu as entry}" $L && break 2; sleep 1; done
+  done
+  echo "[play] attract menu after $t try(s): $(grep -aE "${MENU_SEEN:-appended|on the start menu as entry}" $L | tail -1 | cut -c1-160)"
+  for m in $(seq 1 16); do grep -aqE "$MENU_PICK" $L && break; $P sw "$SLOT" "${MENU_SW:-RIGHT FLIPPER BUTTON}"; sleep 2; done
+  echo "[play] menu after $m step(s): $(grep -aE "$MENU_PICK" $L | tail -1 | cut -c1-160)"
+fi
 for k in $(seq 1 8); do
   # a retry drops its coins again: coins dropped while the game is still booting are not counted (PAD-1289, Pokemon)
   [ "$COINS" -gt 0 ] && [ "$k" -gt 1 ] && $P coin "$SLOT" "$COINS" > /dev/null 2>&1
   [ "$START_HOLD_MS" -gt 0 ] && { $P sw "$SLOT" "START BUTTON" "$START_HOLD_MS"; sleep 7; }
   $P sw "$SLOT" "START BUTTON"; sleep 8
   [ -n "$AFTER_START_SWS" ] && sws "$AFTER_START_SWS" 3
+  # PAD-1506: the start menu comes once the game has started and its own start film has played (Pokemon): wait for
+  # the runtime's menu line (MENU_SEEN), step it (MENU_SW) until it logs MENU_PICK, then Start
+  if [ -n "${MENU_PICK:-}" ] && [ "${MENU_OPEN:-}" != flippers ] && grep -aq "in_game 0 -> 1" $L; then
+    for m in $(seq 1 30); do grep -aqE "${MENU_SEEN:-appended|on the start menu as entry}" $L && break; sleep 1; done
+    echo "[play] menu up after ${m}s: $(grep -aE "${MENU_SEEN:-appended|on the start menu as entry}" $L | tail -1 | cut -c1-160)"
+    for m in $(seq 1 16); do grep -aqE "$MENU_PICK" $L && break; $P sw "$SLOT" "${MENU_SW:-RIGHT FLIPPER BUTTON}"; sleep 2; done
+    echo "[play] menu after $m step(s): $(grep -aE "$MENU_PICK" $L | tail -1 | cut -c1-160)"; $P sw "$SLOT" "START BUTTON"; sleep 8
+  fi
   grep -q "in_game 0 -> 1\|\[probe\] in game" $L && break
 done
 echo "[play] game after $k start press(es)"; sleep 3
@@ -136,6 +158,11 @@ edge)
     for s in "${fl[@]}"; do $P sw "$SLOT" "$s" 600; sleep 2; done
   done
   sleep 10 ;;
+challenge)   # PAD-1506 (MENU_PICK picked the entry): wait out the picked game's first ball, then drain to its end
+  for k in $(seq 1 120); do grep -aqE "END|ended" $L && break; sleep 1; done
+  for d in $(seq 1 ${DRAINS:-3}); do echo "[play] drain $d: $(drain)"; sleep 8; plunge > /dev/null; sleep 4; done
+  grep -aE "challenge|competition|START|END|one ball|extra ball|high score" $L | tail -14
+  sleep 5 ;;
 spare)
   for i in $(seq 1 60); do grep -q "sweep: input" $L && break; sleep 1; done
   ln=$(grep -a -m1 "sweep: input" $L); echo "[play] $ln"

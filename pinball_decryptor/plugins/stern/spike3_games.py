@@ -32,6 +32,8 @@ SPIKE3_DB = {
                                 "supported": True},
     "pokemon_le":              {"display": "Pokemon LE",
                                 "supported": True},
+    "pokemon_pro":             {"display": "Pokemon PRO",
+                                "supported": True},    # PAD-1506: without a row its card read as an unknown Spike 3 card
     "walking_dead_remastered_le": {"display": "Walking Dead Remastered LE",
                                    "supported": True},    # PAD-1293: its cards are named transformers_mtmte_le-<version>_spike3; without a row it read
     # "Transformers Mtmte LE" off the filename

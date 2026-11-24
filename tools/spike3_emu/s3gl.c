@@ -35,6 +35,7 @@
 #define glDrawElements pad_s2_glDrawElements
 #define glUniform4fv   pad_s2_glUniform4fv
 #define glUniformMatrix4fv pad_s2_glUniformMatrix4fv
+#define PAD_GLBRIDGE_HOST_PIXELSTORE 1   /* PAD-1506: glPixelStorei is ours (below), forwarded to the host */
 #include "glbridge.c"
 #undef glUniform4fv
 #undef glUniformMatrix4fv

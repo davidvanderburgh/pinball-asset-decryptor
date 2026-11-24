@@ -103,3 +103,23 @@ Still left, in this order:
 
 Rig notes: `parts.py --rootfs-file` prints text and damages a binary; pull folders with `--rootfs-dir`. The
 service menu needs Select twice (a splash page first); Bluetooth is the last row, one Minus from the top.
+
+## State after the third run (2026-11-24): done
+
+- **Spike 3**: the arm64 release on the LUKS system partition (`ssh_spike3.rewrite_rootfs`, shared with remote
+  access), `S3_HOOK_LINES` in `game_monitor` with `SPIKEBT_BACKEND=bluez5`, the game's exit code handed on, and
+  the launcher's switched-off mark removed after Stern's three normal ends (1, 3, 6). Proven on a real Fallout LE
+  0.82 card and in the Spike 3 emulator (docs/validation).
+- **Supported games**: installing keeps `profiles/supported-games.json` and `profiles/spike3/*.json` from the
+  source tree at the tag; the tab and the build say whether the card's game program is one the release knows.
+  Checked on five real cards. A game program this app changed is not known to his menu: no Bluetooth entry there.
+- **On the machine**: "Check it on the machine" (remote access) reports the plugin's state and removes
+  `/dump/spikebt/disabled`.
+- The author asked to be credited as mattlqx; done everywhere.
+- Dropped: putting the plugin straight on a card or a running machine without a build. The existing direct routes
+  keep a Bluetooth card's block (tested).
+
+Worth telling the author (none of it blocks this): an option for extra preloads in `run-live.sh` would retire
+`pad-bt-game`; `run-live.sh` exits 2 without starting the game on an unknown `SPIKEBT_BACKEND`; on Spike 3 exit
+codes 1, 3 and 6 are normal ends that his launcher treats as failures; his menu cannot attach to a game program
+PAD has changed (Music Mode rows, editions).

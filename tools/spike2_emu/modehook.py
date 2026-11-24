@@ -116,7 +116,41 @@ ALL_HOOK_LINES = [
     "\t\t$1",
     "\tfi",
 ]
-BLOCKS = (ALL_HOOK_LINES, MENU_HOOK_LINES, HOOK_LINES)
+#: THE BLUETOOTH FORM (PAD-1554).  A card with Bluetooth headphones (the app's core/bluetooth_card.py, which
+#: writes this block) starts the game through spike-pinball-bluetooth's own launcher,
+#: /usr/local/spikebt/run-live.sh (https://gitlab.com/mattlqx/spike-pinball-bluetooth): it starts its helper,
+#: preloads its menu and our mode.so into the game itself, and runs the plain game when anything is missing.
+#: The launcher knows mode.so only, so when the card also has padmenu.so or pad-buttons.so it is handed
+#: BT_GAME instead of the game: a few lines of sh that put those in front of the launcher's own preload list
+#: and exec the game (PADGAME).  With no launcher on the card, or its `enabled` file gone, the block does what
+#: ALL_HOOK_LINES does.  core/remote_buttons.py carries the same lines, and a test holds the two equal.
+BT_DIR = "/usr/local/spikebt"
+BT_RUN = BT_DIR + "/run-live.sh"
+BT_ENABLED = BT_DIR + "/enabled"
+BT_GAME = "/usr/local/bin/pad-bt-game"
+BT_HOOK_LINES = [
+    "\t# padmode (item 128) + padmenu (PAD-1309) + pad-buttons (PAD-1467) + Bluetooth headphones (PAD-1554).",
+    "\t# Command-scoped, so the restart lines below and conagent never see it.",
+    "\tPADPRE=",
+    "\t[ -f " + MENU_SO + " ] && PADPRE=" + MENU_SO,
+    "\t[ -f " + BUTTONS_SO + " ] && PADPRE=${PADPRE:+$PADPRE:}" + BUTTONS_SO,
+    "\tif [ -f " + BT_ENABLED + " ] && [ -x " + BT_RUN + " ]; then",
+    "\t\t# spike-pinball-bluetooth's launcher starts the game: it preloads its menu and mode.so itself",
+    '\t\tif [ -n "$PADPRE" ] && [ -x ' + BT_GAME + " ]; then",
+    "\t\t\tPADGAME=$1 PADPRE=$PADPRE " + BT_RUN + " " + BT_GAME,
+    "\t\telse",
+    "\t\t\t" + BT_RUN + " $1",
+    "\t\tfi",
+    "\telse",
+    "\t\t[ -f " + MODE_SO + " ] && PADPRE=${PADPRE:+$PADPRE:}" + MODE_SO,
+    '\t\tif [ -n "$PADPRE" ]; then',
+    "\t\t\tLD_PRELOAD=$PADPRE $1",
+    "\t\telse",
+    "\t\t\t$1",
+    "\t\tfi",
+    "\tfi",
+]
+BLOCKS = (BT_HOOK_LINES, ALL_HOOK_LINES, MENU_HOOK_LINES, HOOK_LINES)
 
 
 class Refused(Exception):
@@ -159,6 +193,13 @@ def has_buttons_hook(text):
     return any(lines[k:k + n] == ALL_HOOK_LINES for k in range(len(lines) - n + 1))
 
 
+def has_bluetooth_hook(text):
+    """True when this script carries the Bluetooth block (BT_HOOK_LINES)."""
+    lines = _lines(text)
+    n = len(BT_HOOK_LINES)
+    return any(lines[k:k + n] == BT_HOOK_LINES for k in range(len(lines) - n + 1))
+
+
 def has_hook(text):
     """True when this script already carries our block.
 
@@ -186,6 +227,7 @@ def hook_game_monitor(text, menu=None):
     if menu is None:
         menu = has_menu_hook(text)
     buttons = has_buttons_hook(text)        # PAD-1467: a card with remote buttons keeps its block, whatever else
+    bluetooth = has_bluetooth_hook(text)    # PAD-1554: and one with Bluetooth headphones keeps that one
     text = strip_hook(text)
     lines = _lines(text)
     hits = [k for k, l in enumerate(lines) if l == RUN_LINE]
@@ -195,12 +237,16 @@ def hook_game_monitor(text, menu=None):
             "stock Spike 2 game_monitor and nothing has been written"
             % (RUN_LINE, len(hits)))
     k = hits[0]
-    lines[k:k + 1] = ALL_HOOK_LINES if buttons else MENU_HOOK_LINES if menu else HOOK_LINES
+    lines[k:k + 1] = (BT_HOOK_LINES if bluetooth else ALL_HOOK_LINES if buttons
+                      else MENU_HOOK_LINES if menu else HOOK_LINES)
     return "\n".join(lines)
 
 
 def describe(text):
     """One line for a log: whether this script carries the mode hook."""
+    if has_bluetooth_hook(text):
+        return ("game_monitor: Bluetooth hook present, the game started by %s when it is there, else "
+                "preloading %s, %s and %s when there" % (BT_RUN, MENU_SO, BUTTONS_SO, MODE_SO))
     if has_buttons_hook(text):
         return ("game_monitor: remote-buttons hook present, preloading %s, %s and %s when there"
                 % (MENU_SO, BUTTONS_SO, MODE_SO))

@@ -95,7 +95,37 @@ ALL_HOOK_LINES = [
     '\t\t$1',
     '\tfi',
 ]
-BLOCKS = (ALL_HOOK_LINES, MENU_HOOK_LINES, HOOK_LINES)
+#: the block of a card with Bluetooth headphones (PAD-1554, core/bluetooth_card.py): the game started by
+#: spike-pinball-bluetooth's own launcher, which preloads its menu and the mode runtime itself.  It knows no other
+#: object, so with a boot menu or these buttons on the card it is handed BT_GAME, which puts them in front and
+#: starts the game.  Without the launcher (or its `enabled` file) the block does what ALL_HOOK_LINES does.
+BT_DIR = '/usr/local/spikebt'
+BT_RUN = BT_DIR + '/run-live.sh'
+BT_ENABLED = BT_DIR + '/enabled'
+BT_GAME = '/usr/local/bin/pad-bt-game'
+BT_HOOK_LINES = [
+    '\t# padmode (item 128) + padmenu (PAD-1309) + pad-buttons (PAD-1467) + Bluetooth headphones (PAD-1554).',
+    '\t# Command-scoped, so the restart lines below and conagent never see it.',
+    '\tPADPRE=',
+    '\t[ -f ' + MENU_SO + ' ] && PADPRE=' + MENU_SO,
+    '\t[ -f ' + SO + ' ] && PADPRE=${PADPRE:+$PADPRE:}' + SO,
+    '\tif [ -f ' + BT_ENABLED + ' ] && [ -x ' + BT_RUN + ' ]; then',
+    "\t\t# spike-pinball-bluetooth's launcher starts the game: it preloads its menu and mode.so itself",
+    '\t\tif [ -n "$PADPRE" ] && [ -x ' + BT_GAME + ' ]; then',
+    '\t\t\tPADGAME=$1 PADPRE=$PADPRE ' + BT_RUN + ' ' + BT_GAME,
+    '\t\telse',
+    '\t\t\t' + BT_RUN + ' $1',
+    '\t\tfi',
+    '\telse',
+    '\t\t[ -f ' + MODE_SO + ' ] && PADPRE=${PADPRE:+$PADPRE:}' + MODE_SO,
+    '\t\tif [ -n "$PADPRE" ]; then',
+    '\t\t\tLD_PRELOAD=$PADPRE $1',
+    '\t\telse',
+    '\t\t\t$1',
+    '\t\tfi',
+    '\tfi',
+]
+BLOCKS = (BT_HOOK_LINES, ALL_HOOK_LINES, MENU_HOOK_LINES, HOOK_LINES)
 
 NOT_SPIKE2 = 'Remote buttons work on Stern Spike 2 cards only.'
 NOT_STOCK = ("This card's game start-up script (/etc/init.d/game_monitor) is not one this app knows, so it is left "
@@ -149,15 +179,25 @@ def strip_blocks(text):
     return '\n'.join(lines)
 
 
-def monitor_text(text, on, mode=False, menu=False):
+def has_block(text, block):
+    """Whether the start-up script *text* carries *block* (one of :data:`BLOCKS`)."""
+    return _find(_lines(text), block) is not None
+
+
+def monitor_text(text, on, mode=False, menu=False, bluetooth=None):
     """The game start-up script for the buttons choice *on*.  Off puts back the form the card would have without
     it: the multi-boot block when the card has a boot menu (*menu*), the mode block when it has modes (*mode*),
-    else Stern's own line.  ExtrasError when the script is not one of the known forms."""
+    else Stern's own line.  *bluetooth* (PAD-1554) is whether the card starts its game through the Bluetooth
+    launcher, whose block serves every other choice as well: None keeps what the script has, and
+    core/bluetooth_card.py passes its own choice.  ExtrasError when the script is not one of the known forms."""
+    if bluetooth is None:
+        bluetooth = has_block(text, BT_HOOK_LINES)
     lines = _lines(strip_blocks(text))
     hits = [k for k, l in enumerate(lines) if l == RUN_LINE]
     if len(hits) != 1:
         raise ExtrasError(NOT_STOCK)
-    block = ALL_HOOK_LINES if on else MENU_HOOK_LINES if menu else HOOK_LINES if mode else [RUN_LINE]
+    block = (BT_HOOK_LINES if bluetooth else ALL_HOOK_LINES if on else MENU_HOOK_LINES if menu
+             else HOOK_LINES if mode else [RUN_LINE])
     lines[hits[0]:hits[0] + 1] = block
     return '\n'.join(lines)
 
@@ -177,8 +217,10 @@ def inspect_root(reader):
     monitor_text(script, True)                              # refuses a script that is not a known form
     there = ssh_card._node(reader, SO) is not None
     so = _read(reader, SO) if there else None
-    hooked = _find(_lines(script), ALL_HOOK_LINES) is not None
-    return {'enabled': bool(hooked and so is not None and hashlib.sha256(so).hexdigest() == SHIM_SHA256),
+    hooked = has_block(script, ALL_HOOK_LINES)
+    # PAD-1554: the Bluetooth block loads the shim as well, and is not this option's to take away
+    loads = hooked or has_block(script, BT_HOOK_LINES)
+    return {'enabled': bool(loads and so is not None and hashlib.sha256(so).hexdigest() == SHIM_SHA256),
             'hooked': hooked, 'file': there}
 
 

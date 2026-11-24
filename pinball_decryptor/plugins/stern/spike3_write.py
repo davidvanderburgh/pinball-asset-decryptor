@@ -911,7 +911,7 @@ class Spike3WritePipeline(BasePipeline):
     def _run(self):
         from . import spike3, engine
         from .spike3_keys import Spike3KeyError
-        from ...core import ssh_card
+        from ...core import bluetooth_card, ssh_card
         from ...core.card_extras import ExtrasError
         self._set_phase(0)  # Detect
         try:
@@ -921,6 +921,15 @@ class Spike3WritePipeline(BasePipeline):
                 ssh_card.validate_output(self.original_path, self.output_path)
         except ExtrasError as e:
             raise PipelineError('Remote access', str(e)) from e
+        try:
+            # PAD-1554: the Bluetooth headphones plugin goes on the system partition the same checked way,
+            # and is refused here, before anything is built, when it is ticked and cannot go on
+            bt_config = bluetooth_card.validate_request(self.original_path, self.assets_dir,
+                                                        key_source=self.key_source)
+            if bt_config is not None:
+                ssh_card.validate_output(self.original_path, self.output_path)
+        except ExtrasError as e:
+            raise PipelineError('Bluetooth headphones', str(e)) from e
         if not spike3.is_spike3_card(self.original_path):
             raise PipelineError("Detect", "The original is not a Stern Spike 3 "
                                 "secure SD-card image.")
@@ -934,7 +943,8 @@ class Spike3WritePipeline(BasePipeline):
                                 cancel=lambda: self._cancelled,
                                 phase=self._set_phase,
                                 key_source=self.key_source,
-                                **({'allow_empty': True} if config is not None or recovering else {}))
+                                **({'allow_empty': True} if config is not None or bt_config is not None
+                                   or recovering else {}))
         except _Cancelled:
             _discard(self.output_path)
             self._check_cancel()
@@ -953,13 +963,21 @@ class Spike3WritePipeline(BasePipeline):
             if n:
                 bits.append("%d %s%s" % (n, word, "" if n == 1 else "s"))
         marker = ssh_card.pending_marker(self.output_path)
-        note = ''
-        if config is not None:
+        note = bt_note = ''
+        if config is not None or bt_config is not None:
+            step = 'Remote access'
             try:
                 marker.write_text('Incomplete SSH preparation; do not flash.\n')
-                note = ssh_card.apply_to_build(self.original_path, self.output_path, config,
-                    log=self._log, cancel=lambda: self._cancelled, key_source=self.key_source)
-                self._check_cancel()
+                if config is not None:
+                    note = ssh_card.apply_to_build(self.original_path, self.output_path, config,
+                        log=self._log, cancel=lambda: self._cancelled, key_source=self.key_source)
+                    self._check_cancel()
+                if bt_config is not None:
+                    step = 'Bluetooth headphones'
+                    bt_note = bluetooth_card.apply_to_build(
+                        self.original_path, self.output_path, bt_config,
+                        log=self._log, cancel=lambda: self._cancelled, key_source=self.key_source)
+                    self._check_cancel()
                 ssh_card.note_build(self.output_path, self.assets_dir)
                 marker.unlink(missing_ok=True)
             except Exception as e:
@@ -968,14 +986,17 @@ class Spike3WritePipeline(BasePipeline):
                         os.replace(self.output_path, self.output_path + '.ssh-incomplete')
                     except OSError:
                         pass
-                raise PipelineError('Remote access', str(e)) from e
+                raise PipelineError(step, str(e)) from e
         elif recovering:
             self._check_cancel()
             if not engine.read_build_manifest(self.output_path).get('complete'):
                 raise PipelineError('Remote access', 'The rebuild did not record a complete image; its failure marker was retained.')
             marker.unlink(missing_ok=True)
-        self._done(True, "Wrote %s to %s%s" % (", ".join(bits) or ('remote access (SSH)' if note else 'the card'),
-                       self.output_path, ('\n' + note) if note else ''))
+        named = ' and '.join(n for n, said in (('remote access (SSH)', note), ('Bluetooth headphones', bt_note))
+                             if said)
+        notes = '\n'.join(n for n in (note, bt_note) if n)
+        self._done(True, "Wrote %s to %s%s" % (", ".join(bits) or named or 'the card',
+                       self.output_path, ('\n' + notes) if notes else ''))
 
 
 def _discard(path):

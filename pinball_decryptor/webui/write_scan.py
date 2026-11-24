@@ -471,7 +471,30 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
                      'Pending (Network tab: fix the keys)', 'pending'))
     rows.extend(wifi_rows(window, assets_path))
     rows.extend(buttons_rows(window, assets_path))
+    rows.extend(bluetooth_rows(window, assets_path))
     return rows
+
+
+def bluetooth_rows(window, assets_path):
+    """PAD-1554: the project's Bluetooth headphones choice as a Write row, when it differs from the source card's
+    (the plugin's release on the card is part of that: another version installed is a change to write)."""
+    from ..core import bluetooth_card, card_extras
+    try:
+        rec = card_extras.load_bluetooth(assets_path)
+    except card_extras.ExtrasError:
+        return [('Bluetooth headphones — invalid configuration', 'system', 'Pending (Plugins tab)', 'pending')]
+    if rec is None:
+        return []
+    source_var = _window_getter(window, 'write_upd_var')
+    source = bluetooth_card.inspect_image(source_var.get()) if source_var is not None else {}
+    want = bluetooth_card.wanted_release(rec)
+    if rec['enabled'] and not want:
+        return [('Bluetooth headphones — the plugin is not installed', 'system',
+                 'Pending (Plugins tab: install it)', 'pending')]
+    if rec['enabled'] == bool(source.get('enabled')) and (not rec['enabled'] or source.get('release') == want):
+        return []
+    return [('Bluetooth headphones — ' + ('spike-pinball-bluetooth %s' % want if rec['enabled']
+                                          else 'off, as shipped'), 'system', 'Pending (Plugins tab)', 'pending')]
 
 
 def buttons_rows(window, assets_path):

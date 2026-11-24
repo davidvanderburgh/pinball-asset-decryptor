@@ -532,6 +532,39 @@ editions: give it its own name with **Name the editions…**, and its own
 title and attract with **Replace the game's attract** on the Attract tab. The editions share the machine's settings, so give every
 edition music modes, or none.
 
+## Plugins tab (Stern Spike 2 and Spike 3)
+
+Optional add-ons that other people made and publish themselves. A plugin is not part of this app: when you
+install one, the app downloads the version you pick from its author's own project and keeps it on this
+computer beside your settings, so updating the app leaves it installed.
+
+Each plugin has two halves:
+
+- **On this computer.** The versions its author has published, newest first. The one marked *tested with this
+  app* is the version this release of the app was proven with. **Install** downloads and checks it. A newer
+  version can be installed too and is marked as not tested yet. **Install from files** is for a computer that
+  cannot reach gitlab.com: download the release's two `.tar.gz` files and its `SHA256SUMS` elsewhere and pick
+  all three. **Remove** takes it off this computer; cards already written keep it.
+- **On your cards.** Tick it for the open project, then Write: cards written from that project carry it.
+  Untick it and Write again to take it off. *Exactly what it changes on the card* lists every file.
+
+### Bluetooth headphones
+
+Made by mattlqx (<https://gitlab.com/mattlqx/spike-pinball-bluetooth>). It adds a Bluetooth entry to the game's
+own menus, a volume for each headset, and cabinet speakers that can go quiet while headphones play.
+
+- **Spike 2** needs a USB Bluetooth adapter plugged into the machine. **Spike 3** uses the machine's own radio;
+  its card must be unlocked with your own key, as for anything else written to a Spike 3 card.
+- **It works on exact game versions.** The tab says whether the card you picked is one the installed version
+  knows. On any other the game runs as it is, with no Bluetooth entry. A game program this app has changed
+  (Music Mode rows in the service menu, editions) is not one it knows either, and the Write log says so when
+  the card it built is such a one.
+- **In the game:** hold the left flipper in attract mode and choose Bluetooth, or open Service and choose
+  Bluetooth with the coin door buttons.
+- **If the Bluetooth entry goes away** after the game crashed: the plugin switches itself off when a game ends
+  badly. With remote access set up (Network tab), **Check it on the machine** on this tab switches it back on.
+- Paired headphones and their settings are kept on the machine, not on the card.
+
 ## Mod Pack tab
 
 A mod pack is a small zip of only your changed files, to share.

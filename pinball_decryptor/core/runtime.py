@@ -501,6 +501,18 @@ def install(log=None, progress=None, runner=None, opener=None,
     if out.returncode != 0:
         # _why, not stderr: wsl.exe writes its errors to STDOUT, so a full
         # disk read "exit 4294967295" here and the reason was lost (PAD-840)
+        from . import prereqs
+        if prereqs.vm_platform_error(_why(out)):
+            # PAD-1564: WSL from the Store, the feature under it off.  The
+            # import cannot work until that changes, and "if WSL 2 is not
+            # installed" read as not-me to someone who has WSL.
+            raise RuntimeError(
+                "could not import the runtime: %s\nWindows' Virtual Machine "
+                "Platform feature, which WSL 2 runs on, is switched off. "
+                "Install Missing switches it on (administrator permission, "
+                "then one Windows restart); by hand: `wsl --install "
+                "--no-distribution` in an administrator terminal, then "
+                "restart." % _why(out))
         raise RuntimeError(
             "could not import the runtime: %s%s\nIf WSL 2 itself is not "
             "installed: `wsl --install --no-distribution` in an "

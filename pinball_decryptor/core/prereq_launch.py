@@ -63,13 +63,18 @@ ROUTE_RUNTIME = "runtime"
 ROUTE_SCRIPT = "script"
 
 
-def pick_route(wsl_rows_missing, wsl_ok, runtime_state, restart_pending=False):
+def pick_route(wsl_rows_missing, wsl_ok, runtime_state, restart_pending=False,
+               vm_off=False):
     """Which install Install Missing starts on Windows.
 
     *wsl_rows_missing*: did any missing prerequisite probe inside WSL.
     *wsl_ok*: ``wsl --status`` - True on, False off, None did not answer.
     *runtime_state*: :func:`core.runtime.status`'s state.
     *restart_pending*: WSL was installed in this boot and waits on a restart.
+    *vm_off*: Windows' Virtual Machine Platform is off (no vmcompute
+    service).  ``wsl --status`` still answers 0 then, so WSL read as on and
+    PAD-1564 was handed a 414 MB runtime that could not import: switching
+    the feature on is the step, the same -WslOnly one.
 
     Only ``absent`` and ``stale`` runtimes are installable: ``ready`` has its
     tools already (a red row there is the app's fault, said elsewhere),
@@ -78,6 +83,8 @@ def pick_route(wsl_rows_missing, wsl_ok, runtime_state, restart_pending=False):
     """
     if not wsl_rows_missing or runtime_state not in ("absent", "stale"):
         return ROUTE_SCRIPT
+    if vm_off:
+        wsl_ok = False
     if wsl_ok is True:
         return ROUTE_RUNTIME
     if wsl_ok is False and not restart_pending:
@@ -85,16 +92,28 @@ def pick_route(wsl_rows_missing, wsl_ok, runtime_state, restart_pending=False):
     return ROUTE_SCRIPT
 
 
-def wsl_setup_text(rows):
-    """The question before ROUTE_WSL; *rows* names what is waiting on it."""
-    return ("WSL2 is not set up on this PC, and %s %s on it.\n\n"
-            "Set it up now? Windows asks for administrator permission, "
-            "installs WSL2 in a window of its own (a few minutes) and then "
-            "usually needs one restart.\n\n"
+def wsl_setup_text(rows, vm_off=False):
+    """The question before ROUTE_WSL; *rows* names what is waiting on it.
+    *vm_off*: WSL is installed but the Virtual Machine Platform is off
+    (PAD-1564), so "not set up" would read as wrong to someone who can see
+    WSL in his Start menu."""
+    if vm_off:
+        what = ("WSL is installed on this PC, but Windows' Virtual Machine "
+                "Platform feature, which WSL2 runs on, is switched off")
+        step = ("Switch it on now? Windows asks for administrator "
+                "permission, switches the feature on in a window of its own "
+                "(a few minutes) and then needs one restart.")
+    else:
+        what = "WSL2 is not set up on this PC"
+        step = ("Set it up now? Windows asks for administrator permission, "
+                "installs WSL2 in a window of its own (a few minutes) and "
+                "then usually needs one restart.")
+    return ("%s, and %s %s on it.\n\n%s\n\n"
             "After the restart, click Install Missing again: it installs "
             "the app's own Linux, with every tool already in it. You do not "
             "need to install Ubuntu or anything else yourself."
-            % (_names(rows), "runs" if len(rows) == 1 else "run"))
+            % (what, _names(rows), "runs" if len(rows) == 1 else "run",
+               step))
 
 
 def runtime_text(rows, size_mb, stale=False):

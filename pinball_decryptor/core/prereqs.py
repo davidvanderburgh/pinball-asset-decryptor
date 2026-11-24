@@ -460,7 +460,15 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
     # its distro "answered, but could not hand out a loop device" while
     # nothing at all ran in it).  Ask the one question that separates them.
     if _wsl_distro_runs_commands() is False:
-        msg, hint = _diagnose_wsl_dead_distro(err)
+        # A distro that does not start because WINDOWS will not start any:
+        # firmware, or the Virtual Machine Platform feature (PAD-1564 was
+        # sent to reinstall Ubuntu over the latter).
+        if _virtualization_disabled():
+            msg, hint = _diagnose_virtualization_off()
+        elif vm_platform_error(err) or _vm_platform_off():
+            msg, hint = _diagnose_vm_platform_off()
+        else:
+            msg, hint = _diagnose_wsl_dead_distro(err)
         return False, msg, hint
     # ...and the loop-device probe, whose failure is a property of the
     # DISTRO (WSL 1 owns no loop devices), not of a package apt can fix.
@@ -561,7 +569,11 @@ def _run_in_wsl(cmd: str, timeout: float) -> subprocess.CompletedProcess:
     return subprocess.run(
         runtime.wsl_head(root=True) + ["--", "bash", "-c", cmd],
         capture_output=True,
-        text=True,
+        # ...and read back AS UTF-8: text=True alone decodes with the
+        # Windows code page, which turned PAD-1564's French "n'est pas
+        # activée" into "nâ€™est pas activÃ©e" in the log.
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         env=dict(os.environ, WSL_UTF8="1"),
         creationflags=_CREATE_FLAGS,
@@ -985,6 +997,108 @@ def _virtualization_disabled() -> bool:
     return _virt_disabled_cache
 
 
+#: wsl.exe's own words for "Windows' Virtual Machine Platform is off".  The
+#: sentence around them is translated (PAD-1564 arrived in French), the
+#: error names and the command it recommends are not.
+_VM_PLATFORM_MARKS = ("HCS_E_SERVICE_NOT_AVAILABLE",
+                      "HCS_E_HYPERV_NOT_INSTALLED",
+                      "0x80370102",
+                      "--no-distribution",
+                      "VirtualMachinePlatform",
+                      "Virtual Machine Platform")
+
+#: sc.exe's exit code for a service that does not exist.
+_ERROR_SERVICE_DOES_NOT_EXIST = 1060
+
+_vm_platform_off_cache: Optional[bool] = None
+
+
+def vm_platform_error(text: str) -> bool:
+    """True when a wsl.exe error is the Virtual Machine Platform one."""
+    low = (text or "").lower()
+    return any(m.lower() in low for m in _VM_PLATFORM_MARKS)
+
+
+def _vm_platform_off() -> bool:
+    """True only when Windows has no Host Compute Service at all.
+
+    WSL 2 starts every Linux through ``vmcompute``, the service the Virtual
+    Machine Platform feature (or Hyper-V) installs.  With the feature off the
+    Store's WSL still installs, ``wsl --status`` still exits 0 and a distro
+    still registers, so every check that asked wsl.exe read the machine as
+    "WSL2 set up": PAD-1564 was told his Ubuntu itself was broken, and
+    Install Missing downloaded a 414 MB runtime that could not import.  The
+    service's absence is the one fact that does not depend on wsl.exe or on
+    the Windows language (sc.exe exits 1060 for it), and querying it needs
+    no administrator.  Anything else - a stopped service, a failed query -
+    is "don't know", never "off".
+    """
+    global _vm_platform_off_cache
+    if sys.platform != "win32":
+        return False
+    if _vm_platform_off_cache is None:
+        try:
+            _vm_platform_off_cache = subprocess.run(
+                ["sc", "query", "vmcompute"],
+                capture_output=True,
+                timeout=PROBE_TIMEOUT,
+                creationflags=_CREATE_FLAGS,
+            ).returncode == _ERROR_SERVICE_DOES_NOT_EXIST
+        except (subprocess.TimeoutExpired, OSError):
+            _vm_platform_off_cache = False
+    return _vm_platform_off_cache
+
+
+def vm_platform_reason() -> str:
+    """One paragraph for a WSL that cannot start any Linux because the
+    firmware or the Virtual Machine Platform says no; "" when neither is
+    known to.  For the places that only have a sentence to give (the
+    pipelines' own prerequisite gates)."""
+    if _virtualization_disabled():
+        msg, hint = _diagnose_virtualization_off()
+    elif _vm_platform_off():
+        msg, hint = _diagnose_vm_platform_off()
+    else:
+        return ""
+    return "%s %s" % (msg, hint)
+
+
+def _diagnose_virtualization_off() -> Tuple[str, str]:
+    return ("WSL2 cannot start: hardware virtualization is disabled "
+            "in this computer's BIOS/UEFI firmware, so installing "
+            "WSL/Ubuntu again will not help.",
+            "Reboot into the BIOS/UEFI setup screen and enable "
+            "virtualization — the option is named Intel VT-x, AMD-V, "
+            "SVM Mode, or Virtualization Technology, usually under "
+            "Advanced or CPU settings. Then click 'Install Missing' "
+            "above the tabs. If the firmware has no such option, this "
+            "machine cannot run WSL2.")
+
+
+def _diagnose_vm_platform_off() -> Tuple[str, str]:
+    """(message, hint) for WSL installed on a Windows whose Virtual Machine
+    Platform feature is off (PAD-1564).  No distro, package or runtime can
+    help; switching the feature on and restarting does."""
+    if _wsl_restart_pending():
+        return ("Windows' Virtual Machine Platform feature was switched on, "
+                "but Windows has not been restarted since, so WSL 2 cannot "
+                "start any Linux yet.",
+                "Restart Windows (use Restart; with Fast Startup, Shut down "
+                "is not a restart), then click 'Install Missing' above the "
+                "tabs to finish.")
+    return ("WSL is installed, but Windows' Virtual Machine Platform feature "
+            "is switched off, so WSL 2 cannot start any Linux at all. "
+            "Nothing is wrong with the distro or with any package.",
+            "Click 'Install Missing' above the tabs: it switches the feature "
+            "on (Windows asks for administrator permission) and then needs "
+            "one Windows restart. By hand it is the same step: "
+            "'wsl --install --no-distribution' in an administrator "
+            "PowerShell window, then restart. If it still says this after "
+            "the restart, hardware virtualization is off in the BIOS/UEFI "
+            "setup (Intel VT-x, AMD-V, SVM Mode or Virtualization "
+            "Technology): switch it on there.")
+
+
 def _diagnose_wsl_unusable() -> Tuple[str, str]:
     """(message, install_hint) when WSL can't run our probe at all — no
     registered distro, or no WSL.  Four machine states hide behind that
@@ -998,15 +1112,7 @@ def _diagnose_wsl_unusable() -> Tuple[str, str]:
     past a user unnoticed through three whole support round-trips while
     every other state's hint kept him retrying the install (PAD-21)."""
     if _virtualization_disabled():
-        return ("WSL2 cannot start: hardware virtualization is disabled "
-                "in this computer's BIOS/UEFI firmware, so installing "
-                "WSL/Ubuntu again will not help.",
-                "Reboot into the BIOS/UEFI setup screen and enable "
-                "virtualization — the option is named Intel VT-x, AMD-V, "
-                "SVM Mode, or Virtualization Technology, usually under "
-                "Advanced or CPU settings. Then click 'Install Missing' "
-                "above the tabs. If the firmware has no such option, this "
-                "machine cannot run WSL2.")
+        return _diagnose_virtualization_off()
     if _wsl_restart_pending():
         return ("WSL2 was installed, but Windows has not been restarted "
                 "since — the restart is what finishes WSL2 setup.",
@@ -1016,6 +1122,10 @@ def _diagnose_wsl_unusable() -> Tuple[str, str]:
     status = _wsl_status_ok()
     if status is None:
         return _diagnose_wsl_silent()
+    # wsl --status answers 0 with the feature WSL 2 runs on switched off
+    # (PAD-1564), so "WSL is enabled" needs the service that feature brings.
+    if status and _vm_platform_off():
+        return _diagnose_vm_platform_off()
     # PAD-1103: where this build carries the app's own Linux, Install Missing
     # installs THAT (core.prereq_launch.pick_route), not an Ubuntu of one
     # exact release with the tools apt-installed into it - so the hint says

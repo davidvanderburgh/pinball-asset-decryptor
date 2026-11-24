@@ -133,8 +133,10 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   run as the Modes tab's Check this game does). `port_words.py` 0 problems on each.
 - **D&D LE 1.11:** no drain ends a ball in the check (the ball saver serves it back, the ball stays in the shooter
   lane); the shipped D&D LE 1.10 port, proven 2026-10-07, fails the same way on the same rigs today, so it is the rig
-  or the check on this title, not the port. Retried on fresh NVRAM (the slots' D&D LE NVRAM, from October, set aside as
-  `nv/dungeons_and_dragons_le.pad1555-oct`).
+  or the check on this title, not the port. Fresh NVRAM changed nothing (1.10 and 1.11 both failed again; the slots'
+  October NVRAM is back in place). Next: find what broke D&D LE's drain on the rig after PAD-713 (2026-10-24, the
+  dragon hold fill; `git log -- tools/spike2_emu/ballmodel.py plunge.py modes/gamecheck.sh`), prove 1.10 passes again,
+  then check, stamp and ship 1.11 (its derived port: `C:/tmp/PAD-1555/ports2/dungeons_and_dragons_le-1.11.port`).
 - **Left (step 5):** the proven sets (lights, screen/clip, ball save, multiball, stack, place, done, with, shaker,
   wizards, held coils, magnet/scoop, title scenes) for every new build, each with its own rig proof, and the feature
   lines the predecessors carry (light-show passes, wizard objects, challenge sites, scoop/coil sites). Until then the

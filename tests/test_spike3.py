@@ -255,7 +255,7 @@ def test_all_titles_supported():
     # the user still supplies the key via their own keyfile.
     unsupported = [k for k, v in s3g.SPIKE3_DB.items() if not v.get("supported")]
     assert unsupported == []
-    assert len(s3g.SPIKE3_DB) == 7                  # PAD-1293: + Transformers LE
+    assert len(s3g.SPIKE3_DB) == 8                  # PAD-1293: + Transformers LE; PAD-1506: + Pokemon Pro
 
 
 # --------------------------------------------------------------------------

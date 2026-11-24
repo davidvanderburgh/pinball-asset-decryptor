@@ -96,7 +96,7 @@ def test_the_app_offers_on_the_pro_what_it_offers_on_the_le():
 
 
 def test_the_card_is_named_pokemon_pro():
-    key = G.spike3_key_for_path(r"D:\x\pokemon_pro-0_87_0_spike3.Release.64G.sdcard-secure.raw")
+    key = G.spike3_key_for_path("cards/pokemon_pro-0_87_0_spike3.Release.64G.sdcard-secure.raw")
     assert key == "pokemon_pro"
     assert G.spike3_display(key) == "Pokemon PRO (Spike 3)"
     assert G.spike3_key_for_path("pokemon_le-0_87_0_spike3.Release.64G.sdcard-secure.raw") == "pokemon_le"

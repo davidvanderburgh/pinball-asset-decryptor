@@ -45,6 +45,17 @@ if [ "${PROOF:-game}" = edge ]; then
   for s in "${fl[@]}"; do $P sw "$SLOT" "$s" 400; sleep 2; done
 fi
 [ "$COINS" -gt 0 ] && { $P coin "$SLOT" "$COINS"; sleep 3; }
+# PAD-1506: a start menu that opens in attract (MENU_OPEN=flippers: both flipper buttons held at once, as Bond's and
+# Pokemon's CHOOSE YOUR MODE OF PLAY): open it, step it to MENU_PICK, and the Start below picks it
+if [ -n "${MENU_PICK:-}" ] && [ "${MENU_OPEN:-}" = flippers ]; then
+  for t in 1 2 3; do
+    IFS='|' read -r -a fl <<< "$FLIP_SWS"; for s in "${fl[@]}"; do $P sw "$SLOT" "$s" 1500 & done; wait; sleep 3
+    for m in $(seq 1 10); do grep -aqE "${MENU_SEEN:-appended|on the start menu as entry}" $L && break 2; sleep 1; done
+  done
+  echo "[play] attract menu after $t try(s): $(grep -aE "${MENU_SEEN:-appended|on the start menu as entry}" $L | tail -1 | cut -c1-160)"
+  for m in $(seq 1 16); do grep -aqE "$MENU_PICK" $L && break; $P sw "$SLOT" "${MENU_SW:-RIGHT FLIPPER BUTTON}"; sleep 2; done
+  echo "[play] menu after $m step(s): $(grep -aE "$MENU_PICK" $L | tail -1 | cut -c1-160)"
+fi
 for k in $(seq 1 8); do
   # a retry drops its coins again: coins dropped while the game is still booting are not counted (PAD-1289, Pokemon)
   [ "$COINS" -gt 0 ] && [ "$k" -gt 1 ] && $P coin "$SLOT" "$COINS" > /dev/null 2>&1
@@ -53,7 +64,7 @@ for k in $(seq 1 8); do
   [ -n "$AFTER_START_SWS" ] && sws "$AFTER_START_SWS" 3
   # PAD-1506: the start menu comes once the game has started and its own start film has played (Pokemon): wait for
   # the runtime's menu line (MENU_SEEN), step it (MENU_SW) until it logs MENU_PICK, then Start
-  if [ -n "${MENU_PICK:-}" ] && grep -aq "in_game 0 -> 1" $L; then
+  if [ -n "${MENU_PICK:-}" ] && [ "${MENU_OPEN:-}" != flippers ] && grep -aq "in_game 0 -> 1" $L; then
     for m in $(seq 1 30); do grep -aqE "${MENU_SEEN:-appended|on the start menu as entry}" $L && break; sleep 1; done
     echo "[play] menu up after ${m}s: $(grep -aE "${MENU_SEEN:-appended|on the start menu as entry}" $L | tail -1 | cut -c1-160)"
     for m in $(seq 1 16); do grep -aqE "$MENU_PICK" $L && break; $P sw "$SLOT" "${MENU_SW:-RIGHT FLIPPER BUTTON}"; sleep 2; done

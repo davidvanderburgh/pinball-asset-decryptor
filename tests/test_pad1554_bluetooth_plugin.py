@@ -359,3 +359,56 @@ def test_flash_only_needs_a_build_that_carries_the_choice(tmp_path, store, plugi
     shutil.copyfile(image, out)
     BT.apply_to_build(str(image), str(out), BT.validate_request(str(image), str(project)))
     BT.guard_flash(str(project), str(out))
+
+
+# ------------------------------------------------------------------ the build
+def test_a_build_puts_the_plugin_on_after_the_others_and_names_it(tmp_path, monkeypatch):
+    from pinball_decryptor.core import ssh_card
+    from tests.test_extras_pipeline import setup_pipeline
+    pipe, events, out = setup_pipeline(tmp_path, monkeypatch)
+    monkeypatch.setattr(ssh_card, 'validate_request', lambda *a: None)
+    monkeypatch.setattr(ssh_card, 'note_build', lambda *a: events.append('noted'))
+    monkeypatch.setattr(BT, 'validate_request', lambda *a: {'enabled': True})
+    monkeypatch.setattr(B, 'validate_request', lambda *a: {'enabled': True})
+    monkeypatch.setattr(B, 'apply_to_build', lambda *a, **kw: events.append('buttons') or 'Remote buttons: on.')
+    monkeypatch.setattr(BT, 'apply_to_build', lambda *a, **kw: events.append('bluetooth') or BT.note(True, 'v0.3.0'))
+    pipe.run()
+    assert events[:4] == ['engine', 'buttons', 'bluetooth', 'noted']
+    ok, msg = events[-1]
+    assert ok is True and msg.startswith('Wrote remote buttons and Bluetooth headphones to ')
+    assert msg.endswith('Remote buttons: on.\n' + BT.note(True, 'v0.3.0'))
+    assert not Path(str(out) + '.ssh-pending').exists()
+
+    def fail(*a, **kw):
+        raise ExtrasError('the card has no room')
+    monkeypatch.setattr(BT, 'apply_to_build', fail)
+    events.clear()
+    pipe.run()
+    assert events[-1] == (False, 'the card has no room')
+    assert not out.exists() and Path(str(out) + '.ssh-incomplete').exists()   # never left where a flash finds it
+
+
+def test_a_ticked_plugin_that_is_not_installed_stops_the_build_before_it_starts(tmp_path, monkeypatch, store):
+    from pinball_decryptor.core import ssh_card
+    from tests.test_extras_pipeline import setup_pipeline
+    pipe, events, out = setup_pipeline(tmp_path, monkeypatch)
+    monkeypatch.setattr(ssh_card, 'validate_request', lambda *a: None)
+    monkeypatch.setattr(BT, 'inspect_image', lambda *a, **kw: {'supported': True, 'enabled': False, 'release': ''})
+    card_extras.save_bluetooth(str(tmp_path / 'project'), True)
+    pipe.run()
+    assert events == [(False, BT.NOT_INSTALLED)] and not out.exists()
+
+
+def test_the_write_tab_lists_the_pending_choice(tmp_path, monkeypatch, store, plugin):
+    from pinball_decryptor.webui import write_scan
+    project = tmp_path / 'project'
+    project.mkdir()
+    assert write_scan.bluetooth_rows(None, str(project)) == []
+    card_extras.save_bluetooth(str(project), True)
+    assert 'the plugin is not installed' in write_scan.bluetooth_rows(None, str(project))[0][0]
+    fake, blobs, sums = plugin
+    P.install(fake, opener=Web({'v0.3.0': (blobs, sums)}))
+    row = write_scan.bluetooth_rows(None, str(project))[0]
+    assert row[0] == 'Bluetooth headphones \u2014 spike-pinball-bluetooth v0.3.0' and 'Plugins tab' in row[2]
+    card_extras.save_bluetooth(str(project), False)
+    assert write_scan.bluetooth_rows(None, str(project)) == []                # off on a card without it: nothing

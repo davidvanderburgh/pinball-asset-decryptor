@@ -298,6 +298,8 @@ def guard_flash(project, image):
     wifi_card.guard_flash(project, image)       # PAD-1467: the Wi-Fi start-up choice is pending intent too
     from . import remote_buttons
     remote_buttons.guard_flash(project, image)  # and the remote-buttons choice
+    from . import bluetooth_card
+    bluetooth_card.guard_flash(project, image)  # PAD-1554: and the Bluetooth headphones plugin
     config = validate_request(image, project)
     if config is None:
         return

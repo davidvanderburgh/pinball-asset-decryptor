@@ -714,6 +714,9 @@ class Spike2Emu:
         self._mapped = set()
         self.st = {"R": 0, "k": 0}
         self._slot_cache = {}   # (scale, chan) -> resolved codec entry (generic)
+        # PAD-1551: an entry no sound of the key has read as clear audio through
+        # yet (see _resolve_entry): used until one does, never trusted over it
+        self._slot_weak = {}
         # (lo, hi) of the master-directory record array, set by the chain that
         # is replaying it; bounds the record write-back (see _record_write_addr).
         self._md_range = (0, 0)
@@ -2090,6 +2093,10 @@ class Spike2Emu:
             rms = max(rms, float(np.sqrt(np.mean(np.asarray(res[1], float) ** 2))))
         return sf, rms
 
+    #: How many stock sounds of a key :meth:`warm_slots_for_grown` asks before
+    #: it settles for an entry none of them read as clear audio through.
+    WARM_TRIES = 12
+
     def warm_slots_for_grown(self, params, edited=()):
         """Resolve the codec entry of every GROWN sound, and of every sound in
         *edited* (the idx a Write is about to re-encode), from another sound of
@@ -2118,6 +2125,11 @@ class Spike2Emu:
         want = {(p["scale"], p["chan"]) for p in params
                 if p.get("grown") or p["idx"] in edited}
         for key in sorted(want - set(self._slot_cache)):
+            # PAD-1551: the first stock sound of the key is not always one to
+            # learn from (see _resolve_entry: a record that is noise through
+            # every entry), so walk on until one reads as clear audio.  None
+            # in WARM_TRIES: the key keeps what the first one gave, as before.
+            tried = 0
             for q in params:
                 if (q["scale"], q["chan"]) == key and not q.get("grown") \
                         and q["idx"] not in edited \
@@ -2126,7 +2138,17 @@ class Spike2Emu:
                         self._resolve_entry(q)
                     except Exception:
                         pass
-                    break
+                    tried += 1
+                    if key in self._slot_cache or tried >= self.WARM_TRIES:
+                        break
+            if key not in self._slot_cache and key in self._weak_slots():
+                self._slot_cache[key] = self._weak_slots().pop(key)
+
+    def _weak_slots(self):
+        """The entries no sound of their key has read as clear audio through
+        yet (PAD-1551, :meth:`_resolve_entry`); made on first use, so an
+        emulator built without ``__init__`` (the tests' stand-ins) has one."""
+        return self.__dict__.setdefault("_slot_weak", {})
 
     def _resolve_entry(self, p):
         """Pick the codec function that actually decodes audio for a generic
@@ -2197,6 +2219,21 @@ class Spike2Emu:
             if m is not None and m[0] < 0.45:
                 best = fnv
                 break
+        if best is not None:
+            self._weak_slots().pop(key, None)
+            self._slot_cache[key] = best
+            return best
+        # PAD-1551: no entry reads as clear audio through THIS sound, so what
+        # it settles is kept apart (_slot_weak) and the next sound of the key
+        # that does read clearly decides.  Heisei V2.3 (a Godzilla retheme)
+        # carries three mono records that are noise through every entry
+        # (specflat 0.82-0.85 on the mono codec, 0.66 on the stereo one), each
+        # the first long sound of its (scale, chan): pass 2 took the stereo
+        # codec for them as the least flat noise, the key kept it, and every
+        # new sound that landed on scales 12, 29 or 30 failed its bit-exact
+        # self-test ("cannot re-encode bit-exact on the chain's parameters").
+        if key in self._weak_slots():
+            return self._weak_slots()[key]
         # Pass 2: nothing was clearly audio -- the sound has a quiet/silent
         # intro.  Re-probe longer, reject the loud-noise codec, take lowest sf.
         if best is None:
@@ -2210,7 +2247,7 @@ class Spike2Emu:
             pool = survivors if survivors else [(f, sf) for f, sf, _ in scored]
             if pool:
                 best = pick_slot(pool, self._SLOT_TIE)
-        self._slot_cache[key] = best
+        self._weak_slots()[key] = best
         return best
 
     def _slot_candidates(self, p):

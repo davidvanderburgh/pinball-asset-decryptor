@@ -23,6 +23,11 @@ BADGE_FILE = "badge.png"
 MAX_MONSTERS = BS.MAX_NEW
 #: what the choice is called (the hat, the form, the runtime's log)
 TITLE = "MORE KAIJU"
+#: PAD-1551: a monster's facts for a card whose portraits carry a facts card (Heisei V2.3: BIO, POWERS, HEIGHT,
+#: WEIGHT) - a file in its mode's folder, ``{"bio": words, "powers": [up to three], "height": "45M", "weight":
+#: "8,000 T", "kana": its name in katakana}``, every key optional; a card without a facts card never reads it
+FACTS_FILE = "monster.json"
+FACT_KEYS = ("bio", "powers", "height", "weight", "kana")
 
 
 class MoreKaijuError(ValueError):
@@ -44,6 +49,20 @@ def picture_of(folder, picture="", screen_art=""):
     return ""
 
 
+def facts_of(folder):
+    """PAD-1551: the facts in a monster's folder (:data:`FACTS_FILE`): only the keys it gives, {} when it has none
+    or the file cannot be read."""
+    import json
+    try:
+        with open(os.path.join(folder, FACTS_FILE), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: data[k] for k in FACT_KEYS if data.get(k)}
+
+
 def monsters(project, code, forms=()):
     """The new monsters (form modes, then code modes): ``[{"slug", "name", "slot", "picture"}]`` from its form modes
     that start on a battle with ``roster_more``, and its code modes (blocks modes are code modes) whose assets say
@@ -57,7 +76,8 @@ def monsters(project, code, forms=()):
             continue
         folder = MP.mode_folder(project, slug) if project else ""
         out.append({"slug": slug, "name": (spec.name or slug).upper()[:40], "slot": slot,
-                    "picture": picture_of(folder, "", getattr(spec, "screen_art", "") or "") if folder else ""})
+                    "picture": picture_of(folder, "", getattr(spec, "screen_art", "") or "") if folder else "",
+                    **(facts_of(folder) if folder else {})})
     for slug, spec in code or ():
         more = getattr(spec, "more", None) or {}
         if not isinstance(more, dict) or more.get("slot") is None:
@@ -65,7 +85,8 @@ def monsters(project, code, forms=()):
         folder = MP.mode_folder(project, slug) if project else ""
         out.append({"slug": slug, "name": (spec.name or slug).upper()[:40], "slot": int(more["slot"]),
                     "picture": picture_of(folder, str(more.get("picture") or ""),
-                                          getattr(spec, "screen_art", "") or "") if folder else ""})
+                                          getattr(spec, "screen_art", "") or "") if folder else "",
+                    **(facts_of(folder) if folder else {})})
     return out
 
 

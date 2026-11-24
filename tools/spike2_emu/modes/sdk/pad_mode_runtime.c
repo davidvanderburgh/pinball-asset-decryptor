@@ -19967,6 +19967,8 @@ static struct {
                                           * 2 CHARACTERS (a pick, no abilities), 3 ENHANCED; 0: none asked */
     unsigned hold;                       /* PAD-1449 round 10: coop.cfg `hold on` (1) / `hold off` (2); 0: as the start
                                           * menu says (coop_hold_starts) */
+    unsigned style_default;              /* PAD-1558: coop.cfg `style normal|characters|enhanced` (1-3), the style of a
+                                          * co-op or team game no chooser step took one for; 0: no line (NORMAL) */
     unsigned round;                      /* PAD-1042: the round of turns on this ball (1..the larger team) */
     unsigned started;                    /* PAD-1054: the game_start count last seen */
     int solo_ask;                        /* PAD-1054: that game began with the button held: a team of one, once it plays */
@@ -21951,6 +21953,27 @@ static void sty_menu_walk(pm_reg *buttons, unsigned lbit, unsigned rbit)
     say("styles: the start menu's %s shows %s", sty_label(smn.kind), STY_NAMES[smn.at]);
 }
 
+/* PAD-1558 (David: "if i do this from the stern IC menu, it doesn't have those extra options. i can only select co-op
+ * normal"): the style a game of `kind` plays when no step took one - its Start pressed on the entry with no Action,
+ * the Insider Connected Home Team screen's own game-mode select, the right flipper held at Start: the card's coop.cfg
+ * `style` (`dflt`, 1-3) for a co-op or team game, NORMAL without one; the game's own STANDARD and challenges always
+ * NORMAL, the game as it is (tests lift it verbatim) */
+static int sty_default_for(unsigned kind, unsigned dflt)
+{
+    if (kind == STY_STANDARD || kind == STY_CHALLENGE) return 1;
+    return dflt >= 1u && dflt <= 3u ? (int)dflt : 1;
+}
+
+/* PAD-1558: a co-op or team game the held button began (no start menu, no chooser): the card's `style` line, where it
+ * has one, says how it plays - NORMAL no character pick, CHARACTERS a pick with no abilities, ENHANCED as before */
+static void coop_style_held(void)
+{
+    if (!coop.style_default || coop.setting) return;
+    coop.style = coop.style_default <= 3u ? coop.style_default : 3u;
+    coop.plain = coop.style == 1u;
+    say("styles: the held button's game plays the card's default style - %s", STY_NAMES[coop.style - 1]);
+}
+
 /* the menu's Start (the switch drain; the game begins its game on it): what the cursor's entry says is kept for it */
 static void sty_menu_go(void)
 {
@@ -21964,11 +21987,15 @@ static void sty_menu_go(void)
     else if (kind == 3u || kind == 4u || kind == 5u)
         team = kind;
     smn.go_style = sty_menu_go_style(smn.open, smn.shaping, smn.at, smn.taken);
+    if (!smn.taken && !(smn.open && !smn.shaping))            /* PAD-1558: none chosen - the card's default */
+        smn.go_style = sty_default_for(kind, coop.style_default);
     smn.go_kind = kind;
     smn.go_team = team;
     smn.go_ms = pm_ms() | 1ul;
     say("styles: Start on the start menu's %s - %s %s goes in when the game begins%s", sty_label(kind), sty_label(kind),
-        STY_NAMES[smn.go_style - 1], smn.taken || (smn.open && !smn.shaping) ? "" : " (none chosen: NORMAL)");
+        STY_NAMES[smn.go_style - 1], smn.taken || (smn.open && !smn.shaping) ? ""
+        : coop.style_default && kind != STY_STANDARD && kind != STY_CHALLENGE ? " (none chosen: the card's default)"
+        : " (none chosen: NORMAL)");
 }
 
 /* PAD-1449 round 8 (DoomWalrus666, on v1.561.7: "Once a version selection is made, version selection is no longer
@@ -22273,8 +22300,9 @@ static void sty_begin(unsigned kind)
 {
     sty.preset = sty_menu_preset(kind);
     if (sty_default_normal(sty.preset, smn.frame_ms != 0)) {   /* PAD-1449 round 5 */
-        sty.preset = 1;
-        say("styles: no version chosen on the start menu (its Action was the game's: the Home Team screen) - NORMAL");
+        sty.preset = sty_default_for(kind, coop.style_default);   /* PAD-1558: the card's default, else NORMAL */
+        say("styles: no version chosen on the start menu (its Action was the game's: the Home Team screen) - %s%s",
+            STY_NAMES[sty.preset - 1], sty.preset != 1 ? " (the card's default style)" : "");
     }
     sty_open(kind);
     if (sty.preset == 1) {                                    /* PAD-1449 round 5: co-op and teams at NORMAL too -
@@ -24793,6 +24821,7 @@ static void coop_solo_check(void)
     coop.standard = 0;                                        /* PAD-1224 */
     coop.plain = 0;                                           /* PAD-1443 */
     coop.style = 0;                                           /* PAD-1449 */
+    coop_style_held();                                        /* PAD-1558 */
     coop.n = 1;
     coop.turn = 1;
     coop.round = 1;
@@ -25495,6 +25524,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.standard = 0;                                    /* PAD-1224 */
         coop.plain = 0;                                       /* PAD-1443 */
         coop.style = 0;                                       /* PAD-1449 */
+        coop_style_held();                                    /* PAD-1558 */
         coop.turn = 1;
         n = 1;
         coop_awards_begin();                                  /* PAD-1028 */
@@ -25939,6 +25969,9 @@ static void coop_line(const char *s)
     if (str_starts(s, "coop on")) { coop.on = 1; return; }
     if (str_starts(s, "hold on")) { coop.hold = 1; return; }          /* PAD-1449 round 10: the held button's co-op */
     if (str_starts(s, "hold off")) { coop.hold = 2; return; }
+    if (str_starts(s, "style normal")) { coop.style_default = 1; return; }       /* PAD-1558: the default style */
+    if (str_starts(s, "style characters")) { coop.style_default = 2; return; }
+    if (str_starts(s, "style enhanced")) { coop.style_default = 3; return; }
     if (str_starts(s, "teams on")) { coop.teams_always = 4; return; }   /* PAD-1042: Team 2v2 */
     if (str_starts(s, "teams 2v1")) { coop.teams_always = 3; return; }  /* ... Team 2v1 */
     if (str_starts(s, "teams 3v1")) { coop.teams_always = 5; return; }  /* PAD-1224: Team 3v1 */

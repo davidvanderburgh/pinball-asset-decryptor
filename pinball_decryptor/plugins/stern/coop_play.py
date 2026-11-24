@@ -141,7 +141,7 @@ def save(project, on, menu=None):
     data = staged_changes.load(project)
     raw = data.get(STAGED_KEY) if isinstance(data.get(STAGED_KEY), dict) else {}
     was = bool(raw.get("on"))
-    keep = {k: v for k, v in raw.items() if k in ("awards", "characters")}
+    keep = {k: v for k, v in raw.items() if k in ("awards", "characters", "style")}   # PAD-1558: the style too
     if on and (raw.get("menu") if menu is None else menu):
         keep["menu"] = True
     if on or keep:
@@ -150,6 +150,60 @@ def save(project, on, menu=None):
         data.pop(STAGED_KEY, None)
     staged_changes.save(project, data)
     return was
+
+
+#: PAD-1558 (David: "if i do this from the stern IC menu, it doesn't have those extra options"): the style a co-op or
+#: team game plays when no style was chosen for it on the start menu's own step - Start pressed on CO-OP, the Insider
+#: Connected Home Team screen's game-mode select, the right flipper held at Start. coop.cfg ``style <name>``; NORMAL
+#: (the game as it is, no character pick) writes no line. The game's own STANDARD and challenges are never changed.
+STYLES_DEFAULT = ("normal", "characters", "enhanced")
+STYLE_LABELS = {"normal": "Normal", "characters": "Characters", "enhanced": "Enhanced"}
+
+
+def _style_of(v):
+    v = str(v or "").strip().lower()
+    return v if v in STYLES_DEFAULT else "normal"
+
+
+def load_style(project):
+    """PAD-1558: the project's default co-op style, one of :data:`STYLES_DEFAULT` ("normal" when none is kept)."""
+    if not project:
+        return "normal"
+    from ...core import staged_changes
+    try:
+        raw = staged_changes.load(project).get(STAGED_KEY)
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: the plain game
+        return "normal"
+    return _style_of(raw.get("style")) if isinstance(raw, dict) else "normal"
+
+
+def save_style(project, style):
+    """PAD-1558: keep *style* as the project's default co-op style (normal keeps none); returns what it was."""
+    from ...core import staged_changes
+    data = staged_changes.load(project)
+    raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
+    was = _style_of(raw.get("style"))
+    style = _style_of(style)
+    if style == "normal":
+        raw.pop("style", None)
+    else:
+        raw["style"] = style
+    if raw == {"on": False}:
+        data.pop(STAGED_KEY, None)                      # nothing of co-op's left to keep
+    else:
+        data[STAGED_KEY] = raw
+    staged_changes.save(project, data)
+    return was
+
+
+def style_line(project, characters=None):
+    """PAD-1558: coop.cfg's ``style`` line for *project* ("" for NORMAL, or with no character pick on: a style with
+    characters needs them)."""
+    style = load_style(project)
+    chars = load_characters(project) if characters is None else characters
+    if style == "normal" or not (chars or {}).get("pick"):
+        return ""
+    return "style %s\n" % style
 
 
 def title_refusal(prof):
@@ -3371,6 +3425,8 @@ def export_settings(project, path):
     head = {"kind": FILE_KIND, "version": FILE_VERSION,
             "from": {"label": prof.label if prof is not None else ""},
             "on": bool(raw.get("on")), "menu": bool(raw.get("menu")), "awards": awards, "characters": chars}
+    if _style_of(raw.get("style")) != "normal":
+        head["style"] = _style_of(raw.get("style"))     # PAD-1558: the default co-op style
     as_zip = not path.lower().endswith(".json")
     pictures, left_out = [], 0
     for i, c in enumerate(chars["list"]):
@@ -3603,6 +3659,8 @@ def import_settings(project, path):
         raw = {"on": bool(head.get("on"))}
         if head.get("on") and head.get("menu"):
             raw["menu"] = True
+        if _style_of(head.get("style")) != "normal":
+            raw["style"] = _style_of(head.get("style"))  # PAD-1558: the default co-op style
         got = head.get("awards") if isinstance(head.get("awards"), dict) else {}
         for k, v in got.items():
             if isinstance(v, dict):

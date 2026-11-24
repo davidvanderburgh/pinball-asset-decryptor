@@ -1917,6 +1917,7 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
                            CP.port_sites(result.profile), CP.port_values(result.profile), setting=setting, only=only)
         if CP.load_characters(project).get("pick"):          # PAD-1449 round 2: the start menu's ENHANCED line
             text += "team_words %s\n" % CP.team_words(project).upper()
+        text += CP.style_line(project)                       # PAD-1558: the style when none is chosen
         if screens:
             text += "screens %s\n" % result.profile.hud_scene
             text += "award_cards on\n"            # PAD-1028 round 2: the awards on the winners' cards

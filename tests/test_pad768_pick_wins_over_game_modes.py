@@ -192,7 +192,7 @@ def test_the_runtime_reads_the_slots_off_the_game_query():
              0xe5b40004, 0xe5903000, 0xe5933038, 0xe12fff33, 0xe3500000, 0x0afffff7, 0xe5940000, 0xe5903000,
              0xe5933044, 0xe1530006]
     src = _runtime()
-    fn = src[src.index("static long mode_query_slot(int kind_slot)"):]
+    fn = src[src.index("static long mode_query_slot(int kind_slot)\n{"):]   # PAD-1537: past its forward declaration
     fn = fn[:fn.index("\n}\n")]
     pairs = re.findall(r"w\[i \+ 1\] == (0x[0-9a-f]+)u\) return", fn)
     assert pairs == ["0xe12fff33", "0xe1530006"]

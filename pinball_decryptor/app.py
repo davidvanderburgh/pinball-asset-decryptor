@@ -7736,6 +7736,36 @@ class App:
         if hydrate:
             self._start_extract()
 
+    def _warn_project_needs_admin(self, folder, platform=None):
+        """PAD-1563: a project inside PAD's own install folder (Program
+        Files) could be made while every launch was elevated (PAD-1081 had
+        one).  PAD starts unelevated now, and Windows lets only an elevated
+        program change files there, so saving to it would fail: say so once
+        a session, the moment it opens.  Returns whether it warned."""
+        if (platform or sys.platform) != "win32":
+            return False
+        from .core import update_slots
+        from .core.admin import is_admin
+        app_dir = update_slots.installed_app_dir()
+        if not app_dir or is_admin():
+            return False
+        f = os.path.normcase(os.path.abspath(folder))
+        a = os.path.normcase(os.path.abspath(app_dir))
+        if not f.startswith(a.rstrip("\\/") + os.sep):
+            return False
+        warned = self.__dict__.setdefault("_admin_project_warned", set())
+        if f in warned:
+            return False
+        warned.add(f)
+        messagebox.showwarning(
+            "Project inside PAD's install folder",
+            "This project is inside PAD's own install folder:\n%s\n\n"
+            "PAD starts without Administrator rights, and Windows lets only "
+            "an elevated program change files there, so saving to it will "
+            "fail.  Copy the project folder somewhere of your own (your "
+            "Documents, say) and open it from there." % folder)
+        return True
+
     def _apply_project_folder(self, folder, data):
         """Push an anchored project onto the UI: manufacturer, stock image,
         the folder itself (build location derives), options, file name."""
@@ -7754,6 +7784,7 @@ class App:
         if self._current_mfr is not mfr:
             self._on_manufacturer_change(mfr)
             self.window.show_mfr_view()
+        self._warn_project_needs_admin(folder)
         self.window.extract_input_var.set(
             _rmd(str(data.get("stock_image") or "")))
         self.window.extract_output_var.set(_rmd(folder))

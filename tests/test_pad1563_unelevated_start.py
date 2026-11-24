@@ -136,3 +136,24 @@ def test_an_unelevated_run_leaves_the_update_to_the_setup_exe(tmp_path, monkeypa
         assert w.app._staging_for(inst) is None
         monkeypatch.setattr(admin, "is_admin", lambda: True)
         assert w.app._staging_for(inst) == "windows"
+
+
+def test_a_project_inside_the_install_folder_is_named_once(tmp_path, monkeypatch):
+    """A project made in Program Files while every launch was elevated
+    (PAD-1081) cannot be saved by an unelevated PAD: it says so on open."""
+    from pinball_decryptor.core import admin, update_slots
+    app_dir = tmp_path / "Pinball Asset Decryptor"
+    inside = app_dir / "My Sonic"
+    inside.mkdir(parents=True)
+    with web_app(tmp_path, mfr="jjp") as w:
+        monkeypatch.setattr(update_slots, "installed_app_dir", lambda *a, **k: str(app_dir))
+        monkeypatch.setattr(admin, "is_admin", lambda: False)
+        warn = w.app._warn_project_needs_admin
+        assert w.run(warn, str(inside), "win32") is True
+        assert any("install folder" in str(a.get("title", "")) for a in w.asked), w.asked
+        assert w.run(warn, str(inside), "win32") is False          # once a session
+        assert w.run(warn, str(tmp_path / "elsewhere"), "win32") is False
+        assert w.run(warn, str(app_dir.parent / "Pinball Asset Decryptor 2" / "x"), "win32") is False
+        assert w.run(warn, str(inside), "linux") is False
+        monkeypatch.setattr(admin, "is_admin", lambda: True)
+        assert w.run(warn, str(app_dir / "Other"), "win32") is False

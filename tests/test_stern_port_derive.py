@@ -207,6 +207,24 @@ def test_a_fallback_placement_gives_way_to_a_references_own(monkeypatch):
     assert prov["site ball_end"]["value"] == "0x310" and prov["site ball_end"]["refs"] == ["b-1.0"]
 
 
+def test_the_same_model_s_port_is_copied_before_its_other_models(monkeypatch):
+    """PAD-1555: King Kong LE 1.01's derived port copied King Kong Pro 0.97's values, shots and lamps (the Pro's
+    hardware; the Pro draft placed more) and the LE crashed 35 s into its boot. The same model's port comes first."""
+    from pinball_decryptor.plugins.stern import portswitch
+    monkeypatch.setattr(portswitch, "drain", lambda elf, *a: None)
+    refs = [_ref("king_kong_pro-0.97", "king_kong_pro", "0.97"), _ref("king_kong_le-0.97", "king_kong_le", "0.97")]
+    core = {("site", "tick"): 0x100, ("site", "shot_dispatch"): 0x200, ("site", "ball_end"): 0x300,
+            ("site", "score_add"): 0x400, ("data", "cur_player"): 0x9000, ("data", "scores"): 0x9100}
+    pro = _draft("king_kong_pro-0.97", {**core, ("site", "callout"): 0x500}, shots=("0x1 Pro ramp",))
+    le = _draft("king_kong_le-0.97", core, shots=("0x1 LE ramp",))
+    for game, want, other in (("king_kong_le", "LE ramp", "Pro ramp"), ("king_kong_pro", "Pro ramp", "LE ramp")):
+        body, _prov, _missing, _notes = D.merge({"king_kong_pro-0.97": pro, "king_kong_le-0.97": le}, refs, _Tgt(),
+                                                game, "1.01.0", "cmode")
+        text = "\n".join(body)
+        assert "shot 0x1 %s" % want in text and other not in text, game
+    assert G.REVISION >= 12     # ports derived with the other model's lines are derived again
+
+
 def test_a_draft_that_lacks_a_core_entry_says_so(monkeypatch):
     monkeypatch.setattr(D, "framework_core", lambda *a: dict(values=[], mapped=[], switch_lines=[], example="", notes=[]))
     refs = [_ref("a-1.0", "godzilla_pro", "1.15")]

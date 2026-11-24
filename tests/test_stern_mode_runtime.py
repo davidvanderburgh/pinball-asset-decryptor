@@ -27,7 +27,9 @@ PORTS = [
     ("aerosmith_le", "1.16"),
     ("avengers_infinity_le", "1.09"),
     ("avengers_infinity_le", "1.10"),
+    ("avengers_infinity_le", "1.12"),  # PAD-1555
     ("avengers_infinity_pro", "1.10"),
+    ("avengers_infinity_pro", "1.12"),  # PAD-1555
     ("batman", "1.13"),
     ("batman", "1.14"),
     ("beatles", "1.29"),
@@ -37,9 +39,12 @@ PORTS = [
     ("dungeons_and_dragons_le", "1.00"),
     ("dungeons_and_dragons_le", "1.10"),
     ("dungeons_and_dragons_pro", "1.10"),
+    ("dungeons_and_dragons_pro", "1.11"),  # PAD-1555
     ("elvira3", "1.13"),
     ("foo_fighters_le", "1.04"),
+    ("foo_fighters_le", "1.05"),  # PAD-1555
     ("foo_fighters_pro", "1.04"),
+    ("foo_fighters_pro", "1.05"),  # PAD-1555
     ("godzilla_le", "1.16"),
     ("godzilla_pro", "1.15"),
     ("godzilla_pro", "1.16"),
@@ -61,7 +66,10 @@ PORTS = [
     ("jurassic_park_pro", "1.16"),
     ("jurassic_park_the_pin", "1.05"),
     ("king_kong_le", "0.97"),
+    ("king_kong_le", "1.00"),  # PAD-1555
+    ("king_kong_le", "1.01"),  # PAD-1555
     ("king_kong_pro", "0.97"),
+    ("king_kong_pro", "1.01"),  # PAD-1555
     ("led_zeppelin_le", "1.22"),
     ("led_zeppelin_pro", "1.22"),
     ("mando_le", "1.44"),
@@ -69,6 +77,7 @@ PORTS = [
     ("mando_pro", "1.45"),
     ("metallica_spike", "1.03"),
     ("metallica_spike", "1.04"),
+    ("metallica_spike", "1.05"),  # PAD-1555
     ("munsters_le", "1.28"),
     ("munsters_pro", "1.28"),
     ("rush_le", "1.18"),

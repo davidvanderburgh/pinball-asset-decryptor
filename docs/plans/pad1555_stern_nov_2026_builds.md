@@ -118,3 +118,25 @@ What each set's evidence lines say was seen (the recipe a job in `tools/spike2_e
 
 Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `game.port`, `mode.cfg`;
 `PAD_SLOT=n tryit.sh install <stage>` before `job_boot`; `tryit.sh start K` / `stop`. Clear `dump/gamecheck.on`.
+
+### Run 2 (2026-11-24 afternoon): a shipped, proven port per new build
+
+- **Derive fix (port_derive.merge, portgen REVISION 12):** the references were ranked same title first but not same
+  MODEL first, so King Kong LE 1.01's port copied King Kong Pro 0.97's values, shots and lamps (the Pro draft placed
+  more) and the game crashed 35 s into its boot (segv in the event dispatch's handler, hook_dispatch at 0x4a5a18).
+  Foo Fighters LE 1.05, Avengers Pro 1.12 and D&D Pro 1.11 had taken the other model's lines too. The same model's
+  port now ranks first; REVISION 12 re-derives any port a person's PC derived with the other model's lines.
+- **Shipped (9 ports, `ports/` + recipes):** King Kong LE 1.00 (never had one) and 1.01, King Kong Pro 1.01, Avengers
+  LE / Pro 1.12, Foo Fighters LE / Pro 1.05, D&D Pro 1.11, Metallica Remastered 1.05: each the derived port, then a
+  full build check on the stock card (`newbuild/checkjob.sh`, gamecheck.sh play full: the runtime hooked the game, shots
+  from their switches, a drain ended a ball, a tilted ball 2 and a ball 3), stamped by `newbuild/stamp.py` (reads the
+  run as the Modes tab's Check this game does). `port_words.py` 0 problems on each.
+- **D&D LE 1.11:** no drain ends a ball in the check (the ball saver serves it back, the ball stays in the shooter
+  lane); the shipped D&D LE 1.10 port, proven 2026-10-07, fails the same way on the same rigs today, so it is the rig
+  or the check on this title, not the port. Retried on fresh NVRAM (the slots' D&D LE NVRAM, from October, set aside as
+  `nv/dungeons_and_dragons_le.pad1555-oct`).
+- **Left (step 5):** the proven sets (lights, screen/clip, ball save, multiball, stack, place, done, with, shaker,
+  wizards, held coils, magnet/scoop, title scenes) for every new build, each with its own rig proof, and the feature
+  lines the predecessors carry (light-show passes, wizard objects, challenge sites, scoop/coil sites). Until then the
+  Modes tab greys those parts on the new builds, but Write puts modes on their cards.
+- Do not edit a job script while a sweep runs it (bash reads it as it goes: three jobs died "without a verdict").

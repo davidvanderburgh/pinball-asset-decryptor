@@ -48,7 +48,9 @@ import numpy as np
 #: 11: a build whose event bus has more or fewer ids than the reference's keeps the reference's events, each at
 #: this build's own id read off the event map (PAD-1389: King Kong LE 1.00 added one, so its port lost game_start
 #: and ball_start, and with them the Score feed)
-REVISION = 11
+#: 12: the same model's port ranks before the title's other models' (port_derive.merge, PAD-1555: King Kong LE 1.01 took
+#: King Kong Pro 0.97's values, shots and lamps and crashed at boot)
+REVISION = 12
 RECIPE_FORMAT = 1
 #: PAD-1389: the event map's format (:func:`compile_busmap`)
 BUSMAP_FORMAT = 1

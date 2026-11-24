@@ -22,7 +22,7 @@ printf "the Modes tab's Check this game\n" > "$S/gamecheck.on"
 bash "$MODES/tryit.sh" install "$S" > "$JOB_OUT/install.txt" 2>&1 < /dev/null || job_fail "tryit.sh install: $(tail -1 "$JOB_OUT/install.txt")"
 export PAD_MODE_SO=/lib/pad_mode.so
 job_boot
-job_wait_attract "${PAD_BOOT_DEADLINE:-420}" || job_fail "$JOB_WHY"
+job_wait_attract "${PAD_BOOT_DEADLINE:-420}" || { cp "$DUMP/mode.log" "$JOB_OUT/mode.log" 2>/dev/null; job_fail "$JOB_WHY"; }
 job_sleep 5
 full=""; [ "${FULL:-1}" = 1 ] && full=full
 bash "$MODES/gamecheck.sh" play "$GAME" $full > "$JOB_OUT/check.txt" 2>&1 < /dev/null

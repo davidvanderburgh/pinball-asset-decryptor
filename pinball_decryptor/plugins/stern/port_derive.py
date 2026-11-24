@@ -454,8 +454,11 @@ def merge(drafts, refs, tgt, game, version, family):
     are the port's (its values; for the same title also its shots, callouts, text and lamps)."""
     from . import portgen
     by_ref = {r.name: r for r in refs}
+    # PAD-1555: the same MODEL's port before its other models' (King Kong LE 1.01 took King Kong Pro 0.97's values,
+    # shots and lamps, the Pro's hardware, and the LE crashed 35 s into its boot)
     ranked = sorted(drafts.values(), key=lambda d: (
-        not _same_title(game, by_ref[d["ref"]].game), bool(d["missing"]), -len(d["placed"]), d["ref"]))
+        not _same_title(game, by_ref[d["ref"]].game), by_ref[d["ref"]].game != game, bool(d["missing"]),
+        -len(d["placed"]), d["ref"]))
     parsed = {d["ref"]: _parse(d["lines"]) for d in ranked}
     votes = {}
     for d in ranked:

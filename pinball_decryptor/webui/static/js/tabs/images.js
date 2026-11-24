@@ -17,6 +17,7 @@ import { OriginalsWindow } from "./originals.js";
 import { testCol } from "../core/testtick.js";
 import { SetPicker, SetStrip } from "../core/image_sets.js";
 import { UnlockBox } from "../core/unlock_box.js";
+import { PixelEditor } from "./pixel_edit.js";
 
 export const css = true;
 
@@ -51,6 +52,8 @@ const RES_TIPS = {
   wri: "Written: the maximum resolution PAD will write to the card. Orange: smaller than you imported it, because the screen never shows more. Amber Current: the game shows it bigger than your picture, so it may look soft.",
   org: "Origin: Original is the official card's asset; Custom is not the official card's, but was on the card this project was extracted from.",
 };
+// PAD-1547: a small picture painted pixel by pixel, saved as its replacement
+const PIXEL_TIP = "Paint this picture pixel by pixel and save it as its replacement. For small pictures (up to 256 × 256), such as Sonic's ring display frames.";
 const REP_TIP = "Click to choose a replacement for this image (double-click the row does the same), or drop an image file on the row.";
 // PAD-312: the chosen-files color profile, baked into this picture as it is staged
 const COLOR_TIP = "Green: a color profile is attached to this file. The Color profile tab's individual files profile is baked into it when you build. Red: no color profile is attached; it goes on the card as it is. Blue lock: the game's own picture, never touched (tick Unlock extracted images to give it a palette too). Click a palette to attach or detach it. Select several pictures (Shift-click or Ctrl-click) and pick a profile in the Colors bar to give it to all of them.";
@@ -323,6 +326,7 @@ export default function ImagesTab() {
   const [sel, setSel] = useState(() => new Set());
   const [cur, setCur] = useState(null);
   const [rename, setRename] = useState(null);
+  const [pixel, setPixel] = useState(null);
   const anchor = useRef(null);
 
   const idOf = (e) => (typeof e === "number" ? ((slotAt(s, e) || {}).r || "#" + e) : GROUP + e.g);
@@ -452,6 +456,7 @@ export default function ImagesTab() {
   const runAct = async (act, id, selIds) => {
     const r = await call("images.act", act, id, selIds);
     if (act === "group_rename" && r && r.key != null) setRename(r);
+    if (act === "pixel_edit" && r && r.pixel) setPixel(r.pixel);
   };
 
   const onContext = async (e, i, ev) => {
@@ -794,6 +799,8 @@ export default function ImagesTab() {
           ${p.rep_name ? html`<span class="mono small ellip img-repname" ...${tip(p.color
             ? { head: p.rep, lines: [{ profile: p.color.on ? p.color.name : "None" }] } : p.rep)}>— ${p.rep_name}</span>` : null}
           <span class="grow"></span>
+          ${prevRel && p.pixel ? html`<${Button} size="sm" kind="ghost" icon="brush" onClick=${() => setPixel(prevRel)} disabled=${running}
+            title=${PIXEL_TIP}>Edit pixels…<//>` : null}
           ${prevRel ? html`<${Button} drop size="sm" onClick=${() => call("images.choose", prevRel)}>Choose…<//>` : null}
           ${prevRel && p.clearable ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("images.clear_one", prevRel)}>Clear replacement<//>` : null}
         </div>
@@ -821,6 +828,7 @@ export default function ImagesTab() {
     </section>
 
     ${s.note ? html`<p class="small muted img-note">${s.note}</p>` : null}
+    ${pixel ? html`<${PixelEditor} rel=${pixel} onClose=${() => setPixel(null)} />` : null}
     ${rename ? html`<${RenameModal} spec=${rename} onClose=${() => setRename(null)} />` : null}
     ${s.originals && s.originals.open ? html`<${OriginalsWindow} ns="images" o=${s.originals} />` : null}
   </div>${bar}</div>`;

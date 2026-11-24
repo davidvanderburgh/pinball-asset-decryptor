@@ -65,8 +65,12 @@ TEAM_FILES_DIR = "Team files"
 # ".pad_game" holds what a loaded shared game brought for the app itself (core.
 # game_file, PAD-1408): its record and the maker's compiled code modes.
 SHARED_GAME_DIR = ".pad_game"
+# "Pixel edits" holds the pictures the Images tab's pixel editor saved (webui.
+# tabs.pixel_edit, PAD-1547): the user's own pictures for the card's slots,
+# never slots of their own.
+PIXEL_EDITS_DIR = "Pixel edits"
 NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
-                            ".write_cache", SHARED_GAME_DIR, SHARED_PICTURES_DIR,
+                            ".write_cache", SHARED_GAME_DIR, SHARED_PICTURES_DIR, PIXEL_EDITS_DIR,
                             MUSIC_MODE_FILES_DIR, RANDOM_CLIP_FILES_DIR,
                             ATTRACT_FILES_DIR, TEAM_FILES_DIR})
 

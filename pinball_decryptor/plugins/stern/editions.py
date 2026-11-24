@@ -149,11 +149,12 @@ SPIKE3_PROVEN = frozenset({
     "fallout_le-0.82",
     "transformers_mtmte_le-0.96",
     "pokemon_le-0.87",               # PAD-1505: 0.87's menu has the spare setting 0.82's lacks
+    "pokemon_pro-0.87",              # PAD-1553: the Pro 0.87's menu is the LE 0.87's, the same spare setting
 })
 SPIKE3_NO_SPARE = ("Editions are not offered on %s: its game program uses every setting EDITION "
                    "could take, so its operator menu cannot take EDITION.")
 SPIKE3_NOT_PROVEN = ("Editions are not offered on %s yet: they work on Star Wars ELG 1.10, Fallout "
-                     "0.81 and 0.82, Transformers 0.96 and Pokemon 0.87 (Spike 3).")
+                     "0.81 and 0.82, Transformers 0.96 and Pokemon 0.87, LE and Pro (Spike 3).")
 #: the Spike 3 builds read and found to have no setting to spare
 SPIKE3_FULL = frozenset({"pokemon_le-0.82", "star_wars_2025_le-0.96", "star_wars_2025_pro-0.84",
                          "walking_dead_remastered_le-0.92"})

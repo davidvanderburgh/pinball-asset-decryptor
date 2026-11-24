@@ -149,7 +149,7 @@ def mode_descriptor(desc, extent, key, units):
     for b in ops:
         if drop_wait:
             drop_wait = False
-            if b[0] == 0x11:
+            if b[0] in (0x10, 0x11):        # the dropped play's own wait (PAD-1542: 0x10 too)
                 continue
         if b[0] == 0x07:
             mark += 1

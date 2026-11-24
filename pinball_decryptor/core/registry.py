@@ -1046,6 +1046,13 @@ class Manufacturer(ABC):
         Called off the UI thread."""
         return {}
 
+    def sound_song_parts(self, assets_dir, rels):
+        """``{rel: {"pieces": [...], "kept": [...], "music": [...]}}`` (each a list of
+        ``(rel, seconds)``) for the Replace-Audio slots *rels* the game plays as one song
+        with others (PAD-1542: a replacement for a song's music plays in place of the whole
+        song).  ``{}`` (the default) for none.  Called off the UI thread."""
+        return {}
+
     def video_sizes(self, assets_dir, slots_by_rel, assignments):
         """``{rel: (w, h)}`` of the assigned clips that go on the card at
         another size than their slot (Simon, 2026-11-21: "the image rules need

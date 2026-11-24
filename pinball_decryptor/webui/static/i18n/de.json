@@ -13020,5 +13020,14 @@
 "Hold the ball in the shooter lane": "Kugel in der Abschussbahn halten",
 "For testing: a ball the game serves waits in the shooter lane until you plunge it (Plunge, the plunger key, or the launch button on a game that has one).\n\nWhat it stops is the game's own TIMED PLUNGER setting, which launches a waiting ball by itself after a set number of idle seconds. It is held at Off while the game runs; your machine's own setting is kept and comes back at the next Start without this tick. A launch the game makes on purpose (a ball save, a multiball) still goes. Takes effect at the next Start.": "Zum Testen: Eine Kugel, die das Spiel ausgibt, wartet in der Abschussbahn, bis du sie abschießt (Plunger, die Plunger-Taste oder der Abschussknopf bei einem Spiel, das einen hat).\n\nUnterbunden wird die eigene Einstellung TIMED PLUNGER des Spiels, die eine wartende Kugel nach einer eingestellten Zahl untätiger Sekunden selbst abschießt. Sie wird auf Aus gehalten, solange das Spiel läuft; die eigene Einstellung deines Automaten bleibt erhalten und kommt beim nächsten Start ohne diesen Haken zurück. Ein Abschuss, den das Spiel absichtlich macht (ein Ball Save, ein Multiball), geht weiterhin. Wirkt beim nächsten Start.",
 "Stop the sound Play started.": "Den mit Abspielen gestarteten Sound stoppen.",
-"Sound stopped.": "Sound gestoppt."
+"Sound stopped.": "Sound gestoppt.",
+"Song in parts": "Song in Teilen",
+"Song in {} parts": "Song in {} Teilen",
+"Piece of a song": "Teil eines Songs",
+"The game plays this sound as one song with {}.": "Das Spiel spielt diesen Sound zusammen mit {} als einen Song.",
+"A replacement here plays in place of the whole song: Write leaves {} out of it.": "Ein Ersatz hier spielt anstelle des ganzen Songs: Write lässt {} weg.",
+"Kept in it, as the game also plays them in other sounds: {}.": "Bleibt darin, weil das Spiel sie auch in anderen Sounds spielt: {}.",
+"A piece of a song: the game plays it with {}, the song's music.": "Ein Teil eines Songs: Das Spiel spielt ihn mit {}, der Musik des Songs.",
+"This piece stays in the song even then: the game also plays it in other sounds.": "Dieser Teil bleibt auch dann im Song: Das Spiel spielt ihn auch in anderen Sounds.",
+"Replace that sound and this piece drops out, so the replacement plays in place of the whole song.": "Ersetze diesen Sound, und dieser Teil fällt weg, sodass der Ersatz anstelle des ganzen Songs spielt."
 }

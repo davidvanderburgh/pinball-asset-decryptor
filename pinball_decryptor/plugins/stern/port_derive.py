@@ -661,6 +661,15 @@ def merge(drafts, refs, tgt, game, version, family):
         # a start shot a template mode finds among these names (a copied one names a rule shot)
         texts = [t for t in texts if t.split()[1:2] != ["example_start_shot"]] + [
             "text example_start_shot     %s" % fw["example"]]
+    # PAD-1555: the callers of the build's own award screens and light shows that use what they get back, read off
+    # THIS program (ret_use.py); a copied `own_ret_scanned 1` with no list made a whole-game mode refuse them all
+    rsites = {n: placed.get(("site", n)) for n in ("show_start", "award_screen")}
+    if getattr(tgt, "arr", None) is not None and any(v is not None for v in rsites.values()):
+        from . import ret_use
+        try:
+            values += [(line.split()[1], line.split(None, 1)[1]) for line in ret_use.value_lines(ret_use.scan(tgt, rsites))]
+        except ImportError:
+            pass                                    # no disassembler: no list, and no `own_ret_scanned` either
     sites = {n for (k, n) in placed if k == "site"}
     data = {n for (k, n) in placed if k == "data"}
     missing = portgen.core_missing(sites, data, _numbers(values), len(fw["mapped"]))
@@ -759,7 +768,9 @@ def _read_here(name):
     """Values a port gets from its own build only: the end of ball's bus id (0x34 on generation B is
     the tick's exit on A), the switch tables (portswitch) and, PAD-715, a plain-C title's books of its modes (audit
     and flag ids: each build's own name tables, mode_framework.plain_books)."""
-    return name == "ball_end_event" or name.startswith(("switch_", "place_audit_", "place_flag_"))
+    from . import ret_use
+    return (name == "ball_end_event" or name.startswith(("switch_", "place_audit_", "place_flag_"))
+            or ret_use.is_own(name))
 
 
 def _numbers(values):

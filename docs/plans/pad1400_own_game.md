@@ -154,3 +154,9 @@ exactly the mode's awards, and the game ended with the mode.
   `shot_dispatch` nor `switch_spawn`. On them award screens and light shows are counted only, and their rules may
   still count shots silently. A port derived on the user's machine from their own card gets the newest build's sites
   only where the derivation places them.
+
+## D&D LE (PAD-1555)
+
+The rig could not end a ball on D&D LE (its drain counted the dragon's balls out of the trough's six); fixed in
+PAD-1555, and a whole-game mode through three balls on D&D LE 1.10 passes (newbuild/ownjob.sh: 759 light shows and 79
+award screens of the game's refused, no crash). The lost scan_ret_use.py is plugins/stern/ret_use.py now.

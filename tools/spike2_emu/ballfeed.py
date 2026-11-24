@@ -634,7 +634,7 @@ class Feeder:
             return
         mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
         lane_made = self.lane is not None and bool(padsw.merged(m, self.lane))
-        dplan = ballmodel.plan_drain(self.trough, mrg, self.lane, lane_made, self.held(mrg))
+        dplan = ballmodel.plan_drain(self.trough, mrg, self.lane, lane_made, self.held(mrg), self.extra_max)
         if dplan.refused and self.trough.full(mrg) and self.extra < self.extra_max:
             self.extra += 1
             self.homebound.pop(0)
@@ -692,7 +692,7 @@ class Feeder:
         lane_made = (self.lane is not None
                      and bool(padsw.merged(m, self.lane)))
         dplan = ballmodel.plan_drain(self.trough, mrg, self.lane, lane_made,
-                                     self.held(mrg))
+                                     self.held(mrg), self.extra_max)
         if dplan.refused and self.trough.full(mrg) and self.extra < self.extra_max:
             self.extra += 1                         # home, behind the trough's last switch
             say("way home: the ball stopped behind the full trough (%d there)" % self.extra)

@@ -326,6 +326,36 @@ def test_a_launched_ball_drains_and_a_multiball_drains_past_a_waiting_one(
                                             lane_made=True)) == (68, 1)
 
 
+def test_a_lock_s_own_balls_count_on_top_of_the_trough_s(ballmodel, tr, monkeypatch):
+    """PAD-1555: D&D LE's dragon holds the four balls installed on top of the trough's six. With ball 1 on the
+    playfield (trough 5, dragon 4) a drain counted 6 - 5 - 4 < 0 balls in play and was refused as "the ball is still
+    in the shooter lane", every time, so no drain ever ended a ball in the emulator."""
+    launched = mrg_with(71, 70, 69, 68, 67)
+    assert not ballmodel.plan_drain(tr, launched, lane_id=62, lane_made=False, held=4)
+    assert ballmodel.in_play(tr, launched, 62, False, held=4, extra=4) == 1
+    assert ballmodel.plan_drain(tr, launched, lane_id=62, lane_made=False, held=4, extra=4).switches() == [(66, 1)]
+    by_name = {n: 80 + i for i, n in enumerate(ballmodel.HOLDS[0][0])}
+    monkeypatch.delenv("PAD_BALL_EXTRA", raising=False)
+    assert ballmodel.complement(by_name) == ballmodel.HOLDS[0][3] == 4
+    monkeypatch.setenv("PAD_BALL_EXTRA", "3")
+    assert ballmodel.complement(by_name) == 3
+    assert ballmodel.complement({"TROUGH 1": 71}) == 0
+
+
+def test_the_build_check_leaves_the_dragon_s_switches_alone():
+    """PAD-1555: the check pressed DRAGON HOLD 1-4 and STACK as playfield switches; the game read a jam and kicked
+    the dragon's balls out mid-check."""
+    import pathlib
+    import re
+    src = (pathlib.Path(__file__).resolve().parents[1] / "tools" / "spike2_emu" / "modes" / "gamecheck.sh").read_text(
+        encoding="utf-8")
+    pat = re.search(r"grep -qiE '([^']+)'", src[src.index("skipped()"):]).group(1)
+    for name in ("DRAGON HOLD 1", "DRAGON HOLD STACK"):
+        assert re.search(pat, name, re.I), name
+    for name in ("Car Hold Opto", "Angle Sensor Threshold"):
+        assert not re.search(pat, name, re.I), name
+
+
 def test_a_title_with_no_lane_switch_drains_on_the_trough_alone(ballmodel, tr):
     """No lane to read is not a lane with a ball in it."""
     plan = ballmodel.plan_drain(tr, mrg_with(71, 70, 69, 68, 67), lane_id=None,

@@ -4,6 +4,8 @@
 # card, hidden, muted): the runtime hooked the game, 24 of its 44 shots came from their switches, a drain
 # ended a ball (a tilted ball 2 and a ball 3), events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end, tilt_warning, tilt.
 # Shots no press made: Left outlane, Right outlane, Action button, Left flipper button, Right flipper button, Start button, Left flipper + Action button, Right flipper + Action button, Action button held 1 s, Left flipper button held 1 s, Right flipper button held 1 s, Action button released, Left flipper button released, Right flipper button released, Both flipper buttons, Action button held 3 s, Left flipper button held 3 s, Right flipper button held 3 s, Start button held 1 s, Start button released.
+# Whole game (PAD-1400, a mode that IS the game) proven 2026-11-24 by modes/newbuild/ownjob.sh: 3 balls ended, 1979 light shows and 52 award screens refused, no crash;
+# its own_pass callers read off this build by ret_use.py.
 # program sha1 13c6ce01e187d11aa4e0358ffdc8f803c934f2ed, portgen revision 12, 59 reference port(s) of framework generation B.
 
 game           dungeons_and_dragons_pro
@@ -28,6 +30,69 @@ site lamp_group       0x004cd93c 0xe92d4038 0xe1a04000
 site award_screen     0x002b618c 0xe92d4070 0xe24dd008
 #   drain_rule_call: located (strict) [Dungeons & Dragons Pro 1.10, Dungeons & Dragons LE 1.10, Venom Pro 1.07, Venom LE 1.07]
 site drain_rule_call  0x002bde68 0xe3a0100a 0xe12fff3c
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# ret_use.py, read off this build); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0           0x0006f540
+value own_pass_1           0x0007d4f4
+value own_pass_2           0x0007ece0
+value own_pass_3           0x0007ecfc
+value own_pass_4           0x0007ed18
+value own_pass_5           0x0007ed34
+value own_pass_6           0x0007ed50
+value own_pass_7           0x0007ed6c
+value own_pass_8           0x000901fc
+value own_pass_9           0x0009d930
+value own_pass_10          0x000a5dec
+value own_pass_11          0x000ba958
+value own_pass_12          0x0011506c
+value own_pass_13          0x0012f8e4
+value own_pass_14          0x00130200
+value own_pass_15          0x001351dc
+value own_pass_16          0x0013acc4
+value own_pass_17          0x0013ba6c
+value own_pass_18          0x0013bac0
+value own_pass_19          0x0013bb14
+value own_pass_20          0x0013bb74
+value own_pass_21          0x0013bc24
+value own_pass_22          0x0013bc6c
+value own_pass_23          0x0013bcc0
+value own_pass_24          0x0013dbb0
+value own_pass_25          0x0013dcb8
+value own_pass_26          0x0013f440
+value own_pass_27          0x001447d0
+value own_pass_28          0x00144848
+value own_pass_29          0x001448a4
+value own_pass_30          0x001448f4
+value own_pass_31          0x0014494c
+value own_pass_32          0x001449bc
+value own_pass_33          0x0014c450
+value own_pass_34          0x0014ca50
+value own_pass_35          0x0014ca8c
+value own_pass_36          0x0015e900
+value own_pass_37          0x0017abe8
+value own_pass_38          0x001a4b00
+value own_pass_39          0x001a5530
+value own_pass_40          0x001c9d74
+value own_pass_41          0x001d6f88
+value own_pass_42          0x001e4870
+value own_pass_43          0x001eccd8
+value own_pass_44          0x001f0cd4
+value own_pass_45          0x001f0d70
+value own_pass_46          0x0022fc08
+value own_pass_47          0x00271544
+value own_pass_48          0x00449628
+value own_pass_49          0x0047e53c
+value own_pass_50          0x00487578
+value own_pass_51          0x004875c0
+value own_pass_52          0x0049e430
+value own_pass_53          0x0049e6e8
+value own_pass_54          0x004c14b0
+value own_pass_55          0x004c1500
+value own_pass_56          0x004c16e4
+value own_pass_57          0x004c1734
+value own_pass_58          0x004c7994
+value own_pass_59          0x004cdae8
 #   show_start: located (strict) [Dungeons & Dragons Pro 1.10, Dungeons & Dragons LE 1.10, Dungeons & Dragons LE 1.00, The Munsters Pro 1.28, Venom Pro 1.07, Godzilla Pro 1.16, Foo Fighters Pro 1.04, John Wick LE 1.02, John Wick Pro 1.02, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Rush LE 1.19, Rush Pro 1.19, Jaws Pro 1.02, King Kong Pro 0.97, Jurassic Park Pro 1.16, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Venom LE 1.07, Godzilla Premium/LE 1.16, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Star Wars Pro 1.31, Foo Fighters LE 1.04, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Uncanny X-Men Pro 0.98, The Munsters LE 1.28, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, James Bond 007 Pro 1.06, King Kong LE 0.97, Aerosmith 1.16, Elvira 1.13, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Uncanny X-Men LE 0.98, James Bond 60th LE 1.11, Jurassic Park LE 1.16, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Star Wars ELG 1.10, TMNT Pro 1.59, James Bond 007 LE 1.06, The Beatles 1.29, Batman 66 1.14, Aerosmith LE 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Deadpool LE 1.16, Deadpool Pro 1.16, Jaws LE 1.02, John Wick LE 1.01, Metallica Remastered 1.03, Star Wars LE 1.30, Deadpool LE 1.14]
 site show_start       0x003bb5b4 0xe92d47f0 0xe2508000
 #   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Dungeons & Dragons Pro 1.10, Dungeons & Dragons LE 1.10, Dungeons & Dragons LE 1.00, The Munsters Pro 1.28, Venom Pro 1.07, Godzilla Pro 1.16, Foo Fighters Pro 1.04, John Wick LE 1.02, John Wick Pro 1.02, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Rush LE 1.19, Rush Pro 1.19, Jaws Pro 1.02, King Kong Pro 0.97, Jurassic Park Pro 1.16, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Venom LE 1.07, Godzilla Premium/LE 1.16, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Star Wars Pro 1.31, Foo Fighters LE 1.04, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Uncanny X-Men Pro 0.98, The Munsters LE 1.28, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, James Bond 007 Pro 1.06, King Kong LE 0.97, Aerosmith 1.16, Elvira 1.13, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Uncanny X-Men LE 0.98, James Bond 60th LE 1.11, Jurassic Park LE 1.16, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Star Wars ELG 1.10, TMNT Pro 1.59, James Bond 007 LE 1.06, The Beatles 1.29, Batman 66 1.14, Aerosmith LE 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Deadpool LE 1.16, Deadpool Pro 1.16, Jaws LE 1.02, John Wick LE 1.01, Metallica Remastered 1.03, Star Wars LE 1.30, Deadpool LE 1.14]
@@ -395,8 +460,7 @@ site coop_eb_award    0x002b2ec4 0xe92d4070 0xe1a06000
 #   candidate: the reference coop_count_shield calls 0x286e00, which is 0x20c654 in the target - prove what it does before using it
 #   candidate: the reference coop_count_shield calls 0x4082f4, which is 0x489208 in the target - prove what it does before using it
 # site reel_tick              NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   switch_spawn: located (strict) [Rush LE 1.19, Rush Pro 1.19, Jurassic Park Pro 1.16, Star Wars LE 1.31, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Star Wars Pro 1.31, Metallica Remastered 1.04, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Aerosmith 1.16, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park LE 1.16, Stranger Things 1.13, Stranger Things LE 1.13, Star Wars ELG 1.10, Batman 66 1.14, Aerosmith LE 1.16]
-site switch_spawn     0x00279b38 0xeb0447db 0xe3500000
+# site switch_spawn  left out: dungeons_and_dragons_pro-1.10 has none (PAD-1400 placed it only where a build needed it; PAD-1555)
 # site left_post_get          NOT PLACED: not unique in the reference; no caller could be lined up
 #   right_post_get: through the handler of hook 0x1f, as in the reference [Iron Maiden LE 1.18, Iron Maiden Pro 1.18]
 site right_post_get   0x00489118 0xe30f3c60 0xe3403080
@@ -668,7 +732,6 @@ scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
 scene hud                  b237b7288453dee42f8299bea3fb57de90e6e473
 
 # ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
-value own_ret_scanned      1
 value backdrop_surface 1
 value mode_mask_busy        0x210
 value surface_playing       2

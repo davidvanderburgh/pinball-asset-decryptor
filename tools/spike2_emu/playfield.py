@@ -1569,6 +1569,11 @@ class SwitchWatch:
             if hit is not None:
                 self.lane_id = hit["id"]
                 break
+        # PAD-1555: a lock's balls (D&D LE's dragon, TMNT LE's van) are neither home nor in play, and D&D LE's are
+        # installed on top of the trough's six - the same count plunge.py's drain makes, so the line and Drain agree
+        by_name = {(r.get("name") or "").upper().strip(): r["id"] for r in load_switch_list() if r.get("name")}
+        self.lock_ids = ballmodel.lock_ids(by_name)
+        self.extra = ballmodel.complement(by_name)
         return bool(self.positions)
 
     def poll(self):
@@ -1724,8 +1729,9 @@ def _lane_made(watch):
 def balls_in_play(watch):
     """How many balls are out on the playfield, by ballmodel.in_play's rule -
     the one plunge.py's drain refuses on, so the line and the button agree."""
+    held = sum(1 for i in getattr(watch, "lock_ids", ()) if watch.is_made(i))
     return ballmodel.in_play(ballmodel.Trough(watch.positions), watch.mrg,
-                             getattr(watch, "lane_id", None), _lane_made(watch))
+                             getattr(watch, "lane_id", None), _lane_made(watch), held, getattr(watch, "extra", 0))
 
 
 def drain_ready(watch):

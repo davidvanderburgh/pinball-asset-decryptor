@@ -38,6 +38,7 @@ PORTS = [
     ("deadpool_pro", "1.16"),
     ("dungeons_and_dragons_le", "1.00"),
     ("dungeons_and_dragons_le", "1.10"),
+    ("dungeons_and_dragons_le", "1.11"),  # PAD-1555
     ("dungeons_and_dragons_pro", "1.10"),
     ("dungeons_and_dragons_pro", "1.11"),  # PAD-1555
     ("elvira3", "1.13"),

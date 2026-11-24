@@ -250,6 +250,17 @@ def test_drain_is_ready_only_with_a_ball_in_play(playfield):
     assert not playfield.drain_ready(unread)
 
 
+def test_drain_counts_a_lock_s_balls_on_top_of_the_trough(playfield):
+    """PAD-1555: D&D LE's dragon holds four balls installed on top of the trough's six. Ball 1 on the playfield
+    (trough 5, dragon 4) read as 6 - 5 - 4 < 0 in play: Drain greyed, as plunge.py's drain refused it."""
+    w = _watch(playfield, [71, 70, 69, 68, 67, 91, 92, 93, 94], lane=62)
+    w.lock_ids, w.extra = [91, 92, 93, 94, 83], 4
+    w.is_made = lambda i: bool(w.mrg[i])
+    assert playfield.balls_in_play(w) == 1 and playfield.drain_ready(w)
+    w.mrg[66] = 1                                       # it drained: all home, the dragon full
+    assert playfield.balls_in_play(w) == 0 and not playfield.drain_ready(w)
+
+
 def test_drain_is_greyed_while_the_ball_waits_and_lights_once_launched(
         playfield):
     """The model's `drain` flag is what pf.js sets the button's disabled

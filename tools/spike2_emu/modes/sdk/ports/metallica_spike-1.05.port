@@ -4,6 +4,8 @@
 # card, hidden, muted): the runtime hooked the game, 35 of its 58 shots came from their switches, a drain
 # ended a ball (a tilted ball 2 and a ball 3 to the game's end), events seen firing: game_start, ball_start, ball_end, bonus_end, tilt_warning, tilt, game_over.
 # Shots no press made: Left outlane, Right outlane, Coffin lock 1, Coffin lock 2, Coffin lock 3, Action button, Left flipper button, Right flipper button, Start button, Left flipper + Action button, Right flipper + Action button, Action button held 1 s, Left flipper button held 1 s, Right flipper button held 1 s, Action button released, Left flipper button released, Right flipper button released, Both flipper buttons, Action button held 3 s, Left flipper button held 3 s, Right flipper button held 3 s, Start button held 1 s, Start button released.
+# Whole game (PAD-1400, a mode that IS the game) proven 2026-11-24 by modes/newbuild/ownjob.sh: 3 balls ended, 45753 light shows and 164 award screens refused, no crash;
+# its own_pass callers read off this build by ret_use.py.
 # program sha1 a33a1fb70361c2d25cd7aac92f6ff6c1c7d276a6, portgen revision 11, 59 reference port(s) of framework generation B.
 
 game           metallica_spike
@@ -30,6 +32,35 @@ site show_priority    0x0043a3d4 0xe30d30b4 0xe3403700
 site award_screen     0x001c9e1c 0xe92d4070 0xe24dd008
 #   drain_rule_call: located (strict) [Metallica Remastered 1.04, Godzilla Pro 1.16, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, King Kong Pro 0.97, Godzilla Premium/LE 1.16, The Munsters Pro 1.28, Rush LE 1.19, Rush Pro 1.19, Jurassic Park Pro 1.16, Foo Fighters Pro 1.04, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, The Mandalorian LE 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian Pro 1.45, Aerosmith 1.16, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, James Bond 007 Pro 1.06, Jurassic Park LE 1.16, Stranger Things 1.13, Stranger Things LE 1.13, TMNT LE 1.59, Elvira 1.13, The Munsters LE 1.28, Star Wars ELG 1.10, Foo Fighters LE 1.04, James Bond 60th LE 1.11, Uncanny X-Men LE 0.98, Jurassic Park Pin 1.05, The Beatles 1.29, James Bond 007 LE 1.06, Aerosmith LE 1.16, Deadpool LE 1.16, Deadpool Pro 1.16, Jaws LE 1.02, TMNT Pro 1.59, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14]
 site drain_rule_call  0x00387894 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# ret_use.py, read off this build); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0           0x00035390
+value own_pass_1           0x00047698
+value own_pass_2           0x0005e7c4
+value own_pass_3           0x000a4c80
+value own_pass_4           0x000c8874
+value own_pass_5           0x000c8940
+value own_pass_6           0x000c8a18
+value own_pass_7           0x000c8aec
+value own_pass_8           0x000f29f8
+value own_pass_9           0x0013f580
+value own_pass_10          0x001a09a4
+value own_pass_11          0x001a0e94
+value own_pass_12          0x001a2784
+value own_pass_13          0x001a27d4
+value own_pass_14          0x001a29b8
+value own_pass_15          0x001a2a08
+value own_pass_16          0x00237624
+value own_pass_17          0x00237958
+value own_pass_18          0x0035f548
+value own_pass_19          0x0035f590
+value own_pass_20          0x00394e84
+value own_pass_21          0x0039ea84
+value own_pass_22          0x0039eb20
+value own_pass_23          0x003ab364
+value own_pass_24          0x003e6c84
+value own_pass_25          0x00439478
 #   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Metallica Remastered 1.04, Metallica Remastered 1.03, Godzilla Pro 1.16, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, King Kong Pro 0.97, Godzilla Premium/LE 1.16, The Munsters Pro 1.28, Rush LE 1.19, Rush Pro 1.19, Jurassic Park Pro 1.16, Foo Fighters Pro 1.04, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Godzilla Pro 1.15, The Mandalorian LE 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Venom Pro 1.07, The Mandalorian Pro 1.45, Aerosmith 1.16, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, James Bond 007 Pro 1.06, Jurassic Park LE 1.16, Stranger Things 1.13, Stranger Things LE 1.13, TMNT LE 1.59, Elvira 1.13, The Munsters LE 1.28, Star Wars ELG 1.10, Foo Fighters LE 1.04, James Bond 60th LE 1.11, Uncanny X-Men LE 0.98, Venom LE 1.07, Jurassic Park Pin 1.05, The Beatles 1.29, James Bond 007 LE 1.06, Aerosmith LE 1.16, Deadpool LE 1.16, Deadpool Pro 1.16, Jaws LE 1.02, TMNT Pro 1.59, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, John Wick LE 1.01, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
 site string_new       0x0001674c 0xe28fc606 0xe28cca25
 #   dynamic_cast: PLT stub for __dynamic_cast [Metallica Remastered 1.04, Metallica Remastered 1.03, Godzilla Pro 1.16, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, King Kong Pro 0.97, Godzilla Premium/LE 1.16, The Munsters Pro 1.28, Rush LE 1.19, Rush Pro 1.19, Jurassic Park Pro 1.16, Foo Fighters Pro 1.04, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Godzilla Pro 1.15, The Mandalorian LE 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Venom Pro 1.07, The Mandalorian Pro 1.45, Aerosmith 1.16, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, James Bond 007 Pro 1.06, Jurassic Park LE 1.16, Stranger Things 1.13, Stranger Things LE 1.13, TMNT LE 1.59, Elvira 1.13, The Munsters LE 1.28, Star Wars ELG 1.10, Foo Fighters LE 1.04, James Bond 60th LE 1.11, Uncanny X-Men LE 0.98, Venom LE 1.07, Jurassic Park Pin 1.05, The Beatles 1.29, James Bond 007 LE 1.06, Aerosmith LE 1.16, Deadpool LE 1.16, Deadpool Pro 1.16, Jaws LE 1.02, TMNT Pro 1.59, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, John Wick LE 1.01, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
@@ -644,7 +675,6 @@ scene video_bank           9d57875196c613785a1eee010c55223a0f1aa821
 scene attract              2e119473ac9f46f42cfd44abc13b7b934a847029
 
 # ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
-value own_ret_scanned      1
 value clip_surface_hide     1
 value mode_mask_busy        0x210
 value surface_playing       2

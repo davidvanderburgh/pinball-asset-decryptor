@@ -142,3 +142,30 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   lines the predecessors carry (light-show passes, wizard objects, challenge sites, scoop/coil sites). Until then the
   Modes tab greys those parts on the new builds, but Write puts modes on their cards.
 - Do not edit a job script while a sweep runs it (bash reads it as it goes: three jobs died "without a verdict").
+
+### Run 3 (2026-11-24 evening): D&D LE, the rig's dragon, whole game on the new builds
+
+- **D&D LE on the rig (the cause of every "no drain ended a ball", 1.10's shipped port too, and PAD-1400's unproven
+  D&D LE):** `ballmodel.in_play` counted balls in play as the trough's six minus trough, lane and locked balls, but
+  D&D LE's dragon balls are installed ON TOP of the six (ballfeed's PAD_BALL_EXTRA complement): ball 1 out read
+  6 - 5 - 4 < 0 and every drain was refused "the ball is still in the shooter lane". `ballmodel.complement()` gives the
+  title's complement; plunge.py's drain, ballfeed's way home and the playfield window's in-play line / Drain button
+  count it. And gamecheck.sh pressed DRAGON HOLD 1-4 / STACK as playfield switches (the game read a jam and kicked the
+  dragon): skipped now. D&D LE 1.11 and 1.10 pass the full check (`newbuild/checkjob.sh`), 1.11 ships.
+- **Whole game (PAD-1400) on the new builds:** a derived port copied `value own_ret_scanned 1` from its references and
+  dropped the `own_pass_*` list, so a whole-game mode would refuse EVERY award screen / light show caller, the ones that
+  crash on a null among them (TMNT Pro's). `plugins/stern/ret_use.py` (PAD-1400's lost scan_ret_use.py, rebuilt: every
+  caller that uses r0 after the call as a base, a store, an argument or a return, null-checked ones excepted; never
+  misses a PAD-1400 caller that really uses it, lists some extra) now runs in every derivation, and the two values are
+  never copied (portgen REVISION 13). The ten new ports carry their own lists; switch_spawn stays only where the same
+  model's earlier port had it (Metallica). `newbuild/ownjob.sh`: a whole-game mode through three balls - all ten new
+  builds pass (no crash, the game's shows and award screens refused), and so does D&D LE 1.10 (PAD-1400 could not).
+- **Left (next run): the predecessors' feature lines on the new ports.** These tests are red because the new ports are
+  now the latest builds and lack what latest builds carry (40 cases, every one a new port):
+  test_spike2_mode_clip_back (surface seek/length/position; reel tick), test_stern_game_rules (rule lines whole),
+  test_pad645_attract_every_build (switch_hit sites), test_stern_mode_shaker, test_stern_mode_magnet_part,
+  test_stern_mode_game_shows, test_spike2_mode_backdrop_v2, test_pr18_stock_shot_bits, test_pad826_spare_io,
+  test_pad782_attract_items, test_pad1478_serve_every_title (x2), test_pad1449_start_menu_styles, test_pad1406_flippers,
+  test_pad1202_coop_up_call, test_pad1022_idle_pause. Each names a feature block the predecessor port has; carry it
+  (re-placed in the new program: the derived port's sites where it has them, port_tool / the feature's own reader
+  otherwise), prove it the way that feature's proven set was proven, then add the build to the set.

@@ -232,7 +232,8 @@ def test_switch_spawn_refuses_only_rule_handlers():
     wrap = wrap[:wrap.index("\n}\n")]
     assert "og_rule_handler(handler)" in wrap and "return og_spawn_target(group, handler, arg, r3);" in wrap
     ports = sorted(p.stem for p in (SDK / "ports").glob("*.port") if "\nsite switch_spawn " in p.read_text(encoding="utf-8"))
-    assert {"rush_le-1.19", "batman-1.14", "star_wars_le-1.31"} <= set(ports) and len(ports) == 19
+    # PAD-1555: Metallica Remastered 1.05 keeps 1.04's (the other new builds' predecessors had none)
+    assert {"rush_le-1.19", "batman-1.14", "star_wars_le-1.31", "metallica_spike-1.05"} <= set(ports) and len(ports) == 20
 
 
 def test_the_drain_question_is_answered_no_on_every_newest_build():
@@ -245,7 +246,7 @@ def test_the_drain_question_is_answered_no_on_every_newest_build():
     assert "og_drain_hold = og.owner && !og.tilted;" in text
     ports = [p for p in (SDK / "ports").glob("*.port")]
     have = [p.stem for p in ports if "\nsite drain_rule_call " in p.read_text(encoding="utf-8")]
-    assert len(have) == 53
+    assert len(have) == 63                                      # PAD-1555: the ten November 2026 builds too
     for p in ports:
         m = re.search(r"^site drain_rule_call\s+\S+\s+(0x\w+)\s+(0x\w+)", p.read_text(encoding="utf-8"), re.M)
         if m:
@@ -265,4 +266,6 @@ def test_award_screens_and_shows_pass_at_callers_that_use_the_result():
     assert "value own_ret_scanned      1" in tp
     assert re.search(r"^value own_pass_\d+\s+0x00147cf0$", tp, re.M)
     scanned = [p for p in (SDK / "ports").glob("*.port") if "\nvalue own_ret_scanned " in p.read_text(encoding="utf-8")]
-    assert len(scanned) == 53
+    assert len(scanned) == 63                                   # PAD-1555: the ten November 2026 builds (ret_use.py)
+    for p in scanned:                                           # never "scanned" with no list (a derived port was)
+        assert re.search(r"^value own_pass_0\s+0x", p.read_text(encoding="utf-8"), re.M), p.name

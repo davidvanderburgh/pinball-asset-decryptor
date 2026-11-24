@@ -1,4 +1,4 @@
-"""Bluetooth headphones on a Stern card: Matt Kulka's spike-pinball-bluetooth, put on by a build (PAD-1554).
+"""Bluetooth headphones on a Stern card: mattlqx's spike-pinball-bluetooth, put on by a build (PAD-1554).
 
 https://gitlab.com/mattlqx/spike-pinball-bluetooth gives a Spike 2 or Spike 3 machine Bluetooth headphones: a
 Bluetooth entry in the game's own menus, per-headset volume, cabinet speaker control.  Its author asked that this
@@ -52,7 +52,7 @@ PLUGIN = card_plugins.register(Plugin(
     name='Bluetooth headphones',
     what="Bluetooth headphones for Stern Spike 2 and Spike 3 machines: a Bluetooth entry in the game's own menus, "
          'a volume for each headset, and the cabinet speakers on, off or off while headphones play.',
-    author='Matt Kulka (mattlqx)',
+    author='mattlqx',
     project='https://gitlab.com/mattlqx/spike-pinball-bluetooth',
     license='GPL-2.0',
     archives={'armv7': 'spike-pinball-bluetooth-armv7.tar.gz', 'arm64': 'spike-pinball-bluetooth-arm64.tar.gz'},

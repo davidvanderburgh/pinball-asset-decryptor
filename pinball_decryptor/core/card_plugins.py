@@ -1,6 +1,6 @@
 """Plugins: optional add-ons made by other people, pulled from their own repository (PAD-1554).
 
-David, on putting Matt Kulka's Bluetooth headphones on a card: "would you be cool if I integrated your bluetooth
+David, on putting mattlqx's Bluetooth headphones on a card: "would you be cool if I integrated your bluetooth
 feature into PAD?"  The author: "do you think you could have it pull the repo and use it from there rather than
 pulling all the code into the PAD repo?  maybe select a version tag or something.  installation integration would
 be great."  And David on the screen: "maybe a new Plugins tab, where the user can choose optional plugins to

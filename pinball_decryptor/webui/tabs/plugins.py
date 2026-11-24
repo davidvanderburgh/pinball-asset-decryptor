@@ -1,7 +1,7 @@
 """Plugins: optional add-ons made by other people, installed from their own project (PAD-1554).
 
 David: "maybe a new Plugins tab, where the user can choose optional plugins to install.  they need to persist
-between PAD updates too."  The first is Matt Kulka's Bluetooth headphones, whose author asked that the app pull his
+between PAD updates too."  The first is mattlqx's Bluetooth headphones, whose author asked that the app pull his
 releases at a version tag rather than carry his code.
 
 One card a plugin, in two halves:

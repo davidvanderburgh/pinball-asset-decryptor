@@ -1560,7 +1560,7 @@ HELP_CONTENT = {
             "- **Remove** takes the plugin off this computer. Cards already written keep it.",
         ]),
         ("Bluetooth headphones", [
-            "Made by Matt Kulka (https://gitlab.com/mattlqx/spike-pinball-bluetooth). It gives a Stern machine "
+            "Made by mattlqx (https://gitlab.com/mattlqx/spike-pinball-bluetooth). It gives a Stern machine "
             "a Bluetooth entry in the game's own menus, a volume for each headset, and cabinet speakers that "
             "can go quiet while headphones play.\n\n"
             "- A Spike 2 machine needs a USB Bluetooth adapter plugged in.\n"

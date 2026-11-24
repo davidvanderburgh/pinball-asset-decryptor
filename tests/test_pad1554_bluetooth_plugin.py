@@ -1,4 +1,4 @@
-"""PAD-1554: the Bluetooth headphones plugin (Matt Kulka's spike-pinball-bluetooth): pulled from its author's
+"""PAD-1554: the Bluetooth headphones plugin (mattlqx's spike-pinball-bluetooth): pulled from its author's
 project at a version tag, kept outside the app, and put on a Spike 2 card unchanged by a build."""
 import gzip
 import hashlib
@@ -99,7 +99,7 @@ def plugin(monkeypatch):
 def test_the_plugin_names_its_author_project_and_the_release_it_was_tested_with():
     p = BT.PLUGIN
     assert P.PLUGINS['bluetooth'] is p and p.project == 'https://gitlab.com/mattlqx/spike-pinball-bluetooth'
-    assert 'Matt Kulka' in p.author and p.license == 'GPL-2.0' and p.tested == 'v0.3.0'
+    assert p.author == 'mattlqx' and p.license == 'GPL-2.0' and p.tested == 'v0.3.0'
     assert set(p.pinned['v0.3.0']) == {ARMV7, ARM64} and all(len(h) == 64 for h in p.pinned['v0.3.0'].values())
     assert P.asset_url(p, 'v0.3.0', ARMV7) == (
         'https://gitlab.com/mattlqx/spike-pinball-bluetooth/-/releases/v0.3.0/downloads/' + ARMV7)
@@ -466,7 +466,7 @@ def test_the_plugins_tab_installs_a_version_and_saves_the_projects_tick(tmp_path
         row = _settle(w, lambda r: r['releases_state'] == 'ok')
         st = w.state('plugins')
         assert st['store'] == str(store) and 'updating this app leaves it installed' in st['intro']
-        assert row['name'] == 'Bluetooth headphones' and 'Matt Kulka' in row['author']
+        assert row['name'] == 'Bluetooth headphones' and row['author'] == 'mattlqx'
         assert row['project_url'] == 'https://gitlab.com/mattlqx/spike-pinball-bluetooth' and row['license'] == 'GPL-2.0'
         assert [(r['tag'], r['tested']) for r in row['releases']] == [('v0.4.0', False), ('v0.3.0', True)]
         assert row['pick'] == 'v0.3.0' and not row['installed'] and row['offered'] and row['supported']

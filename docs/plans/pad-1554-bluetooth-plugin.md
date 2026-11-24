@@ -1,6 +1,6 @@
 # PAD-1554: Bluetooth headphones as a plugin
 
-Matt Kulka's [spike-pinball-bluetooth](https://gitlab.com/mattlqx/spike-pinball-bluetooth) gives Stern Spike 2
+mattlqx's [spike-pinball-bluetooth](https://gitlab.com/mattlqx/spike-pinball-bluetooth) gives Stern Spike 2
 and Spike 3 machines Bluetooth headphones. David asked him whether PAD could integrate it. His answer, which is
 the design brief:
 

@@ -1,0 +1,25 @@
+/* Plugins tab (js/tabs/plugins.js, PAD-1554): one card a plugin, what is installed on this computer beside
+   whether this project's cards carry it. */
+.plg-page { gap: 16px; }
+.plg-card .bd { display: flex; flex-direction: column; gap: 12px; }
+.plg-what { margin: 0; color: var(--ink-2); line-height: 1.45; max-width: 90ch; }
+.plg-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; color: var(--ink-3); }
+.plg-link { font: inherit; color: var(--accent); background: transparent; border: 0; padding: 0; cursor: pointer;
+  text-decoration: underline; overflow-wrap: anywhere; text-align: left; }
+.plg-halves { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start;
+  border-top: 1px solid var(--line); padding-top: 12px; }
+html.bp-1100 .plg-halves { grid-template-columns: 1fr; }
+.plg-half { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.plg-half-hd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 14px; }
+.plg-state { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.plg-state.on { border-color: var(--accent-line); background: var(--accent-soft); }
+.plg-state.off { color: var(--ink-3); }
+.plg-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.plg-adv { border-top: 1px solid var(--line); padding-top: 8px; }
+.plg-adv-hd { font: inherit; font-weight: 600; color: var(--ink-2); background: transparent; border: 0; padding: 2px 0;
+  cursor: pointer; text-align: left; }
+.plg-adv-bd { margin-top: 6px; }
+.plg-fields { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.plg-fields th, .plg-fields td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.plg-fields th { color: var(--ink-3); font-weight: 600; width: 30%; white-space: normal; }
+.plg-fields td { overflow-wrap: anywhere; }

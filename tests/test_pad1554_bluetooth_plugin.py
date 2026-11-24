@@ -412,3 +412,87 @@ def test_the_write_tab_lists_the_pending_choice(tmp_path, monkeypatch, store, pl
     assert row[0] == 'Bluetooth headphones \u2014 spike-pinball-bluetooth v0.3.0' and 'Plugins tab' in row[2]
     card_extras.save_bluetooth(str(project), False)
     assert write_scan.bluetooth_rows(None, str(project)) == []                # off on a card without it: nothing
+
+
+# ------------------------------------------------------------------ the Plugins tab
+def _settle(w, done):
+    import time
+    for _ in range(300):
+        w.drain()
+        if done(w.state('plugins')['plugins'][0]):
+            return w.state('plugins')['plugins'][0]
+        time.sleep(0.02)
+    raise AssertionError('never settled')
+
+
+def test_the_plugins_tab_is_on_the_rail_where_a_plugin_could_go():
+    from pinball_decryptor.webui import help_content as HD, tabs as T
+    from pinball_decryptor.webui.tabs import plugins as TP
+    assert ("plugins", "plugins", "Plugins", "Plugins", "Make", "blocks") in T.TABS
+    assert len([t for t in T.TABS if t[0] == 'plugins']) == 1
+    win = (ROOT / 'pinball_decryptor/webui/window.py').read_text(encoding='utf-8')
+    assert '"Plugins": _plugins_offered(mfr),' in win and '"Plugins": None' in win
+    assert TP.offered(type('M', (), {'key': 'stern', '_era': 'spike2'})())
+    assert not TP.offered(type('M', (), {'key': 'jjp', '_era': ''})()) and not TP.offered(None)
+    assert [t for t, _b in HD.sections_for('Plugins')] == ["What it's for", 'Versions', 'Bluetooth headphones']
+    js = (ROOT / 'pinball_decryptor/webui/static/js/tabs/plugins.js').read_text(encoding='utf-8')
+    assert 'title=""' not in js and 'export const css = true' in js
+    assert (ROOT / 'pinball_decryptor/webui/static/css/tabs/plugins.css').is_file()
+
+
+def test_the_plugins_tab_installs_a_version_and_saves_the_projects_tick(tmp_path, monkeypatch, store, plugin):
+    from pinball_decryptor.webui.tabs import plugins as TP
+    from tests.webui_harness import web_app
+    fake, blobs, sums = plugin
+    monkeypatch.setitem(P.PLUGINS, 'bluetooth', fake)
+    web = Web({'v0.3.0': (blobs, sums), 'v0.4.0': release(b'two')})
+    monkeypatch.setattr(P.net, 'urlopen', web)
+    with web_app(tmp_path, mfr='stern') as w:
+        w.window.current_mfr._era = 'spike2'
+        project = tmp_path / 'project'
+        project.mkdir()
+        image = tmp_path / 'source.raw'
+        image.write_bytes(b'card')
+        monkeypatch.setattr(BT, 'inspect_image', lambda path, **k: dict(supported=True, reason='', enabled=False,
+                                                                        release='', hooked=False, files=False))
+        w.run(w.window.write_assets_var.set, str(project))
+        w.run(w.window.write_upd_var.set, str(image))
+        svc = w.window.service('plugins')
+        assert svc.rail_needs() == 'none'
+        w.run(svc.on_show)
+        row = _settle(w, lambda r: r['releases_state'] == 'ok')
+        st = w.state('plugins')
+        assert st['store'] == str(store) and 'updating this app leaves it installed' in st['intro']
+        assert row['name'] == 'Bluetooth headphones' and 'Matt Kulka' in row['author']
+        assert row['project_url'] == 'https://gitlab.com/mattlqx/spike-pinball-bluetooth' and row['license'] == 'GPL-2.0'
+        assert [(r['tag'], r['tested']) for r in row['releases']] == [('v0.4.0', False), ('v0.3.0', True)]
+        assert row['pick'] == 'v0.3.0' and not row['installed'] and row['offered'] and row['supported']
+        assert row['now'] == 'no Bluetooth headphones (as shipped)' and any(r[0] == 'To undo' for r in row['details'])
+        # ticked before it is installed: said, in the words that tell the user what to do
+        assert w.call('plugins.configure', 'bluetooth', True, str(project))
+        assert card_extras.load_bluetooth(str(project)) == {'enabled': True}
+        row = w.state('plugins')['plugins'][0]
+        assert row['enabled'] and 'not installed on this computer' in row['hint']
+        assert w.call('plugins.configure', 'bluetooth', True, str(tmp_path)) is False     # not this tab's project
+        # install the tested version, then a newer one
+        assert w.call('plugins.install', 'bluetooth', '')
+        row = _settle(w, lambda r: not r['busy'])
+        assert row['installed'] == 'v0.3.0' and row['installed_tested'] and row['kind'] == 'ok' and not row['hint']
+        assert P.installed(fake)['tag'] == 'v0.3.0' and (store / 'bluetooth' / 'installed.json').is_file()
+        assert w.call('plugins.pick', 'bluetooth', 'v0.4.0') and w.call('plugins.install', 'bluetooth', 'v0.4.0')
+        row = _settle(w, lambda r: not r['busy'])
+        assert row['installed'] == 'v0.4.0' and not row['installed_tested'] and 'newer than this version' in row['note']
+        # a download that fails says so and leaves what was installed
+        monkeypatch.setattr(P.net, 'urlopen', lambda req, timeout: (_ for _ in ()).throw(OSError('offline')))
+        assert w.call('plugins.install', 'bluetooth', 'v0.3.0')
+        row = _settle(w, lambda r: not r['busy'])
+        assert row['kind'] == 'err' and 'Could not download' in row['note'] and row['installed'] == 'v0.4.0'
+        assert w.call('plugins.remove', 'bluetooth')
+        row = w.state('plugins')['plugins'][0]
+        assert not row['installed'] and 'Cards already written keep it' in row['note'] and P.installed(fake) is None
+        assert w.call('plugins.install', 'nothing', '') is False and w.call('plugins.remove', 'nothing') is False
+        # another manufacturer: nothing to tick
+        w.window.current_mfr._era = 'spike3'
+        w.run(svc.publish)
+        row = w.state('plugins')['plugins'][0]
+        assert not row['offered'] and row['reason'] == BT.NOT_SPIKE2

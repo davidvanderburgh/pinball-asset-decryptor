@@ -55,12 +55,17 @@ PHASE_ROW_BY_KEY = {
     "Emulate PB": "emulate",
     "Multi-boot": "multiboot",
     "Replace Audio": None, "Replace Video": None,
-    "Replace Images": None, "Replace Text": None, "Scenes": None, "Network": None,
+    "Replace Images": None, "Replace Text": None, "Scenes": None, "Network": None, "Plugins": None,
     "Partition Explorer": None, "Default Settings": None, "Test Card": None,
 }
 
 def _ssh_offered(mfr):
     from ..core.ssh_card import offered
+    return offered(mfr)
+
+
+def _plugins_offered(mfr):
+    from .tabs.plugins import offered
     return offered(mfr)
 
 
@@ -560,6 +565,8 @@ class WebWindow:
             # PR #38 review: the score feed and remote access, both for a machine on the owner's network.
             # PAD-1399: remote access is Spike 3's too, so the tab is shown wherever either one is offered
             "Network": g("modes") or _ssh_offered(mfr),
+            # PAD-1554: add-ons from other people's projects, shown where one could go on this kind of card
+            "Plugins": _plugins_offered(mfr),
             # PAD-1382: the service menu with the app's rows in it (Stern Spike 2, the mode runtime's)
             "Service Menu": g("modes"),
             # PAD-1040: the expression light shows ride it too, and are no part of the mode maker

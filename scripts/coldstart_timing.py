@@ -17,6 +17,7 @@ import threading
 import time
 
 T0 = time.perf_counter()
+T0_EPOCH = time.time()
 APP = (sys.argv[4] if len(sys.argv) > 4 else
        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = sys.argv[1]
@@ -177,6 +178,22 @@ def _timed_run_native(ctx, server, host):
 
         # what the page is showing as the start goes on
         def _look():
+            # PAD-1546: evaluate_js waits on the window's thread, which the web
+            # engine keeps busy at times; the page notes on its own clock when
+            # its Starting line gave way (a DOM observer runs in the page)
+            try:
+                result["win"].evaluate_js(
+                    "(function(){if(window.__padTabs!==undefined)return;"
+                    "window.__padTabs=null;var a=document.getElementById('app');"
+                    "var ok=function(){var t=(a&&a.innerText)||'';"
+                    "if(t.trim()&&!/^\\s*Starting/.test(t)){window.__padTabs="
+                    "performance.timeOrigin+performance.now();return true;}"
+                    "return false;};if(ok())return;var o=new MutationObserver("
+                    "function(){if(ok())o.disconnect();});o.observe(document."
+                    "documentElement,{childList:true,subtree:true,"
+                    "characterData:true});})()")
+            except Exception:                           # noqa: BLE001
+                pass
             for _ in range(12):
                 try:
                     text = result["win"].evaluate_js(
@@ -199,6 +216,13 @@ def _timed_run_native(ctx, server, host):
                         round((time.perf_counter() - t) * 1000)))
             time.sleep(0.05)
         result["latency"] = lat
+        try:
+            at = result["win"].evaluate_js("window.__padTabs")
+            if at:
+                marks.append(("page drew its tabs (the page's clock)",
+                              round(at / 1000.0 - T0_EPOCH, 3)))
+        except Exception:                               # noqa: BLE001
+            pass
         try:
             js = result["win"].evaluate_js(
                 "JSON.stringify({nav: performance.getEntriesByType("

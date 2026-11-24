@@ -2003,6 +2003,18 @@ class WriteTab(TabService):
                 changed = 0
             if changed is None:
                 return                                  # superseded
+            # PAD-1546: the chosen-files colour row is worked out here first (numpy's import and the
+            # Recommended profile's fit, a quarter of a second and more at start, both kept once made):
+            # the loop's pass over the pending rows then finds them ready instead of holding up the page.
+            # At start it waits for the tabs to be on the page: loading numpy's libraries holds every
+            # thread up, the loop too (a second from a cold disk)
+            deadline = time.monotonic() + 5.0
+            while self.store.get("shell", "opening") and time.monotonic() < deadline:
+                time.sleep(0.05)
+            try:
+                write_scan.chosen_files_rows(mfr, assets_path)
+            except Exception:                           # noqa: BLE001 - the loop's pass says what is wrong
+                pass
             if self._scan_id == scan_id:
                 _post(self._finish_scan, changed, scan_id, assets_path)
 

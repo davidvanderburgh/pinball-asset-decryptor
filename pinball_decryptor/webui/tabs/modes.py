@@ -383,6 +383,8 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
 
     def __init__(self, window):
         super().__init__(window)
+        # PAD-1546: a manufacturer or project change waits for the tab to be shown
+        self._unread = False
         self.f = _blank_form()
         self._shot_names = []              # the shown title's shots; none until a card says
         self._shots_on = set()
@@ -535,6 +537,8 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         keeps its PATH, so nothing else here notices, and "This project names no card"
         stayed up until a restart. ``quick`` (the ticker) first asks the files' size and
         time whether anything was written. True when it refreshed."""
+        if not self.shown():               # PAD-1546: on_show asks the same
+            return False
         project = self.project()
         if (project and getattr(self, "_visible", False) and self._preview_on()
                 and self._title_stale(project, quick)):
@@ -587,17 +591,29 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             self.ctx.loop.post(fn, *args)
 
     def _on_project_changed(self):
+        if not self._load_now():
+            return
         if self._spk_on():
-            if getattr(self, "_visible", False):
-                self._post(self.spk_refresh)        # the sound folder may follow the project
+            self._post(self.spk_refresh)        # the sound folder may follow the project
             return
         if self._jjp_on():
-            if getattr(self, "_visible", False):
-                self._post(self.jjp_refresh)        # the sound folder may follow the project
+            self._post(self.jjp_refresh)        # the sound folder may follow the project
             return
-        if not getattr(self, "_visible", False) or not self._preview_on():
+        if not self._preview_on():
             return
         self._post(self._refresh_all)
+
+    def _load_now(self):
+        """PAD-1546: a manufacturer or project change reads the modes now only while this
+        tab is the one on screen.  Behind another tab it is read when the tab is next shown
+        (on_show), so opening the last project at start, about 0.4 s of reading every port
+        file, does not hold up the tabs coming up."""
+        if not getattr(self, "_visible", False):
+            return False
+        if self.shown():
+            return True
+        self._unread = True
+        return False
 
     def _refresh_all(self):
         self.refresh()
@@ -613,17 +629,18 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
     def on_manufacturer(self, mfr):
         if self._spk_on():
             self.set(jjp={"on": False})
-            if getattr(self, "_visible", False):
+            if self._load_now():
                 self.spk_refresh()
             return
         self.set(spk={"on": False})
         if self._jjp_on():
-            if getattr(self, "_visible", False):
+            if self._load_now():
                 self.jjp_refresh()
             return
         self.set(jjp={"on": False})
         self._hook_vars()
-        if getattr(self, "_visible", False):
+        if self._load_now():
+            self._unread = False
             self._refresh_all()
             self._show_emu()
 
@@ -639,15 +656,21 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             self.jjp_refresh()
             return
         self._hook_vars()
-        if self.project() != (self.get("project") or "") or (
+        if self._unread:
+            # PAD-1546: a manufacturer or project change came while another tab was shown
+            self._unread = False
+            self._save_if_edited()
+            self._refresh_all()
+        elif self.project() != (self.get("project") or "") or (
                 self._slug is not None and not os.path.isfile(
                     os.path.join(MP.mode_folder(self._open_project, self._slug), MP.MODE_FILE))
                 ) or self._title_stale(self.project()):
             self._save_if_edited()
             self.refresh()
+            self.refresh_stock_modes()
         else:
             self._refresh_list()
-        self.refresh_stock_modes()
+            self.refresh_stock_modes()
         self._show_emu()
         self._kick_ticker()
 

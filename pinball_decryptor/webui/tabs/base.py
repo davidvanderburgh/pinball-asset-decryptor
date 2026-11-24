@@ -18,6 +18,7 @@ Contract (see docs/plans/web_ui.md, "Writing a tab"):
 Hooks (all on the UI loop):
   on_manufacturer(mfr)   a manufacturer (or era) was applied
   on_show()              the tab became the selected one
+  on_hide()              another tab became the selected one (PAD-1546)
   on_running(running, mode)  a run started or ended (set_running)
   on_project(folder)     the project folder changed
 """
@@ -117,11 +118,19 @@ class TabService:
     def toast(self, text, level="info"):
         self.window.toast(text, level)
 
+    def shown(self):
+        """True while this is the selected tab, the one on screen.  (``_visible``
+        is the window's: the tab is on the rail for this manufacturer.)"""
+        return self.store.get("shell", "tab") == self.ns
+
     # -- hooks -----------------------------------------------------------
     def on_manufacturer(self, mfr):
         pass
 
     def on_show(self):
+        pass
+
+    def on_hide(self):
         pass
 
     def on_running(self, running, mode):

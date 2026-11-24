@@ -28,7 +28,6 @@ class PlayOptionsTab(TabService):
     def __init__(self, window):
         super().__init__(window)
         from ...plugins.stern import mode_project as MP
-        self._visible = False
         self.set(intro=INTRO, keeps_ic=MP.KEEPS_IC_NOTE, keeps_ic_head=MP.KEEPS_IC_HEAD, project="",
                  none_why="Open or extract a Stern Spike 2 card project first (Extract tab): the options are the "
                           "project's.")
@@ -49,18 +48,16 @@ class PlayOptionsTab(TabService):
         self.set(project=project)
 
     def on_show(self):
-        self._visible = True
         self.publish()
 
-    def on_hide(self):
-        self._visible = False
-
+    # PAD-1546: behind another tab nothing is read, on_show reads it (at start
+    # this was 0.3 s of reading the project's port files before the tabs came up)
     def on_project(self, folder):
-        if self._visible:
+        if self.shown():
             self.publish()
 
     def on_manufacturer(self, mfr):
-        if self._visible:
+        if self.shown():
             self.publish()
 
 

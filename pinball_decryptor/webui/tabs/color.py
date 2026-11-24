@@ -384,6 +384,7 @@ class ColorTab(TabService):
         self._rev = 0
         self._sample = "card"
         self._project = ""
+        self._unread = False         # PAD-1546: a change waits for a tab that shows it
         self._undo = {}              # PAD-354: {stored key: [what it was, ...]}
         self._redo = {}
         self._last_move = {}         # {stored key: (slider, time)}: one drag = one step
@@ -2136,12 +2137,33 @@ class ColorTab(TabService):
         self.set(try_note="")
         # the tab itself is the project's profiles, never one file's
         self._file = None
+        self._unread = False
         self._load()
         self._publish_sample()
 
     def on_project(self, folder):
         self._file = None
-        self._load()
+        self._load_when_shown()
+
+    #: PAD-1546: the tabs whose page draws from this state: this one, and the Colors bar
+    #: and Color column of Images, Video and Scenes (static/js/tabs/color_pane.js)
+    SHOWN_ON = ("color", "images", "video", "scenes")
+
+    def _load_when_shown(self):
+        """Read the project's profiles now when a tab that shows them is on screen, else
+        when one is next shown (on_tab_changed): opening the last project at start, a
+        quarter of a second, does not hold up the tabs coming up."""
+        if self.store.get("shell", "tab") in self.SHOWN_ON:
+            self._unread = False
+            self._load()
+        else:
+            self._unread = True
+
+    def on_tab_changed(self, ns):
+        # this tab's own on_show reads them in any case
+        if self._unread and ns in self.SHOWN_ON and ns != self.ns:
+            self._unread = False
+            self._load()
 
     def on_manufacturer(self, mfr):
         try:
@@ -2156,7 +2178,7 @@ class ColorTab(TabService):
         if not on_display:
             self._mode = "display"
         self.set(on_display=on_display)
-        self._load()
+        self._load_when_shown()
 
 
 TAB = ColorTab

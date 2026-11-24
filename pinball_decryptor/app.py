@@ -598,10 +598,15 @@ class App:
         )
 
     def _start_session_deferred(self):
-        try:
-            self._start_session()
-        finally:
-            self.ctx.store.set("shell", opening=False)
+        from .core import session_log
+        # PAD-1546: the lines the restore logs are written to the session and
+        # project logs in one piece once the tabs are on their way to the page
+        # (one open of each file, not two a line: about 0.1 s on this PC)
+        with session_log.batched():
+            try:
+                self._start_session()
+            finally:
+                self.ctx.store.set("shell", opening=False)
 
     def _start_session(self):
         """Everything after the window exists: at startup, or once the

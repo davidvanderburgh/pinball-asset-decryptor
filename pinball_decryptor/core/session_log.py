@@ -130,29 +130,38 @@ def set_project(folder, version="", label=""):
             folder = None
     if folder == _project_dir:
         return False
-    # lines held for a batch were the old project's
-    _flush_batch()
+    # lines held for a batch keep the project they were logged in (each
+    # carries its folder), so nothing needs writing out here
     _project_dir = folder
     if folder is None:
         return True
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     name = label or os.path.basename(folder) or folder
-    _append_raw("\n----- Project: %s (%s) — %s -----\n"
-                % (name, folder, stamp))
-    _append_project_raw(
-        "\n%s%s — %s opened %s =====\n"
-        % (BANNER_PREFIX, version or "?", name, stamp))
+    session = ("\n----- Project: %s (%s) — %s -----\n"
+               % (name, folder, stamp))
+    project = ("\n%s%s — %s opened %s =====\n"
+               % (BANNER_PREFIX, version or "?", name, stamp))
+    held = getattr(_batch, "lines", None)
+    if held is not None:
+        # PAD-1546: inside a batch (the start's restore) the banners wait
+        # with the lines around them: two opens fewer of each file
+        held.append((session, None, None))
+        held.append((None, folder, project))
+        return True
+    _append_raw(session)
+    _append_project_raw(project, folder)
     return True
 
 
-def _append_project_raw(line):
-    path = project_log_path()
+def _append_project_raw(line, folder=None):
+    folder = folder or _project_dir
+    path = project_log_path(folder) if folder else None
     if not path:
         return
     # Never recreate a project folder that has gone (deleted, or a NAS that
     # dropped): makedirs below would happily rebuild the tree at a stale
     # mount point, which is worse than losing the mirror for those lines.
-    if not os.path.isdir(_project_dir):
+    if not os.path.isdir(folder):
         return
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -209,7 +218,7 @@ def append(text, level="info"):
     line = "[%s] %s%s\n" % (stamp, prefix, clean_line(text))
     held = getattr(_batch, "lines", None)
     if held is not None:
-        held.append(line)
+        held.append((line, _project_dir, line))
         return
     _append_raw(line)
     _append_project_raw(line)
@@ -250,10 +259,18 @@ def _flush_batch():
     held = getattr(_batch, "lines", None)
     if not held:
         return
-    text = "".join(held)
+    # (session line or None, project folder or None, its project line)
+    entries = list(held)
     del held[:]
-    _append_raw(text)
-    _append_project_raw(text)
+    text = "".join(e[0] for e in entries if e[0])
+    if text:
+        _append_raw(text)
+    by_folder = {}
+    for _line, folder, pline in entries:
+        if folder and pline:
+            by_folder.setdefault(folder, []).append(pline)
+    for folder, lines in by_folder.items():
+        _append_project_raw("".join(lines), folder)
 
 
 def _append_raw(line):

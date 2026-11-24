@@ -11,7 +11,7 @@
 //   const shell = useNs("shell")
 //   onEvent("open_dialog", e => ...)  // one-off events
 
-import { useEffect, useState } from "../vendor/preact-htm.js";
+import { useEffect, useLayoutEffect, useRef, useState } from "../vendor/preact-htm.js";
 
 const params = new URLSearchParams(location.search);
 export const TOKEN = params.get("t") || "";
@@ -26,7 +26,14 @@ const eventListeners = new Map();  // type -> Set(fn)
 let connected = false;
 const connListeners = new Set();
 
+// PAD-1546: how many times each namespace (and "*", any of them) has changed,
+// so a component that subscribes after its render can tell it missed one
+const nsVersion = new Map();
+let logVersion = 0;
+
 function emitNs(ns) {
+  nsVersion.set(ns, (nsVersion.get(ns) || 0) + 1);
+  if (ns !== "*") nsVersion.set("*", (nsVersion.get("*") || 0) + 1);
   const set = nsListeners.get(ns);
   if (set) for (const fn of [...set]) fn();
   const all = nsListeners.get("*");
@@ -39,17 +46,31 @@ export function subscribe(ns, fn) {
   return () => nsListeners.get(ns).delete(fn);
 }
 
+// PAD-1546: the subscription is made in the same task as the render (a layout
+// effect: a plain effect waits for the next frame, and a hidden window's for a
+// second), and a change that came in between still re-renders.  The shell
+// once stayed on "Starting..." when the last project finished opening in that
+// gap, until some later change happened to re-render it.
 export function useNs(ns) {
   const [, force] = useState(0);
-  useEffect(() => subscribe(ns, () => force((n) => n + 1)), [ns]);
+  const seen = useRef(0);
+  seen.current = nsVersion.get(ns) || 0;
+  useLayoutEffect(() => {
+    const off = subscribe(ns, () => force((n) => n + 1));
+    if ((nsVersion.get(ns) || 0) !== seen.current) force((n) => n + 1);
+    return off;
+  }, [ns]);
   return state[ns] || {};
 }
 
 export function useLog() {
   const [, force] = useState(0);
-  useEffect(() => {
+  const seen = useRef(0);
+  seen.current = logVersion;
+  useLayoutEffect(() => {
     const fn = () => force((n) => n + 1);
     logListeners.add(fn);
+    if (logVersion !== seen.current) fn();
     return () => logListeners.delete(fn);
   }, []);
   return logLines;
@@ -83,6 +104,7 @@ function setConnected(v) {
 }
 
 function emitLog() {
+  logVersion += 1;
   for (const fn of [...logListeners]) fn();
 }
 

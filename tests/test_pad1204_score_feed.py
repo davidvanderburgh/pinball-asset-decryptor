@@ -535,6 +535,8 @@ def test_the_network_tab_asks_the_modes_service_for_the_score_feed(monkeypatch):
     tab.window = type("W", (), {"service": lambda self, ns: Modes() if ns == "modes" else None,
                                 "write_assets_var": Var(), "write_upd_var": Var()})()
     monkeypatch.setattr(NT.NetworkTab, "mfr", None, raising=False)
+    # PAD-1546: the feed is read while the tab is the one on screen, as it is in on_show
+    monkeypatch.setattr(tab, "shown", lambda: True, raising=False)
     tab.on_show()
     assert said == ["P"] and "home network" in NT.INTRO
 

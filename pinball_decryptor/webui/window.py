@@ -216,7 +216,15 @@ class WebWindow:
         if svc is None:
             raise RpcError("No tab %s" % ns)
         prev_key = self.current_tab_key()
+        prev = self._by_ns.get(self.ctx.store.get("shell", "tab"))
         self.ctx.store.set("shell", tab=ns)
+        if prev is not None and prev is not svc:
+            # PAD-1546: the tab that was on screen hears it was left (a live
+            # view on it stops, PAD-1467); this hook was never called before
+            try:
+                prev.on_hide()
+            except Exception:                        # noqa: BLE001
+                log.exception("on_hide %s", prev.ns)
         # Tk's _on_tab_changed: no preview keeps playing behind another tab,
         # and a footer an emulator or the multi-boot panel owned goes back
         # to "Ready" when their tab is left.

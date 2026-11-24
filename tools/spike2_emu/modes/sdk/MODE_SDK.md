@@ -6989,7 +6989,7 @@ and the right flipper or a held Start where those still begin co-op (`coop_style
 game's own STANDARD and challenges NORMAL whatever the line says. No line (or NORMAL, which the app writes as none, or a
 project with the characters' pick off) is the game as it was. The style is then what the chooser's would be
 (`sty_close`): CHARACTERS and ENHANCED pick a character at the first ball. Emulator: Godzilla LE 1.16 Heisei V2.3
-(image 1 of David's card), Start on CO-OP. The emulator has no Insider login, so the Home Team screen's route is
+(image 1 of David's card), Start on CO-OP and on TEAM PLAY 2 VS 2 with `style characters`: CHOOSE YOUR GODZILLA at ball 1 (without the line: NORMAL, no pick). The emulator has no Insider login, so the Home Team screen's route is
 proven only as the same `sty_begin` path.
 
 ### Co-op awards (PAD-1028)

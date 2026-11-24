@@ -686,14 +686,6 @@ foreach ($k in @(%(keys)s)) {
     }
   } catch { Say ('uninstall entry not updated: ' + $_) }
 }
-if (%(register)s) {
-  try {
-    $vpx = Join-Path $app 'tools\spike2_emu\vpx\padvpx.py'
-    if (Test-Path -LiteralPath $vpx) {
-      Start-Process -FilePath (Join-Path $app 'python\python.exe') -ArgumentList ('"' + $vpx + '" register') -WorkingDirectory $app -WindowStyle Hidden -Wait
-    }
-  } catch { Say ('Visual Pinball controller not registered: ' + $_) }
-}
 # the shortcuts start launcher.vbs: never delete the old version while the
 # new one has none (an antivirus may have taken it from the new folder)
 $whole = Test-Path -LiteralPath (Join-Path $app 'launcher.vbs')
@@ -706,6 +698,22 @@ $stuck = KeepUsers $old $app
 if (%(launch)s) {
   Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + (Join-Path $app 'launcher.vbs') + '"') -WorkingDirectory $app
   Say 'started the new version'
+}
+# AFTER the new version is started, never before it (PAD-1548).  Registering
+# the Visual Pinball controller loads the kit, which asks WSL where the rig
+# is - and the app shut WSL down on its way out, so that ask boots WSL cold:
+# 4 to 12 s that every Restart to update spent with nothing on screen.
+# Nothing in a start needs the registration.  Started from the temp folder
+# and not waited for: a working directory inside the app's folder would
+# hold it open against the next update's rename.
+if (%(register)s) {
+  try {
+    $vpx = Join-Path $app 'tools\spike2_emu\vpx\padvpx.py'
+    if (Test-Path -LiteralPath $vpx) {
+      Start-Process -FilePath (Join-Path $app 'python\python.exe') -ArgumentList ('"' + $vpx + '" register') -WorkingDirectory $env:TEMP -WindowStyle Hidden
+      Say 'registering the Visual Pinball controller'
+    }
+  } catch { Say ('Visual Pinball controller not registered: ' + $_) }
 }
 if ($whole -and -not $stuck) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
 if (Test-Path -LiteralPath $old) { Say ($old + ' is left for the next start to delete') }

@@ -7287,7 +7287,23 @@ class App:
         check is pure-Python Ed25519, a few milliseconds a code; the time it
         took goes in the log with what it turned on."""
         from .core import preview
-        rows = preview.load(self._preview_codes())
+        codes = self._preview_codes()
+        # PAD-1548: a code for features every copy has now is dropped, not
+        # reported at every start (the window that removed codes went with
+        # the last preview)
+        kept = preview.without_spent(codes)
+        if len(kept) != len(codes):
+            if kept:
+                self._settings[preview.SETTINGS_KEY] = kept
+            else:
+                self._settings.pop(preview.SETTINGS_KEY, None)
+            if not self._capture_run():
+                try:
+                    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+                    write_json_atomic(SETTINGS_FILE, self._settings)
+                except OSError:
+                    pass        # dropped again at the next start
+        rows = preview.load(kept)
         self._preview_startup = (rows, preview.load_ms())
 
     def _log_preview_startup(self):

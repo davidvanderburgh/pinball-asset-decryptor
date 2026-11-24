@@ -296,6 +296,26 @@ def judge(codes, today=None, public_keys=None):
     return frozenset(active), rows
 
 
+def without_spent(codes, public_keys=None):
+    """The stored *codes* without the ones nobody needs any more: a code that
+    checks out and names only features now in every copy (:data:`RELEASED`).
+    A code that does not decode, or names anything else (a preview still to
+    unlock, a feature this version lacks), is kept: its line in the log is
+    the only word its holder gets about it."""
+    kept = []
+    for text in codes or ():
+        if isinstance(text, str) and text.strip():
+            try:
+                g = decode(text, public_keys)
+            except PreviewCodeError:
+                g = None
+            if g is not None and g.features and all(
+                    f in RELEASED for f in g.features):
+                continue
+        kept.append(text)
+    return kept
+
+
 def load(codes, today=None, public_keys=None):
     """Judge the stored *codes* and make the result this run's state (cached: nothing
     re-checks a signature until the next :func:`load`). Returns the :class:`Status`

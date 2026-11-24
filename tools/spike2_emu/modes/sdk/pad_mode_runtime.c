@@ -5596,13 +5596,48 @@ static void on_layered_priority(pm_reg *r)
     if (r[0]) disp_layered_mgr = (unsigned char *)(unsigned long)r[0];
 }
 
+/* PAD-1537: a clip of ours in the place of every one-shot clip the game plays for a moment: an intro's or an
+ * outro's, as the game's mode it goes with starts or ends. The game plays its own start or TOTAL clip a moment after
+ * (Godzilla 1.16's Jet Fighter Attack: "fighter_intro" 30 ms after the START, "fighter_total" after its STOP), on the
+ * one surface, over ours; with the swap its own display shows ours, its words and timing as always. The game's
+ * displays are never held for it (PAD-353): the swap is the co-op intro's (PAD-1114), its film's name replaced. */
+static char cs_name[64];
+static unsigned long cs_until;
+
+int pm_clip_swap_next(const char *ours, unsigned ms)
+{
+    unsigned i;
+    if (!ours || !ours[0] || !fn("clip_play")) return 0;
+    for (i = 0; ours[i] && i + 1 < sizeof cs_name; i++) cs_name[i] = ours[i];
+    cs_name[i] = 0;
+    cs_until = (pm_ms() + (ms ? ms : 400u)) | 1ul;
+    return 1;
+}
+
+static void cs_swap(pm_reg *r)
+{
+    const char *name = (const char *)(unsigned long)r[0];
+    unsigned i;
+    if (!cs_until) return;
+    if ((long)(cs_until - pm_ms()) < 0) {
+        cs_until = 0;
+        return;
+    }
+    if (!name || r[1] || disp_clip_ours) return;              /* a loop is a background's; ours is ours */
+    for (i = 0; name[i] && name[i] == cs_name[i]; i++) ;
+    if (!name[i] && !cs_name[i]) return;                      /* ours already */
+    say("clip swap: the game's own clip \"%s\" plays \"%s\" in its place", name, cs_name);
+    r[0] = (unsigned)(unsigned long)cs_name;       /* every one in the window: a shot's own clip may come first */
+}
+
 /* clip_play from anyone but us while our clip draws: the one surface is the game's now */
 static int ci_film_swap(pm_reg *r);      /* PAD-1114: the co-op intro in the game's own start film */
 static void on_clip_play(pm_reg *r)
 {
     const char *name;
     unsigned i;
-    ci_film_swap(r);                          /* PAD-1114: before anything reads the name */
+    if (!ci_film_swap(r))                     /* PAD-1114: before anything reads the name */
+        cs_swap(r);                           /* PAD-1537 */
     name = (const char *)(unsigned long)r[0];
     if (!disp_clip_ours) bd_clip_lost();      /* hud-layers: the backdrop is played again after it */
     if (disp_clip_ours) gbg_ours();           /* PAD-658: ours took the one surface (a full-screen clip, the backdrop) */
@@ -6794,7 +6829,96 @@ static void lit_hold_check(unsigned id)
     for (k = 0; k < BLOCK_WORDS; k++) lit_said[k] = 0;
 }
 
+/* PAD-1537: the game's own modes seen starting and stopping, for a mode that runs WITH one (its intro and outro).
+ * A start is counted where the game's START goes ahead (nothing of ours took it or held it off), a stop where its
+ * STOP is entered for a mode not stopped already (any outcome) - on a plain-C title, with no STOP of a mode class,
+ * only its completion (the COMPLETED audit or flag PAD-747 watches). Counted on the game's thread, read on the tick. */
+static unsigned gm_starts[BLOCK_IDS], gm_stops[BLOCK_IDS];
+static unsigned gm_said[BLOCK_IDS];
+/* a C++ title's START is entered before it decides: the start counts once the mode runs for the player (gm_check_tick) */
+static struct { unsigned long at; unsigned starts; unsigned char p; } gm_chk[BLOCK_IDS];
+static int place_counts_on;                   /* PAD-710, below */
+static unsigned place_player(void);
+static unsigned place_stopped(unsigned obj, unsigned p);
+static unsigned place_starts(unsigned obj, unsigned p);
+static void gm_seen(unsigned id, int stop, const char *how)
+{
+    char key[24];
+    const char *nm;
+    unsigned p;
+    if (id >= BLOCK_IDS || !pm_in_game()) return;
+    if (!stop && block_obj[id] && place_counts_on && (p = place_player()) != 0) {
+        gm_chk[id].at = pm_ms() | 1ul;
+        gm_chk[id].p = (unsigned char)p;
+        gm_chk[id].starts = place_starts(block_obj[id], p);
+        return;
+    }
+    if (stop) gm_stops[id]++;
+    else gm_starts[id]++;
+    if (gm_said[id] >= 6) return;                /* said the first few times only: a game starts its modes often */
+    gm_said[id]++;
+    pm_snprintf(key, sizeof key, "block_name_%u", id);
+    nm = pm_port_text(key);
+    say("follow: the game's %s (mode %u) %s (%s)", nm ? nm : "?", id, stop ? "stopped" : "started", how);
+}
+
+/* from done_tick: a START entered on a C++ title - the mode runs for the player now, or the game's START ran and left
+ * it (Deadpool 1.16's Disco Loops a second time in a ball). Running: the mode object's own ACTIVE virtual where the
+ * runtime knows its slot (the one the game's "a mode is active" query calls, PAD-768), else not stopped for the player
+ * and its start count up where the port names it */
+static long mode_query_slot(int kind_slot);
+static unsigned place_vfn_at(unsigned obj, long slot);
+static int gm_active(unsigned obj)
+{
+    long a = pm_port_value("mode_slot_active", -1);
+    unsigned f;
+    if (a < 0) a = mode_query_slot(0);
+    if (a < 0 || !(f = place_vfn_at(obj, a))) return -1;
+    return (int)(((unsigned (*)(unsigned))(unsigned long)f)(obj) & 0xffu);
+}
+
+static void gm_check_tick(void)
+{
+    unsigned id;
+    for (id = 0; id < BLOCK_IDS; id++) {
+        unsigned obj = block_obj[id], p = gm_chk[id].p;
+        int on, act;
+        if (!gm_chk[id].at) continue;
+        act = obj ? gm_active(obj) : -1;
+        on = obj && (act >= 0 ? act != 0 : !place_stopped(obj, p)
+                     && (pm_port_value("mode_starts_at", -1) < 0 || place_starts(obj, p) != gm_chk[id].starts));
+        if (on) {
+            gm_chk[id].at = 0;
+            gm_starts[id]++;
+            if (gm_said[id] < 6) {
+                gm_said[id]++;
+                say("follow: the game's %s (mode %u) started (its start)", pm_game_mode_name(id), id);
+            }
+        } else if (pm_ms() - (gm_chk[id].at & ~1ul) > 500 || !pm_in_game()) {
+            gm_chk[id].at = 0;
+            if (gm_said[id] < 6) {
+                gm_said[id]++;
+                say("follow: the game's %s (mode %u): its START ran but did not start it - not a start (active %d, "
+                    "stopped %u, starts %u -> %u)", pm_game_mode_name(id), id, act, obj ? place_stopped(obj, p) : 0u,
+                    gm_chk[id].starts, obj ? place_starts(obj, p) : 0u);
+            }
+        }
+    }
+}
+
+static int block_start_veto(pm_reg *r, unsigned hook_n);
 static int on_block_start(pm_reg *r, unsigned hook_n)
+{
+    unsigned id;
+    int v = block_start_veto(r, hook_n);
+    if (v) return v;
+    for (id = 0; id < BLOCK_IDS; id++)
+        if (block_hook_of[id] == hook_n + 1 && bm_has(block_named, id) && (!block_obj[id] || block_obj[id] == r[0])) break;
+    if (id < BLOCK_IDS && !place_check[id]) gm_seen(id, 0, "its start");   /* a check's mode: at its own start */
+    return 0;
+}
+
+static int block_start_veto(pm_reg *r, unsigned hook_n)
 {
     unsigned id;
     for (id = 0; id < BLOCK_IDS; id++)          /* this start's mode: its object, or the start is its own */
@@ -6832,7 +6956,9 @@ static int on_block_start(pm_reg *r, unsigned hook_n)
 /* PAD-715: the start a port names for a mode whose block_start is a check: a claimed place is taken here */
 static int on_place_start(pm_reg *r, unsigned id)
 {
-    return id < BLOCK_IDS && place_from[id] && place_take(r, id);
+    if (id < BLOCK_IDS && place_from[id] && place_take(r, id)) return 1;
+    if (id < BLOCK_IDS) gm_seen(id, 0, "its own start");          /* PAD-1537 */
+    return 0;
 }
 
 int pm_block_list(const unsigned char *ids, int n)
@@ -14311,7 +14437,7 @@ static void more_ball_end(void)
 static int (*place_fn[PLACE_IDS])(unsigned id);
 static const struct pm_mode *place_by[PLACE_IDS];
 static struct { unsigned obj, id; unsigned char on, owed, plain; signed char won; } place_held[5];   /* per player 1-4 */
-static int place_counts_on;                   /* the port names the game's mode framework */
+/* place_counts_on: above gm_seen - the port names the game's mode framework */
 
 static const char *place_name(unsigned id)
 {
@@ -14697,12 +14823,29 @@ int pm_game_mode_start(unsigned id)
     char key[24];
     pm_addr f;
     if (!(can & PM_CAN_PLACE) || id >= PLACE_IDS || !bm_has(block_named, id) || !pm_in_game()) return 0;
-    if (!block_obj[id] && !place_fn[id]) return 0;
+    /* PAD-1537 rig: PAD_TEST_PLAIN_START=1 calls a plain-C start with no claim - the follower's proof on those titles,
+     * whose starts take no arguments (they set their own first, as the mini-wizards' do, PAD-473); never on a machine */
+    if (!block_obj[id] && !place_fn[id] && !(getenv("PAD_TEST_PLAIN_START") && *getenv("PAD_TEST_PLAIN_START") == '1'))
+        return 0;
     pm_snprintf(key, sizeof key, "block_start_%u", id);
     if (!(f = place_check[id] ? place_from[id] : fn(key))) return 0;   /* PAD-715: a check's mode, its own start */
     say("place: the game's %s (mode %u) started for a test (its START at 0x%08" PMA ", object 0x%08" PMA ")", place_name(id),
         id, f, block_obj[id]);
     ((void (*)(pm_addr))(unsigned long)f)(block_obj[id]);
+    return 1;
+}
+
+/* PAD-1537 test path: the game's own STOP of its mode id (a C++ title's, through the mode's vtable), as its clock
+ * running out calls it, for the player up - only while it runs for that player. 1 = called */
+int pm_game_mode_stop(unsigned id, int won)
+{
+    pm_addr obj, stop;
+    unsigned p;
+    if (id >= PLACE_IDS || !bm_has(block_named, id) || !pm_in_game() || !(obj = block_obj[id])) return 0;
+    if (!(stop = place_stop_fn(obj)) || !(p = place_player()) || place_stopped(obj, p)) return 0;
+    say("place: the game's %s (mode %u) stopped for a test (its STOP at 0x%08" PMA ", %s)", place_name(id), id, stop,
+        won ? "completed" : "not completed");
+    ((void (*)(unsigned, unsigned, unsigned))(unsigned long)stop)(obj, won ? 1u : 0u, 1u);
     return 1;
 }
 
@@ -14852,6 +14995,7 @@ static void done_mark(unsigned id, unsigned p, const char *how)
     unsigned *b = done_of(p);
     if (!b || id >= DONE_IDS || !pm_in_game() || done_has(b, id)) return;
     b[id >> 5] |= 1u << (id & 31);
+    if (id < BLOCK_IDS && !block_obj[id]) gm_seen(id, 1, how);   /* PAD-1537: a plain-C mode's end is its completion */
     say("done: player %u completed the game's %s (mode %u, %s) - %u of the game's modes this game", p, done_name(id),
         id, how, done_count_of(p));
 }
@@ -14861,11 +15005,13 @@ static void done_stop_seen(pm_reg *r, const char *how)
 {
     pm_addr obj = r[0];
     unsigned id, p;
-    if (!r[1] || !obj || !pm_in_game()) return;
+    if (!obj || !pm_in_game()) return;
     for (id = 0; id < BLOCK_IDS && !(block_obj[id] == obj && bm_has(block_named, id)); id++) ;
     if (id >= BLOCK_IDS) return;
     if (!(p = place_player())) p = pm_player();
     if (place_stopped(obj, p)) return;              /* stopped already: the STOP returns at once */
+    gm_seen(id, 1, r[1] ? "completed" : "not completed");   /* PAD-1537: every outcome ends a mode that runs with it */
+    if (!r[1]) return;
     done_mark(id, p, how);
 }
 
@@ -14958,6 +15104,7 @@ static int done_slot(pm_addr obj, unsigned f)
 static void done_tick(void)
 {
     unsigned id, p, g;
+    gm_check_tick();                                /* PAD-1537 */
     if (!done_stops_tried && place_counts_on) {
         static unsigned slots;
         unsigned have = 0, want = 0, k;
@@ -15041,6 +15188,21 @@ static void done_arm(void)
     if (named)
         say("done: the runtime sees %d of the game's modes completed (%d of the %d it names a start of; %d through "
             "their COMPLETED audit)", named, bm_count(done_seen), bm_count(block_named), done_audits);
+}
+
+/* PAD-1537: what the runtime sees of the game's mode id (1 its start, 2 its every stop, 4 its stop only when it is
+ * completed), and the counts so far this boot */
+int pm_game_mode_follow(unsigned id, unsigned *starts, unsigned *stops)
+{
+    int f = 0;
+    if (id >= BLOCK_IDS || !bm_has(block_named, id)) return 0;
+    if (block_hook_of[id] && (!place_check[id] || place_from[id])) f |= 1;
+    /* a C++ title's STOPs are hooked over the first ticks (done_tick): one not tried yet counts as seen */
+    if (block_obj[id] && (done_has(done_seen, id) || (place_counts_on && !done_stops_tried))) f |= 2;
+    else if (done_has(done_seen, id)) f |= 4;
+    if (starts) *starts = gm_starts[id];
+    if (stops) *stops = gm_stops[id];
+    return f;
 }
 
 int pm_game_mode_done_seen(unsigned id)

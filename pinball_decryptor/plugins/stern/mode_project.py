@@ -132,6 +132,9 @@ class TitleProfile:
     #                                  place of (when the game starts one); counts: it counts as that mode there
     done_modes: tuple = ()           # PAD-747: ((id, name), ...) the game's own modes whose completion the runtime
     #                                  sees, for a mode that starts once the player has completed some of them
+    follows: tuple = ()              # PAD-1537: ((id, name, ends), ...) the game's own modes a mode can run WITH (its
+    #                                  intro and outro): ends "stop" (every end seen), "completed" (only that end: else
+    #                                  its clock), "clock" (none seen: its clock ends it)
     building_rule: str = ""          # PAD-589: the game's own building locks (one of game_rules, BUILDING_RULES): a
     #                                  mode moves the building only while it sees no shots
     shakes: tuple = ()               # PAD-414: ((name, label), ...) the game's own shakes (`text shake_<name>`)
@@ -359,7 +362,7 @@ PORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
 #: with :meth:`TitleProfile.why_not`, and :func:`runtime_cfg` leaves its lines out.
 PARTS = ("countdown", "lights", "screen", "clip", "own_sound", "stack", "events", "multiball", "ball_save",
          "magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "wizard", "roster", "challenge",
-         "place", "done")
+         "place", "done", "with")
 
 #: PAD-420: the parts that are a piece of the machine. A machine without one has no section for it on the tab.
 HARDWARE_PARTS = ("magnet", "scoop", "coils", "shield", "building", "shaker")
@@ -1402,6 +1405,98 @@ def _done_cannot(key, label, port=None):
         return ()
     return (("done", "The app has found how %s records its own modes completed but has not yet seen a mode of yours "
                      "start on them in the emulator, so it cannot here yet." % label),)
+
+
+#: PAD-1537: a mode that runs WITH one of the game's own modes - starts as the game's START of it goes ahead, ends as its
+#: STOP runs - for an intro and an outro of the player's own (the mode file's ``starts_on with_game``; MODE_SDK.md "An
+#: intro and an outro for one of the game's own modes"). The builds where it was seen in the emulator: a mode file
+#: following one of the game's modes started with it and ended with it (C:\tmp\PAD-1537).
+WITH_PROVEN = frozenset({
+    "aerosmith-1.16",                # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
+    "aerosmith_le-1.16",             # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
+    "avengers_infinity_le-1.10",     # PAD-1537 rig: Super Reactor (19) followed twice
+    "avengers_infinity_pro-1.10",    # PAD-1537 rig: Super Reactor (19) followed twice
+    "batman-1.14",                   # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Batphone Hurry Up (0) - started with it, its clock ended it
+    "beatles-1.29",                  # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): All My Loving (0) - started with it, its clock ended it
+    "deadpool_le-1.16",              # PAD-1537 rig: Disco Loops (19) followed once, its second START refused by the game
+    "deadpool_pro-1.16",             # PAD-1537 rig: Disco Loops (19) followed once, its second START refused by the game
+    "dungeons_and_dragons_le-1.10",  # PAD-1537 rig: Mimic Hurry Up (12) followed twice
+    "dungeons_and_dragons_pro-1.10", # PAD-1537 rig: Map Choosen Ritual Singleball (53) followed twice
+    "foo_fighters_le-1.04",          # PAD-1537 rig: Super Skill Shot (8) followed twice
+    "foo_fighters_pro-1.04",         # PAD-1537 rig: Super Skill Shot (8) followed twice
+    "godzilla_le-1.16",              # PAD-1537 rig: Jet Fighter Attack (21) followed twice
+    "godzilla_pro-1.16",             # PAD-1537 rig: Jet Fighter Attack (21) followed twice
+    "guardians-1.15",                # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
+    "guardians_le-1.15",             # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
+    "iron_maiden_le-1.18",           # PAD-1537 rig: Fear of the Dark (1) followed once, its second START refused by the game
+    "iron_maiden_pro-1.18",          # PAD-1537 rig: Fear of the Dark (1) followed once, its second START refused by the game
+    "james_bond_60th_le-1.11",       # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Villain Mode (0) - started with it, its clock ended it
+    "james_bond_le-1.06",            # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Bullshit Scoring (0) - started with it, its clock ended it
+    "james_bond_pro-1.06",           # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Bullshit Scoring (0) - started with it, its clock ended it
+    "jaws_le-1.02",                  # PAD-1537 rig: Super Buoys (29) followed twice
+    "jaws_pro-1.02",                 # PAD-1537 rig: Super Buoys (29) followed twice
+    "john_wick_le-1.02",             # PAD-1537 rig: Job Assassination (6) followed twice
+    "john_wick_pro-1.02",            # PAD-1537 rig: Job Assassination (6) followed twice
+    "jurassic_park_le-1.16",         # PAD-1537 rig: Chaos Hurry Up (4) followed twice
+    "jurassic_park_pro-1.16",        # PAD-1537 rig: Escape Nublar (127) followed twice
+    "jurassic_park_the_pin-1.05",    # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Stegosaurus (0) - started with it, its clock ended it
+    "king_kong_le-0.97",             # PAD-1537 rig: King Kombos (27) followed twice
+    "king_kong_pro-0.97",            # PAD-1537 rig: King Kombos (27) followed twice
+    "led_zeppelin_le-1.22",          # PAD-1537 rig: Black Dog (1) followed twice
+    "led_zeppelin_pro-1.22",         # PAD-1537 rig: Black Dog (1) followed twice
+    "mando_le-1.45",                 # PAD-1537 rig: Super Skill Shot (10) followed twice
+    "mando_pro-1.45",                # PAD-1537 rig: Super Skill Shot (10) followed twice
+    "metallica_spike-1.04",          # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Battery (0) - started with it, its clock ended it
+    "munsters_le-1.28",              # PAD-1537 rig: Lily Mode (3) followed twice
+    "munsters_pro-1.28",             # PAD-1537 rig: Lily Mode (3) followed twice
+    "rush_le-1.19",                  # PAD-1537 rig: La Villa Strangiato (2) followed twice
+    "rush_pro-1.19",                 # PAD-1537 rig: La Villa Strangiato (2) followed twice
+    "star_wars_elg-1.10",            # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Inner Loop (0) - started with it, its clock ended it
+    "star_wars_le-1.31",             # PAD-1537 rig: Shooting Gallery (29) followed once (a second START in a ball leaves a mode its STOP cannot stop)
+    "star_wars_pro-1.31",            # PAD-1537 rig: Shooting Gallery (29) followed once (a second START in a ball leaves a mode its STOP cannot stop)
+    "stranger_things-1.13",          # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Bullshit Scoring (0) - started with it, its clock ended it
+    "stranger_things_le-1.13",       # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Bullshit Scoring (0) - started with it, its clock ended it
+    "sword_of_rage_le-1.19",         # PAD-1537 rig: Sand Worm (0) followed twice
+    "sword_of_rage_pro-1.19",        # PAD-1537 rig: Sand Worm (0) followed twice
+    "turtles_le-1.59",               # PAD-1537 rig: Training Level Two (0) followed twice
+    "turtles_pro-1.59",              # PAD-1537 rig: Training Level Two (0) followed twice
+    "uncanny_xmen_le-0.98",          # PAD-1537 rig (plain C): Sentinel Hurry Up (1) - its start seen; a test call cannot run it (it takes the mode's object)
+    "uncanny_xmen_pro-0.98",         # PAD-1537 rig (plain C): Sentinel Hurry Up (1) - its start seen; a test call cannot run it (it takes the mode's object)
+    "venom_le-1.07",                 # PAD-1537 rig: Mini Mode 01 (19) followed twice
+    "venom_pro-1.07",                # PAD-1537 rig: Mini Mode 01 (19) followed once, its second START refused by the game
+})
+
+
+def _follows(port):
+    """PAD-1537: ``((id, name, ends), ...)``, in id order: the game's own modes a mode can run with - the ones whose
+    START the runtime hooks (PAD-363's block lines; a check's mode by its own start, PAD-715) - and how it sees one
+    end: "stop" on a C++ title whose mode framework the port names (the STOP of every mode object, any outcome),
+    "completed" where only its completion is seen (a plain-C title's COMPLETED audit or flag), else "clock"."""
+    if not port:
+        return ()
+    counts = _place_counts(port)
+    done = {i for i, _nm in _done_modes(port)}
+    out = []
+    for i, name, _on in _game_modes(port):
+        if port["data"].get("block_obj_%d" % i) and counts:
+            ends = "stop"
+        elif i in done:
+            ends = "completed"
+        else:
+            ends = "clock"
+        out.append((i, name, ends))
+    return tuple(out)
+
+
+def _with_cannot(key, label, port=None):
+    """PAD-1537: the ``cannot`` entry for a mode that runs with one of the game's own modes on build ``key``, or ()."""
+    if not _follows(port):
+        return (("with", "%s names none of its own modes' starts, so a mode of yours cannot run with one there yet."
+                 % label),)
+    if key in WITH_PROVEN:
+        return ()
+    return (("with", "The app has found %s's own modes' starts but has not yet seen a mode of yours run with one in "
+                     "the emulator, so it cannot here yet." % label),)
 
 
 def _challenges(port):
@@ -3023,6 +3118,7 @@ def profile_from_port(path):
     cannot += list(_challenge_cannot(key, label, port))      # PAD-615
     cannot += list(_place_cannot(key, label, port))          # PAD-710
     cannot += list(_done_cannot(key, label, port))           # PAD-747
+    cannot += list(_with_cannot(key, label, port))           # PAD-1537
     cannot += list(_shaker_cannot(key, label, port))         # PAD-414
     cannot += list(_shows_cannot(label, port))               # PAD-418
     cannot += list(_wizards_cannot(key, label, port))        # PAD-436
@@ -3109,6 +3205,7 @@ def profile_from_port(path):
         challenge_menu=_challenge_menu(key, port) if not any(c[0] == "challenge" for c in cannot) else 0,
         places=_places(port) if not any(c[0] == "place" for c in cannot) else (),   # PAD-710
         done_modes=_done_modes(port) if not any(c[0] == "done" for c in cannot) else (),   # PAD-747
+        follows=_follows(port) if not any(c[0] == "with" for c in cannot) else (),   # PAD-1537
         # PAD-619: not where a challenge is the game-play mode's index or a game-mode table's (Jaws, Godzilla, Venom:
         # their Default Game Mode cannot select one) - only by its handler or its flag (Bond, Stranger Things, Rush)
         challenge_by_default=bool(port) and not any(k.startswith(("challenge_mode_", "challenge_name_msg_"))
@@ -3480,12 +3577,14 @@ try:
         roster_counts=bool(_port_115 and "battle_stop" in _port_115["site"]),   # PAD-706: not on Pro 1.15
         places=_places(_port_115) if not _place_cannot(_key_115, _label_115, _port_115) else (),   # PAD-710
         done_modes=_done_modes(_port_115) if not _done_cannot(_key_115, _label_115, _port_115) else (),   # PAD-747
+        follows=_follows(_port_115) if not _with_cannot(_key_115, _label_115, _port_115) else (),   # PAD-1537
         spare=_spare(_port_115, _key_115),                   # PAD-826
         absent=machine_absent("godzilla_pro"),
         cannot=tuple(c for c in GODZILLA_PRO_1_15.cannot
                      if c[0] not in ("magnet", "scoop", "coils", "shield", "building", "shaker", "shows", "roster",
-                                     "challenge", "place", "done"))
+                                     "challenge", "place", "done", "with"))
         + _place_cannot(_key_115, _label_115, _port_115) + _done_cannot(_key_115, _label_115, _port_115)
+        + _with_cannot(_key_115, _label_115, _port_115)
         + _magnet_cannot(_key_115, _label_115, _port_115) + _scoop_cannot(_key_115, _label_115, _port_115)
         + _coils_cannot(_key_115, _label_115, _port_115) + _shield_cannot(_key_115, _label_115, _port_115)
         + _building_cannot(_key_115, _label_115, _port_115)
@@ -4163,6 +4262,10 @@ class ModeSpec:
     # modes in a game - the ones in done_modes (the profile's done_modes: their ids), [] = any of them
     done_count: int = 4
     done_modes: list = field(default_factory=list)
+    # PAD-1537: with starts_on "with_game", the game's own mode (the profile's follows: its id) the mode runs with: it
+    # starts as the game starts that mode and ends as the game's mode ends - its start clip and sound are that mode's
+    # intro, its end clip and sound its outro; -1 = none
+    with_mode: int = -1
     # PAD-414: the cabinet's shaker: [[when, what, strength, shot]] - when "start", "shot" (on every hit of `shot` while it
     # runs) or "end" (left to run out after the end); what is a time in ms at `strength` (0 hard .. 3 soft) or the
     # name of one of the game's own shakes (the profile's shakes; strength then unused). Up to SHAKES_MAX
@@ -4325,6 +4428,8 @@ def _switch_off_what_it_cannot(spec, p):
         spec.starts_on, spec.place_mode = "shot", -1
     if starts_on_done(spec) and not p.can("done"):                   # PAD-747
         spec.starts_on = "shot"
+    if starts_on_with(spec) and not p.can("with"):                   # PAD-1537
+        spec.starts_on, spec.with_mode = "shot", -1
     if not p.can("shaker"):
         spec.shakes = []
     if not p.can("shows"):
@@ -4341,7 +4446,7 @@ def start_shots_taken(project):
     taken = set()
     for _slug, spec in list_modes(project)[0] if project else ():
         if (starts_on_event(spec) or starts_on_battle(spec) or starts_on_challenge(spec) or starts_on_place(spec)
-                or starts_on_done(spec)):
+                or starts_on_done(spec) or starts_on_with(spec)):
             continue
         shots = (spec.start_sequence if starts_on_sequence(spec) else start_shots(spec)) or []
         taken.update(s for s in shots if isinstance(s, str) and s)
@@ -4721,7 +4826,8 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         for i, name, _on in getattr(p, "game_modes", ()):
             now.setdefault(name, []).append(i)
         out.block_modes = sorted({j for i in out.block_modes if isinstance(i, int) for j in now.get(was.get(i), ())})
-    if old_key != p.key and ((isinstance(out.done_modes, list) and out.done_modes) or starts_on_place(out)):
+    if old_key != p.key and ((isinstance(out.done_modes, list) and out.done_modes) or starts_on_place(out)
+                             or starts_on_with(out)):
         # PAD-747: the game's modes completed, and PAD-710's place, are numbers in THAT game's table: matched by name
         try:
             was_p = profile(old_key)
@@ -4742,6 +4848,9 @@ def _retarget_advanced(out, old_key, p, names, dropped):
         n = _int_or_none(out.place_mode)
         if starts_on_place(out) and n is not None and was_names.get(n) in now_ids:
             out.place_mode = now_ids[was_names[n]][0]
+        n = _int_or_none(getattr(out, "with_mode", -1))                   # PAD-1537: the same, by its name
+        if starts_on_with(out) and n is not None and was_names.get(n) in now_ids:
+            out.with_mode = now_ids[was_names[n]][0]
     if old_key != p.key and isinstance(out.keep_rules, list) and out.keep_rules:
         # PAD-398: kept by name; a feature the other game does not have is dropped
         have = {name for _n, name in getattr(p, "game_rules", ())}
@@ -5377,14 +5486,20 @@ def validate(spec, folder=None):
     if spec.game_wizard:                               # PAD-436: the game's mode, nothing of its own to check
         return out + validate_starts(spec) + _validate_starts_ends(spec, p, ends=False) + \
             validate_more_to_start(spec, p) + validate_wizard(spec, p)
-    if int(spec.seconds) < 1 and not (spec.multiball and int(spec.seconds) == 0):
-        out.append("It has to run for at least a second.")
-    if not spec.scoring_shots:
+    follows = starts_on_with(spec)                     # PAD-1537: an intro and an outro, nothing to score
+    if follows and with_ends(spec, p) == "stop":
+        if int(spec.seconds) < 0:
+            out.append("Its longest run is 0 seconds (until the game's mode ends) or more.")
+    elif int(spec.seconds) < 1 and not (spec.multiball and int(spec.seconds) == 0):
+        out.append("It has to run for at least a second." if not follows else
+                   "The app cannot see %s's mode end, so give it a clock: the outro plays when it runs out%s." % (
+                       p.label, " or the player completes the game's mode" if with_ends(spec, p) == "completed" else ""))
+    if not spec.scoring_shots and not follows:
         out.append("Pick at least one shot that scores while it runs.")
     for s in spec.scoring_shots:
         if s not in names:
             out.append("%s has no shot called %r." % (p.label, s))
-    if int(spec.award) < 1:
+    if int(spec.award) < 1 and not (follows and not spec.scoring_shots):
         out.append("The first shot has to be worth something.")
     for label, value in (("panel color", spec.panel_color), ("title color", spec.title_color),
                          ("light color", spec.light_color)):
@@ -5422,8 +5537,9 @@ def validate(spec, folder=None):
     out += validate_online(spec, p)                    # PAD-1479
     out += validate_shows(spec, p)                     # PAD-418
     out += validate_more_to_start(spec, p)
-    out += validate_game_modes(spec, p)
-    out += validate_layer(spec)              # PAD-1401
+    if not follows:                          # PAD-1537: it always stacks, as a layer of its own (mode_file.c)
+        out += validate_game_modes(spec, p)
+        out += validate_layer(spec)          # PAD-1401
     return out
 
 
@@ -5983,6 +6099,18 @@ def starts_on_place(spec):
     return bool(words) and words[0] == "game_mode"
 
 
+def starts_on_with(spec):
+    """True when the mode runs WITH one of the game's own modes (``with_mode``): its intro and outro (PAD-1537)."""
+    words = (spec.starts_on or "shot").split()
+    return bool(words) and words[0] == "with_game"
+
+
+def with_ends(spec, p):
+    """PAD-1537: how the game's mode *spec* runs with is seen ending on *p*: "stop", "completed", "clock", or ""."""
+    n = _int_or_none(getattr(spec, "with_mode", -1))
+    return next((e for i, _nm, e in getattr(p, "follows", ()) or () if i == n), "")
+
+
 def starts_on_done(spec):
     """True when the mode starts once the player has completed ``done_count`` of the game's own modes (PAD-747)."""
     words = (spec.starts_on or "shot").split()
@@ -6043,10 +6171,17 @@ def _validate_starts_ends(spec, p, ends=True):
     out = []
     words = (spec.starts_on or "shot").split()
     events = tuple(getattr(p, "events", ()) or ())
-    if words[0] not in ("shot", "event", "sequence", "battle", "challenge", "game_mode", "completed"):
+    if words[0] not in ("shot", "event", "sequence", "battle", "challenge", "game_mode", "completed", "with_game"):
         out.append("A mode starts on a shot, on shots made in order, on one of the game's events, on a battle "
                    "picked on the game's selection screen, as a challenge picked in the game's Challenge mode, "
-                   "in the place of one of the game's own modes, or once some of the game's modes are completed.")
+                   "in the place of one of the game's own modes, once some of the game's modes are completed, or "
+                   "with one of the game's own modes.")
+    elif words[0] == "with_game":                   # PAD-1537
+        n = _int_or_none(getattr(spec, "with_mode", -1))
+        if not p.can("with"):
+            out.append("Running with one of the game's own modes is not on %s yet (Mode says why)." % p.label)
+        elif n is None or n not in {i for i, _nm, _e in getattr(p, "follows", ()) or ()}:
+            out.append("Pick the game's mode this one runs with.")
     elif words[0] == "completed":                   # PAD-747
         have = {i for i, _nm in getattr(p, "done_modes", ()) or ()}
         picked = spec.done_modes if isinstance(spec.done_modes, list) else None
@@ -6197,20 +6332,24 @@ def runtime_cfg(spec, slug, sound_key=None, own_sounds=None, own_sound_ms=None):
             lines.append("light_on       %s" % on)
         if off:
             lines.append("light_off      %s" % off)
-    if spec.countdown and p.can("countdown"):
+    follows = starts_on_with(spec)          # PAD-1537: an intro and an outro - none of the game's time-up calls
+    if spec.countdown and p.can("countdown") and not follows:
         if p.callout_ten_seconds:             # a title may have the 5..1 count and no ten-seconds call
             lines.append("callout_at     10 %d" % p.callout_ten_seconds)
         lines.append("callout_count  %d" % p.callout_countdown)
     if spec.end_sound and sound_key and p.can("own_sound"):
         lines += ["sound_key      %s" % sound_key, "sound_callout  %d" % p.callout_time_up]
-    elif p.callout_time_up:
+    elif p.callout_time_up and not follows:
         lines.append("callout_end    %d" % p.callout_time_up)
     lines += starts_cfg_lines(spec)
     lines += own_sound_lines(spec, own_sounds, own_sound_ms)
-    if not spec.stack:                      # item 140: only when off, so older files are unchanged
-        lines.append("stack          no")
-    lines += game_modes_lines(spec, p)       # PAD-363 / PAD-398
-    lines += layer_lines(spec)               # PAD-1401
+    if follows:                             # PAD-1537: it stacks, a layer of its own (mode_file.c makes it so)
+        lines += ["game_modes     stack", "layer          0"]
+    else:
+        if not spec.stack:                  # item 140: only when off, so older files are unchanged
+            lines.append("stack          no")
+        lines += game_modes_lines(spec, p)   # PAD-363 / PAD-398
+        lines += layer_lines(spec)           # PAD-1401
     lines += parameter_lines(spec, slug, p)
     lines += display_light_lines(spec)
     lines += more_to_start_lines(spec, p)    # PAD-227: nothing unless the mode has them
@@ -6706,6 +6845,9 @@ def _starts_ends_lines(spec, lines, p, ends=True):
     elif starts_on_place(spec) and p.can("place"):   # PAD-710: only the game starting its mode starts it
         out = [line for line in out if not line.startswith("trigger ")]
         out.insert(2, "in_place_of    %d" % int(spec.place_mode))
+    elif starts_on_with(spec) and p.can("with"):     # PAD-1537: with one of the game's own modes (no trigger line)
+        out = [line for line in out if not line.startswith("trigger ")]
+        out.insert(2, "starts_on      with_game %d" % int(spec.with_mode))
     elif starts_on_done(spec) and p.can("done"):     # PAD-747: the game's modes completed (no trigger line)
         out = [line for line in out if not line.startswith("trigger ")]
         ids = done_ids(spec, p)
@@ -6727,7 +6869,7 @@ def _starts_ends_lines(spec, lines, p, ends=True):
             if others:
                 seq.append("%-14s 0x%08x" % ("trigger_seq_reset", p.mask(others)))
         out[2:2] = ["starts_on      sequence"] + seq
-    if not ends:                                     # PAD-436: a mode that hands over never runs
+    if not ends or starts_on_with(spec):                                     # PAD-436: a mode that hands over never runs
         return out
     kind, name = ends_on_parts(spec)
     if kind == "clock":

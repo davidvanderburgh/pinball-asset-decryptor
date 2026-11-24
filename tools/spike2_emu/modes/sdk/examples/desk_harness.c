@@ -718,6 +718,9 @@ int pm_place_counts(unsigned id) { return id < 128; }
 const char *pm_game_mode_name(unsigned id) { return id < 128 ? "Desk Mode" : 0; }
 void pm_place_over(int won) { printf("%6lu PLACE OVER %s\n", now_ms, won ? "COMPLETED" : "not completed"); }
 int pm_game_mode_start(unsigned id) { (void)id; return 0; }
+int pm_game_mode_stop(unsigned id, int won) { (void)id; (void)won; return 0; }
+int pm_clip_swap_next(const char *ours, unsigned ms) { (void)ours; (void)ms; return 0; }
+int pm_game_mode_follow(unsigned id, unsigned *starts, unsigned *stops) { (void)id; if (starts) *starts = 0; if (stops) *stops = 0; return 0; }
 
 /* PAD-747: the game's modes each player completed this game (the `done <id>` command); 100 and up are not seen */
 static unsigned char desk_done[5][128];

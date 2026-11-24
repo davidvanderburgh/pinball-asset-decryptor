@@ -3809,7 +3809,8 @@ def modes_games_rows(ports=None):
                                 ("shield", "shield"), ("building", "building"), ("shaker", "shaker"),
                                 ("shows", "light shows"), ("wizard", "mini-wizards"), ("roster", "battle slot"),
                                 ("challenge", "challenges"), ("place", "game mode places"),
-                                ("done", "starts on game modes completed"))
+                                ("done", "starts on game modes completed"),
+                                ("with", "intros and outros for game modes"))
                  if p.can(k)]                     # PAD-381: what a mode may hold; PAD-392; PAD-615; PAD-710; PAD-747
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")
@@ -4117,7 +4118,12 @@ PREVIEW_HELP = {
                 "instead start when the player picks one of the game's battles on the battle "
                 "selection screen: your mode runs in that battle's place. Or it can start once the player "
                 "has completed a number of the game's own modes in one game (tick which ones count): a "
-                "mini-wizard after four of them, a bigger wizard after all of them.\n"
+                "mini-wizard after four of them, a bigger wizard after all of them. Or it can run *with* one "
+                "of the game's own modes, as its intro and outro: it starts when the game starts that mode "
+                "and ends when the game's mode ends, playing its start clip and sound, then its end clip and "
+                "sound. The game's mode plays as always; the game's music is turned down under your sounds, "
+                "and where the game shows a clip of its own as the mode starts or ends, yours plays in its "
+                "place. Each of the game's own modes has **Add an intro and outro…** on its page.\n"
                 "3. **Runs for:** how long it runs.\n"
                 "4. **Points per shot:** which shots score and what the first one "
                 "pays. A minus number takes that much away on each hit.\n"

@@ -389,8 +389,9 @@ def test_launcher_does_not_elevate_a_copy():
         vbs = f.read()
     code = "\n".join(ln for ln in vbs.splitlines()
                      if not ln.lstrip().startswith("'"))
-    assert re.search(r'If WScript\.Arguments\(0\) = "--copy" Then '
-                     r'compacting = True', code)
+    # PAD-1563: no launch is elevated any more, this one included
+    assert '"runas"' not in code
+    assert 'pythonw.exe", params, appDir, "open", 1' in code
 
 
 def test_both_entry_points_send_copy_to_its_window():

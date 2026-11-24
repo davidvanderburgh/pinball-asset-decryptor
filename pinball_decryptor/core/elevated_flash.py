@@ -17,9 +17,8 @@ Elevation prompt per platform:
   * macOS   — ``osascript … with administrator privileges`` (the native secure
     password dialog; we never see the password).
   * Windows — ``ShellExecuteEx`` with the ``runas`` verb (the standard UAC
-    prompt).  Note the shipped Windows build already launches the whole app
-    elevated via ``launcher.vbs``, so :func:`core.admin.is_admin` is normally
-    already True there and this path is the fallback for an unelevated launch.
+    prompt).  The Windows app starts unelevated (PAD-1563), so this is the
+    normal path there too.
   * Linux   — ``pkexec`` (graphical) when present.  The AppImage re-execs the
     ``.AppImage`` file, because root cannot enter the user's FUSE mount
     (:func:`_helper_argv`).

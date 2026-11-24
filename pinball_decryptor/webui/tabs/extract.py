@@ -959,6 +959,11 @@ class ExtractTab(TabService):
 
     # -- the red panels -------------------------------------------------
     @rpc
+    def restart_as_admin(self):
+        """The panel's Restart as administrator (PAD-1563)."""
+        return bool(self.app.restart_as_admin("extract"))
+
+    @rpc
     def toggle_admin_warning(self):
         self._toggle_admin_warning()
         return self._admin_collapsed

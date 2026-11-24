@@ -2183,34 +2183,40 @@ def test_iss_repairs_python_permissions():
 LAUNCHER_VBS = INSTALLER / "launcher.vbs"
 
 
-def test_windows_launcher_always_elevates():
-    """Regression guard — always-run-as-Administrator launch.
+def test_windows_launcher_does_not_elevate():
+    """PAD-1563 (GitHub issue #46): the app starts WITHOUT Administrator.
 
-    Direct-SSD / SD-card operations need Administrator, and the app used
-    to rely on the user remembering right-click → "Run as administrator"
-    every single launch — forgetting it surfaced halfway through a run
-    as WSL_E_ELEVATION_NEEDED_TO_MOUNT_DISK.  launcher.vbs (the target
-    of every installed shortcut AND the installer's post-install launch)
-    must start pythonw with the ShellExecute "runas" verb so every
-    launch elevates behind a standard one-click UAC prompt.
-    """
+    It used to start every launch elevated (the "runas" verb, one UAC prompt
+    per launch) because reading a game SSD directly needs it.  The jobs that
+    need Administrator now ask for it themselves, and Direct-SSD offers
+    Restart as administrator, so launcher.vbs starts pythonw plainly."""
     src = LAUNCHER_VBS.read_text(encoding="utf-8", errors="replace")
-    assert "ShellExecute" in src and '"runas"' in src, (
-        "launcher.vbs no longer launches the app with the ShellExecute "
-        "'runas' verb — installed users are back to remembering "
-        "right-click → Run as administrator, and Direct-SSD runs fail "
-        "halfway through with WSL_E_ELEVATION_NEEDED_TO_MOUNT_DISK.")
-    assert "On Error Resume Next" in src, (
-        "launcher.vbs must swallow the ShellExecute error raised when "
-        "the user declines the UAC prompt — otherwise declining shows a "
-        "cryptic Windows Script Host error dialog.")
+    code = "\n".join(ln for ln in src.splitlines()
+                     if not ln.lstrip().startswith("'"))
+    assert "ShellExecute" in code and '"open", 1' in code
+    assert '"runas"' not in code, (
+        "launcher.vbs elevates again: every launch asks for UAC (issue #46)")
+    assert "On Error Resume Next" in code, (
+        "launcher.vbs must swallow a ShellExecute error rather than show a "
+        "Windows Script Host error dialog.")
+
+
+def test_installer_reopens_the_app_unelevated():
+    """The installer runs elevated, and what it starts inherits that unless
+    told otherwise: the post-install launch and an in-app update's relaunch
+    run as the user who started setup, so the app comes back unelevated."""
+    iss = ISS.read_text(encoding="utf-8", errors="replace")
+    runs = [ln for ln in iss.splitlines()
+            if ln.startswith("Filename:") and "launcher.vbs" in ln]
+    assert len(runs) == 2, runs
+    for ln in runs:
+        assert "runasoriginaluser" in ln, ln
 
 
 def test_iss_shortcuts_route_through_launcher():
     """Every app shortcut the installer creates must point at
     launcher.vbs — a shortcut aimed straight at pythonw.exe would
-    silently bypass the launcher's self-elevation, resurrecting the
-    right-click → Run as administrator dance for that entry point."""
+    silently bypass the launcher (its arguments, its shown window)."""
     iss = ISS.read_text(encoding="utf-8", errors="replace")
     app_icon_lines = [ln for ln in iss.splitlines()
                       if ln.startswith("Name:") and "icon.ico" in ln]
@@ -2219,8 +2225,7 @@ def test_iss_shortcuts_route_through_launcher():
         "shortcut layout changed?")
     for ln in app_icon_lines:
         assert "launcher.vbs" in ln, (
-            f"installer shortcut bypasses launcher.vbs (and with it the "
-            f"always-run-as-Administrator elevation): {ln}")
+            f"installer shortcut bypasses launcher.vbs: {ln}")
 
 
 DOCKERFILES = sorted((REPO / "pinball_decryptor" / "plugins").glob("*/Dockerfile"))
@@ -2575,7 +2580,7 @@ def test_the_launchers_start_the_app_shown(vbs):
     never visible.  The show argument must be 1."""
     src = vbs.read_text(encoding="utf-8", errors="replace")
     code = [ln for ln in src.splitlines() if not ln.lstrip().startswith("'")]
-    runs = [ln for ln in code if ".Run " in ln or '"runas"' in ln]
+    runs = [ln for ln in code if ".Run " in ln or '"open"' in ln]
     assert runs, "no launch line found in %s" % vbs.name
     for ln in runs:
         assert not re.search(r",\s*0\s*(,|$)", ln.strip()), ln

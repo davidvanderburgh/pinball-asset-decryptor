@@ -363,7 +363,7 @@ def windows_choice(ext=".raw", fileexts=None):
 
 def _machine_class(dll):
     r"""The icon handler's class under HKEY_LOCAL_MACHINE as well, when this
-    run may write there (the installed app runs as Administrator).  Windows
+    run may write there (a run restarted as administrator).  Windows
     hides a user's own classes from elevated programs, PAD among them, so
     without this PAD's own file pickers would draw a card with no icon.
     Never raises; a run without the rights leaves it."""

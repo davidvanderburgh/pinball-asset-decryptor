@@ -72,14 +72,9 @@ def test_launcher_does_not_elevate_a_compact():
     vbs = _read("installer", "launcher.vbs")
     code = "\n".join(ln for ln in vbs.splitlines()
                      if not ln.lstrip().startswith("'"))
-    assert re.search(r'If WScript\.Arguments\(0\) = "--compact" Then '
-                     r'compacting = True', code)
-    # the compact launch is plain and ends the script; every other launch
-    # is still the elevated one, shown (the last argument is 1)
-    plain = code.index('pythonw.exe", params, appDir, "open", 1')
-    quit_at = code.index("WScript.Quit")
-    elevated = code.index('pythonw.exe", params, appDir, "runas", 1')
-    assert code.index("If compacting Then") < plain < quit_at < elevated
+    # PAD-1563: no launch is elevated any more, this one included
+    assert '"runas"' not in code
+    assert 'pythonw.exe", params, appDir, "open", 1' in code
 
 
 def test_both_entry_points_send_compact_to_its_window():

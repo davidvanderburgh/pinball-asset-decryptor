@@ -70,3 +70,24 @@ as its fstab), p5 at `/data`, `/dev/mmcblk0pN` + `/sys/block/mmcblk0` named as o
 `/etc/rc5.d/S30sshd` (dropbear on port 22 under qemu-arm) and its own `game_monitor` running a stand-in game;
 `/sbin/reboot` answers with a log line. The app's own code (`send.py` → `connect` + `send_image`) sends to it, and
 `compare.py` compares the machine card with the build file by file. Results in the ticket's report.
+
+## A multi-boot card's shared store (PAD-1543)
+
+On mkmulticard's store layout every file of every game is a hard link into `/games/.blobs`. The full Send reads
+which names are one file on the image (`store_links`), compares and sends a file under the store's name only, and
+makes the other names hard links to it at the end (`Machine.hardlink`: a link beside the name, renamed over it).
+Nothing on such a partition is written in place, and it gets no pieces job: a changed file is a new store name,
+built beside it from a copy of the machine's old version (found under the game's own name) with only the 1 MiB
+blocks that differ sent, then renamed. Which names are one file on the machine comes from `file_ids` (stat); a
+machine without stat has the names compared like files and the differing ones linked.
+
+`check_layout` refuses, in words that say what to do: a multi-boot image sent to a card not laid out for one
+(write the card once), a one-game image sent to a multi-boot card (build the multi-boot image again), and a work
+partition (p7) smaller than the image's.
+
+Proof, 2026-11-23 (`C:\tmp\PAD-1543`: `standin.sh`, `send.py`, logs): a stand-in machine on a store card of stock
+Godzilla 1.16 + Heisei V1.5 took a Send of stock + Heisei V2.3 over its own dropbear. 956 files (9.0 GB), 934
+names linked, 5.5 GB over the network; afterwards every name, size, link count and sha1 equals the image's, the
+builder's verify passes every store line, a second Send finds nothing to do, and both games reach attract on the
+rig. The same Send with the store ignored (the old behaviour) failed part way and left 30 of the stock game's
+files changed.

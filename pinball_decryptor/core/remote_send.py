@@ -111,9 +111,14 @@ class _Tree:
     def __init__(self, reader, mount):
         self.reader, self.mount = reader, mount
         self.entries = {}
-        for rel, kind, _ino, node in reader.iter_tree():
+        #: PAD-1543: each regular file's inode number in the image, so files that are one file under several
+        #: names (a multi-boot card's shared store) can be told
+        self.inos = {}
+        for rel, kind, ino, node in reader.iter_tree():
             path = posixpath.join(mount, rel)
             self.entries[path] = (kind, node, self._sig(kind, node))
+            if kind == "file":
+                self.inos[path] = ino
 
     def _sig(self, kind, node):
         base = (kind, node["mode"], node["uid"], node["gid"])
@@ -491,6 +496,11 @@ class Machine:
         raise NotImplementedError
 
     def commit(self, renames, links, deletes):
+        raise NotImplementedError
+
+    def hardlink(self, pairs):
+        """PAD-1543: make each ``(existing file, name)``'s *name* that same file (a hard link), replacing what the
+        name was.  A multi-boot card's shared store: one file, held once, under each game's own name for it."""
         raise NotImplementedError
 
     def write_ranges(self, path, ranges):
@@ -1551,6 +1561,19 @@ class SshMachine(Machine):
             lines.append(("rmdir %s 2>/dev/null || true" if is_dir else "rm -f %s") % _q(path))
         if len(lines) > 1:
             self.sh("\n".join(lines))
+
+    def hardlink(self, pairs):
+        pairs = list(pairs)
+        for i in range(0, len(pairs), 100):
+            lines = ["set -e"]
+            for src, path in pairs[i:i + 100]:
+                tmp = posixpath.join(posixpath.dirname(path), "." + posixpath.basename(path) + TMP_TAG)
+                # beside the name and renamed over it: the name is always the old file or the new one.  Done again
+                # after a dropped connection it makes the same link.  The last rm: renaming one name of a file
+                # over another name of that same file does nothing and leaves both
+                lines.append("rm -f %s; ln %s %s; mv -f %s %s; rm -f %s"
+                             % (_q(tmp), _q(src), _q(tmp), _q(tmp), _q(path), _q(tmp)))
+            self.sh("\n".join(lines), timeout=600)
 
     def write_ranges(self, path, ranges):
         big = sum(len(d) for _o, d in ranges)
@@ -2807,6 +2830,14 @@ def _gb(sectors):
     return "%.1f GB" % (sectors * 512 / 1e9)
 
 
+def _has_boot_menu(target):
+    """PAD-1543: is *target* a multi-boot image: its system partition carries the boot menu's list of games (and it
+    isn't a test card, whose menu runs no game)?"""
+    tree = (getattr(target, "trees", None) or {}).get(ROOT)
+    ent = tree.get(TESTCARD_CONF) if tree is not None else None
+    return bool(ent) and ent[0] == "file" and not is_test_card(target)
+
+
 def check_layout(target, machine_layout):
     """Refuse an image the machine's card can't take file by file: those need the card written.
 
@@ -2834,10 +2865,34 @@ def check_layout(target, machine_layout):
         elif num in synced and have[1] < sectors:
             bad.append("partition %d is %s on the machine, smaller than the image's %s"
                        % (num, _gb(have[1]), _gb(sectors)))
+        elif num >= 7 and ptype not in EXTENDED_TYPES and have[1] < sectors:
+            # PAD-1543: a store-layout multi-boot card's work partition, where its menu rebuilds at boot the files
+            # the card holds as differences from another game's.  Too small for this image's, the menu would
+            # start the game with the other game's files in their place and say nothing
+            bad.append("partition %d (where the card's menu rebuilds files it holds as differences) is %.0f MB "
+                       "on the machine, smaller than the %.0f MB this image needs"
+                       % (num, have[1] * 512 / 1e6, sectors * 512 / 1e6))
     extra = sorted(set(machine_layout) - set(target.layout))
     if extra:
         bad.append("the machine has partition%s %s that the image doesn't"
                    % ("s" if len(extra) > 1 else "", ", ".join(map(str, extra))))
+    # PAD-1543 (David sent a multi-boot image to a machine running a one-game card and was told only "partition 7
+    # is missing ... write the card instead"): say what the two cards are and what to do
+    menu = _has_boot_menu(target)
+    missing = sorted(set(target.layout) - set(machine_layout))
+    if spike2 and menu and missing:
+        sizes = ""
+        if 3 in target.layout and 3 in machine_layout:
+            sizes = " (its game partition is %s; this image's is %s)" % (_gb(machine_layout[3][1]),
+                                                                        _gb(target.layout[3][1]))
+        raise SendError("This is a multi-boot image, and the card in the machine isn't laid out for one: partition "
+                        "%s is missing%s. A Send changes files, never a card's partitions, so write this image to "
+                        "the SD card once; after that, new builds of it can be sent to the machine."
+                        % (", ".join(map(str, missing)), sizes))
+    if spike2 and not menu and extra and not missing and max(extra) >= 7:
+        raise SendError("The image's partitions don't match the machine's card (%s). If the machine runs a "
+                        "multi-boot card, this one-game image can't replace one of its games: build the multi-boot "
+                        "image again with this version in it and send that." % "; ".join(bad))
     if bad:
         raise SendError("The image's partitions don't match the machine's card (%s), so it can't be sent file by "
                         "file: write the card instead." % "; ".join(bad))
@@ -2858,12 +2913,66 @@ def _protected(platform, target_tree):
     return keep
 
 
-def sync_ops(tree, mine, prefix, protected, own_mounts, hashes_on_machine, log=None, progress=None):
+#: PAD-1543: a multi-boot card's shared store (mkmulticard's store layout): every game's files are hard links to
+#: the files of this folder of the game partition, each held once
+STORE_DIR = ".blobs"
+
+
+def store_links(tree, mount):
+    """PAD-1543: ``{name: the file it is another name of}`` for a partition of the image that holds a multi-boot
+    card's shared store, else ``{}``.  There, one file has several names (the store's, and each game's own); the
+    Send sends it once, under the first, and makes the others hard links to it, as they are on the image.  Taken
+    as separate files (as a Send did before), a changed file was sent and held once per name, and a file two
+    games share, changed in place under one game's name, changed under the other's too."""
+    store = posixpath.join(mount, STORE_DIR)
+    if (tree.get(store) or ("",))[0] != "dir":
+        return {}
+    groups = {}
+    for path, ino in tree.inos.items():
+        groups.setdefault(ino, []).append(path)
+    out = {}
+    for paths in groups.values():
+        if len(paths) < 2:
+            continue
+        paths.sort(key=lambda p: (not p.startswith(store + "/"), p))
+        for p in paths[1:]:
+            out[p] = paths[0]
+    return out
+
+
+def store_link_ops(tree, mine, followers, put_paths, ids, differ=()):
+    """PAD-1543: the ``hardlink`` ops for *followers* (:func:`store_links`): a name that isn't, on the machine, the
+    very file its first name is (*ids*: ``{path: inode}`` there), or whose file the Send writes anew
+    (*put_paths*).  A machine that can't say which files are one (*ids* None: its busybox has no stat) had its
+    names compared like any file instead, and the ones that *differ* are linked: there a card left with two
+    copies of a file keeps them, as nothing can tell."""
+    ops = []
+    for path, first in sorted(followers.items()):
+        m = mine.get(path)
+        if m is not None and m[0] == "dir":
+            raise SendError("%s is a folder on the machine but not on the image; write the card instead." % path)
+        if ids is None:
+            if path not in differ:
+                continue
+        elif (first not in put_paths and m is not None and m[0] == "file"
+                and ids.get(path) is not None and ids.get(path) == ids.get(first)):
+            continue
+        node = tree.entries[path][1]
+        ops.append(Op("hardlink", path, target=first, mode=stat.S_IMODE(node["mode"]), uid=node["uid"],
+                      gid=node["gid"], stock=None, from_ledger=True))
+    return ops
+
+
+def sync_ops(tree, mine, prefix, protected, own_mounts, hashes_on_machine, log=None, progress=None,
+             followers=()):
     """The ops that make the machine's files under *prefix* (*mine*: its walk) the image's *tree*.  A file the
-    same size on both is compared by sha1 (``hashes_on_machine(paths)``), so an unchanged file is never sent."""
+    same size on both is compared by sha1 (``hashes_on_machine(paths)``), so an unchanged file is never sent.
+    *followers* (PAD-1543, :func:`store_links`): names left to :func:`store_link_ops`, never compared or sent."""
     ops, same_size = [], []
     for path, (kind, node, _sig) in sorted(tree.entries.items()):
         if any(path == m or path.startswith(m + "/") for m in own_mounts if m != prefix):
+            continue
+        if kind == "file" and path in followers:
             continue
         m = mine.get(path)
         own = dict(mode=stat.S_IMODE(node["mode"]), uid=node["uid"], gid=node["gid"], stock=None, from_ledger=True)
@@ -2953,6 +3062,7 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             "; those it hashed on an earlier Send and that haven't changed since aren't read again" if cache.files
             else ": a few minutes"), "info")
     mounted, rw, all_ops, temps, walks = [], [], {}, [], {}
+    shared = {}                             # PAD-1543: {mount: store_links()} of the mounts holding a shared store
     reboot = False
     changed = False
     delta_bytes = 0
@@ -2970,8 +3080,23 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             protected = _protected(target.platform, tree) if mount == ROOT else set()
             skip = [m for m in on if m != mount and (m.startswith(mount.rstrip("/") + "/") or mount == ROOT)]
             mine = walks[mount] = machine.walk(mount, skip)
+            # PAD-1543: a multi-boot card's shared store: each file once, its other names hard links to it
+            followers = store_links(tree, mount) if mount != ROOT else {}
+            ids = None
+            if followers:
+                shared[mount] = followers
+                names = sorted(p for p in set(followers) | set(followers.values())
+                               if (mine.get(p) or ("",))[0] == "file")
+                got = machine.file_ids(names) if names else (0, {})
+                ids = None if got is None else {p: v[2] for p, v in got[1].items()}
             ops = sync_ops(tree, mine, mount, protected, skip,
-                           lambda paths: cache.hashes(paths, machine.file_sha1s), log, progress)
+                           lambda paths: cache.hashes(paths, machine.file_sha1s), log, progress,
+                           followers if ids is not None else ())
+            if followers:
+                differ = {op.path for op in ops if op.kind == "put" and op.path in followers}
+                ops = [op for op in ops if not (op.kind == "put" and op.path in differ)]
+                ops += store_link_ops(tree, mine, followers, {op.path for op in ops if op.kind == "put"}, ids,
+                                      differ)
             if ops:
                 all_ops[mount] = ops
         raws = {}
@@ -2993,7 +3118,8 @@ def sync(target, machine, log=None, progress=None, cancel=None):
         # rewrites (only those are read, as the 1 MiB delta read them), the rest sent
         jobs = {}
         for mount, ops in all_ops.items():
-            if mount == ROOT:
+            if mount == ROOT or mount in shared:
+                # PAD-1543: nothing of a shared store is changed in place (below), so no pieces job there
                 continue
             mine_puts = [op for op in ops if op.kind == "put"]
             has = {op.path for op in mine_puts if (walks[mount].get(op.path) or ("",))[0] == "file"}
@@ -3002,10 +3128,12 @@ def sync(target, machine, log=None, progress=None, cancel=None):
                 jobs[mount] = job
         puts = [op for ops in all_ops.values() for op in ops if op.kind == "put"]
         total = sum(op.size for op in puts) or 1
-        log("Sending %d change(s): %d file(s) (%s), %d link(s), %d removal(s)%s."
+        relinks = sum(op.kind == "hardlink" for v in all_ops.values() for op in v)
+        log("Sending %d change(s): %d file(s) (%s), %d link(s), %d removal(s)%s%s."
             % (n, len(puts), _human(sum(op.size for op in puts)),
                sum(op.kind == "link" for v in all_ops.values() for op in v),
                sum(op.kind == "delete" for v in all_ops.values() for op in v),
+               (", %d name(s) of files the card's games share" % relinks if relinks else ""),
                (", and the boot partition" if raws else "")), "info")
         # the system partition is what the session runs on: its files change by copy and rename, never in place,
         # so its room is checked before anything is touched
@@ -3040,22 +3168,45 @@ def sync(target, machine, log=None, progress=None, cancel=None):
                     % (len(job.ops), _human(sum(op.size for op in job.ops))), "info")
                 sent = pieces_run(machine, tree, job, cancel, progress, sent, total, temps)
                 delta_bytes += job.net
+            names = {}                          # PAD-1543: {a shared file: its other names}
+            for name, first in shared.get(mount, {}).items():
+                names.setdefault(first, []).append(name)
             for op in (o for o in ops if o.kind == "put" and (job is None or o.path not in job.paths)):
                 check()
                 have = walks[mount].get(op.path)
                 if have is not None and have[0] == "file":
                     # the machine has a copy: only its changed blocks go (the game is stopped; a cut-off Send is
                     # finished by the next one, which compares everything again).  Game files change in place;
-                    # system files in a copy renamed over them (delta_replace: the session runs on those)
+                    # system files in a copy renamed over them (delta_replace: the session runs on those), and so
+                    # do a shared store's (PAD-1543: in place, a file changes under every name it has, another
+                    # game's among them)
                     log("Updating %s (%s; only the parts that differ are sent)..." % (op.path, _human(op.size)),
                         "info")
-                    delta_bytes += (delta_replace if mount == ROOT else delta_put)(
+                    delta_bytes += (delta_replace if mount == ROOT or mount in shared else delta_put)(
                         machine, tree, op, cancel,
                         progress=lambda done, base=sent: progress(base + done, total, "Updating"))
                     sent += op.size
                     progress(sent, total, "Updating")
                     continue
                 tmp = posixpath.join(posixpath.dirname(op.path), "." + posixpath.basename(op.path) + TMP_TAG)
+                # PAD-1543: a shared store names a file by what is in it, so a changed file is a NEW one there.
+                # The machine's old version is still under the game's own name for it: a copy of that, beside
+                # the new file's name, takes only the blocks that differ, then gets the name
+                old = next((p for p in sorted(names.get(op.path, ()))
+                            if (walks[mount].get(p) or ("",))[0] == "file"), None)
+                if old is not None and machine.free(mount) >= op.size + walks[mount][old][1] + SPARE:
+                    log("Updating %s (%s; from the machine's %s, only the parts that differ are sent)..."
+                        % (op.path, _human(op.size), old), "info")
+                    machine.copy(old, tmp)
+                    temps.append(tmp)
+                    delta_bytes += delta_put(machine, tree, op, cancel, at=tmp,
+                                             progress=lambda done, base=sent: progress(base + done, total,
+                                                                                       "Updating"))
+                    machine.commit([(tmp, op.path)], [], [])
+                    temps.remove(tmp)
+                    sent += op.size
+                    progress(sent, total, "Updating")
+                    continue
                 direct = mount != ROOT and machine.free(mount) < op.size + SPARE
                 dest = op.path if direct else tmp
                 if direct and machine.free(mount) < op.size + (1 << 20):
@@ -3081,6 +3232,12 @@ def sync(target, machine, log=None, progress=None, cancel=None):
             links = [(op.path, op.target, op.uid, op.gid) for op in ops if op.kind == "link"]
             if links:
                 machine.commit([], links, [])
+            # PAD-1543: last, when every file they are names of is in place
+            hard = [(op.target, op.path) for op in ops if op.kind == "hardlink"]
+            if hard:
+                check()
+                log("Linking %d name(s) to the files the card's games share..." % len(hard), "info")
+                machine.hardlink(hard)
             if dels and mount == ROOT:
                 machine.commit([], [], dels)
         for num, want in raws.items():

@@ -856,7 +856,10 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                  coop_awards_ok=on and kind != "err" and not a64,                               # PAD-1028/1326
                  coop_awards_tip=self.COOP_AWARDS_TIP,
                  coop_chars_tip=self.COOP_CHARS_TIP,                                            # PAD-1031
-                 coop_save_tip=self.COOP_SAVE_TIP, coop_load_tip=self.COOP_LOAD_TIP)            # PAD-1053
+                 coop_save_tip=self.COOP_SAVE_TIP, coop_load_tip=self.COOP_LOAD_TIP,            # PAD-1053
+                 coop_style=_CP.load_style(project) if project else "normal",                    # PAD-1558
+                 coop_style_opts=[{"value": k, "label": _CP.STYLE_LABELS[k]} for k in _CP.STYLES_DEFAULT],
+                 coop_style_tip=self.COOP_STYLE_TIP)
 
     @staticmethod
     def _coop_locked(why):
@@ -1622,6 +1625,31 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         self.log("[modes] co-op characters: %s's set loaded from %s" % (got["game"], path))
         return self._save_coop_chars(project, got["characters"], "set", "%d character(s)" % was,
                                      "%s's %d" % (got["game"], len(got["characters"]["list"])))
+
+    #: PAD-1558: the panel's Style when none is chosen
+    COOP_STYLE_TIP = ("How a co-op or team game plays when no style was chosen for it on the start menu's own step: "
+                      "Start pressed on CO-OP, a co-op game begun from the Insider Connected Home Team screen, or the "
+                      "right flipper held at Start. Characters and Enhanced give each player a character pick at their "
+                      "first ball (Enhanced with its special ability); Normal plays the game as it is. A style picked "
+                      "on the start menu (both flipper buttons, Action on CO-OP) always wins, and the game's own "
+                      "Standard and challenges are never changed. Needs the characters' pick on.")
+
+    @rpc
+    def set_coop_style(self, style):
+        """PAD-1558: the project's default co-op style (normal, characters or enhanced)."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        was = _CP.save_style(project, style)
+        now = _CP.load_style(project)
+        hist = history_log.diff_scalar("modes  co-op style when none is chosen", was, now)
+        history_log.record(project, [hist] if hist else [])
+        self._say("co-op style when none is chosen: %s%s" % (now, "" if _CP.load_characters(project).get("pick")
+                                                               else " (the characters' pick is off: Normal on the card)"))
+        self._publish_coop(project)
+        return True
 
     @rpc
     def set_coop(self, on):

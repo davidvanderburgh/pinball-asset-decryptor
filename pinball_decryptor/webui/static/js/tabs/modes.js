@@ -304,6 +304,11 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, 
           <${Button} size="sm" icon="save" onClick=${() => call("modes.coop_settings_save")} title=${s.coop_save_tip}>Save…<//>
           <${Button} size="sm" icon="folder" onClick=${() => call("modes.coop_settings_load")} title=${s.coop_load_tip}>Load…<//>
         </div>` : null}
+        ${s.coop_awards_ok && s.coop_style_opts ? html`<div class="row modes-coop-style small">
+          <span>Style when none is chosen</span>
+          <${Select} sm value=${s.coop_style || "normal"} options=${s.coop_style_opts} width="100%" title=${s.coop_style_tip}
+            onChange=${(v) => call("modes.set_coop_style", v)} />
+        </div>` : null}
       </div>` : null}
       ${s.cap_text ? html`<span class="small muted">${s.cap_text}</span>` : null}
       ${s.recs_shown ? html`<div class="row modes-rec-btn">

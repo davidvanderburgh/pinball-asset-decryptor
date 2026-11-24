@@ -6980,6 +6980,18 @@ lane; Challenge with no versions; handicaps never carried to the next game):
 - A challenge is the game's own (`sty_chooser_own`): no ACTION TO CHOOSE, no step, Action the game's.
 - The handicap pick waits for the lane (`hand_may_open`) and starts at 0 each game (Handicaps, below).
 
+PAD-1558 (David, on his three-image Godzilla card: "if i do this from the stern IC menu, it doesn't have those extra
+options. i can only select co-op normal"): a co-op or team game that no step asked a style for plays the card's
+default, coop.cfg `style normal|characters|enhanced` (`coop.style_default`; the Modes tab's co-op panel, "Style when
+none is chosen"). That is Start pressed on CO-OP or a team game with no Action (`sty_menu_go`), a game begun from the
+Insider Connected Home Team screen, whose own game-mode select keeps Action (`sty_begin`, after `sty_default_normal`),
+and the right flipper or a held Start where those still begin co-op (`coop_style_held`). `sty_default_for` gives the
+game's own STANDARD and challenges NORMAL whatever the line says. No line (or NORMAL, which the app writes as none, or a
+project with the characters' pick off) is the game as it was. The style is then what the chooser's would be
+(`sty_close`): CHARACTERS and ENHANCED pick a character at the first ball. Emulator: Godzilla LE 1.16 Heisei V2.3
+(image 1 of David's card), Start on CO-OP and on TEAM PLAY 2 VS 2 with `style characters`: CHOOSE YOUR GODZILLA at ball 1 (without the line: NORMAL, no pick). The emulator has no Insider login, so the Home Team screen's route is
+proven only as the same `sty_begin` path.
+
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

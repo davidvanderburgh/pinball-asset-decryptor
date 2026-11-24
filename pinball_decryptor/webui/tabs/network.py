@@ -99,7 +99,6 @@ class NetworkTab(TabService):
 
     def __init__(self, window):
         super().__init__(window)
-        self._visible = False
         self.set(intro=INTRO, project='', source='', supported=False,
                  reason='Select a card image and project first.',
                  enabled=False, public_keys='', error='', running=False, send_intro=SEND_INTRO,
@@ -196,9 +195,13 @@ class NetworkTab(TabService):
             pass
 
     def publish(self):
-        self._publish_feed()
         project = self._project()
-        self._publish_online(project)                       # PAD-1479
+        if self.shown():
+            # PAD-1546: the Score feed and online co-op boxes read the project's port files (0.3 s the first
+            # time); behind another tab they wait for on_show, which publishes again.  The rest is cheap, and
+            # Build reads its error.
+            self._publish_feed()
+            self._publish_online(project)                   # PAD-1479
         info = self._inspect()
         # PAD-1531: the key box starts empty for a project that never saved one, never with the card's own keys:
         # those may be another person's computer (an image they built with remote access on), and the first tick
@@ -1265,14 +1268,12 @@ class NetworkTab(TabService):
         return self._direct_start(kind, 'Changing the machine', work)
 
     def on_show(self):
-        self._visible = True
         self.publish()
         self._show_machine()
         if not self.get('cards_state'):
             self.refresh_cards()
 
     def on_hide(self):
-        self._visible = False
         self.stop_live()            # PAD-1467: a live view nobody is looking at stops loading the machine
         self._follow = None
         self.set(care_following=False)

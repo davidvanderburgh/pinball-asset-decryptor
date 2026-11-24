@@ -62,6 +62,41 @@ About 1 s on the UI loop after the App is made, for the Godzilla project:
 None of the three is on screen at start. Making them load when first shown, or
 off the loop, would put the tabs on the page at about 1 s.
 
+## PAD-1546: the tabs off screen read when shown
+
+The restore ran every tab's manufacturer and project hooks, and several read
+files only the tab itself shows. Each now reads when it is next shown (or, for
+the Colour profiles, when Colour, Images, Video or Scenes is, whose Colors bar
+draws from them); `TabService.shown()` is "this is the selected tab" (the
+window's `_visible` is "on the rail" and must not be written by a tab):
+
+| What | Was | Now |
+|---|---|---|
+| Modes `on_manufacturer` / project change | `_refresh_all`, 0.35-0.4 s | `_unread`, read on `on_show` |
+| Colour `_load` | 0.23-0.27 s (numpy, the Recommended fit) | `_unread`, read on `on_tab_changed` to a tab that shows it |
+| Play options, service menu publish | the same port read (0.3 s) | only while shown (their own `_visible` flag was the rail's, always on) |
+| Network: Score feed + online co-op boxes | the same port read | only while shown; the rest of its publish still runs (Build reads its `error`) |
+| Attract, Lights project change | reread on the rail flag | only while shown |
+| Log lines of the restore | two file opens a line | one `session_log.batched()` for the restore; `set_project`'s banners join it |
+| Write scan's colour row | on the loop (numpy import, up to 1.6 s cold) | worked out on the scan thread after the tabs are up |
+
+`window.select_tab` now calls the left tab's `on_hide` (Network's stops its
+live view, PAD-1467; the hook was never called before).
+
+The page had a race the faster restore exposed: `useNs` subscribed in a plain
+effect, a frame after the render (a second in a hidden window), and the
+`shell.opening` change landing in between was lost, so the page stayed on
+Starting until some later change. It subscribes in a layout effect now and
+re-renders if its namespace changed since the render.
+
+Interleaved, five starts each (`page drew its tabs` is the page's own clock):
+
+| | main | PAD-1546 |
+|---|---|---|
+| Window on screen | 0.54 | 0.55 |
+| Last project opening took | 0.96 | 0.14 |
+| Tabs drawn | 1.73 (1.63-1.77) | 0.87 (0.85-0.87) |
+
 ## Timing it again
 
 ```

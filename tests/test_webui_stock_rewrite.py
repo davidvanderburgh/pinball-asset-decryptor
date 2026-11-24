@@ -53,6 +53,7 @@ def test_the_tab_is_hidden_without_the_preview_switch_so_the_rows_are_too(tmp_pa
 
 def test_no_project_and_a_card_without_rules_have_no_rows(tmp_path, preview_on):
     with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.select_tab", "modes")       # PAD-1546: the tab reads its state when shown
         st = w.state("modes")["rewrite"]
         assert st["on"] is False and st["msg"].startswith("Open or extract a card project first")
         _project(w, tmp_path / "plain")

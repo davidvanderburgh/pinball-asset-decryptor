@@ -88,7 +88,6 @@ class ServiceMenuTab(TabService):
 
     def __init__(self, window):
         super().__init__(window)
-        self._visible = False
         self._read_id = 0
         self._shots = {}                # (project, category, row) -> png: the real menu read this session
         self.set(intro=INTRO, project="", reading=False, why="", menu=None, settings=[],
@@ -280,18 +279,15 @@ class ServiceMenuTab(TabService):
         return True
 
     def on_show(self):
-        self._visible = True
         self.publish()
 
-    def on_hide(self):
-        self._visible = False
-
+    # PAD-1546: behind another tab nothing is read, on_show reads it
     def on_project(self, folder):
-        if self._visible:
+        if self.shown():
             self.publish()
 
     def on_manufacturer(self, mfr):
-        if self._visible:
+        if self.shown():
             self.publish()
 
 

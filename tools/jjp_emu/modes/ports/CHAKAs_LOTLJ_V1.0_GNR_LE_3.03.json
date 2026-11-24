@@ -46,6 +46,61 @@
   "start_combo": true,
   "start_score": true
  },
+ "played": {
+  "can_watch": true,
+  "multiballs": true,
+  "names": [
+   "AFDMode",
+   "AmpConcertBoosterMultiball",
+   "CDMode",
+   "ComaMode",
+   "ComaMultiball",
+   "ConcertBoosterMultiball",
+   "CrowdConcertBoosterMultiball",
+   "LightsConcertBoosterMultiball",
+   "NoSympathyForTheDevil",
+   "PyroConcertBoosterMultiball",
+   "RockMeter",
+   "SlashSolo",
+   "SongMode",
+   "SongModeModes",
+   "SongMode_Better",
+   "SongMode_ChineseDemocracy",
+   "SongMode_CivilWar",
+   "SongMode_Coma",
+   "SongMode_DontCry",
+   "SongMode_DoubleTalkinJive",
+   "SongMode_Estranged",
+   "SongMode_ItsSoEasy",
+   "SongMode_LiveAndLetDie",
+   "SongMode_MrBrownstone",
+   "SongMode_MyMichelle",
+   "SongMode_Nightrain",
+   "SongMode_NovemberRain",
+   "SongMode_OutTaGetMe",
+   "SongMode_ParadiseCity",
+   "SongMode_Patience",
+   "SongMode_RocketQueen",
+   "SongMode_SweetChildOMine",
+   "SongMode_ThisILove",
+   "SongMode_WelcomeToTheJungle",
+   "SongMode_YouCouldBeMine",
+   "SongMultiball",
+   "TourMode",
+   "TourMultiball",
+   "UYI1Mode",
+   "UYI2Mode"
+  ],
+  "game_type": {
+   "can": true,
+   "buttons": {
+    "_Z28jjpe_is_left_flipper_pressedv": true,
+    "_Z29jjpe_is_right_flipper_pressedv": true
+   },
+   "attract_hook": true,
+   "diag_hook": true
+  }
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,

@@ -16,6 +16,7 @@ async function boot() {
     const z = (window.__padState && window.__padState.zoom) || null;
     if (z) applyZoom(z);
   } catch (e) { /* ignore */ }
+  root.textContent = "";     // index.html's spinner (PAD-1545)
   render(html`<${Shell} />`, root);
   connect();
   // captures and tests: say when the first render has settled

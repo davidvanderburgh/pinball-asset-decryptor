@@ -29,6 +29,8 @@ const T = {
   clear: "Drop every replacement picked on this tab in one go — for starting a project over without clearing 48 rows one at a time. It only drops the picks: your own files are untouched, and a slot already built into the project folder keeps the bytes it has (use “Revert all changes…” on the Write tab for those). To clear only some, select the rows — click, then Shift-click or Ctrl-click — and right-click the selection.",
   show: "Narrow the list by what you've already done to it. Changed = the slots with a pending replacement or already changed on disk by a previous build. Unchanged = everything you haven't touched yet, so a part-finished pass is what's left in front of you instead of something to scroll past.",
   noconv: "Use my files as-is — never re-encode (all slots)",
+  unused: "Ticked, the list shows every clip. Untick it to leave out the clips the game never plays (Played in: Not played): nothing in the card's game program asks for them, so they are most likely cut content or leftovers the machine never shows.\n\nThe count beside the buttons says how many are shown. Picking \"Not played by the game\" in the mode list shows them all the same.",
+  seq: "When a clip finishes, select and play the next row in the list, following whatever sort, search, Show and mode filter are showing.\n\nIt plays on the same side: under Replacement, a row with no replacement plays its original.\n\nStops at the end of the list, on ■, on a click on another row, or when you go to another tab.",
   noconvTip: "Applies to every replacement you have picked, not just the selected one — tick or untick it any time and the Convert column re-answers for the whole list. Nothing has to be picked again.\n\nOn: replacements are copied in byte-for-byte, so each one has to already be the clip's container, codec, resolution and frame rate. Lossless and fast, but the file has to be game-ready — a clip the machine can't decode plays its sound over a black picture, and the Convert column says \"✗ wrong format\" when it can see that coming.\n\nOff: anything that isn't already a match is converted to suit the slot, at full size — and a clip that is already this slot's video in the wrong container is repackaged rather than re-encoded, so it loses nothing either.\n\nFor a single clip, right-click its row and use \"This clip's conversion\" — that setting wins over this box, either way, so one hand-encoded clip can go on untouched in a project that converts everything else.",
   trim: "Trim / pad to the original clip length",
   specIntro: "A replacement matching this goes onto the card untouched, at full quality. Anything else has to be converted first — untick \"Use my files as-is\" and the app will do it.",
@@ -39,7 +41,7 @@ const T = {
   // PAD-444: which of the game's modes plays each clip, read off the card's game program
   // PAD-827
   seen: "What the emulator saw the game do with this clip: the switch made just before it started, and \"loops\" when the game starts it again each time it ends. It fills in as you play games on the Emulate tab, where the playfield window lists the clips as they play. The words the game draws over a clip are on the game's screen there. Beside it, what the card's game program says: a clip the game plays in turn with others, one of a set it picks from, or one it asks for as a loop.",
-  modes: "Which of the game's battles, multiballs and other modes play this clip, read from the card's game program. A clip two modes share has a row for each: choose a replacement in one mode's row to change it for that mode only. Not played: nothing in the game asks for the clip, so the machine never shows it.",
+  modes: "Which of the game's battles, multiballs and other modes play this clip, read from the card's game program. A clip two modes share has a row for each: choose a replacement in one mode's row to change it for that mode only. Not played: nothing in the game asks for the clip, so the machine never shows it. Click the header to sort by it: the clips of one mode together, the ones not played after them.",
   modeFilter: "List only the clips one mode of the game plays.",
   modesBusy: "Reading which mode plays each clip…",
   // PAD-453 (DragonRR)
@@ -441,7 +443,7 @@ export function FullButton({ fv, size = "sm" }) {
     onClick=${(e) => { e.stopPropagation(); fv.toggle(); }} />`;
 }
 
-function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
+function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look, onFinished }) {
   const vref = useRef(null);
   const [glLive, setGlLive] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -503,6 +505,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     wantPlay.current = 0;
     setPlaying(false);
     setPos(0);
+    call("video.stopped");      // PAD-1527: a queued "Play sequentially" step is dropped
     if (!v) return;
     songFollow(v, "stop");
     v.pause();
@@ -516,6 +519,8 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     const v = e.currentTarget;
     songFollow(v, "stop");
     if (v && src) v.load();
+    // PAD-1527: "Play sequentially" moves the list on to the next row
+    if (onFinished && pane.path) onFinished(side, pane.path);
   };
   const onError = () => {
     if (!pane.proxy && src) { setFailed(true); asked.current = 0; }
@@ -1062,6 +1067,7 @@ export default function VideoTab() {
     setSel(new Set([rel])); anchor.current = rel;
     choose(rel);
   };
+  const clipFinished = (side, path) => call("video.clip_finished", side, path);
   const playRow = (rel, side = "orig") => {
     setSel(new Set([rel])); anchor.current = rel;
     clearTimeout(selectJob.current);
@@ -1275,7 +1281,7 @@ export default function VideoTab() {
         ? html`<span class=${cx("vid-fit", r.fit_cls === "on" ? "acc-ink" : "dim")}
             ...${tip(r.fit_tip || r.fit)}>${r.fit}</span>`
         : "") },
-    modesCol && { key: "modes", label: "Played in", width: width("modes"), title: T.modes,
+    modesCol && { key: "modes", label: "Played in", width: width("modes"), sort: "modes", title: T.modes,
       render: (r) => (r.unplayed
         ? html`<span class="vid-modes-cell unplayed" ...${tip({ head: "Not played", lines: [
             "Nothing in the game's program asks for this clip, so the machine never shows it."] })}>${modesText(r)}</span>`
@@ -1414,6 +1420,8 @@ export default function VideoTab() {
           prefix=${html`<${Icon} name="search" />`} />
         <span class="vid-show" ...${tip(T.show)}><${Seg} value=${s.change_filter || "All"} options=${["All", "Changed", "Unchanged"]}
           onChange=${(v) => call("video.set_change_filter", v)} /></span>
+        ${md.ready ? html`<${Check} checked=${!s.hide_unused} label="Show unused" title=${T.unused}
+          onChange=${(v) => call("video.set_hide_unused", !v)} />` : null}
         ${modesCol ? html`<${Select} cls="vid-modefilter" sm value=${md.filter || ""} title=${T.modeFilter}
           options=${[{ value: "", label: "Every mode" }].concat((md.list || []).map((m) => ({ value: m.id, label: `${m.label} (${m.n})` })))}
           onChange=${(v) => call("video.set_mode_filter", v)} />`
@@ -1421,6 +1429,7 @@ export default function VideoTab() {
           : md.why ? html`<span class="small muted nw vid-modes-why" ...${tip(md.why.tip)}>${md.why.line}</span>` : null}
         <span class="sp"></span>
         <span class="vid-opts">
+          <${Check} cls="small" ns="video" k="play_through" checked=${s.play_through} label="Play sequentially" title=${T.seq} />
           <${Check} checked=${s.no_conversion} label=${T.noconv} title=${T.noconvTip} cls="small"
             onChange=${(v) => call("video.set_no_conversion", v)} />
           <${Check} checked=${s.trim} label=${T.trim} title=${s.trim_tip} cls="small" disabled=${!s.trim_enabled}
@@ -1475,9 +1484,11 @@ export default function VideoTab() {
         <div class="lookbar-row">${look.offered ? html`<${LookRow} look=${look} ns="video" onOpen=${colorNs.has_project ? openColors : undefined} />` : null}
           <${UnlockBox} /></div>
         <div class="vid-panes">
-          <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look} />
+          <${Pane} pane=${orig} side="orig" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${origHead} look=${look}
+            onFinished=${s.play_through ? clipFinished : null} />
           <span class="vid-vsep"></span>
-          <${Pane} pane=${rep} side="rep" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${repHead} look=${look} />
+          <${Pane} pane=${rep} side="rep" play=${s.play} stopSeq=${s.stop_seq} onEmptyPlay=${emptyPlay} head=${repHead} look=${look}
+            onFinished=${s.play_through ? clipFinished : null} />
         </div>
       </div>
     </section>

@@ -151,6 +151,22 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self.video_trim_var = self.var("trim", "bool", False)
         self.video_no_conversion_var = self.var("no_conversion", "bool", False)
         self.video_best_quality_var = self.var("best_quality", "bool", False)
+        # PAD-1532: "Show unused", as on the Audio tab: unticked, the clips the
+        # game never plays (Played in: Not played) leave the list; remembered
+        # between sessions. The store holds the opposite (hide_unused).
+        self.video_hide_unused_var = self.var("hide_unused", "bool", False)
+        self.video_hide_unused_var.set(
+            self._pref("video_hide_unused", bool) is True)
+        # PAD-1527: "Play sequentially", as on the Audio tab: a clip that plays
+        # to its end moves the list on to the next row and plays that; the
+        # box comes back as the last session left it
+        self.video_play_through_var = self.var("play_through", "bool", False)
+        self.video_play_through_var.set(
+            self._pref("video_play_through", bool) is True)
+        self.video_play_through_var.trace_add(
+            "write", lambda *a: self._remember_pref(
+                "video_play_through", bool(self.video_play_through_var.get())))
+        self._advance_job = None
         self._slots = []                 # [VideoSlot] from the last scan
         self._by_rel = {}                # rel -> VideoSlot
         self._reveal_after_scan = ""     # PAD-1274: a jump waiting on the scan
@@ -225,7 +241,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._m_init()                  # PAD-444: Played in (video_modes.py)
         self._u_init()                  # PAD-453: Undo / Redo (video_undo.py)
         self._m_select_after = []
-        for v in (self.video_search_var, self.video_change_filter_var):
+        for v in (self.video_search_var, self.video_change_filter_var,
+                  self.video_hide_unused_var):
             v.trace_add("write", lambda *_a: self._refresh_list())
         for v in (self.video_trim_var, self.video_no_conversion_var):
             v.trace_add("write", lambda *_a: self._on_option_var())
@@ -659,7 +676,9 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             self._scan_async()
 
     def stop_all_preview_playback(self):
-        """Stop both preview panes (the page pauses its players)."""
+        """Stop both preview panes (the page pauses its players), and
+        drop a queued "Play sequentially" step (PAD-1527)."""
+        self._cancel_advance()
         self._stop_seq += 1
         self.set(stop_seq=self._stop_seq)
 
@@ -730,6 +749,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         if i is None or i not in set(self.get("view") or []):
             self.video_search_var.set("")
             self.video_change_filter_var.set("All")
+            self.video_hide_unused_var.set(False)
             self._refresh_list()
         self._reselect([rel])
         self._load_track(rel)
@@ -890,6 +910,10 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                 elif "video_changed_only" in staged:
                     self.video_change_filter_var.set(
                         "Changed" if staged["video_changed_only"] else "All")
+                hide = self._pref("video_hide_unused", bool)
+                if hide is None:
+                    hide = bool(staged.get("video_hide_unused"))
+                self.video_hide_unused_var.set(hide)
             finally:
                 self._restoring = False
             self._update_trim_enabled()
@@ -927,6 +951,7 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         if after and self._index[after[0]] not in view:
             self.video_search_var.set("")
             self._m_filter = ""
+            self.video_hide_unused_var.set(False)
             self._refresh_list()
             view = self.get("view") or []
         if after:
@@ -1980,6 +2005,8 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             if col == "seen":                   # PAD-827: the seen clips first
                 c = self._m_seen_row(s.rel_path)["seen"]
                 return ((0, c.lower()) if c else (1, ""), s.rel_path.lower())
+            if col == "modes":                  # PAD-1524: the named modes A-Z, then the rest
+                return self._m_sort_key(s.rel_path)
             if col == "rep":
                 rep = self._assign.get(s.rel_path)
                 if rep:
@@ -2012,7 +2039,14 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         if ok is not None:
             slots = [s for s in slots if ok(s.rel_path)]
         slots = [s for s in slots if self._m_keep(s.rel_path)]
+        hide_unused = self._m_hiding_unused()
+        if hide_unused:
+            slots = [s for s in slots if not self._m_unused(s.rel_path)]
         col, desc = self._sort
+        if col == "modes":
+            # PAD-1524: rows that share a Played in stay in file name order either way
+            # (a reversed sort keeps equal rows in the order they came in)
+            slots.sort(key=lambda s: s.rel_path.lower())
         slots.sort(key=self._sort_key(col), reverse=desc)
         view = [self._index[s.rel_path] for s in slots
                 if s.rel_path in self._index]
@@ -2034,9 +2068,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
                                 + (vh.CHANGE_SCAN_NOTE if self._change_running
                                    else ""))
             values["empty"] = "" if shown else (
-                "No slots match the search, the Show filter and the mode."
+                "No slots match the search, the Show filter and the mode%s."
+                % (" or Show unused" if hide_unused else "")
                 if self._m_filter else
-                "No slots match the search and the Show filter.")
+                "No slots match the search and the Show filter%s."
+                % (" or Show unused" if hide_unused else ""))
         values["counts"] = {"changed": changed_total, "total": total,
                             "shown": len(view)}
         values["color_offered"] = bool(total and self._per_file_colour())
@@ -2106,6 +2142,16 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         self._sort = ((col, not cur[1]) if cur and cur[0] == col
                       else (col, default[col]))
         self._refresh_list()
+        return True
+
+    @rpc
+    def set_hide_unused(self, on):
+        """PAD-1532: leave out the clips the game never plays (the "Show
+        unused" tick, which sends the opposite of what it shows, as the Audio
+        tab's does; remembered between sessions)."""
+        self.video_hide_unused_var.set(bool(on))
+        self._remember_pref("video_hide_unused", bool(on))
+        self._save_staged()
         return True
 
     @rpc
@@ -2223,6 +2269,10 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         else:
             data.pop("video_color_slots", None)
         data["video_change_filter"] = self.video_change_filter_var.get()
+        if self.video_hide_unused_var.get():
+            data["video_hide_unused"] = True
+        else:
+            data.pop("video_hide_unused", None)
         names = dict(data.get("replacement_names") or {})
         for rel, path in self._assign.items():
             if isinstance(path, str) and path.strip():
@@ -3400,9 +3450,11 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
         return orig
 
     def _load_track(self, rel, autoplay=None):
-        """MainWindow._video_load_track."""
+        """MainWindow._video_load_track.  Any row loading (a click, ▶, a
+        pick) drops a queued "Play sequentially" step (PAD-1527)."""
         if rel not in self._by_rel:
             return
+        self._cancel_advance()
         self._current = rel
         orig = self._orig_pane(rel)
         pv = dict(self.get("preview") or self._empty_preview())
@@ -3418,6 +3470,66 @@ class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, Undo
             self.set(play={"side": autoplay, "seq": self._play_seq})
         self._update_note(rel)
         self.publish_look()
+
+    # -- "Play sequentially" (PAD-1527) ------------------------------------
+    def _cancel_advance(self):
+        job, self._advance_job = self._advance_job, None
+        if job:
+            self.ctx.loop.after_cancel(job)
+
+    @rpc
+    def stopped(self):
+        """■ on a pane: drop a queued "Play sequentially" step."""
+        self._cancel_advance()
+        return True
+
+    def on_tab_changed(self, ns):
+        """Another tab was picked: the next clip does not start behind it."""
+        if ns != self.ns:
+            self._cancel_advance()
+
+    def _visible_rels(self):
+        """The rows as the list shows them: its sort, search, Show and mode
+        filter."""
+        rows = self._rows
+        return [rows[i].get("rel") for i in (self.get("view") or [])
+                if 0 <= i < len(rows)]
+
+    @rpc
+    def clip_finished(self, side, path=None):
+        """A pane's clip played to its end on its own: with "Play
+        sequentially" ticked, select the next row the list shows and play it
+        on the same pane (Original when that row has no replacement).  It
+        stops at the end of the list."""
+        pane = (self.get("preview") or {}).get(side)
+        if not isinstance(pane, dict) or (path and pane.get("path") != path):
+            return False
+        if not self.video_play_through_var.get():
+            return False
+        rel = self._current
+        rels = self._visible_rels()
+        if rel not in rels:
+            return False
+        i = rels.index(rel)
+        if i + 1 >= len(rels):
+            self.log("Replace Video: played through to the end of the list.",
+                     "info")
+            return False
+        nxt = rels[i + 1]
+        if side != "orig" and not (self._assign.get(nxt)
+                                   or self._stock_coloured(nxt)):
+            side = "orig"
+
+        def _advance():
+            self._advance_job = None
+            if self._current != rel or not self.video_play_through_var.get():
+                return
+            self._reselect([nxt])
+            self._load_track(nxt, side)
+
+        self._cancel_advance()
+        self._advance_job = self.ctx.loop.after(120, _advance)
+        return True
 
     def _pick_state(self, rel):
         return {"can_clear": bool(rel and self._targets([rel])),

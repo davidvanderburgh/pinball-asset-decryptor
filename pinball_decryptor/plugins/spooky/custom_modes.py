@@ -48,6 +48,10 @@ FORM_GROUPS = (
                 "timer_color", "panel_color")),
     ("Balls", ("multiball", "multiball_on", "add_ball", "ball_save")),
     ("Coils", ("coil_start", "coil_shot", "coil_complete", "coil_hold", "coil_hold_on")),
+    # PAD-1508: Spike 2's rules (tools/jjp_emu/MODES.md "Spike 2's rules")
+    ("Rules from Spike 2", ("shot_points", "points_ladder", "end_shots", "penalty", "start_also", "start_max",
+                            "cooldown", "start_needs", "sound_at", "sound_shot_every", "lamp_pattern",
+                            "inside", "in_place_of")),
 )
 TITLE_FORM = ("panel", "font_title", "font_value", "font_timer", "title_color", "value_color",
               "timer_color", "panel_color", "lamp_color", "lamp_blink", "coil_holds")
@@ -84,6 +88,7 @@ DEFAULTS = {
     "panel": "middle", "sound_channel": "fanfare", "picture_at": "0 0 100 100", "video_at": "0 0 100 100",
     "video_loop": "yes", "lamp_color": "ffffff", "lamp_blink": "4", "coil_hold_on": "shots", "coil_holds": "off",
     "combo_seconds": "5", "start_count_reset": "game", "start_once": "no",
+    "points_ladder": "fixed",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
@@ -106,6 +111,14 @@ LABELS = {
     "sound_channel": "Channel for our sound files", "music": "Music (a file of ours)",
     "picture": "Picture (a file of ours)", "picture_at": "Picture box (x y w h, % of screen)",
     "video": "Video (a file of ours)", "video_at": "Video box (x y w h, % of screen)", "video_loop": "Video loops",
+    # PAD-1508
+    "shot_points": "Points per shot (one a line: switches points)", "points_ladder": "Each shot pays",
+    "end_shots": "Shots that end it", "penalty": "Shots that take points (one a line: switches points)",
+    "start_also": "Also needed to start (one a line: switches [hits])", "start_max": "Starts at most, a game",
+    "cooldown": "Seconds before it can start again", "start_needs": "Only after my mode (name [ball|game])",
+    "sound_at": "Sounds at seconds left (one a line: seconds sound)", "sound_shot_every": "Shot sound every Nth shot",
+    "lamp_pattern": "Lamp pattern",
+    "in_place_of": "Starts in place of the game's mode", "inside": "Runs inside my mode (name)",
 }
 
 
@@ -280,7 +293,11 @@ def read_cfg(path):
             text = f.read()
     except OSError:
         return collections.OrderedDict()
-    return collections.OrderedDict((k, v) for _n, k, v in mk().MJ.parse_cfg(text))
+    out = collections.OrderedDict()
+    rep = getattr(mk(), "REPEATABLE", {})
+    for _n, k, v in mk().MJ.parse_cfg(text):
+        out[k] = out[k] + "\n" + v if k in rep and out.get(k) else v   # PAD-1508: every line of a repeated key
+    return out
 
 
 def write_cfg(path, values, header=""):
@@ -291,8 +308,9 @@ def write_cfg(path, values, header=""):
     lines = ["# " + header] if header else []
     for k in order:
         v = str(values.get(k) if values.get(k) is not None else "").strip()
-        if v != "":
-            lines.append("%s = %s" % (k, v))
+        for one in v.splitlines():            # a repeated key (PAD-1508): a line each
+            if one.strip():
+                lines.append("%s = %s" % (k, one.strip()))
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")

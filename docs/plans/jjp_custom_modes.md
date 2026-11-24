@@ -376,3 +376,31 @@ Read off Wonka 03.03's decrypted code, then proven in the emulator
 * **The rig.** A hidden run has no ball feeder (it lives in the matrix window), so the
   proof ran `jjpball.Feeder` headless (`C:\tmp\PAD-1353\feeder.py`) and read coil drives
   off the shim's OUT frames (`coilsample.py`).
+
+## The layout editor and the game's own screen (PAD-1515)
+
+David, 2026-11-23, after the PAD-1512 game type menu: "we definitely want the drag and drop layout
+editor", then "i'd like to also be able to modify the scenes of existing layout in games ... rearrange
+the HUD, or move where certain images or animations appear". How to use both: `tools/jjp_emu/MODES.md`
+("In the app", "The game's own screen").
+
+* **Our screens** are ours to place: new keys `panel_at`, `title_at` / `value_at` / `timer_at` (in % of
+  the panel, the text fitted into its box), a progress line's own box, and the menu's
+  `game_type_title_at` / `_lines_at` / `_hint_at` (in % of the menu). Unset, everything draws where it
+  did. The editor (`tabs/modes_layout.js` over `plugins/jjp/screen_layout.py`) holds the runtime's own
+  numbers for the default places; `test_jjp_screen_layout.py` keeps the two together. Proof:
+  `proof/pad1515/run.sh` + `compare.py`, the editor's preview against the game's frames within 1.5 px.
+* **The game's own screen** has no file; the runtime defines Allegro's draw calls and names each part
+  by the exported object holding it (a reverse index over sprite, atlas, movie, font and displayable
+  objects, and one pointer down). Learned on Wonka: the game draws into a canvas bitmap, screen-sized
+  layers and small HUD pieces, so draws are followed through every bitmap the game draws into and then
+  composites; a small piece is one part (moving its inner draws pushed the score digits off their own
+  bitmap); an atlas the game draws into keeps its own name; text glyphs are nested draws and go with
+  their text; a scaled part needs one anchor (`screen_move`'s `ax ay`) or its pieces scale apart. File
+  names by "the last file opened" were wrong as often as right until limited to the game's own pictures
+  opened just before the load. Proof: `proof/pad1515/screen` + `verify_screen.py`.
+* **Fonts in the preview**: the browser cannot draw the game's font objects (JJPEFont; the TTFs are
+  inside the encrypted assets and no font object names its file), so text is fitted the way the
+  runtime fits it in a stand-in face, named beside the numbers; the true look is the game's own frame
+  (Show it in the game: `in_game_menu.png`, `in_game_mode.png`) as the backdrop.
+

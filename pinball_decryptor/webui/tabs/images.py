@@ -30,6 +30,7 @@ from ..colour_save import ColourSaveMixin
 from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
 from ..testcard_tags import TestTagMixin
+from .pixel_edit import PixelEditMixin
 
 #: the sidecar key of the pictures placed pixel for pixel from the original's origin (the same as
 #: plugins.stern.scene_edit.PLACE_KEY, kept here so this module doesn't load the Stern plugin)
@@ -329,7 +330,7 @@ def same_picture(a, b):
 
 
 # ---------------------------------------------------------------------------
-class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
+class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, PixelEditMixin, TabService):
     _tc_kind = "image"                # PAD-1279: a TEST tick puts the row on the test card
 
     def _tc_project(self):
@@ -466,6 +467,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         """Tk apply_manufacturer's "same clean slate for the image tab"."""
         self._visible_mfr = bool(getattr(mfr.capabilities, "replace_image",
                                          False))
+        self._mfr_key = getattr(mfr, "key", "") or ""
         self._scan_id += 1
         self._change_scan_id += 1
         self._slots = []
@@ -2498,6 +2500,7 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
             "empty": empty, "keep": self._keep_row(rel),
             "color": self._color_row(rel),
             "has_pick": bool(rep),
+            "pixel": self._pixel_offered(rel) if slot else False,
             "clearable": bool(self._replacement_targets([rel]))
             if slot else False,
             "ver": self._preview_ver})
@@ -3298,6 +3301,8 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         if iid not in self._by_rel:
             return []
         items.append({"label": "Choose replacement…", "act": "choose"})
+        if self._pixel_offered(iid):
+            items.append({"label": "Edit pixels…", "act": "pixel_edit"})
         if self._replacement_targets([iid]):
             items.append({"sep": True})
             items.append({"label": "Clear replacement", "act": "clear_one"})
@@ -3335,6 +3340,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
         """Run a menu entry from :meth:`menu`."""
         if action == "choose":
             return self.choose(iid)
+        if action == "pixel_edit":
+            # PAD-1547: the page opens the Edit pixels window on it
+            return {"pixel": iid} if self._pixel_offered(iid) else None
         if action == "csave":
             rows = [r for r in (sel or []) if r in self._by_rel]
             return self.colour_save(rows if iid in rows and len(rows) >= 2

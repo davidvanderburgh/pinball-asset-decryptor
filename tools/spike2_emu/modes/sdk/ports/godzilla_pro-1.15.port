@@ -246,6 +246,10 @@ value roster_select_ms      13000
 # up between English and Japanese at each release of a flipper BUTTON, the cabinet inputs 137 (left) / 139 (right);
 # the co-op pick keeps them from it while it has the flippers (coop.cfg's left / button)
 site language_keys       0x0013c3b8 0xe92d40f8 0xe1a04001
+# PAD-1449 round 11: the play-begun check its PLAYER LANGUAGE SELECT bar and flipper toggle ask (their only two callers);
+# its byte is cleared at a Start and set at the first playfield switch the game counts as play
+site language_begun     0x0016d8f4 0xe5d00008 0xe3500000
+data language_play_begun 0x0070847c
 value language_keys_left   137
 value language_keys_right  139
 site roster_screen_keys   0x0018d3a8 0xe92d4070 0xe1a05000
@@ -985,3 +989,9 @@ site show_stop_number     0x00255dd4 0xe92d4070 0xe3076e80   # (n): every show n
 value show_count          361
 # the show reel (emulator): the shows above seen lighting the playfield on their own
 text show_lit            210 214 215 216 217 249 319
+# ---- PAD-1521: the framework's all-flippers off and on (PAD-733 / PAD-1406's pair, each flipper record's enable bit
+# at +6; found by code: off clears bit 2, on sets 6, 0xd4 apart, as on every newest build) and the flipper policy's
+# call (flippers_on + 0xbc: bl, cmp r0, #0). The flippers off while a mode's total holds the end of a ball.
+site flippers_off         0x004380ac 0xe92d4070 0xe3015800
+site flippers_on          0x00438180 0xe92d4070 0xe3015800
+site flipper_query_call  0x0043823c 0xeb020c7a 0xe3500000

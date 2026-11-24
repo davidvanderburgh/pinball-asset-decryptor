@@ -13,6 +13,7 @@ Usage:
     python scripts/testpick.py spike2 jjp       # named zones, git not asked
     python scripts/testpick.py --list           # show every zone's tests
     python scripts/testpick.py --dry            # print the verdict, run nothing
+    python scripts/testpick.py --full           # the whole suite, regardless
     python scripts/testpick.py spike2 -- -k coil  # after --, args go to pytest
 
 The RELEASE GATE still runs everything, on purpose - this is a dev-loop
@@ -20,6 +21,15 @@ tool.  Selection here is path-based and conservative, not coverage-based:
 a zone owns whole test files, sources are matched by prefix, and any
 changed file no rule recognises promotes the run to FULL and says so.
 pytest itself still applies pytest.ini, so zone runs are parallel too.
+
+PAD-1536: a core/ change, app.py, __main__.py, or a Python file with no
+zone no longer runs everything outright.  Those were 49 of the 54 full
+runs in the last 220 commits, and two tickets' full runs at once filled
+David's CPU.  They now run the tests within two imports of the file
+(scripts/testgraph.py: its own tests and the tests of the modules that
+use it), and still go FULL when conftest.py imports the file, when no
+test reaches a core file at all, or when most of the suite is reached
+anyway.
 """
 
 import argparse
@@ -29,6 +39,16 @@ import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import testgraph  # noqa: E402
+
+# FULL reasons the import graph may narrow (PAD-1536): Python files only.
+# When no test reaches one of these at all, the run stays FULL: a reach
+# the graph cannot see is likelier than an untested core module.
+GRAPH_TRIGGERS = ("pinball_decryptor/core/", "pinball_decryptor/app.py",
+                  "pinball_decryptor/__main__.py")
+# more than this share of the suite reached = just say FULL
+GRAPH_MOST = 0.75
 
 # ---------------------------------------------------------------------------
 # The zone table.  ORDER MATTERS: the first zone whose source prefix matches
@@ -160,6 +180,10 @@ def changed_files(since):
                                              text=True).splitlines())
         names |= set(subprocess.check_output(
             base + ["--cached"], text=True).splitlines())
+        # new files never added (a ticket's new test file, PAD-1533's)
+        names |= set(subprocess.check_output(
+            ["git", "-C", REPO, "ls-files", "--others", "--exclude-standard"],
+            text=True).splitlines())
     return sorted(n.strip().replace("\\", "/") for n in names if n.strip())
 
 
@@ -180,6 +204,42 @@ def classify(path):
     return ("full", "no zone rule for %s" % path)
 
 
+def graph_eligible(path, why):
+    """A FULL verdict the import graph may narrow: a file with no zone rule,
+    or a core/app/__main__ trigger.  conftest.py, pytest.ini, requirements
+    and .github/ stay FULL whatever the graph says."""
+    return why.startswith("no zone rule") or why in GRAPH_TRIGGERS
+
+
+def graph_pick(paths, graph=None, depth=None):
+    """-> (test files, full_why or None, notes) for *paths* via the graph."""
+    g = graph or testgraph.Graph(REPO)
+    depth = testgraph.DEPTH if depth is None else depth
+    picked, notes = set(), []
+    for path in paths:
+        if not g.known(path):        # deleted, or a name no string can say
+            return set(), "%s (not in the import graph)" % path, notes
+        tests, conf = g.tests_reaching(path, depth)
+        if conf:
+            return set(), "%s (conftest.py imports it)" % path, notes
+        if not tests:
+            # untested Python outside core is simply untested; a core file
+            # or a data file nobody names is more likely reached some way
+            # the graph cannot see (a glob, a folder walk): run it all
+            if path.startswith(GRAPH_TRIGGERS) or not path.endswith(
+                    (".py", ".pyw")):
+                return set(), "%s (no test reaches it)" % path, notes
+            notes.append("%s: no test reaches it" % path)
+            continue
+        notes.append("%s: %d test file(s) within %d imports"
+                     % (path, len(tests), depth))
+        picked |= tests
+    if len(picked) > GRAPH_MOST * len(g.test_files()):
+        return set(), "%s reach most of the suite (%d test files)" % (
+            ", ".join(paths), len(picked)), notes
+    return picked, None, notes
+
+
 def zone_tests(names):
     out = []
     for zname, _sources, patterns in ZONES:
@@ -196,6 +256,7 @@ def main(argv):
     ap.add_argument("--since", help="diff against this ref instead of HEAD")
     ap.add_argument("--dry", action="store_true", help="print, do not run")
     ap.add_argument("--list", action="store_true", help="show the zone table")
+    ap.add_argument("--full", action="store_true", help="run the whole suite")
     if "--" in argv:
         cut = argv.index("--")
         argv, extra = argv[:cut], argv[cut + 1:]
@@ -218,21 +279,31 @@ def main(argv):
                   % (", ".join(bad), ", ".join(sorted(known))))
             return 2
         picked, full_why, self_tests = set(args.zones), None, []
+    elif args.full:
+        picked, full_why, self_tests = set(), "--full", []
     else:
         picked, self_tests, full_why = set(), [], None
+        graph_paths = []
         changes = changed_files(args.since)
         if not changes:
             print("no changes found - nothing to test.")
             return 0
         for path in changes:
             kind, val = classify(path)
-            if kind == "full" and full_why is None:
+            if kind == "full" and graph_eligible(path, val):
+                graph_paths.append(path)
+            elif kind == "full" and full_why is None:
                 full_why = "%s (matched %s)" % (path, val)
             elif kind == "zone":
                 picked.add(val)
             elif kind == "self":
                 self_tests.append(os.path.join(REPO, val))
         print("changed: %d file(s)" % len(changes))
+        if graph_paths and not full_why:
+            got, full_why, notes = graph_pick(graph_paths)
+            for line in notes:
+                print("  " + line)
+            self_tests.extend(os.path.join(REPO, t) for t in sorted(got))
 
     if full_why:
         print("FULL suite: %s" % full_why)

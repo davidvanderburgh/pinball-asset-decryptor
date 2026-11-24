@@ -748,6 +748,7 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .jjpm-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 10px; align-items: center; padding: 4px 0; }
 .jjpm-lbl { color: var(--ink-2); font-size: 13px; }
 .jjpm-in { min-width: 0; }
+.jjpm-lines { width: 100%; max-width: 420px; resize: vertical; font-size: 12px; padding: 4px 6px; }   /* PAD-1508 */
 .jjpm-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .jjpm-name { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--line-2); font-size: 12px; max-width: 100%; }
 .jjpm-name .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -775,3 +776,56 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .jjpm-num { display: inline-flex; align-items: center; gap: 6px; }
 /* PAD-1412: the selected card's game, where the game picker was */
 .jjpm-game { display: inline-block; padding: 6px 12px; border: 1px solid var(--line, #3a3f47); border-radius: 6px; font-weight: 600; white-space: nowrap; }
+
+/* PAD-1515: the JJP screen layout editor (tabs/modes_layout.js) */
+.jjpl { margin: 4px 0 16px; display: flex; flex-direction: column; gap: 6px; }
+.jjpl-hd { gap: 8px; align-items: center; }
+.jjpl-title { font-weight: 600; }
+.jjpl-words button { text-transform: capitalize; }
+.jjpl-hint { margin-top: -2px; }
+.jjpl-canvas { position: relative; width: 100%; max-width: 960px; background: #000; overflow: hidden; border-radius: 4px;
+  outline: 1px solid var(--line); user-select: none; touch-action: none; }
+.jjpl-canvas:focus { outline: 1px solid var(--accent-line); }
+.jjpl-bk { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.jjpl-el { position: absolute; box-sizing: border-box; cursor: move; outline: 1px solid rgba(255, 255, 255, .35); }
+.jjpl-el.dflt { outline-style: dashed; }
+.jjpl-el.k-shared { outline: 1px dashed rgba(120, 200, 255, .8); }
+.jjpl-el.k-text, .jjpl-el.k-lines { outline-color: rgba(255, 220, 0, .45); }
+.jjpl-el.sel { outline: 2px solid var(--accent); z-index: 5; }
+.jjpl-el.off { display: none; }
+.jjpl-fill { position: absolute; inset: 0; }
+.jjpl-bar { position: absolute; left: 0; right: 0; }
+.jjpl-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.jjpl-empty { position: absolute; inset: 0; display: grid; place-items: center; color: #888; font-size: 11px; }
+.jjpl-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; white-space: nowrap;
+  transform-origin: center; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; pointer-events: none; }
+.jjpl-rows { position: absolute; inset: 0; pointer-events: none; }
+.jjpl-row { position: relative; }
+.jjpl-pickbar { position: absolute; left: 0; right: 0; top: 0; }
+.jjpl-rowtext { position: absolute; left: 2%; right: 2%; top: 0; }
+.jjpl-tag { position: absolute; left: 0; top: -15px; font-size: 10px; line-height: 14px; padding: 0 4px; color: #000;
+  background: rgba(255, 255, 255, .75); border-radius: 2px; white-space: nowrap; pointer-events: none; display: none; }
+.jjpl-el:hover .jjpl-tag, .jjpl-el.sel .jjpl-tag { display: block; }
+.jjpl-h { position: absolute; width: 9px; height: 9px; background: var(--accent); border: 1px solid #fff; z-index: 6; }
+.jjpl-h.h-nw { left: -5px; top: -5px; cursor: nwse-resize; } .jjpl-h.h-se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.jjpl-h.h-ne { right: -5px; top: -5px; cursor: nesw-resize; } .jjpl-h.h-sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.jjpl-h.h-n { left: calc(50% - 5px); top: -5px; cursor: ns-resize; } .jjpl-h.h-s { left: calc(50% - 5px); bottom: -5px; cursor: ns-resize; }
+.jjpl-h.h-w { left: -5px; top: calc(50% - 5px); cursor: ew-resize; } .jjpl-h.h-e { right: -5px; top: calc(50% - 5px); cursor: ew-resize; }
+.jjpl-guide { position: absolute; background: #ff3cc8; z-index: 7; pointer-events: none; }
+.jjpl-insp { gap: 10px; align-items: center; max-width: 960px; min-height: 30px; }
+.jjpl-num { display: inline-flex; gap: 4px; align-items: center; }
+.jjpl-num span { color: var(--ink-2); font-size: 12px; }
+.jjpl-num input { width: 70px; }
+.jjpl-part { position: absolute; inset: 0; background-repeat: no-repeat; pointer-events: none; }
+.jjpl-ghost { position: absolute; box-sizing: border-box; pointer-events: none; outline: 1px dashed rgba(255, 60, 200, .8);
+  background: repeating-linear-gradient(45deg, rgba(0, 0, 0, .55) 0 6px, rgba(255, 60, 200, .25) 6px 12px); }
+.jjpl-el.k-part { outline: 1px solid rgba(120, 200, 255, .35); }
+.jjpl-el.k-part.dflt { outline-style: dotted; }
+.jjpl-el.fixed { cursor: default; outline: 1px dotted rgba(160, 160, 160, .35); }
+.jjpl-el.hid { outline: 1px dashed rgba(255, 60, 60, .8); }
+.jjpl-parts { display: flex; flex-wrap: wrap; gap: 4px; max-width: 960px; align-items: center; }
+.jjpl-pchip { font: 11px var(--mono); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line); background: var(--bg-2);
+  color: var(--ink-2); cursor: pointer; }
+.jjpl-pchip.moved { border-color: rgba(255, 60, 200, .7); color: var(--ink); }
+.jjpl-pchip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--ink); }
+.jjpl-show { gap: 8px; align-items: center; margin: -6px 0 14px; }

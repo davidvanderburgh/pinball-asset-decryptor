@@ -19,10 +19,33 @@
 ' app's first window is its main window: 0 started v1.0.0 / v1.0.1 with the
 ' window created and never shown (the Tk app got away with 0 because its
 ' first window was an invisible root).
+'
+' Arguments are passed on (PAD-1514): Explorer starts this with a card
+' image's path when one is double-clicked, and the app opens on its write
+' dialog.  Each is quoted again, since WScript.Arguments has unquoted them.
 Set fso = CreateObject("Scripting.FileSystemObject")
 appDir = fso.GetParentFolderName(WScript.ScriptFullName)
+params = """" & appDir & "\Pinball Asset Decryptor.pyw"""
+For Each a In WScript.Arguments
+    params = params & " """ & a & """"
+Next
+' One launch is NOT elevated (PAD-1522): "--compact" as the first argument,
+' Explorer's right-click > Compact with PAD on a card image.  It only makes
+' the user's own file sparse, in a small window of its own, so it starts
+' with the plain "open" verb and no UAC prompt.
+compacting = False
+If WScript.Arguments.Count > 0 Then
+    If WScript.Arguments(0) = "--compact" Then compacting = True
+    ' PAD-1535: Move with PAD moves the user's own card, no prompt either
+    If WScript.Arguments(0) = "--move" Then compacting = True
+    ' PAD-1539: Copy with PAD copies the user's own card, no prompt either
+    If WScript.Arguments(0) = "--copy" Then compacting = True
+End If
 On Error Resume Next
+If compacting Then
+    CreateObject("Shell.Application").ShellExecute _
+        appDir & "\python\pythonw.exe", params, appDir, "open", 1
+    WScript.Quit
+End If
 CreateObject("Shell.Application").ShellExecute _
-    appDir & "\python\pythonw.exe", _
-    """" & appDir & "\Pinball Asset Decryptor.pyw""", _
-    appDir, "runas", 1
+    appDir & "\python\pythonw.exe", params, appDir, "runas", 1

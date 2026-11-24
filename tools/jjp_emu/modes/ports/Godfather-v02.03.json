@@ -38,6 +38,43 @@
   ]
  },
  "proc_modes": [],
+ "played": {
+  "can_watch": true,
+  "multiballs": true,
+  "names": [
+   "Baptism",
+   "BoxingMode",
+   "CompoundMB",
+   "DeliveryMode",
+   "DinnerSpecialsMode",
+   "FiveFamiliesMB",
+   "GodfatherMultiballRule",
+   "HonorMode",
+   "HungJuryMode",
+   "JobAwardMode",
+   "JobAwardMultiballRule",
+   "JobsMode",
+   "MarketDayMode",
+   "PursuitMode",
+   "RaidMode",
+   "ShakedownMode",
+   "SicilyMB",
+   "TakeTheCannoliMode",
+   "TributeMode",
+   "TurfWarMB",
+   "TurnpikeMode",
+   "WeddingFavorMode"
+  ],
+  "game_type": {
+   "can": true,
+   "buttons": {
+    "_Z28jjpe_is_left_flipper_pressedv": true,
+    "_Z29jjpe_is_right_flipper_pressedv": true
+   },
+   "attract_hook": true,
+   "diag_hook": true
+  }
+ },
  "media": {
   "can_play_own_media": true,
   "ok": {

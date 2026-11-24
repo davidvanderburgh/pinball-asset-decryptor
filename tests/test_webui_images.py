@@ -473,7 +473,8 @@ def test_clear_one_selected_and_all(scanned):
         w.call("images.choose", rel)
     items = w.call("images.menu", PLAIN, [PLAIN])
     labels = [it.get("label") for it in items if not it.get("sep")]
-    assert labels[:2] == ["Choose replacement…", "Clear replacement"]
+    # PAD-1547: a small PNG can be painted too
+    assert labels[:3] == ["Choose replacement…", "Edit pixels…", "Clear replacement"]
     assert w.call("images.act", "clear_one", PLAIN, [PLAIN]) == 1
     # the multi-row menu
     items = w.call("images.menu", BANNER, [BANNER, SPRITE, GLYPH])

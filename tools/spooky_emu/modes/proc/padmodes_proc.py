@@ -132,17 +132,28 @@ def join(game, mode_dir=None):
 
 
 # ============================================================================ the mode files
-def parse(text):
-    d = {}
+#: keys a mode file may give on several lines (PAD-1508), newline-joined as mkjjpmodes.py reads them
+REPEATABLE = {"shot_points": 8, "start_also": 3, "sound_at": 8, "penalty": 8}
+
+
+def parse(text, into=None):
+    d = dict(into or {})
+    seen = set()
     for raw in text.splitlines():
         s = raw.strip()
         if not s or s[0] in "#;" or "=" not in s:
             continue
         k, v = s.split("=", 1)
-        v = v.strip()
+        k, v = k.strip(), v.strip()
         if " #" in v:
             v = v[:v.index(" #")].strip()
-        d[k.strip()] = v
+        if k in REPEATABLE and k in d and (k in seen or into is not None):
+            lines = d[k].split("\n")
+            if len(lines) < REPEATABLE[k]:
+                d[k] = d[k] + "\n" + v
+        else:
+            d[k] = v
+        seen.add(k)
     return d
 
 
@@ -170,8 +181,7 @@ def load_modes(game, d):
     title = parse(_read(os.path.join(d, "title.cfg"))) if os.path.isfile(os.path.join(d, "title.cfg")) else {}
     out = []
     for fn in sorted(f for f in os.listdir(d) if f.endswith(".mode")):
-        cfg = dict(title)
-        cfg.update(parse(_read(os.path.join(d, fn))))
+        cfg = parse(_read(os.path.join(d, fn)), into=title)   # a title.cfg line and the mode's add up
         m = {
             "file": fn, "cfg": cfg, "name": cfg.get("name") or fn[:-5],
             "start": switches(game, fn, "start", cfg.get("start", "")),
@@ -185,6 +195,7 @@ def load_modes(game, d):
         }
         m["title"] = cfg.get("title") or m["name"]
         start_rules(game, fn, m, cfg)
+        spike2_rules(game, fn, m, cfg)
         m["dir"] = d
         lamps_coils_balls(game, fn, m, cfg)
         out.append(m)
@@ -192,6 +203,23 @@ def load_modes(game, d):
             fn, m["name"], " ".join(m["start"]) or "-", m["start_count"], " ".join(m["shots"]) or "-",
             m["points"], ("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends",
             m["complete"], m["complete_points"]))
+    names = {m["name"].lower(): m for m in out}
+    for m in out:
+        if m["inside"]:
+            m["inside_mode"] = names.get(m["inside"].lower())
+            if m["inside_mode"] is None or m["inside_mode"] is m:
+                m["inside_mode"] = None
+                log("%s: inside %s: no other mode of ours has that name; it can never start" % (m["file"], m["inside"]))
+            else:
+                log("%s: runs inside %s (starts only while it runs, ends with it)" % (m["file"], m["inside_mode"]["name"]))
+        if m["in_place_of"]:
+            log("%s: in place of the game's %s" % (m["file"], " ".join(sorted(m["in_place_of"]))))
+    for m in out:
+        if m["needs"]:
+            m["needs_mode"] = names.get(m["needs"].lower())
+            if m["needs_mode"] is None or m["needs_mode"] is m:
+                m["needs_mode"] = None
+                log("%s: start_needs %s: no other mode of ours has that name; it can never start" % (m["file"], m["needs"]))
     log("%d custom mode(s) from %s" % (len(out), d))
     return out, title
 
@@ -199,7 +227,7 @@ def load_modes(game, d):
 def start_rules(game, fn, m, cfg):
     """PAD-1424: JJP's start rules (MODES.md "Start rules from the game's hook lists")."""
     m["combo"] = switches(game, fn, "start_combo", cfg.get("start_combo", ""))
-    m["combo_seconds"] = max(1, to_int(cfg.get("combo_seconds"), 5))
+    m["combo_seconds"] = max(0, to_int(cfg.get("combo_seconds"), 5))      # 0: no time limit (PAD-1508)
     m["start_score"] = to_int(cfg.get("start_score"), 0)
     m["start_on"] = set(w.lower() for w in cfg.get("start_on", "").replace(",", " ").split())
     m["start_after"] = set(w.lower() for w in cfg.get("start_after", "").replace(",", " ").split())
@@ -211,6 +239,67 @@ def start_rules(game, fn, m, cfg):
             fn, " ".join(sorted(m["start_on"])) or "-", " ".join(sorted(m["start_after"])) or "-",
             m["start_score"], " ".join(m["combo"]) or "-", m["combo_seconds"], m["once"],
             "ball" if m["reset_ball"] else "game"))
+
+
+def _lines(cfg, key):
+    return [ln.strip() for ln in (cfg.get(key) or "").split("\n") if ln.strip()]
+
+
+def spike2_rules(game, fn, m, cfg):
+    """PAD-1508: Spike 2's rules, the JJP runtime's keys (tools/jjp_emu/MODES.md "Spike 2's rules")."""
+    def pairs(key):
+        out = []
+        for ln in _lines(cfg, key):
+            w = ln.split()
+            if len(w) >= 2 and to_int(w[-1], -1) >= 0:
+                out.append((switches(game, fn, key, " ".join(w[:-1])), to_int(w[-1])))
+            else:
+                log("%s: %s %s: wants <switches> <points>; skipped" % (fn, key, ln))
+        return out
+    m["shot_points"] = pairs("shot_points")
+    m["penalty"] = pairs("penalty")
+    m["ladder_rising"] = (cfg.get("points_ladder") or "fixed") == "rising"
+    m["end_shots"] = switches(game, fn, "end_shots", cfg.get("end_shots", ""))
+    m["start_max"] = max(0, to_int(cfg.get("start_max"), 0))
+    m["cooldown"] = max(0, to_int(cfg.get("cooldown"), 0))
+    also = []
+    for ln in _lines(cfg, "start_also"):
+        w = ln.split()
+        count = 1
+        if len(w) > 1 and to_int(w[-1], -1) > 0:
+            count, w = min(99, to_int(w[-1])), w[:-1]
+        also.append({"switches": switches(game, fn, "start_also", " ".join(w)), "count": count, "got": 0})
+    if also and not m["start"]:
+        log("%s: start_also adds to start, and there is no start line: ignored" % fn)
+        also = []
+    m["start_also"] = also
+    w = (cfg.get("start_needs") or "").split()
+    m["needs_ball"] = bool(w) and w[-1] == "ball"
+    if w and w[-1] in ("ball", "game"):
+        w = w[:-1]
+    m["needs"], m["needs_mode"] = " ".join(w), None
+    at = []
+    for ln in _lines(cfg, "sound_at"):
+        w = ln.split(None, 1)
+        if len(w) == 2 and to_int(w[0], 0) > 0:
+            at.append({"secs": to_int(w[0]), "sound": w[1].strip(), "done": False})
+        else:
+            log("%s: sound_at %s: wants <seconds left> <sound>; skipped" % (fn, ln))
+    m["sound_at"] = at
+    m["shot_every"] = max(0, to_int(cfg.get("sound_shot_every"), 0))
+    m["lamp_pattern"] = (cfg.get("lamp_pattern") or "").lower()
+    m.update(runs_game=0, ended_at=0.0)
+    # PAD-1508 (run 2): a mode inside another of ours, and a mode in a game mode's place
+    m["inside"], m["inside_mode"] = (cfg.get("inside") or "").strip(), None
+    m["in_place_of"] = set(w.lower() for w in (cfg.get("in_place_of") or "").replace(",", " ").split())
+    if any((m["shot_points"], m["penalty"], m["ladder_rising"], m["end_shots"], m["start_max"], m["cooldown"],
+            m["start_also"], m["needs"], m["sound_at"], m["shot_every"], m["lamp_pattern"])):
+        log("mode %s Spike 2 rules: %d shot_points, %d penalty, ladder %s, end shots %s, start_max %d, "
+            "cooldown %d s, %d start_also, start_needs %s, %d sound_at, shot sound every %d, lamp pattern %s" % (
+                fn, len(m["shot_points"]), len(m["penalty"]), "rising" if m["ladder_rising"] else "fixed",
+                " ".join(m["end_shots"]) or "-", m["start_max"], m["cooldown"], len(m["start_also"]),
+                (m["needs"] + (" (this ball)" if m["needs_ball"] else " (this game)")) if m["needs"] else "-",
+                len(m["sound_at"]), m["shot_every"], m["lamp_pattern"] or "-"))
 
 
 def lamps_coils_balls(game, fn, m, cfg):
@@ -380,6 +469,32 @@ def _runtime_class(base):
                         self.add_switch_handler(name=n, event_type="active", delay=None, handler=self.pad_switch)
             self.layer = None
             log("switch handlers on %s" % (" ".join(seen) or "-"))
+            if any(m.get("in_place_of") for m in modes):
+                self.pad_hook_queue()
+
+        def pad_hook_queue(self):
+            """in_place_of (PAD-1508): every mode the game starts goes through game.modes.add
+            (SkeletonGame's mode queue); ours looks at it first."""
+            q = getattr(self.game, "modes", None)
+            orig = getattr(q, "add", None)
+            if orig is None or getattr(orig, "pad_hooked", False):
+                log("in_place_of cannot work: the game's mode queue has no add()")
+                return
+            rt = self
+
+            def add(mode, *a, **k):
+                try:
+                    if mode is not rt and rt.pad_in_place(mode):
+                        return None
+                except Exception:
+                    log("in_place_of failed: %s" % traceback.format_exc())
+                return orig(mode, *a, **k)
+            add.pad_hooked = True
+            try:
+                q.add = add
+                log("in_place_of: the game's mode queue is ours to look at first")
+            except Exception:
+                log("in_place_of cannot work: the game's mode queue cannot be wrapped")
 
         # ------------------------------------------------------------ the game's events
         def mode_started(self):
@@ -393,7 +508,9 @@ def _runtime_class(base):
             for m in self.pad_modes:
                 self.pad_stop(m, "")
                 m["hits"] = 0
-                m.update(combo_at=0, ran_game=False, score_fired=set())
+                m.update(combo_at=0, ran_game=False, score_fired=set(), runs_game=0, ended_at=0.0)
+                for a in m.get("start_also", ()):
+                    a["got"] = 0
             log("game starting: start counts reset")
 
         def evt_ball_starting(self):
@@ -409,6 +526,8 @@ def _runtime_class(base):
                 m["ran_ball"], m["combo_at"] = False, 0
                 if m.get("reset_ball"):
                     m["hits"] = 0
+                    for a in m.get("start_also", ()):
+                        a["got"] = 0
             self.pad_event("ball_start")
             if ball == 1:
                 self.pad_event("first_ball")
@@ -455,26 +574,99 @@ def _runtime_class(base):
                     for m in self.pad_modes:
                         if m["running"]:
                             self.pad_running_switch(m, sw.name)
-                            if sw.name in m["shots"]:
-                                self.pad_shot(m, sw.name)
+                            value = self.pad_value(m, sw.name)
+                            if value is not None:
+                                self.pad_shot(m, sw.name, value)
+                            self.pad_penalty(m, sw.name)
+                            if m["running"] and sw.name in m.get("end_shots", ()):
+                                self.pad_stop(m, "end shot %s" % sw.name)
                             continue
                         self.pad_combo(m, sw.name, now)
+                        also = self.pad_also(m, sw.name)
                         if not m["running"] and sw.name in m["start"]:
-                            self.pad_fire(m, "start switch %s hit" % sw.name)
+                            self.pad_fire(m, "start switch %s hit" % sw.name, switch=True)
+                        elif also and not m["running"] and m["hits"] >= m["start_count"]:
+                            self.pad_fire(m, "start_also met on %s" % sw.name, switch=True, count=False)
             except Exception:
                 log("switch %s failed: %s" % (getattr(sw, "name", sw), traceback.format_exc()))
             return None             # SwitchContinue: the game's own modes still see the switch
 
         # ------------------------------------------------------------ start rules (PAD-1424)
-        def pad_fire(self, m, why):
+        def pad_blocked(self, m):
+            """Why m may not start (or count toward a start) now, or None: start_once, and
+            Spike 2's start_max, cooldown and start_needs (PAD-1508)."""
+            if m.get("once") == "ball" and m.get("ran_ball"):
+                return "already ran this ball (start_once)"
+            if m.get("once") == "game" and m.get("ran_game"):
+                return "already ran this game (start_once)"
+            if m.get("start_max") and m.get("runs_game", 0) >= m["start_max"]:
+                return "started %d time(s) this game, its start_max" % m["runs_game"]
+            if m.get("cooldown") and m.get("ended_at"):
+                left = m["cooldown"] - (time.time() - m["ended_at"])
+                if left > 0:
+                    return "cooling down, %d s left" % int(left + 0.999)
+            if m.get("needs"):
+                n = m.get("needs_mode")
+                if n is None:
+                    return "start_needs names no mode of ours"
+                if not (n.get("ran_ball") if m.get("needs_ball") else n.get("ran_game")):
+                    return "%s has not run this %s (start_needs)" % (n["name"], "ball" if m.get("needs_ball") else "game")
+            if m.get("inside"):
+                p = m.get("inside_mode")
+                if p is None:
+                    return "inside names no mode of ours"
+                if not p["running"]:
+                    return "it runs inside %s, which is not running" % p["name"]
+            return None
+
+        def pad_in_place(self, mode):
+            """in_place_of (PAD-1508): the game is starting one of its modes; a mode of ours that
+            takes its place starts instead, and the game's is not added.  True when taken."""
+            name = type(mode).__name__.lower()
+            for m in self.pad_modes:
+                if name not in m.get("in_place_of", ()) or m["running"]:
+                    continue
+                if not self.pad_playing():
+                    return False
+                no = self.pad_blocked(m)
+                if no:
+                    log("%s: the game's %s started as it always does - ours not started (%s)" % (m["name"], type(mode).__name__, no))
+                    return False
+                log("%s: the game's %s held off - ours starts in its place" % (m["name"], type(mode).__name__))
+                self.pad_start(m)
+                return True
+            return False
+
+        def pad_also(self, m, name):
+            """start_also (PAD-1508): a hit of one of its lines' switches counts, any order."""
+            hit = False
+            for i, a in enumerate(m.get("start_also", ())):
+                if name in a["switches"] and a["got"] < a["count"] and not m["running"]:
+                    why = self.pad_blocked(m)
+                    if why:
+                        log("%s: start_also %s not counted - %s" % (m["name"], name, why))
+                        return False
+                    a["got"] += 1
+                    hit = True
+                    log("%s: start_also %d, %s: %d of %d" % (m["name"], i + 1, name, a["got"], a["count"]))
+            return hit
+
+        def pad_fire(self, m, why, switch=False, count=True):
             """A start rule fired for m: one more toward its start_count."""
             if m["running"] or not self.pad_playing():
                 return
-            if (m.get("once") == "ball" and m.get("ran_ball")) or (m.get("once") == "game" and m.get("ran_game")):
+            no = self.pad_blocked(m)
+            if no:
+                log("%s: %s - not counted (%s)" % (m["name"], why, no))
                 return
-            m["hits"] += 1
-            log("%s: %s (%d of %d)" % (m["name"], why, m["hits"], m["start_count"]))
+            if count and m["hits"] < m["start_count"]:
+                m["hits"] += 1
+                log("%s: %s (%d of %d)" % (m["name"], why, m["hits"], m["start_count"]))
             if m["hits"] >= m["start_count"]:
+                waiting = [a for a in m.get("start_also", ()) if a["got"] < a["count"]]
+                if switch and waiting:
+                    log("%s: start shots made - waiting for %d start_also line(s)" % (m["name"], len(waiting)))
+                    return
                 self.pad_start(m)
 
         def pad_event(self, ev):
@@ -489,7 +681,7 @@ def _runtime_class(base):
             combo = m.get("combo") or []
             if len(combo) < 2 or m["running"]:
                 return
-            if m["combo_at"] > 0 and now - m["combo_time"] > m["combo_seconds"]:
+            if m["combo_at"] > 0 and m["combo_seconds"] > 0 and now - m["combo_time"] > m["combo_seconds"]:
                 m["combo_at"] = 0
             if combo[m["combo_at"]] == name:
                 m["combo_at"] += 1
@@ -541,6 +733,11 @@ def _runtime_class(base):
         def pad_start(self, m):
             m["hits"], m["running"], m["made"], m["total"] = 0, True, 0, 0
             m["combo_at"], m["ran_ball"], m["ran_game"] = 0, True, True
+            m["runs_game"] = m.get("runs_game", 0) + 1
+            for a in m.get("start_also", ()):
+                a["got"] = 0
+            for a in m.get("sound_at", ()):
+                a["done"] = False
             m["left"] = float(m["seconds"])
             log("%s: STARTED (%s)" % (m["name"], ("%d s" % m["seconds"]) if m["seconds"] > 0 else "until the ball ends"))
             self.pad_sound(m, "sound_start")
@@ -558,14 +755,38 @@ def _runtime_class(base):
             self.shown = m
             self.pad_draw()
 
-        def pad_shot(self, m, name):
-            got = pad_award(self.game, m["points"])
+        def pad_value(self, m, name):
+            """What a hit of name pays while m runs, or None when it does not score: the first
+            shot_points line holding it, else points when it is in shots (PAD-1508)."""
+            for sws, pts in m.get("shot_points", ()):
+                if name in sws:
+                    return pts
+            return m["points"] if name in m["shots"] else None
+
+        def pad_penalty(self, m, name):
+            """penalty (PAD-1508): a hit that does not score takes points away, never below 0."""
+            if self.pad_value(m, name) is not None:
+                return
+            for sws, pts in m.get("penalty", ()):
+                if name in sws:
+                    have = pad_score(self.game) or 0
+                    take = min(pts, have)
+                    got = pad_award(self.game, -take) if take > 0 else 0
+                    m["total"] += got
+                    log("%s: penalty shot %s: %d (asked %d), score %s" % (m["name"], name, got, pts, pad_score(self.game)))
+                    return
+
+        def pad_shot(self, m, name, value=None):
+            value = m["points"] if value is None else value
+            pts = value * (m["made"] + 1) if m.get("ladder_rising") else value
+            got = pad_award(self.game, pts)
             m["made"] += 1
             m["total"] += got
             log("%s: shot %d%s on %s: %d points (player score %s)" % (
                 m["name"], m["made"], (" of %d" % m["complete"]) if m["complete"] > 0 else "", name, got,
                 pad_score(self.game)))
-            self.pad_sound(m, "sound_shot")
+            if not m.get("shot_every") or m["made"] % m["shot_every"] == 0:
+                self.pad_sound(m, "sound_shot")
             self.pad_coil(m, "coil_shot")
             if m.get("hold_on") == "shots":
                 self.pad_hold(m)
@@ -584,6 +805,10 @@ def _runtime_class(base):
             if not m["running"]:
                 return
             m["running"] = False
+            m["ended_at"] = time.time()           # cooldown (PAD-1508)
+            for x in self.pad_modes:              # a mode inside this one ends with it (PAD-1508)
+                if x.get("inside_mode") is m and x["running"]:
+                    self.pad_stop(x, "the mode it runs inside ended")
             if why:
                 log("%s: ended (%s), %d shot(s), total %d" % (m["name"], why, m["made"], m["total"]))
                 self.pad_sound(m, "sound_end")
@@ -614,6 +839,11 @@ def _runtime_class(base):
                 for m in self.pad_modes:
                     if m["running"] and m["seconds"] > 0 and not (m.get("mb_served") and m.get("mb_on")):
                         m["left"] -= dt
+                        for a in m.get("sound_at", ()):     # PAD-1508: a sound at N seconds left
+                            if not a["done"] and a["secs"] < m["seconds"] and m["left"] <= a["secs"]:
+                                a["done"] = True
+                                log("%s: %d s left - sound_at %s" % (m["name"], a["secs"], a["sound"]))
+                                self.pad_sound(m, "sound_at", a["sound"])
                         if m["left"] <= 0:
                             self.pad_stop(m, "time ran out")
                     if m["running"]:
@@ -657,8 +887,20 @@ def _runtime_class(base):
                     led = _item(getattr(g, "leds", None), n)
                     lamp = None if led is not None else _item(getattr(g, "lamps", None), n)
                     if led is not None and ctl is not None:
-                        if on:
-                            c, b = m["lamp_color"], m["lamp_blink"]
+                        pat = m.get("lamp_pattern") or ("blink" if m["lamp_blink"] > 0 else "solid")
+                        if on and pat in ("pulse", "chase"):
+                            c, rate = m["lamp_color"], m["lamp_blink"] or 4
+                            if pat == "pulse":     # PAD-1508: the colour rising and falling
+                                half = int(500 / rate)
+                                script = [{"color": c, "time": half, "fade": True},
+                                          {"color": "000000", "time": half, "fade": True}]
+                            else:                  # chase: one lamp at a time, in the lamps line's order
+                                step, at = int(1000 / rate), names.index(n)
+                                script = [{"color": c if i == at else "000000", "time": step, "fade": False}
+                                          for i in range(len(names))]
+                            ctl.run_script(led.name, script, priority=PRIORITY, repeat=True, blend=False)
+                        elif on:
+                            c, b = m["lamp_color"], (0 if pat == "solid" else m["lamp_blink"] or 4)
                             if b > 0:
                                 half = int(500 / b)
                                 ctl.run_script(led.name, [{"color": c, "time": half, "fade": False},
@@ -674,7 +916,12 @@ def _runtime_class(base):
                             ctl.disable(led.name, priority=PRIORITY)
                         done.append(led.name)
                     elif lamp is not None:
-                        if on and m["lamp_blink"] > 0:
+                        pat = m.get("lamp_pattern") or ("blink" if m["lamp_blink"] > 0 else "solid")
+                        if on and pat == "chase" and len(names) > 1:      # PAD-1508: a slot of 32 each
+                            at, k = names.index(n), len(names)
+                            bits = sum(1 << b for b in range(32) if b * k // 32 == at)
+                            lamp.schedule(schedule=bits, cycle_seconds=0, now=True)
+                        elif on and pat != "solid" and m["lamp_blink"] > 0:
                             lamp.schedule(schedule=0x0f0f0f0f if m["lamp_blink"] >= 4 else 0x00ff00ff,
                                           cycle_seconds=0, now=True)
                         elif on:
@@ -829,8 +1076,8 @@ def _runtime_class(base):
                 pass
 
         # ------------------------------------------------------------ sounds
-        def pad_sound(self, m, key):
-            name = m["cfg"].get(key, "")
+        def pad_sound(self, m, key, name=None):
+            name = m["cfg"].get(key, "") if name is None else name
             if not name:
                 return
             if is_file(name):

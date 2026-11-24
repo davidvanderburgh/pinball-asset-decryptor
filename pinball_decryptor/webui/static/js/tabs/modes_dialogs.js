@@ -316,6 +316,9 @@ function CoopLook({ look }) {
           onClick=${() => call("modes.coop_chars_look", c.key, "")} />` : null}
       </span>`)}
     </div>
+    <${Check} checked=${!!look.match} label="Name and corners in each character's frame color"
+      title="Each character's cards draw its name, corners and arrows in its own frame color (the color well on its row, or Frame and lights), so every character has a color of its own. Off: the Name and Corners and arrows colors above, the same on every card."
+      onChange=${(v) => call("modes.coop_chars_look", "match", !!v)} />
     <div class="row" style="gap:8px">
       <${Button} size="sm" kind="ghost" icon="image" onClick=${() => call("modes.coop_chars_backdrop", false)}
         title=${look.backdrop ? "The picture behind every pick card and award card: choose another." : "A picture of your own behind every pick card and award card, in place of the panel (the panel's color then goes unused)."}>
@@ -479,7 +482,7 @@ export function CoopCharsDialog({ s, onClose }) {
     ${ch.intro ? html`<div class="row" style="margin-top:6px; gap:8px">
       <span class="small dim" style="white-space:nowrap">Light show with it</span>
       <${IntroShowPick} value=${ch.intro_show || ""} modeShows=${s.mode_shows || []} pick=${s.show_pick} disabled=${!!ch.intro_show_off}
-        title=${ch.intro_show_off || "One of the game's own light shows (the ones its modes play are listed under the mode, or pick any by its number), on the playfield while the intro plays; it stops when the intro ends or is skipped."} />
+        title=${ch.intro_show_off || "One of the game's own light shows (the ones its modes play are listed under the mode, or pick any by its number), the playfield's only lighting while the intro plays: the game's own start lighting goes out and the GI goes dark. It repeats until the intro ends or is skipped, then the game has the lights back."} />
       <span class="small dim wrap">${ch.intro_show_off || ((s.mode_shows || []).length ? "Each is listed under the game's mode that plays it (its How it works lists them too)." : "The game's modes' light shows are listed once the card has been read.")}</span>
     </div>` : null}
     <div class="row" style="margin-top:8px; gap:8px">

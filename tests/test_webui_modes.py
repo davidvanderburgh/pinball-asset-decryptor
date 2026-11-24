@@ -94,6 +94,8 @@ def test_visible_only_for_spike2_and_jjp_with_the_preview_switch(tmp_path, previ
         # PAD-1350: JJP has the tab too - its custom-modes editor (tests/test_webui_modes_jjp.py);
         # PAD-1417: Spooky too (tests/test_webui_modes_spooky.py)
         assert tabs["modes"]["visible"] == (mfr in ("stern", "jjp", "spooky"))
+        if mfr == "stern":
+            w.call("ui.select_tab", "modes")       # PAD-1546: the tab reads its state when shown
         st = w.state("modes")
         if mfr == "stern":
             # no project yet: the Tk tab's no-project state
@@ -1346,6 +1348,7 @@ def test_a_project_with_no_card_knows_no_game(tmp_path, preview_on):
     from pinball_decryptor.plugins.stern import mode_project as MP
     proj = tmp_path / "bare"
     with web_app(tmp_path, mfr="stern") as w:
+        w.call("ui.select_tab", "modes")       # PAD-1546: the tab reads its state when shown
         _project(w, proj, card=None)
         st = w.state("modes")
         # said once, in the note: the head keeps only the counts

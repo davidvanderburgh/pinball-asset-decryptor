@@ -223,8 +223,15 @@ def _pick_installer_asset(assets, platform=None, machine=None):
     digest = asset.get("digest") or ""
     sha256 = (digest[len("sha256:"):]
               if digest.startswith("sha256:") else None)
-    return {"name": asset["name"], "url": asset["browser_download_url"],
-            "size": asset.get("size") or 0, "sha256": sha256, "kind": kind}
+    picked = {"name": asset["name"], "url": asset["browser_download_url"],
+              "size": asset.get("size") or 0, "sha256": sha256, "kind": kind}
+    if kind == "windows-installer":
+        # PAD-1519: the release's file list, when it publishes one - an
+        # installed copy then updates from the changed files alone
+        # (core/update_delta.py) and never downloads the setup exe
+        from .update_delta import pick_manifest_asset
+        picked["delta"] = pick_manifest_asset(assets, asset["name"])
+    return picked
 
 
 def check_for_update(current_version, repo=None, not_ready_cb=None):
@@ -385,7 +392,14 @@ def staged_update_ok(path, installer, check_digest=True):
 
 
 # Inno Setup switches for the unattended install-over-the-top:
-#   /SILENT                   progress window only, no wizard
+#   /VERYSILENT               no wizard and no progress window either
+#                             (PAD-1529, David: "why am i suddenly seeing
+#                             the setup window").  The update splash
+#                             (core/update_splash) is what the user watches
+#                             from the click to the new version's window; a
+#                             Setup window on top of it read as something
+#                             having gone wrong.  Not /SUPPRESSMSGBOXES: an
+#                             install that cannot go on still says so
 #   /NORESTART                never reboot out from under the user
 #   /FORCECLOSEAPPLICATIONS   let Setup close our python process if it's
 #                             somehow still holding files when the copy
@@ -402,7 +416,7 @@ def staged_update_ok(path, installer, check_digest=True):
 #                             "Install Missing" if any are actually gone);
 #                             MERGETASKS keeps the user's other remembered
 #                             choices (e.g. desktop icon) intact.
-INSTALLER_ARGS = ('/SILENT /NORESTART /FORCECLOSEAPPLICATIONS /RELAUNCH=1 '
+INSTALLER_ARGS = ('/VERYSILENT /NORESTART /FORCECLOSEAPPLICATIONS /RELAUNCH=1 '
                   '/MERGETASKS="!runprereqs"')
 
 

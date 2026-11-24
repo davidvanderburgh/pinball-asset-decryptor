@@ -329,6 +329,10 @@ value roster_select_ms      13000
 # up between English and Japanese at each release of a flipper BUTTON, the cabinet inputs 137 (left) / 139 (right);
 # the co-op pick keeps them from it while it has the flippers (coop.cfg's left / button)
 site language_keys       0x0013c3b8 0xe92d40f8 0xe1a04001
+# PAD-1449 round 11: the play-begun check its PLAYER LANGUAGE SELECT bar and flipper toggle ask (their only two callers);
+# its byte is cleared at a Start and set at the first playfield switch the game counts as play
+site language_begun     0x0016d8f4 0xe5d00008 0xe3500000
+data language_play_begun 0x007074a0
 value language_keys_left   137
 value language_keys_right  139
 # PAD-1114: PLAYER LANGUAGE SELECT (adjustment 14: the bar over the start film) and each player's language
@@ -652,6 +656,7 @@ lamp 397          0              SCOOP BB-BATTLE  # lamp 184, I/O group 6 index 
 lamp 398          0              SCOOP BB-GODZILLA PWR UP  # lamp 185, I/O group 6 index 15, at 254,346
 lamp 399          0              SCOOP BB-SUMMON ALLY  # lamp 186, I/O group 6 index 16, at 254,346
 lamp 401          0              LOWER PLAYFIELD GI-RED(X4)  # lamp 188, I/O group 6 index 0, at 0,0
+lamp 402          0              LOWER PLAYFIELD GI-WHT(X8)  # lamp 189, I/O group 6 index 1, at 0,0
 lamp 403          0              UPPER PLAYFIELD GI-RED(X9)  # lamp 190, I/O group 7 index 0, at 0,0
 lamp 404          0              UPPER PLAYFIELD GI-WHT(X12)  # lamp 191, I/O group 7 index 1, at 0,0
 lamp 405          0              MASER FIRE FLASH  # lamp 192, I/O group 6 index 48, at 91,438

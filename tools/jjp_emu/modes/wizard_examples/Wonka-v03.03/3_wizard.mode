@@ -1,0 +1,14 @@
+# A wizard mode for Wonka-v03.03: it starts once the player has played these 4 of the game's own
+# modes in one game, or when PAD WIZARD is picked on the attract menu (hold both flipper
+# buttons a second in attract).  Every key: tools/jjp_emu/MODES.md
+name = PAD Wizard
+title = PAD WIZARD
+start_all = CandyLaneMode DotsMode FactoryTourMode MikeTeaveeMode
+game_type = PAD WIZARD
+shots = switch_target_tv switch_ramp_center_made switch_ramp_left_made
+points = 3000000
+points_ladder = rising
+multiball = 3 20
+seconds = 0
+sound_start = se_Fanfare_GobMB_Intro
+sound_shot = se_Fanfare_Jackpot

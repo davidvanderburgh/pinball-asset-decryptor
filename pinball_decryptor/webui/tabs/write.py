@@ -457,6 +457,11 @@ def _ask_grow_here(then=None):
     return True
 
 
+#: PAD-1531: the Write tab's note for a project built for sharing (Network tab)
+SHARE_NOTE = ("Build for sharing is on (Network tab): cards and images from this project carry no remote access, "
+              "and none of the machine's own settings, scores or logs.")
+
+
 class WriteTab(TabService):
     ns = "write"
     key = "Write"
@@ -1061,6 +1066,19 @@ class WriteTab(TabService):
                 "WARNING: %d video(s) go on bigger than their slot on a machine where that has not been tested "
                 "yet: they may show oversized or cut off. Untick Imported size on the Video tab to convert them "
                 "to the slot's size." % n)})
+        # PAD-1531: who a card written from here lets in over the network (a shared image must let nobody in)
+        try:
+            from ...core import card_extras, ssh_card
+            if ssh_card.offered(mfr):
+                cfg = card_extras.configuration(assets)
+                if cfg is not None and cfg.get("share"):
+                    infos.append({"kind": "", "text": SHARE_NOTE})
+                else:
+                    said = ssh_card.who_gets_in((self.write_upd_var.get() or "").strip(), cfg)
+                    if said:
+                        warns.append({"kind": "warn", "text": said[1]})
+        except Exception:                               # noqa: BLE001 - the note just isn't shown
+            pass
         return errs + warns + infos
 
     def _refresh_prebuild_notes(self):
@@ -1985,6 +2003,18 @@ class WriteTab(TabService):
                 changed = 0
             if changed is None:
                 return                                  # superseded
+            # PAD-1546: the chosen-files colour row is worked out here first (numpy's import and the
+            # Recommended profile's fit, a quarter of a second and more at start, both kept once made):
+            # the loop's pass over the pending rows then finds them ready instead of holding up the page.
+            # At start it waits for the tabs to be on the page: loading numpy's libraries holds every
+            # thread up, the loop too (a second from a cold disk)
+            deadline = time.monotonic() + 5.0
+            while self.store.get("shell", "opening") and time.monotonic() < deadline:
+                time.sleep(0.05)
+            try:
+                write_scan.chosen_files_rows(mfr, assets_path)
+            except Exception:                           # noqa: BLE001 - the loop's pass says what is wrong
+                pass
             if self._scan_id == scan_id:
                 _post(self._finish_scan, changed, scan_id, assets_path)
 
@@ -2325,7 +2355,7 @@ class WriteTab(TabService):
     # the Build / flash dialog
     # ------------------------------------------------------------------
     def _open_flash_dialog(self, initial_image=None, fresh=False,
-                           image_titles=None):
+                           image_titles=None, opened_file=False):
         on_flash = self.window.cb.get("on_flash_image")
         if on_flash is None:
             return False
@@ -2355,7 +2385,9 @@ class WriteTab(TabService):
         handed_in = ""
         if initial_image and os.path.isfile(initial_image):
             initial = initial_image
-            handed_in = "Multi-boot"
+            # PAD-1514: an image double-clicked in Explorer, not a card the
+            # Multi-boot tab made
+            handed_in = "" if opened_file else "Multi-boot"
         if self._flash is not None:
             self._flash.close()
         # Tk opened the dialog over whatever tab was showing.  Once the shell
@@ -2411,6 +2443,7 @@ class WriteTab(TabService):
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(
                 k, c),
             handed_in=handed_in, fresh_image=bool(handed_in and fresh),
+            opened_file=bool(opened_file and initial_image),
             flashed_fn=self._image_was_flashed, image_titles=image_titles,
             publish=self._publish_flash,
             ask_open=self.window.ask_open, ask_save=self._ask_save)

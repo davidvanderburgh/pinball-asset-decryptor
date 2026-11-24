@@ -90,7 +90,8 @@ _STR_FIELDS = (
     "challenge",                                                                      # PAD-615
     "challenge_launch", "challenge_launch_s",                                         # PAD-643
     "place_mode",                                                                     # PAD-710
-    "done_count")                                                                     # PAD-747
+    "done_count",                                                                     # PAD-747
+    "with_mode")                                                                      # PAD-1537
 _DEFAULTS = {
     "screen": True, "countdown": True, "lights": False, "advanced": False, "stack": True,
     "light_shots_on": False, "panel_color": "#000000", "title_color": "#000000",
@@ -112,6 +113,7 @@ _DEFAULTS = {
     "challenge_launch": "clip", "challenge_launch_s": "4",                          # PAD-643: clip, time or player
     "place_mode": "",                                                               # PAD-710: by its name
     "done_count": "4",                                                              # PAD-747
+    "with_mode": "",                                                                # PAD-1537: by its name
     # PAD-414: the shaker - as it starts, on a shot, as it ends; a shake of the mode's own (strength + seconds) or
     # one of the game's ("game:<name>")
     "shake_on_start": False, "shake_on_shot": False, "shake_on_end": False,
@@ -322,7 +324,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
     _LIGHT_PATTERN_WORDS = (("solid", "Solid"), ("blink", "Blink"), ("pulse", "Pulse"),
                             ("chase", "Chase"))
     _PART_SECTIONS = ("lights", "screen", "clip", "multiball", "ball_save", "magnet", "scoop", "coils", "shield",
-                      "building", "shaker", "shows", "wizard", "roster", "challenge", "place", "done")
+                      "building", "shaker", "shows", "wizard", "roster", "challenge", "place", "done", "with")
     _TWO_COLUMN_SHOTS = 18
     CHALLENGE_NEW = "A new challenge of its own"       # PAD-615 round 2: the Starts on choice that adds one
     _PROBE_TRIES = 240
@@ -381,6 +383,8 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
 
     def __init__(self, window):
         super().__init__(window)
+        # PAD-1546: a manufacturer or project change waits for the tab to be shown
+        self._unread = False
         self.f = _blank_form()
         self._shot_names = []              # the shown title's shots; none until a card says
         self._shots_on = set()
@@ -533,6 +537,8 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         keeps its PATH, so nothing else here notices, and "This project names no card"
         stayed up until a restart. ``quick`` (the ticker) first asks the files' size and
         time whether anything was written. True when it refreshed."""
+        if not self.shown():               # PAD-1546: on_show asks the same
+            return False
         project = self.project()
         if (project and getattr(self, "_visible", False) and self._preview_on()
                 and self._title_stale(project, quick)):
@@ -585,17 +591,29 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             self.ctx.loop.post(fn, *args)
 
     def _on_project_changed(self):
+        if not self._load_now():
+            return
         if self._spk_on():
-            if getattr(self, "_visible", False):
-                self._post(self.spk_refresh)        # the sound folder may follow the project
+            self._post(self.spk_refresh)        # the sound folder may follow the project
             return
         if self._jjp_on():
-            if getattr(self, "_visible", False):
-                self._post(self.jjp_refresh)        # the sound folder may follow the project
+            self._post(self.jjp_refresh)        # the sound folder may follow the project
             return
-        if not getattr(self, "_visible", False) or not self._preview_on():
+        if not self._preview_on():
             return
         self._post(self._refresh_all)
+
+    def _load_now(self):
+        """PAD-1546: a manufacturer or project change reads the modes now only while this
+        tab is the one on screen.  Behind another tab it is read when the tab is next shown
+        (on_show), so opening the last project at start, about 0.4 s of reading every port
+        file, does not hold up the tabs coming up."""
+        if not getattr(self, "_visible", False):
+            return False
+        if self.shown():
+            return True
+        self._unread = True
+        return False
 
     def _refresh_all(self):
         self.refresh()
@@ -611,17 +629,18 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
     def on_manufacturer(self, mfr):
         if self._spk_on():
             self.set(jjp={"on": False})
-            if getattr(self, "_visible", False):
+            if self._load_now():
                 self.spk_refresh()
             return
         self.set(spk={"on": False})
         if self._jjp_on():
-            if getattr(self, "_visible", False):
+            if self._load_now():
                 self.jjp_refresh()
             return
         self.set(jjp={"on": False})
         self._hook_vars()
-        if getattr(self, "_visible", False):
+        if self._load_now():
+            self._unread = False
             self._refresh_all()
             self._show_emu()
 
@@ -637,15 +656,21 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             self.jjp_refresh()
             return
         self._hook_vars()
-        if self.project() != (self.get("project") or "") or (
+        if self._unread:
+            # PAD-1546: a manufacturer or project change came while another tab was shown
+            self._unread = False
+            self._save_if_edited()
+            self._refresh_all()
+        elif self.project() != (self.get("project") or "") or (
                 self._slug is not None and not os.path.isfile(
                     os.path.join(MP.mode_folder(self._open_project, self._slug), MP.MODE_FILE))
                 ) or self._title_stale(self.project()):
             self._save_if_edited()
             self.refresh()
+            self.refresh_stock_modes()
         else:
             self._refresh_list()
-        self.refresh_stock_modes()
+            self.refresh_stock_modes()
         self._show_emu()
         self._kick_ticker()
 
@@ -992,7 +1017,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         "and what it does, the flippers move to the next one (one another teammate has is skipped), the Action button "
         "takes it, and when the time to pick runs out (the seconds count down on the machine) the one shown is taken. "
         "RANDOM picks one nobody has. Its ability holds while that teammate is up. A player alone picks one too by "
-        "holding the right flipper button while pressing Start to begin the game.")
+        "choosing CHARACTERS or ENHANCED for their game on the start menu.")
 
     def _publish_coop_chars(self, project):
         from ...plugins.stern import coop_play as _CP
@@ -1071,13 +1096,17 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         from ...plugins.stern import coop_play as _CP
         th = _CP.theme_of(chars.get("theme"))
         own = chars.get("theme") or {}
+        match = bool(th["match"])
         colours = [{"key": k, "label": label, "value": th[k] or (_CP.PANEL_STOCK if k == "panel" else th["accent"]),
                     "own": bool(own.get(k)), "follows": not th[k],
-                    "hint": ("the stock dark panel until you pick one" if k == "panel"
-                             else "the frame's color until you pick one") if not th[k] else ""}
+                    # PAD-1513: with match on, a character's cards take its frame color here; this one is RANDOM's
+                    "hint": ("each character's cards use its frame color; this one is for the RANDOM card"
+                             if match and k in _CP.MATCH_ROLES else
+                             ("the stock dark panel until you pick one" if k == "panel"
+                              else "the frame's color until you pick one") if not th[k] else "")}
                    for k, label in _CP.COLOUR_ROLES]
         return {"title": th["title"], "colours": colours, "backdrop": bool(_CP.backdrop_path(project, th)),
-                "dim": th["dim"], "dims": list(_CP.DIMS)}
+                "dim": th["dim"], "dims": list(_CP.DIMS), "match": match}
 
     def _save_coop_chars(self, project, chars, what, was, now):
         from ...core import history_log
@@ -1191,8 +1220,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
 
     @rpc
     def coop_chars_look(self, key, value=None):
-        """PAD-1079: one part of the pick's look: its title, a colour (``#rrggbb``; ``""`` the default again) or how
-        dark its background picture is drawn."""
+        """PAD-1079: one part of the pick's look: its title, a colour (``#rrggbb``; ``""`` the default again), how
+        dark its background picture is drawn, or (PAD-1513, ``match``) whether each character's name and corners take
+        its frame colour."""
         from ...core import history_log
         from ...plugins.stern import coop_play as _CP
         project = self.project()
@@ -2803,6 +2833,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                                  else "battle" if MP.starts_on_battle(spec)
                                  else "challenge" if MP.starts_on_challenge(spec)
                                  else "game_mode" if MP.starts_on_place(spec)
+                                 else "with_game" if MP.starts_on_with(spec)
                                  else "completed" if MP.starts_on_done(spec) else "shot")
         roster = list(getattr(self._shown or self._profile, "roster", ()) or ())     # PAD-589: by its name
         slot = MP._int_or_none(getattr(spec, "roster_slot", -1))
@@ -2815,6 +2846,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         places = {i: nm for i, nm, _c in getattr(self._shown or self._profile, "places", ()) or ()}   # PAD-710
         n = MP._int_or_none(getattr(spec, "place_mode", -1))
         self.f["place_mode"] = places.get(n, "") if n is not None else ""
+        follows = {i: nm for i, nm, _e in getattr(self._shown or self._profile, "follows", ()) or ()}   # PAD-1537
+        n = MP._int_or_none(getattr(spec, "with_mode", -1))
+        self.f["with_mode"] = follows.get(n, "") if n is not None else ""
         p = self._shown or self._profile                                                # PAD-747
         n = MP._int_or_none(getattr(spec, "done_count", 4))
         self.f["done_count"] = str(n if n is not None and n > 0 else 4)
@@ -2855,6 +2889,8 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             spec.starts_on = "game_mode"
         elif self.f["starts_kind"] == "completed":       # PAD-747
             spec.starts_on = "completed"
+        elif self.f["starts_kind"] == "with_game":       # PAD-1537
+            spec.starts_on = "with_game"
         else:
             spec.starts_on = "shot"
         roster = list(getattr(self._shown or self._profile, "roster", ()) or ())     # PAD-589
@@ -2871,6 +2907,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         by_name = {nm: i for i, nm, _c in getattr(self._shown or self._profile, "places", ()) or ()}   # PAD-710
         name = str(self.f["place_mode"]).strip()
         spec.place_mode = by_name.get(name, -1) if spec.starts_on == "game_mode" else -1
+        by_name = {nm: i for i, nm, _e in getattr(self._shown or self._profile, "follows", ()) or ()}   # PAD-1537
+        name = str(self.f["with_mode"]).strip()
+        spec.with_mode = by_name.get(name, -1) if spec.starts_on == "with_game" else -1
         n = MP._int_or_none(self.f["done_count"])                                        # PAD-747
         spec.done_count = n if n is not None else 4
         spec.done_modes = sorted(self._done_on) if spec.starts_on == "completed" else []
@@ -3024,6 +3063,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                     "mb_on_shots": [self.MB_ON_START], "game_modes": [], "magnet_shot": "",
                     "held_coils": [], "shield_rule": "", "building_floors": [], "building_rule": "", "roster": [], "challenges": [],
                     "places": [], "place_found": False, "done_modes": [], "done_found": False,
+                    "follows": [], "follow_found": False,
                     "game_shows": [], "show_numbers": 0, "shakes": [], "shake_max": [],
                     "game_wizards": [], "wizard_shot": "", "wizard_lights": [], "wizard_claims": False}
         names = [n for n, _m in p.shots]
@@ -3070,6 +3110,10 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 # main: one the app names a start of, else one the game only keeps books of), and whether there are any
                 "done_modes": [{"id": i, "name": nm, "main": i < MP.DONE_EXTRA} for i, nm in getattr(p, "done_modes", ()) or ()],
                 "done_found": bool(getattr(p, "done_modes", ())) or "has found" in p.why_not("done"),
+                # PAD-1537: the game's own modes a mode may run with (its intro and outro), and how the app sees each
+                # end: "stop" (every end), "completed" (only that one: else its clock), "clock" (none: its clock)
+                "follows": [{"id": i, "name": nm, "ends": e} for i, nm, e in getattr(p, "follows", ()) or ()],
+                "follow_found": bool(getattr(p, "follows", ())) or "has found" in p.why_not("with"),
                 # PAD-414: what a shake can be - one of the mode's own at a strength, or one of the game's
                 # (PAD-474: only the strengths the game itself shakes at; a one-power shaker has hard alone)
                 "shakes": ([{"value": w, "label": "a %s shake" % w} for k, w in MP.SHAKE_STRENGTHS.items()
@@ -3463,7 +3507,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                                      "film_still", "film_sound", "own_extra", "lit_shots",
                                      "show_order", "multiball", "ball_save", "give_way", "block", "own_game",
                                      "magnet", "scoop", "coils", "shield", "building", "shaker", "shows",
-                                     "wizard", "roster", "challenge", "place", "done")}
+                                     "wizard", "roster", "challenge", "place", "done", "with")}
             self.set(reasons={}, limits={}, dis=dis, hide={}, editor_on=False, dup_ok=False,
                      del_ok=bool(on or self._code_slug))
             return
@@ -5600,8 +5644,66 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
             "build": MP.title_label(build.game, build.version),
             "about": about, "starts": list(getattr(mode, "starts", []) or [])[:3],
             "how": self._how_for(build, mid),
+            "follow": self._follow_for(build.mode_name(mid), mid),          # PAD-1537
             "note": keep_note if note is None else note,
             "n_changed": sum(1 for r in rows if r["changed"])})
+
+    def _follow_id(self, name, mid):
+        """PAD-1537: the id the runtime knows the game's mode by (the profile's follows), matched by its name, else the
+        stock table's own id where the port names that one; None when a mode cannot run with it here."""
+        follows = getattr(self._profile, "follows", ()) or ()
+        want = (name or "").strip().lower()
+        for i, nm, _e in follows:
+            if nm.strip().lower() == want:
+                return i
+        return mid if any(i == mid for i, _nm, _e in follows) else None
+
+    def _follow_for(self, name, mid):
+        """PAD-1537: the game's mode page's Intro and outro: whether a mode of yours can run with it here, how its end
+        is seen, and the modes of yours that do."""
+        p = self._profile
+        if p is None:
+            return None
+        fid = self._follow_id(name, mid)
+        why = p.why_not("with")
+        if not why and fid is None:
+            why = "The app does not see %s start on this build, so a mode of yours cannot run with it." % name
+        mine = []
+        project = self.project()
+        if project and fid is not None:
+            try:
+                listed = MP.list_modes(project)[0]
+            except (MP.ModeProjectError, OSError):
+                listed = []
+            mine = [{"slug": slug, "name": spec.name} for slug, spec in listed
+                    if MP.starts_on_with(spec) and MP._int_or_none(getattr(spec, "with_mode", -1)) == fid]
+        ends = next((e for i, _nm, e in getattr(p, "follows", ()) or () if i == fid), "")
+        return {"id": fid, "can": not why, "why": why, "ends": ends, "mine": mine}
+
+    @rpc
+    def intro_outro(self):
+        """PAD-1537: a new mode of yours that runs with the game's mode on the page - its intro and outro - set up to
+        score nothing and show nothing of its own, opened for its clips and sounds."""
+        build, mid = self._stock_build, self._game_mode
+        if build is None or mid is None or self._profile is None:
+            return None
+        name = build.mode_name(mid)
+        f = self._follow_for(name, mid) or {}
+        if not f.get("can"):
+            compat.messagebox.showinfo("Intro and outro", f.get("why") or "Not on this game.")
+            return None
+        spec = self._blank_spec()
+        spec.starts_on, spec.with_mode = "with_game", f["id"]
+        spec.scoring_shots, spec.award = [], 0
+        spec.seconds = 0 if f.get("ends") == "stop" else 30
+        spec.screen = spec.lights = spec.countdown = False
+        spec.game_modes = "stack"
+        spec.clip, spec.clip_when = "none", "start"
+        try:
+            return self.new_mode(("%s INTRO" % name).upper()[:40], spec)
+        except MP.ModeProjectError as e:
+            compat.messagebox.showinfo("Intro and outro", str(e))
+            return None
 
     @rpc
     def game_set(self, key, value):

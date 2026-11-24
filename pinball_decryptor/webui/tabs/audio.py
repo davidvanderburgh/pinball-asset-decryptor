@@ -231,6 +231,48 @@ def _uses_lines(uses):
     return lines
 
 
+def _song_name(rel, secs):
+    """A sound as a song's tip names it: its file's name and length (PAD-1542)."""
+    return "%s (%.1f s)" % (os.path.splitext(os.path.basename(rel))[0], secs or 0.0)
+
+
+def _song_cells(rel, parts):
+    """PAD-1542: row *rel*'s song-in-parts badge (``sp`` its words, ``spn`` how many parts the
+    song has) and tip (``sp_tip``), off *parts* (every row's
+    :meth:`.registry.Manufacturer.sound_song_parts`: the pieces a sound's song plays with it,
+    or the songs' music it is a piece of).  A replacement for a song's music plays in place of
+    the whole song: Write leaves its other pieces out, except those the game also plays in
+    other sounds."""
+    sp = parts.get(rel) or {}
+    if sp.get("pieces"):
+        kept = {r for r, _s in sp.get("kept") or ()}
+        gone = [_song_name(r, s) for r, s in sp["pieces"] if r not in kept]
+        stay = [_song_name(r, s) for r, s in sp["pieces"] if r in kept]
+        n = len(sp["pieces"]) + 1
+        lines = ["The game plays this sound as one song with %s." % ", ".join(
+            _song_name(r, s) for r, s in sp["pieces"])]
+        if gone:
+            lines.append("A replacement here plays in place of the whole song: Write "
+                         "leaves %s out of it." % ", ".join(gone))
+        if stay:
+            lines.append("Kept in it, as the game also plays them in other sounds: %s."
+                         % ", ".join(stay))
+        return {"sp": "Song in %d parts" % n, "spn": n, "sp_tip": lines}
+    music = sp.get("music") or ()
+    if not music:
+        return {}
+    songs = [parts.get(m) or {} for m, _s in music]
+    held = all(rel in {k for k, _s in s.get("kept") or ()} for s in songs)
+    lines = ["A piece of a song: the game plays it with %s, the song's music." % ", ".join(
+        _song_name(r, s) for r, s in music),
+             "This piece stays in the song even then: the game also plays it in other "
+             "sounds." if held else
+             "Replace that sound and this piece drops out, so the replacement plays in "
+             "place of the whole song."]
+    n = max(len(s.get("pieces") or ()) for s in songs) + 1
+    return {"sp": "Piece of a song", "spn": n, "sp_tip": lines}
+
+
 def _variants_lines(n, duration):
     """The Format cell's tip for a file of *n* variants of one sound (PAD-637)."""
     each = (duration or 0.0) / n
@@ -397,10 +439,10 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         self.audio_play_subst_var.set(
             self._pref("audio_play_subst", bool) is True)
         self.audio_play_through_var.trace_add(
-            "write", lambda *a: self._remember(
+            "write", lambda *a: self._remember_pref(
                 "audio_play_through", bool(self.audio_play_through_var.get())))
         self.audio_play_subst_var.trace_add(
-            "write", lambda *a: self._remember(
+            "write", lambda *a: self._remember_pref(
                 "audio_play_subst", bool(self.audio_play_subst_var.get())))
         self.audio_search_var.trace_add("write",
                                         lambda *a: self._refresh_list())
@@ -423,6 +465,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         self._level = {}            # rel -> int dB (Stern)
         self._uses = None           # rel -> [(request, name)] (PAD-635)
         self._variants = {}         # rel -> variants its file holds (PAD-637)
+        self._parts = {}            # rel -> its song's pieces (PAD-1542)
         self._keep_whole = []       # ordered rels (Stern Spike 2 grow)
         # PAD-494: a slot's files for the other MUSIC MODES ({rel: {mode: path}}),
         # the modes' names, and the plugin's answer to which slots can have them
@@ -894,10 +937,16 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
                     assets_path, [s.rel_path for s in slots]) if mfr else None)
             except Exception:                           # noqa: BLE001
                 variants = None
+            # PAD-1542: which slots the game plays as one song with others
+            try:
+                parts = (mfr.sound_song_parts(
+                    assets_path, [s.rel_path for s in slots]) if mfr else None)
+            except Exception:                           # noqa: BLE001
+                parts = None
             if self._scan_id != scan_id:
                 return
             self._post(self._populate_after_scan, slots, scan_id,
-                       assets_path, cats, offer, uses, variants, req_why)
+                       assets_path, cats, offer, uses, variants, req_why, parts)
 
         self._set_scanning(True)
         threading.Thread(target=_work, daemon=True,
@@ -944,7 +993,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
 
     def _populate_after_scan(self, slots, scan_id, scan_dir, cats=None,
                              offer=None, uses=None, variants=None,
-                             req_why=""):
+                             req_why="", parts=None):
         from ...core import staged_changes
         if self._scan_id != scan_id:
             return
@@ -952,6 +1001,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         self._cats = cats or {}
         self._uses = uses if isinstance(uses, dict) else None
         self._variants = variants if isinstance(variants, dict) else {}
+        self._parts = parts if isinstance(parts, dict) else {}
         if self._uses is None and self._sort[0] == "rq":
             self._sort = ("#0", False)
         self.set(req_cap=self._uses is not None, req_tip=_REQ_TIP,
@@ -1542,6 +1592,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
             row["rq"] = len(uses)
             row["rq_tip"] = _uses_lines(uses)
         row.update(self._fmt_cells(s))
+        row.update(_song_cells(rel, self._parts))
         # Simon (2026-11-21): Origin - the official card's sound, or custom
         info = getattr(self, "_origin_info", None)
         if info:
@@ -1811,7 +1862,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         if value not in _CHANGE_FILTER_VALUES:
             return False
         self.audio_change_filter_var.set(value)
-        self._remember("audio_show", value)
+        self._remember_pref("audio_show", value)
         self._save_staged_changes()
         return True
 
@@ -1821,7 +1872,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         between sessions). PAD-1275: the tick reads "Show unused" now, so it
         sends the opposite of what it shows."""
         self.audio_hide_unused_var.set(bool(on))
-        self._remember("audio_hide_unused", bool(on))
+        self._remember_pref("audio_hide_unused", bool(on))
         self._save_staged_changes()
         return True
 
@@ -1830,7 +1881,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         if value != "All types" and value not in _TYPE_KEYS:
             return False
         self.audio_type_var.set(value)
-        self._remember("audio_type", value)
+        self._remember_pref("audio_type", value)
         self._refresh_list()
         return True
 
@@ -1866,33 +1917,6 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
     # PAD-1176 / PAD-1209: toolbar choices kept app-wide in settings.json
     _SHOW_COMMENTS_KEY = "audio_show_comments"
 
-    def _pref(self, key, kind):
-        """The value *key* was last set to (of type *kind*), this session
-        or an earlier one; None when it never was."""
-        app = self.app
-        s = getattr(app, "_settings", None) if app is not None else None
-        got = s.get(key) if isinstance(s, dict) else None
-        if not isinstance(got, kind):
-            got = getattr(self, "_prefs_local", {}).get(key)
-        return got if isinstance(got, kind) else None
-
-    def _remember(self, key, value):
-        """Keep *value* for *key* in settings.json (saved straight away, so
-        it is there next session whatever way the app is closed)."""
-        if not hasattr(self, "_prefs_local"):
-            self._prefs_local = {}
-        if self._prefs_local.get(key) == value and self._pref(
-                key, type(value)) == value:
-            return
-        self._prefs_local[key] = value
-        app = self.app
-        if app is not None and isinstance(getattr(app, "_settings", None), dict):
-            app._settings[key] = value
-            try:
-                app._save_settings()
-            except Exception:                              # noqa: BLE001
-                pass
-
     def _show_comments_pref(self):
         """True / False once "Show comments" was ticked or unticked; None
         before (the Comment column then shows once a sound has a comment)."""
@@ -1903,7 +1927,7 @@ class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
         """PAD-1176: show or hide the Comment column, remembered between
         sessions; hiding the column the list is sorted by sorts by name."""
         on = bool(on)
-        self._remember(self._SHOW_COMMENTS_KEY, on)
+        self._remember_pref(self._SHOW_COMMENTS_KEY, on)
         if not on and self._sort and self._sort[0] == "cm":
             self._sort = ("#0", False)
         self._refresh_list()

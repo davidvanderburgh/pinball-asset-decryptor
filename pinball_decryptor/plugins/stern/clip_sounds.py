@@ -1081,6 +1081,53 @@ def sound_uses(project):
     return out
 
 
+#: PAD-1542: a record at least this long is a song's music; the others a song plays with it are
+#: its pieces (the engine's ``_SONG_PART_SECONDS``)
+SONG_MUSIC_SECONDS = 20.0
+
+
+def song_pieces(project, seconds):
+    """PAD-1542: ``{idx: {"pieces": [idx, ...], "kept": [idx, ...], "music": [idx, ...]}}`` -
+    the songs the game plays in parts, off the project's :data:`REQUESTS_TSV` and *seconds*
+    ``{idx: length}``.  A record of music (:data:`SONG_MUSIC_SECONDS` or longer) that a request
+    plays with others has them as ``pieces``: a replacement for it plays in place of the whole
+    song, so those drop out, except ``kept``, the ones the game also plays without it.  A piece
+    has ``music``, the songs' music it is a piece of.  ``{}`` when the project's map predates
+    the later parts or there are none.  Iron Maiden LE 1.18: idx 950 (Flight of Icarus, 219 s)
+    has pieces 471 (0.6 s, its opening) and 941 (10.5 s, its ending).  *seconds* may be a
+    function of an idx instead, asked only for the records a request plays with others."""
+    req = read_requests(project)
+    if not req or any(v["also"] is None for v in req.values()):
+        return {}
+    if callable(seconds):
+        ask, seconds = seconds, {}
+        for v in req.values():
+            if len(v["idx"]) == 1 and v["also"]:
+                for i in v["idx"] + v["also"]:
+                    if i not in seconds:
+                        seconds[i] = ask(i)
+    every = [set(v["idx"]) | set(v["also"]) for v in req.values()]
+    seqs = [[v["idx"][0]] + [i for i in v["also"] if i != v["idx"][0]]
+            for v in req.values() if len(v["idx"]) == 1 and v["also"]]
+    out = {}
+    for seq in seqs:
+        for m in seq:
+            if (seconds.get(m) or 0.0) < SONG_MUSIC_SECONDS:
+                continue
+            got = out.setdefault(m, {"pieces": [], "kept": [], "music": []})
+            for j in seq:
+                if j != m and j not in got["pieces"]:
+                    got["pieces"].append(j)
+    for m in [m for m, v in out.items() if v["pieces"]]:
+        got = out[m]
+        got["kept"] = [j for j in got["pieces"] if any(j in e and m not in e for e in every)]
+        for j in got["pieces"]:
+            mus = out.setdefault(j, {"pieces": [], "kept": [], "music": []})["music"]
+            if m not in mus:
+                mus.append(m)
+    return {i: v for i, v in out.items() if v["pieces"] or v["music"]}
+
+
 #: Why the Audio tab shows no Requests column on a project with decoded sounds
 #: (:func:`sound_uses_why`)
 WHY_EXTRACT_AGAIN = ("No Requests column: this project's extract did not record which sounds "

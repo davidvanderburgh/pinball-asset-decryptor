@@ -1,0 +1,11 @@
+# PAD-1515 proof: a wizard whose three progress panes each sit in a box of their own (a row at the top left).
+name = WIZARD
+title = WIZARD
+start_all = cl_mode MikeTeaveeMode
+progress = cl_mode pane1.png pane1_grey.png 2 2 15 15
+progress = MikeTeaveeMode pane2.png pane2_grey.png 18 2 15 15
+progress_seconds = 6
+game_type = WIZARD GAME
+shots = switch_target_tv
+points = 1000000
+seconds = 15

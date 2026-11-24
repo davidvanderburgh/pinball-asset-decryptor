@@ -4756,6 +4756,69 @@ When the player has completed 2 of the eight missions) on X-Men LE 0.98 did not 
 started on Mayhem in Midtown, the second mission (`C:\tmp\PAD-747\rig\run_bw.sh`). James Bond 60th keeps no books of its Villain
 Mode (nothing to count there).
 
+## An intro and an outro for one of the game's own modes (PAD-1537)
+
+A tester asked to "attach custom video clips, along with their accompanying audio, as Intros and Outros for the
+machine's native modes ... ideally ducking or pausing conflicting native audio". A mode file that runs WITH one of the
+game's own modes does it, with nothing new to learn about clips and sounds: its start clip and start sound are the
+intro, its end sound and end clip the outro.
+
+```
+name           JET INTRO
+starts_on      with_game 21          # Godzilla's Jet Fighter Attack (block_name_21)
+seconds        0                     # until the game's mode ends (where the runtime sees it end)
+shots          0x00000000
+award          0
+clip_start     PadMode_jet_intro_Clip
+clip_end       PadMode_jet_intro_Clip2
+sound_start    <request>
+sound_end      <request>
+```
+
+- **The edges.** The runtime counts each of the game's modes starting and stopping (`pm_game_mode_follow`): a start where
+  the game's START goes ahead (PAD-363's `block_start_<id>` hook, not one a mode of ours took the place of or held off;
+  a check's mode at its own start, PAD-715) - on a C++ title once the mode then runs for the player (not stopped, its
+  start count up where the port names it): a START the game enters and turns down (Deadpool 1.16's Disco Loops a
+  second time in a ball) is `follow: ... its START ran but did not start it - not a start`, and plays no intro - and
+  a stop where the mode's STOP is entered for a mode not stopped already,
+  any outcome (the PAD-747 hook, which before counted only a completed one). On a plain-C title there is no STOP of a
+  mode class: only the mode's completion (its COMPLETED audit or flag) is seen, so the follower's clock ends it when
+  the player does not complete it. Each edge is logged the first few times: `follow: the game's Jet Fighter Attack
+  (mode 21) started (its start)`, `... stopped (not completed)`.
+- **The mode.** It starts on the tick after the game's START (`START (the game's Jet Fighter Attack started)`) and ends
+  as the STOP is seen (`END (the game's Jet Fighter Attack stopped)`), its end sound played first as at a clock's
+  end. It always stacks with the game's modes and runs as a layer (`layer 0`), so it never holds a game mode off, takes
+  no shots from the modes under it, and runs over a mode of yours. `seconds 0` is valid where the stop is seen.
+- **The music.** While its start or end sound plays, every music request of the game's that plays is ducked
+  (`pm_sound_duck`, 28 steps over 150 ms) - including the music the game's mode starts a moment after its START - and
+  ramped back (400 ms) once the sound is over: `own sound: the game's music 78 turned down under call 1291`, then
+  `... back up (call 1291 over)`.
+- **The clips.** The game plays a clip of its own as many of its modes start and end, on the one surface, a moment
+  after ours (Godzilla 1.16 Jet Fighter Attack: "fighter_intro" 55 ms after the START, "fighter_total" 41 ms after the
+  STOP). The game's displays are never held back for a mode (PAD-353), so instead every one-shot clip the game plays
+  in the 400 ms after ours plays ours in its place (`pm_clip_swap_next`, the co-op intro's swap of the clip's name,
+  PAD-1114): the game's own start or TOTAL screen shows the user's video under its words. `clip swap: the game's own
+  clip "fighter_intro" plays "intro4" in its place`. A looped clip (a background's) is never swapped.
+- **Test path.** `/dump/game_mode.start` and `/dump/game_mode.stop` (the id in the file) call the game's own START and
+  STOP of that mode (`pm_game_mode_start`, `pm_game_mode_stop`: the function its clock running out calls).
+
+**Proven in the emulator** (hidden, muted; `C:\tmp\PAD-1537\job.sh`): Godzilla Premium/LE 1.16, a follower of Jet
+Fighter Attack with a start and an end clip and sound: started 50 ms after the game's START, its clip in the place of
+"fighter_intro", the game's music 78 ducked under its start sound and back up after it; ended on the game's STOP, its
+end sound with the game's music 67 ducked, its end clip; a second start and stop the same way. The other builds of the
+sweep (`mode_project.WITH_PROVEN`, 53 of the 69 ports) followed one of the game's modes: the C++ builds its START
+and STOP twice (Iron Maiden on Fear of the Dark and John Wick on Job Assassination: the hurry-ups the PAD-710 sweep
+used refuse a forced START; Deadpool, Iron Maiden and Venom refuse a second one in a ball, and the follower stays
+out; Star Wars once - its STOP returns at once on a mode STARTed a second time in a ball, as its stopped byte +0x17
+stays set, so nothing stops it but the ball's end). The plain-C titles: the game's start seen and the mode's clock
+ending it (`PAD_TEST_PLAIN_START=1` in the game's environment lets the test path call a plain-C start with no claim;
+rig only - X-Men's starts take the mode's object, so there only the start was seen, the test call hangs). Elvira 3
+1.13 (PAD-1541) through the game instead: its one start is the House manager's, which takes the manager, so the test
+call dies on a null; a game's House Lock started the selected House, the follower with it, its clock ended it. Not
+offered: the older builds no card is left of to run (Stern keeps only the current one). Not measured: a game mode that ends at a drain (the emulator's Godzilla
+did not end the ball on a lone drain): the follower ends with the ball, as every mode does, and plays no outro then;
+a plain-C mode's completion ending it (the same COMPLETED audit or flag PAD-747's sweep saw).
+
 ## A mode in the game's Challenge list (PAD-615)
 
 Stern's framework has a **Player Challenge** game on every Spike 2 title: the player picks it on the game's own
@@ -5235,6 +5298,10 @@ static void on_ball_end(void)
   of ball goes on.
 - Never on a tilted ball: the port's `tilt` event counted since the last ball ended refuses the ask, and a tilt
   during a hold ends it.
+- The flippers are off for the hold (PAD-1521), as at the game's own end of ball: the hold runs before the game
+  switches them off, so they stayed live through the total. The runtime switches them off through the game's own
+  all-flippers off (`site flippers_off`, PAD-1406) at the hold's start and each tick, and answers the game's flipper
+  policy "off" meanwhile; never back on - the game's next ball brings them back, as after any ball.
 - The held coils (magnet, building, shield, shaker) still let go at the drain, before the hold; the display
   priority's ending and the backdrop are given back after it.
 
@@ -6644,7 +6711,8 @@ players 2..4 itself on the one Start; `team_play_get_player_score` makes players
   (`tm.kind`). The team fill takes its size from that pick (`tm.size`, read by `coop_teams_switched_on`); coop.cfg's
   `teams` still makes its one team game. A store an older card's 0-6 row left reads as near as it can
   (`coop_row_mode`: 3 Enhanced, 4-6 Classic). The right flipper held at Start still makes a co-op game (a team of one
-  alone) at 1 or 2, and a later Start in it adds a co-op teammate.
+  alone) at 1 or 2, and a later Start in it adds a co-op teammate - only on a build whose start menu the port does not
+  know (PAD-1449 round 10, below).
   Emulator-proven with Write-built override sets and their pinned runtime (rig kit `C:/tmp/PAD-1073`: tryset.py
   `<code> <card> <out> <default> <project> [chars]`, rig/job.sh steps the start menu entry by entry to `TARGET`; a
   fresh store so the row reads its default): Godzilla LE 1.16 (an index menu) at 1 Classic - entries 4-6 CO-OP PLAY,
@@ -6854,6 +6922,26 @@ alone began the game. The step is now the menu's own and the game start never wa
   the step is kept from the game and the one that takes the style reaches it too - Action there takes the mode and goes
   back to the roster (it begins no game); at PRESS ACTION TO START GAME Action keeps the pick as Start does
   (`sty_menu_go`). A port without the two values keeps rounds 5/6's left-flipper guess.
+- Round 8 (DoomWalrus666, on v1.561.7: "Once a version selection is made, version selection is no longer available
+  until a game is started and ended"; he took a version, then added a player): a Start on the live menu arms `go`
+  until a game begins, and rounds 4-7 gave the plain menu's Action to the game while it was armed (the Home Team
+  screen a Start brings has its own Action). A Start that adds a player begins no game and the menu draws on under the
+  Home Team screens, so `go` stayed armed and the plain mode list never opened the step again until a game was played.
+  With the overlay read, an armed Start keeps Action from the step only where the overlay is not known, or the plain
+  menu is off its mode list (`sty_go_keeps_action`; sub-state 4 is the mode list, kept as `smn.ov_sub`); a style taken
+  while it is armed re-arms it with the new pick. Emulator, Godzilla LE 1.16, the overlay forced to the plain menu
+  after a Start in the Home Team mode select: v1.561.7 began the game on that Action (NORMAL, no step), round 8 opened
+  the step and the game began as the style taken. Godzilla Pro 1.16 (his title) reads 1/4 on its plain menu.
+- Round 9 (DoomWalrus666, on v1.564.1: "When on Standard Regular (started via Start Button default), if Start button
+  is pressed during the Match screen, co-op intro plays and Enhanced mode is started"): PAD-1054's "held at Start" was
+  the right flipper down at the game's start or let go at most 1.5 s before it, and Godzilla LE 1.16 begins the game on
+  a Start in the match draw at once (emulator), so a right flipper tapped to hurry the draw along and let go just
+  before the Start made a co-op game of one: the co-op intro, then a character with its ability. Where coop.cfg names
+  the Start switch (`intro_start`) the drain keeps each Start out of a game and whether the button was down AT it
+  (`coop_go_edge`: `coop_go_ms`, `coop_go_held`); a game that starts within `COOP_GO_GAP_MS` (20 s) of that press is
+  the button's only when it was down at the press or is down at the start, for the co-op game of one
+  (`coop_solo_check`) and the intro's film (`ci_film_due`) both (`coop_start_held`). No such press (a port without
+  `intro_start`), as before.
 - With no step up the entry's line says the style taken and START TO PLAY, or its name and ACTION TO CHOOSE
   (`sty_menu_rest_words`); leaving the entry forgets the choice.
 - Start on the live menu (`sty_menu_go`) keeps what the line says - the style taken, the one shown while a step is up,
@@ -7157,7 +7245,8 @@ LE's shooter lane level byte reads the opposite sense to its flippers', so the l
 a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.
 
 PAD-1054 (DoomWalrus666): a player alone picks too. A game whose start (`game_start`) comes with `button` held, or
-let go of at most 1.5 s before, is a co-op game of ONE when it plays one player, CO-OP PLAY is not Off (any of Co-op,
+let go of at most 1.5 s before (PAD-1449 round 9: where the Start switch is known, down AT the Start that began it, or
+at the start itself), is a co-op game of ONE when it plays one player, CO-OP PLAY is not Off (any of Co-op,
 Team 2v2, Team 2v1; always, with no `setting`) and there is a pick: player 1 picks at once and the ability holds as a
 teammate's. Its score goes on the game's own boards, no co-op awards follow it and the top line stays the game's own
 `BALL n`. A Start in its first ball still adds a teammate (any Start, button held or not, as in a co-op game), or with
@@ -7165,6 +7254,38 @@ a team mode on begins the team game, player 1 keeping the character.
 
     co-op: the right flipper was held at Start - one player with a character (the game's own boards; a Start in ball 1 still adds a teammate)
     co-op: the right flipper was held at Start - no character pick (CO-OP PLAY is Off)
+
+PAD-1449 round 10 (DoomWalrus666, on v1.566.1: "Please remove the function of starting Co-op when holding down right
+flipper, it is no longer necessary with the new mode options"): the button held at Start makes no co-op game where the
+start menu has CO-OP PLAY to pick one with (the start menu hooked, `tm.armed`). Every place the held button turned a
+Start into co-op reads `coop_start_button_held()` instead of the button itself: the team of one above, the co-op intro
+(`ci_film_due`, and TIMED PLUNGER answered off for it), the Start that began the game (`coop_go_edge`) and a held Start
+in ball 1 of a one-player game adding a co-op teammate (`coop_add_wrap`: now a competing player, as a plain Start). On
+a build whose start menu the port does not know the hold is the only way into co-op, and it stays. coop.cfg
+overrides either way:
+
+    hold on                   the button held at Start makes a co-op game even with the start menu's CO-OP PLAY
+    hold off                  never
+
+The button still walks the character pick and the menus; only its Start meaning goes. `mode.log` says which, once
+the start menu is armed:
+
+    co-op: the right flipper held at Start starts no co-op - the start menu's CO-OP PLAY does (the start menu has CO-OP PLAY)
+
+PAD-1449 round 11 (DoomWalrus666: "Sometimes language selection did not appear during the intro. This happened
+sporadically"): Godzilla's PLAYER LANGUAGE SELECT bar and its flipper toggle both ask one check each time, has play
+begun (`site language_begun`, LE 1.16 0x1712cc, Pro 1.15/1.16 0x16d8f4, their only two callers). It answers the rule's
+own cached byte, else `data language_play_begun` (LE 0x712748), which the game clears at a Start. A ball launched, or a playfield
+switch the game counts as play, makes it answer yes, and from then on the bar's two lines are written empty and a
+flipper flips nothing. A ball still rolling or kicked out after a reset or a quick restart, or a launch, did that during
+the intro (emulator, LE 1.16: the ball launched 1 s into a Standard game's film, 3 of 3 games with no bar at all; the
+global byte poked alone changed nothing). While the game's intro screen is up in ball 1 (`ci_film_up`), the check is
+refused and answers 0 (`lang_bar_kept`), so the bar and its flips last as long as that screen, for our intro swapped in
+or the game's own film; after it the game's own answer counts again. Armed with the co-op characters or an intro on the
+card (`coop_chars_arm`), as the language keys' veto is:
+
+    language: the game's PLAYER LANGUAGE SELECT bar stays up through the intro screen in ball 1, whatever the playfield switches do
+    language: play began (the ball launched, or a playfield switch) while the game's intro screen is up in ball 1 - its PLAYER LANGUAGE SELECT bar and flips are kept until that screen closes
 
 `mode.log`:
 

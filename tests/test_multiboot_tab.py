@@ -602,10 +602,13 @@ def test_ensure_selector_builds_from_the_checkout_then_falls_back(
     argv = ensure_selector_args(form, cwd="/mnt/c/repo")
     assert argv[:4] == ["wsl.exe", "-e", "bash", "-lc"]
     line = _line(argv)
-    assert line.startswith("cd /mnt/c/repo && if make -C "
+    # previewselect.sh (PAD-1534): `make all`, but only when a digest of
+    # the sources moved, and the compiler's output kept out of the log
+    assert line.startswith("cd /mnt/c/repo && if bash "
+                           "tools/spike2_emu/previewselect.sh "
                            "/mnt/c/repo/tools/spike2_emu/codeselect "
-                           "BUILD=~/emusrc/codeselect-preview "
-                           "ROOT=~/spike2root all; then echo "
+                           "~/emusrc/codeselect-preview "
+                           "~/spike2root; then echo "
                            "'[preview] selector:' "
                            "~/emusrc/codeselect-preview/codeselect; "
                            "elif [ -x ~/spike2root/usr/local/codeselect/"
@@ -620,12 +623,13 @@ def test_ensure_selector_builds_from_the_checkout_then_falls_back(
     # refusal at the end of it names `apt install make` (PAD-126).
     assert "install" not in line.split("elif ! command -v make", 1)[0]
     # ...and with no card to unpack one from, nothing runs before the make
-    assert line.startswith("cd /mnt/c/repo && if make")
+    assert line.startswith("cd /mnt/c/repo && if bash tools/spike2_emu/"
+                           "previewselect.sh ")
     assert PREVIEW_BUILD_DIR == "~/emusrc/codeselect-preview"
     # a selector build elsewhere names its own rootfs
     form.selector_dir = "~/my root/usr/local/codeselect"
     line = _line(ensure_selector_args(form, cwd="/mnt/c/repo"))
-    assert "ROOT=~/'my root' all" in line
+    assert "~/emusrc/codeselect-preview ~/'my root'; then" in line
     assert "[ -x ~/'my root/usr/local/codeselect/codeselect' ]" in line
     assert parse_selector_path("make: Nothing to be done for 'all'.\n"
                                "[preview] selector: /home/d/emusrc/"
@@ -672,7 +676,7 @@ def test_ensure_selector_unpacks_a_guest_filesystem_when_there_is_none(
     quoted = multiboot_core._q(multiboot_core.wsl(str(card)))
     line = _line(ensure_selector_args(form, cwd="/mnt/c/repo",
                                       card=str(card)))
-    head, _make = line.split("; if make", 1)
+    head, _make = line.split("; if bash tools/spike2_emu/previewselect.sh", 1)
     assert head == ("cd /mnt/c/repo && if [ ! -d ~/spike2root/usr/lib ] "
                     "&& [ -f %s ]; then PAD_ROOT=~/spike2root bash "
                     "tools/spike2_emu/ensureselect.sh %s; fi"

@@ -405,6 +405,29 @@ lasts until the app closes or another project opens.
 tab, and Write puts it on the card. Which of them you see depends on the
 machine, and each tab's **?** explains its own controls.
 
+### Edit pixels (small pictures, Sonic's ring displays)
+
+Right-click a small PNG on the Images tab (up to 256 x 256) and pick **Edit
+pixels…**, or press it beside **Choose…**, to paint it pixel by pixel:
+Pencil, Eraser, Fill and Pick, the picture's own colors, Undo, and the
+other frames of its folder to step through and play. **Save** makes it the
+picture's replacement (kept in the project's `Pixel edits` folder), built
+onto the card by the Write like any other.
+
+Jersey Jack's Sonic draws its micro-LED ring displays from the pictures in
+`graphics/Mini LED`: each ring is 14 x 14 full-color LEDs, each frame a
+14 x 14 picture (a bigger one is a sheet of 14 x 14 frames, marked in
+yellow). Sonic keeps every file at the byte size it shipped at, so the
+editor saves as small as it can without changing a pixel and shows the
+size against the game's; a picture that will not fit is not saved.
+
+**Where the rings are:** beside a ring picture, the editor shows Sonic's
+playfield with its five ring displays marked: top left, left ramp, left
+orbit, top right and right ramp (all on the upper half). The marks are drawn
+on the game's own playfield picture, which was taken before the rings were
+fitted. **Ring map** in the toolbar hides or shows it. Which ring shows a
+given picture is decided by the game.
+
 ### Attract screens (Stern Spike 2)
 
 The **Attract** tab lists the screens the game shows in attract mode, in

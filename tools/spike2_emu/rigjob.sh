@@ -33,6 +33,7 @@
 # stops the rig and prints a VERDICT fail saying so (job_cleanup, on EXIT).
 RIG=${RIG:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
 . "$RIG/padpath.sh"
+. "$RIG/gamestate.sh"           # gs_wait_show (PAD-1541)
 set -u
 
 JOB_T0=0 JOB_WHY="" JOB_WPID="" JOB_DONE="" JOB_ATTRACT_S="" JOB_GAME_S=""
@@ -141,6 +142,13 @@ job_wait_attract() {
             attract|running)
                 JOB_ATTRACT_S=$(job_elapsed)
                 job_say "attract at ${JOB_ATTRACT_S}s (state=$st)"
+                # PAD-1541: the light show runs seconds before the attract scene and its clips are
+                # loaded, and a Start in that gap kills elvira3-1.13 (gamestate.sh, gs_show_up)
+                if gs_wait_show "$PAD_LOGDIR/gzwatch.log"; then
+                    job_say "attract show up at $(job_elapsed)s (its first clip opened)"
+                else
+                    job_dead || job_say "no attract clip by $(job_elapsed)s; going on"
+                fi
                 return 0 ;;
         esac
         if job_dead; then

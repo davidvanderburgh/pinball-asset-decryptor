@@ -99,7 +99,6 @@ class NetworkTab(TabService):
 
     def __init__(self, window):
         super().__init__(window)
-        self._visible = False
         self.set(intro=INTRO, project='', source='', supported=False,
                  reason='Select a card image and project first.',
                  enabled=False, public_keys='', error='', running=False, send_intro=SEND_INTRO,
@@ -196,18 +195,32 @@ class NetworkTab(TabService):
             pass
 
     def publish(self):
-        self._publish_feed()
         project = self._project()
-        self._publish_online(project)                       # PAD-1479
+        if self.shown():
+            # PAD-1546: the Score feed and online co-op boxes read the project's port files (0.3 s the first
+            # time); behind another tab they wait for on_show, which publishes again.  The rest is cheap, and
+            # Build reads its error.
+            self._publish_feed()
+            self._publish_online(project)                   # PAD-1479
         info = self._inspect()
-        enabled, keys, error = info.get('enabled', False), info.get('public_keys', ''), ''
+        # PAD-1531: the key box starts empty for a project that never saved one, never with the card's own keys:
+        # those may be another person's computer (an image they built with remote access on), and the first tick
+        # of the box would save their key into this project and so onto every card written from it
+        enabled, keys, error, rec = info.get('enabled', False), '', '', None
+        share = False
         try:
             rec = card_extras.load(project)
             if rec is not None:
                 enabled, keys = rec['enabled'], rec['public_keys']
                 card_extras.configuration(project)
+            share = card_extras.load_share(project)
         except card_extras.ExtrasError as e:
             error = str(e)
+        # PAD-1531: the computers other than this one the card lets in, kept by a build from a project that never
+        # set remote access (one that did writes its own keys in their place)
+        others = ([card_extras.key_name(k) for k in card_extras.others(info.get('public_keys', ''))]
+                  if rec is None and info.get('enabled') and not share else [])
+        self.set(share=share, others=others)
         wifi = self._inspect_wifi()
         wifi_on, wifi_band, wifi_error = wifi.get('enabled', False), wifi.get('band5', False), ''
         try:
@@ -425,7 +438,8 @@ class NetworkTab(TabService):
                 'Set up remote access',
                 "Put remote access on the card in %s?\n\nPAD adds a small program to the card's system files "
                 "that lets this computer in over your network, so Send to machine can reach the machine. The game, "
-                "its settings and high scores stay as they are.\n\nYour computer may ask for administrator "
+                "its settings and high scores stay as they are. If the card already lets another computer in, PAD "
+                "asks you whether it stays.\n\nYour computer may ask for administrator "
                 "access to change the card." % shown, icon='warning'):
             return False
         return self._set_up(device)
@@ -446,13 +460,47 @@ class NetworkTab(TabService):
             return False
         return self._set_up(path)
 
-    def _set_up(self, path):
+    def _own_keys(self):
+        """The project's saved keys of the user's own SSH programs: one-button setup keeps them on the card."""
+        try:
+            rec = card_extras.load(self._project())
+        except card_extras.ExtrasError:
+            rec = None
+        return (rec or {}).get('public_keys') or ''
+
+    def _ask_others(self, path, lines):
+        """PAD-1531: the card trusts other computers than this one.  They may be someone else's (an image they
+        built with remote access on) or the user's own other computer with PAD (every PAD key looks alike), so the
+        user says: Yes takes them off, No keeps them (and saves them with the project, so builds keep them too)."""
+        names = [card_extras.key_name(k) for k in lines]
+        many = len(names) > 1
+        what = os.path.basename(path) if os.path.isfile(path) else 'The card'
+        ans = compat.messagebox.askyesnocancel(
+            'Set up remote access',
+            "%s already lets %s in over the network:\n\n%s\n\nIf %s your own (another computer of yours with PAD, "
+            "or your own SSH program), keep %s. If not, take %s off: whoever has %s could get into the machine.\n\n"
+            "Yes: take %s off, so only this computer can get in.\nNo: keep %s, mine." % (
+                what, '%d other computers' % len(names) if many else 'another computer',
+                '\n'.join('  ' + n for n in names), 'they are' if many else 'it is', 'them' if many else 'it',
+                'them' if many else 'it', 'them' if many else 'that computer', 'them' if many else 'it',
+                'them, they are' if many else 'it, it is'),
+            icon='warning')
+        if ans is None:
+            self.set(setup_busy=False, setup_pct=0, setup_kind='', setup_note='Canceled. The card was not changed.')
+            return False
+        return self._set_up(path, keep_others=not ans, kept=() if ans else tuple(lines))
+
+    def _set_up(self, path, keep_others=None, kept=()):
         from ...core import remote_setup
         self.set(setup_busy=True, setup_pct=0, setup_note='Starting...', setup_kind='')
         project = self._project()
+        own = self._own_keys()
         loop = self.ctx.loop
+        taken = []
 
         def log(text, level='info'):
+            if level == 'warning':
+                taken.append(text)                      # PAD-1531: whose access came off stays in the last word
             loop.post(self.log, text, level)
             loop.post(lambda: self.set(setup_note=text))
 
@@ -466,27 +514,39 @@ class NetworkTab(TabService):
 
         def work():
             try:
-                res = remote_setup.set_up_with_privileges(path, log=log, progress=progress)
+                res = remote_setup.set_up_with_privileges(path, log=log, progress=progress, own=own,
+                                                          keep_others=keep_others)
+                lines = remote_setup.asked(res)
+                if lines is not None:
+                    # nothing changed yet: the user says whether the other computers stay, then it runs again
+                    loop.post(self._ask_others, path, lines)
+                    return
                 image = os.path.isfile(path)
                 where = os.path.basename(path) if image else 'The card'
                 text = ('%s already had remote access, and it lets this computer in.' % where if res == 'already'
                         else '%s has remote access now.' % where)
                 text += (" Write it to the machine's card, then use Find my machine." if image else
                          ' Put the card back in the machine, switch it on, then use Find my machine.')
+                if taken:
+                    text = taken[-1].replace('Taking', 'Took', 1) + ' ' + text
                 kind = 'ok'
             except Exception as e:                              # noqa: BLE001 - said, never raised into the UI
                 text, kind = str(e) or e.__class__.__name__, 'err'
-            loop.post(self._set_up_done, text, kind, project)
+            loop.post(self._set_up_done, text, kind, project, kept)
         threading.Thread(target=work, daemon=True, name='pad-remote-setup').start()
         return True
 
-    def _set_up_done(self, text, kind, project):
+    def _set_up_done(self, text, kind, project, kept=()):
         if kind == 'ok' and project and project == self._project() and self._inspect().get('supported'):
-            # a card written later from this project keeps remote access, or the machine would lose it again
+            # a card written later from this project keeps remote access, or the machine would lose it again;
+            # PAD-1531: and keeps the other computers the user said were theirs
             try:
                 rec = card_extras.load(project)
-                if rec is None or not rec['enabled']:
-                    card_extras.save(project, True, rec['public_keys'] if rec else '')
+                keys = rec['public_keys'] if rec else ''
+                if kept:
+                    keys = (keys.rstrip('\n') + '\n' if keys.strip() else '') + '\n'.join(kept)
+                if rec is None or not rec['enabled'] or kept:
+                    card_extras.save(project, True, keys)
                     self.publish()
             except card_extras.ExtrasError:
                 pass
@@ -1208,14 +1268,12 @@ class NetworkTab(TabService):
         return self._direct_start(kind, 'Changing the machine', work)
 
     def on_show(self):
-        self._visible = True
         self.publish()
         self._show_machine()
         if not self.get('cards_state'):
             self.refresh_cards()
 
     def on_hide(self):
-        self._visible = False
         self.stop_live()            # PAD-1467: a live view nobody is looking at stops loading the machine
         self._follow = None
         self.set(care_following=False)
@@ -1253,6 +1311,59 @@ class NetworkTab(TabService):
         if write is not None:
             write.reload_assets_tabs()
         return True
+
+    @rpc
+    def configure_share(self, on, project):
+        """PAD-1531: Build for sharing: cards and images built from this project carry no remote access and none of
+        the machine's own data (core/share_build.py)."""
+        if project != self._project() or self.get('running') or not os.path.isdir(project or ''):
+            return False
+        try:
+            card_extras.save_share(project, bool(on))
+        except card_extras.ExtrasError as e:
+            self.set(error=str(e))
+            return False
+        self._saved_extras()
+        return True
+
+    @rpc
+    def take_others_off(self, project):
+        """PAD-1531: the project saves its own remote access setting, so a card written from it no longer keeps the
+        other computers' keys the original trusts: on for this computer alone when the card let it in, else off."""
+        if project != self._project() or self.get('running') or not self._inspect()['supported']:
+            return False
+        try:
+            if card_extras.load(project) is None:
+                from ...core import remote_setup
+                lets_in = bool(remote_setup.look(self._source()).get('lets_pad_in'))
+                card_extras.save(project, lets_in, '')
+        except card_extras.ExtrasError as e:
+            self.set(error=str(e))
+            return False
+        self._saved_extras()
+        return True
+
+    @rpc
+    def keep_others(self, project):
+        """PAD-1531: the other computers the original lets in are the user's own: the project saves them as its own
+        keys, so cards written from it keep letting them in (with this computer's added)."""
+        if project != self._project() or self.get('running') or not self._inspect()['supported']:
+            return False
+        try:
+            if card_extras.load(project) is None:
+                lines = card_extras.others(self._inspect().get('public_keys', ''))
+                card_extras.save(project, True, '\n'.join(lines))
+        except card_extras.ExtrasError as e:
+            self.set(error=str(e))
+            return False
+        self._saved_extras()
+        return True
+
+    def _saved_extras(self):
+        self.publish()
+        write = self.window.service('write')
+        if write is not None:
+            write.reload_assets_tabs()
 
     @rpc
     def configure_buttons(self, enabled, project):

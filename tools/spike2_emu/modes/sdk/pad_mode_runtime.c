@@ -2959,12 +2959,13 @@ static int lamps_checked(void)
  * number k. */
 enum { CX_SOLID, CX_FADE_IN, CX_FADE_OUT, CX_CROSSFADE, CX_PULSE, CX_STROBE, CX_SWEEP_UP, CX_SWEEP_DOWN, CX_FILL_UP,
        CX_FILL_DOWN, CX_CHASE_UP, CX_CHASE_DOWN, CX_BOUNCE, CX_CENTER_OUT, CX_CENTER_IN, CX_ALTERNATE, CX_RAINBOW,
-       CX_SPARKLE, CX_FIRE, CX_METER, CX_GAME, CX_N };
+       CX_SPARKLE, CX_FIRE, CX_METER, CX_GAME, CX_REC, CX_N };
 /* CX_GAME (PAD-1063): the game's own show of a song, read from the game's memory - no arithmetic of this slice's
- * (cx_colour gives 0); SONG SHOWS' cab_colour paints it */
+ * (cx_colour gives 0); SONG SHOWS' cab_colour paints it. CX_REC (PAD-1516): a recording of a game's own cabinet
+ * lights (`rec` / `recmap`), likewise painted by cab_colour */
 static const char *const CX_NAMES[CX_N] = { "solid", "fade_in", "fade_out", "crossfade", "pulse", "strobe",
     "sweep_up", "sweep_down", "fill_up", "fill_down", "chase_up", "chase_down", "bounce", "center_out", "center_in",
-    "alternate", "rainbow", "sparkle", "fire", "meter", "game" };
+    "alternate", "rainbow", "sparkle", "fire", "meter", "game", "rec" };
 struct cx_step { int fx; unsigned ms, a, b, rate, blend; };
 
 static unsigned cx_mix(unsigned a, unsigned b, int f256)        /* a..b by f/256 */
@@ -3068,6 +3069,7 @@ static unsigned cx_colour(const struct cx_step *st, int side, unsigned u, unsign
         if (up >= p) return 0;
         return up > p - 90 ? st->b : st->a;
     case CX_GAME: break;                   /* PAD-1063: not this slice's arithmetic (cab_colour) */
+    case CX_REC: break;                    /* PAD-1516: likewise */
     }
     return 0;
 }
@@ -3121,6 +3123,8 @@ static int str_starts(const char *s, const char *prefix);   /* below */
 #define CAB_STEPS    128
 #define CABS_REQS    8192
 static const char *const CABS_FILES[] = { "/usr/local/padmode/cabshow.cfg", "/dump/cabshow.cfg" };
+static const char *const CABS_DIRS[] = { "/usr/local/padmode/", "/dump/" };   /* PAD-1516: its recordings beside it */
+static const char *cabs_dir = "/dump/";
 #define CAB_SIDS     8
 struct cab_show { char name[32]; unsigned sid[CAB_SIDS]; int n_sid, loop, n[2]; struct cx_step st[2][CAB_STEPS]; };
 static struct cab_show cabs[CABS_MAX];
@@ -3134,6 +3138,12 @@ static int cab_side[N_CAB], cab_lane[N_CAB];         /* -1 left blade, 1 right, 
 static unsigned cab_songs, cab_songs_rows, cab_songs_px;
 static unsigned short cab_spk[CAB_SPK_MAX][CAB_SPK_PX];
 static int cab_spk_n[CAB_SPK_MAX], n_cab_spk, cab_src[N_CAB];
+/* PAD-1516: recordings of a game's own cabinet lights (cab_rec.py: the emulator sampled them), each a file beside
+ * cabshow.cfg - "PADCREC1", u32 period ms, u32 frames, u32 lights, then frames x lights x RGB - and each of THIS
+ * cabinet's lights' source in it (`recmap`, worked out by the app from both cabinets' places; -1 none: dark) */
+#define CAB_RECS     8
+#define CAB_REC_MAX  (8u << 20)
+static struct { const unsigned char *px; unsigned period, frames, lights; short map[N_CAB]; } cab_rec[CAB_RECS];
 static volatile unsigned cabs_pending;               /* the request the worker took last (0 = none since) */
 static const struct pm_mode cab_owner = { "the card's expression light show", 0, 0, 0, 0, 0 };
 #define CAB_GONE_MS  250
@@ -3237,16 +3247,32 @@ static unsigned cab_game_colour(const struct cx_step *st, int k, unsigned t)
     return (unsigned)sum[0] << 16 | (unsigned)sum[1] << 8 | (unsigned)sum[2];
 }
 
+/* PAD-1516: light k's colour in recording st->a at st->rate + t ms: its source light's in that frame; 0 (dark) past the
+ * recording's end, for a light with no source, or a recording that did not load */
+static unsigned cab_rec_colour(const struct cx_step *st, int k, unsigned t)
+{
+    unsigned f, at;
+    int src;
+    if (st->a >= CAB_RECS || !cab_rec[st->a].px || k < 0 || k >= N_CAB) return 0;
+    src = cab_rec[st->a].map[k];
+    if (src < 0 || (unsigned)src >= cab_rec[st->a].lights) return 0;
+    f = (st->rate + t) / cab_rec[st->a].period;
+    if (f >= cab_rec[st->a].frames) return 0;
+    at = (f * cab_rec[st->a].lights + (unsigned)src) * 3u;
+    return (unsigned)cab_rec[st->a].px[at] << 16 | (unsigned)cab_rec[st->a].px[at + 1] << 8 | cab_rec[st->a].px[at + 2];
+}
+
 static unsigned cab_colour(const struct cx_step *st, int k, unsigned t)
 {
-    return st->fx == CX_GAME ? cab_game_colour(st, k, t) : cx_colour(st, cab_side[k], cab_u[k], (unsigned)k, t);
+    return st->fx == CX_GAME ? cab_game_colour(st, k, t) : st->fx == CX_REC ? cab_rec_colour(st, k, t)
+           : cx_colour(st, cab_side[k], cab_u[k], (unsigned)k, t);
 }
 
 /* cx_blend with the game's own shows among the steps */
 static unsigned cab_blend(const struct cx_step *st, const struct cx_step *prev, int k, unsigned t)
 {
     unsigned c;
-    if (st->fx != CX_GAME && (!prev || prev->fx != CX_GAME))   /* the slice's own patterns: its own blend */
+    if (st->fx != CX_GAME && st->fx != CX_REC && (!prev || (prev->fx != CX_GAME && prev->fx != CX_REC)))
         return cx_blend(st, prev, cab_side[k], cab_u[k], (unsigned)k, t);
     c = cab_colour(st, k, t);
     if (st->blend && t < st->blend)
@@ -3429,6 +3455,33 @@ int pm_cab_show_stop(void)
     return was;
 }
 
+/* PAD-1516: recording r from <dir><name>, checked against its `rec` line; said either way */
+static void cab_rec_load(unsigned r, unsigned per, unsigned fr, unsigned li, const char *name, unsigned len,
+                         const char *dir)
+{
+    char path[160];
+    unsigned long want = (unsigned long)fr * li * 3u + 20u;
+    char *buf;
+    long got;
+    unsigned d = 0, m;
+    for (m = 0; dir[m] && d < sizeof path - 1; m++) path[d++] = dir[m];
+    for (m = 0; m < len && d < sizeof path - 1; m++) path[d++] = name[m];
+    path[d] = 0;
+    buf = (char *)mmap(0, want + 1, 3 /* PROT_READ | PROT_WRITE */, 0x22 /* MAP_PRIVATE | MAP_ANONYMOUS */, -1, 0);
+    if (!buf || buf == (char *)-1) return;          /* never malloc in the game (MODE_SDK.md rule 2) */
+    got = pm_read_file(path, buf, want + 1);
+    if (got != (long)want || buf[0] != 'P' || buf[7] != '1' || *(unsigned *)(buf + 8) != per
+        || *(unsigned *)(buf + 12) != fr || *(unsigned *)(buf + 16) != li) {
+        say("expression lights: recording %u (%s) did not load: %ld byte(s), %lu wanted", r, path, got, want);
+        return;
+    }
+    cab_rec[r].px = (const unsigned char *)buf + 20;
+    cab_rec[r].period = per;
+    cab_rec[r].frames = fr;
+    cab_rec[r].lights = li;
+    say("expression lights: recording %u, %u frame(s) of %u light(s) every %u ms (%s)", r, fr, li, per, path);
+}
+
 /* cabshow.cfg, read before the gate; the lights' sides and lanes from their places */
 static void cabs_arm(void)
 {
@@ -3437,7 +3490,7 @@ static void cabs_arm(void)
     unsigned k;
     int c = -1;
     for (k = 0; k < sizeof CABS_FILES / sizeof CABS_FILES[0] && n < 0; k++)
-        n = pm_read_file(CABS_FILES[k], raw, sizeof raw - 1);
+        if ((n = pm_read_file(CABS_FILES[k], raw, sizeof raw - 1)) >= 0) cabs_dir = CABS_DIRS[k];
     if (n <= 0) return;
     raw[n] = 0;
     for (i = 0; i <= n; i++) {
@@ -3470,6 +3523,41 @@ static void cabs_arm(void)
                 }
                 cab_spk_n[n_cab_spk] = m;
                 if (!m) break;
+            }
+            continue;
+        }
+        if (str_starts(s, "rec ")) {                    /* PAD-1516: rec <i> <period> <frames> <lights> <file> */
+            int ok[4];
+            unsigned r, per, fr, li;
+            s += 4;
+            r = (unsigned)number(&s, &ok[0]);
+            per = (unsigned)number(&s, &ok[1]);
+            fr = (unsigned)number(&s, &ok[2]);
+            li = (unsigned)number(&s, &ok[3]);
+            while (*s == ' ' || *s == '\t') s++;
+            for (e = s; *e && *e != '\r' && *e != ' ' && *e != '#'; e++) ;
+            if (ok[0] && ok[1] && ok[2] && ok[3] && r < CAB_RECS && per && fr && li && li <= 1024
+                && (unsigned long)fr * li * 3u + 20u <= CAB_REC_MAX)
+                cab_rec_load(r, per, fr, li, s, (unsigned)(e - s), cabs_dir);
+            continue;
+        }
+        if (str_starts(s, "recmap ")) {                 /* PAD-1516: recmap <i> <src of light 0>,<src of light 1>,... */
+            int ok1, m;
+            unsigned r;
+            s += 7;
+            r = (unsigned)number(&s, &ok1);
+            if (!ok1 || r >= CAB_RECS) continue;
+            for (m = 0; m < N_CAB; m++) cab_rec[r].map[m] = -1;
+            while (*s == ' ') s++;
+            for (m = 0; m < N_CAB && *s && *s != '\r' && *s != '#'; m++) {
+                int neg = *s == '-', ok2;
+                long v;
+                if (neg) s++;
+                v = number(&s, &ok2);
+                if (!ok2) break;
+                cab_rec[r].map[m] = (short)(neg ? -1 : v);
+                if (*s != ',') break;
+                s++;
             }
             continue;
         }
@@ -5508,13 +5596,48 @@ static void on_layered_priority(pm_reg *r)
     if (r[0]) disp_layered_mgr = (unsigned char *)(unsigned long)r[0];
 }
 
+/* PAD-1537: a clip of ours in the place of every one-shot clip the game plays for a moment: an intro's or an
+ * outro's, as the game's mode it goes with starts or ends. The game plays its own start or TOTAL clip a moment after
+ * (Godzilla 1.16's Jet Fighter Attack: "fighter_intro" 30 ms after the START, "fighter_total" after its STOP), on the
+ * one surface, over ours; with the swap its own display shows ours, its words and timing as always. The game's
+ * displays are never held for it (PAD-353): the swap is the co-op intro's (PAD-1114), its film's name replaced. */
+static char cs_name[64];
+static unsigned long cs_until;
+
+int pm_clip_swap_next(const char *ours, unsigned ms)
+{
+    unsigned i;
+    if (!ours || !ours[0] || !fn("clip_play")) return 0;
+    for (i = 0; ours[i] && i + 1 < sizeof cs_name; i++) cs_name[i] = ours[i];
+    cs_name[i] = 0;
+    cs_until = (pm_ms() + (ms ? ms : 400u)) | 1ul;
+    return 1;
+}
+
+static void cs_swap(pm_reg *r)
+{
+    const char *name = (const char *)(unsigned long)r[0];
+    unsigned i;
+    if (!cs_until) return;
+    if ((long)(cs_until - pm_ms()) < 0) {
+        cs_until = 0;
+        return;
+    }
+    if (!name || r[1] || disp_clip_ours) return;              /* a loop is a background's; ours is ours */
+    for (i = 0; name[i] && name[i] == cs_name[i]; i++) ;
+    if (!name[i] && !cs_name[i]) return;                      /* ours already */
+    say("clip swap: the game's own clip \"%s\" plays \"%s\" in its place", name, cs_name);
+    r[0] = (unsigned)(unsigned long)cs_name;       /* every one in the window: a shot's own clip may come first */
+}
+
 /* clip_play from anyone but us while our clip draws: the one surface is the game's now */
 static int ci_film_swap(pm_reg *r);      /* PAD-1114: the co-op intro in the game's own start film */
 static void on_clip_play(pm_reg *r)
 {
     const char *name;
     unsigned i;
-    ci_film_swap(r);                          /* PAD-1114: before anything reads the name */
+    if (!ci_film_swap(r))                     /* PAD-1114: before anything reads the name */
+        cs_swap(r);                           /* PAD-1537 */
     name = (const char *)(unsigned long)r[0];
     if (!disp_clip_ours) bd_clip_lost();      /* hud-layers: the backdrop is played again after it */
     if (disp_clip_ours) gbg_ours();           /* PAD-658: ours took the one surface (a full-screen clip, the backdrop) */
@@ -6706,7 +6829,96 @@ static void lit_hold_check(unsigned id)
     for (k = 0; k < BLOCK_WORDS; k++) lit_said[k] = 0;
 }
 
+/* PAD-1537: the game's own modes seen starting and stopping, for a mode that runs WITH one (its intro and outro).
+ * A start is counted where the game's START goes ahead (nothing of ours took it or held it off), a stop where its
+ * STOP is entered for a mode not stopped already (any outcome) - on a plain-C title, with no STOP of a mode class,
+ * only its completion (the COMPLETED audit or flag PAD-747 watches). Counted on the game's thread, read on the tick. */
+static unsigned gm_starts[BLOCK_IDS], gm_stops[BLOCK_IDS];
+static unsigned gm_said[BLOCK_IDS];
+/* a C++ title's START is entered before it decides: the start counts once the mode runs for the player (gm_check_tick) */
+static struct { unsigned long at; unsigned starts; unsigned char p; } gm_chk[BLOCK_IDS];
+static int place_counts_on;                   /* PAD-710, below */
+static unsigned place_player(void);
+static unsigned place_stopped(unsigned obj, unsigned p);
+static unsigned place_starts(unsigned obj, unsigned p);
+static void gm_seen(unsigned id, int stop, const char *how)
+{
+    char key[24];
+    const char *nm;
+    unsigned p;
+    if (id >= BLOCK_IDS || !pm_in_game()) return;
+    if (!stop && block_obj[id] && place_counts_on && (p = place_player()) != 0) {
+        gm_chk[id].at = pm_ms() | 1ul;
+        gm_chk[id].p = (unsigned char)p;
+        gm_chk[id].starts = place_starts(block_obj[id], p);
+        return;
+    }
+    if (stop) gm_stops[id]++;
+    else gm_starts[id]++;
+    if (gm_said[id] >= 6) return;                /* said the first few times only: a game starts its modes often */
+    gm_said[id]++;
+    pm_snprintf(key, sizeof key, "block_name_%u", id);
+    nm = pm_port_text(key);
+    say("follow: the game's %s (mode %u) %s (%s)", nm ? nm : "?", id, stop ? "stopped" : "started", how);
+}
+
+/* from done_tick: a START entered on a C++ title - the mode runs for the player now, or the game's START ran and left
+ * it (Deadpool 1.16's Disco Loops a second time in a ball). Running: the mode object's own ACTIVE virtual where the
+ * runtime knows its slot (the one the game's "a mode is active" query calls, PAD-768), else not stopped for the player
+ * and its start count up where the port names it */
+static long mode_query_slot(int kind_slot);
+static unsigned place_vfn_at(unsigned obj, long slot);
+static int gm_active(unsigned obj)
+{
+    long a = pm_port_value("mode_slot_active", -1);
+    unsigned f;
+    if (a < 0) a = mode_query_slot(0);
+    if (a < 0 || !(f = place_vfn_at(obj, a))) return -1;
+    return (int)(((unsigned (*)(unsigned))(unsigned long)f)(obj) & 0xffu);
+}
+
+static void gm_check_tick(void)
+{
+    unsigned id;
+    for (id = 0; id < BLOCK_IDS; id++) {
+        unsigned obj = block_obj[id], p = gm_chk[id].p;
+        int on, act;
+        if (!gm_chk[id].at) continue;
+        act = obj ? gm_active(obj) : -1;
+        on = obj && (act >= 0 ? act != 0 : !place_stopped(obj, p)
+                     && (pm_port_value("mode_starts_at", -1) < 0 || place_starts(obj, p) != gm_chk[id].starts));
+        if (on) {
+            gm_chk[id].at = 0;
+            gm_starts[id]++;
+            if (gm_said[id] < 6) {
+                gm_said[id]++;
+                say("follow: the game's %s (mode %u) started (its start)", pm_game_mode_name(id), id);
+            }
+        } else if (pm_ms() - (gm_chk[id].at & ~1ul) > 500 || !pm_in_game()) {
+            gm_chk[id].at = 0;
+            if (gm_said[id] < 6) {
+                gm_said[id]++;
+                say("follow: the game's %s (mode %u): its START ran but did not start it - not a start (active %d, "
+                    "stopped %u, starts %u -> %u)", pm_game_mode_name(id), id, act, obj ? place_stopped(obj, p) : 0u,
+                    gm_chk[id].starts, obj ? place_starts(obj, p) : 0u);
+            }
+        }
+    }
+}
+
+static int block_start_veto(pm_reg *r, unsigned hook_n);
 static int on_block_start(pm_reg *r, unsigned hook_n)
+{
+    unsigned id;
+    int v = block_start_veto(r, hook_n);
+    if (v) return v;
+    for (id = 0; id < BLOCK_IDS; id++)
+        if (block_hook_of[id] == hook_n + 1 && bm_has(block_named, id) && (!block_obj[id] || block_obj[id] == r[0])) break;
+    if (id < BLOCK_IDS && !place_check[id]) gm_seen(id, 0, "its start");   /* a check's mode: at its own start */
+    return 0;
+}
+
+static int block_start_veto(pm_reg *r, unsigned hook_n)
 {
     unsigned id;
     for (id = 0; id < BLOCK_IDS; id++)          /* this start's mode: its object, or the start is its own */
@@ -6744,7 +6956,9 @@ static int on_block_start(pm_reg *r, unsigned hook_n)
 /* PAD-715: the start a port names for a mode whose block_start is a check: a claimed place is taken here */
 static int on_place_start(pm_reg *r, unsigned id)
 {
-    return id < BLOCK_IDS && place_from[id] && place_take(r, id);
+    if (id < BLOCK_IDS && place_from[id] && place_take(r, id)) return 1;
+    if (id < BLOCK_IDS) gm_seen(id, 0, "its own start");          /* PAD-1537 */
+    return 0;
 }
 
 int pm_block_list(const unsigned char *ids, int n)
@@ -12355,7 +12569,10 @@ static struct {
     volatile int holding;                   /* from the ask until the game's end of ball goes on */
     int asking;                             /* the modes' .ball_end are running: they may ask */
     unsigned tilts;                         /* the tilt event's count when the last ball ended */
+    volatile int flippers_off;              /* PAD-1521: the flippers are off for the hold */
 } beh;
+
+static int fl_hold(int off);                /* PAD-1521: PAD-1406's flippers, below */
 
 static unsigned event_count(int id);        /* the events section, below */
 
@@ -12389,8 +12606,17 @@ static void ball_end_hold_run(void)
     if (!beh.ms) return;
     until = t0 + beh.ms;
     say("ball end: held up to %u ms for a mode's total - then the game's end of ball goes on", beh.ms);
-    while (!beh.release && !ball_tilted() && pm_ms() < until)
+    /* PAD-1521 (luvthatapex, Bond LE): the hold runs before the game's end of ball switches the flippers off, so they
+     * stayed live through the whole total. Off now, through the game's own all-flippers off (PAD-1406's pair), and
+     * the game's flipper policy answered "off" meanwhile; never back on here: the game's next ball brings them back,
+     * as after any ball (a challenge game's end, its game over). */
+    if ((beh.flippers_off = fl_hold(1)))
+        say("ball end: the flippers are off for the hold, as at the game's own end of ball");
+    while (!beh.release && !ball_tilted() && pm_ms() < until) {
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+        if (beh.flippers_off) fl_hold(1);       /* again each tick: a listener of the game's may have said on */
+    }
+    beh.flippers_off = fl_hold(0);
     why = beh.release ? "the mode let go" : ball_tilted() ? "the ball tilted" : "its time ran out";
     say("ball end: let go after %lu ms (%s)", pm_ms() - t0, why);
 }
@@ -14211,7 +14437,7 @@ static void more_ball_end(void)
 static int (*place_fn[PLACE_IDS])(unsigned id);
 static const struct pm_mode *place_by[PLACE_IDS];
 static struct { unsigned obj, id; unsigned char on, owed, plain; signed char won; } place_held[5];   /* per player 1-4 */
-static int place_counts_on;                   /* the port names the game's mode framework */
+/* place_counts_on: above gm_seen - the port names the game's mode framework */
 
 static const char *place_name(unsigned id)
 {
@@ -14597,12 +14823,29 @@ int pm_game_mode_start(unsigned id)
     char key[24];
     pm_addr f;
     if (!(can & PM_CAN_PLACE) || id >= PLACE_IDS || !bm_has(block_named, id) || !pm_in_game()) return 0;
-    if (!block_obj[id] && !place_fn[id]) return 0;
+    /* PAD-1537 rig: PAD_TEST_PLAIN_START=1 calls a plain-C start with no claim - the follower's proof on those titles,
+     * whose starts take no arguments (they set their own first, as the mini-wizards' do, PAD-473); never on a machine */
+    if (!block_obj[id] && !place_fn[id] && !(getenv("PAD_TEST_PLAIN_START") && *getenv("PAD_TEST_PLAIN_START") == '1'))
+        return 0;
     pm_snprintf(key, sizeof key, "block_start_%u", id);
     if (!(f = place_check[id] ? place_from[id] : fn(key))) return 0;   /* PAD-715: a check's mode, its own start */
     say("place: the game's %s (mode %u) started for a test (its START at 0x%08" PMA ", object 0x%08" PMA ")", place_name(id),
         id, f, block_obj[id]);
     ((void (*)(pm_addr))(unsigned long)f)(block_obj[id]);
+    return 1;
+}
+
+/* PAD-1537 test path: the game's own STOP of its mode id (a C++ title's, through the mode's vtable), as its clock
+ * running out calls it, for the player up - only while it runs for that player. 1 = called */
+int pm_game_mode_stop(unsigned id, int won)
+{
+    pm_addr obj, stop;
+    unsigned p;
+    if (id >= PLACE_IDS || !bm_has(block_named, id) || !pm_in_game() || !(obj = block_obj[id])) return 0;
+    if (!(stop = place_stop_fn(obj)) || !(p = place_player()) || place_stopped(obj, p)) return 0;
+    say("place: the game's %s (mode %u) stopped for a test (its STOP at 0x%08" PMA ", %s)", place_name(id), id, stop,
+        won ? "completed" : "not completed");
+    ((void (*)(unsigned, unsigned, unsigned))(unsigned long)stop)(obj, won ? 1u : 0u, 1u);
     return 1;
 }
 
@@ -14752,6 +14995,7 @@ static void done_mark(unsigned id, unsigned p, const char *how)
     unsigned *b = done_of(p);
     if (!b || id >= DONE_IDS || !pm_in_game() || done_has(b, id)) return;
     b[id >> 5] |= 1u << (id & 31);
+    if (id < BLOCK_IDS && !block_obj[id]) gm_seen(id, 1, how);   /* PAD-1537: a plain-C mode's end is its completion */
     say("done: player %u completed the game's %s (mode %u, %s) - %u of the game's modes this game", p, done_name(id),
         id, how, done_count_of(p));
 }
@@ -14761,11 +15005,13 @@ static void done_stop_seen(pm_reg *r, const char *how)
 {
     pm_addr obj = r[0];
     unsigned id, p;
-    if (!r[1] || !obj || !pm_in_game()) return;
+    if (!obj || !pm_in_game()) return;
     for (id = 0; id < BLOCK_IDS && !(block_obj[id] == obj && bm_has(block_named, id)); id++) ;
     if (id >= BLOCK_IDS) return;
     if (!(p = place_player())) p = pm_player();
     if (place_stopped(obj, p)) return;              /* stopped already: the STOP returns at once */
+    gm_seen(id, 1, r[1] ? "completed" : "not completed");   /* PAD-1537: every outcome ends a mode that runs with it */
+    if (!r[1]) return;
     done_mark(id, p, how);
 }
 
@@ -14858,6 +15104,7 @@ static int done_slot(pm_addr obj, unsigned f)
 static void done_tick(void)
 {
     unsigned id, p, g;
+    gm_check_tick();                                /* PAD-1537 */
     if (!done_stops_tried && place_counts_on) {
         static unsigned slots;
         unsigned have = 0, want = 0, k;
@@ -14941,6 +15188,21 @@ static void done_arm(void)
     if (named)
         say("done: the runtime sees %d of the game's modes completed (%d of the %d it names a start of; %d through "
             "their COMPLETED audit)", named, bm_count(done_seen), bm_count(block_named), done_audits);
+}
+
+/* PAD-1537: what the runtime sees of the game's mode id (1 its start, 2 its every stop, 4 its stop only when it is
+ * completed), and the counts so far this boot */
+int pm_game_mode_follow(unsigned id, unsigned *starts, unsigned *stops)
+{
+    int f = 0;
+    if (id >= BLOCK_IDS || !bm_has(block_named, id)) return 0;
+    if (block_hook_of[id] && (!place_check[id] || place_from[id])) f |= 1;
+    /* a C++ title's STOPs are hooked over the first ticks (done_tick): one not tried yet counts as seen */
+    if (block_obj[id] && (done_has(done_seen, id) || (place_counts_on && !done_stops_tried))) f |= 2;
+    else if (done_has(done_seen, id)) f |= 4;
+    if (starts) *starts = gm_starts[id];
+    if (stops) *stops = gm_stops[id];
+    return f;
 }
 
 int pm_game_mode_done_seen(unsigned id)
@@ -18362,6 +18624,7 @@ static void dto_ball_end(void)
  *     the game's own next ball brings them back, as after any ball; a tilt leaves them to the game. */
 static struct {
     int off;                            /* 1 = this route switched them off */
+    volatile int held;                  /* PAD-1521: off for a mode's total at the ball's end (fl_hold) */
     unsigned long since;
     char by[40];
 } fl;
@@ -18371,7 +18634,7 @@ static int fl_query_armed;               /* 0 not yet, 1 the call wrapped, -1 no
 
 static unsigned long fl_query(unsigned long id, unsigned long args, unsigned long a2, unsigned long a3)
 {
-    if (id == 0x40u && fl.off && args) {
+    if (id == 0x40u && (fl.off || fl.held) && args) {
         ((volatile unsigned *)args)[1] = 1u;         /* off: the policy switches this flipper off */
         return 1u;
     }
@@ -18445,6 +18708,18 @@ int pm_flippers(int on)
 }
 
 int pm_flippers_off(void) { return fl.off; }
+
+/* PAD-1521: the flippers off while a mode's total holds the game's end of ball (ball_end_hold_run), as the game's
+ * own end of ball has them; 1 = off (the port names the pair). fl_hold(0) only stops the policy's "off" answer:
+ * never back on here - the game's next ball brings them back, as after any ball. */
+static int fl_hold(int off)
+{
+    if (!off || !fl_sites()) return fl.held = 0;
+    fl_query_arm();
+    fl.held = 1;
+    ((void (*)(void))(unsigned long)fn("flippers_off"))();
+    return 1;
+}
 
 /* PAD-1406: the calling mode has the whole game (pm_own_game) */
 static int og_has_it(void)
@@ -19690,6 +19965,8 @@ static struct {
                                           * character pick (ENHANCED CO-OP is the one with the pick) */
     unsigned style;                      /* PAD-1449: the style the start menu's chooser took for this game - 1 NORMAL,
                                           * 2 CHARACTERS (a pick, no abilities), 3 ENHANCED; 0: none asked */
+    unsigned hold;                       /* PAD-1449 round 10: coop.cfg `hold on` (1) / `hold off` (2); 0: as the start
+                                          * menu says (coop_hold_starts) */
     unsigned round;                      /* PAD-1042: the round of turns on this ball (1..the larger team) */
     unsigned started;                    /* PAD-1054: the game_start count last seen */
     int solo_ask;                        /* PAD-1054: that game began with the button held: a team of one, once it plays */
@@ -19699,6 +19976,12 @@ static struct {
     unsigned long join_at;               /* ... when that line went up (join_n 0: none up) */
 } coop;
 #define COOP_SOLO_MS 1500ul              /* PAD-1054: the button held this close before a game's start is "held at Start" */
+#define COOP_GO_GAP_MS 20000ul           /* PAD-1449 round 9: a Start out of a game this soon before a game's start began it
+                                          * (at once from attract or the match draw; a menu or a login may come between) */
+static volatile unsigned long coop_go_ms;   /* PAD-1449 round 9: pm_ms() | 1 of the last Start out of a game (0: none) */
+static volatile int coop_go_held;           /* ... the button was down at that press */
+static int coop_start_held(unsigned long go, int go_held, int now_held, unsigned long held, unsigned long start,
+                           unsigned long window);
 #define COOP_JOIN_MS 2000ul             /* PAD-1052: each "PLAYERS ADDED" line on the top line */
 #define COOP_JOIN_ROUNDS 3u              /* ... said three times over: Godzilla LE 1.16's game-start film (not a display
                                           * effect) hid the first five, about 10 s (emulator) */
@@ -20054,6 +20337,22 @@ static int switch_held(unsigned id);
 static int coop_button_held(void)
 {
     return switch_held(coop.button);
+}
+
+/* PAD-1449 round 10 (DoomWalrus666, on v1.566.1: "Please remove the function of starting Co-op when holding down right
+ * flipper, it is no longer necessary with the new mode options"): the button held at Start makes a co-op game (PAD-1017,
+ * PAD-1054's team of one, the co-op intro) only where the start menu has no CO-OP PLAY entry to pick one with (the
+ * port does not know this build's menu: tm.armed 0). coop.cfg `hold on` keeps it, `hold off` drops it everywhere (tests
+ * lift it verbatim) */
+static int coop_hold_starts(unsigned hold, int menu)
+{
+    return hold == 1u || (hold != 2u && !menu);
+}
+
+/* PAD-1449 round 10: the button held, as a Start's co-op button (0 where it starts no co-op) */
+static int coop_start_button_held(void)
+{
+    return coop_hold_starts(coop.hold, tm.armed) && coop_button_held();
 }
 
 /* PAD-1033: switch `id` held now (a flipper button, polled from the tick) */
@@ -20712,7 +21011,7 @@ static unsigned adj_chain(unsigned id)
         /* the game reads it at its Start (emulator, Godzilla LE 1.16: once, before the intro begins), so a Start that
          * is about to be a co-op or team game - the right flipper held, or the start menu's entry just picked - is
          * answered off too */
-        int soon = ci.clip[0] && (coop_button_held() || (tm.pending && pm_ms() - tm.seen_ms < TEAM_PICK_MS));
+        int soon = ci.clip[0] && (coop_start_button_held() || (tm.pending && pm_ms() - tm.seen_ms < TEAM_PICK_MS));
         static int said;
         if (v && (ci.phase >= CI_PLAY || soon)) {
             if (said < 8 && ++said)
@@ -21449,6 +21748,7 @@ static struct {
                                           * step's again (a login or GAME MODE SELECT walks no mode) */
     volatile int ov;                     /* round 7: the game's Insider overlay on the menu, read at its frame
                                           * (sty_overlay_read): STY_OV_* (0: the port names none - rounds 5/6's guess) */
+    volatile unsigned ov_sub;            /* round 8: its sub-state word as read (4: the mode list is up) */
 } smn = { .entry = -1 };
 
 /* PAD-1449 round 7 (DoomWalrus666, on v1.561.1: "other times the action button does nothing on the home team screen,
@@ -21482,6 +21782,7 @@ static void sty_overlay_read(void)
     int was = smn.ov;
     if (!sa || !ua) return;                                   /* (0 stays: rounds 5/6's left flipper guess) */
     smn.ov = sty_overlay_kind(*(volatile unsigned *)sa, *(volatile unsigned *)ua);
+    smn.ov_sub = *(volatile unsigned *)ua;
     if (!smn.ov) smn.ov = STY_OV_LOGIN;                       /* (an overlay state we do not know: the game's) */
     if (smn.ov != was) {
         static const char *const OV_SAYS[] = { "", "the plain menu: Action on a mode is the style step's",
@@ -21670,6 +21971,20 @@ static void sty_menu_go(void)
         STY_NAMES[smn.go_style - 1], smn.taken || (smn.open && !smn.shaping) ? "" : " (none chosen: NORMAL)");
 }
 
+/* PAD-1449 round 8 (DoomWalrus666, on v1.561.7: "Once a version selection is made, version selection is no longer
+ * available until a game is started and ended ... User selected a mode and version, then went to add a user"): a Start
+ * on the menu arms `go` until a game begins, and rounds 4-6 gave the menu's Action to the game while it was armed - the
+ * Home Team screen that Start brought has its own Action. A Start that adds a player begins no game, and the menu draws
+ * on under the Home Team screens, so `go` stayed armed and the plain mode list's Action never opened the step again
+ * until a game was played. Where the game's overlay is read the Home Team screens say so themselves: an armed Start
+ * keeps Action from the step only where the overlay is not known, or the plain menu is not on its mode list (sub-state
+ * 4). (tests lift it verbatim) */
+static int sty_go_keeps_action(int ov, unsigned sub, int go)
+{
+    if (!go) return 0;
+    return !ov || !(ov == STY_OV_PLAIN && sub == 4u);
+}
+
 /* from the switch drain (coop_edge): on the live menu, Action works the step (the menu's frame does it), Start keeps
  * the entry's pick for the game it begins */
 /* Action is the step's, not the game's (coop_hides keeps it from the game at the drain, so it begins no game and
@@ -21680,7 +21995,8 @@ static int sty_menu_owns_action(void)
     if (!sty_menu_live() || sty_menu_kind() == 0u) return 0;
     if (smn.ov == STY_OV_MODES) return !smn.open || smn.shaping;   /* round 7: the Action that takes the style goes
                                                                      * on to the game too - it takes the mode there */
-    if (smn.ov) return smn.ov == STY_OV_PLAIN && !smn.go_ms;    /* round 7: the overlay's own screens: the game's */
+    if (smn.ov) return smn.ov == STY_OV_PLAIN               /* round 7: the overlay's own screens: the game's */
+                       && !sty_go_keeps_action(smn.ov, smn.ov_sub, smn.go_ms != 0);   /* round 8: a Start before */
     return !smn.go_ms && (!smn.home_ms || smn.home_walk);       /* (a port without the overlay: rounds 5/6) */
 }
 
@@ -21774,7 +22090,8 @@ static int sty_menu_hold_back(unsigned long since_frame, unsigned long since_act
 static int sty_menu_held(void)
 {
     unsigned long since = smn.hold_ms ? pm_ms() - (smn.hold_ms & ~1ul) : ~0ul;
-    if (!sty_menu_hold_back(smn.frame_ms ? pm_ms() - smn.frame_ms : ~0ul, since, smn.go_ms != 0,
+    if (!sty_menu_hold_back(smn.frame_ms ? pm_ms() - smn.frame_ms : ~0ul, since,
+                            sty_go_keeps_action(smn.ov, smn.ov_sub, smn.go_ms != 0),   /* round 8 */
                             sty_menu_kind() != 0u))
         return 0;
     smn.hold_ms = 0;                                          /* (the drain's edge gave the step its Action) */
@@ -21892,6 +22209,11 @@ static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, un
         smn.open = 0;
         smn.walk_ms = pm_ms();
         say("styles: %s %s taken on the start menu - Start begins it", sty_label(smn.kind), STY_NAMES[smn.at]);
+        if (smn.go_ms) {                                      /* round 8: a Start before it (a player added - no game
+                                                              * begun) kept the last pick: this one goes in instead */
+            say("styles: a Start was pressed on the menu before - the game it begins takes this pick");
+            sty_menu_go();
+        }
         break;
     }
     if (!teams && smn.team) kind = smn.team;
@@ -22124,6 +22446,40 @@ static int on_language_keys(pm_reg *r)
     return 1;
 }
 
+/* PAD-1449 round 11 (DoomWalrus666: "Sometimes language selection did not appear during the intro ... sporadically"):
+ * Godzilla's PLAYER LANGUAGE SELECT bar asks one check each frame, and so does its flipper toggle (`site
+ * language_begun`, LE 1.16 0x1712cc, Pro 1.15/1.16 0x16d8f4; these two are its only callers): has play begun? It
+ * answers the rule's own cached byte (+8), else a global one (`data language_play_begun`, LE 0x712748) that the game
+ * clears at a Start; a launched ball sets the answer (emulator, LE 1.16: launched 1 s into a Standard game's film, the
+ * bar never came; the global byte poked alone did not do it). Once that byte is set the bar's two lines are written empty and a flipper flips nothing. A ball
+ * still rolling or kicked out of the playfield after a reset or a quick restart sets it during the intro, so the bar never
+ * came. While the game's intro screen is up in ball 1 (ci_film_up), the check answers "not yet", so the bar and its flips
+ * last as long as the intro (ours swapped in, or the game's own film). After that the game's answer is used again
+ * (tests lift it verbatim) */
+static int lang_bar_kept(int in_game, int film_up, unsigned ball)
+{
+    return in_game && film_up == 1 && ball <= 1;
+}
+
+static int on_language_begun(pm_reg *r, unsigned n)
+{
+    static unsigned said_game;
+    pm_addr flag = data("language_play_begun");
+    int begun;
+    (void)n;
+    if (!lang_bar_kept(pm_in_game(), ci_film_up(), coop_ball_byte ? *coop_ball_byte : 1u)) return 0;
+    /* the game's own answer, for the log: the rule's cached byte (+8, what a launch sets; emulator: the global byte
+     * poked alone changed nothing), else the global one */
+    begun = (r[0] >= 0x10000u && *(volatile unsigned char *)(unsigned long)(r[0] + 8u))
+            || (flag && *(volatile unsigned char *)(unsigned long)flag);
+    if (begun && said_game != chg_game_now() + 1) {
+        said_game = chg_game_now() + 1;
+        say("language: play began (the ball launched, or a playfield switch) while the game's intro screen is up in ball 1 - its PLAYER "
+            "LANGUAGE SELECT bar and flips are kept until that screen closes");
+    }
+    return 1;                                                 /* refused: the check returns 0, "not begun" */
+}
+
 /* PAD-1045: an Action press at a launch - the turn's ball not served yet, waiting, or just out - is the launch's, not
  * half of the save's double press. PAD-1051: from the game's plunger flags where the port names them (Godzilla LE's
  * shooter lane switch reads the opposite sense to its flippers, so its level said "out" while the ball waited), else
@@ -22138,6 +22494,15 @@ static int coop_launch_press(unsigned long now)
         return 1;
     }
     return !coop_turn_waited || now - coop_waited_ms < COOP_LAUNCH_MS;
+}
+
+/* PAD-1449 round 9: a Start pressed out of a game (coop.cfg `intro_start`) - the one that begins the next game - and
+ * whether the button was down AT it (coop_start_held) */
+static void coop_go_edge(unsigned id, int press)
+{
+    if (!press || !id || id != ci.start_sw || pm_in_game()) return;
+    coop_go_held = coop_start_button_held();               /* PAD-1449 round 10 */
+    coop_go_ms = pm_ms() | 1ul;
 }
 
 /* every edge of the switch drain (the game's thread): the pick's flippers and Action, the save's double press */
@@ -22157,6 +22522,7 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
         }
         return;
     }
+    coop_go_edge(id, (level & 1u) == closed);                 /* PAD-1449 round 9: a Start out of a game */
     sty_menu_edge(id, (level & 1u) == closed);                /* PAD-1449 round 4: Action and Start on the menu */
     if (sty.open && sty.ready && coop_teammates()) {          /* PAD-1449: the style chooser has them */
         if ((level & 1u) != closed) return;
@@ -23343,6 +23709,15 @@ static void coop_chars_arm(struct site *e)
             say("co-op characters: the game's language select (language_keys) could not be hooked - it sees the "
                 "pick's flippers");
     }
+    if (fn("language_begun")) {                               /* PAD-1449 round 11 */
+        static int begun_hooked;
+        if (!begun_hooked && (begun_hooked = hook_veto_n(fn("language_begun"), on_language_begun, 0, 0)) != 0)
+            say("language: the game's PLAYER LANGUAGE SELECT bar stays up through the intro screen in ball 1, whatever "
+                "the playfield switches do");
+        else if (!begun_hooked)
+            say("language: the game's play-begun check (language_begun) could not be hooked - a playfield switch in "
+                "the intro still clears its language bar");
+    }
     if (coop_pick_on && (!coop_left || !coop_action))
         say("co-op characters: the pick walks with %s and takes with %s", coop_left ? "both flippers" : "the right flipper",
             coop_action ? "Action" : "the time alone (coop.cfg names no Action button)");
@@ -23486,7 +23861,8 @@ static int ci_film_held(int chars, int held, int switched_on)
 static int ci_film_due(void)
 {
     int held = ci_film_held(coop_ch_n && coop_pick_on,
-                            coop_button_held() || (coop.held_ms && pm_ms() - (coop.held_ms & ~1ul) <= CI_HELD_MS),
+                            coop_start_held(coop_go_ms, coop_go_held, coop_start_button_held(), coop.held_ms, pm_ms(),
+                                            CI_HELD_MS),       /* PAD-1449 round 9: at the Start that began it */
                             coop_switched_on() || coop_teams_switched_on() != 0);
     if (sty.open && (sty.kind == STY_STANDARD || sty.kind == STY_CHALLENGE)) return 0;   /* PAD-1449: its style
                                                               * first: NORMAL is the game's own film */
@@ -23613,6 +23989,65 @@ static int ci_prio_lifted;
 static unsigned long ci_show_first, ci_show_looked;
 static unsigned ci_show_plays;
 
+/* PAD-1476 round 4 (DoomWalrus666: "Can we replace the intro lighting with the chosen lighting? Typically the GI gets
+ * dark during tank multiball intro"): with a show picked, that show is the intro's lighting. The game's own shows
+ * running as it starts (the start film's - Godzilla's 305 over the whole playfield) are ended, and any the game starts
+ * while the intro plays, and the playfield's GI strings ("GI" a word of its own in the lamp's name) are held dark;
+ * the GI goes back to the game as the intro ends (played, skipped, the game over) */
+#define CI_GI_MAX 8
+static int ci_gi[CI_GI_MAX], ci_gi_n;
+static unsigned ci_quieted;
+
+static int ci_name_gi(const char *s)     /* "GI" a word of its own (tests lift it verbatim) */
+{
+    int i;
+    for (i = 0; s && s[i] && s[i + 1]; i++)
+        if (s[i] == 'G' && s[i + 1] == 'I' && (i == 0 || s[i - 1] < 'A' || s[i - 1] > 'Z')
+            && (s[i + 2] < 'A' || s[i + 2] > 'Z'))
+            return 1;
+    return 0;
+}
+
+/* the game's own shows running now, but the intro's: each number ended (the game's stopper ends every record of it) */
+static void ci_quiet_game_shows(void)
+{
+    unsigned rec, k, nums[16], n = 0, j;
+    pm_addr stop = fn("show_stop_number");
+    if (!stop || !ci.show || show_layout() != 1) return;
+    for (rec = *(const unsigned *)(unsigned long)show_head, k = 0; rec && k < 64 && n < 16;
+         rec = *(const unsigned *)(unsigned long)(rec + 0x84), k++) {
+        unsigned num;
+        if (!(*(const unsigned short *)(unsigned long)(rec + 2) & 0x20)) continue;
+        num = *(const unsigned short *)(unsigned long)(rec + 0x96);
+        if (!num || num == (unsigned)ci.show) continue;
+        for (j = 0; j < n && nums[j] != num; j++) ;
+        if (j == n) nums[n++] = num;
+    }
+    for (j = 0; j < n; j++) {
+        ((unsigned (*)(unsigned))(unsigned long)stop)(nums[j]);
+        if (ci_quieted < 8 && ++ci_quieted)
+            say("co-op intro: the game's own light show %u ended - the intro's show %d is its lighting", nums[j],
+                ci.show);
+    }
+}
+
+static void ci_gi_dark(void)
+{
+    int k;
+    ci_gi_n = 0;
+    if (!(can & PM_CAN_LAMPS)) return;
+    for (k = 0; k < n_lamps && ci_gi_n < CI_GI_MAX; k++)
+        if (ci_name_gi(lamps[k].name) && lamp_paint(k, 0)) ci_gi[ci_gi_n++] = k;
+    if (ci_gi_n) say("co-op intro: %d GI string(s) dark while its light show plays", ci_gi_n);
+}
+
+static void ci_gi_back(void)
+{
+    if (!ci_gi_n) return;
+    lamp_release_list(ci_gi, ci_gi_n, "the co-op intro's GI");
+    ci_gi_n = 0;
+}
+
 static void ci_show_start(void)
 {
     ci.show_on = 0;
@@ -23625,6 +24060,11 @@ static void ci_show_start(void)
     ci_show_first = pm_ms();
     ci_show_plays = 1;
     if (!ci.show_on) say("co-op intro: its light show %d not played (the line above says why)", ci.show);
+    if (ci.show_on) {                                         /* round 4: it alone lights the intro */
+        ci_quieted = 0;
+        ci_quiet_game_shows();
+        ci_gi_dark();
+    }
 }
 
 /* every tick: the intro's show started again once it has ended by itself, while the intro has more to play */
@@ -23634,20 +24074,33 @@ static void ci_show_again(unsigned long now)
     int top;
     if (!ci.show_on || (ci.phase != CI_FILM && ci.phase != CI_PLAY) || now - ci_show_looked < 100ul) return;
     ci_show_looked = now;
-    if (show_now.n != -ci.show || show_now.call != 2) {      /* another of ours took over: it is theirs now */
+    /* another of ours took over: it is theirs now (the GI stays dark until the intro ends: ci_show_stop). Round 4:
+     * show_now.n 0 is ours ended by its time (show_kill) - started again below like one over by itself */
+    if (show_now.n && (show_now.n != -ci.show || show_now.call != 2)) {
         ci.show_on = 0;
         return;
     }
-    if (show_running(ci.show, &top) != 0) return;            /* playing, or not known on this build */
+    ci_quiet_game_shows();                                    /* round 4: one the game started meanwhile */
+    if (show_now.n && show_running(ci.show, &top) != 0) return;   /* playing, or not known on this build */
     played = now - ci_show_first;
-    left = ci.ms > played ? ci.ms - played : 0;
-    if (left <= CI_SHOW_AGAIN_MS) return;
+    /* round 3: an intro whose length the card does not carry (`intro <clip> 0`: its video's length unread) has its
+     * show started again for as long as it plays - ci_show_stop ends it with the intro. Round 4: so has one played
+     * past the length its card says (Godzilla Pro 1.16, emulator: the game's intro screen ran 10.8 s of a 9 s
+     * intro, and its show and dark GI went 1.2 s early) */
+    left = !ci.ms || played >= ci.ms ? SHOW_MAX_MS : ci.ms - played;
+    if (ci.ms && played < ci.ms && left <= CI_SHOW_AGAIN_MS) return;
     show_now.n = 0;                                           /* over by itself: nothing of it to stop */
     if (show_number_start_over(ci.show, left + 500ul, "the co-op intro, again")) {
         ci_show_plays++;
         if (ci_show_plays <= 3 || ci_show_plays % 10 == 0)
-            say("co-op intro: its light show %d over after one play - started again (%u plays, %lu ms of the intro "
-                "left)", ci.show, ci_show_plays, left);
+        {
+            if (ci.ms)
+                say("co-op intro: its light show %d over after one play - started again (%u plays, %lu ms of the "
+                    "intro left)", ci.show, ci_show_plays, left);
+            else
+                say("co-op intro: its light show %d over after one play - started again (%u plays; the intro's "
+                    "length not on the card: until it ends)", ci.show, ci_show_plays);
+        }
     } else {
         ci.show_on = 0;
     }
@@ -23655,6 +24108,7 @@ static void ci_show_again(unsigned long now)
 
 static void ci_show_stop(const char *how)
 {
+    ci_gi_back();                                             /* round 4 */
     if (!ci.show_on) return;
     ci.show_on = 0;
     if (show_now.n == -ci.show && show_now.call == 2) show_kill(how);
@@ -24284,6 +24738,23 @@ static int coop_solo_held(unsigned long held, unsigned long start)
     return held && start - held <= COOP_SOLO_MS;
 }
 
+/* PAD-1449 round 9 (DoomWalrus666, on v1.564.1: "When on Standard Regular (started via Start Button default), if Start
+ * button is pressed during the Match screen, co-op intro plays and Enhanced mode is started"): "held at Start" was the
+ * button down at the game's start (`now_held`) or let go at most `window` ms before it (`held`, pm_ms() | 1; 0 never),
+ * so a right flipper tapped to hurry the match draw along and let go just before the Start (Godzilla LE 1.16 begins
+ * the game on that Start at once, emulator) made a co-op game of one: the co-op intro, then a character with its
+ * ability. PAD-1054 asked for the button "held when start button is pressed". Where the Start switch is known (coop.cfg
+ * `intro_start`) its press out of a game is kept (`go`, pm_ms() | 1, with `go_held`: the button down AT that press),
+ * and a game that starts within COOP_GO_GAP_MS of it is the button's only when it was down at that press or is down
+ * at the start (both pressed together); with no such press, as before (tests lift it verbatim) */
+static int coop_start_held(unsigned long go, int go_held, int now_held, unsigned long held, unsigned long start,
+                           unsigned long window)
+{
+    if (now_held) return 1;
+    if (go && start - (go & ~1ul) <= COOP_GO_GAP_MS) return go_held;
+    return held && start - (held & ~1ul) <= window;
+}
+
 /* PAD-1054: that game, now playing: a team of one with the game's one player, CO-OP PLAY (or a team mode) on and
  * characters to pick (tests lift it verbatim) */
 static int coop_solo_takes(unsigned players, int switched_on, int chars)
@@ -24299,10 +24770,14 @@ static void coop_solo_check(void)
     g = chg_game_now();
     if (g != coop.started) {                                  /* before this tick's poll: the held time AT the start */
         coop.started = g;
-        coop.solo_ask = g && coop_solo_held(coop.held_ms, pm_ms());
+        coop.solo_ask = g && coop_start_held(coop_go_ms, coop_go_held, coop_start_button_held(), coop.held_ms, pm_ms(),
+                                             COOP_SOLO_MS);
+        if (g && !coop.solo_ask && coop_solo_held(coop.held_ms, pm_ms()))   /* PAD-1449 round 9 */
+            say("co-op: the right flipper was let go %lu ms before this game began and was up at the Start that began it "
+                "(%lu ms before) - the game's own start", pm_ms() - (coop.held_ms & ~1ul), pm_ms() - (coop_go_ms & ~1ul));
         coop_fresh_ms = g ? pm_ms() | 1ul : 0ul;              /* PAD-1078: no ball in play until its first waits */
     }
-    if (coop_button_held()) coop.held_ms = pm_ms() | 1ul;
+    if (coop_start_button_held()) coop.held_ms = pm_ms() | 1ul;   /* PAD-1449 round 10 */
     if (!coop.solo_ask || !pm_in_game() || !pm_player()) return;
     coop.solo_ask = 0;
     if (coop_teammates()) return;                             /* the held Start made a team already */
@@ -25003,7 +25478,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     if (solo && *coop_players_byte == 1 && coop_teams_switched_on()) return coop_team_add(r0, r1, r2, r3);
     if (!n && *coop_players_byte == 1 && coop_teams_switched_on() && !tm.armed)
         return coop_team_fill(r0, r1, r2, r3);                /* PAD-1052: no start menu to pick it on */
-    if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_button_held()))
+    if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_start_button_held()))   /* PAD-1449 round 10 */
         return coop_add_game(r0, r1, r2, r3);
     if (n >= 4) {
         say("co-op: Start - the team is full (4)");
@@ -25462,6 +25937,8 @@ static void coop_line(const char *s)
     while (*s == ' ' || *s == '\t') s++;
     if (!*s || *s == '#') return;
     if (str_starts(s, "coop on")) { coop.on = 1; return; }
+    if (str_starts(s, "hold on")) { coop.hold = 1; return; }          /* PAD-1449 round 10: the held button's co-op */
+    if (str_starts(s, "hold off")) { coop.hold = 2; return; }
     if (str_starts(s, "teams on")) { coop.teams_always = 4; return; }   /* PAD-1042: Team 2v2 */
     if (str_starts(s, "teams 2v1")) { coop.teams_always = 3; return; }  /* ... Team 2v1 */
     if (str_starts(s, "teams 3v1")) { coop.teams_always = 5; return; }  /* PAD-1224: Team 3v1 */
@@ -25736,6 +26213,10 @@ static void coop_arm(void)
             coop.teams_always == 3u ? "2v1" : coop.teams_always == 5u ? "3v1" : "on",
             coop.teams_always == 3u ? "2" : coop.teams_always == 5u ? "2 (team 1: 1+3+4)" : "2+4");   /* PAD-1052 */
     team_menu_arm();                                          /* PAD-1052: TEAM PLAY / CO-OP PLAY on the start menu */
+    say("co-op: the right flipper held at Start %s (%s)", coop_hold_starts(coop.hold, tm.armed)
+        ? "makes a co-op game" : "starts no co-op - the start menu's CO-OP PLAY does",
+        coop.hold == 1u ? "coop.cfg `hold on`" : coop.hold == 2u ? "coop.cfg `hold off`"
+        : tm.armed ? "the start menu has CO-OP PLAY" : "no start menu entry for it");   /* PAD-1449 round 10 */
     coop_awards_arm();                                        /* PAD-1028 */
     if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */
@@ -29181,7 +29662,8 @@ static void bsid_line(const char *ms, const char *slot, const char *ids, const c
  * the game's mode mask holds the attract bit (value mode_mask_attract, 0x10 measured on Godzilla and
  * Bond) and no game is played, plays the carrier with the next file's key swapped in where the game
  * looks its record up (att_lookup) - once the last one has had its length (+ATT_GAP): a press while
- * one still plays is not another sound. The files go round in turn.
+ * one still plays is not another sound. The files go round in turn. PAD-1520: not while the mask holds the
+ * game's end-of-game bits too (value mode_mask_game_end, 0x88: MATCH is 0x98 on Bond LE 1.06).
  * PAD-645: most games play a sound of their own at a flipper button in attract (Deadpool LE 1.14: its
  * request 179 at every release). With
  *   aquiet  <a silent record's key>                             the build's own short silence
@@ -29213,6 +29695,8 @@ static struct {
     unsigned hs_skips;                      /* round 2: presses while the game's high scores took initials */
     volatile unsigned long menu_ms;         /* round 2: the game's start menu was last seen running then */
     unsigned menu_skips;
+    unsigned end_skips;                     /* PAD-1520: presses while the game's end of game (MATCH) played */
+    unsigned end_bits;                      /* PAD-1520: its mode mask bits (value mode_mask_game_end, 0x88) */
 } att = { .cur = -1 };
 static int att_bad;
 
@@ -29333,6 +29817,16 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
     int k;
     if (id != att.sw[0] && id != att.sw[1]) return;
     if (!(mask & att.attract_bit) || pm_in_game()) return;   /* attract only: not a game, a tilt, a menu */
+    if (mask & att.end_bits) {
+        /* PAD-1520: the game's end of game holds two more bits beside the attract one while it plays out (James
+         * Bond LE 1.06 in the emulator: 0x98 through MATCH and its roulette wheel, then 0x10 once attract runs).
+         * Only those two: a game's own attract may hold others (0x110 on Bond 60th LE 1.11, now and then on John
+         * Wick LE 1.02) - a press there is one in attract */
+        if (att.end_skips++ < 4)
+            say("attract flipper sounds: switch %u while the game's end of game (MATCH) plays, mode mask 0x%x - no "
+                "sound", id, mask & 0xffffu);
+        return;
+    }
     if (chg_scores_running) {                           /* PAD-641 round 2: a high score's initials are being entered */
         if (att.hs_skips++ < 4)
             say("attract flipper sounds: switch %u while the game takes a high score's initials - no sound", id);
@@ -29417,6 +29911,7 @@ static void att_arm(void)
         return;
     }
     att.attract_bit = (unsigned)pm_port_value("mode_mask_attract", 0x10);
+    att.end_bits = (unsigned)pm_port_value("mode_mask_game_end", 0x88);
     if (!edge_hook(e)) {
         say("attract flipper sounds: off - switch_edge 0x%08" PMA " cannot be hooked", e->addr);
         return;

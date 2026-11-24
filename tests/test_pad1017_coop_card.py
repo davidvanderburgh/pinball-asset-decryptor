@@ -269,7 +269,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     assert "return only && v ? setting_addr(v) : 0;" in R._lift(      # ... the build says (PAD-1326: moved; PAD-1382)
         src, "static pm_addr coop_setting_wanted(void)\n{")
     add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
-    assert "coop_switched_on() && coop_button_held()" in add                   # Off: Start adds a competing player
+    assert "coop_switched_on() && coop_start_button_held()" in add             # Off: Start adds a competing player
     assert "return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) != 0u;" in R._lift(
         src, "static int coop_switched_on(void)")
 

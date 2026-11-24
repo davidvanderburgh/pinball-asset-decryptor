@@ -65,13 +65,20 @@ FORM_GROUPS = (
     ("Picture and video", ("picture", "picture_at", "video", "video_at", "video_loop")),
     ("Lamps", ("lamps", "lamp_color", "lamp_blink")),
     ("Screen", ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
-                "panel_color", "panel")),
+                "panel_color", "panel", "panel_at", "title_at", "value_at", "timer_at")),   # PAD-1515: places
     ("Balls", ("multiball", "multiball_on", "add_ball", "ball_save")),                       # PAD-1353
     ("Coils", ("coil_start", "coil_shot", "coil_complete", "coil_hold", "coil_hold_on")),     # PAD-1353
+    # PAD-1508: Spike 2's rules (tools/jjp_emu/MODES.md "Spike 2's rules")
+    ("Rules from Spike 2", ("shot_points", "points_ladder", "end_shots", "start_also", "start_max",
+                            "cooldown", "start_needs", "sound_at", "sound_shot_every", "lamp_pattern",
+                            "in_place_of")),
+    # PAD-1512: a wizard mode (every one of the game's modes played) and a game type picked in attract
+    ("Wizard mode and game type", ("start_all", "start_all_count", "progress", "progress_at", "progress_seconds",
+                                   "game_type")),
 )
 #: mode keys the form does not show: ``code`` is set when a mode is made with blocks or in C++
 #: (the New mode window, PAD-1384) and shown as how the mode is made
-NOT_ON_FORM = ("code",)
+NOT_ON_FORM = ("code", "penalty", "inside")   # PAD-1508: JJP cannot take points away, and runs ours one at a time
 #: the runtime's defaults (MODES.md "Mode keys"): what an empty key means
 DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
@@ -81,6 +88,13 @@ DEFAULTS = {
     "video_at": "0 0 100 100", "video_loop": "yes",
     "coil_hold_on": "shots", "coil_holds": "off",
     "combo_seconds": "5", "start_count_reset": "game", "start_once": "no",
+    "points_ladder": "fixed",
+    "progress_at": "0 0 100 100", "progress_seconds": "5",
+    "game_type_normal": "NORMAL GAME", "game_type_title": "GAME TYPE",
+    "game_type_hint": "FLIPPERS TO CHOOSE - START TO PLAY", "game_type_panel_color": "000000e0",
+    "game_type_bar_color": "ffdc00", "game_type_title_color": "ffdc00", "game_type_item_color": "9a9a9a",
+    "game_type_pick_color": "ffffff", "game_type_pick_bar_color": "ffffff38", "game_type_hint_color": "c8c8c8",
+    "game_type_picture_at": "0 0 100 100",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
@@ -92,6 +106,15 @@ LABELS = {
     "font_title": "Title font", "font_value": "Total font", "font_timer": "Timer font",
     "title_color": "Title color", "value_color": "Total color", "timer_color": "Timer color",
     "panel_color": "Panel color", "panel": "Panel place",
+    # PAD-1515: the layout editor's places
+    "panel_at": "Panel box (x y w h, % of screen; empty = the panel place)",
+    "title_at": "Title box (x y w h, % of the panel)", "value_at": "Total box (x y w h, % of the panel)",
+    "timer_at": "Timer box (x y w h, % of the panel)",
+    "game_type_title_at": "Attract menu: heading box (x y w h, % of the menu)",
+    "game_type_lines_at": "Attract menu: lines box (x y w h, % of the menu)",
+    "game_type_hint_at": "Attract menu: hint box (x y w h, % of the menu)",
+    "screen_move": "The game's own screen: parts moved (one a line: name dx dy [scale])",
+    "screen_hide": "The game's own screen: parts hidden (one a line: name)",
     "sound_channel": "Channel for our sound files", "sound_like": "Our sounds set like",
     "music": "Music (a file of ours)", "music_like": "Our music set like",
     "picture": "Picture (a file of ours)", "picture_at": "Picture box (x y w h, % of screen)",
@@ -106,10 +129,42 @@ LABELS = {
     "start_score": "Starts at a score", "start_combo": "Starts on a combo (in order)",
     "combo_seconds": "Combo seconds between shots", "start_count_reset": "Start count resets every",
     "start_once": "Starts at most once a", "code": "Its own code",
+    # PAD-1508
+    "shot_points": "Points per shot (one a line: switches points)", "points_ladder": "Each shot pays",
+    "end_shots": "Shots that end it", "penalty": "Shots that take points (one a line: switches points)",
+    "start_also": "Also needed to start (one a line: switches [hits])", "start_max": "Starts at most, a game",
+    "cooldown": "Seconds before it can start again", "start_needs": "Only after my mode (name [ball|game])",
+    "sound_at": "Sounds at seconds left (one a line: seconds sound)", "sound_shot_every": "Shot sound every Nth shot",
+    "lamp_pattern": "Lamp pattern",
+    "in_place_of": "Starts in place of the game's mode", "inside": "Runs inside my mode (name)",
+    # PAD-1512
+    "start_all": "Starts once the player has played all of these game modes",
+    "start_all_count": "...or this many of them",
+    "progress": "Progress pictures (one a line: game mode picture [unlit picture] [x y w h])",
+    "progress_at": "Progress box (x y w h, % of screen)", "progress_seconds": "Progress shows for (seconds)",
+    "game_type": "Game type on the attract menu (its line)",
+    "game_type_normal": "Attract menu: the normal game's line", "game_type_title": "Attract menu: its heading",
+    "game_type_hint": "Attract menu: the hint line (none hides it)",
+    "game_type_at": "Attract menu box (x y w h, % of screen; empty = centred)",
+    "game_type_panel_color": "Attract menu: panel color", "game_type_bar_color": "Attract menu: top and bottom bars",
+    "game_type_title_color": "Attract menu: heading color", "game_type_item_color": "Attract menu: line color",
+    "game_type_pick_color": "Attract menu: picked line color", "game_type_pick_bar_color": "Attract menu: picked line's bar",
+    "game_type_hint_color": "Attract menu: hint color",
+    "game_type_font_title": "Attract menu: heading font", "game_type_font_item": "Attract menu: line font",
+    "game_type_font_hint": "Attract menu: hint font",
+    "game_type_picture": "Attract menu: picture under it (a file of ours)",
+    "game_type_picture_at": "Attract menu picture box (x y w h, % of screen)",
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
-              "panel_color", "panel", "game_modes", "hold_multiballs", "ingame_state", "coil_holds")
+              "panel_color", "panel", "panel_at", "title_at", "value_at", "timer_at",
+              "game_modes", "hold_multiballs", "ingame_state", "coil_holds",
+              "game_type_normal", "game_type_title", "game_type_hint", "game_type_at",
+              "game_type_panel_color", "game_type_bar_color", "game_type_title_color", "game_type_item_color",
+              "game_type_pick_color", "game_type_pick_bar_color", "game_type_hint_color",
+              "game_type_font_title", "game_type_font_item", "game_type_font_hint",
+              "game_type_picture", "game_type_picture_at",
+              "game_type_title_at", "game_type_lines_at", "game_type_hint_at", "screen_move", "screen_hide")
 
 
 # ============================================================================ where things are
@@ -273,7 +328,11 @@ def read_cfg(path):
             text = f.read()
     except OSError:
         return collections.OrderedDict()
-    return collections.OrderedDict((k, v) for _n, k, v in mk().parse_cfg(text))
+    out = collections.OrderedDict()
+    rep = set(getattr(mk(), "REPEATABLE", {})) | set(getattr(mk(), "TITLE_REPEATABLE", ()))
+    for _n, k, v in mk().parse_cfg(text):
+        out[k] = out[k] + "\n" + v if k in rep and out.get(k) else v   # PAD-1508: every line of a repeated key
+    return out
 
 
 def write_cfg(path, values, header=""):
@@ -286,8 +345,9 @@ def write_cfg(path, values, header=""):
         lines.append("# " + header)
     for k in order:
         v = str(values.get(k) if values.get(k) is not None else "").strip()
-        if v != "":
-            lines.append("%s = %s" % (k, v))
+        for one in v.splitlines():            # a repeated key (PAD-1508): a line each
+            if one.strip():
+                lines.append("%s = %s" % (k, one.strip()))
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
@@ -412,9 +472,11 @@ def blocks_to_cpp(label, fn):
 
 
 def blocks_names(port, folder):
-    """What the Blocks editor offers for this title: its switches, lamps, sounds and coils."""
+    """What the Blocks editor offers for this title: its switches, lamps, sounds and coils, and
+    the game's own modes and multiballs (PAD-1512)."""
     return {"kit": "jjp", "shots": names_for(port, "switches"), "lamps": names_for(port, "lamps"),
-            "sounds": names_for(port, "sound"), "coils": names_for(port, "coil_pulse")}
+            "sounds": names_for(port, "sound"), "coils": names_for(port, "coil_pulse"),
+            "played": names_for(port, "played")}
 
 
 def code_stale(label):
@@ -591,6 +653,10 @@ def names_for(port, kind, folder=None):
         return ["any"] + sorted(st.get("objects") or ()) + sorted(
             set(st.get("classes") or ()) | set(port.get("mode_classes") or ())
             | set(port.get("proc_modes") or ()))   # PAD-1365: the proc engine's game modes
+    if kind == "played":            # PAD-1512 start_all: the game's mode / multiball classes and globals
+        pl = port.get("played") or {}
+        st = port.get("stock") or {}
+        return sorted(st.get("objects") or ()) + sorted(set(pl.get("names") or ()) | set(port.get("proc_modes") or ()))
     return []
 
 
@@ -706,6 +772,30 @@ def runtime_path(iso):
             h.update(f.read())
     stem = re.sub(r"\.iso$", "", os.path.basename(iso), flags=re.I)
     return os.path.join(modes_root(), ".runtime", "%s-%s.so" % (stem, h.hexdigest()[:12]))
+
+
+def screens_args(iso, runtime, label, to_linux, open_mode=""):
+    """PAD-1515: the jjpscreens.sh argv ("Show it in the game": the game's own screens, each part named,
+    into the mode folder's .layout/ for the layout editor), as root from the checkout root, run by bash.
+    The attract game type menu is opened too when a mode has a game type, and ``open_mode`` (a .mode
+    file) is started when it has start switches: each grabbed with ours drawn, the true look."""
+    from . import screen_layout as SL
+    folder = title_dir(label)
+    argv = ["tools/jjp_emu/jjpscreens.sh", "--iso", to_linux(iso), "--so", to_linux(runtime),
+            "--modes", to_linux(folder), "--out", to_linux(os.path.join(folder, SL.FRAMES_DIR))]
+    if any((read_mode(label, m["file"]).get("game_type") or "").strip() for m in list_modes(label)):
+        argv.append("--menu")
+    if open_mode:
+        m = read_mode(label, open_mode)
+        sw = (m.get("start") or "").split()
+        count = (m.get("start_count") or "1").strip()
+        if sw and re.match(r"^[A-Za-z0-9_]+$", sw[0]) and count.isdigit():
+            argv += ["--start", "%s %d" % (sw[0], min(int(count), 20))]
+    return argv
+
+
+#: the screens run's command line, for stopping it inside Linux (see BUILD_PATTERN)
+SCREENS_PATTERN = "tools/jjp_emu/jjp[s]creens.sh"
 
 
 def runtime_args(iso, out, to_linux):

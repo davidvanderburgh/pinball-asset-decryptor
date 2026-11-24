@@ -1,0 +1,58 @@
+note wait for the game to come up and start a game
+wait installed: 240
+wait game state 2 -> 4 240
+sleep 30
+press dswitch_coin_1
+press dswitch_coin_1
+sleep 1
+press dswitch_start
+wait game state \d+ -> 5 90
+sleep 3
+plunge
+sleep 3
+note RULES B before A has run: not counted
+press switch_target_gobstopper
+note start_also: bank_1 once (start shot), bank_2 twice
+press switch_target_bank_1
+press switch_target_bank_2
+press switch_target_bank_2
+wait "RULES A" STARTED 10
+sleep 9
+note ladder: tv +1M, tv +2M (shot sound on the 2nd), left ramp 3M x3
+press switch_target_tv
+press switch_target_tv
+press switch_ramp_left_made
+note end shot
+press switch_target_factory
+wait "RULES A" ENDED by end shot 10
+note cooldown: start shots now are not counted
+press switch_target_bank_1
+press switch_target_bank_2
+note RULES B needs A this game: now it starts (pulse)
+press switch_target_gobstopper
+wait "RULES B" STARTED 10
+wait "RULES B" over 20
+note combo with a 7 s gap (no time limit)
+press switch_target_bank_3
+sleep 7
+press switch_target_l_loop
+wait "RULES C" STARTED 15
+wait "RULES C" over 20
+sleep 4
+note RULES A second run (cooldown past)
+press switch_target_bank_1
+press switch_target_bank_2
+press switch_target_bank_2
+wait "RULES A" STARTED.*\n(.|\n)*"RULES A" STARTED 10
+press switch_target_factory
+sleep 10
+note third: start_max 2
+press switch_target_bank_1
+press switch_target_bank_2
+press switch_target_bank_2
+sleep 2
+sleep 8
+note in_place_of: the test switch starts Candy Lane; RULES D starts in its place
+press switch_target_captiveball
+wait "RULES D" starting: in place of 20
+wait "RULES D" over 20

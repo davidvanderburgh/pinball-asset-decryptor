@@ -916,3 +916,43 @@ def test_a_card_copy_is_on_the_board_while_it_runs():
     assert 'note "$slot" "rigbatch $key (waiting for its card: $lbl)"' in rb
     assert 'PAD_LABEL="$WHO" setsid bash "$RIG/cardstage.sh" "$OUT" cache' in rb
     assert '"$(pad_board_dir)"/copy-*.json' in rb
+
+
+# PAD-1541: attract is the light show, but a Start belongs after the attract scene's first clip - elvira3-1.13 dies on
+# a Start in the seconds between (gamestate.sh, gs_show_up), and every start path waits for it (gs_wait_show).
+_LAMPS = "[led] light show running: 30 lamp commands in 133 ms and the picture is moving (last node=8 cmd=9e, 124336 ms)"
+_CLIP = "[vid] ch0 owns source 0xce1660b8"
+_WHERE = "[vid] ch0 location -> ./assets/lcd/auto_loaded/54589bdb/scene.assets/2.asset/0.asset"
+
+
+def _show_up(*lines):
+    body = 'f=$(mktemp)\nprintf "%%s\n" %s > "$f"\n. "$R/gamestate.sh"\ngs_show_up "$f"; echo "rc=$?"\nrm -f "$f"\n' % (
+        " ".join("'%s'" % l for l in lines))
+    rc, out, err = _sh(body)
+    assert rc == 0, err
+    return out.strip().splitlines()[-1]
+
+
+def test_the_attract_show_is_up_at_its_first_clip_after_the_lamps():
+    assert _show_up("[gst] factory_make", _LAMPS, "[sw] 145532 ms +39l", _CLIP) == "rc=0"
+    assert _show_up(_LAMPS, _WHERE) == "rc=0"
+
+
+def test_lamps_alone_or_a_clip_before_them_is_not_the_show():
+    assert _show_up(_LAMPS) == "rc=1"                       # elvira3's crash window: lamps, no scene yet
+    assert _show_up(_CLIP, "[sw] 1 ms +36l") == "rc=1"      # a boot / Tech Alerts clip is not attract's
+    assert _show_up(_CLIP, _LAMPS) == "rc=1"
+
+
+def test_the_wait_for_the_show_gives_up_at_its_cap():
+    rc, out, err = _sh('f=$(mktemp)\necho "%s" > "$f"\n. "$R/gamestate.sh"\n'
+                       't=$(date +%%s); gs_wait_show "$f" 2; echo "rc=$? took=$(( $(date +%%s) - t ))"\nrm -f "$f"\n'
+                       % _LAMPS)
+    assert rc == 0, err
+    line = out.strip().splitlines()[-1]
+    assert line.startswith("rc=1 ") and int(line.split("took=")[1]) <= 4, line
+
+
+def test_every_start_path_waits_for_the_attract_show():
+    for name in ("rigjob.sh", "motorcheck.sh", "longplay.sh", os.path.join("modes", "gamecheck.sh")):
+        assert "gs_wait_show" in _src(name), name

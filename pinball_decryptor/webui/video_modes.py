@@ -382,6 +382,20 @@ class ModesMixin:
         """*rels* less the followers that have no file (no pick can be made for those)."""
         return [r for r in rels if r not in self._m_virtual]
 
+    def _m_sort_key(self, rel):
+        """PAD-1524: the Played in sort: rows naming modes first, by what the cell says, then
+        "Other parts of the game", then "Not played", then the rows with nothing in the cell
+        (at the bottom going A-Z, at the top going Z-A). The file name breaks ties (the
+        caller sorts by it first, so the ties keep that order both ways)."""
+        ms = self._m_modes.get(rel) or []
+        if ms:
+            return (0, ", ".join(self._m_label(m) for m in ms).lower())
+        if rel in self._m_other:
+            return (1, "")
+        if rel in self._m_unplayed:
+            return (2, "")
+        return (3, "")
+
     def _m_row(self, rel):
         """The row's Played in cells (they override the slot's own where a follower shows
         its shared clip's name and the clip it follows)."""
@@ -476,6 +490,15 @@ class ModesMixin:
         if f == UNPLAYED:
             return rel in self._m_unplayed and not ms
         return f in ms
+
+    def _m_unused(self, rel):
+        """PAD-1532: *rel* is a clip the game never plays (Played in: Not played)."""
+        return rel in self._m_unplayed and not self._m_modes.get(rel)
+
+    def _m_hiding_unused(self):
+        """PAD-1532: "Show unused" is unticked and leaves the unplayed clips out. Picking "Not
+        played by the game" in the mode filter shows them all the same (it asks for them)."""
+        return bool(self.video_hide_unused_var.get()) and self._m_filter != UNPLAYED
 
     def _m_follow_text(self, rel):
         """The Replacement pane's words on a follower with no replacement, or None."""

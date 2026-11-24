@@ -58,7 +58,9 @@ def test_pick_installer_asset_windows():
     assert got == {"name": "Pinball_Asset_Decryptor_v9.0.0_Windows.exe",
                    "url": "https://example.com/win.exe",
                    "size": 42, "sha256": "ab" * 32,
-                   "kind": "windows-installer"}
+                   "kind": "windows-installer",
+                   # PAD-1519: no file list on this release
+                   "delta": None}
 
 
 def test_pick_installer_asset_no_digest_is_ok():
@@ -313,7 +315,11 @@ def test_launch_uses_unattended_inno_switches(tmp_path):
     # the prerequisites pass (Inno remembers a first-install "Install
     # prerequisites" tick per AppId and would re-run WSL2/partclone/gpg
     # on every silent update otherwise).
-    for switch in ("/SILENT", "/NORESTART",
+    # PAD-1529: no Setup window at all - the update splash is the wait, and
+    # /SUPPRESSMSGBOXES stays out so a stuck install can still say so
+    assert "/SILENT" not in args.split()
+    assert "/SUPPRESSMSGBOXES" not in args.split()
+    for switch in ("/VERYSILENT", "/NORESTART",
                    "/FORCECLOSEAPPLICATIONS", "/RELAUNCH=1",
                    '/MERGETASKS="!runprereqs"'):
         assert switch in args.split()

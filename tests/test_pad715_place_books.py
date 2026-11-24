@@ -111,12 +111,12 @@ def test_restore_power_is_read_off_the_program():
 # ---- the runtime ---------------------------------------------------------------------------------
 def test_the_check_takes_nothing_and_the_start_takes_the_place():
     rt = _src("pad_mode_runtime.c")
-    hook = rt[rt.index("static int on_block_start(pm_reg *r, unsigned hook_n)"):]
+    hook = rt[rt.index("static int block_start_veto(pm_reg *r, unsigned hook_n)\n{"):]   # PAD-1537: on_block_start's claims
     hook = hook[:hook.index("\n}\n")]
     assert "!place_check[id] && place_take(r, id)" in hook
     for want in ('pm_snprintf(name, sizeof name, "place_start_%u", id);',
                  "hook_veto_n(a, on_place_start, id, 0)) place_from[id] = a;",
-                 "return id < BLOCK_IDS && place_from[id] && place_take(r, id);",
+                 "if (id < BLOCK_IDS && place_from[id] && place_take(r, id)) return 1;",   # PAD-1537: else its own start is seen
                  "if (place_check[id] && !place_from[id]) return 0;",
                  "if (!(f = place_check[id] ? place_from[id] : fn(key))) return 0;"):
         assert want in rt, want

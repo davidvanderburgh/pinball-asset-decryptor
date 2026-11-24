@@ -935,7 +935,8 @@ int pm_ball_launch_known(void);                                      /* 1 = the 
  * Your tick goes on meanwhile, so the total you show then is drawn. The hold ends at its time, on
  * pm_ball_end_release (from your tick), or at once on a tilted ball. 1 = it will hold; 0 = not from .ball_end, a
  * tilted ball, or no PM_CAN_BALL_END_HOLD (the port's `site proc_sleep`). pm_ball_end_holding: 1 from the ask until
- * the game's end of ball goes on (watch it from your tick to take the total down then). */
+ * the game's end of ball goes on (watch it from your tick to take the total down then). The flippers are off for the
+ * hold, as at the game's own end of ball (PAD-1521; the port's flippers_off), and the game's next ball brings them back. */
 #define PM_CAN_BALL_END_HOLD 0x0800u  /* pm_ball_end_hold / pm_ball_end_release / pm_ball_end_holding */
 int pm_ball_end_hold(unsigned ms);
 void pm_ball_end_release(void);
@@ -984,6 +985,17 @@ int pm_game_modes_end(const char *why);
 int pm_game_mode_done(unsigned id);
 int pm_game_mode_done_seen(unsigned id);                         /* 1 = its completion is seen here */
 int pm_game_modes_done(const unsigned char *ids, unsigned n);
+
+/* ---- a mode that runs WITH one of the game's own modes: its intro and outro (PAD-1537) -----------------------------
+ * pm_game_mode_follow(id, &starts, &stops): what the runtime sees of the game's mode id - 1 its start (the game's START
+ * going ahead: not taken by a mode in its place, not held off), 2 its every stop (a C++ title's STOP, any outcome), 4
+ * its stop only when it is completed (a plain-C title's COMPLETED audit or flag); 0 = none, or not a mode the port
+ * names. starts / stops (may be 0): how many of each this boot, counted on the game's thread - a change is the edge. */
+int pm_game_mode_follow(unsigned id, unsigned *starts, unsigned *stops);
+int pm_clip_swap_next(const char *ours, unsigned ms);   /* every one-shot clip the game plays in the next ms (400
+                                                          when 0) plays `ours`, a clip of the video bank; 1 = armed */
+int pm_game_mode_stop(unsigned id, int won);   /* for a test: the game's STOP of its mode id (C++ titles), as its clock
+                                                  running out calls it, while it runs for the player up; 1 = called */
 
 /* ---- spare switches and driver outputs (PAD-826; MODE_SDK.md "Spare switches and outputs") -------------------------
  * For hardware a mod ADDS: a switch wired to a node board input the game has no switch on, a coil, flasher or toy

@@ -580,13 +580,19 @@ def _tree_manifest(d):
     return out
 
 
+# PAD-1507: a card written onto a Windows drive is made sparse by Windows first;
+# the one definition is mkmulticard's (PAD-1533 gave Spike 2 and JJP the same)
+_windows_sparse_file = mkc.windows_sparse_file
+
+
 def _copy_image_file(src, dst, total):
     """The card copy, metered; an all-zero MiB is skipped (a hole where the
     filesystem allows one), so a fresh copy costs no more than its data."""
     CH = 8 << 20
     PROGRESS.step("copying image 0's card", total)
     zero = bytes(CH)
-    with open(src, "rb") as fi, open(dst, "wb") as fo:
+    sparse = _windows_sparse_file(dst, total)
+    with open(src, "rb") as fi, open(dst, "r+b" if sparse else "wb") as fo:
         while True:
             b = fi.read(CH)
             if not b:

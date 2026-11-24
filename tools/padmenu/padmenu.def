@@ -1,0 +1,4 @@
+LIBRARY padmenu64
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

@@ -86,6 +86,29 @@ class Host:
             except Exception:                           # noqa: BLE001
                 pass
 
+    def bring_to_front(self):
+        """Restore and raise the window (PAD-1514: an image double-clicked
+        while the app was already open).  Never raises."""
+        win = self.window
+        if win is None:
+            return
+        try:
+            win.restore()
+        except Exception:                               # noqa: BLE001
+            pass
+        if sys.platform == "win32":
+            try:
+                form = win.native
+                from System import Action
+
+                def _up():
+                    form.TopMost = True
+                    form.Activate()
+                    form.TopMost = False
+                form.BeginInvoke(Action(_up))
+            except Exception:                           # noqa: BLE001
+                pass
+
     def is_maximized(self):
         # full screen is not a size to keep: the window as it was before it
         return self._fs_was_max if self._fullscreen else self._maximized
@@ -255,49 +278,103 @@ def _on_gui_thread(win, fn):
     return box.get("r")
 
 
+class Building:
+    """An App being made on the UI loop (:func:`begin_build`), with the
+    server already answering.  :meth:`finish` waits for it and wires up what
+    needs it; :meth:`result` is for everyone else to wait on that."""
+
+    def __init__(self, ctx, server):
+        self.ctx = ctx
+        self.server = server
+        self._made = {}
+        self._made_evt = threading.Event()
+        self._finished = threading.Event()
+        self._lock = threading.Lock()
+        self._started = False
+        self.error = None
+
+    @property
+    def finished(self):
+        return self._finished.is_set()
+
+    def finish(self):
+        """Wait for the App, register what needs it, and let the page have
+        its state.  Raises what the App's constructor raised.  Runs once;
+        a later call is :meth:`result`."""
+        with self._lock:
+            mine, self._started = not self._started, True
+        if not mine:
+            return self.result()
+        try:
+            self._made_evt.wait()
+            if "error" in self._made:
+                raise self._made["error"]
+            _wire_app(self.ctx, self.server, self._made["app"])
+        except BaseException as e:                   # noqa: BLE001 - re-raised
+            self.error = e
+            raise
+        finally:
+            self._finished.set()
+            # a page waiting for its state gets it (or, after an error, an
+            # empty one from an app that is on its way out)
+            self.ctx.building.set()
+        return self.ctx, self.server
+
+    def result(self):
+        self._finished.wait()
+        if self.error is not None:
+            raise self.error
+        return self.ctx, self.server
+
+
+def begin_build(ctx=None):
+    """Start the server and the making of the App on the UI loop, and
+    return at once (PAD-1545: the native host puts its window up meanwhile).
+    The page's first ask for its state waits until :meth:`Building.finish`
+    has run."""
+    ctx = ctx or Context()
+    ctx.building = threading.Event()
+    compat.install(ctx)
+    ctx.loop.start()
+    server = WebServer(ctx)
+    server.start()
+    pending = Building(ctx, server)
+
+    from ..app import App
+
+    def _job():
+        try:
+            app = App(ctx)
+            # what the native window opens with, read before the jobs the
+            # App queued at start-up run: asked for afterwards, the window
+            # waited behind all of them (PAD-610)
+            ctx.start_geometry = app.saved_geometry()
+            pending._made["app"] = app
+        except BaseException as e:                   # noqa: BLE001 - re-raised
+            pending._made["error"] = e
+        finally:
+            pending._made_evt.set()
+    ctx.loop.post(_job)
+    return pending
+
+
 def build(ctx=None, meanwhile=None):
     """Context + server + app, ready for a host.  Returns (ctx, server).
 
     ``meanwhile()``, when given, runs on the calling thread while the UI loop
     builds the App (the native host loads its window toolkit then), and its
     errors are logged, never raised."""
-    ctx = ctx or Context()
-    compat.install(ctx)
-    ctx.loop.start()
-    server = WebServer(ctx)
-    server.start()
-
-    from ..app import App
-
-    def _make_app():
-        app = App(ctx)
-        # what the native window opens with, read before the jobs the App
-        # queued at start-up run: asked for afterwards, the window waited
-        # behind all of them (PAD-610)
-        ctx.start_geometry = app.saved_geometry()
-        return app
-    if meanwhile is None:
-        app = ctx.loop.call(_make_app)
-    else:
-        made = {}
-        done = threading.Event()
-
-        def _job():
-            try:
-                made["app"] = _make_app()
-            except BaseException as e:               # noqa: BLE001 - re-raised
-                made["error"] = e
-            finally:
-                done.set()
-        ctx.loop.post(_job)
+    pending = begin_build(ctx)
+    if meanwhile is not None:
         try:
             meanwhile()
         except Exception:                               # noqa: BLE001
             log.warning("start-up work beside the App failed", exc_info=True)
-        done.wait()
-        if "error" in made:
-            raise made["error"]
-        app = made["app"]
+    return pending.finish()
+
+
+def _wire_app(ctx, server, app):
+    """What the host registers once the App exists."""
     reg = ctx.registry
     reg.register("shell.accept_disclaimer", app.accept_disclaimer)
     reg.register("fs.list", list_dir, on_loop=False)
@@ -314,6 +391,21 @@ def build(ctx=None, meanwhile=None):
     from . import agent_link
     ctx.server = server
     agent_link.register(ctx)
+    # PAD-1514: a second launch with an image hands it to this one
+    reg.register("shell.open_image", lambda path: app.open_image(path))
+    if ctx.host is not None:
+        from . import open_image
+        try:
+            open_image.write_link(ctx, server.port)
+        except OSError:
+            log.warning("instance link not written", exc_info=True)
+        # Explorer's double-click and right-click "Write to a card with
+        # PAD" for card images: per user, so an in-app update (whose staged
+        # installer writes no shortcuts or registry) gets it too
+        # (the gear's "Open card images with PAD": off until ticked)
+        if (getattr(app, "_settings", None) or {}).get("card_images", False):
+            threading.Thread(target=open_image.register_association,
+                             daemon=True).start()
     if (getattr(app, "_settings", None) or {}).get("agent_access"):
         agent_link.set_enabled(ctx, True, _app_version())
     # hot reload while developing (never in a frozen build): see devreload
@@ -323,7 +415,6 @@ def build(ctx=None, meanwhile=None):
         ctx.dev_watcher.start()
         reg.register("shell.dev_restart", lambda: devreload.restart(ctx),
                      on_loop=False)
-    return ctx, server
 
 
 def url_for(ctx, server, query=""):
@@ -345,6 +436,13 @@ def _close_app(ctx):
         agent_link.remove_link(ctx)
     except Exception:                                   # noqa: BLE001
         pass
+    try:
+        from . import open_image
+        open_image.remove_link(ctx)
+    except Exception:                                   # noqa: BLE001
+        pass
+    if ctx.app is None:
+        return          # closed before the App was made: nothing to save
     try:
         ctx.loop.call(ctx.app._on_close, timeout=60)
     except Exception:                                   # noqa: BLE001
@@ -429,19 +527,24 @@ def run_native(ctx, server, host):
     height = max(MIN_SIZE[1], height)
     screens = host.screens if host.screens is not None else _screens(webview)
     width, height, x, y = fit_to_screens(width, height, x, y, screens)
-    # the App composed its title (version, the dev branch badge) before this
-    # window existed, so its set_title found no window: open with it (a
-    # title set from here on waits in host._pending_title for the window to
-    # show).  Read here, not on the UI loop: that runs the start-up jobs.
+    # the title the App has composed so far (version, the dev branch badge),
+    # or the plain one while the App is still being made (PAD-1545): a title
+    # set from here on waits in host._pending_title for the window to show.
+    # Read here, not on the UI loop: that runs the start-up jobs.
     try:
         title = ctx.app.root.title() or APP_TITLE
     except Exception:                                   # noqa: BLE001
-        title = APP_TITLE
+        title = host._pending_title or APP_TITLE
     win = webview.create_window(
         title, url_for(ctx, server), width=width, height=height,
         x=x, y=y, min_size=MIN_SIZE, background_color="#15171A",
         text_select=True, maximized=bool(maximized))
     host.window = win
+    if host.quitting:
+        # the App failed to build while this window was being made (main's
+        # build thread asked to quit before there was a window to close)
+        host.window = None
+        return
     ctx.dialogs.native_file_dialog = host.native_file_dialog
     closing_done = threading.Event()
 
@@ -782,22 +885,63 @@ def main(argv=None):
     args, _rest = parser.parse_known_args(argv)
 
     logging.basicConfig(level=logging.WARNING)
+    # PAD-1514: a card image double-clicked in Explorer.  A PAD already
+    # open takes it (its window comes forward on the write dialog) and this
+    # launch ends; otherwise this run opens on it.
+    from . import open_image
+    image = open_image.image_arg(_rest)
+    if image and open_image.hand_to_running(image):
+        return 0
     mode = "serve" if args.serve else "browser" if args.browser else "native"
     ctx = Context()
+    ctx.open_image = image
     host = Host(ctx, mode)
     ctx.host = host
-    meanwhile = host.preload_window if mode == "native" else None
     watch = _startup_watch()
-    try:
-        ctx, server = build(ctx, meanwhile=meanwhile)
-    finally:
-        if watch is not None:
-            watch.done()
+    pending = None
+    if mode == "native":
+        # PAD-1545: the window goes up WHILE the App is made, not after it.
+        # The App is 1.5 s and more of a start (the last project's ports,
+        # tables and card), the web engine most of another second: side by
+        # side, and with the project opened as the App's first job instead
+        # of inside its constructor, the window shows in about a second.
+        ctx.defer_session = True
+        try:
+            from ..app import saved_window_geometry
+            ctx.start_geometry = saved_window_geometry()
+        except Exception:                               # noqa: BLE001
+            log.warning("saved window place not read", exc_info=True)
+        pending = begin_build(ctx)
+        server = pending.server
+
+        def _finish_build():
+            try:
+                pending.finish()
+            except BaseException:                       # noqa: BLE001
+                # main raises it (pending.result) once the window is gone
+                log.exception("the app could not be built")
+                host.quit()
+            finally:
+                if watch is not None:
+                    watch.done()
+        threading.Thread(target=_finish_build, name="app-build",
+                         daemon=True).start()
+        try:
+            host.preload_window()
+        except Exception:                               # noqa: BLE001
+            log.warning("start-up work beside the App failed", exc_info=True)
+    else:
+        try:
+            ctx, server = build(ctx)
+        finally:
+            if watch is not None:
+                watch.done()
     try:
         if mode == "native":
             try:
                 import webview  # noqa: F401
             except Exception as e:                      # noqa: BLE001
+                pending.result()        # the log line needs the App's window
                 ctx.loop.post(ctx.window.append_log,
                               "The app window could not start (%s); showing "
                               "the app in your browser instead." % e,
@@ -806,7 +950,10 @@ def main(argv=None):
         if mode == "native":
             try:
                 run_native(ctx, server, host)
+                if pending.finished:
+                    pending.result()    # a build that failed closed the window
             except Exception as e:                      # noqa: BLE001
+                pending.result()        # raises here if the build failed
                 if host.quitting:
                     return 0
                 text = ("The app window could not start (%s); showing the "

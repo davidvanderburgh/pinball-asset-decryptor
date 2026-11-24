@@ -4772,6 +4772,186 @@ def _classify_audio_edits(byidx, audio_edits, assets_dir):
     return fits, grows
 
 
+def _whole_song_plans(byidx, wide, audio_edits, idle=()):
+    """PAD-1542: ``(plans, kept)`` for the songs in parts whose music the user replaced.
+    ``plans`` ``{sid: (idx, [idx, ...])}``: each sound id of the game's that plays a replaced
+    record of music (at least :data:`_SONG_PART_SECONDS`) with other records, the replaced
+    record and what the sound id plays now, to play that record alone in place of the whole
+    song.  ``kept`` ``{sid: (idx, [shared idx, ...])}``: the ones left as they are because a
+    record they play beside it is one the game also plays without it (alone, or in another
+    song), which the replacement must not take away.  A sound id that plays two replaced
+    records, or a record the user replaced beside the music, plays them as the user made them.
+    *idle* are the sound ids the game never plays (:func:`.bank_build.never_played`: Iron
+    Maiden LE 1.18's 978 plays idx 786 and 895, which no request names): they neither keep a
+    piece in a song nor are rewritten.
+
+    Iron Maiden LE 1.18's song select plays "MUSIC: ICARUS" as sound id 977, idx 471's 0.6 s
+    and then idx 950's 219 s, and 968 goes on into idx 941's 10.5 s ending: a tester's own song
+    on idx 950 started with the first second of Flight of Icarus."""
+    music = {i for i in audio_edits
+             if i in byidx and int(byidx[i].get("length", 0) or 0) >= _SONG_PART_SECONDS * 44100}
+    if not music:
+        return {}, {}
+    idle = {int(s) for s in idle or ()}
+    plays_of = {}
+    for sid, (_d, idxs) in wide.items():
+        if sid in idle:
+            continue
+        for i in idxs:
+            plays_of.setdefault(i, set()).add(sid)
+    plans, kept = {}, {}
+    for sid, (_d, idxs) in sorted(wide.items()):
+        if sid >> 16 or sid in idle or len(idxs) < 2 or None in idxs:
+            continue
+        own = sorted({i for i in idxs if i in music})
+        if len(own) != 1:
+            continue
+        r = own[0]
+        others = [j for j in dict.fromkeys(idxs) if j != r]
+        if any(j in audio_edits for j in others):
+            continue
+        shared = [j for j in others
+                  if any(r not in wide[s][1] for s in plays_of.get(j, ()))]
+        if shared:
+            kept[sid] = (r, shared)
+        else:
+            plans[sid] = (r, list(idxs))
+    return plans, kept
+
+
+def _whole_song_writes(img_path, params, sites, wide, plans, mask):
+    """PAD-1542: ``({file offset: bytes}, {sid: why})`` - each sound id of *plans*
+    (:func:`_whole_song_plans`) with its descriptor in ``image.bin`` rewritten to play its
+    replaced record in place of the whole song (:func:`_mode_song_descriptor`: the opening
+    play names that record, the song's later plays in the same stretch of the script are
+    dropped with their waits, one in a loop names it again, and the declared length is that
+    record's), whitened as the card carries it; ``why`` the ones that could not be."""
+    byidx = {q["idx"]: q for q in params}
+    dec0 = {}
+    for s in sites:
+        dec0.setdefault(s.sid, s.dur_off - _DESC_DUR_OFF)
+    writes, why = {}, {}
+    with open(_lp(img_path), "rb") as f:
+        for sid, (r, idxs) in sorted(plans.items()):
+            plain = bytes(wide[sid][0])
+            if sid not in dec0:
+                why[sid] = "no play table of the game's names it"
+                continue
+            parts = [byidx.get(i) for i in idxs]
+            keys = [_play_key(pl, sid, mask) for _o, pl in _own_payloads(plain)]
+            if not all(q and q.get("findkey") for q in parts) or keys != [
+                    bytes(q["findkey"]) for q in parts]:
+                why[sid] = "its script does not name the records it plays as this app reads them"
+                continue
+            units = [_duration_units_emitted(q["length"]) for q in parts]
+            d = _mode_song_descriptor(plain, sid, mask, keys[0], bytes(byidx[r]["findkey"]),
+                                      _duration_units_emitted(byidx[r]["length"]), units[0],
+                                      units[1:], extent=len(plain))
+            if d is None or len(d) != len(plain):
+                why[sid] = "its script holds a step this app does not know"
+                continue
+            f.seek(dec0[sid])
+            cipher = f.read(len(plain))
+            if len(cipher) != len(plain):
+                why[sid] = "its script runs past the end of image.bin"
+                continue
+            i = 0
+            while i < len(d):
+                if d[i] == plain[i]:
+                    i += 1
+                    continue
+                j = i
+                while j < len(d) and d[j] != plain[j]:
+                    j += 1
+                writes[dec0[sid] + i] = bytes(d[k] ^ plain[k] ^ cipher[k] for k in range(i, j))
+                i = j
+    return writes, why
+
+
+def _whole_songs(gr_path, img_path, params, sites, audio_edits, log):
+    """PAD-1542: ``{file offset: bytes}`` written into *img_path* (the build's working copy of
+    ``image.bin``) so a replaced song's music plays in place of the whole song: every sound id
+    the game plays it by in parts (:func:`_whole_song_plans`) plays the replaced record alone,
+    so the game's own opening, ending and other pieces of that song drop out, whatever their
+    length.  The caller patches the card's ``image.bin`` with the same bytes and reads the
+    play tables again.  ``{}`` (the file untouched) when there is nothing to do, the card's
+    descriptors cannot be read, or the rewritten ones do not read back as planned."""
+    byidx = {q["idx"]: q for q in params}
+    if not sites or not any(
+            int((byidx.get(i) or {}).get("length", 0) or 0) >= _SONG_PART_SECONDS * 44100
+            for i in audio_edits):
+        return {}
+    try:
+        mask = _desc_key_mask(params, sites)
+        wide = _wide_descriptors_once(gr_path, img_path, params, mask)
+    except Exception as e:  # noqa: BLE001 - the songs play as they did
+        log("Songs in parts: the game's descriptors could not be read (%s), so a replaced "
+            "song's other pieces still play beside it." % e, "warning")
+        return {}
+    try:
+        from . import bank_build as BB
+        with open(_lp(gr_path), "rb") as f:
+            elf = f.read()
+        with open(_lp(img_path), "rb") as f:
+            head = f.read(1 << 16)
+        idle = BB.never_played(wide, BB.stock_slots(BB.request_list_slots(elf, head), {}))
+    except Exception:  # noqa: BLE001 - every sound id counts, as if the game played them all
+        idle = set()
+    plans, kept = _whole_song_plans(byidx, wide, audio_edits, idle)
+    for sid, (r, shared) in sorted(kept.items()):
+        log("idx %d: sound id %d plays it with idx %s, which the game also plays without it, "
+            "so that sound id keeps playing %s beside the replacement."
+            % (r, sid, ", ".join(str(j) for j in shared),
+               "it" if len(shared) == 1 else "them"), "info")
+    if not plans:
+        return {}
+    writes, why = _whole_song_writes(img_path, params, sites, wide, plans, mask)
+    for sid, w in sorted(why.items()):
+        log("idx %d: sound id %d still plays the game's other pieces of the song beside the "
+            "replacement (%s)." % (plans[sid][0], sid, w), "warning")
+        plans.pop(sid)
+    if not writes:
+        return {}
+    with open(_lp(img_path), "r+b") as f:
+        undo = {}
+        for off, b in writes.items():
+            f.seek(off)
+            undo[off] = f.read(len(b))
+            f.seek(off)
+            f.write(b)
+    try:
+        now = _wide_descriptors_once(gr_path, img_path, params, mask)
+        bad = sorted(sid for sid, (r, _i) in plans.items()
+                     if not now.get(sid) or set(now[sid][1]) != {r})
+    except Exception as e:  # noqa: BLE001
+        bad, now = sorted(plans), None
+        log("Songs in parts: the rewritten descriptors could not be read back (%s)." % e,
+            "warning")
+    if bad:
+        with open(_lp(img_path), "r+b") as f:
+            for off, b in undo.items():
+                f.seek(off)
+                f.write(b)
+        _WIDE_ONCE[:] = [None, None]
+        log("Songs in parts: sound id%s %s did not read back as the replaced record alone, so "
+            "the songs play as they did, with the game's other pieces beside the replacement."
+            % ("s" if len(bad) > 1 else "", ", ".join(str(s) for s in bad)), "warning")
+        return {}
+    by_r = {}
+    for sid, (r, idxs) in sorted(plans.items()):
+        by_r.setdefault(r, (set(), set()))
+        by_r[r][0].add(sid)
+        by_r[r][1].update(j for j in idxs if j != r)
+    for r, (sids, gone) in sorted(by_r.items()):
+        log("idx %d plays in place of the whole song: sound id%s %s no longer play%s the "
+            "game's other piece%s of it (idx %s, %.1f s)."
+            % (r, "s" if len(sids) > 1 else "", ", ".join(str(s) for s in sorted(sids)),
+               "" if len(sids) > 1 else "s", "s" if len(gone) > 1 else "",
+               ", ".join(str(j) for j in sorted(gone)),
+               sum(int(byidx[j].get("length", 0) or 0) for j in gone) / 44100.0), "info")
+    return writes
+
+
 #: A replacement at least this much (card samples, 0.1 s) shorter than the sound
 #: it replaces ends at its own length when the bank may grow (PAD-800); one
 #: closer to the stock length is fitted in place, its few ms of silence not
@@ -8408,6 +8588,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         progress(0, 100, "Checking the project for changes...")
     baseline = read_checksums(assets_dir)
     audio_edits = _select_changed_idx_wavs(assets_dir, baseline)
+    _song_writes = {}           # PAD-1542: image.bin descriptor bytes, {offset: bytes}
 
     video_edits = _changed_videos(assets_dir, baseline)
     image_edits = _changed_images(assets_dir, baseline)
@@ -9079,6 +9260,21 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     grows = {}
                     grow_places = None
                     _greads = None      # the staged bank's consumed map, once derived
+                    # PAD-1542: a replaced song's music plays in place of the
+                    # whole song: the game's own other pieces of it drop out of
+                    # its descriptors (image.bin's working copy, and the card's
+                    # image.bin by the same bytes), so its play tables are read
+                    # again from here on
+                    if audio_edits and any(
+                            int(p.get("length", 0) or 0) >= _SONG_PART_SECONDS * 44100
+                            for p in params if p["idx"] in audio_edits):
+                        _song_writes = _whole_songs(
+                            gr_path, img_path, params,
+                            _card_descriptor_sites(gr_path, img_path, log,
+                                                   card_key=_sites_key),
+                            audio_edits, log)
+                        if _song_writes:
+                            _sites_key = None
                     _fits, _grows = _classify_audio_edits(
                         {p["idx"]: p for p in params}, audio_edits, assets_dir)
                     # PAD-800: a shorter replacement ends at its own length
@@ -10715,6 +10911,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # the in-place writes as well would be wasted work on an image build
         # and actively wrong on an override set, which patches the file and
         # then copies over it.
+        if _song_writes and grow_places is None:
+            # PAD-1542: the songs' rewritten descriptors, patched into the card's
+            # image.bin with the sounds.  A staged image.bin was copied from the
+            # working copy that already holds them, and its play tables were
+            # re-pointed since: writing them again would put back the stock key
+            # of a record that grew (the first proof run played no tone at all).
+            audio_patches = {**_song_writes, **(audio_patches or {})}
         audio_inplace = audio_patches
         if grow_places is not None:
             if progress:
@@ -13318,7 +13521,12 @@ def _mode_descriptor_swaps(desc, sid, mask, swaps, extent=None):
 #: 0x03 (back to the 0x07 mark: a loop; always "07 00" / "03 00", a mark's number, not an
 #: offset). 0x0b plays a record (three zero bytes, then the 8-byte payload) and 0x11 waits for
 #: it; 0x01, 0x02, 0x06 and 0x08 are kept as they are.
-_DESC_OPS = {0x00: 1, 0x01: 3, 0x02: 3, 0x03: 2, 0x06: 6, 0x07: 2, 0x08: 5, 0x0b: 12, 0x11: 2}
+#: PAD-1542: 0x10 is a wait of a u32 (1/4000 s, :data:`_DESC_WAIT`), and 0x0e takes four bytes
+#: too: with both, all 30 of Iron Maiden LE 1.18's descriptors that play more than one record
+#: read to exactly their own end (sound id 950, The Trooper looped, waits 20.7 s, then
+#: ``0e 01 00 00 00``, then waits 25 s); any other length for 0x0e leaves 950 unread.
+_DESC_OPS = {0x00: 1, 0x01: 3, 0x02: 3, 0x03: 2, 0x06: 6, 0x07: 2, 0x08: 5, 0x0b: 12, 0x0e: 5,
+             0x10: 5, 0x11: 2}
 _DESC_OPS_AT = 7
 
 
@@ -13371,7 +13579,7 @@ def _mode_song_descriptor(desc, sid, mask, slot_key, host_key, mode_units, slot_
     for b in ops:
         if drop_wait:
             drop_wait = False
-            if b[0] == 0x11:
+            if b[0] in (0x10, 0x11):        # the dropped play's own wait (PAD-1542: 0x10 too)
                 continue
         if b[0] == 0x07:
             mark += 1

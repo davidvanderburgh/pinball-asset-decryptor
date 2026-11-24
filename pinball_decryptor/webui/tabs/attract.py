@@ -53,11 +53,10 @@ class AttractTab(TabService):
         return ((var.get() if var is not None else "") or "").strip()
 
     def on_project(self, folder):
-        if getattr(self, "_visible", False) or self.window.current_tab_key() == self.key:
+        if self.shown():                # PAD-1546: else on_show reads it
             self._read()
 
     def on_show(self):
-        self._visible = True
         if self._folder() != self._project or self._rec is None:
             self._read()
         self._audio_ready()

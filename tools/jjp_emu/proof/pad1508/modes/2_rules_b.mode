@@ -1,0 +1,9 @@
+name = RULES B
+start = switch_target_gobstopper
+start_needs = RULES A game
+seconds = 8
+lamps = lp_gobstopper
+lamp_color = ff0000
+lamp_pattern = pulse
+lamp_blink = 1
+game_modes = ignore

@@ -179,12 +179,15 @@ const num = (v) => ({ k: "num", v });
 const isJjp = (ch) => (ch || {}).kit === "jjp";
 const JJP_WHEN = [["running", "while it runs"], ["idle", "while it is not running"]];
 const JJP_RESETS = [["mode", "each time it starts"], ["kept", "kept between runs"]];
-const JJP_VALUE_WORDS = { hits: "hits of a switch since it started", scored: "scoring shots made" };
+const JJP_VALUE_WORDS = { hits: "hits of a switch since it started", scored: "scoring shots made",
+  all_played: "the player's start_all modes played" };
+const JJP_PLAYED = [["started", "starts"], ["ended", "ends"]];   // PAD-1512
 const valueWord = (ch, k) => (isJjp(ch) && JJP_VALUE_WORDS[k]) || VALUE_WORDS[k] || k;
 function jjpHats(ch) {
   const sw = (ch.shots || [])[0] || "";
   return [{ kind: "mode_start" }, { kind: "mode_end" }, { kind: "shot", shot: sw, when: "running" },
-    { kind: "shot", shot: sw, when: "idle" }, { kind: "any_shot" }, { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 }];
+    { kind: "shot", shot: sw, when: "idle" }, { kind: "any_shot" }, { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 },
+    { kind: "played", mode: (ch.played || [])[0] || "", when: "started" }];
 }
 function jjpStmts(ch, vars) {
   const v = (vars[0] || {}).name || "";
@@ -294,7 +297,7 @@ export function stmtTemplates(ch, vars, prog = {}) {
 
 function valueTemplates(ch, vars, timers, prog = {}) {
   if (isJjp(ch)) return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" },
-    { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "op", op: "+", a: null, b: null }];
+    { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "all_played" }, { k: "op", op: "+", a: null, b: null }];
   return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" }, { k: "mode_hits", shot: (ch.shots || [])[0] || "" },
     { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "timer_left", timer: ((timers || [])[0] || {}).name || "" },
     { k: "combo_chain" }, { k: "combo_steps", combo: comboNames(prog)[0] || "" },          // PAD-708
@@ -816,6 +819,9 @@ export function HatBody({ h, path, ed }) {
     if (h.kind === "shot") return html`<span class="bk-w b">When</span><${ShotPick} value=${h.shot} ed=${ed} onChange=${(v) => set("shot", v)} /><span class="bk-w b">is hit</span>
       <${Pick} value=${h.when === "idle" ? "idle" : "running"} options=${JJP_WHEN} onChange=${(v) => set("when", v)} />`;
     if (h.kind === "any_shot") return html`<span class="bk-w b" ...${tip("After the form scored one of its scoring shots (its Settings)")}>When a scoring shot is made</span>`;
+    if (h.kind === "played") return html`<span class="bk-w b" ...${tip("In a game, whether this mode runs or not: one of the game's own modes or multiballs (PAD-1512). Start the mode works here.")}>When the game</span>
+      <${Pick} value=${h.when === "ended" ? "ended" : "started"} options=${JJP_PLAYED} onChange=${(v) => set("when", v)} />
+      <${Pick} value=${h.mode} options=${ed.ch.played || []} width=${240} missing="(not on this game)" onChange=${(v) => set("mode", v)} />`;
   }
   switch (h.kind) {
     case "mode_start": return html`<span class="bk-w b">When the mode starts</span>`;
@@ -914,6 +920,7 @@ export function hatLabel(h) {
     challenge: "When the player picks a challenge", battle: "When the player picks a battle",
     game_mode: "When the game starts one of its modes",
     completed: "When the player has completed some of the game's modes",
+    played: "When the game starts or ends one of its modes",
     spare_switch: "When a spare switch closes",
     combo: (h.shots || []).every((x) => x === "lit") ? "When a lit shot follows a lit shot" : "When a shot follows a shot (a combo)" }[h.kind] || h.kind;
 }

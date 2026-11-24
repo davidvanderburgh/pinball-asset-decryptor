@@ -537,7 +537,12 @@ HELP_CONTENT = {
             "- Picks are stored in the project folder, not the card: they survive "
             "closing the app or pointing Extract at another card image.\n"
             "- **Full screen:** the button at the right of a player's bar, or a "
-            "double-click on the picture, fills the window with it; Esc comes back.",
+            "double-click on the picture, fills the window with it; Esc comes back.\n"
+            "- **Play sequentially** plays down the list on its own, following your "
+            "sort, search, Show and mode filter, on the side you started it on "
+            "(under Replacement, a row with no replacement plays its original). It "
+            "stops at the end, on ■, on a click on another row, when you open a "
+            "replacement picker, or when you go to another tab.",
         ]),
         ("Replace from a folder", [
             "**Replace from folder…**, beside the project folder, picks each file in a "
@@ -811,7 +816,8 @@ HELP_CONTENT = {
             "build (a direct-SD write leaves it out); the other mode keeps the clip it had.\n"
             "- Clear the replacement and the row is the **Same clip as** the first again.\n"
             "- **Not played**: nothing in the game asks for the clip, so the machine never "
-            "shows it; a replacement there changes nothing.",
+            "shows it; a replacement there changes nothing. Untick **Show unused** in the "
+            "toolbar to leave those clips out of the list.",
             "**Sounds with a clip** (Spike 2): under the panes, the sounds the game plays "
             "with the clip, read from its program: kept with the clip, asked for right after "
             "it, or named after it. Each is named by its file in the project's audio folder; "
@@ -1812,7 +1818,8 @@ HELP_CONTENT = {
          "- A press while one is still playing does not start another.\n"
          "- **Time between sounds** spaces them out: any time, or at most one every 10 "
          "seconds up to one every 5 minutes; a press before then plays nothing.\n"
-         "- They do not play while the game takes the initials for a high score.\n"
+         "- They do not play while the game takes the initials for a high score, nor "
+         "during the MATCH at the end of a game.\n"
          "- They ride one of the game's own sounds, so each plays for at most that "
          "sound's length (about 2 seconds on Star Wars, almost 15 on James Bond 007 LE, "
          "45 on Jaws); a longer file is cut to it, and the log says so.\n"
@@ -3422,7 +3429,11 @@ HELP_CONTENT = {
          "list of what its card shows: the game's logo, a picture, the game's "
          "attract video, a video file, or nothing. A video's first frame is the "
          "still shown when the card is not highlighted. The right side of the "
-         "dialog draws the card as the menu will."),
+         "dialog draws the card as the menu will.\n\n"
+         "**Replace image…** beside the file's name puts another build of that "
+         "game in the row, a newer version say. Its place in the menu, title, "
+         "picture, sounds, settings and high scores stay as they are, and a "
+         "loaded card is then updated with only the files that differ."),
         ("Menu settings",
          "**Menu settings…** on the action bar holds everything that belongs to the "
          "whole menu rather than one image:\n\n"
@@ -3521,8 +3532,11 @@ HELP_CONTENT = {
         ]),
         ("Sounds",
          "Every sound row (the menu's move and confirm, an image's music and "
-         "confirm) has a **▶ Play** beside **Browse…**, played through the "
-         "preview's volume and Mute.\n\n"
+         "confirm) has a **▶ Play** beside **Browse…**, played at the "
+         "preview's volume even when the preview is muted. The preview's music "
+         "stops while Edit image or Menu settings is open, so you hear only the "
+         "sound you picked. **Stop** beside it ends that sound, for a long music "
+         "file you have heard enough of.\n\n"
          "- A WAV file plays straight off disk. A word (auto, synth, menu) plays "
          "what the last preview made for THAT row. If nothing plays, tick **Sound** "
          "under the preview to make it; the Log says why.\n"
@@ -3799,7 +3813,8 @@ def modes_games_rows(ports=None):
                                 ("shield", "shield"), ("building", "building"), ("shaker", "shaker"),
                                 ("shows", "light shows"), ("wizard", "mini-wizards"), ("roster", "battle slot"),
                                 ("challenge", "challenges"), ("place", "game mode places"),
-                                ("done", "starts on game modes completed"))
+                                ("done", "starts on game modes completed"),
+                                ("with", "intros and outros for game modes"))
                  if p.can(k)]                     # PAD-381: what a mode may hold; PAD-392; PAD-615; PAD-710; PAD-747
         if p.stack_note and p.can("stack"):
             also.append("waits for multiballs only")
@@ -3918,8 +3933,10 @@ PREVIEW_HELP = {
                 "characters (below), a game picked on the menu first asks how to play it (see **The start "
                 "menu's games**): NORMAL, CHARACTERS or ENHANCED. No service menu setting is needed: they are on "
                 "every card with co-op play.\n"
-                "2. Or start a game as usual and hold the **right flipper button** while pressing **Start** to "
-                "add a teammate, once for each. A plain Start adds a competing player as always.\n\n"
+                "2. On the few builds whose start menu PAD cannot add CO-OP PLAY to, start a game as usual and "
+                "hold the **right flipper button** while pressing **Start** to add a teammate, once for each. "
+                "Where the start menu has CO-OP PLAY, holding the right flipper at Start does nothing special: "
+                "a Start adds a competing player as always.\n\n"
                 "- The team shares one score and all of the game's progress. Every teammate has a "
                 "score panel, and every panel shows the team's score.\n"
                 "- Teammates take turns ball by ball: every teammate plays ball 1, then ball 2, and "
@@ -3958,12 +3975,11 @@ PREVIEW_HELP = {
                 "is taken. So: Action picks, the flippers choose the language, then the plunger or Action "
                 "launches. Each player's first ball only comes to the shooter lane once they have picked, so "
                 "neither the Action press that picks nor the game's timed plunger can launch it early. The seconds left count down on the machine, and every flipper press starts them again from the top (so a player can read each character as long as they like; the time only runs out when the flippers are left alone), and the one taken stays on the glass a "
-                "moment saying PICKED. A player on their own gets the pick too: hold the **right flipper button** "
-                "while pressing Start to begin the game. The "
-                "right flipper held through that Start belongs to the pick, so it does not change the game's "
-                "language; let go of it and walk the characters as usual. The machine's top line also says how "
-                "to take one (ACTION PICKS). The "
-                "score then goes on the game's own boards, and a Start in ball 1 still adds a teammate. "
+                "moment saying PICKED. A player on their own gets the pick too: pick the game on the start menu "
+                "and choose CHARACTERS or ENHANCED (on a build with no such menu, hold the **right flipper "
+                "button** while pressing Start to begin the game; the right flipper held through that Start "
+                "belongs to the pick, so it does not change the game's language). The machine's top line also "
+                "says how to take one (ACTION PICKS). "
                 "**Time to pick** sets how long (30 seconds unless you change it, or "
                 "no time limit). RANDOM picks one nobody has. The box under a character's name takes a smaller "
                 "sub header for its cards, as typed (Godzilla vs Biollante (1989)). **Picture…** gives a "
@@ -3975,7 +3991,9 @@ PREVIEW_HELP = {
                 "frame and the panel, and a **Background…** picture of your own behind every pick card and "
                 "award card, darkened as much as you like so the words stay easy to read; **Default look** "
                 "puts the game's set's look back. The color well on a character's row gives its cards a "
-                "frame color of their own, and **Video…** puts a video of your own in its picture's frame: "
+                "frame color of their own; tick **Name and corners in each character's frame color** in the "
+                "look and its name, corners and arrows take that color too, so every character has a color of "
+                "its own. **Video…** puts a video of your own in its picture's frame: "
                 "it plays over and over while the pick is on that character (on a game the app cannot play "
                 "it on yet, the dialog says so and the picture shows). **Intro video…** opens each co-op and "
                 "team game with a video of your own, full screen and with its own sound (the video's own "
@@ -4104,7 +4122,12 @@ PREVIEW_HELP = {
                 "instead start when the player picks one of the game's battles on the battle "
                 "selection screen: your mode runs in that battle's place. Or it can start once the player "
                 "has completed a number of the game's own modes in one game (tick which ones count): a "
-                "mini-wizard after four of them, a bigger wizard after all of them.\n"
+                "mini-wizard after four of them, a bigger wizard after all of them. Or it can run *with* one "
+                "of the game's own modes, as its intro and outro: it starts when the game starts that mode "
+                "and ends when the game's mode ends, playing its start clip and sound, then its end clip and "
+                "sound. The game's mode plays as always; the game's music is turned down under your sounds, "
+                "and where the game shows a clip of its own as the mode starts or ends, yours plays in its "
+                "place. Each of the game's own modes has **Add an intro and outro…** on its page.\n"
                 "3. **Runs for:** how long it runs.\n"
                 "4. **Points per shot:** which shots score and what the first one "
                 "pays. A minus number takes that much away on each hit.\n"

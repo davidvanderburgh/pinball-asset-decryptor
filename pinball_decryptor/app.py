@@ -258,6 +258,30 @@ class UiQueue(queue.Queue):
             self._pending = False
 
 
+def geometry_from_settings(settings):
+    """(width, height, x, y, maximized) from a settings dict's "WxH+X+Y",
+    or None when nothing usable is saved."""
+    geo = (settings or {}).get("window_geometry") or ""
+    m = re.match(r"(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?", str(geo))
+    if not m:
+        return None
+    w, h = int(m.group(1)), int(m.group(2))
+    x = int(m.group(3)) if m.group(3) is not None else None
+    y = int(m.group(4)) if m.group(4) is not None else None
+    return (w, h, x, y, bool(settings.get("window_maximized")))
+
+
+def saved_window_geometry():
+    """The saved window place read straight from settings.json, for the
+    desktop host to open the window BEFORE the App exists (PAD-1545)."""
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return geometry_from_settings(data) if isinstance(data, dict) else None
+
+
 class App:
     """The run logic behind the web window.  Constructed ON the UI loop
     (``webui.host.build``) with the web UI's context: ``ctx.loop`` is the
@@ -430,7 +454,19 @@ class App:
                       badge=self._checkout_badge or "")
 
         if not self._need_disclaimer:
-            self._start_session()
+            if getattr(ctx, "defer_session", False):
+                # PAD-1545: the desktop host has the window up already and
+                # its page waits on this constructor.  Opening the last
+                # project (a second or more: its ports, tables and card) is
+                # the next job on the loop instead of the end of this one,
+                # so the page gets its state and draws first.  "opening"
+                # keeps the page on its Starting line until the tabs are
+                # there (a manufacturer view with no tabs yet says "Nothing
+                # to show").
+                ctx.store.set("shell", opening=True)
+                self.root.after(0, self._start_session_deferred)
+            else:
+                self._start_session()
 
     def _report_ui_error(self, text):
         """An exception escaping a UI job (a button's handler, an ``after``
@@ -489,6 +525,8 @@ class App:
             on_scenes_own_colours_change=self._on_scenes_own_colours_change,
             initial_agent_access=bool(s.get("agent_access", False)),
             on_agent_access_change=self._on_agent_access_change,
+            initial_card_images=bool(s.get("card_images", False)),
+            on_card_images_change=self._on_card_images_change,
             initial_look_switches=s.get("look_switches") or {},
             on_look_switches_change=self._on_look_switches_change,
             initial_compare_row_limit=s.get("compare_row_limit"),
@@ -559,6 +597,17 @@ class App:
             on_language_change=self._on_language_change,
         )
 
+    def _start_session_deferred(self):
+        from .core import session_log
+        # PAD-1546: the lines the restore logs are written to the session and
+        # project logs in one piece once the tabs are on their way to the page
+        # (one open of each file, not two a line: about 0.1 s on this PC)
+        with session_log.batched():
+            try:
+                self._start_session()
+            finally:
+                self.ctx.store.set("shell", opening=False)
+
     def _start_session(self):
         """Everything after the window exists: at startup, or once the
         first-launch disclaimer has been accepted."""
@@ -587,6 +636,63 @@ class App:
             # captures and tests never delete the PC's real files
             self.root.after(2500, self._prune_old_versions, True)
         self._schedule_autosave()
+        # PAD-1514: a card image double-clicked in Explorer started this run
+        pending = getattr(self.ctx, "open_image", None) if getattr(
+            self, "ctx", None) is not None else None
+        if pending:
+            self.ctx.open_image = None
+            self.root.after(0, self.open_image, pending)
+
+    def open_image(self, path):
+        """A card image handed in from outside (Explorer's double-click,
+        PAD-1514): switch to the manufacturer and era it belongs to and open
+        the Flash image dialog with it in, so a card and Write are all that is
+        left.  Before the first-launch disclaimer is answered it waits for
+        the session.  Returns whether the image was taken."""
+        path = os.path.abspath(str(path or ""))
+        if not os.path.isfile(path):
+            messagebox.showerror("Open image",
+                                 "This file is not there any more:\n" + path)
+            return False
+        if not getattr(self, "_session_started", False):
+            self.ctx.open_image = path
+            return True
+        try:
+            if self.ctx.host is not None:
+                self.ctx.host.bring_to_front()
+        except Exception:                               # noqa: BLE001
+            pass
+        from .webui import open_image as _oi
+        mfr, game = _oi.detect(self._manufacturers, path)
+        name = os.path.basename(path)
+        if mfr is None:
+            mfr = self._current_mfr
+            if mfr is None or not mfr.capabilities.flash_image:
+                messagebox.showerror(
+                    "Open image",
+                    "PAD does not recognize %s as a card image of a machine "
+                    "it can write. Pick the manufacturer, then use Write's "
+                    "Flash image to write it anyway." % name)
+                return False
+            self.window.append_log(
+                "[open] %s is not an image PAD recognizes; it opens for %s "
+                "as it is." % (name, mfr.display))
+        if not mfr.capabilities.flash_image:
+            messagebox.showinfo(
+                "Open image",
+                "%s is a %s image, and PAD does not write %s cards." % (
+                    name, mfr.display, mfr.display))
+            return False
+        if self._current_mfr is not mfr:
+            self._on_manufacturer_change(mfr)
+        era = getattr(game, "era", "") if game is not None else ""
+        if (era and hasattr(mfr, "set_era")
+                and getattr(mfr, "current_era", "") != era):
+            self.window.set_era(era)
+        opener = getattr(self.window, "_open_flash_dialog", None)
+        if opener is None:
+            return False
+        return bool(opener(initial_image=path, opened_file=True))
 
     def accept_disclaimer(self, accepted):
         """The first-launch disclaimer, answered on the page.  Declining
@@ -2454,6 +2560,32 @@ class App:
     # Write
     # ------------------------------------------------------------------
 
+    def _strangers_ok(self, image_path):
+        """PAD-1531: an image that lets other computers than this one in over the network (someone else's image,
+        built with remote access on) is written only when the user says so: written onto the machine, it would let
+        that person in."""
+        from .core import card_extras, ssh_card
+        try:
+            state = ssh_card.inspect_image(image_path)
+            if not state.get('enabled'):
+                return True
+            rec = card_extras.load(self.window.write_assets_var.get().strip())
+            strangers = card_extras.others(state.get('public_keys', ''), (rec or {}).get('public_keys') or '')
+        except Exception:                               # noqa: BLE001 - nothing to say about an unreadable image
+            return True
+        if not strangers:
+            return True
+        many = len(strangers) > 1
+        return messagebox.askyesno(
+            'Remote access',
+            "This image lets %s in over the network: %s.\n\nA machine running a card written from it would let "
+            "%s in, with full control of the machine.\n\nWrite it anyway? To take %s off first, use \"Use a card "
+            "image file...\" under Remote access on the Network tab." % (
+                '%d other computers' % len(strangers) if many else 'another computer',
+                ', '.join(card_extras.key_name(k) for k in strangers),
+                'them' if many else 'it', 'them' if many else 'it'),
+            icon='warning')
+
     def _extras_form_problem(self):
         service = getattr(self.window, 'service', None)
         extras = service('network') if callable(service) else None
@@ -2930,6 +3062,8 @@ class App:
             except ExtrasError as e:
                 messagebox.showerror('Remote access', str(e))
                 return
+        if not menu_only and not self._strangers_ok(image_path):
+            return
         # ``target`` (item 123): the dialog's second place for the image - the
         # game's own disk in a dock, installed here.  On Windows that hands the
         # disk to WSL whole, which is the elevation gate Direct-SSD stands behind.
@@ -6382,6 +6516,21 @@ class App:
 
         def _run():
             reused = False
+            if bg["how"] == "windows" and installer.get("delta"):
+                # PAD-1519: from the changed files alone when the release
+                # publishes its file list; anything in the way of that is
+                # the setup exe's turn, below
+                try:
+                    staged, note = self._stage_update_from_changes(bg, _post)
+                except InterruptedError:
+                    return
+                if staged:
+                    _post(self._background_update_ready, bg, False, staged,
+                          None, note)
+                    return
+                if bg["cancel"].is_set():
+                    return
+                _post(self._background_update_downloading, bg, note)
             try:
                 if staged_update_ok(dest, installer):
                     reused = True
@@ -6451,6 +6600,94 @@ class App:
         ok, info = stage_update_macos(bg["path"])
         return (info, None) if ok else (None, info)
 
+    def _stage_update_from_changes(self, bg, post):
+        """Worker thread (PAD-1519): get *bg*'s version ready from the files
+        already installed plus the ones the release changed, with no setup
+        exe.  Returns ``(staged folder, what it took)`` or ``(None, why
+        not)``; the caller then downloads the installer as before.
+
+        The banner says Downloading while the folder is filled (the copy of
+        the unchanged files is a few seconds; the bar is the changed files
+        coming down) and Installing for the compile and the rest."""
+        from .core import update_delta
+        version, installer = bg["version"], bg["installer"]
+        app_dir = update_slots.installed_app_dir()
+        if not app_dir:
+            return None, "this copy was not installed by the setup program"
+        if update_slots.swap_failed_version() == version:
+            # before the look for a staged copy: the one that would not
+            # swap in is still there, and without the setup exe on disk it
+            # would fail the same way again
+            return None, "switching to it in place did not work last time"
+        if update_slots.staged_install_ok(app_dir, version):
+            return update_slots.next_dir(app_dir), "it was ready already"
+        cancel = bg["cancel"].is_set
+        took = {}
+        started = time.time()
+        lst = os.path.join(update_slots.next_dir(app_dir), ".pad_compile.lst")
+
+        def _fill(target, _copy_progress):
+            manifest = update_delta.fetch_manifest(installer["delta"],
+                                                   version)
+            last = [-5]
+
+            def _progress(stage, done, total):
+                if stage != "download" or not total:
+                    return
+                pct = min(100, int(done * 100 / total))
+                if pct >= last[0] + 5:     # the banner redraws every 5 %
+                    last[0] = pct
+                    post(self._background_update_progress, bg, pct)
+            took.update(update_delta.build_tree(
+                manifest, app_dir, target, cancel_cb=cancel,
+                progress_cb=_progress,
+                max_download=int(installer.get("size") or 0) or None))
+            post(self._background_update_installing, bg)
+            return update_delta.compile_args(target, took["changed"], lst)
+
+        def _installed(pct):
+            # dropped by _background_update_progress until the banner is
+            # on Installing
+            post(self._background_update_progress, bg, pct, "installing")
+        try:
+            ok, info = update_slots.stage_delta_install(
+                _fill, app_dir, version, cancel_cb=cancel,
+                progress_cb=_installed)
+        except InterruptedError:
+            raise
+        except update_delta.DeltaUnavailable as e:
+            return None, str(e)
+        except Exception as e:                              # noqa: BLE001
+            return None, f"{type(e).__name__}: {e}"
+        if not ok:
+            return None, info
+        try:
+            os.unlink(lst)
+        except OSError:
+            pass
+
+        def _mb(n):
+            return ("%.1f MB" if n < 10e6 else "%.0f MB") % (n / 1e6)
+        whole = int(installer.get("size") or 0)
+        note = "%d changed file%s, %s downloaded%s, ready in %.0f s" % (
+            took["fetched"], "" if took["fetched"] == 1 else "s",
+            _mb(took["fetched_bytes"]),
+            " instead of the %s installer" % _mb(whole) if whole else "",
+            time.time() - started)
+        return update_slots.next_dir(app_dir), note
+
+    def _background_update_downloading(self, bg, why):
+        """The changed-files route gave up (PAD-1519), possibly after its
+        banner had moved on to Installing: say why, and show the installer's
+        download."""
+        if getattr(self, "_bg_update", None) is not bg:
+            return
+        bg["stage"], bg["pct"] = "downloading", None
+        self.window.append_log(
+            f"v{bg['version']} can't be made from the changed files alone "
+            f"({why}) - downloading its installer instead.", "info")
+        self._show_background_update(bg)
+
     def _background_update_installing(self, bg):
         if getattr(self, "_bg_update", None) is not bg:
             return
@@ -6460,7 +6697,7 @@ class App:
         self._show_background_update(bg)
 
     def _background_update_ready(self, bg, reused=False, staged=None,
-                                 err=None):
+                                 err=None, note=None):
         if getattr(self, "_bg_update", None) is not bg:
             return
         bg["stage"], bg["pct"], bg["staged"] = "ready", None, staged
@@ -6473,6 +6710,7 @@ class App:
             f"Update v{bg['version']} is "
             + ("installed" if staged
                else "already downloaded" if reused else "downloaded")
+            + (f" ({note})" if note else "")
             + (" - restarting into it." if getattr(
                 self, "_restart_pending", None)
                else " - press Restart to update whenever you're ready."),
@@ -6691,6 +6929,15 @@ class App:
             app_dir = update_slots.installed_app_dir()
             if not app_dir or not update_slots.staged_install_ok(app_dir,
                                                                  version):
+                return False
+            if update_slots.swap_failed_version() == version:
+                # PAD-1529: the helper could not switch to this version a
+                # moment ago and brought this one back up to fetch the
+                # installer.  Trying the same swap again cost another close,
+                # another wait and another failure before the installer ran
+                self.window.append_log(
+                    f"Switching to v{version} in place did not work last "
+                    "time - running its installer.", "info")
                 return False
             # the helper only renames once this process is gone, so the
             # state is written first, as for the installer (PAD-188)
@@ -7045,7 +7292,23 @@ class App:
         check is pure-Python Ed25519, a few milliseconds a code; the time it
         took goes in the log with what it turned on."""
         from .core import preview
-        rows = preview.load(self._preview_codes())
+        codes = self._preview_codes()
+        # PAD-1548: a code for features every copy has now is dropped, not
+        # reported at every start (the window that removed codes went with
+        # the last preview)
+        kept = preview.without_spent(codes)
+        if len(kept) != len(codes):
+            if kept:
+                self._settings[preview.SETTINGS_KEY] = kept
+            else:
+                self._settings.pop(preview.SETTINGS_KEY, None)
+            if not self._capture_run():
+                try:
+                    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+                    write_json_atomic(SETTINGS_FILE, self._settings)
+                except OSError:
+                    pass        # dropped again at the next start
+        rows = preview.load(kept)
         self._preview_startup = (rows, preview.load_ms())
 
     def _log_preview_startup(self):
@@ -7093,14 +7356,7 @@ class App:
         """(width, height, x, y, maximized) from settings.json ("WxH+X+Y"),
         for the desktop host to open the window where it was left; None
         when nothing usable is saved."""
-        geo = self._settings.get("window_geometry") or ""
-        m = re.match(r"(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?", geo)
-        if not m:
-            return None
-        w, h = int(m.group(1)), int(m.group(2))
-        x = int(m.group(3)) if m.group(3) is not None else None
-        y = int(m.group(4)) if m.group(4) is not None else None
-        return (w, h, x, y, bool(self._settings.get("window_maximized")))
+        return geometry_from_settings(self._settings)
 
     def _on_language_change(self, code):
         """The app's language (gear menu > Language, PAD-458), kept in
@@ -7679,6 +7935,11 @@ class App:
     def _on_agent_access_change(self, on):
         """Persist the ⚙ "Let AI agents control PAD" toggle (PAD-844)."""
         self._settings["agent_access"] = bool(on)
+        self._save_settings()
+
+    def _on_card_images_change(self, on):
+        """Persist the gear's "Open card images with PAD" toggle (PAD-1514)."""
+        self._settings["card_images"] = bool(on)
         self._save_settings()
 
     def _on_look_switches_change(self, switches):

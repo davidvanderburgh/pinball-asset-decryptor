@@ -80,6 +80,36 @@ gs_booted() { [ "$(gs_count 'gst\] factory_make' "$1")" -ge 3 ]; }
 # it as attract is the fault above.
 gs_past_alerts() { [ "$(gs_count '\[led\] light show running' "$1")" -ge 1 ]; }
 
+# THE ATTRACT SHOW IS ON THE SCREEN (PAD-1541): past Tech Alerts, AND the game
+# has opened a video clip since its light show began (gstvid.c's `[vid] chN
+# owns source` / `location ->`). The lamps come first: the game starts its
+# light show, then loads the attract scene and its clips, and on the rig that
+# load is the card's and the CPU's time, not the game's, so the gap does not
+# shrink at 4x. A Start inside the gap is not merely ignored: elvira3-1.13's
+# Start handler calls through the attract scene's VideoSurface before it is
+# bound and dies on a null pointer (pc 0x1c96fc, every run, any NVRAM), so
+# whatever presses Start waits for this. Measured across ~120 rig runs of the
+# other titles: their first clip always opened before the Start, which is why
+# only Elvira 3 showed it.
+gs_show_up() {
+    [ -r "$1" ] || return 1
+    awk '/\[led\] light show running/ { lit = 1; next }
+         lit && /\[vid\] ch[0-9]+ (owns source|location ->)/ { ok = 1; exit }
+         END { exit !ok }' "$1" 2>/dev/null
+}
+
+# gs_wait_show <log> [wall seconds, default PAD_SHOW_WAIT or 120]: until gs_show_up, the guest gone, or the cap.
+# 0 = the show is up; 1 = not by the cap (a title with no clip in its attract: the caller goes on regardless).
+gs_wait_show() {
+    local end=$(( $(date +%s) + ${2:-${PAD_SHOW_WAIT:-120}} ))
+    until gs_show_up "$1"; do
+        [ "$(date +%s)" -lt "$end" ] || return 1
+        # this slot's guest only (padpath.sh's pad_pids, where the caller has it): another rig's game is not ours
+        if declare -F pad_pids > /dev/null; then [ -n "$(pad_pids -x game | head -1)" ] || return 1; fi
+        sleep 1
+    done
+}
+
 # One word for the whole state, for anything that just wants to print it.
 # Deliberately does NOT try to tell attract mode from the operator menu or from
 # a ball in play: nothing measurable from outside distinguishes them yet, and

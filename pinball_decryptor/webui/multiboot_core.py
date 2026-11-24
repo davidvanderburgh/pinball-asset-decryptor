@@ -292,6 +292,11 @@ CODESELECT_SRC = TOOL_DIR + "/codeselect"
 #: ``--selector-dir`` looks - ensurebuild.sh's own rules, called rather than
 #: copied (see :func:`install_selector_line`).
 ENSURESELECT = TOOL_DIR + "/ensureselect.sh"
+#: The PREVIEW's selector build: ``make all`` into a scratch directory, but
+#: only when a digest of the sources moved, and quiet unless it fails
+#: (PAD-1534: file times on an installed app could not be trusted, so every
+#: preview recompiled the whole menu program into the user's log).
+PREVIEWSELECT = TOOL_DIR + "/previewselect.sh"
 #: THE MENU'S COLOUR THEMES: the selector's own themes.json, one definition -
 #: the selector compiles it in, mkmulticard.py writes the keys, this tab shows
 #: the picker and the "make your own" colour grid.  Read once, on first use,
@@ -3578,12 +3583,13 @@ def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
     # (PAD-126).  Nothing about the emulator needs it, so a machine that runs
     # every title can still be this one.
     return (ensure
-            + "if make -C %s BUILD=%s ROOT=%s all; then echo %s %s; "
+            + "if bash %s %s %s %s; then echo %s %s; "
               "elif [ -x %s ]; then echo %s %s; "
               "elif [ ! -d %s ]; then echo %s; exit 1; "
               "elif ! command -v make >/dev/null 2>&1; then echo %s; exit 1; "
               "else echo %s; exit 1; fi"
-            % (_q(src_dir), _q(build_dir), _q(rootfs), tag, _q(built),
+            % (_q(PREVIEWSELECT), _q(src_dir), _q(build_dir), _q(rootfs),
+               tag, _q(built),
                _q(installed), tag, _q(installed), _q(lib),
                _q("[preview] error: no selector - the menu program is built "
                   "against the machine's own filesystem, and this PC has not "
@@ -6757,9 +6763,19 @@ def sound_choices(paths):
 #: control anybody presses.  PLAY_NAME is how the notes beside it refer to it.
 PLAY_NAME = "Play"
 PLAY_LABEL = "\u25b6 " + PLAY_NAME
-PLAY_TIP = ("Hear this sound now, through the preview's own volume and Mute.\n"
+PLAY_TIP = ("Hear this sound now, at the preview's volume, even with the "
+            "preview muted. The preview's music stops while this window is "
+            "open.\n"
             "A word (auto, synth, menu) plays the file the menu has ready for "
             "it; pick or type a WAV and it plays that.")
+
+
+#: ...and the Stop beside it (David, PAD-1530: "I should also have the
+#: option to stop the music that is playing. There are some really long
+#: music files and I don't need to hear them the whole time I have the menu
+#: open").
+STOP_NAME = "Stop"
+STOP_TIP = "Stop the sound Play started."
 
 
 #: What a video shows, STATED rather than offered as controls (David:
@@ -6897,6 +6913,13 @@ PREVIEW_NOTES = {
     "text": "This card shows its text and nothing else.",
     "noffmpeg": "ffmpeg is not installed, so the frame cannot be shown here.",
 }
+
+
+#: Replace image…'s tooltip, beside the image's file in Edit image…
+#: (PAD-1544).
+REPLACE_TIP = ("Put another build of this game here - a newer version, say. "
+               "Its place in the menu, title, picture, sounds, settings and "
+               "high scores all stay as they are.")
 
 
 class _PageDialog:
@@ -7436,6 +7459,9 @@ class MultibootPanel:
         self._menu_dialog = None
         self._buildflash_dialog = None
         self._edit_backup = None        # the row a cancelled edit restores
+        #: ...and the random cards' games a replaced file moved with it
+        #: (PAD-1544): ``(member, its path, its version)`` to put back.
+        self._edit_repath = []
         self._menu_backup = None
         #: Widgets that live only while a dialog is up: the Edit image…
         #: dialog's picture / video entries by kind, and its clip fields.
@@ -10203,19 +10229,136 @@ class MultibootPanel:
         if self._selected() != i:
             self._refresh_tree(select=i)
         self._edit_backup = (i, replace(self._rows[i]))
+        self._edit_repath = []
         self._image_dialog = ImageEditorDialog(self, i, self._rows[i])
         self._sync_editor_states()
+        self._music_aside()
         return self._image_dialog.show()
+
+    # -- a newer build of ONE image, from Edit image… (PAD-1544) -----------
+    #: Under the image's file once it was changed in the dialog.
+    REPLACED_NOTE = ("Was %s. Only the game changes: this image keeps its "
+                     "place in the menu, its title, picture, sounds, "
+                     "settings and high scores.")
+
+    def replace_image(self, path, index=None):
+        """Row *index* (the open Edit image…'s row, else the selected one)
+        <- another image file, AND NOTHING ELSE ABOUT IT.  True when the row
+        changed.
+
+        A NEWER BUILD OF ONE GAME IS THE COMMON EDIT TO A FINISHED CARD
+        (David, 2026-11-24: "there's a new build of Heisei. I would expect
+        to be able to update it from the pencil menu. this will maintain my
+        multi-boot layout while just being able to change a single game
+        image").  The only way was to remove the row and add the new file,
+        which lost its place in the list, its title, its picture, its sounds
+        and - the one that costs - the store its settings and high scores
+        live in on the machine.  Here the row stays the row: its file moves
+        and every other field is left exactly as it was, so the names its
+        settings and scores are kept under do not move either.
+
+        Two things DO follow the file, because they were never the owner's:
+        a title or subtitle still reading what the OLD file's name suggested
+        becomes what the new one suggests (a subtitle of "V2.3" must not sit
+        under V2.4), and the version column is blanked until the tool reads
+        the new file.  A random card that rolls between the card's own images
+        keeps rolling to this one under its new file.
+
+        The dialog's Cancel puts all of it back."""
+        dlg_i = getattr(self._image_dialog, "_index", None)
+        i = index if index is not None else (
+            dlg_i if dlg_i is not None else self._selected())
+        if i is None or not 0 <= i < len(self._rows):
+            return False
+        row = self._rows[i]
+        path = (path or "").strip().strip('"')
+        if not path:
+            return False
+        if is_group(row):
+            self._error("A random card has no image file of its own - change "
+                        "its games in the list below.")
+            return False
+        old = (row.path or "").strip().strip('"')
+        if old and _norm(old) == _norm(path):
+            return False
+        be = self._backend
+        again = any(_norm(q) == _norm(path)
+                    for r in self._rows if r is not row
+                    and not (is_group(r) and r.keep) for q in row_paths(r))
+        if again and not repeats_allowed(be):
+            self._error("%s is already on the %s. A %s %s cannot keep two "
+                        "copies of one game apart, so it is listed once."
+                        % (os.path.basename(path), be.out_noun, be.label,
+                           be.out_noun))
+            return False
+        if old:
+            was_t, was_s = suggest_title(old, be.key)
+            new_t, new_s = suggest_title(path, be.key)
+            if (row.title or "").strip() == (was_t or "").strip():
+                row.title = new_t
+            if (row.subtitle or "").strip() == (was_s or "").strip():
+                row.subtitle = new_s
+        row.path = path
+        row.version = ""
+        # A RANDOM CARD OVER THE CARD'S OWN IMAGES names this game by its
+        # file.  Left alone it would name a game no row carries any more -
+        # unless another row still carries the old file (PAD-1498), in which
+        # case that copy is the one it goes on rolling to.
+        still = any(_norm(q) == _norm(old)
+                    for r in self._rows if r is not row
+                    and not (is_group(r) and r.keep) for q in row_paths(r))
+        if old and not still:
+            for r in self._rows:
+                if not (is_group(r) and r.keep):
+                    continue
+                for m in r.members:
+                    if _norm((m.path or "").strip().strip('"')) == _norm(old):
+                        if self._image_dialog is not None:
+                            self._edit_repath.append((m, m.path, m.version))
+                        m.path, m.version = path, ""
+        if self._selected() == i:
+            self._load_editor()
+        self._refresh_tree(select=self._selected())
+        self._sync_compact_lock()
+        if i == 0:
+            self._maybe_default_output()
+        self._warm_container()
+        self._sync_image_preview()
+        hook = getattr(self._image_dialog, "sync_source", None)
+        if hook is not None:
+            hook()
+        self._ok("")
+        return True
+
+    def replaced_note(self):
+        """The line under the open dialog's image file: what it was before
+        this sitting changed it, or "" while it is the file it opened with."""
+        if self._image_dialog is None or self._edit_backup is None:
+            return ""
+        i, was = self._edit_backup
+        if not 0 <= i < len(self._rows) or is_group(self._rows[i]):
+            return ""
+        old = (was.path or "").strip().strip('"')
+        new = (self._rows[i].path or "").strip().strip('"')
+        if _norm(old) == _norm(new):
+            return ""
+        return self.REPLACED_NOTE % (os.path.basename(old) or was.device
+                                     or "an image with no file recorded")
 
     def _image_editor_ok(self):
         self._forget_image_dialog()
         self._refresh_tree(select=self._edit_backup[0]
                            if self._edit_backup else None)
         self._edit_backup = None
+        self._edit_repath = []
         self.schedule_preview(now=True)
 
     def _image_editor_cancel(self):
         self._forget_image_dialog()
+        # PAD-1544: a replaced file took the random cards' claim on it along
+        for m, m_path, m_version in self._edit_repath:
+            m.path, m.version = m_path, m_version
+        self._edit_repath = []
         if self._edit_backup is not None:
             i, row = self._edit_backup
             if 0 <= i < len(self._rows):
@@ -10229,6 +10372,7 @@ class MultibootPanel:
         self._clip_widgets = ()
         self._roll_repeat_box = None
         self._roll_norepeat_free = None
+        self._music_back()
 
     def open_menu_settings(self):
         """'Menu settings…': the sounds, volume, countdown, default image
@@ -10255,6 +10399,7 @@ class MultibootPanel:
                              self._tests_var.get(),
                              self._back_hold_var.get())
         self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
+        self._music_aside()
         return self._menu_dialog.show()
 
     def _menu_settings_ok(self):
@@ -10307,6 +10452,32 @@ class MultibootPanel:
         self._theme_tip = None
         self._color_entries = {}
         self._color_swatches = {}
+        self._music_back()
+
+    def _sub_menu_open(self):
+        """Edit image… or Menu settings… is up: the two windows with sound
+        rows and a Play beside each."""
+        return (getattr(self, "_image_dialog", None) is not None
+                or getattr(self, "_menu_dialog", None) is not None)
+
+    def _music_aside(self):
+        """A sub-menu with sounds in it opened: the preview's music bed
+        stops while it is up (David, PAD-1530: "the music from the preview
+        always overplays when i have the sub-menus open"), so the sound a
+        Play there names is heard on its own.  Nothing is opened for it."""
+        if getattr(self, "_audio", None) is not None:
+            self._audio.loop(None)
+            self._audio.set_volume(self._effective_volume())
+
+    def _music_back(self):
+        """The sub-menu closed: the preview plays what the menu plays again
+        (silence while Sound is off or the tab is hidden), at the preview's
+        own volume and Mute."""
+        if (getattr(self, "_stopped", False) or self._sub_menu_open()
+                or getattr(self, "_audio", None) is None):
+            return
+        self._audio.set_volume(self._effective_volume())
+        self._sound_follow()
 
     # -- the theme ---------------------------------------------------------
 
@@ -12513,9 +12684,9 @@ class MultibootPanel:
         yet and nothing has rendered.  A row holding one of the WORDS (auto,
         synth, menu) has no file of its own until a prepare has made one, so
         the media directory's WAV for THAT row is played instead - the sound
-        the card will actually carry.  Either way it goes out through the
-        preview's own volume and Mute, so what comes out is what the strip's
-        knob says.
+        the card will actually carry.  Either way it goes out at the
+        preview's own volume, and Mute does not silence it while the dialog
+        is up (PAD-1530): the preview's music steps aside instead.
 
         *image* IS THE ROW THE BUTTON BELONGS TO, and Edit image… passes it:
         a word on ONE image's Music or Confirm row resolves to that image's
@@ -12569,11 +12740,22 @@ class MultibootPanel:
         audio = self._audio_player()
         audio.set_volume(self._effective_volume())
         audio.play(path)
-        self._write("%s: playing %s (%.2f s)%s"
-                    % (label, os.path.basename(path), head["seconds"],
-                       " - Mute is on, so nothing will be heard"
-                       if self._pv_mute_var.get() else ""))
+        self._write("%s: playing %s (%.2f s)"
+                    % (label, os.path.basename(path), head["seconds"]))
         return True
+
+    def stop_sound_choice(self):
+        """The Stop beside a sound row: silence what Play started, now.
+
+        The preview's music is already stopped while Edit image… or Menu
+        settings… is up, so this is the one sound there is; the device is
+        given back, and closing the window brings the preview's music back
+        as before (:meth:`_music_back`)."""
+        playing = self._audio is not None
+        self._stop_sound()
+        if playing:
+            self._write("Sound stopped.")
+        return playing
 
     def _sound_choice_path(self, label, value, image=None):
         """``(path, why)`` for one sound row: the WAV to play, or '' and the
@@ -12793,6 +12975,8 @@ class MultibootPanel:
         every highlight change may call it."""
         if not self._sound_var.get() or self._pv_hidden:
             return False
+        if self._sub_menu_open():
+            return False                # its music waits for it to close
         music = self.menu_sounds()["music"]
         if not music and self._audio is None:
             return False                # nothing to play: open nothing
@@ -12804,8 +12988,15 @@ class MultibootPanel:
     def _effective_volume(self):
         """What the player is told: the menu's volume (0-100, the machine's
         own loudness, media.json's number) scaled by the preview's knob,
-        and 0 while Mute is ticked."""
-        if self._pv_mute_var.get():
+        and 0 while Mute is ticked.
+
+        MUTE IS THE PREVIEW'S, NOT THE SUB-MENUS' (David, PAD-1530: "when
+        I'm muting music from the preview, i still want to be able to hear
+        the music or audio selected from specific game image menu").  While
+        Edit image… or Menu settings… is up the preview's music is stopped
+        (:meth:`_music_aside`) and the only sound is the one its Play asked
+        for, so Mute does not silence it; the knob still sets how loud."""
+        if self._pv_mute_var.get() and not self._sub_menu_open():
             return 0
         try:
             gain = max(0.0, min(1.0, float(self._pv_gain_var.get()) / 100.0))

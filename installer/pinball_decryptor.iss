@@ -55,6 +55,13 @@ DisableProgramGroupPage=auto
 ; (the one in place stays, and its uninstaller is copied across by the app).
 Uninstallable=not IsStaged
 VersionInfoVersion={#AppVersion}.0
+; PAD-1534: file times are stored and restored in UTC. The default keeps
+; the compiling machine's LOCAL wall clock and installs it as the user's
+; local time, and the release runner's local time IS UTC - so on a PC five
+; hours west every installed file was five hours in the future, and make
+; (the Multi-boot preview's menu build) recompiled everything, every time,
+; warning "Clock skew detected".
+TimeStampsInUTC=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -267,6 +274,18 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /reset /T /C /Q"; StatusMsg: "Repairing Python file permissions..."; Flags: runhidden waituntilterminated
 Filename: "{sys}\icacls.exe"; Parameters: """{app}\python"" /grant *S-1-5-32-545:(OI)(CI)RX /T /C /Q"; StatusMsg: "Repairing Python file permissions..."; Flags: runhidden waituntilterminated
 
+; --- Windows 11's short right-click menu (PAD-1523) ---------------------
+; "Compact with PAD" reaches Windows 11's first
+; right-click menu only through a package (pinball_decryptor\shell\
+; padmenu.msix, which the app adds for its user: webui/shell_menu.py), and
+; Windows adds a package only when its signature is trusted on the machine.
+; It is signed with the app's own certificate; this puts that certificate's
+; public part in the machine's Trusted People, which trusts packages signed
+; with the app's key and nothing else.  Elevated, which this installer is.
+; Windows 10 has no such menu and is left alone.  The uninstaller takes it
+; away again (RemoveTheFileAssociation).
+Filename: "{sys}\certutil.exe"; Parameters: "-f -addstore TrustedPeople ""{app}\pinball_decryptor\shell\padmenu.cer"""; StatusMsg: "Adding the right-click menu..."; Flags: runhidden waituntilterminated; MinVersion: 10.0.22000
+
 ; --- Compile the app's Python once, here --------------------------------
 ; The app ships as source (the __pycache__ folders are excluded above), so
 ; the first start after every install or update compiled each of its ~400
@@ -290,7 +309,7 @@ Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app
 
 ; --- In-app update relaunch ----------------------------------------------
 ; The app's "Install update" flow runs this installer silently
-; (/SILENT /RELAUNCH=1) and exits; the postinstall entry above is
+; (/VERYSILENT /RELAUNCH=1) and exits; the postinstall entry above is
 ; skipifsilent, so without this the silent upgrade would end with
 ; nothing on screen.  Routed through launcher.vbs like every other
 ; entry point (self-elevation), and gated on the /RELAUNCH=1 flag so a
@@ -526,12 +545,82 @@ begin
           True, True, True);
 end;
 
+{ PAD-1514: the app registers card images (.raw / .img / .iso) for its user  }
+{ when it starts (webui/open_image.py register_association, HKCU so an in-app  }
+{ update gets it too); the uninstall takes every key of it away again.  The    }
+{ names here are open_image.PROGID and VERB.                                   }
+procedure RemoveTheFileAssociation;
+var
+  Exts: array[0..2] of String;
+  I: Integer;
+  Cur: String;
+  ResultCode: Integer;
+begin
+  Exts[0] := '.raw'; Exts[1] := '.img'; Exts[2] := '.iso';
+  for I := 0 to 2 do
+  begin
+    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Classes\' + Exts[I] +
+                   '\OpenWithProgids', 'PinballAssetDecryptor.CardImage');
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+      'Software\Classes\SystemFileAssociations\' + Exts[I] +
+      '\shell\PinballAssetDecryptor.Write');
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+      'Software\Classes\SystemFileAssociations\' + Exts[I] +
+      '\shell\PinballAssetDecryptor.Compact');
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+      'Software\Classes\SystemFileAssociations\' + Exts[I] +
+      '\shell\PinballAssetDecryptor.Move');
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+      'Software\Classes\SystemFileAssociations\' + Exts[I] +
+      '\shell\PinballAssetDecryptor.Copy');
+    if RegQueryStringValue(HKEY_CURRENT_USER, 'Software\Classes\' + Exts[I],
+                           '', Cur) and
+       (Cur = 'PinballAssetDecryptor.CardImage') then
+      RegDeleteValue(HKEY_CURRENT_USER, 'Software\Classes\' + Exts[I], '');
+  end;
+  RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+    'Software\Classes\PinballAssetDecryptor.CardImage');
+  { PAD-1522: the card icon handler's class (shell_icon.CLSID), per user and
+    per machine, and its staged copy.  A copy Explorer still holds stays
+    until Explorer lets go; nothing points at it any more. }
+  RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER,
+    'Software\Classes\CLSID\' + '{6E1B5C0A-52D4-4F0B-9C55-1A1522CA4D01}');
+  RegDeleteKeyIncludingSubkeys(HKEY_LOCAL_MACHINE,
+    'Software\Classes\CLSID\' + '{6E1B5C0A-52D4-4F0B-9C55-1A1522CA4D01}');
+  { PAD-1526: the same class listed as an icon overlay identifier
+    (shell_icon.OVERLAY_KEY, OVERLAY_NAME) }
+  RegDeleteKeyIncludingSubkeys(HKEY_LOCAL_MACHINE,
+    'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers\' +
+    '     PinballCardCompact');
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\shell'),
+          True, True, True);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\compact_queue'),
+          True, True, True);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\move_queue'),
+          True, True, True);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\copy_queue'),
+          True, True, True);
+  { PAD-1523: the short-menu package (shell_menu.NAME) for this user, its
+    staged handler, and the certificate the install trusted it by (the
+    thumbprint is shell/padmenu64.json's; a test holds the two together). }
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -NonInteractive -Command "Get-AppxPackage -Name ' +
+       'PinballAssetDecryptor.ShellMenu | Remove-AppxPackage"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\certutil.exe'),
+       '-delstore TrustedPeople 246D199E7D32A5CB4F446F74CC67829192237F88',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  DelTree(ExpandConstant('{localappdata}\pinball_decryptor\shell_menu'),
+          True, True, True);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   HasRuntime, HasDisk: Boolean;
 begin
   if CurUninstallStep <> usPostUninstall then
     Exit;
+  RemoveTheFileAssociation();
   if UninstallSilent() then
     Exit;
 

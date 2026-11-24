@@ -250,7 +250,9 @@ class DiskMixin:
                           "pct": None}],
                      "rows": [], "status": "", "busy": False,
                      "can_clean_all": False, "can_reclaim": False,
-                     "can_resize": False, "can_move": False}}
+                     "can_resize": False, "can_move": False,
+                     # PAD-1507: the "Card images" section (shellx_cards)
+                     "cards": self._cards_initial()}}
         self.set(disk=self._disk_state())
         self.disk_refresh()
         return self._disk_state()

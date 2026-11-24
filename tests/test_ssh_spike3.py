@@ -29,7 +29,9 @@ def test_spike3_payload_and_buildroot_hook(card, tmp_path):
     with root.open('rb') as f:
         r = Ext4Reader(f, 0, root.stat().st_size)
         assert S._node(r, '/etc/init.d/S60padsshd') is None
-        assert S._read(r, '/root/.ssh/authorized_keys') == config['public_keys'].encode()
+        # PAD-1531: off is off - the trusted keys and PAD's programs come off with the boot hook
+        assert S._node(r, '/root/.ssh/authorized_keys') is None
+        assert S._node(r, '/usr/local/bin/dropbear') is None and S._node(r, '/etc/init.d/sshd') is None
         assert not S.inspect_root(r, 'stern-spike3', (2,131,0,root.stat().st_size))['enabled']
     S.prepare_rootfs(root, tmp_path, config, platform='stern-spike3')
     with root.open('rb') as f:

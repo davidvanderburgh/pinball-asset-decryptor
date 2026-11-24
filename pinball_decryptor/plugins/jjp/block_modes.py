@@ -19,23 +19,26 @@ The program (the Stern program's shape, with JJP's own hats and blocks)::
      "scripts": [{"hat": {"kind": ...}, "do": [statement, ...]}]}
 
 hats: mode_start, mode_end, shot {shot: <switch>, when: running | idle}, any_shot (a scoring
-shot the form scored), every {seconds}, seconds_left {seconds}.
+shot the form scored), every {seconds}, seconds_left {seconds}, played {mode: <the game's mode or
+multiball, a global or class>, when: started | ended} (PAD-1512: the game's own, in a game,
+whether this mode runs or not).
 statements: start_mode (from a "while it is not running" script), end_mode, add_time {seconds},
 set_time {seconds, at_least}, multiball {balls, save}, ball_save {seconds}, score {points},
 set {var, value}, change {var, by}, if {cond, then, else}, jjp_sound {sound}, jjp_lamp {lamp,
 color, blink}, jjp_lamp_off {lamp}, jjp_title {text, value}, jjp_coil {coil, ms}, log {text}.
 values: num {v}, var {name}, hits {shot} (a switch's hits this run), scored (the form's scoring
-shots made), total, secs_left, op {op, a, b}.  conditions: cmp {op, a, b}, and, or, not, running.
+shots made), total, secs_left, all_played (its start_all modes the player up has played, PAD-1512),
+op {op, a, b}.  conditions: cmp {op, a, b}, and, or, not, running.
 """
 import json
 import os
 import re
 
 FORMAT = 1
-HATS = ("mode_start", "mode_end", "shot", "any_shot", "every", "seconds_left")
+HATS = ("mode_start", "mode_end", "shot", "any_shot", "every", "seconds_left", "played")
 OPS = ("start_mode", "end_mode", "add_time", "set_time", "multiball", "ball_save", "score", "set",
        "change", "if", "jjp_sound", "jjp_lamp", "jjp_lamp_off", "jjp_title", "jjp_coil", "log")
-VALUES = ("num", "var", "hits", "scored", "total", "secs_left", "op")
+VALUES = ("num", "var", "hits", "scored", "total", "secs_left", "all_played", "op")
 CONDS = ("cmp", "and", "or", "not", "running")
 RESETS = ("mode", "kept")
 ARITH = {"+": "+", "-": "-", "*": "*", "/": "/"}
@@ -144,7 +147,11 @@ def problems(program, names=None):
             name_ok("switches", h.get("shot"), where)
         if h["kind"] in ("every", "seconds_left") and not _pos_num(h.get("seconds")):
             out.append("%s: the seconds must be a number above 0" % where)
-        idle = h["kind"] == "shot" and h.get("when") == "idle"
+        if h["kind"] == "played" and not str(h.get("mode") or "").strip():
+            out.append("%s: no game mode picked" % where)
+        # it may start the mode where the mode is not running: a "while it is not running" switch,
+        # or one of the game's modes starting or ending (PAD-1512)
+        idle = (h["kind"] == "shot" and h.get("when") == "idle") or h["kind"] == "played"
 
         def stmt(b, _path, where=where, idle=idle):
             op = b.get("op")
@@ -153,7 +160,7 @@ def problems(program, names=None):
                 return
             if op == "start_mode" and not idle:
                 out.append("%s: Start the mode works only in a When a switch is hit while it is not running"
-                           " script (it is already running here)" % where)
+                           " or a When the game starts or ends a mode script (it is already running here)" % where)
             if op in ("set", "change") and b.get("var") not in var_names:
                 out.append("%s: %s names no variable of this mode" % (where, stmt_words(b)))
             if op == "jjp_sound":
@@ -202,7 +209,8 @@ def hat_words(h):
             "shot": "when %s is hit%s" % (h.get("shot") or "a switch",
                                           " while it is not running" if h.get("when") == "idle" else ""),
             "any_shot": "when a scoring shot is made", "every": "every %s s" % h.get("seconds"),
-            "seconds_left": "at %s s left" % h.get("seconds")}.get(k, k)
+            "seconds_left": "at %s s left" % h.get("seconds"),
+            "played": "when the game %s %s" % ("ends" if h.get("when") == "ended" else "starts", h.get("mode") or "a mode")}.get(k, k)
 
 
 def stmt_words(b):
@@ -247,6 +255,8 @@ class _Gen:
             return "jm_total()"
         if k == "secs_left":
             return "(long long)jm_seconds_left()"
+        if k == "all_played":
+            return "(long long)jm_all_played()"
         if k == "op":
             a, b, op = self.val(v.get("a")), self.val(v.get("b")), ARITH.get(v.get("op"), "+")
             if op == "/":
@@ -409,5 +419,13 @@ def to_cpp(program, name="", code=""):
             body += ["    if (jm_is(sw, %s)) {   // script %d" % (_str(s["hat"].get("shot")), i + 1)]
             body += g.stmts(s["do"], 2) + ["    }"]
         fn("static void idle(const char *sw)", body, ".idle = idle")
+    if by.get("played"):                       # PAD-1512: the game's own modes and multiballs
+        body = []
+        for i, s in by["played"]:
+            m = _str(s["hat"].get("mode"))
+            body += ["    if (started == %d && (jm_is(name, %s) || jm_is(cls, %s))) {   // script %d"
+                     % (0 if s["hat"].get("when") == "ended" else 1, m, m, i + 1)]
+            body += g.stmts(s["do"], 2) + ["    }"]
+        fn("static void game_mode(const char *name, const char *cls, int started)", body, ".game_mode = game_mode")
     L.append("JM_REGISTER({ .api = JM_API%s });" % "".join(", " + r for r in regs))
     return "\n".join(L) + "\n"

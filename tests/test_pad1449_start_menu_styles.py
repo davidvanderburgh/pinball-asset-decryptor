@@ -418,7 +418,7 @@ int main(void)
     # round 6 (DoomWalrus666: "Selecting a mode no longer brings up the other options"): the hand-back never lets
     # Action begin a game from a mode entry - the start is held back, the hand-back ends and the step opens
     held = R._lift(src, "static int sty_menu_held(void)\n{")
-    assert "smn.go_ms != 0," in held and "smn.home_ms != 0," not in held
+    assert "smn.go_ms != 0)," in held and "smn.home_ms != 0," not in held
     assert "smn.home_ms = 0;" in held and "smn.act = 1;" in held
     edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
     assert edge.index("!smn.ov && smn.home_ms && !smn.home_walk && !smn.go_ms && sty_menu_kind() != 0u") < edge.index("sty_menu_owns_action()")
@@ -456,7 +456,7 @@ int main(void)
     assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "1 222 33 2 4 2 2 0"
     owns = R._lift(src, "static int sty_menu_owns_action(void)\n{")
     assert "if (smn.ov == STY_OV_MODES) return !smn.open || smn.shaping;" in owns
-    assert "if (smn.ov) return smn.ov == STY_OV_PLAIN && !smn.go_ms;" in owns
+    assert "if (smn.ov) return smn.ov == STY_OV_PLAIN" in owns
     edge = R._lift(src, "static void sty_menu_edge(unsigned id, int press)")
     assert edge.index("smn.ov == STY_OV_START") < edge.index("sty_menu_owns_action()")
     assert "smn.ov == STY_OV_MODES && smn.open && !smn.shaping" in edge
@@ -465,3 +465,141 @@ int main(void)
     assert "smn.open && !smn.act" in read
     hook = R._lift(src, "static void team_menu_frame(pm_reg *r)")
     assert hook.index("sty_overlay_read();") < hook.index("sty_menu_walk(&r[breg]")
+
+
+def test_round8_a_start_that_begins_no_game_leaves_the_mode_list_its_step(tmp_path):
+    """PAD-1449 round 8 (DoomWalrus666, on v1.561.7: "Once a version selection is made, version selection is no longer
+    available until a game is started and ended ... User selected a mode and version, then went to add a user"): a
+    Start that adds a player arms the menu's Start until a game begins; on the plain mode list Action is the step's
+    all the same"""
+    src = _src()
+    code = r"""#include <stdio.h>
+#define STY_OV_PLAIN 1
+#define STY_OV_LOGIN 2
+#define STY_OV_MODES 3
+#define STY_OV_START 4
+""" + R._lift(src, "static int sty_go_keeps_action(int ov, unsigned sub, int go)") + r"""
+int main(void)
+{
+    /* no Start: never; the plain mode list (1/4) after a Start: the step's; the plain menu off its mode list; a port
+     * with no overlay words (rounds 4-6: the Home Team screen a Start brought is the game's); the overlay's screens */
+    printf("%d%d%d %d %d %d%d%d\n", sty_go_keeps_action(0, 4, 0), sty_go_keeps_action(STY_OV_PLAIN, 4, 0),
+           sty_go_keeps_action(STY_OV_LOGIN, 0, 0), sty_go_keeps_action(STY_OV_PLAIN, 4, 1),
+           sty_go_keeps_action(STY_OV_PLAIN, 3, 1), sty_go_keeps_action(0, 4, 1), sty_go_keeps_action(STY_OV_LOGIN, 0, 1),
+           sty_go_keeps_action(STY_OV_MODES, 4, 1));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "000 0 1 111"
+    owns = R._lift(src, "static int sty_menu_owns_action(void)\n{")
+    assert "!sty_go_keeps_action(smn.ov, smn.ov_sub, smn.go_ms != 0)" in owns
+    assert "return !smn.go_ms && (!smn.home_ms || smn.home_walk);" in owns      # (no overlay words: as before)
+    held = R._lift(src, "static int sty_menu_held(void)\n{")
+    assert "sty_go_keeps_action(smn.ov, smn.ov_sub, smn.go_ms != 0)" in held
+    assert "smn.ov_sub = *(volatile unsigned *)ua;" in R._lift(src, "static void sty_overlay_read(void)")
+    # a version taken after that Start is the one the game it begins takes
+    frame = R._lift(src, "static void sty_menu_frame(unsigned c, int teams, int ours, unsigned std_msg, unsigned index)")
+    case4 = frame[frame.index("    case 4:"):]
+    assert case4.index("if (smn.go_ms) {") < case4.index("sty_menu_go();") < case4.index("break;")
+
+
+def test_round9_the_right_flipper_counts_at_the_start_that_began_the_game(tmp_path):
+    """PAD-1449 round 9 (DoomWalrus666, on v1.564.1: "When on Standard Regular (started via Start Button default), if
+    Start button is pressed during the Match screen, co-op intro plays and Enhanced mode is started"): a right flipper
+    tapped in the match draw and let go just before the Start was "held at Start" (let go at most 1.5 s before the
+    game's start) and made a co-op game of one. The Start that began the game says it now: the button down at that
+    press, or down at the start."""
+    src = _src()
+    code = r"""#include <stdio.h>
+#define COOP_GO_GAP_MS 20000ul
+""" + R._lift(src, "static int coop_start_held(unsigned long go, int go_held, int now_held, unsigned long held, "
+                   "unsigned long start,\n                           unsigned long window)\n{") + r"""
+int main(void)
+{
+    /* a Start 0.5 s before the start, the flipper up at it, let go 1 s before the start: not held; down at it: held;
+     * down at the start (both pressed together): held; a Start 25 s before (none that began it): the old rule - let go
+     * 1 s before: held, 3 s before: not; no Start seen and never pressed: not */
+    printf("%d %d %d %d %d %d\n", coop_start_held(99500 | 1, 0, 0, 99000 | 1, 100000, 1500),
+           coop_start_held(99500 | 1, 1, 0, 0, 100000, 1500), coop_start_held(99500 | 1, 0, 1, 0, 100000, 1500),
+           coop_start_held(75000 | 1, 0, 0, 99000 | 1, 100000, 1500), coop_start_held(0, 0, 0, 97000 | 1, 100000, 1500),
+           coop_start_held(0, 0, 0, 0, 100000, 1500));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "0 1 1 1 0 0"
+    edge = R._lift(src, "static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)\n{")
+    assert edge.index("coop_go_edge(id, (level & 1u) == closed);") < edge.index("sty_menu_edge(")
+    rec = R._lift(src, "static void coop_go_edge(unsigned id, int press)\n{")
+    assert "if (!press || !id || id != ci.start_sw || pm_in_game()) return;" in rec
+    assert rec.index("coop_go_held = coop_start_button_held();") < rec.index("coop_go_ms = pm_ms() | 1ul;")
+    solo = R._lift(src, "static void coop_solo_check(void)\n{")
+    assert ("coop.solo_ask = g && coop_start_held(coop_go_ms, coop_go_held, coop_start_button_held(), coop.held_ms, pm_ms(),"
+            in solo)
+    film = R._lift(src, "static int ci_film_due(void)\n{")
+    assert "coop_start_held(coop_go_ms, coop_go_held, coop_start_button_held(), coop.held_ms, pm_ms()," in film
+
+
+def test_round10_the_held_right_flipper_starts_no_coop_where_the_start_menu_has_it(tmp_path):
+    """PAD-1449 round 10 (DoomWalrus666, on v1.566.1: "Please remove the function of starting Co-op when holding down
+    right flipper, it is no longer necessary with the new mode options"): every place a held button turned a Start into
+    co-op reads coop_start_button_held(), which is the button only where the start menu has no CO-OP PLAY entry
+    (tm.armed 0); coop.cfg `hold on` / `hold off` overrides it."""
+    src = _src()
+    code = r"""#include <stdio.h>
+""" + R._lift(src, "static int coop_hold_starts(unsigned hold, int menu)\n{") + r"""
+int main(void)
+{
+    /* as the menu says: menu hooked - no, no menu - yes; `hold on`: yes either way; `hold off`: no either way */
+    printf("%d %d %d %d %d %d\n", coop_hold_starts(0, 1), coop_hold_starts(0, 0), coop_hold_starts(1, 1),
+           coop_hold_starts(1, 0), coop_hold_starts(2, 1), coop_hold_starts(2, 0));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "0 1 1 1 0 0"
+    gate = R._lift(src, "static int coop_start_button_held(void)\n{")
+    assert "coop_hold_starts(coop.hold, tm.armed) && coop_button_held()" in gate
+    assert "coop_go_held = coop_start_button_held();" in R._lift(src, "static void coop_go_edge(unsigned id, int press)\n{")
+    solo = R._lift(src, "static void coop_solo_check(void)\n{")
+    assert "if (coop_start_button_held()) coop.held_ms = pm_ms() | 1ul;" in solo
+    assert "coop_button_held()" not in solo
+    assert "coop_button_held()" not in R._lift(src, "static int ci_film_due(void)\n{")
+    add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)\n{")
+    assert "coop_switched_on() && coop_start_button_held()))" in add and "coop_button_held()" not in add
+    assert "int soon = ci.clip[0] && (coop_start_button_held() ||" in src
+    line = R._lift(src, "static void coop_line(const char *s)\n{")
+    assert 'if (str_starts(s, "hold on")) { coop.hold = 1; return; }' in line
+    assert 'if (str_starts(s, "hold off")) { coop.hold = 2; return; }' in line
+    arm = R._lift(src, "static void coop_arm(void)\n{")
+    assert arm.index("team_menu_arm();") < arm.index("coop_hold_starts(coop.hold, tm.armed)")
+
+
+def test_round11_the_language_bar_stays_up_through_the_intro_screen_in_ball_1(tmp_path):
+    """PAD-1449 round 11 (DoomWalrus666: "Sometimes language selection did not appear during the intro ... sporadically"):
+    Godzilla's PLAYER LANGUAGE SELECT bar and its flipper toggle ask one play-begun check (`site language_begun`, their
+    only two callers); a ball launched, or a playfield switch, in the intro made it answer yes and the bar never came
+    (emulator, LE 1.16: 3 of 3 launches 1 s into the film). While the game's intro screen is up in ball 1 the check is
+    refused (answers 0)."""
+    src = _src()
+    code = r"""#include <stdio.h>
+""" + R._lift(src, "static int lang_bar_kept(int in_game, int film_up, unsigned ball)\n{") + r"""
+int main(void)
+{
+    /* up in ball 1 - kept; not in a game, screen down or unknown, ball 2 - the game's own answer */
+    printf("%d %d %d %d %d %d\n", lang_bar_kept(1, 1, 1), lang_bar_kept(1, 1, 0), lang_bar_kept(0, 1, 1),
+           lang_bar_kept(1, 0, 1), lang_bar_kept(1, -1, 1), lang_bar_kept(1, 1, 2));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, code, flags=("-no-pie",)).strip() == "1 1 0 0 0 0"
+    on = R._lift(src, "static int on_language_begun(pm_reg *r, unsigned n)\n{")
+    assert "lang_bar_kept(pm_in_game(), ci_film_up(), coop_ball_byte ? *coop_ball_byte : 1u)" in on
+    assert "return 1;" in on.rstrip().splitlines()[-2]            # refused: the check answers 0, "not begun"
+    arm = R._lift(src, "static void coop_chars_arm(struct site *e)\n{")
+    assert 'hook_veto_n(fn("language_begun"), on_language_begun, 0, 0)' in arm   # refused = returns 0
+    for name, addr, flag in (("godzilla_le-1.16", "0x001712cc", "0x00712748"),
+                             ("godzilla_pro-1.15", "0x0016d8f4", "0x0070847c"),
+                             ("godzilla_pro-1.16", "0x0016d8f4", "0x007074a0")):
+        port = (PORTS / (name + ".port")).read_text(encoding="utf-8")
+        assert re.search(r"^site language_begun\s+%s 0xe5d00008 0xe3500000\s*$" % addr, port, re.M), name
+        assert re.search(r"^data language_play_begun %s\s*$" % flag, port, re.M), name
+        assert "site language_keys" in port

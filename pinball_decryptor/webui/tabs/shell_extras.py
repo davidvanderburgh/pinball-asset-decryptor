@@ -33,6 +33,7 @@ from ... import __version__
 from ...core import session_log
 from .. import compat
 from ..picker_data import MFR_VISUALS, peek_text, tooltip_text
+from ..shellx_cards import CardsMixin
 from ..shellx_disk import DiskMixin
 from ..shellx_machines import MachinesMixin
 from ..shellx_donations import DonationsMixin
@@ -82,6 +83,16 @@ AGENT_ACCESS_TIP = (
     "through the same checks as clicking. Off by default; only programs "
     "running as you on this PC can reach it.")
 
+CARD_IMAGES_TIP = (
+    "Double-click a .raw card image, or right-click a .raw, .img or .iso "
+    "and pick Write to a card with PAD: PAD opens on that machine's write "
+    "dialog with the image in it. Right-click a .raw or .img and pick "
+    "Compact with PAD to store that card compact where it is: a small "
+    "window shows it, and PAD itself does not start. A compact .raw has a "
+    "green badge on its icon. Off until you tick it. .img and .iso "
+    "still mount on a "
+    "double-click, as Windows does for every disc image.")
+
 
 def not_elevated_on_windows():
     """True when this is Windows and the app runs WITHOUT Administrator rights (PAD-1336).
@@ -116,7 +127,7 @@ def _visuals():
     return dict(MFR_VISUALS)
 
 
-class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin,
+class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, CardsMixin, ResetMixin, TeamMixin,
                   DonationsMixin, ReportMixin, GettingStartedMixin, TabService):
     ns = "shellx"
     key = ""
@@ -127,7 +138,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin
         "voice_quality_var", "update_interval_var", "autosave_interval_var",
         "old_versions_var", "update_auto_download_var",
         "show_log_history_var",
-        "scenes_own_colours_var", "agent_access_var",
+        "scenes_own_colours_var", "agent_access_var", "card_images_var",
         "set_update_check_running", "show_update_banner",
         "show_up_to_date_toast", "open_update_download_dialog",
         "apply_preview_features",
@@ -167,6 +178,10 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin
         self.agent_access_var = self.var(
             "agent_access", "bool",
             bool(cb.get("initial_agent_access", False)))
+        # PAD-1514: Explorer opens card images on PAD's write dialog
+        self.card_images_var = self.var(
+            "card_images", "bool",
+            bool(cb.get("initial_card_images", False)))
         self._update_check_busy = False
         self._update_available = None       # (version, url, installer|None)
         self._update_stage = None           # None | "downloading" | "ready"
@@ -251,6 +266,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin
             "toggle_log_history": self._toggle_log_history,
             "toggle_scenes_own_colours": self._toggle_scenes_own_colours,
             "toggle_agent_access": self._toggle_agent_access,
+            "toggle_card_images": self._toggle_card_images,
             "agent_setup": self._show_agent_setup,
             "voice_quality": self._pick_voice_quality,
             "clear_voice_models": self._clear_voice_models,
@@ -440,6 +456,16 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin
             {"id": "agent_setup", "label": "Connect an agent…",
              "disabled": not self.agent_access_var.get(),
              "title": "The lines to add to an AI agent's MCP servers."}]})
+        if sys.platform == "win32":
+            from .. import open_image
+            installed = open_image.install_dir() is not None
+            items.append({"label": "Card images", "submenu": [
+                {"id": "toggle_card_images",
+                 "label": "Open card images with PAD",
+                 "checked": bool(self.card_images_var.get()),
+                 "disabled": not installed,
+                 "title": (CARD_IMAGES_TIP if installed else
+                           "Only the installed app sets this up.")}]})
         items.append({"sep": True})
         if sys.platform == "win32":
             label = "Manage disk space…"
@@ -639,6 +665,63 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin
                    "full history in the log file) · this session below "
                    "────────────" % LOG_SEED_LINES)
         self.set(log_seed={"lines": lines, "cut": cut})
+
+    def _toggle_card_images(self):
+        """⚙ → Card images → Open card images with PAD (PAD-1514): Explorer
+        opens a .raw on its write dialog, and every .raw / .img / .iso has
+        "Write to a card with PAD" on its right-click menu.  PAD-1522: a
+        .raw / .img also has "Compact with PAD" there, and a compact .raw
+        its own icon.  Off takes all of it away."""
+        from .. import open_image
+        on = not bool(self.card_images_var.get())
+        self.card_images_var.set(on)
+        fn = self.window.cb.get("on_card_images_change")
+        if fn is not None:
+            fn(on)
+        self.publish_settings_items()
+        if not on:
+            open_image.unregister_association()
+            self.log("Card images no longer open with PAD from Explorer.",
+                     "info")
+            return True
+        open_image.register_association(take_raw=True)
+        if open_image.raw_is_pads():
+            self._card_images_result()
+            return True
+        # another app also opens .raw, so Windows wants the user's own click
+        # once: bring its question up here, from the switch (PAD-1518)
+        self.log("Card images: Windows is asking which app opens .raw "
+                 "files. Pick Pinball Asset Decryptor, then Always.", "info")
+
+        def _ask():
+            open_image.ask_windows(".raw")
+            self.ctx.loop.post(self._card_images_result)
+        threading.Thread(target=_ask, name="pad-shellx-openwith",
+                         daemon=True).start()
+        return True
+
+    def _card_images_result(self):
+        from .. import open_image
+        other = open_image.raw_chosen_elsewhere()
+        if not other and not open_image.raw_is_pads():
+            self.log("Card images: Windows has no app chosen for .raw files "
+                     "yet. Double-click one and pick Pinball Asset Decryptor "
+                     "> Always, or untick and tick this switch to be asked "
+                     "again. Right-click > Write to a card with PAD works "
+                     "either way.", "warning")
+        elif other:
+            self.log("Card images: .raw files still open with %s. To change "
+                     "it, untick and tick this switch and pick Pinball "
+                     "Asset Decryptor > Always when Windows asks. "
+                     "Right-click > Write to a card with PAD works either "
+                     "way." % other, "warning")
+        else:
+            self.log("Card images open with PAD: double-click a .raw, or "
+                     "right-click a .raw, .img or .iso > Write to a card "
+                     "with PAD. Right-click a .raw or .img > Compact with "
+                     "PAD stores it compact where it is; a compact .raw "
+                     "has a green badge on its icon.", "info")
+        return True
 
     def _toggle_agent_access(self):
         """⚙ → Let AI agents control PAD (PAD-844): publish or take away the

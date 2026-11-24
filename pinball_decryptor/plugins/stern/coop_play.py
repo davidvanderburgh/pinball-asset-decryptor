@@ -1394,8 +1394,9 @@ def _characters(got):
     if got.get("bonus"):                                # PAD-1123: the teammate's character on their End of Ball Bonus
         out["bonus"] = True
     if theme:
-        out["theme"] = {k: (int(v) if k == "dim" and str(v).isdigit() else str(v)) for k, v in theme.items()
-                        if k in THEME and v is not None and v != ""}
+        out["theme"] = {k: (int(v) if k == "dim" and str(v).isdigit() else True if k == "match" else str(v))
+                        for k, v in theme.items() if k in THEME and v is not None and v != ""
+                        and (k != "match" or _truthy(v))}       # PAD-1513: match is kept only when on
     return out
 
 
@@ -1756,7 +1757,7 @@ def style_card(project, characters, index, theme=None, team="your team", scale=2
         rows = (len(shown) + cols - 1) // cols
         gw, gh = (pw - (cols - 1) * 6 * S) // cols, (ph - (rows - 1) * 6 * S) // rows
         for k, c in enumerate(shown):
-            tile = _portrait(project, c, gw, gh, c.get("colour") or th["accent"], th["accent2"])
+            tile = _portrait(project, c, gw, gh, *character_colours(th, c)[:2])
             if index == 1:                                  # CHARACTERS: the faces, a little quieter
                 tile = Image.blend(tile, Image.new("RGBA", tile.size, (8, 10, 16, 255)), 0.25)
             pic.paste(tile, ((k % cols) * (gw + 6 * S), (k // cols) * (gh + 6 * S)))
@@ -2428,6 +2429,7 @@ def bonus_card(name, colour="#ffb400", theme=None, picture="", project="", scale
     th = theme_of(theme)
     acc = clean_colour(colour) or th["accent"]
     A = _hex(acc)
+    name_ink = character_colours(th, {"colour": acc})[2]        # PAD-1513: the frame's colour, with the look's match
     S = scale
     gw, gh = _bonus_card_size()
     W, H = gw * S, gh * S
@@ -2468,7 +2470,7 @@ def bonus_card(name, colour="#ffb400", theme=None, picture="", project="", scale
     photo = Image.alpha_composite(photo, shadow.filter(ImageFilter.GaussianBlur(3 * S)))
     pd = ImageDraw.Draw(photo)
     for t, y in zip(lines, ys):
-        pd.text((pw // 2, y), t, font=nf, fill=_hex(th["name"]), anchor="ms", stroke_width=max(1, S),
+        pd.text((pw // 2, y), t, font=nf, fill=_hex(name_ink), anchor="ms", stroke_width=max(1, S),
                 stroke_fill=(0, 0, 0, 255))
     img.paste(photo, (px, py), pm)
     ImageDraw.Draw(img).rounded_rectangle((px, py, px + pw - 1, py + ph - 1), radius=10 * S, outline=A[:3] + (255,),
@@ -2602,11 +2604,16 @@ def save_look(project, key, value):
         if str(value) not in {str(d) for d in DIMS}:
             raise CoopError("The background can be darkened by %s percent." % ", ".join(str(d) for d in DIMS))
         theme[key] = int(value)
+    elif key == "match":                    # PAD-1513: off is the default, so it is not kept
+        if _truthy(value):
+            theme[key] = True
+        else:
+            theme.pop(key, None)
     elif clean_colour(value):
         theme[key] = clean_colour(value)
     else:
         raise CoopError("%r is not a colour (#rrggbb)." % value)
-    chars["theme"] = {k: v for k, v in theme.items() if v not in (None, "")}
+    chars["theme"] = {k: v for k, v in theme.items() if v is not None and v != ""}
     return save_characters(project, chars)
 
 
@@ -2767,7 +2774,10 @@ def peek_hint(theme=None, text=PEEK_TEXT):
 #: (``backdrop``, the project's file) darkened by ``dim`` percent so the words stay readable
 THEME = {"title": "CHOOSE YOUR CHARACTER", "accent": "#ffb400", "accent2": "#ff5a1f", "heading": "#ffffff",
          "name": "#ffffff", "sub": "", "badge": "", "badge_text": "#0c0c12", "does": "#dee4f0", "help": "#ffffff",
-         "count": "", "panel": "", "backdrop": "", "dim": 40}
+         "count": "", "panel": "", "backdrop": "", "dim": 40, "match": False}
+#: PAD-1513 (DoomWalrus666: "each character's name text and corners to match the Character frame color"): with the
+#: look's ``match`` on, a character's cards draw its name and the corners-and-arrows colour in its frame colour too
+MATCH_ROLES = ("name", "accent2")
 #: PAD-1079: the Look's colours, in the dialog's order: (theme key, what it colours)
 COLOUR_ROLES = (("accent", "Frame and lights"), ("accent2", "Corners and arrows"), ("heading", "Title"),
                 ("count", "Count (01 / 11)"), ("name", "Name"), ("sub", "Sub header"), ("badge", "Ability badge"),
@@ -2839,9 +2849,25 @@ def theme_of(theme=None):
                 t[k] = int(v) if int(v) in DIMS else THEME[k]
             except (TypeError, ValueError):
                 pass
+        elif k == "match":
+            t[k] = _truthy(v)
         elif clean_colour(v):
             t[k] = clean_colour(v)
     return t
+
+
+def _truthy(v):
+    return v is True or str(v).strip().lower() in ("1", "true", "on", "yes")
+
+
+def character_colours(th, character):
+    """A character's card colours ``(frame, corners and arrows, name)`` in the look *th* (:func:`theme_of`): its own
+    frame colour (PAD-1079) or the look's; PAD-1513: with the look's ``match`` the name and the corners take the
+    frame's colour as well. ``character`` None (RANDOM) keeps the look's own."""
+    acc = (character or {}).get("colour") or th["accent"]
+    if character is not None and th.get("match"):
+        return acc, acc, acc
+    return acc, th["accent2"], th["name"] or acc
 
 
 def backdrop_path(project, theme=None):
@@ -2998,9 +3024,10 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
     n = len(chars)
     rnd = index >= n
     c = None if rnd else chars[index]
-    acc, acc2 = (c or {}).get("colour") or th["accent"], th["accent2"]     # PAD-1079: a character's own frame colour
-    A, A2 = _hex(acc), _hex(acc2)
+    acc, acc2, name_ink = character_colours(th, c)      # PAD-1079: a character's own frame colour (PAD-1513: its
+    A, A2 = _hex(acc), _hex(acc2)                       # name and corners too, with the look's match)
     ink = {k: _hex(th[k] or acc) for k in ("heading", "count", "name", "sub", "badge", "badge_text", "does")}
+    ink["name"] = _hex(name_ink)
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     # the panel: a near-black body with a cold-to-warm wash, a fine grid (or the owner's background picture), a lit
     # border and corner brackets
@@ -3183,8 +3210,8 @@ def award_card(project, characters, index, theme=None, scale=2):
         c_["tag"] = tag_of(c_["name"], [x["name"] for x in chars])
     c = chars[index]
     th = theme_of(theme)
-    acc = c.get("colour") or th["accent"]                       # PAD-1079: the pick card's look, its colours too
-    A, A2 = _hex(acc), _hex(th["accent2"])
+    acc, acc2, name_ink = character_colours(th, c)              # PAD-1079: the pick card's look, its colours too
+    A, A2 = _hex(acc), _hex(acc2)
     S = scale
     W, H = AWARD_SIZE[0] * S, AWARD_SIZE[1] * S
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -3206,7 +3233,7 @@ def award_card(project, characters, index, theme=None, scale=2):
     # the portrait, in a lit frame
     px, py, pw, ph = 40 * S, 80 * S, 340 * S, 300 * S
     img = _glow(img, (px - 4 * S, py - 4 * S, px + pw + 4 * S, py + ph + 4 * S), 16 * S, A[:3] + (230,), 10 * S, 6 * S)
-    por = _portrait(project, c, pw, ph, acc, th["accent2"])
+    por = _portrait(project, c, pw, ph, acc, acc2)
     pm = Image.new("L", (pw, ph), 0)
     ImageDraw.Draw(pm).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=14 * S, fill=255)
     img.paste(por, (px, py), pm)
@@ -3224,7 +3251,7 @@ def award_card(project, characters, index, theme=None, scale=2):
     ImageDraw.Draw(shadow).text((ix + 4 * S, 200 * S + 5 * S), c["name"], font=nf, fill=(0, 0, 0, 220), anchor="ls")
     img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(4 * S)))
     d = ImageDraw.Draw(img)
-    d.text((ix, 200 * S), c["name"], font=nf, fill=_hex(th["name"]), anchor="ls", stroke_width=max(1, S),
+    d.text((ix, 200 * S), c["name"], font=nf, fill=_hex(name_ink), anchor="ls", stroke_width=max(1, S),
            stroke_fill=(0, 0, 0, 255))
     nw = min(iw - 40 * S, d.textlength(c["name"], font=nf))
     d.rectangle((ix, 214 * S, ix + nw, 220 * S), fill=A[:3] + (255,))

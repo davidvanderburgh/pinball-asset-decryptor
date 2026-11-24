@@ -1,0 +1,30 @@
+D desktop setup: done
+D laptop setup asks about: ['PAD on another computer (key SHA256:zZvL7ArCKRny)'] (card unchanged until answered)
+D laptop answers Keep: done -> card trusts ['desktop', 'laptop']
+D laptop presses again (kept key now saved with its project): already
+E laptop answers Take it off: done -> card trusts ['laptop']
+F rebuilt from the project: True -> card trusts ['desktop']
+=== D: desktop set it up, then the laptop, answering Keep
+  /tmp -> /var/tmp
+  /var/run -> /run
+  /var/tmp -> /var/volatile/tmp
+  boot hook on the card: /etc/rc5.d/S30sshd -> ../init.d/sshd; starting it
+  authorized_keys on the card: pinball-asset-decryptor pinball-asset-decryptor 
+  desktop's key: LOGGED-IN as uid 0 on stern-spike2
+  laptop's key: LOGGED-IN as uid 0 on stern-spike2
+=== E: desktop set it up, then the laptop, answering Take it off
+  /tmp -> /var/tmp
+  /var/run -> /run
+  /var/tmp -> /var/volatile/tmp
+  boot hook on the card: /etc/rc5.d/S30sshd -> ../init.d/sshd; starting it
+  authorized_keys on the card: pinball-asset-decryptor 
+  desktop's key: root@127.0.0.1: Permission denied (publickey).
+  laptop's key: LOGGED-IN as uid 0 on stern-spike2
+=== F: an existing setup (desktop) rebuilt from its project
+  /tmp -> /var/tmp
+  /var/run -> /run
+  /var/tmp -> /var/volatile/tmp
+  boot hook on the card: /etc/rc5.d/S30sshd -> ../init.d/sshd; starting it
+  authorized_keys on the card: pinball-asset-decryptor 
+  desktop's key: LOGGED-IN as uid 0 on stern-spike2
+  laptop's key: root@127.0.0.1: Permission denied (publickey).

@@ -421,6 +421,13 @@ yellow). Sonic keeps every file at the byte size it shipped at, so the
 editor saves as small as it can without changing a pixel and shows the
 size against the game's; a picture that will not fit is not saved.
 
+**Where the rings are:** beside a ring picture, the editor shows Sonic's
+playfield with its five ring displays marked: top left, left ramp, left
+orbit, top right and right ramp (all on the upper half). The marks are drawn
+on the game's own playfield picture, which was taken before the rings were
+fitted. **Ring map** in the toolbar hides or shows it. Which ring shows a
+given picture is decided by the game.
+
 ### Attract screens (Stern Spike 2)
 
 The **Attract** tab lists the screens the game shows in attract mode, in

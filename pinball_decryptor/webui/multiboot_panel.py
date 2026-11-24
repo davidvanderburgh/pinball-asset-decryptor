@@ -384,6 +384,11 @@ class _WebImageDialog:
             self.source = mt._cell_image(rows[self._index])
         self.sync_preview()
 
+    def sync_source(self):
+        """PAD-1544: the image's file changed - the title and the line under
+        it name the new one, and the card draws its logo."""
+        self.sync_members()
+
     def show(self):
         self.sync_kind()
         self.sync_preview()
@@ -1142,6 +1147,10 @@ class WebMultibootPanel(_Base):
         out["ed"] = {
             "index": d._index, "title": d.title, "source": d.source,
             "group": d._group, "kinds": kinds, "kind": kind,
+            # PAD-1544: a newer build of this one image, everything else kept
+            "can_replace": not d._group,
+            "replaced": self.replaced_note(),
+            "replace_tip": mt.REPLACE_TIP,
             "file_kind": shown if shown in d.file_kinds else None,
             "file_label": "Video file:" if shown == "video"
             else "Picture file:",

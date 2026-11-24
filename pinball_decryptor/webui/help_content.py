@@ -3429,7 +3429,11 @@ HELP_CONTENT = {
          "list of what its card shows: the game's logo, a picture, the game's "
          "attract video, a video file, or nothing. A video's first frame is the "
          "still shown when the card is not highlighted. The right side of the "
-         "dialog draws the card as the menu will."),
+         "dialog draws the card as the menu will.\n\n"
+         "**Replace image…** beside the file's name puts another build of that "
+         "game in the row, a newer version say. Its place in the menu, title, "
+         "picture, sounds, settings and high scores stay as they are, and a "
+         "loaded card is then updated with only the files that differ."),
         ("Menu settings",
          "**Menu settings…** on the action bar holds everything that belongs to the "
          "whole menu rather than one image:\n\n"

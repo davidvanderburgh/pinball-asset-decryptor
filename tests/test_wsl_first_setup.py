@@ -107,8 +107,9 @@ def _drain(fake):
     return out
 
 
-def _machine(monkeypatch, wsl_ok, state, pending=False):
+def _machine(monkeypatch, wsl_ok, state, pending=False, vm_off=False):
     monkeypatch.setattr(prereqs, "_wsl_status_ok", lambda: wsl_ok)
+    monkeypatch.setattr(prereqs, "_vm_platform_off", lambda: vm_off)
     monkeypatch.setattr(prereqs, "_wsl_restart_pending", lambda: pending)
     monkeypatch.setattr(runtime, "status",
                         lambda refresh=False: (state, "said"))
@@ -179,6 +180,22 @@ def test_wsl_route_runs_the_script_wsl_only(monkeypatch):
     call.fn()
     assert fake.ran == [("s.ps1", True)]
     assert "WSL2 is not set up" in asked[0]
+
+
+def test_feature_off_routes_to_switching_it_on(monkeypatch):
+    """PAD-1564: wsl --status 0, runtime absent, Virtual Machine Platform
+    off.  It used to be the 414 MB runtime, which could not import."""
+    _machine(monkeypatch, True, "absent", vm_off=True)
+    fake = _fake_app(missing=("WSL2", "partclone"))
+    app_module.App._install_prereqs_win_route(fake, "s.ps1")
+    [call] = _drain(fake)
+    asked = []
+    monkeypatch.setattr(app_module.threading, "Thread", _Threads)
+    monkeypatch.setattr(app_module.messagebox, "askyesno",
+                        lambda t, m: asked.append(m) or True)
+    call.fn()
+    assert fake.ran == [("s.ps1", True)] and fake.runtime_installs == 0
+    assert "Virtual Machine Platform" in asked[0]
 
 
 def test_wsl_route_declined_does_nothing(monkeypatch):
@@ -335,6 +352,7 @@ $global:calls = @()
 $global:statusAsked = 0
 function Test-VirtualizationDisabled { return ($cfg['virt'] -eq '1') }
 function Test-WslFeatureEnabled { return ($cfg['feature'] -eq '1') }
+function Test-VmPlatformOn { return ($cfg['vmp'] -ne '0') }
 function Get-BootSessionId { return 'BOOT42' }
 function wsl {
     $a = $args -join ' '
@@ -372,7 +390,7 @@ def _powershell():
 
 
 def _run_setup(tmp_path, marker_text=None, **cfg):
-    base = dict(status="1", after="1", virt="0", feature="0", help="new",
+    base = dict(status="1", after="1", virt="0", feature="0", vmp="1", help="new",
                 install="0", web="1", dism="0")
     base.update(cfg)
     harness = tmp_path / "harness.ps1"
@@ -402,6 +420,16 @@ needs_ps = pytest.mark.skipif(_powershell() is None,
 
 
 @needs_ps
+def test_setup_wsl_status_ok_but_feature_off_installs(tmp_path):
+    """PAD-1564: the Store's WSL answers --status with the Virtual Machine
+    Platform off.  That is not "already set up": the install runs, and with
+    the service still absent after it, a restart is what is due."""
+    code, calls, marker, _ = _run_setup(tmp_path, status="0", after="0",
+                                        vmp="0", install="0")
+    assert "wsl --install --no-distribution" in calls
+    assert code == 3010 and marker
+
+
 def test_setup_wsl_already_on(tmp_path):
     code, calls, marker, _ = _run_setup(tmp_path, marker_text="OLD",
                                         status="0")

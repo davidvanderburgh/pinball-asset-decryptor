@@ -1518,9 +1518,11 @@ class App:
         if not rows:
             return prereq_launch.ROUTE_SCRIPT, rows, ""
         state = runtime.status(refresh=True)[0]
+        self._install_vm_off = prereqs._vm_platform_off()
         route = prereq_launch.pick_route(
             True, prereqs._wsl_status_ok(), state,
-            restart_pending=prereqs._wsl_restart_pending())
+            restart_pending=prereqs._wsl_restart_pending(),
+            vm_off=self._install_vm_off)
         return route, rows, state
 
     def _offer_install_route_win(self, route, rows, state, script):
@@ -1528,7 +1530,9 @@ class App:
         from .core import prereq_launch, runtime
         title = "Install Prerequisites"
         if route == prereq_launch.ROUTE_WSL:
-            if messagebox.askyesno(title, prereq_launch.wsl_setup_text(rows)):
+            # the worker's answer: sc.exe is never asked on the UI thread
+            if messagebox.askyesno(title, prereq_launch.wsl_setup_text(
+                    rows, vm_off=getattr(self, "_install_vm_off", False))):
                 threading.Thread(target=self._run_install_prereqs_win,
                                  args=(script, True), daemon=True).start()
             return

@@ -723,12 +723,21 @@ $ManufacturerPrereqs = [ordered]@{
 # about it: written only when something was installed that waits on a
 # restart, and removed otherwise, because a marker from an install that did
 # not happen is a lie the next run would repeat (PAD-164).
+# `wsl --status` exits 0 with Windows' Virtual Machine Platform switched off
+# - the Store's WSL installs either way - so on its own it called PAD-1564's
+# PC "already set up" while nothing could start there.  WSL 2 starts every
+# Linux through the vmcompute service, which only that feature (or Hyper-V)
+# brings, and it is there the moment the feature is on and Windows restarted.
+function Test-VmPlatformOn {
+    return [bool](Get-Service -Name vmcompute -ErrorAction SilentlyContinue)
+}
+
 function Install-WslPlatform {
     Write-Step "Checking WSL2..."
     $ok = $false
     try {
         & wsl --status *> $null
-        $ok = ($LASTEXITCODE -eq 0)
+        $ok = (($LASTEXITCODE -eq 0) -and (Test-VmPlatformOn))
     } catch {}
     if ($ok) {
         Remove-Item -LiteralPath $script:RestartMarker -Force -ErrorAction SilentlyContinue
@@ -797,7 +806,7 @@ function Install-WslPlatform {
     $ok = $false
     try {
         & wsl --status *> $null
-        $ok = ($LASTEXITCODE -eq 0)
+        $ok = (($LASTEXITCODE -eq 0) -and (Test-VmPlatformOn))
     } catch {}
     if ($ok) {
         Remove-Item -LiteralPath $script:RestartMarker -Force -ErrorAction SilentlyContinue

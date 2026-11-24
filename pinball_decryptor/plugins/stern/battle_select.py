@@ -21,7 +21,23 @@ battle bookkeeping stay the game's. A new monster's battle is that place's battl
 place is, won or lost as it.
 
 A monster's picture is the person's (``monster.png`` in its mode's folder); nothing of a manufacturer's is drawn
-here - the frames, greys and lettering are taken from the card the build is for."""
+here - the frames, greys and lettering are taken from the card the build is for.
+
+PAD-1551: A CARD THAT DRAWS THE SCREEN ANOTHER WAY. Heisei V2.3 laid the screen out again: the seven places are
+DIAMONDS on a checkerboard (one, two, one, two, one) and each place's portrait is ONE picture of two cards side by
+side - the monster's picture card, its name and katakana lettered on it, and a facts card (BIO, POWERS, HEIGHT,
+WEIGHT) with the screen's two lines of help drawn into it. Laid out as two columns, that screen came out as a pile of
+tiles down the left edge with each new monster's picture over both cards (emulator, PAD-1551). Such a card is told by
+where its places sit (:func:`lattice_of`) and gets a layout of its own kind:
+
+* the places and the new monsters go on the card's own checkerboard, with more rows and columns and smaller diamonds
+  when they must be, the three battles the game keeps locked above the four it opens with, as the card has them
+  (:func:`_lattice_layout`);
+* what is the card's FRAME and what is a monster's PICTURE is read off the card itself - a pixel most of the seven
+  places agree on is the frame's (:func:`consensus`) - so a new diamond is the card's frame round the new picture
+  (:func:`tile_window`), and a new portrait is the card's twin cards with the picture in the first, the name and
+  katakana lettered on it, and the monster's facts lettered in the second (:func:`twin_cards`,
+  :func:`_twin_portrait`; the facts are the person's, ``monster.json`` in the mode's folder)."""
 from __future__ import annotations
 
 import colorsys
@@ -291,6 +307,11 @@ class Screen:
             self.tile_at.append(mul(rest(sel), rest(kid)))
         self.sheet_px = texture_rgba(scene, bitmap_of(self.sheet).body["tex"])
         self.sheet_at = rest(self.sheet)
+        #: PAD-1551: the checkerboard's steps when the places are diamonds on one (Heisei V2.3), else None
+        self.lattice = lattice_of(self)
+        #: one tile pixel in CharacterSelect space (the two-column screens draw theirs one to one)
+        self.unit = float(self.tile_at[0][0]) if self.lattice else 1.0
+        self._window = self._twin = None
 
     def origin(self, s):
         return apply(self.tile_at[s], 0, 0)
@@ -355,8 +376,70 @@ def _column(gs, pitch):
     return out, (y - pitch if out else 0.0)
 
 
+def lattice_of(sc):
+    """PAD-1551: ``(sx, sy)``, the checkerboard's steps in CharacterSelect space, when the seven places sit as
+    diamonds on one (three columns or more of them: Heisei V2.3's one, two, one, two, one); None for the two
+    columns every other card has. A screen that is neither is refused."""
+    o = [sc.origin(s) for s in range(7)]
+    tw = sc.tile[0].shape[1] * abs(sc.tile_at[0][0])
+
+    def steps(vals):
+        vals = sorted(vals)
+        return [b - a for a, b in zip(vals, vals[1:]) if b - a > tw * 0.25]
+    dx, dy = steps([x for x, _y in o]), steps([y for _x, y in o])
+    if len(dx) < 2:
+        return None
+    sx, sy = min(dx), (min(dy) if dy else 0.0)
+    if sy <= 0:
+        raise BattleSelectError("the card's selection screen lays its places out in a way this build does not know")
+    for x, y in o:
+        cx, cy = (x - o[0][0]) / sx, (y - o[0][1]) / sy
+        if abs(cx - round(cx)) > 0.2 or abs(cy - round(cy)) > 0.2 or (int(round(cx)) + int(round(cy))) % 2:
+            raise BattleSelectError("the card's selection screen lays its places out in a way this build does not "
+                                    "know")
+    return sx, sy
+
+
+def _lattice_layout(sc, slots):
+    """PAD-1551: :func:`layout` for a screen of diamonds on a checkerboard. The board that holds every tile at the
+    biggest size inside the room the card's own seven take (never bigger than the card draws them); its cells are
+    filled as a page is read, the battles the game keeps locked (places 4-6, and the new monsters booked against
+    them) first - above, where the card has them - then the four it opens with and theirs."""
+    sx, sy = sc.lattice
+    o = [sc.origin(s) for s in range(7)]
+    if not slots:
+        return {s: o[s] for s in range(7)}, 1.0
+    tw, th = sc.tile[0].shape[1] * sc.unit, sc.tile[0].shape[0] * sc.unit
+    x0, y0 = min(x for x, _y in o), min(y for _x, y in o)
+    room_w, room_h = max(x for x, _y in o) + tw - x0, max(y for _x, y in o) + th - y0
+    n = 7 + len(slots)
+    best = None
+    for cols in range(2, 10):
+        for rows in range(2, 14):
+            for par in (0, 1):
+                cells = [(r, c) for r in range(rows) for c in range(cols) if (r + c) % 2 == par]
+                if len(cells) < n:
+                    continue
+                k = min(1.0, room_w / ((cols - 1) * sx + tw), room_h / ((rows - 1) * sy + th))
+                rank = (round(k, 4), n - len(cells), -(rows * cols), -par)
+                if best is None or rank > best[0]:
+                    best = (rank, k, cells[:n])
+    if best is None:
+        raise BattleSelectError("the selection screen has no room for %d tiles" % n)
+    _rank, k, cells = best
+    c0, c1 = min(c for _r, c in cells), max(c for _r, c in cells)
+    r0, r1 = min(r for r, _c in cells), max(r for r, _c in cells)
+    left = x0 + (room_w - ((c1 - c0) * sx + tw) * k) / 2.0
+    top = y0 + (room_h - ((r1 - r0) * sy + th) * k) / 2.0
+    gs = groups(slots)
+    keys = [key for g in gs[4:] for key in g] + [key for g in gs[:4] for key in g]
+    return {key: (left + (c - c0) * sx * k, top + (r - r0) * sy * k) for key, (r, c) in zip(keys, cells)}, k
+
+
 def layout(sc, slots):
     """Each place's tile origin in CharacterSelect space and the tiles' scale: ``({place: (x, y)}, k)``."""
+    if getattr(sc, "lattice", None):
+        return _lattice_layout(sc, slots)
     o = [sc.origin(s) for s in range(7)]
     th = float(sc.tile[0].shape[0])
     tw = float(sc.tile[0].shape[1])
@@ -465,20 +548,276 @@ def framed(template, pic, grow, centre_y):
     return out
 
 
-def grey_like(sc, colour, slot=0):
+def consensus(stack, tol=14, need=5):
+    """PAD-1551: what a card's seven pictures of one kind have in common. ``stack``: the pictures on one grid
+    (n, h, w, 4). Returns ``(median picture, mask)``: the mask is where at least ``need`` of them are within ``tol``
+    of the median - the frame they all wear, as against each one's own picture."""
+    med = np.median(stack, axis=0)
+    near = (np.abs(stack.astype(np.float32) - med[None]).max(axis=-1) <= tol).sum(axis=0)
+    return (med + 0.5).clip(0, 255).astype(np.uint8), near >= need
+
+
+def _mask_filter(mask, size, grow):
+    img = Image.fromarray((mask * 255).astype(np.uint8), "L")
+    img = img.filter(ImageFilter.MaxFilter(size) if grow else ImageFilter.MinFilter(size))
+    return np.asarray(img) > 127
+
+
+def tile_window(sc):
+    """PAD-1551: where a lit tile shows its monster, in tile pixels - the pixels the seven lit tiles do NOT share
+    (their frame is the same on all), closed over the specks where their pictures happen to agree."""
+    if sc._window is None:
+        h, w = sc.tile[0].shape[:2]
+        stack = np.zeros((len(sc.tile), h, w, 4), np.uint8)
+        for i, t in enumerate(sc.tile):
+            stack[i, :min(h, t.shape[0]), :min(w, t.shape[1])] = t[:h, :w]
+        _med, same = consensus(stack, 20, 5)
+        win = ~same & ((stack[..., 3] > 250).sum(axis=0) >= len(sc.tile) - 1)
+        win = _mask_filter(_mask_filter(win, 3, False), 3, True)              # specks outside the window go
+        win = _mask_filter(_mask_filter(win, 15, True), 15, False)            # holes inside it close
+        if win.mean() < 0.08:
+            raise BattleSelectError("the card's lit tiles show no picture this build can tell from their frame")
+        sc._window = win
+    return sc._window
+
+
+def framed_window(template, pic, window, centre_y):
+    """PAD-1551: ``template`` (a lit tile of the card's) with ``pic`` in its ``window`` (:func:`tile_window`)."""
+    ys, xs = np.nonzero(window)
+    x0, x1, y0, y1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
+    flat = np.asarray(_cover(pic, x1 - x0, y1 - y0, centre_y).convert("RGBA"))
+    out = template.copy()
+    sub = window[y0:y1, x0:x1]
+    out[y0:y1, x0:x1][sub] = flat[sub]
+    out[..., 3][window] = 255
+    return out
+
+
+#: PAD-1551: the facts card of a twin-card portrait, as parts of the portrait picture (measured on Heisei V2.3's
+#: 821 x 588): where the BIO's lines go, the POWERS' (between the card's two emblems), and the HEIGHT and WEIGHT
+#: values - (x0, y0, x1, y1)
+TWIN_BIO = (0.560, 0.158, 0.958, 0.394)
+TWIN_POWERS = (0.662, 0.450, 0.860, 0.592)
+TWIN_HEIGHT = (0.570, 0.655, 0.735, 0.722)
+TWIN_WEIGHT = (0.778, 0.655, 0.958, 0.722)
+#: the picture card's lettering: the name's band (its width and height, and how far its foot is from the card's)
+#: and the katakana's column (from the card's left and top, and one letter's height), as parts of the picture card
+TWIN_NAME = (0.86, 0.105, 0.040)
+TWIN_KANA = (0.075, 0.035, 0.072)
+TEXT_FONTS = (r"C:\Windows\Fonts\bahnschrift.ttf", r"C:\Windows\Fonts\ARIALNB.TTF", r"C:\Windows\Fonts\arialbd.ttf",
+              "/System/Library/Fonts/Supplemental/Arial Narrow Bold.ttf",
+              "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+
+
+def _text_font(size):
+    f = _font(TEXT_FONTS, size)
+    try:
+        f.set_variation_by_name("Bold SemiCondensed")          # Bahnschrift: the nearest to the card's own letters
+    except Exception:                                       # noqa: BLE001 - not a variable font: as it is
+        pass
+    return f
+
+
+def twin_cards(sc, scene):
+    """PAD-1551: the card's twin-card portrait, read off its seven: ``{"frame", "at", "med", "chrome", "left",
+    "right"}`` - place 0's portrait node and its matrix in the portrait group, the seven portraits' median, where
+    they agree (the two cards' frames, the facts card's headings, the help lines), and the boxes (x0, y0, x1, y1)
+    of the picture card's and the facts card's insides. Raises when the portraits are not two cards."""
+    if sc._twin is not None:
+        return sc._twin
+    found = []
+    for s in range(7):
+        kids = sprite_of(sc.body[s]).body["kids"]
+        pics = [n for n in kids if bitmap_of(n) is not None and not n.name.startswith("PAD_")]
+        if not pics:
+            raise BattleSelectError("a place of the card's selection screen has no portrait")
+        fr = max(pics, key=lambda n: bitmap_of(n).body["w"] * bitmap_of(n).body["h"])
+        found.append((fr, texture_rgba(scene, bitmap_of(fr).body["tex"]), mul(rest(sc.body[s]), rest(fr))))
+    fr0, px0, m0 = found[0]
+    h, w = px0.shape[:2]
+    stack = np.stack([px0] + [warp(px, mul(inv(m0), m), (w, h)) for _f, px, m in found[1:]])
+    med, same = consensus(stack, 14, 5)
+    var = ~same & ((stack[..., 3] > 250).sum(axis=0) >= 6)
+    cols = var.mean(axis=0) > 0.3
+    runs, start = [], None
+    for x in range(w + 1):
+        on = x < w and bool(cols[x])
+        if on and start is None:
+            start = x
+        elif not on and start is not None:
+            if x - start > w * 0.2:
+                runs.append((start, x))
+            start = None
+    if len(runs) != 2:
+        raise BattleSelectError("the card's portraits are not the picture card and facts card this build knows "
+                                "(%d found)" % len(runs))
+    boxes = []
+    for x0, x1 in runs:
+        ys = np.nonzero(var[:, x0:x1].mean(axis=1) > 0.3)[0]
+        boxes.append((x0, int(ys.min()), x1, int(ys.max()) + 1))
+    sc._twin = dict(frame=fr0, at=rest(fr0), med=med, chrome=same & (med[..., 3] > 128), left=boxes[0],
+                    right=boxes[1])
+    return sc._twin
+
+
+def _paste(out, px, x, y):
+    """premultiplied ``px`` over ``out`` (uint8, in place) with its corner at (x, y)"""
+    h, w = px.shape[:2]
+    x0, y0, x1, y1 = max(0, x), max(0, y), min(out.shape[1], x + w), min(out.shape[0], y + h)
+    if x1 <= x0 or y1 <= y0:
+        return
+    src = px[y0 - y:y1 - y, x0 - x:x1 - x].astype(np.float32)
+    dst = out[y0:y1, x0:x1].astype(np.float32)
+    out[y0:y1, x0:x1] = (src + dst * (1.0 - src[..., 3:4] / 255.0) + 0.5).clip(0, 255).astype(np.uint8)
+
+
+def kana_art(kana, size):
+    """A name's katakana lettered down a column, as the Heisei V2.3 card letters its own (orange, a dark edge)."""
+    f = _font(KANA_FONTS, size)
+    edge = max(2, int(size) // 9)
+    step = int(size * 1.04)
+    w, h = int(size * 1.5) + 2 * edge, step * len(kana) + 2 * edge + int(size * 0.3)
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    for i, ch in enumerate(kana):
+        cw = d.textlength(ch, font=f)
+        q = i / max(1, len(kana) - 1)
+        fill = (255, int(176 - 70 * q), int(40 - 20 * q), 255)
+        d.text(((w - cw) / 2.0, edge + i * step), ch, font=f, fill=fill, stroke_width=edge, stroke_fill=(24, 8, 0, 255))
+    return premultiply(img)
+
+
+def _lines_art(lines, w, h, size, pitch=1.14):
+    """Lines of words centred in a ``w`` x ``h`` box, lettered as the facts card letters its own (off-white, a dark
+    edge): premultiplied RGBA."""
+    img = Image.new("RGBA", (max(1, int(w)), max(1, int(h))), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    f = _text_font(size)
+    step = size * pitch
+    y = (h - step * len(lines)) / 2.0
+    for line in lines:
+        tw = d.textlength(line, font=f)
+        d.text(((w - tw) / 2.0, y), line, font=f, fill=(242, 238, 226, 255), stroke_width=max(1, int(size) // 14),
+               stroke_fill=(8, 12, 18, 255))
+        y += step
+    return premultiply(img)
+
+
+def _wrap(words, width, size):
+    """``words`` in lines no wider than ``width`` at ``size`` (a word too long for a line keeps one to itself)."""
+    f = _text_font(size)
+    d = ImageDraw.Draw(Image.new("L", (4, 4)))
+    lines, cur = [], ""
+    for word in str(words).split():
+        trial = (cur + " " + word).strip()
+        if cur and d.textlength(trial, font=f) > width:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = trial
+    return lines + ([cur] if cur else [])
+
+
+def _facts(m):
+    """A new monster's facts for the facts card: ``(bio, [powers], height, weight)`` - "" / [] for one not given."""
+    powers = m.get("powers") or []
+    if isinstance(powers, str):
+        powers = [p for p in re.split(r"[\n;]+", powers)]
+    powers = [" ".join(str(p).split()) for p in powers if str(p).strip()][:3]
+    one = lambda key: " ".join(str(m.get(key) or "").split())
+    return one("bio"), powers, one("height").upper(), one("weight").upper()
+
+
+def _twin_portrait(sc, scene, m, pic, picture_node, group_node, name):
+    """PAD-1551: a new monster's portrait on a card of twin cards: the card's two frames, the monster's picture in
+    the first with its name and katakana lettered on it, and in the second the picture again, dark, behind the
+    card's own headings and help lines and the monster's facts."""
+    tc = twin_cards(sc, scene)
+    med, chrome = tc["med"], tc["chrome"]
+    h, w = med.shape[:2]
+    out = np.zeros((h, w, 4), np.uint8)
+    lx0, ly0, lx1, ly1 = tc["left"]
+    rx0, ry0, rx1, ry1 = tc["right"]
+    out[ly0:ly1, lx0:lx1] = np.asarray(_cover(pic, lx1 - lx0, ly1 - ly0, 0.45).convert("RGBA"))
+    back = _cover(pic, rx1 - rx0, ry1 - ry0, 0.45).filter(ImageFilter.GaussianBlur(max(2, (rx1 - rx0) // 36)))
+    dark = np.asarray(back.convert("RGB")).astype(np.float32) * 0.24 + np.array([5.0, 12.0, 20.0], np.float32)
+    out[ry0:ry1, rx0:rx1, :3] = (dark + 0.5).clip(0, 255).astype(np.uint8)
+    out[ry0:ry1, rx0:rx1, 3] = 255
+    keep = chrome.copy()
+    e = max(6, w // 64)
+    keep[ly0 + e:ly1 - e, lx0 + e:lx1 - e] = False                 # the picture is the monster's, whole
+    lum = med[..., 0] * 0.299 + med[..., 1] * 0.587 + med[..., 2] * 0.114
+    inner = np.zeros_like(keep)
+    inner[ry0 + e:ry1 - e, rx0 + e:rx1 - e] = True
+    solid = _mask_filter(_mask_filter(chrome, 3, False), 3, True) & (lum > 56)
+    keep = np.where(inner, solid, keep)                             # the facts card: its headings and lines only
+    zones = {key: (int(z[0] * w), int(z[1] * h), int(z[2] * w), int(z[3] * h))
+             for key, z in (("bio", TWIN_BIO), ("powers", TWIN_POWERS), ("height", TWIN_HEIGHT),
+                            ("weight", TWIN_WEIGHT))}
+    for x0, y0, x1, y1 in zones.values():
+        keep[y0:y1, x0:x1] = False                                  # no place's own words under the new ones
+    out[keep] = med[keep]
+    # the name across the picture card's foot, the katakana down its left
+    art = name_art(str(m["name"]).upper(), "")
+    ix0, iy0, ix1, iy1 = ink_box(art)
+    lw, lh = lx1 - lx0, ly1 - ly0
+    k = min(TWIN_NAME[0] * lw / float(ix1 - ix0), TWIN_NAME[1] * lh / float(iy1 - iy0))
+    ink = Image.fromarray(art[iy0:iy1, ix0:ix1], "RGBA").resize(
+        (max(1, int(round((ix1 - ix0) * k))), max(1, int(round((iy1 - iy0) * k)))), Image.LANCZOS)
+    _paste(out, np.asarray(ink), lx0 + (lw - ink.width) // 2, ly1 - int(TWIN_NAME[2] * lh) - ink.height)
+    kana = m.get("kana", katakana(m["name"]))
+    if kana:
+        size = TWIN_KANA[2] * lh
+        room = lh * 0.62
+        if size * 1.04 * len(kana) > room:
+            size = room / (1.04 * len(kana))
+        _paste(out, kana_art(kana, size), lx0 + int(TWIN_KANA[0] * lw - size * 0.75), ly0 + int(TWIN_KANA[1] * lh))
+    # the facts
+    bio, powers, height, weight = _facts(m)
+    if bio:
+        x0, y0, x1, y1 = zones["bio"]
+        size = h * 0.036
+        lines = _wrap(bio, x1 - x0, size)
+        while len(lines) * size * 1.14 > (y1 - y0) and size > 9:
+            size -= 1
+            lines = _wrap(bio, x1 - x0, size)
+        _paste(out, _lines_art(lines, x1 - x0, y1 - y0, size), x0, y0)
+    if powers:
+        x0, y0, x1, y1 = zones["powers"]
+        size = h * 0.034
+        d = ImageDraw.Draw(Image.new("L", (4, 4)))
+        while size > 9 and max(d.textlength(p_, font=_text_font(size)) for p_ in powers) > (x1 - x0):
+            size -= 1
+        _paste(out, _lines_art(powers, x1 - x0, y1 - y0, size), x0, y0)
+    for key, word in (("height", height), ("weight", weight)):
+        if word:
+            x0, y0, x1, y1 = zones[key]
+            _paste(out, _lines_art([word], x1 - x0, y1 - y0, h * 0.036), x0, y0)
+    return group_node(name, [picture_node(name + "_Art", out, tc["at"])], rest(sc.body[0]))
+
+
+def grey_like(sc, colour, slot=0, window=None):
     """A new tile's grey: the place ``slot``'s grey tile, its inside the new colour tile's in the card's own grey -
     the grey's light fitted to the colour tile's on that place (least squares), so a Heisei card's hard black and
-    white and a stock card's soft grey both come out as the card draws its own."""
+    white and a stock card's soft grey both come out as the card draws its own. ``window`` (PAD-1551): where the
+    tiles show their monster, when the card's frame is not a plain edge (:func:`tile_window`)."""
     g0 = sc.grey(slot).astype(np.float32)
     c0 = sc.tile[slot].astype(np.float32)
-    inside = inner_mask(sc.tile[slot][..., 3], 5)
+    inside = inner_mask(sc.tile[slot][..., 3], 5) if window is None else window
     lum = lambda a: a[..., 0] * 0.299 + a[..., 1] * 0.587 + a[..., 2] * 0.114
     x, y = lum(c0)[inside], lum(g0)[inside]
     a, b = np.polyfit(x, y, 1) if len(x) > 16 and float(np.std(x)) > 1.0 else (0.8, 0.0)
     out = g0.copy()
-    ins = inner_mask(colour[..., 3], 5)
+    ins = inner_mask(colour[..., 3], 5) if window is None else window
     v = np.clip(lum(colour.astype(np.float32)) * a + b, 0, 255)
     for ch in range(3):
+        if window is not None and len(x) > 16 and float(np.std(x)) > 1.0:
+            # PAD-1551: such a card tints its greys (Heisei V2.3's are sepia): each colour fitted on its own
+            ca, cb = np.polyfit(x, g0[..., ch][inside], 1)
+            out[..., ch][ins] = np.clip(lum(colour.astype(np.float32)) * ca + cb, 0, 255)[ins]
+            continue
         out[..., ch][ins] = v[ins]
     out[..., 3][ins] = 255
     return (out + 0.5).clip(0, 255).astype(np.uint8)
@@ -622,7 +961,8 @@ def build(stock, monsters):
         return copy_text(name, template, m, b" ")
 
     at, k = layout(sc, [int(m["slot"]) for m in monsters])
-    place = lambda key: mul(move(*at[key]), scale(k))               # tile pixels -> CharacterSelect space
+    place = lambda key: mul(move(*at[key]), scale(k * sc.unit))     # tile pixels -> CharacterSelect space
+    window = tile_window(sc) if sc.lattice else None                 # PAD-1551: a card of diamonds and twin cards
     greys = [sc.grey(s) for s in range(7)]
     # the padlock and the claw as they sit on place 4's tile - read BEFORE the places move: read after, the box had moved
     # and the tile it was measured against had not, and each new tile's claw sat a tile lower (David, v21: "one was way
@@ -649,8 +989,8 @@ def build(stock, monsters):
         key = ("new", i)
         names = node_names(m["slug"])
         pic = _picture(m.get("picture"), m["name"], 632, 828, _hue(i))
-        colour = framed(sc.tile[0], pic, 5, 0.34)
-        new_kids.append(picture_node(names["Gray"], grey_like(sc, colour), place(key)))
+        colour = framed(sc.tile[0], pic, 5, 0.34) if window is None else framed_window(sc.tile[0], pic, window, 0.34)
+        new_kids.append(picture_node(names["Gray"], grey_like(sc, colour, window=window), place(key)))
         lits.append(shown_node(names["Lit"], colour, place(key)))
         # the padlock and the claw sit on a new tile as on place 4's (the right column's first): their pixels -> place
         # 4's tile pixels (lock_m, done_m) -> this tile's place
@@ -658,7 +998,8 @@ def build(stock, monsters):
             lits.append(shown_node(names["Lock"], lock_px, mul(place(key), lock_m)))
         if done_px is not None:
             lits.append(shown_node(names["Done"], done_px, mul(place(key), done_m)))
-        portraits.append(_portrait_group(sc, scene, m, pic, picture_node, group_node, names["Portrait"]))
+        portraits.append((_twin_portrait if sc.lattice else _portrait_group)(
+            sc, scene, m, pic, picture_node, group_node, names["Portrait"]))
         if prog_t is not None:
             # PAD-733: its count, a copy of place 0's words placed on this tile as place 0's sits on its own; blank
             # until the runtime writes the mode's count (pm_roster_more_progress)

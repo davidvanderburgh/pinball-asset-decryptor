@@ -741,9 +741,16 @@ def test_the_runtime_wires_the_screen_in():
 
 
 # ---- the scene the card build makes ------------------------------------------------------------------------
-def _scene_bytes():
+#: PAD-1551: where Heisei V2.3 puts its seven diamonds, in checkerboard steps (column, row) by slot
+LATTICE_CELLS = ((1, 2), (2, 3), (1, 4), (0, 3), (0, 1), (1, 0), (2, 1))
+LATTICE_STEP = 30
+
+
+def _scene_bytes(lattice=False):
     """A small selection screen of the measured shape: the map, the overlay with the title, the grey sheet, seven
-    places' portraits and lit tiles, their state boxes and words - built with the tree's own writer."""
+    places' portraits and lit tiles, their state boxes and words - built with the tree's own writer. ``lattice``
+    (PAD-1551): as Heisei V2.3 draws it - the lit tiles framed squares on a checkerboard, each portrait one picture
+    of two framed cards."""
     sc = T.Scene()
     sc.classes = {1: "Bitmap", 3: "Text", 4: "Sprite", 5: "Shape"}
     ids = [10]
@@ -781,12 +788,25 @@ def _scene_bytes():
     for s, n in enumerate(BS.SLOT_NODES):
         frame = np.zeros((90, 70, 4), np.uint8)
         frame[:, :] = (220, 220, 220, 255)
+        if lattice:                      # the picture card and the facts card in one picture, a frame round each
+            frame = np.zeros((92, 160, 4), np.uint8)
+            frame[:, :] = (220, 220, 220, 255)
+            frame[8:84, 8:72] = (30 * s, 90, 200, 255)
+            frame[8:84, 88:152] = (200, 30 * s, 90, 255)
         name = np.zeros((40, 100, 4), np.uint8)
         name[10:30, 10:90] = (255, 140, 0, 255)
-        cs_kids.append(group(n + "FullBody_instance", [bitmap("frame", 70, 90, frame, 0, 0),
+        cs_kids.append(group(n + "FullBody_instance", [bitmap("frame", frame.shape[1], frame.shape[0], frame, 0, 0),
                                                        bitmap("PAD_%d4a" % s, 100, 40, name, 40, -50)],
                              200, 40, kf=[(1, 1 if s == 0 else 0)]))
     for s, n in enumerate(BS.SLOT_NODES):
+        if lattice:
+            col, row = LATTICE_CELLS[s]
+            sq = np.zeros((48, 48, 4), np.uint8)
+            sq[2:46, 2:46] = (200, 200, 200, 255)
+            sq[10:38, 10:38] = (30 * s, 90, 200, 255)
+            cs_kids.append(group(n + "_Selected_instance", [bitmap("t", 48, 48, sq, 0, 0)],
+                                 10 + col * LATTICE_STEP, 10 + row * LATTICE_STEP))
+            continue
         col, row = (0, s) if s < 4 else (1, s - 4 + 0.5)
         cs_kids.append(group(n + "_Selected_instance", [bitmap("t", 48, 40, tile((30 * s, 90, 200)), 0, 0)],
                              10 + col * 70, 10 + row * 60))
@@ -1134,3 +1154,130 @@ def test_a_mode_that_holds_the_games_modes_off_darkens_the_shots_it_does_not_lig
     assert relight.index("quiet_shots();") < relight.index("lamp_send(i)")       # after a show: dark first
     assert re.search(r"#define GAME_MODES\s+2\b", c)
     assert re.search(r"#define GAME_MODES\s+0\b", BM.to_c(monster(), "mothra"))   # "stack": QUIET_SHOTS is 0
+
+
+# ---- PAD-1551: a card that draws the screen as diamonds on a checkerboard, a twin card per place ---------------------
+@pytest.fixture(scope="module")
+def lattice_stock():
+    try:
+        return _scene_bytes(lattice=True)
+    except Exception as e:
+        pytest.skip("a hand-made scene does not serialize here: %s" % e)
+
+
+def _built_screen(data):
+    real, BS.PREFIX = BS.PREFIX, "ZZZ_"                         # read the built screen as the game's
+    try:
+        return BS.Screen(T.parse(data))
+    finally:
+        BS.PREFIX = real
+
+
+def test_a_screen_is_told_by_where_its_places_sit(stock, lattice_stock):
+    assert BS.Screen(T.parse(stock)).lattice is None                    # two columns: laid out as it always was
+    sx, sy = BS.Screen(T.parse(lattice_stock)).lattice
+    assert abs(sx - LATTICE_STEP) < 0.5 and abs(sy - LATTICE_STEP) < 0.5
+
+
+@pytest.mark.parametrize("n", [1, 3, 5])
+def test_a_checkerboard_screen_keeps_its_checkerboard(lattice_stock, n):
+    """Every tile - the game's seven and the new ones - on one checkerboard no bigger than the card's own, none on
+    another, inside the room the card's seven took (the two-column layout piled them down the left edge)."""
+    sc0 = BS.Screen(T.parse(lattice_stock))
+    at, k = BS.layout(sc0, [m["slot"] for m in BS.order(_mons(n))])
+    assert len(at) == 7 + n and 0.3 < k <= 1.0
+    pts = list(at.values())
+    step = LATTICE_STEP * k
+    for i, (x, y) in enumerate(pts):
+        for u, v in pts[i + 1:]:
+            cx, cy = (u - x) / step, (v - y) / step
+            assert abs(cx - round(cx)) < 0.01 and abs(cy - round(cy)) < 0.01
+            assert (round(cx), round(cy)) != (0, 0) and (round(cx) + round(cy)) % 2 == 0
+    o = [sc0.origin(s) for s in range(7)]
+    assert min(x for x, _y in pts) >= min(x for x, _y in o) - 0.01
+    assert max(x for x, _y in pts) + 48 * k <= max(x for x, _y in o) + 48 + 0.01
+    assert min(y for _x, y in pts) >= min(y for _x, y in o) - 0.01
+    assert max(y for _x, y in pts) + 48 * k <= max(y for _x, y in o) + 48 + 0.01
+
+
+def test_one_more_monster_needs_no_smaller_tiles(lattice_stock):
+    """The card's own board has an eighth cell on its other colour (two, one, two, one, two)."""
+    sc0 = BS.Screen(T.parse(lattice_stock))
+    _at, k = BS.layout(sc0, [0])
+    assert k == 1.0
+
+
+def test_the_locked_battles_stay_above_the_open_ones(lattice_stock):
+    sc0 = BS.Screen(T.parse(lattice_stock))
+    mons = BS.order(_mons(3))
+    at, _k = BS.layout(sc0, [m["slot"] for m in mons])
+    top = max(at[s][1] for s in (4, 5, 6))
+    assert all(at[key][1] >= top for key in at if key not in (4, 5, 6))
+
+
+def test_a_new_tile_wears_the_cards_frame_round_its_picture(lattice_stock, tmp_path):
+    from PIL import Image
+    Image.new("RGB", (64, 64), (0, 255, 0)).save(tmp_path / "monster.png")
+    sc0 = BS.Screen(T.parse(lattice_stock))
+    win = BS.tile_window(sc0)
+    assert win[24, 24] and not win[4, 4] and not win[44, 24]            # the picture, not the frame
+    out = BS.build(lattice_stock, [{"slug": "g", "name": "GREEN", "slot": 0,
+                                   "picture": str(tmp_path / "monster.png")}])
+    sc = T.parse(out)
+    lit = next(n for n, _p, _d in sc.walk() if n.name == "PadSel_g_Lit_Art")
+    px = BS.texture_rgba(sc, BS.bitmap_of(lit).body["tex"])
+    assert px[24, 24, 1] > 200 and px[24, 24, 0] < 60                    # the monster's picture in the window
+    assert abs(int(px[5, 24, 0]) - 200) < 16 and abs(int(px[5, 24, 1]) - 200) < 16   # the card's frame round it
+
+
+def test_a_new_portrait_is_the_cards_two_cards(lattice_stock, tmp_path):
+    from PIL import Image
+    Image.new("RGB", (64, 64), (0, 255, 0)).save(tmp_path / "monster.png")
+    sc0 = BS.Screen(T.parse(lattice_stock))
+    tc = BS.twin_cards(sc0, sc0.scene)
+    (lx0, ly0, lx1, ly1), (rx0, _ry0, rx1, _ry1) = tc["left"], tc["right"]
+    assert 6 <= lx0 <= 10 and 70 <= lx1 <= 74 and 86 <= rx0 <= 90 and 150 <= rx1 <= 154
+    out = BS.build(lattice_stock, [{"slug": "g", "name": "GREEN", "slot": 0, "picture": str(tmp_path / "monster.png"),
+                                   "bio": "A green one.", "powers": ["Being green"], "height": "1M",
+                                   "weight": "2 T"}])
+    sc = T.parse(out)
+    names = [n.name for n, _p, _d in sc.walk()]
+    assert "PadSel_g_Portrait_Art" in names and "PadSel_g_Portrait_Name" not in names   # one picture, lettered
+    art = next(n for n, _p, _d in sc.walk() if n.name == "PadSel_g_Portrait_Art")
+    px = BS.texture_rgba(sc, BS.bitmap_of(art).body["tex"])
+    assert px.shape[:2] == (92, 160)
+    assert px[20, 40, 1] > 180 and px[20, 40, 0] < 80                    # the picture card: the monster's picture
+    assert px[20, 100, 1] < 110                                          # the facts card: the picture again, dark
+    assert abs(int(px[3, 40, 0]) - 220) < 16 and abs(int(px[3, 120, 0]) - 220) < 16    # both frames the card's own
+    assert abs(int(px[46, 80, 0]) - 220) < 16                            # and what is between them
+
+
+def test_portraits_that_are_not_two_cards_are_refused(lattice_stock):
+    sc0 = BS.Screen(T.parse(lattice_stock))
+    for s in range(7):                       # every place the same picture: nothing tells a card's inside
+        kid = BS.sprite_of(sc0.body[s]).body["kids"][0]
+        BS.bitmap_of(kid).body["tex"] = BS.bitmap_of(BS.sprite_of(sc0.body[0]).body["kids"][0]).body["tex"]
+    with pytest.raises(BS.BattleSelectError):
+        BS.twin_cards(sc0, sc0.scene)
+
+
+def test_what_seven_pictures_share_is_their_frame():
+    stack = np.zeros((7, 4, 4, 4), np.uint8)
+    stack[..., 3] = 255
+    stack[:, :2] = (90, 90, 90, 255)                 # the same on all seven
+    for i in range(7):
+        stack[i, 2:] = (30 * i, 0, 0, 255)           # each its own
+    stack[0, 0, 0] = (255, 255, 255, 255)            # one of the seven drawn over the frame there
+    med, same = BS.consensus(stack)
+    assert same[:2].all() and not same[2:].any()
+    assert tuple(med[0, 0]) == (90, 90, 90, 255)
+
+
+def test_a_monsters_facts_come_from_its_folder(tmp_path):
+    from pinball_decryptor.plugins.stern import more_kaiju as MK
+    assert MK.facts_of(str(tmp_path)) == {}
+    (tmp_path / MK.FACTS_FILE).write_text('{"bio": "A spider.", "powers": ["Web"], "height": "45M", "other": 1, '
+                                          '"weight": ""}', encoding="utf-8")
+    assert MK.facts_of(str(tmp_path)) == {"bio": "A spider.", "powers": ["Web"], "height": "45M"}
+    (tmp_path / MK.FACTS_FILE).write_text("not json", encoding="utf-8")
+    assert MK.facts_of(str(tmp_path)) == {}

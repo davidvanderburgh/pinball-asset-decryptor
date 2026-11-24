@@ -69,3 +69,21 @@ def test_re_extract_does_not_baseline_a_nested_extract(tmp_path):
     rels = set(checksums.read_checksums(str(proj)))
     assert not any(r.startswith("star_wars_le") for r in rels)
     assert "audio/idx0000.wav" in rels
+
+
+def test_a_music_modes_file_is_not_an_edit_of_the_sound_it_is_named_after(tmp_path):
+    """PAD-1552: an Extract of a card with music modes brings their files back under the names the card recorded
+    (PAD-553), into "Music mode files". Heisei V2.3's "idx0644 - Biollante Theme Revised 5.wav" was taken for an
+    edit of sound 644, and the next Write put a music mode's song over the game's own - fifteen sounds."""
+    proj = _project(tmp_path)
+    for folder in sorted(checksums.NON_ASSET_DIRS):
+        _put(str(proj / folder / "idx0001 - somebody's song.wav"), b"a music mode's file")
+    baseline = checksums.read_checksums(str(proj))
+    assert engine._select_changed_idx_wavs(str(proj), baseline) == {}
+    # the sound's own file edited: still found, and it is the one in audio/
+    _put(str(proj / "audio" / "idx0001.wav"), b"edited")
+    edits = engine._select_changed_idx_wavs(str(proj), baseline)
+    assert list(edits) == [1] and os.path.dirname(edits[1]) == str(proj / "audio")
+    # a folder of that name deeper down is the user's own business
+    _put(str(proj / "audio" / "Music mode files" / "idx0000 - mine.wav"), b"edited-0")
+    assert sorted(engine._select_changed_idx_wavs(str(proj), baseline)) == [0, 1]

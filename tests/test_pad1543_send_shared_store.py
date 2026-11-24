@@ -263,3 +263,50 @@ def test_the_real_machine_links_by_a_copy_of_the_name_renamed_over_it():
     src, tmp, name = (R._q(p) for p in ("/games/.blobs/ab", "/games/img1/.it's.wav" + R.TMP_TAG,
                                         "/games/img1/it's.wav"))
     assert cmds == ["set -e\nrm -f %s; ln %s %s; mv -f %s %s; rm -f %s" % (tmp, src, tmp, tmp, name, tmp)]
+
+
+# ------------------------------------------------------------------ what a refused Send says
+MENU_ROOT = dict(STOCK_ROOT, **{
+    "usr": ("dir",), "usr/local": ("dir",), "usr/local/codeselect": ("dir",),
+    "usr/local/codeselect/images.conf": ("file", b"image=/dev/mmcblk0p3|Godzilla|by Stern\n"
+                                                 b"image=/dev/mmcblk0p3:img1|Heisei|V2.3\n")})
+#: David's Godzilla machine and the image he built, 2026-11-23
+ONE_GAME_CARD = {1: (8192, 16384), 2: (24576, 688128), 3: (712704, 28311550), 4: (29024256, 2),
+                 5: (29026304, 147454), 6: (29173760, 1089534)}
+MULTI_IMAGE = {1: (8192, 16384), 2: (24576, 688128), 3: (712704, 57257984), 4: (57970688, 1323008),
+               5: (57972736, 147454), 6: (58120192, 1089534), 7: (59209728, 83968)}
+
+
+def _layout(target, parts):
+    target.layout = {n: (a, b, 0x0C if n == 1 else 0x0F if n == 4 else 0x83) for n, (a, b) in parts.items()}
+    return target
+
+
+def test_a_multi_boot_image_sent_to_a_one_game_card_says_to_write_the_card_once():
+    target = _layout(StoreTarget(OLD, MENU_ROOT), MULTI_IMAGE)
+    with pytest.raises(R.SendError) as e:
+        R.check_layout(target, ONE_GAME_CARD)
+    said = str(e.value)
+    assert "multi-boot image" in said and "partition 7 is missing" in said
+    assert "its game partition is 14.5 GB; this image's is 29.3 GB" in said
+    assert "write this image to the SD card once" in said
+    # the card written, the same image (or a new build of it) goes
+    R.check_layout(target, {n: v[:2] for n, v in target.layout.items()})
+
+
+def test_a_one_game_image_sent_to_a_multi_boot_card_says_to_build_the_multi_boot_image_again():
+    target = _layout(FakeTarget(flat(OLD), STOCK_ROOT), ONE_GAME_CARD)
+    with pytest.raises(R.SendError, match="the machine has partition 7 that the image doesn't.*build the "
+                                          "multi-boot image again with this version in it and send that"):
+        R.check_layout(target, MULTI_IMAGE)
+
+
+def test_a_work_partition_too_small_for_the_new_image_is_refused():
+    """The emulator proof's finding: the machine's partition 7 only had to exist.  A new build whose games differ
+    more needs a bigger one; sent to a card with the old, the menu would boot a game on the other game's files."""
+    target = _layout(StoreTarget(OLD, MENU_ROOT), {**MULTI_IMAGE, 7: (59209728, 3788800)})
+    with pytest.raises(R.SendError, match=r"partition 7 \(where the card's menu rebuilds files it holds as "
+                                          r"differences\) is 43 MB on the machine, smaller than the 1940 MB"):
+        R.check_layout(target, MULTI_IMAGE)
+    # a machine with the bigger one takes an image that needs less
+    R.check_layout(_layout(StoreTarget(OLD, MENU_ROOT), MULTI_IMAGE), {**MULTI_IMAGE, 7: (59209728, 3788800)})

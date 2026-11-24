@@ -2830,6 +2830,14 @@ def _gb(sectors):
     return "%.1f GB" % (sectors * 512 / 1e9)
 
 
+def _has_boot_menu(target):
+    """PAD-1543: is *target* a multi-boot image: its system partition carries the boot menu's list of games (and it
+    isn't a test card, whose menu runs no game)?"""
+    tree = (getattr(target, "trees", None) or {}).get(ROOT)
+    ent = tree.get(TESTCARD_CONF) if tree is not None else None
+    return bool(ent) and ent[0] == "file" and not is_test_card(target)
+
+
 def check_layout(target, machine_layout):
     """Refuse an image the machine's card can't take file by file: those need the card written.
 
@@ -2857,10 +2865,34 @@ def check_layout(target, machine_layout):
         elif num in synced and have[1] < sectors:
             bad.append("partition %d is %s on the machine, smaller than the image's %s"
                        % (num, _gb(have[1]), _gb(sectors)))
+        elif num >= 7 and ptype not in EXTENDED_TYPES and have[1] < sectors:
+            # PAD-1543: a store-layout multi-boot card's work partition, where its menu rebuilds at boot the files
+            # the card holds as differences from another game's.  Too small for this image's, the menu would
+            # start the game with the other game's files in their place and say nothing
+            bad.append("partition %d (where the card's menu rebuilds files it holds as differences) is %.0f MB "
+                       "on the machine, smaller than the %.0f MB this image needs"
+                       % (num, have[1] * 512 / 1e6, sectors * 512 / 1e6))
     extra = sorted(set(machine_layout) - set(target.layout))
     if extra:
         bad.append("the machine has partition%s %s that the image doesn't"
                    % ("s" if len(extra) > 1 else "", ", ".join(map(str, extra))))
+    # PAD-1543 (David sent a multi-boot image to a machine running a one-game card and was told only "partition 7
+    # is missing ... write the card instead"): say what the two cards are and what to do
+    menu = _has_boot_menu(target)
+    missing = sorted(set(target.layout) - set(machine_layout))
+    if spike2 and menu and missing:
+        sizes = ""
+        if 3 in target.layout and 3 in machine_layout:
+            sizes = " (its game partition is %s; this image's is %s)" % (_gb(machine_layout[3][1]),
+                                                                        _gb(target.layout[3][1]))
+        raise SendError("This is a multi-boot image, and the card in the machine isn't laid out for one: partition "
+                        "%s is missing%s. A Send changes files, never a card's partitions, so write this image to "
+                        "the SD card once; after that, new builds of it can be sent to the machine."
+                        % (", ".join(map(str, missing)), sizes))
+    if spike2 and not menu and extra and not missing and max(extra) >= 7:
+        raise SendError("The image's partitions don't match the machine's card (%s). If the machine runs a "
+                        "multi-boot card, this one-game image can't replace one of its games: build the multi-boot "
+                        "image again with this version in it and send that." % "; ".join(bad))
     if bad:
         raise SendError("The image's partitions don't match the machine's card (%s), so it can't be sent file by "
                         "file: write the card instead." % "; ".join(bad))

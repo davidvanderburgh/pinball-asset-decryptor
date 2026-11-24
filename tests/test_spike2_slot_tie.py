@@ -179,3 +179,66 @@ def test_candidates_are_offered_in_dispatch_order():
                       (-1, 0), (-1, 1), (-1, 2), (-1, 3),
                       # PAD-674: JP 1.13's half-stride table, scale * 0x20
                       ("half", 0), ("half", 1), ("half", 2), ("half", 3)]
+
+
+# ---------------------------------------------------------------------------
+# PAD-1551: a sound that is noise through EVERY entry must not settle its key.
+# Heisei V2.3 (a Godzilla retheme): idx 351, the first long mono sound of
+# scale 30, scores as below on its own row; pass 2 took the stereo codec as
+# the least flat noise and every new mono sound on scale 30 then failed its
+# bit-exact self-test.
+# ---------------------------------------------------------------------------
+NOISE_351 = {((0, 0), 0.6): (0.671, 6468.0), ((0, 0), 3.5): (0.657, 6415.0),
+             ((0, 1), 0.6): (0.843, 6412.0), ((0, 1), 3.5): (0.827, 6440.0),
+             ((0, 2), 0.6): (0.848, 6406.0), ((0, 2), 3.5): (0.825, 6405.0),
+             ((0, 3), 0.6): (0.843, 6413.0), ((0, 3), 3.5): (0.827, 6440.0)}
+CLEAR_MONO = {((0, 1), 0.6): (0.017, 3503.0), ((0, 1), 3.5): (0.042, 3096.0),
+              ((0, 3), 0.6): (0.017, 3504.0), ((0, 3), 3.5): (0.042, 3096.0),
+              ((0, 0), 0.6): (0.676, 6435.0), ((0, 0), 3.5): (0.667, 6428.0)}
+
+
+def _emu_by_sound(by_idx):
+    emu, place_of = _emu({})
+    emu._slot_metrics = lambda p, fnv, secs: by_idx[p["idx"]].get(
+        (place_of[fnv], secs), (0.85, 6400.0))
+    return emu
+
+
+def _mono30(idx, **kw):
+    return dict(idx=idx, scale=30, chan=1, length=150000, **kw)
+
+
+def test_a_noise_sound_does_not_settle_its_key():
+    emu = _emu_by_sound({351: NOISE_351, 400: CLEAR_MONO})
+    assert emu._resolve_entry(_mono30(351)) == FN[(0, 0)]   # all it can say
+    assert (30, 1) not in emu._slot_cache                   # and not for good
+    assert emu._resolve_entry(_mono30(400)) == FN[(0, 1)]
+    assert emu._slot_cache[(30, 1)] == FN[(0, 1)]
+    # the noise sound itself now goes through the key's real codec
+    assert emu._resolve_entry(_mono30(351)) == FN[(0, 1)]
+
+
+def test_a_clear_sound_first_is_as_it_always_was():
+    emu = _emu_by_sound({351: NOISE_351, 400: CLEAR_MONO})
+    assert emu._resolve_entry(_mono30(400)) == FN[(0, 1)]
+    assert emu._resolve_entry(_mono30(351)) == FN[(0, 1)]
+
+
+def test_the_warm_walks_past_a_noise_sound_to_a_clear_one():
+    emu = _emu_by_sound({351: NOISE_351, 352: NOISE_351, 400: CLEAR_MONO})
+    params = [_mono30(351), _mono30(352), _mono30(400),
+              _mono30(1138, grown=True)]
+    emu.warm_slots_for_grown(params)
+    assert emu._slot_cache[(30, 1)] == FN[(0, 1)]
+
+
+def test_the_warm_keeps_the_first_answer_when_no_sound_is_clear():
+    """A key whose every sound is quiet resolves as it did before."""
+    emu = _emu_by_sound({i: NOISE_351 for i in range(40)})
+    params = [_mono30(i) for i in range(39)] + [_mono30(39, grown=True)]
+    seen = []
+    real = emu._resolve_entry
+    emu._resolve_entry = lambda p: (seen.append(p["idx"]), real(p))[1]
+    emu.warm_slots_for_grown(params)
+    assert emu._slot_cache[(30, 1)] == FN[(0, 0)]
+    assert seen == list(range(Spike2Emu.WARM_TRIES))

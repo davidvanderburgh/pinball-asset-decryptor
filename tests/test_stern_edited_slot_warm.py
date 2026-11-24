@@ -19,6 +19,8 @@ class _Emu:
     """Just the slot cache and resolver of a booted emulator."""
 
     warm_slots_for_grown = Spike2Emu.warm_slots_for_grown
+    _weak_slots = Spike2Emu._weak_slots
+    WARM_TRIES = Spike2Emu.WARM_TRIES
 
     def __init__(self):
         self._slot_cache = {}

@@ -32,10 +32,11 @@ def test_offered_on_every_latest_title_without_its_own_coop():
     latest = _latest()
     own = [p for p in latest if SMo.title_key(p).startswith(CP.OWN_COOP)]
     offered = [p for p in latest if not CP.title_refusal(p)]
-    assert len(latest) == 59 and len(own) == 15       # PAD-1287: + Walking Dead Remastered (Spike 3), refused;
+    assert len(latest) == 60 and len(own) == 15       # PAD-1287: + Walking Dead Remastered (Spike 3), refused;
     # PAD-1289: + Pokemon LE (Spike 3), refused; PAD-1288: + Fallout LE (Spike 3), refused
     # PAD-1290: + Star Wars 2025 LE (Spike 3), refused
     # PAD-1291: + Star Wars 2025 Pro (Spike 3), refused
+    # PAD-1553: + Pokemon Pro 0.87 (Spike 3), refused like the LE
     # PAD-1293: + Transformers LE (Spike 3), refused; PAD-1326: + Fallout LE and Walking Dead Remastered LE (Spike 3:
     # their ports read the button) and Transformers LE (Spike 3, the same), offered
     assert len(offered) == 41

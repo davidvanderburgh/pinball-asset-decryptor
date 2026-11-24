@@ -1165,7 +1165,8 @@ export function Shell() {
       <${DialogHost} />
     </div>`;
   }
-  if (!shell.view) return html`<div class="app"><div class="page"><div class="row"><${Spinner} /><span class="muted">Starting…</span></div></div></div>`;
+  // shell.opening: the last project is still being opened (PAD-1545)
+  if (!shell.view || shell.opening) return html`<div class="app"><div class="page"><div class="row"><${Spinner} /><span class="muted">Starting…</span></div></div></div>`;
   return html`<div class="app">
     <${TopBar} shell=${shell} />
     <${Banners} shell=${shell} />

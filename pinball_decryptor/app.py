@@ -258,6 +258,30 @@ class UiQueue(queue.Queue):
             self._pending = False
 
 
+def geometry_from_settings(settings):
+    """(width, height, x, y, maximized) from a settings dict's "WxH+X+Y",
+    or None when nothing usable is saved."""
+    geo = (settings or {}).get("window_geometry") or ""
+    m = re.match(r"(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?", str(geo))
+    if not m:
+        return None
+    w, h = int(m.group(1)), int(m.group(2))
+    x = int(m.group(3)) if m.group(3) is not None else None
+    y = int(m.group(4)) if m.group(4) is not None else None
+    return (w, h, x, y, bool(settings.get("window_maximized")))
+
+
+def saved_window_geometry():
+    """The saved window place read straight from settings.json, for the
+    desktop host to open the window BEFORE the App exists (PAD-1545)."""
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return geometry_from_settings(data) if isinstance(data, dict) else None
+
+
 class App:
     """The run logic behind the web window.  Constructed ON the UI loop
     (``webui.host.build``) with the web UI's context: ``ctx.loop`` is the
@@ -430,7 +454,19 @@ class App:
                       badge=self._checkout_badge or "")
 
         if not self._need_disclaimer:
-            self._start_session()
+            if getattr(ctx, "defer_session", False):
+                # PAD-1545: the desktop host has the window up already and
+                # its page waits on this constructor.  Opening the last
+                # project (a second or more: its ports, tables and card) is
+                # the next job on the loop instead of the end of this one,
+                # so the page gets its state and draws first.  "opening"
+                # keeps the page on its Starting line until the tabs are
+                # there (a manufacturer view with no tabs yet says "Nothing
+                # to show").
+                ctx.store.set("shell", opening=True)
+                self.root.after(0, self._start_session_deferred)
+            else:
+                self._start_session()
 
     def _report_ui_error(self, text):
         """An exception escaping a UI job (a button's handler, an ``after``
@@ -560,6 +596,12 @@ class App:
             initial_language=s.get("ui_language"),
             on_language_change=self._on_language_change,
         )
+
+    def _start_session_deferred(self):
+        try:
+            self._start_session()
+        finally:
+            self.ctx.store.set("shell", opening=False)
 
     def _start_session(self):
         """Everything after the window exists: at startup, or once the
@@ -7293,14 +7335,7 @@ class App:
         """(width, height, x, y, maximized) from settings.json ("WxH+X+Y"),
         for the desktop host to open the window where it was left; None
         when nothing usable is saved."""
-        geo = self._settings.get("window_geometry") or ""
-        m = re.match(r"(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?", geo)
-        if not m:
-            return None
-        w, h = int(m.group(1)), int(m.group(2))
-        x = int(m.group(3)) if m.group(3) is not None else None
-        y = int(m.group(4)) if m.group(4) is not None else None
-        return (w, h, x, y, bool(self._settings.get("window_maximized")))
+        return geometry_from_settings(self._settings)
 
     def _on_language_change(self, code):
         """The app's language (gear menu > Language, PAD-458), kept in

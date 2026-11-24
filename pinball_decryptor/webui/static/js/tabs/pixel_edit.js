@@ -13,6 +13,28 @@ const TOOL_TIP = "Pencil (P) paints the color, Eraser (E) makes pixels see-throu
 const RING_NOTE = "Sonic's ring displays: each ring is a grid of 14 × 14 full-color LEDs, and each frame is a 14 × 14 picture like this one with red, green, blue and see-through levels of 0-255 each, so any color can be used. A bigger picture is a sheet of 14 × 14 frames; the yellow lines mark them. The game holds every file at its original size in bytes, so a saved picture has to fit in it (the line at the bottom). Frames can be changed, not added: the game plays the frames it has.";
 const LED_TIP = "How the picture looks as lit LEDs: one dot per pixel, see-through parts dark.";
 const PLAY_FPS = 12;
+const MAP_TIP = "Where Sonic's five ring displays sit on the playfield, marked on the game's own playfield picture (taken before the rings were fitted, so they are not in it). Which ring shows which picture is up to the game.";
+
+// PAD-1549: where the ring displays are.  Sonic's game program, which places them, is locked
+// to its own key, so the positions were measured from Jersey Jack's playfield photo
+// (webui/tabs/pixel_edit.py, SONIC_RINGS) and are drawn on the project's own picture.
+function RingMap({ map }) {
+  const [hot, setHot] = useState(0);
+  return html`<div class="pxe-map">
+    <div class="eyebrow" ...${tip(MAP_TIP)}>Where the rings are</div>
+    <div class="pxe-map-pf">
+      <img src=${mediaUrl(map.photo)} alt="" draggable="false" />
+      ${map.rings.map((r) => html`<span class=${cx("pxe-map-ring", hot === r.n && "on")}
+        style=${{ left: (r.x * 100) + "%", top: (r.y * 100) + "%" }}
+        onMouseEnter=${() => setHot(r.n)} onMouseLeave=${() => setHot(0)}
+        ...${tip({ head: `Ring ${r.n}: ${r.name}`, lines: [r.where] })}>${r.n}</span>`)}
+    </div>
+    <ol class="pxe-map-list small">
+      ${map.rings.map((r) => html`<li class=${cx(hot === r.n && "on")}
+        onMouseEnter=${() => setHot(r.n)} onMouseLeave=${() => setHot(0)}>${r.name}</li>`)}
+    </ol>
+  </div>`;
+}
 
 const fromB64 = (s) => { const b = atob(s || ""); const a = new Uint8ClampedArray(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; };
 const toB64 = (a) => { let s = ""; for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
@@ -46,6 +68,7 @@ export function PixelEditor({ rel, onClose }) {
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [askClose, setAskClose] = useState(false);
+  const [showMap, setShowMap] = useState(true);
   const px = useRef(null);
   const hist = useRef({ undo: [], redo: [] });
   const cvRef = useRef(null);
@@ -259,6 +282,8 @@ export function PixelEditor({ rel, onClose }) {
         <${Button} size="sm" kind="ghost" icon="undo" onClick=${undo} disabled=${!hist.current.undo.length} title="Undo (Ctrl+Z)" />
         <${Button} size="sm" kind="ghost" icon="redo" onClick=${redo} disabled=${!hist.current.redo.length} title="Redo (Ctrl+Y)" />
         <${Button} size="sm" kind=${grid ? "" : "ghost"} onClick=${() => setGrid(!grid)} title="Show the line between pixels (G)">Grid<//>
+        ${spec.ringmap ? html`<${Button} size="sm" kind=${showMap ? "" : "ghost"} icon="map" onClick=${() => setShowMap(!showMap)}
+          title="Show or hide where Sonic's ring displays sit on the playfield">Ring map<//>` : null}
         <${Button} size="sm" kind="ghost" onClick=${toOriginal} title="Put the game's own picture back in the editor (Undo takes it back). Saving it drops this slot's replacement.">Game's own<//>
       </div>
       <div class="pxe-body">
@@ -288,6 +313,7 @@ export function PixelEditor({ rel, onClose }) {
               ...${tip(`${hex(c).toUpperCase()}${c[3] < 255 ? ` at ${Math.round(c[3] / 2.55)}%` : ""}`)}></button>`)}
           </div>
         </div>
+        ${spec.ringmap && showMap ? html`<${RingMap} map=${spec.ringmap} />` : null}
       </div>
       ${spec.ring ? html`<p class="small muted pxe-note">${RING_NOTE}</p>` : null}
       ${msg ? html`<${Note} kind=${msg.kind === "err" ? "err" : "ok"}>${msg.text}<//>` : null}

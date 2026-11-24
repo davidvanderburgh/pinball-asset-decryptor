@@ -81,6 +81,29 @@ def is_ring_picture(rel):
     return "mini led" in parts[:-1]
 
 
+#: Sonic's own overhead playfield picture (its service-menu test screens draw
+#: on it); the ring map is marked on it, so PAD ships no picture of its own.
+RING_MAP_PHOTO = "graphics/Game Tests/rip_playfield_overhead_desaturated_resized.jpg"
+
+#: Where Sonic's five ring displays sit (PAD-1549), as fractions of
+#: :data:`RING_MAP_PHOTO`'s width and height.  The game program that places
+#: them is locked to Sonic's own Sentinel key, so they were measured instead:
+#: each ring's centre on Jersey Jack's 2988 x 4509 overhead photo of the
+#: Special Edition, carried onto the game's picture by a perspective fit of 83
+#: matching features (median error 0.6 px of the 341 x 768 picture).  The
+#: game's picture was taken before the rings were fitted, so they are not in
+#: it.  The operator manual wires them from three connectors (Left, Center and
+#: Right Ring) on the GI LED hub board; which ring hangs on which is in the
+#: locked program too, so no name here claims one.
+SONIC_RINGS = (
+    {"n": 1, "name": "Top left", "where": "behind the Eggman sign, by the top left lane", "x": 0.3581, "y": 0.1247},
+    {"n": 2, "name": "Left ramp", "where": "at the left ramp's entrance, under the Eggman sign", "x": 0.3190, "y": 0.2202},
+    {"n": 3, "name": "Left orbit", "where": "in the left orbit lane", "x": 0.2103, "y": 0.3192},
+    {"n": 4, "name": "Top right", "where": "at the top of the right orbit", "x": 0.9100, "y": 0.1480},
+    {"n": 5, "name": "Right ramp", "where": "at the right ramp's entrance", "x": 0.7858, "y": 0.3925},
+)
+
+
 def decode_rgba(w, h, data):
     """The PIL picture of *w* x *h* RGBA bytes sent as base64 *data*."""
     from PIL import Image
@@ -176,6 +199,18 @@ class PixelEditMixin:
                 break
         return out
 
+    def _ring_map(self):
+        """The ring map for Sonic's ring pictures: ``{photo, rings}``, the
+        game's own playfield picture from this project and where the rings
+        sit on it, or None when the project has no such picture."""
+        path = self._pixel_orig_path(RING_MAP_PHOTO) if RING_MAP_PHOTO in self._by_rel else None
+        if not path:
+            base = self._scan_dir or self._assets_dir()
+            path = os.path.join(base, *RING_MAP_PHOTO.split("/")) if base else None
+        if not path or not os.path.isfile(path):
+            return None
+        return {"photo": path, "rings": [dict(r) for r in SONIC_RINGS]}
+
     def _pixel_edit_path(self, rel):
         from ...core.checksums import PIXEL_EDITS_DIR
         assets = self._scan_dir or self._assets_dir()
@@ -212,6 +247,7 @@ class PixelEditMixin:
             "budget": self._pixel_budget(rel),
             "cell": sprite_cell(os.path.dirname(slot.abs_path), stock.size, ring),
             "ring": ring,
+            "ringmap": self._ring_map() if ring else None,
             "frames": frames,
             "index": next((i for i, f in enumerate(frames) if f["rel"] == rel), 0),
         }

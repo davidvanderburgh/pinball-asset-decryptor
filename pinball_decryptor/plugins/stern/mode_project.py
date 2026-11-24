@@ -585,6 +585,10 @@ MULTIBALL_PROVEN = frozenset({
     # s3proof.sh TITLE=pokemon_le PROOF=mb): MB TEST's 3 balls asked for and served through the game's serve, 3 in play,
     # 3 shots scored 6,000,000, balls in play 3 -> 2, the mode ended on its 40 s clock, then "ours is over" at one ball
     "pokemon_le-0.87/spike3",
+    # PAD-1506 2026-11-24, Pokemon Pro 0.87's Spike 3 card (rig slot 173, hidden, muted, the port carried from the LE
+    # 0.87's, s3proof.sh TITLE=pokemon_pro PROOF=mb): MB TEST on Berry target left x3, 3 balls asked for and served through
+    # the game's serve, 3 shots scored 6,000,000, the mode ended on its 40 s clock, then "ours is over" at one ball
+    "pokemon_pro-0.87/spike3",
     # PAD-1287 2026-11-15 (Spike 3 rig slot 37, hidden, muted): a mode.cfg `multiball 3 10` on three Tower target hits,
     # the game served to 3 balls in play (trough 3/6), 3 shots scored, counted 3 -> 2 -> 1 and gave its multiball back
     "walking_dead_remastered_le-0.92/spike3",
@@ -710,6 +714,10 @@ BALL_SAVE_PROVEN = frozenset({
     # PROOF=ballsave): SAVE TEST's 15 s save taken, the drain inside it served back (trough eject + auto plunger), 3 shots
     # scored 6,000,000 on that ball, the drain after the save ended it; SAVE CONTROL ended the ball on its first drain, 5.9 s in
     "pokemon_le-0.87/spike3",
+    # PAD-1506 2026-11-24, Pokemon Pro 0.87's Spike 3 card (rig slots 171/172, hidden, muted, PROOF=ballsave): SAVE TEST's
+    # 15 s save taken, the drain inside it served back (trough eject 1 s later, auto plunger), 3 shots scored 6,000,000 on
+    # that ball, the drain after the save ended it; SAVE CONTROL ended the ball on its first drain, 5.9 s in
+    "pokemon_pro-0.87/spike3",
     # PAD-1288 2026-11-15 (Spike 3 rig slots 64/65, hidden, muted, s3proof.sh PROOF=ballsave TITLE=fallout_le): SAVE
     # TEST's 15 s save taken, the drain inside it served back (eject + auto plunger 1 s later), 3 shots scored 6,000,000
     # on that ball, the drain after the save ended it; the control without ball_save ended on its first drain, 5.9 s in
@@ -2515,6 +2523,9 @@ BUS_IDS = 208
 #: other three, and the written card's mode scored on Left outlane and Left return lane.
 #: pokemon_le-0.87/spike3: PAD-1504 (slot 150) its switch lines came out as 0.82's; POKE TEST started on the third Berry
 #: target left hit and scored 6 shots (Left orbit, Rear ramp made, Captive ball-target) through score_add.
+#: pokemon_pro-0.87/spike3: PAD-1506 (slot 170) the census (s3census.sh) measured 38 of its 43 switch lines reaching the
+#: modes, each on its device-table rank (the slingshots, pop bumpers and Right eject send none); POKE TEST started on the
+#: third Berry target left hit and scored 6 shots (Left orbit, Rear ramp made, Captive ball-target) through score_add.
 #: PAD-1290 (2026-11-15, Spike 3 rig slot 190, hidden, muted): Star Wars 2025 LE 0.96's - proofs/s3census.sh pressed
 #: each of its 32 drafted switches in a game, 27 reached the modes on ids of their own (the port's lines are those ids:
 #: the table's ranks were wrong from its RIGHT TARGET on), and a mode file started on Right target x3 and scored on Left
@@ -2527,7 +2538,8 @@ BUS_IDS = 208
 #: device-table rank (proofs/titles/transformers_mtmte_le-0.96.switch_ids); a mode file started on Megatron target left
 #: x3 and scored 6 shots on Right orbit, Center loop and Left orbit.
 SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3",
-                                 "pokemon_le-0.82/spike3", "pokemon_le-0.87/spike3", "star_wars_2025_le-0.96/spike3",
+                                 "pokemon_le-0.82/spike3", "pokemon_le-0.87/spike3", "pokemon_pro-0.87/spike3",
+                                 "star_wars_2025_le-0.96/spike3",
                                  "star_wars_2025_pro-0.84/spike3", "transformers_mtmte_le-0.96/spike3"})
 #: Builds whose shots from the framework's switch drain (site switch_edge, `switch` lines) were seen
 #: reaching a mode in the emulator, each switch once, as ``<game>-<version>`` (2026-09-23: The Beatles
@@ -2706,7 +2718,7 @@ TITLE_SCENES = {
     "star_wars_2025_pro-0.84/spike3": dict(bank="4b0834ccf5aac497528a805d5f6b35a4", clip_proven=True),   # its in-play bank 3a9d7db5, as the LE; 2026-11-18: 49% at 0-3 s, 0% before and at 8 s; an attract item 47%
     "pokemon_le-0.82/spike3": dict(bank="8b0ceb32002a4c661217be7019bdbb11", clip_proven=True),   # 60ed7e50, its only bank; 2026-11-18: 72% at 0-3 s of the 6 s clip, 0% before and at 8 s
     "pokemon_le-0.87/spike3": dict(bank="32eb5f813905cf4b00a0304c7195bbb4", clip_proven=True),   # PAD-1504: 60ed7e50 again, its scene.radium changed in 0.87; 2026-11-22: 72-75% from 1.7 s to 9.5 s after the trigger, 0% before and after
-    "pokemon_pro-0.87/spike3": dict(bank="32eb5f813905cf4b00a0304c7195bbb4", clip_proven=True),   # PAD-1506: the LE 0.87's bank, byte for byte (60ed7e50); PROOF PENDING
+    "pokemon_pro-0.87/spike3": dict(bank="32eb5f813905cf4b00a0304c7195bbb4", clip_proven=True),   # PAD-1506: the LE 0.87's bank byte for byte (60ed7e50); 2026-11-24: 72-75% for the 6 s clip, 0% before; an attract item 88% for its 8 s
     "fallout_le-0.82/spike3": dict(bank="4ccd1a8c8814e7db01666271105f6cc7", clip_proven=True),   # 60ed7e50, its only bank; 2026-11-18: 64% at 1-3 s, 0% before and at 8 s
     "transformers_mtmte_le-0.96/spike3": dict(bank="26d398bdc2be14090caf149bb4d34210", clip_proven=True),   # 60ed7e50, its only bank; 2026-11-18: 33-35% at 0-3 s (the play screen's video), 0% before and at 8 s
     "star_wars_le-1.31": dict(screen_proven=True, hud="9183de0da4e6ed603f16064ec7a8493b", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=True),   # PAD-420 2026-10-08 media proof (stock card, hidden, muted; the ball-start hero / path choice confirmed with the Action Button first): our screen and clip seen on the glass (magenta 44% clip, 45% screen, 0.0% before)
@@ -3275,6 +3287,7 @@ SPARE_IO_PROVEN = frozenset({
     # the game sent none of them anything
     "pokemon_le-0.82/spike3",          # 98 switches; 8:13; outputs 1:1 9:1 10:0 13:1
     "pokemon_le-0.87/spike3",          # PAD-1504: the same - 98 switches; 8:13 -> shot twice; outputs 1:1 9:1 10:0 13:1 (pulse, held, OFF)
+    "pokemon_pro-0.87/spike3",         # PAD-1506: 96 switches; 9:12 -> shot twice; outputs 1:1 8:6 9:1 13:1 (pulse, held, OFF)
     "star_wars_2025_le-0.96/spike3",   # 87 switches; 9:15; outputs 1:1 8:6 9:0 13:0
     "star_wars_2025_pro-0.84/spike3",  # 84 switches; 9:13; outputs 1:1 8:6 9:5
     "transformers_mtmte_le-0.96/spike3",   # 96 switches; 9:14; outputs 1:1 9:0 13:1

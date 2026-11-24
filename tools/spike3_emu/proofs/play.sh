@@ -51,9 +51,13 @@ for k in $(seq 1 8); do
   [ "$START_HOLD_MS" -gt 0 ] && { $P sw "$SLOT" "START BUTTON" "$START_HOLD_MS"; sleep 7; }
   $P sw "$SLOT" "START BUTTON"; sleep 8
   [ -n "$AFTER_START_SWS" ] && sws "$AFTER_START_SWS" 3
-  if [ -n "${MENU_PICK:-}" ]; then   # PAD-1506: step the start menu (MENU_SW) until the runtime logs MENU_PICK, then Start
+  # PAD-1506: the start menu comes once the game has started and its own start film has played (Pokemon): wait for
+  # the runtime's menu line (MENU_SEEN), step it (MENU_SW) until it logs MENU_PICK, then Start
+  if [ -n "${MENU_PICK:-}" ] && grep -aq "in_game 0 -> 1" $L; then
+    for m in $(seq 1 30); do grep -aqE "${MENU_SEEN:-appended|on the start menu as entry}" $L && break; sleep 1; done
+    echo "[play] menu up after ${m}s: $(grep -aE "${MENU_SEEN:-appended|on the start menu as entry}" $L | tail -1 | cut -c1-160)"
     for m in $(seq 1 16); do grep -aqE "$MENU_PICK" $L && break; $P sw "$SLOT" "${MENU_SW:-RIGHT FLIPPER BUTTON}"; sleep 2; done
-    echo "[play] menu after $m step(s): $(grep -aE "$MENU_PICK" $L | tail -1)"; $P sw "$SLOT" "START BUTTON"; sleep 8
+    echo "[play] menu after $m step(s): $(grep -aE "$MENU_PICK" $L | tail -1 | cut -c1-160)"; $P sw "$SLOT" "START BUTTON"; sleep 8
   fi
   grep -q "in_game 0 -> 1\|\[probe\] in game" $L && break
 done

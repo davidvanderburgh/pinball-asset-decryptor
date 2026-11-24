@@ -655,6 +655,7 @@ static unsigned int pixel_bytes(unsigned int fmt, unsigned int type, int w, int 
  * bytes), but the card's own boot_display - the message screen a Send to machine shows - uploads its font's
  * one-byte glyphs at alignment 1.  The host replays every upload at GL's default alignment 4, so a row the
  * guest packed tighter is repacked here to 4-byte rows before it goes; an aligned upload goes as it always did. */
+#ifndef PAD_GLBRIDGE_HOST_PIXELSTORE
 static int unpack_align = 4;
 static unsigned char repack_buf[256 * 1024];
 
@@ -682,6 +683,16 @@ static const void *host_rows(unsigned int fmt, unsigned int type, int w, int h, 
         memcpy(repack_buf + y * dst, (const unsigned char *)px + y * src, row);
     return repack_buf;
 }
+#else
+/* PAD-1506: the Spike 3 rig (s3gl.c, which #includes this file) has a glPixelStorei of its own that hands the
+ * alignment to its host renderer (PADGL_PIXELSTORE), so here an upload goes exactly as it did before PAD-1427 */
+static const void *host_rows(unsigned int fmt, unsigned int type, int w, int h, const void *px,
+                             unsigned int *bytes)
+{
+    *bytes = pixel_bytes(fmt, type, w, h);
+    return px;
+}
+#endif
 
 int glTexImage2D(unsigned int target, int level, int ifmt, int w, int h,
                  int border, unsigned int fmt, unsigned int type, const void *px)

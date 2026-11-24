@@ -4806,9 +4806,17 @@ sound_end      <request>
 Fighter Attack with a start and an end clip and sound: started 50 ms after the game's START, its clip in the place of
 "fighter_intro", the game's music 78 ducked under its start sound and back up after it; ended on the game's STOP, its
 end sound with the game's music 67 ducked, its end clip; a second start and stop the same way. The other builds of the
-sweep (`mode_project.WITH_PROVEN`) followed the mode the PAD-710 sweep started there, twice. Not measured: a game mode
-that ends at a drain (the emulator's Godzilla did not end the ball on a lone drain): the follower ends with the ball,
-as every mode does, and plays no outro then; the plain-C titles (no STOP to see), which stay unoffered.
+sweep (`mode_project.WITH_PROVEN`, 52 of the 69 ports) followed one of the game's modes: the C++ builds its START
+and STOP twice (Iron Maiden on Fear of the Dark and John Wick on Job Assassination: the hurry-ups the PAD-710 sweep
+used refuse a forced START; Deadpool, Iron Maiden and Venom refuse a second one in a ball, and the follower stays
+out; Star Wars once - its STOP returns at once on a mode STARTed a second time in a ball, as its stopped byte +0x17
+stays set, so nothing stops it but the ball's end). The plain-C titles: the game's start seen and the mode's clock
+ending it (`PAD_TEST_PLAIN_START=1` in the game's environment lets the test path call a plain-C start with no claim;
+rig only - X-Men's starts take the mode's object, so there only the start was seen, the test call hangs). Not offered:
+the older builds no card is left of to run (Stern keeps only the current one), and Elvira 3 1.13, whose game does not
+start on the rig (with main's runtime too). Not measured: a game mode that ends at a drain (the emulator's Godzilla
+did not end the ball on a lone drain): the follower ends with the ball, as every mode does, and plays no outro then;
+a plain-C mode's completion ending it (the same COMPLETED audit or flag PAD-747's sweep saw).
 
 ## A mode in the game's Challenge list (PAD-615)
 

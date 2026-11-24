@@ -46,6 +46,7 @@ static void coop_team_users_end(void) {}
 static struct { int open; unsigned who; } pk;               /* PAD-1031: the characters' pick (test_pad1031_coop_characters.py) */
 static struct { int on; } coop_done;                       /* PAD-1044: the one taken, on the glass */
 static void coop_pick_say(void) {}
+static void coop_style_held(void) {}               /* PAD-1558: the card's default style (test_pad1558_coop_default_style.py) */
 static void coop_pick_open(unsigned t) { (void)t; }
 static void coop_chars_begin(void) {}
 static void coop_chars_turn(void) {}

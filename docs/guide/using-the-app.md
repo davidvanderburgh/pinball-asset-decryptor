@@ -541,10 +541,11 @@ computer beside your settings, so updating the app leaves it installed.
 Each plugin has two halves:
 
 - **On this computer.** The versions its author has published, newest first. The one marked *tested with this
-  app* is the version this release of the app was proven with. **Install** downloads and checks it. A newer
-  version can be installed too and is marked as not tested yet. **Install from files** is for a computer that
-  cannot reach gitlab.com: download the release's two `.tar.gz` files and its `SHA256SUMS` elsewhere and pick
-  all three. **Remove** takes it off this computer; cards already written keep it.
+  app* is the version this release of the app was proven with.
+  - **Install** downloads and checks it. A newer version can be installed too and is marked as not tested yet.
+  - **Install from files** is for a computer that cannot reach gitlab.com: download the release's two `.tar.gz`
+    files and its `SHA256SUMS` elsewhere and pick all three.
+  - **Remove** takes it off this computer; cards already written keep it.
 - **On your cards.** Tick it for the open project, then Write: cards written from that project carry it.
   Untick it and Write again to take it off. *Exactly what it changes on the card* lists every file.
 

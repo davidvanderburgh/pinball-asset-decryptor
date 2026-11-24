@@ -1422,6 +1422,7 @@ WITH_PROVEN = frozenset({
     "deadpool_pro-1.16",             # PAD-1537 rig: Disco Loops (19) followed once, its second START refused by the game
     "dungeons_and_dragons_le-1.10",  # PAD-1537 rig: Mimic Hurry Up (12) followed twice
     "dungeons_and_dragons_pro-1.10", # PAD-1537 rig: Map Choosen Ritual Singleball (53) followed twice
+    "elvira3-1.13",                  # PAD-1541 rig (plain C, through the game - House Lock started a House): Houses (0) - started with it, its clock ended it
     "foo_fighters_le-1.04",          # PAD-1537 rig: Super Skill Shot (8) followed twice
     "foo_fighters_pro-1.04",         # PAD-1537 rig: Super Skill Shot (8) followed twice
     "godzilla_le-1.16",              # PAD-1537 rig: Jet Fighter Attack (21) followed twice

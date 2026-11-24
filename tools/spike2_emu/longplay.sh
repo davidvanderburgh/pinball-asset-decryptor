@@ -125,6 +125,7 @@ for _ in $(seq 1 600); do
     sleep 1
 done
 gs_past_alerts "$LOG" || { say "never reached attract; giving up"; exit 1; }
+gs_wait_show "$LOG" || say "(no attract clip opened; playing anyway)"   # PAD-1541
 say "attract reached; starting to play"
 
 DEADLINE=$((SECONDS + MINS * 60))

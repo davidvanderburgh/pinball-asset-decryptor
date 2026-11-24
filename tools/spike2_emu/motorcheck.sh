@@ -24,6 +24,7 @@
 # A still of the game FBO at the end of the sample goes to
 # $PAD_LOGDIR/motorcheck.<key>.png.
 . "$(dirname "$0")/padpath.sh"
+. "$(dirname "$0")/gamestate.sh"   # gs_wait_show (PAD-1541)
 set -u
 KEY=${1:?usage: motorcheck.sh <key> <card>}
 CARD=${2:?usage: motorcheck.sh <key> <card>}
@@ -63,6 +64,7 @@ done
 # because "attract" in status.sh is the first picture, and on a slow boot (a
 # card staged cold, three rigs at once) john_wick_le was still putting up its
 # STANDARD GAME MODE card 40 s later and ignored the Start press (PAD-248).
+gs_wait_show "$PAD_LOGDIR/gzwatch.log"   # PAD-1541: the attract scene loaded, not just its lamps
 sleep "${MOTOR_SETTLE:-8}"
 for kv in ${MOTOR_HOLD//,/ }; do          # "77:1 84:0" or "77:1,84:0"
     python3 "$RIG/swhold.py" "${kv%%:*}" "${kv##*:}" > /dev/null

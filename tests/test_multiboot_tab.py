@@ -2245,7 +2245,8 @@ def test_the_project_switch_saves_before_it_restores(tmp_path):
     stub = SimpleNamespace(
         _settings={}, _project_path=str(a), _current_mfr=mfr, window=window,
         _registry_touch=lambda f: None, _set_loaded_project=lambda f: None,
-        _save_settings=lambda: None, _capture_run=lambda: False)
+        _save_settings=lambda: None, _capture_run=lambda: False,
+        _warn_project_needs_admin=lambda f: False)   # PAD-1563's own test
     stub.multiboot_state = lambda: App.multiboot_state(stub)
     stub.save_multiboot_state = (
         lambda folder: App.save_multiboot_state(stub, folder))

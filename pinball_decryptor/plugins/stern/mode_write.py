@@ -1591,11 +1591,10 @@ def coop_clips_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
         except CP.CoopError as e:
             raise ModeWriteError(str(e)) from None
         try:
-            bank, info = VB.add_clip(bank, name, os.path.getsize(made))
+            bank = _coop_clip_put(result, bank, name, made, assets)
         except VB.VideoBankError as e:
             raise ModeWriteError("the co-op characters' videos: %s could not be added to the video bank (%s)"
                                  % (name, e)) from None
-        result.new.append((assets + info["path"], made))
         out.append((i + 1, name))
     if not bank_src:
         bank_src = os.path.join(scratch, "coop_tree", *bank_card.split("/"))
@@ -1607,6 +1606,29 @@ def coop_clips_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
     result.lines.append("co-op characters: a video in the picture's place for %s"
                         % ", ".join(names.get(n - 1, str(n)) for n, _name in out))
     return out
+
+
+
+def _coop_clip_put(result, bank, name, made, assets):
+    """PAD-1552: the co-op clip ``name`` (the file ``made``) into the bank scene ``bank``; returns the new bank.
+    A card an earlier build gave co-op clips (Heisei V2.3 written over by another project with co-op characters)
+    already has clips of our names: the bank has no way to take one out, and adding one again was refused ("the
+    bank already has a clip called 'PadCoopIntro'"), so the build stopped. Such a clip's entry and file take this
+    one instead, as a random clip's does (PAD-862, clip_variants): the bank keeps its size and the card one file.
+    ``assets``: the bank's ``scene.assets/`` folder on the card."""
+    from . import video_bank as VB
+    size = os.path.getsize(made)
+    try:
+        there = any(c.name == name for c in VB.parse_scene(bank).library.entries)
+    except VB.VideoBankError:                           # not a bank this reads: add_clip says why
+        there = False
+    if there:
+        bank, path = VB.set_clip_size(bank, name, size)
+        result.replaced.append((assets + path, made))
+        return bank
+    bank, got = VB.add_clip(bank, name, size)
+    result.new.append((assets + got["path"], made))
+    return bank
 
 
 def coop_intro_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
@@ -1649,10 +1671,9 @@ def coop_intro_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
     info = detect_video_info(made)
     ms = int(round(float(getattr(info, "duration", 0) or 0) * 1000)) if info else 0
     try:
-        bank, got = VB.add_clip(bank, CP.INTRO_CLIP, os.path.getsize(made))
+        bank = _coop_clip_put(result, bank, CP.INTRO_CLIP, made, bank_card[:-len("scene.radium")] + "scene.assets/")
     except VB.VideoBankError as e:
         raise ModeWriteError("the co-op intro video could not be added to the video bank (%s)" % e) from None
-    result.new.append((bank_card[:-len("scene.radium")] + "scene.assets/" + got["path"], made))
     if not bank_src:
         bank_src = os.path.join(scratch, "coop_tree", *bank_card.split("/"))
         os.makedirs(os.path.dirname(bank_src), exist_ok=True)
@@ -1697,10 +1718,10 @@ def coop_ceremony_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
         raise ModeWriteError(str(e)) from None
     info = detect_video_info(made)
     try:
-        bank, got = VB.add_clip(bank, CP.CEREMONY_CLIP, os.path.getsize(made))
+        bank = _coop_clip_put(result, bank, CP.CEREMONY_CLIP, made,
+                              bank_card[:-len("scene.radium")] + "scene.assets/")
     except VB.VideoBankError as e:
         raise ModeWriteError("the co-op awards ceremony video could not be added to the video bank (%s)" % e) from None
-    result.new.append((bank_card[:-len("scene.radium")] + "scene.assets/" + got["path"], made))
     _coop_bank_put(result, scratch, bank_card, bank, bank_src)
     result.lines.append("co-op awards: %s (%.1f s, looped) plays behind the award cards"
                         % (os.path.basename(src), float(getattr(info, "duration", 0) or 0) if info else 0.0))
@@ -1774,11 +1795,10 @@ def coop_picked_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
         info = detect_video_info(made)
         ms = int(round(float(getattr(info, "duration", 0) or 0) * 1000)) if info else 0
         try:
-            bank, added = VB.add_clip(bank, name, os.path.getsize(made))
+            bank = _coop_clip_put(result, bank, name, made, assets)
         except VB.VideoBankError as e:
             raise ModeWriteError("the co-op characters' picked clips: %s could not be added to the video bank (%s)"
                                  % (name, e)) from None
-        result.new.append((assets + added["path"], made))
         out.append((i + 1, name, ms))
     _coop_bank_put(result, scratch, bank_card, bank, bank_src)
     result.lines.append("co-op characters: a clip once picked for %s"
@@ -1850,11 +1870,10 @@ def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, pr
         except CP.CoopError as e:
             raise ModeWriteError(str(e)) from None
         try:
-            bank, added = VB.add_clip(bank, name, os.path.getsize(made))
+            bank = _coop_clip_put(result, bank, name, made, assets)
         except VB.VideoBankError as e:
             raise ModeWriteError("the co-op characters on the bonus: %s could not be added to the video bank (%s)"
                                  % (name, e)) from None
-        result.new.append((assets + added["path"], made))
         out.append((i + 1, name))
     _coop_bank_put(result, scratch, bank_card, bank, bank_src)
     result.lines.append("co-op characters: on their teammate's End of Ball Bonus (%s, its portrait bottom-right, its name across the picture's foot) "

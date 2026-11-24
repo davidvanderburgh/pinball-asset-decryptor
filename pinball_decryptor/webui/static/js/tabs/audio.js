@@ -909,6 +909,8 @@ export default function AudioTab() {
           ? html`<span class="aud-modes" aria-label=${`Sounds for music modes ${r.md.join(", ")}`} ...${tip({ head: "Music modes", lines: [r.md_tip] })}><${Icon} name="music" />${r.md.join(" ")}</span>`
           : null}${r.tn
           ? html`<span class="aud-modes" aria-label=${r.tr ? `Plays ${r.tn} sounds at random` : `Plays ${r.tn} sounds in turn`} ...${tip({ head: r.tr ? "Play at random" : "Play in turn", lines: [r.tn_tip] })}><${Icon} name="shuffle" />${r.tn}</span>`
+          : null}${r.sp
+          ? html`<span class="aud-modes" aria-label=${r.sp} ...${tip({ head: "Song in parts", lines: r.sp_tip })}><${Icon} name="link" />${r.spn}</span>`
           : null}</span>` },
     // PAD-635: how many of the game code's sound requests play the sound
     ...(s.req_cap ? [{ key: "rq", label: "Requests", sort: "rq", title: s.req_tip, width: FIXED.rq + "px", num: true,

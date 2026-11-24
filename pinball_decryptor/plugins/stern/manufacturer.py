@@ -1234,6 +1234,38 @@ class SternManufacturer(Manufacturer):
                 out[rel] = got[int(m.group(1))]
         return out
 
+    def sound_song_parts(self, assets_dir, rels):
+        # PAD-1542: Extract's sound_requests.tsv - the songs the game plays in
+        # parts, and the pieces a replacement of a song's music leaves out.  The
+        # list is drawn before its lengths are read, so the few records a
+        # request plays in turn have their headers read here.
+        import wave
+        from .clip_sounds import _IDX_RE, song_pieces
+        rel_of, secs = {}, {}
+        for rel in rels:
+            d, _s, name = rel.rpartition("/")
+            m = _IDX_RE.search(name) if d == "audio" else None
+            if m:
+                rel_of.setdefault(int(m.group(1)), rel)
+
+        def length(i):
+            rel = rel_of.get(i)
+            if rel is None:
+                return 0.0
+            try:
+                with wave.open(os.path.join(assets_dir, rel), "rb") as w:
+                    secs[rel] = w.getnframes() / float(w.getframerate() or 1)
+            except Exception:                           # noqa: BLE001
+                secs[rel] = 0.0
+            return secs[rel]
+        got = song_pieces(assets_dir, length)
+        out = {}
+        for i, v in got.items():
+            if i in rel_of:
+                out[rel_of[i]] = {k: [(rel_of[j], secs.get(rel_of[j], 0.0)) for j in v[k]
+                                      if j in rel_of] for k in ("pieces", "kept", "music")}
+        return out
+
     def video_quality(self, path, log=None, progress=None, cancel=None):
         # Spike 2 cards only — the clips are ftyp assets on an ext4 games
         # partition, which neither a Whitestar ROM zip nor a Spike 1 card has.

@@ -13020,5 +13020,14 @@
 "Hold the ball in the shooter lane": "Retenir la bille dans le couloir de lancement",
 "For testing: a ball the game serves waits in the shooter lane until you plunge it (Plunge, the plunger key, or the launch button on a game that has one).\n\nWhat it stops is the game's own TIMED PLUNGER setting, which launches a waiting ball by itself after a set number of idle seconds. It is held at Off while the game runs; your machine's own setting is kept and comes back at the next Start without this tick. A launch the game makes on purpose (a ball save, a multiball) still goes. Takes effect at the next Start.": "Pour les tests : une bille servie par le jeu attend dans le couloir de lancement jusqu'à ce que vous la lanciez (Lancer, la touche du lanceur, ou le bouton de lancement sur un jeu qui en a un).\n\nCe qui est arrêté, c'est le réglage TIMED PLUNGER du jeu lui-même, qui lance seul une bille en attente après un nombre de secondes d'inactivité réglé. Il est tenu sur Off pendant que le jeu tourne ; le réglage de votre machine est conservé et revient au prochain démarrage sans cette case. Un lancement que le jeu fait exprès (un ball save, un multibille) part toujours. Prend effet au prochain démarrage.",
 "Stop the sound Play started.": "Arrêter le son lancé par Lire.",
-"Sound stopped.": "Son arrêté."
+"Sound stopped.": "Son arrêté.",
+"Song in parts": "Chanson en plusieurs parties",
+"Song in {} parts": "Chanson en {} parties",
+"Piece of a song": "Partie d'une chanson",
+"The game plays this sound as one song with {}.": "Le jeu joue ce son comme une seule chanson avec {}.",
+"A replacement here plays in place of the whole song: Write leaves {} out of it.": "Un remplacement ici joue à la place de toute la chanson : Write en retire {}.",
+"Kept in it, as the game also plays them in other sounds: {}.": "Conservés, car le jeu les joue aussi dans d'autres sons : {}.",
+"A piece of a song: the game plays it with {}, the song's music.": "Une partie d'une chanson : le jeu la joue avec {}, la musique de la chanson.",
+"This piece stays in the song even then: the game also plays it in other sounds.": "Cette partie reste dans la chanson même alors : le jeu la joue aussi dans d'autres sons.",
+"Replace that sound and this piece drops out, so the replacement plays in place of the whole song.": "Remplacez ce son et cette partie disparaît : le remplacement joue à la place de toute la chanson."
 }

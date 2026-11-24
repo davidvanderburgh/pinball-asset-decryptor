@@ -305,16 +305,19 @@ Filename: "{app}\python\python.exe"; Parameters: "-m compileall -q -j 0 ""{app}\
 ; controller from the final one (core/update_slots.py).
 Filename: "{app}\python\python.exe"; Parameters: """{app}\tools\spike2_emu\vpx\padvpx.py"" register"; WorkingDir: "{app}"; StatusMsg: "Registering the Visual Pinball controller..."; Flags: runhidden waituntilterminated; Check: not IsStaged
 
-Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Description: "Launch Pinball Asset Decryptor"; Flags: nowait postinstall skipifsilent
+; runasoriginaluser on both launches (PAD-1563): this installer runs
+; elevated, and the app must not inherit that - it starts unelevated and
+; asks for Administrator only for the jobs that need it (issue #46).
+Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Description: "Launch Pinball Asset Decryptor"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 ; --- In-app update relaunch ----------------------------------------------
 ; The app's "Install update" flow runs this installer silently
 ; (/VERYSILENT /RELAUNCH=1) and exits; the postinstall entry above is
 ; skipifsilent, so without this the silent upgrade would end with
 ; nothing on screen.  Routed through launcher.vbs like every other
-; entry point (self-elevation), and gated on the /RELAUNCH=1 flag so a
+; entry point, and gated on the /RELAUNCH=1 flag so a
 ; plain silent install (e.g. mass deployment) stays hands-off.
-Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Flags: nowait; Check: RelaunchRequested
+Filename: "wscript.exe"; Parameters: """{app}\launcher.vbs"""; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: RelaunchRequested
 
 [UninstallRun]
 Filename: "{app}\python\python.exe"; Parameters: """{app}\tools\spike2_emu\vpx\padvpx.py"" unregister"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "padvpx-unregister"

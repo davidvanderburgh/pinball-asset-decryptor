@@ -400,6 +400,7 @@
 "Read canceled after {} of {} bytes.": "Read cancelled after {} of {} bytes.",
 "Read canceled before completion.": "Read cancelled before completion.",
 "Reading {} was canceled.": "Reading {} was cancelled.",
+"The Bluetooth headphones preparation was canceled.": "The Bluetooth headphones preparation was cancelled.",
 "Recognized filename hints: alien{}, queen.": "Recognised filename hints: alien{}, queen.",
 "Recognized hints: MedievalMadness, AttackFromMars, MonsterBash, PulpFiction, CactusCanyon (case-insensitive).": "Recognised hints: MedievalMadness, AttackFromMars, MonsterBash, PulpFiction, CactusCanyon (case-insensitive).",
 "Recovering the images was canceled; whatever was written into {} is half a file.": "Recovering the images was cancelled; whatever was written into {} is half a file.",

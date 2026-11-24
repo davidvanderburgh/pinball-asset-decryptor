@@ -882,6 +882,9 @@ def main(argv=None):
                         help="show the app in the system browser")
     parser.add_argument("--serve", action="store_true",
                         help="run the server only and print its URL")
+    # PAD-1563: a Restart as administrator from a Direct-SSD tab reopens on it
+    parser.add_argument("--direct-ssd", choices=("extract", "write"),
+                        help=argparse.SUPPRESS)
     args, _rest = parser.parse_known_args(argv)
 
     logging.basicConfig(level=logging.WARNING)
@@ -895,6 +898,7 @@ def main(argv=None):
     mode = "serve" if args.serve else "browser" if args.browser else "native"
     ctx = Context()
     ctx.open_image = image
+    ctx.direct_ssd = args.direct_ssd
     host = Host(ctx, mode)
     ctx.host = host
     watch = _startup_watch()

@@ -6,12 +6,14 @@ fail with elevation errors otherwise.  The GUI uses
 :func:`is_admin` to gate the Direct-SSD UI (warning banner +
 disabled Extract / Apply Modifications buttons when not elevated).
 
-``relaunch_as_admin`` is kept as a helper but isn't currently wired
-to any button — an earlier attempt at one-click "Restart as
-Administrator" had cross-environment failure modes (frozen vs
-source, embeddable Python vs venv) that made the button visibly
-"do nothing" in some setups.  Going through the standard Windows
-"right-click → Run as administrator" flow is more reliable.
+The app starts WITHOUT Administrator on Windows (PAD-1563, GitHub issue
+#46); the jobs that need it ask for it as they start.  A Direct-SSD run
+cannot (its wsl --mount calls run all through the pipeline), so its panel's
+Restart as administrator uses :func:`relaunch_as_admin` with
+:func:`restart_args`.  An earlier one-click restart was dropped because it
+visibly "did nothing" in some setups: a ``-m`` run re-started as a plain
+script, and an elevated start lands in System32, not the app's folder.
+:func:`restart_args` and the working folder passed on cover both.
 
 On macOS / Linux the equivalent operation (``diskutil mount`` /
 direct device access for ``debugfs``) usually goes through ``sudo``
@@ -26,6 +28,7 @@ session, so paths saved as ``W:\\…`` break the moment the app runs
 elevated.
 """
 
+import os
 import sys
 
 
@@ -104,8 +107,32 @@ def resolve_mapped_drive(path):
     return remote.rstrip("\\/") + p[2:]
 
 
-def relaunch_as_admin():
+def restart_args(argv, tab):
+    """The arguments a Restart as administrator from a Direct-SSD *tab*
+    starts the elevated copy with (PAD-1563): the script this run was
+    started as, then ``--direct-ssd <tab>``.  Nothing else of this run's
+    command line comes along - a card image double-clicked in Explorer was
+    handed in already, and an earlier ``--direct-ssd`` is replaced.  A run
+    started as ``-m pinball_decryptor`` (its argv[0] the package's
+    ``__main__.py``) restarts the same way, since that file cannot run as a
+    plain script; a frozen build's argv[0] is its own exe, so it gets only
+    the flag."""
+    script = (argv or [""])[0]
+    if getattr(sys, "frozen", False):
+        head = []
+    elif os.path.basename(script) == "__main__.py":
+        head = ["-m", os.path.basename(os.path.dirname(os.path.abspath(script)))]
+    else:
+        head = [os.path.abspath(script)]
+    return head + ["--direct-ssd", tab]
+
+
+def relaunch_as_admin(args=None):
     """Re-launch the current Python process with elevation (Windows).
+
+    *args* are the interpreter's arguments (``sys.argv`` when None - this
+    run's own command line); :func:`restart_args` builds them for a Restart
+    as administrator.
 
     Uses ``ShellExecuteW`` with the ``runas`` verb, which is what
     triggers the standard UAC prompt.  On approval the new process
@@ -129,9 +156,12 @@ def relaunch_as_admin():
         # returns a value > 32 on success; <= 32 means failure
         # (32 = SE_ERR_DLLNOTFOUND, 5 = SE_ERR_ACCESSDENIED — the
         # "user clicked No on UAC" case).
-        argv = " ".join(f'"{a}"' for a in sys.argv)
+        argv = " ".join(f'"{a}"' for a in (sys.argv if args is None
+                                            else args))
+        # the working folder too: an elevated start otherwise lands in
+        # System32, where a "-m pinball_decryptor" run finds no package
         rc = ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", sys.executable, argv, None, 1)
+            None, "runas", sys.executable, argv, os.getcwd(), 1)
         return int(rc) > 32
     except Exception:
         return False

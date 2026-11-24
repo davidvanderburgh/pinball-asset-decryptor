@@ -154,7 +154,9 @@ function DirectNotes({ s }) {
           aria-expanded=${!s.admin_collapsed}>
           <b>${unwarn(s.admin_title)}</b><span class="muted">${s.admin_collapsed ? "▼" : "▲"}</span>
         </button>
-        ${s.admin_collapsed ? null : html`<div class="wr-panel-bd">${s.admin_body}</div>`}
+        ${s.admin_collapsed ? null : html`<div class="wr-panel-bd">${s.admin_body}
+          <div class="row" style="margin-top:8px"><${Button} size="sm" icon="refresh" onClick=${() => call("write.restart_as_admin")}
+            title=${{ head: "Restart as administrator", lines: [["Click", "Windows asks once (UAC), then PAD closes and reopens here elevated, on this tab with the same source picked"]] }}>Restart as administrator<//></div></div>`}
       </div></div></div>`);
   }
   if (s.show_fda) {

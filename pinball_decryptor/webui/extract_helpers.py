@@ -109,10 +109,10 @@ def admin_body_text(mfr):
                  if mfr else "From SSD")
     return (
         f"Reading directly from the {noun} needs Windows Administrator "
-        "privileges — Windows gates raw disk access behind elevation. "
-        "Close the app, right-click the \"Pinball Asset Decryptor\" "
-        "shortcut, choose \"Run as administrator\", then re-select "
-        f"\"{ssd_label}\" — your drive and output folder are remembered.")
+        "rights — Windows only lets an elevated program take a whole disk, "
+        "and PAD starts without them. Restart as administrator asks Windows "
+        f"once, then reopens PAD here on \"{ssd_label}\" — your drive and "
+        "output folder are remembered.")
 
 
 def input_label(mfr):

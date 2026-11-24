@@ -671,6 +671,9 @@ def slots(tmp_path, staged, monkeypatch):
     rec = dict(staged, stages=[], swaps=[], stage_ok=True, saved=0)
     rec["gate"].set()
     monkeypatch.setattr(us, "installed_app_dir", lambda *a, **k: app_dir)
+    # the copy beside the install and the swap are an elevated run's (PAD-1563)
+    from pinball_decryptor.core import admin
+    monkeypatch.setattr(admin, "is_admin", lambda: True)
     # never this PC's own note of a swap that failed
     rec["note"] = tmp_path / "swap_failed.txt"
     monkeypatch.setattr(us, "swap_failed_note_path",

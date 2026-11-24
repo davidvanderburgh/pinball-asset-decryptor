@@ -4772,6 +4772,92 @@ def _classify_audio_edits(byidx, audio_edits, assets_dir):
     return fits, grows
 
 
+#: PAD-1542: a song's other part under this long (seconds) is its opening, sting or ending,
+#: silenced when the user replaces the song's music (:func:`_song_part_silences`)
+_SONG_EDGE_SECONDS = 20.0
+#: PAD-1542: how long the silence standing in for such a part is (card samples, 0.05 s): short
+#: enough that a bank which may change length ends it at once (PAD-800), and padded to the
+#: part's own length where it may not
+_SONG_EDGE_SILENCE = 2205
+
+
+def _song_part_silences(byidx, wide, audio_edits, assets_dir):
+    """PAD-1542: ``{idx: (part, sids)}`` - the short parts (under :data:`_SONG_EDGE_SECONDS`)
+    of a song in parts whose music (a record of at least :data:`_SONG_PART_SECONDS`) the user
+    replaced, each with the replaced record it belongs to and the sound ids that play it.
+    Iron Maiden LE 1.18's song select plays "MUSIC: ICARUS" as sound id 977, idx 471's 0.6 s
+    and then idx 950's 219 s (968 goes on into idx 941's 10.5 s ending): a tester's own song
+    on idx 950 started with the first second of Flight of Icarus.  A part counts only when
+    every sound id that plays it (*wide*, :func:`_wide_descriptors`) also plays a replaced
+    record of music, so a record the game plays alone or in another song keeps its own sound;
+    a part the user replaced keeps their file."""
+    from .spike2.emulator import bands_of
+    edge = _SONG_EDGE_SECONDS * 44100
+    music = {i for i in audio_edits
+             if i in byidx and int(byidx[i].get("length", 0) or 0) >= _SONG_PART_SECONDS * 44100}
+    if not music:
+        return {}
+    plays_of = {}
+    for sid, (_d, idxs) in wide.items():
+        for i in idxs:
+            plays_of.setdefault(i, set()).add(sid)
+    out = {}
+    for sid, (_d, idxs) in sorted(wide.items()):
+        owners = [i for i in idxs if i in music]
+        if not owners or None in idxs:
+            continue
+        for j in idxs:
+            p = byidx.get(j)
+            if (j in audio_edits or j in out or p is None or bands_of(p) > 1
+                    or not 0 < int(p.get("length", 0) or 0) < edge):
+                continue
+            sids = plays_of.get(j, set())
+            if all(any(i in music for i in wide[s][1]) for s in sids):
+                out[j] = (owners[0], sorted(sids))
+    return out
+
+
+def _write_silence(path, frames=_SONG_EDGE_SILENCE):
+    """PAD-1542: a 44.1 kHz stereo 16-bit WAV of *frames* of silence at *path*."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    w = wave.open(_lp(path), "wb")
+    try:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(b"\0\0\0\0" * int(frames))
+    finally:
+        w.close()
+    return path
+
+
+def _silence_song_parts(gr_path, img_path, params, sites, audio_edits, assets_dir, work, log):
+    """PAD-1542: *audio_edits* with a silence for every short part of a song whose music the
+    user replaced (:func:`_song_part_silences`), so their song plays without the game's own
+    opening or ending around it; *audio_edits* as it was when there is none or the card's
+    descriptors cannot be read."""
+    byidx = {q["idx"]: q for q in params}
+    if not sites or not any(
+            int((byidx.get(i) or {}).get("length", 0) or 0) >= _SONG_PART_SECONDS * 44100
+            for i in audio_edits):
+        return audio_edits
+    try:
+        wide = _wide_descriptors_once(gr_path, img_path, params, _desc_key_mask(params, sites))
+    except Exception:
+        return audio_edits
+    found = _song_part_silences(byidx, wide, audio_edits, assets_dir)
+    if not found:
+        return audio_edits
+    out = dict(audio_edits)
+    for j, (owner, sids) in sorted(found.items()):
+        out[j] = _write_silence(os.path.join(work, "pad_song_parts", "idx%04d.wav" % j))
+        log("idx %d: the game plays this %.1f s part of a song with idx %d (sound id%s %s); "
+            "with idx %d replaced it is left silent, so the replacement plays without it."
+            % (j, int(byidx[j].get("length", 0) or 0) / 44100.0, owner,
+               "s" if len(sids) > 1 else "", ", ".join(str(s) for s in sids), owner), "info")
+    return out
+
+
 #: A replacement at least this much (card samples, 0.1 s) shorter than the sound
 #: it replaces ends at its own length when the bank may grow (PAD-800); one
 #: closer to the stock length is fitted in place, its few ms of silence not
@@ -9079,6 +9165,16 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     grows = {}
                     grow_places = None
                     _greads = None      # the staged bank's consumed map, once derived
+                    # PAD-1542: a replaced song's music plays without the
+                    # game's own short opening and ending parts around it
+                    if audio_edits and any(
+                            int(p.get("length", 0) or 0) >= _SONG_PART_SECONDS * 44100
+                            for p in params if p["idx"] in audio_edits):
+                        audio_edits = _silence_song_parts(
+                            gr_path, img_path, params,
+                            _card_descriptor_sites(gr_path, img_path, log,
+                                                   card_key=_sites_key),
+                            audio_edits, assets_dir, work, log)
                     _fits, _grows = _classify_audio_edits(
                         {p["idx"]: p for p in params}, audio_edits, assets_dir)
                     # PAD-800: a shorter replacement ends at its own length

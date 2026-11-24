@@ -82,3 +82,24 @@ Read from the v0.3.0 tag (commit `c21bfbd0`) and its release archives.
    `mode_install.py`/`mkmulticard.py` paths that read `game_monitor` (they go through `modehook`, which knows the
    block now); a "clear the switched-off mark" (`/dump/spikebt/disabled`) for Send to machine.
 7. Docs: `docs/guide/using-the-app.md` Plugins section, help text.
+
+## State after the second run (2026-11-24)
+
+Done and committed: items 1 (build pipeline, flash guard, Write tab rows), 2 (Plugins tab, help text, shots) and
+4 (emulator proof) of the list above. The proof is written up in
+`docs/validation/2026-11-24-pad-1554-bluetooth-plugin.md`; its scripts are in `C:\tmp\PAD-1554\rig\`, the proof
+card is `~/pad1554/gz_pro_1554bt.raw` in WSL Ubuntu (delete it when the ticket ships).
+
+Still left, in this order:
+
+1. **Spike 3** (item 5). The author's launcher exits without starting the game when `SPIKEBT_BACKEND` is not one
+   it knows: the hook must set `bluez5` exactly. `tabs/plugins.offered` and `bluetooth_card.offered` are
+   Spike 2 only today, so the tab is not on a Spike 3 rail yet.
+2. **Straight to a card / Send to machine** (item 6): `core/network_apply.py` takes `wifi` and `buttons`; add the
+   plugin, and remove `/dump/spikebt/disabled` on Send to machine so a plugin that switched itself off comes back.
+3. **Supported game check** (item 3): tell the user on the tab whether the picked card's game version is one the
+   installed release knows.
+4. `docs/guide/using-the-app.md`: a Plugins section.
+
+Rig notes: `parts.py --rootfs-file` prints text and damages a binary; pull folders with `--rootfs-dir`. The
+service menu needs Select twice (a splash page first); Bluetooth is the last row, one Minus from the top.

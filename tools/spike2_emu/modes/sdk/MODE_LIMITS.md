@@ -176,82 +176,83 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 
 | Game | Screen, clip, sounds | Countdown | Ball save | Lights | Also |
 |---|---|---|---|---|---|
-| Aerosmith 1.16 | ✓ | no | ✓ | shots | buttons, scoop, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Aerosmith 1.16 | ✓ | no | ✓ | shots | buttons, scoop, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Aerosmith LE 1.15 | ✓ | no | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Aerosmith LE 1.16 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Aerosmith LE 1.16 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Batman 66 1.14 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Batman 66 1.14 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Deadpool LE 1.14 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Deadpool LE 1.16 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all | buttons, light shows, starts on game modes completed |
-| Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
-| Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
-| Elvira 1.13 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| Elvira 1.13 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Fallout LE 0.82 (Spike 3) | no | no | ✓ | no | challenges, never waits |
-| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, building, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed |
+| Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, building, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, light shows, battle slot, challenges, game mode places, starts on game modes completed |
-| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed |
-| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Guardians of the Galaxy 1.15 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Guardians of the Galaxy LE 1.14 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Guardians of the Galaxy LE 1.15 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Iron Maiden LE 1.16 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, light shows, game mode places |
-| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Iron Maiden LE 1.18 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Iron Maiden Pro 1.18 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| James Bond 007 LE 1.06 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| James Bond 007 Pro 1.06 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| James Bond 60th LE 1.11 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, light shows, game mode places, intros and outros for game modes |
+| Jaws LE 1.02 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Jaws Pro 1.02 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | John Wick LE 1.01 | ✓ | no | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| John Wick LE 1.02 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| John Wick Pro 1.02 | ✓ | no | ✓ | shots | buttons, scoop, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
-| King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
-| Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| John Wick LE 1.02 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| John Wick Pro 1.02 | ✓ | no | ✓ | shots | buttons, scoop, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Jurassic Park LE 1.16 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| King Kong LE 1.00 | no | ✓ | no | no | buttons, light shows, never waits, never run |
+| King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Pokemon LE 0.82 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Pokemon LE 0.87 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Rush LE 1.19 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Rush LE 1.19 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Star Wars 2025 LE 0.96 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Star Wars 2025 Pro 0.84 (Spike 3) | no | no | ✓ | no | challenges, waits for multiballs only |
-| Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, light shows, challenges, game mode places, starts on game modes completed |
+| Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, light shows, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Star Wars ELG 1.10 (Spike 3) | ✓ | ✓ | ✓ | shots | mechanisms, light shows, challenges, game mode places, starts on game modes completed |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Stranger Things 1.13 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Stranger Things LE 1.12 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Stranger Things LE 1.13 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Sword of Rage LE 1.18 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Sword of Rage LE 1.19 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Sword of Rage Pro 1.19 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| TMNT LE 1.59 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | TMNT Pro 1.58 | no | no | ✓ | no | buttons, light shows, challenges, game mode places, starts on game modes completed, never waits |
-| TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, waits for multiballs only |
+| TMNT Pro 1.59 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| The Beatles 1.29 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes, waits for multiballs only |
 | The Mandalorian LE 1.44 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
-| The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, challenges, game mode places, starts on game modes completed |
-| The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, challenges, game mode places, starts on game modes completed |
+| The Mandalorian LE 1.45 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| The Mandalorian Pro 1.45 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| The Munsters LE 1.28 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| The Munsters Pro 1.28 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Transformers LE 0.96 (Spike 3) | no | no | ✓ | no | challenges, never waits |
-| Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
-| Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
-| Venom LE 1.07 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
-| Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Uncanny X-Men LE 0.98 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| Venom LE 1.07 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
+| Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Walking Dead Remastered LE 0.92 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 
 - **Countdown no:** the game's voice never says a number on its own.

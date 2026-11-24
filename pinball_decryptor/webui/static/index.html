@@ -4,10 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pinball Asset Decryptor</title>
+<!-- PAD-1545: what the window shows from its first paint until the app has
+     answered with its state (the window opens while the app is still being
+     made).  Inline and wordless: it is drawn before app.css and the
+     language catalog are in.  main.js clears it for the first render. -->
+<style>
+html, body { margin: 0; height: 100%; background: #15171a; }
+#page-boot { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+#page-boot i { width: 26px; height: 26px; border-radius: 50%; border: 3px solid #323841; border-top-color: #8a929c; animation: page-boot-spin .8s linear infinite; }
+@keyframes page-boot-spin { to { transform: rotate(360deg); } }
+</style>
 <link rel="stylesheet" href="/static/css/app.css">
 <script type="module" src="/static/js/main.js"></script>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><div id="page-boot" role="status" aria-label="Starting"><i></i></div></div>
 </body>
 </html>

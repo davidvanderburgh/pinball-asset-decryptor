@@ -28,6 +28,14 @@ class Context:
         # set once a page has asked for its state: the native window's page
         # reached the app (the host's blank-window watch, PAD-748)
         self.page_seen = threading.Event()
+        # PAD-1545: the desktop host opens its window while the App is still
+        # being made.  Set by the host to an Event that fires once the App is
+        # there; the page's first ask for its state waits on it.  None when
+        # nothing is being made (tests, a Context used on its own).
+        self.building = None
+        # ...and the host asking the App to open the last project as its
+        # first job on the loop, not inside its constructor
+        self.defer_session = False
         # files dropped on the window, by full path (drops.py, PAD-838)
         self.drops = DropBox()
 
@@ -35,7 +43,14 @@ class Context:
     def state_snapshot(self):
         """The page's starting point: the event number and the state as of
         that number (events after it are replayed on top)."""
-        if not self.page_seen.is_set():
+        first = not self.page_seen.is_set()
+        # the page reached the app, whether or not the App is made yet: the
+        # host's blank-window watch is satisfied from here
+        self.page_seen.set()
+        building = self.building
+        if building is not None:
+            building.wait()
+        if first:
             # the first page of this run is up: a Restart to update's
             # splash, if this is the version it waited for, is done
             # (core/update_splash, PAD-1036); a FindWindow when there is none
@@ -44,7 +59,6 @@ class Context:
                 update_splash.dismiss()
             except Exception:                           # noqa: BLE001
                 pass
-        self.page_seen.set()
         window = self.window
         seq = self.bus.last_seq
         state = self.store.snapshot()

@@ -192,8 +192,11 @@ def test_main_shows_the_browser_and_says_how_to_get_the_window(monkeypatch):
     server = types.SimpleNamespace(stop=lambda: None)
     browser = []
     monkeypatch.setattr(host_mod, "Context", lambda: ctx)
-    monkeypatch.setattr(host_mod, "build",
-                        lambda ctx, meanwhile=None: (ctx, server))
+    # the native start makes the App beside the window (PAD-1545)
+    pending = types.SimpleNamespace(
+        ctx=ctx, server=server, finished=True,
+        finish=lambda: (ctx, server), result=lambda: (ctx, server))
+    monkeypatch.setattr(host_mod, "begin_build", lambda ctx: pending)
 
     def _native(ctx, server, host):
         raise WindowUnusable("its web engine (Edge WebView2) did not start")

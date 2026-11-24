@@ -760,3 +760,77 @@ def test_a_spike2_cards_game_program_is_read_through_its_link(tmp_path):
         f.seek(26 << 20)
         f.write(fs.read_bytes())
     assert BT.game_program_sha256(str(card)) == (BT.SPIKE2, hashlib.sha256(game).hexdigest())
+
+
+# ------------------------------------------------------------------ on the machine
+class Machine:
+    """A machine over remote access: what its card and its own data hold."""
+
+    def __init__(self, files, stuck=False):
+        self.files, self.ran, self.stuck, self.closed = set(files), [], stuck, False
+
+    def sh(self, script, timeout=20, check=True):
+        self.ran.append(script)
+        if script.startswith('rm -f '):
+            if not self.stuck:
+                self.files.discard(script[6:])
+            return 0, ''
+        out = []
+        if BT.ENABLED in self.files:
+            out.append('on-card')
+        if BT.DISABLED in self.files:
+            out.append('switched-off')
+        out.append('release v0.3.0' if BT.RELEASE in self.files else 'release ')
+        if 'helper' in self.files:
+            out.append('helper-running')
+        return 0, '\n'.join(out) + '\n'
+
+    def close(self):
+        self.closed = True
+
+
+def test_a_plugin_that_switched_itself_off_is_switched_back_on_from_here():
+    assert BT.parse_status('on-card\nswitched-off\nrelease v0.3.0\n') == dict(
+        on_card=True, switched_off=True, release='v0.3.0', helper=False)
+    assert BT.parse_status('release \n') == dict(on_card=False, switched_off=False, release='', helper=False)
+    assert BT.parse_status('release ; rm -rf /\n')['release'] == ''
+    assert 'has no Bluetooth headphones on it' in BT.check_machine(Machine([]))
+    m = Machine([BT.ENABLED, BT.RELEASE, 'helper'])
+    assert BT.check_machine(m) == 'spike-pinball-bluetooth v0.3.0 is on the machine and switched on, and its helper is running.'
+    assert not any(x.startswith('rm') for x in m.ran)                # nothing is touched when nothing is wrong
+    m = Machine([BT.ENABLED, BT.RELEASE, BT.DISABLED])
+    said = BT.check_machine(m)
+    assert 'had switched itself off after a game that ended badly; it is switched back on' in said
+    assert 'rm -f /dump/spikebt/disabled' in m.ran and BT.DISABLED not in m.files
+    with pytest.raises(ExtrasError, match='could not be taken away'):
+        BT.check_machine(Machine([BT.ENABLED, BT.RELEASE, BT.DISABLED], stuck=True))
+
+
+def test_the_plugins_tab_checks_the_machine_the_network_tab_knows(tmp_path, monkeypatch, store, plugin):
+    from pinball_decryptor.core import pad_ssh_key, remote_send
+    from tests.webui_harness import web_app
+    fake, blobs, sums = plugin
+    monkeypatch.setitem(P.PLUGINS, 'bluetooth', fake)
+    monkeypatch.setattr(P.net, 'urlopen', Web({'v0.3.0': (blobs, sums)}))
+    monkeypatch.setattr(pad_ssh_key, 'KEY_DIR', tmp_path / 'keys')
+    with web_app(tmp_path, mfr='stern') as w:
+        w.window.current_mfr._era = 'spike2'
+        svc = w.window.service('plugins')
+        w.run(svc.on_show)
+        _settle(w, lambda r: r['releases_state'] == 'ok')
+        assert w.state('plugins')['plugins'][0]['address'] == '' and w.call('plugins.check_machine', 'bluetooth') is False
+        w.call('network.set_address', '192.168.1.40')
+        w.run(svc.publish)
+        assert w.state('plugins')['plugins'][0]['address'] == '192.168.1.40'
+        m = Machine([BT.ENABLED, BT.RELEASE, BT.DISABLED])
+        monkeypatch.setattr(remote_send, 'connect', lambda address: m)
+        assert w.call('plugins.check_machine', 'bluetooth')
+        row = _settle(w, lambda r: not r['busy'] and r['note'])
+        assert row['kind'] == 'ok' and 'it is switched back on' in row['note'] and m.closed
+
+        def down(address):
+            raise remote_send.SendError('Nothing answered at 192.168.1.40.')
+        monkeypatch.setattr(remote_send, 'connect', down)
+        assert w.call('plugins.check_machine', 'bluetooth')
+        row = _settle(w, lambda r: not r['busy'] and r['kind'] == 'err')
+        assert row['note'] == 'Nothing answered at 192.168.1.40.'

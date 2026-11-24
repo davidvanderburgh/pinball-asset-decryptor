@@ -606,3 +606,43 @@ def apply_to_build(original, output, config, log=None, cancel=None, key_source=N
                 log(check['text'], 'warning')
             said += '\n' + check['text']
     return said
+
+
+# ------------------------------------------------------------------ on the machine, over remote access
+#: His launcher switches itself off (the file DISABLED, on the machine's own data) after a game that ended badly,
+#: and nothing a card write does brings it back: that file is not on the card.  The Plugins tab asks the machine,
+#: and takes the mark away when it is there.
+STATUS = ('[ -f ' + ENABLED + ' ] && echo on-card; [ -e ' + DISABLED + ' ] && echo switched-off; '
+          'echo "release $(cat ' + RELEASE + ' 2>/dev/null)"; pidof spikebt >/dev/null 2>&1 && echo helper-running; '
+          'true')
+
+
+def parse_status(text):
+    """``dict(on_card, switched_off, release, helper)`` from :data:`STATUS`'s answer."""
+    lines = [l.strip() for l in (text or '').splitlines()]
+    release = next((l.split(None, 1)[1] for l in lines if l.startswith('release ') and len(l.split()) == 2), '')
+    return {'on_card': 'on-card' in lines, 'switched_off': 'switched-off' in lines,
+            'release': release if card_plugins.TAG.match(release) else '', 'helper': 'helper-running' in lines}
+
+
+def check_machine(machine):
+    """Ask a connected ``remote_send`` machine how the plugin is doing there and, when its launcher has switched
+    itself off, switch it back on.  The sentence to show."""
+    def sh(script):
+        answer = machine.sh(script, timeout=20, check=False)
+        return answer[1] if isinstance(answer, tuple) else answer
+    state = parse_status(sh(STATUS))
+    if not state['on_card']:
+        return ("This machine's card has no Bluetooth headphones on it. Tick it here and write the card from "
+                'this project.')
+    what = 'spike-pinball-bluetooth %s is on the machine' % (state['release'] or '(a release this app did not put on)')
+    if state['switched_off']:
+        sh('rm -f ' + DISABLED)
+        if parse_status(sh(STATUS))['switched_off']:
+            raise ExtrasError('%s and has switched itself off; the mark could not be taken away.' % what)
+        return ('%s. It had switched itself off after a game that ended badly; it is switched back on, from the '
+                'next time the game starts (restart the game on the Network tab, or switch the machine off and on).'
+                % what)
+    return '%s and switched on%s.' % (what, ', and its helper is running' if state['helper'] else
+                                      '; its helper is not running, which is normal on a game version it does '
+                                      'not know or with no Bluetooth adapter')

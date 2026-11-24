@@ -104,6 +104,7 @@ class PluginsTab(TabService):
         game = self._game(plugin, card, rec) if can and info['supported'] and not info.get('unpicked') else {}
         return {
             'game_note': game.get('text', ''), 'game_kind': {True: 'ok', False: 'warn'}.get(game.get('known'), ''),
+            'address': self._address(),
             'key': plugin.key, 'name': plugin.name, 'what': plugin.what, 'author': plugin.author,
             'project_url': plugin.project, 'license': plugin.license, 'tested': plugin.tested,
             'installed': rec['tag'] if rec else '', 'installed_tested': bool(rec and rec['tested']),
@@ -145,6 +146,38 @@ class PluginsTab(TabService):
                 self.ctx.loop.post(done)
             threading.Thread(target=work, daemon=True, name='pad-plugin-game').start()
         return {}
+
+    def _address(self):
+        """The machine the Network tab knows ('' when none): where "Check it on the machine" asks."""
+        network = self.window.service('network')
+        try:
+            return (network.get('address') or '') if network is not None else ''
+        except Exception:                                   # noqa: BLE001
+            return ''
+
+    @rpc
+    def check_machine(self, key):
+        """Ask the machine (over remote access) whether the plugin is on it and switched on; its launcher
+        switches itself off after a game that ended badly, and this switches it back on."""
+        plugin = self._plugin(key)
+        address = self._address()
+        card = CARDS[key]['card'] if plugin is not None else None
+        if plugin is None or not address or not hasattr(card, 'check_machine'):
+            return False
+
+        def work(say):
+            from ...core import remote_send
+            try:
+                machine = remote_send.connect(address)
+            except remote_send.SendError as e:
+                raise card_plugins.PluginError(str(e)) from None
+            try:
+                return card.check_machine(machine)
+            except (card_extras.ExtrasError, remote_send.SendError) as e:
+                raise card_plugins.PluginError(str(e)) from None
+            finally:
+                machine.close()
+        return self._start(key, 'Asking the machine at %s' % address, work, lambda text: text)
 
     def publish(self):
         project = self._project()

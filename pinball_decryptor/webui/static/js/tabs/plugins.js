@@ -79,6 +79,11 @@ function OnYourCards({ p, s }) {
     ${p.error ? html`<p role="alert" class="err-ink">${p.error}</p>` : null}
     <span class="small muted">${p.needs}</span>
     ${p.game_note ? html`<${Note} kind=${p.game_kind === "warn" ? "warn" : "ok"}>${p.game_note}<//>` : null}
+    ${p.address ? html`<div class="plg-row">
+      <${Button} size="sm" disabled=${!!p.busy || s.running}
+        title="Asks the machine over remote access whether the plugin is on it and switched on. Its launcher switches itself off after a game that ended badly; this switches it back on."
+        onClick=${() => call("plugins.check_machine", p.key)}>Check it on the machine<//>
+      <span class="small muted">The machine at ${p.address} (Network tab)</span></div>` : null}
     <${Advanced} title="Exactly what it changes on the card">
       <table class="plg-fields">
         <tbody>${(p.details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>

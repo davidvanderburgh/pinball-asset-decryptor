@@ -886,6 +886,32 @@ got_le 1075 1515 1578 1519 "1521,1522,1523,1524,1525,1526" 1080` - the
 trough held through the bridge, three coins and Start put the game in
 CHOOSE YOUR HOUSE and its TROUGH UP-KICKER came back as solenoid 1.
 
+**Stern Spike 3** (`"platform": "spike3"`, PAD-1560): a Spike 3 run is
+Spike 2-shaped for PAD.Controller - tools/spike3_emu's s3leds.py fills the
+run's `dump/padled` at padled.h's offsets and s3keys.py merges `dump/padsw`
+into the node inputs - so the controller plays it through its Spike 2 path.
+Only three things differ: the run is found by its own board record
+(`spike3-<n>.run`, the slot directory `/var/tmp/pad-s3/slot<n>` as `root`;
+a record its beater stopped touching two minutes ago is a run WSL took
+down, not a run), the switch table is the slot's
+`tables/game/switch_list.txt` (s3bridge.py writes it; no other slot's is
+seeded in), and a run the controller started is up at s3prog.py's
+`[s3run] progress run` line in the launch log (`padlaunch.Spike3Boot`).
+`padlaunch.Spike3Launch` starts one as the Emulate tab does - `s3launch.sh
+CARD SLOT MINUTES --audio --keyfile <the user's padkeys.json>` as root, on
+the first of Spike 3 slots 7, 6, 5, 4 that no live record and no other
+holder's `slot-N.lock` has - with `PAD_TITLE_TAG` (the kit's label in the
+game window's title, as watch.sh gives a Spike 2 run) and
+`PAD_S3_AUTOGUIDE=walk` (Guided Setup walked, as on a headless run: the
+player is at the table, not the game's service buttons). The card is the
+title's `*.sdcard-secure.raw` in the library's `spike3` sibling; the key is
+the one the Extract tab's Spike 3 unlock saved (`~/.pad/spike3_padkeys.json`,
+or the kit's `spike3_keyfile`), and without one the run stops at the card
+store's first decrypt, as it does on the Emulate tab. The run's ball model
+(s3balls.py) stands aside while the controller's `dump/ballfeed.off` is
+there. `padvpx run <title> [--hidden] [--mute]` and `padvpx stop <title>`
+take a Spike 3 title too.
+
 **Stern SAM** (and the WPC remakes): VPinMAME runs those games from the
 person's own ROM set already, so nothing for this kit to do, and they are
 not in the catalogue (David, 2026-11-02: no reinventing the wheel; Spike 1,

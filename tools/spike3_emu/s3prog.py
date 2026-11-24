@@ -24,6 +24,11 @@ import time
 
 BOOT_S = float(os.environ.get("PAD_S3_PROG_BOOT_S", "8"))
 NODES_S = float(os.environ.get("PAD_S3_PROG_NODES_S", "12"))
+#: how long the boot may take before this stops reporting. Time Guided Setup
+#: spends on the screen waiting for the user does not count (PAD-1560): a
+#: player who took ten minutes to press Save & Exit left the footer on
+#: "Guided Setup is waiting for you" for good, and a Visual Pinball table's
+#: loading window waiting for "run" with it
 GIVE_UP_S = 600
 #: after the lamps light, how long Guided Setup may take to appear before the
 #: run is called ready anyway (a title that never shows it)
@@ -69,10 +74,14 @@ def main():
     t_claimed = None
     t_lamps = None
     seen_guided = False
+    prev = t0
     while time.time() - t0 < GIVE_UP_S:
         declared, claimed, lamps = state(sd)
         now = time.time()
         g = guided(sd)
+        if lamps and g == "showing":
+            t0 += now - prev                         # the user's time, not the boot's
+        prev = now
         if lamps:
             t_lamps = t_lamps or now
         if lamps and g == "walking":                 # autoguide (a headless run)

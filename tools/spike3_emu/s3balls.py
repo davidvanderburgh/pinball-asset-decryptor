@@ -28,6 +28,12 @@ switch named SHOOTER LANE (or SHOOTER...), the coil named TROUGH (or
 TROUGH EJECT / BALL TROUGH) and AUTO PLUNGER (or AUTO LAUNCH). DIR/balls.json
 records what was resolved, for s3press.py.
 
+STOOD ASIDE FOR A TABLE (PAD-1560): while the slot's dump/ballfeed.off is
+there - the file PAD.Controller leaves for Spike 2's ballfeed.py while a
+Visual Pinball table owns the balls - no eject or launch is answered and no
+keep-alive tap made: the table's own trough and plunger move every ball
+switch. The window's ball moves still run (a person asked for them).
+
 PAD_S3_BALLS=0 turns the model off; PAD_S3_BALLS_HOME=0 starts the trough
 empty instead of full.
 
@@ -184,6 +190,7 @@ class Balls:
         if d:
             dump = os.path.join(d, "dump")
             self.req_dir = dump if os.path.isdir(dump) else d
+        self._aside = (0.0, False)       # (checked at, ballfeed.off there)
         self.write_where()
         if os.environ.get("PAD_S3_BALLS_HOME", "1") != "0":
             for nb in where["trough"]:
@@ -299,9 +306,27 @@ class Balls:
     def pf_state(self):
         return tuple(self.made(nb) for nb in self.pf)
 
+    def aside(self, now=None):
+        """Whether a table owns the balls (dump/ballfeed.off, PAD-1560),
+        looked at twice a second at most."""
+        now = time.time() if now is None else now
+        at, was = self._aside
+        if now - at < 0.5:
+            return was
+        on = bool(self.req_dir) and os.path.exists(os.path.join(self.req_dir, "ballfeed.off"))
+        if on != was:
+            self.say("ballfeed.off %s: %s" % (
+                "there" if on else "gone",
+                "the table's trough moves the balls" if on else "the model answers the trough again"))
+        self._aside = (now, on)
+        return on
+
     def keep_alive(self, now):
         """PAD-1137: tap a slingshot (or lane, or pop) when a ball in play has
         moved no playfield switch for ALIVE_S. See the module docstring."""
+        if self.aside(now):
+            self.pf_moved = now
+            return
         cur = self.pf_state()
         if cur != self.pf_last:
             self.pf_last, self.pf_moved = cur, now
@@ -335,7 +360,7 @@ class Balls:
         if self.queue and now >= self.busy_until and not self.due:
             verb, tag = self.queue.pop(0)
             self.answer(tag, self.move(verb))
-        if (self.eject_held and not self.due and now >= self.busy_until
+        if (self.eject_held and not self.due and now >= self.busy_until and not self.aside(now)
                 and not (self.w["shooter"] and self.made(self.w["shooter"]))):
             self.eject_held = False
             self.say("the shooter lane is clear: the held trough eject is served")
@@ -359,6 +384,8 @@ class Balls:
             if (node, idx) not in self.configured:
                 self.configured.add((node, idx))
                 return
+        if (node, idx) in (self.w["eject"], self.w["launch"]) and self.aside():
+            return
         if (node, idx) == self.w["eject"]:
             if TRACE:
                 sh = self.w["shooter"]

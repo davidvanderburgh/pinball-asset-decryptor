@@ -208,6 +208,9 @@ case "$cmd" in
         # never says so still gets its three tries after a minute
         wait_for 60 "\[led\] light show running" "$PAD_LOGDIR/gzwatch.log" \
             || say "(the game never said its attract show was running; starting anyway)"
+        # PAD-1541: and for its first clip - the lamps run seconds before the attract scene is loaded,
+        # and elvira3-1.13 dies on a Start in that gap (gamestate.sh, gs_show_up)
+        ( . "$RIG/gamestate.sh"; gs_wait_show "$PAD_LOGDIR/gzwatch.log" )             || say "(no attract clip opened; starting anyway)"
         # a Start the game ignores (a service screen the rig's autoattract opened for a moment, a
         # menu a first boot left up) is tried again, up to three times, leaving any menu first
         started=""

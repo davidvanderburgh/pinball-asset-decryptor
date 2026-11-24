@@ -186,30 +186,30 @@ def export_rootfs(path, dest, key_source=None, cancel=None):
             left -= len(chunk)
 
 
-def apply_to_build(original, output, config, log=None, cancel=None, key_source=None):
+def rewrite_rootfs(output, prepare, keys, cancel=None, size=None, what='SSH', stop=None):
+    """The decrypted root filesystem of the Spike 3 image *output* copied to a scratch file, changed and checked
+    by ``prepare(part, work)``, written back through the same LUKS volume and read back from the card.  Only a
+    prepared, verified filesystem is written; a failure raises ExtrasError and the caller must treat *output* as
+    incomplete.  (PAD-1554: remote access and the Bluetooth headphones plugin both change it this way.)"""
     from . import ssh_card as S
-    S.validate_output(original, output)
-    keys = key_for(original, key_source)
-    source = S.inspect_image(original, key_source=keys)
-    dest = S.inspect_image(output, key_source=keys, allow_pending=True)
-    if (not source['supported'] or not dest['supported'] or source['platform'] != PLATFORM
-            or source['partition'] != dest['partition']
-            or source['segment_offset'] != dest['segment_offset']
-            or source['plaintext_size'] != dest['plaintext_size']):
-        raise ExtrasError(source.get('reason') or dest.get('reason') or 'The Spike 3 system partition changed unexpectedly.')
-    size = dest['plaintext_size']
+    stop = stop or S._cancel
+    if size is None:
+        with open_rootfs(output, key_source=keys) as vol:
+            size = vol.size
     if shutil.disk_usage(Path(output).parent).free < size + (32 << 20):
         raise ExtrasError('Not enough free space to stage the decrypted Spike 3 root filesystem.')
     with tempfile.TemporaryDirectory(prefix='pad-ssh-s3-', dir=str(Path(output).parent)) as tmp:
         work = Path(tmp); part = work / 'rootfs.img'
         export_rootfs(output, part, key_source=keys, cancel=cancel)
-        S.prepare_rootfs(part, work, config, platform=PLATFORM, cancel=cancel)
+        prepare(part, work)
         expected = S._hash_file(part)
-        S._cancel(cancel)
+        stop(cancel)
         with open_rootfs(output, writable=True, key_source=keys) as vol, part.open('rb') as src:
+            if vol.size != size or part.stat().st_size != size:
+                raise ExtrasError('The Spike 3 system partition changed unexpectedly.')
             left = size
             while left:
-                S._cancel(cancel)
+                stop(cancel)
                 chunk = src.read(min(left, 1 << 20))
                 if not chunk:
                     raise ExtrasError('The staged Spike 3 filesystem is truncated.')
@@ -221,13 +221,28 @@ def apply_to_build(original, output, config, log=None, cancel=None, key_source=N
         with open_rootfs(output, key_source=keys) as vol:
             left = size
             while left:
-                S._cancel(cancel)
+                stop(cancel)
                 chunk = vol.read(min(left, 1 << 20))
                 if not chunk:
                     raise ExtrasError('The Spike 3 read-back is truncated.')
                 got.update(chunk); left -= len(chunk)
         if got.hexdigest() != expected:
             raise ExtrasError('The re-encrypted Spike 3 filesystem failed read-back verification.')
+
+
+def apply_to_build(original, output, config, log=None, cancel=None, key_source=None):
+    from . import ssh_card as S
+    S.validate_output(original, output)
+    keys = key_for(original, key_source)
+    source = S.inspect_image(original, key_source=keys)
+    dest = S.inspect_image(output, key_source=keys, allow_pending=True)
+    if (not source['supported'] or not dest['supported'] or source['platform'] != PLATFORM
+            or source['partition'] != dest['partition']
+            or source['segment_offset'] != dest['segment_offset']
+            or source['plaintext_size'] != dest['plaintext_size']):
+        raise ExtrasError(source.get('reason') or dest.get('reason') or 'The Spike 3 system partition changed unexpectedly.')
+    rewrite_rootfs(output, lambda part, work: S.prepare_rootfs(part, work, config, platform=PLATFORM, cancel=cancel),
+                   keys, cancel=cancel, size=dest['plaintext_size'])
     text = 'SSH server enabled (key-only, port 22).' if config['enabled'] else S.OFF_TEXT
     if log: log(text, 'info')
     return text

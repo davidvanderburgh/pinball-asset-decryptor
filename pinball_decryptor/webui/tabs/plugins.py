@@ -29,8 +29,12 @@ INTRO = ('Optional add-ons made by other people. A plugin is downloaded from its
 CARDS = {
     'bluetooth': dict(card=bluetooth_card, load=card_extras.load_bluetooth, save=card_extras.save_bluetooth,
                       tick='Put Bluetooth headphones on cards I write from this project',
-                      needs='A Spike 2 machine needs a USB Bluetooth adapter plugged in. It works on the exact '
-                            'game versions its author lists; on any other the game runs as Stern shipped it.'),
+                      needs={bluetooth_card.SPIKE2: 'A Spike 2 machine needs a USB Bluetooth adapter plugged '
+                             'in. It works on the exact game versions its author lists; on any other the game '
+                             'runs as Stern shipped it.',
+                             bluetooth_card.SPIKE3: 'A Spike 3 machine uses its own Bluetooth radio. It works '
+                             'on the exact game versions its author lists; on any other the game runs as Stern '
+                             'shipped it.'}),
 }
 
 
@@ -72,6 +76,7 @@ class PluginsTab(TabService):
         if pick not in tags:
             pick = plugin.tested if plugin.tested in tags else tags[0]
         can = card.offered(self.mfr)
+        platform = card.platform_of(self.mfr) or card.SPIKE2
         if not can:
             info = dict(supported=False, reason=card.NOT_SPIKE2, enabled=False)
         elif not self._source():
@@ -102,8 +107,8 @@ class PluginsTab(TabService):
             'busy': self._busy.get(plugin.key, ''), 'note': text, 'kind': kind,
             'offered': can, 'supported': bool(info['supported']), 'reason': info['reason'],
             'enabled': on, 'has_project': has_project, 'hint': hint, 'error': error,
-            'tick': side['tick'], 'needs': side['needs'],
-            'details': [list(r) for r in card.DETAILS],
+            'tick': side['tick'], 'needs': side['needs'][platform],
+            'details': [list(r) for r in card.details(platform)],
             'now': '' if info.get('unpicked') or not info['supported'] else card.describe(info),
         }
 

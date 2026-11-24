@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import shutil
+import sys
 import tarfile
 from pathlib import Path
 
@@ -341,6 +342,8 @@ def test_a_card_that_is_not_one_this_app_knows_is_left_alone(tmp_path, store, pl
     assert BT.apply_to_build(str(image), str(out), {'enabled': False}) == ''
     assert sha(out) == sha(image)
     assert BT.offered(type('M', (), {'key': 'stern', '_era': 'spike2'})())
+    assert BT.platform_of(type('M', (), {'key': 'stern', '_era': 'spike3'})()) == BT.SPIKE3
+    assert not BT.offered(type('M', (), {'key': 'stern', '_era': 'spike1'})())
     assert not BT.offered(type('M', (), {'key': 'jjp', '_era': ''})()) and not BT.offered(None)
 
 
@@ -491,8 +494,171 @@ def test_the_plugins_tab_installs_a_version_and_saves_the_projects_tick(tmp_path
         row = w.state('plugins')['plugins'][0]
         assert not row['installed'] and 'Cards already written keep it' in row['note'] and P.installed(fake) is None
         assert w.call('plugins.install', 'nothing', '') is False and w.call('plugins.remove', 'nothing') is False
-        # another manufacturer: nothing to tick
+        # a Spike 3 card: offered too, with its own words (no adapter, how an encrypted partition is changed)
         w.window.current_mfr._era = 'spike3'
         w.run(svc.publish)
         row = w.state('plugins')['plugins'][0]
-        assert not row['offered'] and row['reason'] == BT.NOT_SPIKE2
+        assert row['offered'] and 'its own Bluetooth radio' in row['needs']
+        assert any(r[0] == 'Normal power-off' for r in row['details'])
+        assert not any('pad-bt-game' in r[1] or 'btusb.ko' in r[1] for r in row['details'])
+        # an era the plugin does not go on: nothing to tick
+        w.window.current_mfr._era = 'spike1'
+        w.run(svc.publish)
+        row = w.state('plugins')['plugins'][0]
+        assert not row['offered'] and row['reason'] == BT.NOT_OFFERED
+
+
+# ------------------------------------------------------------------ Spike 3
+#: Stern's Spike 3 game_monitor, the part around the line that starts the game (read off a Fallout LE 0.82 card;
+#: the same file on every Spike 3 card in the library)
+S3_STOCK = ('#!/bin/sh\n\nsource /etc/init.d/shared\n\nPOWER_LOSS="3"\n\nif [ -x $GAME ]; then\n'
+            '\tpkill boot_display \n\n\twhile [ true ] ;\n\tdo\n\t\t# start game\n\t\t$GAME\n'
+            '\t\tGAME_EXIT_REASON="$?"\n\n\t\tif [ "$GAME_EXIT_REASON" -eq "$POWER_LOSS" ]; then\n'
+            '\t\t\tsync_and_hang\n\t\tfi\n\t\tsleep 1\n\tdone\nfi\n')
+
+
+def test_the_spike3_block_runs_the_launcher_with_bluez5_and_hands_on_the_games_exit_code():
+    on = BT.s3_monitor_text(S3_STOCK, True)
+    block = '\n'.join(BT.S3_HOOK_LINES)
+    assert block in on and BT.s3_monitor_text(on, True) == on and BT.s3_monitor_text(on, False) == S3_STOCK
+    # exactly the spelling his launcher knows: any other value makes it exit without starting the game
+    assert '\t\t\tSPIKEBT_BACKEND=bluez5 /usr/local/spikebt/run-live.sh $GAME\n' in on
+    assert '[ -f /usr/local/spikebt/enabled ] && [ -x /usr/local/spikebt/run-live.sh ]' in block
+    # Stern's script reads $? on the next line: the block ends by setting it to the game's own code
+    assert on.index('(exit "$PADBT")') < on.index('GAME_EXIT_REASON="$?"')
+    assert on.split('(exit "$PADBT")\n')[1].startswith('\t\tGAME_EXIT_REASON="$?"')
+    assert block.count('PADBT=$?') == 2
+    # a normal end (reboot asked for, power off, deep sleep) does not leave the launcher switched off
+    assert 'case "$PADBT" in 1|3|6) rm -f /dump/spikebt/disabled ;; esac' in block
+    for bad in ('#!/bin/sh\nexec /games/game\n', S3_STOCK.replace('\t\tGAME_EXIT_REASON="$?"\n', ''),
+                S3_STOCK + '\t\t$GAME\n\t\tGAME_EXIT_REASON="$?"\n'):
+        with pytest.raises(ExtrasError, match='not one this app knows'):
+            BT.s3_monitor_text(bad, True)
+
+
+def test_the_block_sets_the_exit_code_in_a_real_shell(tmp_path):
+    """The block run by sh with stand-ins for the launcher and the game: Stern's line reads the game's code."""
+    import subprocess
+    sh = shutil.which('sh')
+    if not sh or sys.platform == 'win32':
+        pytest.skip('a POSIX sh is required')
+    run = tmp_path / 'run-live.sh'
+    run.write_text('#!/bin/sh\n"$1"; r=$?; [ $r -ne 0 ] && touch %s/disabled; exit $r\n' % tmp_path)
+    game = tmp_path / 'game'
+    (tmp_path / 'enabled').write_text('')
+    for f in (run,):
+        f.chmod(0o755)
+    block = '\n'.join(BT.S3_HOOK_LINES).replace('/usr/local/spikebt', str(tmp_path)).replace(
+        '/dump/spikebt', str(tmp_path))
+    for code, kept in ((0, False), (3, False), (1, False), (6, False), (4, True), (139, True)):
+        game.write_text('#!/bin/sh\nexit %d\n' % code)
+        game.chmod(0o755)
+        (tmp_path / 'disabled').unlink(missing_ok=True)
+        out = subprocess.run([sh, '-c', 'GAME=%s\n%s\necho "reason=$?"' % (game, block)], capture_output=True,
+                             text=True)
+        assert out.stdout.strip() == 'reason=%d' % code, (code, out)
+        assert (tmp_path / 'disabled').exists() is kept, code
+    (tmp_path / 'enabled').unlink()                                   # no plugin: the plain game, the same code
+    game.write_text('#!/bin/sh\nexit 5\n')
+    out = subprocess.run([sh, '-c', 'GAME=%s\n%s\necho "reason=$?"' % (game, block)], capture_output=True, text=True)
+    assert out.stdout.strip() == 'reason=5'
+
+
+def _s3_root(tmp_path):
+    """A plain ext filesystem shaped like a Spike 3 system partition (the encryption is ssh_spike3's)."""
+    image = build(tmp_path, extra={'etc/init.d/game_monitor': S3_STOCK.encode(),
+                                   'etc/issue': b'Welcome to Stern Pinball Spike 3\n'})
+    root = tmp_path / 'rootfs.img'
+    root.write_bytes(image.read_bytes()[1 << 20:25 << 20])
+    return root
+
+
+def _s3_node(root, path):
+    from pinball_decryptor.plugins.stern.ext4 import Ext4Reader
+    from pinball_decryptor.core import ssh_card
+    with open(root, 'rb') as f:
+        r = Ext4Reader(f, 0, root.stat().st_size)
+        n = ssh_card._node(r, path)
+        return n and dict(n, data=r.read_file_bytes(n) if n['mode'] & 0o100000 else None)
+
+
+def test_spike3_takes_the_arm64_release_and_no_driver_and_gives_it_all_back(tmp_path, store, plugin):
+    from pinball_decryptor.plugins.stern.ext4 import Ext4Reader
+    fake, blobs, sums = plugin
+    P.install(fake, opener=Web({'v0.3.0': (blobs, sums)}))
+    tag, members = P.files(fake, 'arm64')
+    root = _s3_root(tmp_path)
+    work = tmp_path / 'work'
+    work.mkdir()
+    BT.prepare_rootfs(root, work, True, members, tag, platform=BT.SPIKE3)
+    with open(root, 'rb') as f:
+        info = BT.inspect_root(Ext4Reader(f, 0, root.stat().st_size), BT.SPIKE3)
+    assert info == dict(enabled=True, hooked=True, files=True, release='v0.3.0')
+    for name, (data, mode) in members.items():
+        got = _s3_node(root, BT.DIR + '/' + name)
+        assert got['data'] == data and got['mode'] & 0o7777 == mode and got['uid'] == 0, name
+    assert _s3_node(root, BT.DIR + '/btusb.ko') is None and _s3_node(root, BT.DIR + '/radio-start.sh') is None
+    assert _s3_node(root, BT.WRAPPER) is None                        # Spike 3 has no other preload to carry
+    mon = _s3_node(root, BT.MONITOR)
+    assert mon['data'].decode() == BT.s3_monitor_text(S3_STOCK, True) and mon['mode'] & 0o7777 == 0o755
+    BT.prepare_rootfs(root, work, False, platform=BT.SPIKE3)
+    assert _s3_node(root, BT.DIR) is None and _s3_node(root, BT.MONITOR)['data'].decode() == S3_STOCK
+    # a Spike 2 card's script on it, or a system that is not Spike 3's: left alone
+    other = tmp_path / 'other'
+    other.mkdir()
+    plain = build(other, extra={'etc/init.d/game_monitor': STOCK.encode(), 'etc/issue': b'Stern Pinball Spike 3'})
+    bad = other / 'rootfs.img'
+    bad.write_bytes(plain.read_bytes()[1 << 20:25 << 20])
+    with pytest.raises(ExtrasError, match='not one this app knows'):
+        BT.prepare_rootfs(bad, work, True, members, tag, platform=BT.SPIKE3)
+
+
+def test_a_spike3_build_puts_the_plugin_on_after_remote_access(tmp_path, monkeypatch):
+    from pinball_decryptor.core import ssh_card
+    from pinball_decryptor.plugins.stern import spike3, spike3_write as W
+    source = tmp_path / 'source.raw'
+    source.write_bytes(b'original')
+    out = tmp_path / 'out.raw'
+    project = tmp_path / 'project'
+    project.mkdir()
+    events = []
+    monkeypatch.setattr(spike3, 'is_spike3_card', lambda path: True)
+    monkeypatch.setattr(ssh_card, 'validate_request', lambda *a, **k: None)
+    monkeypatch.setattr(ssh_card, 'validate_output', lambda *a, **k: None)
+    monkeypatch.setattr(ssh_card, 'say_who_gets_in', lambda *a, **k: None)
+    monkeypatch.setattr(ssh_card, 'note_build', lambda *a: events.append('noted'))
+    monkeypatch.setattr(BT, 'validate_request', lambda original, assets, key_source=None: {'enabled': True})
+
+    def write(*a, **kw):
+        assert kw.get('allow_empty') is True                         # the plugin alone is a card to write
+        events.append('engine')
+        out.write_bytes(b'copied')
+        return (0, 0, 0, 0)
+    monkeypatch.setattr(W, 'write_card', write)
+
+    def apply(original, output, config, log=None, cancel=None, key_source=None):
+        events.append(('bluetooth', key_source))
+        return BT.note(True, 'v0.3.0', BT.SPIKE3)
+    monkeypatch.setattr(BT, 'apply_to_build', apply)
+    pipe = W.Spike3WritePipeline(str(source), str(project), str(out), lambda *a: None, lambda *a: None,
+                                 lambda *a: None, lambda ok, msg: events.append((ok, msg)), key_source='KEYS')
+    pipe.run()
+    assert events[:3] == ['engine', ('bluetooth', 'KEYS'), 'noted']
+    ok, msg = events[-1]
+    assert ok is True and msg.startswith('Wrote Bluetooth headphones to ')
+    assert msg.endswith("It uses the machine's own Bluetooth radio.")
+    assert not ssh_card.pending_marker(str(out)).exists()
+
+    def fail(*a, **kw):
+        raise ExtrasError('the key does not open this card')
+    monkeypatch.setattr(BT, 'apply_to_build', fail)
+    events.clear()
+    pipe.run()
+    assert events[-1] == (False, 'the key does not open this card')
+    assert not out.exists() and Path(str(out) + '.ssh-incomplete').exists()
+    # ticked on a card that cannot take it: stopped before anything is written
+    monkeypatch.setattr(BT, 'validate_request',
+                        lambda *a, **k: (_ for _ in ()).throw(ExtrasError(BT.NO_KEY)))
+    events.clear()
+    pipe.run()
+    assert events == [(False, BT.NO_KEY)]

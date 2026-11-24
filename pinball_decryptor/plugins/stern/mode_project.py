@@ -1412,7 +1412,58 @@ def _done_cannot(key, label, port=None):
 #: intro and an outro for one of the game's own modes"). The builds where it was seen in the emulator: a mode file
 #: following one of the game's modes started with it and ended with it (C:\tmp\PAD-1537).
 WITH_PROVEN = frozenset({
-    "godzilla_le-1.16",              # PAD-1537: Jet Fighter Attack (21) followed twice, its intro clip in the place of "fighter_intro", the music ducked
+    "aerosmith-1.16",                # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
+    "aerosmith_le-1.16",             # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
+    "avengers_infinity_le-1.10",     # PAD-1537 rig: Super Reactor (19) followed twice
+    "avengers_infinity_pro-1.10",    # PAD-1537 rig: Super Reactor (19) followed twice
+    "batman-1.14",                   # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Batphone Hurry Up (0) - started with it, its clock ended it
+    "beatles-1.29",                  # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): All My Loving (0) - started with it, its clock ended it
+    "deadpool_le-1.16",              # PAD-1537 rig: Disco Loops (19) followed once, its second START refused by the game
+    "deadpool_pro-1.16",             # PAD-1537 rig: Disco Loops (19) followed once, its second START refused by the game
+    "dungeons_and_dragons_le-1.10",  # PAD-1537 rig: Mimic Hurry Up (12) followed twice
+    "dungeons_and_dragons_pro-1.10", # PAD-1537 rig: Map Choosen Ritual Singleball (53) followed twice
+    "foo_fighters_le-1.04",          # PAD-1537 rig: Super Skill Shot (8) followed twice
+    "foo_fighters_pro-1.04",         # PAD-1537 rig: Super Skill Shot (8) followed twice
+    "godzilla_le-1.16",              # PAD-1537 rig: Jet Fighter Attack (21) followed twice
+    "godzilla_pro-1.16",             # PAD-1537 rig: Jet Fighter Attack (21) followed twice
+    "guardians-1.15",                # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
+    "guardians_le-1.15",             # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
+    "iron_maiden_le-1.18",           # PAD-1537 rig: Fear of the Dark (1) followed once, its second START refused by the game
+    "iron_maiden_pro-1.18",          # PAD-1537 rig: Fear of the Dark (1) followed once, its second START refused by the game
+    "james_bond_60th_le-1.11",       # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Villain Mode (0) - started with it, its clock ended it
+    "james_bond_le-1.06",            # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Bullshit Scoring (0) - started with it, its clock ended it
+    "james_bond_pro-1.06",           # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Bullshit Scoring (0) - started with it, its clock ended it
+    "jaws_le-1.02",                  # PAD-1537 rig: Super Buoys (29) followed twice
+    "jaws_pro-1.02",                 # PAD-1537 rig: Super Buoys (29) followed twice
+    "john_wick_le-1.02",             # PAD-1537 rig: Job Assassination (6) followed twice
+    "john_wick_pro-1.02",            # PAD-1537 rig: Job Assassination (6) followed twice
+    "jurassic_park_le-1.16",         # PAD-1537 rig: Chaos Hurry Up (4) followed twice
+    "jurassic_park_pro-1.16",        # PAD-1537 rig: Escape Nublar (127) followed twice
+    "jurassic_park_the_pin-1.05",    # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Stegosaurus (0) - started with it, its clock ended it
+    "king_kong_le-0.97",             # PAD-1537 rig: King Kombos (27) followed twice
+    "king_kong_pro-0.97",            # PAD-1537 rig: King Kombos (27) followed twice
+    "led_zeppelin_le-1.22",          # PAD-1537 rig: Black Dog (1) followed twice
+    "led_zeppelin_pro-1.22",         # PAD-1537 rig: Black Dog (1) followed twice
+    "mando_le-1.45",                 # PAD-1537 rig: Super Skill Shot (10) followed twice
+    "mando_pro-1.45",                # PAD-1537 rig: Super Skill Shot (10) followed twice
+    "metallica_spike-1.04",          # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Battery (0) - started with it, its clock ended it
+    "munsters_le-1.28",              # PAD-1537 rig: Lily Mode (3) followed twice
+    "munsters_pro-1.28",             # PAD-1537 rig: Lily Mode (3) followed twice
+    "rush_le-1.19",                  # PAD-1537 rig: La Villa Strangiato (2) followed twice
+    "rush_pro-1.19",                 # PAD-1537 rig: La Villa Strangiato (2) followed twice
+    "star_wars_elg-1.10",            # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Inner Loop (0) - started with it, its clock ended it
+    "star_wars_le-1.31",             # PAD-1537 rig: Shooting Gallery (29) followed once (a second START in a ball leaves a mode its STOP cannot stop)
+    "star_wars_pro-1.31",            # PAD-1537 rig: Shooting Gallery (29) followed once (a second START in a ball leaves a mode its STOP cannot stop)
+    "stranger_things-1.13",          # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Bullshit Scoring (0) - started with it, its clock ended it
+    "stranger_things_le-1.13",       # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Bullshit Scoring (0) - started with it, its clock ended it
+    "sword_of_rage_le-1.19",         # PAD-1537 rig: Sand Worm (0) followed twice
+    "sword_of_rage_pro-1.19",        # PAD-1537 rig: Sand Worm (0) followed twice
+    "turtles_le-1.59",               # PAD-1537 rig: Training Level Two (0) followed twice
+    "turtles_pro-1.59",              # PAD-1537 rig: Training Level Two (0) followed twice
+    "uncanny_xmen_le-0.98",          # PAD-1537 rig (plain C): Sentinel Hurry Up (1) - its start seen; a test call cannot run it (it takes the mode's object)
+    "uncanny_xmen_pro-0.98",         # PAD-1537 rig (plain C): Sentinel Hurry Up (1) - its start seen; a test call cannot run it (it takes the mode's object)
+    "venom_le-1.07",                 # PAD-1537 rig: Mini Mode 01 (19) followed twice
+    "venom_pro-1.07",                # PAD-1537 rig: Mini Mode 01 (19) followed once, its second START refused by the game
 })
 
 

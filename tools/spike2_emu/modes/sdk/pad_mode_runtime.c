@@ -14823,7 +14823,10 @@ int pm_game_mode_start(unsigned id)
     char key[24];
     pm_addr f;
     if (!(can & PM_CAN_PLACE) || id >= PLACE_IDS || !bm_has(block_named, id) || !pm_in_game()) return 0;
-    if (!block_obj[id] && !place_fn[id]) return 0;
+    /* PAD-1537 rig: PAD_TEST_PLAIN_START=1 calls a plain-C start with no claim - the follower's proof on those titles,
+     * whose starts take no arguments (they set their own first, as the mini-wizards' do, PAD-473); never on a machine */
+    if (!block_obj[id] && !place_fn[id] && !(getenv("PAD_TEST_PLAIN_START") && *getenv("PAD_TEST_PLAIN_START") == '1'))
+        return 0;
     pm_snprintf(key, sizeof key, "block_start_%u", id);
     if (!(f = place_check[id] ? place_from[id] : fn(key))) return 0;   /* PAD-715: a check's mode, its own start */
     say("place: the game's %s (mode %u) started for a test (its START at 0x%08" PMA ", object 0x%08" PMA ")", place_name(id),

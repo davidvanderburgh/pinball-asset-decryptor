@@ -286,7 +286,7 @@ def test_the_runtime_takes_the_start_and_counts_it():
     assert "if (id < BLOCK_IDS && !place_check[id] && place_take(r, id)) return 1;" in hook
     assert hook.index("place_take") < hook.index("lit_hold_until")   # before the lit hold and the block
     for want in ("place_begin(block_obj[id], id, up);", "place_audit(a);", "place_flag_set(fl)",
-                 'place_book("audit_completed", id)', "if (!block_obj[id] && !place_fn[id]) return 0;",
+                 'place_book("audit_completed", id)', "if (!block_obj[id] && !place_fn[id] && !(getenv(\"PAD_TEST_PLAIN_START\")",
                  "((void (*)(unsigned, unsigned, unsigned))(unsigned long)f)(obj, won ? 1u : 0u, 1u);",
                  "place_arm();", "place_tick();", "place_ball_end();", 'can & PM_CAN_PLACE ? " place" : ""'):
         assert want in rt, want

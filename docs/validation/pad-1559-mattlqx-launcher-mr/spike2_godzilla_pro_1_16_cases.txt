@@ -1,0 +1,12 @@
+before fallback: backend=- helper=real game_exit=0 -> launcher_rc=0 game_started=yes preload=[/usr/local/padmode/mode.so] menu_loaded=no buttons_loaded=no disabled_mark=no secs=1
+before unknown: backend=demo helper=real game_exit=0 -> launcher_rc=2 game_started=no preload=[] menu_loaded=no buttons_loaded=no disabled_mark=no secs=0
+before live: backend=- helper=shim game_exit=0 -> launcher_rc=0 game_started=yes preload=[/usr/local/padmode/mode.so:/usr/local/spikebt/menu.so] menu_loaded=yes buttons_loaded=no disabled_mark=no secs=2
+before s2exit1: backend=- helper=shim game_exit=1 -> launcher_rc=1 game_started=yes preload=[/usr/local/padmode/mode.so:/usr/local/spikebt/menu.so] menu_loaded=yes buttons_loaded=no disabled_mark=yes secs=3
+before s3exit3: backend=bluez5 helper=shim game_exit=3 -> launcher_rc=3 game_started=yes preload=[/usr/local/padmode/mode.so:/usr/local/spikebt/menu.so] menu_loaded=yes buttons_loaded=no disabled_mark=yes secs=2
+before s3exit2: backend=bluez5 helper=shim game_exit=2 -> launcher_rc=2 game_started=yes preload=[/usr/local/padmode/mode.so:/usr/local/spikebt/menu.so] menu_loaded=yes buttons_loaded=no disabled_mark=yes secs=3
+after fallback: backend=- helper=real game_exit=0 -> launcher_rc=0 game_started=yes preload=[/usr/local/bin/pad-buttons.so:/usr/local/padmode/mode.so] menu_loaded=no buttons_loaded=yes disabled_mark=no secs=1
+after unknown: backend=demo helper=real game_exit=0 -> launcher_rc=0 game_started=yes preload=[/usr/local/bin/pad-buttons.so:/usr/local/padmode/mode.so] menu_loaded=no buttons_loaded=yes disabled_mark=no secs=1
+after live: backend=- helper=shim game_exit=0 -> launcher_rc=0 game_started=yes preload=[/usr/local/bin/pad-buttons.so:/usr/local/padmode/mode.so:/usr/local/spikebt/menu.so] menu_loaded=yes buttons_loaded=yes disabled_mark=no secs=3
+after s2exit1: backend=- helper=shim game_exit=1 -> launcher_rc=1 game_started=yes preload=[/usr/local/bin/pad-buttons.so:/usr/local/padmode/mode.so:/usr/local/spikebt/menu.so] menu_loaded=yes buttons_loaded=yes disabled_mark=yes secs=4
+after s3exit3: backend=bluez5 helper=shim game_exit=3 -> launcher_rc=3 game_started=yes preload=[/usr/local/bin/pad-buttons.so:/usr/local/padmode/mode.so:/usr/local/spikebt/menu.so] menu_loaded=yes buttons_loaded=yes disabled_mark=no secs=2
+after s3exit2: backend=bluez5 helper=shim game_exit=2 -> launcher_rc=2 game_started=yes preload=[/usr/local/bin/pad-buttons.so:/usr/local/padmode/mode.so:/usr/local/spikebt/menu.so] menu_loaded=yes buttons_loaded=yes disabled_mark=yes secs=3

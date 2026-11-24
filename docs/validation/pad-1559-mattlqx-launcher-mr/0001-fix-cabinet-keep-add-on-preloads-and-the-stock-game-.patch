@@ -1,0 +1,284 @@
+From 144adaf120b0695ec49cbafdde5fa6ae5970e83f Mon Sep 17 00:00:00 2001
+From: David Vanderburgh <davidvanderburgh@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 15:24:09 -0500
+Subject: [PATCH] fix(cabinet): keep add-on preloads and the stock game on
+ launcher fallbacks
+
+- SPIKEBT_PRELOAD names further colon-separated objects to preload. Both
+  launchers put them in front of their own list, in the menu path and in
+  stock_game, so menu.so stays rightmost and still initializes first.
+- An unsupported SPIKEBT_BACKEND now starts the stock game like every
+  other run-live.sh failure path, instead of exiting 2 without a game
+  and leaving the supervisor to restart it in a loop.
+- With bluez5, game exits 1, 3 and 6 no longer disable the menu. Spike 3's
+  game_monitor treats them as normal ends (reboot requested after an
+  update, power loss, deep sleep), so a power-off switched Bluetooth off.
+  Spike 2 keeps the existing rule.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/build-menu.md             |   7 +-
+ scripts/cabinet/run-demo.sh    |  10 ++-
+ scripts/cabinet/run-live.sh    |  21 ++++-
+ tests/test_cabinet_launcher.py | 150 ++++++++++++++++++++++-----------
+ 4 files changed, 136 insertions(+), 52 deletions(-)
+
+diff --git a/docs/build-menu.md b/docs/build-menu.md
+index 95eb3ae..09988bd 100644
+--- a/docs/build-menu.md
++++ b/docs/build-menu.md
+@@ -198,7 +198,12 @@ Install the tested `menu.so`, `spikebt`, `btusb.ko`, `run-live.sh`, and
+ and update the helper and launcher scripts together. Verify their checksums and preserve
+ the original game launcher before integrating `run-live.sh` into it. The
+ launcher expects an `enabled` file in that directory and preserves an installed
+-`/usr/local/padmode/mode.so` preload.
++`/usr/local/padmode/mode.so` preload. Set `SPIKEBT_PRELOAD` to a colon-separated
++list of further objects that must stay preloaded; the launcher puts them in front
++of its own list, with or without the menu. An unsupported `SPIKEBT_BACKEND`
++starts the stock game. After a game exit other than 0, the launcher disables the
++menu. With `bluez5`, exits 1, 3 and 6 (reboot requested, power loss and deep
++sleep, which Spike 3's game monitor treats as normal) leave it enabled.
+ 
+ On Spike 2, owned AVRCP sessions provide actual headset volume controls and
+ notifications when supported. A pre-existing control connection is never taken
+diff --git a/scripts/cabinet/run-demo.sh b/scripts/cabinet/run-demo.sh
+index 6e3214c..3695643 100755
+--- a/scripts/cabinet/run-demo.sh
++++ b/scripts/cabinet/run-demo.sh
+@@ -4,9 +4,16 @@
+ set -u
+ base=/usr/local/spikebt
+ state=/dump/spikebt
++# Optional colon-separated objects that other cabinet add-ons need preloaded.
++# They go in front of this launcher's own list, so they initialize last.
++extra=${SPIKEBT_PRELOAD:-}
+ stock_game() {
++    stock_preload=$extra
+     if [ -f /usr/local/padmode/mode.so ]; then
+-        LD_PRELOAD=/usr/local/padmode/mode.so "$1"
++        stock_preload=${stock_preload:+$stock_preload:}/usr/local/padmode/mode.so
++    fi
++    if [ -n "$stock_preload" ]; then
++        LD_PRELOAD="$stock_preload" "$1"
+     else
+         "$1"
+     fi
+@@ -49,6 +56,7 @@ preload="$base/menu.so"
+ # glibc initializes these preloads from right to left. Check the original
+ # game instructions before the event agent installs its observers.
+ [ ! -f /usr/local/padmode/mode.so ] || preload="/usr/local/padmode/mode.so:$preload"
++[ -z "$extra" ] || preload="$extra:$preload"
+ # Pilot diagnostics are volatile. Truncate only before a new game process.
+ SPIKEBT_BACKEND=demo LD_PRELOAD="$preload" "$1" 2> /tmp/spikebt-game.log
+ result=$?
+diff --git a/scripts/cabinet/run-live.sh b/scripts/cabinet/run-live.sh
+index 27c6a3c..3edd64b 100755
+--- a/scripts/cabinet/run-live.sh
++++ b/scripts/cabinet/run-live.sh
+@@ -4,14 +4,24 @@ set -u
+ base=/usr/local/spikebt
+ state=/dump/spikebt/live
+ backend=${SPIKEBT_BACKEND:-bluez}
+-case "$backend" in bluez|bluez5) ;; *) echo 'Unsupported live backend' >&2; exit 2 ;; esac
++# Optional colon-separated objects that other cabinet add-ons need preloaded.
++# They go in front of this launcher's own list, so they initialize last.
++extra=${SPIKEBT_PRELOAD:-}
+ stock_game() {
++    stock_preload=$extra
+     if [ -f /usr/local/padmode/mode.so ]; then
+-        LD_PRELOAD=/usr/local/padmode/mode.so "$1"
++        stock_preload=${stock_preload:+$stock_preload:}/usr/local/padmode/mode.so
++    fi
++    if [ -n "$stock_preload" ]; then
++        LD_PRELOAD="$stock_preload" "$1"
+     else
+         "$1"
+     fi
+ }
++case "$backend" in bluez|bluez5) ;; *)
++    echo "Unsupported live backend $backend; starting the stock game" >&2
++    stock_game "$1"; exit $? ;;
++esac
+ if [ -e /dump/spikebt/disabled ] || [ ! -f "$base/enabled" ]; then stock_game "$1"; exit $?; fi
+ # Spike 3 already runs BlueZ 5 and BlueALSA. Never load the Spike 2 module
+ # or replace its system daemons. The helper verifies both services at startup.
+@@ -49,9 +59,14 @@ preload="$base/menu.so"
+ # glibc initializes these preloads from right to left. Check the original
+ # game instructions before the event agent installs its observers.
+ [ ! -f /usr/local/padmode/mode.so ] || preload="/usr/local/padmode/mode.so:$preload"
++[ -z "$extra" ] || preload="$extra:$preload"
+ SPIKEBT_BACKEND="$backend" SPIKEBT_SOCKET="$state/menu.sock" LD_PRELOAD="$preload" "$1" 2> /tmp/spikebt-game.log
+ result=$?
+-if [ "$result" -ne 0 ]; then
++# Spike 3's game_monitor treats 1 (reboot requested), 3 (power loss) and
++# 6 (deep sleep) as normal ends. Keep the menu enabled after those.
++normal_exit=0
++[ "$backend" != bluez5 ] || case "$result" in 1|3|6) normal_exit=1 ;; esac
++if [ "$result" -ne 0 ] && [ "$normal_exit" -eq 0 ]; then
+     echo "Bluetooth menu disabled after game exit $result; stock preload retained" >> "$state/helper.log"
+     touch /dump/spikebt/disabled
+ fi
+diff --git a/tests/test_cabinet_launcher.py b/tests/test_cabinet_launcher.py
+index a2c7963..b0f385e 100644
+--- a/tests/test_cabinet_launcher.py
++++ b/tests/test_cabinet_launcher.py
+@@ -14,53 +14,109 @@ ROOT = Path(__file__).resolve().parents[1]
+ @unittest.skipUnless(platform.libc_ver()[0] == "glibc" and shutil.which("cc"),
+                      "requires glibc and a C compiler")
+ class CabinetLauncherTests(unittest.TestCase):
+-    def test_bluetooth_checks_original_words_before_event_agent_initializes(self):
+-        with tempfile.TemporaryDirectory() as directory:
+-            root = Path(directory)
+-            (root / "padmode").mkdir()
+-            (root / "enabled").touch()
+-            # This stands in for a game instruction that the agent replaces.
+-            game = root / "game"
++    def setUp(self):
++        directory = tempfile.TemporaryDirectory()
++        self.addCleanup(directory.cleanup)
++        self.root = root = Path(directory.name)
++        (root / "padmode").mkdir()
++        (root / "enabled").touch()
++        # This stands in for a game instruction that the agent replaces.
++        self.game = root / "game"
++        subprocess.run(
++            ["cc", "-rdynamic", "-x", "c", "-", "-o", self.game],
++            input=("#include <stdlib.h>\nint original_word = 1;\n"
++                   "int main(void) { const char *code = getenv(\"GAME_EXIT\");"
++                   " return code ? atoi(code) : 0; }"),
++            text=True, check=True,
++        )
++        for filename, body in (
++            ("menu.so", 'puts(original_word == 1 ? "guard passed" : "guard failed");'),
++            ("padmode/mode.so", 'original_word = 0; puts("event agent armed");'),
++            ("extra.so", 'puts("extra armed");'),
++        ):
+             subprocess.run(
+-                ["cc", "-rdynamic", "-x", "c", "-", "-o", game],
+-                input="int original_word = 1; int main(void) { return 0; }",
++                ["cc", "-shared", "-fPIC", "-x", "c", "-", "-o", root / filename],
++                input=("#include <stdio.h>\nextern int original_word;\n"
++                       "__attribute__((constructor)) static void start(void) { " + body + " }"),
+                 text=True, check=True,
+             )
+-            for filename, body in (
+-                ("menu.so", 'puts(original_word == 1 ? "guard passed" : "guard failed");'),
+-                ("padmode/mode.so", 'original_word = 0; puts("event agent armed");'),
+-            ):
+-                subprocess.run(
+-                    ["cc", "-shared", "-fPIC", "-x", "c", "-", "-o", root / filename],
+-                    input=("#include <stdio.h>\nextern int original_word;\n"
+-                           "__attribute__((constructor)) static void start(void) { " + body + " }"),
+-                    text=True, check=True,
+-                )
+-            helper = root / "spikebt"
+-            helper.write_text(
+-                "#!/usr/bin/env python3\n"
+-                "import socket, sys, time\n"
+-                "sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)\n"
+-                "sock.bind(next(arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--socket=')))\n"
+-                "time.sleep(30)\n"
+-            )
+-            helper.chmod(0o755)
+-            pidof = root / "pidof"
+-            pidof.write_text("#!/bin/sh\nexit 1\n")
+-            pidof.chmod(0o755)
+-            env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}", SPIKEBT_BACKEND="bluez5")
+-            for mode in ("live", "demo"):
+-                with self.subTest(mode=mode):
+-                    launcher = (ROOT / f"scripts/cabinet/run-{mode}.sh").read_text()
+-                    for source, dest in (
+-                        ("/usr/local/spikebt", root),
+-                        ("/usr/local/padmode", root / "padmode"),
+-                        ("/dump/spikebt", root / "state"),
+-                        ("/run/spikebt-helper.pid", root / "helper.pid"),
+-                        ("/tmp/spikebt-game.log", root / "game.log"),
+-                    ):
+-                        launcher = launcher.replace(source, str(dest))
+-                    result = subprocess.run(["sh", "-c", launcher, "launcher", game],
+-                                            env=env, capture_output=True, text=True, timeout=10)
+-                    self.assertEqual(result.returncode, 0, result.stderr)
+-                    self.assertEqual(result.stdout.splitlines(), ["guard passed", "event agent armed"])
++        for name, body in (
++            ("spikebt",
++             "#!/usr/bin/env python3\n"
++             "import socket, sys, time\n"
++             "sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)\n"
++             "sock.bind(next(arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--socket=')))\n"
++             "time.sleep(30)\n"),
++            ("pidof", "#!/bin/sh\nexit 1\n"),
++            ("radio-start.sh", "#!/bin/sh\nexit 0\n"),
++        ):
++            (root / name).write_text(body)
++            (root / name).chmod(0o755)
++        self.disabled = root / "state" / "disabled"
++
++    def launch(self, mode, **env):
++        launcher = (ROOT / f"scripts/cabinet/run-{mode}.sh").read_text()
++        for source, dest in (
++            ("/usr/local/spikebt", self.root),
++            ("/usr/local/padmode", self.root / "padmode"),
++            ("/dump/spikebt", self.root / "state"),
++            ("/run/spikebt-helper.pid", self.root / "helper.pid"),
++            ("/tmp/spikebt-game.log", self.root / "game.log"),
++        ):
++            launcher = launcher.replace(source, str(dest))
++        env = {**os.environ, "PATH": f"{self.root}:{os.environ['PATH']}",
++               "SPIKEBT_BACKEND": "bluez5", **env}
++        # None unsets a variable the calling shell may carry.
++        return subprocess.run(["sh", "-c", launcher, "launcher", self.game],
++                              env={k: v for k, v in env.items() if v is not None},
++                              capture_output=True, text=True, timeout=10)
++
++    def test_bluetooth_checks_original_words_before_event_agent_initializes(self):
++        for mode in ("live", "demo"):
++            with self.subTest(mode=mode):
++                result = self.launch(mode, SPIKEBT_PRELOAD=None)
++                self.assertEqual(result.returncode, 0, result.stderr)
++                self.assertEqual(result.stdout.splitlines(), ["guard passed", "event agent armed"])
++
++    def test_extra_preloads_go_in_front_with_the_menu(self):
++        for mode in ("live", "demo"):
++            with self.subTest(mode=mode):
++                result = self.launch(mode, SPIKEBT_PRELOAD=str(self.root / "extra.so"))
++                self.assertEqual(result.returncode, 0, result.stderr)
++                self.assertEqual(result.stdout.splitlines(),
++                                 ["guard passed", "event agent armed", "extra armed"])
++
++    def test_stock_game_keeps_extra_preloads(self):
++        (self.root / "enabled").unlink()
++        for mode in ("live", "demo"):
++            with self.subTest(mode=mode):
++                result = self.launch(mode, SPIKEBT_PRELOAD=str(self.root / "extra.so"))
++                self.assertEqual(result.returncode, 0, result.stderr)
++                self.assertEqual(result.stdout.splitlines(), ["event agent armed", "extra armed"])
++        (self.root / "padmode/mode.so").unlink()
++        result = self.launch("live", SPIKEBT_PRELOAD=str(self.root / "extra.so"))
++        self.assertEqual(result.stdout.splitlines(), ["extra armed"])
++        result = self.launch("live", SPIKEBT_PRELOAD=None)
++        self.assertEqual((result.returncode, result.stdout), (0, ""))
++
++    def test_unsupported_live_backend_starts_the_stock_game(self):
++        result = self.launch("live", SPIKEBT_BACKEND="demo", SPIKEBT_PRELOAD=str(self.root / "extra.so"),
++                             GAME_EXIT="4")
++        self.assertEqual(result.returncode, 4)
++        self.assertIn("Unsupported live backend demo", result.stderr)
++        self.assertEqual(result.stdout.splitlines(), ["event agent armed", "extra armed"])
++        self.assertFalse(self.disabled.exists())
++
++    def test_spike3_normal_exits_keep_the_menu_enabled(self):
++        for backend, code, disabled in (
++            ("bluez5", "1", False), ("bluez5", "3", False), ("bluez5", "6", False),
++            ("bluez5", "2", True), ("bluez5", "139", True),
++            ("bluez", "1", True), ("bluez", "3", True),
++        ):
++            with self.subTest(backend=backend, code=code):
++                if self.disabled.exists():
++                    self.disabled.unlink()
++                result = self.launch("live", SPIKEBT_BACKEND=backend, SPIKEBT_PRELOAD=None, GAME_EXIT=code)
++                self.assertEqual(result.returncode, int(code), result.stderr)
++                self.assertEqual(result.stdout.splitlines(), ["guard passed", "event agent armed"])
++                self.assertEqual(self.disabled.exists(), disabled)
+-- 
+2.51.2.windows.1
+

@@ -1,7 +1,7 @@
 # s3proof.sh - one emulator proof run of a Spike 3 port (PAD-1286; the recipe: docs/plans/spike3_modes.md,
 # "The proof pass on a Spike 3 port"). As root in WSL, hidden and muted, on rig slot $SLOT:
 #
-#   [TITLE=<game>] PROOF=ballsave|game|mb|coil|mode|clock|census|stackmb|edge|spare  CARD=<name in D:\Pinball\images\Stern\spike3>  SLOT=88 \
+#   [TITLE=<game>] PROOF=ballsave|game|mb|coil|mode|clock|census|stackmb|edge|spare|challenge  CARD=<name in D:\Pinball\images\Stern\spike3>  SLOT=88 \
 #   CFG=save.cfg [CFG2=done.cfg] [SO=<a mode64.so>] [PORT=<a port>] TAG=<name> OUT=<a Windows dir as /mnt/c/...> \
 #     bash s3proof.sh
 #
@@ -29,6 +29,7 @@ cp "${SO:-$REPO/tools/spike2_emu/modes/sdk/prebuilt/mode64.so}" "$W/mode64.so"
 cp "${PORT:-$REPO/tools/spike2_emu/modes/sdk/ports/spike3/$PORTNAME}" "$W/files/game.port"
 cp "$MODES/${CFG:-save.cfg}" "$W/files/mode.cfg"
 [ -n "${CFG2:-}" ] && cp "$MODES/$CFG2" "$W/files/mode1.cfg"
+for x in ${EXTRA:-}; do cp "$MODES/$x" "$W/files/"; done   # PAD-1506: other files beside the runtime (comp.cfg)
 # the mode files name Star Wars ELG's shot bits; another title's (its port's switch lines) from its titles/<game>.env
 for f in "$W"/files/mode*.cfg; do
   [ -n "${TRIGGER_BITS:-}" ] && sed -i "s/^trigger \+0x[0-9a-fA-F]\+/trigger        $TRIGGER_BITS/" "$f"

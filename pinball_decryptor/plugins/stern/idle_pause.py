@@ -27,7 +27,8 @@ NO_NEED = "%s pauses its timers by itself when its ALLOW INACTIVITY TO PAUSE TIM
 #: 0.82 (176), Star Wars 2025 LE 0.96 (182) and Transformers LE 0.96 (174) read theirs once each, in the
 #: `adjustment(id) == 1` check before their timer test (as TMNT and Godzilla do on Spike 2), so none needs the fix.
 #: Star Wars ELG's Spike 2 build has none either (PAD-1022's census).
-NO_SETTING_TITLES = ("star_wars_elg", "pokemon_le", "walking_dead_remastered_le", "star_wars_2025_pro")
+#: PAD-1506: Pokemon Pro 0.87 has none either (no AD_INACTIVE_TIMER in its program, as the LE's 0.87).
+NO_SETTING_TITLES = ("star_wars_elg", "pokemon_le", "pokemon_pro", "walking_dead_remastered_le", "star_wars_2025_pro")
 NO_SETTING = "%s has no ALLOW INACTIVITY TO PAUSE TIMERS setting: its timers run as the game sets them."
 #: what the card does, for the tab and the log
 HOW = ("with ALLOW INACTIVITY TO PAUSE TIMERS on (the game's own setting, on by default), the missions' clocks and "

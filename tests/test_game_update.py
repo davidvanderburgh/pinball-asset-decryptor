@@ -147,13 +147,16 @@ def test_machines_update_starts_the_update_and_hands_the_build_to_the_write_tab(
         return True
 
     host.window = w
-    host.app = SimpleNamespace(_start_machine_update=start)
+    touched = []
+    host.app = SimpleNamespace(_start_machine_update=start, _registry_touch=touched.append,
+                               _save_settings=lambda: touched.append("saved"))
     fn = getattr(type(host).machines_update, "__wrapped__", type(host).machines_update)
     assert fn(host, "m1") is True
     assert started == {"mid": "m1", "project": "proj", "card": "old.raw"}
     assert w.write_upd_var.v == "new.raw" and w.write_assets_var.v == "ws_new"
     assert w.write_filename_var.v == build.name and rebound == [str(build)] and tabs == ["write"]
     assert "Send to machine" in shown[0] and "Keep the card's own settings" in shown[0]
+    assert touched == ["ws_new", "saved"]                  # the new project is known, so the row names it
 
 
 def test_the_row_offers_the_update_only_with_a_project_and_newer_code():

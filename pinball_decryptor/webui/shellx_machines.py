@@ -514,6 +514,12 @@ class MachinesMixin:
             w.write_assets_var.set(workspace)
             w.write_output_var.set(os.path.dirname(build))
             w.write_filename_var.set(os.path.basename(build))
+            # the update's extract is the machine's project from now on: known to the app, so the
+            # row (which finds a machine's project among the known ones) still names one
+            touch = getattr(self.app, "_registry_touch", None)
+            if touch is not None:
+                touch(workspace)
+                self.app._save_settings()
             if os.path.isfile(build):
                 self.machines_rebind(mid, build)
             w.select_tab("write")

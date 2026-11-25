@@ -1615,7 +1615,16 @@ HELP_CONTENT = {
             "| `insider` | each player's Insider Connected account id, null for a player not logged in |\n\n"
             "**What your server receives (API contract)**, on the Score feed card once it is ticked, shows the "
             "whole request as the machine sends it to your address, the body laid out, every field with its type, "
-            "and what your server should answer.",
+            "and what your server should answer.\n\n"
+            "**Also during the game** (under the address, off to start with) has the machine post each thing that "
+            "happens while a game is played as well: the game's start, each ball's start and end, a change of "
+            "player, the scores once a second while they change, multiballs, bonus and modes starting and ending, "
+            "a tilt, and the game's end. Each message carries every score, the player up and their ball, so a "
+            "stream overlay or a second screen can show the game live. The machine never waits for your server: "
+            "a message it does not take straight away is dropped, and the game plays on.\n\n"
+            "**Save the sample overlay...** saves a small server and a page that shows the live scores, the "
+            "player up, the ball and the modes running: run the server on the computer at your address, then add "
+            "its page to OBS as a Browser source or open it in a browser on a second screen. Its README says how.",
         ]),
         ("Remote access (SSH)", [
             "**Remote access** lets a computer on your home network log in to the machine and copy files to and "

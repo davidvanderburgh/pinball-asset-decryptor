@@ -61,3 +61,8 @@ html.bp-1100 .net-layout, html.bp-1100 .net-cols2 { grid-template-columns: 1fr; 
 .net-oc-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0; }
 .net-oc-colour { width: 32px; height: 26px; padding: 0; border: 1px solid var(--line, #444); border-radius: 6px;
   background: none; cursor: pointer; }
+
+/* PAD-1575: Score feed - "Also during the game" under the address, with the sample overlay's button */
+.net-live { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 2px 22px; }
+.net-live .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.net-live-contract { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line, rgba(127, 127, 127, .25)); }

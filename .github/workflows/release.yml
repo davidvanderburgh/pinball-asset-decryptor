@@ -57,10 +57,32 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
+        id: py
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: 'pip'
+
+      # PAD-1581: the bundled Python (embeddable + get-pip + the pinned
+      # deps) is ~50 s of this job and the same for every release that
+      # changes only the app's own files, so it is kept between runs.  The
+      # key is everything build.ps1 reads to make it (it checks the same
+      # fingerprint itself before using a restored copy) plus the month, so
+      # the unpinned pip/setuptools/wheel it carries still refresh.  On a
+      # miss build.ps1 makes it as before and leaves a copy that this step
+      # saves at the end of the job - after the installer is attached, off
+      # the release's critical path.  The Inno Setup compress (~60 s) is NOT
+      # cacheable: ISCC re-compresses its whole solid stream every build.
+      - name: Bundled Python cache key
+        id: pybundle
+        shell: pwsh
+        run: '"month=$(Get-Date -Format yyyy-MM)" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT'
+
+      - name: Restore the bundled Python
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/pad-python
+          key: pad-python-win-${{ steps.py.outputs.python-version }}-${{ steps.pybundle.outputs.month }}-${{ hashFiles('installer/build.ps1', 'requirements.txt', 'requirements-windows.txt', 'requirements-ui.txt') }}
 
       - name: Install Inno Setup
         shell: pwsh
@@ -70,7 +92,7 @@ jobs:
 
       - name: Build installer
         shell: pwsh
-        run: installer/build.ps1
+        run: installer/build.ps1 -PythonCache (Join-Path $env:RUNNER_TEMP 'pad-python')
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

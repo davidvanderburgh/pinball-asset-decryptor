@@ -86,3 +86,35 @@ Steps:
    ticked, boot it in the Spike 3 emulator (s3launch.sh, hidden, muted, `--keyfile`),
    frames of the TEST CARD menu and the IMAGES screen (s3press.py NEXT/SELECT).
 5. Shots: before/after testcard.png (the shot script already captures it).
+
+## Test card (run 2 - what was built and proven)
+
+- `mks3multi.py testcard --primary CARD --out OUT --selector-dir D [--media-dir M]
+  [--color ...] [--keyfile K]`: the design above. images.conf is mks3multi's own
+  (`image=img0|TEST CARD|...`, `timeout=0`) plus the lines mkmulticard writes for a
+  Spike 2 test card (`color_profile=0|...`, `test_dir=/games/pad/testcard`, the
+  `test_<kind>=` lines, `testcard=on`). Test sounds are refused in words.
+- A card built for a Windows `--out` is put together in the first Linux folder with
+  room for the card (`WORKDIRS`: /var/tmp/pad_s3multi, then the card store's disk
+  /mnt/wsl/cards/pad_s3multi). This PC's distro has 38 GB free, so the multi-boot
+  build was refused here too; it shares the fallback.
+- The app: the Test card tab is offered on Spike 3 (`testcard_core.available`); a
+  Spike 3 source card (`is_spike3_source`) takes `multiboot_core._s3_testcard_commands`:
+  the Spike 3 menu program (ensures3select.sh), `selectmedia prepare --screen
+  1920x1080` (test pictures and clips fitted to the Spike 3 screen, not Spike 2's
+  1360x768 LCD), then the builder as root with the user's key. Sounds and the
+  Spike 2-only network options are left off with a sentence; the page's words follow
+  the source card (coin-door buttons on Spike 3).
+- The emulator walk found two faults in the shared menu (codeselect settings.c) on a
+  coin-door build: BACK was ignored in the test screens (a list could never be left),
+  and the footers named the flippers, START and ACTION. Now, on SEL_COIN_DOOR builds,
+  BACK backs out of a test card's screens and the footers say PREVIOUS / NEXT,
+  SELECT, BACK; a Spike 2 build's strings are byte for byte what they were.
+
+Proven: the app's Test card tab (web UI harness, Spike 3 session) built a test card
+from the real Fallout LE 0.82 card with a picture, a clip and a sound (the sound left
+off with its sentence), in 13-16 min. In the Spike 3 emulator (hidden, muted): the
+TEST CARD menu (IMAGES 1 picture, VIDEOS 1 video, SCENES / SOUNDS none, COLOR
+CORRECTION); SELECT opened DEFAULT PAD TEST CARD, BACK came back, NEXT + SELECT opened
+IMAGES and showed the picture full screen, BACK BACK, NEXT + SELECT opened VIDEOS and
+played the clip (60 frames at 30 fps).

@@ -172,6 +172,7 @@ def test_spike3_test_card_conf_is_the_test_card_menu():
 def test_spike3_test_card_refuses_sounds(monkeypatch, tmp_path):
     mk = _mks3()
     monkeypatch.setattr(mk, "_need_root", lambda: None)
+    monkeypatch.setattr(mk.mkc, "PNG_MAX", mk.mkc.PNG_MAX)      # the build raises it in its process
     monkeypatch.setattr(mk, "Card", lambda path, keyfile=None: types.SimpleNamespace(path=path))
     monkeypatch.setattr(mk.mkc, "plan_media", lambda d, n, tests_apart=False: {
         "tests": [("t.wav", "TONE", "sound", None)], "files": {}, "rows": [], "volume": 50})
@@ -243,3 +244,39 @@ def test_test_card_source_spike3_detection(s3_disk, tmp_path):
     other.write_bytes(b"\0" * 4096)
     assert tc.is_spike3_source(str(other)) is False
     assert tc.is_spike3_source(str(tmp_path / "missing.raw")) is False
+
+
+def test_spike3_test_pictures_are_fitted_to_its_1920x1080_screen(monkeypatch):
+    from pinball_decryptor.webui import multiboot_core as mbc
+    from pinball_decryptor.webui import spike3_key
+    monkeypatch.setattr(spike3_key, "find_keyfile", lambda *a, **k: None)
+    form = types.SimpleNamespace(images=[types.SimpleNamespace(path=r"D:\cards\fallout.raw")], volume=50,
+                                 selector_dir="", tests=[], platform="s3", colour_profiles={})
+    prep = repr(dict(mbc.testcard_commands(form, r"C:\tmp\tc.raw", r"C:\tmp\media", test_specs=[]))["prepare"])
+    assert "--screen" in prep and "1920x1080" in prep
+    form2 = types.SimpleNamespace(**dict(vars(form), platform="stern", selector_dir=mbc.DEFAULT_SELECTOR_DIR))
+    prep2 = repr(dict(mbc.testcard_commands(form2, r"C:\tmp\tc.raw", r"C:\tmp\media", test_specs=[]))["prepare"])
+    assert "--screen" not in prep2                       # Spike 2: the 1360x768 LCD, as before
+    mk = _mks3()
+    assert mk.SCREEN == (1920, 1080)
+
+
+def test_selectmedia_screen_raises_the_test_picture_cap(tmp_path, monkeypatch):
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(ROOT, "tools", "spike2_emu"))
+    import selectmedia as sm_
+    monkeypatch.setattr(sm_, "TEST_PNG_MAX", (1360, 768))
+    seen = {}
+
+    def stop(a):
+        seen["cap"] = sm_.TEST_PNG_MAX
+        raise SystemExit(0)
+    # cmd_prepare sets the cap first thing; stop it right after
+    monkeypatch.setattr(sm_, "parse_size", lambda s: tuple(int(v) for v in s.split("x")))
+    a = types.SimpleNamespace(screen="1920x1080")
+    try:
+        monkeypatch.setattr(sm_, "read_media_manifest", stop, raising=False)
+        sm_.cmd_prepare(a)
+    except (SystemExit, AttributeError, TypeError, KeyError):
+        pass
+    assert sm_.TEST_PNG_MAX == (1920, 1080)

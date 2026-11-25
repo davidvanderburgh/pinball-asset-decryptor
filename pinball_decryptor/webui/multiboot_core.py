@@ -4224,7 +4224,7 @@ def _s3_testcard_commands(form, out, media_dir, cwd=None, test_specs=None):
     primary = wsl(form.images[0].path)
     prep = [SELECTMEDIA, "prepare", "--primary", primary, "--art", "0=none", "--anim", "0=none",
             "--music", "0=none", "--sound-move", "none", "--sound-confirm", "none",
-            "--cards", "1", "--out", wsl(media_dir)] + list(test_specs or []) + [
+            "--cards", "1", "--out", wsl(media_dir), "--screen", "1920x1080"] + list(test_specs or []) + [
             "--volume", str(int(form.volume))]
     tc = [be.tool, "testcard", "--primary", primary, "--out", wsl(out),
           "--selector-dir", platform_selector_dir(form.selector_dir, be),

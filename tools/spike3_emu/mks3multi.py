@@ -766,6 +766,9 @@ def build_card(a):
 # ============================================================================== testcard
 #: PAD-1586: a Spike 3 TEST CARD's test files, under /games/pad (the menu's own folder)
 TESTCARD_SUBDIR = "testcard"
+#: the Spike 3 machine's screen (the game's HDMI-A-2, 1920x1080): what its test pictures and
+#: clips are fitted to, where a Spike 2 card's are fitted to the 1360x768 LCD
+SCREEN = (1920, 1080)
 
 
 def testcard_conf(media, colour):
@@ -795,6 +798,8 @@ def testcard_card(a):
     none on a Spike 3 machine (the amplifier is the game's to start)."""
     _need_root()
     card = Card(a.primary, getattr(a, "keyfile", None))
+    # the test pictures and clips are the Spike 3 screen's size (selectmedia prepare --screen)
+    mkc.PNG_MAX = SCREEN
     media = mkc.plan_media(a.media_dir, 1, tests_apart=True) if a.media_dir else None
     if media:
         sounds = [t for t in (media.get("tests") or []) if mkc.test_parts(t)[2] == "sound"]

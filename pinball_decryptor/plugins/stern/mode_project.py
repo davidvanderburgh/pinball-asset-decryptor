@@ -651,6 +651,7 @@ def _multiball_cannot(key, label, sites=None):
 #: saved ball, and a drain after it ended the ball. Until a build is here the tab greys Ball save.
 BALL_SAVE_PROVEN = frozenset({
     "metallica_spike-1.05",            # PAD-1555 2026-11-24 newbuild/bsjob.sh: ball save 10 s taken, the drain inside it served back, the next drains (a second ball out after the save) ended the ball; 1.04 the same in the run
+    "dungeons_and_dragons_le-1.11",    # PAD-1555 2026-11-24 newbuild/bsjob.sh (rerun bs6, stock card, hidden, muted; the 1.10 control the same): ball save 10 s taken (the game is saving), the drain inside it served back, the third drain ended the ball; the earlier runs' missing END was those runs'
     "king_kong_le-1.00",               # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
     "king_kong_le-1.01",               # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
     "king_kong_pro-1.01",              # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
@@ -980,6 +981,10 @@ SCOOP_PROVEN = frozenset({
     # `scoop_hold 4000` mode): a ball settled - held 4000 ms, let go after 4008 ms (its time ran out), the game's kick
     # node 8 coil 8 140/255 60 ms after it
     "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
+    # the same job once their ports' scoop_event_arg (D&D's, copied) was out - with it the handler waited for the event
+    # in its second argument and no ball settled: King Kong's KONG CAVE VUK 49 (the kick node 8 coil 8 150/255 60 ms),
+    # Avengers' 47 (node 8 coil 7 200/255 60 ms), Metallica's RT EJECT OPTO 57 (the 1.04 control the same); 4005-4015 ms
+    "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "avengers_infinity_le-1.12", "metallica_spike-1.05",
     "king_kong_pro-0.97",              # PAD-420 2026-10-08 scoop_job6 (stock card staged on the NVMe, hidden, muted; the KONG CAVE VUK, King Kong LE's twin handler - its run-18 segvs were the D: card stall): no mode, kicked 1723 ms after landing; scoop_hold 4000, 5724 ms (held 4016); a mode stop 2.5 s into a hold, let go at once (held 2050), kicked 1253 ms after the stop; after the mode, 1718 ms ([coildrive] node 8 coil 8, 150 for 60 ms); no abort
 })
 

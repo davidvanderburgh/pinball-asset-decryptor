@@ -6,7 +6,7 @@
 #   STEPS=<n>        right-flipper steps at most to reach the entry (default 16)
 #
 # Run with rigbatch --speed 1 (a menu walk at 4x missed flipper steps, PAD-1449). The runtime arms on the card's comp.cfg
-# alone; START shows the start menu, the right flipper walks it until the runtime says the entry is picked, START takes
+# alone; both flipper buttons held in attract show the start menu (PAD-619), the right flipper walks it until the runtime says the entry is picked, START takes
 # it. Pass: `prolonged competition: armed`, `on the start menu as entry N of N`, `... picked on the menu` and
 # `ON until the machine is switched off - game 1 plays as Competition`.
 . "$(cd "$(dirname "$0")/../.." && pwd)/rigjob.sh"
@@ -29,12 +29,16 @@ armed=$(grep -a -m1 -Eo 'prolonged competition: (armed - on the start menu at 0x
 case "$armed" in *armed*) ;; *) cp "$log" "$JOB_OUT/mode.log"; job_fail "${armed:-the runtime said nothing of prolonged competition}";; esac
 LIST=$DUMP/tables/$GAME/switch_list.txt
 sw() { awk -v p="$1" '$1 ~ /^[0-9]+$/ { n = ""; for (i = 5; i <= NF; i++) n = n " " $i; if (toupper(n) ~ p) { print $1; exit } }' "$LIST"; }
-START=$(sw 'START BUTTON'); RIGHT=$(sw 'RIGHT FLIPPER BUTTON|RIGHT FLIPPER');
-[ -n "$START" ] && [ -n "$RIGHT" ] || job_fail "no START ($START) or right flipper ($RIGHT) in the switch list"
+START=$(sw 'START BUTTON'); LEFT=$(sw '^ (L|LEFT) FLIPPER BUTTON$'); RIGHT=$(sw '^ (R|RIGHT) FLIPPER BUTTON$')   # never UP LEFT FLIPPER EOS
+[ -n "$START" ] && [ -n "$LEFT" ] && [ -n "$RIGHT" ] || job_fail "no START ($START) or flippers ($LEFT $RIGHT) in the switch list"
 job_sleep 5
-job_press "$START"
-job_wait_log "$log" 'prolonged competition: on the start menu as entry' 20 \
-    || { cp "$log" "$JOB_OUT/mode.log"; job_fail "START showed no menu with the entry: $(grep -a 'prolonged competition' "$log" | tail -1 | cut -c1-160)"; }
+# CHOOSE YOUR MODE OF PLAY: both flipper buttons held in attract (PAD-619)
+for try in 1 2 3; do
+    job_press "$LEFT" 2500 & job_press "$RIGHT" 2500; wait
+    job_wait_log "$log" 'prolonged competition: on the start menu as entry' 8 && break
+done
+grep -aq 'prolonged competition: on the start menu as entry' "$log" \
+    || { cp "$log" "$JOB_OUT/mode.log"; job_fail "both flippers held showed no menu with the entry: $(grep -a 'prolonged competition' "$log" | tail -1 | cut -c1-160)"; }
 entry=$(grep -a -m1 -Eo 'prolonged competition: on the start menu as entry [0-9]+ of [0-9]+[^)]*\)?' "$log" | cut -c1-160)
 for ((k = 0; k < ${STEPS:-16}; k++)); do
     grep -aq 'prolonged competition: .* picked on the menu' "$log" && break

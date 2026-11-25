@@ -408,6 +408,18 @@ function DiskSpaceDialog({ close }) {
         <div class=${cx("sx-bar", barKind(b.pct))}><i style=${`width:${b.pct == null ? 0 : b.pct}%`}></i></div>
       </div>`)}
     </div>
+    ${d && d.old ? html`<div class="card sx-old stack" style="gap:6px">
+      <span class="h2">${d.old.head}</span>
+      ${d.old.note ? html`<span class="small muted wrap">${d.old.note}</span>` : null}
+      ${(d.old.rows || []).map((r) => html`<div class="row sx-old-row" ...${tip({ head: r.text, lines: r.tip.split("\n") })}>
+        <span class="grow ellip">${r.text}</span><span class="mono small">${r.size}</span></div>`)}
+      <div class="row wrap">
+        ${d.old.button ? html`<${Button} kind="primary" onClick=${() => call("shellx.old_distro_clean")}
+          disabled=${busy || d.old.busy}>${d.old.button}<//>` : null}
+        ${d.old.busy ? html`<${Spinner} />` : null}
+        ${d.old.status ? html`<span class="small wrap grow">${d.old.status}</span>` : null}
+      </div>
+    </div>` : null}
     <div class="stack" style="gap:4px">
       <span class="h2">Automatic clean-up</span>
       <${Check} checked=${!d || d.auto_on !== false} disabled=${!d} label="Clean up automatically"

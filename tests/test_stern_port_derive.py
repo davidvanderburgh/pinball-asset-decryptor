@@ -209,7 +209,7 @@ def test_a_fallback_placement_gives_way_to_a_references_own(monkeypatch):
 
 def test_the_same_model_s_port_is_copied_before_its_other_models(monkeypatch):
     """PAD-1555: King Kong LE 1.01's derived port copied King Kong Pro 0.97's values, shots and lamps (the Pro's
-    hardware; the Pro draft placed more) and the LE crashed 35 s into its boot. The same model's port comes first."""
+    hardware; the Pro draft placed more). The same model's port comes first."""
     from pinball_decryptor.plugins.stern import portswitch
     monkeypatch.setattr(portswitch, "drain", lambda elf, *a: None)
     refs = [_ref("king_kong_pro-0.97", "king_kong_pro", "0.97"), _ref("king_kong_le-0.97", "king_kong_le", "0.97")]

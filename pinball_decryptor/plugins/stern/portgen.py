@@ -49,10 +49,12 @@ import numpy as np
 #: this build's own id read off the event map (PAD-1389: King Kong LE 1.00 added one, so its port lost game_start
 #: and ball_start, and with them the Score feed)
 #: 12: the same model's port ranks before the title's other models' (port_derive.merge, PAD-1555: King Kong LE 1.01 took
-#: King Kong Pro 0.97's values, shots and lamps and crashed at boot)
+#: King Kong Pro 0.97's values, shots and lamps)
 #: 13: the callers of the award screens and light shows that use what they get back are read off the build (ret_use.py);
 #: `own_ret_scanned` and `own_pass_*` are never copied (PAD-1555: a copied `own_ret_scanned 1` came with no list)
-REVISION = 13
+#: 14: another title's value is copied only when two titles or more name it and every other-title reference agrees on
+#: it (PAD-1555: the November 2026 builds' derivations took other titles' coil devices, drives and message numbers)
+REVISION = 14
 RECIPE_FORMAT = 1
 #: PAD-1389: the event map's format (:func:`compile_busmap`)
 BUSMAP_FORMAT = 1

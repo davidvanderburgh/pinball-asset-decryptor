@@ -1,10 +1,10 @@
 # avengers_infinity_pro 1.12 - PAD-1555: Stern's November 2026 build: derived (port_derive) from this framework generation's references, the same model's
 # proven port first (its values, shots, callouts, text and lamps).
 # Emulator-proven 2026-11-24 by a full build check (modes/newbuild/checkjob.sh: gamecheck.sh play full, the stock
-# card, hidden, muted): the runtime hooked the game, 32 of its 61 shots came from their switches, a drain
+# card, hidden, muted): the runtime hooked the game, 31 of its 61 shots came from their switches, a drain
 # ended a ball (a tilted ball 2 and a ball 3 to the game's end), events seen firing: game_start, ball_start, ball_end, bonus_start, bonus_end, tilt_warning, tilt, game_over.
-# Shots no press made: Left outlane, Right outlane, Shot 0x400, Shot 0x10000, Shot 0x40000, Shot 0x80000, Pops, Left spinner, Right orbit (0x4000000000), Inner loop, Disc, Action button, Left flipper button, Right flipper button, Start button, Left flipper + Action button, Right flipper + Action button, Action button held 1 s, Left flipper button held 1 s, Right flipper button held 1 s, Action button released, Left flipper button released, Right flipper button released, Both flipper buttons, Action button held 3 s, Left flipper button held 3 s, Right flipper button held 3 s, Start button held 1 s, Start button released.
-# Whole game (PAD-1400, a mode that IS the game) proven 2026-11-24 by modes/newbuild/ownjob.sh: 3 balls ended, 0 light shows and 2 award screens refused, no crash;
+# Shots no press made: Left outlane, Right outlane, Shot 0x400, Shot 0x10000, Shot 0x40000, Shot 0x80000, Pops, Left spinner, Right orbit (0x4000000000), Inner loop, Scoop arrow, Disc, Action button, Left flipper button, Right flipper button, Start button, Left flipper + Action button, Right flipper + Action button, Action button held 1 s, Left flipper button held 1 s, Right flipper button held 1 s, Action button released, Left flipper button released, Right flipper button released, Both flipper buttons, Action button held 3 s, Left flipper button held 3 s, Right flipper button held 3 s, Start button held 1 s, Start button released.
+# Whole game (PAD-1400, a mode that IS the game) proven 2026-11-24 by modes/newbuild/ownjob.sh: 3 balls ended, 0 light shows and 4 award screens refused, no crash;
 # its own_pass callers read off this build by ret_use.py.
 # program sha1 20bbea5f9615c5944022d3b9dec2de7621deb996, portgen revision 12, 59 reference port(s) of framework generation B.
 
@@ -125,6 +125,8 @@ site surface_find     0x00523210 0xe92d4070 0xe24dd008
 site surface_set_video 0x0051a8c0 0xe5d030d4 0xe92d4ff0
 #   surface_play: placed through 3 callers, e.g. the bl at 0x278678 [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Metallica Remastered 1.04, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Foo Fighters LE 1.04, James Bond 60th LE 1.11, Venom LE 1.07, The Beatles 1.29, James Bond 007 LE 1.06, TMNT Pro 1.59, Batman 66 1.14, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00]
 site surface_play     0x00518758 0xe5d030d4 0xe92d43f0
+#   surface_duration: PAD-1555, at its distance from surface_play in this build's player (the November 2026 layout; test_spike2_mode_clip_back)
+site surface_duration 0x00516fd0 0xe5d030d4 0xe92d40f0
 #   surface_stop: placed through 3 callers, e.g. the bl at 0x358a0 [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Pro 1.15, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, Jurassic Park LE 1.16, John Wick LE 1.01]
 site surface_stop     0x00517b68 0xe5d030d4 0xe92d40f0
 #   surface_seek: located (strict) [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, James Bond 007 LE 1.06, TMNT Pro 1.59, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
@@ -168,7 +170,6 @@ site lamp_free_owner  0x0027ca2c 0xe92d4010 0xe1a04000
 #   event_cancel: located (strict) [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
 site event_cancel     0x00473b3c 0xe92d40f8 0xe30b6cc8
 #   show_1: located (strict) [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10]
-site show_1           0x00085344 0xe92d4010 0xe24dd010
 # site show_2                 NOT PLACED: the references disagree: 0x17a65c (Avengers: Infinity Quest Pro 1.10), 0x17722c (Avengers: Infinity Quest LE 1.10), 0x40640 (Star Wars LE 1.31)
 # site show_3                 NOT PLACED: the references disagree: 0x46c2c (Avengers: Infinity Quest Pro 1.10), 0x17a65c (Avengers: Infinity Quest LE 1.10), 0x1471f8 (King Kong LE 0.97), 0x12d9e4 (Jaws Pro 1.02), 0x1530d4 (Uncanny X-Men Pro 0.98), 0x40640 (Star Wars Pro 1.31, Iron Maiden LE 1.18, Iron Maiden Pro 1.18)
 # site show_4                 NOT PLACED: the references disagree: 0x7815c (Avengers: Infinity Quest Pro 1.10), 0x46c2c (Avengers: Infinity Quest LE 1.10), 0x12d9e4 (Jurassic Park Pro 1.16), 0x13c4a0 (Guardians of the Galaxy 1.15)
@@ -187,7 +188,6 @@ site shake_stop       0x0013616c 0xe52de004 0xe24dd00c
 #   drive_left: located (strict) [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16]
 site drive_left       0x001a33a8 0xe3500000 0xe92d4038
 #   coil_frame: located (loose) [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
-site coil_frame       0x0054e1f0 0xe5d13000 0xe353000f
 # site coil_off               NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   coop_start_game: located (strict) [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16]
 site coop_start_game  0x0035ed38 0xe92d47f0 0xe3024875
@@ -203,39 +203,8 @@ site flipper_query_call 0x0043980c 0xebf9d3ed 0xe3500000
 site ball_device_keep 0x0037afbc 0xe3053acc 0xe3403059
 #   show_stop_number: located (strict) [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
 site show_stop_number 0x004743c4 0xe92d4070 0xe30b6cc8
-# site scoop_handler          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference scoop_handler calls 0x3fb1b4, which is 0x397f54 in the target - prove what it does before using it
-#   candidate: the reference scoop_handler calls 0x133d58, which is 0x13638c in the target - prove what it does before using it
-#   candidate: the reference scoop_handler calls 0x1377e0, which is 0x139fec in the target - prove what it does before using it
-# site ball_end               NOT PLACED: the references disagree: 0xac46c (Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, Jurassic Park LE 1.16, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, Deadpool LE 1.14), 0x298334 (John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01)
-# site light_run              NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site clip_play              NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference clip_play calls 0x526b8, which is 0x4ea90 in the target - prove what it does before using it
-#   candidate: the reference clip_play calls 0x576624, which is 0x51a8c0 in the target - prove what it does before using it
-# site clip_stop              NOT PLACED: absent in the target (the function changed); callers disagree: 0x4ec80 x2, 0x3af38 x1
-#   candidate: the reference clip_stop calls 0x526b8, which is 0x4ea90 in the target - prove what it does before using it
-#   candidate: the reference clip_stop calls 0x1a7a40, which is 0x160e44 in the target - prove what it does before using it
-#   candidate: the reference clip_stop calls 0x52b34, which is 0x126c7c in the target - prove what it does before using it
 #   video_player: placed through 3 callers, e.g. the bl at 0x22d58 [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, Jurassic Park LE 1.16, Jaws LE 1.02, John Wick LE 1.01]
 site video_player     0x0004ea68 0xe92d4010 0xe30e4738
-# site stock_any_running      NOT PLACED: absent in the target (the function changed); no caller could be lined up; 4 of its cmode_manager's virtuals start as the reference's does
-# site stock_battle_running   NOT PLACED: absent in the target (the function changed); no caller could be lined up; 4 of its cmode_manager's virtuals start as the reference's does
-# site stock_multiball_running NOT PLACED: absent in the target (the function changed); callers disagree: 0xaac04 x1, 0x100f38 x1; 0 of its cmode_manager's virtuals start as the reference's does
-# site skill_shot_award       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference skill_shot_award calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-#   candidate: the reference skill_shot_award calls 0x16fa70, which is 0x87724 in the target - prove what it does before using it
-#   candidate: the reference skill_shot_award calls 0x286e00, which is 0x497b90 in the target - prove what it does before using it
-# site mball_start            NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference mball_start calls 0x7db28, which is 0x7273c in the target - prove what it does before using it
-#   candidate: the reference mball_start calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-#   candidate: the reference mball_start calls 0x3ab40c, which is 0x473bcc in the target - prove what it does before using it
-# site mball_stop             NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference mball_stop calls 0x3ab37c, which is 0x473b3c in the target - prove what it does before using it
-# site roster_start           NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site roster_done            NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference roster_done calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site roster_city_done       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference roster_city_done calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
 #   display_effect_start: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
 site display_effect_start 0x004d5994 0xe92d47f0 0xe2516000
 #   display_effect_next: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Uncanny X-Men LE 0.98, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00]
@@ -248,96 +217,22 @@ site layered_priority 0x0002f38c 0xe92d4008 0xe5903058
 site layered_waiter   0x0004eed8 0xe92d4ff0 0xe30bc930
 #   stock_rule_get: through the handler of hook 0x3, as in the reference [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Rush LE 1.19, Rush Pro 1.19, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Star Wars Pro 1.31, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Star Wars LE 1.30]
 site stock_rule_get   0x000aa848 0xe3510018 0xe92d4008
-# site caward_add             NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference caward_add calls 0x2575c0, which is 0x28c7c4 in the target - prove what it does before using it
-#   candidate: the reference caward_add calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site caward_build           NOT PLACED: absent in the target (the function changed); only 1 caller lined up
-#   candidate: the reference caward_build calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site caward_add_scaled      NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference caward_add_scaled calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-#   candidate: the reference caward_add_scaled calls 0x2575c0, which is 0x28c7c4 in the target - prove what it does before using it
-#   candidate: the reference caward_add_scaled calls 0x2f904, which is 0x2d818 in the target - prove what it does before using it
 #   game_event: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, TMNT LE 1.59, Elvira 1.13, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, James Bond 007 LE 1.06, John Wick LE 1.01]
 site game_event       0x00464c38 0xe92d47f0 0xe1a09000
 #   event_post_replacing: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
 site event_post_replacing 0x00473bcc 0xe92d4070 0xe1a05001
-# site ebirah_refill_counts   NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference ebirah_refill_counts calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site ebirah_stage_done      NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference ebirah_stage_done calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-#   candidate: the reference ebirah_stage_done calls 0x3ab40c, which is 0x473bcc in the target - prove what it does before using it
-#   candidate: the reference ebirah_stage_done calls 0x13bc98, which is 0x133158 in the target - prove what it does before using it
-# site ebirah_award_screen    NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference ebirah_award_screen calls 0x35ddc8, which is 0x405f64 in the target - prove what it does before using it
-#   candidate: the reference ebirah_award_screen calls 0x3e99dc, which is 0x3ad5f4 in the target - prove what it does before using it
-#   candidate: the reference ebirah_award_screen calls 0x2ac950, which is 0x2b0ef4 in the target - prove what it does before using it
-# site ebirah_final_mask      NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference ebirah_final_mask calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site tank_maser_phase       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference tank_maser_phase calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site tank_positions_or      NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site tank_pick_record       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site tank_path_index        NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site tank_seed_wave         NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference tank_seed_wave calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-#   candidate: the reference tank_seed_wave calls 0x2f640, which is 0x2d5c0 in the target - prove what it does before using it
-# site tank_destroy           NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference tank_destroy calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site tank_advance           NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference tank_advance calls 0x5c50c0, which is 0x56a050 in the target - prove what it does before using it
-# site tank_award_screen_kill NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference tank_award_screen_kill calls 0x35ddc8, which is 0x405f64 in the target - prove what it does before using it
-#   candidate: the reference tank_award_screen_kill calls 0x2ac950, which is 0x2b0ef4 in the target - prove what it does before using it
-#   candidate: the reference tank_award_screen_kill calls 0x1c5858, which is 0x17a24c in the target - prove what it does before using it
 #   switch_hit: located (loose) [Godzilla Pro 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
 site switch_hit       0x001a6d6c 0xe2503000 0x012fff1e
 #   switch_hit2: located (loose) [Godzilla Pro 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
 site switch_hit2      0x001a6e0c 0xe92d4010 0xe2504000
-# site battle_stop            NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference battle_stop calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-#   candidate: the reference battle_stop calls 0x121470, which is 0x1289cc in the target - prove what it does before using it
-#   candidate: the reference battle_stop calls 0x11b2d8, which is 0xdf3d0 in the target - prove what it does before using it
 #   battle_started: located (loose) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 site battle_started   0x000ab218 0xe3510018 0xe92d4008
 #   battle_clock: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 site battle_clock     0x003c7d84 0xe92d4010 0xe1a04000
-# site roster_cursor          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference roster_cursor calls 0x3abc04, which is 0x4743c4 in the target - prove what it does before using it
-#   candidate: the reference roster_cursor calls 0x3e99dc, which is 0x3ad5f4 in the target - prove what it does before using it
-# site roster_resume          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference roster_resume calls 0x13bc98, which is 0x133158 in the target - prove what it does before using it
-#   candidate: the reference roster_resume calls 0x1954ec, which is 0x3ba34 in the target - prove what it does before using it
-# site language_keys          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference language_keys calls 0x3cfbc, which is 0x2f4cc in the target - prove what it does before using it
-#   candidate: the reference language_keys calls 0x3cd3c, which is 0x2f24c in the target - prove what it does before using it
-#   candidate: the reference language_keys calls 0x16d8f4, which is 0x121690 in the target - prove what it does before using it
 #   language_begun: located (loose) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 site language_begun   0x00121690 0xe5d0000c 0xe3500000
-# site roster_screen_keys     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference roster_screen_keys calls 0x3a3164, which is 0x397f54 in the target - prove what it does before using it
-#   candidate: the reference roster_screen_keys calls 0x2ac950, which is 0x2b0ef4 in the target - prove what it does before using it
-#   candidate: the reference roster_screen_keys calls 0x121470, which is 0x1289cc in the target - prove what it does before using it
-# site roster_screen_open     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference roster_screen_open calls 0x24e3d4, which is 0x2aeb90 in the target - prove what it does before using it
-#   candidate: the reference roster_screen_open calls 0x3a31a0, which is 0x397f90 in the target - prove what it does before using it
-#   candidate: the reference roster_screen_open calls 0x3e99dc, which is 0x3ad5f4 in the target - prove what it does before using it
-# site roster_screen_pick     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference roster_screen_pick calls 0x3a31a0, which is 0x397f90 in the target - prove what it does before using it
-#   candidate: the reference roster_screen_pick calls 0x2ac950, which is 0x2b0ef4 in the target - prove what it does before using it
-#   candidate: the reference roster_screen_pick calls 0x3e99dc, which is 0x3ad5f4 in the target - prove what it does before using it
-# site roster_screen_bump     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference roster_screen_bump calls 0x3a3164, which is 0x397f54 in the target - prove what it does before using it
-#   candidate: the reference roster_screen_bump calls 0x3a31e8, which is 0x397fd8 in the target - prove what it does before using it
-#   candidate: the reference roster_screen_bump calls 0x3abc04, which is 0x4743c4 in the target - prove what it does before using it
-# site roster_slot_state      NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   roster_timer_on: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 site roster_timer_on  0x00397f54 0xe92d4008 0xe3053a94
-# site roster_switch_held     NOT PLACED: absent in the target (the function changed); callers disagree: 0x3e701c x15, 0x2a8114 x1
-#   candidate: the reference roster_switch_held calls 0x3ac7b4, which is 0x3e6fb0 in the target - prove what it does before using it
-#   candidate: the reference roster_switch_held calls 0x3ac618, which is 0x3e6e14 in the target - prove what it does before using it
-# site roster_portrait_step   NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site battle_beaten          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference battle_beaten calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
 #   backdrop_draw: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02]
 site backdrop_draw    0x00032f38 0xe5903054 0xe92d4010
 #   scene_show: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Venom Pro 1.07, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Aerosmith 1.16, Stranger Things 1.13, Stranger Things LE 1.13]
@@ -346,52 +241,13 @@ site scene_show       0x00406388 0xe92d4070 0xe30b4ccc
 site frame_end        0x00406594 0xe3500000 0xe92d40f8
 #   frame_kick: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Venom Pro 1.07, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Aerosmith 1.16, Stranger Things 1.13, Stranger Things LE 1.13]
 site frame_kick       0x004c6050 0xe92d4070 0xe2906008
-# site magnet_get             NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   ball_search_delay: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16]
 site ball_search_delay 0x0046bd70 0xe30b3994 0xe0600280
-# site block_battle_shots     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site coop_adj_changed       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference coop_adj_changed calls 0x287374, which is 0x498100 in the target - prove what it does before using it
 #   coop_eb_award: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 site coop_eb_award    0x002ac8a4 0xe92d4070 0xe1a06000
-# site coop_boost             NOT PLACED: absent in the target (the function changed); only 1 caller lined up
-#   candidate: the reference coop_boost calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-#   candidate: the reference coop_boost calls 0x3a5f6c, which is 0x464c38 in the target - prove what it does before using it
-# site coop_cache_173         NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference coop_cache_173 calls 0x286e00, which is 0x497b90 in the target - prove what it does before using it
-#   candidate: the reference coop_cache_173 calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site coop_cache_168         NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference coop_cache_168 calls 0x286e00, which is 0x497b90 in the target - prove what it does before using it
-#   candidate: the reference coop_cache_168 calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site coop_count_tanks       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference coop_count_tanks calls 0x286e00, which is 0x497b90 in the target - prove what it does before using it
-#   candidate: the reference coop_count_tanks calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
 #   comp_menu_frame: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, John Wick LE 1.02, John Wick Pro 1.02]
-site comp_menu_frame  0x00059abc 0xe0833106 0xe51330d4
-# site coop_cache_176         NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference coop_cache_176 calls 0x286e00, which is 0x497b90 in the target - prove what it does before using it
-#   candidate: the reference coop_cache_176 calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site coop_yes_maser         NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference coop_yes_maser calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site coop_lit_maser         NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site coop_count_spins       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference coop_count_spins calls 0x286e00, which is 0x497b90 in the target - prove what it does before using it
-#   candidate: the reference coop_count_spins calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site coop_count_shield      NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference coop_count_shield calls 0x286e00, which is 0x497b90 in the target - prove what it does before using it
-#   candidate: the reference coop_count_shield calls 0x4082f4, which is 0x493adc in the target - prove what it does before using it
-# site mg_magnet_get          NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   bridge_get: located (loose) [Godzilla Premium/LE 1.16]
 site bridge_get       0x0004e2e8 0xe92d4030 0xe30e46f8
-# site shield_move            NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference shield_move calls 0x3f3700, which is 0x473eec in the target - prove what it does before using it
-#   candidate: the reference shield_move calls 0x3f33e0, which is 0x473bcc in the target - prove what it does before using it
-# site shield_update          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference shield_update calls 0x3c040c, which is 0x1b39d8 in the target - prove what it does before using it
-#   candidate: the reference shield_update calls 0x3be9b8, which is 0x2361b0 in the target - prove what it does before using it
-# site building_move          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference building_move calls 0x2b3614, which is 0x497b90 in the target - prove what it does before using it
-# site building_busy          NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   challenge_menu_frame: located (strict) [Godzilla Premium/LE 1.16]
 site challenge_menu_frame 0x00059abc 0xe0833106 0xe51330d4
 #   live_records: located (strict) [King Kong Pro 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Venom Pro 1.07, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Aerosmith 1.16, James Bond 60th LE 1.11, Stranger Things 1.13, Stranger Things LE 1.13, Aerosmith LE 1.16, Metallica Remastered 1.03]
@@ -400,144 +256,36 @@ site live_records     0x00473f34 0xe30b2cc8 0xe3402075
 site layer_add        0x0006b520 0xe30bcccc 0xe1a03002
 #   layer_remove: located (strict) [King Kong Pro 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Venom Pro 1.07, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Deadpool LE 1.16, Deadpool Pro 1.16, Deadpool LE 1.14]
 site layer_remove     0x0006b538 0xe92d40f8 0xe5913004
-# site spider_magnet_get      NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site river_diverter_get     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site log_diverter_get       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site ramp_diverter_get      NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site left_post_get          NOT PLACED: not unique in the reference; only 1 caller lined up
-# site right_post_get         NOT PLACED: not unique in the reference; no caller could be lined up
 # site switch_spawn  left out: avengers_infinity_pro-1.10 has none (PAD-1400 placed it only where a build needed it; PAD-1555)
 #   orbit_post_get: located (strict) [Jurassic Park Pro 1.16]
 site orbit_post_get   0x0004e2e8 0xe92d4030 0xe30e46f8
-# site room_post_get          NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   inlane_post_get: located (loose) [Jurassic Park Pro 1.16]
 site inlane_post_get  0x0004e084 0xe92d4010 0xe30e46b8
-# site spot_level_get         NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site spot_rule_get          NOT PLACED: absent in the target (the function changed); its hooks' handlers call different functions here: 0x397f54 (hook 0x3), 0x473eec (hook 0x3)
-#   candidate: 0x397f54, called by a handler of one of its hooks - drain a ball with each hooked and keep the one that fires
-#   candidate: 0x473eec, called by a handler of one of its hooks - drain a ball with each hooked and keep the one that fires
-# site spot_award_grow        NOT PLACED: absent in the target (the function changed); only 1 caller lined up
-#   candidate: the reference spot_award_grow calls 0x24bcec, which is 0x493adc in the target - prove what it does before using it
 #   spot_award_collect: located (strict) [The Munsters Pro 1.28]
 site spot_award_collect 0x0002da3c 0xe92d4ff8 0xe1a09002
-# site spot_super_available   NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference spot_super_available calls 0x24bcec, which is 0x493adc in the target - prove what it does before using it
-# site spot_super_light       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference spot_super_light calls 0x24bcec, which is 0x493adc in the target - prove what it does before using it
 #   spot_process_cancel: located (strict) [The Munsters Pro 1.28]
 site spot_process_cancel 0x00473b3c 0xe92d40f8 0xe30b6cc8
 #   spot_process_start: located (strict) [The Munsters Pro 1.28]
 site spot_process_start 0x00473bcc 0xe92d4070 0xe1a05001
-# site spot_pre_super_seq     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site spot_post_super_seq    NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference spot_post_super_seq calls 0x39e090, which is 0x4739ec in the target - prove what it does before using it
-#   candidate: the reference spot_post_super_seq calls 0x152448, which is 0x2b0ef4 in the target - prove what it does before using it
 #   spot_add_ball: located (strict) [The Munsters Pro 1.28]
 site spot_add_ball    0x0037b778 0xe92d47f0 0xe1a04000
-# site spot_add_eligible      NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site spot_clock_bind_call   NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference spot_clock_bind_call calls 0x24bcec, which is 0x493adc in the target - prove what it does before using it
-#   candidate: the reference spot_clock_bind_call calls 0x2aa58, which is 0x2d5c0 in the target - prove what it does before using it
-#   candidate: the reference spot_clock_bind_call calls 0x2a2180, which is 0x1a72a4 in the target - prove what it does before using it
-# site spot_timer_pause       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site spot_grandpa_eject_save NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference spot_grandpa_eject_save calls 0xfb280, which is 0x398694 in the target - prove what it does before using it
-#   candidate: the reference spot_grandpa_eject_save calls 0x32b01c, which is 0x379648 in the target - prove what it does before using it
-#   candidate: the reference spot_grandpa_eject_save calls 0x39e090, which is 0x4739ec in the target - prove what it does before using it
-# site spot_adjust_get        NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference spot_adjust_get calls 0x20efb0, which is 0x497b90 in the target - prove what it does before using it
 #   spot_save_start: located (strict) [The Munsters Pro 1.28]
 site spot_save_start  0x00398694 0xe92d4070 0xe24dd010
-# site spot_mystery_eligible  NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site spot_mystery_collect   NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference spot_mystery_collect calls 0x24bcec, which is 0x493adc in the target - prove what it does before using it
-# site spot_mystery_lottery   NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference spot_mystery_lottery calls 0x39de50, which is 0x4737cc in the target - prove what it does before using it
-# site spot_toy_get           NOT PLACED: absent in the target (the function changed); its hooks' handlers call different functions here: 0x397f54 (hook 0x3), 0x473eec (hook 0x3)
-#   candidate: 0x397f54, called by a handler of one of its hooks - drain a ball with each hooked and keep the one that fires
-#   candidate: 0x473eec, called by a handler of one of its hooks - drain a ball with each hooked and keep the one that fires
 #   trex_magnet_get: located (strict) [Jurassic Park LE 1.16]
 site trex_magnet_get  0x0004e084 0xe92d4010 0xe30e46b8
-# site raptor_post_get        NOT PLACED: not unique in the reference; no caller could be lined up
-# site reel_tick              NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   status_bar: through the handler of hook 0x4e, as in the reference [James Bond 007 Pro 1.06, James Bond 007 LE 1.06]
 site status_bar       0x00374f40 0xe92d4010 0xe3054908
-# site bond_women_mult        NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference bond_women_mult calls 0x206d90, which is 0x473f34 in the target - prove what it does before using it
-# site film_complete          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference film_complete calls 0x1de35c, which is 0x493adc in the target - prove what it does before using it
-# site wizard_start           NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference wizard_start calls 0x1de35c, which is 0x493adc in the target - prove what it does before using it
-# site wizard_light           NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference wizard_light calls 0x3f4c2c, which is 0x2aeb90 in the target - prove what it does before using it
-#   candidate: the reference wizard_light calls 0x1de35c, which is 0x493adc in the target - prove what it does before using it
-# site wizard_way             NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site right_return_up_take   NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference right_return_up_take calls 0x206848, which is 0x4739ec in the target - prove what it does before using it
-#   candidate: the reference right_return_up_take calls 0x48fdb4, which is 0x3f0b2c in the target - prove what it does before using it
-# site right_return_up_give   NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference right_return_up_give calls 0x207004, which is 0x4741a8 in the target - prove what it does before using it
 #   show_13: located (loose) [James Bond 007 Pro 1.06]
-site show_13          0x0010ed28 0xe92d4010 0xe1a04000
 #   show_14: located (loose) [James Bond 007 Pro 1.06]
-site show_14          0x0010ed28 0xe92d4010 0xe1a04000
 #   show_15: located (loose) [James Bond 007 Pro 1.06]
-site show_15          0x0010ed28 0xe92d4010 0xe1a04000
 #   show_16: located (loose) [James Bond 007 Pro 1.06]
-site show_16          0x0010ed28 0xe92d4010 0xe1a04000
 #   show_17: located (loose) [James Bond 007 Pro 1.06]
-site show_17          0x0010ed28 0xe92d4010 0xe1a04000
 #   show_18: located (loose) [James Bond 007 Pro 1.06]
-site show_18          0x0010ed28 0xe92d4010 0xe1a04000
 #   show_19: located (loose) [James Bond 007 Pro 1.06]
-site show_19          0x0010ed28 0xe92d4010 0xe1a04000
 #   show_20: located (loose) [James Bond 007 Pro 1.06]
-site show_20          0x0010ed28 0xe92d4010 0xe1a04000
 #   show_21: located (loose) [James Bond 007 Pro 1.06]
-site show_21          0x0010ed28 0xe92d4010 0xe1a04000
 #   show_22: located (loose) [James Bond 007 Pro 1.06]
-site show_22          0x0010ed28 0xe92d4010 0xe1a04000
-# site sentinel_kick_fire     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference sentinel_kick_fire calls 0x1eaf28, which is 0x497b90 in the target - prove what it does before using it
-#   candidate: the reference sentinel_kick_fire calls 0x38ddd4, which is 0x1a3450 in the target - prove what it does before using it
-# site wizard_go_1            NOT PLACED: not unique in the reference; no caller could be lined up
-#   candidate: the reference wizard_go_1 calls 0x19d7c4, which is 0x493adc in the target - prove what it does before using it
-# site wizard_go_2            NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference wizard_go_2 calls 0x19d7c4, which is 0x493adc in the target - prove what it does before using it
-#   candidate: the reference wizard_go_2 calls 0x16f800, which is 0x405f64 in the target - prove what it does before using it
-# site rule_dispatch          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference rule_dispatch calls 0x24e3cc, which is 0x397f54 in the target - prove what it does before using it
-#   candidate: the reference rule_dispatch calls 0x3183f8, which is 0x473bcc in the target - prove what it does before using it
-# site wizard_earned_1        NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference wizard_earned_1 calls 0x22f680, which is 0x493adc in the target - prove what it does before using it
-# site timers_paused          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference timers_paused calls 0x1ceb60, which is 0x1a69e4 in the target - prove what it does before using it
-# site song_track             NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference song_track calls 0x23721c, which is 0x2b16a8 in the target - prove what it does before using it
-#   candidate: the reference song_track calls 0x237a90, which is 0x2b1f1c in the target - prove what it does before using it
-#   candidate: the reference song_track calls 0x4b5f98, which is 0x56a7b8 in the target - prove what it does before using it
 #   kickback_set: located (strict) [Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15]
-site kickback_set     0x00354194 0xe92d4038 0xe1a04001
-# site sentinel_head_up       NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference sentinel_head_up calls 0x2ef7e8, which is 0x187dc8 in the target - prove what it does before using it
-#   candidate: the reference sentinel_head_up calls 0x316d38, which is 0x2a8114 in the target - prove what it does before using it
-#   candidate: the reference sentinel_head_up calls 0x42ab80, which is 0x473eec in the target - prove what it does before using it
-# site sentinel_head_down     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference sentinel_head_down calls 0x2ef7e8, which is 0x187dc8 in the target - prove what it does before using it
-#   candidate: the reference sentinel_head_down calls 0x316d38, which is 0x2a8114 in the target - prove what it does before using it
-#   candidate: the reference sentinel_head_down calls 0x42ab80, which is 0x473eec in the target - prove what it does before using it
-# site comp_menu_obj_built    NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference comp_menu_obj_built calls 0x3cd880, which is 0x198db4 in the target - prove what it does before using it
-#   candidate: the reference comp_menu_obj_built calls 0x367460, which is 0x497b90 in the target - prove what it does before using it
-#   candidate: the reference comp_menu_obj_built calls 0x33ab5c, which is 0x184ad4 in the target - prove what it does before using it
-# site comp_menu_obj_pick     NOT PLACED: absent in the target (the function changed); no caller could be lined up
-#   candidate: the reference comp_menu_obj_pick calls 0x3509ec, which is 0x40635c in the target - prove what it does before using it
-#   candidate: the reference comp_menu_obj_pick calls 0x350a18, which is 0x406388 in the target - prove what it does before using it
-# site comp_menu_obj_add_fn   NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site layer_playing          NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site layer_video            NOT PLACED: absent in the target (the function changed); no caller could be lined up
-# site wizard_go_3            NOT PLACED: not unique in the reference; no caller could be lined up
-#   candidate: the reference wizard_go_3 calls 0x488f28, which is 0x3f124c in the target - prove what it does before using it
 #   the end of ball: no ball_end site - the framework's end of ball at 0x35f0cc dispatches bus 0x34 (its sequence 0x35, 0x36, 0x34, then the bonus 0x27, 0x28) - drain a ball to prove it (value ball_end_event below)
 
 # ---- globals: data <name> <address> ----
@@ -595,116 +343,41 @@ data game_flags             0x007380b8
 #   game_flag_count: derived from 2 places, e.g. 0x17a8b0+0x40 [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Star Wars LE 1.30, Deadpool LE 1.14]
 data game_flag_count        0x00594c34
 #   sw_struct: derived from 2 places, e.g. 0x2c36e0+0x1c [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
-data sw_struct              0x006ee3a8
 #   message_table: derived from 2 places, e.g. 0x2f9d70+0x24 [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, The Munsters LE 1.28, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16, Deadpool LE 1.14]
 data message_table          0x006a21f4
 #   ball_devices: derived from 2 places, e.g. 0x23f48c+0x10 [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16]
 data ball_devices           0x006a1c7c
 #   ball_device_count: derived from 2 places, e.g. 0x1e91c8+0x1ac [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, Deadpool LE 1.16, James Bond 007 LE 1.06, TMNT Pro 1.59, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16]
 data ball_device_count      0x00595acc
-# data scoop_slot             NOT PLACED: no code that loads it could be lined up
 #   message_count: derived from 2 places, e.g. 0x364660+0xd4 [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, James Bond 007 Pro 1.06, Foo Fighters Pro 1.04, Star Wars LE 1.31, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Venom Pro 1.07, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, The Beatles 1.29, Deadpool LE 1.16, TMNT Pro 1.59, Deadpool Pro 1.16, Deadpool LE 1.14]
 data message_count          0x00595b5c
 #   message_remap: derived from 2 places, e.g. 0x36473c+0x10 [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, James Bond 007 Pro 1.06, Foo Fighters Pro 1.04, Star Wars LE 1.31, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Venom Pro 1.07, Uncanny X-Men LE 0.98, Jaws LE 1.02, TMNT LE 1.59, The Beatles 1.29, Deadpool LE 1.16, TMNT Pro 1.59, Deadpool Pro 1.16, Deadpool LE 1.14]
 data message_remap          0x006efc64
-# data city_variants          NOT PLACED: no code that loads it could be lined up
-# data stock_mode_manager     NOT PLACED: the references disagree: 0x6db038 (Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, Jurassic Park LE 1.16, Rush LE 1.19, Rush Pro 1.19), 0x6dd9a8 (Iron Maiden LE 1.18, Iron Maiden Pro 1.18)
-# data rule_battle            NOT PLACED: the references disagree: 0x6dd0b8 (King Kong Pro 0.97, Jaws Pro 1.02), 0x6dd1a0 (Jurassic Park Pro 1.16, Jurassic Park LE 1.16, Jurassic Park Pin 1.05)
-# data roster_screen_table    NOT PLACED: no code that loads it could be lined up
 #   rule_cities: derived from 2 places, e.g. 0x3b0f4+0x10 [Iron Maiden LE 1.18, Iron Maiden Pro 1.18]
 data rule_cities            0x006dd9a8
 #   display_effects: derived from 1 places, e.g. 0x43815c+0xa4; ONE place is enough here: the runtime uses it only when the manager it points at holds award_screen_arg's table (disp_manager), so a wrong one holds nothing [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Foo Fighters Pro 1.04, Metallica Remastered 1.04, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Foo Fighters LE 1.04, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00]
 data display_effects        0x00765a1c
 #   layered_displays: derived from 1 places, e.g. 0x3cc60+0x8; ONE place is enough here: the program loads it in ONE place only (its getter), so two can never agree [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, Jurassic Park LE 1.16, Rush LE 1.19, Rush Pro 1.19, Metallica Remastered 1.04, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, John Wick LE 1.01, Metallica Remastered 1.03]
 data layered_displays       0x00660c34
-# data ebirah_stage_awards    NOT PLACED: no code that loads it could be lined up
-# data ebirah_lamp_table      NOT PLACED: no code that loads it could be lined up
-# data tank_path              NOT PLACED: no code that loads it could be lined up
-# data tank_spot_list         NOT PLACED: no code that loads it could be lined up
 #   score_mult: derived from 2 places, e.g. 0x257460+0x40 [Godzilla Pro 1.16, King Kong Pro 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Jurassic Park LE 1.16, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Uncanny X-Men LE 0.98, TMNT LE 1.59, Elvira 1.13, Star Wars ELG 1.10, Aerosmith 1.16, Foo Fighters LE 1.04, The Munsters LE 1.28, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Stranger Things 1.13, Stranger Things LE 1.13, Venom LE 1.07, The Beatles 1.29, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
 data score_mult             0x006675fc
 #   language_play_begun: derived from 2 places, e.g. 0x1e143c+0x4c [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
 data language_play_begun    0x006658b4
-# data language_player        NOT PLACED: no code that loads it could be lined up
-# data roster_portrait_state  NOT PLACED: no code that loads it could be lined up
-# data intro_state            NOT PLACED: no code that loads it could be lined up
-# data battle_beaten_rule     NOT PLACED: no code that loads it could be lined up
-# data battle_beaten_guard    NOT PLACED: disagreement: 0x6ddf78 x1, 0x6dd740 x1
-# data backdrop_city_vtable   NOT PLACED: no code that loads it could be lined up
 #   multiball_record: derived from 2 places, e.g. 0x36e5e4+0x4 [Godzilla Pro 1.16, Godzilla Premium/LE 1.16]
 data multiball_record       0x00735a50
 #   ball_search_time: derived from 2 places, e.g. 0x52bb8+0x4 [Godzilla Pro 1.16, Godzilla Premium/LE 1.16]
 data ball_search_time       0x0066b930
-# data coop_count_jets_rule   NOT PLACED: no code that loads it could be lined up
-# data shield_motor           NOT PLACED: no code that loads it could be lined up
-# data building_stepper       NOT PLACED: no code that loads it could be lined up
-# data wizard_obj_4           NOT PLACED: no code that loads it could be lined up
-# data wizard_obj_5           NOT PLACED: no code that loads it could be lined up
 #   spot_lamps_dirty: derived from 2 places, e.g. 0x67714+0x1c [The Munsters Pro 1.28]
 data spot_lamps_dirty       0x006e4768
 #   spot_screen_info: derived from 2 places, e.g. 0x41764+0x10 [The Munsters Pro 1.28]
 data spot_screen_info       0x006611c0
-# data spot_toy_vtable        NOT PLACED: no code that loads it could be lined up
-# data wizard_state           NOT PLACED: no code that loads it could be lined up
-# data wizard_table           NOT PLACED: no code that loads it could be lined up
-# data lamps_dirty            NOT PLACED: no code that loads it could be lined up
-# data gate_obj               NOT PLACED: no code that loads it could be lined up
-# data right_return_up_obj    NOT PLACED: no code that loads it could be lined up
-# data gates_obj              NOT PLACED: no code that loads it could be lined up
-# data wizard_ready_1         NOT PLACED: no code that loads it could be lined up
-# data control_gates_obj      NOT PLACED: no code that loads it could be lined up
-# data mode_running_1         NOT PLACED: no code that loads it could be lined up
-# data mode_running_2         NOT PLACED: no code that loads it could be lined up
-# data mode_running_3         NOT PLACED: no code that loads it could be lined up
-# data mode_running_4         NOT PLACED: no code that loads it could be lined up
-# data mode_running_5         NOT PLACED: no code that loads it could be lined up
-# data mode_running_6         NOT PLACED: no code that loads it could be lined up
-# data mode_running_7         NOT PLACED: no code that loads it could be lined up
-# data mode_running_8         NOT PLACED: no code that loads it could be lined up
-# data mode_running_9         NOT PLACED: no code that loads it could be lined up
-# data mode_running_10        NOT PLACED: no code that loads it could be lined up
-# data wizard_built_1         NOT PLACED: no code that loads it could be lined up
-# data wizard_running_1       NOT PLACED: no code that loads it could be lined up
-# data wizard_built_2         NOT PLACED: no code that loads it could be lined up
-# data wizard_running_2       NOT PLACED: no code that loads it could be lined up
-# data orbit_gates_obj        NOT PLACED: no code that loads it could be lined up
-# data song_positions         NOT PLACED: no code that loads it could be lined up
 #   kickback_count: derived from 2 places, e.g. 0x39eefc+0x8 [Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15]
-data kickback_count         0x005afc0c
-# data mode_running_11        NOT PLACED: no code that loads it could be lined up
-# data sentinel_head_obj      NOT PLACED: no code that loads it could be lined up
-# data wizard_obj_6           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_1            NOT PLACED: no code that loads it could be lined up
-# data mode_rule_2            NOT PLACED: no code that loads it could be lined up
-# data mode_rule_3            NOT PLACED: no code that loads it could be lined up
-# data mode_rule_4            NOT PLACED: no code that loads it could be lined up
-# data mode_rule_5            NOT PLACED: no code that loads it could be lined up
-# data mode_rule_6            NOT PLACED: no code that loads it could be lined up
-# data mode_rule_7            NOT PLACED: no code that loads it could be lined up
-# data mode_rule_8            NOT PLACED: no code that loads it could be lined up
-# data mode_rule_9            NOT PLACED: no code that loads it could be lined up
-# data mode_rule_10           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_11           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_12           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_13           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_14           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_15           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_16           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_17           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_18           NOT PLACED: no code that loads it could be lined up
-# data mode_rule_19           NOT PLACED: no code that loads it could be lined up
-# data right_gate_obj         NOT PLACED: no code that loads it could be lined up
-# data layer_stack            NOT PLACED: no code that loads it could be lined up
-# data video_layer            NOT PLACED: no code that loads it could be lined up
-# data control_gate_obj       NOT PLACED: no code that loads it could be lined up
-# data upper_gate_obj         NOT PLACED: no code that loads it could be lined up
 
 # ---- scenes ----
 #   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x50290+0x20); other titles' ports place 9d57875196c613785a1eee010c55223a0f1aa821 (The Munsters Pro 1.28, Metallica Remastered 1.04, The Munsters LE 1.28, Metallica Remastered 1.03), 7949bb14a9a21abf5e2885a01eb5ed4f9c3a8eca (Uncanny X-Men Pro 0.98, Uncanny X-Men LE 0.98), 4d963cfab70d8c850b1221649bcc7b4d96d558d3 (Jurassic Park Pin 1.05) [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10]
 scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 #   scene hud: COPIED, unverified (no code that loads it could be lined up; the target program names the same id); other titles' ports place 9d57875196c613785a1eee010c55223a0f1aa821 (King Kong Pro 0.97, King Kong LE 0.97, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Metallica Remastered 1.04, Jaws LE 1.02, The Munsters LE 1.28, John Wick LE 1.01, Metallica Remastered 1.03), 4d963cfab70d8c850b1221649bcc7b4d96d558d3 (Jurassic Park Pin 1.05) [Avengers: Infinity Quest Pro 1.10, Avengers: Infinity Quest LE 1.10]
 scene hud                  6cd5668f1f8189d6aa5e79203f12a0d0a4c90038
-# scene attract                NOT PLACED: the references disagree: 394c4a037fb26e12f536c42b2677bfed831f5c98 (Godzilla Pro 1.16, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Godzilla Pro 1.15, King Kong LE 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, Jurassic Park LE 1.16, Foo Fighters Pro 1.04, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Led Zeppelin LE 1.22, Venom Pro 1.07, Led Zeppelin Pro 1.22, Jaws LE 1.02, Elvira 1.13, Foo Fighters LE 1.04, Venom LE 1.07, Dungeons & Dragons LE 1.00), 60ed7e5036b8ce09d35a3e101ea6fc1380b37d97 (The Munsters Pro 1.28, Star Wars ELG 1.10, The Munsters LE 1.28), 4d963cfab70d8c850b1221649bcc7b4d96d558d3 (Jurassic Park Pin 1.05)
 
 # ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
 value backdrop_surface 1
@@ -745,45 +418,20 @@ value tower_post_devoff   4
 value tower_post_off_slot 31
 value proc_exit_hooks      0x120
 value proc_exit_slots      4
-value show_proc            13201
-value show_secs_1         5
-value show_secs_2         4
-value show_secs_3         4
-value show_secs_4         3
-value show_secs_5         8
-value show_secs_6         8
-value show_secs_7         4
-value show_secs_8         8
-value show_secs_9         8
-value show_secs_10        8
-value show_secs_11        2
-value show_secs_12        1
-value shake_adj            355
+value shake_adj            357
 value shake_drive          7
 value game_flags_at       4
 value coop_ball_msg          1255
 value show_count          340
 value scoop_event          2
 value clip_layer            0
-value language_keys_left   137
-value language_keys_right  139
-value language_adjustment 14
-value intro_state_at        0x44
-value intro_state_up        0
-value serve_music          66
 value backdrop_video_at      0x54
 value backdrop_scene_at      0x18
-value stock_slot_shot   41
-value stock_slot_lit    25
-value stock_field       0x18
 value stock_slot_end        10
-value stock_slot_stop       11
 value stock_slot_running    12
 value stock_slot_shot_entry 15
-value stock_slot_mask       44
 value stock_running_at      0x1b      # + player: running byte
 value stock_level_at        0x3c      # + 4 * player: starts this game
-value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
 value ebirah_rule           12
 value ebirah_spin_left_at   0x8c      # + 4 * player, spins left on the Left spinner (15 at a refill)
 value ebirah_spin_top_at    0x9c      # Top spinner (40)
@@ -818,242 +466,14 @@ value tank_multiplier_at    0xac      # the Maser multiplier (3 a wave, -1 per t
 value tank_maser_hits_at    0xb0      # + 4 * (player - 1)
 value tank_path_entries     6
 value tank_path_entry_size  16
-value shooter_lane_switch 62  # the served ball lands here (plunge.py: SHOOTER LANE); the flippers are back then
-value block_battle_hi         0x00000020
-value coop_ball_msg_max      0
-value coop_cache_173_at   0x10
-value coop_cache_168_at   0x4
-value coop_count_jets_at   0xa8
-value coop_count_tanks_at 0x44
-value coop_tier1_rules     0xf000
-value comp_menu_frame_list_at    300
-value comp_menu_frame_count_at   64
-value comp_menu_frame_count_last 0
-value comp_menu_frame_cap        9   # the game-mode table's entries
-value comp_menu_frame_cursor_reg 6
-value comp_menu_frame_buttons_reg 5
-value comp_menu_index            3   # COMPETITION
-value comp_menu_index_msg        1920
-value comp_menu_end_index        1   # STANDARD
-value comp_menu_end_msg          1915
-value comp_menu_end_caption_msg  1914   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
-value comp_menu_challenge_0      4   # PAD-1449: a challenge's index (the style chooser follows it)
-value comp_menu_challenge_1      5   # PAD-1449: a challenge's index (the style chooser follows it)
-value comp_menu_challenge_msg_0  3275   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_1  3276   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value coop_cache_176_at   0x4
-value coop_lit_maser_at    0x14
-value coop_lit_maser_min   1
-value coop_count_spins_at  0x74
-value coop_count_shield_at 0x34
-value coop_count_shield_stride 8
-value coop_steps_building_at  0x2c
-value coop_steps_building_n   6
-value coop_count_heatray_at  0x4
-value coop_count_heatspins_at  0x28
-value coop_count_saucer_at    0x4
-value coop_steps_powerline_at  0x38
-value coop_steps_powerline_n   3
-value coop_steps_powerline_inline 1
-value coop_steps_powerline_done 1
-value coop_steps_powerline_width 4
-value coop_keep_magna_at      0x14
-value coop_count_heatlevel_at  0x24
-value coop_count_rampage_at     0xb
-value coop_count_rampage_stride 1
-value coop_count_rampage_width  1
-value coop_count_train_at     0x2c
-value coop_keep_djmult_at     0xc
-value coop_keep_perks_at      0x44
-value shield_pos_at        44
-value shield_target_at     48
-value shield_away          86
-value shield_toward        87
-value hit_sound_1          367
-value hit_sound_2          368
-value hit_sound_3          369
-value hit_sound_4          370
-value hit_sound_5          371
-value hit_sound_6          372
-value hit_sound_7          373
-value hit_sound_8          374
-value building_at          44
-value building_target_at   48
-value building_floors      4
-value spider_magnet_dev    10
-value river_diverter_dev   12
-value log_diverter_dev     13
-value ramp_diverter_dev    15
-value left_post_dev        12
-value right_post_dev       11
-value comp_menu_challenge_2      10   # PAD-1449: a challenge's index (the style chooser follows it)
-value comp_menu_challenge_3      11   # PAD-1449: a challenge's index (the style chooser follows it)
-value comp_menu_challenge_4      12   # PAD-1449: a challenge's index (the style chooser follows it)
-value comp_menu_challenge_msg_2  4106   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_3  4114   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_4  4113   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value orbit_post_dev      13
-value orbit_post_ctl      40
-value orbit_post_devoff   4
-value orbit_post_off_slot 31
-value room_post_dev       14
-value room_post_ctl       40
-value room_post_devoff    4
-value room_post_off_slot  31
-value inlane_post_dev     8
-value inlane_post_ctl     40
-value inlane_post_devoff  4
-value inlane_post_off_slot 31
-value shake_power          42
-value stock_shot_bits 32
-value spot_phase_at 0x80
-value spot_hits_at 0x8c
-value spot_post_super_at 0x84
-value spot_timer_extended_at 0x84
-value trex_magnet_dev     17
-value trex_magnet_ctl     40
-value trex_magnet_devoff  4
-value trex_magnet_off_slot 31
-value raptor_post_dev     15
-value raptor_post_ctl     40
-value raptor_post_devoff  4
-value raptor_post_off_slot 31
-value wizard_entry   0x20
-value gate_ctl            28
-value gate_off_slot       3
 value gate_devoff         18
-value right_return_up_ctl    16
-value right_return_up_devoff 18
-value right_return_up_off_slot 3
-value right_return_up_left   32
-value right_return_up_pending 36
-value right_return_up_max_ms 14000
-value right_return_up_no_hold_flag 166   # FG_MODES_DO_NOT_HOLD_BALL
-value mode_flag_1           102
-value mode_flag_2           104
-value mode_flag_3           85
-value mode_flag_4           42
-value mode_flag_5           141
-value mode_flag_6           139
-value show_call_13       1
-value show_secs_13       2
-value show_call_14       2
-value show_secs_14       2
-value show_call_15       3
-value show_secs_15       2
-value show_call_16       4
-value show_secs_16       2
-value show_call_17       5
-value show_secs_17       2
-value show_call_18       6
-value show_secs_18       2
-value show_call_19       7
-value show_secs_19       2
-value show_call_20       8
-value show_secs_20       2
-value show_call_21       9
-value show_secs_21       2
-value show_call_22       10
-value show_secs_22       2
-value done_audit_0                 376
-value done_flag_1                  77
-value done_flag_2                  83
-value done_flag_3                  94
-value done_flag_4                  100
-value done_flag_5                  113
-value done_flag_6                  117
-value done_flag_7                  121
-value done_flag_8                  125
-value done_flag_9                  131
-value done_flag_10                 136
-value done_flag_11                 174
-value wizard_slot_enable 42   # its base class's enable: sets the player's byte at +0x83 that START's check (v[46]) reads
-value gates_ctl           12
-value gates_off_slot      5
-value control_gates_dev   16
 value control_gates_ctl   32
 value control_gates_devoff 4
 value control_gates_off_slot 30
-value cerebro_post_off_adj 174
-value cerebro_post_own_game 1
-value sentinel_jaw_off_adj 178
-value sentinel_jaw_own_game 1
-value sentinel_kick_off_adj 181
-value shake_power_adj      315
-value wizard_flag_1      50    # FG_BLACKENED_MULTIBALL_ACTIVE
-value wizard_proc_2      223   # its own process, which the start creates
-value comp_menu_challenge_5      13   # PAD-1449: a challenge's index (the style chooser follows it)
-value comp_menu_challenge_6      14   # PAD-1449: a challenge's index (the style chooser follows it)
-value comp_menu_challenge_msg_5  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_6  3656   # PAD-1449 round 2: its name message (the menu's style step letters it)
 value scoop_event_arg      1
-value left_post_ctl       28
-value left_post_devoff    4
-value left_post_off_slot  30
-value right_post_ctl      28
-value right_post_devoff   4
-value right_post_off_slot 30
 value orbit_gates_ctl     12
 value orbit_gates_off_slot 5
-value done_flag_0                  56
 value song_now_at            0x160
-value inactive_adj           175
-value sentinel_hand_off_adj 179
-value sentinel_hand_own_game 1
-value sentinel_finger_off_adj 186
-value sentinel_finger_own_game 1
-value mode_rule_slot       15
-value done_audit_1                 293
-value done_audit_2                 301
-value done_audit_3                 308
-value done_audit_4                 315
-value done_audit_5                 320
-value done_audit_6                 327
-value done_audit_7                 333
-value done_audit_8                 338
-value done_audit_9                 343
-value done_audit_10                348
-value done_audit_11                354
-value done_audit_12                360
-value done_audit_13                365
-value done_audit_14                384
-value done_audit_15                388
-value done_audit_16                398
-value done_audit_17                410
-value done_audit_18                429
-value right_gate_dev      9
-value right_gate_ctl      32
-value right_gate_devoff   4
-value right_gate_off_slot 30
-value comp_menu_obj_reg      5
-value comp_menu_obj_pick_reg 4
-value comp_menu_obj_vec      516   # +0x204: the entries' begin, +0x208 their end
-value comp_menu_obj_index    528   # +0x210: the selected entry
-value comp_menu_obj_kind     2     # COMPETITION's kind (flag 17)
-value comp_menu_obj_end_kind 1     # STANDARD's
-value mode_flag_7           114   # Victory laps
-value wizard_arg_1       1
-value wizard_arg_2       1
-value wizard_flag_2      78    # FG_SEASON_TWO_WIZARD_MODE_MULTIBALL_ACTIVE
-value done_flag_13                 64
-value done_flag_14                 70
-value done_flag_15                 76
-value done_flag_16                 82
-value done_flag_17                 103
-value done_flag_18                 110
-value done_flag_19                 113
-value control_gate_dev    15
-value control_gate_ctl    32
-value control_gate_devoff 4
-value control_gate_off_slot 30
-value mode_flag_8           58    # Penguin (episode 95) 0x16bfcc
-value mode_flag_9           59    # Riddler (episodes 1-2) 0x18ad88
-value mode_flag_10          60    # Riddler (episode 96) 0x199374
-value mode_flag_11          63    # Major villain wizard mode 0x127c4c
-value mode_flag_12          76    # Shame mode 0x1baabc
-value wizard_flag_3      87    # FG_MINOR_VILLAIN_WIZARD_MODE_3_ACTIVE
-value upper_gate_ctl      12
-value upper_gate_off_slot 5
 value ball_end_event        0x34
 value switch_drain_size     0x180
 value switch_record_size    0x20
@@ -1061,7 +481,6 @@ value switch_level_at       0x18
 value switch_desc_via       0x8
 value switch_flags_at       0x1a
 value switch_polarity_at    0x1c
-value switch_edge_shots     0x0
 
 # ---- shots: COPIED from Avengers: Infinity Quest Pro 1.10, the same title; unverified ----
 shot 0x1             Shot 0x1
@@ -1118,30 +537,6 @@ text tower_post_label     Tower up post
 text tower_magnet_drive   9 0 255 300 100
 text tower_post_drive     9 5 255 128 64
 text held_coils            tower_magnet tower_post
-text show_name_1          Wide white glow
-text show_kind_1          flashy
-text show_name_2          Wide white chase
-text show_kind_2          flashy
-text show_name_3          Wide green glow
-text show_kind_3          flashy
-text show_name_4          Wide orange and white strobe
-text show_kind_4          flashy
-text show_name_5          Wide glow
-text show_kind_5          flashy
-text show_name_6          Wide green and cyan chase
-text show_kind_6          flashy
-text show_name_7          Wide cyan and white fade
-text show_kind_7          subdued
-text show_name_8          Wide slow yellow and green fade
-text show_kind_8          subdued
-text show_name_9          Wide slow white fade
-text show_kind_9          subdued
-text show_name_10         Wide slow green and magenta fade
-text show_kind_10         subdued
-text show_name_11         Wide red and yellow strobe
-text show_kind_11         accent
-text show_name_12         Wide blue and white chase
-text show_kind_12         accent
 text shake_max_ms          500 0 3000 0
 text shake_setting_ms      0 100 334 500 4000
 text shake_short            0:200:0
@@ -1343,10 +738,6 @@ lamp 79           0              OPEN PORTAL  # lamp 52, I/O group 7 index 88, a
 lamp 58,59,60     0              (S)TRANGE  # lamp 45, I/O group 7 index 93, at 90,290
 
 # ---- added cabinet lights (PAD-1448): a card's addcab.cfg adds lights on the Cabinet Lights board, node 2 ----
-data addcab_light_tab  0x00665780  # the light table's pointer (24-byte records)
-data addcab_dev_tab    0x0066daf4  # the device table's pointer (48-byte records)
-data addcab_light_n    0x005ac9c8  # the light count the game copies at start-up
-data addcab_dev_n      0x005acb4c  # the device count it copies
 value addcab_lights    177
 value addcab_devices   297
 value addcab_clone     159  # the LED light the added ones copy: DR STRANGE HANDS-LEFT
@@ -1486,3 +877,73 @@ value mode_starts_at         0x3c
 site  mode_started           0x000ab218 0xe3510018 0xe92d4008
 data  mode_manager           0x006db038
 value mode_id_at             4
+
+# ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
+# docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch
+# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit); on the
+# older framework sw_listen / sw_boards / coil_used instead (the listener table, the board table, a coil there)
+site coil_frame            0x0054e1f0 0xe5d13000 0xe353000f
+site coil_off              0x00549fcc 0xe351000f 0xe1a02001
+data sw_struct             0x006ee3a8
+
+# ---- PAD-420 (PAD-1555: the earlier build's shows, each placed in this program): the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1           0x00085344 0xe92d4010 0xe24dd010   # avengers_infinity_le-1.10's Wide white glow: its lit lights 89% alike; 150 lights in its lamp groups, 0 light-runner commands, white, 5.2 s
+text show_name_1          Wide white glow
+text show_kind_1          flashy
+value show_secs_1         5
+site show_2           0x0017a65c 0xe92d4ff0 0xe24dd074   # 142 lights in its lamp groups, 0 light-runner commands, white, 4.5 s
+text show_name_2          Wide white chase
+text show_kind_2          flashy
+value show_secs_2         4
+site show_3           0x00046c2c 0xe92d4ff0 0xe24dd03c   # 142 lights in its lamp groups, 0 light-runner commands, green, 4.3 s
+text show_name_3          Wide green glow
+text show_kind_3          flashy
+value show_secs_3         4
+site show_4           0x0007815c 0xe92d4010 0xeb0cd5bb   # 142 lights in its lamp groups, 0 light-runner commands, orange, white, 3.3 s
+text show_name_4          Wide orange and white strobe
+text show_kind_4          flashy
+value show_secs_4         3
+site show_5           0x00171c5c 0xe92d4070 0xeb08eefb   # 142 lights in its lamp groups, 0 light-runner commands, no colour given, 7.5 s
+text show_name_5          Wide glow
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6           0x000739b4 0xe92d4ff0 0xe24dd02c   # 141 lights in its lamp groups, 0 light-runner commands, green, cyan, 7.7 s
+text show_name_6          Wide green and cyan chase
+text show_kind_6          flashy
+value show_secs_6         8
+site show_7           0x00172c24 0xe92d47f0 0xe24dd038   # 146 lights in its lamp groups, 0 light-runner commands, cyan, white, 3.6 s
+text show_name_7          Wide cyan and white fade
+text show_kind_7          subdued
+value show_secs_7         4
+site show_8           0x0001d44c 0xe92d4ff0 0xe24dd014   # 142 lights in its lamp groups, 0 light-runner commands, yellow, green, 8.0 s
+text show_name_8          Wide slow yellow and green fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9           0x00078898 0xe92d41f0 0xe24dd038   # 142 lights in its lamp groups, 0 light-runner commands, white, 7.5 s
+text show_name_9          Wide slow white fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10          0x00178c24 0xe92d4ff0 0xe24dd04c   # 141 lights in its lamp groups, 0 light-runner commands, green, magenta, 7.6 s
+text show_name_10         Wide slow green and magenta fade
+text show_kind_10         subdued
+value show_secs_10        8
+site show_11          0x001116ac 0xe92d40f0 0xe24dd01c   # avengers_infinity_le-1.10's Wide red and yellow strobe: its lit lights 91% alike; 141 lights in its lamp groups, 0 light-runner commands, blue, white, 1.3 s
+text show_name_11         Wide red and yellow strobe
+text show_kind_11         accent
+value show_secs_11        2
+site show_12          0x00111884 0xe92d40f0 0xe24dd01c   # 140 lights in its lamp groups, 0 light-runner commands, blue, white, 1.3 s
+text show_name_12         Wide blue and white chase
+text show_kind_12         accent
+value show_secs_12        1
+

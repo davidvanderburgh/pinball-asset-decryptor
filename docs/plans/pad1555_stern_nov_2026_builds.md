@@ -169,3 +169,42 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   test_pad1202_coop_up_call, test_pad1022_idle_pause. Each names a feature block the predecessor port has; carry it
   (re-placed in the new program: the derived port's sites where it has them, port_tool / the feature's own reader
   otherwise), prove it the way that feature's proven set was proven, then add the build to the set.
+
+### Run 4 (2026-11-24 night): the earlier builds' features on the new ports
+
+- **Correction to run 2:** King Kong LE 1.01's crash 35 s into boot (segv in an event handler under hook_dispatch) is
+  INTERMITTENT, not the Pro's lines: the Pro-values port, the committed port and the current one passed 5 of 5 in a row,
+  and 12 of 12 more boots (6 stock, 6 with the object) were clean; it showed only under a busy rig (4 of ~30 boots).
+  PAD-1400 saw the same kind on King Kong Pro 0.97 (a corrupt listener in a broadcast loop, one in seven). The
+  same-model ranking stays right on its own.
+- **King Kong LE's transfer** used the 1.00 program as the 0.97 reference (prog/king_kong_le-1.01-OLD is 1.00); with the
+  real 0.97 program (`prog/king_kong_le-0.97`, sha1 = the port's) it agrees 100% with the proven port, as every other
+  build's does.
+- **A derive leak, fixed (portgen REVISION 14):** values the primary reference lacks were copied from ANY other title
+  whose name was not on the title-value list - the new ports carried Jurassic Park's raptor post, X-Men's sentinel and
+  Cerebro, Godzilla's Ebirah, Guardians' timers_paused / kickbacks, Munsters Pro's stock_shot_bits, other titles' coil
+  devices and message numbers. Another title's value is now the framework's only when two titles or more name it and
+  every other-title reference agrees. The ten ports were cleaned the same way (220-ish values each); start-menu lines
+  (comp_menu_*, serve_music) only where the earlier build has a start menu (King Kong, Metallica); other titles' NOT
+  PLACED notes taken out (newbuild/carry.py --prune-only).
+- **Stern's November 2026 builds changed two framework pieces** (not D&D 1.11):
+  - the video player: surface_seek / duration / position at -0x1b8 / -0x1788 / -0xa4c from surface_play
+    (set_video - play = 0x2168), proven by their GStreamer calls (duration, position) and on the emulator: a mode's
+    clip came back after the game's at 13646 of 28766 ms and played at 14479 a second on (Foo Fighters LE 1.05,
+    newbuild/clipjob.sh with modes/sdk/clipback_test_mode.c); King Kong LE read 8033 ms into a 14000 ms clip;
+  - node boards with sixteen coils: the coil frame / off wrappers test `cmp rN, #15` (spare_io.py's FRAME16 / OFF16;
+    a mode still drives outputs 0-8 only).
+- **Light shows:** all twelve of each earlier build's shows, at the same numbers (a mode names them), from the port,
+  port_tool's transfer and `newbuild/showmatch.py` (whole-body match, the tables' filled places as tie-break); all three
+  agree wherever two place one. King Kong's 8-10 came from showmatch only (8/9 told apart by their tables: red and blue).
+- **Kit (tools/spike2_emu/modes/newbuild/):** checkjob, ownjob, clipjob(2), shakejob, magnetjob, showjob (rigbatch
+  jobs), stamp.py, carry.py, showmatch.py, scan_ret_use.py. Coil proofs read `[coildrive]` from dump/game.out.
+- **Left:** per-build proofs and set entries for lights, screen / clip / TITLE_SCENES, ball save, multiball, stack,
+  place, done, with, wizards (wizard_obj lines), scoop (scoop_handler / slot), held coils (coil_take / give / off),
+  challenges (Avengers, Foo Fighters, Metallica: challenge_menu lines). Their recipes are in "Proving a new build's
+  parts" above.
+- **Operator adjustments were renumbered** in the November builds (SHAKER MOTOR: Avengers 355 -> 357, King Kong
+  347 -> 357, D&D 165/164 -> 163/162): every port value that names an adjustment by number must be read off the build
+  (`shake_adj` re-read by shaker_lines.py in all ten). Also still to do: the modules that list builds by key and know
+  their adjustments / menus / sounds / scenes (menu_settings.py, sound_modes.py, scene_write.py, mode_project.py's
+  title lists) - the new builds are not in them yet, each to be read off the build, never copied.

@@ -100,7 +100,7 @@ def find_coil_frame(text):
     hits = []
     for va, ws in words(text):
         for i in range(len(ws) - len(FRAME)):
-            if all(want is None or ws[i + k] == want for k, want in enumerate(FRAME)):
+            if all(want is None or ws[i + k] == want or (k == 1 and ws[i + k] == FRAME16) for k, want in enumerate(FRAME)):
                 if (ws[i + 7] >> 24) == 0xea:            # b <frame builder>
                     hits.append((va + 4 * i, ws[i], ws[i + 1]))
     return hits
@@ -110,13 +110,17 @@ def find_coil_frame(text):
 #: fire (`8n 03 40 <coil>`), opens with the same five words; the 0x4d (mov r2,#77) is what tells them apart.
 OFF = (0xe3510008, 0xe1a02001, 0x9a000001, 0xe3a00000, 0xe12fff1e, 0xe52de004, 0xe24dd00c, 0xe3a0c000)
 OFF_CMD = 0xe3a0204d
+#: PAD-1555: Stern's November 2026 builds (node firmware 1.41/1.42) take sixteen coils a board: the same wrappers with
+#: `cmp r3, #15` / `cmp r1, #15` (a mode still drives outputs 0-8 only, pad_mode_runtime.c's spare output limit)
+FRAME16 = 0xe353000f
+OFF16 = 0xe351000f
 
 
 def find_coil_off(text):
     hits = []
     for va, ws in words(text):
         for i in range(len(ws) - 16):
-            if all(ws[i + k] == want for k, want in enumerate(OFF)) and OFF_CMD in ws[i + 8:i + 16]:
+            if all(ws[i + k] == want or (k == 0 and ws[i + k] == OFF16) for k, want in enumerate(OFF))                     and OFF_CMD in ws[i + 8:i + 16]:
                 hits.append((va + 4 * i, ws[i], ws[i + 1]))
     return hits
 

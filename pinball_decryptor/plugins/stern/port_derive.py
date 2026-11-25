@@ -455,7 +455,7 @@ def merge(drafts, refs, tgt, game, version, family):
     from . import portgen
     by_ref = {r.name: r for r in refs}
     # PAD-1555: the same MODEL's port before its other models' (King Kong LE 1.01 took King Kong Pro 0.97's values,
-    # shots and lamps, the Pro's hardware, and the LE crashed 35 s into its boot)
+    # shots and lamps - the Pro's hardware - because the Pro's draft placed more)
     ranked = sorted(drafts.values(), key=lambda d: (
         not _same_title(game, by_ref[d["ref"]].game), by_ref[d["ref"]].game != game, bool(d["missing"]),
         -len(d["placed"]), d["ref"]))
@@ -557,10 +557,28 @@ def merge(drafts, refs, tgt, game, version, family):
             lamps.append("lamp %s" % rest)
     # values the primary lacks, from the other references in rank order (framework offsets:
     # one generation keeps them); never another title's rule values or struct offsets
+    # PAD-1555: another title's value is the FRAMEWORK's only when at least two titles name it and every reference of
+    # another title agrees on it (a struct offset is the same everywhere; a title's coil device, drive, message or
+    # music number is not). By name alone King Kong LE 1.01 took Jurassic Park's raptor post, X-Men's sentinel and
+    # Cerebro and Godzilla's Ebirah values.
+    seen = {}
+    for d in ranked:
+        t = by_ref[d["ref"]].game
+        if _same_title(game, t):
+            continue
+        for key, rest in parsed[d["ref"]][2]:
+            w = rest.split()
+            if key == "value" and len(w) >= 2:
+                seen.setdefault(w[0], (set(), set()))
+                seen[w[0]][0].add(w[1])
+                seen[w[0]][1].add(t.split("_")[0])
+    def shared(n):
+        v = seen.get(n)
+        return framework_value(n) and v is not None and len(v[0]) == 1 and len(v[1]) >= 2
     left_off = set()
     if not same:
-        left_off = {n for n, _r in values if not framework_value(n)}
-        values = [(n, r) for n, r in values if framework_value(n)]
+        left_off = {n for n, _r in values if not shared(n)}
+        values = [(n, r) for n, r in values if shared(n)]
     have = {n for n, _r in values}
     for d in ranked[1:]:
         mine = _same_title(game, by_ref[d["ref"]].game)
@@ -568,7 +586,7 @@ def merge(drafts, refs, tgt, game, version, family):
             n = rest.split()[0] if rest.split() else ""
             if key != "value" or n in have or n.startswith("shot_mask") or portgen.generated(key, rest):
                 continue
-            if not mine and not framework_value(n):
+            if not mine and not shared(n):
                 left_off.add(n)
                 continue
             values.append((n, rest))

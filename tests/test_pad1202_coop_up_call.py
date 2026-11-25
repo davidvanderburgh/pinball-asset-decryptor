@@ -118,7 +118,10 @@ def test_the_shipped_calls_and_no_others():
 def test_the_latest_ports_carry_the_line():
     with_coop = [p for p in sorted(PORTS.glob("*.port")) if "site  coop_player_change" in p.read_text(encoding="utf-8")]
     have = {p.stem for p in with_coop if "site  coop_up_call" in p.read_text(encoding="utf-8")}
-    assert have == {"avengers_infinity_le-1.10", "avengers_infinity_pro-1.10", "dungeons_and_dragons_le-1.10",
+    assert have == {"king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01",   # PAD-1555: the November 2026 builds
+                    "avengers_infinity_le-1.12", "avengers_infinity_pro-1.12", "foo_fighters_le-1.05",
+                    "foo_fighters_pro-1.05", "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
+                    "avengers_infinity_le-1.10", "avengers_infinity_pro-1.10", "dungeons_and_dragons_le-1.10",
                     "dungeons_and_dragons_pro-1.10", "foo_fighters_le-1.04", "foo_fighters_pro-1.04",
                     "godzilla_le-1.16", "godzilla_pro-1.15", "godzilla_pro-1.16", "iron_maiden_le-1.18", "iron_maiden_pro-1.18",
                     "james_bond_le-1.06", "james_bond_pro-1.06", "jaws_le-1.02", "jaws_pro-1.02",

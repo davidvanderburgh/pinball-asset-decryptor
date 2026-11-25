@@ -22,7 +22,11 @@ RULED = {"avengers_infinity_le-1.09": 23, "avengers_infinity_le-1.10": 23, "aven
          "john_wick_le-1.01": 20, "john_wick_le-1.02": 20, "john_wick_pro-1.02": 21, "king_kong_le-0.97": 21,
          "king_kong_pro-0.97": 21, "mando_le-1.44": 12, "mando_le-1.45": 12, "mando_pro-1.45": 12,
          "sword_of_rage_le-1.18": 14, "sword_of_rage_le-1.19": 14, "sword_of_rage_pro-1.19": 13,
-         "venom_le-1.07": 19, "venom_pro-1.07": 19}
+         "venom_le-1.07": 19, "venom_pro-1.07": 19,
+         # PAD-1555: the November 2026 builds (King Kong 1.00 added the UI Bonus Screen rule)
+         "king_kong_le-1.00": 22, "king_kong_le-1.01": 22, "king_kong_pro-1.01": 22, "avengers_infinity_le-1.12": 23,
+         "avengers_infinity_pro-1.12": 23, "foo_fighters_le-1.05": 17, "foo_fighters_pro-1.05": 17,
+         "dungeons_and_dragons_le-1.11": 18, "dungeons_and_dragons_pro-1.11": 18}
 
 
 @pytest.mark.parametrize("cls, name", [

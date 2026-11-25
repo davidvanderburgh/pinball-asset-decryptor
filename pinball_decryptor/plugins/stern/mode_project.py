@@ -764,6 +764,8 @@ MAGNET_MAX_MS = 5000
 #: hit while the mode ran gave ONE magnet command of the operator's powers ([coildrive] on the magnet), and it
 #: ended at its time. Until a build is here the tab greys Magnet.
 MAGNET_PROVEN = frozenset({
+    "dungeons_and_dragons_le-1.11",    # PAD-1555 2026-11-24 newbuild/magnetjob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): `magnet 2000` on the Bottom Right Orbit Opto (87): two hits, two grabs, node 9 coil 2 pulse 255 for 60 ms then held, as 1.10 in the same run
+    "dungeons_and_dragons_pro-1.11",   # PAD-1555 2026-11-24 newbuild/magnetjob.sh: the same on its Bottom Right Orbit Opto (84): two grabs, node 9 coil 2 driven
     "godzilla_pro-1.16",               # 2026-10-05 rig 1, the stock card: the starting hit grabbed 2000 ms (255 for 350, then 50 for 1650, [coildrive] node 9 coil 6, held to its end), a hit mid-grab refused with no OFF from the game, a grab 6 s later held to its end, a mode stop let go 565 ms early, a drain mid-grab: the game ended the grab's process and the magnet went off 798 ms early, no abort
     "godzilla_le-1.16",                # 2026-10-05 rig 1, the stock Premium/LE card: the same (held 2000 to its end, mode stop 584 ms early, drain 782 ms early, no abort); and the first hit started a magnet process of the game's, which the grab stood aside for
     "godzilla_pro-1.15",               # PAD-394 2026-10-05 rig 2, the stock card: two grabs held to their end (255 for 350, then 50 for 1650, [coildrive] node 9 coil 6, the game's OFF 2017 / 2000 ms on), a hit 1 s in refused with no OFF from the game, a mode stop let go 115 ms early, no abort
@@ -863,6 +865,14 @@ MAGNET_GAME_LIMIT = {
     # PAD-475 walk: OVERLORD MAGNET (9:0; group 8 = node 9) 255 for 120 ms, OVERLORD HIT (9:1), then 90 ms, ~300 ms
     # after an Overlord opto / hit target press (2 of 16) - the census's single presses never met it
     "foo_fighters_le-1.04": ("shot", "Overlord magnet", "the Overlord"),
+    # PAD-1555: Stern's November 2026 builds of the same machines - the same rules for their magnets as the earlier
+    # build's (each a rules update on the same playfield: King Kong 1.01 the "Holiday Hotfix")
+    "avengers_infinity_le-1.12": ("shot", "tower magnet", "the tower optos"),
+    "avengers_infinity_pro-1.12": ("shot", "tower magnet", "the tower optos"),
+    "king_kong_le-1.00": ("shot", "spider magnet", "the pit targets"),
+    "king_kong_le-1.01": ("shot", "spider magnet", "the pit targets"),
+    "king_kong_pro-1.01": ("shot", "spider magnet", "the pit targets"),
+    "foo_fighters_le-1.05": ("shot", "Overlord magnet", "the Overlord"),
 }
 
 
@@ -1584,6 +1594,16 @@ SHAKE_CALLS = {"ms strength force": ((), ()), "ms force": ((), ()),
 #: The builds where a mode file's ``shake`` lines were seen reach the board in the emulator (PAD-474: every
 #: latest build with a shaker, C:/tmp/PAD-474/shake_job.sh through rigbatch.sh, docs/plans/pad474_shaker.md).
 SHAKER_PROVEN = frozenset({
+    "foo_fighters_le-1.05",           # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): shake 1500 ms at 2, the game's table caps it at 1200: node 1 coil 0 pulse 31/255 for 1200 ms
+    "foo_fighters_pro-1.05",          # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): shake 1500 ms at 2, the game's table caps it at 1200: node 1 coil 0 pulse 31/255 for 1200 ms
+    "king_kong_le-1.00",              # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 31/255 for 1500 ms
+    "king_kong_le-1.01",              # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 31/255 for 1500 ms
+    "king_kong_pro-1.01",             # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 31/255 for 1500 ms
+    "avengers_infinity_le-1.12",      # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 23/255 for 1500 ms
+    "avengers_infinity_pro-1.12",     # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 23/255 for 1500 ms
+    "dungeons_and_dragons_le-1.11",   # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): one power: shake 484 ms at 0: node 1 coil 0 pulse 51/255 for 480 ms
+    "dungeons_and_dragons_pro-1.11",  # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): one power: shake 484 ms at 0: node 1 coil 0 pulse 51/255 for 480 ms
+    "metallica_spike-1.05",           # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): one power: shake 1024 ms at 0: node 1 coil 0 pulse 40/255 for 1020 ms
     "godzilla_le-1.16",                # PAD-414 2026-10-06 rig 1, the stock Premium/LE card, PAD_COIL_PROBE=1: shake start 1500 2 -> node 1 coil 0 31/255 for 1500 ms; the game's jackpot shake on each left ramp (51/255, 500 ms), a hit while it ran refused; shake end 1000 3 ran out after the mode (no OFF); pm_end mid-shake sent the game's OFF with 4001 ms left
     "aerosmith-1.16",                  # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (524 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
     "aerosmith_le-1.16",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (524 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out

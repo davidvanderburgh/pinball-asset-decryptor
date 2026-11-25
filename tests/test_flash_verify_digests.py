@@ -11,6 +11,7 @@ import pytest
 
 from pinball_decryptor.core import rawdevice as rd
 from tests.test_flash_card_read_errors import _menu_case
+from tests.test_flash_read_ahead import _ahead_threads
 from tests.test_stern_flash import _pattern
 
 
@@ -81,6 +82,7 @@ def test_a_bad_byte_is_still_named_exactly(tmp_path, monkeypatch):
     with pytest.raises(rd.FlashError,
                        match="first difference at byte %s" % f"{want:,}"):
         rd.flash_image_to_device(img, card, eject=False, skip_free=False)
+    assert not _ahead_threads()
 
 
 def test_the_unaligned_tail_is_verified_too(tmp_path, monkeypatch):
@@ -139,6 +141,26 @@ def test_verify_by_hash_can_be_canceled(tmp_path):
     with pytest.raises(rd.FlashCancelled, match="Verify canceled after"):
         rd._verify_flash_readback(card, img, len(data), cancel=cancel,
                                   digests=digests)
+    assert not _ahead_threads()
+
+
+def test_the_card_is_read_ahead_while_the_hash_is_taken(tmp_path,
+                                                         monkeypatch):
+    img, card = _img_and_card(tmp_path)
+    data = open(img, "rb").read()
+    digests = []
+    with rd.RawDeviceFile(card, writable=True) as dev, open(img, "rb") as src:
+        dev.copy_image_onto(src, len(data), chunk=8 * 512, digests=digests)
+    import threading
+    readers = set()
+    real = rd.RawDeviceFile._aligned_read
+
+    def spy(self, at, n):
+        readers.add(threading.current_thread().name)
+        return real(self, at, n)
+    monkeypatch.setattr(rd.RawDeviceFile, "_aligned_read", spy)
+    rd._verify_flash_readback(card, img, len(data), digests=digests)
+    assert readers == {"pad-read-ahead"}
 
 
 def test_no_hashes_kept_when_not_verifying(tmp_path, monkeypatch):

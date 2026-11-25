@@ -160,6 +160,19 @@ def _chunk_digest(buf):
     return hashlib.sha256(buf).digest()
 
 
+def _hashing_reader(read, hashes):
+    """*read* ``(pos, n)`` that also files each chunk's
+    :func:`_chunk_digest` in *hashes* under its offset.  It runs on the
+    read-ahead thread (PAD-1583), so the hash is taken while the card is
+    busy with the chunk before, and costs the write nothing."""
+    def hashed(pos, n):
+        buf = read(pos, n)
+        if buf:
+            hashes[pos] = _chunk_digest(buf)
+        return buf
+    return hashed
+
+
 def _first_difference(got, exp):
     """Index of the first byte where *got* and *exp* differ (the shorter
     one's length when one is a prefix of the other)."""
@@ -828,7 +841,11 @@ class RawDeviceFile:
         # The image is read on a thread of its own, a few chunks ahead, while
         # this one writes (PAD-1577): the image's disk and the card work at
         # the same time.
-        with _ReadAhead(spans, _file_reader(src, overlay), step) as chunks:
+        read = _file_reader(src, overlay)
+        hashes = {}
+        if digests is not None:
+            read = _hashing_reader(read, hashes)
+        with _ReadAhead(spans, read, step) as chunks:
             for pos, buf in chunks:
                 if cancel is not None and cancel():
                     raise FlashCancelled(
@@ -851,7 +868,7 @@ class RawDeviceFile:
                     self.seek(pos)
                     self.write(buf)
                 if digests is not None:
-                    digests.append((pos, len(buf), _chunk_digest(buf)))
+                    digests.append((pos, len(buf), hashes.pop(pos)))
                 written += len(buf)
                 undrained += len(buf)
                 if drain and (undrained >= _FLASH_DRAIN or written >= total):
@@ -2341,8 +2358,10 @@ def _flash_menu_plan(image_path, device_path, plan, *, log=None,
                 total = sum(length for _o, length, _w in plan["write"])
                 rate = []
                 spans = [(off, length) for off, length, _w in plan["write"]]
-                with _ReadAhead(spans, _file_reader(src),
-                                _FLASH_CHUNK) as chunks:
+                read, hashes = _file_reader(src), {}
+                if digests is not None:
+                    read = _hashing_reader(read, hashes)
+                with _ReadAhead(spans, read, _FLASH_CHUNK) as chunks:
                     for pos, buf in chunks:
                         if cancel is not None and cancel():
                             raise FlashCancelled(
@@ -2354,8 +2373,7 @@ def _flash_menu_plan(image_path, device_path, plan, *, log=None,
                         dev.seek(pos)
                         dev.write(buf)
                         if digests is not None:
-                            digests.append((pos, len(buf),
-                                            _chunk_digest(buf)))
+                            digests.append((pos, len(buf), hashes.pop(pos)))
                         written += len(buf)
                         if progress is not None:
                             progress(written, total,
@@ -2539,15 +2557,25 @@ def _verify_card_digests(device_path, image_path, digests, total, *,
     *shown_at_checked*, else the chunk's offset of *shown_total*."""
     checked = 0
     rate = []
-    with RawDeviceFile(device_path, writable=False) as dev:
-        for pos, length, digest in digests:
+    said = {"at": 0}
+
+    def card_read(pos, n):
+        return _read_back(dev, pos, n,
+                          total if shown_total is None else shown_total,
+                          what,
+                          shown_at=said["at"] if shown_at_checked else None)
+    # The card is read a chunk or two ahead on a thread of its own while
+    # this one hashes the chunk before: the card never waits on the hash.
+    # Each span is one chunk exactly as written, so the two lists pair up
+    # (a short read is a mismatch, and stops the verify there).
+    spans = [(pos, length) for pos, length, _d in digests]
+    step = max((length for _p, length, _d in digests), default=1)
+    with RawDeviceFile(device_path, writable=False) as dev, \
+            _ReadAhead(spans, card_read, step) as chunks:
+        for (pos, length, digest), (_at, got) in zip(digests, chunks):
             if cancel is not None and cancel():
                 raise FlashCancelled(
                     "Verify canceled after %d of %d bytes." % (checked, total))
-            got = _read_back(dev, pos, length,
-                             total if shown_total is None else shown_total,
-                             what,
-                             shown_at=checked if shown_at_checked else None)
             if len(got) != length or _chunk_digest(got) != digest:
                 with open(image_path, "rb") as src:
                     exp = _file_reader(src, overlay)(pos, length)
@@ -2559,6 +2587,7 @@ def _verify_card_digests(device_path, image_path, digests, total, *,
                     off = 0
                 raise mismatch(pos, off)
             checked += length
+            said["at"] = checked
             if progress is not None:
                 progress(checked, total,
                          desc + _rate_note(rate, checked, total))

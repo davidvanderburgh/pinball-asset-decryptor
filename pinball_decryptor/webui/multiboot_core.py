@@ -1407,9 +1407,35 @@ def host_path(path):
         m = re.match(r"^/mnt/([a-zA-Z])(?=/|$)", p)
         if m:
             return m.group(1).upper() + ":" + p[len(m.group(0)):]
+        # PAD-1585: what rig.wsl_path made of a share and of WSL's own file
+        # system goes back too - an image from the card store (/mnt/wsl, the
+        # library's home since PAD-966) came back as a path Windows cannot
+        # open, so a card read back named images nothing on the PC could read
+        m = re.match(r"^/mnt/unc/([^/]+)/([^/]+)(?=/|$)", p)
+        if m:
+            return "//%s/%s%s" % (m.group(1), m.group(2), p[len(m.group(0)):])
+        if p == "/mnt/wsl" or p.startswith("/mnt/wsl/"):
+            distro = _shared_wsl_distro()
+            if distro:
+                return "//wsl.localhost/%s%s" % (distro, p)
     if _mac.enabled():
         return _mac.host_from_container(p)
     return p
+
+
+#: PAD-1585: the distro whose share :func:`host_path` names for /mnt/wsl (the same in every distro), found once
+_WSL_SHARE = {}
+#: tried in this order: the app's own runtime, then the usual default
+WSL_SHARE_DISTROS = ("PAD-Runtime", "Ubuntu")
+
+
+def _shared_wsl_distro():
+    r"""A distro whose ``\\wsl.localhost\<distro>\mnt\wsl`` Windows can open (``PAD_WSL_DISTRO`` first),
+    remembered for the session; "" when none."""
+    if "name" not in _WSL_SHARE:
+        names = [n for n in (os.environ.get("PAD_WSL_DISTRO"),) + WSL_SHARE_DISTROS if n]
+        _WSL_SHARE["name"] = next((n for n in names if os.path.isdir("//wsl.localhost/%s/mnt/wsl" % n)), "")
+    return _WSL_SHARE["name"]
 
 
 def rig_repo_dir():

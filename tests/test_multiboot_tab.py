@@ -3701,3 +3701,17 @@ def test_one_image_listed_twice_is_a_menu_on_stern_only(tmp_path):
     assert st["images"][2] == "bad" and "listed twice" in st["images"][3]
     form.platform = "jjp"
     assert any("Image 2 is listed twice" in e for e in validate_form(form))
+
+
+def test_a_card_store_or_share_image_comes_back_as_a_path_windows_opens(monkeypatch):
+    """PAD-1585: rig.wsl_path spells a \\wsl.localhost store path as /mnt/wsl/... and a share as
+    /mnt/unc/<server>/<share>/...; a card read back named those images by paths Windows could not open, so an
+    update found them unreadable.  host_path reverses both."""
+    _win(monkeypatch)
+    monkeypatch.setattr(multiboot_core, "_WSL_SHARE", {"name": "PAD-Runtime"})
+    assert host_path("/mnt/wsl/cards/cardcache/kk.raw") == "//wsl.localhost/PAD-Runtime/mnt/wsl/cards/cardcache/kk.raw"
+    assert host_path("/mnt/unc/nas/pinball/kk.raw") == "//nas/pinball/kk.raw"
+    assert host_path("/mnt/d/Pinball/x.mov") == "D:/Pinball/x.mov"
+    assert host_path("/home/david/x.png") == "/home/david/x.png"
+    monkeypatch.setattr(multiboot_core, "_WSL_SHARE", {"name": ""})        # no distro Windows can open: left as it was
+    assert host_path("/mnt/wsl/cards/x.raw") == "/mnt/wsl/cards/x.raw"

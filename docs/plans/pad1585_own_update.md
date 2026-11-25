@@ -159,12 +159,24 @@ verified by the builder (14 min default, 6.5 min compact with the extract reused
 back: both images 1.01 (inspect), image 1 carries the mod's text (PADUG LINE), image 2 Stern's (DEBUG LINE), on
 both layouts.
 
-## Still to do (next runs of this ticket)
+## 5. Other makers (DONE, run 5)
 
-Done or decided: the Update button (2, 2b), delivery (3: the Write tab's Send to machine keeps /data, /dump and
-/connectivity; a card write ticks Keep the card's own settings; no PAD stick, see run 2's decisions), a new build
-with no port (6: `mode_news` names it in the question; the update goes on without the modes, which stay in the
-old project).
+- **Barrels of Fun (Labyrinth):** the multi-boot `.fun` carries the vendor's `update/updatecode.sh` (update.sh copies
+  it over the machine's updater) with a guard before its `rm -rf /home/pinball/extracted/*`
+  (`mkbofmulti.patch_updatecode`). With the menu installed (`extracted/decrypt/padselect`), a stick's `lab.fun`
+  whose listing has no `padselect/` is not installed: a note on the stick (`PAD-UPDATE-NOT-INSTALLED.txt`), a line
+  in `~/pad-update-guard.log`, the game carries on. A PAD multi-boot update still installs; a stick holding
+  `bof-update-ok*` lets a normal one through. `verify` checks the guard is there. Proof: `machine_sim.sh`
+  (Labyrinth's own updatecode.sh, update.sh, .bash_profile) on a guarded `.fun` built from the stock and Sarah
+  `lab.fun`: 22/22, steps G (refused, menu and image 1 intact, note on the stick; PAD's own update installs) and F
+  (the pass file: a normal update removes the menu, the stock profile is back).
+- **Spooky: not guarded (decision).** Its update menu is in the game program the machine runs; the multi-boot
+  install controls only `uptest/main.x86_64` (the launcher), not the installer, so a guard would mean patching
+  every title's game program. The guide keeps saying a normal update takes the menu away; the owner updates the
+  builds in PAD and installs the new multi-boot update.
+- **Dutch Pinball (TBL):** a normal update installs beside the menu's version (Version Select), never over it:
+  nothing to guard. **American Pinball:** no multi-boot.
 
-5. **Other makers** (BoF, Spooky, AP, TBL) where the multi-boot guide says a normal update takes our menu away:
-   the same guard on their updaters.
+## Nothing left
+
+Every part of the ticket is done (1-6 above); see the proofs in each section.

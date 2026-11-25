@@ -635,6 +635,11 @@ class App:
         if not os.environ.get("PAD_UI_NO_UPDATE_CHECK"):
             # captures and tests never delete the PC's real files
             self.root.after(2500, self._prune_old_versions, True)
+        if not os.environ.get("PAD_UI_NO_UPDATE_CHECK") or os.environ.get(
+                "PAD_PAYLOAD_DIR"):
+            # a payload folder named on purpose is a scratch one: a capture
+            # may tidy it (PAD-1595's own proof shot does)
+            self.root.after(3000, self._prune_payload_cache)
         self._schedule_autosave()
         # PAD-1514: a card image double-clicked in Explorer started this run
         pending = getattr(self.ctx, "open_image", None) if getattr(
@@ -6370,6 +6375,31 @@ class App:
                     pass                   # window gone
         threading.Thread(target=_run, daemon=True,
                          name="prune-old-versions").start()
+
+    def _prune_payload_cache(self):
+        """Delete emulator downloads this version no longer pins (PAD-1595):
+        a runtime re-cut used to leave its ~400 MB tarball behind for good.
+        Off the main thread; one log line says what went."""
+        from .core import payloads
+
+        def _run():
+            try:
+                lines = payloads.prune_summary(*payloads.prune_cache())
+            except Exception as e:                      # noqa: BLE001
+                lines = ["Couldn't tidy the emulator downloads: %s" % e]
+
+            def _report():
+                for line in lines:
+                    self.window.append_log(
+                        line, "warning" if line.startswith("Couldn't")
+                        else "info")
+            if lines:
+                try:
+                    self.root.after(0, _report)
+                except RuntimeError:
+                    pass                   # window gone
+        threading.Thread(target=_run, daemon=True,
+                         name="prune-payload-cache").start()
 
     def _schedule_autosave(self):
         """(Re-)arm the ⚙ "Save automatically" timer (PAD-541).

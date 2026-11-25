@@ -52,11 +52,15 @@ NETWORK SHAPE, and every part of it is a decision:
   terminal.
 """
 
+import contextlib
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
@@ -203,7 +207,8 @@ def cache_path(payload: Payload) -> str:
     Named with the hash prefix, so a payload that is re-cut lands beside the
     old one instead of on top of it: a stale file can then never masquerade as
     the new one, and rolling back is deleting a file rather than re-downloading
-    the previous build."""
+    the previous build.  :func:`prune_cache` is what stops "beside" meaning
+    "forever" (PAD-1595)."""
     stamp = payload.sha256[:12] if payload.sha256 else "unpinned"
     return os.path.join(cache_root(), "%s-%s" % (stamp, payload.filename))
 
@@ -259,6 +264,11 @@ def download(payload: Payload, dest: Optional[str] = None,
     if log:
         log("Downloading %s (%s)…" % (payload.filename, payload.version))
     part = dest + ".part"
+    with in_use(dest):
+        return _download(payload, dest, part, url, log, progress, opener)
+
+
+def _download(payload, dest, part, url, log, progress, opener) -> str:
     do_open = opener or net.urlopen
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "pad-payloads"})
@@ -347,7 +357,8 @@ def install(payload: Payload, installer=None, log=None,
     if not ok:
         raise RuntimeError("refusing to install %s: %s" % (payload.filename, why))
     place = installer or default_installer(distro)
-    place(payload, src)
+    with in_use(src):
+        place(payload, src)
     if log:
         log("Installed %s -> %s" % (payload.filename, payload.dest))
     return payload.dest
@@ -518,7 +529,143 @@ def ensure(keys: Optional[List[str]] = None, log=None, progress=None,
         ensure_cached(p, log=log, progress=progress, opener=opener, repo=repo)
         install(p, installer=installer, log=log, distro=distro)
         installed.append(p.key)
+    if installed:
+        _prune_quietly(log)
     return installed
+
+
+# ---------------------------------------------------------------------------
+# PAD-1595: what a re-cut leaves behind.
+#
+# cache_path() puts every build of a payload in a file of its own, named with
+# its hash prefix, and nothing used to delete the old ones: David's folder held
+# six 385-434 MB runtime tarballs and an old runtime-base, 2.4 GB of which one
+# file was current, and every user gained ~400 MB per runtime re-cut for good.
+# So after an install and at start-up, every cached file the app no longer pins
+# goes.  The CURRENT runtime tarball stays even after `wsl --import` has used
+# it: it is what lets a broken distro be re-imported without the 400 MB
+# download again.
+
+#: A cache file's name: the 12-hex hash prefix cache_path() writes, a dash, the
+#: payload's file name, and ".part" while it is still arriving.  Nothing else in
+#: the folder is ours to judge, so nothing else is touched.
+_CACHED_NAME = re.compile(r"^([0-9a-f]{12})-(.+?)(\.part)?$")
+
+#: A file written this recently may be another copy of the app (an older
+#: version, pinning other hashes) between its download and its import.
+#: Windows already refuses to delete a file `wsl --import` has open; this
+#: covers the moments either side.
+PRUNE_GRACE = 3600
+
+_held: Dict[str, int] = {}
+_held_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def in_use(path: str):
+    """Mark a cache file as being downloaded, installed or imported, so a prune
+    running meanwhile in this process leaves it (and its .part) alone."""
+    key = os.path.normcase(os.path.abspath(path))
+    with _held_lock:
+        _held[key] = _held.get(key, 0) + 1
+    try:
+        yield path
+    finally:
+        with _held_lock:
+            _held[key] -= 1
+            if not _held[key]:
+                del _held[key]
+
+
+def _is_held(path: str) -> bool:
+    key = os.path.normcase(os.path.abspath(path))
+    if key.endswith(".part"):
+        key = key[:-5]
+    with _held_lock:
+        return key in _held
+
+
+def current_payloads() -> List[Payload]:
+    """Every payload this app version pins: the registry and the runtime
+    image (pinned in core/runtime.py, which imports this module)."""
+    keep = list(PAYLOADS.values())
+    try:
+        from . import runtime
+        keep.append(runtime.IMAGE)
+    except Exception:                                   # noqa: BLE001
+        pass
+    return keep
+
+
+def prune_cache(keep: Optional[List[Payload]] = None,
+                root: Optional[str] = None,
+                now: Optional[float] = None) -> Tuple[List[Tuple[str, int]],
+                                                      List[Tuple[str, str]]]:
+    """Delete cached downloads this app version no longer pins.
+
+    Returns ``(deleted, failed)``: ``[(path, bytes)]`` and ``[(path, why)]``.
+    Kept: every current payload's file (and a .part of one, which is a
+    download under way), anything held by :func:`in_use`, anything written in
+    the last :data:`PRUNE_GRACE` seconds, and every file whose name is not one
+    cache_path() makes.  A file Windows will not delete (open in an import)
+    is reported in ``failed`` and left for the next start."""
+    root = root or cache_root()
+    keep = current_payloads() if keep is None else keep
+    wanted = {os.path.basename(cache_path(p)) for p in keep if p.sha256}
+    now = time.time() if now is None else now
+    deleted, failed = [], []
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return deleted, failed
+    for name in names:
+        m = _CACHED_NAME.match(name)
+        if not m:
+            continue
+        final = name[:-5] if m.group(3) else name
+        if final in wanted:
+            continue
+        path = os.path.join(root, name)
+        if _is_held(path):
+            continue
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if not os.path.isfile(path) or now - st.st_mtime < PRUNE_GRACE:
+            continue
+        try:
+            os.remove(path)
+        except OSError as e:
+            failed.append((path, e.strerror or str(e)))
+            continue
+        deleted.append((path, st.st_size))
+    return deleted, failed
+
+
+def prune_summary(deleted, failed) -> List[str]:
+    """Log lines for a prune; [] when it did nothing."""
+    lines = []
+    if deleted:
+        total = sum(n for _p, n in deleted)
+        lines.append("Deleted %d superseded emulator download%s (%s) from %s."
+                     % (len(deleted), "" if len(deleted) == 1 else "s",
+                        _human(total), os.path.dirname(deleted[0][0])))
+    for path, why in failed:
+        lines.append("Couldn't delete the superseded download %s: %s"
+                     % (os.path.basename(path), why))
+    return lines
+
+
+def _prune_quietly(log=None) -> None:
+    """Prune after an install; a prune that fails never fails the install."""
+    try:
+        lines = prune_summary(*prune_cache())
+    except Exception:                                   # noqa: BLE001
+        return
+    for line in lines:
+        if log:
+            log(line)
 
 
 def _unlink(path: str) -> None:

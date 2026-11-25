@@ -174,6 +174,11 @@ static unsigned team_frame_n, team_frame_kinds[6];
 static unsigned team_frame_cap;
 static char team_cap_coop[] = "CO-OP", team_cap_teams[] = "TEAMS";
 static void team_frame_restore(void);
+/* PAD-1572: the game's own list (no other object's copy): ours goes after the last entry */
+static unsigned *frame_list_read(pm_reg *r, const char *n, unsigned *stack, unsigned cap, int *copy)
+{ (void)r; (void)n; (void)cap; *copy = 0; return stack; }
+static unsigned frame_append_at(const unsigned *l, unsigned cnt, int copy) { (void)l; (void)copy; return cnt; }
+static void frame_own(const unsigned *l, unsigned at) { (void)l; (void)at; }
 @FNS@
 static unsigned r[64], r3[64];
 int main(void)

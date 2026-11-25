@@ -449,6 +449,11 @@ static unsigned lettered; static const char *letter;
 static int pm_message_set(unsigned id, const char *w) { lettered = id; letter = w; return 1; }
 static void pm_message_restore(unsigned id) { if (lettered == id) lettered = 0; }
 static int sty_menu_up(void) { return 0; }   /* PAD-1449: no start-menu style step up, the cursor is the game's */
+/* PAD-1572: the game's own list (no other object's copy): ours goes after the last entry */
+static unsigned *frame_list_read(pm_reg *r, const char *n, unsigned *stack, unsigned cap, int *copy)
+{ (void)r; (void)n; (void)cap; *copy = 0; return stack; }
+static unsigned frame_append_at(const unsigned *l, unsigned cnt, int copy) { (void)l; (void)copy; return cnt; }
+static void frame_own(const unsigned *l, unsigned at) { (void)l; (void)at; }
 @FNS@
 static unsigned char frame[0x200] __attribute__((aligned(16)));
 static unsigned char f2[0x200] __attribute__((aligned(16)));

@@ -1,0 +1,9 @@
+godzilla_le-fixboth|/mnt/wsl/cards/cardcache/Godzilla Premium 1.16 Heisei Custom V1.99D Kaiju Edition + daveyvandy modes v36.raw|PAD1572_RT=/mnt/c/tmp/PAD-1572/heisei_new_mode.so
+godzilla_le-fixours|/mnt/wsl/cards/cardcache/Godzilla Premium 1.16 Heisei Custom V1.99D Kaiju Edition + daveyvandy modes v36.raw|PAD1572_RT=/mnt/c/tmp/PAD-1572/heisei_new_mode.so PAD1572_NO_BT=1
+godzilla_le-fixbtact|/mnt/wsl/cards/cardcache/Godzilla Premium 1.16 Heisei Custom V1.99D Kaiju Edition + daveyvandy modes v36.raw|PAD1572_RT=/mnt/c/tmp/PAD-1572/heisei_new_mode.so PAD1572_BTACT=1
+godzilla_pro-compours|/mnt/wsl/cards/library/godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw|PAD1572_COMP=godzilla_pro-1.16 PAD1572_NO_BT=1
+deadpool_pro-compours|/mnt/wsl/cards/library/deadpool_pro-1_16_0.Release.8G.sdcard.raw|PAD1572_COMP=deadpool_pro-1.16 PAD1572_NO_BT=1
+foo_fighters_le-compours|/mnt/wsl/cards/library/foo_fighters_le-1_04_0.Release.16G.sdcard.raw|PAD1572_COMP=foo_fighters_le-1.04 PAD1572_NO_BT=1
+godzilla_pro-compbt|/mnt/wsl/cards/library/godzilla_pro-1_16_0_spike2.Release.8G.sdcard.raw|PAD1572_COMP=godzilla_pro-1.16
+deadpool_pro-compbt|/mnt/wsl/cards/library/deadpool_pro-1_16_0.Release.8G.sdcard.raw|PAD1572_COMP=deadpool_pro-1.16 PAD1572_BOTH=1
+foo_fighters_le-compbt|/mnt/wsl/cards/library/foo_fighters_le-1_04_0.Release.16G.sdcard.raw|PAD1572_COMP=foo_fighters_le-1.04 PAD1572_BOTH=1

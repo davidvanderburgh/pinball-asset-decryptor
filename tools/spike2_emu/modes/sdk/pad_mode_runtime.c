@@ -17513,9 +17513,127 @@ static unsigned challenge_frame_moved(unsigned was, unsigned cursor, unsigned co
     return cursor;
 }
 
+/* PAD-1572: the list the game READS at a start-menu frame site, from the site's own two words. Every 32-bit frame site
+ * ported is `add rB, rB, rC, lsl #2` then `ldr rD, [rB, #+-k]`: the entry under the cursor is read at rB +- k + 4 * rC,
+ * so the list is rB +- k at the hook (before those words run). Usually that is the stack list `.._list_at` names; but
+ * another object may point the game at a copy of its own (spike-pinball-bluetooth's start-menu picker copies the list
+ * once, when the menu opens, and the game reads the copy from then on), and an entry written only into the stack list
+ * is then a choice the game draws blank. Returns the address, or 0 for any other shape (the caller keeps its own). */
+#if !PM_A64
+static unsigned long frame_read_list_at(unsigned w0, unsigned w1, const pm_reg *r)
+{
+    unsigned b = (w0 >> 16) & 15u, k = w1 & 0xFFFu;
+    if ((w0 & 0x0FE00070u) != 0x00800000u || ((w0 >> 12) & 15u) != b || ((w0 >> 7) & 31u) != 2u) return 0;
+    if ((w1 & 0x0F700000u) != 0x05100000u || ((w1 >> 16) & 15u) != b || b > FULL_REG_LAST) return 0;
+    return (w1 & 0x00800000u) ? (unsigned long)r[b] + k : (unsigned long)r[b] - k;
+}
+#endif
+
+/* PAD-1572: frame_read_list_at for the hooked site *name*, when it differs from *stack* and the cap's entries there are
+ * mapped: the list to append to (said once; *copy* 1); else *stack* (*copy* 0) */
+static unsigned *frame_list_read(pm_reg *r, const char *name, unsigned *stack, unsigned cap, int *copy)
+{
+    *copy = 0;
+#if PM_A64
+    (void)r; (void)name; (void)cap;
+    return stack;
+#else
+    static int said;
+    struct site *s = site(name);
+    unsigned long at = s && s->ok ? frame_read_list_at(s->w0, s->w1, r) : 0;
+    if (!at || at == (unsigned long)stack || !maps_has(at, (cap + 1u) * 4u, MAP_R)) return stack;
+    *copy = 1;
+    if (!said) {
+        said = 1;
+        say("start menu: the game reads its list at 0x%08lx, not the frame's own (another object's copy) - our entry goes "
+            "there", at);
+    }
+    return (unsigned *)at;
+#endif
+}
+
+/* PAD-1572: where an entry of ours goes in a menu list of *cnt* entries. After them, as always - except in another
+ * object's copy of the list (frame_list_read's *copy*) whose last entry repeats an earlier one and is not one of ours:
+ * that is the copy's owner's own row (spike-pinball-bluetooth's Bluetooth choice borrows the selected mode's index). Ours
+ * then takes that row's place and the count stays: the picker puts its row back after ours on its next frame. Growing
+ * the list instead makes the picker take it for a new menu and append its row again, leaving the first behind as a
+ * second STANDARD. The slots ours took are kept with their values (frame_own), so our next entry never takes them. */
+#define FRAME_OWN_MAX 32
+static unsigned frame_own_val[FRAME_OWN_MAX], frame_own_set[FRAME_OWN_MAX];
+static unsigned long frame_own_list;
+
+static int frame_owned(const unsigned *list, unsigned at)
+{
+    return (unsigned long)list == frame_own_list && at < FRAME_OWN_MAX && frame_own_set[at] && list[at] == frame_own_val[at];
+}
+
+static void frame_own(const unsigned *list, unsigned at)
+{
+    unsigned i;
+    if ((unsigned long)list != frame_own_list) {
+        frame_own_list = (unsigned long)list;
+        for (i = 0; i < FRAME_OWN_MAX; i++) frame_own_set[i] = 0;
+    }
+    if (at < FRAME_OWN_MAX) {
+        frame_own_val[at] = list[at];
+        frame_own_set[at] = 1;
+    }
+}
+
+static unsigned frame_append_at(const unsigned *list, unsigned cnt, int copy)
+{
+    unsigned i;
+    if (!copy || cnt < 2 || frame_owned(list, cnt - 1)) return cnt;
+    for (i = 0; i + 1 < cnt; i++)
+        if (list[i] == list[cnt - 1]) return cnt - 1;
+    return cnt;
+}
+
+/* PAD-1572: spike-pinball-bluetooth's menu.so adds a Bluetooth choice to the same start menu as our entries. On a card
+ * its launcher preloads it to the RIGHT of us, so glibc runs its set-up first: it checks the game's original code, then
+ * we hook (the other order fails its check and it leaves the game alone). A menu of game-mode indices at a 32-bit frame
+ * site holds both choices (frame_list_read, frame_append_at). A menu of RECORDS (the challenge_menu / comp_menu_obj
+ * sites) does not: from the menu's first button read on, before any point we hook, the game reads the picker's own copy
+ * of the records, and an entry we add leaves a choice that closes the menu. There, and on a 64-bit program (never run
+ * beside it), our entry stays off the start menu while that menu is loaded: its Bluetooth choice works; ours is not
+ * offered (the modes, Prolonged Competition and teams otherwise as always). */
+static int bt_menu_loaded(void)
+{
+    static int known = -1;
+    static const char want[] = "/spikebt/menu.so";
+    char buf[1024], line[512];
+    long n, i, j = 0, k;
+    int fd;
+    if (known >= 0) return known;
+    known = 0;
+    fd = open("/proc/self/maps", O_RDONLY);
+    if (fd < 0) return 0;
+    while (!known && (n = read(fd, buf, sizeof buf)) > 0)
+        for (i = 0; i < n && !known; i++) {
+            if (buf[i] != '\n') {
+                if (j < (long)sizeof line - 1) line[j++] = buf[i];
+                continue;
+            }
+            line[j] = 0;
+            for (k = 0; k + (long)sizeof want - 1 <= j; k++)
+                if (!__builtin_strcmp(line + k, want)) { known = 1; break; }
+            j = 0;
+        }
+    close(fd);
+    return known;
+}
+
+static int start_menu_yields(const char *who, int frame)
+{
+    if ((frame && !PM_A64) || !bt_menu_loaded()) return 0;
+    say("%s: not on the start menu - spike-pinball-bluetooth's menu is loaded and reads its own copy of this menu (%s); "
+        "its Bluetooth choice is there instead", who, PM_A64 ? "a 64-bit program" : "a list of records");
+    return 1;
+}
+
 /* PAD-1369: the menu's list and count at the frame site: in the frame (`.._list_at` / `.._count_at`) or in registers
  * (`.._list_reg` / `.._count_reg`, hook_full's numbers), as Prolonged Competition's comp_menu_frame reads them */
-static int challenge_frame_list(pm_reg *r, unsigned **list, unsigned **count)
+static int challenge_frame_list(pm_reg *r, unsigned **list, unsigned **count, int *copy)
 {
     unsigned char *sp = FULL_SP(r);
     long lreg = pm_port_value("challenge_menu_frame_list_reg", -1);
@@ -17525,6 +17643,10 @@ static int challenge_frame_list(pm_reg *r, unsigned **list, unsigned **count)
                       : (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_list_at", 300));
     *count = nreg >= 0 ? (unsigned *)&r[nreg]
                        : (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_count_at", 64));
+    *copy = 0;
+    if (lreg < 0)
+        *list = frame_list_read(r, "challenge_menu_frame", *list, (unsigned)pm_port_value("challenge_menu_frame_cap", 9),
+                                copy);
     return 1;
 }
 
@@ -17557,9 +17679,9 @@ static void challenge_menu_frame(pm_reg *r)
         ? (unsigned *)(unsigned long)(data("game_play_modes") + (unsigned)pm_port_value("game_play_mode_at", 8)) : 0;
     static unsigned ours_at;                 /* the list position of our entry */
     static int said_n, room_said;
-    int own[N_OWN_CHALLENGE], n = 0, k, on, prev_sub = frame_sub;
-    unsigned cursor, eat;
-    if (creg > FULL_REG_LAST || breg > FULL_REG_LAST || !challenge_frame_list(r, &list, &count)) return;
+    int own[N_OWN_CHALLENGE], n = 0, k, on, prev_sub = frame_sub, copy;
+    unsigned cursor, eat, at;
+    if (creg > FULL_REG_LAST || breg > FULL_REG_LAST || !challenge_frame_list(r, &list, &count, &copy)) return;
     cnt = *count + clast;
     if (slot >= 0) {
         char key[24];
@@ -17574,12 +17696,14 @@ static void challenge_menu_frame(pm_reg *r)
         frame_sp = (unsigned long)sp;
         frame_on = 0;
         frame_cursor_was = cursor;
-        if (cnt >= cap) {
+        at = frame_append_at(list, cnt, copy);                     /* PAD-1572 */
+        if (at >= cap) {
             if (!room_said++) say("challenge menu: no room for MODE CHALLENGE - the game's menu holds %u entries", cap);
             return;
         }
-        ours_at = cnt;
+        ours_at = at;
         list[ours_at] = entry;
+        frame_own(list, ours_at);
         cnt = ours_at + 1;
         *count = cnt - clast;
         if (last_at > 0) *(unsigned *)(sp + last_at) = ours_at;     /* the loop's copy of the last index (Pokemon) */
@@ -18039,7 +18163,8 @@ static void challenges_arm(void)
     if (site("challenge_menu") && site("challenge_menu_pick") && pm_port_value("challenge_menu_cap", 0) > 0
         && pm_port_value("challenge_menu_list_at", 0) > 0
         && (pm_port_value("challenge_menu_count_at", 0) > 0 || pm_port_value("challenge_menu_count_reg", -1) >= 4)
-        && (challenges_n || (pm_port_value("challenge_menu_slot", 0) < 0 && challenge_ball_id >= 0))) {
+        && (challenges_n || (pm_port_value("challenge_menu_slot", 0) < 0 && challenge_ball_id >= 0))
+        && !start_menu_yields("challenge menu", 0)) {                       /* PAD-1572 */
         if (fn("challenge_menu") && fn("challenge_menu_pick")
             && (pm_port_value("challenge_menu_count_reg", -1) >= 0 ? hook_full(fn("challenge_menu"), challenge_menu_built)
                                                                     : hook(fn("challenge_menu"), challenge_menu_built))
@@ -18059,7 +18184,8 @@ static void challenges_arm(void)
         && (pm_port_value("challenge_menu_frame_count_at", 0) > 0 || pm_port_value("challenge_menu_frame_count_reg", -1) >= 0)
         && ((challenges_n && pm_port_value("challenge_menu_slot", -1) == 0 && pm_port_value("challenge_name_msg_0", 0) > 0)
             || (pm_port_value("challenge_menu_slot", 0) < 0 && challenge_ball_id >= 0
-                && pm_port_value("challenge_menu_frame_name_msg", 0) > 0))) {
+                && pm_port_value("challenge_menu_frame_name_msg", 0) > 0))
+        && !start_menu_yields("challenge menu", 1)) {                       /* PAD-1572 */
         if (fn("challenge_menu_frame") && hook_full(fn("challenge_menu_frame"), challenge_menu_frame)) {
             can |= PM_CAN_CHALLENGE_MENU;
             say("challenge menu: the start menu's frame at 0x%08" PMA " - one MODE CHALLENGE entry (as %s's game-mode index "
@@ -27225,28 +27351,31 @@ static void comp_menu_frame(pm_reg *r)
     unsigned breg = (unsigned)pm_port_value("comp_menu_frame_buttons_reg", moved ? 0 : 99);
     unsigned idx = (unsigned)pm_port_value(comp.on ? "comp_menu_end_index" : "comp_menu_index", 0);
     unsigned msg = (unsigned)pm_port_value(comp.on ? "comp_menu_end_msg" : "comp_menu_index_msg", 0);
-    unsigned n;
+    unsigned n, at;
     static int room_said;
-    int was = comp.pending;
+    int was = comp.pending, copy = 0;
     if (lreg > FULL_REG_LAST || nreg > FULL_REG_LAST || creg > FULL_REG_LAST || breg > FULL_REG_LAST) return;
     list = lreg >= 0 ? (unsigned *)(unsigned long)r[lreg]
                      : (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0));
     count = nreg >= 0 ? (unsigned *)&r[nreg] : (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_count_at", 0));
+    if (lreg < 0) list = frame_list_read(r, "comp_menu_frame", list, cap, &copy);      /* PAD-1572 */
     n = *count + last;
     if (!idx || !msg || n > cap) return;
     if ((unsigned long)sp != comp_frame_sp || comp_frame_at >= n || list[comp_frame_at] != idx) {   /* a new menu */
         comp_frame_sp = (unsigned long)sp;
         comp_frame_restore();
-        if (n >= cap) {
+        at = frame_append_at(list, n, copy);                    /* PAD-1572 */
+        if (at >= cap) {
             if (!room_said++) say("prolonged competition: no room on the start menu - its list holds %u indices", cap);
             return;
         }
-        comp_frame_at = n;
-        list[n] = idx;
-        *count += 1;
-        if (last_at > 0) *(unsigned *)(sp + last_at) = n;      /* the loop's copy of the last index */
-        say("prolonged competition: on the start menu as entry %u of %u (game-mode index %u, %s; cursor %" PMU ")", n + 1,
-            n + 1, idx, comp_name(), r[creg]);
+        comp_frame_at = at;
+        list[at] = idx;
+        frame_own(list, at);
+        *count += at + 1 - n;
+        if (last_at > 0) *(unsigned *)(sp + last_at) = at;     /* the loop's copy of the last index */
+        say("prolonged competition: on the start menu as entry %u of %u (game-mode index %u, %s; cursor %" PMU ")", at + 1,
+            at + 1, idx, comp_name(), r[creg]);
     }
     /* the cursor this frame draws: the press read just now moves it after this point (left back, right on, both
      * wrapping), and the game letters the name as the cursor ARRIVES - so the message is ours from that frame (a
@@ -27387,6 +27516,7 @@ static void comp_arm(void)
         say("prolonged competition: off - the port does not know this game's start menu");
         return;
     }
+    if (start_menu_yields("prolonged competition", frame)) return;            /* PAD-1572 */
     if (!bus || !bus->ok || game < 0 || ball < 0) {
         say("prolonged competition: off - %s", !bus || !bus->ok ? "the port's hook_dispatch is missing or wrong"
             : "the port names no game_start / ball_start event");
@@ -28490,10 +28620,12 @@ static const char *team_kind_caption(unsigned k)
 static void team_menu_frame(pm_reg *r)
 {
     unsigned char *sp = (unsigned char *)(r + 14);
-    unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0));
+    unsigned cap = (unsigned)pm_port_value("comp_menu_frame_cap", 0);
+    int copy;
+    unsigned *list = frame_list_read(r, "comp_menu_frame",                       /* PAD-1572 */
+                                     (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0)), cap, &copy);
     unsigned *count = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_count_at", 0));
     unsigned last = pm_port_value("comp_menu_frame_count_last", 0) ? 1u : 0u;
-    unsigned cap = (unsigned)pm_port_value("comp_menu_frame_cap", 0);
     unsigned creg = (unsigned)pm_port_value("comp_menu_frame_cursor_reg", 13);
     unsigned breg = (unsigned)pm_port_value("comp_menu_frame_buttons_reg", 13);
     unsigned idx = (unsigned)pm_port_value("comp_menu_end_index", 0);
@@ -28511,15 +28643,16 @@ static void team_menu_frame(pm_reg *r)
             if (!room_said++) say("teams: no room for TEAM PLAY on the start menu - its list holds %u indices", cap);
             return;
         }
-        team_frame_at = n;
-        for (j = 0; j < nk && n + j < cap; j++) {        /* PAD-1073: Standard's index once for each of ours */
-            list[n + j] = idx;
+        team_frame_at = frame_append_at(list, n, copy);         /* PAD-1572 */
+        for (j = 0; j < nk && team_frame_at + j < cap; j++) {   /* PAD-1073: Standard's index once for each of ours */
+            list[team_frame_at + j] = idx;
+            frame_own(list, team_frame_at + j);
             team_frame_kinds[j] = kinds[j];
         }
         team_frame_n = j;
-        *count += j;
+        *count += team_frame_at + j - n;
         say("teams: %s%s on the start menu as entries %u-%u (Standard's game-mode index %u; cursor %" PMU ")",
-            team_kind_name(kinds[0]), j > 1 ? " and TEAM PLAY" : "", n + 1, n + j, idx, r[creg]);
+            team_kind_name(kinds[0]), j > 1 ? " and TEAM PLAY" : "", team_frame_at + 1, team_frame_at + j, idx, r[creg]);
     }
     sty_overlay_read();                                 /* PAD-1449 round 7: the game's Insider overlay */
     sty_menu_walk(&r[breg], 4u, 2u);                    /* PAD-1449 round 2: the style step has the flippers */
@@ -28571,6 +28704,10 @@ static void team_menu_arm(void)
     }
     if (!frame && !list) {
         say("teams: the port does not know this game's start menu - the second Start of a one-player game adds the teams");
+        return;
+    }
+    if (start_menu_yields("teams", frame)) {                                   /* PAD-1572 */
+        say("teams: the second Start of a one-player game adds the teams");
         return;
     }
     if (frame && !have_data(msg_d)) {

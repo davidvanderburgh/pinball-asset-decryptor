@@ -276,6 +276,22 @@ def strip_events(base, parts, strips, level, lamp_on=1):
     return out
 
 
+def strip_lit(base, parts, events):
+    """[(E number, "left red", value)] of the strip events lit in *events*
+    (PAD-1603: the controller log names them, so a report says whether PAD
+    sent the strips anything); "left p2 red" with parts, part 1 the bottom."""
+    if not base:
+        return []
+    names = {n: k for k, n in strip_numbers(base, parts).items()}
+    out = []
+    for n, v in events:
+        if v and n in names:
+            side, part, c = names[n]
+            out.append((n, "%s%s %s" % (("left", "right")[side], "" if parts == 1 else " p%d" % (part + 1),
+                                        STRIP_COLOURS[c][0]), v))
+    return out
+
+
 def strip_dof_lines(base, parts):
     """The DOF config text for each side's strip toy, {"left", "right"}: an
     effect per part and colour, the part's place given as AT/AH (percent from

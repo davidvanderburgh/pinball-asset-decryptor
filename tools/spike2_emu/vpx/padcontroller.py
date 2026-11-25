@@ -2184,8 +2184,56 @@ class Bridge:
         for n, leds in m.dof_flashers.items():
             level = max(self._led_level(data, nd, ix) for nd, ix in leds)
             self._dof_set("S", n, level if level >= LAMP_ON else 0)
-        for n, v in self._cab_events(data):
+        ev = self._cab_events(data)
+        for n, v in ev:
             self._dof_set("E", n, v)
+        self._note_strips("PAD's own DOF", ev)
+
+    #: how often the controller log says what the strips sent DOF (PAD-1603)
+    STRIP_LOG_S = 30.0
+
+    def _note_strips(self, route, events, now=None):
+        """The light strips in the controller log (PAD-1603): the first time
+        they light, and every STRIP_LOG_S what they showed and how many
+        changes went to DOF, or that the game kept them dark. Mike St P's
+        report after a minute of Jaws named the strips' E numbers and nothing
+        of what was sent on them, so it could not say whether PAD or the DOF
+        config left his side LEDs dark."""
+        base, parts = self.cab.get("dof_strips"), self.cab.get("strip_parts", 1)
+        if not base or not getattr(self, "cab_strips", None):
+            return
+        now = time.monotonic() if now is None else now
+        top = base + 2 * parts * len(padcabinet.STRIP_COLOURS)
+        st = {n: v for n, v in events if base <= n < top}
+        sl = getattr(self, "_strip_log", None)
+        if sl is None:
+            sl = self._strip_log = {"t": now, "prev": {}, "sent": 0, "polls": 0, "lit": 0,
+                                    "shown": [], "first": True}
+        sl["sent"] += sum(1 for n, v in st.items() if sl["prev"].get(n) != v)
+        sl["prev"] = st
+        sl["polls"] += 1
+        lit = padcabinet.strip_lit(base, parts, sorted(st.items()))
+        if lit:
+            sl["lit"] += 1
+            for _n, w, _v in lit:
+                if w not in sl["shown"]:
+                    sl["shown"].append(w)
+            if sl["first"]:
+                sl["first"] = False
+                log("DOF strips: first lit, %s, to %s" % (
+                    ", ".join("E%d = %d (%s)" % (n, v, w) for n, w, v in lit), route))
+        if now - sl["t"] < self.STRIP_LOG_S:
+            return
+        secs = now - sl["t"]
+        if sl["lit"]:
+            log("DOF strips, last %.0f s, to %s: %d changes sent, lit in %d of %d polls, showed %s; now %s"
+                % (secs, route, sl["sent"], sl["lit"], sl["polls"], ", ".join(sl["shown"]),
+                   ", ".join("E%d = %d (%s)" % (n, v, w) for n, w, v in lit) or "dark"))
+        else:
+            log("DOF strips, last %.0f s, to %s: the game lit none of its %s, so E%d-E%d stayed 0"
+                % (secs, route, "blades" if self.cab_strips["source"] == "blades" else "speaker lights",
+                   base, top - 1))
+        sl.update(t=now, sent=0, polls=0, lit=0, shown=[])
 
     def _cab_events(self, data):
         """[(E number, value)] of the cabinet's own DOF events: the buttons'
@@ -2211,7 +2259,9 @@ class Bridge:
         its own (PAD-1480): an original table PAD drives (vpxshadow) keeps the
         DOF its controller.vbs started inside B2S.Server, and Mike St P's Jaws
         shaker never reached it."""
-        for n, v in self._cab_events(data):
+        ev = self._cab_events(data)
+        self._note_strips("the DOF in B2S.Server", ev)
+        for n, v in ev:
             if self._b2s_dof.get(n) != v:
                 if not self._b2s_dof:
                     log("DOF: the cabinet's E events (start E%s, lockdown E%s, shaker E%s, strips %s) go to"
@@ -2627,6 +2677,7 @@ class Bridge:
             self.cab_strips = padcabinet.cabinet_strips(tables_dir)
         except Exception:                                   # noqa: BLE001
             self.cab_strips = None
+        self._strip_log = None              # PAD-1603: a fresh strip log a run
         bulbs = self.cab["gi_bulbs"].get(self.title, [])
         log("cabinet lights: %s; DOF start E%s, lockdown E%s, shaker E%s (%s), strips %s; BACKBOX GI bulbs: %s"
             % (", ".join("%s %s" % (k, v) for k, v in sorted(self.cab_leds.items())) or "none named",

@@ -50,6 +50,7 @@ import sys
 import threading
 import time
 from typing import Optional, Tuple
+from . import payloads as _payloads
 from . import wsl_up as _wsl_up
 
 from .payloads import (Payload, cache_path, ensure_cached,  # noqa: F401
@@ -496,8 +497,9 @@ def install(log=None, progress=None, runner=None, opener=None,
     os.makedirs(target, exist_ok=True)
     _need_room(target, IMPORT_ROOM, "install the emulator's Linux")
     say("Installing the runtime (this takes a moment, once)…")
-    out = run(["wsl.exe", "--import", DISTRO, target, tarball, "--version", "2"],
-              timeout=900)
+    with _payloads.in_use(tarball):
+        out = run(["wsl.exe", "--import", DISTRO, target, tarball,
+                   "--version", "2"], timeout=900)
     if out.returncode != 0:
         # _why, not stderr: wsl.exe writes its errors to STDOUT, so a full
         # disk read "exit 4294967295" here and the reason was lost (PAD-840)
@@ -525,6 +527,9 @@ def install(log=None, progress=None, runner=None, opener=None,
         raise RuntimeError("the runtime imported but does not answer as ours: "
                            "%s" % detail)
     say(detail)
+    # PAD-1595: the runtimes this one replaces are 400 MB each.  The current
+    # tarball stays, so a broken distro re-imports without a download.
+    _payloads._prune_quietly(say)
     return state
 
 

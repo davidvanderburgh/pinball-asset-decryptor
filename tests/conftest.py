@@ -325,6 +325,9 @@ def _isolate_title_cache_session(tmp_path_factory):
     # PAD-1307: a test that starts a rig must never turn off timesyncd in the
     # developer's own distros (core/timesync.py runs real wsl.exe calls).
     os.environ["PAD_KEEP_TIMESYNC"] = "1"
+    # PAD-1595: a successful install prunes the payload download cache, so no
+    # test may ever see the developer's real one.
+    os.environ["PAD_PAYLOAD_DIR"] = str(tmp_path_factory.mktemp("payloads"))
 
 
 

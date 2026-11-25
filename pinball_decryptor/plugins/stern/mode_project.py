@@ -2406,6 +2406,9 @@ STACK_BALLS_PROVEN = frozenset({
     "guardians_le-1.14", "aerosmith_le-1.15", "elvira3-1.13", "jurassic_park_the_pin-1.05",
     "metallica_spike-1.04",           # PAD-306 2026-10-01: the framework's serve asked for two (0x3e3008), the
                                       # stack no mode refused ("a multiball"); one drained, started
+    "metallica_spike-1.05",           # PAD-1555 2026-11-24 newbuild/stjob.sh WIZ=1 (stock card, hidden, muted; the 1.04 control the
+                                      # same): the game's own Blackened Multiball handed over (game_wizard start), a stack no
+                                      # mode refused ("a multiball is running") through 5 drains, started at the 6th
     "aerosmith_le-1.16",                 # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
     "guardians-1.15",                    # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
     "guardians_le-1.15",                 # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running

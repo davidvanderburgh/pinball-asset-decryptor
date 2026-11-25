@@ -1164,8 +1164,9 @@ data typeinfo_cmode_mball   0x0074a16c
 data typeinfo_vmi           0x00734740   # any multiple-inheritance typeinfo: its vptr (GamePlayModes)
 
 # ---- PAD-1555: held coils on the November 2026 builds ----
-# PAD-1555: ControlCoil grew a word at +36 here (its virtuals read +0x28 / +0x30 / +0x33 where 0.97 read +0x24 /
-# +0x2c / +0x2f): the on-time word the game asks a coil for is at +40
-value ccoil_ontime_at       40
+# PAD-1555: the ControlCoil object's words sit one word earlier here than on 0.97 (emulator, at a hold's start:
+# 0.97 +0x24 0, +0x28 1, +0x2c the controlling process; here +0x20 0, +0x24 1, +0x28 the process): the on-time word
+# the game asks a coil for is at +32
+value ccoil_ontime_at       32
 value coil_rec_size        0x70   # PAD-1555: the coil record grew in the November 2026 builds (its coil_count code: x * 7 * 16)
 site coil_give        0x0005f800 0xe3510000 0xe92d4038   # PAD-1555: the earlier build's, by a masked run of its code unique in both programs

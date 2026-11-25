@@ -7596,10 +7596,17 @@ static int coil_game_busy(const struct held_coil *c)
     if (c->obj && c->ctl) {
         ctl = *(const unsigned short *)(unsigned long)(c->obj + c->ctl);
         if (ctl && ctl != c->id) return 1;
-        /* PAD-1555: the object's on-time word - +36 on spike::ControlCoil, +40 where Stern's November 2026 builds
-         * grew the object by a word at +36 (King Kong 1.00 / 1.01: every field from +0x24 on moved 4; reading +36
-         * there, the new word, every hold was let go 13 ms in as "the game wants it") */
-        if (!c->route && *(const unsigned *)(unsigned long)(c->obj + CCOIL_ONTIME_AT)) return 1;
+        /* PAD-1555: the object's on-time word - +36 on spike::ControlCoil, +32 on Stern's November 2026 King Kong
+         * builds, whose object's words sit one word earlier (at a hold's start 0.97 has +0x24 0, +0x28 1, +0x2c the
+         * controlling process; 1.01 +0x20 0, +0x24 1, +0x28 the process): read at +36 there, the 1, every hold was
+         * let go 13 ms in as "the game wants it" */
+        if (!c->route && *(const unsigned *)(unsigned long)(c->obj + CCOIL_ONTIME_AT)) {
+            const unsigned *w = (const unsigned *)(unsigned long)(c->obj + 0x20);
+            say("%s: the game's on-time word (+%u) is %u - the object's +0x20..+0x34: %08x %08x %08x %08x %08x %08x",
+                c->name, (unsigned)CCOIL_ONTIME_AT, *(const unsigned *)(unsigned long)(c->obj + CCOIL_ONTIME_AT),
+                w[0], w[1], w[2], w[3], w[4], w[5]);
+            return 1;
+        }
     }
     if (c->route && coil_rec_busy(c)) return 1;
     pm_snprintf(key, sizeof key, "%s_procs", c->name);

@@ -163,13 +163,13 @@ def test_every_port_s_example_start_shot_is_one_of_its_shots():
 
 
 def test_the_control_coil_on_time_word_is_the_port_s():
-    """PAD-1555: the November King Kong builds grew spike::ControlCoil by a word at +36 (its virtuals read +0x28 /
-    +0x30 / +0x33 where 0.97's read +0x24 / +0x2c / +0x2f); the runtime read the game's on-time word at +36 and let
-    every hold go 13 ms in. The offset is the port's (`value ccoil_ontime_at`, default 36)."""
+    """PAD-1555: on the November King Kong builds the ControlCoil object's words sit one word earlier (emulator: at a
+    hold's start 0.97 +0x24 0, +0x28 1, +0x2c our process; 1.01 +0x20 0, +0x24 1, +0x28 our process); the runtime read
+    the game's on-time word at +36, the 1, and let every hold go 13 ms in. The offset is the port's (`value ccoil_ontime_at`, default 36)."""
     src = (ROOT / "tools" / "spike2_emu" / "modes" / "sdk" / "pad_mode_runtime.c").read_text(encoding="utf-8")
     assert '#define CCOIL_ONTIME_AT ((pm_addr)pm_port_value("ccoil_ontime_at", 36))' in src
     assert "c->obj + CCOIL_ONTIME_AT" in src and "c->obj + 36)" not in src
     for key in ("king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01"):
         text = (PORTS / (key + ".port")).read_text(encoding="utf-8")
-        assert re.search(r"^value ccoil_ontime_at\s+40$", text, re.M), key
+        assert re.search(r"^value ccoil_ontime_at\s+32$", text, re.M), key
     assert "ccoil_ontime_at" not in (PORTS / "king_kong_le-0.97.port").read_text(encoding="utf-8")

@@ -339,3 +339,22 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
     stack mode on 1.05 AND the 1.04 control - the runtime counts only the game's own multiball: start the game's
     own multiball (Blackened) instead, as WIZARDS_PROVEN's Metallica 1.04 line did.
   - Merge main before release (three tests red at the branch's base are green there).
+
+### Run 9 (2026-11-24 late): challenges and Metallica's stack
+
+- **Metallica 1.05's challenges** (`chal2job.sh` + `modes/sdk/gpmset_mode.c`, PAD-619's `gpm set` re-made: the
+  GamePlayModes singleton's current index set to Lux Aeterna Combo (8) in attract, as the menu's pick sets it): challenge
+  0 claimed, `CH TEST START (challenge pick)`; the 1.04 control the same. CHALLENGE_PROVEN.
+- **Avengers 1.12 / Foo Fighters 1.05** (index menus now): a plain MODE CHALLENGE (`challenge_menu_frame` on the comp
+  frame, as Pokemon 0.87's) - and the derive had dropped the challenge game's own calls and flag (challenge_balls,
+  _extra_ball, _end_ball, challenge_on_flag 18; placed by a masked match of the earlier build's, one match each).
+  `chaljob.sh`: appended (entry 5 of 5 / 9 of 9), lettered CHALLENGE / PAD CHALLENGE, picked, START (challenge pick).
+  CHALLENGE_MENU_FRAME_PROVEN.
+- **Metallica 1.05's stack** (`stjob.sh WIZ=1`): our own multiball's balls are never the game's ("ours is over (1 ball
+  in play) - two or more are the game's again"), so the game's own Blackened Multiball was handed over; `stack no`
+  refused ("a multiball is running") through 5 drains, started at the 6th; 1.04 the same. STACK_BALLS_PROVEN.
+- **Left for run 10 - the latest-build sets the new builds are not in yet** (each game's latest build carries them):
+  BUTTON_SHOTS_PROVEN (9: PAD-1403's method), menu_settings.PROVEN (MUSIC MODE / EDITION rows, PAD-724's sweep),
+  sound_modes.PROVEN and TURN_PROVEN (PAD-494 / PAD-565 sweeps), STACK_RECORDS_PROVEN and SWITCH_EDGE_PROVEN
+  (Metallica 1.05), BANK_SONG_NO_ROOM (D&D 1.11: image.bin + its biggest music bank against MAPPED_MAX); the cstarts
+  finder's Metallica list (find_c_starts.py names 1.04 only).

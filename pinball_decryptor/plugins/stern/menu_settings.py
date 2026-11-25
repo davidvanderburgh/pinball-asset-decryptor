@@ -88,6 +88,9 @@ SAVED_PROGRESS = "saved_progress"
 COLOUR_BLIND = "colour_blind"
 #: PAD-1589: spoken scores: Off/On (stored 0, 1), Off to start with
 SPOKEN_SCORES = "spoken_scores"
+#: Simon (2026-11-25): BOOT MENU FLIPPER (:mod:`.boot_flip`): a multi-boot card's right flipper hold back to the boot menu,
+#: 1 Off, 2 after 20 s, 3 after 60 s with no game on - read by padmenu.so inside the game, not by the mode runtime
+BOOT_FLIP = "boot_flip"
 #: each setting of ours: the adjustment it takes over, its descriptor caption, its row caption and
 #: the menu category whose page lists it. EDITION sits on Attract Mode (16), beside the game's own
 #: BOOT SCREEN and 70TH BOOT SCREEN, which is where an operator already picks how the game looks.
@@ -105,6 +108,7 @@ SETTINGS = {
     SAVED_PROGRESS: (None, "SAVED PROGRESS", "Saved Progress", 16),
     COLOUR_BLIND: (None, "COLOR BLIND", "Color Blind", 16),
     SPOKEN_SCORES: (None, "SPOKEN SCORES", "Spoken Scores", 16),
+    BOOT_FLIP: (None, "BOOT MENU FLIPPER", "Boot Menu Flipper", 16),
 }
 
 

@@ -35,6 +35,9 @@ SETTINGS = (
     ("brightness", "Picture settings", "Brightness, Contrast and Saturation (Write tab)."),
     ("saved_progress", "Saved Progress", "On the card when the project keeps progress between games (a variable "
                                          "saved between games). Clear clears it; so does a factory reset."),
+    ("boot_flip", "Boot Menu Flipper", "For a multi-boot card (Multi-boot tab): the operator switches the right "
+                                       "flipper hold back to the boot menu - Off, or once there has been no game on "
+                                       "for 20 s or 60 s. It wins over the Multi-boot tab's own setting."),
 )
 
 #: a ticked row with nothing behind it yet goes on the card with placeholder values (PR #40 review: shown after the
@@ -127,6 +130,9 @@ class ServiceMenuTab(TabService):
                 else:
                     note = OFF_NOTES[key] + ("" if key in has else " " + where)
                 row.update(can=True, on=on, note=note)
+            elif key == SM.FLIP_KEY:                    # Simon: needs nothing in the project; unticked to start with
+                on = key in ticked
+                row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row. " + where)
             elif key == "handicap":
                 on = HC.load(project)
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")
@@ -178,7 +184,7 @@ class ServiceMenuTab(TabService):
             ok = modes.set_colour_blind(bool(on))
         elif key == "spoken_scores":
             ok = modes.set_spoken_scores(bool(on))
-        elif key in SM.OFF_KEYS:                        # PAD-1393 round 2: the row on or off the card, the setting kept
+        elif key in SM.TICK_KEYS:                        # PAD-1393 round 2: the row on or off the card, the setting kept
             project = self._project()
             if not project:
                 return False

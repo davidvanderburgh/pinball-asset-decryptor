@@ -602,6 +602,8 @@ class ModePlan:
     picture_file: str = ""
     #: PAD-1382: ``settings.cfg`` beside the mode files, the settings sharing the MORE SETTINGS rows ("" = none)
     settings_file: str = ""
+    #: BOOT MENU FLIPPER: ``padmenu.cfg`` beside the mode files, where padmenu.so reads the row ("" = none)
+    flip_file: str = ""
     #: image sets: ``scenes.cfg`` beside the mode files ("" = none) and the variants' own scene files with it
     scenes_file: str = ""
     scene_files: list = field(default_factory=list)
@@ -2661,6 +2663,11 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             from . import menu_settings as MSet
             dst = os.path.join(out_dir, MSet.SHARED_CFG)
             shutil.copyfile(result.settings_file, dst)
+            extras.append(dst)
+        if getattr(result, "flip_file", ""):           # BOOT MENU FLIPPER: padmenu.cfg, for padmenu.so
+            from . import boot_flip as BF
+            dst = os.path.join(out_dir, BF.CFG_NAME)
+            shutil.copyfile(result.flip_file, dst)
             extras.append(dst)
         if getattr(result, "scenes_file", ""):         # image sets: scenes.cfg and the variants' scene files
             from . import scene_variants as SV

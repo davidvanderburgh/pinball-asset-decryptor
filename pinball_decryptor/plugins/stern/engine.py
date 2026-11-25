@@ -10238,6 +10238,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         from . import saved_progress as _SP
         _saved_modes = _SP.wanted(assets_dir, list(mode_list) + list(code_list))
         saved_menu = _SavedProgressMenu(log) if _saved_modes else None
+        # Simon (2026-11-25): BOOT MENU FLIPPER, the multi-boot card's right flipper hold, when its row is ticked
+        from . import service_menu as _SvM_f
+        flip_menu = (_BootFlipMenu(log) if not _is_spike3(disk_f) and _SvM_f.FLIP_KEY in _SvM_f.on_keys(assets_dir)
+                     else None)
         # PAD-1382: the owner's own settings (Service menu tab) beside them, all in the owner's order
         from . import service_menu as _SvM
         if not _is_spike3(disk_f):
@@ -10251,7 +10255,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else:
                     image_menu = _ph
         _menu_list = _SvM.arrange(assets_dir, [music_menu, edition_menu, *picture_menus, coop_menu, hand_menu,
-                                              image_menu, saved_menu, cvd_menu, spk_menu], log)
+                                              image_menu, saved_menu, cvd_menu, spk_menu, flip_menu], log)
         menu_job = _MenuJobs(*_menu_list) if _menu_list else None
         picture_cfg = ""
         settings_cfg = ""
@@ -10260,6 +10264,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         image_setting = 0
         saved_setting = 0
         cvd_setting = spk_setting = 0
+        flip_cfg = ""
         if (text_edits or shader_prof is not None or clip_job is not None
                 or menu_job is not None or wifi_menu):
             if progress:
@@ -10290,6 +10295,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if hand_menu is not None and hand_menu.ok:
                 # PAD-1033: no HANDICAP row (no spare setting left): the handicaps are always on
                 hand_setting = hand_menu.setting.live
+            if flip_menu is not None and flip_menu.ok:
+                # the row's value word, for padmenu.so (a row of its own, or the runtime's word on MORE SETTINGS)
+                flip_cfg = _boot_flip_cfg(flip_menu, grow_work)
             if saved_menu is not None and saved_menu.ok:
                 # PAD-1402: no SAVED PROGRESS row (no spare setting left): the progress is kept, but nothing clears it
                 saved_setting = saved_menu.setting.live
@@ -10611,7 +10619,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         if (bank_plan is not None and bank_plan.retired
                 and not (_modes_on or _clips_on or sound_modes_cfg or picture_cfg
                          or _attract_on or _coop_on or _idle_on or _hand_on or _acc_on or _cabs_on
-                         or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg)):
+                         or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg or flip_cfg)):
             # PAD-1235: the earlier Write's runtime files would stay and play the
             # banks this build took the place of
             raise RuntimeError(
@@ -10622,7 +10630,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "another mode feature in the project.")
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
                 or _hand_on or _acc_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg
-                or _scenes_on):
+                or _scenes_on
+                or flip_cfg):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -10738,6 +10747,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     raise _MW.ModeWriteError("none of the project's random clips can go on "
                                              "this card")
                 mode_plan.settings_file = settings_cfg      # PAD-1382: the shared rows' table
+                mode_plan.flip_file = flip_cfg              # BOOT MENU FLIPPER: where padmenu.so reads the row
                 # PAD-1035: the project's own edits of a scene the modes rewrite whole (the co-op
                 # pick's screens in Godzilla's HUD, a mode's screen, random clips in the bank) go
                 # on in the rewritten scene: in-place ones were in the bytes it was built from,
@@ -12842,6 +12852,36 @@ class _SpokenScoresMenu(_MusicModeMenu):
                  "scores." % self.why, "warning")
 
 
+class _BootFlipMenu(_MusicModeMenu):
+    """Simon (2026-11-25, on the table: "there is no way to enable or disable the right flipper action"): BOOT MENU
+    FLIPPER in the game's own service menu (:mod:`.boot_flip`): 1 Off, 2 after 20 s, 3 after 60 s - how a multi-boot
+    card's right flipper hold back to the boot menu behaves. padmenu.so reads it (``padmenu.cfg``), not the runtime."""
+
+    KEY = "boot_flip"
+
+    def __init__(self, log):
+        from . import boot_flip as _BF
+        super().__init__(len(_BF.MENU_NAMES), _BF.MENU_NAMES, log)
+
+    def wanted(self):
+        from . import boot_flip as _BF
+        return self.KEY, self.count, self.names, {"default": _BF.MENU_DEFAULT, "help_text": _BF.MENU_HELP}
+
+    def done(self):
+        self.ok = True
+        self.log("Boot menu flipper: BOOT MENU FLIPPER is in the operator menu (%s), 2 (20 s) to start with. On a "
+                 "multi-boot card it sets the right flipper hold back to the boot menu: 1 Off, 2 or 3 once the "
+                 "flippers have been off 20 s or 60 s; it wins over the Multi-boot tab's setting." % self.setting.where,
+                 "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Boot menu flipper: BOOT MENU FLIPPER could not be added to the operator menu (%s), so a multi-boot "
+                 "card keeps the Multi-boot tab's flipper setting." % self.why, "warning")
+
+
 class _ImageSetMenu(_MusicModeMenu):
     """PAD-1390: IMAGE SET in the game's own service menu (:mod:`.scene_variants`): which of the project's image sets
     the screens with variants show, 1 to n by the sets' names, 1 (the scenes as the project has them) to start with.
@@ -12987,6 +13027,16 @@ def _shared_settings_cfg(menu_job, work, log):
         "SETTINGS picks one and the row under it shows its value (%s). The card keeps each one's value."
         % (", ".join(_MSet.SETTINGS[j.KEY][1] for j in shared),
            shared[0].setting.where.rsplit(",", 1)[0]), "info")
+    return path
+
+
+def _boot_flip_cfg(flip_menu, work):
+    """BOOT MENU FLIPPER: ``padmenu.cfg`` in *work* (:func:`.boot_flip.cfg_text`), its path."""
+    from . import boot_flip as _BF
+    os.makedirs(_lp(work), exist_ok=True)
+    path = os.path.join(work, _BF.CFG_NAME)
+    with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
+        f.write(_BF.cfg_text(flip_menu.setting.live, flip_menu.KEY, flip_menu.setting.default))
     return path
 
 

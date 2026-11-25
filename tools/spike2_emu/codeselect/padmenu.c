@@ -646,6 +646,22 @@ static int flip_fire, flip_fired;
 static long long flip_since = -1, flip_last = -1;
 static int flip_was = -1;
 static FILE *trace;
+/* THE SERVICE MENU ROW (Simon, 2026-11-25: "there is no way to enable or disable the right flipper action").  A
+ * game the app wrote with BOOT MENU FLIPPER ticked has /usr/local/padmode/padmenu.cfg (boot_flip.py):
+ *     flip_row <the value's word> <key> <default>
+ * 1 Off, 2 after 20 s, 3 after 60 s with no game on.  The word is the game's own address of the row's value (this
+ * object runs inside the game), or, at 0xfade0000 and up, one of the mode runtime's MORE SETTINGS words, whose value
+ * the runtime keeps in /dump/pad_settings.state as "<key> <value>".  Where the card has the row, it wins over
+ * images.conf's boot_menu= / flip_guard=.  An address the game has not mapped is never read (flip_row_ok). */
+#define ROW_CFG     "/usr/local/padmode/padmenu.cfg"
+#define ROW_STATE   "/dump/pad_settings.state"
+#define ROW_SHARED  0xfade0000ul
+#define ROW_HOLD_MS 5000
+static unsigned long row_addr;             /* 0: no row on this card */
+static char row_key[40], row_state[128] = ROW_STATE;
+static int row_def = 2, row_val = -1, row_ok = -1;
+static int guard_env;                      /* PADMENU_FLIP_GUARD_MS given (the tests): it wins over the row's too */
+static long long row_due;
 
 static void tr(const char *fmt, ...)
 {
@@ -716,11 +732,80 @@ static void rule_set(unsigned node, unsigned coil, int on, int input)
  * answer the scan all the time, which is why the first version (a hold = readings no more than
  * 500 ms apart) passed there.  So the last reading IS the button until the next one, and the 5 s
  * are counted on the game's other bus traffic (flip_check from every frame the game writes). */
+/* the row's address in a readable mapping of this process (read once) */
+static int flip_row_ok(void)
+{
+    FILE *f;
+    char line[256];
+    if (row_ok >= 0)
+        return row_ok;
+    row_ok = 0;
+    if (!(f = fopen("/proc/self/maps", "r")))
+        return 0;
+    while (fgets(line, sizeof line, f)) {
+        unsigned long a, b;
+        char perm[8];
+        if (sscanf(line, "%lx-%lx %7s", &a, &b, perm) == 3 && perm[0] == 'r'
+                && row_addr >= a && row_addr + 4 <= b) {
+            row_ok = 1;
+            break;
+        }
+    }
+    fclose(f);
+    if (!row_ok)
+        tr("BOOT MENU FLIPPER: 0x%08lx is not in this game's memory - the row is not read", row_addr);
+    return row_ok;
+}
+
+/* the row's value now (1..3): its word, or the runtime's file; the default until there is one.  The file is read at
+ * most once a second, and only while the button is down (flip_check). */
+static int flip_row(long long t)
+{
+    int v = -1;
+    if (row_addr < ROW_SHARED) {
+        if (flip_row_ok())
+            v = (int)*(volatile uint32_t *)(uintptr_t)row_addr;
+    } else if (t >= row_due) {
+        FILE *f = fopen(row_state, "r");
+        char line[96];
+        size_t k = strlen(row_key);
+        row_due = t + 1000;
+        row_val = -1;
+        if (f) {
+            while (fgets(line, sizeof line, f))
+                if (!strncmp(line, row_key, k) && line[k] == ' ')
+                    row_val = atoi(line + k + 1);
+            fclose(f);
+        }
+        v = row_val;
+    } else {
+        v = row_val;
+    }
+    if (v < 1 || v > 3)
+        v = row_def;                           /* a fresh store reads 0 until the game has loaded its settings */
+    return v;
+}
+
 static void flip_check(long long t)
 {
-    if (flip_fired || flip_ms <= 0 || flip_was != 1)
+    long hold = flip_ms, quiet = flip_quiet_ms;
+    if (flip_fired || flip_was != 1)
         return;
-    if (rules_live || t - rules_off_since < flip_quiet_ms) {
+    if (row_addr) {                            /* the operator's row wins over images.conf */
+        static int said = -1;
+        int v = flip_row(t);
+        if (v != said)
+            tr("BOOT MENU FLIPPER reads %d (%s)", v, v == 1 ? "off" : v == 2 ? "after 20 s" : "after 60 s");
+        said = v;
+        if (v == 1)
+            return;
+        hold = flip_ms > 0 ? flip_ms : ROW_HOLD_MS;
+        if (!guard_env)
+            quiet = v == 2 ? 20000 : 60000;
+    }
+    if (hold <= 0)
+        return;
+    if (rules_live || t - rules_off_since < quiet) {
         if (flip_since >= 0)
             tr("hold broken: %s", rules_live ? "a game is in play" : "the flippers went off too lately");
         flip_since = -1;                       /* no game on, for the whole hold */
@@ -730,9 +815,9 @@ static void flip_check(long long t)
         flip_since = t;
         return;
     }
-    if (t - flip_since >= flip_ms) {
+    if (t - flip_since >= hold) {
         flip_fired = 1;
-        tr("RIGHT FLIPPER HELD %ld ms with no game on - %s", flip_ms,
+        tr("RIGHT FLIPPER HELD %ld ms with no game on - %s", hold,
            flip_fire ? "restarting into the boot menu" : "would restart (PADMENU_FLIP_FIRE not set)");
         if (flip_fire)
             ask_for_reboot_why("padmenu: right flipper held - restarting the machine into the boot menu\n");
@@ -822,7 +907,7 @@ ssize_t write(int fd, const void *buf, size_t n)
     ssize_t r;
     if (!next && !(next = (write_fn)dlsym(RTLD_NEXT, "write"))) { errno = ENOSYS; return -1; }
     r = next(fd, buf, n);
-    if (r > 0 && (flip_ms > 0 || trace) && fd > 2 && is_nb(fd))
+    if (r > 0 && (flip_ms > 0 || row_addr || trace) && fd > 2 && is_nb(fd))
         nb_wrote(fd, buf, r);
     return r;
 }
@@ -866,13 +951,38 @@ static void flip_init(const char *conf)
         guard_s = atol(w);
     flip_ms = v && *v ? strtol(v, NULL, 10) : hold_s * 1000;
     flip_quiet_ms = q && *q ? strtol(q, NULL, 10) : guard_s * 1000;
+    guard_env = q && *q;
     flip_fire = !(f && *f == '1');
     rules_off_since = now_ms();
     if (t && *t)
         trace = fopen(t, "a");
+    {
+        const char *rc = getenv("PADMENU_ROW_CFG"), *rs = getenv("PADMENU_ROW_STATE");   /* the tests' */
+        FILE *cf = fopen(rc && *rc ? rc : ROW_CFG, "r");
+        char line[160], key[40];
+        unsigned long a;
+        int d;
+        if (cf) {
+            while (fgets(line, sizeof line, cf))
+                if (sscanf(line, "flip_row %lx %39s %d", &a, key, &d) == 3 && a) {
+                    row_addr = a;
+                    snprintf(row_key, sizeof row_key, "%s", key);
+                    row_def = d >= 1 && d <= 3 ? d : 2;
+                }
+            fclose(cf);
+        }
+        if (rs && *rs)
+            snprintf(row_state, sizeof row_state, "%s", rs);
+        unsetenv("PADMENU_ROW_CFG");
+        unsetenv("PADMENU_ROW_STATE");
+    }
     tr("padmenu flipper watcher: hold %ld ms (0 = off), after the flippers are off %ld ms, %s", flip_ms,
        flip_quiet_ms, flip_fire ? "restarts" : "log only");
-    if (flip_ms > 0) {
+    if (row_addr)
+        tr("BOOT MENU FLIPPER row at 0x%08lx (%s, %d to start with): it decides", row_addr, row_key, row_def);
+    if (row_addr) {
+        say("padmenu: the service menu's BOOT MENU FLIPPER decides the right flipper hold back to the boot menu\n");
+    } else if (flip_ms > 0) {
         char m[160];
         snprintf(m, sizeof m, "padmenu: the right flipper held %ld s with no game on restarts into the boot menu"
                  " (the flippers off %ld s first)\n", flip_ms / 1000, flip_quiet_ms / 1000);

@@ -78,7 +78,7 @@ def _n(n, word):
     return "%d %s%s" % (n, word, "" if n == 1 else "s")
 
 
-def carry_report(plan, detail_lines, modes_line="", modes_blocked=False, new_label=""):
+def carry_report(plan, detail_lines, modes_line="", modes_blocked=False, new_label="", modes_left=()):
     """What the update carries and what it cannot, for the question asked before the build.
 
     *plan* is :func:`core.mod_transfer.plan_transfer`'s; *detail_lines* its
@@ -91,7 +91,7 @@ def carry_report(plan, detail_lines, modes_line="", modes_blocked=False, new_lab
         n = len(got.get("matched") or ()) + len(got.get("remapped") or ())
         if n:
             carried.append(_n(n, word))
-    left = [text for level, text in detail_lines if level in ("error", "warning")]
+    left = [text for level, text in detail_lines if level in ("error", "warning")] + list(modes_left)
     text_drop = len((plan.get("text") or {}).get("dropped") or ())
     if text_drop and not any(t.startswith("Text") for t in left):
         left.append("%s cannot be carried: the new build has no matching line." % _n(text_drop, "text edit"))
@@ -120,3 +120,60 @@ def question(report, cap=12):
                      "now, or wait.")
     lines += ["", "Yes builds the update without these. No stops here: nothing has been written."]
     return "Update to %s without these?" % new, "\n".join(lines)
+
+
+# ---- modes (Stern Spike 2): carried by shot name onto the new build --------------------------------------
+def modes_check(project, workspace):
+    """``(carry, left_out)`` for the modes of *project* on the build extracted into *workspace*, checked the way
+    ``mode_project.copy_modes`` matches them (shots by NAME, :func:`retarget`) without copying anything:
+    *carry* the slugs that run there as they are (and code modes, which a build checks), *left_out* a sentence
+    per mode that names a shot the new build lacks or does not load. Those stay in the old project (nothing
+    is lost): an update without them never puts a mode on the card that a build would refuse.
+    ``([], [])`` when the project has no modes or the new build has no port (``mode_news`` says that)."""
+    from ..plugins.stern import mode_project as MP
+    from ..plugins.stern import code_modes as CM
+    try:
+        found, broken = MP.list_modes(project)
+        codes = CM.code_slugs(project)
+    except Exception:                                   # noqa: BLE001
+        return [], []
+    if not found and not broken and not codes:
+        return [], []
+    try:
+        _card, p = MP.project_profile(workspace)
+    except Exception:                                   # noqa: BLE001
+        p = None
+    if p is None:
+        return [], []
+    carry, left = [], []
+    for slug, spec in found:
+        new, dropped = MP.retarget(spec, p)
+        problems = []
+        if not dropped:
+            try:
+                problems = MP.validate(new, MP.mode_folder(project, slug))
+            except Exception:                           # noqa: BLE001
+                problems = []
+        if dropped or problems:
+            why = ("%s has no %s" % (p.label, ", ".join(dropped))) if dropped else " ".join(problems)
+            left.append("Mode %s: %s. It stays in the old project: pick its shots again there, then Copy to... "
+                        "on the Modes tab carries it over." % (spec.name, why))
+        else:
+            carry.append(slug)
+    for slug, why in broken:
+        left.append("Mode %s: its file does not load (%s)." % (slug, why))
+    return carry + list(codes), left
+
+
+def carry_modes(project, workspace, slugs, log=None):
+    """Copy the modes *slugs* (:func:`modes_check`'s *carry*) of *project* into the new build's *workspace*
+    (``mode_project.copy_modes``: whole folders, saved for the new title). -> the report's summary ('' when
+    there is nothing to carry)."""
+    if not slugs:
+        return ""
+    from ..plugins.stern import mode_project as MP
+    report = MP.copy_modes(project, workspace, slugs=slugs)
+    if log:
+        for line in report.lines():
+            log("Modes: " + line, "info")
+    return report.summary().split("\n\n", 1)[0]

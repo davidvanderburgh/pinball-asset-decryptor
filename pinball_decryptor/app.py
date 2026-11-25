@@ -4772,11 +4772,18 @@ class App:
                 modes_line = mfr.mode_news(raw, project=project,
                                            cancel=lambda: self._cancel_requested)
                 blocked = "can't run" in modes_line or "could not be read" in modes_line
+            carry, modes_left = ([], []) if blocked else game_update.modes_check(project, ws)
+
+            def post(ws2):
+                return game_update.carry_modes(project, ws2, carry, log=lambda t, l="info":
+                                               self.msg_queue.put(LogMsg(t, l)))
+
             report = game_update.carry_report(
-                plan, mod_transfer.plan_detail_lines(plan), modes_line, blocked, new_label)
+                plan, mod_transfer.plan_detail_lines(plan), modes_line, blocked, new_label,
+                modes_left=modes_left)
             title, message = game_update.question(report)
             if report["clean"]:
-                return
+                return post
             box, done = {}, threading.Event()
 
             def _q():
@@ -4788,6 +4795,7 @@ class App:
             done.wait()
             if not box.get("yes"):
                 raise mod_port.PortSkip("stopped before building: nothing was written")
+            return post
 
         def after(results):
             built = [j for j, st, _d in results if st == "ok"]
@@ -5011,8 +5019,10 @@ class App:
 
         PAD-1585: *gate(ws, plan)* runs after the transfer is planned and
         before anything is applied or built (an update's "what can't be
-        carried" question; it raises PortSkip to stop), *after(results)* on
-        the UI thread once the chain is done."""
+        carried" question; it raises PortSkip to stop) and may return
+        *post(ws)*, run after the transfer is applied (the update's modes)
+        and returning words for the summary; *after(results)* runs on the UI
+        thread once the chain is done."""
         from .core import mod_port, mod_transfer
 
         log_cb, progress_cb, extract, run_sub = self._port_sub_runner()
@@ -5028,8 +5038,7 @@ class App:
             for level, line in mod_transfer.plan_detail_lines(plan):
                 log_cb(line, level)
             totals = plan["totals"]
-            if gate is not None:
-                gate(ws, plan)
+            post = gate(ws, plan) if gate is not None else None
             if totals["transfer"] == 0:
                 raise mod_port.PortSkip(
                     "none of the project's mods have a matching slot or "
@@ -5041,7 +5050,8 @@ class App:
                        % totals["flagged"], "warning")
             res = mod_transfer.apply_transfer(project, ws, plan,
                                               include_flagged=False)
-            return ("%d audio, %d video, %d image, %d text transferred%s%s"
+            more = post(ws) if callable(post) else ""
+            return ("%d audio, %d video, %d image, %d text transferred%s%s%s"
                     % (res["audio"], res["video"], res["image"],
                        res["text"],
                        ("; %d slot(s) with random clips"
@@ -5049,7 +5059,8 @@ class App:
                        if res.get("video_variants") else "",
                        ("; %d sound(s) with music mode files"
                         % res["sound_modes"])
-                       if res.get("sound_modes") else ""))
+                       if res.get("sound_modes") else "",
+                       ("; " + more) if more else ""))
 
         def stage(ws):
             pend_a = self._stage_pending_audio(ws)

@@ -26,6 +26,7 @@ from .core.updater import (AUTO_DOWNLOAD_DEFAULT, AUTO_DOWNLOAD_KEY,
 from .webui import compat
 from .webui.compat import filedialog, messagebox
 from .webui.i18n import translator
+from .core import pad_temp
 
 log = logging.getLogger(__name__)
 
@@ -3759,19 +3760,28 @@ class App:
             return
         if not messagebox.askyesno(where, text + "\n\nLoad them into this project now?"):
             return
-        src = path
+        src, scratch = path, None
         if not is_zip:
-            import tempfile
-            src = os.path.join(tempfile.mkdtemp(prefix="pad-modes-"),
+            scratch = pad_temp.mkdtemp(prefix="pad-modes-")
+            src = os.path.join(scratch,
                                os.path.basename(os.path.normpath(path)) + ".zip")
-            try:
-                modpack.zip_modes_folder(about["folder"], src)
-            except OSError as e:
-                messagebox.showerror(where, "Could not read the modes in %s: %s"
-                                     % (path, e))
-                return
-        self.window.select_tab("modes")
-        modes.load_file(src)
+        try:
+            if scratch:
+                try:
+                    modpack.zip_modes_folder(about["folder"], src)
+                except OSError as e:
+                    messagebox.showerror(where, "Could not read the modes in %s: %s"
+                                         % (path, e))
+                    return
+            self.window.select_tab("modes")
+            modes.load_file(src)
+        finally:
+            # PAD-1596: the zip made of the folder was left in the temp folder
+            # for good, one more on every load (load_file is done with it)
+            if scratch:
+                import shutil
+                shutil.rmtree(scratch, ignore_errors=True)
+                pad_temp.forget_owner(scratch)
 
     # -- PAD-1408: a mod pack with the modes: a whole game ----------------
     def _pack_includes(self, assets_dir):

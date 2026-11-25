@@ -125,6 +125,8 @@ class CardTab(TabService):
         self.set(preview={"state": "loading", "stage": "Reading the card…"})
 
         def _work():
+            CP.touch(out)
+            CP.prune_cache(keep=(os.path.basename(out),))
             games = _kept_games(out) if ck else None
             if games is None:
                 games = CP.games_on(path)

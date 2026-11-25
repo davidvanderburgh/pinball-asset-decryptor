@@ -19,6 +19,7 @@ from .executor import (CommandError, create_executor, find_usbipd,
 from ...core import runtime
 from ...core.checksums import NON_ASSET_DIRS
 from ...core.ext4_grow import loop_unavailable_reason
+from ...core import pad_temp
 
 # Where the decrypt shim writes what it learns about the running game (inside
 # the chroot).  Deliberately not the asset output dir: a successful run's
@@ -1394,7 +1395,7 @@ def fit_video_to_size(content, target, path, original=None, log=None,
         return out
 
     ext = os.path.splitext(path)[1].lower() or ".webm"
-    work = tempfile.mkdtemp(prefix="jjp_fitvid_")
+    work = pad_temp.mkdtemp(prefix="jjp_fitvid_")
     try:
         src = os.path.join(work, "replacement" + ext)
         with open(src, "wb") as fh:
@@ -9362,7 +9363,7 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                 if not read_only:
                     # Mod mode: set up local temp dir for staging
                     tag = uuid.uuid4().hex[:8]
-                    self._debugfs_tmp = tempfile.mkdtemp(
+                    self._debugfs_tmp = pad_temp.mkdtemp(
                         prefix=f"jjp_debugfs_{tag}_")
 
                 self.mount_point = None

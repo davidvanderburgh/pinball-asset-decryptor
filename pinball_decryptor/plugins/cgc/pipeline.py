@@ -48,6 +48,7 @@ from .formats import (detect_game, find_data_partition, find_game_partition,
                       is_img_file, read_mbr_partitions)
 from .games import GAME_DB
 from . import mods as M
+from ...core import pad_temp
 
 
 # CGC's WPC remakes (MM/AFM/MB) ship the original Williams WPC ROM
@@ -935,7 +936,7 @@ class WritePipeline(BasePipeline):
 
             self._set_phase(3)
             inner_root_to_assets_root = info["asset_subtree"]
-            card_dir = tempfile.mkdtemp(prefix="pad_cgc_libs_")
+            card_dir = pad_temp.mkdtemp(prefix="pad_cgc_libs_")
             try:
                 self._build_mods(inner_exec, mod_plan, changed, card_dir)
                 self._check_programs(inner_exec, changed, card_dir,
@@ -1077,7 +1078,7 @@ class WritePipeline(BasePipeline):
                 f"MB of the card's game partition stays free.", "info")
             return
         from . import cc_usb_audio
-        card = tempfile.mkdtemp(prefix="pad_cc_usb_")
+        card = pad_temp.mkdtemp(prefix="pad_cc_usb_")
         try:
             card_usb = os.path.join(card, "usb.so")
             dump = shlex.quote(

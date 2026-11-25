@@ -39,6 +39,7 @@ ImageFont = lazy_module("PIL.ImageFont")
 from . import mode_project as MP
 from . import scene_write as SW
 from . import video_bank as VB
+from ...core import pad_temp
 
 FONTS = (r"C:\Windows\Fonts\arialbd.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
          "/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/Library/Fonts/Arial Bold.ttf")
@@ -336,7 +337,7 @@ def make_clips(jobs, ffmpeg, workers=CLIP_WORKERS, progress=None):
         except OSError:
             keep = False
     if not keep:
-        folder = scratch = tempfile.mkdtemp(prefix="spike2_clips_")
+        folder = scratch = pad_temp.mkdtemp(prefix="spike2_clips_")
     made, todo = {}, []
     for job in jobs:
         path = os.path.join(folder, clip_key(job, ffmpeg) + ".mp4")

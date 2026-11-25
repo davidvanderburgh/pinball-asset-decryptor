@@ -22,6 +22,7 @@ import threading
 
 from .. import compat
 from .base import TabService, rpc
+from ...core import pad_temp
 
 #: Tk module constants (gui/main_window.py _PEX_*): the preview's file types
 #: and the byte cap for the image/font render read.
@@ -559,7 +560,7 @@ class PartitionsTab(TabService):
             return
         try:
             if not self._preview_dir:
-                self._preview_dir = tempfile.mkdtemp(prefix="pad_pex_")
+                self._preview_dir = pad_temp.mkdtemp(prefix="pad_pex_")
             out = os.path.join(self._preview_dir, "preview_%d.png" % seq)
             with open(out, "wb") as f:
                 f.write(png)

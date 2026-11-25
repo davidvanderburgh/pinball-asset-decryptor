@@ -36,6 +36,7 @@ from ...core.executor import CommandError
 from ...core.tar_utils import safe_member
 from .formats import find_ext_partition
 from .games import GAME_DB
+from ...core import pad_temp
 
 _OUTER_MNT = "/tmp/pad_aaiw_outer"
 _INNER_MNT = "/tmp/pad_aaiw_inner"
@@ -106,7 +107,7 @@ def _7z_list(sevenzip, archive):
 
 def _extract_via_7z(sevenzip, img_path, output_dir, log, progress, cancel_cb):
     subtree = GAME_DB["aaiw"]["asset_subtree"].lstrip("/")  # opt/assets/alice
-    work = tempfile.mkdtemp(prefix="pad_aaiw_")
+    work = pad_temp.mkdtemp(prefix="pad_aaiw_")
     try:
         # 1. Extract the (largest) partition — the ext4 game/installer carrier.
         progress(0, 4, "Reading installer image...")
@@ -209,7 +210,7 @@ def _extract_via_wsl(img_path, output_dir, executor, log, progress, cancel_cb):
     img_exec = executor.to_exec_path(img_path)
     os.makedirs(output_dir, exist_ok=True)
 
-    work = tempfile.mkdtemp(prefix="pad_aaiw_")
+    work = pad_temp.mkdtemp(prefix="pad_aaiw_")
     raw_host = os.path.join(work, "sda2.raw.img")
     raw_exec = executor.to_exec_path(raw_host)
     unmount_outer = unmount_inner = None

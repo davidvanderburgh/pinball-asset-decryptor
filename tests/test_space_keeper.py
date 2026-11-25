@@ -207,8 +207,10 @@ def test_temp_folder_leftovers_go_after_a_day_not_the_stern_caches(tmp_path):
     entries.append({"path": str(busy), "size": 2 << 20,
                     "manufacturer": "Stern Pinball", "detail": "tmnt"})
     plan = sk.plan_host(entries, time.time())
+    # PAD-1596: the cache itself stays; its entry unused for 30 days goes
     assert sorted(os.path.basename(p) for p in paths(plan)) == [
-        "pad-ffmpeg-abc", "spike2_godzilla_0a1b2c3d"]
+        "f.bin", "pad-ffmpeg-abc", "spike2_godzilla_0a1b2c3d"]
+    assert str(tmp_path / "spike2_card_cache") not in paths(plan)
 
 
 # ---------------------------------------------------------------- Spike 2 cards

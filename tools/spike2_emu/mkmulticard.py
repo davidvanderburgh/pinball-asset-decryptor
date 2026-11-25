@@ -8742,7 +8742,7 @@ def _mkext(path, kib, files, links=()):
     subprocess.run(["mke2fs", "-q", "-F", "-t", "ext4", "-b", "1024", path, str(kib)], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     cmds, made = [], set()
-    stage = tempfile.mkdtemp(prefix="synth.")
+    stage = tempfile.mkdtemp(prefix="mkmulticard.synth.")
     for k, (cardpath, data) in enumerate(files.items()):
         parts = cardpath.strip("/").split("/")
         for d in range(1, len(parts)):
@@ -9496,7 +9496,7 @@ def selftest(d, selector_file=None):
     ok &= verify_card(out2, verify_plan(out2, [A, C, B]), sel, mode="full")
     print("== a loop of the same file mounted by someone else is refused by name")
     _t, st7b, cnt7b = Geometry.from_file(out2).part(7)
-    foreign = tempfile.mkdtemp(prefix="foreign_mnt_")
+    foreign = tempfile.mkdtemp(prefix="mkmulticard.foreign_mnt_")
     loop = _run(["losetup", "--find", "--show", "-o", str(st7b * SECTOR), "--sizelimit", str(cnt7b * SECTOR),
                  out2]).strip()
     try:

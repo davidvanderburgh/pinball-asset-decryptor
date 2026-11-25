@@ -45,6 +45,7 @@ from .admin import is_admin
 from .rawdevice import (FlashCancelled, FlashError, flash_image_to_device,
                         flash_menu_to_device, is_device_path,
                         read_device_menu_to_image, read_device_to_image)
+from . import pad_temp
 
 # IPC file names inside the per-flash temp directory.  The parent creates the
 # directory and ``job.json``; the elevated child writes the rest.
@@ -183,7 +184,7 @@ def _ipc_dir(prefix):
     card from a source run.  The fix is one inheritable ACE for the user, granted before
     the child exists, so everything it creates inherits it.  Best-effort: a failed grant
     changes nothing for the shipped build, which launches elevated anyway."""
-    ipc = tempfile.mkdtemp(prefix=prefix)
+    ipc = pad_temp.mkdtemp(prefix=prefix)
     if sys.platform == "win32":
         user = os.environ.get("USERNAME")
         if user:

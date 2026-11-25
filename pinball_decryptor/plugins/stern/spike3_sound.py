@@ -67,6 +67,10 @@ import struct
 import sys
 import wave
 from dataclasses import dataclass
+try:
+    from ...core.pad_temp import mkdtemp as _mkdtemp   # PAD-1596: who made it
+except ImportError:                       # run on its own, as a script
+    from tempfile import mkdtemp as _mkdtemp
 
 HEADER_SIZE = 0x80
 MD_OFF_FIELD = 0x40          # u64
@@ -321,7 +325,7 @@ def _synth_container(path: str) -> None:
 
 def _cmd_selftest(args) -> int:
     import tempfile
-    tmp = tempfile.mkdtemp(prefix="image_sound_selftest_")
+    tmp = _mkdtemp(prefix="image_sound_selftest_")
     cpath = os.path.join(tmp, "image.bin")
     _synth_container(cpath)
     img = ImageSound(cpath)

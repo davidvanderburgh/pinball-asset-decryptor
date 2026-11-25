@@ -33,6 +33,7 @@ from .spike3_extract import (CATEGORIES, want_category,
                              extract_videos, is_sound_container,
                              is_video_head, video_brand, _MAX_RADIUM)
 from .formats import _title_from_filename
+from ...core import pad_temp
 
 _LUKS2_MAGIC = spike3.LUKS2_MAGIC
 
@@ -127,7 +128,7 @@ class Spike3SpkExtractPipeline(BasePipeline):
             if low.endswith(".spk") and not zipfile.is_zipfile(self.input_path):
                 spk_path = self.input_path
             else:
-                tmpdir = tempfile.mkdtemp(prefix="pad_spk_")
+                tmpdir = pad_temp.mkdtemp(prefix="pad_spk_")
                 spk_path = os.path.join(tmpdir, "package.spk")
                 self._log("Reconstructing package (this needs ~12 GB temp)...",
                           "info")

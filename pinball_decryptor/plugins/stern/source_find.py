@@ -20,6 +20,7 @@ import threading
 
 from ...core import source_match, video_quality
 from ...core.longpath import ext as _lp
+from ...core import pad_temp
 
 
 def _manifest_map(assets_dir):
@@ -90,7 +91,7 @@ def find_video_sources(card, stock, assets_dir, roots, cache_dir=None,
 
     log("Comparing %s with the stock card..." % os.path.basename(card), "info")
     reader, cf, replaced = replaced_clips(card, stock, cancel)
-    tmp = tempfile.mkdtemp(prefix="pad_srcfind_")
+    tmp = pad_temp.mkdtemp(prefix="pad_srcfind_")
     try:
         clips, nodes, unnamed = [], {}, []
         for path, node in replaced:

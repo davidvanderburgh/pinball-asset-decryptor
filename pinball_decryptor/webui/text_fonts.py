@@ -19,6 +19,7 @@ import tempfile
 
 from . import compat
 from .rpc import rpc
+from ..core import pad_temp
 
 log = logging.getLogger(__name__)
 
@@ -271,7 +272,7 @@ class TextFontsService:
 
     def _tmpdir(self):
         if self._tmp is None or not os.path.isdir(self._tmp):
-            self._tmp = tempfile.mkdtemp(prefix="pad-fonts-")
+            self._tmp = pad_temp.mkdtemp(prefix="pad-fonts-")
         return self._tmp
 
     def _drop_tmp(self):

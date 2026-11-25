@@ -25,6 +25,7 @@ import sys
 import tempfile
 
 from .executor import CommandError, DockerExecutor
+from ...core import pad_temp
 
 
 # Known partition layouts for each game.
@@ -581,7 +582,7 @@ def extract_clonezilla(image_path, output_dir, executor, game_key=None,
                 zip_member = matching[0]
                 log(f"Extracting {zip_member}...")
 
-                temp_dir = tempfile.mkdtemp(prefix="spooky_cz_")
+                temp_dir = pad_temp.mkdtemp(prefix="spooky_cz_")
                 zf.extract(zip_member, temp_dir)
                 source_path = os.path.join(temp_dir, zip_member)
 

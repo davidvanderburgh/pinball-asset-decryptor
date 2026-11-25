@@ -17,6 +17,7 @@ import tempfile
 
 from ...core import card_extras, ssh_jjp, remote_send_jjp
 from .executor import CommandError
+from ...core import pad_temp
 
 
 class RemoteAccessError(Exception):
@@ -139,7 +140,7 @@ def _verify(pipeline, config):
     if 'symlink' not in hook or ssh_jjp.UNIT not in hook:
         raise RemoteAccessError('The remote access start-up hook did not land in the root.')
     want = ssh_jjp.expected(config)
-    tmpdir = tempfile.mkdtemp(prefix='pad-ra-check-', dir=None if _native(pipeline)
+    tmpdir = pad_temp.mkdtemp(prefix='pad-ra-check-', dir=None if _native(pipeline)
                               else pipeline.executor.host_tmp_dir())
     try:
         for i, (path, (mode, digest)) in enumerate(sorted(want.items())):

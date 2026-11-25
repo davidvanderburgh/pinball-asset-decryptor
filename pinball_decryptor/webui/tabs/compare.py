@@ -21,6 +21,7 @@ import time
 
 from .. import compat
 from .base import TabService, rpc
+from ...core import pad_temp
 
 #: Tk gui/main_window.py COMPARE_ROW_LIMIT_* (kept here: the Tk module is
 #: deleted at the cut-over, and these are display choices, not report logic).
@@ -536,7 +537,7 @@ class CompareTab(TabService):
                         raise FileNotFoundError(
                             "%s is no longer there" % path)
                 else:
-                    out = tempfile.mkdtemp(prefix="spike2_compare_")
+                    out = pad_temp.mkdtemp(prefix="spike2_compare_")
                     path = mfr.extract_report_file(image, ref, out)
             except Exception as e:               # noqa: BLE001
                 err = e

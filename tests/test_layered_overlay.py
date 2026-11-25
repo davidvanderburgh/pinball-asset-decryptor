@@ -182,9 +182,36 @@ def test_a_frames_colour_conversion_has_no_divide_per_pixel():
     assert "/" not in inner.split("o += 4;")[0], "nothing divides inside the pixel loop"
     assert "int sx = xm[x];" in inner
     assert "g->xmap[x] = (int)((long long)x * g->w / g->ow);" in c
-    assert '"clip: %lld frames converted: copy %lld ms, convert %lld ms a frame"' in c
+    assert '"clip: %lld frames: copy %lld ms, convert %lld ms a frame (%s)"' in c
     # and it reads a cached copy: the decoder's frames are uncached (ffmpegcolorspace: 470 ms)
-    assert "memcpy(g->raw, px, size); src = g->raw;" in c and "convert(g, src, size, g->px[back]);" in c
+    assert "memcpy(g->raw[back], px, size);" in c
+    assert "if (want) convert(g, g->raw_size[back] ? g->raw[back] : px, size, g->px[back]);" in c
+
+
+def test_the_graphics_chip_converts_a_clip():
+    """The table, 2026-11-25: 10 fps with the CPU converting (64 ms a 1360x768 frame).  The game
+    hands vpudec's frames to the GPU; the menu uploads the YUV planes and a shader converts them,
+    drawn under the canvas, which is see-through where the clip shows.  Emulator: 30.0 of 30 fps."""
+    g = _read(SEL, "gstclip.c")
+    assert "int gclip_yuv_take(struct gclip *g, struct gclip_yuv *f)" in g
+    assert "if (back == g->held) {" in g, "no copy goes into the frame being uploaded"
+    e = _read(SEL, "egl_stern.c")
+    assert "int egl_stern_video(struct egl_stern *e" in e
+    assert "video_plane(e, 1, GL_LUMINANCE_ALPHA, stride / 2, rows / 2, u, remake);" in e   # NV12
+    assert "1.1640625 * (texture(ty, TexCoords).r - 0.0627451)" in e   # gstclip.c's 298/256
+    frame = e[e.index("void egl_stern_frame("):]
+    assert frame.index("if (e->y_on)") < frame.index("glBindTexture(GL_TEXTURE_2D, e->tex);")
+    for other in ("egl_x11.c", "egl_kms.c", "fb_linux.c"):
+        assert "int egl_stern_video(" in _read(SEL, other) and "return -1;" in _read(SEL, other)
+    s = _read(SEL, "settings.c")
+    assert "return st->t_gpu && st->t_vid && st->t_col < 0 && !st->t_err[0];" in s, \
+        "a colour correction is the CPU's LUT: the CPU draws the clip then"
+    assert "gfx_clear(e->g, (W - st->t_vw) / 2, (H - st->t_vh) / 2, st->t_vw, st->t_vh);" in s
+    assert "== st->t_ovl_shown) return;" in s, "the canvas changes only with the scene's picture"
+    c = _read(SEL, "codeselect.c")
+    assert c.count("se.video = video_cb;") == 3 and 'getenv("CODESELECT_VIDEO_CPU")' in c
+    gfx = _read(SEL, "gfx.c")
+    assert "void gfx_clear(struct gfx *g" in gfx and "if (p[3] != 0xff) {" in gfx
 
 
 def test_closing_a_clip_waits_for_a_frame_under_way():

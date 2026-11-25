@@ -11,6 +11,7 @@
 #include "testpics.h"
 #include "art.h"
 #include "video.h"
+#include "gstclip.h"
 #include "overlay.h"
 #include "log.h"
 
@@ -117,6 +118,9 @@ struct state {
     int t_vloops;                            /* its loops so far: a new one restarts the sound */
     long long t_vstart;                      /* when it last started */
     struct ovl *t_ovl;                       /* the scene over it (overlay.h), or NULL */
+    int t_gpu;                               /* the graphics chip draws the clip (test_gpu) */
+    int t_vw, t_vh;                          /* ...at this size, centred (0: no frame yet) */
+    const struct art_image *t_ovl_shown;     /* the scene's picture on the canvas now */
     long long t_perf_due, t_draw_ms;         /* the video's 5 s account in the log */
     int t_draws;
     /* Simon (2026-11-22): on a moving test item "quick press to freeze, long press to back
@@ -433,6 +437,10 @@ static void test_unload(struct state *st)
         vid_close(st->t_vid);
         st->t_vid = NULL;
     }
+    if (st->t_gpu && st->e->video) st->e->video(st->e->ctx, NULL, 0, 0, 0, 0);
+    st->t_gpu = 0;
+    st->t_vw = st->t_vh = 0;
+    st->t_ovl_shown = NULL;
     if (st->t_ovl) { ovl_close(st->t_ovl); st->t_ovl = NULL; }
     if (st->t_vsound) {
         /* its voice fades out first: the clip is freed when that is over */
@@ -490,6 +498,13 @@ static void test_load(struct state *st, long long now)
             char snd[sizeof path + 8], *dot;
             st->t_vid = vid_open(path, e->g->w, e->g->h, now, st->t_err, sizeof st->t_err);
             if (!st->t_vid) break;
+            /* the table (2026-11-25): the CPU converting a 1360x768 frame is 64 ms - 10 fps;
+             * the game gives vpudec's frames to the graphics chip, and so does this */
+            st->t_gpu = e->video && e->video_gpu && vid_is_clip(st->t_vid);
+            if (st->t_gpu) {
+                vid_want_rgba(st->t_vid, 0);
+                sel_say("test: the graphics chip converts the clip's frames");
+            }
             st->t_vloops = 0;
             st->t_vstart = now;
             snprintf(snd, sizeof snd, "%s", path);
@@ -578,6 +593,21 @@ static void test_close(struct state *st)
     sel_say("test: closed");
 }
 
+/* the graphics chip draws the clip: not through a colour correction (the CPU's LUT) */
+static int test_gpu(const struct state *st)
+{
+    return st->t_gpu && st->t_vid && st->t_col < 0 && !st->t_err[0];
+}
+
+static void test_gpu_off(struct state *st, const char *why)
+{
+    struct settings_env *e = st->e;
+    if (e->video) e->video(e->ctx, NULL, 0, 0, 0, 0);
+    st->t_gpu = 0;
+    if (st->t_vid) vid_want_rgba(st->t_vid, 1);
+    sel_say("test: %s: the CPU converts the clip", why);
+}
+
 /* one animation tick: 0 nothing, 1 the frame changed (only the frame's own
  * rectangle needs drawing), 2 the caption went (the whole screen does) */
 static int test_tick(struct state *st, long long now)
@@ -586,7 +616,24 @@ static int test_tick(struct state *st, long long now)
     if (st->t_frozen) return 0;              /* held: nothing moves on the screen */
     if (st->t_vid) {
         int k;
-        if (vid_frame(st->t_vid, now, &k)) changed = 1;
+        if (st->t_gpu) vid_want_rgba(st->t_vid, !test_gpu(st));    /* START: corrected / not */
+        if (test_gpu(st)) {
+            struct gclip_yuv f;
+            if (vid_yuv_take(st->t_vid, &f)) {
+                struct settings_env *e = st->e;
+                int first = !st->t_vw;
+                int r = e->video(e->ctx, &f, (e->g->w - f.ow) / 2, (e->g->h - f.oh) / 2, f.ow, f.oh);
+                vid_yuv_done(st->t_vid);
+                if (r < 0) {
+                    test_gpu_off(st, "the graphics chip cannot show this clip");
+                    changed = 2;
+                } else {
+                    st->t_vw = f.ow;
+                    st->t_vh = f.oh;
+                    changed = first ? 2 : 1;            /* the first one cuts the hole */
+                }
+            }
+        } else if (vid_frame(st->t_vid, now, &k)) changed = 1;
         if (vid_loops(st->t_vid) != st->t_vloops) {
             st->t_vloops = vid_loops(st->t_vid);
             st->t_vstart = now;                      /* the scene over it starts again too */
@@ -802,6 +849,7 @@ static void draw_overlay(struct state *st, long long now)
     int x, y, cw, ch;
     if (!st->t_ovl) return;
     im = ovl_at(st->t_ovl, now - st->t_vstart, &x, &y);
+    st->t_ovl_shown = im;
     if (!im) return;
     ovl_canvas(st->t_ovl, &cw, &ch);
     gfx_blit(e->g, (e->g->w - cw) / 2 + x, (e->g->h - ch) / 2 + y, im->rgba, im->w, im->h);
@@ -816,6 +864,7 @@ static void draw_test(struct state *st)
     char buf[400], col[260];
 
     gfx_fill(e->g, 0x000000);
+    if (st->t_gpu && !test_gpu(st) && e->video) e->video(e->ctx, NULL, 0, 0, 0, 0);
     if (k < TP_NBUILTIN) {
         testpics_draw(k, e->g->px, W * 4, W, H);
     } else if (test_is_back(st, k)) {
@@ -841,6 +890,9 @@ static void draw_test(struct state *st)
         text_fit(e, !e->au ? "the menu has no sound on this machine"
                  : audio_playing(e->au, st->t_voice) ? "playing" : "press START to play it again",
                  28 * s, 18 * s, W - (int)(80 * s), W / 2, H / 2 + (int)(60 * s), 0, TH(e, TITLE));
+    } else if (test_gpu(st)) {
+        /* the clip is the graphics chip's, under the canvas: a see-through hole for it */
+        if (st->t_vw) gfx_clear(e->g, (W - st->t_vw) / 2, (H - st->t_vh) / 2, st->t_vw, st->t_vh);
     } else {
         const struct art_image *im = st->t_img ? st->t_img
                                    : st->t_vid ? vid_current(st->t_vid)
@@ -918,6 +970,21 @@ static void draw_test_frame(struct state *st)
     int W = e->g->w, H = e->g->h, x, y, bottom;
     const struct art_image *im;
     if ((!st->t_anim && !st->t_vid) || st->t_err[0]) return;
+    if (test_gpu(st)) {
+        /* the frame went to the graphics chip already (test_tick): the canvas changes
+         * only when the scene over it moves to another picture */
+        int ox, oy, cw, ch;
+        if (!st->t_ovl || !st->t_vw) return;
+        if (ovl_at(st->t_ovl, sel_now_ms() - st->t_vstart, &ox, &oy) == st->t_ovl_shown) return;
+        ovl_canvas(st->t_ovl, &cw, &ch);
+        x = (W - st->t_vw) / 2;
+        y = (H - st->t_vh) / 2;
+        gfx_rect(e->g, (W - cw) / 2, (H - ch) / 2, cw, ch, 0x000000);
+        gfx_clear(e->g, x, y, st->t_vw, st->t_vh);
+        draw_overlay(st, sel_now_ms());
+        if (st->t_caption && y + st->t_vh > H - (int)(96 * S(e))) draw_test(st);
+        return;
+    }
     im = st->t_vid ? vid_current(st->t_vid) : art_anim_frame(st->t_anim, st->t_frame);
     if (!im) return;
     x = (W - im->w) / 2;

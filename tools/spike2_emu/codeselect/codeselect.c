@@ -52,6 +52,7 @@
 #include "log.h"
 #include "colour.h"
 #include "settings.h"
+#include "gstclip.h"
 
 #define VERSION "3.2"
 
@@ -1858,6 +1859,22 @@ static void present_cb(void *ctx)
     present(p->g, p->egl, p->headless, p->invert);
 }
 
+/* the test card's clip, drawn by the graphics chip (settings.h; the table, 2026-11-25) */
+static int video_cb(void *ctx, const struct gclip_yuv *f, int x, int y, int w, int h)
+{
+    struct present_ctx *p = ctx;
+    if (p->headless) return -1;
+    if (!f) return egl_stern_video(p->egl, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, p->invert);
+    return egl_stern_video(p->egl, f->data, f->fourcc, f->w, f->h, f->stride, f->rows, x, y, w, h, p->invert);
+}
+
+/* CODESELECT_VIDEO_CPU=1: the CPU converts a clip, as before (to compare the two) */
+static int video_gpu_wanted(int headless)
+{
+    const char *v = getenv("CODESELECT_VIDEO_CPU");
+    return !headless && !(v && *v && *v != '0');
+}
+
 /* THE SCREEN TEXTURE, ONCE.  egl_stern_texture makes a new one every call; the
  * menu can now come up more than once in a run (back from the TEST CARD ENTRY,
  * or after the hidden start-up screen), so the second time the whole frame -
@@ -2358,6 +2375,8 @@ int main(int argc, char **argv)
         se.media_dir = *c.test_dir ? c.test_dir : media.dir;
         se.first_image = 0;
         se.present = present_cb;
+        se.video = video_cb;
+        se.video_gpu = video_gpu_wanted(headless);
         se.ctx = &pctx;
         se.stop = &g_stop;
         se.testcard = 1;
@@ -2535,6 +2554,8 @@ menu_again:
             se.media_dir = *c.test_dir ? c.test_dir : media.dir;
             se.first_image = lastimg;
             se.present = present_cb;
+            se.video = video_cb;
+            se.video_gpu = video_gpu_wanted(headless);
             se.ctx = &pctx;
             se.stop = &g_stop;
             if (music_voice >= 0) { audio_stop(au, music_voice); music_voice = -1; music_clip = NULL; }
@@ -2734,6 +2755,8 @@ testcard_done:
             se.media_dir = *c.test_dir ? c.test_dir : media.dir;
             se.first_image = -1;
             se.present = present_cb;
+            se.video = video_cb;
+            se.video_gpu = video_gpu_wanted(headless);
             se.ctx = &pctx;
             se.stop = &g_stop;
             se.testcard = 1;

@@ -46,6 +46,9 @@ void gclip_stats(const struct gclip *g, int *shown, int *dropped)
 { (void)g; if (shown) *shown = 0; if (dropped) *dropped = 0; }
 const char *gclip_error(const struct gclip *g) { (void)g; return ""; }
 void gclip_close(struct gclip *g) { (void)g; }
+void gclip_want_rgba(struct gclip *g, int on) { (void)g; (void)on; }
+int gclip_yuv_take(struct gclip *g, struct gclip_yuv *f) { (void)g; (void)f; return 0; }
+void gclip_yuv_done(struct gclip *g) { (void)g; }
 
 #else
 
@@ -187,8 +190,13 @@ struct gclip {
     unsigned char *px[2];           /* RGBA, ow * oh * 4: [front] is the caller's */
     int *xmap;                      /* output column -> decoded column (ow of them) */
     long long conv_ms, copy_ms;     /* time spent converting / copying, for the log */
-    unsigned char *raw;             /* the frame copied out of the decoder's memory */
-    unsigned raw_len;
+    /* the frames copied out of the decoder's memory, [front] the newest; the graphics
+     * chip's upload reads [held] (gclip_yuv_take .. gclip_yuv_done), so no copy goes into
+     * that one meanwhile */
+    unsigned char *raw[2];
+    unsigned raw_len[2], raw_size[2];
+    int held;
+    int want_rgba;                  /* 0: the graphics chip converts (gclip_want_rgba) */
     int front;
     long long made, taken;          /* frames converted / frames handed out */
     long long last_frame_ms;
@@ -218,20 +226,28 @@ static unsigned char clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : (unsigne
 
 /* one decoded frame -> RGBA in the back buffer (BT.601, limited range, nearest
  * sample when it is fitted down) */
+/* a decoder may pad the planes to 16: the stride and plane height the size says */
+static void planes(const struct gclip *g, unsigned size, int *ys, int *ph)
+{
+    static const int al[] = { 1, 16, 32, 64 };
+    int i, j;
+    *ys = g->w;
+    *ph = g->h;
+    for (i = 0; i < 4; i++)
+        for (j = 0; j < 4; j++) {
+            int aw = (g->w + al[i] - 1) / al[i] * al[i], ah = (g->h + al[j] - 1) / al[j] * al[j];
+            if ((unsigned)(aw * ah * 3 / 2) == size) { *ys = aw; *ph = ah; return; }
+        }
+}
+
 static void convert(struct gclip *g, const unsigned char *data, unsigned size, unsigned char *dst)
 {
     int sw = g->w, sh = g->h, x, y;
-    int ys = sw, ph = sh, nv12 = g->fourcc == FOURCC('N', 'V', '1', '2');
+    int ys, ph, nv12 = g->fourcc == FOURCC('N', 'V', '1', '2');
     int yv12 = g->fourcc == FOURCC('Y', 'V', '1', '2');
     const unsigned char *Y, *U, *V;
-    /* a decoder may pad the planes to 16: find the stride the size says */
-    static const int al[] = { 1, 16, 32, 64 };
-    int i, j;
-    for (i = 0; i < 4; i++)
-        for (j = 0; j < 4; j++) {
-            int aw = (sw + al[i] - 1) / al[i] * al[i], ah = (sh + al[j] - 1) / al[j] * al[j];
-            if ((unsigned)(aw * ah * 3 / 2) == size) { ys = aw; ph = ah; i = j = 4; }
-        }
+    planes(g, size, &ys, &ph);
+    (void)sw;
     Y = data;
     if (nv12) { U = data + ys * ph; V = U + 1; }
     else {
@@ -269,7 +285,7 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     struct gclip *g = data;
     const unsigned char *px = *(const unsigned char **)((char *)buf + G.off_data);
     unsigned size = *(unsigned *)((char *)buf + G.off_size);
-    int back;
+    int back, want;
     (void)sink; (void)pad;
     if (!px || !g->ow) return;
     /* a frame too short for its picture (not decoded YUV) is skipped, never read past */
@@ -283,23 +299,33 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     }
     pthread_mutex_lock(&g->mu);
     if (g->closing) { pthread_mutex_unlock(&g->mu); return; }
-    g->in_cb++;
     back = !g->front;
+    if (back == g->held) {                  /* the upload is reading it: this one goes */
+        g->dropped++;
+        pthread_mutex_unlock(&g->mu);
+        return;
+    }
+    g->in_cb++;
+    want = g->want_rgba;
     pthread_mutex_unlock(&g->mu);
     {
         /* The table, 2026-11-25: GStreamer's own ffmpegcolorspace took 470 ms a frame off
          * vpudec too - the decoder's frames are in uncached DMA memory, where every byte
-         * the CPU reads is a bus trip.  One block copy (burst reads) into cached memory,
-         * then the conversion reads that. */
+         * the CPU reads is a bus trip.  One block copy (burst reads, 13 ms) into cached
+         * memory; then the conversion (64 ms) only when the graphics chip is not doing it. */
         long long t0 = now_ms(), t1;
-        const unsigned char *src = px;
-        if (g->raw_len < size) {
-            unsigned char *r = realloc(g->raw, size);
-            if (r) { g->raw = r; g->raw_len = size; }
+        if (g->raw_len[back] < size) {
+            unsigned char *r = realloc(g->raw[back], size);
+            if (r) { g->raw[back] = r; g->raw_len[back] = size; }
         }
-        if (g->raw && g->raw_len >= size) { memcpy(g->raw, px, size); src = g->raw; }
+        if (g->raw[back] && g->raw_len[back] >= size) {
+            memcpy(g->raw[back], px, size);
+            g->raw_size[back] = size;
+        } else {
+            g->raw_size[back] = 0;
+        }
         t1 = now_ms();
-        convert(g, src, size, g->px[back]);
+        if (want) convert(g, g->raw_size[back] ? g->raw[back] : px, size, g->px[back]);
         g->copy_ms += t1 - t0;
         g->conv_ms += now_ms() - t1;
     }
@@ -308,10 +334,11 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     if (g->made > g->taken) g->dropped++;   /* the one before was never shown */
     g->front = back;
     g->made++;
-    if (g->made % 10 == 0)                  /* what a frame costs here (the table's 1.4 fps) */
-        sel_log("clip: %lld frames converted: copy %lld ms, convert %lld ms a frame",
-                g->made, g->copy_ms / g->made, g->conv_ms / g->made);
     g->last_frame_ms = now_ms();
+    if (g->made % 30 == 0)                  /* what a frame costs here (the table's 1.4 fps) */
+        sel_log("clip: %lld frames: copy %lld ms, convert %lld ms a frame (%s)",
+                g->made, g->copy_ms / g->made, g->conv_ms / g->made,
+                want ? "on the CPU" : "the graphics chip converts");
     pthread_mutex_unlock(&g->mu);
 }
 
@@ -430,6 +457,8 @@ struct gclip *gclip_open(const char *path, int max_w, int max_h, char *err, int 
     g->xmap = malloc((size_t)g->ow * sizeof *g->xmap);
     if (!g->px[0] || !g->px[1] || !g->xmap) { snprintf(err, errlen, "clip: out of memory for %dx%d", g->ow, g->oh); goto fail; }
     { int x; for (x = 0; x < g->ow; x++) g->xmap[x] = (int)((long long)x * g->w / g->ow); }
+    g->held = -1;
+    g->want_rgba = 1;
     if (G.query_duration(g->pipe, &fmt, &g->dur_ns) && fmt == GST_FORMAT_TIME && g->dur_ns > 0) {}
     else g->dur_ns = 0;
     if (G.set_state(g->pipe, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
@@ -492,6 +521,47 @@ const struct art_image *gclip_frame(struct gclip *g, long long now, int *k)
     return fresh ? &g->out : NULL;
 }
 
+/* THE GRAPHICS CHIP'S WAY (the table, 2026-11-25: 10 fps with the CPU converting):
+ * the newest copied frame as it came from the decoder; the game itself hands vpudec's
+ * frames to the GPU (glTexDirectVIV) and never converts them on the CPU */
+void gclip_want_rgba(struct gclip *g, int on)
+{
+    pthread_mutex_lock(&g->mu);
+    g->want_rgba = on ? 1 : 0;
+    pthread_mutex_unlock(&g->mu);
+}
+
+int gclip_yuv_take(struct gclip *g, struct gclip_yuv *f)
+{
+    int fresh = 0;
+    maybe_loop(g, now_ms());
+    pthread_mutex_lock(&g->mu);
+    if (g->made > g->taken && g->raw_size[g->front]) {
+        int i = g->front;
+        g->taken = g->made;
+        g->shown++;
+        g->held = i;
+        f->data = g->raw[i];
+        f->size = g->raw_size[i];
+        f->fourcc = g->fourcc ? g->fourcc : FOURCC('I', '4', '2', '0');
+        f->w = g->w;
+        f->h = g->h;
+        planes(g, f->size, &f->stride, &f->rows);
+        f->ow = g->ow;
+        f->oh = g->oh;
+        fresh = 1;
+    }
+    pthread_mutex_unlock(&g->mu);
+    return fresh;
+}
+
+void gclip_yuv_done(struct gclip *g)
+{
+    pthread_mutex_lock(&g->mu);
+    g->held = -1;
+    pthread_mutex_unlock(&g->mu);
+}
+
 /* NOTE: the caller draws from out.rgba while the streaming thread may be
  * converting into the OTHER buffer - never into the one handed out, unless two
  * frames arrive between two looks; then a frame may tear (seen as a dropped one) */
@@ -539,9 +609,10 @@ void gclip_close(struct gclip *g)
     g->px[0] = g->px[1] = NULL;
     free(g->xmap);
     g->xmap = NULL;
-    free(g->raw);
-    g->raw = NULL;
-    g->raw_len = 0;
+    free(g->raw[0]);
+    free(g->raw[1]);
+    g->raw[0] = g->raw[1] = NULL;
+    g->raw_len[0] = g->raw_len[1] = 0;
     pthread_mutex_unlock(&g->mu);
     /* the record itself stays (a few hundred bytes a clip): a handoff that still
      * arrives after this - the emulator's bridge - finds `closing` and leaves */

@@ -38,4 +38,19 @@ void  gclip_stats(const struct gclip *g, int *shown, int *dropped);
 const char *gclip_error(const struct gclip *g);
 void  gclip_close(struct gclip *g);
 
+/* THE GRAPHICS CHIP'S WAY (the table, 2026-11-25): the frame as the decoder gave it
+ * (copied out of its uncached memory), for a shader to convert.  gclip_want_rgba(g, 0)
+ * stops the CPU conversion; gclip_yuv_take hands the newest frame over (1) and holds
+ * it until gclip_yuv_done. */
+struct gclip_yuv {
+    const unsigned char *data;
+    unsigned size, fourcc;          /* NV12, I420 or YV12 */
+    int w, h;                       /* the picture */
+    int stride, rows;               /* the Y plane's row length and rows (padded) */
+    int ow, oh;                     /* the size it is shown at */
+};
+void  gclip_want_rgba(struct gclip *g, int on);
+int   gclip_yuv_take(struct gclip *g, struct gclip_yuv *f);
+void  gclip_yuv_done(struct gclip *g);
+
 #endif

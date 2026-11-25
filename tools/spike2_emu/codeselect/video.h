@@ -66,6 +66,14 @@ int   vid_threads(const struct vid *v);
 /* the decode error that stopped a frame, or "" */
 const char *vid_error(const struct vid *v);
 
+/* THE GRAPHICS CHIP'S WAY (gstclip.h, the table 2026-11-25): a clip through the
+ * machine's decoder can hand its frames over as YUV for a shader; a .padv cannot */
+struct gclip_yuv;
+int   vid_is_clip(const struct vid *v);
+void  vid_want_rgba(struct vid *v, int on);
+int   vid_yuv_take(struct vid *v, struct gclip_yuv *f);
+void  vid_yuv_done(struct vid *v);
+
 void vid_close(struct vid *v);
 
 #endif

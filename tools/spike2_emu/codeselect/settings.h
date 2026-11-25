@@ -45,6 +45,8 @@
 #include "audio.h"
 #include "theme.h"
 
+struct gclip_yuv;
+
 #define SETTINGS_IDLE_MS 120000
 /* ...and inside Test pictures, where looking without pressing is the point */
 #define TEST_IDLE_MS 600000
@@ -69,6 +71,12 @@ struct settings_env {
                                             ACTION on the top screen goes back to the menu */
     int first_image;                     /* the image Color correction opens on, or -1 */
     void (*present)(void *ctx);          /* upload what is dirty and swap */
+    /* THE GRAPHICS CHIP DRAWS A CLIP (the table, 2026-11-25: 10 fps with the CPU
+     * converting): one YUV frame shown at x, y, w x h under the canvas from the next
+     * present on (f NULL: none); 0 shown, -1 cannot (the CPU converts it as before).
+     * NULL, or video_gpu 0 (a snapshot, another machine), never asks. */
+    int (*video)(void *ctx, const struct gclip_yuv *f, int x, int y, int w, int h);
+    int video_gpu;
     void *ctx;
     volatile sig_atomic_t *stop;
 };

@@ -153,6 +153,20 @@ def _file_reader(f, overlay=None):
     return read
 
 
+def _chunk_digest(buf):
+    """What a chunk written to the card is remembered by (PAD-1583): the
+    verify compares the card's read-back against it instead of reading the
+    image a second time."""
+    return hashlib.sha256(buf).digest()
+
+
+def _first_difference(got, exp):
+    """Index of the first byte where *got* and *exp* differ (the shorter
+    one's length when one is a prefix of the other)."""
+    n = min(len(got), len(exp))
+    return next((i for i in range(n) if got[i] != exp[i]), n)
+
+
 class FlashError(Exception):
     """A flash cannot proceed (e.g. the image is larger than the target card)."""
 
@@ -762,7 +776,7 @@ class RawDeviceFile:
         self._write_aligned(a_start, region)
 
     def copy_image_onto(self, src, total, *, progress=None, cancel=None,
-                        chunk=None, overlay=None, ranges=None):
+                        chunk=None, overlay=None, ranges=None, digests=None):
         """Bulk-copy ``total`` bytes from file object *src* onto this device,
         starting at offset 0 (a dd-style flash).
 
@@ -786,6 +800,10 @@ class RawDeviceFile:
         (if given) is polled between chunks and a True return raises
         :class:`FlashCancelled` (a partial flash leaves the card unbootable —
         the caller is expected to surface that).  Returns the bytes written.
+
+        *digests*, a list, gets ``(offset, length, digest)`` appended for every
+        chunk written (:func:`_chunk_digest`, PAD-1583), so the verify can
+        read the card alone instead of the card and the image.
         """
         if not self.writable:
             raise OSError("device opened read-only")
@@ -832,6 +850,8 @@ class RawDeviceFile:
                     # don't disturb whatever lies past the image's last byte.
                     self.seek(pos)
                     self.write(buf)
+                if digests is not None:
+                    digests.append((pos, len(buf), _chunk_digest(buf)))
                 written += len(buf)
                 undrained += len(buf)
                 if drain and (undrained >= _FLASH_DRAIN or written >= total):
@@ -1379,11 +1399,17 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
                                                  overlay, log)
                               if skip_free else None)
                     src.seek(0)
+                    # Each chunk's hash, taken as it is written, is what the
+                    # verify checks the card against (PAD-1583): it then
+                    # reads the card alone, not the image (often on a
+                    # spinning disk) a second time.
+                    digests = [] if verify else None
                     written = dev.copy_image_onto(
                         src, img_size,
                         progress=_slow_card_watch(
                             log, progress, _has_menu_partition(image_path)),
-                        cancel=cancel, overlay=overlay, ranges=ranges)
+                        cancel=cancel, overlay=overlay, ranges=ranges,
+                        digests=digests)
                 dev.flush()
             # Read the card back and confirm it byte-for-byte matches the
             # image.  A raw flash has no other integrity check, and a
@@ -1400,7 +1426,7 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
                 _verify_flash_readback(device_path, image_path, img_size,
                                        log=log, progress=progress,
                                        cancel=cancel, overlay=overlay,
-                                       ranges=ranges)
+                                       ranges=ranges, digests=digests)
     except PermissionError as e:
         # Surface a denied device open (macOS TCC without Full Disk Access,
         # or a genuinely unelevated run) as a FlashError so the dialog shows
@@ -2264,13 +2290,16 @@ def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
         log("Menu-only write: checking that this card was flashed from %s"
             % os.path.basename(image_path), "info")
     try:
+        digests = [] if verify else None
         written = _flash_menu_plan(image_path, device_path, plan, log=log,
-                                   progress=progress, cancel=cancel)
+                                   progress=progress, cancel=cancel,
+                                   digests=digests)
         if verify:
             if on_verify_start is not None:
                 on_verify_start()
             _verify_menu_readback(device_path, image_path, plan,
-                                  log=log, progress=progress, cancel=cancel)
+                                  log=log, progress=progress, cancel=cancel,
+                                  digests=digests)
     except PermissionError as e:
         raise FlashError(str(e)) from e
     except OSError as e:
@@ -2282,9 +2311,11 @@ def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
 
 
 def _flash_menu_plan(image_path, device_path, plan, *, log=None,
-                     progress=None, cancel=None):
+                     progress=None, cancel=None, digests=None):
     """The write half of :func:`flash_menu_to_device`: prove the card, then
-    put the plan's ranges on it.  Returns the bytes written."""
+    put the plan's ranges on it.  Returns the bytes written.  *digests*, a
+    list, gets each written chunk's ``(offset, length, digest)``
+    (PAD-1583)."""
     written = 0
     with _disk_offline_for_write(device_path, log), \
             _locked_volumes(device_path, log):
@@ -2322,6 +2353,9 @@ def _flash_menu_plan(image_path, device_path, plan, *, log=None,
                             continue
                         dev.seek(pos)
                         dev.write(buf)
+                        if digests is not None:
+                            digests.append((pos, len(buf),
+                                            _chunk_digest(buf)))
                         written += len(buf)
                         if progress is not None:
                             progress(written, total,
@@ -2332,14 +2366,26 @@ def _flash_menu_plan(image_path, device_path, plan, *, log=None,
 
 
 def _verify_menu_readback(device_path, image_path, plan, *, log=None,
-                          progress=None, cancel=None):
+                          progress=None, cancel=None, digests=None):
     """Read the menu partition back and confirm it matches the image.
 
     The same reasoning as the whole-image verify: a raw write has no other
-    integrity check, and a card whose menu half landed boots into nothing."""
+    integrity check, and a card whose menu half landed boots into nothing.
+    With *digests* (the write's own chunk hashes, PAD-1583) only the card
+    is read."""
     if log is not None:
         log("Verifying the menu partition (reading it back)\u2026", "info")
     total = sum(length for _o, length, _w in plan["write"])
+    if digests is not None:
+        _verify_card_digests(
+            device_path, image_path, digests, total, progress=progress,
+            cancel=cancel, desc="Verifying the boot menu\u2026",
+            what="the menu partition", shown_at_checked=True,
+            mismatch=lambda pos, _off: FlashError(_menu_mismatch_text(pos)))
+        if log is not None:
+            log("Menu verified: it matches the image byte-for-byte.",
+                "success")
+        return
     checked = 0
     rate = []
     with RawDeviceFile(device_path, writable=False) as dev, \
@@ -2356,17 +2402,19 @@ def _verify_menu_readback(device_path, image_path, plan, *, log=None,
                 got = _read_back(dev, pos, len(exp), total,
                                  "the menu partition", shown_at=checked)
                 if got[:len(exp)] != exp:
-                    raise FlashError(
-                        "The card does not match the image at byte %s of the "
-                        "menu partition - the write did not land. Try again, "
-                        "or write the whole image."
-                        % f"{pos:,}")
+                    raise FlashError(_menu_mismatch_text(pos))
                 checked += len(exp)
                 if progress is not None:
                     progress(checked, total, "Verifying the boot menu\u2026"
                              + _rate_note(rate, checked, total))
     if log is not None:
         log("Menu verified: it matches the image byte-for-byte.", "success")
+
+
+def _menu_mismatch_text(pos):
+    return ("The card does not match the image at byte %s of the menu "
+            "partition - the write did not land. Try again, or write the "
+            "whole image." % f"{pos:,}")
 
 
 #: A card read that fails is tried this many more times, each on a fresh
@@ -2431,7 +2479,7 @@ def _read_back(dev, at, length, total, what="the card", shown_at=None):
 
 def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
                            progress=None, cancel=None, overlay=None,
-                           ranges=None):
+                           ranges=None, digests=None):
     """Read the just-flashed card back and compare it to the source image.
 
     Raises :class:`FlashError` at the first mismatch (the card is bad -- a
@@ -2440,11 +2488,86 @@ def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
     of the image's bytes (:meth:`RawDeviceFile.copy_image_onto`), and is
     what the card must hold there.  *ranges* are the parts of the image
     that were written (:func:`copy_ranges`) and so the only parts compared.
+    *digests* are the write's own chunk hashes
+    (:meth:`RawDeviceFile.copy_image_onto`, PAD-1583): with them only the
+    card is read, and the image only for a chunk that does not match.
     """
     if log is not None:
         log("Verifying the flashed card (reading it back)…", "info")
     spans = [(0, img_size)] if ranges is None else ranges
     total = sum(length for _o, length in spans)
+    if digests is not None:
+        _verify_card_digests(
+            device_path, image_path, digests, total, progress=progress,
+            cancel=cancel, desc="Verifying flashed card…", overlay=overlay,
+            shown_total=img_size,
+            mismatch=lambda pos, off: FlashError(
+                _flash_mismatch_text(pos + off)))
+    else:
+        _verify_card_and_image(device_path, image_path, spans, total,
+                               img_size, progress=progress, cancel=cancel,
+                               overlay=overlay)
+    if log is not None:
+        log("Card verified: it matches the image byte-for-byte."
+            if ranges is None else
+            "Card verified: every block in use matches the image.",
+            "success")
+
+
+def _flash_mismatch_text(at):
+    return (
+        "The card does not match the image after flashing "
+        "(first difference at byte %s). The write didn't "
+        "land correctly -- usually a flaky SD card or card "
+        "reader. Flash again, or use a different card / "
+        "reader. Do NOT install this card on the machine: a "
+        "partially-written installer can fail with a SHELL "
+        "ERROR or leave the machine unbootable." % f"{at:,}")
+
+
+def _verify_card_digests(device_path, image_path, digests, total, *,
+                         progress=None, cancel=None, desc, mismatch,
+                         overlay=None, what="the card", shown_total=None,
+                         shown_at_checked=False):
+    """Read back every chunk in *digests* ``[(offset, length, digest)]`` -
+    what the write put on the card - and compare its hash (PAD-1583).
+
+    Only the card is read: the image is opened just for a chunk that does
+    not match, to find the first byte that differs, and ``mismatch(pos,
+    off)`` (the chunk's offset, the byte within it) is the error raised.
+    A failed card read says how far it got: *checked* of *total* with
+    *shown_at_checked*, else the chunk's offset of *shown_total*."""
+    checked = 0
+    rate = []
+    with RawDeviceFile(device_path, writable=False) as dev:
+        for pos, length, digest in digests:
+            if cancel is not None and cancel():
+                raise FlashCancelled(
+                    "Verify canceled after %d of %d bytes." % (checked, total))
+            got = _read_back(dev, pos, length,
+                             total if shown_total is None else shown_total,
+                             what,
+                             shown_at=checked if shown_at_checked else None)
+            if len(got) != length or _chunk_digest(got) != digest:
+                with open(image_path, "rb") as src:
+                    exp = _file_reader(src, overlay)(pos, length)
+                off = _first_difference(got, exp)
+                if off >= min(len(got), len(exp)) and len(got) == len(exp):
+                    # The card holds what the image holds NOW but not what
+                    # was written: the image changed under the flash.  The
+                    # card is still not what was written, so it fails.
+                    off = 0
+                raise mismatch(pos, off)
+            checked += length
+            if progress is not None:
+                progress(checked, total,
+                         desc + _rate_note(rate, checked, total))
+
+
+def _verify_card_and_image(device_path, image_path, spans, total, img_size,
+                           *, progress=None, cancel=None, overlay=None):
+    """The verify with no write hashes to go by: the card and the image are
+    both read, chunk by chunk, and compared."""
     checked = 0
     rate = []
     with RawDeviceFile(device_path, writable=False) as dev, \
@@ -2462,24 +2585,9 @@ def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
                     continue
                 got = _read_back(dev, pos, len(exp), img_size)
                 if got != exp:
-                    off = next((i for i in range(min(len(got), len(exp)))
-                                if got[i] != exp[i]),
-                               min(len(got), len(exp)))
-                    raise FlashError(
-                        "The card does not match the image after flashing "
-                        "(first difference at byte %s). The write didn't "
-                        "land correctly -- usually a flaky SD card or card "
-                        "reader. Flash again, or use a different card / "
-                        "reader. Do NOT install this card on the machine: a "
-                        "partially-written installer can fail with a SHELL "
-                        "ERROR or leave the machine unbootable."
-                        % f"{pos + off:,}")
+                    raise FlashError(_flash_mismatch_text(
+                        pos + _first_difference(got, exp)))
                 checked += len(exp)
                 if progress is not None:
                     progress(checked, total, "Verifying flashed card…"
                              + _rate_note(rate, checked, total))
-    if log is not None:
-        log("Card verified: it matches the image byte-for-byte."
-            if ranges is None else
-            "Card verified: every block in use matches the image.",
-            "success")

@@ -418,3 +418,15 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   slot idx is its turn build's (C:/tmp/PAD-1555/turn/<key>.mk.txt SLOT line for the chosen sid), its rank/row from
   service_menu.pages; the NVM copy path in musicjob.sh ($ROOT/data/nv/*/NVM found nothing - read it where the rig
   keeps the slot's /data).
+
+### Run 13 (2026-11-25): MUSIC MODE / EDITION on every new build
+
+- **Proven** (`musicjob.sh` + `musiccheck.py`; builder C:/tmp/PAD-1555/turn/mbuild.sh, msteps.py): King Kong LE / Pro
+  1.01, Avengers LE / Pro 1.12, Foo Fighters LE / Pro 1.05, Metallica 1.05 - the slot 500 Hz twice, the real menu
+  walked (Custom Code page rank 6 / Metallica 7; Foo Fighters the last rows of its Standard Adjustments, the DMD-style
+  list), Music Mode and Edition set to 2, the mode 2 file 1000 Hz twice, and the settings store (<slot>/upper/data/nv/
+  <game>/NVM, the newest generation; 44-byte records keyed SHA1(caption), value at +36) holding both at 2.
+- **D&D LE / Pro 1.11** (`edjob.sh`, EDITION alone - no runtime needed): Edition set to 2 on Custom Code, stored 2. A
+  MUSIC MODE file is refused for room on 1.11 and on 1.10 alike; 1.11 takes 1.10's place in menu_settings.PROVEN.
+- Every set of the ticket's list is now proven on the new builds. Left: merge main before release (three tests red at
+  the branch's base are green there).

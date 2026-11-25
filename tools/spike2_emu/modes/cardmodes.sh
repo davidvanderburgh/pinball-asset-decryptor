@@ -73,7 +73,7 @@ forget() {
     [ -f "$MARK" ] || return 0
     rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP/game.port" \
           "$DUMP"/mode.start "$DUMP"/mode[1-7].start "$DUMP/mode.stop" "$DUMP/mode.clip" \
-          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$DUMP/sounds.cfg" "$DUMP/picture.cfg" "$DUMP/settings.cfg" "$DUMP/attract.cfg" "$DUMP/coop.cfg" "$DUMP/idle.cfg" "$DUMP/handicap.cfg" "$DUMP/comp.cfg" "$DUMP/cabshow.cfg" "$DUMP"/cabrec[0-7].bin "$DUMP/addcab.cfg" "$DUMP/scorefeed.cfg" "$DUMP/records.cfg" "$DUMP/saved.cfg" "$DUMP/buttons.cfg" "$DUMP/scenes.cfg" "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
+          "$DUMP/mode.log" "$DUMP"/*.assets "$DUMP/stock.cfg" "$DUMP/clips.cfg" "$DUMP/sounds.cfg" "$DUMP/picture.cfg" "$DUMP/settings.cfg" "$DUMP/attract.cfg" "$DUMP/coop.cfg" "$DUMP/idle.cfg" "$DUMP/handicap.cfg" "$DUMP/access.cfg" "$DUMP/comp.cfg" "$DUMP/cabshow.cfg" "$DUMP"/cabrec[0-7].bin "$DUMP/addcab.cfg" "$DUMP/scorefeed.cfg" "$DUMP/records.cfg" "$DUMP/saved.cfg" "$DUMP/buttons.cfg" "$DUMP/scenes.cfg" "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
     return 0
 }
 
@@ -236,6 +236,14 @@ if [ "$SCENES" != 0 ]; then
     if [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ]; then WHAT="image sets ($SCENES scene file(s))"
     else WHAT="$WHAT and image sets ($SCENES scene file(s))"; fi
 fi
+# PAD-1589: access.cfg (colour-blind insert colours, spoken scores) is a reason of its own too
+ACC=0
+[ -f "$S/access.cfg" ] && ACC=$(grep -c -E "^(cvd|spoken)	" "$S/access.cfg" 2>/dev/null)
+case "$ACC" in ''|*[!0-9]*) ACC=0 ;; esac
+if [ "$ACC" != 0 ]; then
+    if [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ] && [ "$SCENES" = 0 ]; then WHAT="accessibility"
+    else WHAT="$WHAT and accessibility"; fi
+fi
 
 # PAD-1552: THREE forms of the hook load the runtime (modehook.py BLOCKS). A single card's names the object
 # on its LD_PRELOAD line ($HOOK); a multi-boot card's (PAD-1309) and a remote-buttons card's (PAD-1467)
@@ -258,7 +266,7 @@ if [ -n "${PAD_MODE_SO:-}" ]; then
         "(PAD_MODE_SO=$PAD_MODE_SO): that one runs, the card's own modes are left out"
     exit 0
 fi
-if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ] && [ "$SCENES" = 0 ]; }; then
+if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ] && [ "$SCENES" = 0 ] && [ "$ACC" = 0 ]; }; then
     forget
     say "$WHO carries a mode object but no $([ -f "$S/game.port" ] && echo "mode file" || echo "port file") beside it:"
     say "  nothing the emulator can run. This run boots without it"
@@ -280,7 +288,7 @@ fi
 if [ "$(id -u)" = 0 ]; then
     _o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
     [ -n "$_o" ] && [ "$_o" != root ] && chown "$_o" "$ROOT$OBJECT" "$DUMP/game.port" \
-        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/cabrec[0-7].bin "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$DUMP"/scenes.cfg "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
+        "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/settings.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/access.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/cabrec[0-7].bin "$DUMP"/addcab.cfg "$DUMP"/scorefeed.cfg "$DUMP"/records.cfg "$DUMP"/saved.cfg "$DUMP"/buttons.cfg "$DUMP"/scenes.cfg "$DUMP"/scn_*.radium "$MARK" 2>/dev/null
 fi
 say "$WHO carries $WHAT: their runtime runs in this game, as on the machine"
 echo "$OBJECT"

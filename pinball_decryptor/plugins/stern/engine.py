@@ -8873,6 +8873,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1033: a handicap for each player - handicap.cfg beside the runtime (the modes' delivery)
     hand_prof = _handicap_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _hand_on = hand_prof is not None
+    # PAD-1589: color-blind insert colors and spoken scores - access.cfg beside the runtime (the modes' delivery)
+    acc_prof, acc_preset, _acc_spoken = _access_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    _acc_on = acc_prof is not None
     # PAD-1040: the cabinet's expression light shows - cabshow.cfg beside the runtime (the modes' delivery)
     cabs_prof, cabs_shows = _cabs_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _cabs_on = cabs_prof is not None
@@ -8919,6 +8922,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         scenes_prof, scenes_sets = None, None
         attract_prof = coop_prof = idle_prof = hand_prof = comp_prof = None
         _attract_on = _coop_on = _idle_on = _hand_on = _comp_on = False
+        acc_prof, acc_preset, _acc_spoken, _acc_on = None, "", False, False   # PAD-1589: Spike 2 only for now
         cabs_prof, cabs_shows, _cabs_on = None, [], False
         feed_prof, feed_url, _feed_on = None, "", False
         stime_lines, stime_prof, _stime_on = [], None, False
@@ -8936,7 +8940,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         and not boot_edits and not mode_list and not code_list
         and not variant_slots and not sound_modes and not editions
         and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
-        and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
+        and not _hand_on and not _acc_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
         and not stock_mode_edits and shader_prof is None
         and not own_clips and not score_edits
         and not (not _is_spike3(disk_f)
@@ -8948,7 +8952,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
-            and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
+            and not _hand_on and not _acc_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits and not wifi_menu
             and not (not _is_spike3(disk_f)
@@ -9421,6 +9425,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                            desc_sites, assets_dir, audio_edits,
                                            sound_modes, sound_modes_prof,
                                            mode_own_used, log)
+                        if sound_modes.speak:
+                            # PAD-1589: the spoken scores' words ride a
+                            # carrier of their own
+                            _speak_carrier(gr_path, img_path, params,
+                                           desc_sites, assets_dir, audio_edits,
+                                           sound_modes, sound_modes_prof,
+                                           mode_own_used, log)
                         # PAD-791: the records the game plays in a sequence,
                         # off its descriptors read whole (the play tables stop
                         # at 80 bytes; Iron Maiden's 974 plays idx 919 past
@@ -9479,6 +9490,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                    if _SMo_is_attract(u["mode"])
                                    or _SMo_is_shot(u["mode"])
                                    or _SMo_is_intro(u["mode"])
+                                   or _SMo_is_speak(u["mode"])
                                    or _SMo_is_juke(u["mode"])]
                         _sm_frags, _sm_sids, _sm_seqs = _sound_modes_for_banks(
                             gr_path, img_path, params, desc_sites,
@@ -9527,7 +9539,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                 # earlier Write's banks of its sounds are this one's to replace
                                 retire_touched=(set(_bank_touched.values()) if (
                                     mode_list or code_list or sound_mode_used or _clips_on
-                                    or _attract_on or _coop_on or _idle_on or _hand_on
+                                    or _attract_on or _coop_on or _idle_on or _hand_on or _acc_on
                                     or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on)
                                     else None))
                             break
@@ -10207,6 +10219,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)
         # PAD-1033: HANDICAP, the row that switches the players' handicaps (the last spare setting it takes)
         hand_menu = _HandicapMenu(log) if _hand_on else None
+        # PAD-1589: COLOR BLIND (the project's preset to start with) and SPOKEN SCORES (once the words are in sounds.cfg)
+        cvd_menu = _ColourBlindMenu(acc_preset, log) if _acc_on and acc_preset else None
+        _spoken_on = bool(_acc_on and _acc_spoken and sound_modes_cfg and _spoken_in(sound_modes_cfg))
+        if _acc_on and _acc_spoken and not _spoken_on and getattr(sound_modes, "speak", None):
+            # (made, but none landed in sounds.cfg; no voice or no carrier was said where it happened)
+            log("Spoken scores: left out of this build: the card's sounds carry none of the spoken numbers.", "warning")
+        spk_menu = _SpokenScoresMenu(log) if _spoken_on else None
         # PAD-1390: IMAGE SET, which of the project's image sets the screens show (a row of its own, or shared)
         image_menu = _ImageSetMenu(scenes_sets["names"], log) if scenes_sets else None
         # PAD-1402: SAVED PROGRESS, when one of the card's modes keeps progress between games (Keep / Clear)
@@ -10226,7 +10245,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else:
                     image_menu = _ph
         _menu_list = _SvM.arrange(assets_dir, [music_menu, edition_menu, *picture_menus, coop_menu, hand_menu,
-                                              image_menu, saved_menu], log)
+                                              image_menu, saved_menu, cvd_menu, spk_menu], log)
         menu_job = _MenuJobs(*_menu_list) if _menu_list else None
         picture_cfg = ""
         settings_cfg = ""
@@ -10234,6 +10253,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         hand_setting = 0
         image_setting = 0
         saved_setting = 0
+        cvd_setting = spk_setting = 0
         if (text_edits or shader_prof is not None or clip_job is not None
                 or menu_job is not None or wifi_menu):
             if progress:
@@ -10267,6 +10287,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if saved_menu is not None and saved_menu.ok:
                 # PAD-1402: no SAVED PROGRESS row (no spare setting left): the progress is kept, but nothing clears it
                 saved_setting = saved_menu.setting.live
+            if cvd_menu is not None and cvd_menu.ok:
+                # PAD-1589: no COLOR BLIND row: the project's preset always on
+                cvd_setting = cvd_menu.setting.live
+            if spk_menu is not None and spk_menu.ok:
+                spk_setting = spk_menu.setting.live
+            elif spk_menu is not None:
+                _spoken_on = False                       # PAD-1589: never on without the operator's say
             # PAD-1382: settings sharing the MORE SETTINGS rows - the runtime's table of them, and MUSIC MODE's
             # cfg (written before the menu was planned) pointed at the value the menu gave it
             settings_cfg = _shared_settings_cfg(menu_job, grow_work, log)
@@ -10553,6 +10580,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 os.path.join(grow_work, "scenes"), live=image_setting,
                 only=not (mode_list or code_list), log=log)
         _scenes_on = bool(scenes_staged[0])
+        # PAD-1589: neither of the accessibility options survived (no voice for the words, no row for them): nothing
+        # of theirs goes on the card
+        _acc_on = bool(_acc_on and (acc_preset or _spoken_on))
         # PAD-446: a build of random clips and no mode says so in its own words
         _who = ("Modes" if _modes_on else "Random clips" if variant_slots
                 else "Music modes" if sound_modes_cfg and (sound_modes.count or sound_modes.turns)
@@ -10564,6 +10594,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Co-op play" if _coop_on
                 else "Inactivity pauses timers" if _idle_on
                 else "Handicaps" if _hand_on
+                else "Accessibility" if _acc_on
                 else "Expression lights" if _cabs_on
                 else "Prolonged Competition" if _comp_on
                 else "High score records" if _rec_on and not _feed_on and not _stime_on   # PAD-1280
@@ -10573,7 +10604,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         _who_hud = _who
         if (bank_plan is not None and bank_plan.retired
                 and not (_modes_on or _clips_on or sound_modes_cfg or picture_cfg
-                         or _attract_on or _coop_on or _idle_on or _hand_on or _cabs_on
+                         or _attract_on or _coop_on or _idle_on or _hand_on or _acc_on or _cabs_on
                          or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg)):
             # PAD-1235: the earlier Write's runtime files would stay and play the
             # banks this build took the place of
@@ -10584,7 +10615,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "card without the earlier build's music modes, or keep a music mode or "
                 "another mode feature in the project.")
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg or _scenes_on):
+                or _hand_on or _acc_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on or settings_cfg
+                or _scenes_on):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -10596,7 +10628,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _attract_on else "Adding co-op play..."
                          if _coop_on else "Adding inactivity pausing the timers..."
                          if _idle_on else "Adding the handicaps..."
-                         if _hand_on else "Adding the expression light shows..."
+                         if _hand_on else "Adding the accessibility options..."
+                         if _acc_on else "Adding the expression light shows..."
                          if _cabs_on else "Adding Prolonged Competition..."
                          if _comp_on else "Adding the records on the high scores..."
                          if _rec_on and not _feed_on and not _stime_on else "Adding the score feed..."
@@ -10606,7 +10639,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             try:
                 _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
                     variant_prof, sound_modes_prof, picture_prof, attract_prof, coop_prof, idle_prof,
-                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof, scenes_prof))
+                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof, scenes_prof, acc_prof))
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -10679,6 +10712,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     idle=_idle_on, idle_prof=idle_prof,               # PAD-1022
                     handicap=_hand_on, handicap_prof=hand_prof,       # PAD-1033
                     handicap_setting=hand_setting,
+                    access=({"cvd": acc_preset, "cvd_setting": cvd_setting, "spoken": _spoken_on,   # PAD-1589
+                             "spoken_setting": spk_setting} if _acc_on and (acc_preset or _spoken_on) else None),
+                    access_prof=acc_prof,
                     cabs=cabs_shows if _cabs_on else None, cabs_prof=cabs_prof,   # PAD-1040
                     cabs_sids=_cabs_sids,
                     comp=_comp_on, comp_prof=comp_prof,               # PAD-1041
@@ -10768,6 +10804,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     log("Handicaps: %s." % (_line[len("handicaps: "):] if _line.startswith("handicaps: ")
                                             else _line[len("handicap "):]).rstrip("."), "info")
                     continue
+                if _line.startswith(("color-blind inserts: ", "spoken scores: ")):   # PAD-1589: their own names
+                    _k = _line.index(": ")
+                    log("%s: %s." % (_line[:1].upper() + _line[1:_k], _line[_k + 2:].rstrip(".")), "info")
+                    continue
                 if _line.startswith("expression lights: "):   # PAD-1414: theirs, not "Random clips"
                     log("Expression lights: %s." % _line[len("expression lights: "):].rstrip("."), "info")
                     continue
@@ -10785,6 +10825,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               else "adding co-op play" if _coop_on
                               else "adding inactivity pausing the timers" if _idle_on
                               else "adding the handicaps" if _hand_on
+                              else "adding the accessibility options" if _acc_on
                               else "adding the expression light shows" if _cabs_on
                               else "adding Prolonged Competition" if _comp_on
                               else "adding the records on the high scores"
@@ -11105,6 +11146,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "idle": bool(getattr(mode_plan, "idle_file", "")),
                 # PAD-1033: a handicap for each player
                 "handicap": bool(getattr(mode_plan, "handicap_file", "")),
+                # PAD-1589: color-blind insert colors, spoken scores
+                "access": bool(getattr(mode_plan, "access_file", "")),
                 # PAD-1040: the card's expression light shows
                 "cabs": bool(getattr(mode_plan, "cabshow_file", "")),
                 # PAD-1041: Prolonged Competition on the start menu
@@ -11975,6 +12018,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     modes.intro = _coop_intro_wav(assets_dir, log)    # PAD-1114: and the co-op intro's sound
     modes.picks = _coop_picked_wavs(assets_dir, log)  # PAD-1123: and the co-op characters' sounds once picked
     modes.ceremony = _coop_ceremony_wav(assets_dir, log)   # PAD-1317: and the co-op awards ceremony's music
+    modes.speak = _spoken_wavs(assets_dir, log)         # PAD-1589: and the spoken scores' number words
     if not modes.any:
         return None, None
     n = len(modes.files())
@@ -12044,8 +12088,16 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                 modes.intro, modes.picks, modes.ceremony = "", [], ""
                 if not modes.any:
                     return None, None
+        if modes.speak:
+            # PAD-1589: the spoken scores' words: the record lookup and a carrier, as the co-op sounds
+            k_why = _SMo.title_refusal(prof, turns=True)
+            if k_why:
+                log("Spoken scores: left out of this build: %s." % k_why.rstrip("."), "warning")
+                modes.speak = []
+                if not modes.any:
+                    return None, None
         why = _SMo.title_refusal(prof) if modes.count else ""
-        if why and (modes.attract or modes.shots or modes.coop) and not modes.turns:
+        if why and (modes.attract or modes.shots or modes.coop or modes.speak) and not modes.turns:
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
                 % (len(modes.files()), why.rstrip(".")), "warning")
             modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
@@ -12057,7 +12109,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
             modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
         elif not why and modes.turns:
             why = _SMo.title_refusal(prof, turns=True)
-            if why and (modes.attract or modes.shots or modes.coop):
+            if why and (modes.attract or modes.shots or modes.coop or modes.speak):
                 log("Sounds in turn: %d file(s) the game would play in turn are left out of this "
                     "build: %s." % (sum(map(len, modes.turns.values())), why.rstrip(".")), "warning")
                 modes.slots, modes.names, modes.turns, why = {}, [], {}, ""
@@ -12075,6 +12127,8 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
         elif modes.coop and not modes.count and not modes.turns:
             log("Co-op sounds: left out of this build (the intro and the picks play without them): %s."
                 % why.rstrip("."), "warning")
+        elif modes.speak and not modes.count and not modes.turns:
+            log("Spoken scores: left out of this build: %s." % why.rstrip("."), "warning")
         elif modes.count:
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
                 % (n, why.rstrip(".")), "warning")
@@ -12584,6 +12638,61 @@ def _feed_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     return prof, url
 
 
+def _spoken_in(sounds_cfg):
+    """PAD-1589: whether the card's ``sounds.cfg`` carries the spoken scores' words."""
+    try:
+        with open(_lp(sounds_cfg), encoding="utf-8") as f:
+            return any(line.startswith("sword\t") for line in f)
+    except OSError:
+        return False
+
+
+def _access_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-1589: ``(title, color-blind preset or "", spoken scores asked)`` of the accessibility options the card
+    carries, or ``(None, "", False)`` when the project asks for none or they are left out (a warning says why). The
+    modes' gate, as the handicaps'. The spoken numbers themselves ride the sound modes' road
+    (:func:`_sound_modes_for_build`)."""
+    from . import accessibility as _AC
+    from . import mode_write as _MW
+    preset, spoken = _AC.load_cvd(assets_dir), _AC.load_spoken(assets_dir)
+    if not preset and not spoken:
+        return None, "", False
+    if dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry them"
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        from . import handicap as _HC
+        prof = _HC.project_title(assets_dir, probe=True)
+        if preset:
+            c_why = _AC.title_refusal(prof, "cvd")
+            if c_why:
+                log("Color-blind inserts: left out of this build: %s." % c_why.rstrip("."), "warning")
+                preset = ""
+        if spoken:
+            s_why = _AC.title_refusal(prof, "spoken")
+            if s_why:
+                log("Spoken scores: left out of this build: %s." % s_why.rstrip("."), "warning")
+                spoken = False
+        if not preset and not spoken:
+            return None, "", False
+    if why:
+        log("Accessibility: left out of this build: %s." % why.rstrip("."), "warning")
+        return None, "", False
+    if preset:
+        log("Color-blind inserts: the game's RGB inserts in %s colors (one-color inserts keep their lens's color)."
+            % preset.replace("_", "-"), "info")
+    return prof, preset, spoken
+
+
 def _handicap_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     """PAD-1033: the title of the card the players' handicaps go on, or ``None`` when the project does not ask for them
     or they are left out (one warning says why). The modes' gate, as co-op play's."""
@@ -12668,6 +12777,63 @@ class _HandicapMenu(_MusicModeMenu):
         self.why = str(why).rstrip(".") or "unknown"
         self.log("Handicaps: HANDICAP could not be added to the operator menu (%s), so the handicaps are always on "
                  "on this card." % self.why, "info")
+
+
+class _ColourBlindMenu(_MusicModeMenu):
+    """PAD-1589: COLOR BLIND in the game's own service menu (:mod:`.accessibility`): 0 Off, 1 red-green, 2
+    blue-yellow, starting on the project's preset. A row of its own, or one of the settings on the MORE SETTINGS rows
+    (PAD-1382). With no row left the preset is always on."""
+
+    KEY = "colour_blind"
+
+    def __init__(self, preset, log):
+        from . import accessibility as _AC
+        self.preset = preset
+        super().__init__(_AC.CVD_MENU_VALUES, (), log)
+
+    def wanted(self):
+        from . import accessibility as _AC
+        return self.KEY, _AC.CVD_MENU_VALUES, (), {"default": _AC.preset_value(self.preset) + 1,
+                                                   "help_text": _AC.CVD_MENU_HELP, "from_zero": True}
+
+    def done(self):
+        self.ok = True
+        self.log("Color-blind inserts: COLOR BLIND is in the operator menu (%s), %s to start with: 0 turns it off."
+                 % (self.setting.where, self.preset.replace("_", "-")), "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Color-blind inserts: COLOR BLIND could not be added to the operator menu (%s), so the %s colors are "
+                 "always on on this card." % (self.why, self.preset.replace("_", "-")), "info")
+
+
+class _SpokenScoresMenu(_MusicModeMenu):
+    """PAD-1589: SPOKEN SCORES in the game's own service menu (:mod:`.accessibility`), Off/On, Off to start with. A
+    row of its own, or one of the settings on the MORE SETTINGS rows. With no row left the card says no scores (they
+    are never on without the operator's say)."""
+
+    KEY = "spoken_scores"
+
+    def __init__(self, log):
+        super().__init__(2, (), log)
+
+    def wanted(self):
+        from . import accessibility as _AC
+        return self.KEY, 2, (), {"default": 1, "help_text": _AC.SPOKEN_MENU_HELP, "onoff": True}
+
+    def done(self):
+        self.ok = True
+        self.log("Spoken scores: SPOKEN SCORES is in the operator menu (%s), Off to start with: set it to On and the "
+                 "machine says each player's score at the end of each ball." % self.setting.where, "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Spoken scores: SPOKEN SCORES could not be added to the operator menu (%s), so this card says no "
+                 "scores." % self.why, "warning")
 
 
 class _ImageSetMenu(_MusicModeMenu):
@@ -13412,7 +13578,8 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                     who, ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
                     when), "info")
         if (not longer_ok or (_SMo.is_turn(mode) and not _SMo.is_attract(mode)
-                               and not _SMo.is_shot(mode) and not _SMo.is_intro(mode))) and want > room \
+                               and not _SMo.is_shot(mode) and not _SMo.is_intro(mode)
+                               and not _SMo.is_speak(mode))) and want > room \
                 and not _SMo.is_juke(mode):
             # as a replacement is when the bank can't grow (direct-SD, PAD_STERN_AUDIO_GROW=0); a file
             # in turn always (PAD-565: the game plays it for as long as its slot's descriptor says).
@@ -13796,7 +13963,8 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     who = ("Music modes" if modes.count else "Sounds in turn" if modes.turns
            else "Attract flipper sounds" if modes.attract
            else "Sounds on shots" if modes.shots
-           else "Co-op intro" if modes.coop and not modes.jukebox else "Jukebox")
+           else "Co-op intro" if modes.coop and not modes.jukebox
+           else "Spoken scores" if modes.speak and not modes.jukebox else "Jukebox")
     live = 0
     banked = [u for u in used if u.get("bank") is not None]
     used = [u for u in used if u.get("bank") is None]
@@ -13814,6 +13982,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
                              modes, log)
     shots = _shot_lines(params, [u for u in used if _SMo.is_shot(u["mode"])], modes, log)
     intro = _intro_lines(params, [u for u in used if _SMo.is_intro(u["mode"])], modes, log)   # PAD-1114
+    speak = _speak_lines(params, [u for u in used if _SMo.is_speak(u["mode"])], modes, log)   # PAD-1589
     # PAD-638: a music mode's own files in turn are turned at that mode file's record (one in
     # image.bin: a mode file in a sound bank is played by a bank sound id, never its key)
     mode_hosts = {(u["rel"], int(u["mode"])): int(u["host"]) for u in used
@@ -13825,6 +13994,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
                                      and not _SMo.is_attract(u["mode"])
                                      and not _SMo.is_shot(u["mode"])
                                      and not _SMo.is_intro(u["mode"])
+                                     and not _SMo.is_speak(u["mode"])
                                      and not _SMo.is_juke(u["mode"])], log,
                             mode_hosts=mode_hosts)
     jukebox = _jukebox_lines(params, [u for u in used + banked if _SMo.is_juke(u["mode"])],
@@ -13844,11 +14014,11 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     if modes.count and not sounds and not bsids:
         log("Music modes: none of the files for the other modes can be played on this card, so "
             "MUSIC MODE is not added.", "warning")
-        if not turns and not tsids and not jukebox and not attract and not shots and not intro:
+        if not turns and not tsids and not jukebox and not attract and not shots and not intro and not speak:
             return ""
         modes.slots, modes.names = {}, []
     if not sounds and not turns and not bsids and not tsids and not attract and not jukebox and not shots \
-            and not intro:
+            and not intro and not speak:
         log("%s: none of the files can be played on this card; every sound plays its "
             "own." % ("Sounds in turn" if modes.turns or not (modes.attract or modes.shots)
                       else "Attract flipper sounds" if modes.attract else "Sounds on shots"), "warning")
@@ -13858,6 +14028,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     randoms = sorted({bytes(byidx[int(u["slot"])]["findkey"]) for u in used + banked
                       if _SMo.is_turn(u["mode"]) and not _SMo.is_mode_turn(u["mode"])
                       and not _SMo.is_shot(u["mode"]) and not _SMo.is_intro(u["mode"])
+                      and not _SMo.is_speak(u["mode"])
                       and u.get("lines") and u["rel"] in modes.random
                       and (byidx.get(int(u["slot"])) or {}).get("findkey")})
     for u in used:                            # PAD-638: a music mode's own, by its file's record
@@ -13876,7 +14047,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
         f.write(_SMo.cfg_text(live, modes.count if sounds or bsids else 0, sounds, only,
                               turns=turns, bsids=bsids, tsids=tsids, randoms=randoms, attract=attract,
-                              jukebox=jukebox, shots=shots, intro=intro,
+                              jukebox=jukebox, shots=shots, intro=intro, speak=speak,
                               record=_SMo.card_record(modes, used + banked)))
     return path
 
@@ -14177,6 +14348,66 @@ def _intro_lines(params, used, modes, log):
         else:
             out["host"], out["ms"] = bytes(hp["findkey"]), ms
     return out if out["key"] is not None else None
+
+
+def _speak_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, modes, prof, mode_own_used, log):
+    """PAD-1589: the carrier the spoken scores' words ride (*modes*.speak), a request the game never plays
+    (:func:`_free_carrier`), not the attract flipper sounds', the shot sounds' nor the co-op sounds'. Sets
+    ``modes.speak_rel`` and ``modes.speak_plan`` ``{"request", "slot"}``; with none, logs why and empties
+    ``modes.speak`` (the card says no scores)."""
+    skip = [plan["slot"] for plan in (modes.attract_plan if modes.attract else None,
+                                      modes.shot_plan if modes.shots else None,
+                                      modes.intro_plan if modes.coop else None) if plan]
+    request, slot, rel, whose, why = _free_carrier(gr_path, img_path, params, sites, assets_dir,
+                                                   audio_edits, modes, prof, mode_own_used, skip=skip)
+    if request is None:
+        log("Spoken scores: left out of this build: %s." % why, "warning")
+        modes.speak, modes.speak_rel, modes.speak_plan = [], "", {}
+        return None
+    modes.speak_rel = rel
+    modes.speak_plan = {"request": request, "slot": slot}
+    log("Spoken scores: %d spoken numbers ride request %d (sound idx %d, %s)." % (len(modes.speak), request, slot,
+                                                                                 whose), "info")
+    return None
+
+
+def _speak_lines(params, used, modes, log):
+    """PAD-1589: the ``sounds.cfg`` entries of the spoken scores' words (*used*, their entries off the grow) for
+    :func:`.sound_modes.cfg_text`: ``{"request", "key" (the carrier's own record key), "words": [(word, its record's
+    key, ms)]}``, or ``None`` when none landed."""
+    from . import accessibility as _AC
+    from . import sound_modes as _SMo
+    plan = getattr(modes, "speak_plan", None) or {}
+    if not used or not plan:
+        return None
+    byidx = {p["idx"]: p for p in params}
+    out = {"request": int(plan["request"]), "key": None, "words": []}
+    for u in used:
+        sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
+        k = _SMo.speak_of(u["mode"])
+        if not sp or not hp or not hp.get("grown") or not sp.get("findkey") or not hp.get("findkey"):
+            log("Spoken scores: the word \"%s\" is left out: its record did not come out of the grown bank."
+                % (_AC.WORDS[k] if 0 <= k < len(_AC.WORDS) else k), "warning")
+            continue
+        u["lines"] = 1
+        out["key"] = bytes(sp["findkey"])
+        out["words"].append((k, bytes(hp["findkey"]), int(-(-int(u["frames"]) * 1000 // 44100))))
+    return out if out["key"] is not None and out["words"] else None
+
+
+def _spoken_wavs(assets_dir, log):
+    """PAD-1589: ``[(word number, WAV)]`` the spoken scores' words, made with the computer's own voice into the
+    project's write cache (once), or ``[]`` when the project does not ask for spoken scores or the words cannot be
+    made (one warning says why)."""
+    from . import accessibility as _AC
+    from . import sound_modes as _SMo
+    if not _AC.load_spoken(assets_dir):
+        return []
+    try:
+        return _AC.make_words(os.path.join(assets_dir, _SMo.CACHE_DIR, "spoken"), log)
+    except Exception as e:  # noqa: BLE001 - no voice, or it failed: the card says no scores
+        log("Spoken scores: left out of this build: %s" % str(e).rstrip("."), "warning")
+        return []
 
 
 def _coop_intro_wav(assets_dir, log):
@@ -22847,6 +23078,12 @@ def _SMo_is_shot(mode):
     """PAD-945: a sound on a shot stays in image.bin: the runtime swaps its record's key in."""
     from . import sound_modes as _SMo
     return _SMo.is_shot(mode)
+
+
+def _SMo_is_speak(mode):
+    """PAD-1589: the spoken scores' words stay in image.bin: the runtime swaps their records' keys in."""
+    from . import sound_modes as _SMo
+    return _SMo.is_speak(mode)
 
 
 def _SMo_is_intro(mode):

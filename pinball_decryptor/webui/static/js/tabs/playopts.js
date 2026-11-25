@@ -25,7 +25,7 @@ export default function PlayOptionsTab() {
   const p = useNs("playopts");
   const s = useNs("modes");
   const [levels, setLevels] = useState(false);
-  const any = s.hand_shown || s.comp_shown || s.idle_shown;
+  const any = s.hand_shown || s.comp_shown || s.idle_shown || s.cvd_shown || s.spk_shown;
   return html`<div class="page po-page">
     <${PageHead} title="Play options" sub=${p.intro} />
     ${p.keeps_ic ? html`<div class="po-note"><${Note} kind="ok"><b>${p.keeps_ic_head}.</b> ${p.keeps_ic}<//></div>` : null}
@@ -46,6 +46,19 @@ export default function PlayOptionsTab() {
         ${s.idle_shown ? html`<${Option} title="Inactivity pauses timers" on=${s.idle_on} tip=${s.idle_tip}
             onChange=${(v) => call("modes.set_idle_pause", v)}>
           <${Said} text=${s.idle_note} kind=${s.idle_note_kind} />
+        <//>` : null}
+        ${s.cvd_shown ? html`<${Option} title="Color-blind insert colors" on=${s.cvd_on} tip=${s.cvd_tip}
+            onChange=${(v) => call("modes.set_colour_blind", v, s.cvd_preset)}>
+          <div class="row po-presets" role="group" aria-label="Color-blind preset">
+            ${(s.cvd_presets || []).map((p) => html`<label key=${p.key} class="chk">
+              <input type="radio" name="po-cvd" checked=${s.cvd_preset === p.key}
+                onChange=${() => call("modes.set_colour_blind", s.cvd_on, p.key)} /><span>${p.name}</span></label>`)}
+          </div>
+          <${Said} text=${s.cvd_note} kind=${s.cvd_note_kind} />
+        <//>` : null}
+        ${s.spk_shown ? html`<${Option} title="Spoken scores" on=${s.spk_on} tip=${s.spk_tip}
+            onChange=${(v) => call("modes.set_spoken_scores", v)}>
+          <${Said} text=${s.spk_note} kind=${s.spk_note_kind} />
         <//>` : null}
       </div>`}
     ${levels ? html`<${HandicapLevelsDialog} s=${s} onClose=${() => setLevels(false)} />` : null}

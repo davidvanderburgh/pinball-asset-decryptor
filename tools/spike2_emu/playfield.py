@@ -991,6 +991,34 @@ def insert_look():
     return look if look in INSERT_LOOKS else INSERT_LOOKS[0]
 
 
+def cvd_preview():
+    """PAD-1589: the color-blind preview the RGB inserts are drawn in (the Modes tab's Light shows sets it too), ""
+    for none; kept in the state file."""
+    p = load_state().get("cvd_preview")
+    return p if p in cablights.CVD_MAP else ""
+
+
+def card_cvd():
+    """PAD-1589: the color-blind preset the run's own card has on now (its runtime writes dump/pad_cvd.now every 2 s
+    while it runs), 0 for none: then the game's lights come already recolored and the preview stands down."""
+    path = os.path.join(padpath.dump() or "", "pad_cvd.now")
+    try:
+        if time.time() - os.path.getmtime(path) > 6:     # rewritten every 2 s while a run has it on
+            return 0
+        with open(path) as f:
+            return int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def cvd_vals(vals, preset):
+    """An RGB fixture's channel values as the color-blind *preset* shows them; a one-color fixture's as they are."""
+    if not preset or "W" in vals:
+        return vals
+    r, g, b = cablights.cvd_remap(tuple(vals.get(c) or 0 for c in "RGB"), preset)
+    return dict(vals, R=r, G=g, B=b)
+
+
 def tinted(vals, F, tints):
     """A single-colour fixture's values as the colour a MODE painted it, else
     ``vals`` as they are - the All RGB look (PAD-668; PAD-658 drew this
@@ -3791,6 +3819,8 @@ class Field(LedRing):
         # under the Backpanel section of the cabinet column
         self.panel_sw = self._panel_switches()
         self.insert_look = insert_look()        # PAD-668
+        self.cvd = cvd_preview()                # PAD-1589
+        self._card_cvd, self._card_cvd_at = 0, 0.0
         # PAD-500: the cabinet's own lights, in a column left of the art
         self.cab = CabinetLights(expression_on())
         self._sw_named = None
@@ -4181,12 +4211,16 @@ class Field(LedRing):
         if state_changed():
             # the Modes tab changed a colour or the switch (PAD-668)
             self.insert_look = insert_look()
+            self.cvd = cvd_preview()                    # PAD-1589
             self.lens_changed(None)
         tints = (coilmap.paint_tints(d, GROUP_NODE)
                  if self.insert_look == "rgb" else None)
+        if self.cvd and time.monotonic() - self._card_cvd_at > 1.0:
+            self._card_cvd, self._card_cvd_at = card_cvd(), time.monotonic()
+        cvd = self.cvd if not self._card_cvd else ""    # PAD-1589: a card that recolors needs no preview
         for F in self.fixtures:
             rgb, level = fixture_color(
-                tinted(self._chan_vals(F, d, now), F, tints), own_lens(F["name"]))
+                cvd_vals(tinted(self._chan_vals(F, d, now), F, tints), cvd), own_lens(F["name"]))
             if rgb:
                 lit += 1
             st = (rgb, level)

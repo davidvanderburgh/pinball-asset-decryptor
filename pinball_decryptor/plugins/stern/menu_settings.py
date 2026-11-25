@@ -84,6 +84,10 @@ IMAGE_SET = "image_set"
 #: PAD-1402: SAVED PROGRESS (:mod:`.saved_progress`): 1 Keep, 2 Clear - Clear the default, so a factory reset clears the
 #: modes' saved progress with the game's settings; the mode runtime clears it and puts the row back to Keep
 SAVED_PROGRESS = "saved_progress"
+#: PAD-1589: color-blind insert colors (:mod:`.accessibility`): 0 Off, 1 red-green, 2 blue-yellow (from zero)
+COLOUR_BLIND = "colour_blind"
+#: PAD-1589: spoken scores: Off/On (stored 0, 1), Off to start with
+SPOKEN_SCORES = "spoken_scores"
 #: each setting of ours: the adjustment it takes over, its descriptor caption, its row caption and
 #: the menu category whose page lists it. EDITION sits on Attract Mode (16), beside the game's own
 #: BOOT SCREEN and 70TH BOOT SCREEN, which is where an operator already picks how the game looks.
@@ -99,6 +103,8 @@ SETTINGS = {
     HANDICAP: (None, "HANDICAP", "Handicap", 16),
     IMAGE_SET: (None, "IMAGE SET", "Image Set", 16),
     SAVED_PROGRESS: (None, "SAVED PROGRESS", "Saved Progress", 16),
+    COLOUR_BLIND: (None, "COLOR BLIND", "Color Blind", 16),
+    SPOKEN_SCORES: (None, "SPOKEN SCORES", "Spoken Scores", 16),
 }
 
 

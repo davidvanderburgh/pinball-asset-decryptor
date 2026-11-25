@@ -62,6 +62,11 @@ def wanted(project, honour_off=True):
         jobs.append(E._CoopMenu(log))
     if HC.load(project):
         jobs.append(E._HandicapMenu(log))
+    from . import accessibility as AC                   # PAD-1589: COLOR BLIND and SPOKEN SCORES (Play options)
+    if AC.load_cvd(project):
+        jobs.append(E._ColourBlindMenu(AC.load_cvd(project), log))
+    if AC.load_spoken(project):
+        jobs.append(E._SpokenScoresMenu(log))
     from . import scene_variants as SV
     sets = SV.load(project)                             # PAD-1390: IMAGE SET, when the project has image sets
     if sets:

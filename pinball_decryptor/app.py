@@ -4725,7 +4725,8 @@ class App:
         and a newer build.  Then the one-click port's chain for that one
         image (extract, transfer, stage, build beside the machine's card),
         stopping after the transfer is planned to say what can NOT be carried
-        (core/game_update.carry_report) before anything is built.
+        (core/game_update.carry_report) before anything is built.  The new
+        extract and the build go beside the project folder.
         *on_built(build, workspace, raw)* on the UI thread after a build."""
         from .core import game_update, mod_port
         if not getattr(self._current_mfr.capabilities, "mod_transfer", False):
@@ -4745,7 +4746,10 @@ class App:
         except game_update.UpdateRefused as e:
             messagebox.showwarning("Update", str(e))
             return False
-        out_dir = os.path.dirname(os.path.abspath(card)) if card else os.path.dirname(project)
+        # beside the project folder: the new build's extract becomes the
+        # project going forward, next to the old one (never inside it, and
+        # never wherever the machine's card happens to sit)
+        out_dir = os.path.dirname(os.path.abspath(project))
         jobs = mod_port.plan_ports(project, [raw], out_dir)
         job = jobs[0]
         if not messagebox.askyesno(
@@ -4891,6 +4895,56 @@ class App:
                          args=(os.path.normpath(project), jobs),
                          daemon=True).start()
 
+    def _record_extract_facts(self, in_path, out_path, mfr, say):
+        """What a finished extract records about its card beside the project
+        (worker thread: the probes open the multi-GB image): the card's own
+        version in the sidecar (read from its update index, so version chips
+        built on this extract are fact, not filename guesses), whether it is
+        the card Stern released (PAD-426) and the project's revision history
+        from its fingerprint (PAD-427).  PAD-1585: the one-click port's and
+        an update's extracts record the same, so the new project knows its
+        card (its modes are checked and carried against it)."""
+        try:
+            ver, exact = mfr.card_version(in_path)
+            if ver and exact:
+                from .core.extract_source import (
+                    amend_extract_source)
+                amend_extract_source(out_path, card_version=ver)
+        except Exception:
+            pass
+        # Was this the card Stern released?  The project keeps
+        # the answer, so its baseline is known to be stock or
+        # known to be someone's build (PAD-426).  Every file's
+        # bytes are hashed: a card built elsewhere can keep
+        # Stern's records for files it replaced.
+        try:
+            check = getattr(mfr, "stock_check", None)
+            stock = check(in_path, deep=True) if check else None
+            if stock and stock["status"] in ("official",
+                                             "modified"):
+                from .core.extract_source import (
+                    amend_extract_source)
+                amend_extract_source(out_path, stock={
+                    k: stock[k] for k in ("status", "label",
+                                          "sidx", "text")})
+                say(
+                    "Source card: " + stock["text"],
+                    "success" if stock["status"] == "official"
+                    else "warning")
+        except Exception:
+            stock = None
+        # The project's revision history starts (or carries on)
+        # from this card's fingerprint (PAD-427).
+        try:
+            from .core import lineage
+            info = lineage.card_print(in_path, measure=True)
+            if info:
+                lineage.note_extract(
+                    out_path, os.path.basename(in_path), info,
+                    (stock or {}).get("status") or "")
+        except Exception:
+            pass
+
     def _port_sub_runner(self):
         """``(log_cb, progress_cb, extract, run_sub)`` for a port worker:
         *extract(raw, ws)* runs the plugin's full extract as ``self.pipeline``
@@ -4919,6 +4973,9 @@ class App:
             if hasattr(p, "set_log_line_cb"):
                 p.set_log_line_cb(self._post_log_line)
             run_sub(p)
+            # PAD-1585: the new extract knows its card, as an Extract does
+            write_extract_source(ws, raw)
+            self._record_extract_facts(raw, ws, self._current_mfr, log_cb)
 
         run_sub.step_done = step_done
         return log_cb, progress_cb, extract, run_sub
@@ -6110,54 +6167,15 @@ class App:
         if is_extract and success and self._last_extract_io:
             in_path, out_path = self._last_extract_io
             write_extract_source(out_path, in_path)
-            # Stamp the card's OWN version into the sidecar (read from its
-            # update index — survives renamed files), so version chips built
-            # on this extract are fact, not filename guesses.  Off-thread:
-            # the probe opens the multi-GB image, and this is the UI thread.
             mfr = self._current_mfr
-            if hasattr(mfr, "card_version") and os.path.isfile(in_path):
-                def _stamp(in_path=in_path, out_path=out_path, mfr=mfr):
-                    try:
-                        ver, exact = mfr.card_version(in_path)
-                        if ver and exact:
-                            from .core.extract_source import (
-                                amend_extract_source)
-                            amend_extract_source(out_path, card_version=ver)
-                    except Exception:
-                        pass
-                    # Was this the card Stern released?  The project keeps
-                    # the answer, so its baseline is known to be stock or
-                    # known to be someone's build (PAD-426).  Every file's
-                    # bytes are hashed: a card built elsewhere can keep
-                    # Stern's records for files it replaced.
-                    try:
-                        check = getattr(mfr, "stock_check", None)
-                        stock = check(in_path, deep=True) if check else None
-                        if stock and stock["status"] in ("official",
-                                                         "modified"):
-                            from .core.extract_source import (
-                                amend_extract_source)
-                            amend_extract_source(out_path, stock={
-                                k: stock[k] for k in ("status", "label",
-                                                      "sidx", "text")})
-                            self.window.append_log(
-                                "Source card: " + stock["text"],
-                                "success" if stock["status"] == "official"
-                                else "warning")
-                    except Exception:
-                        stock = None
-                    # The project's revision history starts (or carries on)
-                    # from this card's fingerprint (PAD-427).
-                    try:
-                        from .core import lineage
-                        info = lineage.card_print(in_path, measure=True)
-                        if info:
-                            lineage.note_extract(
-                                out_path, os.path.basename(in_path), info,
-                                (stock or {}).get("status") or "")
-                    except Exception:
-                        pass
-                threading.Thread(target=_stamp, daemon=True).start()
+            if os.path.isfile(in_path):
+                # Off-thread: the probes open the multi-GB image, and this
+                # is the UI thread.
+                threading.Thread(
+                    target=self._record_extract_facts,
+                    args=(in_path, out_path, mfr,
+                          lambda t, l: self.window.append_log(t, l)),
+                    daemon=True).start()
             # The assets folder was pointed at this output dir at extract START
             # (before it held any files), so any Replace-tab scan triggered in
             # the meantime stamped a stale/empty cache for this exact path.

@@ -88,7 +88,7 @@ download = refused, back after 30 s; nothing = the same game running, no marks.
 A machine row with newer code out (`code_watch`) and a project gets **Update to 1.17** (shell.js `MachineRow`,
 `MACH.update`; RPC `shellx.machines_update`). `app._start_machine_update`: the owner picks the new stock image (the
 app downloads none); `core/game_update.check_new_card` refuses another game or a build that is not newer; then the
-one-click port chain for that one image (`_run_port_chain(gate=, after=)`), built beside the machine's card. The
+one-click port chain for that one image (`_run_port_chain(gate=, after=)`), built beside the project folder (its new extract too). The
 gate runs after `plan_transfer`, before `apply_transfer`: `game_update.carry_report` + `question` name what can't
 be carried (the plan's error/warning detail lines, dropped text, `mode_news` when the modes can't run on the new
 build) and ask: yes builds without those, no = `PortSkip`, nothing written. After the build: the machine is

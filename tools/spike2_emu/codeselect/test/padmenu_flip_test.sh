@@ -16,6 +16,8 @@
 #   tilt      rules live, cleared at once, right held, run shorter than the guard + hold -> none
 #   tiltlate  the same, run past the guard + hold        -> one restart
 #   tap       right flipper 300 ms down / 60 ms up       -> none (the hold must be unbroken)
+#   sparse    the table's way: read once at the press, then other frames only -> one restart
+#   sparseup  the same, and read again at the release 200 ms on               -> none
 #   conf-off  no PADMENU_FLIP_MS, the card says boot_menu=menu         -> none
 #   conf-on   no PADMENU_FLIP_MS, boot_menu=flipper flip_hold=1 flip_guard=0 -> one restart
 set -e
@@ -70,7 +72,34 @@ int main(int argc, char **argv)
         rule(fd, 9, 2, 0x00, 1);
     while ((t = ms() - t0) < run_ms) {
         unsigned char f[6], r[12];
-        int c, right = strcmp(mode, "left") && (strcmp(mode, "tap") || (t % 360) < 300), n;
+        int c, n;
+        /* THE TABLE'S PATTERN (2026-11-25): node 8 read only when a switch changes - once at the
+         * press (sparse; sparseup also once at the release, 200 ms on) - and other frames between */
+        if (!strncmp(mode, "sparse", 6)) {
+            static int said, upsaid;
+            int up = !strcmp(mode, "sparseup") && t >= 200;
+            if ((!said || (up && !upsaid))) {
+                if (up) upsaid = 1;
+                said = 1;
+                f[0] = 0x88; f[1] = 3; f[2] = 0x11; f[3] = key; f[4] = ck(f, 4); f[5] = 12;
+                write(fd, f, 6);
+                memset(r, 0xff, 8);
+                if (!up) r[3] &= ~1;
+                for (c = 0; c < 8; c++) r[c] ^= ((key << c) | (key >> ((8 - c) & 7))) & 0xff;
+                r[8] = r[9] = 0;
+                r[10] = ck(r, 10);
+                r[11] = 0;
+                pwrite(fd, r, 12, 4096);
+                lseek(fd, 4096, SEEK_SET);
+                read(fd, r, 12);
+            } else {
+                f[0] = 0x89; f[1] = 2; f[2] = 0x02; f[3] = ck(f, 3); f[4] = 0; n = 5;
+                write(fd, f, n);
+            }
+            usleep(5000);
+            continue;
+        }
+        int right = strcmp(mode, "left") && (strcmp(mode, "tap") || (t % 360) < 300);
         key = (key * 37 + 11) & 0xff;
         if (plain) { f[0] = 0x88; f[1] = 2; f[2] = 0x11; f[3] = ck(f, 3); f[4] = 12; n = 5; }
         else { f[0] = 0x88; f[1] = 3; f[2] = 0x11; f[3] = key; f[4] = ck(f, 4); f[5] = 12; n = 6; }
@@ -135,6 +164,8 @@ run other    1200 1 $FAST
 run tilt      900 0 -E PADMENU_FLIP_MS=400 -E PADMENU_FLIP_GUARD_MS=800 -E PADMENU_CONF="$T/conf-off"
 run tiltlate 2000 1 -E PADMENU_FLIP_MS=400 -E PADMENU_FLIP_GUARD_MS=800 -E PADMENU_CONF="$T/conf-off"
 run tap      1500 0 $FAST
+run sparse   1200 1 $FAST
+run sparseup 1200 0 $FAST
 run conf-off 1600 0 -E PADMENU_CONF="$T/conf-off"
 run conf-on  1800 1 -E PADMENU_CONF="$T/conf-on"
 [ "$fail" = 0 ] && echo "padmenu_flip_test: OK" || { echo "padmenu_flip_test: FAILED"; exit 1; }

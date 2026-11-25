@@ -710,26 +710,20 @@ static void rule_set(unsigned node, unsigned coil, int on, int input)
     }
 }
 
-/* one right flipper sample, from a good node 8 scan reply */
-static void flip_sample(int pressed)
+/* THE HOLD, ON STATE (the table, 2026-11-25: a 9 s hold never counted).  On the real machine the
+ * game reads node 8's switches when the board says one CHANGED: a held flipper gives one reading at
+ * the press and one at the release, and a whole minute of attract gave one.  The emulator's boards
+ * answer the scan all the time, which is why the first version (a hold = readings no more than
+ * 500 ms apart) passed there.  So the last reading IS the button until the next one, and the 5 s
+ * are counted on the game's other bus traffic (flip_check from every frame the game writes). */
+static void flip_check(long long t)
 {
-    long long t = now_ms();
-    if (!pressed && flip_fired && !flip_fire)
-        flip_fired = 0;                        /* log only: every hold is a try */
-    if (pressed != flip_was) {
-        tr("right flipper %s (rules live %d, off for %lld ms)", pressed ? "PRESSED" : "released",
-           rules_live, rules_live ? 0 : t - rules_off_since);
-        flip_was = pressed;
-    }
-    if (flip_fired || flip_ms <= 0)
+    if (flip_fired || flip_ms <= 0 || flip_was != 1)
         return;
-    if (flip_last >= 0 && t - flip_last > 500)
-        flip_since = -1;                       /* the scans stopped for a while: not a hold */
-    flip_last = t;
-    if (!pressed || rules_live || t - rules_off_since < flip_quiet_ms) {
-        if (pressed && flip_since >= 0)
+    if (rules_live || t - rules_off_since < flip_quiet_ms) {
+        if (flip_since >= 0)
             tr("hold broken: %s", rules_live ? "a game is in play" : "the flippers went off too lately");
-        flip_since = -1;
+        flip_since = -1;                       /* no game on, for the whole hold */
         return;
     }
     if (flip_since < 0) {
@@ -743,6 +737,24 @@ static void flip_sample(int pressed)
         if (flip_fire)
             ask_for_reboot_why("padmenu: right flipper held - restarting the machine into the boot menu\n");
     }
+}
+
+/* one right flipper reading, from a good node 8 scan reply */
+static long scans_asked, scans_read;
+static void flip_sample(int pressed)
+{
+    long long t = now_ms();
+    scans_read++;
+    if (!pressed && flip_fired && !flip_fire)
+        flip_fired = 0;                        /* log only: every hold is a try */
+    if (pressed != flip_was) {
+        tr("right flipper %s (rules live %d, off for %lld ms)", pressed ? "PRESSED" : "released",
+           rules_live, rules_live ? 0 : t - rules_off_since);
+        flip_was = pressed;
+        flip_since = -1;                       /* a new press starts its own count */
+    }
+    flip_last = t;
+    flip_check(t);
 }
 
 /* the game's frames out: rules, and which reply is the node 8 scan's */
@@ -763,10 +775,21 @@ static void nb_wrote(int fd, const unsigned char *b, ssize_t n)
             if (rl && rl <= sizeof nb_rx[0]) {
                 nb_want[fd] = (int)rl;
                 nb_is_scan[fd] = cmd == 0x11 && node == NB_NODE_FLIP && rl == 12;
+                if (nb_is_scan[fd]) scans_asked++;
                 nb_key[fd] = len == 3 ? b[i + 3] : 0;
             }
         }
         i += size;
+    }
+    {
+        static long long acct;
+        long long t = now_ms();
+        flip_check(t);
+        if (trace && t - acct >= 30000) {     /* how often the game reads node 8, for the trace */
+            if (acct) tr("node 8 scans: %ld asked, %ld read in 30 s", scans_asked, scans_read);
+            acct = t;
+            scans_asked = scans_read = 0;
+        }
     }
 }
 

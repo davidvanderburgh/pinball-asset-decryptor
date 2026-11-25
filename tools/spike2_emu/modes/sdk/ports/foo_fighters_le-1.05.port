@@ -1,0 +1,1056 @@
+# foo_fighters_le 1.05 - PAD-1555: Stern's November 2026 build: derived (port_derive) from this framework generation's references, the same model's
+# proven port first (its values, shots, callouts, text and lamps).
+# Emulator-proven 2026-11-24 by a full build check (modes/newbuild/checkjob.sh: gamecheck.sh play full, the stock
+# card, hidden, muted): the runtime hooked the game, 43 of its 60 shots came from their switches, a drain
+# ended a ball (a tilted ball 2 and a ball 3 to the game's end), events seen firing: game_start, ball_start, ball_end, bonus_end, tilt_warning, tilt, game_over.
+# Shots no press made: Sonic radio-top, Upper left ramp target, Center spinner, Center spinner flash, Overlord left target, Overlord right target, Overlord (0x80000), Overlord (0x100000), Shot 0x4000000, Shot 0x20000000, Shot 0x40000000, Left flipper button, Right flipper button, Right flipper + Action button, Right flipper button released, Action button held 3 s, Left flipper button held 3 s.
+# Whole game (PAD-1400, a mode that IS the game) proven 2026-11-24 by modes/newbuild/ownjob.sh: 3 balls ended, 57 light shows and 0 award screens refused, no crash;
+# its own_pass callers read off this build by ret_use.py.
+# program sha1 8d5fc7e2abd8a0003c8fdc4ddbc2c0afc16e5aac, portgen revision 12, 59 reference port(s) of framework generation B.
+
+game           foo_fighters_le
+version        1.05
+
+# ---- functions: site <name> <address> <first two instruction words> ----
+#   tick: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site tick             0x00411380 0xe92d4038 0xe3a00037
+#   ball_end: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, Uncanny X-Men LE 0.98, Aerosmith 1.16, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01]
+site ball_end         0x0026608c 0xe92d4070 0xe1a06000
+#   sound_lookup: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site sound_lookup     0x003a79f8 0xe92d4038 0xe1a05000
+#   sound_resolve: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site sound_resolve    0x0030c968 0xe92d41f0 0xe1a05820
+#   score_add: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site score_add        0x00305cfc 0xe30d171e 0xe34013c9
+#   callout: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Jaws Pro 1.02, Venom Pro 1.07, Jurassic Park Pro 1.16, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Venom LE 1.07, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Jaws LE 1.02]
+site callout          0x0030d9a8 0xe92d4010 0xe30be438
+#   callout_nth: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22]
+site callout_nth      0x0030db5c 0xe92d4010 0xe30be438
+#   lamp_group: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site lamp_group       0x003ada1c 0xe92d4038 0xe1a04000
+#   show_priority: located (strict) [Foo Fighters LE 1.04, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, King Kong LE 0.97, Venom LE 1.07, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site show_priority    0x003d47f8 0xe30e3544 0xe34033c1
+#   award_screen: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site award_screen     0x002596a0 0xe92d4070 0xe24dd008
+#   drain_rule_call: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site drain_rule_call  0x002a855c 0xe3a0000a 0xe12fff33
+# PAD-1400: award_screen / show_start callers that use what they get back (a refused 0 would crash them:
+# ret_use.py, read off this build); a whole-game mode never refuses these, every other caller of the two it does
+value own_ret_scanned      1
+value own_pass_0           0x0003cec0
+value own_pass_1           0x00068980
+value own_pass_2           0x0006bd7c
+value own_pass_3           0x0007213c
+value own_pass_4           0x00084a00
+value own_pass_5           0x0015868c
+value own_pass_6           0x0015fecc
+value own_pass_7           0x00188594
+value own_pass_8           0x0019c66c
+value own_pass_9           0x001b07f0
+value own_pass_10          0x001fb848
+value own_pass_11          0x001fbf3c
+value own_pass_12          0x002019e8
+value own_pass_13          0x0021a0b0
+value own_pass_14          0x0021a3e4
+value own_pass_15          0x0021c1fc
+value own_pass_16          0x0021c24c
+value own_pass_17          0x0021c430
+value own_pass_18          0x0021c480
+value own_pass_19          0x002aca24
+value own_pass_20          0x002acac0
+value own_pass_21          0x002fea1c
+value own_pass_22          0x00303e30
+value own_pass_23          0x00308dd4
+value own_pass_24          0x00308e1c
+#   string_new: PLT stub for _ZNSsC1EPKcRKSaIcE [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site string_new       0x00016798 0xe28fc606 0xe28cca3b
+#   dynamic_cast: PLT stub for __dynamic_cast [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site dynamic_cast     0x000161b0 0xe28fc606 0xe28cca3b
+#   resource_get: placed through 3 callers, e.g. the bl at 0x1401a0 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site resource_get     0x0042ae5c 0xe92d43f0 0xe1a04000
+#   find_node: placed through 3 callers, e.g. the bl at 0x1e4a0 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, John Wick LE 1.02, John Wick Pro 1.02, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Metallica Remastered 1.04, Star Wars ELG 1.10, James Bond 60th LE 1.11, The Beatles 1.29, John Wick LE 1.01, Metallica Remastered 1.03]
+site find_node        0x004ef7cc 0xe92d4070 0xe24dd008
+#   set_text: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site set_text         0x004d2f14 0xe92d47f0 0xe1a06000
+#   surface_state: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site surface_state    0x004e2504 0xe5900550 0xe2800008
+#   player_advance: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site player_advance   0x00259a98 0xe2501000 0x012fff1e
+#   display_draw: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site display_draw     0x003ca430 0xe3520001 0x812fff1e
+#   sound_play: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Jaws Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, Jurassic Park Pro 1.16, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Godzilla Pro 1.15, Venom LE 1.07, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Jaws LE 1.02]
+site sound_play       0x0030d9a8 0xe92d4010 0xe30be438
+#   sound_active: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site sound_active     0x0030e110 0xe59f3034 0xe2831e62
+#   sound_stop: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site sound_stop       0x0030e268 0xe92d40f8 0xe1a06000
+#   sound_worker: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site sound_worker     0x0030cf90 0xe92d4ff0 0xe2507000
+#   hook_dispatch: located (loose) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site hook_dispatch    0x00220380 0xe35000d0 0xe92d4038
+#   display_effect_start: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+site display_effect_start 0x0046f5f4 0xe92d47f0 0xe2516000
+#   display_effect_next: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00]
+site display_effect_next 0x0046f9d8 0xe30f3cc4 0xe34033c9
+#   display_priority_now: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+site display_priority_now 0x0046fe6c 0xe5d0000e 0xe12fff1e
+#   layered_priority: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, Godzilla Pro 1.16, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Metallica Remastered 1.04, Godzilla Pro 1.15, King Kong LE 0.97, John Wick LE 1.01, Metallica Remastered 1.03]
+site layered_priority 0x00036940 0xe92d4008 0xe59030f0
+# site caward_add             NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference caward_add calls 0x21f01c, which is 0x305e64 in the target - prove what it does before using it
+#   candidate: the reference caward_add calls 0x2d2d04, which is 0x4115b0 in the target - prove what it does before using it
+#   caward_add_scaled: placed through 3 callers, e.g. the bl at 0x108684 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04]
+site caward_add_scaled 0x00032bb4 0xe92d4ff0 0xe1a08002
+#   show_start: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site show_start       0x003d4598 0xe92d47f0 0xe2508000
+#   rule_dispatch: located (strict) [Foo Fighters LE 1.04, Venom Pro 1.07, Venom LE 1.07]
+site rule_dispatch    0x00192098 0xe92d4070 0xe1a05001
+#   game_event: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, James Bond 007 LE 1.06, John Wick LE 1.01]
+site game_event       0x001ab460 0xe92d47f0 0xe1a09000
+#   event_post_replacing: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+site event_post_replacing 0x001b8ab4 0xe92d4070 0xe1a05001
+#   event_cancel: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+site event_cancel     0x001b8a24 0xe92d40f8 0xe30e6540
+#   switch_hit: located (loose) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, The Beatles 1.29, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+site switch_hit       0x001c8780 0xe2503000 0x012fff1e
+#   switch_hit2: located (loose) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, The Beatles 1.29, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+site switch_hit2      0x001c8820 0xe92d4010 0xe2504000
+#   switch_edge: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site switch_edge      0x001eac18 0xe30f3b54 0xe34033c9
+#   switch_drain: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site switch_drain     0x001eb838 0xe92d4ff0 0xe303929c
+#   surface_find: placed through 3 callers, e.g. the bl at 0x6ee2c [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, King Kong LE 0.97, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 007 Pro 1.06, TMNT Pro 1.59, The Beatles 1.29, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+site surface_find     0x004efac0 0xe92d4070 0xe24dd008
+#   surface_set_video: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+site surface_set_video 0x004e7170 0xe5d030d4 0xe92d4ff0
+#   surface_play: placed through 3 callers, e.g. the bl at 0x1ec268 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Rush LE 1.19, Rush Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, King Kong LE 0.97, Venom LE 1.07, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, James Bond 007 Pro 1.06, TMNT Pro 1.59, The Beatles 1.29, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00]
+site surface_play     0x004e5008 0xe5d030d4 0xe92d43f0
+#   surface_position: PAD-1555, at its distance from surface_play in this build's player (the November 2026 layout; test_spike2_mode_clip_back)
+site surface_position 0x004e45bc 0xe5d030d4 0xe92d40f0
+#   surface_duration: PAD-1555, at its distance from surface_play in this build's player (the November 2026 layout; test_spike2_mode_clip_back)
+site surface_duration 0x004e3880 0xe5d030d4 0xe92d40f0
+#   surface_stop: placed through 3 callers, e.g. the bl at 0x6f17c [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Venom Pro 1.07, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, TMNT LE 1.59, Venom LE 1.07, TMNT Pro 1.59, Dungeons & Dragons LE 1.00]
+site surface_stop     0x004e4418 0xe5d030d4 0xe92d40f0
+#   surface_seek: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+site surface_seek     0x004e4e50 0xe92d43f0 0xe1a07003
+# site surface_duration       NOT PLACED: not unique in the reference; only 1 caller lined up
+#   candidate: the reference surface_duration calls 0x48a71c, which is 0x4f4acc in the target - prove what it does before using it
+#   candidate: the reference surface_duration calls 0x4cdf0c, which is 0x538f7c in the target - prove what it does before using it
+# site surface_position       NOT PLACED: not unique in the reference; only 1 caller lined up
+#   candidate: the reference surface_position calls 0x48a71c, which is 0x4f4acc in the target - prove what it does before using it
+#   candidate: the reference surface_position calls 0x4cdeac, which is 0x538f1c in the target - prove what it does before using it
+#   find_text: placed through 3 callers, e.g. the bl at 0x1c0b4 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Rush LE 1.19, Rush Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Metallica Remastered 1.04, King Kong LE 0.97, Venom LE 1.07, James Bond 60th LE 1.11, Jaws LE 1.02, John Wick LE 1.01, Metallica Remastered 1.03]
+site find_text        0x004ef268 0xe92d4070 0xe24dd008
+#   agent_header: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site agent_header     0x0053d5d8 0xe92d40f8 0xe2505000
+#   agent_begin: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site agent_begin      0x00547f44 0xe590c004 0xe1a00001
+#   balls_in_play: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site balls_in_play    0x002a7f54 0xe92d4010 0xe3024f8c
+#   multiball_serve: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site multiball_serve  0x002a80d0 0xe92d41f0 0xe30de71e
+#   proc_exists: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site proc_exists      0x001b8dd4 0xe30e2540 0xe34023c1
+#   proc_create: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site proc_create      0x001b87a4 0xe30ec540 0xe340c3c1
+#   proc_sleep: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site proc_sleep       0x001b88d4 0xe30e3540 0xe34033c1
+#   adjustment: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site adjustment       0x003c76e8 0xe92d40f0 0xe2504000
+#   coil_fire: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site coil_fire        0x0026efe0 0xe3500000 0xe52de004
+#   lamp_free_owner: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site lamp_free_owner  0x001b75c4 0xe92d4010 0xe1a04000
+# site show_1                 NOT PLACED: the references disagree: 0x90e3c (Foo Fighters LE 1.04), 0xc66ac (Foo Fighters Pro 1.04), 0xe70b0 (Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10), 0xdb93c (Iron Maiden Pro 1.18)
+# site show_2                 NOT PLACED: the references disagree: 0xc66ac (Foo Fighters LE 1.04), 0xdb93c (Foo Fighters Pro 1.04), 0x125914 (Star Wars LE 1.31)
+# site show_3                 NOT PLACED: the references disagree: 0xdb93c (Foo Fighters LE 1.04), 0xcb6ac (Foo Fighters Pro 1.04, TMNT LE 1.59), 0x125914 (Star Wars Pro 1.31, Iron Maiden LE 1.18, Iron Maiden Pro 1.18)
+# site show_4                 NOT PLACED: the references disagree: 0xcb6ac (Foo Fighters LE 1.04), 0x19111c (Foo Fighters Pro 1.04), 0xbba84 (Rush LE 1.19), 0x1a0a94 (Guardians of the Galaxy 1.15), 0xdb93c (Iron Maiden LE 1.18)
+#   show_5: located (strict); other titles' ports place 0xcb6ac (TMNT Pro 1.59) [Foo Fighters LE 1.04]
+# site show_6                 NOT PLACED: the references disagree: 0xca930 (Foo Fighters LE 1.04), 0xcda5c (Foo Fighters Pro 1.04)
+# site show_7                 NOT PLACED: the references disagree: 0xcda5c (Foo Fighters LE 1.04), 0x13523c (Foo Fighters Pro 1.04)
+# site show_8                 NOT PLACED: the references disagree: 0x8e8c0 (Foo Fighters LE 1.04), 0x1992b4 (Foo Fighters Pro 1.04), 0x1a0a94 (Guardians of the Galaxy LE 1.15)
+# site show_9                 NOT PLACED: the references disagree: 0x1992b4 (Foo Fighters LE 1.04), 0x19935c (Foo Fighters Pro 1.04)
+# site show_10                NOT PLACED: the references disagree: 0x486a8 (Foo Fighters LE 1.04), 0x8e8c0 (Foo Fighters Pro 1.04), 0xfc9b8 (Rush Pro 1.19), 0xca930 (Star Wars LE 1.31)
+#   show_11: located (strict); other titles' ports place 0x1a0a94 (Metallica Remastered 1.04) [Foo Fighters Pro 1.04]
+# site show_12                NOT PLACED: the references disagree: 0x3c1cc (Foo Fighters LE 1.04), 0x52804 (Foo Fighters Pro 1.04), 0xdb9f8 (Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10), 0x19935c (Sword of Rage LE 1.19, Sword of Rage Pro 1.19)
+#   shake: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Uncanny X-Men Pro 0.98, Jurassic Park LE 1.16, Uncanny X-Men LE 0.98]
+site shake            0x00191f38 0xe92d40f0 0xe1a04000
+#   shake_stop: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, Godzilla Pro 1.16, Jaws Pro 1.02, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, King Kong LE 0.97, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, Jaws LE 1.02, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10]
+site shake_stop       0x00191fec 0xe52de004 0xe24dd00c
+#   drive_left: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Elvira 1.13, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site drive_left       0x0026ef38 0xe3500000 0xe92d4038
+#   coil_frame: located (loose) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+#   coop_start_game: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site coop_start_game  0x0021a238 0xe92d47f0 0xe3054d70
+#   coop_lobby_add: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site coop_lobby_add   0x0021a360 0xebfffe98 0xe2506000
+#   flippers_off: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site flippers_off     0x0021bdd8 0xe92d4070 0xe30757bc
+#   flippers_on: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site flippers_on      0x0021beac 0xe92d4070 0xe30757bc
+#   flipper_query_call: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site flipper_query_call 0x0021bf68 0xeb001104 0xe3500000
+#   ball_device_keep: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+site ball_device_keep 0x002a7a54 0xe30c3c20 0xe3403055
+#   show_stop_number: located (strict) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+site show_stop_number 0x001b92ac 0xe92d4070 0xe30e6540
+#   shot_dispatch: located (strict) [Foo Fighters Pro 1.04, Jurassic Park Pin 1.05]
+site shot_dispatch    0x00192098 0xe92d4070 0xe1a05001
+#   stock_rule_get: located (strict) [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22]
+site stock_rule_get   0x001726c4 0xe3510027 0xe92d4008
+#   scene_show: located (strict) [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13]
+site scene_show       0x00259ac4 0xe92d4070 0xe30e4544
+#   frame_end: followed from the tick (the main loop's frame end and its kick) [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13]
+site frame_end        0x00259cd0 0xe3500000 0xe92d40f8
+#   frame_kick: located (strict) [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13]
+site frame_kick       0x003c9ce4 0xe92d4070 0xe2906008
+#   live_records: located (strict) [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Metallica Remastered 1.04, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, James Bond 60th LE 1.11, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, Aerosmith LE 1.16, Metallica Remastered 1.03]
+site live_records     0x001b8e1c 0xe30e2540 0xe34023c1
+#   layer_add: located (strict) [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Uncanny X-Men Pro 0.98, Deadpool LE 1.16, Deadpool Pro 1.16, Deadpool LE 1.14]
+site layer_add        0x000f957c 0xe30ec544 0xe1a03002
+#   layer_remove: located (strict) [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Uncanny X-Men Pro 0.98, Deadpool LE 1.16, Deadpool Pro 1.16, Deadpool LE 1.14]
+site layer_remove     0x000f9594 0xe92d40f8 0xe5913004
+# site sound_nth              NOT PLACED: absent in the target (the function changed); only 1 caller lined up
+#   candidate: the reference sound_nth calls 0x151a34, which is 0x30cf90 in the target - prove what it does before using it
+#   spot_rule_get: located (strict) [The Munsters Pro 1.28]
+site spot_rule_get    0x001746c0 0xe92d4010 0xe1a04000
+#   spot_process_cancel: located (strict) [The Munsters Pro 1.28]
+site spot_process_cancel 0x001b8a24 0xe92d40f8 0xe30e6540
+#   spot_process_start: located (strict) [The Munsters Pro 1.28]
+site spot_process_start 0x001b8ab4 0xe92d4070 0xe1a05001
+#   spot_add_ball: located (strict) [The Munsters Pro 1.28]
+site spot_add_ball    0x002a8210 0xe92d47f0 0xe1a04000
+#   spot_add_eligible: located (loose) [The Munsters Pro 1.28]
+site spot_add_eligible 0x001355f8 0xe92d4008 0xe3a0000e
+#   spot_timer_pause: located (strict) [The Munsters Pro 1.28]
+site spot_timer_pause 0x000ba538 0xe5c0101f 0xe12fff1e
+#   spot_adjust_get: placed through 3 callers, e.g. the bl at 0x52398 [The Munsters Pro 1.28]
+site spot_adjust_get  0x003c76e8 0xe92d40f0 0xe2504000
+#   spot_save_start: located (strict) [The Munsters Pro 1.28]
+site spot_save_start  0x003bc28c 0xe92d4070 0xe24dd010
+#   spot_toy_get: located (loose) [The Munsters Pro 1.28]
+site spot_toy_get     0x00087f68 0xe92d4010 0xe1a04000
+# site light_run              NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site clip_play              NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference clip_play calls 0x576624, which is 0x4e7170 in the target - prove what it does before using it
+# site clip_stop              NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference clip_stop calls 0x1b39c8, which is 0x1949b8 in the target - prove what it does before using it
+#   candidate: the reference clip_stop calls 0x41b188, which is 0x3ee1fc in the target - prove what it does before using it
+#   candidate: the reference clip_stop calls 0x35df8c, which is 0x259864 in the target - prove what it does before using it
+# site video_player           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site video_surface          NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site stock_any_running      NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+# site stock_battle_running   NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+# site stock_multiball_running NOT PLACED: absent in the target (the function changed); no caller could be lined up; this build has no cmode_manager
+# site skill_shot_award       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference skill_shot_award calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+#   candidate: the reference skill_shot_award calls 0x286e00, which is 0x3c76e8 in the target - prove what it does before using it
+# site mball_start            NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference mball_start calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+#   candidate: the reference mball_start calls 0x3ab40c, which is 0x1b8ab4 in the target - prove what it does before using it
+# site mball_stop             NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference mball_stop calls 0x3ab37c, which is 0x1b8a24 in the target - prove what it does before using it
+# site roster_start           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site roster_done            NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference roster_done calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+# site roster_city_done       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference roster_city_done calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+# site layered_waiter         NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference layered_waiter calls 0x41b188, which is 0x3ee1fc in the target - prove what it does before using it
+#   candidate: the reference layered_waiter calls 0x3cfbc, which is 0x36b3c in the target - prove what it does before using it
+#   candidate: the reference layered_waiter calls 0x3ce7c, which is 0x36940 in the target - prove what it does before using it
+# site caward_build           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference caward_build calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+# site ebirah_refill_counts   NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_refill_counts calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+# site ebirah_stage_done      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_stage_done calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+#   candidate: the reference ebirah_stage_done calls 0x3ab40c, which is 0x1b8ab4 in the target - prove what it does before using it
+# site ebirah_award_screen    NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_award_screen calls 0x35ddc8, which is 0x2596a0 in the target - prove what it does before using it
+#   candidate: the reference ebirah_award_screen calls 0x3e99dc, which is 0x3d4598 in the target - prove what it does before using it
+#   candidate: the reference ebirah_award_screen calls 0x770e0, which is 0xfd0f0 in the target - prove what it does before using it
+# site ebirah_final_mask      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference ebirah_final_mask calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+# site tank_maser_phase       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_maser_phase calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+# site tank_positions_or      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site tank_pick_record       NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site tank_path_index        NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site tank_seed_wave         NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_seed_wave calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+# site tank_destroy           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_destroy calls 0x4082f4, which is 0x4115b0 in the target - prove what it does before using it
+# site tank_advance           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_advance calls 0x5c50c0, which is 0x536a08 in the target - prove what it does before using it
+# site tank_award_screen_kill NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference tank_award_screen_kill calls 0x35ddc8, which is 0x2596a0 in the target - prove what it does before using it
+#   candidate: the reference tank_award_screen_kill calls 0x3e99dc, which is 0x3d4598 in the target - prove what it does before using it
+#   candidate: the reference tank_award_screen_kill calls 0x770e0, which is 0xfd0f0 in the target - prove what it does before using it
+#   battle_clock: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site battle_clock     0x002737f8 0xe92d4010 0xe1a04000
+#   roster_timer_on: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site roster_timer_on  0x001ba250 0xe92d4008 0xe30c3be8
+#   roster_switch_held: placed through 3 callers, e.g. the bl at 0x189cfc [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site roster_switch_held 0x003dfb98 0xe59f1000 0xeaffffe2
+#   coil_take: located (strict) [Star Wars ELG 1.10, Deadpool LE 1.16, Deadpool Pro 1.16]
+site coil_take        0x0028cc80 0xe92d40f8 0xe30e7544
+#   ball_search_delay: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16]
+site ball_search_delay 0x003ee1fc 0xe30d3c44 0xe0600280
+#   coop_eb_award: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+site coop_eb_award    0x00271558 0xe92d4070 0xe1a06000
+# site switch_spawn  left out: foo_fighters_le-1.04 has none (PAD-1400 placed it only where a build needed it; PAD-1555)
+#   timers_paused: through the handler of hook 0x1a, as in the reference [Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15]
+#   kickback_set: located (strict) [Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15]
+
+# ---- globals: data <name> <address> ----
+#   cur_player: derived from 2 places, e.g. 0x2d2ca4+0x60 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00]
+data cur_player             0x03b96270
+#   scores: derived from 2 places, e.g. 0x21ee20+0x8 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data scores                 0x03c95210
+#   mode_mask: derived from 2 places, e.g. 0x1b500+0xf8 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data mode_mask              0x03c9d71e
+#   event_head: derived from 2 places, e.g. 0x81818+0x6c [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data event_head             0x03c1e540
+#   event_current: derived from 2 places, e.g. 0x1bdd0+0x84 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data event_current          0x03c1e544
+#   resource_manager: a base 0x3bd8800 + field 0x80; the base derived from 2 places, e.g. 0x140128+0x54 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data resource_manager       0x03c868c8
+#   typeinfo_resource: derived from 2 places, e.g. 0x1e120+0x80 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data typeinfo_resource      0x0057a180
+#   typeinfo_scene_player: derived from 2 places, e.g. 0x1e120+0x84 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data typeinfo_scene_player  0x005db044
+#   display_holder: derived from 2 places, e.g. 0x13e73c+0x28 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data display_holder         0x03c86848
+#   award_screen_arg: derived from 2 places, e.g. 0x2f64c+0x20 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data award_screen_arg       0x00654514
+#   sound_channels: derived from 2 places, e.g. 0x2e29e0+0x624 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data sound_channels         0x03c955a0
+#   sound_queue: derived from 2 places, e.g. 0x2e3450+0xc [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data sound_queue            0x03c9b0cc
+#   sound_requests: derived from 2 places, e.g. 0x2e29e0+0x34 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data sound_requests         0x03bf4c8c
+#   sound_request_count: derived from 2 places, e.g. 0xd1d1c+0x24 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data sound_request_count    0x00577d84
+#   display_effects: derived from 1 places, e.g. 0x38e408+0xa4; ONE place is enough here: the runtime uses it only when the manager it points at holds award_screen_arg's table (disp_manager), so a wrong one holds nothing [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Metallica Remastered 1.04, Godzilla Pro 1.15, King Kong LE 0.97, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00]
+data display_effects        0x03c9fcc4
+#   lamp_layers: derived from 2 places, e.g. 0x2e0754+0x8 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data lamp_layers            0x03c1df48
+#   light_count: derived from 2 places, e.g. 0x16e0f8+0x18 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data light_count            0x03c201d0
+#   score_mult: derived from 2 places, e.g. 0x21eebc+0x40 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, The Beatles 1.29, James Bond 007 LE 1.06, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30]
+data score_mult             0x03b91594
+#   switch_records: derived from 2 places, e.g. 0x1c3728+0x40 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data switch_records         0x03c612a4
+#   switch_count: derived from 2 places, e.g. 0x16d8c0+0x38 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data switch_count           0x03c9fb54
+#   stock_mode_table: derived from 2 places, e.g. 0x11ec10+0x8 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, TMNT LE 1.59, Venom LE 1.07, The Munsters LE 1.28, TMNT Pro 1.59, John Wick LE 1.01, Dungeons & Dragons LE 1.00]
+data stock_mode_table       0x006560a4
+#   typeinfo_cmode: derived from 2 places, e.g. 0x11f040+0x34 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, TMNT LE 1.59, Venom LE 1.07, The Munsters LE 1.28, TMNT Pro 1.59, John Wick LE 1.01, Dungeons & Dragons LE 1.00]
+data typeinfo_cmode         0x005a1c28
+#   typeinfo_cmode_mball: derived from 2 places, e.g. 0x11ed98+0x54 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04]
+data typeinfo_cmode_mball   0x005a325c
+# data typeinfo_vmi           NOT PLACED: no code that loads it could be lined up
+#   coil_count: derived from 2 places, e.g. 0x1bfdbc+0x4 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data coil_count             0x03c20214
+#   coil_table: derived from 2 places, e.g. 0x20fd14+0x10 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+data coil_table             0x03c8e874
+#   game_flags: derived from 2 places, e.g. 0x2a7a74+0x4 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Star Wars LE 1.30, Deadpool LE 1.14]
+data game_flags             0x03c8ec74
+#   game_flag_count: derived from 2 places, e.g. 0x2a6244+0x10 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Star Wars LE 1.30, Deadpool LE 1.14]
+data game_flag_count        0x0055bd7c
+#   sw_struct: derived from 2 places, e.g. 0x1c3728+0x40 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
+#   message_table: derived from 2 places, e.g. 0x1f8674+0x24 [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16, Deadpool LE 1.14]
+data message_table          0x03bc7e30
+#   ball_devices: derived from 2 places, e.g. 0x16e6f8+0x10 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+data ball_devices           0x03bc7874
+#   ball_device_count: derived from 2 places, e.g. 0x16e6d8+0x18 [Foo Fighters LE 1.04, Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Rush LE 1.19, Rush Pro 1.19, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Star Wars LE 1.31, Star Wars Pro 1.31, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Metallica Remastered 1.04, TMNT LE 1.59, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Venom LE 1.07, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Jurassic Park LE 1.16, The Munsters LE 1.28, Star Wars ELG 1.10, Elvira 1.13, James Bond 60th LE 1.11, Jurassic Park Pin 1.05, Uncanny X-Men LE 0.98, Aerosmith 1.16, James Bond 007 Pro 1.06, Stranger Things 1.13, Stranger Things LE 1.13, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, James Bond 007 LE 1.06, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, Batman 66 1.14, Aerosmith LE 1.16]
+data ball_device_count      0x0055cc20
+#   message_count: derived from 2 places, e.g. 0x1f8534+0xd4 [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Star Wars LE 1.31, Star Wars Pro 1.31, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Uncanny X-Men LE 0.98, James Bond 007 Pro 1.06, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, Deadpool LE 1.14]
+data message_count          0x0055cca0
+#   message_remap: derived from 2 places, e.g. 0x1f8610+0x10 [Foo Fighters Pro 1.04, The Munsters Pro 1.28, Godzilla Pro 1.16, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Jaws Pro 1.02, John Wick LE 1.02, John Wick Pro 1.02, Venom Pro 1.07, Godzilla Premium/LE 1.16, King Kong Pro 0.97, Jurassic Park Pro 1.16, Star Wars LE 1.31, Star Wars Pro 1.31, Metallica Remastered 1.04, TMNT LE 1.59, Godzilla Pro 1.15, King Kong LE 0.97, Uncanny X-Men Pro 0.98, Uncanny X-Men LE 0.98, James Bond 007 Pro 1.06, TMNT Pro 1.59, The Beatles 1.29, Jaws LE 1.02, Deadpool LE 1.16, Deadpool Pro 1.16, Deadpool LE 1.14]
+data message_remap          0x03c8e588
+# data stock_mode_manager     NOT PLACED: no code that loads it could be lined up
+#   spot_lamps_dirty: derived from 2 places, e.g. 0x41280+0x2c [The Munsters Pro 1.28]
+data spot_lamps_dirty       0x03c95378
+#   spot_screen_info: derived from 2 places, e.g. 0x41764+0x10 [The Munsters Pro 1.28]
+data spot_screen_info       0x00654514
+# data city_variants          NOT PLACED: no code that loads it could be lined up
+# data rule_battle            NOT PLACED: no code that loads it could be lined up
+# data roster_screen_table    NOT PLACED: no code that loads it could be lined up
+# data rule_cities            NOT PLACED: no code that loads it could be lined up
+# data layered_displays       NOT PLACED: no code that loads it could be lined up
+# data ebirah_stage_awards    NOT PLACED: no code that loads it could be lined up
+# data ebirah_lamp_table      NOT PLACED: no code that loads it could be lined up
+# data tank_path              NOT PLACED: no code that loads it could be lined up
+# data tank_spot_list         NOT PLACED: no code that loads it could be lined up
+#   language_play_begun: derived from 2 places, e.g. 0x1e143c+0x4c [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15]
+data language_play_begun    0x03b8ea1c
+#   multiball_record: derived from 2 places, e.g. 0x36e5e4+0x4 [Godzilla Pro 1.16, Godzilla Premium/LE 1.16]
+data multiball_record       0x03c92f8c
+#   ball_search_time: derived from 2 places, e.g. 0x373170+0x30 [Godzilla Pro 1.16, Godzilla Premium/LE 1.16]
+data ball_search_time       0x00655d89
+#   kickback_count: derived from 2 places, e.g. 0x39eefc+0x8 [Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15]
+
+# ---- scenes ----
+#   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x6eff0+0x4); other titles' ports place c530561636277517aa23a51017ca78b045871b6b (Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Star Wars ELG 1.10, Jurassic Park Pin 1.05, Aerosmith 1.16, Aerosmith LE 1.16) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04]
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+#   scene attract: COPIED, unverified (no code that loads it could be lined up; the target program names the same id); other titles' ports place 60ed7e5036b8ce09d35a3e101ea6fc1380b37d97 (The Munsters Pro 1.28, The Munsters LE 1.28), 2e119473ac9f46f42cfd44abc13b7b934a847029 (Metallica Remastered 1.04, Metallica Remastered 1.03), c530561636277517aa23a51017ca78b045871b6b (Star Wars ELG 1.10, Jurassic Park Pin 1.05) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04]
+scene attract              394c4a037fb26e12f536c42b2677bfed831f5c98
+#   scene hud: COPIED, unverified (no code that loads it could be lined up; the target program names the same id); other titles' ports place c70181e060dd17441d2a83fa8ba686c98edbb961 (TMNT LE 1.59, TMNT Pro 1.59), c530561636277517aa23a51017ca78b045871b6b (Jurassic Park Pin 1.05) [Foo Fighters LE 1.04, Foo Fighters Pro 1.04]
+scene hud                  2c8ffcac48035d12ef91df61fb7a796ec391f1e7
+
+# ---- values: COPIED from the references (framework offsets), unverified; the switch_* and ball_end_event values read from this build's own framework code ----
+value mode_mask_busy        0x210
+value surface_playing       2
+value clip_layer            0
+value event_next            0x84
+value event_flags           0x2
+value event_show_flag       0x20
+value event_show_id         0x96
+value scene_player_scene    0x10
+value node_visible_vfn      0xa8
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+value stock_slot_shot   42
+value stock_slot_active 49
+value stock_slot_lit    25
+value stock_field       0x18
+value stock_slot_start      41
+value stock_slot_end        10
+value stock_slot_stop       11
+value stock_slot_running    12
+value stock_slot_shot_entry 15
+value stock_slot_mask       45
+value stock_running_at      0x1b      # + player: running byte
+value stock_level_at        0x3c      # + 4 * player: starts this game
+value stock_award_at        0x50      # the rule's caward* (caward_add's first argument)
+value ebirah_rule           12
+value ebirah_spin_left_at   0x8c      # + 4 * player, spins left on the Left spinner (15 at a refill)
+value ebirah_spin_top_at    0x9c      # Top spinner (40)
+value ebirah_spin_shield_at 0xac      # Shield ramp spinner (15)
+value ebirah_stage_count_at 0xbc      # + 4 * player: stages done (the 2-stage RuleCities/RuleAllies mark reads it)
+value ebirah_stage_index_at 0xd0      # which of 5M / 10M / 15M is next (START resets it)
+value ebirah_kotm_at        0xd4      # byte: King of the Monsters runs (awards go to rule 20)
+value ebirah_spin_left_bit  0x200     # the raw shot bits the handler tests (each spinner's middle bit)
+value ebirah_spin_top_bit   0x2000
+value ebirah_final_shot     0x40      # the Pop bumper: the final blow (or bit 42, unnamed)
+value ebirah_final_mask_lo  0x40      # the field once every counter is 0 (0x814cc writes 0x400_00000040)
+value ebirah_final_mask_hi  0x400
+value ebirah_reminder_event 0x14e
+value ebirah_stage_award_count 3
+value ebirah_stage_msg      0xce3     # award screen messages 0xce3 / 0xce4 / 0xce5 (left / top / shield), 0xce6 the final blow
+value ebirah_stage_lamp_left  0x71    # 113 LEFT SPINNER, the lamp the stage screen names
+value ebirah_stage_lamp_top   0x96    # 150 TOP SPINNER
+value ebirah_stage_lamp_shield 0x7a   # 122 ATTACK MECHA (the shield ramp spinner's insert)
+value ebirah_lamp_entries   6
+value tank_rule             4
+value tank_records_at       0x68      # a std::vector (begin, end) of tank records
+value tank_record_size      40
+value tank_record_active_at 0
+value tank_record_pos_at    8         # u64: the tank's position (a path mask)
+value tank_record_prev_at   0x10      # u64: where it was before the last step (a grace window for the handler)
+value tank_record_dest_at   0x18      # u64: its destination (the Godzilla target 0x80000)
+value tank_record_value_at  0x20      # u64: what destroying it pays (2,500,000 - 500,000 a step, floor 1,500,000)
+value tank_level_at         0x70      # + 4 * player
+value tank_value_at         0x80      # + 8 * player, u64: this player's tank value (+150,000 a kill)
+value tank_destroyed_at     0xa8      # u32: tanks destroyed this wave (4/5/6/7/8 by level light the Maser)
+value tank_multiplier_at    0xac      # the Maser multiplier (3 a wave, -1 per tank that reaches the target)
+value tank_maser_hits_at    0xb0      # + 4 * (player - 1)
+value tank_path_entries     6
+value tank_path_entry_size  16
+value countdown_first 1
+value backdrop_surface 1
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+value stock_mode_count      40
+value magnet_proc          13185
+value proc_exit_hooks      0x120
+value proc_exit_slots      4
+value shake_adj            161
+value shake_drive          7
+value wizard_slot_enable 42   # its base class's enable: sets the player's byte at +0x83 that START's check (v[46]) reads
+value game_flags_at       4
+value coop_ball_msg          1256
+value show_count          198
+value backdrop_video_at      0x54
+value backdrop_scene_at      0x18
+value scoop_event          2
+value control_gates_ctl   32
+value control_gates_devoff 4
+value control_gates_off_slot 30
+value orbit_gates_ctl     12
+value orbit_gates_off_slot 5
+value song_now_at            0x160
+value gate_devoff         18
+value switch_drain_size     0x180
+value switch_record_size    0x20
+value switch_level_at       0x18
+value switch_desc_via       0x8
+value switch_flags_at       0x1a
+value switch_polarity_at    0x1c
+
+# ---- shots: read from the build's own cshot objects (42 single-bit shots from 42 cshot objects (u64 mask at +8, lamp at +0x10)), named after their inserts; prove them with the shot census ----
+shot 0x1             Sonic radio-bottom
+shot 0x2             Sonic radio-top
+shot 0x4             Left crossover
+shot 0x8             Shot 0x8
+shot 0x10            Left ramp
+shot 0x20            Shot 0x20
+shot 0x40            Shot 0x40
+shot 0x80            Shot 0x80
+shot 0x100           Shot 0x100
+shot 0x200           Shot 0x200
+shot 0x400           Shot 0x400
+shot 0x800           Upper left loop
+shot 0x1000          Upper left ramp
+shot 0x2000          Upper left ramp target
+shot 0x4000          Shot 0x4000
+shot 0x8000          Center spinner
+shot 0x10000         Center spinner flash
+shot 0x20000         Overlord left target
+shot 0x40000         Overlord right target
+shot 0x80000         Overlord (0x80000)
+shot 0x100000        Overlord (0x100000)
+shot 0x200000        Overlord (0x200000)
+shot 0x400000        Right ramp
+shot 0x800000        Right ramp left target
+shot 0x1000000       Right ramp right target
+shot 0x2000000       Right orbit
+shot 0x4000000       Shot 0x4000000
+shot 0x8000000       Bot target
+shot 0x10000000      Shot 0x10000000
+shot 0x20000000      Shot 0x20000000
+shot 0x40000000      Shot 0x40000000
+shot 0x80000000      Shot 0x80000000
+shot 0x100000000     Shot 0x100000000
+shot 0x200000000     Shot 0x200000000
+shot 0x400000000     Shot 0x400000000
+shot 0x800000000     Upper pf outer loop
+shot 0x1000000000    Upper pf spinner (0x1000000000)
+shot 0x2000000000    Upper pf spinner (0x2000000000)
+shot 0x4000000000    Upper pf target-left
+shot 0x8000000000    Upper pf target-center
+shot 0x10000000000   Upper pf target-right
+shot 0x20000000000   Shot 0x20000000000
+
+# ---- callouts and text: COPIED from Foo Fighters LE 1.04, the same title; unverified ----
+callout countdown           163
+callout time_up           878   # Better luck next time.
+# PAD-1555: one of its own shots (1.04 named a switch shot; 1.05 has its own shot lines)
+text example_start_shot     Right orbit
+text outlane_up_post_label Outlane up post
+text up_pf_diverter_label Up pf diverter
+text van_up_post_label    Van up post
+text outlane_up_post_drive 8 8 255 64 64 2064
+text up_pf_diverter_drive 9 6 255 32 64
+text van_up_post_drive    9 7 255 32 128
+text held_coils            outlane_up_post up_pf_diverter van_up_post
+text shake_max_ms          334 0 1200 3000
+text shake_setting_ms      0 100 334 500 5000
+text shake_tap              0:100:0
+text shake_short            0:200:3
+text shake_medium           0:334:3
+text shake_long             0:1334:3
+text shake_rumble           0:1666:3
+text wizard_name_1   Austin
+text wizard_film_1   three van cities
+text wizard_name_2   D.C.
+text wizard_film_2   three van cities
+text show_lit            51 54 56 57 58 61 62 72 76 77 80
+
+# ---- events: COPIED, unverified - prove them with event_probe.c (MODE_SDK.md, Events) ----
+event game_start     0x4d
+event ball_start     0x25
+event ball_end       0x34
+event bonus_end      0x28
+event tilt_warning   0xc9
+event tilt           0xc7
+event game_over      0x47
+
+# ---- lamps: the build's own inserts (lamp_map.py), shot ties from its cshot objects ----
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 4 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 5,6,7        0              LOCKDOWN BUTTON  # lamp 3, I/O group 5 index 5, at 0,0
+lamp 155          0              COIN DOOR GI  # lamp 4, I/O group 5 index 1, at 0,0
+lamp 3            0              START BUTTON  # lamp 5, I/O group 5 index 2, at 0,0
+lamp 4            0              TOURNAMENT START  # lamp 6, I/O group 5 index 3, at 0,0
+lamp 23           0              SHOOT AGAIN  # lamp 7, I/O group 7 index 45, at 0,0
+lamp 22           0              POST SAVE  # lamp 8, I/O group 7 index 36, at 0,0
+lamp 156          0              BOTTOM GI-WHT(X15)  # lamp 9, I/O group 7 index 0, at 0,0
+lamp 157          0              BOTTOM GI-RED(X6)  # lamp 10, I/O group 7 index 1, at 0,0
+lamp 158          0              TOP GI-WHT(X10)  # lamp 11, I/O group 8 index 0, at 0,0
+lamp 159          0              TOP GI-RED(X9)  # lamp 12, I/O group 8 index 1, at 0,0
+lamp 27           0x2            SONIC RADIO-TOP  # lamp 13, I/O group 7 index 30, at 0,0
+lamp 28           0x1            SONIC RADIO-BOTTOM  # lamp 14, I/O group 7 index 31, at 0,0
+lamp 29           0              SONIC RADIO-RIGHT  # lamp 15, I/O group 7 index 32, at 0,0
+lamp 36,37,38     0x10           LEFT RAMP  # lamp 16, I/O group 7 index 20, at 0,0
+lamp 39,40,41     0              LEFT RAMP COMBO  # lamp 17, I/O group 7 index 23, at 0,0
+lamp 42           0              START VAN  # lamp 18, I/O group 7 index 26, at 0,0
+lamp 43           0              LEFT RAMP BOLT  # lamp 19, I/O group 7 index 27, at 0,0
+lamp 160          0              VAN FLASH  # lamp 20, I/O group 7 index 16, at 0,0
+lamp 30,31,32     0x4            LEFT CROSSOVER  # lamp 21, I/O group 7 index 10, at 0,0
+lamp 33,34,35     0              LEFT CROSSOVER COMBO  # lamp 22, I/O group 7 index 13, at 0,0
+lamp 96,97,98     0x8000         CENTER SPINNER  # lamp 23, I/O group 8 index 19, at 0,0
+lamp 99,100,101   0              CENTER SPINNER COMBO  # lamp 24, I/O group 8 index 16, at 0,0
+lamp 164          0x10000        CENTER SPINNER FLASH  # lamp 25, I/O group 8 index 3, at 0,0
+lamp 76,77,78     0x800          UPPER LEFT LOOP  # lamp 26, I/O group 8 index 33, at 0,0
+lamp 79,80,81     0              UPPER LEFT LOOP COMBO  # lamp 27, I/O group 8 index 37, at 0,0
+lamp 44,45,46     0              MOD 1  # lamp 28, I/O group 8 index 43, at 0,0
+lamp 47,48,49     0              MOD 2  # lamp 29, I/O group 8 index 50, at 0,0
+lamp 50,51,52     0              MOD 3  # lamp 30, I/O group 8 index 54, at 0,0
+lamp 53,54,55     0              MOD 4  # lamp 31, I/O group 8 index 40, at 0,0
+lamp 56,57,58     0              MOD 5  # lamp 32, I/O group 8 index 47, at 0,0
+lamp 59,60,61     0              MOD 6  # lamp 33, I/O group 8 index 57, at 0,0
+lamp 62           0              MOD A  # lamp 34, I/O group 8 index 46, at 0,0
+lamp 0,0,63       0              MOD  # lamp 35, I/O group 8 index 53, at 0,0
+lamp 83,84,85     0x1000         UPPER LEFT RAMP  # lamp 36, I/O group 8 index 27, at 0,0
+lamp 86,87,88     0              UPPER LEFT RAMP COMBO  # lamp 37, I/O group 8 index 30, at 0,0
+lamp 89           0              COMBOTRON  # lamp 38, I/O group 8 index 36, at 0,0
+lamp 82           0x2000         UPPER LEFT RAMP TARGET  # lamp 39, I/O group 8 index 23, at 0,0
+lamp 90           0              UFO  # lamp 40, I/O group 8 index 22, at 0,0
+lamp 91           0              UFO LOOP BOT  # lamp 41, I/O group 8 index 61, at 0,0
+lamp 92           0              UFO LOOP MID  # lamp 42, I/O group 8 index 62, at 0,0
+lamp 93,94,95     0              UFO LOOP TOP  # lamp 43, I/O group 8 index 63, at 0,0
+lamp 102          0x20000        OVERLORD LEFT TARGET  # lamp 44, I/O group 8 index 15, at 0,0
+lamp 103          0x40000        OVERLORD RIGHT TARGET  # lamp 45, I/O group 8 index 10, at 0,0
+lamp 104,105,106  0x380000       OVERLORD  # lamp 46, I/O group 8 index 11, at 0,0
+lamp 107          0              ALL MY LIFE  # lamp 47, I/O group 8 index 14, at 0,0
+lamp 108          0              MONKEY WRENCH  # lamp 48, I/O group 8 index 9, at 0,0
+lamp 109          0              THE PRETENDER  # lamp 49, I/O group 8 index 8, at 0,0
+lamp 162          0              LEFT SPOTLIGHT  # lamp 50, I/O group 7 index 17, at 0,0
+lamp 163          0              RIGHT SPOTLIGHT  # lamp 51, I/O group 7 index 54, at 0,0
+lamp 117          0x800000       RIGHT RAMP LEFT TARGET  # lamp 52, I/O group 8 index 25, at 0,0
+lamp 118          0x1000000      RIGHT RAMP RIGHT TARGET  # lamp 53, I/O group 8 index 26, at 0,0
+lamp 119,120,121  0x400000       RIGHT RAMP  # lamp 54, I/O group 7 index 71, at 0,0
+lamp 122,123,124  0              RIGHT RAMP COMBO  # lamp 55, I/O group 7 index 74, at 0,0
+lamp 116          0              RIGHT RAMP BOLT  # lamp 56, I/O group 8 index 24, at 0,0
+lamp 125          0              AREA 51  # lamp 57, I/O group 7 index 77, at 0,0
+lamp 126,127,128  0x2000000      RIGHT ORBIT  # lamp 58, I/O group 7 index 64, at 0,0
+lamp 129,130,131  0              RIGHT ORBIT COMBO  # lamp 59, I/O group 7 index 67, at 0,0
+lamp 132          0              RIGHT ORBIT BATTERY  # lamp 60, I/O group 7 index 78, at 0,0
+lamp 73           0              ROCK-O-METER TOP  # lamp 61, I/O group 7 index 51, at 0,0
+lamp 74           0              ROCK-O-METER MID  # lamp 62, I/O group 7 index 52, at 0,0
+lamp 75           0              ROCK-O-METER BOTTOM  # lamp 63, I/O group 7 index 53, at 0,0
+lamp 161          0              KICK TARGET FLASH  # lamp 64, I/O group 7 index 79, at 0,0
+lamp 70           0x8000000      BOT TARGET  # lamp 65, I/O group 7 index 61, at 0,0
+lamp 72           0              EXTRA BALL  # lamp 66, I/O group 7 index 63, at 0,0
+lamp 71           0              BOT AWARD  # lamp 67, I/O group 7 index 62, at 0,0
+lamp 11           0              2X  # lamp 68, I/O group 7 index 37, at 0,0
+lamp 12           0              3X  # lamp 69, I/O group 7 index 46, at 0,0
+lamp 16           0              SEATTLE  # lamp 70, I/O group 7 index 8, at 0,0
+lamp 17           0              ROSWELL  # lamp 71, I/O group 7 index 19, at 0,0
+lamp 18           0              LOS ANGELES  # lamp 72, I/O group 7 index 29, at 0,0
+lamp 19           0              NEW ORLEANS  # lamp 73, I/O group 7 index 9, at 0,0
+lamp 20           0              CHICAGO  # lamp 74, I/O group 7 index 28, at 0,0
+lamp 21           0              NEW YORK  # lamp 75, I/O group 7 index 18, at 0,0
+lamp 14           0              OVERLORD  # lamp 76, I/O group 7 index 47, at 0,0
+lamp 13           0              AUSTIN  # lamp 77, I/O group 7 index 55, at 0,0
+lamp 15           0              D.C.  # lamp 78, I/O group 7 index 38, at 0,0
+lamp 8            0              OVERDRIVE  # lamp 79, I/O group 7 index 33, at 0,0
+lamp 9            0              LEFT INLANE  # lamp 80, I/O group 7 index 34, at 0,0
+lamp 24           0              RIGHT INLANE  # lamp 81, I/O group 7 index 48, at 0,0
+lamp 25           0              RIGHT OUTLANE  # lamp 82, I/O group 7 index 49, at 0,0
+lamp 10           0              LEFT INLANE TARGET  # lamp 83, I/O group 7 index 35, at 0,0
+lamp 26           0              RIGHT INLANE TARGET  # lamp 84, I/O group 7 index 50, at 0,0
+lamp 64           0              FOOBOT HEAD  # lamp 85, I/O group 7 index 70, at 0,0
+lamp 65           0              FOOBOT RIGHT ARM  # lamp 86, I/O group 7 index 57, at 0,0
+lamp 66           0              FOOBOT LEFT ARM  # lamp 87, I/O group 7 index 60, at 0,0
+lamp 67           0              FOOBOT TORSO  # lamp 88, I/O group 7 index 56, at 0,0
+lamp 68           0              FOOBOT RIGHT LEG  # lamp 89, I/O group 7 index 58, at 0,0
+lamp 69           0              FOOBOT LEFT LEG  # lamp 90, I/O group 7 index 59, at 0,0
+lamp 110,111,112  0              OVERLORD MECH LEFT  # lamp 91, I/O group 8 index 66, at 0,0
+lamp 113,114,115  0              OVERLORD MECH RIGHT  # lamp 92, I/O group 8 index 69, at 0,0
+lamp 165          0              OVERLORD MECH FLASH  # lamp 93, I/O group 8 index 60, at 0,0
+lamp 152,153,154  0              UPPER PF DOWN  # lamp 94, I/O group 8 index 77, at 0,0
+lamp 148          0              UPPER PF GI WHT 1  # lamp 95, I/O group 8 index 73, at 0,0
+lamp 149          0              UPPER PF GI WHT 2  # lamp 96, I/O group 8 index 74, at 0,0
+lamp 150          0              UPPER PF GI RED 1  # lamp 97, I/O group 8 index 75, at 0,0
+lamp 151          0              UPPER PF GI RED 2  # lamp 98, I/O group 8 index 76, at 0,0
+lamp 133,134,135  0x3000000000   UPPER PF SPINNER  # lamp 99, I/O group 8 index 88, at 0,0
+lamp 136,137,138  0              UPPER PF SPINNER COMBO  # lamp 100, I/O group 8 index 91, at 0,0
+lamp 139,140,141  0x800000000    UPPER PF OUTER LOOP  # lamp 101, I/O group 8 index 84, at 0,0
+lamp 142,143,144  0              UPPER PF OUTER LOOP COMBO  # lamp 102, I/O group 8 index 81, at 0,0
+lamp 145          0x4000000000   UPPER PF TARGET-LEFT  # lamp 103, I/O group 8 index 95, at 0,0
+lamp 146          0x8000000000   UPPER PF TARGET-CENTER  # lamp 104, I/O group 8 index 94, at 0,0
+lamp 147          0x10000000000  UPPER PF TARGET-RIGHT  # lamp 105, I/O group 8 index 87, at 0,0
+lamp 166          0              UPPER PF CENTER FLASH  # lamp 106, I/O group 8 index 72, at 0,0
+lamp 167          0              UPPER PF AREA 51 FLASH  # lamp 107, I/O group 8 index 80, at 0,0
+lamp 168          0              UPPER PF BACK TGT FLASH  # lamp 108, I/O group 8 index 4, at 0,0
+lamp 716,717,718  0              TOPPER GLASSES  # lamp 229, I/O group 9 index 1, at 0,0
+lamp 719,720,721  0              TOPPER MOUTH  # lamp 230, I/O group 9 index 4, at 0,0
+lamp 530,531,532  0              TOPPER FRONT RAMI  # lamp 259, I/O group 10 index 130, at 0,0
+lamp 539,540,541  0              TOPPER FRONT TAYLOR  # lamp 260, I/O group 10 index 133, at 0,0
+lamp 548,549,550  0              TOPPER FRONT CHRIS  # lamp 261, I/O group 10 index 136, at 0,0
+lamp 659,660,661  0              TOPPER FRONT PAT  # lamp 262, I/O group 10 index 1, at 0,0
+lamp 668,669,670  0              TOPPER FRONT DAVE  # lamp 263, I/O group 10 index 4, at 0,0
+lamp 677,678,679  0              TOPPER FRONT NATE  # lamp 264, I/O group 10 index 7, at 0,0
+
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
+# 96 blade pixel(s), 23 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 241,242,243  10  EXPRESSIVE LIGHTING L 1  # lamp 110, I/O group 1 index 1, at 12,595, blade L
+cablamp 244,245,246  31  EXPRESSIVE LIGHTING L 2  # lamp 111, I/O group 1 index 4, at 12,586, blade L
+cablamp 247,248,249  52  EXPRESSIVE LIGHTING L 3  # lamp 112, I/O group 1 index 7, at 12,576, blade L
+cablamp 250,251,252  72  EXPRESSIVE LIGHTING L 4  # lamp 113, I/O group 1 index 10, at 12,566, blade L
+cablamp 253,254,255  93  EXPRESSIVE LIGHTING L 5  # lamp 114, I/O group 1 index 13, at 12,557, blade L
+cablamp 256,257,258  114 EXPRESSIVE LIGHTING L 6  # lamp 115, I/O group 1 index 16, at 12,547, blade L
+cablamp 259,260,261  135 EXPRESSIVE LIGHTING L 7  # lamp 116, I/O group 1 index 19, at 12,538, blade L
+cablamp 262,263,264  156 EXPRESSIVE LIGHTING L 8  # lamp 117, I/O group 1 index 22, at 12,528, blade L
+cablamp 265,266,267  177 EXPRESSIVE LIGHTING L 9  # lamp 118, I/O group 1 index 25, at 12,519, blade L
+cablamp 268,269,270  197 EXPRESSIVE LIGHTING L 10  # lamp 119, I/O group 1 index 28, at 12,509, blade L
+cablamp 271,272,273  218 EXPRESSIVE LIGHTING L 11  # lamp 120, I/O group 1 index 31, at 12,499, blade L
+cablamp 274,275,276  239 EXPRESSIVE LIGHTING L 12  # lamp 121, I/O group 1 index 34, at 12,490, blade L
+cablamp 277,278,279  260 EXPRESSIVE LIGHTING L 13  # lamp 122, I/O group 1 index 37, at 12,480, blade L
+cablamp 280,281,282  281 EXPRESSIVE LIGHTING L 14  # lamp 123, I/O group 1 index 40, at 12,471, blade L
+cablamp 283,284,285  302 EXPRESSIVE LIGHTING L 15  # lamp 124, I/O group 1 index 43, at 12,461, blade L
+cablamp 286,287,288  322 EXPRESSIVE LIGHTING L 16  # lamp 125, I/O group 1 index 46, at 12,451, blade L
+cablamp 289,290,291  343 EXPRESSIVE LIGHTING L 17  # lamp 126, I/O group 1 index 49, at 12,442, blade L
+cablamp 292,293,294  364 EXPRESSIVE LIGHTING L 18  # lamp 127, I/O group 1 index 52, at 12,432, blade L
+cablamp 295,296,297  385 EXPRESSIVE LIGHTING L 19  # lamp 128, I/O group 1 index 55, at 12,423, blade L
+cablamp 298,299,300  406 EXPRESSIVE LIGHTING L 20  # lamp 129, I/O group 1 index 58, at 12,413, blade L
+cablamp 301,302,303  427 EXPRESSIVE LIGHTING L 21  # lamp 130, I/O group 1 index 61, at 12,404, blade L
+cablamp 304,305,306  447 EXPRESSIVE LIGHTING L 22  # lamp 131, I/O group 1 index 64, at 12,394, blade L
+cablamp 307,308,309  468 EXPRESSIVE LIGHTING L 23  # lamp 132, I/O group 1 index 67, at 12,384, blade L
+cablamp 310,311,312  489 EXPRESSIVE LIGHTING L 24  # lamp 133, I/O group 1 index 70, at 12,375, blade L
+cablamp 313,314,315  510 EXPRESSIVE LIGHTING L 25  # lamp 134, I/O group 1 index 73, at 12,365, blade L
+cablamp 316,317,318  531 EXPRESSIVE LIGHTING L 26  # lamp 135, I/O group 1 index 76, at 12,356, blade L
+cablamp 319,320,321  552 EXPRESSIVE LIGHTING L 27  # lamp 136, I/O group 1 index 79, at 12,346, blade L
+cablamp 322,323,324  572 EXPRESSIVE LIGHTING L 28  # lamp 137, I/O group 1 index 82, at 12,336, blade L
+cablamp 325,326,327  593 EXPRESSIVE LIGHTING L 29  # lamp 138, I/O group 1 index 85, at 12,327, blade L
+cablamp 328,329,330  614 EXPRESSIVE LIGHTING L 30  # lamp 139, I/O group 1 index 88, at 12,317, blade L
+cablamp 331,332,333  635 EXPRESSIVE LIGHTING L 31  # lamp 140, I/O group 1 index 91, at 12,308, blade L
+cablamp 334,335,336  656 EXPRESSIVE LIGHTING L 32  # lamp 141, I/O group 1 index 94, at 12,298, blade L
+cablamp 337,338,339  677 EXPRESSIVE LIGHTING L 33  # lamp 142, I/O group 1 index 97, at 12,289, blade L
+cablamp 340,341,342  697 EXPRESSIVE LIGHTING L 34  # lamp 143, I/O group 1 index 100, at 12,279, blade L
+cablamp 343,344,345  718 EXPRESSIVE LIGHTING L 35  # lamp 144, I/O group 1 index 103, at 12,269, blade L
+cablamp 346,347,348  739 EXPRESSIVE LIGHTING L 36  # lamp 145, I/O group 1 index 106, at 12,260, blade L
+cablamp 349,350,351  760 EXPRESSIVE LIGHTING L 37  # lamp 146, I/O group 1 index 109, at 12,250, blade L
+cablamp 352,353,354  781 EXPRESSIVE LIGHTING L 38  # lamp 147, I/O group 1 index 112, at 12,241, blade L
+cablamp 355,356,357  802 EXPRESSIVE LIGHTING L 39  # lamp 148, I/O group 1 index 115, at 12,231, blade L
+cablamp 358,359,360  822 EXPRESSIVE LIGHTING L 40  # lamp 149, I/O group 1 index 118, at 12,221, blade L
+cablamp 361,362,363  843 EXPRESSIVE LIGHTING L 41  # lamp 150, I/O group 1 index 121, at 12,212, blade L
+cablamp 364,365,366  864 EXPRESSIVE LIGHTING L 42  # lamp 151, I/O group 1 index 124, at 12,202, blade L
+cablamp 367,368,369  885 EXPRESSIVE LIGHTING L 43  # lamp 152, I/O group 1 index 127, at 12,193, blade L
+cablamp 370,371,372  906 EXPRESSIVE LIGHTING L 44  # lamp 153, I/O group 1 index 130, at 12,183, blade L
+cablamp 373,374,375  927 EXPRESSIVE LIGHTING L 45  # lamp 154, I/O group 1 index 133, at 12,174, blade L
+cablamp 376,377,378  947 EXPRESSIVE LIGHTING L 46  # lamp 155, I/O group 1 index 136, at 12,164, blade L
+cablamp 379,380,381  968 EXPRESSIVE LIGHTING L 47  # lamp 156, I/O group 1 index 139, at 12,154, blade L
+cablamp 382,383,384  989 EXPRESSIVE LIGHTING L 48  # lamp 157, I/O group 1 index 142, at 12,145, blade L
+cablamp 385,386,387  10  EXPRESSIVE LIGHTING R 49  # lamp 158, I/O group 1 index 145, at 288,595, blade R
+cablamp 388,389,390  31  EXPRESSIVE LIGHTING R 50  # lamp 159, I/O group 1 index 148, at 288,586, blade R
+cablamp 391,392,393  52  EXPRESSIVE LIGHTING R 51  # lamp 160, I/O group 1 index 151, at 288,576, blade R
+cablamp 394,395,396  72  EXPRESSIVE LIGHTING R 52  # lamp 161, I/O group 1 index 154, at 288,566, blade R
+cablamp 397,398,399  93  EXPRESSIVE LIGHTING R 53  # lamp 162, I/O group 1 index 157, at 288,557, blade R
+cablamp 400,401,402  114 EXPRESSIVE LIGHTING R 54  # lamp 163, I/O group 1 index 160, at 288,547, blade R
+cablamp 403,404,405  135 EXPRESSIVE LIGHTING R 55  # lamp 164, I/O group 1 index 163, at 288,538, blade R
+cablamp 406,407,408  156 EXPRESSIVE LIGHTING R 56  # lamp 165, I/O group 1 index 166, at 288,528, blade R
+cablamp 409,410,411  177 EXPRESSIVE LIGHTING R 57  # lamp 166, I/O group 1 index 169, at 288,519, blade R
+cablamp 412,413,414  197 EXPRESSIVE LIGHTING R 58  # lamp 167, I/O group 1 index 172, at 288,509, blade R
+cablamp 415,416,417  218 EXPRESSIVE LIGHTING R 59  # lamp 168, I/O group 1 index 175, at 288,499, blade R
+cablamp 418,419,420  239 EXPRESSIVE LIGHTING R 60  # lamp 169, I/O group 1 index 178, at 288,490, blade R
+cablamp 421,422,423  260 EXPRESSIVE LIGHTING R 61  # lamp 170, I/O group 1 index 181, at 288,480, blade R
+cablamp 424,425,426  281 EXPRESSIVE LIGHTING R 62  # lamp 171, I/O group 1 index 184, at 288,471, blade R
+cablamp 427,428,429  302 EXPRESSIVE LIGHTING R 63  # lamp 172, I/O group 1 index 187, at 288,461, blade R
+cablamp 430,431,432  322 EXPRESSIVE LIGHTING R 64  # lamp 173, I/O group 1 index 190, at 288,451, blade R
+cablamp 433,434,435  343 EXPRESSIVE LIGHTING R 65  # lamp 174, I/O group 1 index 193, at 288,442, blade R
+cablamp 436,437,438  364 EXPRESSIVE LIGHTING R 66  # lamp 175, I/O group 1 index 196, at 288,432, blade R
+cablamp 439,440,441  385 EXPRESSIVE LIGHTING R 67  # lamp 176, I/O group 1 index 199, at 288,423, blade R
+cablamp 442,443,444  406 EXPRESSIVE LIGHTING R 68  # lamp 177, I/O group 1 index 202, at 288,413, blade R
+cablamp 445,446,447  427 EXPRESSIVE LIGHTING R 69  # lamp 178, I/O group 1 index 205, at 288,404, blade R
+cablamp 448,449,450  447 EXPRESSIVE LIGHTING R 70  # lamp 179, I/O group 1 index 208, at 288,394, blade R
+cablamp 451,452,453  468 EXPRESSIVE LIGHTING R 71  # lamp 180, I/O group 1 index 211, at 288,384, blade R
+cablamp 454,455,456  489 EXPRESSIVE LIGHTING R 72  # lamp 181, I/O group 1 index 214, at 288,375, blade R
+cablamp 457,458,459  510 EXPRESSIVE LIGHTING R 73  # lamp 182, I/O group 1 index 217, at 288,365, blade R
+cablamp 460,461,462  531 EXPRESSIVE LIGHTING R 74  # lamp 183, I/O group 1 index 220, at 288,356, blade R
+cablamp 463,464,465  552 EXPRESSIVE LIGHTING R 75  # lamp 184, I/O group 1 index 223, at 288,346, blade R
+cablamp 466,467,468  572 EXPRESSIVE LIGHTING R 76  # lamp 185, I/O group 1 index 226, at 288,336, blade R
+cablamp 469,470,471  593 EXPRESSIVE LIGHTING R 77  # lamp 186, I/O group 1 index 229, at 288,327, blade R
+cablamp 472,473,474  614 EXPRESSIVE LIGHTING R 78  # lamp 187, I/O group 1 index 232, at 288,317, blade R
+cablamp 475,476,477  635 EXPRESSIVE LIGHTING R 79  # lamp 188, I/O group 1 index 235, at 288,308, blade R
+cablamp 478,479,480  656 EXPRESSIVE LIGHTING R 80  # lamp 189, I/O group 1 index 238, at 288,298, blade R
+cablamp 481,482,483  677 EXPRESSIVE LIGHTING R 81  # lamp 190, I/O group 1 index 241, at 288,289, blade R
+cablamp 484,485,486  697 EXPRESSIVE LIGHTING R 82  # lamp 191, I/O group 1 index 244, at 288,279, blade R
+cablamp 487,488,489  718 EXPRESSIVE LIGHTING R 83  # lamp 192, I/O group 1 index 247, at 288,269, blade R
+cablamp 490,491,492  739 EXPRESSIVE LIGHTING R 84  # lamp 193, I/O group 1 index 250, at 288,260, blade R
+cablamp 493,494,495  760 EXPRESSIVE LIGHTING R 85  # lamp 194, I/O group 1 index 253, at 288,250, blade R
+cablamp 496,497,498  781 EXPRESSIVE LIGHTING R 86  # lamp 195, I/O group 1 index 256, at 288,241, blade R
+cablamp 499,500,501  802 EXPRESSIVE LIGHTING R 87  # lamp 196, I/O group 1 index 259, at 288,231, blade R
+cablamp 502,503,504  822 EXPRESSIVE LIGHTING R 88  # lamp 197, I/O group 1 index 262, at 288,221, blade R
+cablamp 505,506,507  843 EXPRESSIVE LIGHTING R 89  # lamp 198, I/O group 1 index 265, at 288,212, blade R
+cablamp 508,509,510  864 EXPRESSIVE LIGHTING R 90  # lamp 199, I/O group 1 index 268, at 288,202, blade R
+cablamp 511,512,513  885 EXPRESSIVE LIGHTING R 91  # lamp 200, I/O group 1 index 271, at 288,193, blade R
+cablamp 514,515,516  906 EXPRESSIVE LIGHTING R 92  # lamp 201, I/O group 1 index 274, at 288,183, blade R
+cablamp 517,518,519  927 EXPRESSIVE LIGHTING R 93  # lamp 202, I/O group 1 index 277, at 288,174, blade R
+cablamp 520,521,522  947 EXPRESSIVE LIGHTING R 94  # lamp 203, I/O group 1 index 280, at 288,164, blade R
+cablamp 523,524,525  968 EXPRESSIVE LIGHTING R 95  # lamp 204, I/O group 1 index 283, at 288,154, blade R
+cablamp 526,527,528  989 EXPRESSIVE LIGHTING R 96  # lamp 205, I/O group 1 index 286, at 288,145, blade R
+cablamp 172,173,174  41  SPEAKER 1  # lamp 206, I/O group 6 index 1, at 95,28, speaker L
+cablamp 175,176,177  125 SPEAKER 2  # lamp 207, I/O group 6 index 4, at 116,34, speaker L
+cablamp 178,179,180  208 SPEAKER 3  # lamp 208, I/O group 6 index 7, at 131,49, speaker L
+cablamp 181,182,183  291 SPEAKER 4  # lamp 209, I/O group 6 index 10, at 137,70, speaker L
+cablamp 184,185,186  375 SPEAKER 5  # lamp 210, I/O group 6 index 13, at 131,91, speaker L
+cablamp 187,188,189  458 SPEAKER 6  # lamp 211, I/O group 6 index 16, at 116,106, speaker L
+cablamp 190,191,192  541 SPEAKER 7  # lamp 212, I/O group 6 index 19, at 95,112, speaker L
+cablamp 193,194,195  625 SPEAKER 8  # lamp 213, I/O group 6 index 22, at 74,106, speaker L
+cablamp 196,197,198  708 SPEAKER 9  # lamp 214, I/O group 6 index 25, at 59,91, speaker L
+cablamp 199,200,201  791 SPEAKER 10  # lamp 215, I/O group 6 index 28, at 53,70, speaker L
+cablamp 202,203,204  875 SPEAKER 11  # lamp 216, I/O group 6 index 31, at 59,49, speaker L
+cablamp 205,206,207  958 SPEAKER 12  # lamp 217, I/O group 6 index 34, at 74,34, speaker L
+cablamp 208,209,210  45  SPEAKER 13  # lamp 218, I/O group 6 index 37, at 205,28, speaker R
+cablamp 211,212,213  136 SPEAKER 14  # lamp 219, I/O group 6 index 40, at 228,35, speaker R
+cablamp 214,215,216  227 SPEAKER 15  # lamp 220, I/O group 6 index 43, at 243,53, speaker R
+cablamp 217,218,219  318 SPEAKER 16  # lamp 221, I/O group 6 index 46, at 247,76, speaker R
+cablamp 220,221,222  409 SPEAKER 17  # lamp 222, I/O group 6 index 49, at 237,98, speaker R
+cablamp 223,224,225  500 SPEAKER 18  # lamp 223, I/O group 6 index 52, at 217,110, speaker R
+cablamp 226,227,228  590 SPEAKER 19  # lamp 224, I/O group 6 index 55, at 193,110, speaker R
+cablamp 229,230,231  681 SPEAKER 20  # lamp 225, I/O group 6 index 58, at 173,98, speaker R
+cablamp 232,233,234  772 SPEAKER 21  # lamp 226, I/O group 6 index 61, at 163,76, speaker R
+cablamp 235,236,237  863 SPEAKER 22  # lamp 227, I/O group 6 index 64, at 167,53, speaker R
+cablamp 238,239,240  954 SPEAKER 23  # lamp 228, I/O group 6 index 67, at 182,35, speaker R
+
+# ---- the game's own modes and rules (PAD-363, game_mode_blocks.py): read off this build's program ----
+site block_start_8      0x00196d58 0xe92d43f8 0xe1a04000
+data block_obj_8        0x03c18c08
+text block_name_8       Super Skill Shot
+site block_start_10     0x001186dc 0xe92d4ff0 0xe1a0a000
+data block_obj_10       0x03c18d78
+text block_name_10      Radio
+site block_start_11     0x00107a2c 0xe92d4ff0 0xe24dd004
+data block_obj_11       0x03c18e88
+text block_name_11      Bot Frenzy
+site block_start_25     0x001224bc 0xe92d4ff0 0xe1a06000
+data block_obj_25       0x03c19930
+text block_name_25      Van Seattle
+site block_start_26     0x00127a28 0xe92d4ff0 0xe1a06000
+data block_obj_26       0x03c19aa0
+text block_name_26      Van Roswell
+site block_start_27     0x00124990 0xe92d4ff0 0xe1a04000
+data block_obj_27       0x03c19c28
+text block_name_27      Van Los Angeles
+site block_start_28     0x00129f5c 0xe92d4ff0 0xe1a04000
+data block_obj_28       0x03c19d98
+text block_name_28      Van New Orleans
+site block_start_29     0x0012d460 0xe92d4ff0 0xe1a04000
+data block_obj_29       0x03c19f08
+text block_name_29      Van Chicago
+site block_start_30     0x001326b0 0xe92d4ff0 0xe1a04000
+data block_obj_30       0x03c1a080
+text block_name_30      Van New York
+site block_start_32     0x0011b2a0 0xe92d4ff8 0xe1a04000
+data block_obj_32       0x03c1a4d0
+text block_name_32      Lightning
+site block_start_39     0x0011cd54 0xe92d41f0 0xe1a05000
+data block_obj_39       0x03c1b290
+text block_name_39      Super Modulator
+site block_rule_0          0x000ca718 0xe3530000 0x03520302  # cextra_ball::v[34]
+text block_rule_name_0     Extra Ball
+site block_rule_1          0x0014f320 0xe92d43f0 0xe1a04000  # cmultipliers::v[34]
+text block_rule_name_1     Multipliers
+site block_rule_2          0x00154b04 0xe92d4ff0 0xe24dd024  # crule_area_51::v[34]
+text block_rule_name_2     Area 51
+site block_rule_3          0x00158434 0xe92d4ff0 0xe1a07003  # crule_bot_targets::v[34]
+text block_rule_name_3     Bot Targets
+site block_rule_4          0x001682f0 0xe92d43f0 0xe1a07003  # crule_combotron::v[34]
+text block_rule_name_4     Combotron
+site block_rule_5          0x0016cf08 0xe2022010 0xe3a03000  # crule_foo_bot::v[34]
+text block_rule_name_5     Foo Bot
+site block_rule_6          0x00170070 0xe92d4ff0 0xe1a05003  # crule_lightning_kicker::v[34]
+text block_rule_name_6     Lightning Kicker
+site block_rule_7          0x0015be44 0xe92d43f0 0xe1a06002  # crule_loops::v[34]
+text block_rule_name_7     Loops
+site block_rule_8          0x00175b54 0xe92d47f0 0xe1a07003  # crule_outlanes::v[34]
+text block_rule_name_8     Outlanes
+site block_rule_9          0x0017e708 0xe92d4ff0 0xe24dd01c  # crule_overlord::v[34]
+text block_rule_name_9     Overlord
+site block_rule_10         0x00182eb8 0xe92d4ff0 0xe24dd014  # crule_radio_targets::v[34]
+text block_rule_name_10    Radio Targets
+site block_rule_11         0x001883b4 0xe92d43f0 0xe2031020  # crule_spinner::v[34]
+text block_rule_name_11    Spinner
+site block_rule_12         0x0018a94c 0xe92d4070 0xe24dd008  # crule_topper::v[34]
+text block_rule_name_12    Topper
+site block_rule_13         0x0018b7fc 0xe92d4ff0 0xe1a06002  # crule_ufo_captive_ball::v[34]
+text block_rule_name_13    Ufo Captive Ball
+site block_rule_14         0x0018f924 0xe92d4ff0 0xe1a07003  # crule_van::v[34]
+text block_rule_name_14    Van
+site block_rule_15         0x00160db8 0xe92d47f0 0xe2028b01  # crule_van_mods::v[34]
+text block_rule_name_15    Van Mods
+site block_rule_16         0x00192c08 0xe92d4ff0 0xe24dd01c  # cskill_shot::v[34]
+text block_rule_name_16    Skill Shot
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+site  game_scores            0x00410a78 0xe92d4ff0 0xe24dd0bc
+
+# ---- PAD-782: the attract mode's page table (portattract.py) ----
+data  attract_table       0x0065585c
+value attract_entry_size  8
+value attract_page_at     4
+value attract_count       141
+site  attract_sleep       0x001b88d4 0xe30e3540 0xe34033c1
+site  attract_show        0x00259ac4 0xe92d4070 0xe30e4544
+
+# ---- PAD-1017: co-op play (portcoop.py) ----
+site  coop_player_change 0x00411710 0xe92d41f0 0xe24dd008
+site  coop_add_player    0x00411550 0xe92d4038 0xe3a0004f
+data  coop_player        0x03b96270
+data  coop_players       0x03c9e3f8
+site  coop_first_ball    0x00219fec 0xeb07dd94 0xe1a04000
+site  serve_ball         0x0021a0e8 0xeb023859 0xe3a00026
+site  audit_add              0x004157a0 0xe92d43f0 0xe2505000
+site  coop_icon_draw         0x001d55a4 0xebfffdf3 0xe1560004
+site  coop_up_call           0x000bac54 0xeb0d5a55 0xe3500003
+# ---- PAD-1555: this build's start menu is a menu of game-mode table indices now (the earlier build's
+# challenge_menu loop is gone); its frame read off the program (prolonged_comp.frame_lines)
+# PAD-1555: the request the game makes at the ball start's serve (servejob.sh: 948 at the start, 74 at the serve (26 ms before the bus's ball_start), asked again 6 s on) - asked for early when
+# ball 1 waits for a Standard game's character pick (PAD-1449 round 4)
+value serve_music          74
+# PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again
+site  comp_menu_frame        0x000deb98 0xe0833106 0xe51330e4
+value comp_menu_frame_list_at    420
+value comp_menu_frame_count_at   72
+value comp_menu_frame_count_last 0
+value comp_menu_frame_cap        13   # the game-mode table's entries
+value comp_menu_frame_cursor_reg 6
+value comp_menu_frame_buttons_reg 7
+value comp_menu_index            3   # COMPETITION
+value comp_menu_index_msg        1921
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1916
+value comp_menu_end_caption_msg  1915   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
+value comp_menu_challenge_0      10   # PAD-1449: a challenge's index (the style chooser follows it)
+# ---- PAD-1555: a challenge of the modes' own on this start menu of game-mode indices (as Pokemon 0.87's, PAD-1504):
+# one MODE CHALLENGE entry, Standard's index again, lettered CHALLENGE and the mode's name; the frame is the comp menu's
+site  challenge_menu_frame 0x000deb98 0xe0833106 0xe51330e4
+# PAD-1555: the challenge game's own calls, the earlier build's placed here by a masked run of 40 words (one match
+# each): its balls-per-game getter, extra-ball test and end-of-ball call
+site  challenge_balls     0x004115e0 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00271224 0xe30e3c60 0xe34033c8
+site  challenge_end_ball  0x002aa13c 0xe30d271e 0xe34023c9
+# PAD-1555: the challenge game's ball launch (portchallenge.launch_lines, read off this build; the derive had dropped it)
+site  ball_launch         0x002a5efc 0xe92d4010 0xe3024f8c
+value ball_launch_flag       12
+value ball_launch_wait_flag  13
+value challenge_on_flag   18   # FG_PLAYER_CHALLENGE_MODE_ACTIVE, read off the program's FG_ names
+value challenge_menu_frame_buttons_reg 7
+value challenge_menu_frame_list_at    420
+value challenge_menu_frame_count_at   72
+value challenge_menu_frame_count_last 0
+value challenge_menu_frame_cap        13
+value challenge_menu_frame_cursor_reg 6
+value challenge_menu_frame_entry      1   # STANDARD
+value challenge_menu_frame_caption_msg 1915   # STANDARD, lettered CHALLENGE while the cursor is on ours
+value challenge_menu_frame_name_msg   1916   # NORMAL PLAY, lettered the mode's name
+value challenge_menu_caption          1922   # CHALLENGE
+value challenge_menu_slot             -1   # a plain challenge: nothing of the game's to stop
+value challenge_menu_sets_on          1    # the pick is a challenge game of the mode's
+site  challenge_scores       0x00410a78 0xe92d4ff0 0xe24dd0bc
+site  challenge_score_entry  0x0040ffac 0xe1a03000 0xe30406a8
+site  challenge_scores_gate  0x00410ce4 0xebf83da5 0xe3500000
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+data  challenge_scores_table 0x03ba1c30
+data  challenge_scores_count 0x0055c274
+value challenge_scores_cat   1
+site  challenge_pages_0     0x0001ce34 0xe92d4ff0 0xe3a01000
+
+# PAD-710: the game's own mode framework (mode_framework.py, from this build's program): what one of its
+# modes writes as it starts and stops, so a mode of ours in one's place counts as it
+site  mode_player            0x004115b0 0xe3063270 0xe34033b9
+value mode_slot_stop         45
+value mode_stopped_at        0x6b
+value mode_starts_at         0x84
+value mode_wins_at           0xb0
+
+# ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
+# docs/plans/mode_spare_io.md). coil_frame = the node-bus fire-by-address wrapper; sw_struct = the switch
+# service's struct (+16 one 160-byte block per node: +20 its 64 input bits, +28 the switch id per bit); on the
+# older framework sw_listen / sw_boards / coil_used instead (the listener table, the board table, a coil there)
+site coil_frame            0x0051aba8 0xe5d13000 0xe353000f
+site coil_off              0x00516984 0xe351000f 0xe1a02001
+data sw_struct             0x03c612a4
+
+# ---- PAD-420 (PAD-1555: the earlier build's shows, each placed in this program): the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+# route): each a process body of the game's that lights lamps, played as process show_proc (an id the game
+# never uses), its lamp groups freed as it ends (lamp_free_owner). Every candidate was played in the emulator
+# with the lamp groups the show process owned recorded, and on the light-language builds the light runner's
+# commands (shows/scan_job3.sh, scanlog3.so); each is named from what it did - its colours (the RGB inserts its
+# groups lit, or the commands' --red/--green/--blue), on/off toggling (a strobe), in-between levels (a fade),
+# lights coming on in turn (a chase), how many lights next to the build's biggest show (wide: 80% or more,
+# small: 25% or fewer) - and how long it ran (shows/finalname.py; on Godzilla LE's ten it gives PAD-411's
+# kinds). None reaches the game's sound, score, coil, award, clip or event calls (shows/showsafe.py), and none
+# is one the game crashed after in the scan. show_kind: flashy (a mode's start), subdued (its end), accent (a
+# moment).
+value show_proc            13201
+site show_1           0x00090e3c 0xe92d47f0 0xe1a03002   # 280 lights in its lamp groups, 0 light-runner commands, green, magenta, 5.0 s
+text show_name_1          Green and magenta strobe
+text show_kind_1          flashy
+value show_secs_1         5
+site show_2           0x000c66ac 0xe92d40f8 0xeb0c3850   # 60 lights in its lamp groups, 0 light-runner commands, white, 2.6 s
+text show_name_2          Small white strobe
+text show_kind_2          flashy
+value show_secs_2         3
+site show_3           0x000db93c 0xe92d47f0 0xe24dd020   # 60 lights in its lamp groups, 0 light-runner commands, white, 7.3 s
+text show_name_3          Small white glow
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4           0x000cb6ac 0xe92d4038 0xeb02a3e5   # 45 lights in its lamp groups, 0 light-runner commands, orange, 4.3 s
+text show_name_4          Small orange strobe
+text show_kind_4          flashy
+value show_secs_4         4
+site show_5           0x00104b78 0xe92d4ff0 0xe3a00025   # 17 lights in its lamp groups, 0 light-runner commands, green, blue, 8.0 s
+text show_name_5          Small green and blue glow
+text show_kind_5          flashy
+value show_secs_5         8
+site show_6           0x000ca930 0xe92d4ff0 0xe24dd01c   # 8 lights in its lamp groups, 0 light-runner commands, no colour given, 3.2 s
+text show_name_6          Small strobe
+text show_kind_6          flashy
+value show_secs_6         3
+site show_7           0x000cda5c 0xe92d4010 0xeb0c1b64   # 7 lights in its lamp groups, 0 light-runner commands, no colour given, 7.2 s
+text show_name_7          Small glow
+text show_kind_7          flashy
+value show_secs_7         8
+site show_8           0x0008e8c0 0xe92d43f0 0xe24dd014   # 362 lights in its lamp groups, 0 light-runner commands, red, white, 6.8 s
+text show_name_8          Wide slow red and white fade
+text show_kind_8          subdued
+value show_secs_8         8
+site show_9           0x001992b4 0xe92d4010 0xeb08ed4e   # 177 lights in its lamp groups, 0 light-runner commands, green, cyan, 8.0 s
+text show_name_9          Slow green and cyan fade
+text show_kind_9          subdued
+value show_secs_9         8
+site show_10          0x000486a8 0xe92d4ff0 0xe24dd024   # 142 lights in its lamp groups, 0 light-runner commands, red, white, 0.7 s
+text show_name_10         Fast red and white strobe
+text show_kind_10         accent
+value show_secs_10        1
+site show_11          0x000486a8 0xe92d4ff0 0xe24dd024   # 118 lights in its lamp groups, 0 light-runner commands, cyan, white, 1.2 s
+text show_name_11         Fast cyan and white strobe
+text show_kind_11         accent
+value show_secs_11        1
+site show_12          0x0003c1cc 0xe92d4ff0 0xe24dd01c   # 70 lights in its lamp groups, 0 light-runner commands, red, 1.2 s
+text show_name_12         Small fast red strobe
+text show_kind_12         accent
+value show_secs_12        1
+
+# ---- PAD-473 (PAD-1555: the earlier build's, each object placed in this program - newbuild/objfind.py, globals.py, the mode table): the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[41]) as the game's rules start it and asked its ACTIVE (v[49]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x03c19708   # cmode_austin_wizard, a multiball
+text  wizard_name_1   Austin
+text  wizard_film_1   three van cities
+data  wizard_obj_2    0x03c19810   # cmode_dc_wizard, a multiball
+text  wizard_name_2   D.C.
+text  wizard_film_2   three van cities
+value wizard_slot_enable 42   # its base class's enable: sets the player's byte at +0x83 that START's check (v[46]) reads
+
+# ---- PAD-1555: held coils on the November 2026 builds ----
+value coil_rec_size        0x70   # PAD-1555: the coil record grew in the November 2026 builds (its coil_count code: x * 7 * 16)

@@ -168,17 +168,17 @@ def test_the_ports_carry_the_wrappers_by_their_words():
     for path in sorted(PORTS.glob("*.port")):
         lines = _port_lines(path)
         assert "coil_frame" in lines, path.name                                  # every build has the wrapper
-        assert [int(w, 0) for w in lines["coil_frame"][1:3]] == list(sio.FRAME[:2]), path.name
+        assert [int(w, 0) for w in lines["coil_frame"][1:3]] in (list(sio.FRAME[:2]), [sio.FRAME[0], sio.FRAME16]), path.name  # PAD-1555: 16 coils
         if "sw_struct" in lines:
             full += 1
-            assert [int(w, 0) for w in lines["coil_off"][1:3]] == list(sio.OFF[:2]), path.name
+            assert [int(w, 0) for w in lines["coil_off"][1:3]] in (list(sio.OFF[:2]), [sio.OFF16, sio.OFF[1]]), path.name
             assert "coil_table" in lines and "coil_count" in lines, path.name
         else:                                       # the older framework: its listener table, board table, coil query
             old += 1
             assert {"sw_listen", "sw_boards", "coil_used"} <= set(lines), path.name
             assert lines["coil_used"][1] == "0xe92d43f8", path.name                  # push {r3-r9, lr}
             assert "coil_off" not in lines and "coil_table" not in lines, path.name
-    assert full == 59                                                            # the newer framework's builds
+    assert full == 69                                                            # the newer framework's builds (PAD-1555: + 10)
     assert old == 10
 
 
@@ -253,7 +253,7 @@ def test_only_a_proven_build_offers_them():
     assert profiles["godzilla_pro_1_16"].spare == ("in", "out")
     spike2 = {k for k in MP.SPARE_IO_PROVEN if not k.endswith("/spike3")}        # PAD-1329 adds Spike 3 builds
     s2 = [p for p in profiles.values() if not p.key.endswith("_spike3")]        # Spike 3's: test_pad1329
-    assert sum(1 for p in s2 if p.spare == ("in", "out")) == len(spike2) == 69
+    assert sum(1 for p in s2 if p.spare == ("in", "out")) == len(spike2) == 79   # PAD-1555: + 10
     for p in s2:
         key = "%s-%s" % (p.key.rsplit("_", 2)[0], ".".join(p.key.rsplit("_", 2)[1:]))
         if key not in MP.SPARE_IO_PROVEN:

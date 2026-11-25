@@ -460,6 +460,15 @@ STACK_TABLE_NEEDS = (("stock_mode_table", "typeinfo_cmode", "typeinfo_cmode_mbal
 #: item 164: the builds where a ``stack no`` mode was seen held back in the emulator by the table
 #: route (the game's own mode running, then refused; nothing running, then started)
 STACK_PROVEN = frozenset({
+    "dungeons_and_dragons_le-1.11",   # PAD-1555 2026-11-24 newbuild/gmjob.sh (the ball scored first): a stack no mode refused while the game's Mimic Hurry Up (12): cmimic_hurry_up is running
+    "dungeons_and_dragons_pro-1.11",  # PAD-1555 2026-11-24 newbuild/gmjob.sh (the ball scored first): a stack no mode refused while the game's Mimic Hurry Up (12): cmimic_hurry_up is running
+    "foo_fighters_le-1.05",           # PAD-1555 2026-11-24 newbuild/gmjob.sh (the ball scored first): a stack no mode refused while the game's Super Skill Shot (8): csuper_skill_shot is running
+    "foo_fighters_pro-1.05",          # PAD-1555 2026-11-24 newbuild/gmjob.sh (the ball scored first): a stack no mode refused while the game's Super Skill Shot (8): csuper_skill_shot is running
+    "avengers_infinity_le-1.12",      # PAD-1555 2026-11-24 newbuild/gmjob.sh: a stack no mode refused while the game's Soul Gem (8) ran: one of the game's modes (cmode_soul_gem) is running
+    "avengers_infinity_pro-1.12",     # PAD-1555 2026-11-24 newbuild/gmjob.sh: a stack no mode refused while the game's Soul Gem (8) ran: one of the game's modes (cmode_soul_gem) is running
+    "king_kong_le-1.00",              # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): a stack no mode refused while the game's King Kombos (27) ran: one of the game's modes (cmode_king_kombos) is running
+    "king_kong_le-1.01",              # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): a stack no mode refused while the game's King Kombos (27) ran: one of the game's modes (cmode_king_kombos) is running
+    "king_kong_pro-1.01",             # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): a stack no mode refused while the game's King Kombos (27) ran: one of the game's modes (cmode_king_kombos) is running
     "jaws_le-1.02", "jurassic_park_le-1.16", "deadpool_le-1.14", "deadpool_pro-1.16",
     "avengers_infinity_le-1.09", "turtles_pro-1.59", "led_zeppelin_le-1.22", "munsters_le-1.28",
     "venom_le-1.07", "dungeons_and_dragons_le-1.00", "king_kong_le-0.97", "mando_le-1.44",
@@ -504,6 +513,16 @@ MULTIBALL_NEEDS = ("multiball_serve", "balls_in_play")
 #: framework's count rose to the balls asked for while the mode ran, and the mode ended on "one ball
 #: left" once they drained. Until a build is here the tab greys Multiball and says so.
 MULTIBALL_PROVEN = frozenset({
+    "king_kong_le-1.00",               # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
+    "king_kong_le-1.01",               # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
+    "king_kong_pro-1.01",              # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
+    "avengers_infinity_le-1.12",       # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
+    "avengers_infinity_pro-1.12",      # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
+    "foo_fighters_le-1.05",            # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
+    "foo_fighters_pro-1.05",           # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
+    "dungeons_and_dragons_le-1.11",    # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
+    "dungeons_and_dragons_pro-1.11",   # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
+    "metallica_spike-1.05",            # PAD-1555 2026-11-24 newbuild/mbjob.sh (stock card, hidden, muted): 3 balls asked for and served, add-a-ball to 4, drains to END (one ball left)
     "turtles_le-1.59",                 # 2026-09-26 mb_batch.sh (on the rig's van): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left)
     "foo_fighters_le-1.04",            # 2026-09-26 mb_batch.sh (the rig's device table got its coils): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left)
     "venom_le-1.07",                   # 2026-09-26 mb_batch.sh: served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left)
@@ -631,6 +650,16 @@ def _multiball_cannot(key, label, sites=None):
 #: game took the save, a drain inside it was served back with no end of ball, the mode scored on the
 #: saved ball, and a drain after it ended the ball. Until a build is here the tab greys Ball save.
 BALL_SAVE_PROVEN = frozenset({
+    "metallica_spike-1.05",            # PAD-1555 2026-11-24 newbuild/bsjob.sh: ball save 10 s taken, the drain inside it served back, the next drains (a second ball out after the save) ended the ball; 1.04 the same in the run
+    "dungeons_and_dragons_le-1.11",    # PAD-1555 2026-11-24 newbuild/bsjob.sh (rerun bs6, stock card, hidden, muted; the 1.10 control the same): ball save 10 s taken (the game is saving), the drain inside it served back, the third drain ended the ball; the earlier runs' missing END was those runs'
+    "king_kong_le-1.00",               # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
+    "king_kong_le-1.01",               # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
+    "king_kong_pro-1.01",              # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
+    "avengers_infinity_le-1.12",       # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
+    "avengers_infinity_pro-1.12",      # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
+    "foo_fighters_le-1.05",            # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
+    "foo_fighters_pro-1.05",           # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
+    "dungeons_and_dragons_pro-1.11",   # PAD-1555 2026-11-24 newbuild/bsjob.sh (stock card, hidden, muted): ball save 10 s taken (the game is saving), the drain inside it served back, the next drain ended the ball: END (ball ended)
     "aerosmith_le-1.15",                # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "avengers_infinity_le-1.09",        # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
     "batman-1.13",                      # 2026-09-27 rigbatch bs_job.sh: saved drain served back, shots scored on it, next drain ended the ball; control without it ended on the first drain
@@ -764,6 +793,8 @@ MAGNET_MAX_MS = 5000
 #: hit while the mode ran gave ONE magnet command of the operator's powers ([coildrive] on the magnet), and it
 #: ended at its time. Until a build is here the tab greys Magnet.
 MAGNET_PROVEN = frozenset({
+    "dungeons_and_dragons_le-1.11",    # PAD-1555 2026-11-24 newbuild/magnetjob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): `magnet 2000` on the Bottom Right Orbit Opto (87): two hits, two grabs, node 9 coil 2 pulse 255 for 60 ms then held, as 1.10 in the same run
+    "dungeons_and_dragons_pro-1.11",   # PAD-1555 2026-11-24 newbuild/magnetjob.sh: the same on its Bottom Right Orbit Opto (84): two grabs, node 9 coil 2 driven
     "godzilla_pro-1.16",               # 2026-10-05 rig 1, the stock card: the starting hit grabbed 2000 ms (255 for 350, then 50 for 1650, [coildrive] node 9 coil 6, held to its end), a hit mid-grab refused with no OFF from the game, a grab 6 s later held to its end, a mode stop let go 565 ms early, a drain mid-grab: the game ended the grab's process and the magnet went off 798 ms early, no abort
     "godzilla_le-1.16",                # 2026-10-05 rig 1, the stock Premium/LE card: the same (held 2000 to its end, mode stop 584 ms early, drain 782 ms early, no abort); and the first hit started a magnet process of the game's, which the grab stood aside for
     "godzilla_pro-1.15",               # PAD-394 2026-10-05 rig 2, the stock card: two grabs held to their end (255 for 350, then 50 for 1650, [coildrive] node 9 coil 6, the game's OFF 2017 / 2000 ms on), a hit 1 s in refused with no OFF from the game, a mode stop let go 115 ms early, no abort
@@ -863,6 +894,14 @@ MAGNET_GAME_LIMIT = {
     # PAD-475 walk: OVERLORD MAGNET (9:0; group 8 = node 9) 255 for 120 ms, OVERLORD HIT (9:1), then 90 ms, ~300 ms
     # after an Overlord opto / hit target press (2 of 16) - the census's single presses never met it
     "foo_fighters_le-1.04": ("shot", "Overlord magnet", "the Overlord"),
+    # PAD-1555: Stern's November 2026 builds of the same machines - the same rules for their magnets as the earlier
+    # build's (each a rules update on the same playfield: King Kong 1.01 the "Holiday Hotfix")
+    "avengers_infinity_le-1.12": ("shot", "tower magnet", "the tower optos"),
+    "avengers_infinity_pro-1.12": ("shot", "tower magnet", "the tower optos"),
+    "king_kong_le-1.00": ("shot", "spider magnet", "the pit targets"),
+    "king_kong_le-1.01": ("shot", "spider magnet", "the pit targets"),
+    "king_kong_pro-1.01": ("shot", "spider magnet", "the pit targets"),
+    "foo_fighters_le-1.05": ("shot", "Overlord magnet", "the Overlord"),
 }
 
 
@@ -938,6 +977,14 @@ SCOOP_PROVEN = frozenset({
     "elvira3-1.13",                    # PAD-420 2026-10-08 scoop_job6 (stock card, hidden, muted; the Crypt VUK; coins one at a time after the tech alerts): no mode, kicked 1667 ms after landing; scoop_hold 4000, 5550 ms (held 4000); a mode stop 2.5 s into a hold, let go at once (held 1834), kicked 885 ms after the stop; after the mode, 1558 ms ([coildrive] node 9 coil 1, 255 for 60 ms); no abort
     "metallica_spike-1.04",            # PAD-420 2026-10-08 scoop_job6 (stock card, hidden, muted; the RT EJECT; coins one at a time after the tech alerts - its earlier run had no game): no mode, the game kept its first landing and kicked 7690 ms after; scoop_hold 4000, 5557 ms (held 4000); a mode stop 2.5 s into a hold, let go at once (held 1967), kicked 1041 ms after the stop; after the mode, 1558 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
     "james_bond_60th_le-1.11",         # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; the TOP LEFT SCOOP): no mode, kicked 3312 ms after landing; scoop_hold 4000: settled 0.8 s after landing, held 4000 ms, the game's kick 344 ms after the let-go (5130 ms after landing - its own kick, 2.5 s after the settle, waited for the hold); a mode stop 2.5 s into a hold let go at once (held 1917), kicked 623 ms after the stop; after the mode, 3162 ms ([coildrive] node 9 coil 1, 125 for 90 ms); no abort
+    # PAD-1555 2026-11-24 newbuild/scoopjob.sh (rigbatch, stock cards, hidden, muted; switch 49 held 8 s under a
+    # `scoop_hold 4000` mode): a ball settled - held 4000 ms, let go after 4008 ms (its time ran out), the game's kick
+    # node 8 coil 8 140/255 60 ms after it
+    "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
+    # the same job once their ports' scoop_event_arg (D&D's, copied) was out - with it the handler waited for the event
+    # in its second argument and no ball settled: King Kong's KONG CAVE VUK 49 (the kick node 8 coil 8 150/255 60 ms),
+    # Avengers' 47 (node 8 coil 7 200/255 60 ms), Metallica's RT EJECT OPTO 57 (the 1.04 control the same); 4005-4015 ms
+    "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "avengers_infinity_le-1.12", "metallica_spike-1.05",
     "king_kong_pro-0.97",              # PAD-420 2026-10-08 scoop_job6 (stock card staged on the NVMe, hidden, muted; the KONG CAVE VUK, King Kong LE's twin handler - its run-18 segvs were the D: card stall): no mode, kicked 1723 ms after landing; scoop_hold 4000, 5724 ms (held 4016); a mode stop 2.5 s into a hold, let go at once (held 2050), kicked 1253 ms after the stop; after the mode, 1718 ms ([coildrive] node 8 coil 8, 150 for 60 ms); no abort
 })
 
@@ -1021,6 +1068,7 @@ CHALLENGE_PROVEN = frozenset({
     "john_wick_pro-1.02",              # PAD-619 2026-10-19 rig 3: the game-play mode set to Red Circle Reckoning (4, wck_cm_dance_club) in attract, challenge 0 claimed: 4 -> 1 at the ball's start, TAKEN BY PAD START (challenge pick), one ball, GAME OVER. Control: index kept at 4, flag 18, the game's own DANCE CLUB challenge (60 s) on screen
     "metallica_spike-1.03",            # PAD-619 2026-10-19 rig batch_r15: the Lux Aeterna Combo Challenge (7; the challenge game's flag is 17 on 1.03), challenge 0 claimed: 7 -> 1 at the ball's start, START (challenge pick), one ball, GAME OVER
     "metallica_spike-1.04",            # PAD-619 2026-10-19 rig 3: the game-play mode set to the Lux Aeterna Combo Challenge (8) in attract, challenge 0 claimed: 8 -> 1 at the ball's start, TAKEN BY PAD START (challenge pick), one ball, GAME OVER. Control: index kept at 8, flag 18, the game's own COMBO CHALLENGE on screen
+    "metallica_spike-1.05",            # PAD-1555 2026-11-24 newbuild/chal2job.sh + gpmset_mode.c (stock card, hidden, muted; the 1.04 control the same): the game-play mode set to Lux Aeterna Combo (8) in attract, as the menu's pick does; challenge 0 claimed - picked, CH TEST START (challenge pick) at the ball's start
     "rush_pro-1.19",                   # PAD-619 2026-10-19 rig 1, the stock card, hidden, muted: Default Game Mode 2 (Cygnus Book 1), challenge 0 claimed by its flag: RUSH TEST START (challenge pick) as the ball started, flag 29 cleared, the game's Cygnus intro (flag 37) never set, GAME OVER after the one ball. Control: flags 29 and 37 set, the game's own Cygnus played
 })
 
@@ -1089,6 +1137,10 @@ CHALLENGE_NEW = 16                   #: ModeSpec.challenge for a challenge of th
 #: CHALLENGE entry whose flippers step through every challenge of the modes' own, one picked starting its mode as a
 #: one-ball challenge game
 CHALLENGE_MENU_FRAME_PROVEN = {
+    "avengers_infinity_le-1.12": "PAD-1555, 2026-11-24 (newbuild/chaljob.sh, stock card, hidden, muted, rigbatch --speed 1; credits dropped, both flipper buttons held in attract): PAD CHALLENGE (`challenge new`) - MODE CHALLENGE appended as entry 5 of 5 (Standard's game-mode index 1), lettered CHALLENGE / PAD CHALLENGE; one left step onto it, START: picked on the start menu, PAD CHALLENGE START (challenge pick) as the ball started",
+    "avengers_infinity_pro-1.12": "PAD-1555, 2026-11-24 (newbuild/chaljob.sh, stock card, hidden, muted, rigbatch --speed 1; credits dropped, both flipper buttons held in attract): PAD CHALLENGE (`challenge new`) - MODE CHALLENGE appended as entry 5 of 5 (Standard's game-mode index 1), lettered CHALLENGE / PAD CHALLENGE; one left step onto it, START: picked on the start menu, PAD CHALLENGE START (challenge pick) as the ball started",
+    "foo_fighters_le-1.05": "PAD-1555, 2026-11-24 (newbuild/chaljob.sh, stock card, hidden, muted, rigbatch --speed 1; credits dropped, both flipper buttons held in attract): PAD CHALLENGE (`challenge new`) - MODE CHALLENGE appended as entry 9 of 9 (Standard's game-mode index 1), lettered CHALLENGE / PAD CHALLENGE; one left step onto it, START: picked on the start menu, PAD CHALLENGE START (challenge pick) as the ball started",
+    "foo_fighters_pro-1.05": "PAD-1555, 2026-11-24 (newbuild/chaljob.sh, stock card, hidden, muted, rigbatch --speed 1; credits dropped, both flipper buttons held in attract): PAD CHALLENGE (`challenge new`) - MODE CHALLENGE appended as entry 9 of 9 (Standard's game-mode index 1), lettered CHALLENGE / PAD CHALLENGE; one left step onto it, START: picked on the start menu, PAD CHALLENGE START (challenge pick) as the ball started",
     "godzilla_le-1.16": "PAD-686, 2026-10-22: one MODE CHALLENGE entry stepped through 13 modes; JET JAGUAR, KING KONG and OXYGEN DESTROYER picked, each started as the ball did (one ball)",
     "fallout_le-0.82/spike3": "PAD-1369, 2026-11-17 (Spike 3 rig, hidden, muted, the set spike3_modes.plan built from the library card): MODE CHALLENGE appended as entry 9 of 9 (Standard's index again, lettered CHALLENGE / PAD CHALLENGE), picked; START (challenge pick) as the ball started, its ball launched for the player, its clock ended the ball (0x935490), the extra-ball test refused, one ball (the game's Standard plays 4), GAME OVER, PAD CHALLENGE's own high score filed",
     "pokemon_le-0.82/spike3": "PAD-1369, 2026-11-17 (Spike 3 rig, hidden, muted, the set spike3_modes.plan built from the library card): MODE CHALLENGE appended as entry 3 of 3, picked; START (challenge pick) as the ball started, launched for the player, the drain ended the ball with the mode, the extra-ball test refused, one ball, GAME OVER, PAD CHALLENGE's own high score filed",
@@ -1152,6 +1204,16 @@ def _challenge_cannot(key, label, port=None):
 #: in the emulator: the game's START of its mode (called as its rules call it) taken, the mode run in its place, and
 #: at its end the game's own STOP run with the outcome (rig sweep, C:\tmp\PAD-710\rig, place_job.sh).
 PLACE_PROVEN = frozenset({
+    "king_kong_le-1.00",              # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): King Kombos (27): the game's start taken - this starts now in its place, completed by its clock
+    "king_kong_le-1.01",              # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): King Kombos (27): the game's start taken - this starts now in its place, completed by its clock
+    "king_kong_pro-1.01",             # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): King Kombos (27): the game's start taken - this starts now in its place, completed by its clock
+    "avengers_infinity_le-1.12",      # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Reactor (19): the game's start taken - this starts now in its place, completed by its clock
+    "avengers_infinity_pro-1.12",     # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Reactor (19): the game's start taken - this starts now in its place, completed by its clock
+    "foo_fighters_le-1.05",           # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Skill Shot (8): the game's start taken - this starts now in its place, completed by its clock
+    "foo_fighters_pro-1.05",          # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Skill Shot (8): the game's start taken - this starts now in its place, completed by its clock
+    "dungeons_and_dragons_le-1.11",   # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Mimic Hurry Up (12): the game's start taken - this starts now in its place, completed by its clock
+    "dungeons_and_dragons_pro-1.11",  # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Map Choosen Ritual Singleball (53): the game's start taken - this starts now in its place, completed by its clock
+    "metallica_spike-1.05",           # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Battery (0): the game's start taken - this starts now in its place, completed by its clock
     "avengers_infinity_le-1.10",     # PAD-710 run all2: Super Reactor (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
     "avengers_infinity_pro-1.10",    # PAD-710 run all2: Super Reactor (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
     "deadpool_le-1.16",              # PAD-710 run all2: Disco Loops (19): the game's start taken, starts 0 -> 1, completed by its clock: stopped 1
@@ -1297,6 +1359,16 @@ def _place_cannot(key, label, port=None):
 #: game's own STOP of it entered with "completed" on a C++ title, its COMPLETED audit or flag on a plain-C one - and a
 #: mode file waiting for that one started (rig sweep, C:\tmp\PAD-747\rig).
 DONE_PROVEN = frozenset({
+    "king_kong_le-1.00",              # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): King Kombos (27) completed in a mode's place, and a mode file waiting for 1 started on it
+    "king_kong_le-1.01",              # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): King Kombos (27) completed in a mode's place, and a mode file waiting for 1 started on it
+    "king_kong_pro-1.01",             # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): King Kombos (27) completed in a mode's place, and a mode file waiting for 1 started on it
+    "avengers_infinity_le-1.12",      # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Reactor (19) completed in a mode's place, and a mode file waiting for 1 started on it
+    "avengers_infinity_pro-1.12",     # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Reactor (19) completed in a mode's place, and a mode file waiting for 1 started on it
+    "foo_fighters_le-1.05",           # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Skill Shot (8) completed in a mode's place, and a mode file waiting for 1 started on it
+    "foo_fighters_pro-1.05",          # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Skill Shot (8) completed in a mode's place, and a mode file waiting for 1 started on it
+    "dungeons_and_dragons_le-1.11",   # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Mimic Hurry Up (12) completed in a mode's place, and a mode file waiting for 1 started on it
+    "dungeons_and_dragons_pro-1.11",  # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Map Choosen Ritual Singleball (53) completed in a mode's place, and a mode file waiting for 1 started on it
+    "metallica_spike-1.05",           # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Battery (0) completed in a mode's place, and a mode file waiting for 1 started on it
     "aerosmith-1.16",               # PAD-747 sweep: Medley Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
     "aerosmith_le-1.15",            # PAD-747 sweep: Medley Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
     "aerosmith_le-1.16",            # PAD-747 sweep: Medley Multiball (128) completed - its COMPLETED flag - and a mode file waiting for 1 started on it
@@ -1421,6 +1493,16 @@ def _done_cannot(key, label, port=None):
 #: intro and an outro for one of the game's own modes"). The builds where it was seen in the emulator: a mode file
 #: following one of the game's modes started with it and ended with it (C:\tmp\PAD-1537).
 WITH_PROVEN = frozenset({
+    "metallica_spike-1.05",          # PAD-1555 2026-11-24 newbuild/gmjob.sh (plain C, PAD_TEST_PLAIN_START): Battery (0) - started with it, ended with it as the ball ended
+    "king_kong_le-1.00",              # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): King Kombos (27): started with the game's start, ended with its stop
+    "king_kong_le-1.01",              # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): King Kombos (27): started with the game's start, ended with its stop
+    "king_kong_pro-1.01",             # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): King Kombos (27): started with the game's start, ended with its stop
+    "avengers_infinity_le-1.12",      # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Reactor (19): started with the game's start, ended with its stop
+    "avengers_infinity_pro-1.12",     # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Reactor (19): started with the game's start, ended with its stop
+    "foo_fighters_le-1.05",           # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Skill Shot (8): started with the game's start, ended with its stop
+    "foo_fighters_pro-1.05",          # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Super Skill Shot (8): started with the game's start, ended with its stop
+    "dungeons_and_dragons_le-1.11",   # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Mimic Hurry Up (12): started with the game's start, ended with its stop
+    "dungeons_and_dragons_pro-1.11",  # PAD-1555 2026-11-24 newbuild/gmjob.sh (stock card, hidden, muted): Map Choosen Ritual Singleball (53): started with the game's start, ended with its stop
     "aerosmith-1.16",                # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
     "aerosmith_le-1.16",             # PAD-1537 rig (plain C, PAD_TEST_PLAIN_START): Super Scoring (0) - started with it, its clock ended it
     "avengers_infinity_le-1.10",     # PAD-1537 rig: Super Reactor (19) followed twice
@@ -1584,6 +1666,16 @@ SHAKE_CALLS = {"ms strength force": ((), ()), "ms force": ((), ()),
 #: The builds where a mode file's ``shake`` lines were seen reach the board in the emulator (PAD-474: every
 #: latest build with a shaker, C:/tmp/PAD-474/shake_job.sh through rigbatch.sh, docs/plans/pad474_shaker.md).
 SHAKER_PROVEN = frozenset({
+    "foo_fighters_le-1.05",           # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): shake 1500 ms at 2, the game's table caps it at 1200: node 1 coil 0 pulse 31/255 for 1200 ms
+    "foo_fighters_pro-1.05",          # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): shake 1500 ms at 2, the game's table caps it at 1200: node 1 coil 0 pulse 31/255 for 1200 ms
+    "king_kong_le-1.00",              # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 31/255 for 1500 ms
+    "king_kong_le-1.01",              # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 31/255 for 1500 ms
+    "king_kong_pro-1.01",             # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 31/255 for 1500 ms
+    "avengers_infinity_le-1.12",      # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 23/255 for 1500 ms
+    "avengers_infinity_pro-1.12",     # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): shake 1500 ms at 2: node 1 coil 0 pulse 23/255 for 1500 ms
+    "dungeons_and_dragons_le-1.11",   # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): one power: shake 484 ms at 0: node 1 coil 0 pulse 51/255 for 480 ms
+    "dungeons_and_dragons_pro-1.11",  # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): one power: shake 484 ms at 0: node 1 coil 0 pulse 51/255 for 480 ms
+    "metallica_spike-1.05",           # PAD-1555 2026-11-24 newbuild/shakejob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1, its own SHAKER MOTOR adjustment re-read off the build): one power: shake 1024 ms at 0: node 1 coil 0 pulse 40/255 for 1020 ms
     "godzilla_le-1.16",                # PAD-414 2026-10-06 rig 1, the stock Premium/LE card, PAD_COIL_PROBE=1: shake start 1500 2 -> node 1 coil 0 31/255 for 1500 ms; the game's jackpot shake on each left ramp (51/255, 500 ms), a hit while it ran refused; shake end 1000 3 ran out after the mode (no OFF); pm_end mid-shake sent the game's OFF with 4001 ms left
     "aerosmith-1.16",                  # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (524 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
     "aerosmith_le-1.16",               # PAD-474 2026-10-09 stock card, PAD_COIL_PROBE=1: node 1 coil 0, setting 3: start 32/255 1020 ms, OFF at the stop (524 ms left); its short shake 32/255 200 ms on a hit; end 32/255 600 ms ran out
@@ -1843,6 +1935,16 @@ def _shows_cannot(label, port=None):
 WIZARD_NEEDS = (("wizard_start",), ("wizard_state", "wizard_table", "lamps_dirty"))
 #: The builds where a mode file's ``game_wizard`` line was seen hand the player the game's own mode in the emulator.
 WIZARDS_PROVEN = frozenset({
+    "king_kong_le-1.00",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Crash the Gate started (its own start); T-Rex Battle waited while it ran (cmode_crash_the_gate in its way)
+    "king_kong_le-1.01",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Crash the Gate started (its own start); T-Rex Battle waited while it ran (cmode_crash_the_gate in its way)
+    "king_kong_pro-1.01",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Crash the Gate started (its own start); T-Rex Battle waited while it ran (cmode_crash_the_gate in its way)
+    "avengers_infinity_le-1.12",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Soul Gem Quest started; Black Order Multiball waited while it ran (cmode_soul_gem in its way)
+    "avengers_infinity_pro-1.12",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Soul Gem Quest started; Black Order Multiball waited while it ran (cmode_soul_gem in its way)
+    "foo_fighters_le-1.05",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Austin started; D.C. waited while it ran (a multiball, cmode_austin_wizard, in its way)
+    "foo_fighters_pro-1.05",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Austin started; D.C. waited while it ran (a multiball, cmode_austin_wizard, in its way)
+    "dungeons_and_dragons_le-1.11",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Tiny's Dice Game started; Tavern Brawl waited while it ran (ctinys_dice_game in its way)
+    "dungeons_and_dragons_pro-1.11",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Tiny's Dice Game started; Tavern Brawl waited while it ran (ctinys_dice_game in its way)
+    "metallica_spike-1.05",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Blackened Multiball started (its start said so); The End of the Line waited while its multiball ran
     # PAD-436 2026-10-07 rig 2, the stock card: From Russia With Love completed through the game's own collect fired
     # film_frwl and a `game_wizard start Ahoy Mr. Bond` file started the game's Ahoy Mr. Bond (its start, played 0x2, its
     # running query 1, flags 85 86, its intro on the glass); Goldfinger then `light`ed Goldfinger's Jackpot (selected 2,
@@ -2089,6 +2191,31 @@ def _pulse_coils(port, key):
 
 
 HELD_COILS_PROVEN = frozenset({
+    # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1, the object's own powers): coil_hold 2000 - HOLD, the
+    # command on its own board address, and the hold ran its 2000 ms ("its time ran out") once the runtime read the
+    # object's on-time word at +32 (`value ccoil_ontime_at`; at +36 every hold was let go 13 ms in); LE 1.00 twice
+    ("king_kong_le-1.00", "spider_magnet"),   # node 9 coil 0, 255 for 500 ms then 30
+    ("king_kong_le-1.00", "log_diverter"),   # node 9 coil 1, 180 for 200 ms then 48
+    ("king_kong_le-1.00", "ramp_diverter"),   # node 9 coil 7, 255 for 60 ms then 48
+    ("king_kong_le-1.01", "spider_magnet"),   # node 9 coil 0, 255 for 500 ms then 30
+    ("king_kong_le-1.01", "log_diverter"),   # node 9 coil 1, 180 for 200 ms then 48
+    ("king_kong_le-1.01", "ramp_diverter"),   # node 9 coil 7, 255 for 60 ms then 48
+    ("king_kong_pro-1.01", "spider_magnet"),   # node 9 coil 0, 255 for 500 ms then 30
+    ("king_kong_pro-1.01", "river_diverter"),   # node 9 coil 1, 180 for 200 ms then 48
+    ("avengers_infinity_le-1.12", "tower_magnet"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
+    ("avengers_infinity_le-1.12", "tower_post"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
+    ("avengers_infinity_pro-1.12", "tower_magnet"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
+    ("avengers_infinity_pro-1.12", "tower_post"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
+    ("foo_fighters_le-1.05", "outlane_up_post"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
+    ("foo_fighters_le-1.05", "up_pf_diverter"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
+    ("foo_fighters_le-1.05", "van_up_post"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
+    ("foo_fighters_pro-1.05", "van_up_post"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
+    ("metallica_spike-1.05", "loop_up_post"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
+    ("dungeons_and_dragons_le-1.11", "diverter"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, one command on its board address
+    ("dungeons_and_dragons_le-1.11", "up_post"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, one command on its board address
+    ("dungeons_and_dragons_le-1.11", "magnet_hold"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, one command on its board address
+    ("dungeons_and_dragons_pro-1.11", "up_post"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, one command on its board address
+    ("dungeons_and_dragons_pro-1.11", "magnet_hold"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (stock card, hidden, muted, PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, one command on its board address
     ("godzilla_le-1.16", "mg_magnet"),  # 2026-10-05 rig 1, the stock Premium/LE card: held 2000 ms as the mode started (255 for 250, then 80 for 1750: its own adjustments), OFF at its end
     ("godzilla_le-1.16", "bridge"),     # the same run: held 2000 ms on the left ramp (255 for 300, then 25 for 1700), a hit mid-hold refused, held again, a mode stop let go 617 ms early; no abort
     # PAD-394 2026-10-05 rig 2, the stock King Kong LE 0.97 card, the three held 2000 ms as the mode started, each
@@ -2279,6 +2406,9 @@ STACK_BALLS_PROVEN = frozenset({
     "guardians_le-1.14", "aerosmith_le-1.15", "elvira3-1.13", "jurassic_park_the_pin-1.05",
     "metallica_spike-1.04",           # PAD-306 2026-10-01: the framework's serve asked for two (0x3e3008), the
                                       # stack no mode refused ("a multiball"); one drained, started
+    "metallica_spike-1.05",           # PAD-1555 2026-11-24 newbuild/stjob.sh WIZ=1 (stock card, hidden, muted; the 1.04 control the
+                                      # same): the game's own Blackened Multiball handed over (game_wizard start), a stack no
+                                      # mode refused ("a multiball is running") through 5 drains, started at the 6th
     "aerosmith_le-1.16",                 # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
     "guardians-1.15",                    # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
     "guardians_le-1.15",                 # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
@@ -2354,6 +2484,10 @@ def _stack_flags(data, values):
 #: about each mode's own record ids (``value mode_records_1`` ..). Until a build is here its note says
 #: multiballs only.
 STACK_RECORDS_PROVEN = frozenset({
+    "metallica_spike-1.05",           # PAD-1555 2026-11-24 newbuild/recjob.sh (stock card, hidden, muted; the 1.04 control
+                                      # the same): its mode_records read off its song starts (1.04's + 1); a stack no mode
+                                      # started with nothing of the game's running, then the game's Enter Sandman (1) started
+                                      # and it was refused: "one of the game's modes (a song mode) is running"
     "aerosmith_le-1.15",              # 2026-09-26: Double Scoring (ids 237..238) held a stack no mode back, and
                                       # 60 s later its records were gone and the mode started
     "guardians_le-1.14",              # the same with its Double Scoring (ids 232..233)
@@ -2562,9 +2696,12 @@ SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10/spike3", "w
 #: PAD-1293 (2026-11-16, Spike 3 rig slots 160-163): Transformers LE 0.96's shots come from the same edges ("the switch
 #: drain's edges (switch_edge ... the record in x19, the game's mode mask applied)"): the census above and four modes
 #: started on Megatron target left x3 and scored on Right orbit, Center loop and Left orbit.
+#: PAD-1555 (2026-11-24, newbuild/checkjob.sh + edgecheck.py, stock cards, hidden, muted): Metallica 1.05 - each of the
+#: 49 playfield switches gamecheck presses (twice), 35 gave one shot a press on a bit of its own and the same 14 none
+#: (the Coffin locks 88-93 and the like), exactly as the 1.04 control in the same run.
 SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18",
                                 "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16",
-                                "metallica_spike-1.04",
+                                "metallica_spike-1.04", "metallica_spike-1.05",
                                 "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3",
                                 "transformers_mtmte_le-0.96/spike3"})
 
@@ -2586,6 +2723,12 @@ BUTTON_SHOTS_PROVEN = frozenset({
     "munsters_pro-1.28", "rush_le-1.19", "rush_pro-1.19", "star_wars_elg-1.10", "star_wars_le-1.31",
     "star_wars_pro-1.31", "stranger_things-1.13", "stranger_things_le-1.13", "sword_of_rage_le-1.19",
     "sword_of_rage_pro-1.19", "turtles_le-1.59", "turtles_pro-1.59", "uncanny_xmen_le-0.98", "uncanny_xmen_pro-0.98",
+    # PAD-1555 2026-11-24 newbuild/btnjob.sh (rigbatch --speed 1, stock cards, hidden, muted; each card's own buttons.cfg
+    # as Write puts it, an idle mode): none in attract; in a game every line's shot exactly once at its own action
+    # (a press / release, a hold its ms, a combo) - 9 of 9 on King Kong, 18 of 18 on the rest
+    "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "avengers_infinity_le-1.12",
+    "avengers_infinity_pro-1.12", "foo_fighters_le-1.05", "foo_fighters_pro-1.05", "metallica_spike-1.05",
+    "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
     "venom_le-1.07", "venom_pro-1.07"})
 
 
@@ -2643,6 +2786,18 @@ COUNTDOWN_NO_NUMBERS = frozenset({"aerosmith_le-1.15", "john_wick_le-1.01", "elv
                                   "aerosmith-1.16", "aerosmith_le-1.16", "john_wick_le-1.02", "john_wick_pro-1.02"})
 
 TITLE_SCENES = {
+    # PAD-1555: Stern's November 2026 builds - each scene.radium's md5 read off the card (read-only); proven once our
+    # screen and clip are seen on the glass (newbuild/mediajob.sh)
+    "king_kong_le-1.00": dict(screen_proven=True, hud="4f934c4419b2e9a771b0deb8ffd11bc7", bank="87f625eac25ca72dc73696167bcbc01b", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh + mediacheck.py (stock card + its Try it set, hidden, muted): clip "played", own screen "found"; magenta 61.9% clip, 8.9% screen, 0.0% before and after
+    "king_kong_le-1.01": dict(screen_proven=True, hud="6552d9a4d023ccc7b23225c5dc8504ac", bank="87f625eac25ca72dc73696167bcbc01b", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh + mediacheck.py (stock card + its Try it set, hidden, muted): clip "played", own screen "found"; magenta 61.7% clip, 8.9% screen, 0.0% before and after
+    "king_kong_pro-1.01": dict(screen_proven=True, hud="80f43b73ad1de7f7aca4988c03f61a01", bank="87f625eac25ca72dc73696167bcbc01b", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh + mediacheck.py (stock card + its Try it set, hidden, muted): clip "played", own screen "found"; magenta 61.9% clip, 8.9% screen, 0.0% before and after
+    "avengers_infinity_le-1.12": dict(screen_proven=True, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh + mediacheck.py (stock card + its Try it set, hidden, muted): clip "played", own screen "found"; magenta 55.5% clip, 8.9% screen, 0.0% before and after
+    "avengers_infinity_pro-1.12": dict(screen_proven=True, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh + mediacheck.py (stock card + its Try it set, hidden, muted): clip "played", own screen "found"; magenta 55.5% clip, 8.9% screen, 0.0% before and after
+    "foo_fighters_le-1.05": dict(screen_proven=True, hud="3f34991c6809a039dd47b2086a12937a", bank="92f0b52f8ec5d17924a75ad81c222b9b", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh + mediacheck.py (stock card + its Try it set, hidden, muted): clip "played", own screen "found"; magenta 59.5% clip, 8.9% screen, 0.0% before and after
+    "foo_fighters_pro-1.05": dict(screen_proven=True, hud="3f34991c6809a039dd47b2086a12937a", bank="92f0b52f8ec5d17924a75ad81c222b9b", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh + mediacheck.py (stock card + its Try it set, hidden, muted): clip "played", own screen "found"; magenta 59.6% clip, 8.9% screen, 0.0% before and after
+    "metallica_spike-1.05": dict(screen_proven=True, hud="1499e2bbf970aac375c9f73faefb1c92", bank="1499e2bbf970aac375c9f73faefb1c92", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh + mediacheck.py (stock card + its Try it set, hidden, muted): clip "played", own screen "found"; magenta 95.1% clip, 8.9% screen, 0.0% before and after
+    "dungeons_and_dragons_le-1.11": dict(screen_proven=True, hud="e8bbe9670a9a212f18408a602d7b187b", bank="046915f6ff0a53b5608c8e7c4c2a976f", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh PICK=1 + mediacheck.py (stock card + its Try it set, hidden, muted; the PLAYER 1 SELECT A CHARACTER screen stays until the ball makes a switch): clip "played", own screen "found"; magenta 62.5% clip, 8.9% screen, 0.0% before and after
+    "dungeons_and_dragons_pro-1.11": dict(screen_proven=True, hud="76ac5e79ac7d5f8f3b916d925041f266", bank="046915f6ff0a53b5608c8e7c4c2a976f", clip_proven=True),   # PAD-1555 2026-11-24 newbuild/mediajob.sh PICK=1 + mediacheck.py (stock card + its Try it set, hidden, muted; the PLAYER 1 SELECT A CHARACTER screen stays until the ball makes a switch): clip "played", own screen "found"; magenta 63.4% clip, 8.9% screen, 0.0% before and after
     "godzilla_pro-1.15": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27", screen_proven=True,
                               bank="fe35b5b897c2b0df6fe583b0168a6cda", clip_proven=True),
     "godzilla_le-1.16": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27", screen_proven=True,
@@ -3276,6 +3431,14 @@ SPARE_IO_PROVEN = frozenset({
     # closing came as the mode's shot in a game and the spare output 1:1 went out on the bus; the game never drove it
     "aerosmith_le-1.15", "avengers_infinity_le-1.09", "batman-1.13", "guardians_le-1.14", "iron_maiden_le-1.16",
     "mando_le-1.44", "rush_le-1.18", "stranger_things_le-1.12", "sword_of_rage_le-1.18", "turtles_pro-1.58",
+    # PAD-1555, Stern's November 2026 builds (2026-11-24 newbuild/sparejob.sh, rigbatch, stock cards, hidden, muted, 11/11
+    # with the Avengers LE 1.10 control): the spare input closed through /dump/spare_in in a game came as the
+    # instrument's pulse, and the spare output 1:1 went out as [coildrive] node 1 coil 1 200/30 ms (16-coil boards:
+    # spare_io's FRAME16 / OFF16)
+    "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01",          # input 8:39
+    "avengers_infinity_le-1.12", "avengers_infinity_pro-1.12",               # 8:11, 8:8
+    "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",         # 8:8
+    "foo_fighters_le-1.05", "foo_fighters_pro-1.05", "metallica_spike-1.05",  # 8:23, 8:14, 8:14
     # PAD-1329, Spike 3 (64-bit: the switch struct's entries and node blocks of their own, the fire and OFF read off each
     # program; tools/spike3_emu/proofs PROOF=spare, spare_sweep_mode.c, rig slot 97, hidden, muted, 2026-11-16):
     "star_wars_elg-1.10/spike3",   # the struct checked out (69 switches), spare input 8:37 closed on the board came as
@@ -3457,6 +3620,27 @@ LAMPS_PROVEN = frozenset((
     # the mode's scoring shots at 255 (TOP LANE LEFT and YODA MYSTERY dark before and after, LEFT LUKE ARROW the game's
     # own 192 blink before and after); the game's layer list (pm_lamp_layers) had the runtime's layer on top
     "star_wars_elg-1.10/spike3",
+    # PAD-1555 2026-11-24 newbuild/lightsjob.sh + lightcheck.py (rigbatch, stock cards, hidden, muted; the King Kong LE
+    # 0.97 control the same): a mode file's light_all ff00ff solid, 12 s; the shim's LED view copied before, 3 s and 8 s
+    # in, 4 s after - every insert the port names that the rig's led_io places magenta (R >= 200, G <= 40, B >= 200) in
+    # both copies while it ran, single-colour ones at >= 200; none before or after (Avengers Pro: 3 / 4 of the game's own)
+    #   king_kong_le-1.00 / -1.01 / king_kong_pro-1.01: 8/8 RGB, 97/97 single
+    #   avengers_infinity_pro-1.12: 22/22 RGB, 63/63 single
+    #   metallica_spike-1.05: 18/18 RGB, 77/77 single
+    #   dungeons_and_dragons_le-1.11 / _pro-1.11: 36/36 RGB, 50/50 single
+    #   foo_fighters_le-1.05: 30/30 RGB, 74/74 single (its topper's TOPPER FRONT RAMI / TAYLOR / CHRIS are the cabinet's
+    #   own lights, no inserts, as in the earlier proofs)
+    "foo_fighters_le-1.05",
+    #   foo_fighters_pro-1.05: 25/25 RGB, 65/65 single - once its port had the RGB OVERLORD line (REVISION 16; the first
+    #   run left it dark: the port addressed only the single OVERLORD, twice)
+    "foo_fighters_pro-1.05",
+    #   avengers_infinity_le-1.12: 22/25 RGB, 62/62 single, our layer on top (255) - LEFT ORBIT, LEFT RAMP and POPS GEM
+    #   stay the game's: 1.12 sets them itself (white before and through the mode, green after) past the light layers,
+    #   where the 1.10 control (the same job, NB=1) held all 25 magenta, those three dark before and after - as
+    #   Deadpool LE's arrows (23 of 30) above
+    "avengers_infinity_le-1.12",
+    "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "avengers_infinity_pro-1.12", "metallica_spike-1.05",
+    "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
 ))
 
 

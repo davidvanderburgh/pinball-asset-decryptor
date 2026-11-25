@@ -7473,7 +7473,10 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
  *     64 ms then its hold power for 20 s); the hold part of the one command runs to the time asked, at most that.
  *   - PAD-621: `value <name>_no_hold_flag`: a game flag that, set, refuses every hold of it (James Bond's
  *     FG_MODES_DO_NOT_HOLD_BALL, 166). */
-#define COIL_REC_SIZE  0x68u   /* the framework's coil record, the same on every newest build (coilrec.py) */
+/* the framework's coil record: 0x68 bytes on the builds up to October 2026 (coilrec.py); PAD-1555: Stern's November 2026
+ * builds (King Kong 1.00+, Avengers 1.12, Foo Fighters 1.05, Metallica 1.05) grew it to 0x70 - the fields below are
+ * where they were, the record's tail moved - so a port names its own size (`value coil_rec_size`) */
+#define COIL_REC_SIZE  ((pm_addr)pm_port_value("coil_rec_size", 0x68))
 #define COIL_REC_ID    0x14u   /* u32: the latest request's id; 0 when its command has run out */
 #define COIL_REC_LINK  0x10u   /* u32: 0x60000 = a coil linked to another (a flipper's pair): never held */
 #define COIL_REC_COIL  0x1au   /* u16: the coil on its board */
@@ -7583,6 +7586,8 @@ static int coil_disabled(const struct held_coil *c)
 
 /* Is the GAME using this coil: a process of its own controls it, it asked for an on-time, one of the
  * game's processes the port names for it runs, or (route 1) a command of its own is on the coil? */
+#define CCOIL_ONTIME_AT ((pm_addr)pm_port_value("ccoil_ontime_at", 36))
+
 static int coil_game_busy(const struct held_coil *c)
 {
     char key[40];
@@ -7591,7 +7596,17 @@ static int coil_game_busy(const struct held_coil *c)
     if (c->obj && c->ctl) {
         ctl = *(const unsigned short *)(unsigned long)(c->obj + c->ctl);
         if (ctl && ctl != c->id) return 1;
-        if (!c->route && *(const unsigned *)(unsigned long)(c->obj + 36)) return 1;
+        /* PAD-1555: the object's on-time word - +36 on spike::ControlCoil, +32 on Stern's November 2026 King Kong
+         * builds, whose object's words sit one word earlier (at a hold's start 0.97 has +0x24 0, +0x28 1, +0x2c the
+         * controlling process; 1.01 +0x20 0, +0x24 1, +0x28 the process): read at +36 there, the 1, every hold was
+         * let go 13 ms in as "the game wants it" */
+        if (!c->route && *(const unsigned *)(unsigned long)(c->obj + CCOIL_ONTIME_AT)) {
+            const unsigned *w = (const unsigned *)(unsigned long)(c->obj + 0x20);
+            say("%s: the game's on-time word (+%u) is %u - the object's +0x20..+0x34: %08x %08x %08x %08x %08x %08x",
+                c->name, (unsigned)CCOIL_ONTIME_AT, *(const unsigned *)(unsigned long)(c->obj + CCOIL_ONTIME_AT),
+                w[0], w[1], w[2], w[3], w[4], w[5]);
+            return 1;
+        }
     }
     if (c->route && coil_rec_busy(c)) return 1;
     pm_snprintf(key, sizeof key, "%s_procs", c->name);

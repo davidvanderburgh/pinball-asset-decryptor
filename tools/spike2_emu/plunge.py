@@ -142,6 +142,7 @@ def _resolve():
     # item 167: the van's balls are neither home nor in play, so a drain must not count them - nor any other
     # lock's (PAD-654: TMNT LE's glider, D&D LE's dragon)
     ids["locks"] = ballmodel.lock_ids(by_name)
+    ids["extra"] = ballmodel.complement(by_name)     # PAD-1555: D&D LE's dragon balls are on top of the trough's six
     return ids
 
 
@@ -435,7 +436,7 @@ def do_drain(m):
     """
     padsw.take(m, TROUGH)
     plan = ballmodel.plan_drain(_model(), _mrg(m), SHOOTER, _held(m, SHOOTER),
-                                sum(1 for i in _IDS.get("locks", ()) if _mrg(m)[i]))
+                                sum(1 for i in _IDS.get("locks", ()) if _mrg(m)[i]), _IDS.get("extra", 0))
     if plan.refused:
         print(plan.refused)
         return 1

@@ -48,7 +48,17 @@ import numpy as np
 #: 11: a build whose event bus has more or fewer ids than the reference's keeps the reference's events, each at
 #: this build's own id read off the event map (PAD-1389: King Kong LE 1.00 added one, so its port lost game_start
 #: and ball_start, and with them the Score feed)
-REVISION = 11
+#: 12: the same model's port ranks before the title's other models' (port_derive.merge, PAD-1555: King Kong LE 1.01 took
+#: King Kong Pro 0.97's values, shots and lamps)
+#: 13: the callers of the award screens and light shows that use what they get back are read off the build (ret_use.py);
+#: `own_ret_scanned` and `own_pass_*` are never copied (PAD-1555: a copied `own_ret_scanned 1` came with no list)
+#: 14: another title's value is copied only when two titles or more name it and every other-title reference agrees on
+#: it (PAD-1555: the November 2026 builds' derivations took other titles' coil devices, drives and message numbers)
+#: 15: the scoop's event and which argument its handler takes it in are the title's (PAD-1555: D&D's and Venom's
+#: `scoop_event_arg 1` reached King Kong, Avengers, Foo Fighters and Metallica, whose handlers take it in the first)
+#: 16: two inserts of one name each get their own lamp line (portgen._named_insert, PAD-1555: Foo Fighters Pro 1.05's
+#: RGB OVERLORD was drafted as its single OVERLORD, twice)
+REVISION = 16
 RECIPE_FORMAT = 1
 #: PAD-1389: the event map's format (:func:`compile_busmap`)
 BUSMAP_FORMAT = 1
@@ -87,7 +97,10 @@ TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type", "magnet_shot", 
                 # PAD-714: the START and "active?" slots of the title's own mode classes' vtables (Godzilla's cmode
                 # 8 / 14, the crule titles' 33-41 / 39-49): another title's called another virtual (Foo Fighters 1.03
                 # was derived with 38 / 44, its own 41 / 49); a derived port reads its START slot off its own program
-                "stock_slot_start", "stock_slot_active")
+                "stock_slot_start", "stock_slot_active",
+                # PAD-1555: the scoop's event and the argument its handler reads it from (D&D's and Venom's handlers
+                # take it in the second; King Kong's, Metallica's in the first - another title's held no ball)
+                "scoop_event", "scoop_event_arg")
 #: values that are a shot mask, not an address, however large: copied within a title
 SHOT_VALUES = ("magnet_shot",)
 MIN_N, MAX_N = 8, 48
@@ -1512,6 +1525,22 @@ def _same_but_count(by_name, name):
     return hits[0] if len(hits) == 1 else None
 
 
+def _named_insert(cache, ref):
+    """The target's insert for a reference `lamp` line by name. PAD-1555: a title may name two inserts alike - Foo
+    Fighters Pro's OVERLORD is an RGB insert (lamp 46) and a single one (lamp 76) - and a map by name kept the last,
+    so the Pro 1.05 port had the single one twice and the RGB insert no line at all. Each reference line takes the one
+    of its kind (RGB or single) not taken yet, in the target's order; the first of the name when none is left."""
+    hits = cache.get("named", {}).get(ref[3]) or []
+    used = cache.setdefault("used", set())
+    for want_kind in (True, False):
+        for i in hits:
+            if id(i) in used or (want_kind and (len(i["lights"]) == 1) != ref[1]):
+                continue
+            used.add(id(i))
+            return i
+    return hits[0] if hits else None
+
+
 def lamp_draft(rest, target, other_title, report, cache):
     """One `lamp` line for the target (item mode-leds), placed by the insert's name in the target's own
     tables (lampmap), with the target's own shot tie where its shot table was read; or a comment."""
@@ -1526,11 +1555,15 @@ def lamp_draft(rest, target, other_title, report, cache):
     if "inserts" not in cache:
         try:
             ins, how, _t = lampmap.inserts(lampmap.Elf(target.b, target.path))
-            cache["inserts"] = ({i["name"]: i for i in ins}, how)
         except SystemExit as e:
-            cache["inserts"] = ({}, str(e))
+            ins, how = [], str(e)
+        named = {}
+        for i in ins:
+            named.setdefault(i["name"], []).append(i)
+        cache["inserts"] = ({n: l[0] for n, l in named.items()}, how)
+        cache["named"], cache["used"] = named, set()
     by_name, how = cache["inserts"]
-    ins = by_name.get(ref[3]) or _same_but_count(by_name, ref[3])
+    ins = _named_insert(cache, ref) or _same_but_count(by_name, ref[3])
     if ins is None:
         report["lamp missing"] += 1
         return "# lamp %-40s left out: the target names no insert %s (%s)" % (rest.split("#")[0].strip(), ref[3], how)
@@ -1608,6 +1641,7 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
     started = False
     ref_game = target_game = game
     lamp_cache = tgt.__dict__.setdefault("_lamp_cache", {})
+    lamp_cache["used"] = set()                  # PAD-1555: each draft places its own same-named inserts afresh
     total = max(1, sum(1 for k, _r in entries if k != "#"))
     done = 0
     for key, rest in entries:

@@ -61,7 +61,7 @@ press() {   # press <id>: a mark the object logs, then a 150 ms press
 #: (POSITION, HOME, and Batman 66's "Turntable Pos. #2" / "Crane Pos. #5": PAD-420, pressed they left its
 #: ball in play for ever - a drain with the trough full again neither ended the ball nor served one)
 skipped() {
-    echo "$1" | grep -qiE 'TROUGH|FLIPPER|SHOOTER|COIN|SERVICE|^DIP|START|TILT|DOOR|VOLUME|HEADPHONE|ENCODER|QR SCANNER|MOTOR|LOCKDOWN|LOCK [0-9]|TICKET|OUTLANE|OUT LANE|EOS|DETECT|BUTTON|POSITION|POS\.|HOME|INTERLOCK|OPTO BOARD|JAM'
+    echo "$1" | grep -qiE 'TROUGH|FLIPPER|SHOOTER|COIN|SERVICE|^DIP|START|TILT|DOOR|VOLUME|HEADPHONE|ENCODER|QR SCANNER|MOTOR|LOCKDOWN|LOCK [0-9]|DRAGON HOLD|TICKET|OUTLANE|OUT LANE|EOS|DETECT|BUTTON|POSITION|POS\.|HOME|INTERLOCK|OPTO BOARD|JAM'
 }
 
 #: the rig's ball feeder answers the game's trough eject; on a title whose device table has no

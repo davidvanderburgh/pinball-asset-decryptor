@@ -92,7 +92,8 @@ def test_every_build_whose_start_menu_the_app_knows_is_offered_it():
     offered = {k for k, p in MP.profiles().items() if not PCo.title_refusal(p)}
     # every port but Venom's and D&D's (theirs) and three older builds (latest versions only, as co-op)
     assert sorted(set(MP.profiles()) - offered) == [
-        "dungeons_and_dragons_le_1_00", "dungeons_and_dragons_le_1_10", "dungeons_and_dragons_pro_1_10",
+        "dungeons_and_dragons_le_1_00", "dungeons_and_dragons_le_1_10", "dungeons_and_dragons_le_1_11",
+        "dungeons_and_dragons_pro_1_10", "dungeons_and_dragons_pro_1_11",                # PAD-1555: + D&D 1.11
         "john_wick_le_1_01", "metallica_spike_1_03",                         # PAD-1477: + Godzilla Pro 1.15
         "venom_le_1_07", "venom_pro_1_07"]   # PAD-1327: every Spike 3 title with a port has it
     for key in ("deadpool_pro_1_16", "james_bond_le_1_06", "star_wars_pro_1_31", "turtles_pro_1_59",
@@ -100,7 +101,9 @@ def test_every_build_whose_start_menu_the_app_knows_is_offered_it():
                 "godzilla_le_1_16", "jaws_pro_1_02", "john_wick_le_1_02", "king_kong_le_0_97",
                 "metallica_spike_1_04", "uncanny_xmen_le_0_98",                     # round 2: menus of indices
                 "james_bond_60th_le_1_11",                                           # round 2: Bond 60th's object
-                "star_wars_elg_1_10_spike3"):                                        # PAD-1327: on Spike 3
+                "star_wars_elg_1_10_spike3",
+                "avengers_infinity_le_1_12", "foo_fighters_le_1_05",                 # PAD-1555: menus of indices now
+                "king_kong_le_1_01", "metallica_spike_1_05"):                                        # PAD-1327: on Spike 3
         assert key in offered, key
 
 

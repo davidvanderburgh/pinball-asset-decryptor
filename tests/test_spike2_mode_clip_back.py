@@ -288,10 +288,13 @@ def test_every_clip_v2_port_names_the_surfaces_seek_length_and_position(port):
     (the newer player calls the player functions, the older one the player's virtual seek / position / duration)"""
     text = (PORTS / port).read_text(encoding="utf-8")
     play, sv = _site(text, "surface_play")[0], _site(text, "surface_set_video")[0]
-    older = sv - play == 0x2860
-    assert older or sv - play == 0x21f4
-    want = {"surface_seek": 0x1bc, "surface_duration": -0x1274, "surface_position": -0x360} if older else \
-        {"surface_seek": -0x36c, "surface_duration": -0x6b4, "surface_position": -0x510}
+    layouts = {0x2860: {"surface_seek": 0x1bc, "surface_duration": -0x1274, "surface_position": -0x360},
+               0x21f4: {"surface_seek": -0x36c, "surface_duration": -0x6b4, "surface_position": -0x510},
+               # PAD-1555: Stern's November 2026 builds (King Kong 1.00+, Avengers 1.12, Foo Fighters 1.05, Metallica
+               # 1.05) moved the player's functions; seek's prologue and the others' ready-flag reads are the newer's
+               0x2168: {"surface_seek": -0x1b8, "surface_duration": -0x1788, "surface_position": -0xa4c}}
+    assert sv - play in layouts
+    want = layouts[sv - play]
     for name, d in want.items():
         va, w0, w1 = _site(text, name)
         assert va == play + d, name
@@ -663,7 +666,7 @@ def test_the_games_reel_waits_while_a_clip_of_ours_has_the_surface(tmp_path):
 
 REELS = ("aerosmith-1.16", "aerosmith_le-1.15", "aerosmith_le-1.16", "guardians-1.15", "guardians_le-1.14",
          "guardians_le-1.15", "james_bond_le-1.06", "james_bond_pro-1.06", "led_zeppelin_le-1.22",
-         "led_zeppelin_pro-1.22", "metallica_spike-1.03", "metallica_spike-1.04", "rush_le-1.18", "rush_le-1.19",
+         "led_zeppelin_pro-1.22", "metallica_spike-1.03", "metallica_spike-1.04", "metallica_spike-1.05", "rush_le-1.18", "rush_le-1.19",
          "rush_pro-1.19", "stranger_things-1.13", "stranger_things_le-1.12", "stranger_things_le-1.13")
 
 

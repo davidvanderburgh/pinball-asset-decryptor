@@ -357,4 +357,4 @@ def test_the_turns_are_offered_on_one_build_per_game_its_latest():
     assert len(games) == len(set(games)) == 53
     assert {"james_bond_pro-1.06", "james_bond_le-1.06", "godzilla_le-1.16"} <= SMo.TURN_PROVEN
     assert "godzilla_pro-1.15" not in SMo.TURN_PROVEN
-    assert {"avengers_infinity_le-1.10", "avengers_infinity_pro-1.10"} <= SMo.TURN_PROVEN     # PAD-481
+    assert {"avengers_infinity_le-1.12", "avengers_infinity_pro-1.12"} <= SMo.TURN_PROVEN     # PAD-481; PAD-1555: 1.12

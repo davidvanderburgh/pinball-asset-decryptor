@@ -331,6 +331,15 @@ HOLDS = (
 )
 
 
+def complement(by_name):
+    """Balls installed on top of the trough's switches: a HOLDS lock's own (PAD_BALL_EXTRA overrides it), 0 without
+    one. The number ballfeed queues behind the trough, for plunge.py's drain, which has no coil table (PAD-1555)."""
+    for names, _release, _feed, balls in HOLDS:
+        if all(n in by_name for n in names):
+            return int(os.environ.get("PAD_BALL_EXTRA") or balls)
+    return 0
+
+
 def lock_ids(by_name):
     """Every switch of a lock this title has by name (the van, its glider, a HOLDS stack): a ball on one is neither
     home nor in play. For plunge.py's drain, which has no coil table to match a lock by."""
@@ -531,7 +540,7 @@ def plan_launch(lane_id, lane_made):
                   "shooter lane %d opened (ball launched)" % lane_id)])
 
 
-def in_play(tr, mrg, lane_id=None, lane_made=False, held=0):
+def in_play(tr, mrg, lane_id=None, lane_made=False, held=0, extra=0):
     """Balls the game believes are out on the playfield - DERIVED, never counted.
 
     installed - trough - lane. A ball waiting in the shooter lane is not in
@@ -541,10 +550,14 @@ def in_play(tr, mrg, lane_id=None, lane_made=False, held=0):
     """
     lane = 1 if lane_id is not None and lane_made else 0
     # `held`: balls a lock holds (the van, item 167) - neither home nor in play
-    return max(0, len(tr.positions) - tr.count(mrg) - lane - held)
+    # `extra`: balls installed on top of the trough's (a HOLDS lock's complement, complement()). PAD-1555: without them
+    # D&D LE's three dragon balls made 6 - 5 - 3 < 0 with ball 1 on the playfield, and every drain was refused as "the
+    # ball is still in the shooter lane". Balls queued behind the trough are only ever there while it is full, and a
+    # full trough is refused before this is asked.
+    return max(0, len(tr.positions) + extra - tr.count(mrg) - lane - held)
 
 
-def plan_drain(tr, mrg, lane_id=None, lane_made=False, held=0):
+def plan_drain(tr, mrg, lane_id=None, lane_made=False, held=0, extra=0):
     """A ball in play drained. It arrives at the FAR end of the trough.
 
     THIS IS THE HALF NOTHING CAN OBSERVE, so it is an action and not an event.
@@ -568,7 +581,7 @@ def plan_drain(tr, mrg, lane_id=None, lane_made=False, held=0):
     home = tr.arriving(mrg)
     if home is None:
         return Plan(refused="the trough is already full - no ball is in play")
-    if not in_play(tr, mrg, lane_id, lane_made, held):
+    if not in_play(tr, mrg, lane_id, lane_made, held, extra):
         return Plan(refused="the ball is still in the shooter lane - "
                             "Plunge it first")
     # ★ THE BALL ROLLS DOWN THE RAMP FIRST (PAD-186, David's live Mechagodzilla

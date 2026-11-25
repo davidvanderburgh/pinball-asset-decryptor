@@ -143,7 +143,9 @@ def test_every_port_whose_clips_play_on_the_games_own_bank_opts_in():
                 and re.search(r"^value display_at ", t, re.M):     # the runtime's clip_play route (its clip_s/d/v)
             continue
         want.append(p.name)
-    assert on == want and len(on) == 45
+    # PAD-1555: + the nine November 2026 builds with a clip v2 bank of their own (as their earlier builds; Metallica
+    # 1.05 grafts its surface like 1.04), the mode's clip back after the game's proven on the new player
+    assert on == want and len(on) == 54
     assert "james_bond_le-1.06.port" in on and "jaws_pro-1.02.port" not in on and "rush_le-1.19.port" not in on
 
 

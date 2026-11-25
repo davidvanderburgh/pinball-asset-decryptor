@@ -73,7 +73,7 @@ def test_every_coop_port_has_its_serve():
         assert w0 >> 24 == 0xEB and w1 == MOV_R0_26, port.name        # bl <serve> ; mov r0, #0x26
         assert 54 <= (at - e["coop_first_ball"][0]) // 4 <= 63, port.name
         seen += 1
-    assert seen == 54                                                 # the 51 of PAD-1478 + Godzilla LE/Pro 1.16, Pro 1.15
+    assert seen == 64                                                 # the 51 of PAD-1478 + Godzilla LE/Pro 1.16, Pro 1.15; PAD-1555: + 10
 
 
 def test_the_serve_forms_a_held_start_game_before_the_pick_hold():
@@ -157,7 +157,12 @@ def test_the_start_menu_titles_name_their_serve_music():
     want = {"jaws_le-1.02": 66, "jaws_pro-1.02": 66, "john_wick_le-1.02": 77,
             "john_wick_pro-1.02": 77, "king_kong_le-0.97": 124, "king_kong_pro-0.97": 124,
             "metallica_spike-1.04": 65, "uncanny_xmen_le-0.98": 191, "uncanny_xmen_pro-0.98": 191,
-            "godzilla_le-1.16": 66, "godzilla_pro-1.16": 66, "godzilla_pro-1.15": 66}
+            "godzilla_le-1.16": 66, "godzilla_pro-1.16": 66, "godzilla_pro-1.15": 66,
+            # PAD-1555: the November 2026 start-menu builds, the same music as each one's earlier build
+            "king_kong_le-1.00": 125, "king_kong_le-1.01": 125,   # 1.01: its own ids moved one on (sound log)
+            "king_kong_pro-1.01": 125, "metallica_spike-1.05": 87,
+            "avengers_infinity_le-1.12": 468, "avengers_infinity_pro-1.12": 468, "foo_fighters_le-1.05": 74,
+            "foo_fighters_pro-1.05": 74}   # PAD-1555: measured at the bus's ball_start (servejob.sh)
     for port in PORTS.glob("*.port"):
         text = port.read_text(encoding="utf-8")
         if "comp_menu_end_msg" in text:                                # every start-menu title has its serve music

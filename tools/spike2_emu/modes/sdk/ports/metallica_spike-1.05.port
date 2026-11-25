@@ -394,7 +394,7 @@ value shake_power_adj      315
 value game_flags_at          4
 value wizard_flag_1      50    # FG_BLACKENED_MULTIBALL_ACTIVE
 value wizard_proc_2      223   # its own process, which the start creates
-value serve_music          65
+value serve_music          87   # PAD-1555: the request at the serve on this build (sound log: 144, 87 16 ms before the bus's ball_start); Metallica picks among its songs there (1.04: 80 one game, 87 another)
 value coop_ball_msg          1256   # PAD-1555: "BALL %d" moved one on (1914 FLIPPERS TO CHANGE/START SELECTS is new)
 value comp_menu_frame_list_at    652
 value comp_menu_frame_count_at   28

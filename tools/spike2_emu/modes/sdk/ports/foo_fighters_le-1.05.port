@@ -910,6 +910,9 @@ site  coop_icon_draw         0x001d55a4 0xebfffdf3 0xe1560004
 site  coop_up_call           0x000bac54 0xeb0d5a55 0xe3500003
 # ---- PAD-1555: this build's start menu is a menu of game-mode table indices now (the earlier build's
 # challenge_menu loop is gone); its frame read off the program (prolonged_comp.frame_lines)
+# PAD-1555: the request the game makes at the ball start's serve (servejob.sh: 948 at the start, 74 at the serve (26 ms before the bus's ball_start), asked again 6 s on) - asked for early when
+# ball 1 waits for a Standard game's character pick (PAD-1449 round 4)
+value serve_music          74
 # PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again
 site  comp_menu_frame        0x000deb98 0xe0833106 0xe51330e4
 value comp_menu_frame_list_at    420

@@ -402,3 +402,19 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   sound_modes.PROVEN) - doc pad-724: Machine Settings walked from the bottom (Test Menu Settings, Attract Mode, Audio
   Configuration, Audio Content), Audio Content row 1 = Music Mode, Attract Mode row 6 = Edition; on the standard list
   Minus from row 1 wraps to EDITION then MUSIC MODE; Select, Plus, Select sets 2; the store /data/nv/<title>/NVM.
+
+### Run 12 (2026-11-25): sounds in turn finished, MUSIC MODE / EDITION re-made
+
+- Sounds in turn: all seven builds that can hold them (above); D&D at 1.10's parity.
+- **MUSIC MODE / EDITION kit** (`newbuild/musicjob.sh`; builder C:/tmp/PAD-1555/turn/mk.py `MODE=music`: sound_modes
+  `slots` {rel: {"2": 1000 Hz, "3": 2000 Hz}} + `names`, `editions` two names, and `service_menu` `{"on":
+  ["music_mode", "edition"]}` - without the ticks Write leaves both rows off). Both rows land on Machine Settings >
+  Custom Code (King Kong LE 1.01: page rank 6, MUSIC MODE row 0, EDITION row 1 - service_menu.pages on the project's
+  program); STEPS = service_menu.walk(rank, row); Select / Plus / Select sets 2; BACK x6 to attract.
+- **King Kong LE 1.01 proven:** 500 Hz twice, the Custom Code page showing Music Mode 2 and Edition 2 (Current Value =
+  2), "music modes: mode 2 from here on", 1000 Hz twice. menu_settings.PROVEN (= sound_modes.PROVEN), in 0.97's place.
+- **Left for run 13:** the same on King Kong Pro 1.01, Avengers LE / Pro 1.12, Foo Fighters LE / Pro 1.05 (GAP 5),
+  Metallica 1.05, D&D LE / Pro 1.11 (no bank room: a mode file may be refused - EDITION alone then) - each build's
+  slot idx is its turn build's (C:/tmp/PAD-1555/turn/<key>.mk.txt SLOT line for the chosen sid), its rank/row from
+  service_menu.pages; the NVM copy path in musicjob.sh ($ROOT/data/nv/*/NVM found nothing - read it where the rig
+  keeps the slot's /data).

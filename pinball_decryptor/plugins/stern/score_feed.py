@@ -109,11 +109,45 @@ def save(project, on, url=None):
     was = (bool(raw.get("on")), raw.get("url") if isinstance(raw.get("url"), str) else "")
     new_url = was[1] if url is None else (url or "").strip()
     if on or new_url:
-        data[STAGED_KEY] = {"on": bool(on), "url": new_url}
+        data[STAGED_KEY] = dict(raw, on=bool(on), url=new_url)     # PAD-1575: keeps the live tick
     else:
         data.pop(STAGED_KEY, None)
     staged_changes.save(project, data)
     return was
+
+
+def live_on(project):
+    """PAD-1575: the "Also during the game" tick of the project's own score feed."""
+    if not project:
+        return False
+    from ...core import staged_changes
+    try:
+        raw = staged_changes.load(project).get(STAGED_KEY)
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: off
+        return False
+    return isinstance(raw, dict) and bool(raw.get("live"))
+
+
+def save_live(project, on):
+    """PAD-1575: tick (or untick) "Also during the game"; returns how it was. Kept beside the address, so it stays
+    ticked while the feed itself is off."""
+    from ...core import staged_changes
+    data = staged_changes.load(project)
+    raw = data.get(STAGED_KEY) if isinstance(data.get(STAGED_KEY), dict) else {}
+    was = bool(raw.get("live"))
+    raw = dict(raw, live=bool(on))
+    raw.setdefault("on", False)
+    raw.setdefault("url", "")
+    data[STAGED_KEY] = raw
+    staged_changes.save(project, data)
+    return was
+
+
+def live_wanted(project):
+    """PAD-1575: True when the card posts the live events too: the project's own feed is on and is what the card
+    posts to, with "Also during the game" ticked (online co-op's campaign server gets the reports alone)."""
+    on, url = own(project)
+    return bool(on and live_on(project) and url.strip() and wanted(project) == url.strip())
 
 
 def wanted(project):
@@ -190,17 +224,20 @@ def type_lines(game_elf):
     return out[:MAX_TYPES]
 
 
-def cfg_text(url, title, game_elf, only):
+def cfg_text(url, title, game_elf, only, live=False):
     """``scorefeed.cfg``: the address, the game's name for the reports, the logins' tables when *game_elf* shows them;
-    *only* when the card carries no modes (the runtime then arms this and nothing else)."""
+    *only* when the card carries no modes (the runtime then arms this and nothing else); *live* (PAD-1575) when the
+    events while a game is played are posted too."""
     why = url_problem(url)
     if why:
         raise ScoreFeedError(why)
     title = " ".join((title or "").split())[:63]
     users, types = users_line(game_elf), type_lines(game_elf)
+    players = players_line(game_elf) if live else ""                 # PAD-1575
     return ("# PAD-1204: each game's final scores, posted to the owner's own server\n"
             "feed %s\n" % url.strip() + ("title %s\n" % title if title else "") + (users + "\n" if users else "")
-            + "".join(t + "\n" for t in types) + ("only\n" if only else ""))
+            + "".join(t + "\n" for t in types) + ("live\n" if live else "") + (players + "\n" if players else "")
+            + ("only\n" if only else ""))
 
 
 #: PAD-1204 (David: "I'd like to see the sample API contract for the scores API"): what the machine sends and what it
@@ -265,4 +302,96 @@ def contract(url=""):
     return {"request": sample_request(url.strip() if good else PLACEHOLDER),
             "body": json.dumps(SAMPLE, indent=2),
             "fields": [{"name": n, "type": t, "what": w} for n, t, w in FIELDS],
-            "answer": ANSWER}
+            "answer": ANSWER, "live": live_contract()}
+
+
+# ---- PAD-1575: the score feed DURING a game ----------------------------------------------------------------------
+#: the tick beside the Score feed's own, and what it does (the Network tab)
+LIVE_LABEL = "Also during the game"
+LIVE_TIP = ("While a game is played, the machine also posts each thing that happens to the same address: the game's "
+            "start, each ball's start and end, a change of player, the scores (once a second while they change), the "
+            "start and end of multiballs, bonus and modes, a tilt and the game's end. Each carries every score, who is "
+            "up and their ball, so a stream overlay or a second screen shows the game live. The machine never waits "
+            "for your server: what it does not take straight away is dropped. Off to start with.")
+LIVE_NOTE = "While a game is played the machine also posts each of its events here, live."
+#: the runtime's event names (pad_mode_runtime.c live_tick / live_game_end), in the order a game sends them
+LIVE_EVENTS = (
+    ("game_start", "a game started (players is 1; it grows as players are added)"),
+    ("ball_start", "a ball started for the player up (ball counts that player's balls this game)"),
+    ("player_change", "the next player is up"),
+    ("score", "a score changed: sent at most once a second while scores change"),
+    ("mode_start", "a mode, multiball or bonus began: mode is its name, kind what it is"),
+    ("mode_end", "it ended"),
+    ("tilt", "the game was tilted"),
+    ("ball_end", "the ball drained (or the game ended it)"),
+    ("game_end", "the game is over: the final scores, sent just before the game's report"),
+)
+#: the fields of every live event, in pad_mode_runtime.c live_json's order
+LIVE_FIELDS = (
+    ("source", "string", 'always "PAD score feed"'),
+    ("event", "string", "what happened: " + ", ".join(n for n, _ in LIVE_EVENTS)),
+    ("seq", "integer", "counts the events since the machine was switched on: a gap means some were dropped"),
+    ("game", "string", "the game and its version, as the app names the card"),
+    ("game_number", "integer", "the game_number this game's report will carry"),
+    ("ms", "integer", "the machine's own clock in milliseconds, to order events and time them"),
+    ("time", "integer or null", "the machine's clock in Unix seconds; null when the clock was never set"),
+    ("players", "integer", "how many are playing so far, 1 to 4"),
+    ("player", "integer", "the player up, 1 to 4 (0 between games)"),
+    ("ball", "integer", "that player's ball: 1, 2, 3... (an extra ball counts on)"),
+    ("scores", "array of integers", "every player's score now, player 1 first"),
+    ("mode", "string", 'mode_start and mode_end only: the mode\'s name ("Multiball" and "Bonus" for those)'),
+    ("kind", "string", 'mode_start and mode_end only: "card" (a mode of your card), "game" (one of the game\'s own '
+     'modes, on a card with modes), "multiball" or "bonus"'),
+)
+LIVE_SAMPLE = {"source": "PAD score feed", "event": "mode_start", "seq": 42, "game": "Godzilla Premium/LE 1.16",
+               "game_number": 3, "ms": 812345, "time": 1794510083, "players": 2, "player": 2, "ball": 1,
+               "scores": [12345670, 2210500], "mode": "Multiball", "kind": "multiball"}
+LIVE_ANSWER = ("Live events are posted one at a time, the same way, and never tried again: answer with a 2xx status "
+               "within 1.5 s. One not taken is dropped and the next ones wait 5 s, so a slow or absent server never "
+               "holds the game; seq shows the gap. A post without \"event\" is the game's report, as above.")
+#: the sample overlay the tab saves (tools/spike2_emu/modes/sdk/examples/score_feed_overlay)
+OVERLAY_FILES = ("overlay_server.py", "overlay.html", "README.md")
+OVERLAY_TIP = ("Saves a small server and an overlay page for OBS (a Browser source) or any browser on a second "
+               "screen. Run the server on the computer at your server's address: the page shows the live scores, the "
+               "player up, the ball and the modes running. README.md in the folder says how.")
+
+
+def players_line(game_elf):
+    """PAD-1575: ``players <player> <count>``: the framework's player-up byte (the ball in play is the next) and its
+    count of players' byte, read off a Spike 2 program by co-op's finder (portcoop.player_change: 53 of 53 shipped
+    programs); ``""`` when it does not find them (the runtime then counts the players and balls itself)."""
+    from . import portcoop as PCo
+    try:
+        pc = PCo.player_change(PCo.Elf(game_elf)) if game_elf else None
+    except Exception:                                   # noqa: BLE001 - a Spike 3 or unreadable program
+        pc = None
+    return "players 0x%08x 0x%08x" % (pc[1], pc[2]) if pc else ""
+
+
+def live_contract():
+    """PAD-1575: the live events' part of the API contract, as the Network tab shows it."""
+    import json
+    return {"body": json.dumps(LIVE_SAMPLE, indent=2),
+            "fields": [{"name": n, "type": t, "what": w} for n, t, w in LIVE_FIELDS],
+            "events": [{"name": n, "what": w} for n, w in LIVE_EVENTS],
+            "answer": LIVE_ANSWER}
+
+
+def overlay_dir():
+    """The sample overlay's folder in the SDK the app ships."""
+    import os
+    from . import mode_runtime
+    return os.path.join(mode_runtime.sdk_dir(), "examples", "score_feed_overlay")
+
+
+def save_overlay(dest):
+    """Copy the sample overlay into the folder *dest* (made when missing); the paths written."""
+    import os
+    import shutil
+    src = overlay_dir()
+    os.makedirs(dest, exist_ok=True)
+    out = []
+    for name in OVERLAY_FILES:
+        shutil.copyfile(os.path.join(src, name), os.path.join(dest, name))
+        out.append(os.path.join(dest, name))
+    return out

@@ -26,7 +26,24 @@ function FeedContract({ c }) {
           <td class="muted">${f.type}</td><td>${f.what}</td></tr>`)}</tbody></table>
       <div class="lbl">Your server's answer</div>
       <p class="small">${c.answer}</p>
+      ${c.live ? html`<${LiveContract} c=${c.live} />` : null}
     </div>` : null}
+  </div>`;
+}
+
+// PAD-1575: the events posted while a game is played ("Also during the game"), each one JSON object like the report
+function LiveContract({ c }) {
+  return html`<div class="net-live-contract">
+    <div class="lbl">Also during the game: one post per event</div>
+    <table class="net-fields"><thead><tr><th>Event</th><th>When</th></tr></thead>
+      <tbody>${(c.events || []).map((e) => html`<tr key=${e.name}><td class="mono">${e.name}</td><td>${e.what}</td></tr>`)}</tbody></table>
+    <div class="lbl">An event's body, laid out</div>
+    <pre class="mono net-pre">${c.body}</pre>
+    <div class="lbl">An event's fields</div>
+    <table class="net-fields"><thead><tr><th>Field</th><th>Type</th><th>What it holds</th></tr></thead>
+      <tbody>${(c.fields || []).map((f) => html`<tr key=${f.name}><td class="mono">${f.name}</td>
+        <td class="muted">${f.type}</td><td>${f.what}</td></tr>`)}</tbody></table>
+    <p class="small">${c.answer}</p>
   </div>`;
 }
 
@@ -77,6 +94,14 @@ function ScoreFeed({ s, n }) {
       <${Field} value=${s.feed_url} mono placeholder=${s.feed_placeholder} title=${s.feed_url_tip}
         bad=${s.feed_note_kind === "err"} onChange=${() => {}} onCommit=${(v) => call("modes.set_score_feed", true, v)} /></div>` : null}
     <${Said} text=${s.feed_note} kind=${s.feed_note_kind} />
+    ${s.feed_on ? html`<div class="net-live">
+      <${Check} checked=${s.feed_live} wrap label=${s.feed_live_label} title=${s.feed_live_tip}
+        onChange=${(v) => call("modes.set_score_feed_live", v)} />
+      <${Said} text=${s.feed_live_note} kind="" />
+      ${s.feed_live ? html`<div class="row"><${Button} title=${s.feed_overlay_tip}
+        onClick=${() => call("modes.save_feed_overlay")}>Save the sample overlay…<//>
+        <span class="small muted">A page for OBS or a second screen that shows the game live</span></div>` : null}
+    </div>` : null}
     <${FeedContract} c=${s.feed_contract} />
     <${Ways} n=${n || {}} panel="score_feed" />
   <//>`;

@@ -56,6 +56,41 @@ lines). Emulator: Jaws Premium/LE 1.02 (kit `C:\tmp\PAD-1344\rig`).
   shows the request as sent to the typed address, the body laid out, every field with its type, and the answer the
   machine expects (`score_feed.contract()`; a test checks its keys against the runtime's `feed_json`).
 
+## Live events during a game (PAD-1575)
+
+David (2026-11-25, from a list of ideas: "Do 9 too"): a live event feed for streaming - score, ball and mode events to
+an OBS overlay or a second screen, for tournaments and home streamers.
+
+- **The tab**: the Score feed card gets **Also during the game** under the address (the sidecar's `score_feed.live`,
+  kept when the address or the feed's own tick changes; off by default), and once ticked **Save the sample
+  overlay...**. The API contract gains the live events: each event, a sample body, its fields, the answer.
+- **The build**: `scorefeed.cfg` gains `live` and `players <player> <count>` (`score_feed.players_line`, co-op's
+  finder). A card in an online co-op campaign posts its reports to the campaign's server and sends no live events.
+- **The runtime**: MODE_SDK.md "Live events during a game".
+- **The sample overlay**: `tools/spike2_emu/modes/sdk/examples/score_feed_overlay/` (ships with the SDK on every
+  platform).
+
+### Choices
+
+- **One POST per event, the same address and format as the report.** Any server that takes the report takes these;
+  `event` tells them apart. A stream (a socket held open, server-sent events) would need the machine to keep a
+  connection and a server written for it; a post a second at most, on the owner's network, costs nothing.
+- **Every event carries the whole state**, so an overlay that missed some still shows the game right.
+- **Dropped, never retried.** A late score is worth nothing to an overlay, and the machine must never wait: one try,
+  then the next ones wait 5 s; the report at a game's end keeps its own three tries.
+- **The game's own modes** are followed where the runtime already hooks their starts (a card with modes); a card of
+  only the feed hooks nothing more of the game's code for this, and reports multiballs and bonus off the port's events.
+
+### Proof
+
+Emulator, Godzilla LE 1.16 (kit `C:\tmp\PAD-1575`: `build.sh` stages the runtime with two rig instruments,
+`livejob.sh` the rigbatch job; the stub server is the sample overlay server itself, on 127.0.0.1): MODE_SDK.md
+"Live events during a game", Proof. Two earlier runs found what the final one shows fixed: a ball's end named the next
+player (read on the tick after the bus call; now kept from the call), the last ball's end came after game_end (the
+bus's waiting events now go before it), the report could reach the server before game_end (it now waits up to 3 s
+for the live events queued before it), and the players count waited for player 2's first ball (now the game's own
+count byte). Spike 3 carries the same code (prebuilt/mode64.so) and cfg; it was not run on the Spike 3 emulator.
+
 ## Every Spike 2 build (PAD-1389)
 
 David: "I don't see it in the play options tab anymore for King Kong at least. we need to add it to all spike 2 games."

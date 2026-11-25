@@ -27928,6 +27928,8 @@ static int feed_status(const char *resp, unsigned len)
     return (resp[9] - '0') * 100 + (resp[10] - '0') * 10 + (resp[11] - '0');
 }
 
+static int live_holds_report(unsigned long now);   /* PAD-1575, below */
+
 /* The try at the report at tail ended: taken (why 0), another try later, or the report dropped. */
 static void feed_try_done(const char *why)
 {
@@ -27967,6 +27969,7 @@ static void feed_send_step(void)
         /* fall through - the next try */
     case FEED_IDLE:
         if (feed.tail == feed.head) return;
+        if (!feed.tries && live_holds_report(now)) return;  /* PAD-1575: the live game_end goes out first */
         if (!feed.tries && !feed_request(&feed.queue[feed.tail % FEED_QUEUE])) {
             feed.tries = FEED_TRIES;
             feed_try_done("the report did not fit");
@@ -28094,6 +28097,7 @@ static void feed_snapshot(struct feed_report *r)
     }
 }
 
+static void live_game_end(const struct feed_report *r);   /* PAD-1575, below */
 static void feed_queue(const struct feed_report *r, const char *why)
 {
     struct feed_report *q;
@@ -28112,6 +28116,7 @@ static void feed_queue(const struct feed_report *r, const char *why)
         say("online co-op: game %u for team \"%s\" - %u count(s)%s%s %lld", q->number, q->team, q->n_counts,
             q->n_counts ? ", first " : "", q->n_counts ? q->count_name[0] : "", q->n_counts ? q->count_val[0] : 0ll);
     feed.head++;
+    live_game_end(q);                                   /* PAD-1575: the live feed's game_end, before the report */
 }
 
 /* PAD-1344: the game type's rank, from the flags alone (tests lift it verbatim): set = the rank of the strongest type
@@ -28182,8 +28187,543 @@ static void feed_type_sample(void)
     say("score feed: this game is a %s game%s%s", feed.type, feed.challenge[0] ? ": " : "", feed.challenge);
 }
 
+/* ---- PAD-1575: the score feed DURING a game - live events for a stream overlay or a second screen ---------------
+ * David (2026-11-25, idea 9): "a live event feed for streaming ... score, ball and mode events over the network to an
+ * OBS overlay or a second screen ... for tournaments and home streamers". With scorefeed.cfg's `live` line (the
+ * Network tab's "Also during the game" tick) the runtime posts, besides each game's report, one small JSON object for
+ * each thing that happens while a game is played, to the same address:
+ *   {"source":"PAD score feed","event":"ball_start","seq":12,"game":"Godzilla Premium/LE 1.16","game_number":3,
+ *    "ms":81234,"time":1794326400,"players":2,"player":2,"ball":1,"scores":[123450,0]}
+ * event is game_start, ball_start, ball_end, player_change, score (at most once a LIVE_SCORE_MS, while a score
+ * changes), mode_start / mode_end (with "mode", its name, and "kind": "card" a mode of the card's own, "game" one of
+ * the game's own modes where the runtime follows their starts (a card with modes: the block hooks), "multiball" and
+ * "bonus" off the game's event bus), tilt, or game_end (the final scores, the report that follows it). Every event
+ * carries the whole state - how many play, who is up, that player's ball (the ball starts counted for that player this
+ * game: an extra ball counts on), every score - so an overlay needs only the latest one. With scorefeed.cfg's
+ * `players <player> <count>` line (score_feed.players_line: the framework's player-up byte, the ball's next to it, and
+ * the count of players' byte, portcoop.player_change) the players and the ball are the game's own, a player who
+ * pressed Start counted at once. A multiball or bonus the port names as a site event (Godzilla's mball_start) comes
+ * through the runtime's event counters (events_arm, armed for this on a card of only the feed). seq counts the events since
+ * the machine was switched on (a gap: events were dropped); game_number is the number the game's report will carry;
+ * ms the runtime's clock (milliseconds since the game started up).
+ * NEVER HOLDS THE GAME: its own non-blocking socket, stepped on the game's tick as the report's (rules 1-2: no
+ * waiting, no threads), LIVE_TIMEOUT_MS for each part of a post, and no second try: an event the server does not take
+ * is dropped and the next waits LIVE_BACKOFF_MS. With LIVE_QUEUE waiting the oldest goes, and a score update waiting
+ * is replaced by the next one rather than queued behind it. The report at a game's end keeps its own tries. mode.log
+ * says the first drop of an outage, the recovery, and at each game's end how many were posted and dropped and the
+ * longest the live work took on one tick. */
+#define LIVE_QUEUE      24
+#define LIVE_JSON_MAX   640
+#define LIVE_REQ_MAX    (LIVE_JSON_MAX + 384)
+#define LIVE_RING       64
+#define LIVE_SCORE_MS   1000ul
+#define LIVE_MODES_MS   100ul
+#define LIVE_TIMEOUT_MS 1500ul
+#define LIVE_BACKOFF_MS 5000ul
+#define LIVE_OURS       (LAYERS_MAX + 1)
+#define LIVE_HOLD_MS    3000ul                  /* the most a game's report waits for the live events before it */
+
+struct live_event {                             /* what one event says (tests lift live_json) */
+    const char *event, *mode, *kind;
+    unsigned seq, number, players, player, ball;
+    uint64_t scores[4];
+    unsigned long ms;
+    long when;
+};
+
+/* One live event as JSON into out: its length, or 0 when it does not fit. (tests lift it verbatim: its braces are
+ * \x7b and \x7d, as the lifter counts the ones in strings too) */
+static unsigned live_json(char *out, unsigned cap, const struct live_event *e, const char *title)
+{
+    char t[160], md[96];
+    unsigned n, p;
+    int m;
+    feed_json_str(t, sizeof t, title);
+    m = feed_fmt(out, cap, "\x7b\"source\":\"PAD score feed\",\"event\":\"%s\",\"seq\":%u,\"game\":\"%s\","
+                 "\"game_number\":%u,\"ms\":%lu,", e->event, e->seq, t, e->number, e->ms);
+    if (m <= 0 || (unsigned)m >= cap) return 0;
+    n = (unsigned)m;
+    m = e->when > 0 ? feed_fmt(out + n, cap - n, "\"time\":%ld,", e->when) : feed_fmt(out + n, cap - n, "\"time\":null,");
+    if (m <= 0 || (unsigned)m >= cap - n) return 0;
+    n += (unsigned)m;
+    m = feed_fmt(out + n, cap - n, "\"players\":%u,\"player\":%u,\"ball\":%u,\"scores\":[", e->players, e->player,
+                 e->ball);
+    if (m <= 0 || (unsigned)m >= cap - n) return 0;
+    n += (unsigned)m;
+    for (p = 0; p < e->players && p < 4; p++) {
+        m = feed_fmt(out + n, cap - n, "%s%llu", p ? "," : "", (unsigned long long)e->scores[p]);
+        if (m <= 0 || (unsigned)m >= cap - n) return 0;
+        n += (unsigned)m;
+    }
+    if (e->mode) {
+        feed_json_str(md, sizeof md, e->mode);
+        feed_json_str(t, sizeof t, e->kind ? e->kind : "");
+        m = feed_fmt(out + n, cap - n, "],\"mode\":\"%s\",\"kind\":\"%s\"\x7d", md, t);
+    } else
+        m = feed_fmt(out + n, cap - n, "]\x7d");
+    if (m <= 0 || (unsigned)m >= cap - n) return 0;
+    return n + (unsigned)m;
+}
+
+/* The events waiting to be posted: added at head, taken from tail (the one being posted is copied out first). */
+struct live_queue {
+    char body[LIVE_QUEUE][LIVE_JSON_MAX];
+    unsigned len[LIVE_QUEUE], seq[LIVE_QUEUE];
+    unsigned char score[LIVE_QUEUE];
+    unsigned head, tail, dropped;
+};
+
+/* 1 when a score update now would replace the one waiting last rather than queue behind it (tests lift it) */
+static int live_q_merges(const struct live_queue *q)
+{
+    return q->head != q->tail && q->score[(q->head - 1u) % LIVE_QUEUE];
+}
+
+/* Add an event (merge: in place of the score update waiting last, live_q_merges); full, the oldest waiting goes.
+ * (tests lift it verbatim) */
+static void live_q_push(struct live_queue *q, const char *body, unsigned len, unsigned seq, int score, int merge)
+{
+    unsigned i, k;
+    if (!len || len >= LIVE_JSON_MAX) {
+        q->dropped++;
+        return;
+    }
+    if (merge && live_q_merges(q)) i = (q->head - 1u) % LIVE_QUEUE;
+    else {
+        if (q->head - q->tail >= LIVE_QUEUE) {
+            q->tail++;
+            q->dropped++;
+        }
+        i = q->head++ % LIVE_QUEUE;
+    }
+    for (k = 0; k < len; k++) q->body[i][k] = body[k];
+    q->body[i][len] = 0;
+    q->len[i] = len;
+    q->seq[i] = seq;
+    q->score[i] = (unsigned char)(score != 0);
+}
+
+enum { LV_NONE, LV_GAME, LV_BALL, LV_BALL_END, LV_MB_START, LV_MB_END, LV_BONUS_START, LV_BONUS_END, LV_TILT,
+       LV_KINDS };
+
+static struct {
+    int wanted, on;
+    unsigned bus[LV_KINDS];                     /* each kind's bus id (~0u: the port names none) */
+    volatile unsigned rhead;                    /* the bus's events in order, added on the bus, read on the tick */
+    unsigned rtail;
+    volatile unsigned char ring[LIVE_RING], ring_p[LIVE_RING], ring_b[LIVE_RING];
+    unsigned ev_p, ev_b;                        /* the bus event at hand's player and ball (0: as now) */
+    int ended;                                  /* a game_end went out: the bus's stragglers of that game are not sent */
+    unsigned seq, player, ball[4];
+    pm_addr player_at, count_at;                /* scorefeed.cfg's players line: the game's own bytes (0: counted) */
+    int site_id[LV_KINDS], sites_done;          /* a kind the port names as a site event: its event id (-1 none) */
+    unsigned site_seen[LV_KINDS];
+    uint64_t last[4];                           /* the scores the last event carried */
+    unsigned long score_ms, modes_ms;
+    const struct pm_mode *ours[LIVE_OURS];      /* the card's own modes running, and the names they started under */
+    char ours_name[LIVE_OURS][40];
+    int n_ours;
+    unsigned gs[BLOCK_IDS], ge[BLOCK_IDS];      /* the game's modes' starts and stops seen so far */
+    struct live_queue q;
+    int state, fd, status, outage;
+    unsigned long state_ms, tick_us, max_us;
+    unsigned long ticks, sum_us, over_ms, noise_us;   /* this game's ticks: the live work's sum, > 1 ms, the clock's noise */
+    unsigned req_len, req_sent, resp_len, posted, game_posted, game_dropped, outage_dropped;
+    char req[LIVE_REQ_MAX], resp[32];
+} lv;
+
+static unsigned long live_us(void)
+{
+    struct { long s, ns; } t;
+    t.s = t.ns = 0;
+    clock_gettime(1 /* CLOCK_MONOTONIC */, &t);
+    return (unsigned long)t.s * 1000000ul + (unsigned long)t.ns / 1000ul;
+}
+
+/* from the bus (on_feed_dispatch): the events the overlay hears of, kept in order for the tick */
+static void live_bus(unsigned id)
+{
+    unsigned k, slot, p, b = 0;
+    for (k = LV_GAME; k < LV_KINDS && lv.bus[k] != id; k++) ;
+    if (k == LV_KINDS) return;
+    p = pm_player();                            /* who is up as the bus calls: by the tick the game may have moved on */
+    if (p && lv.player_at) b = *(volatile unsigned char *)(unsigned long)(lv.player_at + 1);
+    slot = __sync_fetch_and_add(&lv.rhead, 1u);
+    lv.ring_p[slot % LIVE_RING] = (unsigned char)p;
+    lv.ring_b[slot % LIVE_RING] = (unsigned char)(b <= 20 ? b : 0);
+    __sync_synchronize();
+    lv.ring[slot % LIVE_RING] = (unsigned char)k;   /* last: the tick reads an entry once its kind is in */
+}
+
+/* Queue one event with the game as it is now (number/scores: the report's, for game_end). */
+static void live_emit_as(const char *event, const char *mode, const char *kind, unsigned number, unsigned players,
+                         const uint64_t *scores)
+{
+    struct live_event e;
+    struct { long s, ns; } now;
+    char body[LIVE_JSON_MAX];
+    unsigned len, p = lv.ev_p ? lv.ev_p : pm_player(), k;
+    int score = event[0] == 's' && str_eq(event, "score"), merge = score && live_q_merges(&lv.q);
+    now.s = 0;
+    clock_gettime(0 /* CLOCK_REALTIME */, &now);
+    e.event = event;
+    e.mode = mode;
+    e.kind = kind;
+    e.seq = merge ? lv.q.seq[(lv.q.head - 1u) % LIVE_QUEUE] : ++lv.seq;
+    e.number = number;
+    if (lv.count_at && pm_player()) {               /* the game's own count: a player added shows at once */
+        unsigned c = *(volatile unsigned char *)(unsigned long)lv.count_at;
+        if (c >= 1 && c <= 4 && c > players) players = c;
+    }
+    e.players = players > 4 ? 4 : players;
+    e.player = p;
+    e.ball = p >= 1 && p <= 4 ? lv.ball[p - 1] : 0;
+    if (lv.ev_b) e.ball = lv.ev_b;                  /* the bus event's own (live_bus) */
+    else if (lv.player_at && p) {                   /* the game's own ball, next to its player-up byte */
+        unsigned b = *(volatile unsigned char *)(unsigned long)(lv.player_at + 1);
+        if (b >= 1 && b <= 20) e.ball = b;
+    }
+    for (k = 0; k < 4; k++) {
+        e.scores[k] = k < e.players ? (scores ? scores[k] : pm_score(k + 1)) : 0;
+        lv.last[k] = e.scores[k];
+    }
+    e.ms = pm_ms();
+    e.when = now.s > 1500000000l ? now.s : 0;
+    len = live_json(body, sizeof body, &e, feed.title);
+    live_q_push(&lv.q, body, len, e.seq, score, merge);
+}
+
+static void live_emit(const char *event, const char *mode, const char *kind)
+{
+    unsigned players = feed.max_player, p = pm_player();
+    if (p > players) players = p;
+    if (!players) players = 1;
+    live_emit_as(event, mode, kind, feed.number + 1, players, 0);
+}
+
+static void live_ring(int to_next_game);
+
+/* from feed_queue: a game's report is queued - its game_end goes out first, with the same scores and number, after
+ * the bus's events of that game still waiting (not a next game's start: that one is after it) */
+static void live_game_end(const struct feed_report *r)
+{
+    if (!lv.on) return;
+    live_ring(1);
+    lv.ended = 1;
+    live_emit_as("game_end", 0, 0, r->number, r->players ? r->players : 1, r->scores);
+    say("score feed: live - game %u: %u event(s) posted, %u dropped; the live work on %lu ticks: %lu us a tick on "
+        "average, at most %lu us, %lu tick(s) over 1 ms (two clock reads back to back took up to %lu us: the host's "
+        "own pauses)", r->number, lv.posted - lv.game_posted, lv.q.dropped - lv.game_dropped, lv.ticks,
+        lv.ticks ? lv.sum_us / lv.ticks : 0ul, lv.max_us, lv.over_ms, lv.noise_us);
+    lv.game_posted = lv.posted;
+    lv.game_dropped = lv.q.dropped;
+    lv.max_us = lv.ticks = lv.sum_us = lv.over_ms = lv.noise_us = 0;
+}
+
+static void live_player_check(void)
+{
+    unsigned p = pm_player();
+    if (!p || p == lv.player) return;
+    if (lv.player) {
+        lv.player = p;
+        live_emit("player_change", 0, 0);
+    } else
+        lv.player = p;
+}
+
+/* the card's own modes and the game's (where followed): a start or an end since the last look */
+static void live_modes_check(void)
+{
+    const struct pm_mode *now[LIVE_OURS];
+    char nm[24];
+    const char *name;
+    int n = 0, i, j, k;
+    unsigned id;
+    if (running) now[n++] = running;
+    for (i = 0; i < n_layers && n < LIVE_OURS; i++) now[n++] = layers[i].m;
+    for (i = 0; i < lv.n_ours; i++) {
+        for (j = 0; j < n && now[j] != lv.ours[i]; j++) ;
+        if (j < n) continue;
+        live_emit("mode_end", lv.ours_name[i], "card");
+        for (j = i + 1; j < lv.n_ours; j++) {
+            lv.ours[j - 1] = lv.ours[j];
+            for (k = 0; k < (int)sizeof lv.ours_name[0]; k++) lv.ours_name[j - 1][k] = lv.ours_name[j][k];
+        }
+        lv.n_ours--;
+        i--;
+    }
+    for (j = 0; j < n; j++) {
+        for (i = 0; i < lv.n_ours && lv.ours[i] != now[j]; i++) ;
+        if (i < lv.n_ours || lv.n_ours >= LIVE_OURS) continue;
+        name = mode_name(now[j], "a mode");
+        for (k = 0; name[k] && k + 1 < (int)sizeof lv.ours_name[0]; k++) lv.ours_name[lv.n_ours][k] = name[k];
+        lv.ours_name[lv.n_ours][k] = 0;
+        lv.ours[lv.n_ours++] = now[j];
+        live_emit("mode_start", lv.ours_name[lv.n_ours - 1], "card");
+    }
+    for (id = 0; id < BLOCK_IDS; id++) {
+        if (!bm_has(block_named, id) || (gm_starts[id] == lv.gs[id] && gm_stops[id] == lv.ge[id])) continue;
+        name = pm_game_mode_name(id);
+        if (!name || !name[0]) {
+            pm_snprintf(nm, sizeof nm, "mode %u", id);
+            name = nm;
+        }
+        if (gm_starts[id] != lv.gs[id]) {
+            lv.gs[id] = gm_starts[id];
+            live_emit("mode_start", name, "game");
+        }
+        if (gm_stops[id] != lv.ge[id]) {
+            lv.ge[id] = gm_stops[id];
+            live_emit("mode_end", name, "game");
+        }
+    }
+}
+
+/* the bus's events waiting, in the order the bus called them, each with who was up then; to_next_game: stop before a
+ * game_start (live_game_end: the game that ended goes out first) */
+static void live_ring(int to_next_game)
+{
+    unsigned k, i, p, slot;
+    if (lv.rhead - lv.rtail > LIVE_RING) lv.rtail = lv.rhead - LIVE_RING;     /* a burst past the ring: the newest */
+    while (lv.rtail != lv.rhead) {
+        slot = lv.rtail % LIVE_RING;
+        k = lv.ring[slot];
+        if (!k || (to_next_game && k == LV_GAME)) break;     /* the bus is still writing it, or the next game's */
+        __sync_synchronize();
+        lv.ev_p = lv.ring_p[slot];
+        lv.ev_b = lv.ring_b[slot];
+        lv.ring[slot] = 0;
+        lv.rtail++;
+        switch (k) {
+        case LV_GAME:
+            for (i = 0; i < 4; i++) lv.ball[i] = 0, lv.last[i] = 0;
+            lv.player = 0;
+            lv.ended = 0;
+            lv.score_ms = pm_ms();
+            live_emit("game_start", 0, 0);
+            break;
+        case LV_BALL:
+            lv.ended = 0;                               /* a game the bus did not announce (the first after boot) */
+            live_player_check();
+            p = lv.ev_p ? lv.ev_p : pm_player();
+            if (p >= 1 && p <= 4) lv.ball[p - 1]++;
+            live_emit("ball_start", 0, 0);
+            break;
+        case LV_BALL_END: if (!lv.ended) live_emit("ball_end", 0, 0); break;   /* the last ball's, after game_over */
+        case LV_MB_START: live_emit("mode_start", "Multiball", "multiball"); break;
+        case LV_MB_END: live_emit("mode_end", "Multiball", "multiball"); break;
+        case LV_BONUS_START: if (!lv.ended) live_emit("mode_start", "Bonus", "bonus"); break;
+        case LV_BONUS_END: if (!lv.ended) live_emit("mode_end", "Bonus", "bonus"); break;
+        case LV_TILT: live_emit("tilt", 0, 0); break;
+        }
+        lv.ev_p = lv.ev_b = 0;
+    }
+}
+
+/* on the game's tick, after the report's own work (so a game's end goes out before the next game's start) */
+static void live_tick(int in_game)
+{
+    unsigned long now = pm_ms();
+    unsigned k, i;
+    live_ring(0);
+    if (!lv.sites_done && (can & PM_CAN_EVENTS)) {    /* the kinds the port names as site events, once armed */
+        static const char *const nm[LV_KINDS] = { 0, 0, 0, 0, "multiball_start", "multiball_end", "bonus_start",
+                                                  "bonus_end", "tilt" };
+        int id, any = 0;
+        lv.sites_done = 1;
+        for (k = LV_MB_START; k < LV_KINDS; k++)
+            if (lv.bus[k] == ~0u && (id = pm_event(nm[k])) >= 0 && id < N_EVENT_IDS) {
+                lv.site_id[k] = id;
+                lv.site_seen[k] = event_fired[id];
+                any = 1;
+            }
+        if (any) say("score feed: live - from the port's site events:%s%s%s%s", lv.site_id[LV_MB_START] >= 0
+                     ? " multiball start" : "", lv.site_id[LV_MB_END] >= 0 ? " multiball end" : "",
+                     lv.site_id[LV_BONUS_START] >= 0 ? " bonus" : "", lv.site_id[LV_TILT] >= 0 ? " tilt" : "");
+    }
+    for (k = LV_MB_START; lv.sites_done && k < LV_KINDS; k++) {
+        unsigned f;
+        if (lv.site_id[k] < 0 || (f = event_fired[lv.site_id[k]]) == lv.site_seen[k]) continue;
+        lv.site_seen[k] = f;
+        switch (k) {
+        case LV_MB_START: live_emit("mode_start", "Multiball", "multiball"); break;
+        case LV_MB_END: live_emit("mode_end", "Multiball", "multiball"); break;
+        case LV_BONUS_START: live_emit("mode_start", "Bonus", "bonus"); break;
+        case LV_BONUS_END: live_emit("mode_end", "Bonus", "bonus"); break;
+        case LV_TILT: live_emit("tilt", 0, 0); break;
+        }
+    }
+    if (in_game) live_player_check();
+    if (now - lv.modes_ms >= LIVE_MODES_MS) {
+        lv.modes_ms = now;
+        live_modes_check();
+    }
+    if (in_game && now - lv.score_ms >= LIVE_SCORE_MS) {
+        unsigned players = feed.max_player > 4 ? 4 : feed.max_player;
+        lv.score_ms = now;
+        for (i = 0; i < players && i < 4; i++)
+            if (pm_score(i + 1) != lv.last[i]) {
+                live_emit("score", 0, 0);
+                break;
+            }
+    }
+}
+
+/* PAD-1575: 1 while the live events queued before a game's report (its game_end) are still going out, up to
+ * LIVE_HOLD_MS from the report's first look: the report then follows them; a live feed that is down never holds it
+ * longer */
+static int live_holds_report(unsigned long now)
+{
+    static unsigned long since;
+    if (!lv.on || (lv.q.tail == lv.q.head && lv.state != FEED_CONNECTING && lv.state != FEED_SENDING
+                   && lv.state != FEED_READING)) {
+        since = 0;
+        return 0;
+    }
+    if (!since) since = now | 1ul;
+    if (now - since < LIVE_HOLD_MS) return 1;
+    since = 0;
+    return 0;
+}
+
+static void live_close(void)
+{
+    if (lv.fd >= 0) close(lv.fd);
+    lv.fd = -1;
+}
+
+/* the post at hand ended: taken (why 0), or the event dropped and the next ones wait LIVE_BACKOFF_MS */
+static void live_post_done(const char *why)
+{
+    live_close();
+    if (!why) {
+        lv.posted++;
+        if (lv.outage)
+            say("score feed: live - the server takes them again (HTTP %d); %u event(s) dropped meanwhile", lv.status,
+                lv.q.dropped - lv.outage_dropped);
+        else if (lv.posted == 1)
+            say("score feed: live - the first event was taken (HTTP %d)", lv.status);
+        lv.outage = 0;
+        lv.state = FEED_IDLE;
+        return;
+    }
+    lv.q.dropped++;
+    if (!lv.outage) {
+        lv.outage = 1;
+        lv.outage_dropped = lv.q.dropped - 1;
+        if (lv.status) say("score feed: live - an event was not taken (%s, HTTP %d): dropped, as the next ones are "
+                           "until the server takes them", why, lv.status);
+        else say("score feed: live - an event was not taken (%s): dropped, as the next ones are until the server takes "
+                 "them", why);
+    }
+    lv.state = FEED_WAIT;
+    lv.state_ms = pm_ms();
+}
+
+/* one step of the post at hand, on the game's tick: never waits (as feed_send_step) */
+static void live_send_step(void)
+{
+    unsigned char sa[16];
+    unsigned long now;
+    long got;
+    int k, e, m;
+    unsigned i;
+    if (lv.state == FEED_IDLE && lv.q.tail == lv.q.head) return;
+    now = pm_ms();
+    switch (lv.state) {
+    case FEED_WAIT:
+        if (now - lv.state_ms < LIVE_BACKOFF_MS) return;
+        lv.state = FEED_IDLE;
+        /* fall through */
+    case FEED_IDLE:
+        if (lv.q.tail == lv.q.head) return;
+        i = lv.q.tail++ % LIVE_QUEUE;                   /* out of the queue: a full queue never drops the one posted */
+        m = feed.port == 80 ? feed_fmt(lv.req, sizeof lv.req, "POST %s HTTP/1.0\r\nHost: %s\r\n", feed.path, feed.host)
+                            : feed_fmt(lv.req, sizeof lv.req, "POST %s HTTP/1.0\r\nHost: %s:%u\r\n", feed.path,
+                                       feed.host, feed.port);
+        if (m > 0 && (unsigned)m < sizeof lv.req) {
+            int w = feed_fmt(lv.req + m, sizeof lv.req - (unsigned)m, "User-Agent: PAD-score-feed\r\nContent-Type: "
+                             "application/json\r\nContent-Length: %u\r\nConnection: close\r\n\r\n%s", lv.q.len[i],
+                             lv.q.body[i]);
+            m = w > 0 && (unsigned)w < sizeof lv.req - (unsigned)m ? m + w : 0;
+        } else
+            m = 0;
+        lv.status = 0;
+        lv.req_sent = lv.resp_len = 0;
+        lv.req_len = m > 0 ? (unsigned)m : 0;
+        if (!lv.req_len) {
+            live_post_done("the event did not fit");
+            return;
+        }
+        lv.fd = socket(2 /* AF_INET */, 1 | 0x800 | 0x80000 /* SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC */, 0);
+        if (lv.fd < 0) {
+            live_post_done("no socket");
+            return;
+        }
+        lv.state = FEED_CONNECTING;
+        lv.state_ms = now;
+        /* fall through - the first connect */
+    case FEED_CONNECTING:
+        for (k = 0; k < 16; k++) sa[k] = 0;
+        sa[0] = 2;                                      /* AF_INET (a little-endian u16); the port and address big-endian */
+        sa[2] = (unsigned char)(feed.port >> 8);
+        sa[3] = (unsigned char)(feed.port & 255u);
+        for (k = 0; k < 4; k++) sa[4 + k] = feed.ip[k];
+        if (connect(lv.fd, sa, 16) != 0) {
+            e = feed_errno();
+            if (e == FEED_EINPROGRESS || e == FEED_EALREADY || e == FEED_EINTR) {
+                if (now - lv.state_ms >= LIVE_TIMEOUT_MS) live_post_done("the server did not answer");
+                return;
+            }
+            if (e != FEED_EISCONN) {
+                live_post_done(e == FEED_ECONNREFUSED ? "the server refused the connection"
+                               : e == FEED_EHOSTUNREACH || e == FEED_ENETUNREACH ? "no way to the server's address"
+                               : "the connection failed");
+                return;
+            }
+        }
+        lv.state = FEED_SENDING;
+        lv.state_ms = now;
+        /* fall through */
+    case FEED_SENDING:
+        while (lv.req_sent < lv.req_len) {
+            got = send(lv.fd, lv.req + lv.req_sent, (unsigned long)(lv.req_len - lv.req_sent),
+                       0x4000 | 0x40 /* MSG_NOSIGNAL | MSG_DONTWAIT */);
+            if (got > 0) {
+                lv.req_sent += (unsigned)got;
+                continue;
+            }
+            e = feed_errno();
+            if (got < 0 && (e == FEED_EAGAIN || e == FEED_EINTR) && now - lv.state_ms < LIVE_TIMEOUT_MS) return;
+            live_post_done("the server hung up while it was sent");
+            return;
+        }
+        lv.state = FEED_READING;
+        lv.state_ms = now;
+        /* fall through */
+    case FEED_READING:
+        while (lv.resp_len + 1 < sizeof lv.resp) {
+            got = read(lv.fd, lv.resp + lv.resp_len, sizeof lv.resp - 1 - lv.resp_len);
+            if (got > 0) {
+                lv.resp_len += (unsigned)got;
+                if (lv.resp_len >= 12) break;
+                continue;
+            }
+            e = feed_errno();
+            if (got < 0 && (e == FEED_EAGAIN || e == FEED_EINTR) && now - lv.state_ms < LIVE_TIMEOUT_MS) return;
+            break;
+        }
+        lv.resp[lv.resp_len] = 0;
+        lv.status = feed_status(lv.resp, lv.resp_len);
+        live_post_done(lv.status >= 200 && lv.status < 300 ? 0 : lv.status ? "the server refused it"
+                       : lv.resp_len ? "the server's answer is not HTTP" : "the server sent no answer");
+        return;
+    }
+}
+
 static void on_feed_dispatch(pm_reg *r)
 {
+    if (lv.on) live_bus((unsigned)r[0]);                /* PAD-1575 */
     if (r[0] == feed.game_id) __sync_fetch_and_add(&feed.games, 1u);
     else if (r[0] == feed.ball_id) __sync_fetch_and_add(&feed.balls, 1u);
     else if (r[0] == feed.over_id) __sync_fetch_and_add(&feed.overs, 1u);
@@ -28193,8 +28733,14 @@ static void on_feed_tick(pm_reg *regs)
 {
     unsigned games = feed.games, balls = feed.balls, overs = feed.overs, p = pm_player();
     int in_game = pm_in_game();
+    unsigned long t_us = 0;
     (void)regs;
     feed_send_step();
+    if (lv.on) {                                        /* PAD-1575: the live events' post, one step */
+        t_us = live_us();
+        live_send_step();
+        lv.tick_us = live_us() - t_us;
+    }
     if (balls != feed.balls_seen) {                     /* a ball: the next game's, or the same one going on */
         feed.balls_seen = balls;
         if (feed.pending) {
@@ -28271,6 +28817,19 @@ static void on_feed_tick(pm_reg *regs)
         feed.reported = 1;
         feed.pending = 0;
     }
+    if (lv.on) {                                        /* PAD-1575: after the report's work, the live events */
+        unsigned long c0, c1;
+        t_us = live_us();
+        live_tick(in_game);
+        c0 = live_us();
+        c1 = live_us();                                 /* nothing between: the host's own pauses, for the log */
+        t_us = lv.tick_us + (c0 - t_us);
+        if (t_us > lv.max_us) lv.max_us = t_us;
+        if (c1 - c0 > lv.noise_us) lv.noise_us = c1 - c0;
+        lv.ticks++;
+        lv.sum_us += t_us;
+        if (t_us > 1000ul) lv.over_ms++;
+    }
 }
 
 /* PAD-1479: online co-op counts (pad_mode.h pm_online_add) - added to this game's report; only while the feed is on
@@ -28332,6 +28891,14 @@ static void feed_arm(void)
     for (i = 0; i < n; i++) {
         if (i && raw[i - 1] != '\n') continue;
         if (str_starts(raw + i, "only")) feed.only = 1;
+        else if (str_starts(raw + i, "live")) lv.wanted = 1;           /* PAD-1575: also during the game */
+        else if (str_starts(raw + i, "players ")) {                     /* PAD-1575: the game's own bytes */
+            p = raw + i + 8;
+            lv.player_at = (pm_addr)number(&p, &ok);
+            if (ok) lv.count_at = (pm_addr)number(&p, &ok);
+            if (!ok || !lv.player_at || !lv.count_at) lv.player_at = lv.count_at = 0;
+            else lv.player_at += (pm_addr)game_base, lv.count_at += (pm_addr)game_base;
+        }
         else if (str_starts(raw + i, "feed ")) word(raw + i + 5, url, sizeof url);
         else if (str_starts(raw + i, "title ")) {
             unsigned m = 0;
@@ -28398,6 +28965,28 @@ static void feed_arm(void)
         return;
     }
     feed.armed = 1;
+    if (lv.wanted) {                                    /* PAD-1575: the events while a game is played */
+        static const char *const ev[LV_KINDS] = { 0, "game_start", "ball_start", "ball_end", "multiball_start",
+                                                  "multiball_end", "bonus_start", "bonus_end", "tilt" };
+        int id;
+        for (k = 0; k < LV_KINDS; k++) lv.bus[k] = ~0u, lv.site_id[k] = -1;
+        if (lv.player_at && (!maps_has(lv.player_at, 2, MAP_R) || !maps_has(lv.count_at, 1, MAP_R))) {
+            say("score feed: live - the players bytes 0x%08" PMA " / 0x%08" PMA " are not mapped: the players and "
+                "balls are counted", lv.player_at, lv.count_at);
+            lv.player_at = lv.count_at = 0;
+        }
+        for (k = LV_GAME; k < LV_KINDS; k++)
+            if ((id = event_bus_id(ev[k])) >= 0) lv.bus[k] = (unsigned)id;
+        lv.fd = -1;
+        lv.on = 1;
+        say("score feed: live - while a game is played its events are posted too (bus 0x%x game, 0x%x ball, %s ball "
+            "end, %s multiball, %s bonus, %s tilt on the bus; the game's own modes %s)", lv.bus[LV_GAME], lv.bus[LV_BALL],
+            lv.bus[LV_BALL_END] != ~0u ? "a" : "no", lv.bus[LV_MB_START] != ~0u ? "a" : "no",
+            lv.bus[LV_BONUS_START] != ~0u ? "a" : "no", lv.bus[LV_TILT] != ~0u ? "a" : "no",
+            feed.only ? "are not followed (a card with no modes)" : "where the runtime follows their starts");
+        say("score feed: live - the players and each ball %s", lv.player_at ? "read off the game's own bytes"
+            : "counted from the ball starts");
+    }
     if (feed.cur.campaign[0])                           /* PAD-1479 */
         say("online co-op: campaign \"%s\", team \"%s\", machine \"%s\"%s - each game's report names them, with "
             "the game's online counts", feed.cur.campaign, feed.cur.team[0] ? feed.cur.team : "(none)",
@@ -33275,6 +33864,7 @@ static void pad_mode_start(void)
             : hand_cfg_only() ? "handicap.cfg" : comp_cfg_only() ? "comp.cfg" : feed_cfg_only() ? "scorefeed.cfg"
             : "cabshow.cfg");
         if (n_cabs) lamps_arm();              /* PAD-1040: the shows hold the cabinet's lights on the lamp layer */
+        if (lv.on) events_arm();              /* PAD-1575: counting only - the live feed's multiball site events */
         if ((hand.on || n_cabs) && !hook(fn("tick"), on_hand_tick)) {
             hand.on = 0;
             n_cabs = 0;

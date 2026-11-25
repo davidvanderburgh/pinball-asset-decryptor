@@ -1,0 +1,15 @@
+#!/bin/sh
+# PAD-1572: build for the card's glibc 2.21 with Ubuntu 24.04's armhf gcc and glibc 2.39 headers:
+#  - 32-bit time_t and off_t (the newer defaults import __clock_gettime64 / fcntl64, which 2.21 does not have);
+#  - discovery.c:736 compares a 32-bit off_t with an unsigned constant: a -Wsign-compare error there, kept a warning;
+#  - fstat is a real symbol in the new headers; glibc 2.21 gives it from the static libc_nonshared.a as __fxstat,
+#    which this rootfs does not carry, so the same stub is linked into a shared object.
+case " $* " in
+  *" -shared "*)
+    printf '%s\n' 'struct stat;' 'extern int __fxstat(int, int, struct stat *);' \
+      '__attribute__((visibility("hidden"))) int fstat(int fd, struct stat *st) { return __fxstat(3, fd, st); }' \
+      > /tmp/pad1572fstat.c
+    arm-linux-gnueabihf-gcc -marm -mfloat-abi=hard -fPIC -O2 -c /tmp/pad1572fstat.c -o /tmp/pad1572fstat.o || exit 1
+    exec arm-linux-gnueabihf-gcc -U_TIME_BITS -D_TIME_BITS=32 -U_FILE_OFFSET_BITS -Wno-error=sign-compare "$@" /tmp/pad1572fstat.o ;;
+esac
+exec arm-linux-gnueabihf-gcc -U_TIME_BITS -D_TIME_BITS=32 -U_FILE_OFFSET_BITS -Wno-error=sign-compare "$@"

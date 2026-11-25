@@ -332,5 +332,8 @@ def test_real_repo_core_change_is_not_the_full_suite():
         ["pinball_decryptor/core/sparse_card.py"], g)
     assert why is None
     assert 0 < len(got) < 0.25 * len(g.test_files())
+    # a Spike 3 rig file reaches more: Visual Pinball's launcher starts the
+    # Spike 3 rig (PAD-1560), so the VPX tests importing it come along
+    # (402 of 1087 then), still well short of the whole suite
     got, why, _ = testpick.graph_pick(["tools/spike3_emu/mks3multi.py"], g)
-    assert why is None and 0 < len(got) < 0.25 * len(g.test_files())
+    assert why is None and 0 < len(got) < 0.5 * len(g.test_files())

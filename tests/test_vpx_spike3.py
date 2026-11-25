@@ -74,8 +74,10 @@ def test_the_controller_finds_the_run_and_its_switch_table(tmp_path, monkeypatch
     _post(tmp_path, 7, TITLE)
     rig = pc.Rig(TITLE, emu="spike3")
     assert rig.root == "/var/tmp/pad-s3/slot7" and rig.distro == "Ubuntu" and rig.slot == 7
-    assert rig.led_path().endswith(os.path.join("slot7", "dump", "padled"))
-    assert rig.sw_path().endswith(os.path.join("slot7", "dump", "padsw"))
+    # the dump dir is a \\wsl.localhost path whatever the host (the
+    # controller runs on Windows), so read it with either separator
+    assert rig.led_path().replace("\\", "/").endswith("slot7/dump/padled")
+    assert rig.sw_path().replace("\\", "/").endswith("slot7/dump/padsw")
     # the switch table is the slot's tables/game, whatever the title
     tables = tmp_path / "slot7"
     (tables / "dump").mkdir(parents=True)

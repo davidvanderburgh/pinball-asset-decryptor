@@ -230,6 +230,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.progreloc" \
     --hidden-import "pinball_decryptor.plugins.stern.shader_profile" \
     --hidden-import "pinball_decryptor.plugins.stern.radium_grow" \
+    --hidden-import "pinball_decryptor.plugins.stern.ret_use" \
     --hidden-import "pinball_decryptor.plugins.stern.picture_sizes" \
     --hidden-import "pinball_decryptor.plugins.stern.video_sizes" \
     --hidden-import "pinball_decryptor.plugins.stern.fontrender" \

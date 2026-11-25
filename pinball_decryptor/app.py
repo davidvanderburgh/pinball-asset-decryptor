@@ -4944,7 +4944,12 @@ class App:
                 if not replaced:
                     return
                 say("Updating %s in place: %s." % (card, ", ".join(names[i] for i in sorted(replaced))), "info")
-                panel.update_card(after=(lambda: on_done(card, replaced, plan)) if on_done else None)
+                if not panel.update_card(after=(lambda: on_done(card, replaced, plan)) if on_done else None):
+                    # the tab refused before writing (its own words are in its status line)
+                    messagebox.showwarning(
+                        "Update", "The card was not updated: %s\n\nNothing on it was written. The updated "
+                        "images are in the Multi-boot tab's list; fix what it says there, then update the "
+                        "card from the tab." % (getattr(panel, "_msg", "") or "the Multi-boot tab refused it"))
 
             if jobs:
                 ui(lambda: self._run_update_jobs(jobs, raw, new_label, finish))

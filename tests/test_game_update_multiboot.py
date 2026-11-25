@@ -128,3 +128,21 @@ def test_a_no_at_the_question_changes_nothing(tmp_path, monkeypatch):
     assert answered.wait(5)
     time.sleep(0.2)
     assert not started and not panel.replaced and not panel.updated
+
+
+def test_a_card_the_tab_refuses_to_update_is_said_not_left_silent(tmp_path, monkeypatch):
+    from pinball_decryptor import app as A
+    from pinball_decryptor.webui import multiboot_core
+    panel = _Panel([("stock100.raw", "KING KONG")])
+    panel._msg = "Image 1: no such file"
+    panel.update_card = lambda after=None: False
+    monkeypatch.setattr(G, "multiboot_plan", lambda rows, raw: ("KK 1.01", [(0, "stock", "")]))
+    monkeypatch.setattr(multiboot_core, "is_group", lambda r: False)
+    warned, done = [], threading.Event()
+    monkeypatch.setattr(A.messagebox, "showwarning", lambda t, m: warned.append(m) or done.set())
+    app = SimpleNamespace(window=SimpleNamespace(_multiboot_panel=panel, select_tab=lambda t: None),
+                          msg_queue=SimpleNamespace(put=lambda m: getattr(m, "fn", lambda: None)()))
+    app._ask_on_ui = lambda t, m: True
+    assert A.App._start_multiboot_update(app, str(tmp_path / "c.raw"), "new.raw")
+    assert done.wait(5)
+    assert "not updated: Image 1: no such file" in warned[0] and "Nothing on it was written" in warned[0]

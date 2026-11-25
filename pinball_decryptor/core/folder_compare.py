@@ -51,7 +51,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 from . import hashcache
-from .checksums import (CHECKSUMS_FILE, NON_ASSET_DIRS, TRACKING_SIDECARS,
+from .checksums import (CHECKSUMS_FILE, HASH_THREADS, NON_ASSET_DIRS, TRACKING_SIDECARS,
                         is_other_extract)
 from .image_info import human_size
 
@@ -62,9 +62,9 @@ KINDS = (("sound", "Sounds"), ("video", "Videos"), ("image", "Images"),
 #: What the Text tab edits lives here (``text/strings.tsv``).
 TEXT_DIR = "text"
 
-#: Readers hashing at once.  Reads, not CPU: two or three keep one disk busy
-#: and let two disks run side by side; more only seek.
-_WORKERS = 4
+#: Readers hashing at once: the baseline's count (see
+#: :data:`checksums.HASH_THREADS` for what it was measured against).
+_WORKERS = HASH_THREADS
 
 
 def kind_of(rel):

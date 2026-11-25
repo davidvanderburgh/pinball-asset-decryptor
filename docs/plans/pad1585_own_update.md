@@ -83,7 +83,7 @@ qemu-aarch64 with its own `game_monitor`: stock + stick = Stern's installer repl
 held with the message until the stick was out, a new game, no restart marks; `stern-update-ok` = Stern's installer;
 download = refused, back after 30 s; nothing = the same game running, no marks.
 
-## 2. Update to <new build> on My machines (DONE, proof owed)
+## 2. Update to <new build> on My machines (DONE, proven in 2b)
 
 A machine row with newer code out (`code_watch`) and a project gets **Update to 1.17** (shell.js `MachineRow`,
 `MACH.update`; RPC `shellx.machines_update`). `app._start_machine_update`: the owner picks the new stock image (the
@@ -107,33 +107,35 @@ watch ticked), `artifacts/PAD-1585/{before,after}_machine_row.png`.
 - **The machine is shown on the update as soon as it is built** (rebound to the built image), since the button's
   purpose is that machine; the done message says how to put it on.
 
+## 2b. End-to-end proof, King Kong LE 1.00 -> 1.01 (DONE, run 3)
+
+`C:\tmp\PAD-1585\e2e` (`extract100.py`, `record100.py`, `mods.py`, `drive_update.py`, `verify.py`, `rig.sh`):
+the stock 1.00 card (the WSL card cache's copy; the archive folder itself untouched) extracted into a project,
+given a text edit (DEBUG LINE -> PADUG LINE), sound 0 replaced by a 2 s 440 Hz tone, a 96x96 picture made solid
+magenta, and a new mode PAD UPDATE. Through the real app (its web server; `agent.use_files` answered the picker,
+`/api/reply` the questions): the machine added on the 1.00 card, **Update to 1.01** pressed with the library's
+1.01 image. 13 min: 1.01 extracted, everything carried (so no can't-be-carried question), built.
+
+Read back from the built 1.01 card (extracted again): the text reads PADUG LINE; the tone is at slot **753** (1.00's
+sound 0 is 1.01's 753: the transfer matched it by content; 1.01's own slot 0 is another sound, 799 Hz), the
+picture is 100% magenta, the build record names the mode PAD UPDATE on `king_kong_le-1.01.port`, Stern's updater
+on it is guarded. On a rig it boots to attract in 30 s with `[modes] this card carries 1 mode(s) of its own (PAD
+UPDATE): their runtime runs in this game`; no game started in three tries, exactly as the STOCK 1.01 card on the
+same job (attract 37 s, no game) - the title on the rig, not the update.
+
+Found and fixed on the way: the port's extract never recorded its card (`.extract_source.json`, version, lineage),
+so the new project could not carry modes (`App._record_extract_facts`, shared with Extract); the new project was
+not in the app's projects, so the machine's row lost its project after the update (`project_registry.touch`).
+
 ## Still to do (next runs of this ticket)
 
-- **End-to-end proof, N -> N+1** (the ticket's DONE): stock King Kong LE 1.00 is in the WSL card cache
-  (`/mnt/wsl/cards/cardcache/king_kong_le-1_00_0_spike2.raw`, NOT the archival "older versions" folder, which is
-  off limits) and 1.01 is the library's newest (`D:\Pinball\images\Stern\spike2\king_kong_le-1_01_0_spike2...`).
-  Extract 1.00 into a scratch project; give it an audio, a video or image replacement, a text edit and a mode; add a
-  machine on a build of it; drive `shellx.machines_update` through the web server (`scripts/webui_shot.py`
-  `start_server`; `agent.use_files([1.01 raw])` answers the picker; click the modal); check every change is in the
-  1.01 build (decode the replaced files, read the text, the mode in the build record) and boot it on a rig
-  (`riglock.sh take --any PAD-1585`, hidden, muted).
-- **Modes carried by shot name**: the explorer found no mode copying in `plan_transfer`; check how a project's modes
-  reach the new workspace in the port chain (docs/plans/project_transfer.md `copy_modes`) and wire it in if the
-  chain misses it, refusing nothing: a mode whose shot the new build lacks is named in the report.
+Done or decided: the Update button (2, 2b), delivery (3: the Write tab's Send to machine keeps /data, /dump and
+/connectivity; a card write ticks Keep the card's own settings; no PAD stick, see run 2's decisions), a new build
+with no port (6: `mode_news` names it in the question; the update goes on without the modes, which stay in the
+old project).
 
-2. (done above) **"Update to 1.0.1" button**: on My machines' "1.0.1 is out" row (`webui/shellx_machines._machine_row`,
-   `row["newer"]`, from `core/code_watch.newest`) and on the project. The owner points at the new stock image (the
-   app downloads none). Extract it, `mod_transfer.plan_transfer` + `apply_transfer` (modes by shot name, port
-   checked), and say BEFORE anything is written what can't be carried: `plan_transfer`'s `dropped`/`flagged`,
-   unmatched text (`unmatched_text_lines`), modes whose shot the new build lacks, a build with no port yet ("update
-   without them" / "wait"). `mod_port.plan_ports`/`run_ports` already chain extract/transfer/stage/write.
-3. **The result to the machine**: Send to machine (`remote_send.open_plan` + `send`; check whether a Send carries
-   the system partition's guard to a machine whose card predates it: it does, Send compares `/` too and the
-   updater is read only at power-up, so it is not `BOOT_ONLY`), a PAD update stick for a machine with no
-   network (new: the guard's hand-over point is where a PAD stick would be recognised), or a card write. Settings,
-   audits and scores stay (Send keeps /data; a card write needs the settings carry the multi-boot guide describes).
-4. **Multi-boot**: the same button updates every image of that title (`multiboot_core.replace_image` per image;
-   compact cards' shared files once), other titles left alone.
-6. **No port yet** for the new build: assets and text carry; modes, co-op and runtime features wait (step 2's report).
-- **Other makers** (BoF, Spooky, AP, TBL) where the multi-boot guide says a normal update takes our menu away:
-  the same guard on their updaters.
+4. **Multi-boot**: the same button updates every image of that title on a multi-boot card
+   (`multiboot_core.replace_image` per image; compact cards' shared files once), other titles left alone; proven
+   on a two-image card, compact and not.
+5. **Other makers** (BoF, Spooky, AP, TBL) where the multi-boot guide says a normal update takes our menu away:
+   the same guard on their updaters.

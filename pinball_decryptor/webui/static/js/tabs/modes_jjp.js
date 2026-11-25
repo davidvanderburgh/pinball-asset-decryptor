@@ -507,6 +507,27 @@ function SoundsRow({ j }) {
   </div>`;
 }
 
+// PAD-1605: these modes in the Emulate tab, on the stock ISO, as Spike 2 and Spooky try theirs
+function JjpTryCard({ j }) {
+  const t = j.try || {};
+  const c = j.check || {};
+  const lines = t.lines || [];
+  const why = !t.have ? "The Emulate tab is not in this app" : !c.ok ? "Fix what the check found first"
+    : !t.iso ? "Pick the stock install ISO under Build first: the game runs from it" : (t.busy || (j.build || {}).busy) && !t.running ? "Wait for the build, the stick or the screens run to finish" : "";
+  return html`<section class="card jjpm-try">
+    <div class="hd"><span class="h2">Try it</span><span class="muted small">these modes in the emulator, on the stock ISO, without building an ISO or writing a stick</span></div>
+    <div class="bd"><div class="row" style="gap:8px">
+      <${Button} kind="primary" icon="play" busy=${t.running} disabled=${!!why || t.running}
+        title=${why || "Starts the game in the Emulate tab with these modes in it. The first time for this ISO, the mode runtime is built in the app's Linux as administrator first"}
+        onClick=${() => call(R("try"))}>${t.running ? "Getting ready…" : "Try it"}<//>
+      ${t.running ? html`<${Button} kind="ghost" onClick=${() => call(R("try_cancel"))}>Cancel<//>` : null}
+      <span class=${cx("small", t.done ? (t.ok ? "ok-ink" : "warn-ink") : "muted")}>${t.running || t.done ? t.msg || "" : "Then start a game there and make a mode's start shots: it runs inside the game. Try it again after a change: the game restarts with it."}</span>
+    </div>
+    ${lines.length && (t.running || (t.done && !t.ok)) ? html`<pre class="jjpm-log">${lines.join("\n")}</pre>` : null}
+    </div>
+  </section>`;
+}
+
 function BuildCard({ j }) {
   const b = j.build || {};
   const c = j.check || {};
@@ -613,6 +634,7 @@ export function JjpModes({ s }) {
           <${Editor} j=${j} have=${have} />
           <${TitleSettings} j=${j} have=${have} />
           <${CheckCard} j=${j} />
+          <${JjpTryCard} j=${j} />
           <${StickCard} j=${j} />
           <${BuildCard} j=${j} />
         </div>

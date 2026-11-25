@@ -6,6 +6,8 @@
 #                  game.port): the slot replaced by a 500 Hz tone, its files in turn 1000 / 2000 Hz
 #   SO=<object>    built with modes/sdk/sound_fire_mode.c (build_mode.sh -o fire.so mode_file.c sound_fire_mode.c)
 #   REQ=<request>  the request that plays the slot (alone)
+#   GAP=<s>        game seconds between fires (default 2; longer than the slot's own sound - Foo Fighters LE's idx 450
+#                  runs 3.45 s, and a fire while it still plays starts nothing)
 #
 # The set bound (PAD_OVERRIDE_DIR), its modes' files staged with the fire instrument as the runtime; in attract REQ is
 # fired six times, 2 s apart, the size of $DUMP/audio.raw (s16le, 44.1 kHz, stereo) kept before each (marks.txt) and
@@ -34,7 +36,7 @@ job_sleep 5
 for k in 1 2 3 4 5 6; do
     stat -c %s "$A" >> "$JOB_OUT/marks.txt" 2>/dev/null || echo 0 >> "$JOB_OUT/marks.txt"
     printf '%s' "$REQ" > "$DUMP/sound.fire"
-    job_sleep 2
+    job_sleep "${GAP:-2}"
 done
 job_sleep 2
 cp "$A" "$JOB_OUT/audio.raw" 2>/dev/null

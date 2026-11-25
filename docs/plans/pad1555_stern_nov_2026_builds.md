@@ -380,3 +380,24 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   (s16le 48 kHz stereo) cut after each fire and measured by a Goertzel at 500 / 1000 / 2000 Hz
   (tools/jjp_emu/jjpaudiocap.py:31); MUSIC MODE / EDITION set to 2 by the operator-menu walk (menu_settings.menu_path)
   or an NVM write (codeselect/nvm.c's crc32), read back from /data/nv/<title>/NVM.
+
+### Run 11 (2026-11-25): sounds in turn
+
+- **The kit, re-made** (`newbuild/turnjob.sh` + `turncheck.py`; scratch builder C:/tmp/PAD-1555/turn/mk.py + req.py):
+  a project of eight candidate slots built by `engine.write_overrides` (each replaced by a 500 Hz tone, its files 2 /
+  3 in turn 1000 / 2000 Hz; `.extract_source.json` naming the card, a `.checksums.md5` baseline), the build log naming
+  each slot's game sound id; the slot kept whose sid one request plays alone (the request table). On the rig the
+  fire instrument (sound_fire_mode.c) fires it six times in attract; `audio.raw` is 44.1 kHz s16 stereo (read at 48
+  kHz the tones come out x1.088); each fire's 1.6 s has to be the tone of the file the runtime logged. The set's
+  sounds.cfg says `only`, which keeps the instrument out - the job drops the line.
+- **Proven:** King Kong LE / Pro 1.01, Avengers LE / Pro 1.12, Foo Fighters Pro 1.05, Metallica 1.05 - each in its
+  game's earlier build's place in TURN_PROVEN (latest build only).
+- **D&D:** Write refuses an audible slot's turn files on 1.11 AND on 1.10 today (image.bin + its own bank fill
+  MAPPED_MAX; "too long for this card: it goes into a sound bank") - 1.11 takes 1.10's place at parity.
+- **Foo Fighters LE 1.05: open.** File 2 in turn is silent, file 3 plays, in two builds (eight slots: bank record 4;
+  one slot: record 1); file 2's record is written as "a copy of sound idx 977", file 3's of idx 467 (Foo Fighters Pro's
+  donors play). Next: what idx 977 is on this card (its channel / format), and why its copy is silent.
+- **Left for run 12:** Foo Fighters LE 1.05's turns; the MUSIC MODE / EDITION sweep (menu_settings.PROVEN =
+  sound_modes.PROVEN) - doc pad-724: Machine Settings walked from the bottom (Test Menu Settings, Attract Mode, Audio
+  Configuration, Audio Content), Audio Content row 1 = Music Mode, Attract Mode row 6 = Edition; on the standard list
+  Minus from row 1 wraps to EDITION then MUSIC MODE; Select, Plus, Select sets 2; the store /data/nv/<title>/NVM.

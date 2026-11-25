@@ -210,16 +210,21 @@ TURN_PROVEN = frozenset({
     # request fired six times in attract): the tone after each fire was the file the runtime said it played, in turn;
     # each in its game's earlier build's place (the latest build only)
     "king_kong_le-1.01", "avengers_infinity_le-1.12", "avengers_infinity_pro-1.12", "foo_fighters_pro-1.05",
+    "king_kong_pro-1.01", "metallica_spike-1.05",
+    # D&D 1.11 in 1.10's place: its image.bin and its own bank fill the machine's memory (BANK_SONG_NO_ROOM), so Write
+    # refuses the files of an audible slot ("too long for this card: it goes into a sound bank") on 1.11 exactly as it
+    # does on 1.10 today (PAD-1555, the same one-slot build on both)
+    "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
     "aerosmith-1.16", "aerosmith_le-1.16", "batman-1.14",
-    "beatles-1.29", "deadpool_le-1.16", "deadpool_pro-1.16", "dungeons_and_dragons_le-1.10",
-    "dungeons_and_dragons_pro-1.10", "elvira3-1.13", "foo_fighters_le-1.04",
+    "beatles-1.29", "deadpool_le-1.16", "deadpool_pro-1.16", 
+    "elvira3-1.13", "foo_fighters_le-1.04",
     "godzilla_le-1.16", "godzilla_pro-1.16", "guardians-1.15",
     "guardians_le-1.15", "iron_maiden_le-1.18", "iron_maiden_pro-1.18", "james_bond_60th_le-1.11",
     "james_bond_le-1.06", "james_bond_pro-1.06", "jaws_le-1.02", "jaws_pro-1.02",
     "john_wick_le-1.02", "john_wick_pro-1.02", "jurassic_park_le-1.16", "jurassic_park_pro-1.16",
-    "jurassic_park_the_pin-1.05", "king_kong_pro-0.97",
+    "jurassic_park_the_pin-1.05", 
     "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22", "mando_le-1.45", "mando_pro-1.45",
-    "metallica_spike-1.04", "munsters_le-1.28", "munsters_pro-1.28", "rush_le-1.19",
+    "munsters_le-1.28", "munsters_pro-1.28", "rush_le-1.19",
     "rush_pro-1.19", "star_wars_elg-1.10", "star_wars_le-1.31", "star_wars_pro-1.31",
     "stranger_things-1.13", "stranger_things_le-1.13", "sword_of_rage_le-1.19",
     "sword_of_rage_pro-1.19", "turtles_le-1.59", "turtles_pro-1.59", "uncanny_xmen_le-0.98",

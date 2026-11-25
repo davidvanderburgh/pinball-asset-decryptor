@@ -260,6 +260,62 @@ static struct chip *chip_at(unsigned a)
     return NULL;
 }
 
+/* ---- the speaker amp's volume (PAD-1560) -------------------------------
+ * The game sets its volume on the speaker amplifier, a TAS5711-family part
+ * at 0x1b, never in its PCM: master volume 0x07, channel volume 0x08/0x09
+ * (0x0a the third channel), every step 0.5 dB, 0x30 = 0 dB, 0xff = mute
+ * (walking_dead_remastered_le 0.92, measured: 0x64 after Guided Setup,
+ * Service Plus lowers it, Minus raises it). Nothing here ever reached the
+ * sound, so a run played at full level whatever the menu said (Mike: "they
+ * go up and down but volume stays high"). As on Spike 2 (alsastub.c,
+ * PAD-1302) the gain scales ONLY what goes to the speakers: s3alsa.so reads
+ * pad_s3_amp_gain_q16 (65536 = the game's full level, never above it).
+ * PAD_GAME_VOLUME=0 plays full level as before. */
+#define AMP_ADDR 0x1b
+int pad_s3_amp_gain_q16 = 65536;
+static uint8_t amp_reg[256];
+static int amp_seen;
+
+static void amp_write(unsigned reg, uint8_t v)
+{
+    static int on = -1, last_steps = -2;
+    int master, ch, steps, k;
+    double g = 65536.0;
+    if (!amp_seen) {                       /* unwritten: 0 dB, as at power-up */
+        amp_seen = 1;
+        amp_reg[0x07] = amp_reg[0x08] = amp_reg[0x09] = 0x30;
+    }
+    amp_reg[reg & 0xff] = v;
+    if (reg != 0x07 && reg != 0x08 && reg != 0x09)
+        return;
+    if (on < 0) {
+        const char *e = getenv("PAD_GAME_VOLUME");
+        on = !(e && e[0] == '0' && !e[1]);
+        if (!on)
+            fprintf(stderr, "[s3dev] PAD_GAME_VOLUME=0: the game's volume is ignored, full level\n");
+    }
+    if (!on)
+        return;
+    master = amp_reg[0x07];
+    ch = amp_reg[0x08] < amp_reg[0x09] ? amp_reg[0x08] : amp_reg[0x09];   /* the louder */
+    steps = (master == 0xff || ch == 0xff) ? -1 : (master - 0x30) + (ch - 0x30);
+    if (steps == last_steps)
+        return;
+    last_steps = steps;
+    if (steps < 0 && (master == 0xff || ch == 0xff)) {
+        pad_s3_amp_gain_q16 = 0;
+        fprintf(stderr, "[s3dev] game volume: amp 0x%02x master 0x%02x speakers 0x%02x = mute\n",
+                AMP_ADDR, master, ch);
+        return;
+    }
+    for (k = 0; k < steps; k++)
+        g *= 0.94406087628592;                 /* -0.5 dB */
+    pad_s3_amp_gain_q16 = steps <= 0 ? 65536 : (int)(g + 0.5);
+    fprintf(stderr, "[s3dev] game volume: amp 0x%02x master 0x%02x speakers 0x%02x = %s%d.%d dB\n",
+            AMP_ADDR, master, ch, steps > 0 ? "-" : "", (steps > 0 ? steps : 0) / 2,
+            (steps > 0 ? steps : 0) % 2 * 5);
+}
+
 struct i2c_msg_a64 { uint16_t addr, flags, len, pad; uint8_t *buf; };
 struct i2c_rdwr_a64 { struct i2c_msg_a64 *msgs; uint32_t nmsgs; };
 
@@ -294,10 +350,25 @@ static int i2c_ioctl(int fd, unsigned long cmd, void *arg)
                 }
                 for (j = 0; j < m->len; j++)
                     m->buf[j] = c ? c->reg[c->ptr++] : 0;
-            } else if (c && m->len > 0) {
-                c->ptr = m->buf[0];
-                for (j = 1; j < m->len; j++)
-                    c->reg[c->ptr++] = m->buf[j];
+            } else if (m->len > 0) {
+                static int trace = -1, traced;
+                if (trace < 0)
+                    trace = getenv("PAD_S3_I2C_TRACE") && *getenv("PAD_S3_I2C_TRACE") == '1';
+                if (trace && traced < 20000) {         /* PAD-1560: what the game writes */
+                    traced++;
+                    fprintf(stderr, "[s3dev] i2c 0x%02x w 0x%02x:", m->addr, m->buf[0]);
+                    for (j = 1; j < m->len && j < 17; j++)
+                        fprintf(stderr, " %02x", m->buf[j]);
+                    fprintf(stderr, "%s\n", m->len > 17 ? " ..." : "");
+                }
+                if (m->addr == AMP_ADDR)                  /* auto-increment, as the part does */
+                    for (j = 1; j < m->len; j++)
+                        amp_write(m->buf[0] + j - 1, m->buf[j]);
+                if (c) {
+                    c->ptr = m->buf[0];
+                    for (j = 1; j < m->len; j++)
+                        c->reg[c->ptr++] = m->buf[j];
+                }
             }
         }
         return (int)d->nmsgs;

@@ -489,6 +489,7 @@ class VpxMap:
         self.solenoids = {}                 # number -> (node, index)
         self.lamp_groups = {}               # number -> [(node, index), ...]
         self.raw_lamp_rewrite = {}          # legacy number -> one LED read as its raw level
+        self.led_lamps = True               # every LED also as 1000 + node * 100 + index
         self.rgb_groups = set()             # numbers whose LEDs are an insert's R, G, B
         self.rgb_order = {}                 # number -> "BGR" etc. when not listed R, G, B (PAD-1097)
         self.fakes = {}                     # name -> dict (switch_fakes)
@@ -530,6 +531,12 @@ class VpxMap:
             if k != "_":
                 self.switch_rewrite[int(k)] = int(v)
         self.sol_max = int(m.get("solenoid_max", 68))
+        # every LED is also reported as its own number, 1000 + node * 100 +
+        # index, for a table that names LEDs directly (PAD-859). A SAM table
+        # whose LampTimer indexes its own lamp arrays (Walking Dead's are 220
+        # long) with every number ChangedLamps hands it stops on those with
+        # "Subscript out of range" (PAD-1560): its map says "led_lamps": false
+        self.led_lamps = bool(m.get("led_lamps", True))
         self.raw_lamp_rewrite = {}
         for k, v in m.get("raw_lamp_rewrite", {}).items():
             if k == "_":
@@ -3606,7 +3613,7 @@ class Bridge:
                                                   else rm.lamp_rgb(lamps, *leds[0]))))
                 else:
                     self._lamp_set(n, 1)
-            for node in range(rm.MAX_NODES):
+            for node in range(rm.MAX_NODES if self.map.led_lamps else 0):
                 for idx in range(rm.MAX_INDEX):
                     n = lamp_number(node, idx)
                     if n in self.map.lamp_groups:
@@ -3684,7 +3691,7 @@ class Bridge:
                 self._lamp_set(n, rgb_value(*rgb_levels(levels, getattr(self.map, "rgb_order", {}).get(n))))
             else:
                 self._lamp_set(n, 1)
-        for node in range(16):
+        for node in range(16 if self.map.led_lamps else 0):
             base = 20 + node * 96
             for idx in range(96):
                 n = lamp_number(node, idx)

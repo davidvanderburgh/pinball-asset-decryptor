@@ -335,6 +335,8 @@
    "callback": "Corpse_Ramp"
   }
  },
+ "led_lamps": false,
+ "_led_lamps": "no 1000 + node * 100 + index numbers: the table's LampTimer indexes its 220-long lamp arrays with every ChangedLamps number",
  "raw_lamp_rewrite": {
   "_": [
    "SAM lamp number -> the Remastered LED(s) it reads as 0..255 (the brightest of",

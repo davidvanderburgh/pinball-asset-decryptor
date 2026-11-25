@@ -270,6 +270,36 @@ def test_a_raw_lamp_on_several_leds_reads_the_brightest(tmp_path):
             pc.VpxMap(None).load(str(mapping))
 
 
+def test_walking_dead_gets_only_lamp_numbers_its_arrays_hold(tmp_path):
+    """PAD-1560 (Mike: "Subscript out of range: 'ii'"): the table's LampTimer
+    indexes PFInsertState(220) with every ChangedLamps number, so its map turns
+    off the 1000 + node * 100 + index LED numbers; a map without the switch
+    still reports them."""
+    pc = pytest.importorskip("padcontroller")
+    data = bytearray(20 + 16 * 96)
+    for i in range(20, len(data)):
+        data[i] = 200                                  # every LED lit
+    for path, led_lamps in ((str(VPX / "walking_dead_remastered_le.vpxmap.json"), False),
+                            (None, True)):
+        vm = pc.VpxMap(None)
+        if path:
+            vm.load(path)
+        else:
+            plain = tmp_path / "plain.vpxmap.json"
+            plain.write_text(json.dumps({"raw_lamp_rewrite": {"25": [8, 35]}}), encoding="utf-8")
+            vm.load(str(plain))
+        assert vm.led_lamps is led_lamps
+        b = pc.Bridge.__new__(pc.Bridge)
+        b.map, b.lamp_state, b.lamp_pending = vm, {}, set()
+        b.lock = __import__("threading").Lock()
+        b._poll_lamps(bytes(data))
+        nums = [n for n, _ in b.changed_lamps()]
+        if led_lamps:
+            assert max(nums) >= 1000
+        else:
+            assert nums and max(nums) <= 220 and len(nums) == len(vm.raw_lamp_rewrite)
+
+
 def test_the_walking_dead_map_is_whole():
     """Every number the table uses is the Remastered game's or a known gap,
     every flasher a lamp of the map's own that the table's arrays hold, the

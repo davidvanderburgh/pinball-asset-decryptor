@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from ..core import pad_temp
 
 _lock = threading.Lock()
 _dir = None
@@ -30,7 +31,7 @@ def cache_dir():
     global _dir
     with _lock:
         if _dir is None or not os.path.isdir(_dir):
-            _dir = tempfile.mkdtemp(prefix="pad-audio-")
+            _dir = pad_temp.mkdtemp(prefix="pad-audio-")
         return _dir
 
 

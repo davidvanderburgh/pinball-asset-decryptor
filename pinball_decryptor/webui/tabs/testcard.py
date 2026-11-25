@@ -20,6 +20,7 @@ from .base import TabService
 from ..rpc import rpc, RpcError
 from .. import compat
 from .. import testcard_core as tc
+from ...core import pad_temp
 
 KIND_ORDER = {k: n for n, k in enumerate(tc.KINDS)}
 CARD_TYPES = [("Card images", "*.raw *.img"), ("All files", "*.*")]
@@ -253,7 +254,7 @@ class TestCardTab(TabService):
 
     def _run(self, source, out, items, net=None):
         from .. import multiboot_core as mbc
-        work = tempfile.mkdtemp(prefix="pad_testcard_")
+        work = pad_temp.mkdtemp(prefix="pad_testcard_")
         ok, why = False, ""
         try:
             staged = tc.stage(items, os.path.join(work, "files"), None, log=self._say,

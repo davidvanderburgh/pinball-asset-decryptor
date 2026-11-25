@@ -39,6 +39,7 @@ from collections import namedtuple
 # build failed until he shortened the path).  _lp() opts each call out of it.
 from ...core.longpath import ext as _lp
 from ...core.checksums import MUSIC_MODE_FILES_DIR, NON_ASSET_DIRS, is_other_extract
+from ...core import pad_temp
 
 # The engine is wired; a missing unicorn/numpy is surfaced via the plugin's
 # prerequisite probe + a lazy import error, not by hiding the tabs.
@@ -814,10 +815,13 @@ def _work_dir(label=None, base="spike2_"):
         path = os.path.join(tempfile.gettempdir(), name)
         try:
             os.makedirs(path)
-            return path
         except FileExistsError:
             continue
-    return tempfile.mkdtemp(prefix=base)  # astronomically unlikely fallback
+        # PAD-1596: the space keeper leaves a running build's folder alone,
+        # and takes a dead one's after an hour rather than a day
+        pad_temp.mark_owner(path)
+        return path
+    return pad_temp.mkdtemp(prefix=base)  # astronomically unlikely fallback
 
 
 def _read_video_manifest(vid_dir):
@@ -25201,7 +25205,7 @@ def _assert_bank_integrity(gr_path, img_path, rev, cid, sc_path, patches,
     import shutil
 
     from .spike2.category import CatEmu
-    fd, tmp = tempfile.mkstemp(suffix=".scbin")
+    fd, tmp = tempfile.mkstemp(prefix="pad_scbin_", suffix=".scbin")
     os.close(fd)
     try:
         shutil.copyfile(sc_path, tmp)

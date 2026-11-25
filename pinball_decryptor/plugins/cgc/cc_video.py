@@ -22,6 +22,7 @@ import re
 import shutil
 import tempfile
 from typing import Callable, Dict, List, Optional
+from ...core import pad_temp
 
 # display_art names are "<artidx:04d>_<name>.png"; an animation frame's <name>
 # ends in an optional separator + a frame number.
@@ -103,7 +104,7 @@ def render_animations(display_art_dir: str, out_dir: str,
         frames = max(by_size.values(), key=len)
         if len(frames) < _MIN_FRAMES:
             continue
-        tmp = tempfile.mkdtemp(prefix="cc_anim_")
+        tmp = pad_temp.mkdtemp(prefix="cc_anim_")
         try:
             rendered = []
             for i, p in enumerate(frames):

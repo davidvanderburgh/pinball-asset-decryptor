@@ -20,6 +20,7 @@ these frames exactly, blades and speakers, at 90%.
 """
 import re
 import struct
+from ...core import pad_temp
 
 ROW = 0x14
 #: a row as the file has it (the two pointers zero, or already in the file); a lookahead, so a match one byte early
@@ -265,7 +266,7 @@ def request_slots(card, requests, log=None):
     from . import engine as E
     from .mode_write import request_sids
     log = log or (lambda *a: None)
-    work = tempfile.mkdtemp(prefix="pad_cabstock_")
+    work = pad_temp.mkdtemp(prefix="pad_cabstock_")
     try:
         parts = E._linux_partitions(card)
         with open(E._lp(card), "rb") as disk_f:

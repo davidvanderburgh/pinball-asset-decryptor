@@ -29,6 +29,7 @@ import urllib.request
 
 from . import net
 from .config import GITHUB_REPO
+from . import pad_temp
 
 #: the ⚙ Updates > "Download and install updates in the background" switch
 #: (PAD-1024): settings.json key, default and tooltip
@@ -581,7 +582,7 @@ def stage_update_macos(dmg_path, bundle=None, run=None):
         # caller fall back to the browser rather than half-doing it.
         return False, "%s is not writable by you" % parent
 
-    mnt = tempfile.mkdtemp(prefix="pad-update-")
+    mnt = pad_temp.mkdtemp(prefix="pad-update-")
     staged = macos_staged_path(bundle)
     try:
         r = run(["hdiutil", "attach", "-nobrowse", "-readonly",

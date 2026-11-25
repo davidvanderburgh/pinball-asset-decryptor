@@ -38,6 +38,7 @@ import tempfile
 import threading
 import time
 import weakref
+from . import pad_temp
 
 # How long a person gets to answer the password dialog before the run gives up.
 PROMPT_WAIT_S = 600
@@ -435,7 +436,7 @@ def mount_iso(image_path, prefix="pad_iso_"):
     """Loop-mount *image_path* read-only on a fresh temp dir:
     ``(mount_point, cleanup)``.  On a desktop the root shell that mounts it
     stays until *cleanup* unmounts it, so that is ONE password prompt."""
-    mount_point = tempfile.mkdtemp(prefix=prefix)
+    mount_point = pad_temp.mkdtemp(prefix=prefix)
     r = route()
     session = None
     mount = "mount -o loop,ro %s %s" % (_q(image_path), _q(mount_point))

@@ -112,6 +112,36 @@ HAS_BASH = _bash_usable()
 HAS_DOCKER = shutil.which("docker") is not None
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _private_temp_dir(tmp_path_factory):
+    """The temp folder is the session's own, inside pytest's (which keeps
+    the last few runs and drops the rest).
+
+    PAD-1596: code the tests drive makes its scratch with
+    ``tempfile.mkdtemp`` / ``gettempdir()``, and what a test did not clean
+    up stayed in the developer's real ``%TEMP%`` - 452 ``spike2_grow_*``
+    build folders of untitled test builds were found there, which the app's
+    own space keeper then counted as a user's leftovers.  Child processes
+    get it too (``TEMP`` / ``TMP`` / ``TMPDIR``)."""
+    import tempfile
+    d = tmp_path_factory.getbasetemp() / "systemp"
+    d.mkdir(exist_ok=True)
+    keys = ("TEMP", "TMP", "TMPDIR")
+    was = tempfile.tempdir, {k: os.environ.get(k) for k in keys}
+    tempfile.tempdir = str(d)
+    for k in keys:
+        os.environ[k] = str(d)
+    try:
+        yield str(d)
+    finally:
+        tempfile.tempdir = was[0]
+        for k, v in was[1].items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 @pytest.fixture(autouse=True)
 def _isolate_rig_dirs(tmp_path_factory, monkeypatch):
     """Point both emulator rigs at an empty directory, for every test.

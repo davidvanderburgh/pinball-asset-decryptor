@@ -24,29 +24,12 @@ import re
 import shutil
 import tempfile
 
-# (prefix, manufacturer, detail-role).  Ordered most-specific first so e.g.
-# ``cc_dcs_`` is matched before the broader ``cc_``.  Kept in sync with the
-# ``tempfile.mkdtemp(prefix=...)`` calls across the plugins:
-#   stern/engine.py        -> spike2_*            (host-only; no WSL)
-#   williams/*.py          -> williams_*          (DMD/video render; CGC reuses)
-#   cgc/cc_dcs.py,cc_video  -> cc_dcs_*, cc_anim_*
-#   dp/aaiw.py             -> pad_aaiw_*
-#   spooky/*.py            -> spooky_*
-#   jjp/pipeline.py        -> jjp_*               (host-side temp files)
-#   core/audio.py          -> pad-ffmpeg-*
-#   core/clonezilla.py     -> pad_iso_*
-_PREFIXES = (
-    ("spike2_", "Stern Pinball", "audio extract / build staging"),
-    ("williams_", "Williams DMD render", "DMD / video render"),
-    ("cc_dcs_", "Chicago Gaming Company", "Cactus Canyon DCS scratch"),
-    ("cc_anim_", "Chicago Gaming Company", "Cactus Canyon video render"),
-    ("cc_", "Chicago Gaming Company", "Cactus Canyon scratch"),
-    ("pad_aaiw_", "Dutch Pinball", "Alice in Wonderland staging"),
-    ("spooky_", "Spooky Pinball", "build scratch"),
-    ("jjp_", "Jersey Jack Pinball", "staging"),
-    ("pad-ffmpeg-", "Shared tooling", "ffmpeg helper"),
-    ("pad_iso_", "Shared tooling", "ISO mount"),
-)
+from . import pad_temp
+
+# PAD-1596: the names are core/pad_temp.py's NAMES, the one list of what the
+# app makes in the temp folder; ``(prefix, manufacturer, detail)`` here for
+# the callers that read it.
+_PREFIXES = tuple((n.prefix, n.maker, n.detail) for n in pad_temp.NAMES)
 _PREFIX_STRINGS = tuple(p for p, _m, _d in _PREFIXES)
 
 
@@ -70,13 +53,9 @@ def usage():
 
 
 _HEX8 = re.compile(r"^[0-9a-f]{8}$")
-#: Stern folders kept on purpose between builds (safe to clean: a build makes
+#: Folders kept on purpose between builds (safe to clean: a build makes
 #: them again), named so the Clean temp view says what they are.
-_SPIKE2_KEPT = {
-    "spike2_card_cache": "card copies kept for faster rebuilds",
-    "spike2_clip_cache": "video clips kept for faster rebuilds",
-    "spike2_code_cache": "compiled objects kept for faster rebuilds",
-}
+_SPIKE2_KEPT = {n.prefix: n.detail for n in pad_temp.NAMES if n.kept}
 
 
 def _spike2_detail(name):
@@ -103,12 +82,12 @@ def _spike2_detail(name):
 
 
 def _classify(name):
-    for prefix, mfr, detail in _PREFIXES:
-        if name.startswith(prefix):
-            if prefix == "spike2_":
-                return mfr, _spike2_detail(name)
-            return mfr, detail
-    return "Other", name
+    n = pad_temp.lookup(name)
+    if n is None:
+        return "Other", name
+    if n.prefix == "spike2_":
+        return n.maker, _spike2_detail(name)
+    return n.maker, n.detail
 
 
 def _entry_size(path):
@@ -129,11 +108,15 @@ def _entry_size(path):
     return total
 
 
-def scan():
+def scan(include_empty=False):
     """Return leftover host-temp entries, largest first.
 
-    Each entry is ``{path, size, manufacturer, detail}``.  Only direct children
-    of the temp dir whose name matches a known PAD prefix are considered.
+    Each entry is ``{path, size, manufacturer, detail, in_use}``.  Only
+    direct children of the temp dir whose name is one of the app's
+    (:data:`pad_temp.NAMES`) are considered; ``in_use`` when the process
+    that made it still runs (its detail says so).  Empty ones are left out
+    of the window's list (nothing to free) unless *include_empty* (the
+    space keeper, which tidies them away too).
     """
     td = temp_dir()
     entries = []
@@ -142,26 +125,36 @@ def scan():
     except OSError:
         return entries
     for name in names:
-        if not name.startswith(_PREFIX_STRINGS):
+        if name == pad_temp.OWNERS or pad_temp.lookup(name) is None:
             continue
         path = os.path.join(td, name)
         size = _entry_size(path)
-        if size == 0:
+        if size == 0 and not include_empty:
             continue  # empty leftover -- nothing to free, just noise
         mfr, detail = _classify(name)
-        entries.append({"path": path, "size": size,
+        in_use = pad_temp.owner_state(name) == "alive"
+        if in_use:
+            detail += " (in use)"
+        entries.append({"path": path, "size": size, "in_use": in_use,
                         "manufacturer": mfr, "detail": detail})
     entries.sort(key=lambda e: e["size"], reverse=True)
     return entries
 
 
 def _is_safe(path):
-    """True only for a direct child of the temp dir with a known PAD prefix."""
-    td = os.path.realpath(temp_dir())
+    """True only for a direct child of the temp dir with one of the app's
+    names, or an entry directly inside one of its caches (``child_days``,
+    which the space keeper ages out one by one)."""
+    td = os.path.normcase(os.path.realpath(temp_dir()))
     rp = os.path.realpath(path)
-    if os.path.normcase(os.path.dirname(rp)) != os.path.normcase(td):
-        return False
-    return os.path.basename(rp).startswith(_PREFIX_STRINGS)
+    parent = os.path.dirname(rp)
+    if os.path.normcase(parent) == td:
+        name = os.path.basename(rp)
+        return name != pad_temp.OWNERS and pad_temp.lookup(name) is not None
+    if os.path.normcase(os.path.dirname(parent)) == td:
+        n = pad_temp.lookup(os.path.basename(parent))
+        return bool(n and n.kept and n.child_days)
+    return False
 
 
 def delete(paths):
@@ -179,6 +172,10 @@ def delete(paths):
                 f"Refusing to delete a path outside the temp dir: {p!r}")
     freed = 0
     for p in paths:
+        name = os.path.basename(os.path.realpath(p))
+        top = os.path.normcase(os.path.dirname(os.path.realpath(p))) ==             os.path.normcase(os.path.realpath(temp_dir()))
+        if top and pad_temp.owner_state(name) == "alive":
+            continue    # PAD-1596: a running build's or an open tab's
         freed += _entry_size(p)
         try:
             if os.path.isdir(p) and not os.path.islink(p):
@@ -189,4 +186,6 @@ def delete(paths):
             # A file held open by a still-running operation can't be removed;
             # skip it rather than abort the whole sweep.
             pass
+        if top and not os.path.lexists(p):
+            pad_temp.forget_owner(name)
     return freed

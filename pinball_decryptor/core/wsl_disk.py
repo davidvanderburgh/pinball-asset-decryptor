@@ -1077,7 +1077,8 @@ def _compact(vhdx, progress=None):
     sf = None
     try:
         with tempfile.NamedTemporaryFile(
-                "w", suffix=".txt", delete=False, encoding="ascii") as f:
+                "w", prefix="pad_diskpart_", suffix=".txt", delete=False,
+                encoding="ascii") as f:
             f.write(script)
             sf = f.name
         out = ""
@@ -1111,7 +1112,8 @@ def _compact(vhdx, progress=None):
 def _diskpart_detach(vhdx):
     try:
         with tempfile.NamedTemporaryFile(
-                "w", suffix=".txt", delete=False, encoding="ascii") as f:
+                "w", prefix="pad_diskpart_", suffix=".txt", delete=False,
+                encoding="ascii") as f:
             f.write(f'select vdisk file="{vhdx}"\ndetach vdisk\n')
             sf = f.name
         subprocess.run(["diskpart", "/s", sf], capture_output=True,

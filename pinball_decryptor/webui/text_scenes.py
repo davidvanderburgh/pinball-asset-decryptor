@@ -26,6 +26,7 @@ from . import compat
 from .rpc import rpc
 from .scene_mode_layout import ModeLayoutMixin
 from .text_scenes_tree import TreeEditMixin
+from ..core import pad_temp
 
 log = logging.getLogger(__name__)
 
@@ -543,7 +544,7 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
 
     def _tmpdir(self):
         if self._tmp is None or not os.path.isdir(self._tmp):
-            self._tmp = tempfile.mkdtemp(prefix="pad-scenes-")
+            self._tmp = pad_temp.mkdtemp(prefix="pad-scenes-")
         return self._tmp
 
     def _drop_tmp(self):

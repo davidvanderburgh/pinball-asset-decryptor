@@ -31,6 +31,7 @@ import time
 
 from .audio import (_CREATE_FLAGS, _ffmpeg_banner, find_ffmpeg, find_ffprobe,
                     parse_banner_duration, probe_duration)
+from . import pad_temp
 
 # Video containers we treat as replaceable slots.
 VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".webm", ".ogv", ".avi", ".mkv")
@@ -1318,7 +1319,7 @@ def _pass_workspace(two_pass, ext):
     clips, and only the handful over their slot ever runs two passes."""
     if not two_pass:
         return None, None, None
-    work = tempfile.mkdtemp(prefix="pad_vidbudget_")
+    work = pad_temp.mkdtemp(prefix="pad_vidbudget_")
     return (work, os.path.join(work, "pass"),
             os.path.join(work, "analysis" + (ext or ".webm")))
 

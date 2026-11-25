@@ -32,6 +32,7 @@ from . import dmd_render
 from . import pinmame_capture
 from .formats import detect_game
 from .games import GAME_DB
+from ...core import pad_temp
 
 
 PHASES = (
@@ -364,7 +365,7 @@ class CapturePipeline(BasePipeline):
         ffmpeg = dmd_render.find_ffmpeg()
         if not ffmpeg:
             raise RuntimeError("ffmpeg not found")
-        tmp = tempfile.mkdtemp(prefix="williams_clip_")
+        tmp = pad_temp.mkdtemp(prefix="williams_clip_")
         try:
             # Render each frame as a PNG using the existing renderer.
             # Frames are already brightness-quantized (0..levels-1).

@@ -21,6 +21,7 @@ from .formats import detect_game, display_for_key, linux_partitions
 from ...core.elevated_flash import flash_image_with_privileges
 from ...core.rawdevice import (SKIP_VERIFY_LOG, FlashCancelled, FlashError,
                               RawDeviceFile, format_size, is_device_path)
+from ...core import pad_temp
 
 try:                                   # engine import is optional during bring-up
     from . import engine
@@ -872,7 +873,7 @@ class SternFlashImagePipeline(BasePipeline):
                 "Check card",
                 "Keeping your network settings needs room for a copy of the image (%.1f GB) beside it, and that "
                 "drive has not got it. Free some space, or untick Keep my network settings." % (need / 1e9))
-        folder = tempfile.mkdtemp(prefix="pad-network-")
+        folder = pad_temp.mkdtemp(prefix="pad-network-")
         ok = False
         try:
             try:

@@ -39,6 +39,7 @@ import zipfile
 from . import modpack
 from . import staged_originals
 from .checksums import NON_ASSET_DIRS, read_baseline_any
+from . import pad_temp
 
 GAME_MANIFEST = "pad_game.json"
 GAME_KIND = "pad-game"
@@ -259,7 +260,7 @@ def _code_objects(project, log):
             got.append((key, arch, path))
     if got:
         return got
-    tmp = tempfile.mkdtemp(prefix="pad-game-code-")
+    tmp = pad_temp.mkdtemp(prefix="pad-game-code-")
     try:
         MW.compile_code_object(sources, os.path.join(tmp, "mode.so"), log=log)
         key = MW.code_object_key(sources, "arm")
@@ -294,7 +295,7 @@ def export_game(project, zip_path, name="", log_cb=None, progress_cb=None, files
         head["pad"] = __version__
     except ImportError:
         pass
-    tmp = tempfile.mkdtemp(prefix="pad-game-")
+    tmp = pad_temp.mkdtemp(prefix="pad-game-")
     try:
         parts = []                                         # (member, path)
         # the Mod Pack: every changed file, settings, music modes, clips, attract items

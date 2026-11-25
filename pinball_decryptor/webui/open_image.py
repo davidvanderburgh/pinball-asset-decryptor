@@ -29,6 +29,7 @@ import urllib.error
 import urllib.request
 
 from ..core import config
+from ..core import pad_temp
 
 log = logging.getLogger(__name__)
 
@@ -589,7 +590,7 @@ def ask_windows(ext=".raw"):
     if sys.platform != "win32":
         return False
     import tempfile
-    folder = tempfile.mkdtemp(prefix="pad-card-")
+    folder = pad_temp.mkdtemp(prefix="pad-card-")
     path = os.path.join(folder, "Pinball card image" + ext)
     try:
         import ctypes

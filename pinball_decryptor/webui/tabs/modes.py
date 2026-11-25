@@ -47,6 +47,7 @@ from ..modes_tryit import TryItMixin
 from ..modes_jjp import JjpModesMixin         # PAD-1350: the tab on a JJP game
 from ..modes_spooky import SpookyModesMixin   # PAD-1417: the tab on a Spooky game
 from .base import TabService, rpc
+from ...core import pad_temp
 
 SAVE_DELAY_MS = 500
 
@@ -2529,7 +2530,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
 
     def _tmpdir(self):
         if not self._tmp or not os.path.isdir(self._tmp):
-            self._tmp = tempfile.mkdtemp(prefix="pad-modes-")
+            self._tmp = pad_temp.mkdtemp(prefix="pad-modes-")
         return self._tmp
 
     def _update_preview(self, spec, folder):

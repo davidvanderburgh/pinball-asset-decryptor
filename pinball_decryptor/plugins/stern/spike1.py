@@ -52,6 +52,7 @@ from ...core import checksums, staged_changes
 from ...core.longpath import ext as _lp
 from . import sidx as sidx_mod
 from .ext4 import Ext4Reader
+from ...core import pad_temp
 
 AVAILABLE = True
 
@@ -667,7 +668,7 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
         # Stream image.bin out to a flat temp file first: the per-body reads
         # are random-access, and ext2's one-block runs make random access
         # through the reader quadratic.
-        tmp_dir = tempfile.mkdtemp(prefix="spike1_")
+        tmp_dir = pad_temp.mkdtemp(prefix="spike1_")
         flat = os.path.join(tmp_dir, "image.bin")
         log("Reading image.bin out of the card image…")
 

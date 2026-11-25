@@ -39,6 +39,7 @@ import tempfile
 import time
 
 from .prereqs import MAC_TOOL_DIRS
+from . import pad_temp
 
 HOMEBREW_PATHS = ("/opt/homebrew/bin/brew", "/usr/local/bin/brew")
 MACPORTS_PATHS = ("/opt/local/bin/port",)
@@ -259,7 +260,7 @@ def _run_admin(commands, log, popen):
     Several commands run one after the other in the same script (``&&``),
     each announced by its own line, so one password covers them all and
     the log shows which one is running."""
-    work = tempfile.mkdtemp(prefix="pad_prereq_")
+    work = pad_temp.mkdtemp(prefix="pad_prereq_")
     script = os.path.join(work, "install.sh")
     out = os.path.join(work, "install.log")
     body = ["#!/bin/sh", "export PATH=%s:$PATH"

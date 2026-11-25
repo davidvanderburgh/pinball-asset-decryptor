@@ -9,7 +9,7 @@ import pytest
 
 from pinball_decryptor.core import game_update as G
 
-GAMES = {"new.raw": ("king_kong_le", "1.01.0"), "mod100.raw": ("king_kong_le", "1.00.0"),
+GAMES = {"old100.raw": ("king_kong_le", "1.00.0"), "new.raw": ("king_kong_le", "1.01.0"), "mod100.raw": ("king_kong_le", "1.00.0"),
          "stock100.raw": ("king_kong_le", "1.00.0"), "gz.raw": ("godzilla_pro", "1.16.0"),
          "else100.raw": ("king_kong_le", "1.00.0"), "gone100.raw": ("king_kong_le", "1.00.0"),
          "kk101.raw": ("king_kong_le", "1.01.0")}
@@ -22,9 +22,11 @@ def _reader(card):
 def test_every_image_of_the_game_is_planned_and_every_other_row_kept(tmp_path, monkeypatch):
     proj = tmp_path / "kk mods"; proj.mkdir()
     projects = {"mod100.raw": str(proj), "gone100.raw": str(tmp_path / "deleted")}
-    monkeypatch.setattr(G, "_is_stock", lambda p: os.path.basename(p) == "stock100.raw")
+    status = {"stock100.raw": "official", "else100.raw": "modified", "old100.raw": "unknown"}
+    monkeypatch.setattr(G, "_stock_status", lambda p: status.get(os.path.basename(p), ""))
     rows = [(0, "gz.raw", False), (1, "mod100.raw", False), (2, "stock100.raw", False),
-            (3, "else100.raw", False), (4, "gone100.raw", False), (5, "kk101.raw", False), (6, "", True)]
+            (3, "else100.raw", False), (4, "gone100.raw", False), (5, "kk101.raw", False), (6, "", True),
+            (7, "old100.raw", False)]
     label, plan = G.multiboot_plan(rows, "new.raw", reader=_reader,
                                    project_of=lambda p: projects.get(os.path.basename(p)))
     got = {i: (k, w) for i, k, w in plan}
@@ -36,6 +38,8 @@ def test_every_image_of_the_game_is_planned_and_every_other_row_kept(tmp_path, m
     assert got[4][0] == "keep" and "is gone" in got[4][1]
     assert got[5][0] == "keep" and "already" in got[5][1]
     assert got[6][0] == "keep" and "random card" in got[6][1]
+    # an older release the stock records cannot check (every build an update starts from): taken as Stern's
+    assert got[7] == ("stock", "unchecked")
 
 
 def test_a_card_with_none_of_the_games_images_is_refused():

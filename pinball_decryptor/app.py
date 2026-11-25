@@ -4920,7 +4920,10 @@ class App:
             for i, kind, what in plan:
                 lines.append("  %s: %s" % (names[i], {
                     "project": "its project is carried onto %s (%s)" % (new_label, what),
-                    "stock": "becomes Stern's %s as it is" % new_label}.get(kind, "stays as it is: " + what)))
+                    "stock": "becomes Stern's %s as it is%s" % (new_label, (
+                        " (the app has no record of its release to check it is Stern's own: if it carries "
+                        "changes of its own, they are not kept)") if what == "unchecked" else ""),
+                }.get(kind, "stays as it is: " + what)))
             if not jobs and not stock:
                 ui(lambda: messagebox.showinfo("Update", "Nothing on this card is updated:\n\n" + "\n".join(lines)))
                 return

@@ -224,25 +224,32 @@ def multiboot_plan(rows, new_card, reader=None, project_of=None):
         elif project:
             out.append((index, "keep", "a build of %s whose project folder (%s) is gone"
                         % (_label(game, ver), project)))
-        elif _is_stock(path):
-            out.append((index, "stock", ""))
         else:
-            out.append((index, "keep", "a build of %s made elsewhere: the app has no project of it to carry"
-                        % _label(game, ver)))
+            stock = _stock_status(path)
+            if stock == "official":
+                out.append((index, "stock", ""))
+            elif stock in ("", "unknown"):
+                # the stock records cover current releases only, and an update starts from an older one: an
+                # image the app did not build and cannot check is taken as Stern's, and the question says so
+                out.append((index, "stock", "unchecked"))
+            else:
+                out.append((index, "keep", "a build of %s made elsewhere: the app has no project of it to carry"
+                            % _label(game, ver)))
     if not same:
         raise UpdateRefused("No image on this card is %s's game: pick the new card image of one of its games."
                             % new_label)
     return new_label, out
 
 
-def _is_stock(path):
-    """True when *path* is Stern's own card image (its stock fingerprint check), else False."""
+def _stock_status(path):
+    """The stock check's word for *path*: "official" (Stern's own release, byte for byte), "modified" (a release
+    with files changed), "unknown" (a release the app has no record of - every older build) or ""."""
     try:
         from ..plugins.stern import stock_prints
         got = stock_prints.check_card(path)
-        return bool(got) and got.get("status") == "official"
+        return (got or {}).get("status") or ""
     except Exception:                                   # noqa: BLE001
-        return False
+        return ""
 
 
 def workspace_for(project, new_label):

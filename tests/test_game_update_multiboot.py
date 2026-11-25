@@ -137,10 +137,11 @@ def test_a_no_at_the_question_changes_nothing(tmp_path, monkeypatch):
 def test_a_card_the_tab_refuses_to_update_is_said_not_left_silent(tmp_path, monkeypatch):
     from pinball_decryptor import app as A
     from pinball_decryptor.webui import multiboot_core
-    panel = _Panel([("stock100.raw", "KING KONG")])
+    panel = _Panel([("gz.raw", "GODZILLA"), ("stock100.raw", "KING KONG")])
     panel._msg = "Image 1: no such file"
     panel.update_card = lambda after=None: False
-    monkeypatch.setattr(G, "multiboot_plan", lambda rows, raw: ("KK 1.01", [(0, "stock", "")]))
+    monkeypatch.setattr(G, "multiboot_plan", lambda rows, raw: ("KK 1.01", [(0, "keep", "another game"),
+                                                                           (1, "stock", "")]))
     monkeypatch.setattr(multiboot_core, "is_group", lambda r: False)
     warned, done = [], threading.Event()
     monkeypatch.setattr(A.messagebox, "showwarning", lambda t, m: warned.append(m) or done.set())
@@ -150,3 +151,38 @@ def test_a_card_the_tab_refuses_to_update_is_said_not_left_silent(tmp_path, monk
     assert A.App._start_multiboot_update(app, str(tmp_path / "c.raw"), "new.raw")
     assert done.wait(5)
     assert "not updated: Image 1: no such file" in warned[0] and "Nothing on it was written" in warned[0]
+
+
+def test_a_new_release_as_the_first_image_builds_a_fresh_card_beside_the_old(tmp_path, monkeypatch):
+    """The card's system partition is its first image's; a new release brings its own, and mkmulticard will not
+    update that in place, so the update builds the card again beside the old one."""
+    from pinball_decryptor import app as A
+    from pinball_decryptor.webui import multiboot_core
+    panel = _Panel([("stock100.raw", "KING KONG"), ("gz.raw", "GODZILLA")])
+    built = {}
+
+    class _Var:
+        def set(self, v):
+            built["out"] = v
+    panel._out_var = _Var()
+
+    def build(after=None):
+        built["built"] = True
+        if after:
+            after()
+        return True
+    panel._build_card = build
+    monkeypatch.setattr(G, "multiboot_plan", lambda rows, raw: ("King Kong LE 1.01", [(0, "stock", ""),
+                                                                                      (1, "keep", "another game")]))
+    monkeypatch.setattr(multiboot_core, "is_group", lambda r: False)
+    done = threading.Event()
+    got = {}
+    app = SimpleNamespace(window=SimpleNamespace(_multiboot_panel=panel, select_tab=lambda t: None),
+                          msg_queue=SimpleNamespace(put=lambda m: getattr(m, "fn", lambda: None)()))
+    app._ask_on_ui = lambda t, m: True
+    card = str(tmp_path / "kk.multi.raw")
+    assert A.App._start_multiboot_update(app, card, "new.raw",
+                                         lambda c, rep, plan: got.update(c=c, rep=rep) or done.set())
+    assert done.wait(5)
+    assert built["out"] == str(tmp_path / "kk (King Kong LE 1.01).multi.raw") and built.get("built")
+    assert not panel.updated and panel.replaced == [(0, "new.raw")] and got["c"] == built["out"]

@@ -4946,8 +4946,27 @@ class App:
                     say("Not updated on the card (see above): %s." % ", ".join(failed), "warning")
                 if not replaced:
                     return
-                say("Updating %s in place: %s." % (card, ", ".join(names[i] for i in sorted(replaced))), "info")
-                if not panel.update_card(after=(lambda: on_done(card, replaced, plan)) if on_done else None):
+                if 0 in replaced:
+                    # THE FIRST IMAGE CHANGED RELEASE: the card's system partition (kernel and rootfs) is
+                    # the first image's, a new release brings its own, and an in-place update cannot carry
+                    # that (mkmulticard refuses it). So a fresh card, beside the old one, named for the
+                    # build; the machine's settings and scores stay on the machine (Send keeps them, a
+                    # card write keeps them with Keep the card's own settings)
+                    stem = os.path.basename(card)
+                    for ext in (".multi.raw", ".raw", ".img"):
+                        if stem.lower().endswith(ext):
+                            stem = stem[:-len(ext)]
+                            break
+                    out = os.path.join(os.path.dirname(card), "%s (%s).multi.raw" % (stem, new_label))
+                    say("Building %s: the first image is now %s, whose system partition an in-place update "
+                        "cannot carry." % (out, new_label), "info")
+                    panel._out_var.set(out)
+                    ok = panel._build_card(after=(lambda: on_done(out, replaced, plan)) if on_done else None)
+                else:
+                    say("Updating %s in place: %s." % (card, ", ".join(names[i] for i in sorted(replaced))),
+                        "info")
+                    ok = panel.update_card(after=(lambda: on_done(card, replaced, plan)) if on_done else None)
+                if not ok:
                     # the tab refused before writing (its own words are in its status line)
                     messagebox.showwarning(
                         "Update", "The card was not updated: %s\n\nNothing on it was written. The updated "

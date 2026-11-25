@@ -521,12 +521,19 @@ class MachinesMixin:
         def updated(card, replaced, plan):
             if os.path.isfile(card):
                 self.machines_rebind(mid, card)
+            n = "%d image%s of the game" % (len(replaced), "" if len(replaced) == 1 else "s")
+            if _same(card, r["card"]):
+                how = ("%s's card is updated in place: %s replaced, every other image and the menu as they "
+                       "were." % (r["name"] or "The machine", n))
+            else:
+                how = ("%s's card is built again beside the old one, because its first image is now a new "
+                       "release, whose system an in-place update cannot carry: %s replaced, every other image "
+                       "and the menu as they were." % (r["name"] or "The machine", n))
             compat.messagebox.showinfo(
                 "Card updated",
-                "%s's card is updated in place: %d image%s of the game replaced, every other image, the menu "
-                "and its settings and high scores as they were.\n    %s\n\nPut it on the machine as you put "
-                "the card there before: Send to machine from the Multi-boot tab's card, or write the SD card."
-                % (r["name"] or "The machine", len(replaced), "" if len(replaced) == 1 else "s", card))
+                "%s\n    %s\n\nPut it on the machine: Send to machine sends only what changed and keeps the "
+                "machine's settings, audits and high scores; a card write keeps them with Keep the card's own "
+                "settings." % (how, card))
 
         def built(build, workspace, raw):
             w = self.window

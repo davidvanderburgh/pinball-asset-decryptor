@@ -16,6 +16,7 @@ referencing the now-deleted names, so it would re-raise the moment any sound was
 replaced.  These tests drive the orchestrator far enough to catch both.
 """
 
+from pinball_decryptor.core import sparse_card
 import inspect
 import io
 import os
@@ -199,7 +200,7 @@ def test_write_image_copy_failure_surfaces(tmp_path, monkeypatch):
 
     def bad_copy(_s, _d):
         raise OSError("disk full")
-    monkeypatch.setattr(shutil, "copyfile", bad_copy)
+    monkeypatch.setattr(sparse_card, "sparse_copy", bad_copy)
     with pytest.raises(OSError, match="disk full"):
         engine.write_image(str(src), str(tmp_path), str(out), log=_log)
 
@@ -218,12 +219,12 @@ def test_write_image_waits_for_slow_copy_before_patching(tmp_path, monkeypatch):
                         lambda *a, **k: ({19: b"PATCHED!"}, (1, 0, 0, 0),
                                          None, None, None))
 
-    real_copy = shutil.copyfile
+    real_copy = sparse_card.sparse_copy
 
     def slow_copy(s, d):
         time.sleep(0.15)            # finishes well after compute returns
         return real_copy(s, d)
-    monkeypatch.setattr(shutil, "copyfile", slow_copy)
+    monkeypatch.setattr(sparse_card, "sparse_copy", slow_copy)
 
     def fake_apply(out_f, writes):
         for off, b in writes.items():

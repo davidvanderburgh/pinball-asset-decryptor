@@ -12,6 +12,7 @@ a Spike 2 card keeps its games partition, inside a sparse Stern-shaped card,
 with every encode entry point stubbed to fail the test if it is reached.
 """
 
+from pinball_decryptor.core import sparse_card
 import os
 import struct
 import time
@@ -1076,7 +1077,7 @@ def build(rig, monkeypatch):
     def copy(a, b):
         copies.append(time.monotonic())
         open(b, "wb").close()
-    monkeypatch.setattr(shutil, "copyfile", copy)
+    monkeypatch.setattr(sparse_card, "sparse_copy", copy)
     orig = _stern_card(rig.tmp / "orig.raw", _tiny_fs(free=200))
     out = rig.tmp / "out.raw"
     out.write_bytes(b"the last build")

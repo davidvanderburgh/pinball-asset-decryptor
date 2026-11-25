@@ -2692,9 +2692,12 @@ SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10/spike3", "w
 #: PAD-1293 (2026-11-16, Spike 3 rig slots 160-163): Transformers LE 0.96's shots come from the same edges ("the switch
 #: drain's edges (switch_edge ... the record in x19, the game's mode mask applied)"): the census above and four modes
 #: started on Megatron target left x3 and scored on Right orbit, Center loop and Left orbit.
+#: PAD-1555 (2026-11-24, newbuild/checkjob.sh + edgecheck.py, stock cards, hidden, muted): Metallica 1.05 - each of the
+#: 49 playfield switches gamecheck presses (twice), 35 gave one shot a press on a bit of its own and the same 14 none
+#: (the Coffin locks 88-93 and the like), exactly as the 1.04 control in the same run.
 SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18",
                                 "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16",
-                                "metallica_spike-1.04",
+                                "metallica_spike-1.04", "metallica_spike-1.05",
                                 "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3",
                                 "transformers_mtmte_le-0.96/spike3"})
 

@@ -486,10 +486,15 @@ switch 100  0x8000000000       Lt ramp exit opto
 callout countdown           573
 callout ten_seconds         592
 callout time_up             664
+value mode_records_1       0x00b900b7      # a song mode: ids 183..185 (PAD-1555: 1.04's + 1 - its song starts create 178 / 183 / 188 / 193 where 1.04's create 177 / 182 / 187 / 192)
 text mode_records_name_1   a song mode
+value mode_records_2       0x00be00bc      # a song mode: ids 188..190 (PAD-1555: 1.04's + 1 - its song starts create 178 / 183 / 188 / 193 where 1.04's create 177 / 182 / 187 / 192)
 text mode_records_name_2   a song mode
+value mode_records_3       0x00c300c1      # a song mode: ids 193..195 (PAD-1555: 1.04's + 1 - its song starts create 178 / 183 / 188 / 193 where 1.04's create 177 / 182 / 187 / 192)
 text mode_records_name_3   a song mode
+value mode_records_4       0x00e200e0      # a song mode: ids 224..226 (PAD-1555: 1.04's + 1 - its song starts create 178 / 183 / 188 / 193 where 1.04's create 177 / 182 / 187 / 192)
 text mode_records_name_4   a song mode
+value mode_records_5       0x00e900e8      # a song mode: ids 232..233 (PAD-1555: 1.04's + 1 - its song starts create 178 / 183 / 188 / 193 where 1.04's create 177 / 182 / 187 / 192)
 text mode_records_name_5   a song mode
 text loop_up_post_label   Loop up post
 text loop_up_post_drive   11 2 170 32 68 1032

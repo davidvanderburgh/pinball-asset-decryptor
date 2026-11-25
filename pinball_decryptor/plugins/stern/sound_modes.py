@@ -863,7 +863,9 @@ def slot_key(rel):
 #: machine's :data:`.spike2.soundbank.MAPPED_MAX` (read off the library's cards: Dungeons & Dragons
 #: 1.10's 2,142,352,388 + 39,598,976; the next closest, Rush 1.19, leaves 126 MB): a mode file for
 #: one of their bank songs has no bank of this app's to go into, and no other road
-BANK_SONG_NO_ROOM = frozenset({"dungeons_and_dragons_le-1.10", "dungeons_and_dragons_pro-1.10"})
+#: PAD-1555: 1.11 carries the same image.bin (2,142,352,388) and image-sc01.bin (39,598,976), read off its cards
+BANK_SONG_NO_ROOM = frozenset({"dungeons_and_dragons_le-1.10", "dungeons_and_dragons_pro-1.10",
+                               "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11"})
 
 
 def slot_ok(rel, prof):

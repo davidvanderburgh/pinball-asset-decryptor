@@ -259,7 +259,10 @@ under the game's own name (`lab.fun` for Labyrinth).
 - All the builds share one set of settings and scores.
 - **Back to the menu without switching off:** during a game, hold **EXIT** on
   the coin door for 3 seconds. The machine restarts into the menu.
-- Installing any normal update afterwards removes the menu.
+- A normal update from a stick is not installed over the menu: the game
+  carries on and the stick gets a note saying why. To install one anyway
+  (the menu and its builds go), put a file named `bof-update-ok.txt` on the
+  stick beside it.
 
 | Game | Supported |
 |---|---|

@@ -152,7 +152,20 @@ boot C2 22 14 >/dev/null
 boot E
 check "E no button: the countdown boots the remembered image 1" "game_is pad_image1.bin"
 check "E ...from the menu's own countdown" "grep -q 'countdown expired' $P/bofselect.log"
+# G (PAD-1585) - the update guard: a normal update over the menu is refused ----------------
+check "G the machine's updater carries the update guard" "grep -q 'PAD update guard (PAD-1585)' $H/updatecode.sh"
+rm -f "$W/usb/PAD-UPDATE-NOT-INSTALLED.txt" "$W/usb/bof-update-ok.txt"
+usb_install "$STOCK"
+check "G a normal update is refused: the menu and image 1 are still there" \
+    "[ -e $H/extracted/decrypt/padselect/images.conf ] && [ \"\$(md5sum < $H/extracted/decrypt/pad_image1.bin | cut -d' ' -f1)\" = \"$IMG1_MD5\" ]"
+check "G ...the profile still carries the menu hook" "grep -q 'PAD multi-boot (PAD-342)' $H/.bash_profile"
+check "G ...and the stick says why" "grep -q 'was not installed' $W/usb/PAD-UPDATE-NOT-INSTALLED.txt"
+rm -f $P/install.log
+usb_install "$MULTI"
+check "G a PAD multi-boot update still installs over the menu (its install step ran again)" \
+    "grep -q 'image 1 (pad_image1.bin): .* ok' $P/install.log && [ \"\$(grep -c '^image=' $P/images.conf)\" = 2 ]"
 # F ---------------------------------------------------------------------------------
+touch "$W/usb/bof-update-ok.txt"       # the way back: a normal update with the pass file
 usb_install "$STOCK"
 check "F a normal update: the menu's files are gone" "[ ! -e $H/extracted/decrypt/padselect ] && [ ! -e $H/extracted/decrypt/pad_image1.bin ]"
 check "F a normal update: its own profile is back (no hook)" "! grep -q 'PAD multi-boot' $H/.bash_profile"

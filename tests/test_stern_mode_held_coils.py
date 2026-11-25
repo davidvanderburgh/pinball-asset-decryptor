@@ -59,7 +59,7 @@ def test_the_game_wins_for_every_coil():
     busy = _lift(src, "static int coil_game_busy(")
     assert "c->obj + c->ctl" in busy and "ctl != c->id" in busy              # a process of the game's controls it
     assert "c->ctl = 44;" in _lift(src, "static void coils_arm(void)")       # +44 on Godzilla's ControlCoil
-    assert "c->obj + 36" in busy                                              # the game asked for an on-time
+    assert "c->obj + CCOIL_ONTIME_AT" in busy                                 # the game asked for an on-time (PAD-1555: +36, or the port's)
     assert "_procs" in busy                                                   # the game's own processes the port names
     assert "coil_game_busy(c)" in _lift(src, "int pm_coil_hold(")
     assert 'coil_let_go(c, "the game wants it")' in _lift(src, "static void magnet_tick(")

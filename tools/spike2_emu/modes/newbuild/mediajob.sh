@@ -3,6 +3,8 @@
 # re-made).
 #
 #   SET=<dir>   the Try it set mediabuild.py built (its `set` and `set-modes`), as a /mnt path
+#   PICK=1      press START twice after the plunge: a title that holds ball 1 on a pick screen (D&D's PLAYER 1 SELECT A
+#               CHARACTER) shows nothing of the game until it is taken
 #
 # The set's stage installed (the shipped port, the mode file), its rewritten title files bound (PAD_OVERRIDE_DIR); in a
 # game MEDIA TEST is started: its 4 s magenta title clip at its start, then its magenta screen while it runs. Frames
@@ -20,6 +22,11 @@ log=$DUMP/mode.log
 job_start_game || job_fail "$JOB_WHY"
 job_sleep 3
 python3 "$RIG/plunge.py" plunge > /dev/null 2>&1 < /dev/null
+if [ "${PICK:-0}" = 1 ]; then
+    st=$(awk '$1 ~ /^[0-9]+$/ && toupper($0) ~ / START BUTTON *$/ {print $1; exit}' "$DUMP/tables/$GAME/switch_list.txt")
+    for k in 1 2; do job_sleep 4; job_press "$st" 300; done
+    python3 "$RIG/plunge.py" plunge > /dev/null 2>&1 < /dev/null
+fi
 job_sleep 12
 job_shot "$JOB_OUT/f0_before.png"
 bash "$MODES/tryit.sh" start 0 > /dev/null 2>&1 < /dev/null

@@ -2186,11 +2186,17 @@ def _pulse_coils(port, key):
 
 
 HELD_COILS_PROVEN = frozenset({
-    ("king_kong_le-1.01", "spider_magnet"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, node 9 coil 0, 255 for 500 ms then 30 (the object's own)
-    ("king_kong_le-1.01", "log_diverter"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, node 9 coil 1, 180 for 200 ms then 48 (the object's own)
-    ("king_kong_le-1.01", "ramp_diverter"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, node 9 coil 7, 255 for 60 ms (64, in board ticks) then 48 (the object's own)
-    ("king_kong_pro-1.01", "spider_magnet"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, node 9 coil 0, 255 for 500 ms then 30 (the object's own)
-    ("king_kong_pro-1.01", "river_diverter"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1): coil_hold 2000 - HOLD, node 9 coil 1, 180 for 200 ms then 48 (the object's own)
+    # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1, the object's own powers): coil_hold 2000 - HOLD, the
+    # command on its own board address, and the hold ran its 2000 ms ("its time ran out") once the runtime read the
+    # object's on-time word at +32 (`value ccoil_ontime_at`; at +36 every hold was let go 13 ms in); LE 1.00 twice
+    ("king_kong_le-1.00", "spider_magnet"),   # node 9 coil 0, 255 for 500 ms then 30
+    ("king_kong_le-1.00", "log_diverter"),   # node 9 coil 1, 180 for 200 ms then 48
+    ("king_kong_le-1.00", "ramp_diverter"),   # node 9 coil 7, 255 for 60 ms then 48
+    ("king_kong_le-1.01", "spider_magnet"),   # node 9 coil 0, 255 for 500 ms then 30
+    ("king_kong_le-1.01", "log_diverter"),   # node 9 coil 1, 180 for 200 ms then 48
+    ("king_kong_le-1.01", "ramp_diverter"),   # node 9 coil 7, 255 for 60 ms then 48
+    ("king_kong_pro-1.01", "spider_magnet"),   # node 9 coil 0, 255 for 500 ms then 30
+    ("king_kong_pro-1.01", "river_diverter"),   # node 9 coil 1, 180 for 200 ms then 48
     ("avengers_infinity_le-1.12", "tower_magnet"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
     ("avengers_infinity_le-1.12", "tower_post"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address
     ("avengers_infinity_pro-1.12", "tower_magnet"),   # PAD-1555 2026-11-24 newbuild/coiljob.sh (PAD_COIL_PROBE=1; the 0x70 coil record): coil_hold 2000 - HOLD, one command on its board address

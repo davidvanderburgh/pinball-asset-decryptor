@@ -221,7 +221,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
-| King Kong LE 1.00 | ✓ | ✓ | ✓ | shots | buttons, scoop, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| King Kong LE 1.00 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong LE 1.01 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong Pro 1.01 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |

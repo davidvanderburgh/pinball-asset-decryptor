@@ -247,7 +247,6 @@ site layer_remove     0x000a95d4 0xe92d40f8 0xe5913004
 site spider_magnet_get 0x0007c5a4 0xe92d40f0 0xe304447c
 #   river_diverter_get: placed through 3 callers, e.g. the bl at 0x767b4 [King Kong Pro 0.97]
 site river_diverter_get 0x000781b4 0xe92d40f0 0xe3034ff8
-# site scoop_handler          NOT PLACED: absent in the target (the function changed); no caller could be lined up
 #   candidate: the reference scoop_handler calls 0xac3b4, which is 0xb0944 in the target - prove what it does before using it
 #   candidate: the reference scoop_handler calls 0x3b5fa0, which is 0x41913c in the target - prove what it does before using it
 #   candidate: the reference scoop_handler calls 0x40f854, which is 0x555504 in the target - prove what it does before using it
@@ -392,12 +391,6 @@ data switch_count           0x008db528
 data game_flags             0x008db634
 #   game_flag_count: derived from 2 places, e.g. 0x305814+0x40 [King Kong Pro 0.97, King Kong LE 0.97, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Uncanny X-Men Pro 0.98, Foo Fighters Pro 1.04, Iron Maiden LE 1.18, Jurassic Park LE 1.16, Rush LE 1.19, Rush Pro 1.19, Iron Maiden Pro 1.18, Star Wars LE 1.31, Star Wars Pro 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Metallica Remastered 1.04, Uncanny X-Men LE 0.98, Venom Pro 1.07, James Bond 007 Pro 1.06, Jaws LE 1.02, Foo Fighters LE 1.04, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Elvira 1.13, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Stranger Things LE 1.13, TMNT LE 1.59, Aerosmith 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, The Munsters LE 1.28, James Bond 60th LE 1.11, Star Wars ELG 1.10, Stranger Things 1.13, Jurassic Park Pin 1.05, Venom LE 1.07, James Bond 007 LE 1.06, The Beatles 1.29, TMNT Pro 1.59, Batman 66 1.14, Deadpool LE 1.16, Deadpool Pro 1.16, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Star Wars LE 1.30, Deadpool LE 1.14]
 data game_flag_count        0x006d5e6c
-# data typeinfo_cmode_mball   NOT PLACED: only 1 place lined up (0x73fd8c via 0x13f48c+0x90); 2 needed
-# data typeinfo_vmi           NOT PLACED: no code that loads it could be lined up
-# data scoop_slot             NOT PLACED: no code that loads it could be lined up
-# data wizard_obj_1           NOT PLACED: no code that loads it could be lined up
-# data wizard_obj_2           NOT PLACED: no code that loads it could be lined up
-# data wizard_obj_3           NOT PLACED: no code that loads it could be lined up
 #   sw_struct: derived from 2 places, e.g. 0x45f304+0x1c [King Kong Pro 0.97, King Kong LE 0.97, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Uncanny X-Men Pro 0.98, Foo Fighters Pro 1.04, Iron Maiden LE 1.18, Jurassic Park LE 1.16, Rush LE 1.19, Rush Pro 1.19, Iron Maiden Pro 1.18, Star Wars LE 1.31, Star Wars Pro 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Metallica Remastered 1.04, Uncanny X-Men LE 0.98, Venom Pro 1.07, James Bond 007 Pro 1.06, Jaws LE 1.02, Foo Fighters LE 1.04, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Elvira 1.13, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Stranger Things LE 1.13, TMNT LE 1.59, Aerosmith 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, The Munsters LE 1.28, James Bond 60th LE 1.11, Star Wars ELG 1.10, Stranger Things 1.13, Jurassic Park Pin 1.05, Venom LE 1.07, James Bond 007 LE 1.06, The Beatles 1.29, TMNT Pro 1.59, Batman 66 1.14, Deadpool LE 1.16, Deadpool Pro 1.16, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
 #   coil_count: derived from 2 places, e.g. 0x2cd70c+0xac [King Kong Pro 0.97, King Kong LE 0.97, Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Uncanny X-Men Pro 0.98, Foo Fighters Pro 1.04, Iron Maiden LE 1.18, Jurassic Park LE 1.16, Rush LE 1.19, Rush Pro 1.19, Iron Maiden Pro 1.18, Star Wars LE 1.31, Star Wars Pro 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Metallica Remastered 1.04, Uncanny X-Men LE 0.98, Venom Pro 1.07, James Bond 007 Pro 1.06, Jaws LE 1.02, Foo Fighters LE 1.04, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Elvira 1.13, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, Led Zeppelin LE 1.22, Led Zeppelin Pro 1.22, Stranger Things LE 1.13, TMNT LE 1.59, Aerosmith 1.16, Avengers: Infinity Quest LE 1.10, Avengers: Infinity Quest Pro 1.10, The Munsters LE 1.28, James Bond 60th LE 1.11, Star Wars ELG 1.10, Stranger Things 1.13, Jurassic Park Pin 1.05, Venom LE 1.07, James Bond 007 LE 1.06, The Beatles 1.29, TMNT Pro 1.59, Batman 66 1.14, Deadpool LE 1.16, Deadpool Pro 1.16, Aerosmith LE 1.16, John Wick LE 1.01, Metallica Remastered 1.03, Dungeons & Dragons LE 1.00, Star Wars LE 1.30, Deadpool LE 1.14]
 data coil_count             0x00926e7c
@@ -1090,3 +1083,25 @@ text show_name_12         Wide blue and white strobe
 text show_kind_12         accent
 value show_secs_12        2
 
+# ---- PAD-473 (PAD-1555: the earlier build's, each object placed in this program - newbuild/objfind.py, globals.py, the mode table): the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# mode object, started by its own START (v[11]) as the game's rules start it and asked its ACTIVE (v[18]);
+# the names and what earns each are the game's rulesheet's, the objects this build's own (stock_scan_cpp).
+data  wizard_obj_1    0x0089baa8   # cmode_crash_the_gate
+text  wizard_name_1   Crash the Gate
+text  wizard_film_1   all five island scenes
+data  wizard_obj_2    0x0089b038   # cmode_trex_battle, a multiball
+text  wizard_name_2   T-Rex Battle
+text  wizard_film_2   KING KONG spelled
+data  wizard_obj_3    0x0089b130   # cmode_trex_boss_battle, a multiball
+text  wizard_name_3   T-Rex Boss Battle
+text  wizard_film_3   KING KONG spelled again
+
+# ---- PAD-1555: the scoop, the earlier build's lines placed in this program (its handler by a masked run of
+# its code, unique in both programs; its slot by its neighbours' shift, globals.py) ----
+site scoop_handler    0x000b071c 0xe3073aea 0xe2401002
+data scoop_slot             0x00849170   # PAD-1555: the earlier build's + -0x540c, its neighbours' shift (globals.py)
+
+# ---- PAD-1555: the typeinfo records the stack needs, found by their class names (newbuild/objfind.py; the same
+# search gives the earlier build's own addresses) ----
+data typeinfo_cmode_mball   0x0073fd8c
+data typeinfo_vmi           0x0072a378   # any multiple-inheritance typeinfo: its vptr (GamePlayModes)

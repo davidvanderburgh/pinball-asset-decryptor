@@ -208,3 +208,24 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   (`shake_adj` re-read by shaker_lines.py in all ten). Also still to do: the modules that list builds by key and know
   their adjustments / menus / sounds / scenes (menu_settings.py, sound_modes.py, scene_write.py, mode_project.py's
   title lists) - the new builds are not in them yet, each to be read off the build, never copied.
+
+### Run 5 (2026-11-24 night): mini-wizards, scoop, the stack's typeinfo
+
+- **Mini-wizards** on all ten: each `wizard_obj_<n>` placed in the new program by the method its title allows, each
+  method first checked to give the earlier build's own address - `newbuild/objfind.py` (class name -> typeinfo ->
+  vtable -> its constructor -> the object; King Kong's two T-Rex battles, Avengers' three), the game-mode block of
+  the same name (Crash the Gate, Soul Gem, Battle Royale, Tiny's Dice Game), the mode table's index (Foo Fighters,
+  D&D: every known mode keeps its index), `newbuild/globals.py` (neighbours' shift); where two methods place one they
+  agree. `newbuild/wizjob.sh`: wizard 1 started, wizard 2 held while it ran - all ten (and Avengers LE 1.10 as the
+  control); WIZARDS_PROVEN.
+- **Scoop**: `scoop_handler` by a masked run of the earlier code, unique in both programs (it found Avengers LE 1.12's
+  existing site exactly; D&D's and Metallica's agree with the whole-body match), `scoop_slot` by globals.py: King Kong
+  x3, D&D x2, Metallica. Not yet proven (SCOOP_PROVEN: the scoop_hold job).
+- **Stack** on King Kong / Avengers: `typeinfo_cmode_mball` and `typeinfo_vmi` by class name (GamePlayModes /
+  ConnectivityObjectives, the earlier builds' own). Not yet proven (STACK_PROVEN: the stack job).
+- **Challenges** (Avengers, Foo Fighters, Metallica): portchallenge.find reads none of the new builds' start menus
+  ("the build names no challenge") though the flag names read - the menu code changed too (and Avengers 1.12 has a new
+  FG_PLAYER_SOUL_GEM_CHALLENGE_ACTIVE). Its menu readers need the new shape.
+- **Next, per build, the proofs still owed:** lights (LAMPS_PROVEN: every named insert magenta off the node bus,
+  leddecode.py), ball save, multiball, stack, scoop, place, done, with, held coils, button shots, spare I/O, title
+  scenes; then challenges, then the key-listed modules (menu_settings / sound_modes / scene_write).

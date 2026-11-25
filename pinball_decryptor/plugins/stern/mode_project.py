@@ -1863,6 +1863,16 @@ def _shows_cannot(label, port=None):
 WIZARD_NEEDS = (("wizard_start",), ("wizard_state", "wizard_table", "lamps_dirty"))
 #: The builds where a mode file's ``game_wizard`` line was seen hand the player the game's own mode in the emulator.
 WIZARDS_PROVEN = frozenset({
+    "king_kong_le-1.00",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Crash the Gate started (its own start); T-Rex Battle waited while it ran (cmode_crash_the_gate in its way)
+    "king_kong_le-1.01",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Crash the Gate started (its own start); T-Rex Battle waited while it ran (cmode_crash_the_gate in its way)
+    "king_kong_pro-1.01",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Crash the Gate started (its own start); T-Rex Battle waited while it ran (cmode_crash_the_gate in its way)
+    "avengers_infinity_le-1.12",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Soul Gem Quest started; Black Order Multiball waited while it ran (cmode_soul_gem in its way)
+    "avengers_infinity_pro-1.12",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Soul Gem Quest started; Black Order Multiball waited while it ran (cmode_soul_gem in its way)
+    "foo_fighters_le-1.05",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Austin started; D.C. waited while it ran (a multiball, cmode_austin_wizard, in its way)
+    "foo_fighters_pro-1.05",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Austin started; D.C. waited while it ran (a multiball, cmode_austin_wizard, in its way)
+    "dungeons_and_dragons_le-1.11",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Tiny's Dice Game started; Tavern Brawl waited while it ran (ctinys_dice_game in its way)
+    "dungeons_and_dragons_pro-1.11",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Tiny's Dice Game started; Tavern Brawl waited while it ran (ctinys_dice_game in its way)
+    "metallica_spike-1.05",   # PAD-1555 2026-11-24 newbuild/wizjob.sh (stock card, hidden, muted; the objects placed in this program): Blackened Multiball started (its start said so); The End of the Line waited while its multiball ran
     # PAD-436 2026-10-07 rig 2, the stock card: From Russia With Love completed through the game's own collect fired
     # film_frwl and a `game_wizard start Ahoy Mr. Bond` file started the game's Ahoy Mr. Bond (its start, played 0x2, its
     # running query 1, flags 85 86, its intro on the glass); Goldfinger then `light`ed Goldfinger's Jackpot (selected 2,

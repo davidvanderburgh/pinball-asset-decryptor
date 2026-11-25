@@ -1,12 +1,12 @@
 """PAD-1589 proof shot: the accessibility options on a Spike 2 Godzilla LE 1.16 project (the play options).
 
-    python scripts/shot_pad1589.py <repo> <out.png> [--tick] [--preset red_green|blue_yellow] [--tab playopts|modes]
-                                   [--lights]
+    python scripts/shot_pad1589.py <repo> <out.png> [--tick] [--preset red_green|blue_yellow] [--tab playopts|svcmenu]
+                                   [--h <height>]
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the Godzilla LE 1.16 card (its
 .extract_source.json names it) and shows the play options. Before (main) there is no colour-blind or spoken-score
-option; after there are both, and with --tick both are ticked (--preset picks the colour-blind preset). --lights opens
-the Modes tab's Light shows preview instead (the preset's colours on the playfield there).
+option; after there are both, and with --tick both are ticked (--preset picks the color-blind preset). --tab svcmenu
+shows the Service menu tab instead (the rows on the Custom Code page). The Light shows view: shot_pad1589_lights.py.
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
 """
@@ -67,19 +67,23 @@ def main():
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1500, "height": 1000})
+            page = browser.new_page(viewport={"width": 1500, "height": int(arg("--h", "1000"))})
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             time.sleep(2)
             if tick:
-                print(webui_shot.api(url, "modes.set_colour_blind", True, preset), flush=True)
-                print(webui_shot.api(url, "modes.set_spoken_scores", True), flush=True)
+                for call in (("modes.set_colour_blind", True, preset), ("modes.set_spoken_scores", True)):
+                    try:
+                        print(webui_shot.api(url, *call), flush=True)
+                    except Exception as e:                  # noqa: BLE001 - main has no such action
+                        print("no", call[0], e, flush=True)
                 time.sleep(1)
-            webui_shot.api(url, "ui.select_tab", "modes" if "--lights" in sys.argv else tab)
+            webui_shot.api(url, "ui.select_tab", tab)
             time.sleep(6)
-            if "--lights" in sys.argv:
-                page.get_by_text("Light shows").first.click()
-                time.sleep(5)
+            hide = page.get_by_text("Hide log")
+            if hide.count():
+                hide.first.click()
+                time.sleep(1)
             page.screenshot(path=out)
             print("shot", out, flush=True)
             browser.close()

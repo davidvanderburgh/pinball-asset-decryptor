@@ -58,8 +58,19 @@ stays on Insider Connected: the mode runtime runs them on its settings-only path
 
 ## Proof (emulator, Godzilla LE 1.16, `artifacts/PAD-1589/emulator`)
 
-A set built by the app's own `engine.write_overrides` from a project with both ticked (`C:/tmp/PAD-1589/mkset.py`),
-run by `job.sh` (rigbatch, x1, muted, hidden): see RESULTS.txt there.
+A set built by the app's own `engine.write_overrides` from a project with both ticked (`mkset.py`), run by `job.sh`
+and `job4.sh` (rigbatch, x1, muted, hidden); RESULTS.txt there has the detail.
+
+- The game's own colors held as the preset's (`colour-blind inserts: TOP SAUCER shown c00010 for the game's c00000`,
+  the same values as `accessibility.remap`), switched live from the real service menu: 1 red-green, 2 blue-yellow
+  (yellow ffff00 shown ffe300, blue 0000ff 002bff), 0 the game's colors back. On the wire to the insert boards
+  (lamp_watch): with the preset on, reds carry its blue part (MECHA LANE cc0011) and no pure game red was seen.
+- Six ball ends of a two-player game, six different scores, each said once and held for (3.7-4.9 s); the left flipper
+  held in attract said both players' last scores; every sentence played word for word (`judge.py`: each word a sound
+  worker play of request 1251 whose record lookup took that word's record). SPOKEN SCORES Off: the hold says nothing.
+- Found on the way and fixed: a tilted ball reaches the ball's end twice (tilt, then drain); the flipper hold ignored
+  the row. Godzilla's Action button light is driven outside the light layers the runtime paints over: it keeps the
+  game's colors (it is no shot's light).
 
 ## Spike 3
 

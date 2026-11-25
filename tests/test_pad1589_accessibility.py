@@ -334,3 +334,35 @@ def test_the_runtime_runs_them_without_the_score_gate():
     assert "acc_tick();" in _lift(rt, "static void on_tick(pm_reg *r)")
     assert "acc_tick();" in _lift(rt, "static void on_hand_tick(pm_reg *r)")
     assert "spk_lookup(r)" in _lift(rt, "static void on_sound_lookup(pm_reg *r)")
+
+
+def test_the_playfield_window_previews_and_stands_down(tmp_path, monkeypatch):
+    sys.path.insert(0, EMU)
+    try:
+        import playfield
+    finally:
+        sys.path.remove(EMU)
+    vals = {"R": 0xff, "G": 0x60, "B": 0}
+    assert playfield.cvd_vals(vals, "red_green") == {"R": 0x6f, "G": 0xff, "B": 0}
+    assert playfield.cvd_vals({"W": 200}, "red_green") == {"W": 200}          # a one-color insert keeps its lens
+    assert playfield.cvd_vals(vals, "") is vals
+    monkeypatch.setattr(playfield.padpath, "dump", lambda: str(tmp_path))
+    assert playfield.card_cvd() == 0                                          # no run's card note
+    note = tmp_path / "pad_cvd.now"
+    note.write_text("2\n")
+    assert playfield.card_cvd() == 2                                          # the card recolors: no preview over it
+    old = os.path.getmtime(note) - 60
+    os.utime(note, (old, old))
+    assert playfield.card_cvd() == 0                                          # an ended run's note is not believed
+    monkeypatch.setattr(playfield, "load_state", lambda: {"cvd_preview": "blue_yellow"})
+    assert playfield.cvd_preview() == "blue_yellow"
+    monkeypatch.setattr(playfield, "load_state", lambda: {"cvd_preview": "bogus"})
+    assert playfield.cvd_preview() == ""
+
+
+def test_the_preview_switch_is_shared_with_the_window(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import insert_colours as IC
+    monkeypatch.setattr(IC, "state_path", lambda: str(tmp_path / ".pad_playfield.json"))
+    assert IC.cvd_preview() == ""
+    assert IC.set_cvd_preview("red_green") == "red_green" and IC.cvd_preview() == "red_green"
+    assert IC.set_cvd_preview("nonsense") == "" and IC.cvd_preview() == ""

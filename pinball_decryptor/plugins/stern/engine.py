@@ -10222,7 +10222,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # PAD-1589: COLOR BLIND (the project's preset to start with) and SPOKEN SCORES (once the words are in sounds.cfg)
         cvd_menu = _ColourBlindMenu(acc_preset, log) if _acc_on and acc_preset else None
         _spoken_on = bool(_acc_on and _acc_spoken and sound_modes_cfg and _spoken_in(sound_modes_cfg))
-        if _acc_on and _acc_spoken and not _spoken_on:
+        if _acc_on and _acc_spoken and not _spoken_on and getattr(sound_modes, "speak", None):
+            # (made, but none landed in sounds.cfg; no voice or no carrier was said where it happened)
             log("Spoken scores: left out of this build: the card's sounds carry none of the spoken numbers.", "warning")
         spk_menu = _SpokenScoresMenu(log) if _spoken_on else None
         # PAD-1390: IMAGE SET, which of the project's image sets the screens show (a row of its own, or shared)
@@ -10579,6 +10580,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 os.path.join(grow_work, "scenes"), live=image_setting,
                 only=not (mode_list or code_list), log=log)
         _scenes_on = bool(scenes_staged[0])
+        # PAD-1589: neither of the accessibility options survived (no voice for the words, no row for them): nothing
+        # of theirs goes on the card
+        _acc_on = bool(_acc_on and (acc_preset or _spoken_on))
         # PAD-446: a build of random clips and no mode says so in its own words
         _who = ("Modes" if _modes_on else "Random clips" if variant_slots
                 else "Music modes" if sound_modes_cfg and (sound_modes.count or sound_modes.turns)
@@ -10635,7 +10639,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             try:
                 _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
                     variant_prof, sound_modes_prof, picture_prof, attract_prof, coop_prof, idle_prof,
-                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof, scenes_prof))
+                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof, scenes_prof, acc_prof))
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})

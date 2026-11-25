@@ -47,6 +47,9 @@ const TIP = {
   legacy: "A Run the light show block with steps of its own, made in the Blocks tab before this page: bring it in here as one of the mode's shows, to preview and change.",
   real: "As the machine plays it: an RGB insert in the show's color; a single-color insert only gets brighter or dimmer and glows in its own color (Insert colors; white = not set).",
   rgb: "As if every insert were RGB: every insert in the show's color. The machine cannot show that on its single-color inserts.",
+  cvdOff: "The colors as the game and the show set them.",
+  red_green: "Red-green: the RGB inserts as a card with Color-blind insert colors (Play options) shows them on the red-green preset. One-color inserts keep their own color. The emulator's playfield window shows the same.",
+  blue_yellow: "Blue-yellow: the RGB inserts as a card with Color-blind insert colors (Play options) shows them on the blue-yellow preset. One-color inserts keep their own color. The emulator's playfield window shows the same.",
   lens: "The game's single-color inserts: the show only sets how bright they are, and each glows in its own color. Give each its color here; the emulator's playfield window uses the same colors.",
   lensX: "Back to white (not set)",
 };
@@ -225,6 +228,38 @@ export function monoColour(c, lens) {
   return (at(16) | at(8) | at(0)) >>> 0;
 }
 
+// PAD-1589: an RGB insert's color c as the color-blind preset shows it - accessibility.py remap, byte for byte (the
+// hue moved along the preset's map, the brightest and dimmest parts kept); tests/test_pad1589_accessibility.py holds
+// the copies together
+const CVD_MAP = {
+  red_green: [[0, -50], [250, 1050], [500, 1550], [1200, 1900], [1800, 2100], [2400, 2600], [2750, 3350], [3000, 3400], [3600, 3550]],
+  blue_yellow: [[0, 0], [250, 250], [500, 400], [1200, 1350], [1800, 2000], [2400, 2300], [2750, 2900], [3000, 3050], [3600, 3600]],
+};
+export function cvdRemap(c, preset) {
+  const pts = CVD_MAP[preset];
+  if (!pts) return c >>> 0;
+  let r = (c >>> 16) & 255, g = (c >>> 8) & 255, b = c & 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if (!d) return c >>> 0;
+  const td = (a, q) => Math.trunc(a / q);
+  let h = mx === r ? td(600 * (g - b), d) : mx === g ? td(600 * (b - r), d) + 1200 : td(600 * (r - g), d) + 2400;
+  h = ((h % 3600) + 3600) % 3600;
+  let o = h;
+  for (let i = 0; i < 8; i++) {
+    const [a, oa] = pts[i], [z, oz] = pts[i + 1];
+    if (a <= h && h < z) {
+      let dd = (((oz - oa) % 3600) + 3600) % 3600;
+      if (dd > 1800) dd -= 3600;
+      o = oa + td(dd * (h - a), z - a);
+      break;
+    }
+  }
+  o = ((o % 3600) + 3600) % 3600;
+  const sec = td(o, 600), f = o % 600, rise = mn + td(d * f, 600), fall = mx - td(d * f, 600);
+  [r, g, b] = [[mx, rise, mn], [fall, mx, mn], [mn, mx, rise], [mn, fall, mx], [rise, mn, mx], [mx, mn, fall]][sec];
+  return ((r << 16) | (g << 8) | b) >>> 0;
+}
+
 // ------------------------------------------------------------------ the program's shows
 function walkBlocks(list, fn) {
   (list || []).forEach((b) => {
@@ -275,7 +310,7 @@ function usePlayfield(slug) {
   return pf;
 }
 
-function Preview({ pf, show, light, t, onPick, picking, centre, look, lens, marked }) {
+function Preview({ pf, show, light, t, onPick, picking, centre, look, lens, marked, cvd }) {
   const ins = pf.inserts || [];
   const w = pf.w || Math.max(300, ...ins.map((i) => i.x + 24));
   const h = pf.h || Math.max(600, ...ins.map((i) => i.y + 40));
@@ -298,6 +333,7 @@ function Preview({ pf, show, light, t, onPick, picking, centre, look, lens, mark
       : html`<rect class="pf-outline" x="3" y="3" width=${w - 6} height=${h - 6} rx="48" />`}
     ${ins.map((i, k) => {
       let c = st ? fxBlend(st, at.prev, i.x, i.y, k, at.t, S) : 0;
+      if (c && !i.mono && cvd) c = cvdRemap(c, cvd);      // PAD-1589: the color-blind preset's colors
       if (c && i.mono && look !== "rgb") c = monoColour(c, (lens || {})[i.name] || i.own);
       return html`<circle key=${i.name + i.x} class=${cx("ls-ins", c && "lit")} cx=${i.x} cy=${i.y} r="6"
         style=${c ? { fill: css(c), color: css(c) } : null} ...${tip({ head: i.name, lines: [i.shots.length ? "Shot: " + i.shots.join(", ") : "Not a shot's light"] })} />`;
@@ -315,6 +351,17 @@ function InsertLook({ look, setLook }) {
     ${[["real", "Real LEDs"], ["rgb", "All RGB"]].map(([k, label]) => html`<button type="button" key=${k}
       class=${cx("ls-look-b", look === k && "on")} aria-pressed=${look === k} ...${tip(TIP[k])}
       onClick=${() => { if (look !== k) setLook(k); }}>${label}</button>`)}
+  </div>`;
+}
+
+// PAD-1589: the color-blind preview: the RGB inserts in a preset's colors, as a card with Color-blind insert colors
+// shows them; one table with the emulator's playfield window (insert_colours.py cvd_preview)
+function CvdPreview({ cvd, setCvd }) {
+  return html`<div class="ls-look" role="group" aria-label="Color-blind preview">
+    <span class="small muted">Color-blind</span>
+    ${[["", "Off", "cvdOff"], ["red_green", "Red-green", "red_green"], ["blue_yellow", "Blue-yellow", "blue_yellow"]].map(([k, label, t]) => html`<button type="button" key=${k || "off"}
+      class=${cx("ls-look-b", cvd === k && "on")} aria-pressed=${cvd === k} ...${tip(TIP[t])}
+      onClick=${() => { if (cvd !== k) setCvd(k); }}>${label}</button>`)}
   </div>`;
 }
 
@@ -465,6 +512,9 @@ export function LightShowsView({ c, pg }) {
   const curLook = look || (pf && pf.look) || "real";
   const curLens = lens || (pf && pf.lens) || {};
   const setLook = (k) => { setLookState(k); if (pf) pf.look = k; call("modes.blocks_insert_look", k); };
+  const [cvd, setCvdState] = useState(null);
+  const curCvd = cvd !== null ? cvd : (pf && pf.cvd) || "";
+  const setCvd = (k) => { setCvdState(k); if (pf) pf.cvd = k; call("modes.blocks_cvd_preview", k); };
   const setColour = (name, colour) => {
     const next = { ...curLens };
     if (colour) next[name] = colour; else delete next[name];
@@ -551,7 +601,7 @@ export function LightShowsView({ c, pg }) {
     </div>
     <div class="ls-field">
       ${pf ? html`<${Preview} pf=${pf} show=${show || { steps: [], repeat: 1 }} light=${light} t=${player.t} picking=${picking} centre=${centre}
-          look=${curLook} lens=${curLens} marked=${marked}
+          look=${curLook} lens=${curLens} marked=${marked} cvd=${curCvd}
           onPick=${(x, y) => { edit((d) => { const s = d.shows[si].steps[stepI]; s.at = "xy"; s.x = x; s.y = y; }); setPicking(false); }} />`
         : html`<div class="small muted">Reading the playfield…</div>`}
       ${pf && !pf.art ? html`<div class="small muted pf-why">${pf.why || TIP.noArt}</div>` : null}
@@ -565,6 +615,7 @@ export function LightShowsView({ c, pg }) {
       <input type="range" class="ls-scrub" min="0" max=${total || 1} value=${Math.round(player.t)} disabled=${!total} ...${tip(TIP.scrub)}
         onInput=${(e) => { player.pause(); player.seek(Number(e.target.value)); }} />
       ${pf ? html`<${InsertLook} look=${curLook} setLook=${setLook} />` : null}
+      ${pf ? html`<${CvdPreview} cvd=${curCvd} setCvd=${setCvd} />` : null}
     </div>
     <div class="ls-side">
       ${show ? html`

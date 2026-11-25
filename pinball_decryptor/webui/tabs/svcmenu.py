@@ -28,6 +28,8 @@ SETTINGS = (
     ("edition", "Edition", "Only for a card that holds several editions of the game (Write tab, Editions...): a "
                            "card of one edition has none to pick."),
     ("handicap", "Handicap", ""),
+    ("colour_blind", "Color Blind", "Play options tab: color-blind insert colors."),
+    ("spoken_scores", "Spoken Scores", "Play options tab: the machine says each player's score."),
     ("image_set", "Image Set", "Made on the Images tab (Themes, under Advanced): the operator picks which theme "
                                "the screens show."),
     ("brightness", "Picture settings", "Brightness, Contrast and Saturation (Write tab)."),
@@ -128,6 +130,10 @@ class ServiceMenuTab(TabService):
             elif key == "handicap":
                 on = HC.load(project)
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")
+            elif key in ("colour_blind", "spoken_scores"):     # PAD-1589: the Play options tab's ticks
+                from ...plugins.stern import accessibility as AC
+                on = bool(AC.load_cvd(project) if key == "colour_blind" else AC.load_spoken(project))
+                row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")
             elif key == "saved_progress":               # PAD-1402: follows the modes, not switched here
                 on = key in has
                 row.update(on=on, note="" if on else "Not on the card: nothing in the project is saved between "
@@ -168,6 +174,10 @@ class ServiceMenuTab(TabService):
             return False
         if key == "handicap":
             ok = modes.set_handicap(bool(on))
+        elif key == "colour_blind":                     # PAD-1589
+            ok = modes.set_colour_blind(bool(on))
+        elif key == "spoken_scores":
+            ok = modes.set_spoken_scores(bool(on))
         elif key in SM.OFF_KEYS:                        # PAD-1393 round 2: the row on or off the card, the setting kept
             project = self._project()
             if not project:

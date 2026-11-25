@@ -7483,6 +7483,22 @@ written at the pick (battles 2 / 0, the operator's 1), the heat ray read 8 (its 
 player 1's, the ball save 11 / 15 (the operator's 12) from ball 2; a second game, both players' ball 1 save at their
 kept level.
 
+## Color-blind insert colors and spoken scores (PAD-1589)
+
+Nothing for a mode to call: the Play options tab's two ticks put `access.cfg` beside the runtime
+(`plugins/stern/accessibility.py`; docs/plans/pad1589_accessibility.md):
+
+    cvd     <preset> <row>          1 red-green, 2 blue-yellow; the COLOR BLIND row's value (0 Off, 1, 2), 0 = no row
+    spoken  <row> <left>,<right>    the SPOKEN SCORES row's value (1 On), 0 = no row; the flipper buttons' switches
+    only                            the card carries no modes (no score gate: these change no score)
+
+**Color blind**: every tick, each RGB insert no mode holds is read as the game shows it and, where the preset moves
+its color, held in the preset's color on a layer of ours over the game's; a mode's own colors are remapped where
+`lamp_write` sends them, so `pm_lamp_*` calls need nothing new. One-color inserts keep their lens's color.
+**Spoken scores**: the number words ride a carrier of their own (`sounds.cfg` `sword` lines); at each ball's end the
+runtime says "player N <score>" and holds the end of the ball for it (as `pm_ball_end_hold`: a mode asking a longer
+hold gets the longer one), and the left flipper button held two seconds in attract says each player's last score.
+
 ## Inactivity pauses the timers (PAD-1022)
 
 Every Spike 2 framework offers the operator **ALLOW INACTIVITY TO PAUSE TIMERS** (`AD_INACTIVE_TIMER`, 0..1, on by

@@ -1957,6 +1957,9 @@ static volatile int gms_live;
 static int ci_lookup(pm_reg *r);          /* PAD-1114: the co-op intro's sound */
 static volatile int ci_live;
 static int cpk_lookup(pm_reg *r);         /* PAD-1123: a co-op character's sound once picked */
+static int spk_lookup(pm_reg *r);         /* PAD-1589: a spoken score's word */
+static volatile int spk_live;
+static void spk_sound_line(const char *ks, const char *rs, const char *cks, const char *hs, const char *mss);
 static volatile int cpk_live;
 static int ccer_lookup(pm_reg *r);        /* PAD-1317: the co-op awards ceremony's music */
 static volatile int ccer_live;
@@ -1973,6 +1976,7 @@ static void on_sound_lookup(pm_reg *r)
     if (ccer_live && r[1] && ccer_lookup(r)) return;   /* PAD-1317: the co-op awards ceremony's music */
     if (ci_live && r[1] && ci_lookup(r)) return;     /* PAD-1114: the co-op intro's sound */
     if (cpk_live && r[1] && cpk_lookup(r)) return;   /* PAD-1123: a co-op character's sound once picked */
+    if (spk_live && r[1] && spk_lookup(r)) return;   /* PAD-1589: a spoken score's word */
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
 #if PM_A64
     if (msw_live && r[1] && msw_lookup(r)) return;     /* PAD-1324: the music mode's record, Spike 3 */
@@ -2397,6 +2401,10 @@ static void lamp_paint_note(int k, unsigned rgb, int on)
     ((volatile unsigned *)lamp_paint_plane)[1]++;      /* paint_gen */
 }
 
+/* PAD-1589 (the accessibility section, below): the colour-blind preset now (0 off), and its colour for an RGB insert */
+static volatile int acc_cvd_now;
+static unsigned acc_remap(unsigned rgb, int preset);
+
 static void lamp_write(int k, int level_r, int level_g, int level_b)
 {
     struct lamp_held *h = &lamp_held[k];
@@ -2410,6 +2418,10 @@ static void lamp_write(int k, int level_r, int level_g, int level_b)
         want[0] = level_r > level_g ? level_r : level_g;
         if (level_b > want[0]) want[0] = level_b;
         want[1] = want[2] = 0;
+    } else if (acc_cvd_now && k < n_lamps) {      /* PAD-1589: an insert's colour as the colour-blind preset shows it */
+        unsigned m = acc_remap((unsigned)(level_r & 255) << 16 | (unsigned)(level_g & 255) << 8 | (unsigned)(level_b & 255),
+                               acc_cvd_now);
+        want[0] = (int)(m >> 16 & 255u); want[1] = (int)(m >> 8 & 255u); want[2] = (int)(m & 255u);
     } else {
         want[0] = level_r; want[1] = level_g; want[2] = level_b;
     }
@@ -12461,6 +12473,8 @@ static void chg_pages_tick(void);         /* PAD-663 */
 
 static void coop_tick(void);                /* PAD-1017, below */
 static void hand_tick(void);                /* PAD-1033, below */
+static void acc_tick(void);                 /* PAD-1589, below */
+static void acc_ball_end(void);             /* PAD-1589, below */
 static void rec_tick(void);                    /* PAD-1280: the records section */
 static void saved_tick(void);                  /* PAD-1402: saved progress, below */
 static void on_tick(pm_reg *r)
@@ -12517,6 +12531,7 @@ static void on_tick(pm_reg *r)
     done_tick();                              /* PAD-747: the game's modes completed: STOPs hooked, flags watched */
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
+    acc_tick();                               /* PAD-1589: colour-blind inserts, spoken scores (before the writes) */
     cabs_tick();                              /* PAD-1040: a song's expression light show (before the writes) */
     lamps_tick();                             /* named inserts: their patterns (lights section) */
 }
@@ -12662,6 +12677,7 @@ static void on_ball_end(pm_reg *r)
     beh.asking = 1;
     EACH_MODE(m) if (m->ball_end) { current = m; m->ball_end(); }
     current = 0;
+    acc_ball_end();                           /* PAD-1589: the player's score said, the end of the ball held for it */
     beh.asking = 0;
     magnet_let_go("the ball ended");          /* PAD-381 */
     spare_outs_off("the ball ended");         /* PAD-826 */
@@ -26859,6 +26875,7 @@ static void on_hand_tick(pm_reg *r)
 {
     (void)r;
     if (hand.on) hand_tick();
+    acc_tick();                                 /* PAD-1589: an "only" card's colour-blind inserts, spoken scores */
     cabs_tick();                                /* PAD-1040: an "only" card's expression light shows */
     lamps_tick();
 }
@@ -30956,6 +30973,10 @@ static void sndm_line(char *s)
         ccer_sound_line(f[1], f[2], f[3], f[4]);
         return;
     }
+    if (n >= 6 && str_eq(f[0], "sword")) {    /* PAD-1589: a spoken score's word */
+        spk_sound_line(f[1], f[2], f[3], f[4], f[5]);
+        return;
+    }
     if (n >= 6 && str_eq(f[0], "cpick")) {    /* PAD-1123: a co-op character's sound once picked */
         cpk_sound_line(f[1], f[2], f[3], f[4], f[5]);
         return;
@@ -33228,6 +33249,508 @@ static void addcab_arm(void)
 static void addcab_arm(void) { }
 #endif
 
+/* ---- accessibility (PAD-1589): colour-blind insert colours and spoken scores -------------------------------------
+ * access.cfg beside the runtime (/usr/local/padmode on a card, /dump in the rig; plugins/stern/accessibility.py writes
+ * it), one TAB-separated line each:
+ *
+ *   cvd     <preset> <row>          the colour-blind preset the card starts on (1 red-green, 2 blue-yellow) and the
+ *                                   COLOUR BLIND row's value (0: no row, the preset always on; 0 Off, 1, 2 the presets)
+ *   spoken  <row> <left>,<right>    spoken scores: the SPOKEN SCORES row's value (0: always on; 1 On) and the flipper
+ *                                   buttons' switches
+ *   only                            the card carries no modes: these run on their own (no score gate - they change no
+ *                                   score, so the card stays on Insider Connected)
+ *
+ * COLOUR BLIND: the game tells its shots apart by the colours of its RGB inserts. Every tick each RGB insert no mode of
+ * ours holds is read as the game shows it (its own layers, ours left out: stock_game_rgb) and, when the preset moves
+ * its colour, held in the preset's colour on a layer of ours over the game's (lamp_paint_as as `acc_mode`); a colour
+ * the preset leaves as it is (white, grey, dark) goes back to the game. A mode's own colours go through the same
+ * remap where lamp_write sends them. One-colour inserts glow in their lens's colour and are left alone. acc_remap is
+ * accessibility.remap's integer maths, byte for byte (tests/test_pad1589_accessibility.py compiles it).
+ *
+ * SPOKEN SCORES: sounds.cfg `sword <k> <request> <carrier's key> <word k's key> <ms>`, the words of accessibility.WORDS
+ * on one carrier (as the co-op characters' sounds). At each ball's end (on_ball_end, while the modes may ask) the
+ * words for "player N <score>" are queued, the end of the ball held for them (pm_ball_end_hold, so the bonus waits),
+ * and the tick plays them one after another: the carrier's lookup takes word k's record while it plays. In attract
+ * the left flipper button held alone for two seconds says each player's last score; not while the start menu is up. */
+static const char *const ACC_FILES[] = { "/usr/local/padmode/access.cfg", "/dump/access.cfg" };
+#define ACC_WORDS   34
+#define ACC_SAY_MAX 120
+#define ACC_HOLD_MS 2000ul           /* the left flipper button held alone this long in attract says the scores */
+#define ACC_GAP_MS  40ul             /* between two words */
+#define ACC_MENU_MS 1500ul           /* the start menu counts as up this long after its last frame */
+enum { ACC_W_HUNDRED = 28, ACC_W_THOUSAND, ACC_W_MILLION, ACC_W_BILLION, ACC_W_PLAYER, ACC_W_POINTS };
+static const char *const acc_word[ACC_WORDS] = {
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+    "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty",
+    "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion", "player", "points" };
+static const struct pm_mode acc_mode = { .name = "colour-blind inserts" };
+static struct {
+    int read, on, only, bad;
+    int cvd_wanted, cvd_default;
+    pm_addr cvd_setting;
+    int spoken_wanted, hold_ok;
+    pm_addr spk_setting;
+    unsigned sw[2];
+    unsigned long left_at, menu_ms;
+    int left_said, cvd_said, cvd_samples;
+    unsigned char cvd_seen[32];      /* the inserts whose first recoloring was said (a bit each) */
+} acc;
+static struct {
+    unsigned request;
+    unsigned char key[8], host[ACC_WORDS][8];
+    unsigned ms[ACC_WORDS];
+    unsigned long long have;
+    unsigned char q[ACC_SAY_MAX];
+    int n, i, holding, bad;
+    unsigned long next_at;
+    volatile int cur;
+    volatile unsigned long swap_until;
+    volatile int looked;
+} spk = { .cur = -1 };
+
+/* the preset's hue map, tenths of a degree, closed round the wheel (accessibility.PRESETS) */
+static const short acc_map[2][9][2] = {
+    { {0, -50}, {250, 1050}, {500, 1550}, {1200, 1900}, {1800, 2100}, {2400, 2600}, {2750, 3350}, {3000, 3400}, {3600, 3550} },
+    { {0, 0}, {250, 250}, {500, 400}, {1200, 1350}, {1800, 2000}, {2400, 2300}, {2750, 2900}, {3000, 3050}, {3600, 3600} } };
+
+static unsigned acc_remap(unsigned rgb, int preset)
+{
+    int r = (int)(rgb >> 16 & 255u), g = (int)(rgb >> 8 & 255u), b = (int)(rgb & 255u), mx, mn, d, h, o, i, sec, f, rise, fall;
+    if (preset < 1 || preset > 2) return rgb & 0xffffffu;
+    mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    d = mx - mn;
+    if (!d) return rgb & 0xffffffu;
+    if (mx == r) h = 600 * (g - b) / d;
+    else if (mx == g) h = 600 * (b - r) / d + 1200;
+    else h = 600 * (r - g) / d + 2400;
+    h = (h % 3600 + 3600) % 3600;
+    o = h;
+    for (i = 0; i < 8; i++) {
+        const short *a = acc_map[preset - 1][i], *z = acc_map[preset - 1][i + 1];
+        if (a[0] <= h && h < z[0]) {
+            int dd = ((z[1] - a[1]) % 3600 + 3600) % 3600;
+            if (dd > 1800) dd -= 3600;
+            o = a[1] + dd * (h - a[0]) / (z[0] - a[0]);
+            break;
+        }
+    }
+    o = (o % 3600 + 3600) % 3600;
+    sec = o / 600;
+    f = o % 600;
+    rise = mn + d * f / 600;
+    fall = mx - d * f / 600;
+    switch (sec) {
+    case 0: r = mx; g = rise; b = mn; break;
+    case 1: r = fall; g = mx; b = mn; break;
+    case 2: r = mn; g = mx; b = rise; break;
+    case 3: r = mn; g = fall; b = mx; break;
+    case 4: r = rise; g = mn; b = mx; break;
+    default: r = mx; g = mn; b = fall; break;
+    }
+    return (unsigned)r << 16 | (unsigned)g << 8 | (unsigned)b;
+}
+
+static void acc_line(char *s)
+{
+    char *f[4];
+    int n = 0, ok, ok2;
+    const char *p;
+    while (*s == ' ' || *s == '\t') s++;
+    if (!*s || *s == '#') return;
+    while (*s && n < 4) {
+        f[n++] = s;
+        while (*s && *s != '\t' && *s != ' ') s++;
+        if (*s) *s++ = 0;
+        while (*s == ' ' || *s == '\t') s++;
+    }
+    if (n == 1 && str_eq(f[0], "only")) { acc.only = 1; return; }
+    if (n >= 3 && str_eq(f[0], "cvd")) {
+        p = f[1];
+        acc.cvd_default = (int)number(&p, &ok);
+        p = f[2];
+        acc.cvd_setting = (pm_addr)number(&p, &ok2);
+        if (!ok || !ok2 || acc.cvd_default < 1 || acc.cvd_default > 2) { acc.bad++; return; }
+        acc.cvd_wanted = 1;
+        return;
+    }
+    if (n >= 3 && str_eq(f[0], "spoken")) {
+        p = f[1];
+        acc.spk_setting = (pm_addr)number(&p, &ok);
+        p = f[2];
+        acc.sw[0] = (unsigned)number(&p, &ok2);
+        if (*p == ',') { p++; acc.sw[1] = (unsigned)number(&p, &ok2); }
+        if (!ok) { acc.bad++; return; }
+        acc.spoken_wanted = 1;
+        return;
+    }
+    acc.bad++;
+}
+
+static void acc_read(void)
+{
+    static char raw[2048];
+    long n = -1, i, start = 0;
+    unsigned k;
+    if (acc.read) return;
+    acc.read = 1;
+    for (k = 0; k < sizeof ACC_FILES / sizeof ACC_FILES[0] && n < 0; k++)
+        n = pm_read_file(ACC_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i <= n; i++)
+        if (i == n || raw[i] == '\n' || raw[i] == '\r') {
+            raw[i] = 0;
+            acc_line(raw + start);
+            start = i + 1;
+        }
+}
+
+static int acc_wanted(void)
+{
+    acc_read();
+    return acc.cvd_wanted || acc.spoken_wanted;
+}
+
+static int acc_cfg_only(void) { return acc.on && acc.only; }
+
+/* sounds.cfg `sword <k> <request> <carrier's key> <word k's key> <ms>` (sndm's reader) */
+static void spk_sound_line(const char *ks, const char *rs, const char *cks, const char *hs, const char *mss)
+{
+    const char *p = ks;
+    int ok, ok2, ok3;
+    unsigned k = (unsigned)number(&p, &ok), r, ms;
+    p = rs;
+    r = (unsigned)number(&p, &ok2);
+    p = mss;
+    ms = (unsigned)number(&p, &ok3);
+    if (!ok || !ok2 || !ok3 || !r || !ms || k >= ACC_WORDS || (spk.request && spk.request != r)
+        || !key_hex(cks, spk.key) || !key_hex(hs, spk.host[k])) { spk.bad++; return; }
+    spk.request = r;
+    spk.ms[k] = ms;
+    spk.have |= 1ull << k;
+}
+
+/* the record lookup (any thread): the carrier's own record takes the word playing */
+static int spk_lookup(pm_reg *r)
+{
+    const unsigned char *k = LOOKUP_KEY(r);
+    int w = spk.cur;
+    if (w < 0 || w >= ACC_WORDS || (long)(spk.swap_until - pm_ms()) <= 0 || !key_is(k, spk.key)) return 0;
+    LOOKUP_TAKE(r, spk.host[w]);
+    if (!spk.looked) {
+        spk.looked = 1;
+        say("spoken scores: request %u looked up its record, took the word \"%s\"", spk.request, acc_word[w]);
+    }
+    return 1;
+}
+
+static int acc_cvd_value(void)
+{
+    unsigned v;
+    if (!acc.cvd_wanted) return 0;
+    if (!acc.cvd_setting) return acc.cvd_default;
+    v = *(volatile const unsigned *)(unsigned long)acc.cvd_setting;
+    return v <= 2u ? (int)v : 0;
+}
+
+static int acc_spoken_on(void)
+{
+    return spk_live && (!acc.spk_setting || *(volatile const unsigned *)(unsigned long)acc.spk_setting == 1u);
+}
+
+static void acc_q(int w)
+{
+    if (spk.n < ACC_SAY_MAX) spk.q[spk.n++] = (unsigned char)w;
+}
+
+static void acc_below_thousand(unsigned n)
+{
+    if (n >= 100) { acc_q((int)(n / 100)); acc_q(ACC_W_HUNDRED); n %= 100; }
+    if (n >= 20) { acc_q(20 + (int)(n / 10) - 2); n %= 10; }
+    if (n) acc_q((int)n);
+}
+
+/* accessibility.number_words */
+static void acc_number(uint64_t n)
+{
+    static const uint64_t scale[3] = { 1000000000ull, 1000000ull, 1000ull };
+    static const int word[3] = { ACC_W_BILLION, ACC_W_MILLION, ACC_W_THOUSAND };
+    int i;
+    if (!n) { acc_q(0); return; }
+    for (i = 0; i < 3; i++)
+        if (n >= scale[i]) {
+            uint64_t top = n / scale[i];
+            if (top >= 1000) acc_number(top);
+            else acc_below_thousand((unsigned)top);
+            acc_q(word[i]);
+            n %= scale[i];
+        }
+    acc_below_thousand((unsigned)n);
+}
+
+/* queue "player p <score>" for each player from p0 to p1 (one with no points is left out when several are asked);
+ * returns the milliseconds it takes */
+static unsigned long acc_say_scores(unsigned p0, unsigned p1, const char *why)
+{
+    char text[600];
+    unsigned p;
+    int i, m = 0, first;
+    unsigned long ms = 0;
+    if (spk.i < spk.n) return 0;                 /* still saying the last */
+    spk.n = spk.i = 0;
+    for (p = p0; p <= p1; p++) {
+        uint64_t s = pm_score(p);
+        if (p0 != p1 && !s) continue;
+        acc_q(ACC_W_PLAYER);
+        acc_q((int)p);
+        acc_number(s);
+    }
+    if (!spk.n) return 0;
+    for (i = 0, first = 1; i < spk.n && m < (int)sizeof text - 16; i++, first = 0) {
+        m += pm_snprintf(text + m, sizeof text - (unsigned)m, "%s%s", first ? "" : " ", acc_word[spk.q[i]]);
+        if (spk.have >> spk.q[i] & 1ull) ms += spk.ms[spk.q[i]] + ACC_GAP_MS;
+    }
+    text[m] = 0;
+    spk.next_at = pm_ms();
+    say("spoken scores: %s - says \"%s\" (%lu ms)", why, text, ms);
+    return ms;
+}
+
+/* every tick: the next word, once the last has had its time */
+static void acc_spk_tick(void)
+{
+    unsigned long now = pm_ms();
+    int w;
+    if (spk.i >= spk.n) {
+        if (spk.n && (long)(now - spk.next_at) >= 0) {
+            spk.n = spk.i = 0;
+            spk.cur = -1;
+            if (spk.holding) {
+                spk.holding = 0;
+                pm_ball_end_release();
+            }
+        }
+        return;
+    }
+    if ((long)(now - spk.next_at) < 0) return;
+    w = spk.q[spk.i++];
+    if (!(spk.have >> w & 1ull)) {              /* a word the card lacks: left out */
+        say("spoken scores: the card has no word \"%s\" - left out", acc_word[w]);
+        return;
+    }
+    if (pm_sound_active(spk.request)) pm_sound_stop(spk.request);
+    spk.cur = w;
+    spk.looked = 0;
+    spk.swap_until = now + spk.ms[w] + 1000ul;
+    pm_sound(spk.request);
+    spk.next_at = now + spk.ms[w] + ACC_GAP_MS;
+}
+
+/* the start menu's frame points (as the attract flipper sounds' att_menu_seen) */
+static void acc_menu_seen(pm_reg *r)
+{
+    (void)r;
+    acc.menu_ms = pm_ms() | 1;
+}
+
+/* every tick: the left flipper button held alone in attract */
+static void acc_hold_tick(void)
+{
+    unsigned mask, attract;
+    unsigned long now = pm_ms();
+    if (!acc.hold_ok) return;
+    mask = data("mode_mask") ? *(volatile const unsigned short *)(unsigned long)data("mode_mask") : 0;
+    attract = (mask & (unsigned)pm_port_value("mode_mask_attract", 0x10))
+              && !(mask & (unsigned)pm_port_value("mode_mask_game_end", 0x88)) && !pm_in_game();
+    if (!attract || !switch_held(acc.sw[0]) || (acc.sw[1] && switch_held(acc.sw[1]))
+        || (acc.menu_ms && (long)(now - acc.menu_ms) < (long)ACC_MENU_MS)) {
+        acc.left_at = 0;
+        acc.left_said = 0;
+        return;
+    }
+    if (!acc.left_at) { acc.left_at = now | 1; return; }
+    if (acc.left_said || (long)(now - acc.left_at) < (long)ACC_HOLD_MS) return;
+    acc.left_said = 1;
+    if (!acc_say_scores(1, 4, "the left flipper button held in attract"))
+        say("spoken scores: the left flipper button held in attract - no scores to say");
+}
+
+/* in the emulator only (PAD_LED_SHM, as lamp_paint_map): the preset on now in /dump/pad_cvd.now, every 2 s, so the
+ * playfield window's color-blind preview stands down while the game's lights come recolored already (a file older
+ * than a few seconds is a run's that ended). Never on a machine: no writes to its card. */
+static void acc_cvd_note(int preset)
+{
+    static unsigned long at;
+    static int emu = -1;
+    unsigned long now = pm_ms();
+    int fd;
+    char b[2];
+    if (emu < 0) emu = getenv("PAD_LED_SHM") != 0;
+    if (!emu || (at && now - at < 2000ul)) return;
+    at = now | 1;
+    fd = open("/dump/pad_cvd.now", O_WRONLY | O_CREAT | 01000 /* O_TRUNC */, 0644);
+    if (fd < 0) return;
+    b[0] = (char)('0' + preset);
+    b[1] = '\n';
+    if (write(fd, b, 2) != 2) { }
+    close(fd);
+}
+
+/* from on_tick (or the tick of a card of these only): before cabs_tick and lamps_tick write this tick's levels */
+static void acc_tick(void)
+{
+    int k, preset;
+    if (!acc.on) return;
+    preset = acc_cvd_value();
+    if (acc.cvd_wanted) acc_cvd_note(preset);
+    if (preset != acc_cvd_now) {
+        say("colour-blind inserts: %s", preset == 1 ? "red-green" : preset == 2 ? "blue-yellow" : "off");
+        for (k = 0; k < n_lamps; k++) {
+            if (!preset && lamp_held[k].owner == &acc_mode) lamp_let_go(k);
+            lamp_held[k].last[0] = lamp_held[k].last[1] = lamp_held[k].last[2] = -1;   /* the modes' colours anew */
+        }
+        acc_cvd_now = preset;
+        acc.cvd_said = acc.cvd_samples = 0;     /* the new preset's first recolorings said again */
+        for (k = 0; k < (int)sizeof acc.cvd_seen; k++) acc.cvd_seen[k] = 0;
+    }
+    if (preset && (can & PM_CAN_LAMPS)) {
+        int held = 0;
+        for (k = 0; k < n_lamps; k++) {
+            const struct lamp *x = &lamps[k];
+            struct lamp_held *h = &lamp_held[k];
+            unsigned rgb;
+            if (x->mono || !x->light[1]) continue;              /* a one-colour insert: its lens's colour */
+            if (h->owner && h->owner != &acc_mode) continue;     /* a mode's: lamp_write remaps its colour */
+            rgb = stock_game_rgb(k, 0xffffffu) & 0xffffffu;
+            if (acc_remap(rgb, preset) == rgb) {
+                if (h->owner == &acc_mode) lamp_let_go(k);
+                continue;
+            }
+            if (lamp_paint_as(k, rgb, &acc_mode, 255)) {
+                held++;
+                if (acc.cvd_samples < 12 && !(acc.cvd_seen[k >> 3] & (1u << (k & 7)))) {   /* the proof, once each */
+                    acc.cvd_seen[k >> 3] |= (unsigned char)(1u << (k & 7));
+                    acc.cvd_samples++;
+                    say("colour-blind inserts: %s shown %06x for the game's %06x", lamps[k].name, acc_remap(rgb, preset),
+                        rgb);
+                }
+            }
+        }
+        if (held && !acc.cvd_said) {
+            acc.cvd_said = 1;
+            say("colour-blind inserts: the first of the game's colours recoloured (%d insert(s) this tick)", held);
+        }
+    }
+    if (spk_live) {
+        static int was = -1;
+        int on = acc_spoken_on();
+        if (on != was) {
+            say("spoken scores: %s", on ? "On" : "Off");
+            was = on;
+        }
+        if (on) acc_hold_tick();                /* the operator's Off holds for the flipper too */
+        acc_spk_tick();
+    }
+}
+
+/* from on_ball_end, while the modes' .ball_end may ask for the hold: the player's score, said. Once a ball: a tilted
+ * ball comes here at the tilt and again at its drain (Godzilla LE 1.16 in the emulator, 8 s apart), and a card of these
+ * only has no tilt event to tell them apart - the same player at the same score within 30 s is that ball again. */
+static void acc_ball_end(void)
+{
+    static unsigned last_p;
+    static uint64_t last_score;
+    static unsigned long last_at;
+    unsigned p;
+    uint64_t s;
+    unsigned long ms, now = pm_ms();
+    if (!acc.on || !acc_spoken_on()) return;
+    p = pm_player();
+    if (p < 1 || p > 4) return;
+    s = pm_score(p);
+    if (last_at && p == last_p && s == last_score && now - last_at < 30000ul) {
+        say("spoken scores: player %u's ball ended again at the same score - said once", p);
+        return;
+    }
+    last_p = p;
+    last_score = s;
+    last_at = now | 1;
+    ms = acc_say_scores(p, p, "the ball ended");
+    if (ms && pm_ball_end_hold((unsigned)(ms + 300ul))) spk.holding = 1;
+}
+
+/* a card of these only: the ball's end hooked here (on_ball_end is the gate's) */
+static void on_acc_ball_end(pm_reg *r)
+{
+    (void)r;
+    beh.ms = 0;
+    beh.release = 0;
+    beh.asking = 1;
+    acc_ball_end();
+    beh.asking = 0;
+    ball_end_hold_run();
+    beh.holding = 0;
+    beh.tilts = pm_event("tilt") >= 0 ? event_count(pm_event("tilt")) : 0;
+}
+
+static void acc_arm(void)
+{
+    const char *why = 0;
+    if (!acc_wanted()) return;
+    if (acc.bad) say("accessibility: %d line(s) of access.cfg not read", acc.bad);
+    if (acc.cvd_wanted && acc.cvd_setting) {
+        acc.cvd_setting = setting_addr(acc.cvd_setting);           /* PAD-1382: or a shared one */
+        if (!maps_has(acc.cvd_setting, 4, MAP_R)) {
+            say("colour-blind inserts: off - the COLOUR BLIND setting's value 0x%08" PMA " is not mapped", acc.cvd_setting);
+            acc.cvd_wanted = 0;
+        }
+    }
+    if (acc.cvd_wanted)
+        say("colour-blind inserts: the game's RGB inserts in %s colours%s", acc.cvd_default == 1 ? "red-green" : "blue-yellow",
+            acc.cvd_setting ? " while the service menu's COLOUR BLIND says so (0 Off, 1 red-green, 2 blue-yellow)" : "");
+    if (acc.spoken_wanted) {
+        unsigned k, missing = 0;
+        if (spk.bad) say("spoken scores: %d word line(s) of sounds.cfg not read", spk.bad);
+        for (k = 0; k < ACC_WORDS; k++) missing += !(spk.have >> k & 1ull);
+        if (!spk.request) {
+            say("spoken scores: off - sounds.cfg carries no words");
+        } else if (!fn("sound_play") || !fn("sound_lookup")) {
+            say("spoken scores: off - the port has no sound_play or sound_lookup for this build");
+        } else if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
+            say("spoken scores: off - sound_lookup 0x%08" PMA " cannot be hooked", fn("sound_lookup"));
+        } else {
+            if (acc.spk_setting) {
+                acc.spk_setting = setting_addr(acc.spk_setting);
+                if (!maps_has(acc.spk_setting, 4, MAP_R)) {
+                    say("spoken scores: always on - the SPOKEN SCORES setting's value 0x%08" PMA " is not mapped",
+                        acc.spk_setting);
+                    acc.spk_setting = 0;
+                }
+            }
+            if (pm_sound_priority(spk.request, 3, 0) < 0)
+                say("spoken scores: the carrier's priority stays its own - the port has no request table");
+            spk_live = 1;
+            if (acc.sw[0] && edge_arm(&why)) {
+                static const char *const menu_sites[] = { "challenge_menu_pick", "challenge_menu", 0 };
+                int i;
+                acc.hold_ok = 1;
+                for (i = 0; menu_sites[i]; i++)
+                    if (site(menu_sites[i]) && fn(menu_sites[i])) hook(fn(menu_sites[i]), acc_menu_seen);
+            } else {
+                say("spoken scores: no scores on a flipper hold in attract - %s", acc.sw[0] ? (why ? why : "the switches")
+                    : "the game names no flipper buttons");
+            }
+            say("spoken scores: %u word(s) on request %u%s; at each ball's end%s", ACC_WORDS - missing, spk.request,
+                missing ? " (some missing: left out where they come)" : "",
+                acc.hold_ok ? " and on the left flipper button held in attract" : "");
+            say("spoken scores: %s", acc.spk_setting ? "while the service menu's SPOKEN SCORES is On" : "always on");
+        }
+        acc.spoken_wanted = spk_live;
+    }
+    acc.on = acc.cvd_wanted || acc.spoken_wanted;
+}
+
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
@@ -33258,27 +33781,37 @@ static void pad_mode_start(void)
                                                * it calls on to the picture settings' eglSwapBuffers) */
     idle_arm();                               /* PAD-1022: nor does inactivity pausing the timers */
     hand_arm();                               /* PAD-1033: nor does a player's handicap (the operator's settings) */
+    acc_arm();                                /* PAD-1589: nor do colour-blind inserts or spoken scores */
     comp_arm();                               /* PAD-1041: nor does Prolonged Competition (the game's own Competition) */
     cabs_arm();                               /* PAD-1040: nor do the card's expression light shows */
     feed_arm();                               /* PAD-1204: nor does the score feed (it only reads the scores) */
     if (((clipv_only || sndm_only || pic_only || scnv_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))
-         || feed_cfg_only())
+         || feed_cfg_only() || acc_cfg_only())
         && !attract_wanted() && !coop_wanted() && !rec_wanted()) {   /* PAD-782: attract items take the whole gate;
                                                                          * PAD-1017: co-op too; PAD-1280: records too */
-        say("armed: %s%s%s%s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
+        say("armed: %s%s%s%s%s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
             scnv_only ? "image sets " : "",
             idle_only ? "inactivity pausing timers " : "", hand_cfg_only() ? "handicaps " : "",
             comp_cfg_only() ? "prolonged competition " : "", cabs_only && n_cabs ? "expression light shows " : "",
-            feed_cfg_only() ? "score feed " : "",
+            feed_cfg_only() ? "score feed " : "", acc_cfg_only() ? "accessibility " : "",
             clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : scnv_only ? "scenes.cfg" : idle_only ? "idle.cfg"
             : hand_cfg_only() ? "handicap.cfg" : comp_cfg_only() ? "comp.cfg" : feed_cfg_only() ? "scorefeed.cfg"
-            : "cabshow.cfg");
-        if (n_cabs) lamps_arm();              /* PAD-1040: the shows hold the cabinet's lights on the lamp layer */
-        if ((hand.on || n_cabs) && !hook(fn("tick"), on_hand_tick)) {
+            : acc_cfg_only() ? "access.cfg" : "cabshow.cfg");
+        if (n_cabs || acc.cvd_wanted) lamps_arm();   /* PAD-1040: the shows hold the cabinet's lights on the lamp layer;
+                                                      * PAD-1589: the colour-blind inserts the game's */
+        if ((hand.on || n_cabs || acc.on) && !hook(fn("tick"), on_hand_tick)) {
             hand.on = 0;
             n_cabs = 0;
-            say("handicap / expression lights: off - the game's tick could not be hooked");
+            acc.on = 0;
+            spk_live = 0;
+            say("handicap / expression lights / accessibility: off - the game's tick could not be hooked");
+        }
+        if (acc.on && spk_live) {                 /* PAD-1589: the ball's end, for its score said */
+            ball_end_hold_arm();
+            if (!site("ball_end") || !hook(fn("ball_end"), on_acc_ball_end))
+                say("spoken scores: not at a ball's end - the port has no ball_end site that can be hooked (only on "
+                    "the left flipper button held in attract)");
         }
         return;
     }

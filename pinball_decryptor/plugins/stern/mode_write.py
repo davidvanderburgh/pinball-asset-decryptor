@@ -611,6 +611,8 @@ class ModePlan:
     coop_file: str = ""
     #: PAD-1033: ``handicap.cfg`` beside the mode files, a handicap for each player ("" = none)
     handicap_file: str = ""
+    #: PAD-1589: ``access.cfg`` beside the mode files, colour-blind insert colours and spoken scores ("" = none)
+    access_file: str = ""
     #: PAD-1022: ``idle.cfg`` beside the mode files, inactivity pausing the timers ("" = none)
     idle_file: str = ""
     #: PAD-1040: ``cabshow.cfg`` beside the mode files, the card's expression light shows ("" = none)
@@ -848,7 +850,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
          cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
          score_feed_prof=None, records=None, records_prof=None, code_ok=True, arch="arm", scenes=None,
-         scenes_prof=None, saved=False, saved_setting=0):
+         scenes_prof=None, saved=False, saved_setting=0, access=None, access_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -908,7 +910,12 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     back).
 
     Image sets: *scenes* ``(scenes.cfg, [variant files])`` the engine staged (:mod:`.scene_variants`) go beside the
-    mode files; with nothing else they are a plan of their own, for *scenes_prof*."""
+    mode files; with nothing else they are a plan of their own, for *scenes_prof*.
+
+    PAD-1589: *access* (``{"cvd": preset, "cvd_setting": row, "spoken": bool, "spoken_setting": row}``) puts
+    ``access.cfg`` beside the mode files (colour-blind insert colours, spoken scores: :mod:`.accessibility`); with
+    nothing else it is a plan of its own, for *access_prof*, and the file says the card has no modes (they change no
+    score, so the card stays on Insider Connected)."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -986,6 +993,12 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                                      or comp_prof or handicap_prof or idle_prof or coop_prof or attract_prof
                                      or variants_prof or sound_modes_prof or picture_prof)
             result.scenes_file, result.scene_files = scenes[0], list(scenes[1])
+        if access:                                   # PAD-1589: accessibility, alone or with the above
+            if result is None:
+                result = access_plan(project, game_elf, access_prof or scenes_prof or records_prof or score_feed_prof
+                                     or screen_prof or comp_prof or handicap_prof or idle_prof or coop_prof
+                                     or attract_prof or variants_prof or sound_modes_prof or picture_prof)
+            access_into(result, game_elf, scratch, access, only=True)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -1076,6 +1089,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         idle_into(result, scratch, only=False)
     if handicap:                                     # PAD-1033
         handicap_into(result, game_elf, scratch, handicap_setting, only=False)
+    if access:                                       # PAD-1589
+        access_into(result, game_elf, scratch, access, only=False)
     if cabs:                                         # PAD-1040
         cabs_into(result, scratch, cabs, cabs_sids or {}, only=False, log=log, game_elf=game_elf)
     if comp:                                         # PAD-1041
@@ -1471,6 +1486,54 @@ def addcab_into(result, scratch, added):
     result.addcab_file = path
     result.lines.append("added cabinet lights: %d speaker light(s), %d blade pixel(s) a side, on the Cabinet Lights "
                         "board" % (added["speakers"], added["blades"]))
+    return result
+
+
+# ---- PAD-1589: colour-blind insert colours and spoken scores ------------------------------------
+def access_plan(project, game_elf, prof):
+    """A plan carrying only the accessibility options: no mode, no scene; the runtime and the title's port on p2 with
+    ``access.cfg`` (:func:`access_into`)."""
+    from . import accessibility as AC
+    why = AC.title_refusal(prof, "cvd") and AC.title_refusal(prof, "spoken")
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows" % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def access_into(result, game_elf, scratch, access, only=False):
+    """``access.cfg`` for *result*'s card: *access* (:func:`plan`'s), the flipper buttons read off *game_elf*, *only*
+    when the card carries no modes."""
+    from . import accessibility as AC
+    from . import sound_modes as SMo
+    access = dict(access or {})
+    preset = access.get("cvd") or ""
+    if preset and AC.title_refusal(result.profile, "cvd"):
+        result.lines.append("color-blind inserts: left out - %s" % AC.title_refusal(result.profile, "cvd"))
+        preset = ""
+    spoken = bool(access.get("spoken"))
+    flippers = (SMo.flipper_buttons(game_elf) + [0, 0])[:2] if spoken else (0, 0)
+    if not preset and not spoken:
+        return result
+    text = AC.cfg_text(preset, access.get("cvd_setting") or 0, spoken, access.get("spoken_setting") or 0, flippers,
+                       only=only)
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, AC.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.access_file = path
+    if preset:
+        result.lines.append("color-blind inserts: %s colors on the game's RGB inserts, %s" % (
+            AC.PRESETS[preset][1].lower(), "switched in the service menu (COLOR BLIND)" if access.get("cvd_setting")
+            else "always (no COLOR BLIND row in the service menu)"))
+    if spoken:
+        result.lines.append("spoken scores: player and score at each ball's end%s, %s" % (
+            " and on the left flipper button held in attract" if flippers[0] else "",
+            "switched in the service menu (SPOKEN SCORES), Off to start with" if access.get("spoken_setting")
+            else "always on (no SPOKEN SCORES row in the service menu)"))
     return result
 
 
@@ -2623,6 +2686,11 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             from . import handicap as HC
             dst = os.path.join(out_dir, HC.CFG_NAME)
             shutil.copyfile(result.handicap_file, dst)
+            extras.append(dst)
+        if getattr(result, "access_file", ""):         # PAD-1589: access.cfg, colour-blind inserts, spoken scores
+            from . import accessibility as AC
+            dst = os.path.join(out_dir, AC.CFG_NAME)
+            shutil.copyfile(result.access_file, dst)
             extras.append(dst)
         if getattr(result, "cabshow_file", ""):        # PAD-1040: cabshow.cfg, the card's expression light shows
             from . import cab_shows as CS

@@ -11310,6 +11310,21 @@ def _mark_building(output_path):
         return False
 
 
+def _log_copy_on_disk(output_path, log):
+    """PAD-1593: say what the build's card copy takes on its drive (the
+    copy is sparse; its free space costs nothing).  Never raises."""
+    try:
+        from ...core import sparse_card
+        size = os.path.getsize(_lp(output_path))
+        disk = sparse_card.on_disk_size(_lp(output_path))
+    except Exception:                                   # noqa: BLE001
+        return
+    if size and disk < size:
+        log("The card copy takes %.1f GB on disk of its %.1f GB: the card's "
+            "free space is left out and reads back as zeros."
+            % (disk / 1e9, size / 1e9), "info")
+
+
 def _discard_output(output_path):
     """Remove a half-prepared output and its record together."""
     _safe_remove(output_path)
@@ -14809,8 +14824,15 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     copy_err = []
 
     def _bg_copy():
+        # PAD-1593: the copy is SPARSE, as Spike 3's is (PAD-1507): only the
+        # original's allocated ranges are read and only blocks holding data
+        # are written, so the card's free space (about half a Spike 2 card)
+        # stays holes that cost nothing on disk and read back as zeros - the
+        # same bytes a plain copy writes.  A drive without sparse files
+        # (FAT32, exFAT, some shares) gets the zeros written out instead.
         try:
-            shutil.copyfile(_lp(original_path), _lp(output_path))
+            from ...core import sparse_card
+            sparse_card.sparse_copy(_lp(original_path), _lp(output_path))
         except BaseException as e:          # surfaced to the caller after join
             copy_err.append(e)
 
@@ -14985,6 +15007,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
                 raise OSError("Could not copy the card image to the build's "
                               "destination:\n\n    %s\n\n%s"
                               % (output_path, copy_err[0])) from copy_err[0]
+            _log_copy_on_disk(output_path, log)
 
         whole_record, complete = {}, True
         mode_rec = None

@@ -430,3 +430,7 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   MUSIC MODE file is refused for room on 1.11 and on 1.10 alike; 1.11 takes 1.10's place in menu_settings.PROVEN.
 - Every set of the ticket's list is now proven on the new builds. Left: merge main before release (three tests red at
   the branch's base are green there).
+- Final scan (every proven set: old build in, new build missing): Avengers 1.12 / Foo Fighters 1.05 challenge ports had
+  lost their ball-launch lines in the derive (restored from portchallenge.launch_lines, recipes rebuilt, all four
+  re-proven with chaljob); run 10's button-shot entries had landed in SPARE_IO_PROVEN, now in BUTTON_SHOTS_PROVEN.
+  The scan is clean; port-glob tests: only the three base-red ones (pad1017 coop, pad364, pad723) fail, green on main.

@@ -177,3 +177,76 @@ def carry_modes(project, workspace, slugs, log=None):
         for line in report.lines():
             log("Modes: " + line, "info")
     return report.summary().split("\n\n", 1)[0]
+
+
+# ---- a multi-boot card: every image of the game, the rest left alone ------------------------------------
+def multiboot_plan(rows, new_card, reader=None, project_of=None):
+    """What an update does to each image of a multi-boot card, before anything runs.
+
+    *rows* are ``(index, path, is_group)`` of the Multi-boot tab's rows; *new_card* the new stock image. A row is
+    ``("project", folder)`` when its image is a build of the same game the app made from a project that is still
+    there (the project goes onto the new build, as a one-game update), ``("stock", "")`` when it is Stern's own
+    image of that game (it becomes the new image as it is), or ``("keep", why)`` - another game, a random card, a
+    build of this game the app has no project of, an image not older than the new one. -> ``(new_label, [(index,
+    kind, what)])``; raises :class:`UpdateRefused` when no row is that game at all."""
+    if reader is None:
+        from ..plugins.stern import title_reader
+        reader = title_reader.game_program
+    if project_of is None:
+        from .extract_source import _build_project
+        project_of = _build_project
+    try:
+        new_game, new_ver = read_build(new_card, reader)
+    except Exception as e:                              # noqa: BLE001
+        raise UpdateRefused("%s is not a Stern Spike 2 card image the app can read (%s)."
+                            % (os.path.basename(new_card), e)) from None
+    new_label = _label(new_game, new_ver)
+    out, same = [], 0
+    for index, path, group in rows:
+        if group:
+            out.append((index, "keep", "a random card: it rolls between the images it names"))
+            continue
+        try:
+            game, ver = read_build(path, reader)
+        except Exception:                               # noqa: BLE001
+            out.append((index, "keep", "its image (%s) could not be read" % os.path.basename(path or "?")))
+            continue
+        if game != new_game:
+            out.append((index, "keep", "another game (%s)" % _label(game, ver)))
+            continue
+        same += 1
+        if _key(ver) >= _key(new_ver):
+            out.append((index, "keep", "already %s" % _label(game, ver)))
+            continue
+        project = project_of(path)
+        if project and os.path.isdir(project):
+            out.append((index, "project", project))
+        elif project:
+            out.append((index, "keep", "a build of %s whose project folder (%s) is gone"
+                        % (_label(game, ver), project)))
+        elif _is_stock(path):
+            out.append((index, "stock", ""))
+        else:
+            out.append((index, "keep", "a build of %s made elsewhere: the app has no project of it to carry"
+                        % _label(game, ver)))
+    if not same:
+        raise UpdateRefused("No image on this card is %s's game: pick the new card image of one of its games."
+                            % new_label)
+    return new_label, out
+
+
+def _is_stock(path):
+    """True when *path* is Stern's own card image (its stock fingerprint check), else False."""
+    try:
+        from ..plugins.stern import stock_prints
+        got = stock_prints.check_card(path)
+        return bool(got) and got.get("status") == "official"
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def workspace_for(project, new_label):
+    """Where an update's extract of the new build goes: beside *project*, named for it and the new build, so two
+    projects in one folder never share one."""
+    parent = os.path.dirname(os.path.abspath(project))
+    return os.path.join(parent, "%s (%s)" % (os.path.basename(os.path.normpath(project)), new_label))

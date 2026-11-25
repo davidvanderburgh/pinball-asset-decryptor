@@ -156,7 +156,9 @@ class MachinesMixin:
                "project_name": os.path.basename(found[0][0]) if found else "",
                "project_missing": bool(found) and not os.path.isdir(found[0][0]),
                "more_projects": [f for f, _w, _l in found[1:]],
-               "newer": "", "newer_url": ""}
+               "newer": "", "newer_url": "",
+               # PAD-1585: Update on a multi-boot card updates every image of the game on it
+               "multi": mfr == "stern" and os.path.isfile(card) and _multi(card)}
         if info and code_watch.has_source(mfr):
             newest = code_watch.newest(mfr, info["key"])
             if newest and newest > tuple(info["version"]):
@@ -504,9 +506,27 @@ class MachinesMixin:
         app (app._start_machine_update), told first what can't be carried.  Built, the machine is shown on the
         update and the Write tab is set to put it on the machine: Send to machine (over the network, its
         settings, audits and high scores stay) or Build / flash SD card."""
-        r = self._open_machine_project(mid)
-        if r is None or not r.get("transfer") or r["card_missing"]:
+        r = self._row(mid)
+        if not r or not r.get("transfer") or r["card_missing"]:
             return False
+        if r.get("multi"):
+            # every image of the game on the card, each with its own project: none is opened
+            if not self._enter(r["mfr"]):
+                return False
+        else:
+            r = self._open_machine_project(mid)
+            if r is None:
+                return False
+
+        def updated(card, replaced, plan):
+            if os.path.isfile(card):
+                self.machines_rebind(mid, card)
+            compat.messagebox.showinfo(
+                "Card updated",
+                "%s's card is updated in place: %d image%s of the game replaced, every other image, the menu "
+                "and its settings and high scores as they were.\n    %s\n\nPut it on the machine as you put "
+                "the card there before: Send to machine from the Multi-boot tab's card, or write the SD card."
+                % (r["name"] or "The machine", len(replaced), "" if len(replaced) == 1 else "s", card))
 
         def built(build, workspace, raw):
             w = self.window
@@ -530,7 +550,8 @@ class MachinesMixin:
                 "Build / flash SD card writes a card; tick Keep the card's own settings there to keep them "
                 "when you write over the machine's card." % (r["name"] or "The update", build))
 
-        return bool(self.app._start_machine_update(mid, r["project"], r["card"], on_built=built))
+        return bool(self.app._start_machine_update(mid, r["project"], r["card"], on_built=built,
+                                                   on_multi=updated))
 
     @rpc
     def machines_write(self, mid):
@@ -539,6 +560,15 @@ class MachinesMixin:
             return False
         self.window.select_tab("write")
         return True
+
+
+def _multi(card):
+    """True when the card image *card* carries more than one game image (cached on the file's identity)."""
+    try:
+        from ..plugins.stern import multiimage
+        return len(multiimage.images_for_path(card)) > 1
+    except Exception:                                   # noqa: BLE001
+        return False
 
 
 def _and(words):

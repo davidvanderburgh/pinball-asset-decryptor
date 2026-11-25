@@ -135,13 +135,14 @@ def test_machines_update_starts_the_update_and_hands_the_build_to_the_write_tab(
         host = cls.__new__(cls)
     row = {"name": "My Godzilla", "transfer": True, "card_missing": False, "project": "proj", "card": "old.raw"}
     monkeypatch.setattr(type(host), "_open_machine_project", lambda self, mid: row, raising=False)
+    monkeypatch.setattr(type(host), "_row", lambda self, mid: row, raising=False)
     monkeypatch.setattr(type(host), "machines_rebind", lambda self, mid, path=None: rebound.append(path),
                         raising=False)
     monkeypatch.setattr(SM.compat.messagebox, "showinfo", lambda t, m: shown.append(m))
     w = SimpleNamespace(write_upd_var=_Var(), write_assets_var=_Var(), write_output_var=_Var(),
                         write_filename_var=_Var(), select_tab=tabs.append)
 
-    def start(mid, project, card, on_built=None):
+    def start(mid, project, card, on_built=None, on_multi=None):
         started.update(mid=mid, project=project, card=card)
         on_built(str(build), "ws_new", "new.raw")
         return True
@@ -164,8 +165,8 @@ def test_the_row_offers_the_update_only_with_a_project_and_newer_code():
     from pathlib import Path
     js = (Path(__file__).resolve().parents[1] / "pinball_decryptor" / "webui" / "static" / "js"
           / "shell.js").read_text(encoding="utf-8")
-    m = re.search(r'\$\{r\.newer && proj && r\.transfer \? html`<\$\{Button\}[^`]*machines_update[^`]*Update to '
-                  r'\$\{r\.newer\}', js)
+    m = re.search(r'\$\{r\.newer && \(proj \|\| r\.multi\) && r\.transfer \? html`<\$\{Button\}[^`]*'
+                  r'machines_update[^`]*Update to \$\{r\.newer\}', js)
     assert m, "the Update to <newer> button on the My machines row"
 
 

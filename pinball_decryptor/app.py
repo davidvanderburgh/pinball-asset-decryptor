@@ -4717,17 +4717,22 @@ class App:
         threading.Thread(target=self._run_port_chain, args=(project, jobs),
                          daemon=True).start()
 
-    def _start_machine_update(self, mid, project, card, on_built=None):
+    def _start_machine_update(self, mid, project, card, on_built=None, on_multi=None):
         """PAD-1585: "Update to 1.0.1" on My machines - the machine's project
         carried onto Stern's newer build by the app, never by Stern's updater
         (which a card the app built refuses).  The owner points at the new
         stock card image (the app downloads none); it must be the same game
         and a newer build.  Then the one-click port's chain for that one
-        image (extract, transfer, stage, build beside the machine's card),
-        stopping after the transfer is planned to say what can NOT be carried
+        image (extract, transfer, stage, build), stopping after the transfer
+        is planned to say what can NOT be carried
         (core/game_update.carry_report) before anything is built.  The new
         extract and the build go beside the project folder.
-        *on_built(build, workspace, raw)* on the UI thread after a build."""
+        *on_built(build, workspace, raw)* on the UI thread after a build.
+
+        A MULTI-BOOT card (several images) is :meth:`_start_multiboot_update`:
+        every image of that game on it, the rest left as they are;
+        *on_multi(card, replaced, plan)* on the UI thread once the card is
+        updated."""
         from .core import game_update, mod_port
         if not getattr(self._current_mfr.capabilities, "mod_transfer", False):
             return False
@@ -4741,17 +4746,18 @@ class App:
         if not raw:
             return False
         raw = os.path.normpath(raw)
+        if card and self._card_is_multiboot(card):
+            return self._start_multiboot_update(card, raw, on_multi)
         try:
             old_label, new_label = game_update.check_new_card(card, raw)
         except game_update.UpdateRefused as e:
             messagebox.showwarning("Update", str(e))
             return False
-        # beside the project folder: the new build's extract becomes the
-        # project going forward, next to the old one (never inside it, and
-        # never wherever the machine's card happens to sit)
-        out_dir = os.path.dirname(os.path.abspath(project))
-        jobs = mod_port.plan_ports(project, [raw], out_dir)
-        job = jobs[0]
+        job = mod_port.plan_ports(project, [raw], os.path.dirname(os.path.abspath(project)))[0]
+        # beside the project folder, named for it: the new build's extract is
+        # the project going forward, next to the old one (never inside it,
+        # and never shared by two projects of one folder)
+        job.update(workspace=game_update.workspace_for(project, new_label), project=project)
         if not messagebox.askyesno(
                 "Update to %s?" % new_label,
                 "This machine's project:\n    %s\n\nis carried onto %s%s:\n"
@@ -4762,11 +4768,35 @@ class App:
                    raw, "" if not mod_port.has_baseline(job["workspace"])
                    else " (an earlier extract of it is reused)", job["output"])):
             return False
+
+        def after(results):
+            built = [j for j, st, _d in results if st == "ok"]
+            if built and on_built is not None:
+                on_built(built[0]["output"], built[0]["workspace"], built[0]["raw"])
+
+        self._run_update_jobs([job], raw, new_label, after)
+        return True
+
+    @staticmethod
+    def _card_is_multiboot(card):
+        """True when the card image *card* carries more than one game image."""
+        try:
+            from .plugins.stern import multiimage
+            return len(multiimage.images_for_path(card)) > 1
+        except Exception:                               # noqa: BLE001
+            return False
+
+    def _update_gate(self, projects, raw, new_label):
+        """The question an update asks after each job's transfer is planned
+        and before anything is applied or built (see _run_port_chain's
+        *gate*): what can't be carried, the modes checked by shot name.
+        *projects* maps each job's workspace to its project."""
+        from .core import game_update, mod_port, mod_transfer
         mfr = self._current_mfr
 
         def gate(ws, plan):
-            from .core import mod_transfer
             from .plugins.stern.mode_project import list_modes
+            project = projects.get(ws)
             modes_line, blocked = "", False
             try:
                 has_modes = bool(list_modes(project)[0])
@@ -4788,25 +4818,33 @@ class App:
             title, message = game_update.question(report)
             if report["clean"]:
                 return post
-            box, done = {}, threading.Event()
-
-            def _q():
-                try:
-                    box["yes"] = messagebox.askyesno(title, message)
-                finally:
-                    done.set()
-            self.msg_queue.put(UiCallMsg(_q))
-            done.wait()
-            if not box.get("yes"):
+            if len(projects) > 1:
+                title = "%s (%s)" % (title, os.path.basename(os.path.normpath(project)))
+            if not self._ask_on_ui(title, message):
                 raise mod_port.PortSkip("stopped before building: nothing was written")
             return post
+        return gate
 
-        def after(results):
-            built = [j for j, st, _d in results if st == "ok"]
-            if built and on_built is not None:
-                on_built(built[0]["output"], built[0]["workspace"], built[0]["raw"])
+    def _ask_on_ui(self, title, message):
+        """messagebox.askyesno from a worker thread: asked on the UI loop,
+        the worker waits for the answer."""
+        box, done = {}, threading.Event()
 
-        self._record_path_history(write_output=out_dir)
+        def _q():
+            try:
+                box["yes"] = messagebox.askyesno(title, message)
+            finally:
+                done.set()
+        self.msg_queue.put(UiCallMsg(_q))
+        done.wait()
+        return bool(box.get("yes"))
+
+    def _run_update_jobs(self, jobs, raw, new_label, after):
+        """Start the port chain for an update's *jobs* (each naming its own
+        ``project``), the question asked per job; *after(results)* on the UI
+        thread at the end."""
+        gate = self._update_gate({j["workspace"]: j["project"] for j in jobs}, raw, new_label)
+        self._record_path_history(write_output=os.path.dirname(jobs[0]["output"]))
         self._save_settings()
         self._active_mode = "write"
         self._port_active = True
@@ -4816,8 +4854,104 @@ class App:
         self._staging_failures = []
         self.window.set_running(True, mode="write")
         self.window.reset_steps(mode="write")
-        threading.Thread(target=self._run_port_chain, args=(project, jobs),
+        threading.Thread(target=self._run_port_chain, args=(jobs[0]["project"], jobs),
                          kwargs={"gate": gate, "after": after}, daemon=True).start()
+
+    def _start_multiboot_update(self, card, raw, on_done=None):
+        """PAD-1585: Update on a machine whose card is MULTI-BOOT.  The card is
+        read into the Multi-boot tab (its layout, titles, pictures and the
+        stores its settings and scores live in), and every row of the new
+        image's game is planned (core/game_update.multiboot_plan): a build of
+        a project the app still has is updated onto the new build the
+        one-game way (its own question about what can't be carried), Stern's
+        own image of that game becomes the new image as it is, and every
+        other row - another game, a random card, a build made elsewhere - is
+        left as it is.  The results go in with Replace image (each row keeps
+        its place and its settings and scores) and the card is updated IN
+        PLACE (only what changed is written; a compact card's shared files
+        once).  *on_done(card, replaced, plan)* on the UI thread after."""
+        from .core import game_update, mod_port
+        panel = getattr(self.window, "_multiboot_panel", None)
+        if panel is None or not hasattr(panel, "load_card"):
+            messagebox.showwarning("Update", "The Multi-boot tab is not available, so this multi-boot "
+                                   "card cannot be updated here.")
+            return False
+        if not panel.load_card(card):
+            return False                                # the tab said why
+        try:
+            self.window.select_tab("multiboot")
+        except Exception:                               # noqa: BLE001
+            pass
+        say = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+
+        def ui(fn):
+            self.msg_queue.put(UiCallMsg(fn))
+
+        def work():
+            t0, norm = time.time(), os.path.normcase(os.path.normpath(card))
+            while time.time() - t0 < 1800:
+                loaded = getattr(panel, "_loaded_card", "") or ""
+                if not getattr(panel, "_busy", False) and loaded \
+                        and os.path.normcase(os.path.normpath(loaded)) == norm:
+                    break
+                time.sleep(0.5)
+            else:
+                ui(lambda: messagebox.showwarning("Update", "The Multi-boot tab did not finish reading "
+                                                  "%s, so nothing was changed." % card))
+                return
+            from .webui.multiboot_core import is_group
+            rows = [(i, r.path, is_group(r)) for i, r in enumerate(panel._rows)]
+            try:
+                new_label, plan = game_update.multiboot_plan(rows, raw)
+            except game_update.UpdateRefused as e:
+                ui(lambda: messagebox.showwarning("Update", str(e)))
+                return
+            names = {i: (panel._rows[i].title or os.path.basename(panel._rows[i].path or "")
+                         or "image %d" % (i + 1)) for i, _p, _g in rows}
+            jobs, stock = [], []
+            for i, kind, what in plan:
+                if kind == "project":
+                    job = mod_port.plan_ports(what, [raw], os.path.dirname(os.path.abspath(what)))[0]
+                    job.update(workspace=game_update.workspace_for(what, new_label), project=what, row=i)
+                    jobs.append(job)
+                elif kind == "stock":
+                    stock.append(i)
+            lines = []
+            for i, kind, what in plan:
+                lines.append("  %s: %s" % (names[i], {
+                    "project": "its project is carried onto %s (%s)" % (new_label, what),
+                    "stock": "becomes Stern's %s as it is" % new_label}.get(kind, "stays as it is: " + what)))
+            if not jobs and not stock:
+                ui(lambda: messagebox.showinfo("Update", "Nothing on this card is updated:\n\n" + "\n".join(lines)))
+                return
+            if not self._ask_on_ui(
+                    "Update the card to %s?" % new_label,
+                    "%s is a multi-boot card. Each image of %s's game on it:\n\n%s\n\nThe images that change "
+                    "go in with Replace image, so each keeps its place in the menu, its title, its picture "
+                    "and its settings and high scores, and the card is then updated in place: only what "
+                    "changed is written.\n\nStart?" % (os.path.basename(card), new_label, "\n".join(lines))):
+                return
+
+            def finish(results):                        # UI thread
+                replaced = {j["row"]: j["output"] for j, st, _d in results if st == "ok"}
+                for i in stock:
+                    replaced[i] = raw
+                failed = [names[j["row"]] for j, st, _d in results if st != "ok"]
+                for i, path in sorted(replaced.items()):
+                    panel.replace_image(path, i)
+                if failed:
+                    say("Not updated on the card (see above): %s." % ", ".join(failed), "warning")
+                if not replaced:
+                    return
+                say("Updating %s in place: %s." % (card, ", ".join(names[i] for i in sorted(replaced))), "info")
+                panel.update_card(after=(lambda: on_done(card, replaced, plan)) if on_done else None)
+
+            if jobs:
+                ui(lambda: self._run_update_jobs(jobs, raw, new_label, finish))
+            else:
+                ui(lambda: finish([]))
+
+        threading.Thread(target=work, daemon=True).start()
         return True
 
     def _port_targets(self):
@@ -5089,9 +5223,12 @@ class App:
 
         def transfer(ws):
             # What the new version adds, before the mods go onto it (PAD-1388)
+            # PAD-1585: an update's jobs each name their own project (every
+            # image of a multi-boot card's game)
+            src = (by_ws.get(ws) or {}).get("project") or project
             if ws in by_ws:
-                self._report_news(project, by_ws[ws], log_cb, progress_cb)
-            plan = mod_transfer.plan_transfer(project, ws, log_cb=log_cb)
+                self._report_news(src, by_ws[ws], log_cb, progress_cb)
+            plan = mod_transfer.plan_transfer(src, ws, log_cb=log_cb)
             for level, line in mod_transfer.plan_detail_lines(plan):
                 log_cb(line, level)
             totals = plan["totals"]
@@ -5105,7 +5242,7 @@ class App:
                        "sound were skipped (the safe default; assign those "
                        "by hand on the Replace tab if you want them)."
                        % totals["flagged"], "warning")
-            res = mod_transfer.apply_transfer(project, ws, plan,
+            res = mod_transfer.apply_transfer(src, ws, plan,
                                               include_flagged=False)
             more = post(ws) if callable(post) else ""
             return ("%d audio, %d video, %d image, %d text transferred%s%s%s"

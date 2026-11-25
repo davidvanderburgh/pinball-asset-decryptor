@@ -64,7 +64,8 @@ touch -d "@20" "$T/desk/custom.raw"                                      # rebui
 img "$T/img/gone.raw" 10;   entry gone "$T/img/gone.raw" 940; rm "$T/img/gone.raw"
 truncate -s 1M "$CACHE/half.raw.partial"; echo x > "$CACHE/half.log"    # a copy that never finished
 # a reader of the copy, as fuse2fs is in another rig slot: its argv names the copy, nothing is under $CARDS
-bash -c 'sleep 60; :' _ "$CACHE/inuse.raw" & HOLD=$!
+# (output away from the test's pipe: the killed reader's sleep would hold it open 60 s)
+bash -c 'sleep 60; :' _ "$CACHE/inuse.raw" >/dev/null 2>&1 & HOLD=$!
 sleep 0.5
 for l in old inuse recent custom gone; do echo "state $l $(cache_source_state $l)"; done
 cache_in_use inuse && echo "inuse is in use"

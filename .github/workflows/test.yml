@@ -112,10 +112,34 @@ jobs:
           bash installer/build_mac_e2fsprogs.sh "$RUNNER_TEMP/e2fsprogs"
           echo "PAD_E2FSPROGS_DIR=$RUNNER_TEMP/e2fsprogs" >> "$GITHUB_ENV"
 
+      # The pinned aarch64 compiler's packages (tools/spike3_emu/xgcc.pins), kept
+      # between runs.  The Spike 3 code-mode build test fetched all 41 MB of them
+      # from the Ubuntu snapshot archive on every run: 180-300 s of one worker,
+      # the single slowest test in the suite (PAD-1582).  Only the downloads are
+      # kept, keyed on the pins: every run still checks each package's sha256,
+      # unpacks the kit fresh (about 3 s) and builds with it, so the test proves
+      # what it always did.  Restore and save are separate steps so a red run
+      # still saves (a plain cache step saves only after a green job).
+      - name: Restore the Spike 3 compiler kit's packages (Linux)
+        if: runner.os == 'Linux'
+        id: xgcc-debs
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/pad-xgcc-tests/debs
+          key: xgcc-debs-${{ hashFiles('tools/spike3_emu/xgcc.pins') }}
+
       - name: Run tests (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: python -m pytest tests -n auto --dist loadgroup -v --reruns 2 --reruns-delay 1 -r fER | tee pytest.log
+
+      - name: Save the Spike 3 compiler kit's packages (Linux)
+        if: always() && runner.os == 'Linux' && steps.xgcc-debs.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/pad-xgcc-tests/debs
+          key: xgcc-debs-${{ hashFiles('tools/spike3_emu/xgcc.pins') }}
 
       # The multi-boot card builder's own end-to-end test (item 93): real ext4
       # through debugfs/mke2fs/e2fsck, and - as root, which the hosted runner

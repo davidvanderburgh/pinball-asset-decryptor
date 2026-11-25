@@ -193,7 +193,16 @@ def ssh_like_server():
     srv.close()
 
 
-def test_scan_finds_an_ssh_server_and_says_what_it_is(ssh_like_server):
+@pytest.fixture
+def no_own_address_lookup(monkeypatch):
+    """A scan skips this computer's own addresses, found by resolving its hostname. On the macOS CI runner
+    that name resolves nowhere and every scan waited out the lookup (~35 s, PAD-1582); a 127.0.0.x scan
+    never needed it (127.0.0.0/8 is no address anyone sweeps)."""
+    monkeypatch.setattr(machine_scan, 'local_addresses', lambda: [])
+    monkeypatch.setattr(machine_scan, 'neighbours', lambda: [])
+
+
+def test_scan_finds_an_ssh_server_and_says_what_it_is(ssh_like_server, no_own_address_lookup):
     found = machine_scan.scan([ipaddress.IPv4Network('127.0.0.1/32')], port=ssh_like_server, log_in=False)
     assert [(f['address'], f['banner']) for f in found] == [('127.0.0.1', 'SSH-2.0-dropbear_2025.88')]
     assert machine_scan.scan([ipaddress.IPv4Network('127.0.0.2/32')], port=ssh_like_server, log_in=False) == []
@@ -485,10 +494,9 @@ def slow_ssh_server():
     srv.close()
 
 
-def test_a_known_device_is_asked_unhurried_before_the_sweep(slow_ssh_server, monkeypatch):
+def test_a_known_device_is_asked_unhurried_before_the_sweep(slow_ssh_server, monkeypatch, no_own_address_lookup):
     """PAD-1430: on David's mesh one quick sweep missed the machine; a device this computer already knows is
     there is asked first, with a long timeout."""
-    monkeypatch.setattr(machine_scan, 'neighbours', lambda: [])
     net = [ipaddress.IPv4Network('127.0.0.1/32')]
     monkeypatch.setattr(machine_scan, '_banner', _short_banner(machine_scan._banner))
     assert machine_scan.scan(net, port=slow_ssh_server, timeout=0.1, retry_timeout=None, log_in=False,

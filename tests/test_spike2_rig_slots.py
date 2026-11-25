@@ -560,9 +560,10 @@ S=/tmp/pss.$$
 printf '#!/bin/sh
 sleep "$1"
 ' > "$S" && chmod +x "$S"
-env PAD_SLOT=1 "$S" 30 & a=$!
-env PAD_SLOT=2 "$S" 30 & b=$!
-"$S" 30 & c=$!
+# (output away from the test's pipe: a killed script's sleep would hold it open 30 s)
+env PAD_SLOT=1 "$S" 30 >/dev/null 2>&1 & a=$!
+env PAD_SLOT=2 "$S" 30 >/dev/null 2>&1 & b=$!
+"$S" 30 >/dev/null 2>&1 & c=$!
 sleep 0.2
 n="pss.$$"
 printf '1:%s 2:%s 0:%s\n' "$(PAD_SLOT=1 pad_pids -x "$n")" \
@@ -585,9 +586,10 @@ def test_a_sweeps_card_copier_is_no_rigs_run_script():
 . "$R/padslot.sh"
 d=$(mktemp -d)
 printf 'sleep 30\n' > "$d/cardmount.sh"; cp "$d/cardmount.sh" "$d/watch.sh"
-env -u PAD_SLOT bash "$d/cardmount.sh" /x/card.raw --cache-now & c=$!
-env -u PAD_SLOT bash "$d/cardmount.sh" /x/card.raw & m=$!
-env -u PAD_SLOT bash "$d/watch.sh" 0 & w=$!
+# (output away from the test's pipe: a killed script's sleep would hold it open 30 s)
+env -u PAD_SLOT bash "$d/cardmount.sh" /x/card.raw --cache-now >/dev/null 2>&1 & c=$!
+env -u PAD_SLOT bash "$d/cardmount.sh" /x/card.raw >/dev/null 2>&1 & m=$!
+env -u PAD_SLOT bash "$d/watch.sh" 0 >/dev/null 2>&1 & w=$!
 sleep 0.3
 got=$(PAD_SLOT=0 pad_run_script_pids | sort -n | tr '\n' ' ')
 want=$(printf '%s\n' "$m" "$w" | sort -n | tr '\n' ' ')

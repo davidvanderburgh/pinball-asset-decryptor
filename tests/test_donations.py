@@ -6,6 +6,7 @@ node).
 
 import json
 import os
+import socketserver
 import threading
 import time
 import urllib.error
@@ -18,6 +19,15 @@ from pinball_decryptor.core import donations as D
 
 
 # ---------------------------------------------------------- a fake Worker
+class _NoLookupHTTPServer(HTTPServer):
+    """HTTPServer's bind reverse-looks-up its own address (socket.getfqdn) for a server name nothing here
+    reads; on the macOS CI runner that lookup waited ~35 s for every test's stand-in worker (PAD-1582)."""
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
+
+
 class FakeWorker:
     """Answers /v1/summary and /v1/donate the way worker.js does, from a
     list in memory.  ``down`` refuses connections (the server is stopped);
@@ -113,7 +123,7 @@ class FakeWorker:
                 out["token"] = fake.rows[-1]["token"]
                 self._send(201, out)
 
-        self._srv = HTTPServer(("127.0.0.1", 0), H)
+        self._srv = _NoLookupHTTPServer(("127.0.0.1", 0), H)
         self.url = "http://127.0.0.1:%d" % self._srv.server_port
         threading.Thread(target=self._srv.serve_forever, daemon=True).start()
         return self

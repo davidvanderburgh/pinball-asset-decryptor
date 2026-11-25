@@ -11,24 +11,45 @@ instruction fingerprints at start-up instead. No change to PAD in this ticket.
 | --- | --- | --- |
 | Godzilla Pro 1.16, stock (control) | discovery compatible (scan), menu hooks armed | yes / opens |
 | Godzilla Pro 1.16 + a game program built by PAD main: longer text in an appended segment, MUSIC MODE row | discovery compatible, menu hooks armed | yes / opens |
-| Godzilla Premium Heisei V1.99D + modes card, its mode runtime left out | discovery compatible, menu hooks armed | yes |
-| the same card as it boots, with its mode runtime | discovery compatible, **immutable guards mismatch; stock game unchanged** | **no** |
-| Godzilla Pro 1.16 + PAD's prebuilt mode runtime with no modes | discovery compatible, menu hooks armed | yes |
+| Godzilla Premium Heisei V1.99D + modes card, his menu.so preloaded LEFT of our runtime (wrong order, first pass) | discovery compatible, **immutable guards mismatch** | no |
+| the same card in the card's own order (his `run-live.sh`: our runtime left of `menu.so`) | discovery compatible, menu hooks armed | yes / opens |
 
-Identification took 150-175 ms per boot in the emulator.
+Identification took 150-175 ms per boot in the emulator (Foo Fighters LE 1.04: 2.1 s, a cold scan).
 
 Desk check (`probe.sh`, `cmp2.sh`: his own `tests/discovery_probe.c` built for x86): every program below resolves to
 the same 60 addresses as stock: six built with main by `mkelf.py` (Pro and LE; text, menu row, both) and four older
 PAD builds (Music Mode Pro/LE, Heisei 1.16 builds). Heisei on 1.15 does not resolve: 1.15 is not a version he supports.
 
-## The one conflict: PAD's mode runtime and his start-menu picker
+## The preload order, and the start menu both of us add to
 
-With a card's modes in place, PAD's runtime hooks Godzilla's start menu at `0x603d8` (port sites
-`challenge_menu_frame` / `comp_menu_frame`, which add the MODE CHALLENGE / prolonged competition entry). His menu's
-picker hooks the same loop: tick `0x603b4`, aliases `0x603d0`/`0x60438`, reads `0x603dc`/`0x60440`, and guards
-`0x603d0`-`0x603dc` (`guards.py`). The runtime patches those words first, so his load-time guard check refuses and
-leaves the game unchanged. That is safe (no crash, game plays) but the card gets no Bluetooth entry. Fixing it
-needs the two to share that loop. It is a design decision between the two projects, not a patch to either.
+The first pass reported a clash ("immutable guards mismatch") on the Heisei card. That was the rig's order, not a
+card's: his `run-live.sh` puts `/usr/local/padmode/mode.so` LEFT of `menu.so`, and glibc runs the rightmost preload's
+set-up first, so on a machine his menu checks the game's original code and then our runtime hooks. In that order both
+arm (`menujob.sh` with the card's order: runtime then `menu.so`).
+
+What did clash is the start menu ("CHOOSE YOUR MODE OF PLAY"), which both add a choice to: his Bluetooth, our MODE
+CHALLENGE / Prolonged Competition / teams. His picker copies the menu's list once, at the menu's first button read,
+and points the game's reads at the copy; it appends a row that borrows the selected mode's index, and when the list's
+length is not its own it takes it for a new menu and appends again.
+
+- Godzilla (a menu of game-mode indices, hooked at a frame site): our entry went into the game's stack list after his
+  copy was taken, so it drew blank; and the count change made his picker append its row again, leaving a stray
+  STANDARD. FIXED in the runtime: the entry goes into the list the game reads (`frame_read_list_at`: every 32-bit frame
+  site ported is `add rB, rB, rC, lsl #2; ldr rD, [rB, #-k]`, so the list is rB - k at the hook) and takes his row's
+  place without growing the list (`frame_append_at`): his picker puts its row back after ours. Same for Prolonged
+  Competition and teams at the same site. Proven: Heisei with modes - Standard, Competition, King of the Monsters,
+  CHALLENGE stepping all 13 modes, Bluetooth; MINILLA picked starts its mode; Action on Bluetooth opens his menu.
+  Godzilla Pro with Prolonged Competition the same (COMPETITION UNTIL POWERED OFF, then Bluetooth).
+- Deadpool, Foo Fighters and the other menus of RECORDS (`challenge_menu` sites, ~30 titles): his picker reads its copy
+  from the first button read, before any point we hook, and our entry left a choice that closed the menu. The runtime
+  now leaves its entry off such a menu while his menu is loaded (`start_menu_yields`, which looks for
+  `/spikebt/menu.so` in the process), and on any 64-bit program (never run beside his). Proven: Deadpool Pro 1.16 and
+  Foo Fighters LE 1.04 with Prolonged Competition cycle Standard, Competition, (Challenge,) Bluetooth cleanly, Action
+  opens his menu. Without his menu, unchanged (controls in `final.list`).
+- His `switch_edge` call-site wrapper and our `switch_edge` entry hook chain in the card's order (his patches a call to
+  it, ours the function).
+
+`final.list` (`menujob.sh`, `rigbatch --speed 1`): nine runs, 9/9.
 
 ## Build notes for the author (his CI does not cross-build menu.so)
 

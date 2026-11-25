@@ -397,6 +397,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.game_check" \
     --hidden-import "pinball_decryptor.plugins.stern.final_wizard" \
     --hidden-import "pinball_decryptor.plugins.stern.memory_budget" \
+    --hidden-import "pinball_decryptor.plugins.stern.ret_use" \
     --collect-all "unicorn" \
     --collect-all "capstone" \
     --collect-all "numpy" \

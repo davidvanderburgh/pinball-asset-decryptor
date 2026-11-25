@@ -35,15 +35,14 @@ Every tab has a **?** button in the top bar with tips for that tab.
   makers' code pages and says when a newer build is out (off by default).
   Each row can open the project, extract, write, or change and rename the
   machine; Stern rows can also transfer mods.
-- **Update to 1.17** shows on a Stern Spike 2 row when newer code is out.
-  Download the new card image from Stern and pick it. The app carries the
-  machine's project onto it (replacements, text, modes) and tells you what
-  can't be carried before it builds anything. Then Send to machine or
-  Build / flash SD card puts the update on the machine; both keep its
-  settings, audits and high scores (tick Keep the card's own settings when
-  writing a card). On a multi-boot card every image of that game is
-  updated and the other games stay as they are. A card built here refuses
-  Stern's own updater, so this is how such a card is updated.
+- **Update to 1.17** shows on a Stern Spike 2 row when newer code is out:
+  pick the new card image you downloaded from Stern, and the app carries
+  the machine's project onto it (replacements, text, modes), saying what
+  can't be carried before it builds anything. On a multi-boot card every
+  image of that game is updated and the other games stay as they are.
+- **Putting the update on the machine:** Send to machine, or Build / flash
+  SD card with Keep the card's own settings ticked, keeps its settings,
+  audits and high scores. A card built here refuses Stern's own updater.
 - **Prerequisites** sit in a row at the top: green ✓ or red ✗ per tool, with
   an install hint on hover. Once all are green the row tucks itself away.
 - **The ⚙ settings menu** (top right) keeps the theme, language and zoom,

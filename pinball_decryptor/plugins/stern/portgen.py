@@ -56,7 +56,9 @@ import numpy as np
 #: it (PAD-1555: the November 2026 builds' derivations took other titles' coil devices, drives and message numbers)
 #: 15: the scoop's event and which argument its handler takes it in are the title's (PAD-1555: D&D's and Venom's
 #: `scoop_event_arg 1` reached King Kong, Avengers, Foo Fighters and Metallica, whose handlers take it in the first)
-REVISION = 15
+#: 16: two inserts of one name each get their own lamp line (portgen._named_insert, PAD-1555: Foo Fighters Pro 1.05's
+#: RGB OVERLORD was drafted as its single OVERLORD, twice)
+REVISION = 16
 RECIPE_FORMAT = 1
 #: PAD-1389: the event map's format (:func:`compile_busmap`)
 BUSMAP_FORMAT = 1
@@ -1523,6 +1525,22 @@ def _same_but_count(by_name, name):
     return hits[0] if len(hits) == 1 else None
 
 
+def _named_insert(cache, ref):
+    """The target's insert for a reference `lamp` line by name. PAD-1555: a title may name two inserts alike - Foo
+    Fighters Pro's OVERLORD is an RGB insert (lamp 46) and a single one (lamp 76) - and a map by name kept the last,
+    so the Pro 1.05 port had the single one twice and the RGB insert no line at all. Each reference line takes the one
+    of its kind (RGB or single) not taken yet, in the target's order; the first of the name when none is left."""
+    hits = cache.get("named", {}).get(ref[3]) or []
+    used = cache.setdefault("used", set())
+    for want_kind in (True, False):
+        for i in hits:
+            if id(i) in used or (want_kind and (len(i["lights"]) == 1) != ref[1]):
+                continue
+            used.add(id(i))
+            return i
+    return hits[0] if hits else None
+
+
 def lamp_draft(rest, target, other_title, report, cache):
     """One `lamp` line for the target (item mode-leds), placed by the insert's name in the target's own
     tables (lampmap), with the target's own shot tie where its shot table was read; or a comment."""
@@ -1537,11 +1555,15 @@ def lamp_draft(rest, target, other_title, report, cache):
     if "inserts" not in cache:
         try:
             ins, how, _t = lampmap.inserts(lampmap.Elf(target.b, target.path))
-            cache["inserts"] = ({i["name"]: i for i in ins}, how)
         except SystemExit as e:
-            cache["inserts"] = ({}, str(e))
+            ins, how = [], str(e)
+        named = {}
+        for i in ins:
+            named.setdefault(i["name"], []).append(i)
+        cache["inserts"] = ({n: l[0] for n, l in named.items()}, how)
+        cache["named"], cache["used"] = named, set()
     by_name, how = cache["inserts"]
-    ins = by_name.get(ref[3]) or _same_but_count(by_name, ref[3])
+    ins = _named_insert(cache, ref) or _same_but_count(by_name, ref[3])
     if ins is None:
         report["lamp missing"] += 1
         return "# lamp %-40s left out: the target names no insert %s (%s)" % (rest.split("#")[0].strip(), ref[3], how)
@@ -1619,6 +1641,7 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
     started = False
     ref_game = target_game = game
     lamp_cache = tgt.__dict__.setdefault("_lamp_cache", {})
+    lamp_cache["used"] = set()                  # PAD-1555: each draft places its own same-named inserts afresh
     total = max(1, sum(1 for k, _r in entries if k != "#"))
     done = 0
     for key, rest in entries:

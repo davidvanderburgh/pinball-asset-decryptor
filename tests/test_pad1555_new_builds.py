@@ -132,3 +132,20 @@ def test_the_scoop_event_argument_is_the_title_s_own():
     for port in PORTS.glob("*.port"):
         has = bool(re.search(r"^value scoop_event_arg\s", port.read_text(encoding="utf-8"), re.M))
         assert not has or port.stem.startswith(("dungeons_and_dragons", "venom")), port.stem
+
+
+def test_two_inserts_of_one_name_each_get_their_own_lamp_line():
+    """PAD-1555: Foo Fighters Pro names an RGB OVERLORD (lamp 46) and a single one (lamp 76); the draft's map by name
+    kept the last, so its 1.05 port had the single line twice and the RGB insert none - light_all left it dark."""
+    assert G.REVISION >= 16
+    rgb = dict(name="OVERLORD", lights=[105, 106, 107], lamps=[46], shot=0, group=8, index=11, x=0, y=0)
+    one = dict(name="OVERLORD", lights=[15], lamps=[76], shot=0, group=7, index=47, x=0, y=0)
+    cache = {"named": {"OVERLORD": [rgb, one]}, "used": set()}
+    assert G._named_insert(cache, ((105, 106, 107), False, 0x200000, "OVERLORD")) is rgb
+    assert G._named_insert(cache, ((15, 0, 0), True, 0x200000, "OVERLORD")) is one
+    cache["used"] = set()                       # the single line first, as a reference may list them
+    assert G._named_insert(cache, ((15, 0, 0), True, 0, "OVERLORD")) is one
+    assert G._named_insert(cache, ((105, 106, 107), False, 0, "OVERLORD")) is rgb
+    text = (PORTS / "foo_fighters_pro-1.05.port").read_text(encoding="utf-8")
+    assert re.search(r"^lamp 105,106,107 +0x200000 +OVERLORD  #", text, re.M)
+    assert len(re.findall(r"^lamp 15 +0x200000 +OVERLORD  #", text, re.M)) == 1

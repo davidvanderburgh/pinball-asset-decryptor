@@ -40,6 +40,15 @@ done
 grep -aq 'prolonged competition: on the start menu as entry' "$log" \
     || { cp "$log" "$JOB_OUT/mode.log"; job_fail "both flippers held showed no menu with the entry: $(grep -a 'prolonged competition' "$log" | tail -1 | cut -c1-160)"; }
 entry=$(grep -a -m1 -Eo 'prolonged competition: on the start menu as entry [0-9]+ of [0-9]+[^)]*\)?' "$log" | cut -c1-160)
+if [ "${STD:-0}" = 1 ]; then
+    # the control: START on the menu's first entry (the game's own STANDARD) - a game that starts as the menu picked
+    job_sleep 1.5; job_shot "$JOB_OUT/std.png"; job_press "$START" 400
+    job_wait_log "$log" 'prolonged competition: game [0-9]+ starts' 20 || true
+    job_sleep 2; job_shot "$JOB_OUT/std_after.png"; cp "$log" "$JOB_OUT/mode.log"
+    std=$(grep -a -m1 -Eo 'prolonged competition: game [0-9]+ starts \(prolonged is off\)' "$log")
+    [ -n "$std" ] || job_fail "$entry; STANDARD: START started no game either"
+    job_pass "$entry; STANDARD: $std"
+fi
 # the entry is the menu's last: one left step wraps the cursor onto it (a right-flipper walk of up to 11 steps, at 1.2 s
 # each, outlasted the menu's patience on King Kong LE 0.97 / 1.01: picked, then START took nothing); the walk is kept
 # for a menu that does not wrap

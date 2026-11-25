@@ -12,6 +12,9 @@ import re
 import sys
 
 HDR, IDX = 20, 96
+#: the cabinet's own lights are no inserts (item 164's and PAD-420's proofs: the expressive strip, the speakers, the
+#: topper take only the game's own shows) - Foo Fighters' TOPPER FRONT RAMI / TAYLOR / CHRIS
+CABINET = r"^(TOPPER|SPEAKER|BACKBOX|CABINET)\b"
 
 
 def leds(path):
@@ -30,7 +33,7 @@ def lamps(port):
     names = []
     for line in open(port, encoding="utf-8"):
         m = re.match(r"^lamp\s+[\d,]+\s+\S+\s+(.+?)\s*(#|$)", line)       # an RGB insert: `lamp 82,83,84 ...`
-        if m:
+        if m and not re.match(CABINET, m.group(1).strip().upper()):
             names.append(m.group(1).strip().upper())
     return list(dict.fromkeys(names))
 

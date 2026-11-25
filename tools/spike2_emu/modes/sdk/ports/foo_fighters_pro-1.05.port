@@ -546,7 +546,7 @@ lamp 93           0              UFO LOOP MID  # lamp 42, I/O group 8 index 62, 
 lamp 94,95,96     0              UFO LOOP TOP  # lamp 43, I/O group 8 index 63, at 0,0
 lamp 103          0x20000        OVERLORD LEFT TARGET  # lamp 44, I/O group 8 index 15, at 0,0
 lamp 104          0x40000        OVERLORD RIGHT TARGET  # lamp 45, I/O group 8 index 10, at 0,0
-lamp 15           0x200000       OVERLORD  # lamp 76, I/O group 7 index 47, at 0,0
+lamp 105,106,107  0x200000       OVERLORD  # lamp 46, I/O group 8 index 11, at 0,0; tie: Overlord opto
 lamp 108          0              ALL MY LIFE  # lamp 47, I/O group 8 index 14, at 0,0
 lamp 109          0              MONKEY WRENCH  # lamp 48, I/O group 8 index 9, at 0,0
 lamp 110          0              THE PRETENDER  # lamp 49, I/O group 8 index 8, at 0,0

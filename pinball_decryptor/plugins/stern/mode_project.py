@@ -3581,6 +3581,19 @@ LAMPS_PROVEN = frozenset((
     # the mode's scoring shots at 255 (TOP LANE LEFT and YODA MYSTERY dark before and after, LEFT LUKE ARROW the game's
     # own 192 blink before and after); the game's layer list (pm_lamp_layers) had the runtime's layer on top
     "star_wars_elg-1.10/spike3",
+    # PAD-1555 2026-11-24 newbuild/lightsjob.sh + lightcheck.py (rigbatch, stock cards, hidden, muted; the King Kong LE
+    # 0.97 control the same): a mode file's light_all ff00ff solid, 12 s; the shim's LED view copied before, 3 s and 8 s
+    # in, 4 s after - every insert the port names that the rig's led_io places magenta (R >= 200, G <= 40, B >= 200) in
+    # both copies while it ran, single-colour ones at >= 200; none before or after (Avengers Pro: 3 / 4 of the game's own)
+    #   king_kong_le-1.00 / -1.01 / king_kong_pro-1.01: 8/8 RGB, 97/97 single
+    #   avengers_infinity_pro-1.12: 22/22 RGB, 63/63 single
+    #   metallica_spike-1.05: 18/18 RGB, 77/77 single
+    #   dungeons_and_dragons_le-1.11 / _pro-1.11: 36/36 RGB, 50/50 single
+    #   foo_fighters_le-1.05: 30/30 RGB, 74/74 single (its topper's TOPPER FRONT RAMI / TAYLOR / CHRIS are the cabinet's
+    #   own lights, no inserts, as in the earlier proofs)
+    "foo_fighters_le-1.05",
+    "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "avengers_infinity_pro-1.12", "metallica_spike-1.05",
+    "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
 ))
 
 

@@ -59,8 +59,11 @@ class TestCardTab(TabService):
                          "where": it.rel if it.project else it.path,
                          "problem": tc.item_problem(it)})
         rows.sort(key=lambda r: KIND_ORDER[r["kind"]])        # stable: each list in its own order
+        source_ok = bool(lst.source) and os.path.isfile(lst.source)
         self.set(rows=rows, counts=lst.counts(), source=lst.source,
-                 source_ok=bool(lst.source) and os.path.isfile(lst.source), out=lst.out,
+                 source_ok=source_ok, out=lst.out,
+                 # PAD-1586: the card it is made from is a Spike 3 one: its own words and route
+                 s3=bool(source_ok and tc.is_spike3_source(lst.source)),
                  busy=self._busy, log=self._lines[-400:], pct=self._pct, step=self._step,
                  msg=list(self._msg), max=tc.MAX_ITEMS, full=len(lst.items) >= tc.MAX_ITEMS,
                  network=dict(lst.network), room_mib=tc.room_mib(lst.network), address=self._address())
@@ -153,10 +156,11 @@ class TestCardTab(TabService):
 
     @rpc
     def pick_source(self):
-        """Any Stern Spike 2 card image: the test card takes its boot and system from it."""
+        """Any Stern Spike 2 card image (the test card takes its boot and system from it),
+        or a Spike 3 card image (a Spike 3 test card is that card, laid out for the menu)."""
         lst = tc.shared()
         path = compat.filedialog.askopenfilename(
-            title="Pick any Stern Spike 2 card image",
+            title="Pick a Stern Spike 2 or Spike 3 card image",
             initialdir=os.path.dirname(lst.source) if lst.source else None,
             filetypes=CARD_TYPES)
         if not path:
@@ -175,6 +179,8 @@ class TestCardTab(TabService):
             return False
         lst = tc.shared()
         address = self._address()
+        if tc.is_spike3_source(lst.source):
+            raise RpcError("Send to machine is for a Spike 2 test card: write a Spike 3 one to an SD card")
         if not lst.network.get("ssh"):
             raise RpcError("Tick Remote access first: the test card you send must let this computer in again")
         if not address:
@@ -197,7 +203,7 @@ class TestCardTab(TabService):
             return False
         lst = tc.shared()
         if not lst.source or not os.path.isfile(lst.source):
-            raise RpcError("Pick a Stern Spike 2 card image first: the test card takes its boot and system from it")
+            raise RpcError("Pick a Stern Spike 2 or Spike 3 card image first: the test card is made from it")
         start = lst.out or os.path.join(os.path.dirname(lst.source), "pad_test_card.raw")
         out = compat.filedialog.asksaveasfilename(
             title="Save the test card as", initialdir=os.path.dirname(start) or None,
@@ -257,6 +263,16 @@ class TestCardTab(TabService):
         work = pad_temp.mkdtemp(prefix="pad_testcard_")
         ok, why = False, ""
         try:
+            s3 = tc.is_spike3_source(source)
+            if s3:
+                # PAD-1586: a Spike 3 test card carries no sounds and no network extras
+                if any(it.kind == "sound" for it in items):
+                    self._say("test card: " + tc.S3_NO_SOUND)
+                items = [it for it in items if it.kind != "sound"]
+                net = tc.clean_network(net)
+                if net["room"] or net["ssh"] or net["wifi"]:
+                    self._say("test card: " + tc.S3_NO_NETWORK)
+                net = dict(tc.NETWORK_DEFAULTS)
             staged = tc.stage(items, os.path.join(work, "files"), None, log=self._say,
                               cancel=lambda: self._cancel)
             if self._cancel:
@@ -264,10 +280,11 @@ class TestCardTab(TabService):
                 return
             self._say("test card: %d of %d item%s, and the default PAD test card"
                       % (len(staged), len(items), "" if len(items) == 1 else "s"))
+            sel = os.environ.get("PAD_MULTIBOOT_SELECTOR") or (
+                mbc.backend_for("s3").selector_default if s3 else mbc.DEFAULT_SELECTOR_DIR)
             form = types.SimpleNamespace(images=[types.SimpleNamespace(path=source)], volume=50,
-                                         selector_dir=os.environ.get("PAD_MULTIBOOT_SELECTOR") or mbc.DEFAULT_SELECTOR_DIR,
-                                         tests=[],
-                                         platform="stern", colour_profiles={})
+                                         selector_dir=sel, tests=[],
+                                         platform="s3" if s3 else "stern", colour_profiles={})
             media = os.path.join(work, "media")
             cmds = mbc.testcard_commands(form, out, media, test_specs=tc.test_specs(staged, mbc.wsl),
                                          p3_mib=tc.room_mib(net))
@@ -379,7 +396,9 @@ class TestCardTab(TabService):
         if ok:
             size = os.path.getsize(out) / float(1 << 30) if os.path.exists(out) else 0
             self._msg = ("ok", "Test card built: %s (%.2f GB). Write it to a card like any card image; "
-                               "it boots any Stern Spike 2 machine into the TEST CARD menu." % (out, size))
+                               "it boots %s into the TEST CARD menu." % (
+                                   out, size, "your Stern Spike 3 machine"
+                                   if tc.is_spike3_source(tc.shared().source) else "any Stern Spike 2 machine"))
         elif why == "canceled":
             self._msg = ("warn", "Test card canceled. %s is unfinished." % os.path.basename(out))
         else:

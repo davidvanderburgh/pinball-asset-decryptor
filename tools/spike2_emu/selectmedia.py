@@ -3246,6 +3246,10 @@ def _test_padv(src, out, work, log=say):
 
 
 def cmd_prepare(a):
+    global TEST_PNG_MAX
+    if getattr(a, "screen", None):
+        # PAD-1586: a Spike 3 test card's screen is 1920x1080, not Spike 2's 1360x768 LCD
+        TEST_PNG_MAX = parse_size(a.screen)
     images = [a.primary] + list(a.extra or [])
     n = len(images)
     out = check_output_dir(a.out)
@@ -3492,6 +3496,9 @@ def main(argv=None):
                    help="scale every sound and music bed this run writes so its peak sits at DB "
                         "dBFS (e.g. -12; default: leave levels as the sources have them)")
     s.add_argument("--size", default=None, help="panel WxH (default by image count)")
+    s.add_argument("--screen", default=None,
+                   help="the machine's screen WxH the test pictures and clips are fitted to "
+                        "(default 1360x768, Spike 2's LCD; a Spike 3 machine's is 1920x1080)")
     s.add_argument("--seconds", type=float, default=GIF_MAX_SECONDS,
                    help="animation length (default and cap %g s)" % GIF_MAX_SECONDS)
     s.add_argument("--fps", type=int, default=GIF_MAX_NATIVE_FPS,

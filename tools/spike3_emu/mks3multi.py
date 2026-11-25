@@ -585,6 +585,35 @@ def _tree_manifest(d):
 _windows_sparse_file = mkc.windows_sparse_file
 
 
+#: PAD-1586: where a card built for a Windows --out is put together, in turn: the first
+#: with room for the card. The card store's disk (cardstore.ps1: one ext4 disk mounted in
+#: every distro) is a Linux filesystem too, and usually the one with room when the distro's
+#: own is short of a 64 GB card.
+WORKDIRS = ("/var/tmp/pad_s3multi", "/mnt/wsl/cards/pad_s3multi")
+
+
+def _work_dir(asked, need):
+    """The Linux folder a card for a Windows --out is built in: *asked* (--workdir) when given,
+    else the first of :data:`WORKDIRS` with *need* bytes free; refused in words when none has."""
+    cands = [asked] if asked else list(WORKDIRS)
+    seen = []
+    for d in cands:
+        d = os.path.abspath(d)
+        parent = os.path.dirname(d)
+        if not os.path.isdir(d) and not (asked or os.path.isdir(parent)):
+            continue
+        try:
+            os.makedirs(d, exist_ok=True)
+            free = shutil.disk_usage(d).free
+        except OSError:
+            continue
+        if free >= need:
+            return d
+        seen.append("%s has %s free" % (d, _gb(free)))
+    raise Refused("no Linux folder has room for the %s card while it is built (%s; give --workdir "
+                  "on a bigger Linux disk)" % (_gb(need), "; ".join(seen) or "none found"))
+
+
 def _copy_image_file(src, dst, total):
     """The card copy, metered; an all-zero MiB is skipped (a hole where the
     filesystem allows one), so a fresh copy costs no more than its data."""
@@ -684,12 +713,7 @@ def build_card(a):
     # A Windows --out is built in --workdir and copied there once finished.
     on_windows = bool(re.match(r"^/mnt/[a-z]/", out))
     if on_windows:
-        wd = os.path.abspath(a.workdir or "/var/tmp/pad_s3multi")
-        os.makedirs(wd, exist_ok=True)
-        wfree = shutil.disk_usage(wd).free
-        if wfree < cards[0].size + (1 << 30):
-            raise Refused("the work folder %s has %s free; the card needs %s (give --workdir on a bigger Linux disk)"
-                          % (wd, _gb(wfree), _gb(cards[0].size)))
+        wd = _work_dir(a.workdir, cards[0].size + (1 << 30))
         part = os.path.join(wd, os.path.basename(out) + ".part")
         PROGRESS.start(2 * cards[0].size + work, "building")
     else:
@@ -736,6 +760,118 @@ def build_card(a):
                    "images": [os.path.basename(c.path) for c in cards]}, f, indent=1)
     PROGRESS.finish()
     say("built %s: %d images in %.0f s" % (out, len(cards), time.time() - t0))
+    return 0
+
+
+# ============================================================================== testcard
+#: PAD-1586: a Spike 3 TEST CARD's test files, under /games/pad (the menu's own folder)
+TESTCARD_SUBDIR = "testcard"
+#: the Spike 3 machine's screen (the game's HDMI-A-2, 1920x1080): what its test pictures and
+#: clips are fitted to, where a Spike 2 card's are fitted to the 1360x768 LCD
+SCREEN = (1920, 1080)
+
+
+def testcard_conf(media, colour):
+    """images.conf of a Spike 3 test card: the one image (img0, never booted: testcard=on keeps
+    the menu up until power-off) under the test card's title, the colour profile its pictures
+    are shown with, and the test items - the same lines mkmulticard writes for a Spike 2 test
+    card, which the menu (one codeselect for both) reads alike."""
+    text = render_conf(["img0"], [mkc.TESTCARD_TITLE], [mkc.TESTCARD_SUBTITLE], 0, 0,
+                       media["rows"] if media else [], None, None,
+                       media["volume"] if media else None)
+    lines = text.rstrip("\n").split("\n")
+    lines.append(mkc.conf_colour_line(0, colour or dict(mkc.TESTCARD_NO_CHANGE)))
+    if media and media.get("test_files"):
+        lines.append("test_dir=%s/%s" % (PAD_DIR, TESTCARD_SUBDIR))
+    lines.extend(mkc.conf_test_lines(media["tests"] if media else None))
+    lines.append("testcard=on")
+    return "\n".join(lines) + "\n"
+
+
+def testcard_card(a):
+    """Write the Spike 3 TEST CARD --out from --primary (PAD-1586). Every partition past the
+    signed boot one is LUKS2 under the board's own key, so a Spike 3 test card cannot be made
+    small the Spike 2 way (fresh partitions around boot and rootfs): it is --primary's card,
+    copied, laid out as a multi-boot card with no other image - its games tree in pad/img0 (the
+    boot splash and conagent find theirs through the top links), the menu in pad/ with
+    testcard=on, and the test files in pad/testcard. Sounds are not put on it: the menu plays
+    none on a Spike 3 machine (the amplifier is the game's to start)."""
+    _need_root()
+    card = Card(a.primary, getattr(a, "keyfile", None))
+    # the test pictures and clips are the Spike 3 screen's size (selectmedia prepare --screen)
+    mkc.PNG_MAX = SCREEN
+    media = mkc.plan_media(a.media_dir, 1, tests_apart=True) if a.media_dir else None
+    if media:
+        sounds = [t for t in (media.get("tests") or []) if mkc.test_parts(t)[2] == "sound"]
+        if sounds:
+            raise Refused("%d test sound(s): the menu plays no sound on a Spike 3 machine "
+                          "(the cabinet amplifier is the game's to start); leave them off" % len(sounds))
+    colour = mkc.parse_testcard_colour(a.color)
+    check_selector_dir(a.selector_dir)
+    out = os.path.abspath(a.out)
+    if os.path.normcase(out) == os.path.normcase(card.path):
+        raise Refused("--out is the card it is made from")
+    if os.path.exists(out) and not a.force:
+        raise Refused("%s exists (--force replaces it)" % out)
+    need = menu_bytes(media) + (media["test_bytes"] if media else 0)
+    room = card.fs_bytes - card.used
+    if need * 1.10 + (256 << 20) > room:
+        raise Refused("the test files need %s and %s's games partition has %s free"
+                      % (_gb(need), card.iid, _gb(room)))
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    conf = testcard_conf(media, colour)
+    build_id = uuid.uuid4().hex
+    doc = {"tool": TOOL, "version": VERSION, "built": datetime.datetime.now().isoformat(timespec="seconds"),
+           "build_id": build_id, "testcard": True,
+           "images": [{"dir": "img0", "card": os.path.basename(card.path), "title": card.title,
+                       "version": card.version, "bytes": card.used}]}
+    on_windows = bool(re.match(r"^/mnt/[a-z]/", out))
+    if on_windows:
+        wd = _work_dir(a.workdir, card.size + (1 << 30))
+        part = os.path.join(wd, os.path.basename(out) + ".part")
+        PROGRESS.start(2 * card.size, "building")
+    else:
+        if shutil.disk_usage(os.path.dirname(out) or ".").free < card.size + (1 << 30):
+            raise Refused("%s has too little room for a %s card" % (os.path.dirname(out), _gb(card.size)))
+        part = out + ".part"
+        PROGRESS.start(card.size, "building")
+    t0 = time.time()
+    say("test card: %s's card (%s), its games partition laid out for the TEST CARD menu"
+        % (card.iid, _gb(card.size)))
+    _copy_image_file(card.path, part, card.size)
+    tmp = tempfile.mkdtemp(prefix="pad_s3testcard_", dir="/var/tmp")
+    try:
+        with games_mounted(card, part, True, os.path.join(tmp, "out")) as mo:
+            _lay_out(mo, conf, a.selector_dir, media, a.media_dir, doc)
+            tests = (media or {}).get("test_files") or {}
+            if tests:
+                sub = os.path.join(mo, PAD, TESTCARD_SUBDIR)
+                os.makedirs(sub)
+                for nm, src in tests.items():
+                    shutil.copyfile(src, os.path.join(sub, nm))
+                    os.chmod(os.path.join(sub, nm), 0o644)
+                say("test card: %d test file%s in %s/%s (%s)" % (
+                    len(tests), "" if len(tests) == 1 else "s", PAD_DIR, TESTCARD_SUBDIR,
+                    _gb(media["test_bytes"])))
+            _link_top(mo)
+            say("/games/game -> %s: the TEST CARD menu at every power-up; nothing boots" % TOP_LINKS["game"])
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(part)
+        raise
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if on_windows:
+        say("copying the finished card to %s" % out)
+        _copy_image_file(part, out + ".part", card.size)
+        os.unlink(part)
+        part = out + ".part"
+    os.replace(part, out)
+    with open(out + ".pad-build.json", "w", encoding="utf-8") as f:
+        json.dump({"build_id": build_id, "tool": TOOL, "testcard": True,
+                   "images": [os.path.basename(card.path)]}, f, indent=1)
+    PROGRESS.finish()
+    say("test card: %s (%s; write it like any card image) in %.0f s" % (out, _gb(card.size), time.time() - t0))
     return 0
 
 
@@ -982,7 +1118,16 @@ def main(argv=None):
             s.add_argument("--default-card", type=int)
             s.add_argument("--force", action="store_true")
             s.add_argument("--workdir", help="a Linux folder for the card while it is built when --out is on "
-                           "a Windows drive (default /var/tmp/pad_s3multi)")
+                           "a Windows drive (default: the first of /var/tmp/pad_s3multi, /mnt/wsl/cards/pad_s3multi with room)")
+    s = sub.add_parser("testcard", help="PAD-1586: a Spike 3 TEST CARD - the menu's test screens, no game")
+    s.add_argument("--primary", required=True, help="the Spike 3 card image it is made from")
+    s.add_argument("--out", required=True)
+    s.add_argument("--selector-dir", required=True)
+    s.add_argument("--media-dir")
+    s.add_argument("--color", help="gamma r g b|gain r g b|lift r g b|saturation[|name]")
+    s.add_argument("--keyfile")
+    s.add_argument("--force", action="store_true")
+    s.add_argument("--workdir")
     s = sub.add_parser("inject")
     s.add_argument("--card", required=True)
     s.add_argument("--keyfile")
@@ -1024,6 +1169,8 @@ def main(argv=None):
             return 0
         if a.cmd == "build":
             return build_card(a)
+        if a.cmd == "testcard":
+            return testcard_card(a)
         if a.cmd == "inject":
             return inject_card(a)
         if a.cmd == "verify":

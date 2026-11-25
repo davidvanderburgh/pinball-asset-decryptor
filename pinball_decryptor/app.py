@@ -4778,6 +4778,10 @@ class App:
                 "Card image not found",
                 "This card image isn't there:\n%s" % "\n".join(gone))
             return None
+        other = self._port_other_generation(raws)
+        if other:
+            messagebox.showwarning("Card of another generation", other)
+            return None
         out_dir = ((out_var.get() if out_var is not None else "") or "").strip()
         if not out_dir:
             out_dir = filedialog.askdirectory(
@@ -4790,6 +4794,35 @@ class App:
             if out_var is not None:
                 out_var.set(os.path.normpath(out_dir))
         return raws, os.path.normpath(out_dir)
+
+    def _port_other_generation(self, raws):
+        """Why *raws* can't be ported onto in this session, or ``""``: a
+        Stern Spike 3 card picked while a Spike 2 project is open, or the
+        other way round (PAD-1586).  The port extracts and builds every
+        target with the open card's own pipelines, and a mod moves between
+        builds of one generation, so another generation's card is refused
+        here in words instead of failing half way through the chain."""
+        era = getattr(self._current_mfr, "_era", None)
+        if era not in ("spike2", "spike3"):
+            return ""
+        from .plugins.stern.mode_project import card_arch
+        want = "a64" if era == "spike3" else "arm"
+        try:
+            odd = [r for r in raws if card_arch(r) != want]
+        except Exception:                           # noqa: BLE001
+            return ""
+        if not odd:
+            return ""
+        this, that = (("Spike 3", "Spike 2") if era == "spike3"
+                      else ("Spike 2", "Spike 3"))
+        return ("This project is a Stern %s card's, and %s %s card "
+                "image%s:\n\n%s\n\nMods move between builds of one "
+                "generation: pick %s card images, or open a %s project to "
+                "port onto %s cards."
+                % (this, "this is a" if len(odd) == 1 else "these are",
+                   that, "" if len(odd) == 1 else "s",
+                   "\n".join(os.path.basename(r) for r in odd),
+                   this, that, that))
 
     def _start_whats_new(self):
         """What's new in this version? (PAD-1388): extract each new card into

@@ -7,6 +7,7 @@
 #   SO=<object>    built with modes/sdk/sound_fire_mode.c
 #   REQ=<request>  the request that plays the slot (alone)
 #   STEPS="..."    the presses from attract to MUSIC MODE's row (service_menu.walk: 25 select, 26 plus/down, w<s>)
+#   STEPSFILE=<f>  ... or a file holding them (a rigbatch list line cannot carry a value with spaces)
 #   EDROW=<n>      rows from MUSIC MODE down to EDITION (default 1)
 #   GAP=<s>        game seconds between fires (default 5)
 #
@@ -17,6 +18,7 @@
 . "$(cd "$(dirname "$0")/../.." && pwd)/rigjob.sh"
 job_begin "${1:?usage: musicjob.sh <key> <card>}" "${2:?usage: musicjob.sh <key> <card>}"
 MODES=$RIG/modes
+[ -z "${STEPS:-}" ] && [ -f "${STEPSFILE:-}" ] && STEPS=$(cat "$STEPSFILE")
 [ -d "${SET:-}" ] && [ -d "$SET-modes" ] && [ -f "${SO:-}" ] && [ -n "${REQ:-}" ] && [ -n "${STEPS:-}" ] \
     || job_fail "needs SET, SO, REQ and STEPS"
 S=$JOB_OUT/stage
@@ -50,8 +52,9 @@ job_shot "$JOB_OUT/after.png"
 fire; fire
 cp "$A" "$JOB_OUT/audio.raw" 2>/dev/null
 cp "$log" "$JOB_OUT/mode.log"
-nv=$(ls "$ROOT"/data/nv/*/NVM 2>/dev/null | head -1)
-[ -n "$nv" ] && cp "$nv" "$JOB_OUT/NVM"
+nvd=$(dirname "$ROOT")/upper/data/nv/$GAME/NVM      # the store: a directory of generations, the newest the live one
+nv=$( [ -d "$nvd" ] && ls -t "$nvd" | grep -v '\.crc32$' | head -1)
+[ -n "$nv" ] && cp "$nvd/$nv" "$JOB_OUT/NVM"
 fired=$(grep -a -c "soundfire\] fire $REQ" "$log")
 [ "$fired" -ge 4 ] || job_fail "$fired fire line(s)"
 job_pass "attract=${JOB_ATTRACT_S}s fired $fired; NVM ${nv:+copied}; judge with musiccheck"

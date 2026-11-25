@@ -474,6 +474,11 @@ def fill_monitor(win, client, mon):
     return mon[0] + (mw - nw) // 2, mon[1] + (mh - nh) // 2, nw, nh
 
 
+def raw_leds(v):
+    """A raw_lamp_rewrite value as its LEDs: one (node, index), or several."""
+    return v if isinstance(v[0], tuple) else (v,)
+
+
 class VpxMap:
     """A title's .vpxmap.json, reduced to the three lookups the server makes."""
 
@@ -531,10 +536,18 @@ class VpxMap:
                 continue
             # a legacy number (below 1000: 1000+ is already every LED's own
             # number) -> one [node, index]; anything else would be set twice
-            # a poll and report a change every frame
-            if not (0 < int(k) < 1000 and isinstance(v, list) and len(v) == 2):
-                raise ValueError("raw_lamp_rewrite %r: want a number 1-999 -> [node, index], got %r" % (k, v))
-            self.raw_lamp_rewrite[int(k)] = (int(v[0]), int(v[1]))
+            # a poll and report a change every frame. PAD-1560: or a list of
+            # them, read as the brightest - a SAM table's one-colour insert on
+            # an RGB insert of the newer game lights whatever colour it is given
+            pair = lambda p: (isinstance(p, list) and len(p) == 2
+                              and all(isinstance(x, int) for x in p))
+            ok = 0 < int(k) < 1000 and isinstance(v, list) and (
+                pair(v) or (v and all(pair(p) for p in v)))
+            if not ok:
+                raise ValueError("raw_lamp_rewrite %r: want a number 1-999 -> [node, index] "
+                                 "or a list of them, got %r" % (k, v))
+            self.raw_lamp_rewrite[int(k)] = ((int(v[0]), int(v[1])) if pair(v)
+                                             else tuple((int(a), int(b)) for a, b in v))
         for k, v in m.get("solenoids", {}).items():
             if k != "_":
                 self.solenoids[int(k)] = tuple(v["coil"])
@@ -3489,8 +3502,8 @@ class Bridge:
             self.mrg = switches
             # Some ROM tables read Lamp(n) as a mechanical position or raw
             # brightness, rather than the normal 0/1 or RGB insert value.
-            for n, (node, idx) in self.map.raw_lamp_rewrite.items():
-                self._lamp_set(n, rm.lamp_level(lamps, node, idx))
+            for n, leds in self.map.raw_lamp_rewrite.items():
+                self._lamp_set(n, max(rm.lamp_level(lamps, nd, ix) for nd, ix in raw_leds(leds)))
             for n, leds in self.map.lamp_groups.items():
                 levels = [rm.lamp_level(lamps, nd, ix) for nd, ix in leds]
                 if max(levels) < LAMP_ON:
@@ -3568,8 +3581,8 @@ class Bridge:
     def _poll_lamps(self, data):
         # raw channels (a mechanism's position, a mono level), then the
         # mapped groups, then every LED any table might name directly
-        for n, (node, idx) in self.map.raw_lamp_rewrite.items():
-            self._lamp_set(n, self._led_level(data, node, idx))
+        for n, leds in self.map.raw_lamp_rewrite.items():
+            self._lamp_set(n, max(self._led_level(data, nd, ix) for nd, ix in raw_leds(leds)))
         for n, leds in self.map.lamp_groups.items():
             levels = [self._led_level(data, nd, ix) for nd, ix in leds]
             if max(levels) < LAMP_ON:

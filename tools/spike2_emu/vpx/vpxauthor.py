@@ -975,8 +975,12 @@ def coverage(m):
         leds.add(tuple(x))
     for sect in ("disc_leds", "raw_lamp_rewrite"):
         for k, v in (m.get(sect) or {}).items():
-            if k != "_" and isinstance(v, list) and len(v) == 2:
-                leds.add(tuple(v))
+            if k == "_" or not isinstance(v, list):
+                continue
+            # one [node, index], or (raw_lamp_rewrite, PAD-1560) a list of them
+            for p in ([v] if len(v) == 2 and all(isinstance(x, int) for x in v) else v):
+                if isinstance(p, list) and len(p) == 2:
+                    leds.add(tuple(p))
     for k, v in (m.get("lamp_flasher_numbers") or {}).items():
         if k not in ("_", "_names") and isinstance(v, int) and v >= 1000:
             leds.add(((v - 1000) // 100, (v - 1000) % 100))

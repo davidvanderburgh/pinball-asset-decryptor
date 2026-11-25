@@ -236,3 +236,109 @@ def test_a_table_started_run_walks_guided_setup():
     text = (S3 / "s3run.sh").read_text(encoding="utf-8")
     assert '[ "${PAD_S3_AUTOGUIDE:-1}" != 0 ]' in text
     assert '[ "$WINDOW" = 1 ] && [ "${PAD_S3_AUTOGUIDE:-1}" != walk ]' in text
+
+
+# ------------------------------------------- the Walking Dead table (25269) --
+
+def _twd_map():
+    return json.load(open(VPX / "walking_dead_remastered_le.vpxmap.json", encoding="utf-8"))
+
+
+def test_a_raw_lamp_on_several_leds_reads_the_brightest(tmp_path):
+    """PAD-1560: a SAM table's one-colour insert on an RGB insert of the
+    Remastered game reads the brightest of its three channels, 0..255."""
+    pc = pytest.importorskip("padcontroller")
+    mapping = tmp_path / "raw.vpxmap.json"
+    mapping.write_text(json.dumps({"raw_lamp_rewrite": {
+        "25": [[8, 35], [8, 36], [8, 37]], "4": [8, 66]}}), encoding="utf-8")
+    vm = pc.VpxMap(None)
+    vm.load(str(mapping))
+    assert vm.raw_lamp_rewrite == {25: ((8, 35), (8, 36), (8, 37)), 4: (8, 66)}
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.map, b.lamp_state, b.lamp_pending = vm, {}, set()
+    b.lock = __import__("threading").Lock()
+    data = bytearray(20 + 16 * 96)
+    data[20 + 8 * 96 + 36] = 180                   # only the green channel lit
+    data[20 + 8 * 96 + 66] = 40
+    b._poll_lamps(bytes(data))
+    assert b.lamp(25) == 180 and b.lamp(4) == 40
+    for bad in ([[8, 35], [8]], [], [[8, 35], "x"]):
+        mapping.write_text(json.dumps({"raw_lamp_rewrite": {"25": bad}}), encoding="utf-8")
+        with pytest.raises(ValueError, match="raw_lamp_rewrite"):
+            pc.VpxMap(None).load(str(mapping))
+
+
+def test_the_walking_dead_map_is_whole():
+    """Every number the table uses is the Remastered game's or a known gap,
+    every flasher a lamp of the map's own that the table's arrays hold, the
+    prison doors one coil for SAM 3 and 4."""
+    pc = pytest.importorskip("padcontroller")
+    m = _twd_map()
+    vm = pc.VpxMap(None)
+    vm.load(str(VPX / "walking_dead_remastered_le.vpxmap.json"))
+    assert m["platform"] == "spike3" and m["detect"] and "twd_160h" in m["detect"]
+    rw = {int(k): v for k, v in m["switch_rewrite"].items() if k != "_"}
+    used = {1, 2, 3, 4, 9, 10, 11, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+            32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
+            70, 71, 72}
+    assert used <= set(rw), "every SAM switch the table writes is mapped (or dropped as 0)"
+    live = [v for v in rw.values() if v]
+    assert len(live) == len(set(live)), "two SAM switches on one Remastered switch"
+    assert rw[21] == 64 and rw[18] == 61 and rw[23] == 55 and rw[16] == 13 and rw[71] == 10
+    assert set(m["notes"] if "notes" in m else m["switch_notes"]) >= {str(n) for n in rw}
+    sols = {int(k): tuple(v["coil"]) for k, v in m["solenoids"].items() if k != "_"}
+    assert sols[3] == sols[4] and sols[1] == (8, 1) and sols[2] == (8, 4)
+    assert sols[48] == tuple(m["game_on"]["coils"][0]) and sols[46] == tuple(m["game_on"]["coils"][1])
+    flash = {int(k) for k in m["flash_subs"] if k != "_"}
+    assert flash == set(range(211, 219)) and flash <= set(vm.raw_lamp_rewrite)
+    assert max(vm.raw_lamp_rewrite) <= 220, "the table's lamp arrays are 0 to 220"
+    for n in (152, 153, 154, 133, 134, 135, 120, 121, 122, 106, 107):
+        assert n in vm.raw_lamp_rewrite
+
+
+SAM_SCRIPT = """Option Explicit
+ExecuteGlobal GetTextFile("controller.vbs")
+If Err Then MsgBox "You need the controller.vbs in order to run this table, available in the vp10 package"
+Const UseVPMModSol = 2
+Const cGameName = "twd_160h" \t 'The unique alphanumeric name for this table
+LoadVPM "01560000", "sam.VBS", 3.10
+Const UseSolenoids = 1
+Const UseLamps = 0
+Sub Table1_Init
+\tvpmNudge.TiltSwitch = -7
+\tInitVpmFFlipsSAM
+\tIf Err Then MsgBox "You need the latest sam.vbs in order to run this table, available from vp10.5 and higher"
+End Sub
+SolCallback(15)    = "SolLFlipper"
+SolCallback(16)    = "SolRFlipper"
+Sub Darryl_Timer()
+\tDim nrx
+End Sub
+Sub LampTimer_Timer()
+\tDim chgLamp, ii, cnt : chgLamp = Controller.ChangedLamps
+\tIf Not IsEmpty(chgLamp) Then
+\t\tFor cnt = 0 To UBound(chgLamp)
+\t\t\tii = chglamp(cnt,0) : PFInsertState(ii) = chglamp(cnt,1) / 255
+\t\tNext
+\tEnd If
+End Sub
+"""
+
+
+def test_the_patcher_rewires_the_tables_script():
+    import patch_walking_dead as pw
+    m = _twd_map()
+    text, rep = pw.patch_script(SAM_SCRIPT, m)
+    assert 'ExecuteGlobal GetTextFile("PADSPIKE2.vbs")' in text
+    assert 'Const cGameName = "walking_dead_remastered_le"' in text and 'PadB2SName = "twd_160h"' in text
+    assert "swStartButton = 1013 : swTilt = 1015" in text and "swLRFlip = 1052 : swLLFlip = 1053" in text
+    assert 'LoadVPM "01000000", "PADSPIKE2.vbs", 3.10' in text and "sam.VBS" not in text
+    assert "InitVpmFFlipsSAM" not in text.replace("' PAD: no SAM fast-flip", "")
+    assert "SolCallback(sLLFlipper)" in text and "SolCallback(sRFlipper)" not in text
+    assert "If PadFlash.Exists(CStr(ii)) Then PadFlashCall ii, PFInsertState(ii)" in text
+    assert "\tPadEncStep cbdir" in text and "Controller.Switch(1039)" in text
+    assert 'PadFlash.Add "211", GetRef("WellWalkerFlash")' in text
+    assert "Controller.Switch(1060) = 1" in text and "Controller.Switch(1059) = 1" in text
+    assert "Sub Table1_Exit" in text and "PadStopB2S" in text
+    with pytest.raises(SystemExit, match="no encoder"):
+        pw.patch_script(SAM_SCRIPT.replace("Sub Darryl_Timer()", "Sub Other_Timer()"), m)

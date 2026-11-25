@@ -1,0 +1,21 @@
+/mnt/c/tmp/PAD-1588/standin/boot.sh: line 37: /var/tmp/pad1588/root/tmp/dprint.log: No such file or directory
+KB
+  boot hook: /etc/rc5.d/S30sshd -> ../init.d/sshd
+machine: game godzilla_le, identity AAAAC3NzaC1lZDI1NTE5AAAA..., backups kept in /var/tmp/pad1588/store/id-1a82dc644e58e23e
+VERDICT the stand-in lets this PC in and names its game: PASS  (godzilla_le)
+VERDICT 1 a machine with remote access is backed up without a click: PASS  (taken, ['godzilla_le-settings-20261125-154334.zip']; log: ['Backed up the settings, audits and high scores of godzilla_le at 127.0.0.1 by itself (55 files).'])
+VERDICT 1 the backup holds every file of /data/nv byte for byte: PASS  (55 files)
+VERDICT 1 it only read: the game ran on, not held or restarted: PASS  (game pid [48] -> [48]; scripts run: 2, none holding or changing anything)
+VERDICT 2 the same day: not even logged in to: PASS
+VERDICT 2 a day later, nothing changed: no duplicate kept: PASS  (unchanged, ['godzilla_le-settings-20261125-154334.zip'])
+VERDICT 2 ...and only the sums were read (no copy): PASS
+  day 2: taken, kept 2, pruned []
+  day 3: taken, kept 3, pruned []
+  day 4: taken, kept 3, pruned ['godzilla_le-settings-20261125-154334.zip']
+  day 5: taken, kept 3, pruned ['godzilla_le-settings-20261127-154434.zip']
+VERDICT 3 old ones are pruned to the kept count (3): PASS  (godzilla_le-settings-20261128-154434.zip, godzilla_le-settings-20261129-154434.zip, godzilla_le-settings-20261130-154434.zip)
+  restore: Holding the machine's game while its settings are put back...
+VERDICT 4 a restore from a kept backup brings back changed scores: PASS  (2026-11-28 15:44:34 restored: 55 files; nv/godzilla_le/NVM/00000016 now reads b'HIGH SCORE DAY 3')
+VERDICT 5 before a Send: the restored settings backed up, then no duplicate: PASS  (unchanged then unchanged; The machine's settings, audits and high scores are the same as its backup of 2026-11-28 15:44, so no new one is kept.)
+ALL PASS
+  dprint (the machine's screen) during the run: 

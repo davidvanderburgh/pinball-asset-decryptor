@@ -1,7 +1,7 @@
 // The frame around every tab: top bar, rail, status bar, log drawer,
 // the manufacturer picker, banners, toasts and the dialog host.
 
-import { html, useEffect, useLayoutEffect, useRef, useState, Icon, Button, Chip, Check, openMenu, cx, fmtClock, tip, Empty, Spinner, Progress, mediaUrl }
+import { html, useEffect, useLayoutEffect, useRef, useState, Icon, Button, Chip, Check, Select, openMenu, cx, fmtClock, tip, Empty, Spinner, Progress, mediaUrl }
   from "./core/ui.js";
 import { Component } from "./vendor/preact-htm.js";
 import { useNs, useLog, useConnected, useEvent, state } from "./core/store.js";
@@ -928,6 +928,12 @@ const MACH = {
   transfer: { head: "Transfer Mods", lines: ["Opens this machine's project and the Mod Pack tab's transfer, with this project as the one whose mods move.", "Pick the new code's card image there."] },
   modpack: { head: "Mod Pack", lines: ["Opens this machine's project on the Mod Pack tab: export its changes as a pack, to import into a project of newer code."] },
   noProject: (r) => "No project of this " + r.noun + " yet. Extract opens the Extract tab with it picked; the project you make from it joins this row.",
+  // PAD-1588: settings and score backups by themselves
+  backup: { head: "Back up settings and scores by itself", lines: ["For each machine here that this computer reaches over remote access: once a day, while it is on, PAD copies its adjustments, audits and high scores to this computer when they changed. It only reads them: the game goes on.", "Also before a Send to the machine, and before a whole card for its game is written.", "A card written whole loses them; Restore (the row's More menu) puts a kept backup back."] },
+  keep: "How many backups each machine keeps; older ones are deleted.",
+  why: { auto: "by itself", send: "before a Send", write: "before a card write", "by hand": "by hand" },
+  last: (r) => ({ head: "Settings and scores backed up " + r.backup_last, lines: [r.backups.length + " kept on this computer, the newest " + (MACH.why[r.backups[0].why] || "") + " (" + r.backups[0].files + " files).", "Restore any of them from the row's More menu."] }),
+  none: { head: "No settings backup yet", lines: ["PAD takes one by itself the next time it finds the machine on your network, unless the switch above is off. More > Back up settings now takes one at once."] },
 };
 
 function MachineRow({ r }) {
@@ -935,6 +941,11 @@ function MachineRow({ r }) {
     { label: "Show the " + r.noun, icon: "folder", disabled: r.card_missing, onClick: () => call("shellx.machines_show_card", r.id) },
     { label: r.noun === "card image" ? "Change card…" : "Change " + r.noun + "…", icon: "sd", onClick: () => call("shellx.machines_rebind", r.id) },
     { label: "Rename…", icon: "edit", onClick: () => call("shellx.machines_rename", r.id) },
+    ...((r.backup_machines || []).length ? [{ sep: true },
+      { label: "Back up settings now", icon: "save", onClick: () => call("shellx.machines_backup_now", r.id) },
+      { label: "Restore settings from", icon: "undo", disabled: !(r.backups || []).length,
+        submenu: (r.backups || []).map((b) => ({ label: b.taken + " (" + (MACH.why[b.why] || "backup") + ")" + (r.backup_machines.length > 1 ? " at " + b.address : ""),
+          onClick: () => call("shellx.machines_restore", r.id, b.path) })) }] : []),
     { sep: true },
     { label: "Remove from My machines", icon: "trash", onClick: () => call("shellx.machines_remove", r.id) },
   ]);
@@ -955,6 +966,8 @@ function MachineRow({ r }) {
         ${r.size ? html` · ${r.size}` : null}
         ${" · "}${proj ? html`project <b class="mach-proj" title=${r.project}>${r.project_name}</b>${r.more_projects.length ? " +" + r.more_projects.length + " more" : ""}`
           : r.project_missing ? html`<span class="err-ink">project folder missing: ${r.project_name}</span>` : html`<span ...${tip(MACH.noProject(r))}>no project yet</span>`}
+        ${(r.backup_machines || []).length ? html` · ${r.backup_last ? html`<span class="mach-bk" ...${tip(MACH.last(r))}>settings backed up ${r.backup_last}</span>`
+          : html`<span class="mach-bk" ...${tip(MACH.none)}>no settings backup yet</span>`}` : null}
       </div>
     </div>
     <div class="row mach-acts">
@@ -977,6 +990,13 @@ function MyMachines({ running }) {
       <h2 class="h1 grow" style="margin:0;font-size:24px">My machines</h2>
       ${rows.length ? html`<${Check} checked=${m.watch === true} title=${MACH.watch} label="Check for new game code once a day"
         onChange=${(v) => call("shellx.machines_set_watch", v)} />` : null}
+      ${rows.length ? html`<div class="row" style="gap:6px;align-items:center">
+        <${Check} checked=${(m.backup || {}).auto !== false} title=${MACH.backup} label="Back up settings and scores by itself"
+          onChange=${(v) => call("shellx.machines_set_backup", v, null)} />
+        <${Select} sm width=${92} title=${MACH.keep} disabled=${(m.backup || {}).auto === false} value=${String((m.backup || {}).keep || 5)}
+          options=${[1, 3, 5, 10, 20, 50].map((n) => ({ value: String(n), label: "keep " + n }))}
+          onChange=${(v) => call("shellx.machines_set_backup", null, parseInt(v, 10))} />
+      </div>` : null}
       <${Button} drop icon="plus" disabled=${running} title=${MACH.add} onClick=${() => call("shellx.machines_add")}>Add machine…<//>
     </div>
     ${rows.length ? html`<div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} />`)}</div>

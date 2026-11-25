@@ -257,3 +257,34 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   is "ball passing" - try D&D LE 1.10 in the same job first); King Kong LE 1.00's held coils (its ControlCoil commands
   go out with their fields shifted - "pulse 3/255 for 0 ms, hold 30" - while 1.01's are right: compare the two builds'
   take paths).
+
+### Run 7 (2026-11-24 night): scoop, spare I/O, the start menus, Prolonged Competition, lights
+
+- **Scoop:** D&D LE / Pro 1.11 held (4000 ms, let go 4008 ms, the game's kick node 8 coil 8). King Kong, Avengers LE
+  1.12 and Metallica 1.05 held no ball at first: their ports had D&D's `scoop_event_arg 1` (D&D and Venom name it, so
+  REVISION 14's "two titles agree" took it as the framework's), and their handlers take the event in the FIRST
+  argument. scoop_event / scoop_event_arg are title values now (portgen REVISION 15); without it all five held
+  (4005-4015 ms; Metallica 1.04 the control). `newbuild/scoopjob.sh`.
+- **The two-titles rule** needs only one other title where the references hold only one (Batman derived off Godzilla
+  alone had lost the framework's event list - test_spike2_switch_drain).
+- **Spare I/O:** 11/11 with the Avengers LE 1.10 control (`newbuild/sparejob.sh`): the spare input closed through
+  /dump/spare_in came as the instrument's pulse, output 1:1 went out as node 1 coil 1 200/30 ms.
+- **The start menus:** Avengers 1.12 and Foo Fighters 1.05 no longer have the challenge_menu loop (no masked match;
+  the button tests are gone from the menu code); both are menus of game-mode table indices now, like King Kong's and
+  Metallica's, through the GamePlayModes adapter. Its reader learned two layouts: Foo Fighters 1.05 keeps the table
+  40 bytes into the object its accessors load (the flag field says where entries start), Avengers 1.12 keeps a colour
+  pair at +6 and its messages one field on (STANDARD lettered at +8). The four ports carry `frame_lines`.
+- **Message ids moved:** every November build has one message more before the start menu's (1914 FLIPPERS TO
+  CHANGE/START SELECTS), so STANDARD is 1915, NORMAL PLAY 1916, ALL RANDOMNESS REMOVED 1921, BALL %d 1256. King Kong's
+  three and Metallica 1.05's menu values and four ports' coop_ball_msg had their earlier builds' (the runtime checks
+  coop_ball_msg's words and searches, so no co-op line was wrong on a machine); all read off each build now.
+- **Prolonged Competition** (`newbuild/compjob.sh` + `compcfg.py`, rigbatch --speed 1; the menu opens with both
+  flipper BUTTONS held in attract - "LEFT FLIPPER" first matched UP LEFT FLIPPER EOS; one left step wraps onto our
+  last entry): the whole pick on Avengers LE / Pro 1.12, Foo Fighters LE / Pro 1.05, King Kong Pro 1.01 and Metallica
+  1.05 - the entry appended, picked, START, `ON until the machine is switched off - game 1 plays as Competition`.
+  King Kong LE 1.00 / 1.01 show and pick the entry but START starts nothing, and the King Kong LE 0.97 control (proven
+  in PAD-1041 round 2) does the same in this job: the job's, on that title's menu - a shot after START is queued.
+- **D&D LE 1.11 ball save** passed in a rerun (bs6, with the 1.10 control): the earlier runs' missing END was theirs.
+- **King Kong LE 1.00 held coils:** the right device and coil (spider magnet device 10 at 9:0), the vtables the same as
+  1.01's, but each object reads "pulse 3 for 0 ms, hold 30" and the game takes each coil back within 11-16 ms (its
+  on-time word +36 set): the game drives those coils itself at that moment on 1.00. Left: hold later in the ball.

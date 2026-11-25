@@ -40,13 +40,19 @@ done
 grep -aq 'prolonged competition: on the start menu as entry' "$log" \
     || { cp "$log" "$JOB_OUT/mode.log"; job_fail "both flippers held showed no menu with the entry: $(grep -a 'prolonged competition' "$log" | tail -1 | cut -c1-160)"; }
 entry=$(grep -a -m1 -Eo 'prolonged competition: on the start menu as entry [0-9]+ of [0-9]+[^)]*\)?' "$log" | cut -c1-160)
-for ((k = 0; k < ${STEPS:-16}; k++)); do
+# the entry is the menu's last: one left step wraps the cursor onto it (a right-flipper walk of up to 11 steps, at 1.2 s
+# each, outlasted the menu's patience on King Kong LE 0.97 / 1.01: picked, then START took nothing); the walk is kept
+# for a menu that does not wrap
+job_press "$LEFT"; job_sleep 1.2; k=1
+for ((; k < ${STEPS:-16}; k++)); do
     grep -aq 'prolonged competition: .* picked on the menu' "$log" && break
     job_press "$RIGHT"; job_sleep 1.2
 done
-picked=$(grep -a -m1 -Eo 'prolonged competition: .* picked on the menu' "$log")
-[ -n "$picked" ] || { cp "$log" "$JOB_OUT/mode.log"; job_fail "$entry; ${STEPS:-16} right-flipper steps never reached it"; }
-job_press "$START"
+picked=$(grep -a -m1 -Eo 'prolonged competition: [A-Z ]+ picked on the menu' "$log")
+[ -n "$picked" ] || { cp "$log" "$JOB_OUT/mode.log"; job_fail "$entry; ${STEPS:-16} flipper steps never reached it"; }
+job_shot "$JOB_OUT/picked.png"
+job_press "$START" 400
+job_sleep 3; job_shot "$JOB_OUT/after_start.png"
 job_wait_log "$log" 'prolonged competition: ON until' 30 || true
 job_sleep 3
 cp "$log" "$JOB_OUT/mode.log"

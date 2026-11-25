@@ -296,7 +296,9 @@ def strip_dof_lines(base, parts):
     """The DOF config text for each side's strip toy, {"left", "right"}: an
     effect per part and colour, the part's place given as AT/AH (percent from
     the TOP, so the bottom part is the last), NOBOOL so the value is its
-    brightness. Pasted into the column of an addressable strip in the DOF
+    brightness. A whole strip still names its area (AW100 AH100): DOF only
+    plays an effect on an addressable strip when the line gives an area, so
+    without one the strip stays dark (PAD-1603, Mike's cabinet). Pasted into the column of an addressable strip in the DOF
     Config Tool (or a directoutputconfig line). Empty with no base."""
     if not base:
         return {"left": "", "right": ""}
@@ -305,7 +307,7 @@ def strip_dof_lines(base, parts):
     for side, key in ((0, "left"), (1, "right")):
         bits = []
         for part, (a, b) in enumerate(_parts(100, parts)):
-            area = "" if parts == 1 else " AT%d AH%d" % (100 - b, b - a)
+            area = " AW100 AH100" if parts == 1 else " AT%d AH%d" % (100 - b, b - a)
             for c, (_name, hexc) in enumerate(STRIP_COLOURS):
                 bits.append("E%d %s%s NOBOOL" % (nums[(side, part, c)], hexc, area))
         out[key] = "/".join(bits)

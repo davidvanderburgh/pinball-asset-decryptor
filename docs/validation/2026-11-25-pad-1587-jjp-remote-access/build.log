@@ -1,0 +1,123 @@
+[     0s info] --- System Diagnostics ---
+[     0s info] Pinball Asset Decryptor v1.599.2
+[     0s info] Python 3.14.3
+[     0s info] Windows: Microsoft Windows 11 Home (build 26300)
+[     0s info]   WSL version: 2.6.1.0
+[     0s info]   Kernel version: 6.6.87.2-1
+[     0s info]   WSLg version: 1.0.66
+[     1s info]   * Ubuntu            Running         2
+[     1s info]   docker-desktop    Stopped         2
+[     1s info]   PAD-Runtime       Running         2
+[     1s info]   xorriso: xorriso 1.5.6 : RockRidge filesystem manipulator, libburnia project.
+[     1s info]   partclone: Partclone : v0.3.27 (0882b2de94f05d3ad81304872cbd3dff02105239)
+[     1s info]   pigz: pigz 2.8
+[     1s info]   e2fsck: e2fsck 1.47.0 (5-Feb-2023)
+[     1s info]   base64: base64 (GNU coreutils) 9.4
+[     2s info]   gzip: gzip 1.12
+[     2s info]   ffmpeg: ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers
+[     2s info]   /tmp free space: 44G
+[     2s info] --------------------------
+[     3s info] -- phase 0
+[     3s info] Scanning for modified files...
+[     3s info] Loaded 1 baseline checksums.
+[     3s info] Checking 1 files for changes...
+[     3s info]   Modified: system/jjpe/gen1/miscfiles/graphics/JJP_logo_message.png
+[     3s success] Found 1 modified file(s) out of 1 checked.
+[     3s info] -- phase 1
+[     3s info] Clearing cached image to ensure fresh extraction...
+[     3s info] Extracting ext4 filesystem from ISO...
+[     4s info] ISO mounted. Looking for game partition image...
+[     4s info] Found 3 part(s), 2.4 GB compressed. Converting to raw ext4...
+[     4s info] Using partclone.restore (native, fast)...
+[     4s info]   Starting to restore image (-) to device (/var/tmp/jjp_raw_Wonka-v03.03.img)
+[     4s info]   done!
+[     4s info]   File system:  EXTFS
+[     4s info]   Device size:   17.2 GB = 4194304 Blocks
+[     4s info]   Space in use:   5.3 GB = 1295351 Blocks
+[     4s info]   Block size:   4096 Byte
+[   345s info] Extending image to full filesystem size (16.0 GB)...
+[   346s success] Extraction complete: 16.0 GB raw image.
+[   346s info] [Extract] phase took 5m 42s
+[   346s info] -- phase 2
+[   346s info] Preparing ext4 image for modification...
+[   346s info] Cleaned up stale mounts.
+[   346s success] ext4 image validated.
+[   347s success] Detected game: Willy Wonka & the Chocolate Factory (Wonka)
+[   347s success] Image prepared for debugfs operations.
+[   347s info] -- phase 3
+[   347s info] Writing 1 system file(s) (no encryption)...
+[   347s info]   System file: /jjpe/gen1/miscfiles/graphics/JJP_logo_message.png (689527 bytes)
+[   348s info]     kept mode 0644 owner 0:0
+[   348s success]   [OK] /jjpe/gen1/miscfiles/graphics/JJP_logo_message.png
+[   348s success] System files: 1/1 written
+[   348s success] Only system files were modified (no encryption needed).
+[   357s success] Remote access on (key-only, port 22): this computer can reach the machine and Send to it.
+[   357s info] -- phase 4
+[   357s info] Only system files modified — skipping encrypted file verification.
+[   357s info] Running e2fsck...
+[   357s info]   e2fsck 1.47.0 (5-Feb-2023)
+[   357s info]   Pass 1: Checking inodes, blocks, and sizes
+[   357s info]   Pass 2: Checking directory structure
+[   357s info]   Pass 3: Checking directory connectivity
+[   357s info]   Pass 4: Checking reference counts
+[   357s info]   Pass 5: Checking group summary information
+[   357s info]   /var/tmp/jjp_raw_Wonka-v03.03.img: 65604/1048576 files (1.0% non-contiguous), 1296059/4194304 blocks
+[   357s info]   partclone.ext4: found
+[   358s info]   xorriso: found
+[   358s info]   partclone: Partclone : v0.3.27 (0882b2de94f05d3ad81304872cbd3dff02105239)
+[   358s info]   xorriso: xorriso 1.5.6 : RockRidge filesystem manipulator, libburnia project.
+[   358s info]   pigz: pigz 2.8
+[   358s info] Converting /var/tmp/jjp_raw_Wonka-v03.03.img to partclone format...
+[   358s info] This may take 10-30 minutes depending on image size.
+[   359s info] Starting partclone conversion pipeline...
+[   386s info]   Conversion: 80% (1847 MB written)
+[   392s info]   Conversion: 100% (2445 MB written)
+[   392s success] Partclone files created:
+-rw-r--r-- 1 root root 954M Nov 25 15:40 /var/tmp/jjp_chunks_432901a0/sda3.ext4-ptcl-img.gz.aa
+-rw-r--r-- 1 root root 954M Nov 25 15:40 /var/tmp/jjp_chunks_432901a0/sda3.ext4-ptcl-img.gz.ab
+-rw-r--r-- 1 root root 538M Nov 25 15:40 /var/tmp/jjp_chunks_432901a0/sda3.ext4-ptcl-img.gz.ac
+[   397s success] Chunk verification: new differs from original (orig=e9b725dd… new=000db3fb…)
+[   397s info] [Convert] phase took 0m 39s
+[   397s info] -- phase 5
+[   397s info] Building modified Clonezilla ISO...
+[   397s info] Found 3 new partition chunk(s).
+[   397s info] Running xorriso (splicing partition into original ISO)...
+[   457s success] ISO created: 2.99 GB (original: 2.98 GB, diff: +10.2 MB)
+[   457s success] Output ISO: C:\tmp\PAD-1587\proj\Wonka-v03.03_modified.iso
+[   457s success] Verified: the ISO carries its long file names (Joliet), so a USB stick made from it installs.
+[   587s success] Verified: partition data differs from original (orig=e9b725dd… new=000db3fb…)
+[   587s info] [Build ISO] phase took 3m 10s
+[   598s info] Send record written beside the build: 8 changed files a Send to the machine puts on it.
+[   598s info] -- phase 6
+[   598s info] Cleaning up...
+[   598s success] Cleanup complete.
+[   598s success] Modified ISO ready at: C:\tmp\PAD-1587\proj\Wonka-v03.03_modified.iso
+[   598s success] Moved output ISO to: C:\tmp\PAD-1587\out\Wonka-v03.03-pad1587.iso
+[   599s info] This build is rev 1 of official Willy Wonka & the Chocolate Factory 3.03.
+[   599s info] DONE ok=True Asset modification complete!
+Modified ISO at:
+C:\tmp\PAD-1587\proj\Wonka-v03.03_modified.iso
+
+Final output: C:\tmp\PAD-1587\out\Wonka-v03.03-pad1587.iso
+[   599s info] 
+[   599s info] === Next Steps ===
+[   599s info] 1. Make the install stick: "Build / make USB
+   install stick…" on the Write tab formats a
+   stick and copies this ISO's files onto it.
+   By hand instead: Rufus, default settings, 'ISO
+   Image mode' when it asks. Do NOT use balenaEtcher
+   or Rufus DD mode: the machine cannot read a
+   raw-imaged stick and shows 'Failed to mount USB
+   stick'.
+2. Plug the stick into a USB port on the computer in
+   the backbox. The cabinet's front slot (Cabinet
+   Board slot / USB extension near the coin door)
+   works too but can be 30x slower: a minute on the
+   Restore menu, hours to install. Leave the purple
+   security key plugged in: the installer checks for
+   it and stops with "Security key not found"
+   without it.
+3. Turn the machine on. The installer starts on its
+   own and offers an optional factory reset; the
+   Utilities USB-update menu is NOT part of this.
+RESULT {'ok': True}

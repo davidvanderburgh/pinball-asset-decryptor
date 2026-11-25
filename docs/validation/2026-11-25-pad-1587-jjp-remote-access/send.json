@@ -1,0 +1,89 @@
+{
+ "files": [
+  {
+   "link": "/etc/systemd/system/pad-sshd.service",
+   "path": "/etc/systemd/system/multi-user.target.wants/pad-sshd.service"
+  },
+  {
+   "file": "f00001",
+   "gid": 0,
+   "mode": 420,
+   "path": "/etc/systemd/system/pad-sshd.service",
+   "sha1": "88de1ab3c91b5b166bf5e490c0c3c2e2c657ac0d",
+   "size": 283,
+   "uid": 0
+  },
+  {
+   "file": "f00002",
+   "gid": 0,
+   "mode": 420,
+   "path": "/jjpe/gen1/miscfiles/graphics/JJP_logo_message.png",
+   "sha1": "a06c7acb0dd8cd9d03af49b36e7eca26addcdd97",
+   "size": 689527,
+   "uid": 0
+  },
+  {
+   "file": "f00003",
+   "gid": 0,
+   "mode": 384,
+   "path": "/root/.ssh/authorized_keys",
+   "sha1": "4839933edb272ead54b80a8266f779837747ea36",
+   "size": 210,
+   "uid": 0
+  },
+  {
+   "file": "f00004",
+   "gid": 0,
+   "mode": 493,
+   "path": "/usr/local/bin/dropbear",
+   "sha1": "aa1e5f83e65d645bcd68ced67e8f2476521199f0",
+   "size": 335344,
+   "uid": 0
+  },
+  {
+   "file": "f00005",
+   "gid": 0,
+   "mode": 493,
+   "path": "/usr/local/bin/dropbearkey",
+   "sha1": "fee6ba6564193c13297c044c1fba851648e23e48",
+   "size": 203312,
+   "uid": 0
+  },
+  {
+   "file": "f00006",
+   "gid": 0,
+   "mode": 493,
+   "path": "/usr/local/libexec/pad-sftp-server",
+   "sha1": "3b0ce7131d8820089c0d5106390cef3fc00ca8d1",
+   "size": 2281624,
+   "uid": 0
+  },
+  {
+   "file": "f00007",
+   "gid": 0,
+   "mode": 493,
+   "path": "/usr/local/sbin/pad-sshd",
+   "sha1": "9cca2b71e452a6715ce9de6f61a22b01b5de356c",
+   "size": 1125,
+   "uid": 0
+  }
+ ],
+ "game": "Wonka",
+ "identity": {
+  "/jjpe/gen1/Wonka/fl.dat": "b3c0a3b3ca342f3401c0a7b47918adf945ade09f",
+  "/jjpe/gen1/Wonka/game": "4321248f73fafb4a4b7e42fabde13b8084e2134b",
+  "/jjpe/gen1/fl.dat": "e6941be92aa02767af968952d97e1aa41381137f"
+ },
+ "iso": {
+  "mtime": 1795639291,
+  "name": "Wonka-v03.03-pad1587.iso",
+  "size": 3205693440
+ },
+ "kind": "pad-jjp-send",
+ "remote": {
+  "enabled": true,
+  "public_keys": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILkXGVMupylncrVIDztWzxYlXI9fc+4uKQo0pZvo/Ygn pinball-asset-decryptor\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOQDjTms1M3FS1qTCwwxqA+RF2RREt+NrSl1UJKguuYE pinball-asset-decryptor\n"
+ },
+ "source": "Wonka-v03.03.iso",
+ "version": 1
+}

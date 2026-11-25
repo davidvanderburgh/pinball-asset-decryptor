@@ -3977,6 +3977,22 @@ class DecryptionPipeline:
             return None
         return inode, mode, name
 
+    def _note_sent(self, path):
+        """PAD-1587: a file this build wrote into the root, for its Send record."""
+        sent = getattr(self, '_send_paths', None)
+        if sent is None:
+            sent = self._send_paths = set()
+        sent.add(path)
+
+    def _scratch(self, name):
+        """A scratch file of THIS run in /var/tmp (PAD-1587): the names were shared by every JJP build, so one
+        left behind by another user's run (root-owned) stopped the next build at "Permission denied"."""
+        tag = getattr(self, '_scratch_tag', None)
+        if tag is None:
+            import uuid as _uuid
+            tag = self._scratch_tag = _uuid.uuid4().hex[:8]
+        return f"/var/tmp/jjp_{name.replace('.', '_' + tag + '.', 1)}"
+
     def _debugfs_run(self, command, writable=False, timeout=120):
         """Run a single debugfs command against the raw ext4 image.
 
@@ -5083,7 +5099,7 @@ class ModPipeline(DecryptionPipeline):
         # buffering on the stderr redirect.
         convert_cmd = (
             f"set -o pipefail && "
-            f"partclone.ext4 -c -s '{wsl_img}' -o - 2> >(stdbuf -oL tr '\\r' '\\n' > /var/tmp/jjp_ptcl.log) "
+            f"partclone.ext4 -c -s '{wsl_img}' -o - 2> >(stdbuf -oL tr '\\r' '\\n' > {self._scratch('ptcl.log')}) "
             f"| {compressor} "
             f"| split -b {split_size} -a 2 - '{output_prefix}'"
         )
@@ -5097,7 +5113,7 @@ class ModPipeline(DecryptionPipeline):
             f"while kill -0 $PID 2>/dev/null; do\n"
             f"  sleep 3\n"
             f"  # Extract latest progress from partclone log\n"
-            f"  PCT=$(grep -oP 'Completed:\\s*\\K[\\d.]+' /var/tmp/jjp_ptcl.log 2>/dev/null | tail -1)\n"
+            f"  PCT=$(grep -oP 'Completed:\\s*\\K[\\d.]+' {self._scratch('ptcl.log')} 2>/dev/null | tail -1)\n"
             f"  # Get output size\n"
             f"  OSIZE=$(du -sb '{output_prefix}'* 2>/dev/null | awk '{{s+=$1}} END {{printf \"%d\", s}}')\n"
             f"  if [ -n \"$PCT\" ]; then\n"
@@ -5115,7 +5131,7 @@ class ModPipeline(DecryptionPipeline):
             f"wait $PID\n"
             f"exit $?\n"
         )
-        monitor_path = "/var/tmp/jjp_convert_monitor.sh"
+        monitor_path = self._scratch('convert_monitor.sh')
         monitor_b64 = base64.b64encode(monitor_script.encode()).decode()
         self.executor.run(
             f"echo '{monitor_b64}' | base64 -d > {monitor_path} && "
@@ -5151,7 +5167,7 @@ class ModPipeline(DecryptionPipeline):
             log_content = ""
             try:
                 log_content = self.executor.run(
-                    "tail -5 /var/tmp/jjp_ptcl.log 2>/dev/null", timeout=5).strip()
+                    f"tail -5 {self._scratch('ptcl.log')} 2>/dev/null", timeout=5).strip()
             except CommandError:
                 pass
             raise PipelineError("Convert",
@@ -5275,7 +5291,7 @@ class ModPipeline(DecryptionPipeline):
             f"  {map_str} \\\n"
             f"  -end 2>&1\n"
         )
-        script_path = "/var/tmp/jjp_build_iso.sh"
+        script_path = self._scratch('build_iso.sh')
         script_b64 = base64.b64encode(script.encode()).decode()
         self.executor.run(
             f"echo '{script_b64}' | base64 -d > {script_path} && "
@@ -5498,8 +5514,8 @@ class ModPipeline(DecryptionPipeline):
         # Clean up partclone log and temp scripts
         try:
             self.executor.run(
-                "rm -f /var/tmp/jjp_ptcl.log /var/tmp/jjp_convert_monitor.sh "
-                "/var/tmp/jjp_build_iso.sh 2>/dev/null; true", timeout=5)
+                f"rm -f {self._scratch('ptcl.log')} {self._scratch('convert_monitor.sh')} "
+                f"{self._scratch('build_iso.sh')} 2>/dev/null; true", timeout=5)
         except CommandError:
             pass
 
@@ -6048,6 +6064,9 @@ class StandaloneModPipeline(ModPipeline):
         # uses) whose replacement should keep its own full length instead of
         # being trimmed/padded to the original slot.  See _resize_*_to_duration.
         self.keep_full_length_paths = frozenset(keep_full_length_paths or ())
+        # PAD-1587: every file this build writes into the root (its Send record), and the project's remote access
+        self._send_paths = set()
+        self._remote_config = None
 
     def run(self):
         """Execute the standalone mod pipeline."""
@@ -6093,7 +6112,12 @@ class StandaloneModPipeline(ModPipeline):
             self._phase_scan()
             self._check_cancel()
 
-            if not self.changed_files:
+            from . import remote_access
+            try:
+                self._remote_config = remote_access.config_for(self)
+            except remote_access.RemoteAccessError as e:
+                raise PipelineError("Scan", str(e)) from None
+            if not self.changed_files and self._remote_config is None:
                 self.on_done(True,
                     "No changes detected in the assets folder.\n"
                     "Modify files in the output folder and try again.")
@@ -6111,6 +6135,13 @@ class StandaloneModPipeline(ModPipeline):
             self._timed("Encrypt", self._phase_encrypt_standalone)
             self._check_cancel()
 
+            # PAD-1587: the project's remote access, into the same root (checked as it is read back)
+            try:
+                remote_access.apply(self, self._remote_config)
+            except remote_access.RemoteAccessError as e:
+                raise PipelineError("Encrypt", str(e)) from None
+            self._check_cancel()
+
             if self._is_iso():
                 self.on_phase(4)  # Convert
                 self._timed("Convert", self._phase_convert_standalone)
@@ -6119,6 +6150,13 @@ class StandaloneModPipeline(ModPipeline):
                 self.on_phase(5)  # Build ISO
                 self._timed("Build ISO", self._phase_build_iso)
                 self._check_cancel()
+
+                # PAD-1587: what this build changed, file by file, for Send to machine
+                try:
+                    remote_access.write_send_record(self, self._output_iso_path, self._remote_config)
+                except (remote_access.RemoteAccessError, OSError, CommandError) as e:
+                    self.log(f"No Send record for this build ({e}); it installs from a USB stick as "
+                             f"usual, but Send to machine needs it built again.", "warning")
 
             self._succeeded = True
             self.on_phase(cleanup_phase)
@@ -7242,6 +7280,7 @@ class StandaloneModPipeline(ModPipeline):
                 self._debugfs_run(
                     f'write "{staging}" "{entry.path}"',
                     writable=True, timeout=120)
+                self._note_sent(entry.path)  # PAD-1587: the build's Send record
 
                 # One stat serves both jobs: confirm the size landed, and
                 # tell the metadata restore which fields actually need
@@ -7370,6 +7409,7 @@ class StandaloneModPipeline(ModPipeline):
                 self._debugfs_run(
                     f'write "{staging}" "{fs_path}"',
                     writable=True, timeout=120)
+                self._note_sent(fs_path)  # PAD-1587: the build's Send record
                 self._debugfs_restore_inode_meta(fs_path, meta)
                 if meta:
                     perms, uid, gid = meta
@@ -7640,7 +7680,7 @@ class StandaloneModPipeline(ModPipeline):
         convert_cmd = (
             f"set -o pipefail && "
             f"partclone.ext4 -c -s '{wsl_img}' -o - "
-            f"2> >(stdbuf -oL tr '\\r' '\\n' > /var/tmp/jjp_ptcl.log) "
+            f"2> >(stdbuf -oL tr '\\r' '\\n' > {self._scratch('ptcl.log')}) "
             f"| {compressor} "
             f"| split -b {split_size} -a 2 - '{output_prefix}'"
         )
@@ -7652,7 +7692,7 @@ class StandaloneModPipeline(ModPipeline):
             f"while kill -0 $PID 2>/dev/null; do\n"
             f"  sleep 3\n"
             f"  PCT=$(grep -oP 'Completed:\\s*\\K[\\d.]+' "
-            f"/var/tmp/jjp_ptcl.log 2>/dev/null | tail -1)\n"
+            f"{self._scratch('ptcl.log')} 2>/dev/null | tail -1)\n"
             f"  OSIZE=$(du -sb '{output_prefix}'* 2>/dev/null "
             f"| awk '{{s+=$1}} END {{printf \"%d\", s}}')\n"
             f"  if [ -n \"$PCT\" ]; then\n"
@@ -7669,7 +7709,7 @@ class StandaloneModPipeline(ModPipeline):
             f"exit $?\n"
         )
         import base64
-        monitor_path = "/var/tmp/jjp_convert_monitor.sh"
+        monitor_path = self._scratch('convert_monitor.sh')
         monitor_b64 = base64.b64encode(monitor_script.encode()).decode()
         self.executor.run(
             f"echo '{monitor_b64}' | base64 -d > {monitor_path} && "
@@ -7705,7 +7745,7 @@ class StandaloneModPipeline(ModPipeline):
             log_content = ""
             try:
                 log_content = self.executor.run(
-                    "tail -5 /var/tmp/jjp_ptcl.log 2>/dev/null",
+                    f"tail -5 {self._scratch('ptcl.log')} 2>/dev/null",
                     timeout=5).strip()
             except CommandError:
                 pass
@@ -7784,8 +7824,8 @@ class StandaloneModPipeline(ModPipeline):
 
         try:
             self.executor.run(
-                "rm -f /var/tmp/jjp_ptcl.log /var/tmp/jjp_convert_monitor.sh "
-                "/var/tmp/jjp_build_iso.sh 2>/dev/null; true", timeout=5)
+                f"rm -f {self._scratch('ptcl.log')} {self._scratch('convert_monitor.sh')} "
+                f"{self._scratch('build_iso.sh')} 2>/dev/null; true", timeout=5)
         except CommandError:
             pass
 
@@ -9860,6 +9900,17 @@ class DirectSSDModPipeline(StandaloneModPipeline):
             self.on_phase(0)  # Scan
             self._phase_scan()
             self._check_cancel()
+
+            # PAD-1587: remote access goes on with an install build (Build USB ISO), whose Send record Send to
+            # machine needs; writing straight to the SSD changes the game's files only, so say so
+            try:
+                from . import remote_access
+                if remote_access.config_for(self) is not None:
+                    self.log("Remote access (Network tab) is not changed by Write to SSD: it goes on the machine "
+                             "with a USB install build (Build USB ISO). The SSD keeps the remote access it has.",
+                             "warning")
+            except Exception:                           # noqa: BLE001 - only a note
+                pass
 
             if not self.changed_files:
                 self.on_done(True,

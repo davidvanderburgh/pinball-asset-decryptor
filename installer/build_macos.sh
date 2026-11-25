@@ -180,6 +180,8 @@ pyinstaller \
     --hidden-import "Crypto.Util.Padding" \
     --hidden-import "paramiko" \
     --hidden-import "pinball_decryptor.core.remote_send" \
+    --hidden-import "pinball_decryptor.core.remote_send_jjp" \
+    --hidden-import "pinball_decryptor.core.ssh_jjp" \
     --hidden-import "pinball_decryptor.core.startup_watch" \
     --hidden-import "pinball_decryptor.core.pad_ssh_key" \
     --hidden-import "pinball_decryptor.core.remote_setup" \
@@ -195,6 +197,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.spooky" \
     --hidden-import "pinball_decryptor.plugins.bof" \
     --hidden-import "pinball_decryptor.plugins.jjp" \
+    --hidden-import "pinball_decryptor.plugins.jjp.remote_access" \
+    --hidden-import "pinball_decryptor.plugins.stern.ret_use" \
     --hidden-import "pinball_decryptor.plugins.cgc" \
     --hidden-import "pinball_decryptor.plugins.williams" \
     --hidden-import "pinball_decryptor.plugins.pinmame_classic" \

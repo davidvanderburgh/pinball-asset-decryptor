@@ -232,18 +232,23 @@ function ProjectRemote({ n }) {
     return () => clearTimeout(timer);
   }, [keys, enabled, dirty, locked, n.project]);
   if (!n.project) return null;
+  // PAD-1587: a JJP machine gets it with an install the Write tab builds, not with a card
+  const jjp = n.maker === "jjp";
+  const cards = jjp ? "installs" : "cards";
   return html`<div class="net-sub">
     ${!n.supported ? html`<${Note}>${n.reason}<//>` : null}
-    <${Check} label="Keep remote access on cards I write from this project" checked=${enabled && !n.share}
+    <${Check} label=${`Keep remote access on ${cards} I ${jjp ? "build" : "write"} from this project`} checked=${enabled && !n.share}
       disabled=${locked || n.share} wrap onChange=${(on) => { setEnabled(on); save(on, keys); }} />
     <span class="small muted">${n.share ? "Off while Build for sharing is on."
+      : jjp ? "Installing a build without it takes remote access off the machine again."
       : "Writing a card without it takes remote access off the machine again."}</span>
     ${(n.others || []).length ? html`<${Others} n=${n} locked=${locked} />` : null}
     <${Check} label="Build for sharing" checked=${!!n.share} disabled=${n.running} wrap
       onChange=${(on) => call("network.configure_share", on, n.project)} />
-    <span class="small muted">For an image you give to someone else. A card with remote access on lets this
-      computer into any machine that runs it, so a shared image must not have it: with this on, cards and images
-      from this project carry no remote access, and none of this machine's own settings, scores or logs.</span>
+    <span class="small muted">For an image you give to someone else. ${jjp ? "An install" : "A card"} with remote
+      access on lets this computer into any machine that runs it, so a shared image must not have it: with this
+      on, ${cards} and images from this project carry no remote access, and none of this machine's own settings,
+      scores or logs.</span>
     <${Advanced} title="Advanced: let your own SSH programs in too">
       <p class="small">PAD needs nothing here: it keeps its own key. To log in with a program of your own as well,
         paste your SSH key's <b>public</b> half below (the line that starts${" "}
@@ -255,7 +260,7 @@ function ProjectRemote({ n }) {
         value=${keys} disabled=${locked} placeholder="ssh-ed25519 AAAA… my-laptop"
         onInput=${(e) => { setKeys(e.target.value); setDirty(true); }}
         onBlur=${() => { if (dirty && !locked) { save(enabled, keys); setDirty(false); } }} />
-      <span class="small muted">${dirty ? "Saving…" : "Saved with this project and put on the card when you Write it. Never included in a mod pack you share."}</span>
+      <span class="small muted">${dirty ? "Saving…" : `Saved with this project and put on the ${jjp ? "install" : "card"} when you ${jjp ? "build" : "Write"} it. Never included in a mod pack you share.`}</span>
     <//>
     ${n.error ? html`<p role="alert" class="err-ink">${n.error}</p>` : null}
   </div>`;
@@ -281,7 +286,18 @@ function Others({ n, locked }) {
 
 // PAD-1427 (David: "modify an attached SD card with the push of a button ... they don't have to manually enter
 // secrets or keys"): the machine's card in this computer's reader gets remote access in place
+// PAD-1587: a JJP machine gets remote access with an install (the Write tab's build, on a USB stick once)
+function RemoteAccessJjp({ n }) {
+  return html`<${Card} cls="net-opt" title="Remote access">
+    <p class="net-does">Lets PAD send your changes to the machine over your home network, without making a USB
+      stick each time. Set it up once: turn it on below, build on the Write tab, and install that build on the
+      machine from a USB stick. There is nothing to type: PAD keeps its own key on this computer.</p>
+    <${ProjectRemote} n=${n} />
+  <//>`;
+}
+
 function RemoteAccess({ n }) {
+  if (n.maker === "jjp") return html`<${RemoteAccessJjp} n=${n} />`;
   const cards = n.cards || [];
   const opts = cards.length ? cards.map((c) => ({ value: c.device, label: c.display }))
     : [{ value: "", label: n.cards_state === "detecting" ? "Looking for cards…" : "No card found" }];
@@ -514,6 +530,7 @@ function RemoteButtonsOption({ n }) {
 // useful. what else?" ... "make all of these".
 function MachineCare({ n }) {
   const off = n.running || !!n.care_busy || !n.address;
+  const jjp = n.maker === "jjp";
   return html`<${Card} cls="net-opt" title="Machine care">
     <p class="net-does">Look after your machine from here, over remote access: see how it is doing, collect its
       logs for a problem report, keep its settings and high scores safe, or restart it.</p>
@@ -525,19 +542,21 @@ function MachineCare({ n }) {
     <div class="lbl">Logs</div>
     <div class="row">
       <${Button} disabled=${off} onClick=${() => call("network.grab_logs")}>Save the logs…<//>
-      <${Button} disabled=${n.running || !n.address}
-        onClick=${() => call("network.follow_log", !n.care_following)}>${n.care_following ? "Stop following" : "Follow the mode log"}<//>
+      ${jjp ? null : html`<${Button} disabled=${n.running || !n.address}
+        onClick=${() => call("network.follow_log", !n.care_following)}>${n.care_following ? "Stop following" : "Follow the mode log"}<//>`}
     </div>
-    <span class="small muted">One zip: the system and kernel logs, PAD's mode log, the connectivity logs and a
+    <span class="small muted">${jjp ? `One zip: the game's own logs, the system, kernel and display logs, the
+      systemd journal and a report of the machine's state. It names your network and the machine's addresses; it
+      holds no password.` : `One zip: the system and kernel logs, PAD's mode log, the connectivity logs and a
       report of the machine's state. It names your Wi-Fi network and the machine's addresses; it holds no
-      password.</span>
+      password.`}</span>
     ${n.care_following || n.care_log ? html`<pre class="net-log">${n.care_log || ""}</pre>` : null}
     <div class="lbl">Settings, audits and high scores</div>
     <div class="row">
       <${Button} disabled=${off} onClick=${() => call("network.backup_settings")}>Back up…<//>
       <${Button} disabled=${off} onClick=${() => call("network.restore_settings")}>Restore…<//>
     </div>
-    <span class="small muted">The game keeps them on a small part of the card that writing a whole card wipes.
+    <span class="small muted">${jjp ? "The game keeps them on a small partition of its own that a full install wipes." : "The game keeps them on a small part of the card that writing a whole card wipes."}
       A backup is a small zip; a restore holds the game for a few seconds and keeps what it replaces on the
       machine once.</span>
     <div class="lbl">Restart</div>
@@ -556,7 +575,8 @@ export default function NetworkTab() {
   const s = useNs("modes");
   return html`<div class="page net-page">
     <${PageHead} title="Network" sub=${n.intro} />
-    ${n.offered === false ? html`<${Note}>Remote access works on Stern Spike 2 and Spike 3 cards only.<//>` : null}
+    ${n.offered === false ? html`<${Note}>Remote access works on Stern Spike 2 and Spike 3 cards and Jersey Jack
+      Pinball installs only.<//>` : null}
     <div class="net-layout">
       ${(n.project && s.feed_shown) || n.wifi_offered ? html`<section class="net-group" aria-label="Network settings">
         <div class="net-group-hd"><b>Network settings</b><span class="muted small">What the machine does on your
@@ -571,8 +591,9 @@ export default function NetworkTab() {
         </div>
       </section>` : null}
       ${n.offered !== false ? html`<section class="net-group" aria-label="Remote access">
-        <div class="net-group-hd"><b>Remote access</b><span class="muted small">Reach the machine from this computer
-          over your network: send changes, see its screen, look after it. Set it up once, on the card</span></div>
+        <div class="net-group-hd"><b>Remote access</b><span class="muted small">${n.maker === "jjp"
+          ? "Reach the machine from this computer over your network: send changes, look after it. Set it up once, with an install"
+          : "Reach the machine from this computer over your network: send changes, see its screen, look after it. Set it up once, on the card"}</span></div>
         <div class="net-cols2">
           <div class="net-col">
             <${RemoteAccess} n=${n} />
@@ -580,7 +601,7 @@ export default function NetworkTab() {
             ${n.buttons_offered ? html`<${RemoteButtonsOption} n=${n} />` : null}
           </div>
           <div class="net-col">
-            <${MachineScreen} n=${n} />
+            ${n.maker === "jjp" ? null : html`<${MachineScreen} n=${n} />`}
             <${MachineCare} n=${n} />
           </div>
         </div>

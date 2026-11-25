@@ -1,0 +1,36 @@
+scan: [{'address': '192.168.77.50', 'banner': 'SSH-2.0-dropbear_2025.88', 'lets_in': True, 'game': 'Wonka', 'host_key': ('ssh-ed25519', 'AAAAC3NzaC1lZDI1NTE5AAAAIMxVyj+Q/2jiLgS609+2rEZh/L5PewBH/V15olvwT3KW'), 'note': ''}]
+VERDICT found on the network   PASS  {'address': '192.168.77.50', 'banner': 'SSH-2.0-dropbear_2025.88', 'lets_in': True, 'game': 'Wonka', 'host_key': ('ssh-ed25519', 'AAAAC3NzaC1lZDI1NTE5AAAAIMxVyj+Q/2jiLgS609+2rEZh/L5PewBH/V15olvwT3KW'), 'note': ''} in 41.5 s
+status: [('Game on the card', 'Wonka'), ('System', 'Ubuntu 21.10'), ('Switched on for', '1 day 5 h'), ('Room on the disk, system', '37.1 GB free of 250.9 GB'), ('Room on the disk, settings', '44.6 MB free of 53.0 MB'), ('From PAD on this card', 'files sent from PAD')]
+VERDICT status                 PASS  [('Game on the card', 'Wonka'), ('System', 'Ubuntu 21.10'), ('Switched on for', '1 day 5 h')]
+setup: stock picture back on the machine; restart: PAD_SEND_RESTARTED 2317755
+before game log tail: ['15:08:02 stand-in game started, pid 2317755, message picture e7c0a567ddb7']
+record: 8 entries: ['/etc/systemd/system/multi-user.target.wants/pad-sshd.service', '/etc/systemd/system/pad-sshd.service', '/jjpe/gen1/miscfiles/graphics/JJP_logo_message.png', '/root/.ssh/authorized_keys', '/usr/local/bin/dropbear', '/usr/local/bin/dropbearkey', '/usr/local/libexec/pad-sftp-server', '/usr/local/sbin/pad-sshd']
+  send log: Sending Wonka-v03.03-pad1587.iso to the machine at 192.168.77.50...
+  send log: Sending over two connections at once.
+  send log: Holding the machine's game for the Send (a game being played ends).
+  send log: Sent 1 changed file (673.4 KB) to the machine; the game restarted on them.
+send result: {'ok': True, 's': 'Sent 1 changed file (673.4 KB) to the machine; the game restarted on them.'}
+VERDICT send as a delta        PASS  Sent 1 changed file (673.4 KB) to the machine; the game restarted on them.
+VERDICT game restarted on it   PASS  15:08:12 stand-in game started, pid 2317883, message picture a06c7acb0dd8
+VERDICT original kept          PASS  {"build": "Wonka-v03.03-pad1587.iso", "game": "Wonka", "paths": {"/jjpe/gen1/miscfiles/graphics/JJP_logo_message.png": "saved"}, "sent": "2026-11-25 16:08:09"}
+VERDICT second send no-op      PASS  The machine already has this build: nothing to send.
+VERDICT logs pulled            PASS  4 files, 26896 bytes: ['README.txt', 'report.txt', 'jjpe/temp/game.log', 'jjpe/temp/standin-game.log', 'journal.txt']
+report head: == when
+Wed Nov 25 15:08:16 CST 2026
+ 15:08:16 up 1 day,  5:43,  0 users,  load average: 0.94, 0.74, 1.52
+== versions
+game Wonka
+PRETTY_NAME="Ubuntu 21.10"
+6.6.87.2-microsoft-standard-WSL2
+GUNS-N-ROSES-916855201
+== disk
+Filesystem     1K-blocks      Used Available Use% Mounted on
+overlay        263114392 210754036  38922264  85% /
+/dev/loop6         54260        36     45632   1% /jjpe/perm
+tmp   
+VERDICT settings backed up     PASS  {'game': 'Wonka', 'files': 3, 'bytes': 73}
+  restore log: Holding the machine's game while its settings are put back...
+VERDICT settings restored      PASS  {'game': 'Wonka', 'files': 3}; old kept: perm/ perm/vf/ perm/vf/audits/ perm/vf/audits/audits.dat perm/vf/hiscores.dat perm/vf/new-after-backup.dat perm/vf/settings/ perm/vf/settings/adjustments.cfg
+VERDICT game back after restore PASS  15:08:20 stand-in game started, pid 2318087, message picture a06c7acb0dd8
+VERDICT restart the game       PASS  PAD_SEND_RESTARTED 2318130
+ALL PASS 11/11

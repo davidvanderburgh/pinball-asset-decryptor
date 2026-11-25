@@ -16,7 +16,16 @@
 #>
 
 param(
-    [string]$InnoSetupPath = ""
+    [string]$InnoSetupPath = "",
+    # PAD-1581: a folder that keeps the bundled Python between builds.  The
+    # embeddable + get-pip + the pinned deps are ~50 s of the release job's
+    # ~3 minutes and come out the same for every release that changes only the
+    # app's own files, so the release workflow restores this folder from
+    # actions/cache and passes it here.  It holds python\ (the bundle as it is
+    # right after the deps install) and key.txt (the fingerprint it was made
+    # from); a fingerprint that does not match is rebuilt.  The folder is
+    # CONSUMED on a hit (moved into build\, not copied).  Empty = no cache.
+    [string]$PythonCache = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,93 +85,140 @@ New-Item -ItemType Directory -Path $BuildDir | Out-Null
 $PythonDir = Join-Path $BuildDir "python"
 New-Item -ItemType Directory -Path $PythonDir | Out-Null
 
-# --- Download Python embeddable zip ---------------------------------------
-$embedUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
-$embedZip = Join-Path $BuildDir "python-embed.zip"
-
-Write-Host "`nDownloading Python $PythonVersion embeddable zip..." -ForegroundColor Cyan
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -Uri $embedUrl -OutFile $embedZip -UseBasicParsing
-
-Write-Host "Extracting embeddable zip..." -ForegroundColor Cyan
-Expand-Archive -Path $embedZip -DestinationPath $PythonDir -Force
-
-$libDir = Join-Path $PythonDir "Lib"
-if (-not (Test-Path $libDir)) { New-Item -ItemType Directory -Path $libDir | Out-Null }
-
-# --- Enable import site, install pip + deps ------------------------------
-Write-Host "`nInstalling pip and dependencies into bundled Python..." -ForegroundColor Cyan
+# --- Bundled Python from the cache (PAD-1581) -----------------------------
+# The fingerprint is everything the steps below read: the Python version, the
+# three pinned requirement lists and this script.  get-pip/setuptools/wheel
+# are not pinned, so a hit keeps the ones the cache was made with; the
+# release workflow's cache key rolls over each month to pick up new ones.
 $pthFile = Join-Path $PythonDir "python${pyMajorMinor}._pth"
-if (-not (Test-Path $pthFile)) {
-    Write-Error "Could not find $pthFile"
-    exit 1
+$pythonExe = Join-Path $PythonDir "python.exe"
+$sitePackages = Join-Path $PythonDir "Lib\site-packages"
+$cacheHit = $false
+if ($PythonCache) {
+    $fpParts = @("python=$PythonVersion")
+    foreach ($f in @($MyInvocation.MyCommand.Path,
+                     (Join-Path $ProjectDir "requirements.txt"),
+                     (Join-Path $ProjectDir "requirements-windows.txt"),
+                     (Join-Path $ProjectDir "requirements-ui.txt"))) {
+        $fpParts += "$(Split-Path -Leaf $f)=$((Get-FileHash -Algorithm SHA256 $f).Hash)"
+    }
+    $fingerprint = $fpParts -join "`n"
+    $cacheKeyFile = Join-Path $PythonCache "key.txt"
+    $cachePython = Join-Path $PythonCache "python"
+    if ((Test-Path $cacheKeyFile) -and (Test-Path (Join-Path $cachePython "python.exe")) -and
+            ((Get-Content $cacheKeyFile -Raw) -eq $fingerprint)) {
+        Write-Host "`nBundled Python from the cache ($PythonCache) - no download, nothing for pip to fetch" -ForegroundColor Cyan
+        Remove-Item -Recurse -Force $PythonDir
+        try {
+            Move-Item -Path $cachePython -Destination $PythonDir -ErrorAction Stop
+        } catch {
+            Copy-Item -Path $cachePython -Destination $PythonDir -Recurse -Force
+        }
+        $cacheHit = $true
+    } elseif (Test-Path $PythonCache) {
+        Write-Host "`nBundled Python cache is for other inputs - rebuilding it" -ForegroundColor Yellow
+        Remove-Item -Recurse -Force $PythonCache
+    }
 }
 
-# Uncomment 'import site' so pip works
-$pthRaw = Get-Content $pthFile -Raw
-$pthRaw = $pthRaw -replace '#\s*import site', 'import site'
-Set-Content -Path $pthFile -Value $pthRaw -Encoding ASCII -NoNewline
+if (-not $cacheHit) {
+    # --- Download Python embeddable zip ---------------------------------------
+    $embedUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
+    $embedZip = Join-Path $BuildDir "python-embed.zip"
 
-$getPipUrl = "https://bootstrap.pypa.io/get-pip.py"
-$getPipFile = Join-Path $BuildDir "get-pip.py"
-Invoke-WebRequest -Uri $getPipUrl -OutFile $getPipFile -UseBasicParsing
+    Write-Host "`nDownloading Python $PythonVersion embeddable zip..." -ForegroundColor Cyan
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $embedUrl -OutFile $embedZip -UseBasicParsing
 
-# get-pip.py from 2026-11 runs its bundled pip as "python <tmp>\pip install",
-# and pip refuses to modify itself on Windows when argv[0] is named "pip".
-# Run the same bundled pip through runpy instead (a no-op once upstream fixes it).
-$getPipRaw = Get-Content $getPipFile -Raw
-$getPipRaw = $getPipRaw.Replace(
-    'command.append(os.path.join(tmpdir, "pip"))',
-    'command += ["-c", "import runpy,sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module(''pip'', run_name=''__main__'', alter_sys=True)", tmpdir]')
-Set-Content -Path $getPipFile -Value $getPipRaw -Encoding UTF8 -NoNewline
+    Write-Host "Extracting embeddable zip..." -ForegroundColor Cyan
+    Expand-Archive -Path $embedZip -DestinationPath $PythonDir -Force
 
-$pythonExe = Join-Path $PythonDir "python.exe"
-& $pythonExe $getPipFile --no-warn-script-location 2>&1 | ForEach-Object { Write-Host "    $_" }
-if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip"; exit 1 }
+    $libDir = Join-Path $PythonDir "Lib"
+    if (-not (Test-Path $libDir)) { New-Item -ItemType Directory -Path $libDir | Out-Null }
 
-$sitePackages = Join-Path $PythonDir "Lib\site-packages"
-& $pythonExe -m pip install --no-warn-script-location --target $sitePackages setuptools wheel 2>&1 | ForEach-Object { Write-Host "    $_" }
+    # --- Enable import site, install pip + deps ------------------------------
+    Write-Host "`nInstalling pip and dependencies into bundled Python..." -ForegroundColor Cyan
+    $pthFile = Join-Path $PythonDir "python${pyMajorMinor}._pth"
+    if (-not (Test-Path $pthFile)) {
+        Write-Error "Could not find $pthFile"
+        exit 1
+    }
 
-# Runtime deps bundled into the app's isolated embeddable Python.  This MUST
-# install the FULL runtime set from requirements.txt (Pillow / zstandard /
-# pycryptodome / numpy / unicorn / capstone) -- the app uses ONLY this bundled
-# interpreter (its ._pth sandboxes it from any system Python), so anything
-# missing here is missing for the user with no fix: a manual `pip install` into
-# their own Python is invisible to the app.  That's exactly what bit a
-# fresh-install user whose system pip reported "already satisfied" while the
-# app still showed the Stern deps (unicorn/capstone/numpy) missing.  The extras
-# below aren't in requirements.txt: UnityPy/fsb5/pyogg power Spooky's Unity
-# asset extraction; imageio-ffmpeg bundles a real ffmpeg.exe so Replace
-# Audio/Video format conversion + resampling work out of the box, with no
-# system install or PATH hunting -- find_ffmpeg() falls back to it and
-# ensure_bundled_ffmpeg_on_path() shims it onto PATH at startup (the same way
-# the Mac/Linux builds already bundle it; this closes the "ffmpeg not found"
-# warning on the Stern/other tabs on a fresh Windows install).  faster-whisper
-# (Auto-name call-outs) stays an on-demand "Install Missing" item on Windows --
-# it works there (bundled Python + a functional elevated installer), so it's
-# kept out of the base installer for size; Mac/Linux bundle it because their
-# frozen apps can't install it later.  sounddevice is the Spike 2 emulator's
-# SPEAKER, and it is here rather than in requirements.txt because only this
-# platform can use it: a WSL run serves the guest's PCM to a Windows Python
-# that opens the sound device directly, because WSLg's own audio hop is
-# measurably damaged (+16 dB of error).  Shipping it means a fresh install has
-# good sound with nothing asked of the user -- PAD-95's reporter had no Python
-# of his own at all, so the pip command the app used to print named a program
-# (`py`) his PC did not have.  Existing installs pick it up through
-# install_prerequisites.ps1's Stern pip list.
-# The two lists are FILES, not an array typed in here: this same set was
-# written out inline in five places (three release jobs, build_linux.sh,
-# build_macos.sh and this line), which is how a dependency gets added to the
-# app on one platform only.  Both files pin exact versions - see their headers.
-$reqFile = Join-Path $ProjectDir "requirements.txt"
-$winFile = Join-Path $ProjectDir "requirements-windows.txt"
-$uiFile = Join-Path $ProjectDir "requirements-ui.txt"
-Write-Host "  Installing pinned deps from requirements.txt + requirements-windows.txt + requirements-ui.txt..."
-$ErrorActionPreference = "Continue"
-& $pythonExe -m pip install --no-warn-script-location --target $sitePackages -r $reqFile -r $winFile -r $uiFile 2>&1 | ForEach-Object { Write-Host "    $_" }
-$ErrorActionPreference = "Stop"
-if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip dependencies"; exit 1 }
-Write-Host "  Dependencies installed successfully" -ForegroundColor Green
+    # Uncomment 'import site' so pip works
+    $pthRaw = Get-Content $pthFile -Raw
+    $pthRaw = $pthRaw -replace '#\s*import site', 'import site'
+    Set-Content -Path $pthFile -Value $pthRaw -Encoding ASCII -NoNewline
+
+    $getPipUrl = "https://bootstrap.pypa.io/get-pip.py"
+    $getPipFile = Join-Path $BuildDir "get-pip.py"
+    Invoke-WebRequest -Uri $getPipUrl -OutFile $getPipFile -UseBasicParsing
+
+    # get-pip.py from 2026-11 runs its bundled pip as "python <tmp>\pip install",
+    # and pip refuses to modify itself on Windows when argv[0] is named "pip".
+    # Run the same bundled pip through runpy instead (a no-op once upstream fixes it).
+    $getPipRaw = Get-Content $getPipFile -Raw
+    $getPipRaw = $getPipRaw.Replace(
+        'command.append(os.path.join(tmpdir, "pip"))',
+        'command += ["-c", "import runpy,sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module(''pip'', run_name=''__main__'', alter_sys=True)", tmpdir]')
+    Set-Content -Path $getPipFile -Value $getPipRaw -Encoding UTF8 -NoNewline
+
+    $pythonExe = Join-Path $PythonDir "python.exe"
+    & $pythonExe $getPipFile --no-warn-script-location 2>&1 | ForEach-Object { Write-Host "    $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip"; exit 1 }
+
+    $sitePackages = Join-Path $PythonDir "Lib\site-packages"
+    & $pythonExe -m pip install --no-warn-script-location --target $sitePackages setuptools wheel 2>&1 | ForEach-Object { Write-Host "    $_" }
+
+    # Runtime deps bundled into the app's isolated embeddable Python.  This MUST
+    # install the FULL runtime set from requirements.txt (Pillow / zstandard /
+    # pycryptodome / numpy / unicorn / capstone) -- the app uses ONLY this bundled
+    # interpreter (its ._pth sandboxes it from any system Python), so anything
+    # missing here is missing for the user with no fix: a manual `pip install` into
+    # their own Python is invisible to the app.  That's exactly what bit a
+    # fresh-install user whose system pip reported "already satisfied" while the
+    # app still showed the Stern deps (unicorn/capstone/numpy) missing.  The extras
+    # below aren't in requirements.txt: UnityPy/fsb5/pyogg power Spooky's Unity
+    # asset extraction; imageio-ffmpeg bundles a real ffmpeg.exe so Replace
+    # Audio/Video format conversion + resampling work out of the box, with no
+    # system install or PATH hunting -- find_ffmpeg() falls back to it and
+    # ensure_bundled_ffmpeg_on_path() shims it onto PATH at startup (the same way
+    # the Mac/Linux builds already bundle it; this closes the "ffmpeg not found"
+    # warning on the Stern/other tabs on a fresh Windows install).  faster-whisper
+    # (Auto-name call-outs) stays an on-demand "Install Missing" item on Windows --
+    # it works there (bundled Python + a functional elevated installer), so it's
+    # kept out of the base installer for size; Mac/Linux bundle it because their
+    # frozen apps can't install it later.  sounddevice is the Spike 2 emulator's
+    # SPEAKER, and it is here rather than in requirements.txt because only this
+    # platform can use it: a WSL run serves the guest's PCM to a Windows Python
+    # that opens the sound device directly, because WSLg's own audio hop is
+    # measurably damaged (+16 dB of error).  Shipping it means a fresh install has
+    # good sound with nothing asked of the user -- PAD-95's reporter had no Python
+    # of his own at all, so the pip command the app used to print named a program
+    # (`py`) his PC did not have.  Existing installs pick it up through
+    # install_prerequisites.ps1's Stern pip list.
+    # The two lists are FILES, not an array typed in here: this same set was
+    # written out inline in five places (three release jobs, build_linux.sh,
+    # build_macos.sh and this line), which is how a dependency gets added to the
+    # app on one platform only.  Both files pin exact versions - see their headers.
+    $reqFile = Join-Path $ProjectDir "requirements.txt"
+    $winFile = Join-Path $ProjectDir "requirements-windows.txt"
+    $uiFile = Join-Path $ProjectDir "requirements-ui.txt"
+    Write-Host "  Installing pinned deps from requirements.txt + requirements-windows.txt + requirements-ui.txt..."
+    $ErrorActionPreference = "Continue"
+    & $pythonExe -m pip install --no-warn-script-location --target $sitePackages -r $reqFile -r $winFile -r $uiFile 2>&1 | ForEach-Object { Write-Host "    $_" }
+    $ErrorActionPreference = "Stop"
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to install pip dependencies"; exit 1 }
+    Write-Host "  Dependencies installed successfully" -ForegroundColor Green
+
+    if ($PythonCache) {
+        # Saved as it stands now: what follows (the C++ runtime, the final
+        # ._pth, the smoke tests) runs on every build, hit or miss.
+        Write-Host "  Keeping the bundled Python for the next build in $PythonCache"
+        New-Item -ItemType Directory -Force -Path $PythonCache | Out-Null
+        Copy-Item -Path $PythonDir -Destination $cachePython -Recurse -Force
+        Set-Content -Path $cacheKeyFile -Value $fingerprint -Encoding UTF8 -NoNewline
+    }
+}
 
 # --- Visual C++ runtime, app-local ----------------------------------------
 # The embeddable zip carries vcruntime140(_1).dll but not the C++ library

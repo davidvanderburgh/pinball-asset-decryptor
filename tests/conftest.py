@@ -172,6 +172,16 @@ def _no_linux_root(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_card_record(tmp_path_factory, monkeypatch):
+    """Every test gets its own empty record of what was written to which card
+    (rawdevice.CardRecord, PAD-1584), so no test reads or writes the
+    developer's own, and one test's card is not remembered in the next."""
+    monkeypatch.setenv("PAD_CARD_RECORD", str(
+        tmp_path_factory.mktemp("cards") / "card_writes.json"))
+    monkeypatch.delenv("PAD_WRITE_EVERY_CHUNK", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_title_cache(tmp_path_factory, monkeypatch):
     """Every test gets its own empty per-build cache (title_reader.cache_dir: ports and
     tables worked out on this machine), so no test reads or writes the developer's own,

@@ -163,17 +163,18 @@ def test_the_card_is_read_ahead_while_the_hash_is_taken(tmp_path,
     assert readers == {"pad-read-ahead"}
 
 
-def test_no_hashes_kept_when_not_verifying(tmp_path, monkeypatch):
+def test_not_verifying_reads_nothing_back_but_remembers_the_card(
+        tmp_path, monkeypatch):
+    """Without verify the card is not read back; the hashes are still taken,
+    as what the card holds for the next write onto it (PAD-1584)."""
     img, card = _img_and_card(tmp_path)
-    got = {}
-    real = rd.RawDeviceFile.copy_image_onto
-
-    def spy(self, *a, **k):
-        got["digests"] = k.get("digests")
-        return real(self, *a, **k)
-    monkeypatch.setattr(rd.RawDeviceFile, "copy_image_onto", spy)
+    called = []
+    monkeypatch.setattr(rd, "_verify_flash_readback",
+                        lambda *a, **k: called.append(1))
     rd.flash_image_to_device(img, card, eject=False, verify=False)
-    assert got["digests"] is None
+    assert called == []
+    with rd.RawDeviceFile(card) as dev:
+        assert rd.CardRecord.for_card(dev) is not None
 
 
 def test_menu_verify_does_not_read_the_image(tmp_path, monkeypatch):

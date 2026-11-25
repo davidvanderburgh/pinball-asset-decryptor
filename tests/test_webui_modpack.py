@@ -552,7 +552,16 @@ def test_transfer_from_an_unzipped_file_of_modes_offers_the_modes_tab(tmp_path, 
     with zipfile.ZipFile(_modes_zip(tmp_path / "m.zip")) as zf:
         zf.extractall(folder)
     with web_app(tmp_path, mfr="stern") as w:
-        got = _loads(w, monkeypatch)
+        got, names = [], []
+
+        def _load(path=None, **k):        # the Modes tab reads the zip as it loads
+            got.append(path)
+            with zipfile.ZipFile(path) as zf:
+                names.append(sorted(zf.namelist()))
+
+        modes = w.window.service("modes")
+        monkeypatch.setattr(modes, "_visible", True, raising=False)
+        monkeypatch.setattr(modes, "load_file", _load)
         w.call("ui.set", "modpack", "src", str(folder))
         w.call("ui.set", "modpack", "dst", str(dst))
         w.answers.append("yes")
@@ -561,5 +570,6 @@ def test_transfer_from_an_unzipped_file_of_modes_offers_the_modes_tab(tmp_path, 
         assert "folder holds a file of modes, unzipped" in ask["message"]
         w.drain()
         assert len(got) == 1 and got[0].endswith(".zip")
-        with zipfile.ZipFile(got[0]) as zf:
-            assert sorted(zf.namelist()) == ["modes/kiryu/assets.json", "pad_modes.json"]
+        assert names == [["modes/kiryu/assets.json", "pad_modes.json"]]
+        # PAD-1596: the zip made of the folder is not left in the temp folder
+        assert not os.path.exists(os.path.dirname(got[0]))

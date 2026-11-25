@@ -418,12 +418,15 @@ if [ "$BUS" = 1 ]; then
             fi
         fi
     fi
-    if [ "$BRIDGE" = 1 ] && [ "${PAD_S3_AUTOGUIDE:-1}" = 1 ]; then
+    if [ "$BRIDGE" = 1 ] && [ "${PAD_S3_AUTOGUIDE:-1}" != 0 ]; then
         # a window run is the user's (David, PAD-1090: no automatic Guided
         # Setup): watchguide never presses a button - it only says when
         # Guided Setup is on the screen, for the footer and the playfield
-        # window. A headless run (tests, nobody to press) walks it.
-        if [ "$WINDOW" = 1 ]; then
+        # window. A headless run (tests, nobody to press) walks it, and so
+        # does a run a Visual Pinball table started (PAD-1560:
+        # PAD_S3_AUTOGUIDE=walk) - its player is at the table, which has no
+        # way to reach the game's service buttons for Save & Exit.
+        if [ "$WINDOW" = 1 ] && [ "${PAD_S3_AUTOGUIDE:-1}" != walk ]; then
             python3 "$S/s3press.py" watchguide "$SLOT" > "$SD/autoguide.log" 2>&1 &
         else
             python3 "$S/s3press.py" autoguide "$SLOT" > "$SD/autoguide.log" 2>&1 &

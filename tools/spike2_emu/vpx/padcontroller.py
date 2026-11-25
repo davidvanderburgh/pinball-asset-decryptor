@@ -474,6 +474,11 @@ def fill_monitor(win, client, mon):
     return mon[0] + (mw - nw) // 2, mon[1] + (mh - nh) // 2, nw, nh
 
 
+def raw_leds(v):
+    """A raw_lamp_rewrite value as its LEDs: one (node, index), or several."""
+    return v if isinstance(v[0], tuple) else (v,)
+
+
 class VpxMap:
     """A title's .vpxmap.json, reduced to the three lookups the server makes."""
 
@@ -531,10 +536,18 @@ class VpxMap:
                 continue
             # a legacy number (below 1000: 1000+ is already every LED's own
             # number) -> one [node, index]; anything else would be set twice
-            # a poll and report a change every frame
-            if not (0 < int(k) < 1000 and isinstance(v, list) and len(v) == 2):
-                raise ValueError("raw_lamp_rewrite %r: want a number 1-999 -> [node, index], got %r" % (k, v))
-            self.raw_lamp_rewrite[int(k)] = (int(v[0]), int(v[1]))
+            # a poll and report a change every frame. PAD-1560: or a list of
+            # them, read as the brightest - a SAM table's one-colour insert on
+            # an RGB insert of the newer game lights whatever colour it is given
+            pair = lambda p: (isinstance(p, list) and len(p) == 2
+                              and all(isinstance(x, int) for x in p))
+            ok = 0 < int(k) < 1000 and isinstance(v, list) and (
+                pair(v) or (v and all(pair(p) for p in v)))
+            if not ok:
+                raise ValueError("raw_lamp_rewrite %r: want a number 1-999 -> [node, index] "
+                                 "or a list of them, got %r" % (k, v))
+            self.raw_lamp_rewrite[int(k)] = ((int(v[0]), int(v[1])) if pair(v)
+                                             else tuple((int(a), int(b)) for a, b in v))
         for k, v in m.get("solenoids", {}).items():
             if k != "_":
                 self.solenoids[int(k)] = tuple(v["coil"])
@@ -677,15 +690,25 @@ class Rig:
          that names none: the only Spike 2 run up). This is how a Visual Pinball started from the
          Start menu, with no PAD environment at all, finds the app's run;
       3. padpath's default: the default distro's ~/spike2root.
+
+    PAD-1560: a Spike 3 run (`emu` "spike3") is the same shape - s3leds.py
+    fills dump/padled, s3keys.py takes dump/padsw - found by its own board
+    record (spike3-<n>.run, its slot directory as `root`), with the switch
+    table where s3bridge.py writes it (tables/game/switch_list.txt).
     """
 
-    def __init__(self, title=None, record=None):
+    def __init__(self, title=None, record=None, emu="spike2"):
+        self.emu = emu or "spike2"
         self.distro = os.environ.get("PAD_WSL_DISTRO")
         self.root = os.environ.get("PAD_ROOT_WSL")        # posix
         self.slot = padpath.slot()
         self.how = "environment"
+        if self.emu == "spike3" and not record:
+            # the app's environment names its own Spike 2 rig: never a
+            # Spike 3 run's
+            self.root = None
         if record or not self.root:
-            rec = record or self.board_run(title)
+            rec = record or self.board_run(title, self.emu)
             if rec:
                 self.distro = rec.get("distro") or self.distro
                 self.root = rec.get("root")
@@ -700,8 +723,11 @@ class Rig:
             self.how = "padpath default"
 
     @staticmethod
-    def board_slot(slot):
-        """The board's record for one slot, or None until watch.sh writes it."""
+    def board_slot(slot, emu="spike2"):
+        """The board's record for one slot, or None until watch.sh (a Spike 3
+        run: s3run.sh, as spike3-<n>.run) writes it."""
+        if emu == "spike3":
+            return padlaunch.spike3_record(slot=int(slot))
         try:
             rec = json.load(open(os.path.join(BOARD, "slot-%d.run" % int(slot)), encoding="utf-8"))
             return rec if isinstance(rec, dict) and rec.get("root") else None
@@ -709,7 +735,11 @@ class Rig:
             return None
 
     @staticmethod
-    def board_run(title):
+    def board_run(title, emu="spike2"):
+        if emu == "spike3":
+            # a Spike 3 table always names its title; a stale record (its run
+            # gone with WSL) is not a run
+            return padlaunch.spike3_record(title) if title else None
         runs = []
         try:
             names = sorted(os.listdir(BOARD))
@@ -837,8 +867,15 @@ class Rig:
 
     def tables_dir(self, title, runner=None):
         """dump/tables/<title> as Windows can read it: over the share, or a
-        fresh copy fetched through WSL when the share cannot be opened."""
+        fresh copy fetched through WSL when the share cannot be opened. A
+        Spike 3 run's is its slot's tables/game (s3run.sh: PAD_TABLES,
+        PAD_GAME=game), whatever the title."""
+        spike3 = getattr(self, "emu", "spike2") == "spike3"
+        if spike3:
+            title = "game"
         if self.share:
+            if spike3:
+                return os.path.join(os.path.dirname(self.dump), "tables", title)
             return os.path.join(self.dump, "tables", title or "")
         local = os.path.join(self.local_dir(), "tables")
         got = getattr(self, "_fetched", None)
@@ -847,7 +884,8 @@ class Rig:
         now = time.monotonic()
         if title and now - got.get(title, -1e9) > self.FETCH_FRESH_S:
             got[title] = now
-            self.fetch(self.wsl_dump("tables"), [title], local, runner=runner)
+            src = ((self.root or "").rstrip("/") + "/tables") if spike3 else self.wsl_dump("tables")
+            self.fetch(src, [title], local, runner=runner)
         return os.path.join(local, title or "")
 
     def boot_log_dir(self, runner=None):
@@ -894,10 +932,13 @@ class Rig:
         """{(node, bit): id} from the title's switch_list.txt, the rig's own
         reading of the game's switch table (empty when the run has none)."""
         out = {}
-        if not self.share and title and self.root:
+        # a Spike 3 run's bridge writes its own as the node boards answer:
+        # no other slot's copy is taken in
+        seed = getattr(self, "emu", "spike2") != "spike3"
+        if seed and not self.share and title and self.root:
             self.seed_switch_list_wsl(title)
         path = os.path.join(self.tables_dir(title), "switch_list.txt")
-        if self.share and title and not os.path.exists(path):
+        if seed and self.share and title and not os.path.exists(path):
             self.seed_switch_list(title, path)
         try:
             for line in open(path, encoding="utf-8", errors="replace"):
@@ -2068,6 +2109,12 @@ class Bridge:
     def spike1(self):
         return getattr(self.map, "platform", "spike2") == "spike1"
 
+    @property
+    def emu(self):
+        """The board record's emulator for a Spike 2-shaped run: "spike3" for
+        a Spike 3 title (PAD-1560), else "spike2"."""
+        return "spike3" if getattr(self.map, "platform", "spike2") == "spike3" else "spike2"
+
     def own_solenoid(self, n, coil):
         """`Controller.PadSolenoid(n) = Array(node, index)` (PAD-1303): the
         table's script names a coil the map has no number for, so core.vbs's
@@ -2223,7 +2270,8 @@ class Bridge:
         thread attaches when the game is up, and the table plays from then
         on - switches before that are kept and handed over at attach (the
         table's trough, set once at its Init), Visual Pinball never waits."""
-        self.rig = self.rigmod.Rig(self.native_title) if self.slots else Rig(self.native_title)
+        self.rig = (self.rigmod.Rig(self.native_title) if self.slots
+                    else Rig(self.native_title, emu=self.emu))
         self.pipe = None
         self.launch = None
         self.attached = False
@@ -2335,6 +2383,9 @@ class Bridge:
     # -- PAD-963: a started run is up when the game is in attract
     #: how long a boot log may stay unreadable before the run counts as up
     BOOT_LOG_S = 15.0
+    #: a Spike 3 run's: its first progress line can come minutes in (the
+    #: card's first decrypt into the store), and every line after re-arms it
+    S3_FIRST_LINE_S = 900.0
     #: a board record whose output block is not up this long after is said, with
     #: the run log's last lines (PAD-1208: attach normally comes ~20 s after it)
     BLOCK_LATE_S = 60
@@ -2349,6 +2400,14 @@ class Bridge:
         the playfield window read it); until then the loading window says
         which step the boot is on, and the run's windows are still handed
         back from (_starting). A rig that keeps no such log is ready now."""
+        if self.emu == "spike3" and isinstance(self.launch, padlaunch.Spike3Launch):
+            # PAD-1560: a Spike 3 run says its boot in its own output
+            # (s3prog.py's `[s3run] progress` lines), from this launch on
+            self.boot = padlaunch.Spike3Boot(self.launch.logfile, self.launch.log_from)
+            self._boot_seen = time.monotonic()
+            self.BOOT_LOG_S = self.S3_FIRST_LINE_S
+            self._poll_boot()
+            return
         logdir = ""
         if not self.slots and self.rig is not None and getattr(self.rig, "slot", None):
             # a slot's logs are beside its root: padslots/<n>/root/dump
@@ -2697,10 +2756,11 @@ class Bridge:
             return
         if self.rig is None:
             rec = (self.rigmod.board_record(self.native_title) if self.slots
-                   else Rig.board_slot(self.launch.slot))
+                   else Rig.board_slot(self.launch.slot) if self.emu == "spike2"
+                   else Rig.board_slot(self.launch.slot, self.emu))
             if rec:
                 self.rig = (self.rigmod.Rig(self.native_title, record=rec) if self.slots
-                            else Rig(self.native_title, record=rec))
+                            else Rig(self.native_title, record=rec, emu=self.emu))
                 log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         if self.rig is not None:
             data = read_block(self.rig.led_path(), READ_N) if SHARE_ON else None
@@ -3465,8 +3525,8 @@ class Bridge:
             self.mrg = switches
             # Some ROM tables read Lamp(n) as a mechanical position or raw
             # brightness, rather than the normal 0/1 or RGB insert value.
-            for n, (node, idx) in self.map.raw_lamp_rewrite.items():
-                self._lamp_set(n, rm.lamp_level(lamps, node, idx))
+            for n, leds in self.map.raw_lamp_rewrite.items():
+                self._lamp_set(n, max(rm.lamp_level(lamps, nd, ix) for nd, ix in raw_leds(leds)))
             for n, leds in self.map.lamp_groups.items():
                 levels = [rm.lamp_level(lamps, nd, ix) for nd, ix in leds]
                 if max(levels) < LAMP_ON:
@@ -3544,8 +3604,8 @@ class Bridge:
     def _poll_lamps(self, data):
         # raw channels (a mechanism's position, a mono level), then the
         # mapped groups, then every LED any table might name directly
-        for n, (node, idx) in self.map.raw_lamp_rewrite.items():
-            self._lamp_set(n, self._led_level(data, node, idx))
+        for n, leds in self.map.raw_lamp_rewrite.items():
+            self._lamp_set(n, max(self._led_level(data, nd, ix) for nd, ix in raw_leds(leds)))
         for n, leds in self.map.lamp_groups.items():
             levels = [self._led_level(data, nd, ix) for nd, ix in leds]
             if max(levels) < LAMP_ON:

@@ -58,12 +58,12 @@ INTRO = ("Play a Visual Pinball table with the real game behind it: the "
 #: the supported tables"): the tab lists EVERY machine's tables whatever the
 #: manufacturer, with a filter at the top for one machine (``platform``, ""
 #: for all of them, which is where every sitting starts).
-BRIDGED = ("spike2", "spike1", "spooky")
+BRIDGED = ("spike2", "spike1", "spike3", "spooky")
 
 
 #: PAD-943: the other platforms' tables, where their authors put them
 CATALOG_TIP = ("Every modern platform the app reads, and the Visual Pinball tables of its games: "
-               "where each one is downloaded, who made it, and what plays behind it. A Spike 1 "
+               "where each one is downloaded, who made it, and what plays behind it. A Spike 1 or Spike 3 "
                "table plays on the app's emulator once the app has a map for it, like Spike 2's; "
                "the rest play as their authors wrote them. Stern SAM is not here: Visual PinMAME "
                "runs those games already.")

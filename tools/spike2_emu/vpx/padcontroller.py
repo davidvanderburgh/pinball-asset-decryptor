@@ -2011,6 +2011,7 @@ class Bridge:
         # LOCKDOWN buttons) where the title's tables put them, the kit's
         # cabinet settings, and the backglass handed over for BACKBOX GI
         self.cab_leds = {}
+        self.cab_strips = None             # PAD-1571: padcabinet.cabinet_strips
         self.cab_shaker = None             # PAD-1460: (node, idx) of the SHAKER MOTOR, None = none
         self.cab = padcabinet.settings({})
         self.b2s = None
@@ -2152,6 +2153,10 @@ class Bridge:
         n = self.cab["dof_shaker"]
         if n and self.cab_shaker:
             out.append((n, 1 if self.sol_state.get(self._sol_num(self.cab_shaker)) else 0))
+        # PAD-1571: the cabinet's light strips (blades, else speaker lights)
+        out += padcabinet.strip_events(self.cab.get("dof_strips"), self.cab.get("strip_parts", 1),
+                                       getattr(self, "cab_strips", None),
+                                       lambda nd, ix: self._led_level(data, nd, ix), LAMP_ON)
         return out
 
     def _poll_b2s_dof(self, data):
@@ -2162,9 +2167,10 @@ class Bridge:
         for n, v in self._cab_events(data):
             if self._b2s_dof.get(n) != v:
                 if not self._b2s_dof:
-                    log("DOF: the cabinet's E events (start E%s, lockdown E%s, shaker E%s) go to"
+                    log("DOF: the cabinet's E events (start E%s, lockdown E%s, shaker E%s, strips %s) go to"
                         " the DOF in B2S.Server" % (self.cab["dof_start"] or "-", self.cab["dof_lockdown"]
-                                                    or "-", self.cab["dof_shaker"] or "-"))
+                                                    or "-", self.cab["dof_shaker"] or "-",
+                                                    self._strips_words()))
                 self._b2s_dof[n] = v
                 self.b2s.data(n, v)
 
@@ -2541,12 +2547,29 @@ class Bridge:
             self.cab_shaker = coilmap.shaker_address(os.path.join(tables_dir, "device_xy.txt"))
         except Exception:                                   # noqa: BLE001
             self.cab_shaker = None
+        try:                                # PAD-1571: the light strips, for DOF
+            self.cab_strips = padcabinet.cabinet_strips(tables_dir)
+        except Exception:                                   # noqa: BLE001
+            self.cab_strips = None
         bulbs = self.cab["gi_bulbs"].get(self.title, [])
-        log("cabinet lights: %s; DOF start E%s, lockdown E%s, shaker E%s (%s); BACKBOX GI bulbs: %s"
+        log("cabinet lights: %s; DOF start E%s, lockdown E%s, shaker E%s (%s), strips %s; BACKBOX GI bulbs: %s"
             % (", ".join("%s %s" % (k, v) for k, v in sorted(self.cab_leds.items())) or "none named",
                self.cab["dof_start"] or "-", self.cab["dof_lockdown"] or "-", self.cab["dof_shaker"] or "-",
                ("node %d coil %d" % self.cab_shaker) if self.cab_shaker else "no shaker",
-               ", ".join(bulbs) or "none"))
+               self._strips_words(), ", ".join(bulbs) or "none"))
+
+    def _strips_words(self):
+        """The light strips' DOF events in words, for the log (PAD-1571)."""
+        base, st = self.cab.get("dof_strips"), getattr(self, "cab_strips", None)
+        if not st:
+            return "- (no blades or speaker lights on this title)"
+        what = "%s, node %d, %d+%d pixels" % (st["source"], st["node"], len(st["sides"][0]), len(st["sides"][1]))
+        if not base:
+            return "off (%s)" % what
+        parts = self.cab.get("strip_parts", 1)
+        return "E%d-E%d (%s; %d part%s a side, %d colours each)" % (
+            base, base + 2 * parts * len(padcabinet.STRIP_COLOURS) - 1, what, parts,
+            "" if parts == 1 else "s", len(padcabinet.STRIP_COLOURS))
 
     #: how long a run started for a table may take to come up (a card copied
     #: into the cache first, then the boot)

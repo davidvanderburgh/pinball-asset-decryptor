@@ -473,7 +473,7 @@ value proc_exit_hooks      0x120
 value proc_exit_slots      4
 value shake_adj            357
 value shake_drive          7
-value serve_music          124
+value serve_music          125   # PAD-1555: the request after the serve on this build (emulator sound log: 194, 125, 741, 354 where 0.97 asks 192, 124, ...)
 value comp_menu_frame_list_at    340
 value comp_menu_frame_count_at   56
 value comp_menu_frame_count_last 0

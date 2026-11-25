@@ -159,7 +159,8 @@ def test_the_start_menu_titles_name_their_serve_music():
             "metallica_spike-1.04": 65, "uncanny_xmen_le-0.98": 191, "uncanny_xmen_pro-0.98": 191,
             "godzilla_le-1.16": 66, "godzilla_pro-1.16": 66, "godzilla_pro-1.15": 66,
             # PAD-1555: the November 2026 start-menu builds, the same music as each one's earlier build
-            "king_kong_le-1.00": 124, "king_kong_le-1.01": 124, "king_kong_pro-1.01": 124, "metallica_spike-1.05": 65}
+            "king_kong_le-1.00": 125, "king_kong_le-1.01": 125,   # 1.01: its own ids moved one on (sound log)
+            "king_kong_pro-1.01": 125, "metallica_spike-1.05": 65}
     for port in PORTS.glob("*.port"):
         text = port.read_text(encoding="utf-8")
         if "comp_menu_end_msg" in text:                                # every start-menu title has its serve music

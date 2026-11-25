@@ -288,3 +288,23 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
 - **King Kong LE 1.00 held coils:** the right device and coil (spider magnet device 10 at 9:0), the vtables the same as
   1.01's, but each object reads "pulse 3 for 0 ms, hold 30" and the game takes each coil back within 11-16 ms (its
   on-time word +36 set): the game drives those coils itself at that moment on 1.00. Left: hold later in the ball.
+- **Prolonged Competition, all eight offered new builds proven** (King Kong LE 1.00 / 1.01 too, and the 0.97 control):
+  King Kong LE on the rig is not on free play - "ADD CREDITS 1/1.00 3/2.00": its menu shows our entry, lettered
+  COMPETITION / UNTIL POWERED OFF, but START takes nothing without credits, even the game's own STANDARD (STD=1
+  control); the job drops coins first (plunge.py coin 4).
+- **Lights 10/10 but Avengers LE 1.12** (`newbuild/lightsjob.sh`, `lightcheck.py`, the LED view): King Kong x3, Avengers
+  Pro, Metallica, D&D x2, Foo Fighters LE / Pro. Foo Fighters Pro 1.05's RGB OVERLORD had no lamp line: the derive's
+  lamp_draft placed lines by name through a map that kept the LAST insert of a name, so the single OVERLORD (lamp 76)
+  stood in for the RGB one (lamp 46) twice - REVISION 16, each line takes the one of its kind not taken yet. Avengers
+  LE 1.12's LEFT ORBIT / LEFT RAMP / POPS GEM read white in the LED view before and during (green after): the SWELF
+  bulk frames it misses - judge it on the node bus (PAD_NB_TRACE, the wide decoder) as Avengers 1.10 was.
+- **The serve music moved too** (`newbuild/servejob.sh`: PAD_SOUNDLOG=1 + /dump/soundlog.on, a stock game's requests):
+  King Kong 0.97 asks 192, 124, 720, 352 ...; LE 1.00 / 1.01 and Pro 1.01 ask 194, 125, 74x, 354 - serve_music 125.
+  Metallica 1.04's 65 never shows in that job (143, 80, 148, 90): its music comes another way - Metallica 1.05's 65
+  is unverified. Avengers 1.12 and Foo Fighters 1.05 (menus now) need theirs: mark the serve (the ball start's event,
+  or the style hold's co-op run) and read the request after it - test_pad1478 is red on those two until then.
+- **Left for run 8:** serve_music for Avengers LE / Pro 1.12 and Foo Fighters LE / Pro 1.05 (and Metallica's check);
+  Avengers LE 1.12's lights on the bus; King Kong LE 1.00's held coils (a hold later in the ball); the challenge
+  list on the new index menus (challenge_menu_frame, as Godzilla 1.16 / Pokemon 0.87); title scenes; button shots;
+  the build-keyed modules (menu_settings, sound_modes, scene_write) for the new builds; merge main before release
+  (three tests red at the branch's base are green there).

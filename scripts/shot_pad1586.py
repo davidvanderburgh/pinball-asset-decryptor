@@ -49,10 +49,18 @@ def main():
                                                "extract_output": project,
                                                "write_assets": project,
                                                "partition_image": card}}}, f)
+    # the Test card list: a picture, a clip and a sound, made from the Spike 3 card
+    store = os.path.join(scratch, "testcard.json")
+    repl = r"C:\tmp\PAD-1586\repl"
+    with open(store, "w", encoding="utf-8") as f:
+        json.dump({"source": card, "out": "", "items": [
+            {"kind": "image", "label": "MAGENTA LOGO", "path": os.path.join(repl, "magenta.png")},
+            {"kind": "video", "label": "TEST CLIP", "path": os.path.join(repl, "testsrc.mp4")},
+            {"kind": "sound", "label": "TONE", "path": os.path.join(repl, "tone.wav")}]}, f)
     import site
     proc, url = webui_shot.start_server(
         settings, scratch, app_cmd=[sys.executable, launcher],
-        extra_env={"PYTHONPATH": site.getusersitepackages()})
+        extra_env={"PYTHONPATH": site.getusersitepackages(), "PAD_TESTCARD_STORE": store})
     api = lambda m, *a: webui_shot.api(url, m, *a)          # noqa: E731
     state = lambda: webui_shot.state(url)                    # noqa: E731
     out = lambda n: os.path.join(out_dir, ("after_" if after else "before_") + n)  # noqa: E731
@@ -75,9 +83,9 @@ def main():
             page.screenshot(path=out("tabs.png"))
             for key, name, prep in (
                     ("modpack", "modpack.png", None),
+                    ("testcard", "testcard.png", None),
                     ("partitions", "partitions.png",
-                     lambda: api("partitions.open_image", card)),
-                    ("testcard", "testcard.png", None)):
+                     lambda: api("partitions.open_image", card))):
                 try:
                     api("ui.select_tab", key)
                 except Exception as e:                      # noqa: BLE001
@@ -104,6 +112,10 @@ def main():
                         time.sleep(5)
                 page.screenshot(path=out(name))
                 print("shot", out(name), flush=True)
+                ok = page.get_by_role("button", name="OK")     # a modal the step left up
+                if ok.count():
+                    ok.first.click()
+                    time.sleep(1)
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

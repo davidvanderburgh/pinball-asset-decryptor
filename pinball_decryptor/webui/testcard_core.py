@@ -274,12 +274,40 @@ class TestCardList(object):
 def available(mfr):
     """Whether this manufacturer gets the Test card tab and the TEST ticks: Stern Spike 2
     (a test card is made from a Spike 2 card's boot and system, and boots a Spike 2
-    machine) - the multi-boot and the mode runtime both, and not the Spike 3 era."""
+    machine) - the multi-boot and the mode runtime both - and Stern Spike 3 (PAD-1586: a
+    Spike 3 card's own, laid out by mks3multi.py testcard; the same menu, built for the Pi)."""
     caps = getattr(mfr, "capabilities", None)
     if caps is None:
         return False
-    return (bool(getattr(caps, "multiboot", False)) and bool(getattr(caps, "modes", False))
-            and getattr(mfr, "_era", None) != "spike3")
+    if getattr(mfr, "_era", None) == "spike3":
+        return bool(getattr(caps, "multiboot", False))
+    return bool(getattr(caps, "multiboot", False)) and bool(getattr(caps, "modes", False))
+
+
+#: is_spike3_source()'s answers, by (path, size, mtime)
+_S3_SOURCE = {}
+
+
+def is_spike3_source(path):
+    """Is the card image a test card is made from a Stern Spike 3 card (PAD-1586)? Its
+    partition table says (a few sectors, read once per file); a missing file is not."""
+    try:
+        st = os.stat(path)
+    except (OSError, TypeError, ValueError):
+        return False
+    k = (os.path.normcase(os.path.abspath(path)), st.st_size, st.st_mtime)
+    got = _S3_SOURCE.get(k)
+    if got is None:
+        from ..plugins.stern import spike3
+        got = _S3_SOURCE[k] = bool(spike3.is_spike3_card(path))
+    return got
+
+
+#: what a Spike 3 test card leaves off, in the words the build says
+S3_NO_SOUND = ("a Spike 3 machine's menu plays no sound (the cabinet amplifier is the game's to "
+               "start), so the sounds are left off this card")
+S3_NO_NETWORK = ("remote access, Wi-Fi start-up and extra room are for a Spike 2 test card; a "
+                 "Spike 3 one is the size of the card it is made from")
 
 
 _SHARED = []

@@ -133,3 +133,113 @@ def test_spike3_session_shows_mod_pack_transfer_and_explorer_tabs(tmp_path):
         assert tabs["modpack"]["visible"] and tabs["partitions"]["visible"]
         mp = w.state("modpack")
         assert mp["modpack_cap"] and mp["transfer_cap"]
+
+
+# ---- the Spike 3 Test card (run 2) ---------------------------------------------------------------
+import importlib.util                                                   # noqa: E402
+import os                                                               # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _mks3():
+    spec = importlib.util.spec_from_file_location(
+        "mks3multi_1586", os.path.join(ROOT, "tools", "spike3_emu", "mks3multi.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_spike3_test_card_conf_is_the_test_card_menu():
+    mk = _mks3()
+    media = {"rows": [], "volume": 50, "test_files": {"test0.png": "x"},
+             "tests": [("test0.png", "LOGO", "image", None), ("test1.padv", "CLIP", "video", None)]}
+    text = mk.testcard_conf(media, None)
+    lines = text.splitlines()
+    assert "image=img0|TEST CARD|color profile and test pictures" in lines
+    assert "testcard=on" in lines and "timeout=0" in lines
+    assert "test_dir=/games/pad/testcard" in lines
+    assert any(l.startswith("color_profile=0|") and l.endswith("|No change") for l in lines)
+    # the test lines are the ones mkmulticard writes for a Spike 2 test card (one menu reads both)
+    mkc = mk.mkc
+    for l in mkc.conf_test_lines(media["tests"]):
+        assert l in lines
+    # no test files: no test_dir, still the test card menu
+    bare = mk.testcard_conf(None, None).splitlines()
+    assert "testcard=on" in bare and not any(l.startswith("test_dir=") for l in bare)
+
+
+def test_spike3_test_card_refuses_sounds(monkeypatch, tmp_path):
+    mk = _mks3()
+    monkeypatch.setattr(mk, "_need_root", lambda: None)
+    monkeypatch.setattr(mk, "Card", lambda path, keyfile=None: types.SimpleNamespace(path=path))
+    monkeypatch.setattr(mk.mkc, "plan_media", lambda d, n, tests_apart=False: {
+        "tests": [("t.wav", "TONE", "sound", None)], "files": {}, "rows": [], "volume": 50})
+    a = types.SimpleNamespace(primary="c.raw", keyfile=None, media_dir=str(tmp_path), color=None,
+                              selector_dir=str(tmp_path), out=str(tmp_path / "o.raw"), force=False,
+                              workdir=None)
+    with pytest.raises(mk.Refused, match="plays no sound"):
+        mk.testcard_card(a)
+
+
+def test_spike3_build_work_dir_falls_back_to_the_card_store_disk(monkeypatch, tmp_path):
+    mk = _mks3()
+    small, big = tmp_path / "var" / "pad_s3multi", tmp_path / "cards" / "pad_s3multi"
+    (tmp_path / "var").mkdir()
+    (tmp_path / "cards").mkdir()
+    monkeypatch.setattr(mk, "WORKDIRS", (str(small), str(big)))
+    free = {str(small): 38 << 30, str(big): 120 << 30}
+    monkeypatch.setattr(mk.shutil, "disk_usage",
+                        lambda d: types.SimpleNamespace(free=free[os.path.abspath(d)]))
+    assert mk._work_dir(None, 62 << 30) == str(big)
+    assert mk._work_dir(None, 10 << 30) == str(small)
+    with pytest.raises(mk.Refused, match="no Linux folder has room"):
+        mk._work_dir(None, 200 << 30)
+    # --workdir is the one asked for, or a refusal: never another
+    with pytest.raises(mk.Refused):
+        mk._work_dir(str(small), 62 << 30)
+
+
+def test_test_card_commands_take_the_spike3_route(monkeypatch):
+    from pinball_decryptor.webui import multiboot_core as mbc
+    from pinball_decryptor.webui import spike3_key
+    monkeypatch.setattr(spike3_key, "find_keyfile", lambda *a, **k: r"C:\Users\x\.pad\spike3_padkeys.json")
+    form = types.SimpleNamespace(images=[types.SimpleNamespace(path=r"D:\cards\fallout_le-0_82_0_spike3.raw")],
+                                 volume=50, selector_dir=mbc.backend_for("s3").selector_default, tests=[],
+                                 platform="s3", colour_profiles={})
+    cmds = mbc.testcard_commands(form, r"C:\tmp\tc.raw", r"C:\tmp\media",
+                                 test_specs=["--test", "image:/mnt/c/a.png|A"])
+    labels = [l for l, _a in cmds]
+    assert labels == ["selector", "prepare", mbc.TESTCARD_LABEL]
+    prep = [a for l, a in cmds if l == "prepare"][0]
+    prep_text = " ".join(map(str, prep)) if isinstance(prep, (list, tuple)) else repr(prep)
+    assert "--test" in prep_text and "image:/mnt/c/a.png|A" in prep_text
+    # a Spike 2 form keeps mkmulticard's test card
+    form2 = types.SimpleNamespace(**dict(vars(form), platform="stern", selector_dir=mbc.DEFAULT_SELECTOR_DIR))
+    cmds2 = mbc.testcard_commands(form2, r"C:\tmp\tc.raw", r"C:\tmp\media", test_specs=[])
+    assert "mkmulticard.py" in repr(dict(cmds2)[mbc.TESTCARD_LABEL])
+
+
+def test_s3_testcard_builder_argv(monkeypatch):
+    from pinball_decryptor.webui import multiboot_core as mbc
+    from pinball_decryptor.webui import spike3_key
+    monkeypatch.setattr(spike3_key, "find_keyfile", lambda *a, **k: r"C:\Users\x\.pad\spike3_padkeys.json")
+    seen = []
+    monkeypatch.setattr(mbc, "root_command", lambda args, cwd=None, exe="python3": seen.append(list(args)) or args)
+    form = types.SimpleNamespace(images=[types.SimpleNamespace(path=r"D:\cards\fallout.raw")], volume=50,
+                                 selector_dir="", tests=[], platform="s3", colour_profiles={})
+    mbc.testcard_commands(form, r"C:\tmp\tc.raw", r"C:\tmp\media", test_specs=[])
+    argv = seen[-1]
+    assert argv[:2] == [mbc.backend_for("s3").tool, "testcard"]
+    assert argv[argv.index("--primary") + 1] == mbc.wsl(r"D:\cards\fallout.raw")
+    assert argv[argv.index("--selector-dir") + 1] == "/var/tmp/s3select"
+    assert argv[argv.index("--keyfile") + 1] == mbc.wsl(r"C:\Users\x\.pad\spike3_padkeys.json")
+
+
+def test_test_card_source_spike3_detection(s3_disk, tmp_path):
+    from pinball_decryptor.webui import testcard_core as tc
+    assert tc.is_spike3_source(s3_disk) is True
+    other = tmp_path / "spike2.raw"
+    other.write_bytes(b"\0" * 4096)
+    assert tc.is_spike3_source(str(other)) is False
+    assert tc.is_spike3_source(str(tmp_path / "missing.raw")) is False

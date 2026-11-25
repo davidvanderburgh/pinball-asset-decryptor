@@ -39,6 +39,8 @@ tools/jjp_emu/modes/** text eol=lf
 pinball_decryptor/resources/ssh/sshd text eol=lf
 pinball_decryptor/resources/ssh/armv7/** binary
 pinball_decryptor/resources/ssh/aarch64/** binary
+pinball_decryptor/resources/ssh/x86_64/** binary
+pinball_decryptor/resources/ssh/build-x86_64.sh text eol=lf
 # PAD-1467: the Wi-Fi option's card files: a kernel module, and scripts the card's /bin/sh runs
 pinball_decryptor/resources/wifi/88x2bu.ko binary
 pinball_decryptor/resources/wifi/pad-wifi-band text eol=lf

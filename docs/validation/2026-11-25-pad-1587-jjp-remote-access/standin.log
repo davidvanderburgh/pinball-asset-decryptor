@@ -1,0 +1,14 @@
+== restoring the built install's partitions (tools/jjp_emu/mount.sh)
+game=Wonka
+multiboot=0
+rootb=none
+hook: /etc/systemd/system/pad-sshd.service
+unit ExecStart: /usr/local/sbin/pad-sshd start
+server start rc=0 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMxVyj+Q/2jiLgS609+2rEZh/L5PewBH/V15olvwT3KW root@Wonka-standin
+Fingerprint: SHA256:rG21TMzveARW3g3tIqQaWg1hjoL/9e3vcLo9kOexyqA
+loop: 14:57:21 stand-in game started, pid 2301192, message picture a06c7acb0dd8
+game.log lines: 9
+== stopping
+/var/tmp/pad1587/inner.sh: line 49: 2301144 Killed                  unshare -m --propagation private bash -c "mount --bind $T/standin-game $S/jjpe/gen1/Wonka/game && exec setpriv --bounding-set -sys_boot chroot $S /jjpe/gen1/scripts/rungame.sh" < /dev/null > /dev/null 2>&1
+stopped
+== stand-in gone

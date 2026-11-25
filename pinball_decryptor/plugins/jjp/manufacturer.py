@@ -163,6 +163,9 @@ class _WriteWrapper(StandaloneModPipeline):
             # shutil.move handles cross-drive moves on Windows where
             # os.rename would raise OSError(EXDEV).
             shutil.move(produced, target)
+            # PAD-1587: the build's Send record goes with it
+            from .remote_access import move_record
+            move_record(produced, target)
             self._user_log_cb(
                 f"Moved output ISO to: {target}", "success")
             return f"{original_summary}\n\nFinal output: {target}"

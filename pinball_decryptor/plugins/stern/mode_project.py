@@ -3595,6 +3595,11 @@ LAMPS_PROVEN = frozenset((
     #   foo_fighters_pro-1.05: 25/25 RGB, 65/65 single - once its port had the RGB OVERLORD line (REVISION 16; the first
     #   run left it dark: the port addressed only the single OVERLORD, twice)
     "foo_fighters_pro-1.05",
+    #   avengers_infinity_le-1.12: 22/25 RGB, 62/62 single, our layer on top (255) - LEFT ORBIT, LEFT RAMP and POPS GEM
+    #   stay the game's: 1.12 sets them itself (white before and through the mode, green after) past the light layers,
+    #   where the 1.10 control (the same job, NB=1) held all 25 magenta, those three dark before and after - as
+    #   Deadpool LE's arrows (23 of 30) above
+    "avengers_infinity_le-1.12",
     "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "avengers_infinity_pro-1.12", "metallica_spike-1.05",
     "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
 ))

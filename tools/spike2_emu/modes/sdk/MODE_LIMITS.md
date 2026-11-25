@@ -181,7 +181,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Aerosmith LE 1.16 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
-| Avengers: Infinity Quest LE 1.12 | no | ✓ | ✓ | no | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| Avengers: Infinity Quest LE 1.12 | no | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Avengers: Infinity Quest Pro 1.12 | no | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |

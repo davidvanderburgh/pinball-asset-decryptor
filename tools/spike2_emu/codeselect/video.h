@@ -58,6 +58,9 @@ float vid_fps(const struct vid *v);
 int   vid_loops(const struct vid *v);       /* times it has started again */
 /* since the last start: frames shown and frames skipped (late) */
 void  vid_stats(const struct vid *v, int *shown, int *dropped);
+/* a JPEG frame's decode, averaged (ms; -1: none yet, or a clip through the machine's
+ * decoder) - for the log */
+int   vid_decode_ms(struct vid *v);
 /* decoder threads, for the log */
 int   vid_threads(const struct vid *v);
 /* the decode error that stopped a frame, or "" */

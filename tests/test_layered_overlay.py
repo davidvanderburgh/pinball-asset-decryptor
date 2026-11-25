@@ -155,6 +155,20 @@ def test_the_menu_draws_the_scene_over_the_clip():
     assert "codeselect/overlay.c codeselect/overlay.h" in _read(RIG, "padpath.sh")
 
 
+def test_the_demuxers_video_pad_is_linked_when_it_appears():
+    """The table, 2026-11-25 ("the decoder gave no picture size"): linking all five elements at
+    once stops at qtdemux on a real GStreamer 0.10 - its pad is made once the file is read - so
+    nothing reached vpudec.  The game links "video_00" by hand on "pad-added"; so does the menu."""
+    c = _read(SEL, "gstclip.c")
+    assert 'G.signal_connect(g->demux, "pad-added", (void *)on_pad_added, g, NULL, 0);' in c
+    assert "G.link_many(g->src, g->demux, NULL)" in c
+    assert "G.link_many(g->queue, g->dec, g->sink, NULL)" in c
+    assert "G.link_many(g->src, g->demux, g->queue" not in c
+    assert 'strncmp(name, "video", 5)' in c and "G.pad_link(pad, sinkpad)" in c
+    for s in ('sym("gst_pad_link")', 'sym("gst_object_get_name")', 'sym("g_free")'):
+        assert s in c
+
+
 def test_closing_a_clip_waits_for_a_frame_under_way():
     """2026-11-23: backing out of a clip crashed the menu in the emulator - its video bridge
     handed a frame over after set_state(NULL) - so the close waits, and a late frame leaves."""

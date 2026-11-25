@@ -107,7 +107,10 @@ const struct art_image *ovl_at(struct ovl *o, long long ms, int *x, int *y)
     if ((int)p != o->cur) {
         int w = 0, h = 0;
         char why[200] = "";
+        long long t0 = sel_now_ms();
         unsigned char *px = art_jpeg_decode(o->buf + u32(e + 8), (int)u32(e + 12), &w, &h, why, sizeof why);
+        if (px) sel_log("overlay: picture %u (%dx%d) for frame %lld, %lld ms to decode",
+                        (unsigned)p, w, h, k, sel_now_ms() - t0);
         if (!px) {
             snprintf(o->err, sizeof o->err, "picture %u: %s", (unsigned)p, why);
             return NULL;

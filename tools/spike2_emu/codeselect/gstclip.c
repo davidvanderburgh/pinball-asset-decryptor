@@ -85,6 +85,11 @@ static struct {
     int (*seek)(void *, double, int, int, int, long long, int, long long);
     void *(*buf_alloc)(unsigned);
     void (*mini_unref)(void *);
+    /* qtdemux's pad is made once the file is read ("pad-added"); the game links its
+     * "video_00" by hand, as this does (its own imports: gst_pad_link, gst_object_get_name) */
+    int (*pad_link)(void *, void *);
+    char *(*object_name)(void *);
+    void (*g_free)(void *);
     int off_data, off_size;
 } G;
 
@@ -144,6 +149,9 @@ static int load(void)
     G.query_duration = sym("gst_element_query_duration");
     G.seek = sym("gst_element_seek");
     G.buf_alloc = sym("gst_buffer_new_and_alloc");
+    G.pad_link = sym("gst_pad_link");
+    G.object_name = sym("gst_object_get_name");
+    G.g_free = sym("g_free");
     /* optional: the frame format and rate.  NOT under the emulator's bridge
      * (padgst.so, found by its own pad_vid_prepare): its caps are a stand-in
      * that only answers width and height, and the real library reading one
@@ -189,6 +197,8 @@ struct gclip {
      * thread and was still doing so after set_state(NULL): backing out of a test clip
      * crashed the menu (2026-11-23).  Real GStreamer stops its streaming thread first. */
     int closing, in_cb;
+    int linked;                     /* the demuxer's video pad reached the decoder */
+    int short_said;                 /* a too-short frame has been logged */
     char err[200];
     char path[600];
 };
@@ -258,6 +268,15 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     int back;
     (void)sink; (void)pad;
     if (!px || !g->ow) return;
+    /* a frame too short for its picture (not decoded YUV) is skipped, never read past */
+    if ((unsigned long long)size < (unsigned long long)g->w * g->h * 3 / 2) {
+        pthread_mutex_lock(&g->mu);
+        if (!g->short_said) sel_log("clip: a %u-byte frame for a %dx%d picture: skipped", size, g->w, g->h);
+        g->short_said = 1;
+        g->dropped++;
+        pthread_mutex_unlock(&g->mu);
+        return;
+    }
     pthread_mutex_lock(&g->mu);
     if (g->closing) { pthread_mutex_unlock(&g->mu); return; }
     g->in_cb++;
@@ -271,6 +290,34 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     g->made++;
     g->last_frame_ms = now_ms();
     pthread_mutex_unlock(&g->mu);
+}
+
+/* qtdemux's "pad-added": its video pad to the queue, as the game does ("video_00");
+ * an audio pad is left alone - nothing here plays a clip's sound through GStreamer.
+ * The table found this (Simon, 2026-11-25: "the decoder gave no picture size"):
+ * gst_element_link_many cannot link a pad that is not there yet, so nothing past the
+ * demuxer was ever fed.  The emulator's bridge never looked at the links. */
+static void on_pad_added(void *demux, void *pad, void *data)
+{
+    struct gclip *g = data;
+    char *name = G.object_name(pad);
+    void *sinkpad;
+    (void)demux;
+    if (!name || strncmp(name, "video", 5)) {
+        sel_log("clip: demuxer pad %s left alone", name ? name : "(no name)");
+        if (name) G.g_free(name);
+        return;
+    }
+    sinkpad = G.static_pad(g->queue, "sink");
+    if (!sinkpad) {
+        sel_log("clip: the queue has no sink pad for %s", name);
+    } else {
+        int r = G.pad_link(pad, sinkpad);        /* GST_PAD_LINK_OK is 0 */
+        sel_log("clip: demuxer pad %s linked to the decoder (%d)", name, r);
+        if (r == 0) g->linked = 1;
+        G.object_unref(sinkpad);
+    }
+    G.g_free(name);
 }
 
 /* the size (and format) vpudec negotiated with the sink */
@@ -309,7 +356,13 @@ struct gclip *gclip_open(const char *path, int max_w, int max_h, char *err, int 
     g->src = G.factory_make("filesrc", "src");
     g->demux = G.factory_make("qtdemux", "demux");
     g->queue = G.factory_make("queue", "queue");
-    g->dec = G.factory_make("vpudec", "dec");
+    {
+        /* CODESELECT_CLIP_DECODER: another element in vpudec's place, for a test under qemu
+         * against the card's real GStreamer (there is no video chip there: "identity"
+         * passes the demuxer's frames on, which proves the links) */
+        const char *dn = getenv("CODESELECT_CLIP_DECODER");
+        g->dec = G.factory_make(dn && *dn ? dn : "vpudec", "dec");
+    }
     g->sink = G.factory_make("fakesink", "sink");
     if (!g->pipe || !g->src || !g->demux || !g->queue || !g->dec || !g->sink) {
         snprintf(err, errlen, "clip: the card's GStreamer lacks %s",
@@ -322,13 +375,27 @@ struct gclip *gclip_open(const char *path, int max_w, int max_h, char *err, int 
     G.object_set(g->sink, "signal-handoffs", 1, "sync", 1, NULL);
     G.signal_connect(g->sink, "handoff", (void *)on_handoff, g, NULL, 0);
     G.bin_add_many(g->pipe, g->src, g->demux, g->queue, g->dec, g->sink, NULL);
-    /* qtdemux's pad appears once the file is read: 0.10 links it then */
-    G.link_many(g->src, g->demux, g->queue, g->dec, g->sink, NULL);
+    /* filesrc -> qtdemux now; qtdemux -> queue when its video pad appears (on_pad_added);
+     * queue -> vpudec -> fakesink now.  Linking all five at once, as this first did, stops
+     * at the demuxer on a real GStreamer: its pad does not exist yet. */
+    G.signal_connect(g->demux, "pad-added", (void *)on_pad_added, g, NULL, 0);
+    {
+        int a = G.link_many(g->src, g->demux, NULL), b = G.link_many(g->queue, g->dec, g->sink, NULL);
+        /* said, not refused: the preroll below is the test, and the emulator's bridge
+         * answers for links it never makes */
+        sel_log("clip: linked file -> demuxer %s, queue -> decoder -> sink %s", a ? "yes" : "NO", b ? "yes" : "NO");
+    }
     r = G.set_state(g->pipe, GST_STATE_PAUSED);
     if (r == GST_STATE_CHANGE_FAILURE) { snprintf(err, errlen, "clip: %s would not start", path); goto fail; }
     /* preroll: up to 5 s for the first frame to reach the sink */
-    G.get_state(g->pipe, &st, &pend, 5000000000ULL);
-    if (!read_caps(g)) { snprintf(err, errlen, "clip: the decoder gave no picture size for %s", path); goto fail; }
+    r = G.get_state(g->pipe, &st, &pend, 5000000000ULL);
+    sel_log("clip: preroll state %d (now %d, pending %d), video pad %s", r, st, pend,
+            g->linked ? "linked" : "NOT linked");
+    if (!read_caps(g)) {
+        snprintf(err, errlen, "clip: the decoder gave no picture size for %s%s", path,
+                 g->linked ? "" : " (the file's video never reached the decoder)");
+        goto fail;
+    }
     g->ow = g->w;
     g->oh = g->h;
     if (g->ow > max_w || g->oh > max_h) {       /* fitted down, never up */

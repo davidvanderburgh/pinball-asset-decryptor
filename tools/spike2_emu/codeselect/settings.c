@@ -117,6 +117,8 @@ struct state {
     int t_vloops;                            /* its loops so far: a new one restarts the sound */
     long long t_vstart;                      /* when it last started */
     struct ovl *t_ovl;                       /* the scene over it (overlay.h), or NULL */
+    long long t_perf_due, t_draw_ms;         /* the video's 5 s account in the log */
+    int t_draws;
     /* Simon (2026-11-22): on a moving test item "quick press to freeze, long press to back
      * out" with the button that backs out of a test (ACTION on a test card) */
     int t_frozen;                            /* the frame shown is held */
@@ -422,7 +424,15 @@ static void test_unload(struct state *st)
 {
     if (st->t_img) { art_image_free(st->t_img); st->t_img = NULL; }
     if (st->t_anim) { art_anim_free(st->t_anim); st->t_anim = NULL; }
-    if (st->t_vid) { vid_close(st->t_vid); st->t_vid = NULL; }
+    if (st->t_vid) {
+        int shown = 0, dropped = 0;
+        vid_stats(st->t_vid, &shown, &dropped);
+        sel_log("test: the video ran %lld ms: %d frames shown, %d late, a JPEG frame %d ms to decode on %d thread%s",
+                sel_now_ms() - st->t_vstart, shown, dropped, vid_decode_ms(st->t_vid), vid_threads(st->t_vid),
+                vid_threads(st->t_vid) == 1 ? "" : "s");
+        vid_close(st->t_vid);
+        st->t_vid = NULL;
+    }
     if (st->t_ovl) { ovl_close(st->t_ovl); st->t_ovl = NULL; }
     if (st->t_vsound) {
         /* its voice fades out first: the clip is freed when that is over */
@@ -1265,10 +1275,29 @@ void settings_run(struct settings_env *e)
             }
         }
         if (st.screen == S_TEST && !dirty) {
+            long long t_draw = now;
             int tick = test_tick(&st, now);
-            if (tick == 1) draw_test_frame(&st);
-            else if (tick) dirty = 1;
+            if (tick == 1) {
+                draw_test_frame(&st);
+                st.t_draw_ms += sel_now_ms() - t_draw;
+                st.t_draws++;
+            } else if (tick) dirty = 1;
         }
+        /* A VIDEO'S OWN ACCOUNT every 5 s, for the log (the table, 2026-11-25: 0.1 fps) */
+        if (st.screen == S_TEST && st.t_vid && now >= st.t_perf_due) {
+            int shown = 0, dropped = 0;
+            if (st.t_perf_due) {
+                vid_stats(st.t_vid, &shown, &dropped);
+                sel_log("test: video at %lld ms: %d shown, %d late, decode %d ms, draw %lld ms a frame (%d draws)%s",
+                        now - st.t_vstart, shown, dropped, vid_decode_ms(st.t_vid),
+                        st.t_draws ? st.t_draw_ms / st.t_draws : -1, st.t_draws,
+                        st.t_frozen ? ", frozen" : "");
+            }
+            st.t_perf_due = now + 5000;
+            st.t_draw_ms = 0;
+            st.t_draws = 0;
+        }
+        if (st.screen != S_TEST || !st.t_vid) st.t_perf_due = 0;
         /* the test pictures are looked at, not pressed: a longer wait there
          * (unless the tests shortened every wait) */
         long long wait = st.screen == S_TEST && idle == SETTINGS_IDLE_MS ? TEST_IDLE_MS : idle;

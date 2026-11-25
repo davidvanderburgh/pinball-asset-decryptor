@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
+#include <time.h>
 #include "video.h"
 #include "art.h"
 #include "gstclip.h"
@@ -44,9 +45,19 @@ struct vid {
     int gen;                  /* bumped by a restart: in-flight decodes are thrown away */
     int stop;
     int shown, dropped;
+    /* what a decode costs on this machine (the log: Simon's table ran a 1360x768 .padv at
+     * 0.1 fps on 2026-11-25, which no emulator run came near) */
+    long long dec_ms, dec_n;
     struct art_image out;
     char err[200];
 };
+
+static long long mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 static unsigned rd32(const unsigned char *p)
 {
@@ -71,6 +82,7 @@ static void *decoder(void *arg)
         long long k = v->next_k;
         struct slot *s = &v->slot[k % v->R];
         int gen, fk, ok = 0, w = 0, h = 0;
+        long long t_dec;
         size_t len;
         unsigned char *rgba;
         char why[160] = "";
@@ -90,6 +102,7 @@ static void *decoder(void *arg)
         pthread_mutex_unlock(&v->mu);
 
         fk = (int)(k % v->n);
+        t_dec = mono_ms();
         len = v->off[fk + 1] - v->off[fk];
         if (len > cap) {
             unsigned char *nb = realloc(buf, len);
@@ -112,6 +125,10 @@ static void *decoder(void *arg)
         }
 
         pthread_mutex_lock(&v->mu);
+        if (ok) {
+            v->dec_ms += mono_ms() - t_dec;
+            v->dec_n++;
+        }
         if (gen != v->gen) {
             s->state = SL_EMPTY;            /* a restart came while it decoded */
         } else {
@@ -332,6 +349,16 @@ void vid_stats(const struct vid *v, int *shown, int *dropped)
     if (v->gc) { gclip_stats(v->gc, shown, dropped); return; }
     if (shown) *shown = v->shown;
     if (dropped) *dropped = v->dropped;
+}
+
+int vid_decode_ms(struct vid *v)
+{
+    int r;
+    if (v->gc) return -1;
+    pthread_mutex_lock(&v->mu);
+    r = v->dec_n ? (int)(v->dec_ms / v->dec_n) : -1;
+    pthread_mutex_unlock(&v->mu);
+    return r;
 }
 
 const char *vid_error(const struct vid *v)

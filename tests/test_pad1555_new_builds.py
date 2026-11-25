@@ -119,3 +119,16 @@ def test_the_coil_record_size_is_the_build_s_own():
     for key in NEW:
         text = (PORTS / (key + ".port")).read_text(encoding="utf-8")
         assert bool(re.search(r"^value coil_rec_size\s+0x70", text, re.M)) == (key in big), key
+
+
+def test_the_scoop_event_argument_is_the_title_s_own():
+    """PAD-1555: which argument a title's scoop handler takes its event in is the title's (D&D's and Venom's the
+    second). Two titles naming `scoop_event_arg 1` made it look like the framework's, so King Kong's, Avengers',
+    Foo Fighters' and Metallica's November ports took it - and King Kong's scoop held no ball in the emulator."""
+    from pinball_decryptor.plugins.stern import port_derive as D
+    assert G.REVISION >= 15
+    for n in ("scoop_event", "scoop_event_arg"):
+        assert n in G.TITLE_VALUES and not D.framework_value(n)
+    for port in PORTS.glob("*.port"):
+        has = bool(re.search(r"^value scoop_event_arg\s", port.read_text(encoding="utf-8"), re.M))
+        assert not has or port.stem.startswith(("dungeons_and_dragons", "venom")), port.stem

@@ -868,14 +868,30 @@ def _gpm_singleton(e):
     return singles.pop() if len(singles) == 1 else None
 
 
+#: PAD-1555: where an adapter entry's flag is (index +0, flag +4, messages +6, +8, +10)
+GPM_FLAG_AT = 4
+#: PAD-1555: the most an adapter object holds before its table (Foo Fighters 1.05: 40 bytes)
+GPM_HEAD_MAX = 64
+
+
 def _gpm_table(e):
     """(table va, entries) of the GamePlayModeAdapter's table, by its accessors' one shape; (None, 0)."""
-    w, found = e.words, set()
-    for k in range(len(w) - 4):
+    w, found, flag_at = e.words, set(), set()
+    for k in range(len(w) - 5):
         if w[k] & 0xFFFFFF00 == 0xE3510000 and w[k + 1] == 0x90611181 and w[k + 2] & 0xFFF0F000 == 0x93003000 \
                 and w[k + 3] & 0xFFF0F000 == 0x93403000 and w[k + 4] == 0x90831101:
             found.add((_imm16(w[k + 3]) << 16 | _imm16(w[k + 2]), (w[k] & 0xFF) + 1))
-    return found.pop() if len(found) == 1 else (None, 0)
+            z = w[k + 5]
+            if z & 0xFFF0F0F0 == 0x91D000B0 and (z >> 16) & 0xF == 1:          # ldrhls r0, [r1, #off]: the flag
+                flag_at.add(((z >> 4) & 0xF0) | (z & 0xF))
+    if len(found) != 1:
+        return None, 0
+    tbl, n = found.pop()
+    # PAD-1555: Foo Fighters 1.05's adapter keeps its table 40 bytes into the object its accessors load (their fields
+    # at +0x2c, +0x34, +0x38 where Metallica's are at +4, +0xc, +0x10); the entries start where the flag's field says
+    if len(flag_at) == 1:
+        tbl += flag_at.pop() - GPM_FLAG_AT
+    return tbl, n
 
 
 def _gpm_entries(e, tbl, n):
@@ -883,13 +899,17 @@ def _gpm_entries(e, tbl, n):
     its stores (str/strh/strb, immediate, register and post-indexed offsets) emulated from immediates, and its string
     assignments (bl with r0 = an entry's name field, r1 = a C string)."""
     w, base = e.words, e.text_va
+
+    def ours(a):
+        # the table, or (PAD-1555: Foo Fighters 1.05) the object it sits in, a header before it
+        return a is not None and 0 <= tbl - a <= GPM_HEAD_MAX
     for k in range(len(w) - 1):
         x = w[k]
         if x & 0xFF7F0000 == 0xE51F0000:                     # ldr rX, =tbl
-            if _lit(e, base + 4 * k, x) != tbl:
+            if not ours(_lit(e, base + 4 * k, x)):
                 continue
-        elif not (x & 0xFFF00000 == 0xE3000000 and _imm16(x) == tbl & 0xFFFF and any(
-                z & 0xFFF00000 == 0xE3400000 and (z >> 12) & 0xF == (x >> 12) & 0xF and _imm16(z) == tbl >> 16
+        elif not (x & 0xFFF00000 == 0xE3000000 and any(
+                z & 0xFFF00000 == 0xE3400000 and (z >> 12) & 0xF == (x >> 12) & 0xF and ours(_imm16(z) << 16 | _imm16(x))
                 for z in w[k + 1:k + 4])):
             continue
         regs, mem, names = {}, {}, {}
@@ -947,13 +967,32 @@ def _gpm_entries(e, tbl, n):
                         mem.pop(addr, None)
         if sum(1 for v in names.values() if v) < 3:
             continue
+        at = _gpm_msgs_at(e, tbl, n, mem, names)
         out = {}
         for i in range(n):
             a = tbl + GPM_ENTRY * i
             out[i] = {"index": mem.get(a), "flag": mem.get(a + 4),
-                      "msgs": tuple(mem.get(a + o) for o in (6, 8, 10)), "name": names.get(i, "")}
+                      "msgs": tuple(mem.get(a + o) for o in (at, at + 2, at + 4)), "name": names.get(i, "")}
         return out
     return {}
+
+
+def _gpm_msgs_at(e, tbl, n, mem, names):
+    """Where an adapter entry's three messages start (caption, the line under it, a third): +6 (Metallica, Foo
+    Fighters), or +8 where the program letters STANDARD there on the plain entry - PAD-1555: Avengers 1.12's entries keep
+    a colour pair at +6 (Yel-Org, Red-Wht) and their messages one field on."""
+    table, count = message_table(e)
+    if not table:
+        return 6
+    for i in range(n):
+        if names.get(i) != "sys_standard" or mem.get(tbl + GPM_ENTRY * i + 4):
+            continue
+        for at in (6, 8):
+            m = mem.get(tbl + GPM_ENTRY * i + at)
+            if m is not None and m < count and message_text(e, table, m) == "STANDARD":
+                return at
+        break
+    return 6
 
 
 def gpm_lines(e, names, on_flag, debug=False):

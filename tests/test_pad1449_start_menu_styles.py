@@ -289,6 +289,10 @@ int main(void)
     assert "if (smn.shaping) {" in R._lift(src, "static void sty_menu_walk(pm_reg *buttons, unsigned lbit, unsigned rbit)")
 
 
+NOV_2026 = {"king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "metallica_spike-1.05", "avengers_infinity_le-1.12",
+            "avengers_infinity_pro-1.12", "foo_fighters_le-1.05", "foo_fighters_pro-1.05"}
+
+
 def test_round3_the_index_menu_ports_name_standards_caption():
     seen = 0
     for port in PORTS.glob("*.port"):
@@ -296,9 +300,11 @@ def test_round3_the_index_menu_ports_name_standards_caption():
         if "comp_menu_end_msg" not in text:
             continue
         got = re.findall(r"^value comp_menu_end_caption_msg +(\d+)", text, re.M)
-        assert got == ["1914"], port.name                              # STANDARD, beside its NORMAL PLAY (1915)
+        # STANDARD, beside its NORMAL PLAY (1915); PAD-1555: Stern's November 2026 builds have one message more before
+        # it (1914 FLIPPERS TO CHANGE/START SELECTS), STANDARD 1915 beside NORMAL PLAY 1916
+        assert got == (["1915"] if port.stem in NOV_2026 else ["1914"]), port.name
         seen += 1
-    assert seen == 16                                                  # PAD-1477: + Godzilla Pro 1.15; PAD-1555: King Kong x3, Metallica 1.05
+    assert seen == 20                                                  # PAD-1477: + Godzilla Pro 1.15; PAD-1555: + 8
     from pinball_decryptor.plugins.stern import prolonged_comp as P
     assert "standard_caption(e)" in pathlib.Path(P.__file__).read_text(encoding="utf-8")   # frame_lines writes it
 

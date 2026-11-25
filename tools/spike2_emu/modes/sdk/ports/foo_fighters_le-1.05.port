@@ -487,7 +487,6 @@ value show_count          198
 value backdrop_video_at      0x54
 value backdrop_scene_at      0x18
 value scoop_event          2
-value scoop_event_arg      1
 value control_gates_ctl   32
 value control_gates_devoff 4
 value control_gates_off_slot 30
@@ -909,6 +908,22 @@ site  serve_ball         0x0021a0e8 0xeb023859 0xe3a00026
 site  audit_add              0x004157a0 0xe92d43f0 0xe2505000
 site  coop_icon_draw         0x001d55a4 0xebfffdf3 0xe1560004
 site  coop_up_call           0x000bac54 0xeb0d5a55 0xe3500003
+# ---- PAD-1555: this build's start menu is a menu of game-mode table indices now (the earlier build's
+# challenge_menu loop is gone); its frame read off the program (prolonged_comp.frame_lines)
+# PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again
+site  comp_menu_frame        0x000deb98 0xe0833106 0xe51330e4
+value comp_menu_frame_list_at    420
+value comp_menu_frame_count_at   72
+value comp_menu_frame_count_last 0
+value comp_menu_frame_cap        13   # the game-mode table's entries
+value comp_menu_frame_cursor_reg 6
+value comp_menu_frame_buttons_reg 7
+value comp_menu_index            3   # COMPETITION
+value comp_menu_index_msg        1921
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1916
+value comp_menu_end_caption_msg  1915   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
+value comp_menu_challenge_0      10   # PAD-1449: a challenge's index (the style chooser follows it)
 site  challenge_scores       0x00410a78 0xe92d4ff0 0xe24dd0bc
 site  challenge_score_entry  0x0040ffac 0xe1a03000 0xe30406a8
 site  challenge_scores_gate  0x00410ce4 0xebf83da5 0xe3500000

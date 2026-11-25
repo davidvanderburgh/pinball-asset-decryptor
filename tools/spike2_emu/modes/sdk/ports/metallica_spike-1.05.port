@@ -395,7 +395,7 @@ value game_flags_at          4
 value wizard_flag_1      50    # FG_BLACKENED_MULTIBALL_ACTIVE
 value wizard_proc_2      223   # its own process, which the start creates
 value serve_music          65
-value coop_ball_msg          1255
+value coop_ball_msg          1256   # PAD-1555: "BALL %d" moved one on (1914 FLIPPERS TO CHANGE/START SELECTS is new)
 value comp_menu_frame_list_at    652
 value comp_menu_frame_count_at   28
 value comp_menu_frame_count_last 1   # the count slot holds the last index
@@ -403,10 +403,10 @@ value comp_menu_frame_cap        17   # the game-mode table's entries
 value comp_menu_frame_cursor_reg 10
 value comp_menu_frame_buttons_reg 5
 value comp_menu_index            3   # COMPETITION
-value comp_menu_index_msg        1920
+value comp_menu_index_msg        1921
 value comp_menu_end_index        1   # STANDARD
-value comp_menu_end_msg          1915
-value comp_menu_end_caption_msg  1914   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
+value comp_menu_end_msg          1916
+value comp_menu_end_caption_msg  1915   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
 value comp_menu_challenge_0      8   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_1      9   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_2      10   # PAD-1449: a challenge's index (the style chooser follows it)
@@ -414,17 +414,16 @@ value comp_menu_challenge_3      11   # PAD-1449: a challenge's index (the style
 value comp_menu_challenge_4      12   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_5      13   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_6      14   # PAD-1449: a challenge's index (the style chooser follows it)
-value comp_menu_challenge_msg_0  3691   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_1  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_2  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_3  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_4  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_5  3665   # PAD-1449 round 2: its name message (the menu's style step letters it)
-value comp_menu_challenge_msg_6  3656   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_0  3693   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_1  3666   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_2  3666   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_3  3666   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_4  3666   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_5  3666   # PAD-1449 round 2: its name message (the menu's style step letters it)
+value comp_menu_challenge_msg_6  3657   # PAD-1449 round 2: its name message (the menu's style step letters it)
 value show_count          531
 value backdrop_video_at      0x54
 value backdrop_scene_at      0x18
-value scoop_event_arg      1
 value orbit_gates_ctl     12
 value orbit_gates_off_slot 5
 value song_now_at            0x160

@@ -54,7 +54,9 @@ import numpy as np
 #: `own_ret_scanned` and `own_pass_*` are never copied (PAD-1555: a copied `own_ret_scanned 1` came with no list)
 #: 14: another title's value is copied only when two titles or more name it and every other-title reference agrees on
 #: it (PAD-1555: the November 2026 builds' derivations took other titles' coil devices, drives and message numbers)
-REVISION = 14
+#: 15: the scoop's event and which argument its handler takes it in are the title's (PAD-1555: D&D's and Venom's
+#: `scoop_event_arg 1` reached King Kong, Avengers, Foo Fighters and Metallica, whose handlers take it in the first)
+REVISION = 15
 RECIPE_FORMAT = 1
 #: PAD-1389: the event map's format (:func:`compile_busmap`)
 BUSMAP_FORMAT = 1
@@ -93,7 +95,10 @@ TITLE_VALUES = ("light_owner", "light_lts", "award_screen_type", "magnet_shot", 
                 # PAD-714: the START and "active?" slots of the title's own mode classes' vtables (Godzilla's cmode
                 # 8 / 14, the crule titles' 33-41 / 39-49): another title's called another virtual (Foo Fighters 1.03
                 # was derived with 38 / 44, its own 41 / 49); a derived port reads its START slot off its own program
-                "stock_slot_start", "stock_slot_active")
+                "stock_slot_start", "stock_slot_active",
+                # PAD-1555: the scoop's event and the argument its handler reads it from (D&D's and Venom's handlers
+                # take it in the second; King Kong's, Metallica's in the first - another title's held no ball)
+                "scoop_event", "scoop_event_arg")
 #: values that are a shot mask, not an address, however large: copied within a title
 SHOT_VALUES = ("magnet_shot",)
 MIN_N, MAX_N = 8, 48

@@ -572,9 +572,12 @@ def merge(drafts, refs, tgt, game, version, family):
                 seen.setdefault(w[0], (set(), set()))
                 seen[w[0]][0].add(w[1])
                 seen[w[0]][1].add(t.split("_")[0])
+    # two titles, where the references hold two other titles or more (one other title's references are all there is
+    # to go by: Batman derived off Godzilla alone keeps the framework's event list)
+    others = {by_ref[d["ref"]].game.split("_")[0] for d in ranked if not _same_title(game, by_ref[d["ref"]].game)}
     def shared(n):
         v = seen.get(n)
-        return framework_value(n) and v is not None and len(v[0]) == 1 and len(v[1]) >= 2
+        return framework_value(n) and v is not None and len(v[0]) == 1 and len(v[1]) >= min(2, len(others))
     left_off = set()
     if not same:
         left_off = {n for n, _r in values if not shared(n)}

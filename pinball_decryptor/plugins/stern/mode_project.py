@@ -976,6 +976,10 @@ SCOOP_PROVEN = frozenset({
     "elvira3-1.13",                    # PAD-420 2026-10-08 scoop_job6 (stock card, hidden, muted; the Crypt VUK; coins one at a time after the tech alerts): no mode, kicked 1667 ms after landing; scoop_hold 4000, 5550 ms (held 4000); a mode stop 2.5 s into a hold, let go at once (held 1834), kicked 885 ms after the stop; after the mode, 1558 ms ([coildrive] node 9 coil 1, 255 for 60 ms); no abort
     "metallica_spike-1.04",            # PAD-420 2026-10-08 scoop_job6 (stock card, hidden, muted; the RT EJECT; coins one at a time after the tech alerts - its earlier run had no game): no mode, the game kept its first landing and kicked 7690 ms after; scoop_hold 4000, 5557 ms (held 4000); a mode stop 2.5 s into a hold, let go at once (held 1967), kicked 1041 ms after the stop; after the mode, 1558 ms ([coildrive] node 8 coil 8, 255 for 30 ms); no abort
     "james_bond_60th_le-1.11",         # PAD-420 2026-10-08 scoop_job4 (stock card, hidden, muted; the TOP LEFT SCOOP): no mode, kicked 3312 ms after landing; scoop_hold 4000: settled 0.8 s after landing, held 4000 ms, the game's kick 344 ms after the let-go (5130 ms after landing - its own kick, 2.5 s after the settle, waited for the hold); a mode stop 2.5 s into a hold let go at once (held 1917), kicked 623 ms after the stop; after the mode, 3162 ms ([coildrive] node 9 coil 1, 125 for 90 ms); no abort
+    # PAD-1555 2026-11-24 newbuild/scoopjob.sh (rigbatch, stock cards, hidden, muted; switch 49 held 8 s under a
+    # `scoop_hold 4000` mode): a ball settled - held 4000 ms, let go after 4008 ms (its time ran out), the game's kick
+    # node 8 coil 8 140/255 60 ms after it
+    "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
     "king_kong_pro-0.97",              # PAD-420 2026-10-08 scoop_job6 (stock card staged on the NVMe, hidden, muted; the KONG CAVE VUK, King Kong LE's twin handler - its run-18 segvs were the D: card stall): no mode, kicked 1723 ms after landing; scoop_hold 4000, 5724 ms (held 4016); a mode stop 2.5 s into a hold, let go at once (held 2050), kicked 1253 ms after the stop; after the mode, 1718 ms ([coildrive] node 8 coil 8, 150 for 60 ms); no abort
 })
 
@@ -3383,6 +3387,14 @@ SPARE_IO_PROVEN = frozenset({
     # closing came as the mode's shot in a game and the spare output 1:1 went out on the bus; the game never drove it
     "aerosmith_le-1.15", "avengers_infinity_le-1.09", "batman-1.13", "guardians_le-1.14", "iron_maiden_le-1.16",
     "mando_le-1.44", "rush_le-1.18", "stranger_things_le-1.12", "sword_of_rage_le-1.18", "turtles_pro-1.58",
+    # PAD-1555, Stern's November 2026 builds (2026-11-24 newbuild/sparejob.sh, rigbatch, stock cards, hidden, muted, 11/11
+    # with the Avengers LE 1.10 control): the spare input closed through /dump/spare_in in a game came as the
+    # instrument's pulse, and the spare output 1:1 went out as [coildrive] node 1 coil 1 200/30 ms (16-coil boards:
+    # spare_io's FRAME16 / OFF16)
+    "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01",          # input 8:39
+    "avengers_infinity_le-1.12", "avengers_infinity_pro-1.12",               # 8:11, 8:8
+    "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",         # 8:8
+    "foo_fighters_le-1.05", "foo_fighters_pro-1.05", "metallica_spike-1.05",  # 8:23, 8:14, 8:14
     # PAD-1329, Spike 3 (64-bit: the switch struct's entries and node blocks of their own, the fire and OFF read off each
     # program; tools/spike3_emu/proofs PROOF=spare, spare_sweep_mode.c, rig slot 97, hidden, muted, 2026-11-16):
     "star_wars_elg-1.10/spike3",   # the struct checked out (69 switches), spare input 8:37 closed on the board came as

@@ -574,10 +574,10 @@ value comp_menu_frame_cap        9   # the game-mode table's entries
 value comp_menu_frame_cursor_reg 5
 value comp_menu_frame_buttons_reg 6
 value comp_menu_index            2   # COMPETITION
-value comp_menu_index_msg        1920
+value comp_menu_index_msg        1921
 value comp_menu_end_index        1   # STANDARD
-value comp_menu_end_msg          1915
-value comp_menu_end_caption_msg  1914   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
+value comp_menu_end_msg          1916
+value comp_menu_end_caption_msg  1915   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
 value game_flags_at       4
 value show_count          319
 value backdrop_video_at      0x54
@@ -585,7 +585,6 @@ value backdrop_scene_at      0x18
 value control_gates_ctl   32
 value control_gates_devoff 4
 value control_gates_off_slot 30
-value scoop_event_arg      1
 value gate_devoff         18
 value orbit_gates_ctl     12
 value orbit_gates_off_slot 5

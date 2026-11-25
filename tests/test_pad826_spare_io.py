@@ -253,7 +253,7 @@ def test_only_a_proven_build_offers_them():
     assert profiles["godzilla_pro_1_16"].spare == ("in", "out")
     spike2 = {k for k in MP.SPARE_IO_PROVEN if not k.endswith("/spike3")}        # PAD-1329 adds Spike 3 builds
     s2 = [p for p in profiles.values() if not p.key.endswith("_spike3")]        # Spike 3's: test_pad1329
-    assert sum(1 for p in s2 if p.spare == ("in", "out")) == len(spike2) == 69
+    assert sum(1 for p in s2 if p.spare == ("in", "out")) == len(spike2) == 79   # PAD-1555: + 10
     for p in s2:
         key = "%s-%s" % (p.key.rsplit("_", 2)[0], ".".join(p.key.rsplit("_", 2)[1:]))
         if key not in MP.SPARE_IO_PROVEN:

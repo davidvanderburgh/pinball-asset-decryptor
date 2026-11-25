@@ -175,6 +175,8 @@ def test_every_shipped_build_gets_a_verdict_with_the_game_named():
             seen.add("%s-%s" % (p.game_dir, p.version))
         elif "%s-%s" % (p.game_dir, p.version) in MP.CHALLENGE_MENU_PROVEN:    # PAD-619: only its own, on the menu
             assert p.can("challenge") and p.challenge_menu and not p.challenges, key
+        elif "%s-%s" % (p.game_dir, p.version) in MP.CHALLENGE_MENU_FRAME_PROVEN:   # PAD-1555: a plain MODE CHALLENGE
+            assert p.can("challenge") and p.challenge_menu, key                     # on an index menu (Avengers 1.12)
         else:
             assert not p.can("challenge") and p.label in p.why_not("challenge"), key
     assert seen == set(MP.CHALLENGE_PROVEN) >= set(PORTS)          # PAD-619: + the flag route's (Rush, ..)

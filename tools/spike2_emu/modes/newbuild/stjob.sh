@@ -6,7 +6,7 @@
 #   WIZ=1          the GAME's own multiball instead: slot 0 hands it the port's wizard_name_1 (`game_wizard start`, 5 s;
 #                  Metallica's Blackened Multiball). Our own multiball's balls are never the game's ("multiball: ours
 #                  is over (1 ball in play) - two or more are the game's again"), so `stack no` does not wait for them
-#   DRAINS=<n>     drains to one ball (default 2; WIZ=1: 3)
+#   DRAINS=<n>     at most this many drains, STACK TEST asked after each (default 8)
 #
 # Slot 0, MB TEST: `multiball 3 5`, 10 s - its clock ends it with its balls still in play. Slot 1, STACK TEST: `stack
 # no`. STACK TEST asked while the balls are out: refused (`not started (...): ... is running`); the balls drained to
@@ -60,16 +60,20 @@ mark=$(grep -c "" "$log")
 bash "$MODES/tryit.sh" start 1 > /dev/null 2>&1 < /dev/null
 job_sleep 3
 refused=$(tail -n +"$((mark + 1))" "$log" | grep -a -m1 -Eo 'STACK TEST (not started \([^)]*\): .*|START \([^)]*\))' | cut -c1-160)
-D=${DRAINS:-$([ "${WIZ:-0}" = 1 ] && echo 3 || echo 2)}
-for ((k = 1; k <= D; k++)); do                 # the multiball's balls drained to one
+# the multiball's balls drained one at a time (WIZ=1: past the game's multiball ball save first, which serves a drained
+# ball again), STACK TEST asked after each until it starts - at most DRAINS (default 8)
+[ "${WIZ:-0}" = 1 ] && job_sleep 20
+later=""
+for ((k = 1; k <= ${DRAINS:-8}; k++)); do
     echo "drain $k: $(python3 "$RIG/plunge.py" drain 2>&1 < /dev/null | head -1)" >> "$JOB_OUT/play.txt"
-    job_sleep 2; job_press "${ids[$((k + 4))]:-${ids[0]}}"; job_sleep 1
+    job_sleep 2; job_press "${ids[$((k + 4))]:-${ids[0]}}"; job_sleep 2
+    mark=$(grep -c "" "$log")
+    bash "$MODES/tryit.sh" start 1 > /dev/null 2>&1 < /dev/null
+    job_sleep 3
+    later=$(tail -n +"$((mark + 1))" "$log" | grep -a -m1 -Eo 'STACK TEST (not started \([^)]*\): .*|START \([^)]*\))' | cut -c1-160)
+    echo "  asked: ${later:-nothing said}" >> "$JOB_OUT/play.txt"
+    echo "$later" | grep -q "START" && { later="$later (after $k drain(s))"; break; }
 done
-job_sleep 3
-mark=$(grep -c "" "$log")
-bash "$MODES/tryit.sh" start 1 > /dev/null 2>&1 < /dev/null
-job_sleep 3
-later=$(tail -n +"$((mark + 1))" "$log" | grep -a -m1 -Eo 'STACK TEST (not started \([^)]*\): .*|START \([^)]*\))' | cut -c1-160)
 cp "$log" "$JOB_OUT/mode.log"
 echo "$refused" | grep -q "not started" || job_fail "${end:-no MB END}; with the balls out: ${refused:-nothing said}"
 echo "$later" | grep -q "START" || job_fail "$end; $refused; at one ball: ${later:-nothing said}"

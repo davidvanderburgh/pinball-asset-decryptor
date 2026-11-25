@@ -3446,6 +3446,12 @@ SPARE_IO_PROVEN = frozenset({
     "star_wars_2025_pro-0.84/spike3",  # 84 switches; 9:13; outputs 1:1 8:6 9:5
     "transformers_mtmte_le-0.96/spike3",   # 96 switches; 9:14; outputs 1:1 9:0 13:1
     "walking_dead_remastered_le-0.92/spike3",   # 90 switches; 8:12; output 1:1
+    # PAD-1555 2026-11-24 newbuild/btnjob.sh (rigbatch --speed 1, stock cards, hidden, muted; each card's own buttons.cfg
+    # as Write puts it, an idle mode): none in attract; in a game every line's shot exactly once at its own action
+    # (a press / release, a hold its ms, a combo) - 9 of 9 on King Kong, 18 of 18 on the rest
+    "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "avengers_infinity_le-1.12",
+    "avengers_infinity_pro-1.12", "foo_fighters_le-1.05", "foo_fighters_pro-1.05", "metallica_spike-1.05",
+    "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
 })
 
 #: PAD-1329: proven builds with no spare driver output at all (every output of every driver board is the game's), so a

@@ -191,9 +191,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all | buttons, light shows, starts on game modes completed |
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
-| Dungeons & Dragons LE 1.11 | no | ✓ | ✓ | all | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| Dungeons & Dragons LE 1.11 | ✓ | ✓ | ✓ | all | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
-| Dungeons & Dragons Pro 1.11 | no | ✓ | ✓ | all | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| Dungeons & Dragons Pro 1.11 | ✓ | ✓ | ✓ | all | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Elvira 1.13 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Fallout LE 0.82 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
@@ -222,7 +222,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong LE 1.00 | ✓ | ✓ | ✓ | shots | buttons, scoop, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
-| King Kong LE 1.01 | no | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| King Kong LE 1.01 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong Pro 1.01 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |

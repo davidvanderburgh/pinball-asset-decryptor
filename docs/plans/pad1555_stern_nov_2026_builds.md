@@ -308,3 +308,34 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   list on the new index menus (challenge_menu_frame, as Godzilla 1.16 / Pokemon 0.87); title scenes; button shots;
   the build-keyed modules (menu_settings, sound_modes, scene_write) for the new builds; merge main before release
   (three tests red at the branch's base are green there).
+
+### Run 8 (2026-11-24 late): serve music, Avengers LE lights, screens and clips, King Kong's holds
+
+- **Serve music** at the bus's ball_start (`servejob.sh SO=census.so`: census_mode logs game_start / ball_start
+  beside the sound log): King Kong 1.0x 125 (19 ms before the event), Foo Fighters 1.05 74, Avengers 1.12 468,
+  Metallica 1.05 87 (Metallica picks among its songs there: 1.04 asked 80 in one game, 87 in another - never the
+  port's 65).
+- **Avengers LE 1.12 lights:** our layer is on top (255) and 22/25 RGB went magenta; LEFT ORBIT, LEFT RAMP and POPS
+  GEM stay the game's own (white before and through, green after) - 1.12 sets them past the layers; the 1.10 control
+  held all 25. LAMPS_PROVEN with the note, as Deadpool LE's arrows.
+- **Screens and clips, all ten** (`mediabuild.py` builds the Modes tab's Try it set: a magenta screen and a 4 s
+  magenta title clip; `mediajob.sh` boots it; `mediacheck.py`: clip >= 50%, screen 1-50%, before / after < 0.5%):
+  clips 55-95%, screens 8.9%, 0.0% before and after. King Kong's and Metallica 1.05's HUDs are their earlier
+  builds' profiled shape edited in place (scene_write.SAME_SHAPE); Avengers 1.12 / D&D 1.11 / Foo Fighters 1.05's
+  HUDs are the earlier files. D&D's PLAYER 1 SELECT A CHARACTER stays until the ball makes a switch (PICK=1).
+- **Ports' example start shots:** Foo Fighters LE 1.05 kept 1.04's switch shot, Avengers 1.10 / 1.12 named a Right
+  bullseye no shot is - a Try it on it was refused for the card. Each is one of its own now (test).
+- **King Kong's held coils never held:** the November ControlCoil object's words sit one word earlier (dumped at a
+  hold's start: 0.97 +0x24 0, +0x28 1, +0x2c our process; 1.01 +0x20 0, +0x24 1, +0x28 our process), so the runtime's
+  on-time read (+36) saw the 1 and let every hold go 13 ms in - run 6's proofs saw only the command. `value
+  ccoil_ontime_at 32` on the three; every hold ran its 2000 ms (LE 1.00 twice, LE 1.01, Pro 1.01); coiljob.sh fails a
+  hold let go within 500 ms.
+- **Left for run 9:**
+  - Challenges on Metallica 1.05 (its list read, proof missing), Avengers 1.12 and Foo Fighters 1.05 (their menus are
+    index menus now: the challenge list needs challenge_menu_frame's values, as Godzilla 1.16 / Pokemon 0.87). The
+    PAD-619 proof set the game's DEFAULT GAME MODE live (ch615.c, gone from C:/tmp): re-make it or pick the
+    challenge on the start menu.
+  - Metallica 1.05's stack: `stjob.sh` (our multiball ended by its clock, balls out, then `stack no`) starts the
+    stack mode on 1.05 AND the 1.04 control - the runtime counts only the game's own multiball: start the game's
+    own multiball (Blackened) instead, as WIZARDS_PROVEN's Metallica 1.04 line did.
+  - Merge main before release (three tests red at the branch's base are green there).

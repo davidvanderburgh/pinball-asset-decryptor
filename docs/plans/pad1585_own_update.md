@@ -83,9 +83,45 @@ qemu-aarch64 with its own `game_monitor`: stock + stick = Stern's installer repl
 held with the message until the stick was out, a new game, no restart marks; `stern-update-ok` = Stern's installer;
 download = refused, back after 30 s; nothing = the same game running, no marks.
 
+## 2. Update to <new build> on My machines (DONE, proof owed)
+
+A machine row with newer code out (`code_watch`) and a project gets **Update to 1.17** (shell.js `MachineRow`,
+`MACH.update`; RPC `shellx.machines_update`). `app._start_machine_update`: the owner picks the new stock image (the
+app downloads none); `core/game_update.check_new_card` refuses another game or a build that is not newer; then the
+one-click port chain for that one image (`_run_port_chain(gate=, after=)`), built beside the machine's card. The
+gate runs after `plan_transfer`, before `apply_transfer`: `game_update.carry_report` + `question` name what can't
+be carried (the plan's error/warning detail lines, dropped text, `mode_news` when the modes can't run on the new
+build) and ask: yes builds without those, no = `PortSkip`, nothing written. After the build: the machine is
+rebound to the update and the Write tab is set to it (original = the new stock image, assets = the carried
+workspace, output = the build), so Send to machine (keeps /data, /dump, /connectivity) or Build / flash (tick
+"Keep the card's own settings") puts it on the machine.
+
+Shots: `scripts/shot_pad1585.py` (from shot_pad783: scratch settings, a stub of Stern's code page with 1.17, the
+watch ticked), `artifacts/PAD-1585/{before,after}_machine_row.png`.
+
+## Decisions taken in run 2
+
+- **No PAD update stick.** A machine with no network gets the update by a card write (with Keep the card's own
+  settings), which already exists; a stick our guard would install from means PAD's own installer writing /games
+  on the machine, a second, riskier delivery path for the same result.
+- **The machine is shown on the update as soon as it is built** (rebound to the built image), since the button's
+  purpose is that machine; the done message says how to put it on.
+
 ## Still to do (next runs of this ticket)
 
-2. **"Update to 1.0.1" button**: on My machines' "1.0.1 is out" row (`webui/shellx_machines._machine_row`,
+- **End-to-end proof, N -> N+1** (the ticket's DONE): stock King Kong LE 1.00 is in the WSL card cache
+  (`/mnt/wsl/cards/cardcache/king_kong_le-1_00_0_spike2.raw`, NOT the archival "older versions" folder, which is
+  off limits) and 1.01 is the library's newest (`D:\Pinball\images\Stern\spike2\king_kong_le-1_01_0_spike2...`).
+  Extract 1.00 into a scratch project; give it an audio, a video or image replacement, a text edit and a mode; add a
+  machine on a build of it; drive `shellx.machines_update` through the web server (`scripts/webui_shot.py`
+  `start_server`; `agent.use_files([1.01 raw])` answers the picker; click the modal); check every change is in the
+  1.01 build (decode the replaced files, read the text, the mode in the build record) and boot it on a rig
+  (`riglock.sh take --any PAD-1585`, hidden, muted).
+- **Modes carried by shot name**: the explorer found no mode copying in `plan_transfer`; check how a project's modes
+  reach the new workspace in the port chain (docs/plans/project_transfer.md `copy_modes`) and wire it in if the
+  chain misses it, refusing nothing: a mode whose shot the new build lacks is named in the report.
+
+2. (done above) **"Update to 1.0.1" button**: on My machines' "1.0.1 is out" row (`webui/shellx_machines._machine_row`,
    `row["newer"]`, from `core/code_watch.newest`) and on the project. The owner points at the new stock image (the
    app downloads none). Extract it, `mod_transfer.plan_transfer` + `apply_transfer` (modes by shot name, port
    checked), and say BEFORE anything is written what can't be carried: `plan_transfer`'s `dropped`/`flagged`,

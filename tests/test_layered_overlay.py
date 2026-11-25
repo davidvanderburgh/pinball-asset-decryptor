@@ -182,7 +182,9 @@ def test_a_frames_colour_conversion_has_no_divide_per_pixel():
     assert "/" not in inner.split("o += 4;")[0], "nothing divides inside the pixel loop"
     assert "int sx = xm[x];" in inner
     assert "g->xmap[x] = (int)((long long)x * g->w / g->ow);" in c
-    assert 'sel_log("clip: %lld frames converted, %lld ms a frame"' in c
+    assert '"clip: %lld frames converted: copy %lld ms, convert %lld ms a frame"' in c
+    # and it reads a cached copy: the decoder's frames are uncached (ffmpegcolorspace: 470 ms)
+    assert "memcpy(g->raw, px, size); src = g->raw;" in c and "convert(g, src, size, g->px[back]);" in c
 
 
 def test_closing_a_clip_waits_for_a_frame_under_way():

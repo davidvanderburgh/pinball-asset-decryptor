@@ -186,7 +186,9 @@ struct gclip {
     pthread_mutex_t mu;
     unsigned char *px[2];           /* RGBA, ow * oh * 4: [front] is the caller's */
     int *xmap;                      /* output column -> decoded column (ow of them) */
-    long long conv_ms;              /* time spent converting, for the log */
+    long long conv_ms, copy_ms;     /* time spent converting / copying, for the log */
+    unsigned char *raw;             /* the frame copied out of the decoder's memory */
+    unsigned raw_len;
     int front;
     long long made, taken;          /* frames converted / frames handed out */
     long long last_frame_ms;
@@ -285,17 +287,30 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     back = !g->front;
     pthread_mutex_unlock(&g->mu);
     {
-        long long t0 = now_ms();
-        convert(g, px, size, g->px[back]);
-        g->conv_ms += now_ms() - t0;
+        /* The table, 2026-11-25: GStreamer's own ffmpegcolorspace took 470 ms a frame off
+         * vpudec too - the decoder's frames are in uncached DMA memory, where every byte
+         * the CPU reads is a bus trip.  One block copy (burst reads) into cached memory,
+         * then the conversion reads that. */
+        long long t0 = now_ms(), t1;
+        const unsigned char *src = px;
+        if (g->raw_len < size) {
+            unsigned char *r = realloc(g->raw, size);
+            if (r) { g->raw = r; g->raw_len = size; }
+        }
+        if (g->raw && g->raw_len >= size) { memcpy(g->raw, px, size); src = g->raw; }
+        t1 = now_ms();
+        convert(g, src, size, g->px[back]);
+        g->copy_ms += t1 - t0;
+        g->conv_ms += now_ms() - t1;
     }
     pthread_mutex_lock(&g->mu);
     g->in_cb--;
     if (g->made > g->taken) g->dropped++;   /* the one before was never shown */
     g->front = back;
     g->made++;
-    if (g->made % 60 == 0)                  /* what a frame costs here (the table's 1.4 fps) */
-        sel_log("clip: %lld frames converted, %lld ms a frame", g->made, g->conv_ms / g->made);
+    if (g->made % 10 == 0)                  /* what a frame costs here (the table's 1.4 fps) */
+        sel_log("clip: %lld frames converted: copy %lld ms, convert %lld ms a frame",
+                g->made, g->copy_ms / g->made, g->conv_ms / g->made);
     g->last_frame_ms = now_ms();
     pthread_mutex_unlock(&g->mu);
 }
@@ -524,6 +539,9 @@ void gclip_close(struct gclip *g)
     g->px[0] = g->px[1] = NULL;
     free(g->xmap);
     g->xmap = NULL;
+    free(g->raw);
+    g->raw = NULL;
+    g->raw_len = 0;
     pthread_mutex_unlock(&g->mu);
     /* the record itself stays (a few hundred bytes a clip): a handoff that still
      * arrives after this - the emulator's bridge - finds `closing` and leaves */

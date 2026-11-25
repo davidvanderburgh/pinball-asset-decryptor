@@ -205,6 +205,10 @@ def shot_lit_words(lit):
 #: sound bank be rewritten). They need only the record lookup, not the resolver or the menu setting.
 #: Not here: every build older than its game's latest.
 TURN_PROVEN = frozenset({
+    # PAD-1555 2026-11-25 (newbuild/turnjob.sh + turncheck.py; sets built by engine.write_overrides: a slot one request
+    # plays alone replaced by a 500 Hz tone, its files 2 and 3 in turn 1000 / 2000 Hz in the app's sound bank; the
+    # request fired six times in attract): the tone after each fire was the file the runtime said it played, in turn
+    "king_kong_le-1.01", "avengers_infinity_le-1.12", "avengers_infinity_pro-1.12", "foo_fighters_pro-1.05",
     "aerosmith-1.16", "aerosmith_le-1.16", "avengers_infinity_le-1.10",
     "avengers_infinity_pro-1.10", "batman-1.14",
     "beatles-1.29", "deadpool_le-1.16", "deadpool_pro-1.16", "dungeons_and_dragons_le-1.10",

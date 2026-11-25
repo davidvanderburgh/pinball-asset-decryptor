@@ -449,7 +449,8 @@ POLL_FIRST_MS = 700
 #: the third (Game: the game, or the multi-boot menu before it), run =
 #: Ready.  Item 118, David 2026-09-13: the JJP tab showed Stern's ladder
 #: and never moved it.
-FOOTER_STEPS = (("== mount image ==", "copy", 0, "Restoring the image…"),
+FOOTER_STEPS = (("== tools ==", "copy", 0, "Checking the emulator's tools…"),
+                ("== mount image ==", "copy", 0, "Restoring the image…"),
                 ("== jail ==", "boot", None, "Booting: the jail…"),
                 ("== dongle ==", "boot", None, "Booting: the security key…"),
                 ("== audio ==", "boot", None, "Booting: audio…"),

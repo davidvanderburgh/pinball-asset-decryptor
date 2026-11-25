@@ -739,6 +739,27 @@ value comp_menu_end_index        1   # STANDARD
 value comp_menu_end_msg          1916
 value comp_menu_end_caption_msg  1915   # PAD-1449 round 3: its caption (STANDARD): CO-OP or TEAMS on ours
 value comp_menu_challenge_0      10   # PAD-1449: a challenge's index (the style chooser follows it)
+# ---- PAD-1555: a challenge of the modes' own on this start menu of game-mode indices (as Pokemon 0.87's, PAD-1504):
+# one MODE CHALLENGE entry, Standard's index again, lettered CHALLENGE and the mode's name; the frame is the comp menu's
+site  challenge_menu_frame 0x000de468 0xe0833106 0xe51330e4
+# PAD-1555: the challenge game's own calls, the earlier build's placed here by a masked run of 40 words (one match
+# each): its balls-per-game getter, extra-ball test and end-of-ball call
+site  challenge_balls     0x0042a478 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x00327968 0xe30c3818 0xe34033c3
+site  challenge_end_ball  0x003f236c 0xe3012dc2 0xe34023c1
+value challenge_on_flag   18   # FG_PLAYER_CHALLENGE_MODE_ACTIVE, read off the program's FG_ names
+value challenge_menu_frame_buttons_reg 7
+value challenge_menu_frame_list_at    420
+value challenge_menu_frame_count_at   72
+value challenge_menu_frame_count_last 0
+value challenge_menu_frame_cap        13
+value challenge_menu_frame_cursor_reg 6
+value challenge_menu_frame_entry      1   # STANDARD
+value challenge_menu_frame_caption_msg 1915   # STANDARD, lettered CHALLENGE while the cursor is on ours
+value challenge_menu_frame_name_msg   1916   # NORMAL PLAY, lettered the mode's name
+value challenge_menu_caption          1922   # CHALLENGE
+value challenge_menu_slot             -1   # a plain challenge: nothing of the game's to stop
+value challenge_menu_sets_on          1    # the pick is a challenge game of the mode's
 site  challenge_scores       0x003ec92c 0xe92d4ff0 0xe24dd0bc
 site  challenge_score_entry  0x003ebe60 0xe1a03000 0xe307061c
 site  challenge_scores_gate  0x003ecb98 0xebf6d82f 0xe3500000

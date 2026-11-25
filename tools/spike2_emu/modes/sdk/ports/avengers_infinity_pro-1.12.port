@@ -246,8 +246,6 @@ site coop_eb_award    0x002ac8a4 0xe92d4070 0xe1a06000
 #   comp_menu_frame: located (strict) [Godzilla Pro 1.16, Godzilla Premium/LE 1.16, Godzilla Pro 1.15, John Wick LE 1.02, John Wick Pro 1.02]
 #   bridge_get: located (loose) [Godzilla Premium/LE 1.16]
 site bridge_get       0x0004e2e8 0xe92d4030 0xe30e46f8
-#   challenge_menu_frame: located (strict) [Godzilla Premium/LE 1.16]
-site challenge_menu_frame 0x00059abc 0xe0833106 0xe51330d4
 #   live_records: located (strict) [King Kong Pro 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, James Bond 007 Pro 1.06, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Metallica Remastered 1.04, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Iron Maiden LE 1.18, Iron Maiden Pro 1.18, Venom Pro 1.07, Guardians of the Galaxy 1.15, Guardians of the Galaxy LE 1.15, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Aerosmith 1.16, James Bond 60th LE 1.11, Stranger Things 1.13, Stranger Things LE 1.13, Aerosmith LE 1.16, Metallica Remastered 1.03]
 site live_records     0x00473f34 0xe30b2cc8 0xe3402075
 #   layer_add: located (strict) [King Kong Pro 0.97, Jaws Pro 1.02, Jurassic Park Pro 1.16, John Wick LE 1.02, John Wick Pro 1.02, The Munsters Pro 1.28, Rush LE 1.19, Rush Pro 1.19, Foo Fighters Pro 1.04, Star Wars LE 1.31, Sword of Rage LE 1.19, Sword of Rage Pro 1.19, Uncanny X-Men Pro 0.98, Star Wars Pro 1.31, Dungeons & Dragons LE 1.10, Dungeons & Dragons Pro 1.10, Venom Pro 1.07, The Mandalorian LE 1.45, The Mandalorian Pro 1.45, Deadpool LE 1.16, Deadpool Pro 1.16, Deadpool LE 1.14]
@@ -872,6 +870,27 @@ value comp_menu_challenge_0      4   # PAD-1449: a challenge's index (the style 
 value comp_menu_challenge_1      5   # PAD-1449: a challenge's index (the style chooser follows it)
 value comp_menu_challenge_msg_0  3395   # PAD-1449 round 2: its name message (the menu's style step letters it)
 value comp_menu_challenge_msg_1  3396   # PAD-1449 round 2: its name message (the menu's style step letters it)
+# ---- PAD-1555: a challenge of the modes' own on this start menu of game-mode indices (as Pokemon 0.87's, PAD-1504):
+# one MODE CHALLENGE entry, Standard's index again, lettered CHALLENGE and the mode's name; the frame is the comp menu's
+site  challenge_menu_frame 0x00059abc 0xe0833106 0xe51330d4
+# PAD-1555: the challenge game's own calls, the earlier build's placed here by a masked run of 40 words (one match
+# each): its balls-per-game getter, extra-ball test and end-of-ball call
+site  challenge_balls     0x00493b0c 0xe92d4030 0xe1a05000
+site  challenge_extra_ball 0x002ac570 0xe30f3c48 0xe340306e
+site  challenge_end_ball  0x0037d608 0xe30e205a 0xe340206e
+value challenge_on_flag   18   # FG_PLAYER_CHALLENGE_MODE_ACTIVE, read off the program's FG_ names
+value challenge_menu_frame_buttons_reg 5
+value challenge_menu_frame_list_at    252
+value challenge_menu_frame_count_at   76
+value challenge_menu_frame_count_last 0
+value challenge_menu_frame_cap        9
+value challenge_menu_frame_cursor_reg 6
+value challenge_menu_frame_entry      1   # STANDARD
+value challenge_menu_frame_caption_msg 1915   # STANDARD, lettered CHALLENGE while the cursor is on ours
+value challenge_menu_frame_name_msg   1916   # NORMAL PLAY, lettered the mode's name
+value challenge_menu_caption          1922   # CHALLENGE
+value challenge_menu_slot             -1   # a plain challenge: nothing of the game's to stop
+value challenge_menu_sets_on          1    # the pick is a challenge game of the mode's
 site  challenge_scores       0x00401048 0xe92d4ff0 0xe24dd0bc
 site  challenge_score_entry  0x0040057c 0xe1a03000 0xe30105f8
 site  challenge_scores_gate  0x004012b4 0xebfab543 0xe3500000

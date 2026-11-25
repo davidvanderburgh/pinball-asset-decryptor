@@ -127,6 +127,38 @@ Found and fixed on the way: the port's extract never recorded its card (`.extrac
 so the new project could not carry modes (`App._record_extract_facts`, shared with Extract); the new project was
 not in the app's projects, so the machine's row lost its project after the update (`project_registry.touch`).
 
+## 4. Multi-boot (DONE, run 4)
+
+A machine whose card carries several images (`multiimage.images_for_path`) gets the same button (`row["multi"]`;
+the RPC needs no single project). `App._start_multiboot_update`: the card is read into the Multi-boot tab
+(`load_card`), each row planned by `game_update.multiboot_plan` - a build of a project the app still has: that
+project goes onto the new build the one-game way (its own question); Stern's image of the game, "official" or a
+release the stock records cannot check ("unknown": every older build): becomes the new image as it is, the
+question saying it could not be checked; anything else (another game, a random card, a build made elsewhere, one
+already that new): kept and named. One question lists every row. The results go in with `replace_image` (row,
+place, picture, settings and scores stores kept). Then:
+
+- the first image unchanged: `update_card` in place (only what changed is written);
+- the first image replaced: a FRESH card beside the old one, `<card> (<new build>).multi.raw`: the card's system
+  partition is its first image's, and mkmulticard refuses an in-place update across a new release's ("the
+  rootfs (p2) differs beyond the boot menu's own files ... build a fresh card"). Settings stay on the machine
+  (Send keeps them; a card write with Keep the card's own settings).
+
+The machine moves to the resulting card. A refusal the tab makes before writing is said in a message.
+
+Found and fixed: a card read back named card-store images (`/mnt/wsl/...`, the library's home) and share images
+(`/mnt/unc/...`) by Linux paths Windows cannot open (`multiboot_core.host_path` now maps both back); an update's
+new extract is named for its project, so two projects in one folder never share one.
+
+Proof (`C:\tmp\PAD-1585\e2e`: `build100.py`, `drive_multi_build.py`, `drive_multi_update.py`): the kk100 project
+built onto 1.00 (`D:\PAD-1585-e2e\kk100_mod.raw`, guard on), two two-image cards built through the Multi-boot tab
+([modded 1.00, Stern 1.00]): default layout 30.0 GB in 15 min, compact 15.5 GB in 11 min. Update to 1.01 through
+the app on a machine on each: the question named both rows (the mod by its project, Stern's 1.00 as unchecked
+stock); the project carried (1 sound, 1 picture, 1 text, the mode); the card built again beside the old one and
+verified by the builder (14 min default, 6.5 min compact with the extract reused); the machine moved to it. Read
+back: both images 1.01 (inspect), image 1 carries the mod's text (PADUG LINE), image 2 Stern's (DEBUG LINE), on
+both layouts.
+
 ## Still to do (next runs of this ticket)
 
 Done or decided: the Update button (2, 2b), delivery (3: the Write tab's Send to machine keeps /data, /dump and
@@ -134,8 +166,5 @@ Done or decided: the Update button (2, 2b), delivery (3: the Write tab's Send to
 with no port (6: `mode_news` names it in the question; the update goes on without the modes, which stay in the
 old project).
 
-4. **Multi-boot**: the same button updates every image of that title on a multi-boot card
-   (`multiboot_core.replace_image` per image; compact cards' shared files once), other titles left alone; proven
-   on a two-image card, compact and not.
 5. **Other makers** (BoF, Spooky, AP, TBL) where the multi-boot guide says a normal update takes our menu away:
    the same guard on their updaters.

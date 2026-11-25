@@ -17,8 +17,10 @@ struct ovl {
     int n, np;
     const unsigned char *frame;     /* u32 picture[n] */
     const unsigned char *pict;      /* { x, y, off, size }[np] */
-    int cur;                        /* the picture decoded, or -1 */
-    struct art_image img;
+    int cur;                        /* the picture last handed out, or -1 */
+    /* every picture decoded once, at open: the table (2026-11-25) took ~100 ms a
+     * whole-screen PNG on the Cortex-A9, each time the scene changed picture */
+    struct art_image *img;          /* [np] */
     char err[200];
 };
 
@@ -88,8 +90,31 @@ struct ovl *ovl_open(const char *path, int max_w, int max_h, char *err, int errl
             goto bad;
         }
     }
+    if (o->np && !(o->img = calloc((size_t)o->np, sizeof *o->img))) {
+        snprintf(err, (size_t)errlen, "out of memory");
+        goto bad;
+    }
+    {
+        long long t0 = sel_now_ms();
+        for (i = 0; i < o->np; i++) {
+            const unsigned char *e = o->pict + 16L * i;
+            char why[200] = "";
+            int w = 0, h = 0;
+            unsigned char *px = art_jpeg_decode(o->buf + u32(e + 8), (int)u32(e + 12), &w, &h, why, sizeof why);
+            if (!px) {
+                snprintf(err, (size_t)errlen, "the overlay's picture %d: %s", i, why);
+                goto bad;
+            }
+            o->img[i].rgba = px;
+            o->img[i].w = w;
+            o->img[i].h = h;
+        }
+        sel_log("overlay: %d pictures decoded in %lld ms", o->np, sel_now_ms() - t0);
+    }
     return o;
 bad:
+    if (o->img) for (i = 0; i < o->np; i++) free(o->img[i].rgba);
+    free(o->img);
     free(o->buf);
     free(o);
     return NULL;
@@ -104,26 +129,10 @@ const struct art_image *ovl_at(struct ovl *o, long long ms, int *x, int *y)
     p = u32(o->frame + 4 * k);
     if (p == OVL_NONE) return NULL;
     e = o->pict + 16L * p;
-    if ((int)p != o->cur) {
-        int w = 0, h = 0;
-        char why[200] = "";
-        long long t0 = sel_now_ms();
-        unsigned char *px = art_jpeg_decode(o->buf + u32(e + 8), (int)u32(e + 12), &w, &h, why, sizeof why);
-        if (px) sel_log("overlay: picture %u (%dx%d) for frame %lld, %lld ms to decode",
-                        (unsigned)p, w, h, k, sel_now_ms() - t0);
-        if (!px) {
-            snprintf(o->err, sizeof o->err, "picture %u: %s", (unsigned)p, why);
-            return NULL;
-        }
-        free(o->img.rgba);                 /* stb_image's allocator is plain malloc here */
-        o->img.rgba = px;
-        o->img.w = w;
-        o->img.h = h;
-        o->cur = (int)p;
-    }
+    o->cur = (int)p;
     *x = (int)(int32_t)u32(e);
     *y = (int)(int32_t)u32(e + 4);
-    return &o->img;
+    return &o->img[p];
 }
 
 int ovl_frames(const struct ovl *o) { return o->n; }
@@ -134,8 +143,10 @@ const char *ovl_error(const struct ovl *o) { return o->err; }
 
 void ovl_close(struct ovl *o)
 {
+    int i;
     if (!o) return;
-    free(o->img.rgba);
+    if (o->img) for (i = 0; i < o->np; i++) free(o->img[i].rgba);
+    free(o->img);
     free(o->buf);
     free(o);
 }

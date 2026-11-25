@@ -149,7 +149,11 @@ def test_the_menu_draws_the_scene_over_the_clip():
     assert "if (st->t_ovl) { ovl_close(st->t_ovl); st->t_ovl = NULL; }" in s
     c = _read(SEL, "overlay.c")
     assert "art_jpeg_decode(" in c, "stb_image reads the PNGs (STBI_ONLY_PNG is in art.c)"
-    assert "if ((int)p != o->cur)" in c, "a still stretch is decoded once"
+    # the table (2026-11-25): ~100 ms a whole-screen PNG on the Cortex-A9 each time the scene
+    # changed picture - every picture is decoded once, when the overlay opens
+    assert "overlay: %d pictures decoded in %lld ms" in c
+    at = c[c.index("const struct art_image *ovl_at("):]
+    assert "art_jpeg_decode(" not in at[:at.index("\n}\n")]
     make = _read(SEL, "Makefile")
     assert make.count("gstclip.c overlay.c") == 5 and make.count("gstclip.h overlay.h") == 5
     assert "codeselect/overlay.c codeselect/overlay.h" in _read(RIG, "padpath.sh")
@@ -167,6 +171,18 @@ def test_the_demuxers_video_pad_is_linked_when_it_appears():
     assert 'strncmp(name, "video", 5)' in c and "G.pad_link(pad, sinkpad)" in c
     for s in ('sym("gst_pad_link")', 'sym("gst_object_get_name")', 'sym("g_free")'):
         assert s in c
+
+
+def test_a_frames_colour_conversion_has_no_divide_per_pixel():
+    """The table, 2026-11-25 (Simon: "work but only at 1.4FPS"): a 64-bit divide per pixel is a
+    library call on the Cortex-A9.  The column map is made once a clip."""
+    c = _read(SEL, "gstclip.c")
+    conv = c[c.index("static void convert(struct gclip *g"):c.index("/* fakesink's \"handoff\"")]
+    inner = conv[conv.index("for (x = 0; x < g->ow; x++) {"):]
+    assert "/" not in inner.split("o += 4;")[0], "nothing divides inside the pixel loop"
+    assert "int sx = xm[x];" in inner
+    assert "g->xmap[x] = (int)((long long)x * g->w / g->ow);" in c
+    assert 'sel_log("clip: %lld frames converted, %lld ms a frame"' in c
 
 
 def test_closing_a_clip_waits_for_a_frame_under_way():

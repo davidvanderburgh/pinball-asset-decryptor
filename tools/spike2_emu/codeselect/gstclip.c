@@ -185,6 +185,8 @@ struct gclip {
     int max_w, max_h;
     pthread_mutex_t mu;
     unsigned char *px[2];           /* RGBA, ow * oh * 4: [front] is the caller's */
+    int *xmap;                      /* output column -> decoded column (ow of them) */
+    long long conv_ms;              /* time spent converting, for the log */
     int front;
     long long made, taken;          /* frames converted / frames handed out */
     long long last_frame_ms;
@@ -235,24 +237,24 @@ static void convert(struct gclip *g, const unsigned char *data, unsigned size, u
         U = yv12 ? p2 : p1;
         V = yv12 ? p1 : p2;
     }
+    /* The table, 2026-11-25 (Simon: "work but only at 1.4FPS"): a 64-bit divide for every
+     * pixel is a library call on the Cortex-A9 - hundreds of ms a 1360x768 frame.  The
+     * column map is made once a clip (g->xmap), the row once a row. */
     for (y = 0; y < g->oh; y++) {
         int sy = (int)((long long)y * sh / g->oh);
+        const unsigned char *yr = Y + (size_t)sy * ys;
+        const unsigned char *ur = nv12 ? U + (size_t)(sy / 2) * ys : U + (size_t)(sy / 2) * (ys / 2);
+        const unsigned char *vr = nv12 ? V + (size_t)(sy / 2) * ys : V + (size_t)(sy / 2) * (ys / 2);
+        const int *xm = g->xmap;
         unsigned char *o = dst + (size_t)y * g->ow * 4;
         for (x = 0; x < g->ow; x++) {
-            int sx = (int)((long long)x * sw / g->ow);
-            int c = Y[sy * ys + sx] - 16, d, e;
-            if (nv12) {
-                int k = (sy / 2) * ys + (sx / 2) * 2;
-                d = U[k] - 128;
-                e = V[k] - 128;
-            } else {
-                int k = (sy / 2) * (ys / 2) + sx / 2;
-                d = U[k] - 128;
-                e = V[k] - 128;
-            }
-            o[0] = clamp8((298 * c + 409 * e + 128) >> 8);
-            o[1] = clamp8((298 * c - 100 * d - 208 * e + 128) >> 8);
-            o[2] = clamp8((298 * c + 516 * d + 128) >> 8);
+            int sx = xm[x];
+            int c = 298 * (yr[sx] - 16), d, e, k = nv12 ? (sx & ~1) : (sx >> 1);
+            d = ur[k] - 128;
+            e = vr[k] - 128;
+            o[0] = clamp8((c + 409 * e + 128) >> 8);
+            o[1] = clamp8((c - 100 * d - 208 * e + 128) >> 8);
+            o[2] = clamp8((c + 516 * d + 128) >> 8);
             o[3] = 255;
             o += 4;
         }
@@ -282,12 +284,18 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     g->in_cb++;
     back = !g->front;
     pthread_mutex_unlock(&g->mu);
-    convert(g, px, size, g->px[back]);
+    {
+        long long t0 = now_ms();
+        convert(g, px, size, g->px[back]);
+        g->conv_ms += now_ms() - t0;
+    }
     pthread_mutex_lock(&g->mu);
     g->in_cb--;
     if (g->made > g->taken) g->dropped++;   /* the one before was never shown */
     g->front = back;
     g->made++;
+    if (g->made % 60 == 0)                  /* what a frame costs here (the table's 1.4 fps) */
+        sel_log("clip: %lld frames converted, %lld ms a frame", g->made, g->conv_ms / g->made);
     g->last_frame_ms = now_ms();
     pthread_mutex_unlock(&g->mu);
 }
@@ -404,7 +412,9 @@ struct gclip *gclip_open(const char *path, int max_w, int max_h, char *err, int 
     }
     g->px[0] = calloc((size_t)g->ow * g->oh, 4);
     g->px[1] = calloc((size_t)g->ow * g->oh, 4);
-    if (!g->px[0] || !g->px[1]) { snprintf(err, errlen, "clip: out of memory for %dx%d", g->ow, g->oh); goto fail; }
+    g->xmap = malloc((size_t)g->ow * sizeof *g->xmap);
+    if (!g->px[0] || !g->px[1] || !g->xmap) { snprintf(err, errlen, "clip: out of memory for %dx%d", g->ow, g->oh); goto fail; }
+    { int x; for (x = 0; x < g->ow; x++) g->xmap[x] = (int)((long long)x * g->w / g->ow); }
     if (G.query_duration(g->pipe, &fmt, &g->dur_ns) && fmt == GST_FORMAT_TIME && g->dur_ns > 0) {}
     else g->dur_ns = 0;
     if (G.set_state(g->pipe, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
@@ -512,6 +522,8 @@ void gclip_close(struct gclip *g)
     free(g->px[0]);
     free(g->px[1]);
     g->px[0] = g->px[1] = NULL;
+    free(g->xmap);
+    g->xmap = NULL;
     pthread_mutex_unlock(&g->mu);
     /* the record itself stays (a few hundred bytes a clip): a handoff that still
      * arrives after this - the emulator's bridge - finds `closing` and leaves */

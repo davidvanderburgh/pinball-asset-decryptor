@@ -642,6 +642,13 @@ class App:
         if pending:
             self.ctx.open_image = None
             self.root.after(0, self.open_image, pending)
+        # PAD-1563: this run is a Restart as administrator from a Direct-SSD
+        # tab; it opens back on that tab with From SSD picked
+        resume = getattr(self.ctx, "direct_ssd", None) if getattr(
+            self, "ctx", None) is not None else None
+        if resume:
+            self.ctx.direct_ssd = None
+            self.root.after(0, self._resume_direct_ssd, resume)
 
     def open_image(self, path):
         """A card image handed in from outside (Explorer's double-click,
@@ -1518,9 +1525,11 @@ class App:
         if not rows:
             return prereq_launch.ROUTE_SCRIPT, rows, ""
         state = runtime.status(refresh=True)[0]
+        self._install_vm_off = prereqs._vm_platform_off()
         route = prereq_launch.pick_route(
             True, prereqs._wsl_status_ok(), state,
-            restart_pending=prereqs._wsl_restart_pending())
+            restart_pending=prereqs._wsl_restart_pending(),
+            vm_off=self._install_vm_off)
         return route, rows, state
 
     def _offer_install_route_win(self, route, rows, state, script):
@@ -1528,7 +1537,9 @@ class App:
         from .core import prereq_launch, runtime
         title = "Install Prerequisites"
         if route == prereq_launch.ROUTE_WSL:
-            if messagebox.askyesno(title, prereq_launch.wsl_setup_text(rows)):
+            # the worker's answer: sc.exe is never asked on the UI thread
+            if messagebox.askyesno(title, prereq_launch.wsl_setup_text(
+                    rows, vm_off=getattr(self, "_install_vm_off", False))):
                 threading.Thread(target=self._run_install_prereqs_win,
                                  args=(script, True), daemon=True).start()
             return
@@ -2344,19 +2355,67 @@ class App:
         from .core.admin import is_admin
         if is_admin():
             return True
-        messagebox.showerror(
-            "Administrator Required",
-            "Direct-SSD mode needs Windows Administrator "
-            "privileges.\n\n"
-            "wsl --mount and Set-Disk -IsOffline are both gated by "
-            "Windows itself behind elevation — there is no "
-            "workaround at the app level.\n\n"
-            "To proceed:\n"
-            "  1.  Close this app.\n"
-            "  2.  Right-click the \"Pinball Asset Decryptor\" "
-            "shortcut.\n"
-            "  3.  Choose \"Run as administrator\".")
+        if messagebox.askyesno(
+                "Administrator Required",
+                "Reading a disk directly needs Windows Administrator "
+                "rights: wsl --mount and Set-Disk -IsOffline are gated by "
+                "Windows itself.\n\n"
+                "PAD starts without them.  Restart it as administrator now?"
+                "  It reopens on this tab with From SSD picked."):
+            self.restart_as_admin("extract")
         return False
+
+    #: the tabs a Restart as administrator may reopen on (PAD-1563)
+    DIRECT_SSD_TABS = ("extract", "write")
+
+    def restart_as_admin(self, tab):
+        """PAD-1563 (GitHub issue #46): PAD starts WITHOUT Administrator on
+        Windows, and the jobs that need it ask for it themselves - except a
+        Direct-SSD read or write, whose wsl --mount / Set-Disk calls run all
+        through the pipeline.  That one asks for it here, once: the session
+        is saved, a copy elevated by the UAC prompt is started with
+        ``--direct-ssd <tab>`` (it reopens on *tab* with From SSD picked, see
+        :meth:`_resume_direct_ssd`), and this copy closes.  Declined, nothing
+        changes and this copy carries on.  Returns whether it restarted."""
+        if tab not in self.DIRECT_SSD_TABS:
+            tab = "extract"
+        if self.window._is_running():
+            messagebox.showinfo(
+                "Busy", "Finish or cancel the current operation before "
+                        "restarting as administrator.")
+            return False
+        from .core import admin
+        self._save_session_state()
+        if not admin.relaunch_as_admin(admin.restart_args(sys.argv, tab)):
+            messagebox.showwarning(
+                "Not restarted",
+                "Windows did not start PAD as administrator (was the "
+                "prompt declined?).  Nothing has changed: carry on here, or "
+                "press Restart as administrator again.")
+            return False
+        self.window.append_log(
+            "Restarting as administrator - PAD closes and reopens on the "
+            "same tab.", "info")
+        self._close_for_update()
+        return True
+
+    def _resume_direct_ssd(self, tab):
+        """The elevated run :meth:`restart_as_admin` started: back on *tab*
+        with From SSD picked, so the drive and output folder the settings
+        kept are all there is to check."""
+        if tab not in self.DIRECT_SSD_TABS:
+            return
+        mfr = self._current_mfr
+        if mfr is None or not getattr(mfr.capabilities, "direct_ssd", False):
+            return
+        try:
+            self.window.select_tab(tab)
+            var = getattr(self.window, "%s_input_source_var" % tab, None)
+            if var is not None:
+                var.set("ssd")
+        except Exception:                               # noqa: BLE001
+            log.warning("could not reopen %s on From SSD", tab,
+                        exc_info=True)
 
     # ------------------------------------------------------------------
     # Direct-SSD extract (JJP-only as of v0.6.5)
@@ -6579,6 +6638,12 @@ class App:
         ahead (an AppImage, a source checkout)."""
         kind = (installer or {}).get("kind")
         if kind == "windows-installer" and update_slots.installed_app_dir():
+            # PAD-1563: the app starts unelevated, and the copy beside the
+            # install (Program Files) and the swap need Administrator; the
+            # setup exe asks for it itself, with one UAC prompt, at the click
+            from .core.admin import is_admin
+            if not is_admin():
+                return None
             return "windows"
         if kind == "macos-dmg" and sys.platform == "darwin":
             return "macos"
@@ -6982,9 +7047,9 @@ class App:
         Windows downloads the release's setup exe and runs it silently.
         The app download carries no Mark-of-the-Web, so SmartScreen never
         fires (a browser download of the same unsigned exe re-runs the
-        "Windows protected your PC" gauntlet on every release), and the
-        app already runs elevated via launcher.vbs so there's no UAC
-        prompt either.  The installer's /RELAUNCH=1 hook reopens the app
+        "Windows protected your PC" gauntlet on every release).  The app
+        starts unelevated (PAD-1563), so the setup exe's one UAC prompt is
+        the only question asked.  The installer's /RELAUNCH=1 hook reopens the app
         when the silent install-over-the-top finishes (jim-beam: "is
         there a smarter way" than the per-update security pass).
 
@@ -7675,6 +7740,36 @@ class App:
         if hydrate:
             self._start_extract()
 
+    def _warn_project_needs_admin(self, folder, platform=None):
+        """PAD-1563: a project inside PAD's own install folder (Program
+        Files) could be made while every launch was elevated (PAD-1081 had
+        one).  PAD starts unelevated now, and Windows lets only an elevated
+        program change files there, so saving to it would fail: say so once
+        a session, the moment it opens.  Returns whether it warned."""
+        if (platform or sys.platform) != "win32":
+            return False
+        from .core import update_slots
+        from .core.admin import is_admin
+        app_dir = update_slots.installed_app_dir()
+        if not app_dir or is_admin():
+            return False
+        f = os.path.normcase(os.path.abspath(folder))
+        a = os.path.normcase(os.path.abspath(app_dir))
+        if not f.startswith(a.rstrip("\\/") + os.sep):
+            return False
+        warned = self.__dict__.setdefault("_admin_project_warned", set())
+        if f in warned:
+            return False
+        warned.add(f)
+        messagebox.showwarning(
+            "Project inside PAD's install folder",
+            "This project is inside PAD's own install folder:\n%s\n\n"
+            "PAD starts without Administrator rights, and Windows lets only "
+            "an elevated program change files there, so saving to it will "
+            "fail.  Copy the project folder somewhere of your own (your "
+            "Documents, say) and open it from there." % folder)
+        return True
+
     def _apply_project_folder(self, folder, data):
         """Push an anchored project onto the UI: manufacturer, stock image,
         the folder itself (build location derives), options, file name."""
@@ -7693,6 +7788,7 @@ class App:
         if self._current_mfr is not mfr:
             self._on_manufacturer_change(mfr)
             self.window.show_mfr_view()
+        self._warn_project_needs_admin(folder)
         self.window.extract_input_var.set(
             _rmd(str(data.get("stock_image") or "")))
         self.window.extract_output_var.set(_rmd(folder))

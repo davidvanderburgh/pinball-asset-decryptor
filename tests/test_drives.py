@@ -447,3 +447,118 @@ class TestVisibleDrives:
         shown = visible_drives([at, over], prefer="sd_card")
         assert at in shown
         assert over not in shown
+
+
+# ---- PAD-1556: Windows asked directly when Get-Disk says nothing ------
+
+class TestWindowsNativeFallback:
+    """A PC whose PowerShell Get-Disk answers nothing showed "no drives
+    found" with the SD card in Explorer; the disks are now also asked
+    directly, and fill in whatever PowerShell did not name."""
+
+    @staticmethod
+    def _descriptor(vendor, product, bus):
+        import struct
+        head = bytearray(36)
+        blob = b""
+        offs = []
+        for text in (vendor, product):
+            if text is None:
+                offs.append(0)
+            else:
+                offs.append(36 + len(blob))
+                blob += text.encode("ascii") + b"\x00"
+        struct.pack_into("<II", head, 12, *offs)
+        struct.pack_into("<I", head, 28, bus)
+        return bytes(head) + blob
+
+    def test_descriptor_joins_vendor_and_product(self):
+        from pinball_decryptor.core import drives
+        buf = self._descriptor("Generic- ", "USB3.0 CRW   -SD ", 7)
+        assert drives._parse_storage_descriptor(buf) == (
+            "Generic- USB3.0 CRW -SD", "USB")
+
+    def test_descriptor_without_vendor(self):
+        from pinball_decryptor.core import drives
+        buf = self._descriptor(None, "GIGABYTE AG514K2TB", 17)
+        assert drives._parse_storage_descriptor(buf) == (
+            "GIGABYTE AG514K2TB", "NVMe")
+
+    def test_descriptor_bus_names_match_get_disk(self):
+        from pinball_decryptor.core import drives
+        for bus, name in ((11, "SATA"), (12, "SD"), (13, "MMC"), (99, "")):
+            assert drives._parse_storage_descriptor(
+                self._descriptor("V", "P", bus))[1] == name
+
+    def test_descriptor_too_short_or_bad_offset(self):
+        from pinball_decryptor.core import drives
+        assert drives._parse_storage_descriptor(b"") == ("", "")
+        import struct
+        head = bytearray(36)
+        struct.pack_into("<II", head, 12, 9999, 0)
+        assert drives._parse_storage_descriptor(bytes(head)) == ("", "")
+
+    @staticmethod
+    def _d(n, model="m", bus="USB"):
+        return PhysicalDrive(r"\\.\PHYSICALDRIVE%d" % n, model,
+                             32 * 10 ** 9, bus)
+
+    def test_merge_keeps_powershell_list_when_it_names_everything(self):
+        from pinball_decryptor.core import drives
+        listed = [self._d(1, "ps"), self._d(0, "ps")]
+        native = [self._d(0, "nat"), self._d(1, "nat")]
+        assert drives._merge_windows_drives(listed, native) == listed
+
+    def test_merge_uses_native_when_powershell_is_empty(self):
+        from pinball_decryptor.core import drives
+        native = [self._d(0, "nat", "NVMe"), self._d(4, "nat")]
+        assert drives._merge_windows_drives([], native) == native
+
+    def test_merge_adds_only_the_missing_disk(self):
+        from pinball_decryptor.core import drives
+        listed = [self._d(0, "ps"), self._d(2, "ps")]
+        native = [self._d(0, "nat"), self._d(1, "nat"), self._d(2, "nat")]
+        got = drives._merge_windows_drives(listed, native)
+        assert [d.model for d in got] == ["ps", "nat", "ps"]
+
+    def test_listing_survives_a_silent_get_disk(self, monkeypatch):
+        """The reported case end to end: Get-Disk exits 0 with no output."""
+        import subprocess
+        from pinball_decryptor.core import drives
+        card = self._d(4, "NORELSYS 1081CS1")
+        monkeypatch.setattr(
+            drives.subprocess, "run",
+            lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 0, "", ""))
+        monkeypatch.setattr(drives, "_native_windows_drives", lambda: [card])
+        assert drives._list_physical_drives_windows() == [card]
+
+    def test_listing_survives_powershell_missing_or_hung(self, monkeypatch):
+        import subprocess
+        from pinball_decryptor.core import drives
+        card = self._d(4)
+        monkeypatch.setattr(drives, "_native_windows_drives", lambda: [card])
+        for exc in (FileNotFoundError("powershell"),
+                    subprocess.TimeoutExpired("powershell", 15)):
+            def boom(*a, _e=exc, **k):
+                raise _e
+            monkeypatch.setattr(drives.subprocess, "run", boom)
+            assert drives._list_physical_drives_windows() == [card]
+
+    def test_native_listing_names_this_pcs_system_disk(self):
+        """The real thing, on Windows: the disk Windows runs from is found
+        with its letter, no PowerShell involved."""
+        import os
+        import sys
+        import pytest
+        if sys.platform != "win32":
+            pytest.skip("Windows only")
+        from pinball_decryptor.core import drives
+        got = drives._native_windows_drives()
+        sysdrive = (os.environ.get("SystemDrive") or "C:").upper()
+        assert any(sysdrive in d.mount_label.split() and d.size_bytes > 0
+                   and d.model for d in got), got
+
+    def test_native_listing_is_empty_off_windows(self, monkeypatch):
+        from pinball_decryptor.core import drives
+        monkeypatch.setattr(drives.sys, "platform", "linux")
+        assert drives._native_windows_drives() == []

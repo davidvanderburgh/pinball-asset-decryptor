@@ -9,8 +9,8 @@ Windows
     saves carry the Mark-of-the-Web, so every release (a brand-new
     unsigned binary with zero reputation) would make the user re-run the
     SmartScreen "Windows protected your PC" gauntlet.  A file the app
-    writes has no MOTW, and the app already runs elevated
-    (launcher.vbs), so the whole update is zero extra security prompts.
+    writes has no MOTW, so the whole update is one security prompt: the
+    setup exe's own UAC, the app starting unelevated (PAD-1563).
 
 Linux
     Downloads the ``.AppImage`` and offers to start it.  Here the reason
@@ -424,9 +424,8 @@ def launch_installer_windows(path, shell_execute=None):
     """Run the downloaded setup exe unattended; True on successful launch.
 
     Uses ShellExecuteW so the exe's requireAdministrator manifest is
-    honoured.  The app itself already runs elevated (launcher.vbs), so
-    no UAC prompt appears; if it ever runs unelevated, the same call
-    just raises the standard consent dialog instead of failing.
+    honoured: the app starts unelevated (PAD-1563), so this raises the
+    standard consent dialog once (none in a run that is elevated already).
     """
     if shell_execute is None:
         import ctypes

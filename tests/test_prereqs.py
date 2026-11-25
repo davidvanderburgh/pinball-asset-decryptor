@@ -91,6 +91,9 @@ def _wsl_env(monkeypatch):
     monkeypatch.setattr(prereqs, "_wsl_boot_wait_failed", False)
     monkeypatch.setattr(prereqs, "_wsl_silent", None)
     monkeypatch.setattr(prereqs, "_virtualization_disabled", lambda: False)
+    # ...and the Virtual Machine Platform on (sc.exe, also rejected by the
+    # fakes); the PAD-1564 tests switch it off.
+    monkeypatch.setattr(prereqs, "_vm_platform_off", lambda: False)
     monkeypatch.setattr(wsl_disk, "registered_distros", lambda: [])
     monkeypatch.setattr(prereqs, "_wsl_exe_count", lambda: 0)
     monkeypatch.setattr(prereqs, "_wsl_host_space", lambda distros: None)

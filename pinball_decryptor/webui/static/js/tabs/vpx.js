@@ -127,6 +127,8 @@ function Sheet({ d, onClose }) {
 // "off" (PAD-1480: a greyed 192 read as set), E190 / E191 / E192 suggested in
 // its tooltip.
 function CabinetRow({ c, disabled }) {
+  const [lines, setLines] = useState(false);
+  const nColours = (c.strip_colours || []).length || 8;
   const screens = c.screens || [];
   const opts = [{ value: "0", label: "Where B2S puts it" }].concat(screens.map((m) => ({
     value: String(m.n), label: "Screen " + m.n + (m.primary ? " (main)" : "") + ", " + m.w + "×" + m.h })));
@@ -140,7 +142,7 @@ function CabinetRow({ c, disabled }) {
     <span class="h2">Cabinet</span>
     <span class="small muted" ...${tip({ head: "A cabinet with the game's screen on the backglass monitor.",
       lines: ["The backglass (B2S) goes to a screen of its own: each patched table gets a <name>.res beside it.",
-        "The start and lockdown button lights and the machine's shaker motor go to DOF, and each table's backbox light (BACKBOX GI) to the backglass bulbs you pick on its row."] })}>Backglass on</span>
+        "The start and lockdown button lights, the machine's shaker motor and its cabinet light strips go to DOF, and each table's backbox light (BACKBOX GI) to the backglass bulbs you pick on its row."] })}>Backglass on</span>
     <${Select} sm value=${String(c.backglass || 0)} options=${opts} disabled=${disabled}
       title="The screen the table's backglass fills. Where B2S puts it: its own ScreenRes.txt, as before."
       onChange=${(v) => call("vpx.set_cabinet", { backglass: parseInt(v, 10) || 0 })} />
@@ -154,7 +156,40 @@ function CabinetRow({ c, disabled }) {
       lines: ["The DOF event (E number) sent while the game runs its shaker motor; off (blank): not sent.",
         "Type a number here, e.g. " + ((c.suggested || {}).shaker || 192) + " (free on most), and put the same E" + ((c.suggested || {}).shaker || 192) + " in your DOF config's Shaker column for the table.",
         "The game shakes only while its own SHAKER MOTOR setting has the motor fitted (Jaws LE has it on as it comes)."] })}
+    ${dof("dof_strips", "Strips", (c.suggested || {}).strips || 200, { head: "The cabinet light strips to DOF",
+      lines: ["The first DOF event (E number) of the game's cabinet light strips: the expression lighting blades where the game has them, else its speaker lights, on both sides. Off (blank): not sent.",
+        "Each part of each side gets " + nColours + " E numbers in a row, one per colour (" + (c.strip_colours || []).join(", ") + "): the one nearest the game's colour is lit at its brightness, the rest are off.",
+        "DOF lines… gives the text to paste into your DOF config's strip columns for the table."] })}
+    <${Select} sm value=${String(c.strip_parts || 1)} disabled=${disabled || !c.dof_strips}
+      options=${[1, 2, 3, 4, 6, 8].map((n) => ({ value: String(n), label: n === 1 ? "whole side" : n + " parts a side" }))}
+      title=${{ head: "How finely each strip follows the game", lines: ["Whole side: each side's strip shows one colour. More parts: each side is cut into that many pieces, bottom to top, so a light running up or down the blades runs up or down your strips too.",
+        "More parts use more E numbers: " + nColours + " per part per side."] }}
+      onChange=${(v) => call("vpx.set_cabinet", { strip_parts: parseInt(v, 10) || 1 })} />
+    <${Button} size="sm" kind="ghost" disabled=${!c.dof_strips} onClick=${() => setLines(true)}
+      title="The DOF config text for the left and right strip, to copy">DOF lines…<//>
+    ${lines && c.dof_strips ? html`<${StripLines} c=${c} onClose=${() => setLines(false)} />` : null}
   </div>`;
+}
+
+// PAD-1571: the DOF config text for the cabinet light strips, a box per side
+// to copy into the DOF Config Tool's (or a directoutputconfig's) strip column.
+function StripLines({ c, onClose }) {
+  const sl = c.strip_lines || {};
+  const parts = c.strip_parts || 1;
+  const n = (c.strip_colours || []).length || 8;
+  const last = c.dof_strips + 2 * parts * n - 1;
+  const copy = (t) => { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).catch(() => {}); };
+  const side = (key, label) => html`<div class="vpx-strip-lines">
+      <div class="small"><b>${label}</b> <${Button} size="sm" kind="ghost" icon="copy" onClick=${() => copy(sl[key] || "")}>Copy<//></div>
+      <textarea class="mono small" readonly rows="4" style="width:100%">${sl[key] || ""}</textarea></div>`;
+  return html`<${Modal} title="Cabinet light strips: DOF lines" icon="copy" onClose=${onClose}
+    footer=${html`<${Button} kind="primary" onClick=${onClose}>Close<//>`}>
+    <p class="small">The strips use E${c.dof_strips} to E${last}: ${parts === 1 ? "each side one colour" : parts + " parts a side, bottom to top"}, ${n} colours each.
+      Paste each side's line into the column of that side's LED strip for the table, in the DOF Config Tool or your directoutputconfig.
+      NOBOOL makes the game's brightness the strip's.</p>
+    ${side("left", "Left strip")}
+    ${side("right", "Right strip")}
+  <//>`;
 }
 
 // PAD-1304: which of a backglass's bulbs light with the backbox's GI.

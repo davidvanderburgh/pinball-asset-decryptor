@@ -23,6 +23,12 @@
       "runs": "PAD's own emulator behind the table (PAD.Controller)",
       "bridge": "pad"
     },
+    "spike3": {
+      "name": "Stern Spike 3",
+      "runs": "PAD's own emulator behind the table (PAD.Controller)",
+      "bridge": "pad",
+      "needs": "Stern encrypts every Spike 3 card: the game runs only once the Extract tab's Spike 3 unlock has saved the key."
+    },
     "jjp": {
       "name": "Jersey Jack",
       "runs": "no emulator behind a table yet: the tribute's own script plays",

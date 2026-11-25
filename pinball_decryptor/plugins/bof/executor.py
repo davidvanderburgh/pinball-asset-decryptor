@@ -257,7 +257,8 @@ class WslExecutor(CommandExecutor):
             self.run("echo ok", timeout=15)
             return True, "WSL2 available"
         except Exception:
-            return False, "WSL2 not available. Install from Microsoft Store."
+            from ...core.executor import wsl_unavailable_text
+            return False, wsl_unavailable_text()
 
 
 class NativeExecutor(CommandExecutor):

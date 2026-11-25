@@ -65,7 +65,9 @@ export function AdminPanel({ s }) {
     <button type="button" class="x-alert-hd" aria-expanded=${!collapsed} onClick=${() => call("extract.toggle_admin_warning")}>
       <${Icon} name="warn" /><span class="grow">ADMINISTRATOR PRIVILEGES REQUIRED</span><span aria-hidden="true">${collapsed ? "▼" : "▲"}</span>
     </button>
-    ${collapsed ? null : html`<div class="x-alert-bd">${s.admin_body}</div>`}
+    ${collapsed ? null : html`<div class="x-alert-bd">${s.admin_body}
+      <div class="row" style="margin-top:8px"><${Button} size="sm" icon="refresh" onClick=${() => call("extract.restart_as_admin")}
+        title=${{ head: "Restart as administrator", lines: [["Click", "Windows asks once (UAC), then PAD closes and reopens here elevated, on this tab with the same source picked"]] }}>Restart as administrator<//></div></div>`}
   </div>`;
 }
 

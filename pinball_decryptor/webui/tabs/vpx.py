@@ -58,12 +58,12 @@ INTRO = ("Play a Visual Pinball table with the real game behind it: the "
 #: the supported tables"): the tab lists EVERY machine's tables whatever the
 #: manufacturer, with a filter at the top for one machine (``platform``, ""
 #: for all of them, which is where every sitting starts).
-BRIDGED = ("spike2", "spike1", "spooky")
+BRIDGED = ("spike2", "spike1", "spike3", "spooky")
 
 
 #: PAD-943: the other platforms' tables, where their authors put them
 CATALOG_TIP = ("Every modern platform the app reads, and the Visual Pinball tables of its games: "
-               "where each one is downloaded, who made it, and what plays behind it. A Spike 1 "
+               "where each one is downloaded, who made it, and what plays behind it. A Spike 1 or Spike 3 "
                "table plays on the app's emulator once the app has a map for it, like Spike 2's; "
                "the rest play as their authors wrote them. Stern SAM is not here: Visual PinMAME "
                "runs those games already.")
@@ -986,9 +986,11 @@ class VpxTab(TabService):
     def set_cabinet(self, changes):
         """The Cabinet row: the screen the backglass fills (0: where B2S puts
         it), the B2S DMD hidden, the DOF events the START and LOCKDOWN
-        buttons and the SHAKER MOTOR (PAD-1460) are sent as (0: not sent). Every patched table's <name>.res
+        buttons and the SHAKER MOTOR (PAD-1460) are sent as (0: not sent), and the
+        first of the cabinet light strips' with how many parts a side (PAD-1571). Every patched table's <name>.res
         follows at once; a game picks the rest up as it starts."""
-        keys = ("backglass", "hide_dmd", "dof_start", "dof_lockdown", "dof_shaker")
+        keys = ("backglass", "hide_dmd", "dof_start", "dof_lockdown", "dof_shaker",
+                "dof_strips", "strip_parts")
         changes = {k: v for k, v in dict(changes or {}).items() if k in keys}
         if not changes:
             return False

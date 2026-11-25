@@ -227,17 +227,33 @@ class WslExecutor(CommandExecutor):
             # brought its own there are two candidates and "the default
             # distro" is the wrong one to go and inspect on most machines
             # that have ours.
-            if ours:
-                return False, (
-                    "WSL2 not available: a command in %s - the Linux this app "
-                    "installed - failed. Check that it still starts with "
-                    "'wsl -d %s -- echo ok'. The Emulate tab's Fix setup "
-                    "button reinstalls it." % (ours, ours))
-            return False, ("WSL2 not available: a command in the default "
-                           "distro failed. If WSL is installed, check that "
-                           "the distro still starts — 'wsl -l -v', then "
-                           "'wsl -d <name> -- echo ok'. If it is not "
-                           "installed: wsl --install -d Ubuntu")
+            return False, wsl_unavailable_text()
+
+
+def wsl_unavailable_text() -> str:
+    """What to say when not even ``echo ok`` ran in WSL.
+
+    WINDOWS FIRST: with virtualization off in the firmware, or the Virtual
+    Machine Platform feature off, no distro starts and no install of one can
+    help - PAD-1564's Extract said "Install from Microsoft Store" to a PC
+    that had WSL from the Store and was missing the feature under it.  Both
+    are checked without wsl.exe, so they are facts, not guesses."""
+    from . import prereqs
+    why = prereqs.vm_platform_reason()
+    if why:
+        return "WSL2 not available: " + why
+    ours = runtime.wsl_distro()
+    if ours:
+        return (
+            "WSL2 not available: a command in %s - the Linux this app "
+            "installed - failed. Check that it still starts with "
+            "'wsl -d %s -- echo ok'. The Emulate tab's Fix setup "
+            "button reinstalls it." % (ours, ours))
+    return ("WSL2 not available: a command in the default "
+            "distro failed. If WSL is installed, check that "
+            "the distro still starts — 'wsl -l -v', then "
+            "'wsl -d <name> -- echo ok'. If it is not "
+            "installed: wsl --install -d Ubuntu")
 
 
 class NativeExecutor(CommandExecutor):

@@ -356,6 +356,26 @@ def run(title, hidden=False, mute=False):
                          creationflags=_CREATE_NO_WINDOW)
         print("started %s on the Spike 1 rig from %s (log %s)" % (title, card, launch.logfile))
         return 0
+    if platform == "spike3":
+        # PAD-1560: tools/spike3_emu's s3launch.sh with the title's card, on
+        # a Spike 3 rig slot of the kit's; it stays up for the run's life
+        launch = padlaunch.Spike3Launch(title, card)
+        other = launch.other_run()
+        if other:
+            print("%s is running on the Spike 3 rig's slot %s (%s); stop it first"
+                  % (title, other.get("slot"), other.get("label") or "the app"))
+            return 1
+        slot = launch.take_slot()
+        launch.audio = not (mute or hidden)
+        env, card_wsl = launch.env()
+        if hidden:
+            env = [e for e in env if not e.startswith("PAD_HIDDEN=")] + ["PAD_HIDDEN=1"]
+        cmd = launch.head() + env + ["bash", "%s/s3launch.sh" % launch.rig_wsl] + launch.args(card_wsl)
+        out = open(launch.logfile, "ab")
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                         creationflags=_CREATE_NO_WINDOW)
+        print("started %s on the Spike 3 rig's slot %d from %s (log %s)" % (title, slot, card, launch.logfile))
+        return 0
     if platform in ("spooky", "bof"):
         # PAD-952: tools/spooky_emu's watch.sh with the title's update file,
         # on a Spooky rig slot of the kit's; PAD-1305: tools/bof_emu's with
@@ -413,6 +433,20 @@ def stop(title):
         launch.work = rec.get("root") or ""
         launch.stop()
         print("stopped %s on the Spike 1 rig" % title)
+        return 0
+    if platform == "spike3":
+        rec = padlaunch.spike3_record(title)
+        if not rec:
+            print("no Spike 3 run of %s on the board" % title)
+            return 1
+        if rec.get("label") != padlaunch.LABEL:
+            print("the Spike 3 run of %s is %s's, not the kit's; leaving it"
+                  % (title, rec.get("label") or "somebody"))
+            return 1
+        launch = padlaunch.Spike3Launch(title, "", dist=rec.get("distro"))
+        launch.slot = int(rec.get("slot") or 0)
+        launch.stop()
+        print("stopped %s on the Spike 3 rig's slot %d" % (title, launch.slot))
         return 0
     if platform in ("spooky", "bof"):
         import importlib

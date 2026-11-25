@@ -7,7 +7,8 @@ recognise (model + size + bus type).
 
 Per platform:
   * Windows  — PowerShell ``Get-Disk`` (FriendlyName, Size, BusType,
-    Number) joined to ``\\\\.\\PHYSICALDRIVE<Number>``.
+    Number) joined to ``\\\\.\\PHYSICALDRIVE<Number>``, plus the disks
+    asked directly for whatever Get-Disk did not name (PAD-1556).
   * macOS    — ``diskutil list -plist`` + ``diskutil info``.
   * Linux    — ``lsblk -dbno NAME,MODEL,SIZE,TRAN`` (``-b`` for
     bytes; ``-d`` to skip partitions).
@@ -19,6 +20,7 @@ picker exactly so users transitioning across see the same format:
 
 import os
 import re
+import struct
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -223,10 +225,21 @@ def _parse_linux_lsblk(raw_output):
 # Per-platform enumerators
 # ----------------------------------------------------------------------
 
-def _list_physical_drives_windows():
+def _powershell_exe():
+    """Windows PowerShell by its full path: a PATH that has lost the
+    WindowsPowerShell folder must not empty the drive picker (PAD-1556)."""
+    root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or ""
+    exe = os.path.join(root, "System32", "WindowsPowerShell", "v1.0",
+                       "powershell.exe")
+    return exe if root and os.path.isfile(exe) else "powershell"
+
+
+def _powershell_get_disk():
+    """The drives PowerShell's ``Get-Disk`` names; ``[]`` when it cannot
+    be run, fails, times out or says nothing."""
     try:
         result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
+            [_powershell_exe(), "-NoProfile", "-Command",
              "Get-Disk | ForEach-Object { "
              "$n = $_.Number; $dl = ''; "
              "try { $dl = ((Get-Partition -DiskNumber $n "
@@ -243,6 +256,165 @@ def _list_physical_drives_windows():
     if result.returncode != 0:
         return []
     return _parse_windows_get_disk(result.stdout)
+
+
+# ---- WINDOWS, ASKED DIRECTLY (PAD-1556) -------------------------------
+#
+# ``Get-Disk`` is PowerShell's Storage module talking to Windows' storage
+# management service.  On a PC where that answers nothing (the service
+# disabled by a "debloat" tool, a damaged WMI store, PowerShell blocked by
+# policy or off the PATH, a slow start past the timeout) the picker said
+# "no drives found" with the SD card sitting in Explorer, and the card
+# could only be written with another tool.  The disks themselves answer
+# without any of that: open the PhysicalDriveN device with no access
+# rights and ask it what it is, the way imaging tools do.
+
+#: STORAGE_BUS_TYPE, spelled the way ``Get-Disk`` prints BusType.
+_WIN_BUS_NAMES = {
+    1: "SCSI", 2: "ATAPI", 3: "ATA", 4: "1394", 5: "SSA",
+    6: "Fibre Channel", 7: "USB", 8: "RAID", 9: "iSCSI", 10: "SAS",
+    11: "SATA", 12: "SD", 13: "MMC", 14: "Virtual",
+    15: "File Backed Virtual", 16: "Spaces", 17: "NVMe", 18: "SCM",
+    19: "UFS",
+}
+
+#: How many PhysicalDriveN numbers are tried.  Numbers have gaps (a
+#: reader's empty slots, a disk unplugged since boot), so the walk does
+#: not stop at the first one that is missing.
+_WIN_MAX_DISKS = 64
+
+
+def _descriptor_text(buf, offset):
+    """The NUL-ended ASCII string at *offset* of a storage descriptor
+    (0 = the device gave none), blanks collapsed."""
+    if not offset or offset >= len(buf):
+        return ""
+    end = buf.find(b"\x00", offset)
+    raw = buf[offset:end if end >= 0 else len(buf)]
+    return " ".join(raw.decode("ascii", "replace").split())
+
+
+def _parse_storage_descriptor(buf):
+    """``(model, bus_type)`` out of a STORAGE_DEVICE_DESCRIPTOR: vendor
+    and product joined the way Get-Disk's FriendlyName reads."""
+    if len(buf) < 32:
+        return "", ""
+    vendor_off, product_off = struct.unpack_from("<II", buf, 12)
+    (bus,) = struct.unpack_from("<I", buf, 28)
+    vendor = _descriptor_text(buf, vendor_off)
+    product = _descriptor_text(buf, product_off)
+    model = " ".join(t for t in (vendor, product) if t)
+    return model, _WIN_BUS_NAMES.get(bus, "")
+
+
+def _merge_windows_drives(listed, native):
+    """*listed* (PowerShell's, kept as they are) plus every drive of
+    *native* it did not name, in disk-number order."""
+    seen = {d.device_path.upper() for d in listed}
+    extra = [d for d in native if d.device_path.upper() not in seen]
+    if not extra:
+        return list(listed)
+
+    def number(d):
+        m = re.search(r"(\d+)$", d.device_path)
+        return int(m.group(1)) if m else 1 << 30
+    return sorted(list(listed) + extra, key=number)
+
+
+def _native_windows_drives():
+    """Every physical disk Windows has, asked of the disks themselves -
+    no PowerShell, no WMI, no Administrator.  A reader with no card in it
+    is left out, as Get-Disk leaves it out.  ``[]`` on any failure."""
+    if sys.platform != "win32":
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create = k32.CreateFileW
+        create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                           ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD,
+                           wintypes.HANDLE]
+        create.restype = wintypes.HANDLE
+        ioctl = k32.DeviceIoControl
+        ioctl.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p,
+                          wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+                          ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+        ioctl.restype = wintypes.BOOL
+        close = k32.CloseHandle
+        close.argtypes = [wintypes.HANDLE]
+        drive_type = k32.GetDriveTypeW
+        drive_type.argtypes = [wintypes.LPCWSTR]
+        drive_type.restype = wintypes.UINT
+        invalid = ctypes.c_void_p(-1).value
+        share_rw, open_existing = 0x3, 3
+        dev = "\\\\.\\"
+
+        def opened(path):
+            h = create(path, 0, share_rw, None, open_existing, 0, None)
+            return None if (h is None or h == invalid) else h
+
+        def ask(h, code, inbuf, outsize):
+            out = ctypes.create_string_buffer(outsize)
+            got = wintypes.DWORD(0)
+            ok = ioctl(h, code, inbuf, len(inbuf) if inbuf else 0,
+                       out, outsize, ctypes.byref(got), None)
+            return out.raw[:got.value] if ok else None
+
+        # Which letters sit on which disk (IOCTL_STORAGE_GET_DEVICE_NUMBER).
+        letters = {}
+        mask = k32.GetLogicalDrives()
+        for i in range(26):
+            if not mask & (1 << i):
+                continue
+            letter = chr(ord("A") + i)
+            if drive_type(letter + ":\\") in (4, 5):
+                continue                    # a network share, a CD drive
+            h = opened(dev + letter + ":")
+            if h is None:
+                continue
+            try:
+                raw = ask(h, 0x002D1080, None, 12)
+            finally:
+                close(h)
+            if raw and len(raw) >= 12:
+                devtype, num, _part = struct.unpack("<III", raw[:12])
+                if devtype == 7:            # FILE_DEVICE_DISK
+                    letters.setdefault(num, []).append(letter)
+
+        out = []
+        for num in range(_WIN_MAX_DISKS):
+            path = dev + "PHYSICALDRIVE%d" % num
+            h = opened(path)
+            if h is None:
+                continue
+            try:
+                # IOCTL_DISK_GET_DRIVE_GEOMETRY_EX: DISK_GEOMETRY (24
+                # bytes), then the disk's size.  Fails on an empty reader.
+                geo = ask(h, 0x000700A0, None, 256)
+                if not geo or len(geo) < 32:
+                    continue
+                (size,) = struct.unpack_from("<q", geo, 24)
+                # IOCTL_STORAGE_QUERY_PROPERTY, StorageDeviceProperty.
+                desc = ask(h, 0x002D1400, bytes(12), 1024) or b""
+            finally:
+                close(h)
+            model, bus = _parse_storage_descriptor(desc)
+            out.append(PhysicalDrive(
+                device_path=path, model=model or "(unknown model)",
+                size_bytes=max(size, 0), bus_type=bus,
+                mount_label=" ".join(c + ":"
+                                     for c in sorted(letters.get(num, [])))))
+        return out
+    except Exception:                                   # noqa: BLE001
+        return []
+
+
+def _list_physical_drives_windows():
+    """PowerShell's list, with whatever it did not name (everything, when
+    it answered nothing) filled in from the disks themselves."""
+    return _merge_windows_drives(_powershell_get_disk(),
+                                 _native_windows_drives())
 
 
 def _list_physical_drives_macos():

@@ -1539,6 +1539,42 @@ HELP_CONTENT = {
     # The Modes tab's own tips are in PREVIEW_HELP, read through sections_for;
     # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
     # The key stays so every notebook tab has an entry.
+    # PAD-1554: add-ons made by other people, pulled from their author's project (webui/tabs/plugins.py)
+    "Plugins": [
+        ("What it's for", [
+            "Optional add-ons that other people made and publish themselves. A plugin is not part of this app: "
+            "when you install one, the app downloads the version you pick from its author's own project and "
+            "keeps it on this computer beside your settings. Updating the app leaves it installed.",
+            "Installing a plugin puts nothing on a card. Tick it for a project, then Write: the cards you write "
+            "from that project carry it. Untick it and Write again to take it off.",
+        ]),
+        ("Versions", [
+            "Each plugin lists the versions its author has published. The one marked **tested with this app** "
+            "is the version this release of the app was proven with, and the app checks the download against "
+            "checksums of its own.\n\n"
+            "- A newer version can be installed too. It is checked against its author's published checksums "
+            "and is marked as not tested yet, because this page describes the tested one.\n"
+            "- **Install from files** is for a computer that cannot reach gitlab.com: download the release's "
+            "two .tar.gz files and its SHA256SUMS on another computer and pick all three. Only a tested "
+            "version is taken this way.\n"
+            "- **Remove** takes the plugin off this computer. Cards already written keep it.",
+        ]),
+        ("Bluetooth headphones", [
+            "Made by mattlqx (https://gitlab.com/mattlqx/spike-pinball-bluetooth). It gives a Stern machine "
+            "a Bluetooth entry in the game's own menus, a volume for each headset, and cabinet speakers that "
+            "can go quiet while headphones play.\n\n"
+            "- A Spike 2 machine needs a USB Bluetooth adapter plugged in. A Spike 3 machine uses its own "
+            "radio.\n"
+            "- It works on exact game versions. The tab says whether the card you picked is one the "
+            "installed version knows; on any other the game runs as it is, with no Bluetooth entry. A game "
+            "program this app has changed (Music Mode rows, editions) is not one it knows.\n"
+            "- If the Bluetooth entry goes away after the game crashed, the plugin has switched itself "
+            "off. With remote access set up, **Check it on the machine** switches it back on.\n"
+            "- In the game: hold the left flipper in attract mode and choose Bluetooth, or open Service and "
+            "choose Bluetooth with the coin door buttons.\n"
+            "- Paired headphones and their settings are kept on the machine, not on the card you write.",
+        ]),
+    ],
     # PR #38 review: what the card does on the owner's home network (webui/tabs/network.py)
     "Network": [
         ("What it's for", [

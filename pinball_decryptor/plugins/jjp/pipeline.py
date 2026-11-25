@@ -10887,8 +10887,13 @@ def check_prerequisites(executor, standalone=False):
         except Exception:
             reachable = False
         if not reachable:
-            results.append(("WSL2", False,
-                "WSL2 not available. Install from Microsoft Store."))
+            # Nothing ran, so nothing below can be asked: every tool row
+            # would come back "Not installed. Run: apt install ..." for a
+            # Linux that never started (PAD-1564 got three of them over a
+            # Virtual Machine Platform that was switched off).
+            from ...core.executor import wsl_unavailable_text
+            results.append(("WSL2", False, wsl_unavailable_text()))
+            return results
         else:
             reason = loop_unavailable_reason(executor, "game image")
             if reason:

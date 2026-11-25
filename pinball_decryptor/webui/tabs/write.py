@@ -740,14 +740,14 @@ class WriteTab(TabService):
     @staticmethod
     def _admin_body_text(mfr):
         noun = getattr(mfr, "direct_medium_noun", "SSD") if mfr else "SSD"
-        ssd_label = (getattr(mfr, "extract_ssd_label", "From SSD")
-                     if mfr else "From SSD")
+        ssd_label = (getattr(mfr, "write_ssd_label", "Write to SSD")
+                     if mfr else "Write to SSD")
         return (
-            f"Reading directly from the {noun} needs Windows Administrator "
-            "privileges — Windows gates raw disk access behind elevation. "
-            "Close the app, right-click the \"Pinball Asset Decryptor\" "
-            "shortcut, choose \"Run as administrator\", then re-select "
-            f"\"{ssd_label}\" — your drive and output folder are remembered.")
+            f"Writing directly to the {noun} needs Windows Administrator "
+            "rights — Windows only lets an elevated program take a whole "
+            "disk, and PAD starts without them. Restart as administrator "
+            "asks Windows once, then reopens PAD here on "
+            f"\"{ssd_label}\" — your drive and folders are remembered.")
 
     # ------------------------------------------------------------------
     # destination (image file vs straight onto the card)
@@ -2751,6 +2751,11 @@ class WriteTab(TabService):
         flag calls)."""
         self._admin_collapsed = bool(collapsed)
         self.set(admin_collapsed=self._admin_collapsed)
+
+    @rpc
+    def restart_as_admin(self):
+        """The panel's Restart as administrator (PAD-1563)."""
+        return bool(self.app.restart_as_admin("write"))
 
     @rpc
     def toggle_admin_warning(self):

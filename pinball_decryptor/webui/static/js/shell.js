@@ -423,8 +423,6 @@ function TopBar({ shell }) {
         title=${{ head: "Team", lines: [["Click", "open Project > Team: other people shared new parts of this project"]] }}>Team: ${sx.team_news} new<//>` : null}
     ${pyChanged.length ? html`<${Chip} kind="warn" dot onClick=${() => call("shell.dev_restart")}
         title=${"Python files changed since this app started:\n" + pyChanged.slice(0, 12).join("\n") + (pyChanged.length > 12 ? "\n…" : "") + "\n\nClick to restart the app with them (development checkout only)."}>Python changed · Restart<//>` : null}
-    ${shell.not_admin ? html`<${Chip} kind="warn" dot
-        title=${{ head: "Not running as administrator", lines: [["Why", "PAD was started without Administrator rights, so writing cards, USB passthrough and some build steps can fail or ask for permission one at a time"], ["Fix", "close PAD and start it from its own Start menu or desktop shortcut, or right-click it and choose Run as administrator"]] }}>Not administrator<//>` : null}
     ${!connected ? html`<${Chip} kind="err" dot>Reconnecting…<//>` : null}
     ${upd && upd.available ? html`<${Chip} kind="info" dot onClick=${() => call("ui.settings_action", "install_update")}
         title=${upd.tip || "Pinball Asset Decryptor v" + upd.version + " is available — you're on v" + (shell.version || "") + "."}>${upd.label || ("v" + upd.version + " available")}<//>`

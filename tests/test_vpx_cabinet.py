@@ -74,7 +74,7 @@ def test_cabinet_lights_from_led_io_and_the_platform_places(tmp_path):
 
 def test_settings_defaults_and_updates():
     c = padcabinet.settings({})
-    assert c == {"backglass": 0, "hide_dmd": False, "dof_start": 0, "dof_lockdown": 0, "dof_shaker": 0,
+    assert c == {"backglass": 0, "hide_dmd": False, "dof_start": 0, "dof_lockdown": 0, "dof_shaker": 0, "dof_strips": 0, "strip_parts": 1,
                  "gi_bulbs": {}}
     kit = padcabinet.update({"library": "x"}, backglass=2, hide_dmd=True, dof_start=190)
     assert kit["library"] == "x"
@@ -400,7 +400,7 @@ def test_patch_and_setup_write_the_res(tmp_path, monkeypatch):
     got = vpxsetup.set_cabinet({"backglass": 2, "dof_start": 190}, tables_dir=str(tables), mons=MONS)
     assert got["cabinet"]["backglass"] == 2 and got["cabinet"]["dof_start"] == 190
     assert [m["n"] for m in got["cabinet"]["screens"]] == [1, 2, 3]
-    assert got["cabinet"]["suggested"] == {"start": 190, "lockdown": 191, "shaker": 192}
+    assert got["cabinet"]["suggested"] == {"start": 190, "lockdown": 191, "shaker": 192, "strips": 200}
     # only the table with a backglass beside it gets a .res
     assert (tables / "Jaws (PAD).res").exists() and not (tables / "Godzilla (PAD).res").exists()
     assert json.load(open(kit_path))["cabinet"]["backglass"] == 2

@@ -212,7 +212,8 @@ def digest(project):
     rec = configuration(project)
     wifi = load_wifi(project)
     buttons = load_buttons(project)
-    if rec is None and wifi is None and buttons is None:
+    bluetooth = load_bluetooth(project)
+    if rec is None and wifi is None and buttons is None and bluetooth is None:
         return None
     record = None
     if rec is not None:
@@ -225,6 +226,11 @@ def digest(project):
     if buttons is not None:
         # PAD-1467: and one that sets remote buttons; again, a project that never has keeps its digest
         record = {'base': record, 'buttons': buttons}
+    if bluetooth is not None:
+        # PAD-1554: and one that sets Bluetooth headphones, with the release a build would put on the card (a
+        # newer one installed on the Plugins tab is a change to build); again, others keep their digest
+        from . import bluetooth_card
+        record = {'base': record, 'bluetooth': dict(bluetooth, release=bluetooth_card.wanted_release(bluetooth))}
     return hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
 
 
@@ -264,6 +270,39 @@ def load_buttons(project):
     if not isinstance(rec, dict) or type(rec.get('enabled')) is not bool:
         raise ExtrasError('The project remote-buttons configuration is invalid.')
     return {'enabled': rec['enabled']}
+
+
+def load_bluetooth(project):
+    """PAD-1554: the saved Bluetooth headphones choice ``{'enabled': bool}``, or None when this project never set
+    it (``extras.bluetooth`` in the project's ``.staged_changes.json``; core/bluetooth_card.py puts the plugin's
+    installed release on the card)."""
+    if not project or not os.path.isdir(project):
+        return None
+    extras = staged_changes.load(project).get('extras')
+    if extras is None:
+        return None
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    rec = extras.get('bluetooth')
+    if rec is None:
+        return None
+    if not isinstance(rec, dict) or type(rec.get('enabled')) is not bool:
+        raise ExtrasError('The project Bluetooth headphones configuration is invalid.')
+    return {'enabled': rec['enabled']}
+
+
+def save_bluetooth(project, enabled):
+    if not project or not os.path.isdir(project):
+        raise ExtrasError('Select a project folder before changing the Bluetooth headphones option.')
+    if type(enabled) is not bool:
+        raise ExtrasError('The Bluetooth headphones option must be a checkbox value.')
+    data = staged_changes.load(project)
+    extras = data.setdefault('extras', {})
+    if not isinstance(extras, dict):
+        raise ExtrasError('The project Extras configuration is invalid.')
+    extras['bluetooth'] = {'enabled': enabled}
+    _persist(project, data)
+    return dict(extras['bluetooth'])
 
 
 def save_buttons(project, enabled):

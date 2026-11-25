@@ -38,9 +38,8 @@ Per-OS mechanics:
     partition is capped there (plenty: the stick only ever holds this one
     installer) and an ISO whose contents won't fit is refused with a
     pointer at Rufus' large-FAT32 mode.  Formatting needs Administrator;
-    the shipped build already runs elevated (launcher.vbs), and an
-    unelevated source run gets a one-shot UAC prompt
-    (``Start-Process -Verb RunAs``).
+    the app starts unelevated (PAD-1563), so formatting gets a one-shot
+    UAC prompt (``Start-Process -Verb RunAs``).
   * macOS   — ``diskutil eraseDisk MS-DOS JJPUSB MBR`` (no root needed for
     external media) and ``hdiutil attach`` for the ISO.
   * Linux   — ``pkexec`` runs parted + mkfs.vfat (root needed for block
@@ -172,7 +171,7 @@ def _ps_elevated(script, timeout=300):
 
 def _ps_admin(script, timeout=300, log=None, why="Formatting the stick"):
     """Run a PowerShell script with admin rights — in-process when the app
-    is already elevated (the shipped build), else via one UAC prompt."""
+    is already elevated, else via one UAC prompt."""
     if is_admin():
         return _ps(script, timeout=timeout)
     if log is not None:

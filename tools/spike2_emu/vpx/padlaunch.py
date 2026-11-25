@@ -178,9 +178,12 @@ def _version_key(path):
 
 #: what a title's map says it runs on (`platform`), and the rig that is
 PLATFORM_NAMES = {"spike2": "Spike 2", "spike1": "Spike 1", "spooky": "Spooky",
-                  "bof": "Barrels of Fun"}
-#: the card images a platform's library holds, by glob after `<title>-`
-CARD_GLOBS = {"spike2": ("*.sdcard.raw",), "spike1": ("*.iso",)}
+                  "bof": "Barrels of Fun", "spike3": "Spike 3"}
+#: the card images a platform's library holds, by glob after `<title>-`.
+#: PAD-1560: a Spike 3 card is the 64 GB image Stern ships, `-secure.raw`
+#: (walking_dead_remastered_le-0_92_0.Release.64G.sdcard-secure.raw)
+CARD_GLOBS = {"spike2": ("*.sdcard.raw",), "spike1": ("*.iso",),
+              "spike3": ("*.sdcard-secure.raw", "*.sdcard.raw")}
 #: PAD-952: a Spooky title boots its UPDATE file (tools/spooky_emu prepares
 #: it), named by Spooky, not after the title: the rig's title key -> globs.
 #: PAD-954: Alice Cooper's game-code package, which the same watch.sh hands
@@ -312,6 +315,8 @@ def launch_for(platform, title, card):
         return SpookyLaunch(title, card)
     if platform == "bof":
         return BofLaunch(title, card)
+    if platform == "spike3":
+        return Spike3Launch(title, card)
     return Launch(title, card)
 
 
@@ -1042,6 +1047,234 @@ class SpookyLaunch(Spike1Launch):
             except Exception:                               # noqa: BLE001
                 pass
         self.proc = None
+
+
+# ---------------------------------------------------------------- Spike 3 --
+
+#: how long a rig board record may go without its beater's touch and still
+#: be a run (rigboard.sh's RUN_FRESH_S): a record left by a run WSL took down
+#: with it stays on the board until the next post clears it
+RUN_FRESH_S = 120
+
+
+def spike3_record(title=None, slot=None, board=None):
+    """A live Spike 3 run on the rig board (rigboard.sh's spike3-<n>.run,
+    posted by s3run.sh): the newest of `title`'s, or the one on `slot`; None
+    when there is none or its record has gone stale (PAD-1560)."""
+    d = board or BOARD
+    try:
+        names = sorted(n for n in os.listdir(d) if n.startswith("spike3-") and n.endswith(".run"))
+    except OSError:
+        return None
+    now = time.time()
+    found = []
+    for n in names:
+        path = os.path.join(d, n)
+        try:
+            if now - os.path.getmtime(path) > RUN_FRESH_S:
+                continue
+            rec = json.load(open(path, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(rec, dict) or rec.get("emu") != "spike3" or not rec.get("root"):
+            continue
+        if slot is not None and rec.get("slot") != slot:
+            continue
+        if title and (rec.get("game") or "").lower() != title.lower():
+            continue
+        found.append(rec)
+    if not found:
+        return None
+    return max(found, key=lambda r: r.get("started") or 0)
+
+
+def spike3_keyfile(card=None):
+    """The user's own Spike 3 OTP key file: the kit's `spike3_keyfile`, the
+    one the app's Extract tab unlock saves (webui/spike3_key.py:
+    ~/.pad/spike3_padkeys.json), or a padkeys.json beside the card; None
+    leaves s3launch.sh its own search. Only a file naming an `otp_keyfile`
+    counts: one holding only the .spk package key is refused by the store."""
+    kit = kit_load()
+    for path in (kit.get("spike3_keyfile"),
+                 os.path.join(os.path.expanduser("~"), ".pad", "spike3_padkeys.json"),
+                 os.path.join(os.path.dirname(card), "padkeys.json") if card else None):
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            if json.load(open(path, encoding="utf-8")).get("otp_keyfile"):
+                return path
+        except (OSError, ValueError, AttributeError):
+            continue
+    return None
+
+
+class Spike3Launch(SpookyLaunch):
+    """One Spike 3 run started for a table (PAD-1560): tools/spike3_emu's
+    s3launch.sh with the title's card, as the app's Emulate tab starts one
+    (`wsl -u root`, the user's own OTP key for the card store's first
+    decrypt), visible and with sound, on a Spike 3 rig slot nobody else has.
+
+    The run is Spike 2-shaped for the controller: s3leds.py fills dump/padled
+    at padled.h's offsets and s3keys.py merges dump/padsw into the node
+    inputs, so PAD.Controller reads and writes it as it does a Spike 2 run;
+    only the board record (spike3-<n>.run) and the switch table's place
+    (tables/game/switch_list.txt) differ. s3launch.sh stays in the
+    foreground for the run's life, so `alive` is its process."""
+
+    #: the Spike 3 rig's slots the kit takes, the highest first: the app's
+    #: Emulate tab runs on 1 (or a ticket's leased rig)
+    SLOTS = (7, 6, 5, 4)
+
+    def __init__(self, title, card, dist=None, minutes=240):
+        super().__init__(title, card, dist, minutes)
+        self.rig_wsl = padpath.to_wsl(os.path.join(os.path.dirname(rig_dir()), "spike3_emu"),
+                                      self.distro)
+        self.audio = True
+        #: where this run's lines start in the shared log (the boot watch
+        #: reads s3prog.py's `[s3run] progress` lines from here)
+        self.log_from = 0
+
+    def other_run(self):
+        """A Spike 3 run of this title already up that is not the kit's."""
+        rec = spike3_record(self.title)
+        if rec and rec.get("label") != LABEL:
+            return rec
+        return None
+
+    @staticmethod
+    def leased(n, board=None):
+        """Whether rig slot n is leased to someone else (riglock.sh's
+        slot-N.lock): a ticket's session runs its Spike 3 games on its own
+        rig number, so the kit keeps off it."""
+        try:
+            text = open(os.path.join(board or BOARD, "slot-%d.lock" % n), encoding="utf-8").read()
+        except OSError:
+            return False
+        return LABEL not in text
+
+    def take_slot(self):
+        for n in self.SLOTS:
+            if spike3_record(slot=n) is None and not self.leased(n):
+                self.slot = n
+                return n
+        raise RuntimeError("every Spike 3 rig slot the kit uses (%s) is running a game; stop one "
+                           "first" % ", ".join(str(n) for n in self.SLOTS))
+
+    def env(self):
+        card = padpath.to_wsl(self.card, self.distro)
+        # PAD_TITLE_TAG: the game window's title carries the kit's label as a
+        # Spike 2 run's does (watch.sh's pad_title_tag), which is how the
+        # controller finds it to place it and hand the focus back
+        # PAD_S3_AUTOGUIDE=walk: the rig gets the game past Guided Setup, as
+        # on a headless run - a window run otherwise leaves Save & Exit to
+        # the player, who is at the table and cannot reach it
+        env = ["PAD_LABEL=%s" % LABEL, "PAD_HIDDEN=0", "PAD_S3_AUTOGUIDE=walk",
+               "PAD_TITLE_TAG=[rig %d: %s]" % (self.slot or 0, LABEL)]
+        if sys.platform == "win32":
+            env.append("PAD_BOARD=%s" % padpath.to_wsl(BOARD, self.distro))
+        return env, card
+
+    def args(self, card):
+        """s3launch.sh's arguments: the card, the slot, the minutes, sound
+        and the user's key (spike3_keyfile)."""
+        out = [card, str(self.slot), str(self.minutes)]
+        if self.audio:
+            out.append("--audio")
+        key = spike3_keyfile(self.card)
+        if key:
+            out += ["--keyfile", padpath.to_wsl(key, self.distro)]
+        return out
+
+    def start(self):
+        why = no_linux(self.distro)
+        if why:
+            log(why)
+            raise RuntimeError(why)
+        other = self.other_run()
+        if other:
+            raise RuntimeError("%s is running on the Spike 3 rig's slot %s (%s); stop it first"
+                               % (other.get("title") or self.title, other.get("slot"),
+                                  other.get("label") or "the app"))
+        if self.slot is None:
+            self.take_slot()
+        env, card = self.env()
+        cmd = self.head() + env + ["bash", "%s/s3launch.sh" % self.rig_wsl] + self.args(card)
+        try:
+            self.log_from = os.path.getsize(self.logfile)
+        except OSError:
+            self.log_from = 0
+        out = open(self.logfile, "ab")
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                                     creationflags=_CREATE_NO_WINDOW)
+        log("started %s on the Spike 3 rig's slot %d from %s (distro %s, log %s)"
+            % (self.title, self.slot, self.card, self.distro or "default", self.logfile))
+        return self.slot
+
+    def alive(self):
+        if self.proc is not None and self.proc.poll() is None:
+            return True
+        return spike3_record(self.title, slot=self.slot) is not None
+
+    def stop(self):
+        if self.slot is None:
+            return
+        try:
+            _run(self.head() + ["bash", "%s/s3launch.sh" % self.rig_wsl, "--stop", str(self.slot)],
+                 timeout=120)
+            log("stopped %s on the Spike 3 rig's slot %s" % (self.title, self.slot))
+        except Exception as exc:                            # noqa: BLE001
+            log("stop of the Spike 3 run failed: %s" % exc)
+        if self.proc is not None:
+            try:
+                self.proc.wait(timeout=10)
+            except Exception:                               # noqa: BLE001
+                pass
+        self.proc = None
+
+
+class Spike3Boot:
+    """How far a started Spike 3 run has booted, off its own log: s3prog.py's
+    `[s3run] progress <step> <pct> <words>` lines, which s3launch.sh's
+    output carries into the launch log (the Emulate tab's footer reads the
+    same lines). `poll` answers as bootprog.BootLog does: (state, pct,
+    words), state "attract" at `progress run`, or None before any line; a
+    launch that failed says "Stuck: <why>"."""
+
+    LINE = re.compile(r"\[s3run\] progress (\w+) (\d+) (.*)$")
+
+    def __init__(self, logfile, start=0):
+        self.logdir = logfile
+        self.log = logfile
+        self.off = start
+        self.got = None
+
+    def poll(self):
+        try:
+            size = os.path.getsize(self.log)
+        except OSError:
+            return self.got
+        if size < self.off:
+            self.off = 0
+        if size > self.off:
+            try:
+                with open(self.log, "rb") as f:
+                    f.seek(self.off)
+                    data = f.read(size - self.off)
+            except OSError:
+                return self.got
+            self.off += len(data)
+            for raw in data.decode("utf-8", "replace").splitlines():
+                line = raw.strip()
+                if line.startswith("s3launch: failed - "):
+                    self.got = ("booting", 0, "Stuck: " + line[len("s3launch: failed - "):])
+                    continue
+                m = self.LINE.match(line)
+                if m:
+                    step, pct, words = m.group(1), int(m.group(2)), m.group(3).strip()
+                    self.got = ("attract" if step == "run" else "booting", pct, words)
+                elif line.startswith("s3launch: ") and self.got is None:
+                    self.got = ("booting", 5, line[len("s3launch: "):])
+        return self.got
 
 
 # ---------------------------------------------------------- Barrels of Fun --

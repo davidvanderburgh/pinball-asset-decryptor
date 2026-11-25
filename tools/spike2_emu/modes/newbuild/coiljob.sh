@@ -4,6 +4,7 @@
 #
 #   COILS="<name> ..."  which (default: the port's `text held_coils`)
 #   PORT=<port>         the port (default: modes/sdk/ports/<key>.port)
+#   WAIT=<s>            game seconds into the ball before the first hold (default 5)
 #
 # In one game, for each coil a mode file `coil_hold <name> 2000` (once, as it starts) is written and the mode started.
 # Pass per coil: the runtime's `<name>: HOLD for <ms>` and, after it, a command on the coil's own board address
@@ -31,7 +32,7 @@ GZ=${LOG:-$PAD_LOGDIR/gzwatch.log}
 job_start_game || job_fail "$JOB_WHY"
 job_sleep 3
 python3 "$RIG/plunge.py" plunge > /dev/null 2>&1 < /dev/null
-job_sleep 5
+job_sleep "${WAIT:-5}"
 : > "$JOB_OUT/coils.txt"
 bad=0
 for c in $COILS; do
@@ -54,6 +55,10 @@ for c in $COILS; do
         IFS=, read -r pp pm hp <<<"$want"
         drive=$([ -n "$want" ] && grep -a -m1 -Eo "\[coildrive\] [0-9]+ ms node [0-9]+ coil [0-9]+: pulse $pp/255 for $pm ms, hold $hp/255 for [0-9]+ ms" "$JOB_OUT/coil_$c.txt")
     fi
+    # PAD-1555: a hold the runtime let go at once as "the game wants it" never held (King Kong 1.01, the object's
+    # on-time word read at the old offset): one let go within 500 ms of its start fails the coil
+    quick=$(tail -n +"$lines" "$log" | grep -a -m1 -Eo "$c: let go - the game wants it, after [0-9]+ ms" | grep -Eo '[0-9]+ ms' | grep -Eo '[0-9]+')
+    [ -n "$quick" ] && [ "$quick" -lt 500 ] && drive=""; said="$said${quick:+ (let go after $quick ms: the game wants it)}"
     if echo "$said" | grep -q "HOLD for" && [ -n "$drive" ]; then
         echo "$c pass $said | $drive" >> "$JOB_OUT/coils.txt"
     else

@@ -548,7 +548,8 @@ shot 0x20000000000   Shot 0x20000000000
 # ---- callouts and text: COPIED from Foo Fighters LE 1.04, the same title; unverified ----
 callout countdown           163
 callout time_up           878   # Better luck next time.
-text example_start_shot     Lower right target
+# PAD-1555: one of its own shots (1.04 named a switch shot; 1.05 has its own shot lines)
+text example_start_shot     Right orbit
 text outlane_up_post_label Outlane up post
 text up_pf_diverter_label Up pf diverter
 text van_up_post_label    Van up post

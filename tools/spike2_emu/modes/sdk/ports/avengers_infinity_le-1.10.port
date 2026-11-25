@@ -502,7 +502,8 @@ site block_rule_22         0x0012f468 0xe92d40f8 0xe2035001  # RuleTower::v[30]
 text block_rule_name_22    Tower
 
 # ---- PAD-420: placed by port_tool.py from avengers_infinity_le-1.09.port (the same title), unverified ----
-text example_start_shot     Right bullseye target
+# PAD-1555: one of its own shots (no Right bullseye shot)
+text example_start_shot     Left bullseye
 #   switch_*: this build's own drain (generation B), read off its code (PAD-645: were another generation's)
 value switch_drain_size     384
 value switch_record_size    32

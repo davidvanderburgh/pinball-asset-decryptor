@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ...core.lazy_import import lazy_module
 
@@ -912,6 +912,18 @@ PROFILES = {
         first_free_id=0x300, in_game=True, video=(5, 21)),
 }
 
+
+#: PAD-1555: Stern's November 2026 builds' in-game HUDs, each the same size and structure as an earlier build's profiled
+#: one - every offset that profile names checks out (:func:`check`: the root's frames and children, the insert point
+#: and its neighbour) - with other bytes edited in place: {md5: (the profiled md5, label)}
+SAME_SHAPE = {
+    "4f934c4419b2e9a771b0deb8ffd11bc7": ("cf8da03fa56cd71e414702db70b6aa3d", "King Kong LE 1.00 in-game 9d578751"),
+    "6552d9a4d023ccc7b23225c5dc8504ac": ("cf8da03fa56cd71e414702db70b6aa3d", "King Kong LE 1.01 in-game 9d578751"),
+    "80f43b73ad1de7f7aca4988c03f61a01": ("cf8da03fa56cd71e414702db70b6aa3d", "King Kong Pro 1.01 in-game 9d578751"),
+    "1499e2bbf970aac375c9f73faefb1c92": ("809cbf843c36555ddbda41c3b4909543", "Metallica Remastered 1.05 in-game 9d578751"),
+}
+for _md5, (_base, _label) in SAME_SHAPE.items():
+    PROFILES[_md5] = replace(PROFILES[_base], md5=_md5, label=_label + " (PAD-1555, the earlier build's shape)")
 
 def _edited_in_place(data):
     """PAD-250: the profile of a stock scene an earlier build EDITED IN PLACE - a card PAD built

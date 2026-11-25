@@ -149,3 +149,27 @@ def test_two_inserts_of_one_name_each_get_their_own_lamp_line():
     text = (PORTS / "foo_fighters_pro-1.05.port").read_text(encoding="utf-8")
     assert re.search(r"^lamp 105,106,107 +0x200000 +OVERLORD  #", text, re.M)
     assert len(re.findall(r"^lamp 15 +0x200000 +OVERLORD  #", text, re.M)) == 1
+
+
+def test_every_port_s_example_start_shot_is_one_of_its_shots():
+    """PAD-1555: Foo Fighters LE 1.05's port kept 1.04's `text example_start_shot Lower right target`, a switch shot
+    1.04 named - 1.05 has its own shot lines - and Avengers 1.10 / 1.12 named a Right bullseye no shot of theirs is; a
+    Try it of a mode started on it was refused for the card ("names Lower right target, which Foo Fighters LE 1.05 does
+    not have"). The new mode falls back to the first shot, but the port's example must be its own."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    for key, prof in MP.profiles().items():
+        if prof.example_start_shot and prof.shots:
+            assert prof.example_start_shot in [n for n, _m in prof.shots], key
+
+
+def test_the_control_coil_on_time_word_is_the_port_s():
+    """PAD-1555: the November King Kong builds grew spike::ControlCoil by a word at +36 (its virtuals read +0x28 /
+    +0x30 / +0x33 where 0.97's read +0x24 / +0x2c / +0x2f); the runtime read the game's on-time word at +36 and let
+    every hold go 13 ms in. The offset is the port's (`value ccoil_ontime_at`, default 36)."""
+    src = (ROOT / "tools" / "spike2_emu" / "modes" / "sdk" / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    assert '#define CCOIL_ONTIME_AT ((pm_addr)pm_port_value("ccoil_ontime_at", 36))' in src
+    assert "c->obj + CCOIL_ONTIME_AT" in src and "c->obj + 36)" not in src
+    for key in ("king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01"):
+        text = (PORTS / (key + ".port")).read_text(encoding="utf-8")
+        assert re.search(r"^value ccoil_ontime_at\s+40$", text, re.M), key
+    assert "ccoil_ontime_at" not in (PORTS / "king_kong_le-0.97.port").read_text(encoding="utf-8")

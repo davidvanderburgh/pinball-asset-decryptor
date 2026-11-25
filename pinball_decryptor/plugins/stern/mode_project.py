@@ -2759,6 +2759,18 @@ COUNTDOWN_NO_NUMBERS = frozenset({"aerosmith_le-1.15", "john_wick_le-1.01", "elv
                                   "aerosmith-1.16", "aerosmith_le-1.16", "john_wick_le-1.02", "john_wick_pro-1.02"})
 
 TITLE_SCENES = {
+    # PAD-1555: Stern's November 2026 builds - each scene.radium's md5 read off the card (read-only); proven once our
+    # screen and clip are seen on the glass (newbuild/mediajob.sh)
+    "king_kong_le-1.00": dict(screen_proven=False, hud="4f934c4419b2e9a771b0deb8ffd11bc7", bank="87f625eac25ca72dc73696167bcbc01b", clip_proven=False),
+    "king_kong_le-1.01": dict(screen_proven=False, hud="6552d9a4d023ccc7b23225c5dc8504ac", bank="87f625eac25ca72dc73696167bcbc01b", clip_proven=False),
+    "king_kong_pro-1.01": dict(screen_proven=False, hud="80f43b73ad1de7f7aca4988c03f61a01", bank="87f625eac25ca72dc73696167bcbc01b", clip_proven=False),
+    "avengers_infinity_le-1.12": dict(screen_proven=False, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=False),
+    "avengers_infinity_pro-1.12": dict(screen_proven=False, hud="72bb8788254c99a686700ace0c6e2084", bank="0a433b8e07933efcc8704ca469036c97", bank_tree="demand_loaded", clip_proven=False),
+    "foo_fighters_le-1.05": dict(screen_proven=False, hud="3f34991c6809a039dd47b2086a12937a", bank="92f0b52f8ec5d17924a75ad81c222b9b", clip_proven=False),
+    "foo_fighters_pro-1.05": dict(screen_proven=False, hud="3f34991c6809a039dd47b2086a12937a", bank="92f0b52f8ec5d17924a75ad81c222b9b", clip_proven=False),
+    "metallica_spike-1.05": dict(screen_proven=False, hud="1499e2bbf970aac375c9f73faefb1c92", bank="1499e2bbf970aac375c9f73faefb1c92", clip_proven=False),
+    "dungeons_and_dragons_le-1.11": dict(screen_proven=False, hud="e8bbe9670a9a212f18408a602d7b187b", bank="046915f6ff0a53b5608c8e7c4c2a976f", clip_proven=False),
+    "dungeons_and_dragons_pro-1.11": dict(screen_proven=False, hud="76ac5e79ac7d5f8f3b916d925041f266", bank="046915f6ff0a53b5608c8e7c4c2a976f", clip_proven=False),
     "godzilla_pro-1.15": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27", screen_proven=True,
                               bank="fe35b5b897c2b0df6fe583b0168a6cda", clip_proven=True),
     "godzilla_le-1.16": dict(hud="f9daed5a19aafc807bf9eb3c2def6c27", screen_proven=True,

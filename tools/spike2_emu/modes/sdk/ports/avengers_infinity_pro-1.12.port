@@ -523,7 +523,8 @@ shot 0x40000000000   Disc
 callout countdown         569   # One! / Two!
 callout ten_seconds       571   # You are almost out of time. / Time is running out.
 callout time_up           635   # This fight is over, but there's still more battles to come.
-text example_start_shot     Right bullseye target
+# PAD-1555: one of its own shots (no Right bullseye shot)
+text example_start_shot     Left bullseye
 text tower_magnet_label   Tower magnet
 text tower_post_label     Tower up post
 text tower_magnet_drive   9 0 255 300 100

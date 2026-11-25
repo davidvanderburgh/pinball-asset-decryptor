@@ -7586,6 +7586,8 @@ static int coil_disabled(const struct held_coil *c)
 
 /* Is the GAME using this coil: a process of its own controls it, it asked for an on-time, one of the
  * game's processes the port names for it runs, or (route 1) a command of its own is on the coil? */
+#define CCOIL_ONTIME_AT ((pm_addr)pm_port_value("ccoil_ontime_at", 36))
+
 static int coil_game_busy(const struct held_coil *c)
 {
     char key[40];
@@ -7594,7 +7596,10 @@ static int coil_game_busy(const struct held_coil *c)
     if (c->obj && c->ctl) {
         ctl = *(const unsigned short *)(unsigned long)(c->obj + c->ctl);
         if (ctl && ctl != c->id) return 1;
-        if (!c->route && *(const unsigned *)(unsigned long)(c->obj + 36)) return 1;
+        /* PAD-1555: the object's on-time word - +36 on spike::ControlCoil, +40 where Stern's November 2026 builds
+         * grew the object by a word at +36 (King Kong 1.00 / 1.01: every field from +0x24 on moved 4; reading +36
+         * there, the new word, every hold was let go 13 ms in as "the game wants it") */
+        if (!c->route && *(const unsigned *)(unsigned long)(c->obj + CCOIL_ONTIME_AT)) return 1;
     }
     if (c->route && coil_rec_busy(c)) return 1;
     pm_snprintf(key, sizeof key, "%s_procs", c->name);

@@ -2484,6 +2484,10 @@ def _stack_flags(data, values):
 #: about each mode's own record ids (``value mode_records_1`` ..). Until a build is here its note says
 #: multiballs only.
 STACK_RECORDS_PROVEN = frozenset({
+    "metallica_spike-1.05",           # PAD-1555 2026-11-24 newbuild/recjob.sh (stock card, hidden, muted; the 1.04 control
+                                      # the same): its mode_records read off its song starts (1.04's + 1); a stack no mode
+                                      # started with nothing of the game's running, then the game's Enter Sandman (1) started
+                                      # and it was refused: "one of the game's modes (a song mode) is running"
     "aerosmith_le-1.15",              # 2026-09-26: Double Scoring (ids 237..238) held a stack no mode back, and
                                       # 60 s later its records were gone and the mode started
     "guardians_le-1.14",              # the same with its Double Scoring (ids 232..233)

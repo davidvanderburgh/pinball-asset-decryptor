@@ -36,7 +36,9 @@ job_sleep 3
 python3 "$RIG/plunge.py" plunge > /dev/null 2>&1 < /dev/null
 job_sleep 20
 for id in "${ids[@]:0:6}"; do job_press "$id"; job_sleep 0.5; done     # the ball scores first (stock_base_until)
-job_sleep 4
+# Metallica keeps a second ball out early (its saver serves a drained ball again): wait the save out, a switch tapped
+# every 2 game seconds meanwhile (a saver that counts only while the ball is seen in play)
+for ((t = 0; t < 30; t += 2)); do job_press "${ids[$(( (t / 2) % ${#ids[@]} ))]}"; job_sleep 2; done
 ask() {
     local mark
     mark=$(grep -c "" "$log")
@@ -45,12 +47,12 @@ ask() {
     tail -n +"$((mark + 1))" "$log" | grep -a -m1 -Eo 'STACK TEST (not started \([^)]*\): .*|START \([^)]*\))' | cut -c1-160
 }
 first=""
-for k in 1 2 3; do
+for k in 1 2 3 4 5; do
     first=$(ask)
     echo "ask $k: $first" >> "$JOB_OUT/play.txt"
     echo "$first" | grep -q "START" && break
     echo "drain: $(python3 "$RIG/plunge.py" drain 2>&1 < /dev/null | head -1)" >> "$JOB_OUT/play.txt"
-    job_sleep 4
+    job_sleep 6
 done
 bash "$MODES/tryit.sh" stop > /dev/null 2>&1 < /dev/null
 job_sleep 3

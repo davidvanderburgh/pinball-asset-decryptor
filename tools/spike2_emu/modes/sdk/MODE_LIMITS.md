@@ -229,7 +229,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
-| Metallica Remastered 1.05 | ✓ | ✓ | ✓ | all | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes, waits for multiballs only |
+| Metallica Remastered 1.05 | ✓ | ✓ | ✓ | all | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Pokemon LE 0.82 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Pokemon LE 0.87 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Pokemon Pro 0.87 (Spike 3) | no | no | ✓ | no | challenges, never waits |

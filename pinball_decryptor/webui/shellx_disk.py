@@ -255,6 +255,8 @@ class DiskMixin:
                      "cards": self._cards_initial()}}
         self.set(disk=self._disk_state())
         self.disk_refresh()
+        # PAD-1599: what the app left in the PC's previous Linux
+        self._old_start_check(_probes_allowed())
         return self._disk_state()
 
     def _disk_busy(self, busy, status=None):

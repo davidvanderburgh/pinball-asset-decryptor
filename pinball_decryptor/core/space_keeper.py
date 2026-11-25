@@ -159,8 +159,9 @@ def set_auto(on):
 #   C <root> <bytes> <last> <path>   an emulator cache entry; <last> is the
 #                                    newest of its own date and its markers
 #   B <build> <entry>                a PB I/O-board build stacked on <entry>
-_SCAN = r"""
-df -B1 --output=avail,used /var/tmp | tail -1 | awk '{print "D\t" $1 "\t" $2}'
+#: The L and H lines alone: what runs and what is held.  PAD-1599 asks the
+#: same of the user's previous Linux (core/old_distro.py).
+SCAN_LIVE = r"""
 for r in /var/tmp/pad_*/; do
   r=${r%/}; n=${r##*/}
   case $n in pad_aaiw_*) continue ;; esac
@@ -179,6 +180,10 @@ done | grep -aE '^/(var/)?tmp/' | sort -u | sed 's/^/H\t/'
 cat /sys/block/loop*/loop/backing_file 2>/dev/null | sed 's/^/H\t/'
 awk '{print $5}' /proc/self/mountinfo | grep -aE '^/(var/)?tmp/' |
   sed 's/\\040/ /g; s/^/H\t/'
+"""
+_SCAN = r"""
+df -B1 --output=avail,used /var/tmp | tail -1 | awk '{print "D\t" $1 "\t" $2}'
+""" + SCAN_LIVE + r"""
 newest() { find "$1" -xdev -printf '%T@\n' 2>/dev/null | sort -rn | head -1 | cut -d. -f1; }
 find /tmp /var/tmp -maxdepth 1 \( -name 'cgc_stage_*' -o -name 'bof_*' \
     -o -name 'jjp_*' -o -name 'pad_aaiw_*' \) 2>/dev/null |

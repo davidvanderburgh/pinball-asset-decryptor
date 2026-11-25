@@ -35,6 +35,7 @@ from .. import compat
 from ..picker_data import MFR_VISUALS, peek_text, tooltip_text
 from ..shellx_cards import CardsMixin
 from ..shellx_disk import DiskMixin
+from ..shellx_olddistro import OldDistroMixin
 from ..shellx_machines import MachinesMixin
 from ..shellx_donations import DonationsMixin
 from ..shellx_getting_started import GettingStartedMixin
@@ -114,7 +115,7 @@ def _visuals():
     return dict(MFR_VISUALS)
 
 
-class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, CardsMixin, ResetMixin, TeamMixin,
+class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, OldDistroMixin, CardsMixin, ResetMixin, TeamMixin,
                   DonationsMixin, ReportMixin, GettingStartedMixin, TabService):
     ns = "shellx"
     key = ""

@@ -173,6 +173,23 @@ def _authopen_fd(path, flags):
 # ---------------------------------------------------------------------------
 
 
+#: <sys/disk.h>: _IOR('d', 24, uint32_t) and _IOR('d', 25, uint64_t).
+_DKIOCGETBLOCKSIZE = 0x40046418
+_DKIOCGETBLOCKCOUNT = 0x40086419
+
+
+def _mac_fd_length(fd):
+    """Byte length of the macOS disk open on *fd* (block count x block size,
+    as dd and every imaging tool ask it), or ``None``."""
+    try:
+        import fcntl
+        bs = struct.unpack("=I", fcntl.ioctl(fd, _DKIOCGETBLOCKSIZE, bytes(4)))[0]
+        n = struct.unpack("=Q", fcntl.ioctl(fd, _DKIOCGETBLOCKCOUNT, bytes(8)))[0]
+    except (ImportError, OSError, ValueError, struct.error):
+        return None
+    return bs * n if bs and n else None
+
+
 class _FdIO:
     """``os``-level fd backend: POSIX always, and every *file* path on Windows."""
 
@@ -213,6 +230,16 @@ class _FdIO:
             # card open (Remote access setup, PAD-1429) never learnt the card's
             # size; ask the drive itself, as the writable backend does.
             return _win_fd_length(self.fd)
+        if sys.platform == "darwin" and is_device_path(self.path):
+            # PAD-1566: SEEK_END reports 0 on a /dev/rdiskN fd as well, so
+            # Remote access setup on a Mac said "Couldn't tell how big the
+            # card is."  Ask the disk driver; failing that, diskutil.
+            n = _mac_fd_length(self.fd)
+            if n:
+                return n
+            n = _diskutil_total_size(re.sub(r"^/dev/rdisk", "/dev/disk", self.path))
+            if n:
+                return n
         try:
             end = os.lseek(self.fd, 0, os.SEEK_END)
             os.lseek(self.fd, 0, os.SEEK_SET)

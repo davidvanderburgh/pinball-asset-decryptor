@@ -285,3 +285,51 @@ def test_bridge_sends_no_strips_unless_asked(tmp_path):
     b.dof_finish()
     assert not [g for g in dof.got if g[0] == "E"]
     assert b._strips_words().startswith("off (blades, node 2")
+
+
+# ---------------------------------------------- PAD-1603: the strips logged --
+
+def test_strip_lit_names_side_part_and_colour():
+    assert padcabinet.strip_lit(200, 1, [(200, 0), (208, 255), (205, 17)]) == [
+        (208, "right red", 255), (205, "left blue", 17)]
+    assert padcabinet.strip_lit(200, 2, [(208, 51)]) == [(208, "left p2 red", 51)]
+    assert padcabinet.strip_lit(0, 1, [(208, 51)]) == []
+
+
+def test_the_log_says_what_the_strips_sent_and_when_they_stayed_dark(tmp_path, monkeypatch):
+    kit = padcabinet.update({}, dof_strips=836)
+    pc, b = _bridge(tmp_path, kit, blades=False)
+    said = []
+    monkeypatch.setattr(pc, "log", lambda s: said.append(s))
+    blue = {(7, 2): 255}
+    b._note_strips("the DOF in B2S.Server", b._cab_events(_data(pc, {})), now=0.0)
+    b._note_strips("the DOF in B2S.Server", b._cab_events(_data(pc, blue)), now=1.0)
+    b._note_strips("the DOF in B2S.Server", b._cab_events(_data(pc, blue)), now=2.0)
+    assert said == ["DOF strips: first lit, E841 = 255 (left blue), E849 = 255 (right blue),"
+                    " to the DOF in B2S.Server"]
+    b._note_strips("the DOF in B2S.Server", b._cab_events(_data(pc, {})), now=31.0)
+    assert said[-1] == ("DOF strips, last 31 s, to the DOF in B2S.Server: 20 changes sent, lit in 2 of 4"
+                        " polls, showed left blue, right blue; now dark")
+    for t in (40.0, 62.0):
+        b._note_strips("the DOF in B2S.Server", b._cab_events(_data(pc, {})), now=t)
+    assert said[-1] == ("DOF strips, last 31 s, to the DOF in B2S.Server: the game lit none of its"
+                        " speaker lights, so E836-E851 stayed 0")
+
+
+def test_both_routes_log_the_strips(tmp_path, monkeypatch):
+    kit = padcabinet.update({}, dof_strips=200)
+    pc, b = _bridge(tmp_path, kit, blades=False)
+    said = []
+    monkeypatch.setattr(pc, "log", lambda s: said.append(s))
+    fake = FakeB2SData()
+    assert b.b2s_attach(fake, direct=True)
+    b._poll_b2s_dof(_data(pc, {(7, 2): 255}))
+    b.b2s_finish()
+    assert any(s.startswith("DOF strips: first lit, E205 = 255") and "B2S.Server" in s for s in said)
+    pc2, b2 = _bridge(tmp_path / "own", kit, blades=False)
+    said.clear()
+    dof = FakeDOF()
+    b2.dof_init("rush_le", "x.vpx", factory=lambda: dof)
+    b2._poll_dof(_data(pc2, {(7, 2): 255}))
+    b2.dof_finish()
+    assert any(s.startswith("DOF strips: first lit") and "PAD's own DOF" in s for s in said)

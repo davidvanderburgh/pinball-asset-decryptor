@@ -520,10 +520,36 @@ def helper_main(argv):
         _wait_pid(pid, APP_EXIT_WAIT_S)
         # the app's last wsl.exe calls (the emulators' stop) settle first
         time.sleep(5)
-        run()
+        _off_main_thread(run)
     except Exception as e:                              # noqa: BLE001
         _say("failed: %s" % e)
     return 0
+
+
+def _off_main_thread(fn):
+    """Run *fn* on a thread of its own and wait for it.
+
+    PAD-1599: on the MAIN thread ``runtime.status()`` never asks wsl.exe (the
+    guard that keeps a UI from freezing), so ``runtime.wsl_distro()`` answered
+    None and every lookup fell back to the machine's DEFAULT distro: the
+    helper listed the user's own Ubuntu as "the app's Linux", ran its busy
+    scan and fstrim there, and compacted it (David's record: "Ubuntu
+    217 -> 206 GB") while PAD-Runtime counted as another distro running.
+    The helper has no UI to freeze, so it asks from a worker thread."""
+    import threading
+    box = {}
+
+    def _go():
+        try:
+            box["out"] = fn()
+        except BaseException as e:                      # noqa: BLE001
+            box["err"] = e
+    t = threading.Thread(target=_go, name="pad-disk-giveback")
+    t.start()
+    t.join()
+    if "err" in box:
+        raise box["err"]
+    return box.get("out")
 
 
 __all__ = ["run", "due", "disks", "start_after_close", "helper_main",

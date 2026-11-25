@@ -411,3 +411,19 @@ def test_no_section_in_captures(tmp_path, monkeypatch):
         w.call("shellx.disk_open")
         assert until(w, lambda: w.state("shellx")["disk"].get("old_checked"))
         assert w.state("shellx")["disk"]["old"] is None
+
+
+def test_the_close_helper_asks_off_the_main_thread(monkeypatch):
+    """On the main thread runtime.status() never asks wsl.exe, so the
+    helper took the user's default distro for the app's Linux (David's
+    Ubuntu, 217 -> 206 GB).  Its run is on a thread of its own now."""
+    import threading
+    seen = []
+    monkeypatch.setattr(g, "_wait_pid", lambda pid, t: None)
+    monkeypatch.setattr(g.time, "sleep", lambda s: None)
+    monkeypatch.setattr(g, "run", lambda: seen.append(
+        threading.current_thread() is threading.main_thread()))
+    assert g.helper_main(["x", "--disk-giveback", "1"]) == 0
+    assert seen == [False]
+    with pytest.raises(ValueError):
+        g._off_main_thread(lambda: int("x"))

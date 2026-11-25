@@ -51,3 +51,15 @@ runtime's base tarball and fills it with what an older app left (aged 60 days),
 plus the user's own `~/cardcache_mine` and save states. `run` drives
 check -> remove -> compact; `compact-when-idle` waits for an idle WSL.
 `scripts/shot_pad1599_disk.py` is the window, with `--press`.
+
+## Found on the way: the close helper compacted the wrong distro
+
+The give-back at close (`--disk-giveback`, PAD-1458) ran on its main thread,
+where `runtime.status()` never asks wsl.exe (the guard that keeps a UI from
+freezing). So `runtime.wsl_distro()` was None and every lookup fell back to the
+machine's default distro: on David's PC `disks()` listed his Ubuntu (222 GB) as
+"the app's Linux", the busy scan and fstrim ran there, PAD-Runtime counted as
+"another distro running", and the record "Ubuntu 217 -> 206 GB" is that helper
+compacting the user's distro. The helper now runs on a worker thread
+(`_off_main_thread`); measured on David's PC it lists PAD-Runtime (78.75 GB),
+the data disk, the card store and the owed old disk.

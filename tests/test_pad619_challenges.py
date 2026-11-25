@@ -165,8 +165,8 @@ def test_the_runtime_takes_flags_at_the_dispatch_and_makes_a_mode_challenge_one_
 def test_only_proven_builds_offer_it_and_the_room_is_the_menus():
     for key, p in MP.profiles(MP.PORTS_DIR).items():
         k = "%s-%s" % (p.game_dir, p.version)
-        if k in MP.CHALLENGE_PROVEN or k in MP.CHALLENGE_MENU_PROVEN:
-            assert p.can("challenge"), key
+        if k in MP.CHALLENGE_PROVEN or k in MP.CHALLENGE_MENU_PROVEN or k in MP.CHALLENGE_MENU_FRAME_PROVEN:
+            assert p.can("challenge"), key                      # PAD-1555: + an index menu's MODE CHALLENGE
         else:
             assert not p.can("challenge") and p.label in p.why_not("challenge"), key
         if k in MP.CHALLENGE_MENU_PROVEN:

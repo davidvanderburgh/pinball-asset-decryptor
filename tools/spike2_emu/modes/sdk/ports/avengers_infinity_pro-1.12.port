@@ -878,6 +878,10 @@ site  challenge_menu_frame 0x00059abc 0xe0833106 0xe51330d4
 site  challenge_balls     0x00493b0c 0xe92d4030 0xe1a05000
 site  challenge_extra_ball 0x002ac570 0xe30f3c48 0xe340306e
 site  challenge_end_ball  0x0037d608 0xe30e205a 0xe340206e
+# PAD-1555: the challenge game's ball launch (portchallenge.launch_lines, read off this build; the derive had dropped it)
+site  ball_launch         0x00379464 0xe92d4010 0xe3054a50
+value ball_launch_flag       12
+value ball_launch_wait_flag  13
 value challenge_on_flag   18   # FG_PLAYER_CHALLENGE_MODE_ACTIVE, read off the program's FG_ names
 value challenge_menu_frame_buttons_reg 5
 value challenge_menu_frame_list_at    252

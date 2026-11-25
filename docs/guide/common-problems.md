@@ -47,6 +47,7 @@ what happened, with the app's log, after showing you exactly what goes.
 | **A build that won't fit** (Stern Spike 2) | It stops before writing anything and names the card size that would take it: pick that under **SD card size** on Write and use a bigger card ([SD card size](using-the-app.md#sd-card-size-stern-spike-2)). |
 | A feature says it **needs an image build, not a direct SD write** | Longer sounds, music modes, play in turn and the like need a full image build. Use **Build / flash SD card…** and build the image. |
 | **GAME VALIDATION ERROR** on the machine | A card the app built passes the machine's checks; a file changed by hand on the card afterwards won't. Rebuild from the app, and send a **Report a problem** if it still shows. |
+| **STERN UPDATE NOT INSTALLED** on the machine (Stern Spike 2) | A card built here keeps Stern updates off it, from a USB stick or downloaded over Insider Connected, so your work is not replaced: take the stick out and the game comes back. Update the card here instead. To install Stern's update anyway, put a file named `stern-update-ok.txt` on the stick beside it; that puts Stern's files over the card's. |
 | I want the stock game back | Put the original card back in, or flash your backup image (**Save card as image…** on Select card makes one, with **From SD card** picked). |
 
 ## Emulate

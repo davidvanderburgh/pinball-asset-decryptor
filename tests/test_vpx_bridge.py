@@ -1489,6 +1489,8 @@ def test_jaws_fresh_patch_misses_no_fix(tmp_path):
     assert len(out) == 1
     m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
     assert vs.missed_fixes(str(tmp_path), out[0], m["repatch"]) == []
+    # PAD-1571: nor by the marks every scripted tribute carries (the B2S hand-over)
+    assert vs.missed_fixes(str(tmp_path), out[0], vs.SHADOW_REPATCH) == []
     script = open(os.path.join(tmp_path, out[0][:-4] + ".script.vbs"), encoding="utf-8").read()
     assert "PadFinUp And Abs(p - (i + 1)) < 0.75" in script
 
@@ -3015,7 +3017,7 @@ def test_a_tribute_patched_before_its_sounds_were_carried_asks_for_a_new_patch(t
     again. The ROM tables other patchers make never carry the mark."""
     vs = pytest.importorskip("vpxshadow")
     vset = pytest.importorskip("vpxsetup")
-    (mark,) = vset.SHADOW_REPATCH
+    mark = vset.SHADOW_REPATCH[0]
     assert mark["absent"] == vs.SOUNDS_NOTE
     out, _ = vs.patch(DOF_TRIBUTE, _dof_shadow())
     assert "\n" + vs.SOUNDS_NOTE + "\n" in out
@@ -3025,6 +3027,25 @@ def test_a_tribute_patched_before_its_sounds_were_carried_asks_for_a_new_patch(t
     assert vset.missed_fixes(str(tmp_path), name, vset.SHADOW_REPATCH) == [mark["why"]]
     script.write_text(out, encoding="utf-8")
     assert vset.missed_fixes(str(tmp_path), name, vset.SHADOW_REPATCH) == []
+
+
+def test_a_tribute_patched_before_the_b2s_handover_asks_for_a_new_patch(tmp_path):
+    """PAD-1571: PAD-1480 (v1.552.2) hands the table's B2S.Server to
+    PAD.Controller, the only road the cabinet's E events (shaker, buttons,
+    light strips) have to DOF on a scripted tribute. A copy patched before
+    lacks that line (Mike St P's Jaws), and its row says Patch again."""
+    vs = pytest.importorskip("vpxshadow")
+    vset = pytest.importorskip("vpxsetup")
+    (mark,) = [k for k in vset.SHADOW_REPATCH if "PadB2S" in (k.get("absent") or "")]
+    out, _ = vs.patch(DOF_TRIBUTE, _dof_shadow())
+    line = [ln for ln in out.splitlines() if mark["absent"] in ln]
+    assert len(line) == 1
+    name = "T (PAD).vpx"
+    script = tmp_path / "T (PAD).script.vbs"
+    script.write_text(out, encoding="utf-8")
+    assert vset.missed_fixes(str(tmp_path), name, vset.SHADOW_REPATCH) == []
+    script.write_text(out.replace(line[0], ""), encoding="utf-8")
+    assert vset.missed_fixes(str(tmp_path), name, vset.SHADOW_REPATCH) == [mark["why"]]
     # no script beside the copy: nothing is claimed
     script.unlink()
     assert vset.missed_fixes(str(tmp_path), name, vset.SHADOW_REPATCH) == []

@@ -547,6 +547,12 @@ GENERIC_REPATCH = [
 SHADOW_REPATCH = [
     {"absent": "' PAD: the table's own playfield sounds play beside the machine's switches and coils",
      "why": "its targets, lanes, spinners, bumpers and trough make no sound"},
+    # PAD-1480 (v1.552.2) handed the table's B2S.Server to PAD.Controller, the
+    # only way the cabinet's E events reach DOF on a scripted tribute; it set
+    # no mark, so Mike St P's older Jaws copy kept dark strips and shaker
+    # with nothing saying why (PAD-1571)
+    {"absent": "If IsObject(PadB2S) Then Controller.PadB2S PadB2S",
+     "why": "the shaker, the start and lockdown button lights and the cabinet light strips never reach DOF"},
 ]
 
 

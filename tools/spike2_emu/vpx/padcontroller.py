@@ -2221,6 +2221,23 @@ class Bridge:
                 self._b2s_dof[n] = v
                 self.b2s.data(n, v)
 
+    #: ~10 s of polls: by then a table has started DOF or handed B2S.Server over
+    E_ROUTE_POLLS = 1250
+
+    def _tell_no_e_route(self):
+        """PAD-1571: say so, once, when the cabinet's E events are set but
+        nothing carries them: no DOF of PAD's own and no B2S.Server handed
+        over. Mike St P's Jaws (PAD).vpx, patched before v1.552.2 (PAD-1480),
+        never handed its B2S.Server over: the table's own DOF worked, the
+        shaker and the light strips stayed dark, and the log said nothing."""
+        cab = getattr(self, "cab", None) or {}
+        if not any(cab.get(k) for k in ("dof_start", "dof_lockdown", "dof_shaker", "dof_strips")):
+            return
+        log("DOF: the cabinet's E events (start E%s, lockdown E%s, shaker E%s, strips %s) go nowhere:"
+            " PAD hosts no DOF for this table and it handed no B2S.Server over (a table patched before"
+            " v1.552.2: Patch it again)" % (cab.get("dof_start") or "-", cab.get("dof_lockdown") or "-",
+                                           cab.get("dof_shaker") or "-", self._strips_words()))
+
     def b2s_attach(self, obj, direct=False):
         """PADSPIKE2.vbs's B2S.Server, once it runs (PAD-1304). A second
         call (the table's Reset) replaces the first."""
@@ -3496,6 +3513,8 @@ class Bridge:
                 self._poll_b2s(data)
                 if not (self.dof and self.dof.up):
                     self._poll_b2s_dof(data)
+            elif not (self.dof and self.dof.up) and self.polls == self.E_ROUTE_POLLS:
+                self._tell_no_e_route()
 
     def _poll_once_s1(self):
         """The Spike 1 rig's block (s1bridge), or the Spooky board's in the

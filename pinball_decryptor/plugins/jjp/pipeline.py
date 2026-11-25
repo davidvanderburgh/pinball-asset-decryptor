@@ -3825,7 +3825,7 @@ class DecryptionPipeline:
             dest, win_path = pending
             self._wait_image_released(self._raw_img_path)
             self.log("Moving game image to output folder...", "info")
-            if self._move_image(self._raw_img_path, dest):
+            if self._move_image(self._raw_img_path, dest, win_path):
                 self.log(f"Game image saved to: {win_path}", "success")
 
         # Whatever is left of the raw image in temp dirs goes: a 34 GB card
@@ -3866,10 +3866,19 @@ class DecryptionPipeline:
     #: an rsync --info=progress2 line ("  27,705,573,376  80%  141.66MB/s ...")
     _RSYNC_PROGRESS = re.compile(r"^\s*[\d,]+\s+\d+%")
 
-    def _move_image(self, src, dest):
+    def _move_image(self, src, dest, host_path=None):
         """Move the card image ``src`` to ``dest`` (another filesystem: the
         output folder on the Windows drive), with progress.  The source is
         deleted only once ``dest`` holds every byte of it.
+
+        ``host_path`` is ``dest`` as this process sees it.  The moved image
+        is made compact there (PAD-1594): partclone restored only the used
+        blocks, so the WSL source is sparse, but rsync over WSL's Windows
+        drive writes every zero, leaving a ~34 GB card at full size.  Not
+        rsync --sparse: WSL's Windows drive cannot hold its holes, and its
+        seeks made the copy 7-9x slower there.  ``--chmod=F644``:
+        partclone leaves the image read-only (0400), which rsync carried
+        onto Windows as a read-only file nobody could compact or replace.
 
         Returns True when moved.  A failure is one short warning carrying
         rsync's error, never its progress lines (PAD-1592: a failed move
@@ -3879,7 +3888,8 @@ class DecryptionPipeline:
         last_pct = -1
         try:
             for line in self.executor.stream(
-                f"rsync --info=progress2 --no-inc-recursive '{src}' '{dest}'",
+                f"rsync --chmod=F644 --info=progress2 --no-inc-recursive "
+                f"'{src}' '{dest}'",
                 timeout=config.COPY_TIMEOUT,
             ):
                 self._check_cancel()
@@ -3917,7 +3927,46 @@ class DecryptionPipeline:
                      "info")
             return False
         self.on_progress(100, 100, "Done")
+        if host_path:
+            self._compact_image(host_path)
         return True
+
+    def _compact_image(self, path):
+        """Give the space of the image's empty blocks at ``path`` back to
+        the drive, in place: the bytes and the modified time stay as they
+        were (core.sparse_card.compact_file, as Stern cards do).  A drive
+        that cannot hold holes, or any error, leaves the image at full size
+        with one line saying so; the move itself already succeeded."""
+        from ...core import sparse_card
+        try:
+            if not os.path.isfile(path) or sparse_card.takes_less(path):
+                return
+            if not os.access(path, os.W_OK):
+                # a copy that kept the source's 0400 (Windows: read-only)
+                os.chmod(path, 0o644)
+            self.log("Making the game image compact...", "info")
+
+            def prog(done, total):
+                self._check_cancel()
+                if total:
+                    self.on_progress(int(done * 100 / total), 100,
+                                     "Making the game image compact")
+            res = sparse_card.compact_file(path, progress=prog)
+        except PipelineError:
+            self.log("  Compacting canceled; the image is kept at full "
+                     "size.", "info")
+            return
+        except OSError as e:
+            self.log(f"  Note: the game image stays at full size ({e}).",
+                     "info")
+            return
+        if res.saved > 0:
+            self.log(f"  Game image takes {res.after / 1e9:.1f} GB on disk "
+                     f"(was {res.before / 1e9:.1f} GB).", "info")
+        elif res.notes:
+            self.log("  Note: the game image stays at full size ("
+                     + "; ".join(res.notes) + ").", "info")
+        self.on_progress(100, 100, "Done")
 
     # ---- debugfs helpers (shared by all pipelines) ----
 
@@ -4480,7 +4529,7 @@ class ModPipeline(DecryptionPipeline):
 
                 if self._raw_img_path and self._raw_img_path != dest:
                     self.log("Moving modified image to output folder...", "info")
-                    self._move_image(self._raw_img_path, dest)
+                    self._move_image(self._raw_img_path, dest, win_path)
 
                 self.log(f"Modified image ready at: {win_path}", "success")
                 self.on_done(True,
@@ -6238,7 +6287,7 @@ class StandaloneModPipeline(ModPipeline):
                 win_path = os.path.join(self.assets_folder, img_name)
                 if self._raw_img_path and self._raw_img_path != dest:
                     self.log("Moving modified image to output folder...", "info")
-                    self._move_image(self._raw_img_path, dest)
+                    self._move_image(self._raw_img_path, dest, win_path)
                 self.log(f"Modified image ready at: {win_path}", "success")
                 self.on_done(True,
                     f"Asset modification complete!\n"

@@ -109,6 +109,7 @@ def test_the_flow_updates_the_projects_image_swaps_the_stock_one_and_updates_the
         time.sleep(0.05)
     assert asked and "Update the card to King Kong LE 1.01?" == asked[0][0]
     assert "GODZILLA: stays as it is: another game" in asked[0][1] and "KING KONG: becomes Stern's" in asked[0][1]
+    assert "updated in place" in asked[0][1]                  # the first image is another game: in place
     job = chains[0][0]
     assert job["project"] == str(proj) and job["row"] == 1
     assert job["workspace"].endswith("kk mods (King Kong LE 1.01)")
@@ -179,10 +180,12 @@ def test_a_new_release_as_the_first_image_builds_a_fresh_card_beside_the_old(tmp
     got = {}
     app = SimpleNamespace(window=SimpleNamespace(_multiboot_panel=panel, select_tab=lambda t: None),
                           msg_queue=SimpleNamespace(put=lambda m: getattr(m, "fn", lambda: None)()))
-    app._ask_on_ui = lambda t, m: True
+    asked = []
+    app._ask_on_ui = lambda t, m: asked.append(m) or True
     card = str(tmp_path / "kk.multi.raw")
     assert A.App._start_multiboot_update(app, card, "new.raw",
                                          lambda c, rep, plan: got.update(c=c, rep=rep) or done.set())
     assert done.wait(5)
     assert built["out"] == str(tmp_path / "kk (King Kong LE 1.01).multi.raw") and built.get("built")
     assert not panel.updated and panel.replaced == [(0, "new.raw")] and got["c"] == built["out"]
+    assert "built again beside the old one" in asked[0] and "updated in place" not in asked[0]

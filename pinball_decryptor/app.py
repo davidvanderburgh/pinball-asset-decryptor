@@ -4927,12 +4927,16 @@ class App:
             if not jobs and not stock:
                 ui(lambda: messagebox.showinfo("Update", "Nothing on this card is updated:\n\n" + "\n".join(lines)))
                 return
+            first = any(i == 0 and kind in ("project", "stock") for i, kind, _w in plan)
+            how = ("the card is then built again beside the old one: its first image becomes a new release, "
+                   "whose system an in-place update cannot carry" if first else
+                   "the card is then updated in place: only what changed is written")
             if not self._ask_on_ui(
                     "Update the card to %s?" % new_label,
                     "%s is a multi-boot card. Each image of %s's game on it:\n\n%s\n\nThe images that change "
                     "go in with Replace image, so each keeps its place in the menu, its title, its picture "
-                    "and its settings and high scores, and the card is then updated in place: only what "
-                    "changed is written.\n\nStart?" % (os.path.basename(card), new_label, "\n".join(lines))):
+                    "and its settings and high scores, and %s.\n\nStart?"
+                    % (os.path.basename(card), new_label, "\n".join(lines), how)):
                 return
 
             def finish(results):                        # UI thread

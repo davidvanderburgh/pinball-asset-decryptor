@@ -38,6 +38,8 @@ import subprocess
 import sys
 import time
 
+from . import ext4_used
+
 # Open block devices in binary mode; O_BINARY only exists on Windows.
 _O_BINARY = getattr(os, "O_BINARY", 0)
 # Cap each underlying device read/write at 8 MB (a sector multiple) so a single
@@ -663,13 +665,18 @@ class RawDeviceFile:
         self._write_aligned(a_start, region)
 
     def copy_image_onto(self, src, total, *, progress=None, cancel=None,
-                        chunk=None, overlay=None):
+                        chunk=None, overlay=None, ranges=None):
         """Bulk-copy ``total`` bytes from file object *src* onto this device,
         starting at offset 0 (a dd-style flash).
 
         *overlay* ``(offset, data)`` puts *data* on the card at *offset* in
         place of the image's own bytes there, in the same pass (PAD-736: the
         card's own /data, kept through a whole-image flash).
+
+        *ranges* ``[(offset, length)]`` (:func:`copy_ranges`) are the only
+        parts of the image written, each at its own offset: the rest is free
+        space the card may keep as it is (PAD-1576).  ``total`` and the
+        return value are then the bytes of those ranges.
 
         Whole-sector chunks are written straight through the fd (no
         read-modify-write — a flash overwrites every sector, so the RMW
@@ -698,38 +705,48 @@ class RawDeviceFile:
         drain = (sys.platform.startswith("linux")
                  and is_device_path(self.path))
         rate = []
-        self._io.seek(0)
-        while written < total:
-            if cancel is not None and cancel():
-                raise FlashCancelled(
-                    "Flash canceled after %d of %d bytes." % (written, total))
-            want = min(step, total - written)
-            buf = src.read(want)
-            if not buf:
-                break
-            if overlay is not None:
-                buf = _apply_overlay(buf, written, overlay)
-            if len(buf) % sec == 0:
-                # Aligned fast path: write directly, capped per write syscall.
-                self._io.seek(written)
-                mv = memoryview(buf)
-                off = 0
-                while off < len(buf):
-                    off += self._io.write(
-                        mv[off:off + min(_IO_CHUNK, len(buf) - off)])
-            else:
-                # Final sub-sector tail: RMW the trailing sector(s) so we don't
-                # disturb whatever lies past the image's last byte.
-                self.seek(written)
-                self.write(buf)
-            written += len(buf)
-            undrained += len(buf)
-            if drain and (undrained >= _FLASH_DRAIN or written >= total):
-                self._io.fsync()
-                undrained = 0
-            if progress is not None:
-                progress(written, total, "Writing image to SD card…"
-                         + _rate_note(rate, written, total))
+        if ranges is None:
+            spans = [(0, total)]
+        else:
+            spans = ranges
+            total = sum(length for _o, length in spans)
+        for start, length in spans:
+            if ranges is not None:
+                src.seek(start)
+            pos, end = start, start + length
+            while pos < end:
+                if cancel is not None and cancel():
+                    raise FlashCancelled(
+                        "Flash canceled after %d of %d bytes."
+                        % (written, total))
+                buf = src.read(min(step, end - pos))
+                if not buf:
+                    return written
+                if overlay is not None:
+                    buf = _apply_overlay(buf, pos, overlay)
+                if len(buf) % sec == 0:
+                    # Aligned fast path: write directly, capped per write
+                    # syscall.
+                    self._io.seek(pos)
+                    mv = memoryview(buf)
+                    off = 0
+                    while off < len(buf):
+                        off += self._io.write(
+                            mv[off:off + min(_IO_CHUNK, len(buf) - off)])
+                else:
+                    # Final sub-sector tail: RMW the trailing sector(s) so we
+                    # don't disturb whatever lies past the image's last byte.
+                    self.seek(pos)
+                    self.write(buf)
+                pos += len(buf)
+                written += len(buf)
+                undrained += len(buf)
+                if drain and (undrained >= _FLASH_DRAIN or written >= total):
+                    self._io.fsync()
+                    undrained = 0
+                if progress is not None:
+                    progress(written, total, "Writing image to SD card…"
+                             + _rate_note(rate, written, total))
         return written
 
     def flush(self):
@@ -1201,7 +1218,7 @@ def _slow_card_watch(log, progress, menu_only=False):
 
 def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
                           cancel=None, verify=True, on_verify_start=None,
-                          eject=True, keep_data=False):
+                          eject=True, keep_data=False, skip_free=True):
     """dd-style raw copy of *image_path* onto the physical *device_path*.
 
     Refuses (``FlashError``) when the image is larger than the target card — a
@@ -1231,6 +1248,11 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
     back onto it in place of the image's, in the same pass (see
     :func:`card_data_overlay`).  A card with none to keep is refused before
     anything is written.
+
+    With *skip_free* (default True, PAD-1576) the blocks the image's own
+    ext filesystems call free are neither written nor verified
+    (:func:`copy_ranges`): the card keeps whatever it held there, which
+    nothing reads.  ``PAD_COPY_ALL_BLOCKS=1`` writes every byte, as before.
     """
     img_size = os.path.getsize(image_path)
     # Probe the capacity read-only and guard BEFORE taking the disk offline, so a
@@ -1260,11 +1282,15 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
                     raise FlashCancelled("Canceled before anything was "
                                          "written.")
                 with open(image_path, "rb") as src:
+                    ranges = (_image_copy_ranges(src, img_size, dev.sector,
+                                                 overlay, log)
+                              if skip_free else None)
+                    src.seek(0)
                     written = dev.copy_image_onto(
                         src, img_size,
                         progress=_slow_card_watch(
                             log, progress, _has_menu_partition(image_path)),
-                        cancel=cancel, overlay=overlay)
+                        cancel=cancel, overlay=overlay, ranges=ranges)
                 dev.flush()
             # Read the card back and confirm it byte-for-byte matches the
             # image.  A raw flash has no other integrity check, and a
@@ -1280,7 +1306,8 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
                     on_verify_start()
                 _verify_flash_readback(device_path, image_path, img_size,
                                        log=log, progress=progress,
-                                       cancel=cancel, overlay=overlay)
+                                       cancel=cancel, overlay=overlay,
+                                       ranges=ranges)
     except PermissionError as e:
         # Surface a denied device open (macOS TCC without Full Disk Access,
         # or a genuinely unelevated run) as a FlashError so the dialog shows
@@ -1353,7 +1380,7 @@ def card_image_extent(read_at, dev_size, tail=2):
 
 
 def read_device_to_image(device_path, image_path, *, log=None, progress=None,
-                         cancel=None, extent=None):
+                         cancel=None, extent=None, skip_free=True):
     """dd-style raw copy of the whole card *device_path* into *image_path*.
 
     The exact inverse of :func:`flash_image_to_device`: every sector of the
@@ -1372,7 +1399,15 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
     of the partition table's last partition (:func:`card_image_extent`), which
     is the file the Multi-boot tab can load, update and recover images from -
     the bytes past it are what a bigger SD card has over the image.  The
-    default reads every sector, as a backup should.
+    default covers every sector, as a backup should.
+
+    With *skip_free* (default True, PAD-1576) the blocks the card's own ext
+    filesystems call free are not read (:func:`copy_ranges`): the image is
+    the card's full size with HOLES there (:func:`sparse_truncate`), which
+    read back as zeroes, so a mostly empty card takes the time and the disk
+    room of its data.  A filesystem that was not shut down cleanly - the
+    data partition of a card pulled from a running machine - is read whole.
+    ``PAD_COPY_ALL_BLOCKS=1`` reads every byte, as before.
 
     The image is built at ``<image_path>.part`` and renamed only once the whole
     card has landed, so an interrupted read can never leave a short file
@@ -1402,6 +1437,20 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
         raise ValueError("extent must be None or 'card', not %r" % (extent,))
     dev_size = want
 
+    ranges = None
+    if skip_free and not copy_all_blocks():
+        try:
+            with RawDeviceFile(device_path, writable=False) as dev:
+                planned = copy_ranges(dev._aligned_read, dev_size, dev.sector)
+        except PermissionError as e:
+            raise FlashError(str(e)) from e
+        except OSError:
+            planned = [(0, dev_size)]       # the read below says what is wrong
+        if sum(length for _o, length in planned) < dev_size:
+            ranges = planned
+    need = (sum(length for _o, length in ranges) if ranges is not None
+            else dev_size)
+
     dest_dir = os.path.dirname(os.path.abspath(image_path)) or "."
     try:
         os.makedirs(dest_dir, exist_ok=True)
@@ -1412,36 +1461,61 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
         free = shutil.disk_usage(dest_dir).free
     except OSError:
         free = None
-    if free is not None and free < dev_size:
+    full_text = (
+        "The card is %s but only %s is free in %s. A card image is a "
+        "copy of the whole card, empty space included, so it needs the "
+        "card's full size. Pick a location with more room."
+        % (format_size(dev_size), format_size(free or 0), dest_dir))
+    if free is not None and free < need:
         raise FlashError(
-            "The card is %s but only %s is free in %s. A card image is a "
-            "copy of the whole card, empty space included, so it needs the "
-            "card's full size. Pick a location with more room."
-            % (format_size(dev_size), format_size(free), dest_dir))
+            full_text if ranges is None else
+            "The card holds %s but only %s is free in %s. Pick a location "
+            "with more room."
+            % (format_size(need), format_size(free), dest_dir))
 
     if log is not None:
         log("Source card: %s (%s)" % (device_path, format_size(dev_size)),
             "info")
         log("Image: %s" % image_path, "info")
+        if ranges is not None:
+            log("Skipping the card's free space: %s of %s is in use, and "
+                "only that is read." % (format_size(need),
+                                        format_size(dev_size)), "info")
 
     part_path = image_path + ".part"
     read = 0
     try:
         with RawDeviceFile(device_path, writable=False) as dev, \
                 open(part_path, "wb") as out:
-            while read < dev_size:
-                if cancel is not None and cancel():
-                    raise FlashCancelled(
-                        "Read canceled after %d of %d bytes."
-                        % (read, dev_size))
-                want = min(_VERIFY_CHUNK, dev_size - read)
-                buf = dev._aligned_read(read, want)
-                if not buf:
+            if ranges is not None:
+                # Holes where the free space is.  A destination that cannot
+                # keep holes (FAT32, exFAT, a share) gets a full-size file,
+                # and needs the room for one.
+                try:
+                    holes = sparse_truncate(out, dev_size)
+                except OSError as e:
+                    raise FlashError(full_text) from e
+                if not holes and free is not None and free < dev_size:
+                    raise FlashError(full_text)
+            for start, length in (ranges or [(0, dev_size)]):
+                pos, end = start, start + length
+                while pos < end:
+                    if cancel is not None and cancel():
+                        raise FlashCancelled(
+                            "Read canceled after %d of %d bytes."
+                            % (read, need))
+                    buf = dev._aligned_read(pos, min(_VERIFY_CHUNK, end - pos))
+                    if not buf:
+                        break
+                    if ranges is not None:
+                        out.seek(pos)
+                    out.write(buf)
+                    pos += len(buf)
+                    read += len(buf)
+                    if progress is not None:
+                        progress(read, need, "Reading SD card…")
+                if pos < end:
                     break
-                out.write(buf)
-                read += len(buf)
-                if progress is not None:
-                    progress(read, dev_size, "Reading SD card…")
             out.flush()
             os.fsync(out.fileno())
     except PermissionError as e:
@@ -1449,7 +1523,7 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
         # (or macOS Full Disk Access), not a broken card.
         _unlink_quiet(part_path)
         raise FlashError(str(e)) from e
-    except FlashCancelled:
+    except (FlashCancelled, FlashError):
         _unlink_quiet(part_path)
         raise
     except OSError as e:
@@ -1459,14 +1533,14 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
                          "(or its reader) and try again."
                          % (f"{read:,}", _card_error_detail(e))) from e
 
-    if read < dev_size:
+    if read < need:
         # The card stopped handing bytes back early — a short image would
         # look complete in Explorer and fail on the machine.
         _unlink_quiet(part_path)
         raise FlashError(
             "The card stopped responding after %s of %s. The image was not "
             "kept. Re-seat the card (or its reader) and try again."
-            % (format_size(read), format_size(dev_size)))
+            % (format_size(read), format_size(need)))
 
     try:
         os.replace(part_path, image_path)
@@ -1605,6 +1679,93 @@ def _ebr_chain(read_at, ext_lba, sector=512, limit=64):
         nxt = struct.unpack_from("<II", e1, 8)[0] if e1[4] else 0
         cur = (ext_lba + nxt) if nxt else 0
     return out
+
+
+#: Two used stretches closer than this are copied as one: a gap this small
+#: saves less than the extra seek and write call cost.
+_COPY_MERGE_GAP = 1 << 20
+_EXTENDED_TYPES = (0x05, 0x0F, 0x85)
+
+
+def copy_all_blocks():
+    """True when ``PAD_COPY_ALL_BLOCKS`` asks for every byte to be copied,
+    free space included (the way before PAD-1576)."""
+    return os.environ.get("PAD_COPY_ALL_BLOCKS", "") not in ("", "0")
+
+
+def copy_ranges(read, total, sector=512, keep=()):
+    """The parts of a card or card image worth copying -> sorted
+    ``[(offset, length)]`` covering everything in ``[0, total)`` EXCEPT the
+    blocks its ext filesystems call free (PAD-1576).
+
+    *read(offset, length)* returns bytes of the card.  Everything that is
+    not provably free is in the answer: the partition table, the EBR chain,
+    the gaps between partitions, every partition that is not Linux, and
+    every Linux partition :func:`ext4_used.fs_used_ranges` will not vouch
+    for.  A card with no partition table is one range, the whole of it.
+    *keep* are ranges copied whatever a filesystem says of them (the
+    overlay of a flash).  Ranges start on a *sector* boundary and end on
+    one or at *total*.
+    """
+    def read_at(lba):
+        return read(lba * 512, 512)
+
+    whole = [(0, total)]
+    try:
+        prim = _mbr_primaries(read_at(0))
+        parts = []
+        for _idx, ptype, lba, count in prim:
+            if ptype in _EXTENDED_TYPES:
+                parts += [(ls * 512, lc * 512)
+                          for _e, lt, ls, lc in _ebr_chain(read_at, lba)
+                          if lt == 0x83]
+            elif ptype == 0x83:
+                parts.append((lba * 512, count * 512))
+        parts.sort()
+        if any(a[0] + a[1] > b[0] for a, b in zip(parts, parts[1:])):
+            return whole                    # overlapping partitions: no
+        free = []
+        for off, length in parts:
+            if off + length > total:
+                continue
+            used = ext4_used.fs_used_ranges(
+                lambda o, n, off=off: read(off + o, n), length)
+            if used is None:
+                continue
+            free += [(off + o, n) for o, n in
+                     ext4_used.complement(used, length)]
+    except (OSError, struct.error, ValueError):
+        return whole
+    if not free:
+        return whole
+    out = []
+    for off, length in ext4_used.complement(sorted(free), total) + list(keep):
+        lo = (off // sector) * sector
+        hi = min(total, -(-(off + length) // sector) * sector)
+        out.append((lo, hi - lo))
+    return ext4_used.merge_ranges(out, _COPY_MERGE_GAP)
+
+
+def _image_copy_ranges(src, img_size, sector, overlay, log):
+    """:func:`copy_ranges` of the open image *src* for a flash, or None for
+    "all of it".  Says what is skipped."""
+    if copy_all_blocks():
+        return None
+
+    def read(off, length):
+        src.seek(off)
+        return src.read(length)
+
+    keep = [(overlay[0], len(overlay[1]))] if overlay is not None else []
+    ranges = copy_ranges(read, img_size, sector, keep)
+    used = sum(length for _o, length in ranges)
+    if used >= img_size:
+        return None
+    if log is not None:
+        log("Skipping the image's free space: %s of %s is in use, and only "
+            "that is written and verified." % (format_size(used),
+                                               format_size(img_size)), "info")
+    return ranges
 
 
 def menu_write_plan(image_path):
@@ -2186,47 +2347,59 @@ def _read_back(dev, at, length, total, what="the card", shown_at=None):
 
 
 def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
-                           progress=None, cancel=None, overlay=None):
+                           progress=None, cancel=None, overlay=None,
+                           ranges=None):
     """Read the just-flashed card back and compare it to the source image.
 
     Raises :class:`FlashError` at the first mismatch (the card is bad -- a
     flaky write/card/reader); the caller must NOT let such a card reach the
     machine.  Honours ``cancel``.  *overlay* is what the write put in place
     of the image's bytes (:meth:`RawDeviceFile.copy_image_onto`), and is
-    what the card must hold there.
+    what the card must hold there.  *ranges* are the parts of the image
+    that were written (:func:`copy_ranges`) and so the only parts compared.
     """
     if log is not None:
         log("Verifying the flashed card (reading it back)…", "info")
+    spans = [(0, img_size)] if ranges is None else ranges
+    total = sum(length for _o, length in spans)
     checked = 0
     rate = []
     with RawDeviceFile(device_path, writable=False) as dev, \
             open(image_path, "rb") as src:
-        while checked < img_size:
-            if cancel is not None and cancel():
-                raise FlashCancelled(
-                    "Verify canceled after %d of %d bytes." % (
-                        checked, img_size))
-            want = min(_VERIFY_CHUNK, img_size - checked)
-            exp = src.read(want)
-            if not exp:
-                break
-            if overlay is not None:
-                exp = _apply_overlay(exp, checked, overlay)
-            got = _read_back(dev, checked, len(exp), img_size)
-            if got != exp:
-                off = next((i for i in range(min(len(got), len(exp)))
-                            if got[i] != exp[i]), min(len(got), len(exp)))
-                raise FlashError(
-                    "The card does not match the image after flashing (first "
-                    "difference at byte %s). The write didn't land correctly "
-                    "-- usually a flaky SD card or card reader. Flash again, "
-                    "or use a different card / reader. Do NOT install this "
-                    "card on the machine: a partially-written installer can "
-                    "fail with a SHELL ERROR or leave the machine unbootable."
-                    % f"{checked + off:,}")
-            checked += len(exp)
-            if progress is not None:
-                progress(checked, img_size, "Verifying flashed card…"
-                         + _rate_note(rate, checked, img_size))
+        for start, length in spans:
+            src.seek(start)
+            pos, end = start, start + length
+            while pos < end:
+                if cancel is not None and cancel():
+                    raise FlashCancelled(
+                        "Verify canceled after %d of %d bytes." % (
+                            checked, total))
+                exp = src.read(min(_VERIFY_CHUNK, end - pos))
+                if not exp:
+                    break
+                if overlay is not None:
+                    exp = _apply_overlay(exp, pos, overlay)
+                got = _read_back(dev, pos, len(exp), img_size)
+                if got != exp:
+                    off = next((i for i in range(min(len(got), len(exp)))
+                                if got[i] != exp[i]),
+                               min(len(got), len(exp)))
+                    raise FlashError(
+                        "The card does not match the image after flashing "
+                        "(first difference at byte %s). The write didn't "
+                        "land correctly -- usually a flaky SD card or card "
+                        "reader. Flash again, or use a different card / "
+                        "reader. Do NOT install this card on the machine: a "
+                        "partially-written installer can fail with a SHELL "
+                        "ERROR or leave the machine unbootable."
+                        % f"{pos + off:,}")
+                pos += len(exp)
+                checked += len(exp)
+                if progress is not None:
+                    progress(checked, total, "Verifying flashed card…"
+                             + _rate_note(rate, checked, total))
     if log is not None:
-        log("Card verified: it matches the image byte-for-byte.", "success")
+        log("Card verified: it matches the image byte-for-byte."
+            if ranges is None else
+            "Card verified: every block in use matches the image.",
+            "success")

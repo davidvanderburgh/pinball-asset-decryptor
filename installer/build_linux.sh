@@ -106,6 +106,7 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/core/audio.py:pinball_decryptor/core" \
     --add-data "$ROOT_DIR/pinball_decryptor/core/checksums.py:pinball_decryptor/core" \
     --add-data "$ROOT_DIR/pinball_decryptor/core/colour_profile.py:pinball_decryptor/core" \
+    --add-data "$ROOT_DIR/pinball_decryptor/core/ext4_used.py:pinball_decryptor/core" \
     --add-data "$ROOT_DIR/pinball_decryptor/core/longpath.py:pinball_decryptor/core" \
     --add-data "$ROOT_DIR/pinball_decryptor/core/rawdevice.py:pinball_decryptor/core" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/adjustments.py:pinball_decryptor/plugins/stern" \

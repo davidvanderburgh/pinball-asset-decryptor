@@ -358,3 +358,24 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   sound_modes.PROVEN and TURN_PROVEN (PAD-494 / PAD-565 sweeps), STACK_RECORDS_PROVEN and SWITCH_EDGE_PROVEN
   (Metallica 1.05), BANK_SONG_NO_ROOM (D&D 1.11: image.bin + its biggest music bank against MAPPED_MAX); the cstarts
   finder's Metallica list (find_c_starts.py names 1.04 only).
+
+### Run 10 (2026-11-24 late): the latest-build sets
+
+- **Button shots, ten builds** (`btnjob.sh`, each card's own buttons.cfg from its Try it set): none in attract; every
+  line's shot once at its own action - 9 of 9 on King Kong, 18 of 18 on the rest. BUTTON_SHOTS_PROVEN.
+- **Metallica 1.05's switch edges** (`checkjob.sh` + `edgecheck.py`): 35 of 49 switches one shot a press on a bit of
+  its own, the same 14 none - 1.04 identical. SWITCH_EDGE_PROVEN.
+- **D&D 1.11's bank room:** the same image.bin (2,142,352,388) and image-sc01.bin (39,598,976) as 1.10 - no room for a
+  bank song of a mode file's. BANK_SONG_NO_ROOM.
+- **Metallica 1.05's live records:** the derive had dropped `mode_records_1..5`; its song starts create 178 / 183 /
+  188 / 193 where 1.04's create 177 / 182 / 187 / 192, so each range is 1.04's + 1 (the runtime now says it can tell the
+  timed modes from the live records). The rig proof (`recjob.sh`: `stack no` refused while Enter Sandman runs) is held
+  up by the second ball Metallica keeps out early.
+- **Left for run 11:** STACK_RECORDS_PROVEN for Metallica 1.05 (recjob.sh); the two sound sweeps - sounds in turn
+  (sound_modes.TURN_PROVEN) and MUSIC MODE / EDITION (menu_settings.PROVEN = sound_modes.PROVEN) on the nine latest
+  builds. Both kits are gone (C:/tmp/PAD-724, the PAD-565 sweep): a set built by engine.write_overrides on a project
+  whose `.staged_changes.json` replaces a short one-request sound with a 500 Hz tone, `sound_modes` `turns` (1000 /
+  2000 Hz files) or `slots` + `editions`; the request fired by sound_fire_mode.c (`sound.fire`); $DUMP/audio.raw
+  (s16le 48 kHz stereo) cut after each fire and measured by a Goertzel at 500 / 1000 / 2000 Hz
+  (tools/jjp_emu/jjpaudiocap.py:31); MUSIC MODE / EDITION set to 2 by the operator-menu walk (menu_settings.menu_path)
+  or an NVM write (codeselect/nvm.c's crc32), read back from /data/nv/<title>/NVM.

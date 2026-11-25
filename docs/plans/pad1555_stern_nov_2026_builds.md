@@ -394,10 +394,11 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   game's earlier build's place in TURN_PROVEN (latest build only).
 - **D&D:** Write refuses an audible slot's turn files on 1.11 AND on 1.10 today (image.bin + its own bank fill
   MAPPED_MAX; "too long for this card: it goes into a sound bank") - 1.11 takes 1.10's place at parity.
-- **Foo Fighters LE 1.05: open.** File 2 in turn is silent, file 3 plays, in two builds (eight slots: bank record 4;
-  one slot: record 1); file 2's record is written as "a copy of sound idx 977", file 3's of idx 467 (Foo Fighters Pro's
-  donors play). Next: what idx 977 is on this card (its channel / format), and why its copy is silent.
-- **Left for run 12:** Foo Fighters LE 1.05's turns; the MUSIC MODE / EDITION sweep (menu_settings.PROVEN =
+- **Foo Fighters LE 1.05** (run 12): file 2 seemed silent - the job fired every 2 s and the slot (idx 450) runs
+  3.45 s (its replacement keeps the original's length), so the second fire came while it still played and started
+  nothing; another host (idx 977 excluded) changed nothing. `turnjob.sh GAP=5`: 500 / 1000 / 2000 in the runtime's
+  order every time. TURN_PROVEN.
+- **Left for run 12:** the MUSIC MODE / EDITION sweep (menu_settings.PROVEN =
   sound_modes.PROVEN) - doc pad-724: Machine Settings walked from the bottom (Test Menu Settings, Attract Mode, Audio
   Configuration, Audio Content), Audio Content row 1 = Music Mode, Attract Mode row 6 = Edition; on the standard list
   Minus from row 1 wraps to EDITION then MUSIC MODE; Select, Plus, Select sets 2; the store /data/nv/<title>/NVM.

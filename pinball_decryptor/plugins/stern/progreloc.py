@@ -394,6 +394,80 @@ def is_number_table_word(words, is_ref, k):
     return False
 
 
+#: record strides (in words) probed by :func:`is_number_column_word`
+COLUMN_STRIDES = range(2, 17)
+#: records either side looked at, and how many must hold a number pair
+COLUMN_SPAN = 3
+COLUMN_MIN = 3
+#: how far a neighbour's high half may sit from the word's own
+COLUMN_HI_NEAR = 0x10
+#: fields beside the column one of which a record must share, non-zero,
+#: with the word's own record (the records are the same shape)
+COLUMN_SIBLINGS = (-2, -1, 1, 2)
+#: printable bytes after a NUL that make an address a string's start
+STRING_START_LEAD = 3
+
+
+def is_number_column_word(words, k, points_at_text=None):
+    """True when word *k* (of a segment's aligned dwords *words*) is one
+    field of an array of records whose same field, in the records either
+    side, holds more pairs of small 16-bit numbers: a device's numbers, not
+    a pointer.
+
+    :func:`is_number_table_word` sees such pairs only when they sit word
+    after word.  A device list spreads them out one per record.  PAD-1570
+    is the proving case: Iron Maiden LE 1.18's LED list is 24-byte records
+    of ``{0, 0, "LEDn", 0, numbers, 0x00010001}``, and the record holding
+    0x52 and 0x1a reads as ``"ACES HIGH
+CHAMPION" + 10`` (``CHAMPION``, a
+    real word start, so :func:`is_mid_word` let it through).  Renaming
+    ACES HIGH moved that "tail" and two LEDs came to share a number: the
+    game stopped at boot on ``FATAL: error 207 (Node board device LED list
+    device number conflict)``.
+
+    Within :data:`COLUMN_SPAN` records either side, at one stride, at least
+    :data:`COLUMN_MIN` must be small pairs whose high half is within
+    :data:`COLUMN_HI_NEAR` of the word's own (they read as addresses in the
+    same stretch of ``.rodata``: 0x55/0x19, 0x53/0x1b, 0x57/0x18 beside
+    0x52/0x1a), each value counted once, and given *points_at_text*
+    (``value -> bool``) none of them may read as a pointer to text.  Two of
+    the LED ones land mid-word in other display lines (``IFFICILE``,
+    ``nabled``), the rest on no text at all.  A real pointer column fails:
+    Metallica 1.05's song table ``{0x005b02f4, 0x53}, {0x005b0320,
+    0x54}...`` starts a string at every entry, Iron Maiden's caption table
+    holds the same name-group tail (``" EXTRA EASY"``) three times over,
+    and the counts beside X-Men 0.98's switch names (``0x00140014``,
+    ``0x00080004``) are nowhere near an ``0x0055xxxx`` name.  A neighbour
+    counts only from a record of the same shape, sharing a non-zero field
+    of :data:`COLUMN_SIBLINGS` with the word's own (every LED record holds
+    ``0x00010001`` beside its numbers): Turtles LE 1.59's JSON type-name
+    table follows an array of object pointers at a stride of six, and those
+    pointers address no text either."""
+    w0 = int(words[k])
+    if not _small_pair(w0):
+        return False
+    hi0 = w0 >> 16
+    n = len(words)
+    for s in COLUMN_STRIDES:
+        seen = set()
+        for m in range(-COLUMN_SPAN, COLUMN_SPAN + 1):
+            j = k + m * s
+            if m == 0 or j < 0 or j >= n:
+                continue
+            w = int(words[j])
+            if not any(0 <= j + f < n and 0 <= k + f < n and int(words[k + f])
+                       and words[j + f] == words[k + f]
+                       for f in COLUMN_SIBLINGS if f % s):
+                continue
+            if (w != w0 and w not in seen and _small_pair(w)
+                    and abs((w >> 16) - hi0) <= COLUMN_HI_NEAR
+                    and not (points_at_text and points_at_text(w))):
+                seen.add(w)
+        if len(seen) >= COLUMN_MIN:
+            return True
+    return False
+
+
 def is_string_tail_word(raw, off):
     """True when the aligned word at *off* is the last bytes of a
     NUL-terminated ASCII string — a C++ mangled name in one of the ELF's
@@ -461,6 +535,23 @@ def reference_census(raw, spans, segs=None):
 
     refs = {}
 
+    def points_at_text(val):
+        """True when *val* reads as a pointer to text: into a display line
+        anywhere but mid-word (its start, or a tail such as ``" EXTRA"``),
+        or at the start of any other C string at least
+        :data:`STRING_START_LEAD` printable bytes long.  A pair of device
+        numbers lands there only by chance - Iron Maiden's 0x54/0x1c finds
+        a NUL, ``d'`` and a control byte; 0x53/0x1b lands mid-word in
+        ``DIFFICILE``."""
+        hit, si, d = resolve(np.array([val], dtype=np.uint32))
+        if hit[0]:
+            return not is_mid_word(ordered[int(si[0])][3], int(d[0]))
+        o = _va2off(val)
+        if o is None or o < 1 or o + STRING_START_LEAD > len(raw):
+            return False
+        return raw[o - 1] == 0 and all(
+            0x20 <= c <= 0x7e for c in raw[o: o + STRING_START_LEAD])
+
     def add(si, kind, delta, offs, va):
         refs.setdefault(ordered[si][1], []).append(
             {"kind": kind, "delta": int(delta), "offs": list(offs),
@@ -503,6 +594,8 @@ def reference_census(raw, spans, segs=None):
             if d > 0 and is_mid_word(ordered[si][3], d):
                 continue
             if is_number_table_word(a, hit, int(k)):
+                continue
+            if is_number_column_word(a, int(k), points_at_text):
                 continue
             add(si, KIND_LONE, d, [fo], val)
 

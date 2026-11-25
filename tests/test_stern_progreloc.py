@@ -320,6 +320,81 @@ def test_a_word_in_a_table_of_small_number_pairs_is_not_a_reference():
     assert p_off + 4 in lone and p_off in lone
 
 
+def _device_list(field_of):
+    """A synthetic ELF holding Iron Maiden LE 1.18's LED-list shape (PAD-1570):
+    24-byte records ``{0, 0, name, 0, field, 0x00010001}``, five of them,
+    ``field_of(i, va, junk)`` giving record *i*'s field (*va* maps a string
+    to its address, *junk* is the address of bytes that are no text).  Returns ``(raw, host_off,
+    record_field_offs)``; the strings all sit in the first KB of the page,
+    so their addresses read as small 16-bit pairs, as on the real card."""
+    body = bytearray(b"\x00")
+    strs = {}
+    for text in (b"ACES HIGH\nCHAMPION", b"DIFFICILE", b"LED2", b"SONG ONE",
+                 b"SONG TWO", b"SONG FOUR", b"SONG FIVE"):
+        strs[text] = BODY_OFF + len(body)
+        body += text + b"\x00"
+    junk = BODY_OFF + len(body)                  # bytes that are no text
+    body += bytes(range(0x80, 0xA0))
+    while (BODY_OFF + len(body)) % 4:
+        body += b"\x00"
+
+    def va(text, plus=0):
+        return VBASE + strs[text] + plus
+
+    recs = BODY_OFF + len(body)
+    fields = []
+    for i in range(5):
+        fields.append(recs + 24 * i + 16)
+        body += struct.pack("<6I", 0, 0, va(b"LED2"), 0,
+                            field_of(i, va, VBASE + junk), 0x00010001)
+    body += b"\x00" * 16
+    return _elf(bytes(body)), strs[b"ACES HIGH\nCHAMPION"], fields
+
+
+def test_a_device_number_in_a_record_list_is_not_a_reference():
+    """PAD-1570: the record holding LEDs 0x52/0x1a reads as ``"ACES
+    HIGH\\nCHAMPION" + 10`` - a real word start, so neither the mid-word
+    rule nor the word-after-word number table catches it - and renaming
+    ACES HIGH "repointed" it: two LEDs with one number, ``FATAL: error 207``
+    at every boot.  Its neighbours' same field are numbers too: on no text,
+    or mid-word inside another line (``IFFICILE``)."""
+    def field(i, va, junk):
+        return [junk + 3, va(b"DIFFICILE", 1),
+                va(b"ACES HIGH\nCHAMPION", 10), junk + 9, junk + 14][i]
+    raw, host, fields = _device_list(field)
+    lone = [r["offs"][0] for r in pr.reference_census(raw, _spans(raw))
+            .get(host, []) if r["kind"] == "lone"]
+    assert fields[2] not in lone
+
+
+def test_a_column_of_real_name_pointers_stays_a_reference():
+    """The same record shape holding real pointers - every neighbour starts
+    a string, like Metallica 1.05's song table - keeps its reference."""
+    def field(i, va, junk):
+        return [va(b"SONG ONE"), va(b"SONG TWO"),
+                va(b"ACES HIGH\nCHAMPION", 10), va(b"SONG FOUR"),
+                va(b"SONG FIVE")][i]
+    raw, host, fields = _device_list(field)
+    lone = [r["offs"][0] for r in pr.reference_census(raw, _spans(raw))
+            .get(host, []) if r["kind"] == "lone"]
+    assert fields[2] in lone
+
+
+def test_a_number_column_needs_records_of_one_shape():
+    """A stride that runs into another table (Turtles LE 1.59's object
+    pointers before its JSON type names) shares no field with the word's
+    record, so its address-like words do not count."""
+    nums = (0x00010003, 0x00010005, 0x00010008, 0x00010009, 0x0001000B)
+    rows = []
+    for v in nums:                            # {numbers, 0x00010001, 0xAA}
+        rows += [v, 0x00010001, 0xAA]
+    assert pr.is_number_column_word(rows, 6)
+    for i in range(5):                        # same numbers, no shared field
+        rows[3 * i + 1] = 0x1000 * (i + 1)
+        rows[3 * i + 2] = 0x2000 * (i + 1)
+    assert not pr.is_number_column_word(rows, 6)
+
+
 def test_reference_value_and_retarget_every_kind(synth):
     raw, offs = synth
     c = pr.reference_census(raw, _spans(raw))

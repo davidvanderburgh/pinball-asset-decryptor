@@ -29,6 +29,9 @@ log = logging.getLogger(__name__)
 WATCH_TICK_MS = 3600 * 1000
 #: The first look, after the app has settled (ms).
 WATCH_FIRST_MS = 20 * 1000
+#: PAD-1588: how often the machines on the network are looked at for a settings backup (ms), and the first look
+BACKUP_TICK_MS = 30 * 60 * 1000
+BACKUP_FIRST_MS = 90 * 1000
 
 ADD_TITLE = "Pick the card image or update file your machine runs"
 
@@ -66,6 +69,8 @@ class MachinesMixin:
                            "checking": False})
         self.ctx.loop.after(0, self._machines_refresh)
         self.ctx.loop.after(WATCH_FIRST_MS, self._machines_tick)
+        self._backing_up = False
+        self.ctx.loop.after(BACKUP_FIRST_MS, self._backup_tick)
 
     # -- state ---------------------------------------------------------------
     def _mach_settings(self):
@@ -101,13 +106,20 @@ class MachinesMixin:
         threading.Thread(target=work, name="pad-machines", daemon=True).start()
 
     def _machines_publish(self, token, rows, on):
+        from ..core import machine_backups
         if token != self._mach_token:
             return
         if on:
             self._tell_newer(rows)
+        settings = self._mach_settings() or {}
         self.set(machines={"rows": rows, "watch": on,
                            "watch_text": self._watch_text(rows, on),
-                           "checking": self._mach_checking})
+                           "checking": self._mach_checking,
+                           # PAD-1588: settings and score backups by themselves
+                           "backup": {"auto": machine_backups.auto_on(settings),
+                                      "keep": machine_backups.keep_of(settings),
+                                      "busy": bool(getattr(self, "_backing_up", False)),
+                                      "any": any(r.get("backup_machines") for r in rows)}})
 
     def _tell_newer(self, rows):
         """Newer code for a machine is said once, wherever the owner is (the
@@ -157,12 +169,29 @@ class MachinesMixin:
                "project_missing": bool(found) and not os.path.isdir(found[0][0]),
                "more_projects": [f for f, _w, _l in found[1:]],
                "newer": "", "newer_url": ""}
+        row.update(self._backup_fields(m))
         if info and code_watch.has_source(mfr):
             newest = code_watch.newest(mfr, info["key"])
             if newest and newest > tuple(info["version"]):
                 row["newer"] = machines.version_words(mfr, newest)
                 row["newer_url"] = code_watch.page_url(mfr, info["key"])
         return row
+
+    @staticmethod
+    def _backup_fields(m):
+        """PAD-1588: the machines on the network running this row's game that this computer can log in to, and
+        their kept settings backups, newest first."""
+        from ..core import machine_backups
+        game = machine_backups.game_key(m)
+        ms = machine_backups.for_game(game) if game else []
+        kept = []
+        for net in ms:
+            for b in machine_backups.kept(net["id"]):
+                kept.append({"path": b["path"], "taken": b["taken"][:16], "files": b["files"],
+                             "why": b["why"], "address": net["address"], "stamp": b["stamp"]})
+        kept.sort(key=lambda b: b["stamp"], reverse=True)
+        return {"backup_machines": [n["address"] for n in ms], "backups": kept,
+                "backup_last": kept[0]["taken"] if kept else ""}
 
     @staticmethod
     def _release_info(m):
@@ -269,6 +298,151 @@ class MachinesMixin:
         # title) was turned away as busy: its page is read now
         if not self._machines_check(force=False):
             self._machines_refresh()
+
+    # -- PAD-1588: settings and score backups -------------------------------------
+    def _backup_tick(self):
+        try:
+            self._backup_pass()
+        finally:
+            self.ctx.loop.after(BACKUP_TICK_MS, self._backup_tick)
+
+    def _backup_pass(self):
+        """Every machine of My machines that answers on the network and is due is backed up off the loop (only
+        reads: the game goes on).  Never beside a Send, which takes its own first."""
+        from ..core import machine_backups
+        settings = self._mach_settings()
+        if settings is None or self._backing_up or not machine_backups.auto_on(settings):
+            return False
+        if getattr(self.app, "_send_active", False):
+            return False
+        games = machine_backups.my_games(settings)
+        if not games or not any(m["game"] in games for m in machine_backups.known()):
+            return False
+        keep = machine_backups.keep_of(settings)
+        self._backing_up = True
+
+        def say(text, level="info"):
+            self.ctx.loop.post(self.window.append_log, text, level)
+
+        def work():
+            try:
+                for m, res, err in machine_backups.auto_pass(games, keep, log=say):
+                    log.info("settings backup %s: %s", m["address"], res["status"] if res else err)
+            except Exception:                           # noqa: BLE001
+                log.exception("settings backup pass")
+            finally:
+                self.ctx.loop.post(self._backup_passed)
+        threading.Thread(target=work, name="pad-machine-backup", daemon=True).start()
+        return True
+
+    def _backup_passed(self):
+        self._backing_up = False
+        self._machines_refresh()
+
+    @rpc
+    def machines_set_backup(self, auto=None, keep=None):
+        """The switch (backups by themselves, and before a Send or a whole-card write) and how many each keeps."""
+        from ..core import machine_backups
+        settings = self._mach_settings()
+        if settings is None:
+            return False
+        if auto is not None:
+            settings[machine_backups.AUTO_KEY] = bool(auto)
+        if keep is not None:
+            settings[machine_backups.KEEP_KEY] = machine_backups.keep_of({machine_backups.KEEP_KEY: keep})
+            for net in machine_backups.known():
+                machine_backups.prune(net["id"], machine_backups.keep_of(settings))
+        self._mach_save()
+        self._machines_refresh()
+        if auto:
+            self._backup_pass()
+        return True
+
+    def _backup_target(self, mid, path=""):
+        """``(row's entry, network machine)`` for a row's backup call: the machine *path* was taken from, else the
+        first that runs the row's game."""
+        from ..core import machine_backups
+        m = self._mach(mid)
+        if m is None:
+            return None, None
+        ms = machine_backups.for_game(machine_backups.game_key(m))
+        if path:
+            where = os.path.normcase(os.path.dirname(os.path.abspath(path)))
+            ms = [n for n in ms if os.path.normcase(os.path.abspath(machine_backups.folder(n["id"]))) == where]
+        return m, (ms[0] if ms else None)
+
+    @rpc
+    def machines_backup_now(self, mid):
+        """Back the row's machine up now, whatever the last one's age (none kept when nothing changed)."""
+        from ..core import machine_backups
+        m, net = self._backup_target(mid)
+        if net is None:
+            return False
+        keep = machine_backups.keep_of(self._mach_settings() or {})
+        name = m.get("name") or "the machine"
+
+        def work():
+            try:
+                machine = machine_backups._connect(net["address"])
+                try:
+                    res = machine_backups.take(machine, net["id"], keep, force=True, why="by hand",
+                                               address=net["address"])
+                finally:
+                    machine.close()
+                if res["status"] == "taken":
+                    text, kind = ("Backed up %s's settings, audits and high scores (%d files)."
+                                  % (name, res["files"]), "success")
+                else:
+                    text, kind = ("%s's settings are the same as its backup of %s, so no new one is kept."
+                                  % (name, res["last"]["taken"][:16]), "info")
+            except Exception as e:                      # noqa: BLE001 - said, never raised into the page
+                text, kind = "Couldn't back up %s: %s" % (name, e), "error"
+            self.ctx.loop.post(self._backup_said, text, kind)
+        threading.Thread(target=work, name="pad-machine-backup-now", daemon=True).start()
+        return True
+
+    def _backup_said(self, text, kind):
+        self.window.append_log(text, kind)
+        self.window.toast(text, kind, ms=9000)
+        self._machines_refresh()
+
+    @rpc
+    def machines_restore(self, mid, path):
+        """Put a kept backup back on the row's machine: the game is held while its settings are swapped, every file
+        checked, then the game starts again (core/machine_care.restore_settings)."""
+        from ..core import machine_care, remote_send
+        m, net = self._backup_target(mid, path)
+        if net is None or not os.path.isfile(path or ""):
+            return False
+        try:
+            manifest, _raw = machine_care.read_backup(path)
+        except machine_care.CareError as e:
+            compat.messagebox.showerror("Restore settings", str(e))
+            return False
+        name = m.get("name") or "the machine"
+        when = (manifest.get("taken") or "")[:16]
+        if not compat.messagebox.askyesno(
+                "Restore settings",
+                "Put the backup of %s back on %s (at %s)?\n\nIts adjustments, audits and high scores become those "
+                "of that backup. A game being played ends while they are put back, then the game starts again. The "
+                "settings it has now are kept on the machine beside them." % (when, name, net["address"]),
+                icon="warning"):
+            return False
+
+        def work():
+            try:
+                machine = remote_send.connect(net["address"])
+                try:
+                    res = machine_care.restore_settings(machine, path)
+                finally:
+                    machine.close()
+                text, kind = ("Put %s's settings, audits and high scores of %s back (%d files); its game started "
+                              "again." % (name, when, res["files"]), "success")
+            except Exception as e:                      # noqa: BLE001 - said, never raised into the page
+                text, kind = "Couldn't restore %s's settings: %s" % (name, e), "error"
+            self.ctx.loop.post(self._backup_said, text, kind)
+        threading.Thread(target=work, name="pad-machine-restore", daemon=True).start()
+        return True
 
     # -- page calls ---------------------------------------------------------------
     def _mach(self, mid):

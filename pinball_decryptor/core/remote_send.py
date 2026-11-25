@@ -3367,9 +3367,11 @@ _PHASE_OF = (("Comparing", 1), ("Updating", 2), ("Uploading", 2), ("Writing", 2)
 class SendPipeline(BasePipeline):
     """A Send as one of the app's runs: its log, its progress bar, its Cancel (the Write tab's)."""
 
-    def __init__(self, image, address, log_cb, phase_cb, progress_cb, done_cb, connect_fn=None):
+    def __init__(self, image, address, log_cb, phase_cb, progress_cb, done_cb, connect_fn=None, backup_keep=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image, self.address = image, address
+        # PAD-1588: the machine's settings backed up before anything is sent (None: the owner turned that off)
+        self.backup_keep = backup_keep
         self._connect = connect_fn or connect
         self._phase_now = -1
         self._rate = []
@@ -3401,6 +3403,9 @@ class SendPipeline(BasePipeline):
             raise PipelineError("Connect", str(e)) from None
         machine.log, machine.cancel = self._log, (lambda: self._cancelled)    # PAD-1436: a reconnect says so
         try:
+            if self.backup_keep:
+                from . import machine_backups
+                machine_backups.before_send(machine, self.backup_keep, self._log)
             if hasattr(machine, "widen"):
                 machine.widen(self._log)
             summary = send_image(self.image, machine, self._log, self._send_progress, lambda: self._cancelled)

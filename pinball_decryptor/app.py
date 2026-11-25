@@ -3209,7 +3209,23 @@ class App:
             self._current_run_is_direct_ssd = False
             self.window.set_running(False, mode="write")
             raise
-        threading.Thread(target=self.pipeline.run, daemon=True).start()
+        run = self.pipeline.run
+        if not menu_only:
+            # PAD-1588: a card written whole loses the machine's settings, audits and high scores; a machine running
+            # this game that answers on the network is backed up first (only reads; it says so in the log)
+            from .core import machine_backups
+            if machine_backups.auto_on(self._settings) and machine_backups.known():
+                keep, mfr_key, pipe = machine_backups.keep_of(self._settings), mfr.key, self.pipeline
+
+                def run():
+                    try:
+                        game = machine_backups.game_of_card(image_path, mfr_key)
+                        if game:
+                            machine_backups.before_write(game, keep, log_cb)
+                    except Exception:                   # noqa: BLE001 - the write is never stopped by it
+                        pass
+                    pipe.run()
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_build_send_request(self, address):
         """PAD-1397: the Write tab's Send to machine - build to the Write tab's destination as usual, then send the
@@ -3234,7 +3250,10 @@ class App:
         self.window._set_footer(run_label="Sending")
         self.window.reset_steps(mode="write")
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
-        self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb)
+        from .core import machine_backups
+        keep = machine_backups.keep_of(self._settings) if machine_backups.auto_on(self._settings) else None
+        self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb,
+                                                 backup_keep=keep)
         threading.Thread(target=self.pipeline.run, daemon=True, name="pad-send").start()
 
     def _start_read_card(self, device_path, image_path):

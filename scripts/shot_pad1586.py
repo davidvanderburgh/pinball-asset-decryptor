@@ -89,6 +89,19 @@ def main():
                     except Exception as e:                  # noqa: BLE001
                         print(key, "prep failed:", e, flush=True)
                     time.sleep(6)
+                if key == "partitions" and after:
+                    # the games partition, down to the game's logo, previewed
+                    parts = state().get("partitions", {}).get("parts") or []
+                    games = next((p["value"] for p in parts if "games" in p["value"]), None)
+                    print("parts:", [p["value"] for p in parts], flush=True)
+                    if games:
+                        api("partitions.select_partition", games)
+                        time.sleep(3)
+                        for d in ("/fallout_le", "/fallout_le/assets", "/fallout_le/assets/lcd"):
+                            api("partitions.toggle", d, True)
+                            time.sleep(2)
+                        api("partitions.select", "/fallout_le/assets/lcd/GameLogo.png", 520, 300)
+                        time.sleep(5)
                 page.screenshot(path=out(name))
                 print("shot", out(name), flush=True)
             print("page errors:", errors, flush=True)

@@ -35,7 +35,9 @@ import re
 import shutil
 import struct
 import subprocess
+import queue
 import sys
+import threading
 import time
 
 from . import ext4_used
@@ -54,6 +56,101 @@ _FLASH_CHUNK = 16 << 20
 # drained it (PAD-302).  Flushing every this-many bytes keeps the cache - and
 # so the progress error - to a couple of seconds of card writing.
 _FLASH_DRAIN = 64 << 20
+# Chunks read ahead on a thread of their own while the current one is written
+# or compared (PAD-1577): the image's disk (often D:, a spinning disk) and the
+# card work at the same time instead of in turn.  0 reads in line, as before.
+_READ_AHEAD = 2
+
+
+class _ReadAhead:
+    """``(pos, buf)`` for every chunk of *spans* ``[(offset, length)]``, in
+    order, read by ``read(pos, n)`` on a background thread up to *depth*
+    chunks ahead of the loop taking them (PAD-1577).
+
+    A read that comes back empty is handed on as ``(pos, b"")`` and ends its
+    span (the next span is still read).  An exception the read raises is
+    raised in the taking thread, where the read would have raised it.  Use it
+    as a context manager: leaving the ``with`` early (a cancel, a mismatch,
+    an error) stops the thread and waits for it, so the file or card it reads
+    is never closed under a read still running."""
+
+    _END = object()
+
+    def __init__(self, spans, read, step, depth=None):
+        self._spans = list(spans)
+        self._read = read
+        self._step = step
+        self._depth = _READ_AHEAD if depth is None else depth
+        self._stop = threading.Event()
+        self._thread = None
+        self._q = None
+
+    def _chunks(self):
+        for start, length in self._spans:
+            pos, end = start, start + length
+            while pos < end:
+                buf = self._read(pos, min(self._step, end - pos))
+                yield pos, buf
+                if not buf:
+                    break
+                pos += len(buf)
+
+    def _put(self, item):
+        while not self._stop.is_set():
+            try:
+                self._q.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                pass
+        return False
+
+    def _run(self):
+        try:
+            for item in self._chunks():
+                if self._stop.is_set() or not self._put(item):
+                    return
+        except BaseException as e:          # handed to the taking thread
+            self._put((self._END, e))
+            return
+        self._put((self._END, None))
+
+    def __enter__(self):
+        if self._depth > 0:
+            self._q = queue.Queue(maxsize=self._depth)
+            self._thread = threading.Thread(
+                target=self._run, name="pad-read-ahead", daemon=True)
+            self._thread.start()
+        return self
+
+    def __iter__(self):
+        if self._thread is None:
+            yield from self._chunks()
+            return
+        while True:
+            item = self._q.get()
+            if item[0] is self._END:
+                if item[1] is not None:
+                    raise item[1]
+                return
+            yield item
+
+    def __exit__(self, *_exc):
+        if self._thread is not None:
+            self._stop.set()
+            self._thread.join()
+            self._thread = None
+
+
+def _file_reader(f, overlay=None):
+    """``read(pos, n)`` on file object *f* for :class:`_ReadAhead`, with
+    *overlay* (:func:`_apply_overlay`) put in place."""
+    def read(pos, n):
+        f.seek(pos)
+        buf = f.read(n)
+        if overlay is not None and buf:
+            buf = _apply_overlay(buf, pos, overlay)
+        return buf
+    return read
 
 
 class FlashError(Exception):
@@ -710,20 +807,17 @@ class RawDeviceFile:
         else:
             spans = ranges
             total = sum(length for _o, length in spans)
-        for start, length in spans:
-            if ranges is not None:
-                src.seek(start)
-            pos, end = start, start + length
-            while pos < end:
+        # The image is read on a thread of its own, a few chunks ahead, while
+        # this one writes (PAD-1577): the image's disk and the card work at
+        # the same time.
+        with _ReadAhead(spans, _file_reader(src, overlay), step) as chunks:
+            for pos, buf in chunks:
                 if cancel is not None and cancel():
                     raise FlashCancelled(
                         "Flash canceled after %d of %d bytes."
                         % (written, total))
-                buf = src.read(min(step, end - pos))
                 if not buf:
                     return written
-                if overlay is not None:
-                    buf = _apply_overlay(buf, pos, overlay)
                 if len(buf) % sec == 0:
                     # Aligned fast path: write directly, capped per write
                     # syscall.
@@ -738,7 +832,6 @@ class RawDeviceFile:
                     # don't disturb whatever lies past the image's last byte.
                     self.seek(pos)
                     self.write(buf)
-                pos += len(buf)
                 written += len(buf)
                 undrained += len(buf)
                 if drain and (undrained >= _FLASH_DRAIN or written >= total):
@@ -1497,25 +1590,23 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
                     raise FlashError(full_text) from e
                 if not holes and free is not None and free < dev_size:
                     raise FlashError(full_text)
-            for start, length in (ranges or [(0, dev_size)]):
-                pos, end = start, start + length
-                while pos < end:
+            # The card is read on a thread of its own, a few chunks ahead,
+            # while this one writes the file (PAD-1577).
+            with _ReadAhead(ranges or [(0, dev_size)], dev._aligned_read,
+                            _VERIFY_CHUNK) as chunks:
+                for pos, buf in chunks:
                     if cancel is not None and cancel():
                         raise FlashCancelled(
                             "Read canceled after %d of %d bytes."
                             % (read, need))
-                    buf = dev._aligned_read(pos, min(_VERIFY_CHUNK, end - pos))
                     if not buf:
                         break
                     if ranges is not None:
                         out.seek(pos)
                     out.write(buf)
-                    pos += len(buf)
                     read += len(buf)
                     if progress is not None:
                         progress(read, need, "Reading SD card…")
-                if pos < end:
-                    break
             out.flush()
             os.fsync(out.fileno())
     except PermissionError as e:
@@ -2107,18 +2198,15 @@ def read_device_menu_to_image(device_path, image_path, *, log=None, progress=Non
                 log("Reading the boot menu off %s: %s of %s (the menu, not the games)"
                     % (device_path, format_size(total), format_size(dev_size)), "info")
             sparse_truncate(out, dev_size)
-            for off, length, _what in ranges:
-                done = 0
-                while done < length:
+            spans = [(off, length) for off, length, _what in ranges]
+            with _ReadAhead(spans, dev._aligned_read, _VERIFY_CHUNK) as chunks:
+                for pos, buf in chunks:
                     if cancel is not None and cancel():
                         raise FlashCancelled("Read canceled after %d of %d bytes." % (read, total))
-                    want = min(_VERIFY_CHUNK, length - done)
-                    buf = dev._aligned_read(off + done, want)
                     if not buf:
-                        break
-                    out.seek(off + done)
+                        continue
+                    out.seek(pos)
                     out.write(buf)
-                    done += len(buf)
                     read += len(buf)
                     if progress is not None:
                         progress(read, total, "Reading the boot menu off the card\u2026")
@@ -2221,21 +2309,19 @@ def _flash_menu_plan(image_path, device_path, plan, *, log=None,
                                          "written.")
                 total = sum(length for _o, length, _w in plan["write"])
                 rate = []
-                for off, length, _what in plan["write"]:
-                    src.seek(off)
-                    dev.seek(off)
-                    done = 0
-                    while done < length:
+                spans = [(off, length) for off, length, _w in plan["write"]]
+                with _ReadAhead(spans, _file_reader(src),
+                                _FLASH_CHUNK) as chunks:
+                    for pos, buf in chunks:
                         if cancel is not None and cancel():
                             raise FlashCancelled(
                                 "Menu write canceled after %d of %d bytes - "
                                 "the card's menu is half written and must be "
                                 "written again." % (written, total))
-                        buf = src.read(min(_FLASH_CHUNK, length - done))
                         if not buf:
-                            break
+                            continue
+                        dev.seek(pos)
                         dev.write(buf)
-                        done += len(buf)
                         written += len(buf)
                         if progress is not None:
                             progress(written, total,
@@ -2258,26 +2344,23 @@ def _verify_menu_readback(device_path, image_path, plan, *, log=None,
     rate = []
     with RawDeviceFile(device_path, writable=False) as dev, \
             open(image_path, "rb") as src:
-        for off, length, _what in plan["write"]:
-            src.seek(off)
-            done = 0
-            while done < length:
+        spans = [(off, length) for off, length, _w in plan["write"]]
+        with _ReadAhead(spans, _file_reader(src), _VERIFY_CHUNK) as chunks:
+            for pos, exp in chunks:
                 if cancel is not None and cancel():
                     raise FlashCancelled(
                         "Verify canceled after %d of %d bytes." % (checked,
                                                                     total))
-                exp = src.read(min(_VERIFY_CHUNK, length - done))
                 if not exp:
-                    break
-                got = _read_back(dev, off + done, len(exp), total,
+                    continue
+                got = _read_back(dev, pos, len(exp), total,
                                  "the menu partition", shown_at=checked)
                 if got[:len(exp)] != exp:
                     raise FlashError(
                         "The card does not match the image at byte %s of the "
                         "menu partition - the write did not land. Try again, "
                         "or write the whole image."
-                        % f"{off + done:,}")
-                done += len(exp)
+                        % f"{pos:,}")
                 checked += len(exp)
                 if progress is not None:
                     progress(checked, total, "Verifying the boot menu\u2026"
@@ -2366,19 +2449,17 @@ def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
     rate = []
     with RawDeviceFile(device_path, writable=False) as dev, \
             open(image_path, "rb") as src:
-        for start, length in spans:
-            src.seek(start)
-            pos, end = start, start + length
-            while pos < end:
+        # The image is read on a thread of its own, a few chunks ahead,
+        # while this one reads the card (PAD-1577).
+        with _ReadAhead(spans, _file_reader(src, overlay),
+                        _VERIFY_CHUNK) as chunks:
+            for pos, exp in chunks:
                 if cancel is not None and cancel():
                     raise FlashCancelled(
                         "Verify canceled after %d of %d bytes." % (
                             checked, total))
-                exp = src.read(min(_VERIFY_CHUNK, end - pos))
                 if not exp:
-                    break
-                if overlay is not None:
-                    exp = _apply_overlay(exp, pos, overlay)
+                    continue
                 got = _read_back(dev, pos, len(exp), img_size)
                 if got != exp:
                     off = next((i for i in range(min(len(got), len(exp)))
@@ -2393,7 +2474,6 @@ def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
                         "partially-written installer can fail with a SHELL "
                         "ERROR or leave the machine unbootable."
                         % f"{pos + off:,}")
-                pos += len(exp)
                 checked += len(exp)
                 if progress is not None:
                     progress(checked, total, "Verifying flashed card…"

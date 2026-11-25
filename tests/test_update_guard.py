@@ -22,6 +22,7 @@ STERN_LIKE = "\n".join([
     "DOWNLOADED_SPK_AVAILABLE=/connectivity/update/UPDATE_REQUESTED",
     'for i in "$1"/*.[sS][pP][kK] ; do echo $i; done',
     "mount -o remount -o rw $DEST_MOUNT_POINT",
+    "kill_game() { pkill game; }",
     "/etc/init.d/update_monitor $SPIKE_MENU",
     "",
 ])
@@ -166,3 +167,47 @@ def test_the_multiboot_menu_inject_guards_the_updater_and_the_fingerprint_reads_
     rec = ts.FileRec(hashlib.sha256(guarded.encode()).hexdigest(), len(guarded), 0o100755, 0, 0, 0)
     plain = mk._unguarded_rec(img, 0, os.path.getsize(img), rec)
     assert plain.sha256 == hashlib.sha256(STERN_LIKE.encode()).hexdigest() and plain.size == len(STERN_LIKE)
+
+
+# ---- Spike 3 (an encrypted system partition, opened with the card's keys) ----------------------------
+def test_spike3_build_step_guards_with_the_cards_keys_and_quarantines_a_failure(tmp_path, monkeypatch):
+    from pinball_decryptor.core import ssh_spike3
+    from pinball_decryptor.plugins.stern import spike3_write as W
+    src = tmp_path / "stock.raw"; src.write_bytes(b"stock")
+    out = tmp_path / "build.raw"; out.write_bytes(b"built")
+    logs, calls = [], []
+    pipe = W.Spike3WritePipeline.__new__(W.Spike3WritePipeline)
+    pipe.original_path, pipe.output_path, pipe.key_source, pipe._cancelled = str(src), str(out), "KS", False
+    pipe._log = lambda m, level="info": logs.append((level, m))
+    monkeypatch.setattr(ssh_spike3, "key_for", lambda p, ks=None: ("keys", p, ks))
+    monkeypatch.setattr(U, "state", lambda p, keys=None: "open")
+    monkeypatch.setattr(U, "apply_to_spike3_build",
+                        lambda o, p, keys, log=None, cancel=None: calls.append(keys) or U.GUARD_TEXT)
+    from pinball_decryptor.plugins.stern import engine
+    monkeypatch.setattr(engine, "read_build_manifest", lambda p: {})
+    marker = ssh_card.pending_marker(str(out))
+    assert pipe._guard_updater(marker) == U.GUARD_TEXT
+    assert calls == [("keys", str(src), "KS")] and not marker.exists()
+
+    def boom(*a, **kw):
+        raise ExtrasError("re-encryption failed")
+    monkeypatch.setattr(U, "apply_to_spike3_build", boom)
+    with pytest.raises(P.PipelineError):
+        pipe._guard_updater(marker)
+    assert not out.exists() and Path(str(out) + ".ssh-incomplete").exists()
+
+
+def test_spike3_cards_without_keys_read_as_spike3_not_open(monkeypatch):
+    monkeypatch.setattr(U, "read_update_script", lambda p, keys=None: (None, (2, 0x83, 0, 0), True))
+    assert U.state("card.raw") == "spike3"
+
+
+def test_the_guard_holds_the_game_without_counting_a_restart():
+    """Spike 3's game_monitor counts restarts in /tmp/game_restarts (five clear the connectivity cache, ten
+    reboot): the mark our hold leaves goes, as Send to machine's does."""
+    body = "\n".join(U.GUARD_LINES)
+    back = body.split("pad_back() {", 1)[1].split("\n}", 1)[0]
+    assert "kill -CONT" in back and "/tmp/game_restarts" in back and "pad_marks" in back
+    tell = body.split("pad_tell() {", 1)[1].split("\n}", 1)[0]
+    assert tell.index("pad_marks=") < tell.index("kill -STOP")
+    assert tell.index("/games/spike3/bin") < tell.index("/usr/local/spike")

@@ -82,7 +82,7 @@ GUARD_LINES = [
     '}',
     'pad_log() {',
     '  echo "UPDATE: PAD: $1"',
-    '  echo "$(date) $1" >> %s 2>/dev/null' % GUARD_LOG,
+    '  (echo "$(date) $1" >> %s) 2>/dev/null' % GUARD_LOG,
     '}',
     'pad_stick_in() {',
     '  for d in /dev/sda1 /dev/sda /dev/sdb1 /dev/sdb; do',
@@ -101,12 +101,13 @@ GUARD_LINES = [
     '    [ -z "$pad_mon" ] && sleep 1',
     '    i=$((i+1))',
     '  done',
+    "  pad_marks=\" $(ls /tmp/game_restarts 2>/dev/null | tr '\\n' ' ') \"",
     '  [ -n "$pad_mon" ] && kill -STOP $pad_mon 2>/dev/null',
-    '  pad_game=$(pad_pids game)',
-    '  [ -n "$pad_game" ] && kill -9 $pad_game 2>/dev/null',
+    '  pad_game=" $(pad_pids game)"',
+    '  [ -n "${pad_game# }" ] && kill -9 $pad_game 2>/dev/null',
     '  pad_bd=""',
     '  pad_dp=""',
-    '  for d in /usr/local/spike /usr/local/bin /games/spike3/bin; do',
+    '  for d in /games/spike3/bin /usr/local/spike /usr/local/bin; do',
     '    if [ -z "$pad_bd" ] && [ -x "$d/boot_display" ]; then pad_bd="$d/boot_display"; fi',
     '    if [ -z "$pad_dp" ] && [ -x "$d/dprint" ]; then pad_dp="$d/dprint"; fi',
     '  done',
@@ -118,7 +119,20 @@ GUARD_LINES = [
     '}',
     'pad_back() {',
     '  for p in $(pad_pids boot_display); do kill $p 2>/dev/null; done',
-    '  if [ -n "$pad_mon" ]; then kill -CONT $pad_mon 2>/dev/null; fi',
+    '  [ -n "$pad_mon" ] || return 0',
+    '  kill -CONT $pad_mon 2>/dev/null',
+    '  i=0',
+    '  pad_new=""',
+    '  while [ $i -lt 40 ] && [ -z "$pad_new" ]; do',
+    '    for p in $(pad_pids game); do',
+    '      case "$pad_game " in *" $p "*) ;; *) pad_new=$p ;; esac',
+    '    done',
+    '    [ -z "$pad_new" ] && sleep 1',
+    '    i=$((i+1))',
+    '  done',
+    '  for f in $(ls /tmp/game_restarts 2>/dev/null); do',
+    '    case "$pad_marks" in *" $f "*) ;; *) rm -f "/tmp/game_restarts/$f" ;; esac',
+    '  done',
     '}',
     'pad_guard() {',
     '  umount /media >/dev/null 2>&1',
@@ -175,7 +189,7 @@ def stern_shaped(text):
         text = text.decode('utf-8', 'replace')
     text = strip_guard(text)
     return (text.startswith('#!') and 'DOWNLOADED_SPK_AVAILABLE' in text and '[sS][pP][kK]' in text
-            and 'update_monitor' in text and 'mount -o remount -o rw' in text)
+            and 'update_monitor' in text and 'kill_game' in text)
 
 
 def strip_guard(text):
@@ -230,28 +244,36 @@ def _command(ex, program, *args):
     return ssh_card._command(ex, program, *args)
 
 
-def read_update_script(path):
+def _script_of(r):
+    from . import ssh_card
+    node = ssh_card._node(r, UPDATE_SCRIPT)
+    if node is None or stat.S_IFMT(node['mode']) != stat.S_IFREG or node['size'] > 256 * 1024:
+        return None
+    return r.read_file_bytes(node).decode('utf-8', 'replace')
+
+
+def read_update_script(path, keys=None):
     """``(text or None, partition, encrypted)`` of the card image *path*: Stern's updater as it is on the card's
-    system partition, None when it has none."""
+    system partition, None when it has none. A Spike 3 card's (encrypted) is read only with its *keys*."""
     from . import ssh_card
     from ..plugins.stern.ext4 import Ext4Reader
     with open(path, 'rb') as f:
         size = os.fstat(f.fileno()).st_size
         part, encrypted = ssh_card.system_partition(f, size)
-        if encrypted:
-            return None, part, True
-        r = Ext4Reader(f, part[2], part[3])
-        node = ssh_card._node(r, UPDATE_SCRIPT)
-        if node is None or stat.S_IFMT(node['mode']) != stat.S_IFREG or node['size'] > 256 * 1024:
-            return None, part, False
-        return r.read_file_bytes(node).decode('utf-8', 'replace'), part, False
+        if not encrypted:
+            return _script_of(Ext4Reader(f, part[2], part[3])), part, False
+    if keys is None:
+        return None, part, True
+    from . import ssh_spike3
+    with ssh_spike3.open_rootfs(path, key_source=keys) as vol:
+        return _script_of(Ext4Reader(vol, 0, vol.size)), part, True
 
 
-def state(path):
+def state(path, keys=None):
     """'guarded', 'open' (Stern's updater, unguarded), 'other' (an updater the guard does not know), 'none' (no
-    updater) or 'spike3' (an encrypted system partition: not read here) for the card image *path*."""
-    text, _part, encrypted = read_update_script(path)
-    if encrypted:
+    updater) or 'spike3' (an encrypted system partition and no *keys*) for the card image *path*."""
+    text, _part, encrypted = read_update_script(path, keys)
+    if encrypted and keys is None:
         return 'spike3'
     if text is None:
         return 'none'
@@ -331,6 +353,31 @@ def apply_to_build(original, output, log=None, cancel=None):
     ssh_card.rewrite_partition(output, start, size, lambda p, work: prepare_rootfs(p, work, cancel),
                                cancel, what='Update guard', stop=_cancel)
     if state(output) != 'guarded':
+        raise ExtrasError("Stern's updater on the built image did not read back as guarded.")
+    if log:
+        log(GUARD_TEXT, 'info')
+    return GUARD_TEXT
+
+
+def apply_to_spike3_build(original, output, keys, log=None, cancel=None):
+    """:func:`apply_to_build` for a Spike 3 image *output*: its system partition is opened with the card's *keys*
+    and rewritten through ``ssh_spike3.rewrite_rootfs`` (the checked way remote access changes it)."""
+    from . import ssh_spike3
+    if os.path.samefile(original, output):
+        raise ExtrasError('The update guard must not write the original image.')
+    now = state(output, keys)
+    if now == 'guarded':
+        if log:
+            log(GUARD_TEXT, 'info')
+        return GUARD_TEXT
+    if now != 'open':
+        if log:
+            log("This card's updater is not the one Stern ships (or it has none), so it was left as it is.",
+                'warning' if now == 'other' else 'info')
+        return ''
+    ssh_spike3.rewrite_rootfs(output, lambda p, work: prepare_rootfs(p, work, cancel), keys, cancel=cancel,
+                              what='Update guard', stop=_cancel)
+    if state(output, keys) != 'guarded':
         raise ExtrasError("Stern's updater on the built image did not read back as guarded.")
     if log:
         log(GUARD_TEXT, 'info')

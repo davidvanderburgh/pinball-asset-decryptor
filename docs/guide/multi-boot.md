@@ -159,12 +159,12 @@ on 16 GB. A song-set variant then costs only its changed songs.
   normal card image, copies the pictures and sounds out beside them, and
   from then on the card works like one you built.
 
-> **A Stern update does not install on a Spike 2 card built here**, from a
+> **A Stern update does not install on a Stern card built here**, from a
 > USB stick or downloaded over Insider Connected: the game's screen says
 > STERN UPDATE NOT INSTALLED, and when you take the stick out the game comes
 > back as it was. Rebuild or update the card here instead. A card built with
-> an older version of the app, and a Spike 3 card, does not have this yet:
-> never update those with a Stern update. Both kinds install into whichever
+> an older version of the app does not have this yet: never update one with
+> a Stern update. Both kinds install into whichever
 > game you boot from the menu next, so a build of your own would be replaced
 > by Stern's code, and on a compact card an update would write through the
 > shared files into every game at once. The same goes for a stick holding a

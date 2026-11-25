@@ -66,6 +66,23 @@ of a partition table + that stock partition: guarded in 3.6 s, record vouches, s
 `mkmulticard.ensure_update_guard` on the same partition in WSL: guarded, idempotent, e2fsck clean;
 `p2_digest(stock) == p2_digest(guarded)`.
 
+## 1b. Spike 3 (DONE)
+
+Spike 3's `/etc/init.d/update` (read off Fallout LE 0.82) is the same shape: its paths in `/etc/init.d/shared`
+(`DOWNLOADED_SPK_AVAILABLE` = `/connectivity/update/UPDATE_REQUESTED`), sticks `/dev/sda1 /dev/sda`, Stern's menu
+copied from `/games/spike3/spike_menu` by `update_monitor`, screen tools in `/games/spike3/bin`. The same block goes
+on (`stern_shaped` checks the strings both share). Two things only Spike 3 needed: the screen tools are looked for in
+`/games/spike3/bin` first, and its `game_monitor` counts every restart in `/tmp/game_restarts` (five clear the
+connectivity cache, ten reboot), so `pad_back` waits for the new game and removes the marks the hold left, as Send
+does. `Spike3WritePipeline._guard_updater` runs it on every Spike 3 build, the system partition opened with the
+card's keys and rewritten through `ssh_spike3.rewrite_rootfs` (remote access's checked way).
+
+Proof (`C:\tmp\PAD-1585\standin3.sh`, `run_s3.log` + `run_s3b.log`): the stock Fallout LE 0.82 card's decrypted
+system partition (exported with its keys; `state` reads it `open`) guarded by `prepare_rootfs`, run as `/` under
+qemu-aarch64 with its own `game_monitor`: stock + stick = Stern's installer replaced the files; guarded + stick =
+held with the message until the stick was out, a new game, no restart marks; `stern-update-ok` = Stern's installer;
+download = refused, back after 30 s; nothing = the same game running, no marks.
+
 ## Still to do (next runs of this ticket)
 
 2. **"Update to 1.0.1" button**: on My machines' "1.0.1 is out" row (`webui/shellx_machines._machine_row`,
@@ -82,7 +99,5 @@ of a partition table + that stock partition: guarded in 3.6 s, record vouches, s
 4. **Multi-boot**: the same button updates every image of that title (`multiboot_core.replace_image` per image;
    compact cards' shared files once), other titles left alone.
 6. **No port yet** for the new build: assets and text carry; modes, co-op and runtime features wait (step 2's report).
-- **Spike 3**: its `/etc/init.d/update` is the same shape (stern-spike-3/docs/PLAN_B_RESEARCH.md); the system
-  partition is LUKS (`ssh_spike3` shows how a build changes it). Guard it the same way.
 - **Other makers** (BoF, Spooky, AP, TBL) where the multi-boot guide says a normal update takes our menu away:
   the same guard on their updaters.

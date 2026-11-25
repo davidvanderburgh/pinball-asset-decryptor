@@ -56,7 +56,7 @@ GUARD_LINES = [
     '}',
     'pad_log() {',
     '  echo "UPDATE: PAD: $1"',
-    '  echo "$(date) $1" >> %s 2>/dev/null' % GUARD_LOG,
+    '  (echo "$(date) $1" >> %s) 2>/dev/null' % GUARD_LOG,
     '}',
     'pad_stick_in() {',
     '  for d in /dev/sda1 /dev/sda /dev/sdb1 /dev/sdb; do',
@@ -75,12 +75,13 @@ GUARD_LINES = [
     '    [ -z "$pad_mon" ] && sleep 1',
     '    i=$((i+1))',
     '  done',
+    "  pad_marks=\" $(ls /tmp/game_restarts 2>/dev/null | tr '\\n' ' ') \"",
     '  [ -n "$pad_mon" ] && kill -STOP $pad_mon 2>/dev/null',
-    '  pad_game=$(pad_pids game)',
-    '  [ -n "$pad_game" ] && kill -9 $pad_game 2>/dev/null',
+    '  pad_game=" $(pad_pids game)"',
+    '  [ -n "${pad_game# }" ] && kill -9 $pad_game 2>/dev/null',
     '  pad_bd=""',
     '  pad_dp=""',
-    '  for d in /usr/local/spike /usr/local/bin /games/spike3/bin; do',
+    '  for d in /games/spike3/bin /usr/local/spike /usr/local/bin; do',
     '    if [ -z "$pad_bd" ] && [ -x "$d/boot_display" ]; then pad_bd="$d/boot_display"; fi',
     '    if [ -z "$pad_dp" ] && [ -x "$d/dprint" ]; then pad_dp="$d/dprint"; fi',
     '  done',
@@ -92,7 +93,20 @@ GUARD_LINES = [
     '}',
     'pad_back() {',
     '  for p in $(pad_pids boot_display); do kill $p 2>/dev/null; done',
-    '  if [ -n "$pad_mon" ]; then kill -CONT $pad_mon 2>/dev/null; fi',
+    '  [ -n "$pad_mon" ] || return 0',
+    '  kill -CONT $pad_mon 2>/dev/null',
+    '  i=0',
+    '  pad_new=""',
+    '  while [ $i -lt 40 ] && [ -z "$pad_new" ]; do',
+    '    for p in $(pad_pids game); do',
+    '      case "$pad_game " in *" $p "*) ;; *) pad_new=$p ;; esac',
+    '    done',
+    '    [ -z "$pad_new" ] && sleep 1',
+    '    i=$((i+1))',
+    '  done',
+    '  for f in $(ls /tmp/game_restarts 2>/dev/null); do',
+    '    case "$pad_marks" in *" $f "*) ;; *) rm -f "/tmp/game_restarts/$f" ;; esac',
+    '  done',
     '}',
     'pad_guard() {',
     '  umount /media >/dev/null 2>&1',
@@ -149,7 +163,7 @@ def stern_shaped(text):
         text = text.decode('utf-8', 'replace')
     text = strip_guard(text)
     return (text.startswith('#!') and 'DOWNLOADED_SPK_AVAILABLE' in text and '[sS][pP][kK]' in text
-            and 'update_monitor' in text and 'mount -o remount -o rw' in text)
+            and 'update_monitor' in text and 'kill_game' in text)
 
 
 def strip_guard(text):

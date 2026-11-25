@@ -992,11 +992,48 @@ class Spike3WritePipeline(BasePipeline):
             if not engine.read_build_manifest(self.output_path).get('complete'):
                 raise PipelineError('Remote access', 'The rebuild did not record a complete image; its failure marker was retained.')
             marker.unlink(missing_ok=True)
+        guard_note = '' if self._cancelled else self._guard_updater(marker)
         named = ' and '.join(n for n, said in (('remote access (SSH)', note), ('Bluetooth headphones', bt_note))
                              if said)
-        notes = '\n'.join(n for n in (note, bt_note) if n)
+        notes = '\n'.join(n for n in (note, bt_note, guard_note) if n)
         self._done(True, "Wrote %s to %s%s" % (", ".join(bits) or named or 'the card',
                        self.output_path, ('\n' + notes) if notes else ''))
+
+    def _guard_updater(self, marker):
+        """PAD-1585: Stern's own updater guarded on the built image (core/update_guard.py), as on Spike 2: a Stern
+        update on a USB stick or from Insider Connected is never installed over this card. Opened with the
+        card's keys; a failure part way quarantines the image like the add-ons. -> the summary's line or ''."""
+        from . import engine
+        from ...core import ssh_spike3, update_guard
+        from ...core.card_extras import ExtrasError
+        out = self.output_path
+        if not out or not os.path.isfile(out) or os.path.islink(out):
+            return ''
+        try:
+            keys = ssh_spike3.key_for(self.original_path, self.key_source)
+            before = update_guard.state(out, keys)
+        except (ExtrasError, OSError, ValueError) as e:
+            self._log("Stern's updater could not be read on this image (%s), so it was left as it is." % e,
+                      'warning')
+            return ''
+        if before != 'open':
+            return update_guard.apply_to_spike3_build(self.original_path, out, keys, log=self._log)
+        try:
+            marker.write_text('Incomplete system partition preparation; do not flash.' + chr(10))
+            text = update_guard.apply_to_spike3_build(self.original_path, out, keys, log=self._log,
+                                                      cancel=lambda: self._cancelled)
+            rec = engine.read_build_manifest(out)
+            if rec:
+                rec['output'] = engine._file_stamp(out)
+                engine._write_build_manifest(out, rec)
+            marker.unlink(missing_ok=True)
+            return text
+        except Exception as e:
+            try:
+                os.replace(out, out + '.ssh-incomplete')
+            except OSError:
+                pass
+            raise PipelineError('Update guard', str(e)) from e
 
 
 def _discard(path):

@@ -102,7 +102,9 @@ EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 
                *(("cabrec%d.bin" % _n, 0o100644) for _n in range(8)),
                ("comp.cfg", 0o100644), ("scorefeed.cfg", 0o100644),
                ("records.cfg", 0o100644), ("settings.cfg", 0o100644), ("scenes.cfg", 0o100644),
-               ("saved.cfg", 0o100644), ("buttons.cfg", 0o100644))
+               ("saved.cfg", 0o100644), ("buttons.cfg", 0o100644), ("padmenu.cfg", 0o100644))
+#: BOOT MENU FLIPPER (Simon, 2026-11-25): padmenu.cfg, where the row's value is - read by padmenu.so (the multi-boot
+#: menu's object inside the game), not by the runtime; a whole install too (a row of its own needs nothing else).
 #: PAD-1516: cabrec0-7.bin, recordings of a game's cabinet lights the shows play - never alone: they come with the
 #: shows (cabshow.cfg) that play them.
 #: PAD-1448: addcab.cfg, the cabinet lights the owner's cabinet adds (pad_mode_runtime.c addcab_arm) - never
@@ -115,7 +117,7 @@ EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 
 CLIPS_FILE = "clips.cfg"
 #: the extra files that are each enough for an install without a mode (PAD-446, PAD-494, PAD-537)
 STANDALONE_FILES = (CLIPS_FILE, "sounds.cfg", "picture.cfg", "attract.cfg", "coop.cfg", "idle.cfg", "handicap.cfg",
-                    "access.cfg", "cabshow.cfg", "comp.cfg", "scorefeed.cfg", "records.cfg", "scenes.cfg")
+                    "access.cfg", "cabshow.cfg", "comp.cfg", "scorefeed.cfg", "records.cfg", "scenes.cfg", "padmenu.cfg")
 #: image sets: a scene's variant beside scenes.cfg (scene_variants.file_name), any number of them; one an earlier
 #: install left and this one does not bring is removed too
 SCENE_PREFIX, SCENE_SUFFIX = "scn_", ".radium"

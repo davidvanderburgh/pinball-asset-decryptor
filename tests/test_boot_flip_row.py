@@ -130,3 +130,20 @@ def test_it_plans_on_godzilla_116_with_the_other_rows():
     if MS.is_shared(s):
         assert s.live >= MS.SHARED_BASE
         assert "boot_flip" in MS.shared_cfg_text(settings)
+
+
+def test_the_card_installer_and_the_emulator_carry_the_file():
+    """The first end-to-end Write refused it: "padmenu.cfg is not a file the mode runtime reads"."""
+    import importlib.util
+    path = os.path.join(ROOT, "tools", "spike2_emu", "mode_install.py")
+    spec = importlib.util.spec_from_file_location("mode_install_bf", path)
+    mi = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mi)
+    assert ("padmenu.cfg", 0o100644) in mi.EXTRA_FILES and "padmenu.cfg" in mi.STANDALONE_FILES
+    emu = os.path.join(ROOT, "tools", "spike2_emu")
+    tryit = open(os.path.join(emu, "modes", "tryit.sh"), encoding="utf-8").read()
+    assert 'put "$S/padmenu.cfg" "$DUMP/padmenu.cfg"' in tryit
+    assert tryit.count('"$DUMP"/padmenu.cfg') == 2              # cleared with the other runtime files
+    assert open(os.path.join(emu, "modes", "cardmodes.sh"), encoding="utf-8").read().count("padmenu.cfg") == 2
+    src = open(os.path.join(emu, "codeselect", "padmenu.c"), encoding="utf-8").read()
+    assert '"/dump/padmenu.cfg"' in src                        # the rig's place for it

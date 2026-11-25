@@ -654,6 +654,7 @@ static FILE *trace;
  * the runtime keeps in /dump/pad_settings.state as "<key> <value>".  Where the card has the row, it wins over
  * images.conf's boot_menu= / flip_guard=.  An address the game has not mapped is never read (flip_row_ok). */
 #define ROW_CFG     "/usr/local/padmode/padmenu.cfg"
+#define ROW_CFG_RIG "/dump/padmenu.cfg"           /* the emulator puts a card's runtime files in /dump */
 #define ROW_STATE   "/dump/pad_settings.state"
 #define ROW_SHARED  0xfade0000ul
 #define ROW_HOLD_MS 5000
@@ -959,6 +960,8 @@ static void flip_init(const char *conf)
     {
         const char *rc = getenv("PADMENU_ROW_CFG"), *rs = getenv("PADMENU_ROW_STATE");   /* the tests' */
         FILE *cf = fopen(rc && *rc ? rc : ROW_CFG, "r");
+        if (!cf && !(rc && *rc))
+            cf = fopen(ROW_CFG_RIG, "r");
         char line[160], key[40];
         unsigned long a;
         int d;

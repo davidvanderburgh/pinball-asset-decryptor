@@ -207,17 +207,17 @@ def shot_lit_words(lit):
 TURN_PROVEN = frozenset({
     # PAD-1555 2026-11-25 (newbuild/turnjob.sh + turncheck.py; sets built by engine.write_overrides: a slot one request
     # plays alone replaced by a 500 Hz tone, its files 2 and 3 in turn 1000 / 2000 Hz in the app's sound bank; the
-    # request fired six times in attract): the tone after each fire was the file the runtime said it played, in turn
+    # request fired six times in attract): the tone after each fire was the file the runtime said it played, in turn;
+    # each in its game's earlier build's place (the latest build only)
     "king_kong_le-1.01", "avengers_infinity_le-1.12", "avengers_infinity_pro-1.12", "foo_fighters_pro-1.05",
-    "aerosmith-1.16", "aerosmith_le-1.16", "avengers_infinity_le-1.10",
-    "avengers_infinity_pro-1.10", "batman-1.14",
+    "aerosmith-1.16", "aerosmith_le-1.16", "batman-1.14",
     "beatles-1.29", "deadpool_le-1.16", "deadpool_pro-1.16", "dungeons_and_dragons_le-1.10",
     "dungeons_and_dragons_pro-1.10", "elvira3-1.13", "foo_fighters_le-1.04",
-    "foo_fighters_pro-1.04", "godzilla_le-1.16", "godzilla_pro-1.16", "guardians-1.15",
+    "godzilla_le-1.16", "godzilla_pro-1.16", "guardians-1.15",
     "guardians_le-1.15", "iron_maiden_le-1.18", "iron_maiden_pro-1.18", "james_bond_60th_le-1.11",
     "james_bond_le-1.06", "james_bond_pro-1.06", "jaws_le-1.02", "jaws_pro-1.02",
     "john_wick_le-1.02", "john_wick_pro-1.02", "jurassic_park_le-1.16", "jurassic_park_pro-1.16",
-    "jurassic_park_the_pin-1.05", "king_kong_le-0.97", "king_kong_pro-0.97",
+    "jurassic_park_the_pin-1.05", "king_kong_pro-0.97",
     "led_zeppelin_le-1.22", "led_zeppelin_pro-1.22", "mando_le-1.45", "mando_pro-1.45",
     "metallica_spike-1.04", "munsters_le-1.28", "munsters_pro-1.28", "rush_le-1.19",
     "rush_pro-1.19", "star_wars_elg-1.10", "star_wars_le-1.31", "star_wars_pro-1.31",

@@ -20,7 +20,7 @@ process:
     vpxsetup.py ontop on|off              whether the game's screen stays on top of every other
                                           window (PAD-1231); an open game's window at once
     vpxsetup.py cabinet '<json>'          PAD-1304: backglass screen, hide_dmd, dof_start,
-                                          dof_lockdown, dof_shaker (PAD-1460); rewrites each patched table's .res
+                                          dof_lockdown, dof_shaker (PAD-1460), dof_strips + strip_parts (PAD-1571); rewrites each patched table's .res
     vpxsetup.py bulbs <output> <title>    a patched table's backglass bulbs, and those
                                           chosen to follow BACKBOX GI
     vpxsetup.py gi <title> '<json list>'  the bulbs that follow BACKBOX GI
@@ -717,6 +717,9 @@ def cabinet_state(kit, mons):
     screens to pick from and the bulbs chosen per title."""
     c = padcabinet.settings(kit)
     c["suggested"] = dict(padcabinet.SUGGESTED_DOF)
+    # PAD-1571: the light strips' DOF config text, per side, to paste
+    c["strip_lines"] = padcabinet.strip_dof_lines(c["dof_strips"], c["strip_parts"])
+    c["strip_colours"] = [n for n, _h in padcabinet.STRIP_COLOURS]
     c["screens"] = [{"n": m["n"], "w": m["w"], "h": m["h"], "x": m["x"], "y": m["y"],
                      "primary": bool(m.get("primary"))} for m in mons]
     return c

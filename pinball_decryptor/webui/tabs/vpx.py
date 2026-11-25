@@ -986,9 +986,11 @@ class VpxTab(TabService):
     def set_cabinet(self, changes):
         """The Cabinet row: the screen the backglass fills (0: where B2S puts
         it), the B2S DMD hidden, the DOF events the START and LOCKDOWN
-        buttons and the SHAKER MOTOR (PAD-1460) are sent as (0: not sent). Every patched table's <name>.res
+        buttons and the SHAKER MOTOR (PAD-1460) are sent as (0: not sent), and the
+        first of the cabinet light strips' with how many parts a side (PAD-1571). Every patched table's <name>.res
         follows at once; a game picks the rest up as it starts."""
-        keys = ("backglass", "hide_dmd", "dof_start", "dof_lockdown", "dof_shaker")
+        keys = ("backglass", "hide_dmd", "dof_start", "dof_lockdown", "dof_shaker",
+                "dof_strips", "strip_parts")
         changes = {k: v for k, v in dict(changes or {}).items() if k in keys}
         if not changes:
             return False

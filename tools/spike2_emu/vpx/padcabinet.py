@@ -17,7 +17,8 @@ not the controller's live poll:
   tab offers for BACKBOX GI to light (B2SSetIllumination sets a bulb by name).
 
 The controller (padcontroller.py) reads the settings and the lights, sends
-the buttons to DOF as E events and BACKBOX GI to the bulbs named.
+the buttons, the shaker and the light strips (`strip_events`, PAD-1571) to
+DOF as E events and BACKBOX GI to the bulbs named.
 """
 import os
 import re
@@ -44,7 +45,19 @@ LIGHTS = {
 #: DOF events for the buttons and the shaker motor (PAD-1460): off (0) until
 #: the person picks numbers, so a table's DOF config never hears an event it
 #: uses for something else. E190 / E191 / E192 are the numbers the tab suggests.
-SUGGESTED_DOF = {"start": 190, "lockdown": 191, "shaker": 192}
+SUGGESTED_DOF = {"start": 190, "lockdown": 191, "shaker": 192, "strips": 200}
+
+#: PAD-1571: the cabinet's light strips to DOF. A DOF E event carries one
+#: number, and the colour it lights is the one the DOF config gives it, so a
+#: strip's colour goes as a choice among these: each part of each side has an
+#: E event per colour, the one nearest what the game shows lit at its
+#: brightness and the rest 0. Hex, because DOF reads #rrggbb whatever colour
+#: names its config defines.
+STRIP_COLOURS = (("red", "#FF0000"), ("orange", "#FF8000"), ("yellow", "#FFFF00"),
+                 ("green", "#00FF00"), ("cyan", "#00FFFF"), ("blue", "#0000FF"),
+                 ("purple", "#FF00FF"), ("white", "#FFFFFF"))
+#: how many parts a side may be cut into, bottom to top
+STRIP_PARTS_MAX = 8
 
 RES_KEYS = ("pf_w", "pf_h", "bg_w", "bg_h", "bg_screen", "bg_x", "bg_y",
             "dmd_w", "dmd_h", "dmd_x", "dmd_y", "dmd_flip")
@@ -62,7 +75,10 @@ def settings(kit):
                 0 = not sent
     dof_shaker  the DOF E event the machine's SHAKER MOTOR is sent as, on
                 while the game drives it (PAD-1460), 0 = not sent
-    gi_bulbs    {title: [bulb name, ...]} that follow BACKBOX GI
+    dof_strips  the first DOF E event of the cabinet's light strips
+                (PAD-1571), 0 = not sent; strip_numbers numbers the rest
+    strip_parts how many parts each side's strip is cut into, 1..8
+    gi_bulbs   {title: [bulb name, ...]} that follow BACKBOX GI
     """
     c = kit.get("cabinet") if isinstance(kit.get("cabinet"), dict) else {}
 
@@ -75,7 +91,8 @@ def settings(kit):
     bulbs = c.get("gi_bulbs") if isinstance(c.get("gi_bulbs"), dict) else {}
     return {"backglass": num("backglass"), "hide_dmd": bool(c.get("hide_dmd")),
             "dof_start": num("dof_start"), "dof_lockdown": num("dof_lockdown"),
-            "dof_shaker": num("dof_shaker"),
+            "dof_shaker": num("dof_shaker"), "dof_strips": num("dof_strips"),
+            "strip_parts": min(STRIP_PARTS_MAX, num("strip_parts") or 1),
             "gi_bulbs": {str(t): [str(b) for b in v if str(b)]
                          for t, v in bulbs.items() if isinstance(v, list)}}
 
@@ -87,6 +104,8 @@ def update(kit, **changes):
         if k not in c or k == "gi_bulbs":
             raise KeyError(k)
         c[k] = bool(v) if k == "hide_dmd" else max(0, int(v or 0))
+        if k == "strip_parts":
+            c[k] = min(STRIP_PARTS_MAX, max(1, c[k]))
     kit = dict(kit)
     kit["cabinet"] = c
     return kit
@@ -157,6 +176,123 @@ def cabinet_leds(tables_dir):
     out.update(io)
     if not out and not coilmap.parse_rows(_lines(dev)):
         return {k: list(v) for k, v in SPIKE2_PLACES.items()}
+    return out
+
+
+# ------------------------------------------------------- strips (PAD-1571) --
+
+def cabinet_strips(tables_dir):
+    """The cabinet's light strips as DOF sees them: {"source", "node",
+    "sides": [left, right]}, each side a list of pixels BOTTOM FIRST, a pixel
+    {colour letter: (node, channel)}; None when the title has neither.
+
+    The blades (node 2, "Cabinet Lights": 48 RGB pixels a side) where the
+    title has them; else its backbox speaker lights (node 7: one ring of 23),
+    which then light both sides alike, in ring order - "use node 2 for
+    cabinet lights and for games lacking it, use node 7" (Mike St P). Read as
+    the virtual playfield's cabinet column reads them (cablights)."""
+    import cablights
+    dev = os.path.join(tables_dir, "device_xy.txt")
+    rows = coilmap.parse_rows(_lines(dev))
+    if not rows:
+        return None
+    gn = coilmap.group_node_for(dev, dev_rows=rows)
+    secs, _left = cablights.sections(rows, gn, cablights.boards(cablights.nodedir_for(dev)))
+
+    def px(P):
+        return {c: tuple(a) for c, a in P["channels"].items() if c in ("R", "G", "B")}
+    for S in secs:
+        if S["role"] == cablights.EXPRESSION and S["pixels"]:
+            bars = S["bars"] or [list(range(len(S["pixels"])))]
+            sides = [[px(S["pixels"][k]) for k in bar] for bar in bars]
+            if len(sides) == 1:                 # one unsided bar: both sides
+                sides = sides * 2
+            return {"source": "blades", "node": S["node"], "sides": sides[:2]}
+    for S in secs:
+        if S["role"] == cablights.SPEAKER and S["pixels"]:
+            ring = [px(P) for P in S["pixels"]]
+            return {"source": "speakers", "node": S["node"], "sides": [ring, list(ring)]}
+    return None
+
+
+def strip_colour(rgb):
+    """(STRIP_COLOURS index, brightness 0..255) of a lit colour, or (None, 0)
+    for black: white when its channels are near alike, else the hue's."""
+    import colorsys
+    r, g, b = (max(0, min(255, int(round(v)))) for v in rgb)
+    top = max(r, g, b)
+    if top <= 0:
+        return None, 0
+    if min(r, g, b) >= 0.55 * top:
+        return len(STRIP_COLOURS) - 1, top
+    h = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)[0] * 360.0
+    for i, upto in enumerate((15, 45, 75, 150, 200, 260, 330)):
+        if h < upto:
+            return i, top
+    return 0, top
+
+
+def _parts(n, parts):
+    """[(start, end)] of a side of *n* pixels cut into *parts*, bottom first."""
+    parts = max(1, min(parts, n or 1))
+    return [(n * k // parts, n * (k + 1) // parts) for k in range(parts)]
+
+
+def strip_numbers(base, parts):
+    """{(side, part, colour index): E number}: side 0 left, 1 right; part 0
+    at the bottom. The left side's parts first, eight colours each."""
+    out, n = {}, base
+    for side in (0, 1):
+        for part in range(parts):
+            for c in range(len(STRIP_COLOURS)):
+                out[(side, part, c)] = n
+                n += 1
+    return out
+
+
+def strip_events(base, parts, strips, level, lamp_on=1):
+    """[(E number, value)] for every E event of the strips: in each part
+    the colour it shows (the sum of its lit pixels) at its brightest
+    pixel's level, every other colour 0. *level(node, channel)* reads one
+    channel; a level under *lamp_on* is off. Brightness in 15 steps of 17,
+    so a fading strip is not a stream of events DOF cannot show anyway."""
+    if not base or not strips:
+        return []
+    nums = strip_numbers(base, parts)
+    out = []
+    for side, pixels in enumerate(strips["sides"][:2]):
+        for part, (a, b) in enumerate(_parts(len(pixels), parts)):
+            tot, top = [0, 0, 0], 0
+            for P in pixels[a:b]:
+                lv = [level(*P[c]) if c in P else 0 for c in ("R", "G", "B")]
+                lv = [v if v >= lamp_on else 0 for v in lv]
+                tot = [t + v for t, v in zip(tot, lv)]
+                top = max([top] + lv)
+            mx = max(tot)
+            ci = strip_colour([t * 255.0 / mx for t in tot])[0] if mx else None
+            val = 0 if ci is None else max(17, int(round(top / 17.0)) * 17)
+            for c in range(len(STRIP_COLOURS)):
+                out.append((nums[(side, part, c)], val if c == ci else 0))
+    return out
+
+
+def strip_dof_lines(base, parts):
+    """The DOF config text for each side's strip toy, {"left", "right"}: an
+    effect per part and colour, the part's place given as AT/AH (percent from
+    the TOP, so the bottom part is the last), NOBOOL so the value is its
+    brightness. Pasted into the column of an addressable strip in the DOF
+    Config Tool (or a directoutputconfig line). Empty with no base."""
+    if not base:
+        return {"left": "", "right": ""}
+    nums = strip_numbers(base, parts)
+    out = {}
+    for side, key in ((0, "left"), (1, "right")):
+        bits = []
+        for part, (a, b) in enumerate(_parts(100, parts)):
+            area = "" if parts == 1 else " AT%d AH%d" % (100 - b, b - a)
+            for c, (_name, hexc) in enumerate(STRIP_COLOURS):
+                bits.append("E%d %s%s NOBOOL" % (nums[(side, part, c)], hexc, area))
+        out[key] = "/".join(bits)
     return out
 
 

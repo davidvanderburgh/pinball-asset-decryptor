@@ -106,3 +106,16 @@ def test_a_new_build_ships_a_proven_port_with_its_own_caller_list(key):
     assert len(passes) >= 10
     # switch_spawn only where the same model's earlier port had one (PAD-1400 placed it where a build needed it)
     assert ("\nsite switch_spawn " in text) == (key == "metallica_spike-1.05")
+
+
+def test_the_coil_record_size_is_the_build_s_own():
+    """PAD-1555: the November 2026 builds grew the framework's coil record from 0x68 to 0x70 bytes (the fields the
+    runtime reads stay where they were); a held coil looked for its record at the old stride and found none - "no one
+    coil of the game's is node 9 coil 0" on Avengers LE 1.12. The runtime takes the size from the port."""
+    src = (ROOT / "tools" / "spike2_emu" / "modes" / "sdk" / "pad_mode_runtime.c").read_text(encoding="utf-8")
+    assert '#define COIL_REC_SIZE  ((pm_addr)pm_port_value("coil_rec_size", 0x68))' in src
+    big = {"king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "avengers_infinity_le-1.12",
+           "avengers_infinity_pro-1.12", "foo_fighters_le-1.05", "foo_fighters_pro-1.05", "metallica_spike-1.05"}
+    for key in NEW:
+        text = (PORTS / (key + ".port")).read_text(encoding="utf-8")
+        assert bool(re.search(r"^value coil_rec_size\s+0x70", text, re.M)) == (key in big), key

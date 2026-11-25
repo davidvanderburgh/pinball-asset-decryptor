@@ -7473,7 +7473,10 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
  *     64 ms then its hold power for 20 s); the hold part of the one command runs to the time asked, at most that.
  *   - PAD-621: `value <name>_no_hold_flag`: a game flag that, set, refuses every hold of it (James Bond's
  *     FG_MODES_DO_NOT_HOLD_BALL, 166). */
-#define COIL_REC_SIZE  0x68u   /* the framework's coil record, the same on every newest build (coilrec.py) */
+/* the framework's coil record: 0x68 bytes on the builds up to October 2026 (coilrec.py); PAD-1555: Stern's November 2026
+ * builds (King Kong 1.00+, Avengers 1.12, Foo Fighters 1.05, Metallica 1.05) grew it to 0x70 - the fields below are
+ * where they were, the record's tail moved - so a port names its own size (`value coil_rec_size`) */
+#define COIL_REC_SIZE  ((pm_addr)pm_port_value("coil_rec_size", 0x68))
 #define COIL_REC_ID    0x14u   /* u32: the latest request's id; 0 when its command has run out */
 #define COIL_REC_LINK  0x10u   /* u32: 0x60000 = a coil linked to another (a flipper's pair): never held */
 #define COIL_REC_COIL  0x1au   /* u16: the coil on its board */

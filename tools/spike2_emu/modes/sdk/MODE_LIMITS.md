@@ -181,9 +181,9 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Aerosmith LE 1.16 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Avengers: Infinity Quest LE 1.09 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Avengers: Infinity Quest LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
-| Avengers: Infinity Quest LE 1.12 | no | ✓ | no | no | buttons, shaker, light shows, mini-wizards, never waits |
+| Avengers: Infinity Quest LE 1.12 | no | ✓ | ✓ | no | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Avengers: Infinity Quest Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
-| Avengers: Infinity Quest Pro 1.12 | no | ✓ | no | no | buttons, shaker, light shows, mini-wizards, never waits |
+| Avengers: Infinity Quest Pro 1.12 | no | ✓ | ✓ | no | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Batman 66 1.13 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Batman 66 1.14 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Deadpool LE 1.14 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
@@ -191,15 +191,15 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Deadpool Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Dungeons & Dragons LE 1.00 | ✓ | ✓ | ✓ | all | buttons, light shows, starts on game modes completed |
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
-| Dungeons & Dragons LE 1.11 | no | ✓ | no | no | buttons, magnet, shaker, light shows, mini-wizards, never waits |
+| Dungeons & Dragons LE 1.11 | no | ✓ | no | no | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | buttons, magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
-| Dungeons & Dragons Pro 1.11 | no | ✓ | no | no | buttons, magnet, shaker, light shows, mini-wizards, never waits |
+| Dungeons & Dragons Pro 1.11 | no | ✓ | ✓ | no | buttons, magnet, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Elvira 1.13 | ✓ | no | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Fallout LE 0.82 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
-| Foo Fighters LE 1.05 | no | ✓ | no | no | buttons, shaker, light shows, mini-wizards, never waits |
+| Foo Fighters LE 1.05 | no | ✓ | ✓ | no | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
-| Foo Fighters Pro 1.05 | no | ✓ | no | no | buttons, shaker, light shows, mini-wizards, never waits |
+| Foo Fighters Pro 1.05 | no | ✓ | ✓ | no | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, building, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, light shows, battle slot, challenges, game mode places, starts on game modes completed |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
@@ -221,15 +221,15 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Jurassic Park Pin 1.05 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Jurassic Park Pro 1.16 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong LE 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
-| King Kong LE 1.00 | no | ✓ | no | no | buttons, shaker, light shows, mini-wizards, never waits |
-| King Kong LE 1.01 | no | ✓ | no | no | buttons, shaker, light shows, mini-wizards, never waits |
+| King Kong LE 1.00 | no | ✓ | ✓ | no | buttons, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| King Kong LE 1.01 | no | ✓ | ✓ | no | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | King Kong Pro 0.97 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
-| King Kong Pro 1.01 | no | ✓ | no | no | buttons, shaker, light shows, mini-wizards, never waits |
+| King Kong Pro 1.01 | no | ✓ | ✓ | no | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Led Zeppelin LE 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all | buttons, light shows, challenges, game mode places, starts on game modes completed |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | buttons, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
-| Metallica Remastered 1.05 | no | ✓ | no | no | buttons, shaker, light shows, mini-wizards, never waits |
+| Metallica Remastered 1.05 | no | ✓ | ✓ | no | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes, never waits |
 | Pokemon LE 0.82 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Pokemon LE 0.87 (Spike 3) | no | no | ✓ | no | challenges, never waits |
 | Pokemon Pro 0.87 (Spike 3) | no | no | ✓ | no | challenges, never waits |

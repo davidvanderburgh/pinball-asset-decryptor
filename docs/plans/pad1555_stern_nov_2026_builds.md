@@ -229,3 +229,31 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
 - **Next, per build, the proofs still owed:** lights (LAMPS_PROVEN: every named insert magenta off the node bus,
   leddecode.py), ball save, multiball, stack, scoop, place, done, with, held coils, button shots, spare I/O, title
   scenes; then challenges, then the key-listed modules (menu_settings / sound_modes / scene_write).
+
+### Run 6 (2026-11-24 night): ball save, multiball, place / done / with / stack, held coils
+
+- **Kit:** `newbuild/bsjob.sh` (ball save), `mbjob.sh` (multiball), `gmjob.sh` (stack, place + done, with, in one game:
+  `modes/sdk/gamemode_test_mode.c` makes the game start / stop its own mode, `pm_game_mode_start/stop`), `coiljob.sh`
+  (every held coil: HOLD and one command on its board address in the slot's gzwatch.log). rigbatch list lines take
+  several variables space-separated in the third field (`key|card|ID=27 SO=...`), never `|`-separated.
+- **Proven:** multiball 10/10 (3 served, add-a-ball to 4, END one ball left); place 10/10 and done 10/10 (each title's
+  mode from the earlier proof: King Kombos 27, Super Reactor 19, Super Skill Shot 8, Mimic Hurry Up 12, Map Choosen
+  Ritual Singleball 53, Battery 0); with 9/10 (Metallica's plain-C Battery: its own clock, re-run with a longer wait);
+  ball save 8/10 (D&D LE, Metallica: a second ball is out after the save - the job now drains every ball out); stack
+  3/10 (King Kong; a `stack no` mode waits only for battles / multiballs: re-run on Soul Gem 8, Super Skill Shot 8,
+  Mimic Hurry Up 12, stack phase first); held coils on D&D LE / Pro.
+- **Another framework change:** the coil record grew from 0x68 to 0x70 bytes on the King Kong, Avengers, Foo Fighters
+  and Metallica builds (D&D 1.11 kept 0x68; the request function's fields up to +0x25 unchanged, its tail moved +6), so
+  a held coil found no record ("no one coil of the game's is node 9 coil 0") and the spare outputs read the wrong
+  records. The runtime's COIL_REC_SIZE is the port's `value coil_rec_size` (default 0x68), each port's own read off
+  its coil_count code (x*7*16); prebuilt mode.so / mode64.so rebuilt. King Kong's coil_give placed (masked code run).
+- **Run 6 results:** multiball 10/10, place 10/10, done 10/10, with 10/10 (Metallica: Battery started with it and
+  ended with the ball), ball save 9/10 (Metallica once every ball out drained; 1.04 the same), stack 9/9 that the
+  earlier builds had (King Kong x3 on King Kombos 27, Avengers on Soul Gem 8, D&D on Mimic Hurry Up 12, Foo Fighters on
+  Super Skill Shot 8 - with the ball scored first: until the score moves, a game mode that starts is base play,
+  `stock_base_until`), held coils on every new build but King Kong LE 1.00 (Avengers / Foo Fighters / Metallica once
+  the runtime read the 0x70 record; King Kong by the earlier proof's command profiles, `EXPECT=`).
+- **Left from these sets:** D&D LE 1.11 ball save (after the save the game keeps a second ball out and every drain
+  is "ball passing" - try D&D LE 1.10 in the same job first); King Kong LE 1.00's held coils (its ControlCoil commands
+  go out with their fields shifted - "pulse 3/255 for 0 ms, hold 30" - while 1.01's are right: compare the two builds'
+  take paths).

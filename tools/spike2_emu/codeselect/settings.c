@@ -121,6 +121,12 @@ struct state {
     int t_gpu;                               /* the graphics chip draws the clip (test_gpu) */
     int t_vw, t_vh;                          /* ...at this size, centred (0: no frame yet) */
     long long t_vk;                          /* ...and the clip's frame number on screen (-1: none) */
+    /* THE CAPTION'S FPS over the last two seconds (the table, 2026-11-25: since the start,
+     * the slow first second read 5-10 and a freeze read 22-24 on a clip at 30) */
+#define FPS_WIN 8
+    long long t_fw_t[FPS_WIN];
+    int t_fw_s[FPS_WIN], t_fw_i, t_fw_n;
+    long long t_fw_due, t_cap_due;
     const struct art_image *t_ovl_shown;     /* the scene's picture on the canvas now */
     long long t_perf_due, t_draw_ms;         /* the video's 5 s account in the log */
     int t_draws;
@@ -425,6 +431,9 @@ static const char *test_name(const struct state *st, int k)
 
 static int test_moves(const struct state *st);
 
+static void fps_reset(struct state *st);
+static void draw_caption(struct state *st, int visual);
+
 static void test_unload(struct state *st)
 {
     if (st->t_img) { art_image_free(st->t_img); st->t_img = NULL; }
@@ -482,6 +491,8 @@ static void test_load(struct state *st, long long now)
     test_unload(st);
     st->t_frozen = 0;
     st->t_act_down = 0;
+    fps_reset(st);
+    st->t_cap_due = 0;
     if (t) {
         snprintf(path, sizeof path, "%s/%s", e->media_dir && *e->media_dir ? e->media_dir : ".",
                  t->file);
@@ -595,6 +606,38 @@ static void test_close(struct state *st)
     sel_say("test: closed");
 }
 
+/* the caption's fps: frames shown over the last samples (250 ms apart, two seconds) */
+static void fps_reset(struct state *st)
+{
+    st->t_fw_n = st->t_fw_i = 0;
+    st->t_fw_due = 0;
+}
+
+static void fps_sample(struct state *st, long long now)
+{
+    int shown = 0, dropped = 0;
+    if (!st->t_vid || st->t_frozen || now < st->t_fw_due) return;
+    vid_stats(st->t_vid, &shown, &dropped);
+    if (st->t_fw_n && shown < st->t_fw_s[(st->t_fw_i + FPS_WIN - 1) % FPS_WIN]) fps_reset(st);  /* looped */
+    st->t_fw_t[st->t_fw_i] = now;
+    st->t_fw_s[st->t_fw_i] = shown;
+    st->t_fw_i = (st->t_fw_i + 1) % FPS_WIN;
+    if (st->t_fw_n < FPS_WIN) st->t_fw_n++;
+    st->t_fw_due = now + 250;
+}
+
+/* -1 until half a second has been measured */
+static double fps_now(const struct state *st)
+{
+    int newest = (st->t_fw_i + FPS_WIN - 1) % FPS_WIN;
+    int oldest = st->t_fw_n < FPS_WIN ? 0 : st->t_fw_i;
+    long long dt;
+    if (st->t_fw_n < 2) return -1;
+    dt = st->t_fw_t[newest] - st->t_fw_t[oldest];
+    if (dt < 500) return -1;
+    return (st->t_fw_s[newest] - st->t_fw_s[oldest]) * 1000.0 / (double)dt;
+}
+
 /* the graphics chip draws the clip: not through a colour correction (the CPU's LUT) */
 static int test_gpu(const struct state *st)
 {
@@ -652,6 +695,11 @@ static int test_tick(struct state *st, long long now)
     if (st->t_caption && st->t_caption_until && now >= st->t_caption_until) {
         st->t_caption = 0;
         changed = 2;
+    }
+    fps_sample(st, now);
+    if (st->t_vid && st->t_caption && changed != 2 && now >= st->t_cap_due) {
+        if (st->t_cap_due) draw_caption(st, !st->t_err[0]);
+        st->t_cap_due = now + 500;
     }
     return changed;
 }
@@ -871,10 +919,8 @@ static void draw_overlay(struct state *st, long long now)
 static void draw_test(struct state *st)
 {
     struct settings_env *e = st->e;
-    const struct conf *c = e->c;
     float s = S(e);
     int W = e->g->w, H = e->g->h, k = st->t_item, kind = test_kind(st, k), visual = 1;
-    char buf[400], col[260];
 
     gfx_fill(e->g, 0x000000);
     if (st->t_gpu && !test_gpu(st) && e->video) e->video(e->ctx, NULL, 0, 0, 0, 0);
@@ -919,6 +965,18 @@ static void draw_test(struct state *st)
     }
     if (visual) draw_overlay(st, sel_now_ms());
     if (!st->t_caption) return;
+    draw_caption(st, visual);
+}
+
+/* the caption's band alone (opaque): drawn by draw_test, and again every half second
+ * while a video plays so its fps is the current one */
+static void draw_caption(struct state *st, int visual)
+{
+    struct settings_env *e = st->e;
+    const struct conf *c = e->c;
+    float s = S(e);
+    int W = e->g->w, H = e->g->h, k = st->t_item, kind = test_kind(st, k);
+    char buf[400], col[260];
 
     if (!visual) {
         col[0] = 0;                            /* nothing on this one is colored */
@@ -938,16 +996,17 @@ static void draw_test(struct state *st)
         gfx_rect(e->g, 0, y, W, bh, 0x101114);
         gfx_rect(e->g, 0, y, W, line, TH(e, FRAME_HL));
         if (st->t_vid) {
-            /* what the machine really manages, against what the video asks for */
-            int shown = 0, dropped = 0;
-            long long el = sel_now_ms() - st->t_vstart;
-            vid_stats(st->t_vid, &shown, &dropped);
+            /* what the machine really manages, against what the video asks for: over the
+             * last two seconds, so a slow start or a freeze does not stay in the figure */
+            double f = fps_now(st);
             if (st->t_frozen)
                 snprintf(buf, sizeof buf, "%d / %d   %s   FROZEN", st->t_pos + 1, test_count(st), test_name(st, k));
+            else if (f < 0)
+                snprintf(buf, sizeof buf, "%d / %d   %s   -- of %.0f fps", st->t_pos + 1, test_count(st),
+                         test_name(st, k), (double)vid_fps(st->t_vid));
             else
                 snprintf(buf, sizeof buf, "%d / %d   %s   %.1f of %.0f fps", st->t_pos + 1, test_count(st),
-                         test_name(st, k), el > 500 ? shown * 1000.0 / (double)el : (double)vid_fps(st->t_vid),
-                         (double)vid_fps(st->t_vid));
+                         test_name(st, k), f, (double)vid_fps(st->t_vid));
         } else {
             snprintf(buf, sizeof buf, "%d / %d   %s", st->t_pos + 1, test_count(st), test_name(st, k));
         }
@@ -1347,6 +1406,8 @@ void settings_run(struct settings_env *e)
             } else {
                 st.t_act_down = 0;
                 st.t_frozen = !st.t_frozen;
+                if (st.t_vid) vid_pause(st.t_vid, st.t_frozen);    /* the clip waits too */
+                fps_reset(&st);
                 if (st.t_frozen && st.t_voice >= 0) { audio_stop(e->au, st.t_voice); st.t_voice = -1; }
                 sel_say("test: %s", st.t_frozen ? "frozen" : "playing on");
                 st.t_caption = 1;

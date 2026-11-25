@@ -53,5 +53,7 @@ struct gclip_yuv {
 void  gclip_want_rgba(struct gclip *g, int on);
 int   gclip_yuv_take(struct gclip *g, struct gclip_yuv *f);
 void  gclip_yuv_done(struct gclip *g);
+/* frozen on the test card: the pipeline paused (1) or playing on (0) */
+void  gclip_pause(struct gclip *g, int on);
 
 #endif

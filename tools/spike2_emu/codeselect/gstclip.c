@@ -49,6 +49,7 @@ void gclip_close(struct gclip *g) { (void)g; }
 void gclip_want_rgba(struct gclip *g, int on) { (void)g; (void)on; }
 int gclip_yuv_take(struct gclip *g, struct gclip_yuv *f) { (void)g; (void)f; return 0; }
 void gclip_yuv_done(struct gclip *g) { (void)g; }
+void gclip_pause(struct gclip *g, int on) { (void)g; (void)on; }
 
 #else
 
@@ -200,6 +201,7 @@ struct gclip {
     /* the clip's own frame number since it last started, for each copy: the scene over it
      * follows THIS, not the clock (the table, 2026-11-25: the 0s did not line up) */
     long long pos, raw_k[2];
+    int paused;                     /* frozen on the test card: the pipeline is PAUSED */
     int front;
     long long made, taken;          /* frames converted / frames handed out */
     long long last_frame_ms;
@@ -492,6 +494,7 @@ static void maybe_loop(struct gclip *g, long long now)
 {
     int fmt = GST_FORMAT_TIME;
     long long pos = 0, quiet;
+    if (g->paused) return;                  /* no frames while frozen: not the end */
     pthread_mutex_lock(&g->mu);
     quiet = now - g->last_frame_ms;
     pthread_mutex_unlock(&g->mu);
@@ -571,6 +574,19 @@ void gclip_yuv_done(struct gclip *g)
 {
     pthread_mutex_lock(&g->mu);
     g->held = -1;
+    pthread_mutex_unlock(&g->mu);
+}
+
+/* FROZEN (the table, 2026-11-25: "pressed action to pause and again to unpause... FPS
+ * counter was 22, 24"): the decoder kept going under a frozen picture, so the clip had
+ * moved on by the time it played again.  Now the pipeline itself is paused. */
+void gclip_pause(struct gclip *g, int on)
+{
+    if (!g->pipe || g->paused == (on ? 1 : 0)) return;
+    G.set_state(g->pipe, on ? GST_STATE_PAUSED : GST_STATE_PLAYING);
+    pthread_mutex_lock(&g->mu);
+    g->paused = on ? 1 : 0;
+    g->last_frame_ms = now_ms();
     pthread_mutex_unlock(&g->mu);
 }
 

@@ -73,6 +73,8 @@ int   vid_is_clip(const struct vid *v);
 void  vid_want_rgba(struct vid *v, int on);
 int   vid_yuv_take(struct vid *v, struct gclip_yuv *f);
 void  vid_yuv_done(struct vid *v);
+/* frozen: a clip's decoder pauses (a .padv is held by not taking frames) */
+void  vid_pause(struct vid *v, int on);
 
 void vid_close(struct vid *v);
 

@@ -228,6 +228,20 @@ def test_vivantes_direct_texture_first_as_the_game_does():
     assert 'G.object_set(g->dec, "output-format", 1, NULL);' in g
 
 
+def test_the_fps_is_the_last_two_seconds_and_a_freeze_pauses_the_clip():
+    """The table, 2026-11-25: "the FPS counter isn't working correctly" - averaged since the
+    start, a slow first second read 5-10, and a freeze (the decoder going on underneath) read
+    22-24 on a clip playing at 30.  Emulator: 27 at 1 s, 30, FROZEN, "--", 30."""
+    s = _read(SEL, "settings.c")
+    assert "return (st->t_fw_s[newest] - st->t_fw_s[oldest]) * 1000.0 / (double)dt;" in s
+    assert "if (st.t_vid) vid_pause(st.t_vid, st.t_frozen);    /* the clip waits too */" in s
+    assert "if (st->t_cap_due) draw_caption(st, !st->t_err[0]);" in s, "refreshed while it is up"
+    assert "el > 500 ? shown * 1000.0" not in s
+    g = _read(SEL, "gstclip.c")
+    assert "G.set_state(g->pipe, on ? GST_STATE_PAUSED : GST_STATE_PLAYING);" in g
+    assert "if (g->paused) return;                  /* no frames while frozen: not the end */" in g
+
+
 def test_the_scene_follows_the_clips_own_frame():
     """The table, 2026-11-25: timed by the clock, the scene ran ahead of a clip a little behind its
     pace.  Each copy carries its frame number since the clip started; the caption's fps restarts

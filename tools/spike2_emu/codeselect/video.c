@@ -371,6 +371,7 @@ int vid_is_clip(const struct vid *v) { return v && v->gc; }
 void vid_want_rgba(struct vid *v, int on) { if (v && v->gc) gclip_want_rgba(v->gc, on); }
 int vid_yuv_take(struct vid *v, struct gclip_yuv *f) { return v && v->gc ? gclip_yuv_take(v->gc, f) : 0; }
 void vid_yuv_done(struct vid *v) { if (v && v->gc) gclip_yuv_done(v->gc); }
+void vid_pause(struct vid *v, int on) { if (v && v->gc) gclip_pause(v->gc, on); }
 
 void vid_close(struct vid *v)
 {

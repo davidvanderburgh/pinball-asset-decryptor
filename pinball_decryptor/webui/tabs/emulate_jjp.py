@@ -575,7 +575,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
 
         def work():
             try:
-                if self._attach_dongle():
+                if self._attach_dongle(elevate=False):
                     self._log("JJP: security key attached.")
                 else:
                     self._log("JJP: could not attach the security key "
@@ -588,10 +588,12 @@ class EmulateJJPTab(RigTabMixin, TabService):
         threading.Thread(target=work, daemon=True,
                          name="pad-jjp-attach").start()
 
-    def _attach_dongle(self):
+    def _attach_dongle(self, elevate=True):
         """Hand the key to WSL and WAIT until it is actually there (usbipd
         needs a running distro, and its attach is asynchronous).  True if
-        the key ends up visible in WSL."""
+        the key ends up visible in WSL.  *elevate* False (the attach nobody
+        asked for) never raises a Windows permission prompt: it says to press
+        Start instead."""
         remote = self._remote()
         if remote is not None:
             return self._attach_remote(remote)
@@ -610,41 +612,97 @@ class EmulateJJPTab(RigTabMixin, TabService):
         if self._key_visible_in_wsl():
             self._log("JJP: security key already present in WSL.")
             return True
+        bound = False
+        last = ""
         for _attempt in (1, 2):
-            try:
-                out = subprocess.run(cmd, stdout=subprocess.PIPE,
-                                     stderr=subprocess.STDOUT, timeout=60,
-                                     creationflags=_rig.CREATE_FLAGS)
-                msg = out.stdout.decode("utf-8", "replace").strip()
-            except Exception as exc:                       # noqa: BLE001
-                self._log("JJP: usbipd failed: %s" % exc)
+            got = self._usbipd_attach(cmd)
+            if got is None:
                 return False
-            low = msg.lower()
-            if "no device" in low or "not found" in low:
+            rc, msg = got
+            kind = jjp.attach_verdict(msg)
+            if kind == "nokey":
                 self._log("JJP: the purple JJP key is not plugged into this "
                           "PC.")
                 return False
-            if "not shared" in low or "bind" in low:
-                self._bind_dongle()
+            if kind == "notshared" and not bound:
+                # PAD-1573: a binding belongs to the USB PORT.  The key in a
+                # socket it was never shared from needs one administrator
+                # bind; a plain bind is refused, silently, every time.
+                if not elevate:
+                    self._log("JJP: the key is in a USB port usbipd has not "
+                              "been allowed to share yet. Press Start and "
+                              "say Yes when Windows asks for permission.")
+                    return False
+                self._log("JJP: the key is in a USB port usbipd has not "
+                          "shared yet — sharing it. Windows asks for "
+                          "permission once for each USB port the key is "
+                          "plugged into: say Yes.")
+                if not self._bind_dongle():
+                    return False
+                bound = True
+                got = self._usbipd_attach(cmd)
+                if got is None:
+                    return False
+                rc, msg = got
+                kind = jjp.attach_verdict(msg)
+            if rc != 0 and kind != "already" and msg:
+                # usbipd's own words: firewall, a WSL kernel without USB/IP,
+                # no WSL 2 running - each has its own fix, and a log that
+                # only says "not visible" names none of them.
+                self._log("JJP: usbipd said: " + " ".join(msg.split())[:400])
+                last = msg
             if self._wait_for_key():
                 self._log("JJP: security key attached and visible in WSL.")
                 return True
             self._log("JJP: key attached but not visible yet — retrying.")
-        self._log("JJP: the security key did not appear in WSL. If it is "
-                  "plugged in, unplug and replug it, then press Start again.")
+        if jjp.attach_verdict(last) in ("notshared", "admin"):
+            self._log("JJP: usbipd was not allowed to share the key's USB "
+                      "port. Press Start again and say Yes when Windows "
+                      "asks for permission.")
+        else:
+            self._log("JJP: the security key did not appear in WSL. If it "
+                      "is plugged in, unplug and replug it, then press "
+                      "Start again.")
         return False
 
-    def _bind_dongle(self):
-        exe = jjp.usbipd_path()
-        if not exe:
-            return
+    def _usbipd_attach(self, cmd):
+        """(exit code, what usbipd printed), or None when it could not run."""
         try:
-            subprocess.run([exe, "bind", "--hardware-id", jjp.HASP_VID_PID],
-                           timeout=30, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL,
-                           creationflags=_rig.CREATE_FLAGS)
-        except Exception:                                  # noqa: BLE001
-            pass
+            out = subprocess.run(cmd, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, timeout=60,
+                                 creationflags=_rig.CREATE_FLAGS)
+        except Exception as exc:                           # noqa: BLE001
+            self._log("JJP: usbipd failed: %s" % exc)
+            return None
+        return out.returncode, out.stdout.decode("utf-8", "replace").strip()
+
+    def _bind_dongle(self):
+        """Share the key's USB port, as administrator (PAD-1573).  True when
+        usbipd bound it; otherwise says why and returns False."""
+        cmd = jjp.bind_dongle_elevated_cmd()
+        if not cmd:
+            return False
+        try:
+            out = subprocess.run(cmd, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, timeout=120,
+                                 creationflags=_rig.CREATE_FLAGS)
+        except Exception as exc:                           # noqa: BLE001
+            self._log("JJP: could not share the key's USB port: %s" % exc)
+            return False
+        if out.returncode == 0:
+            self._log("JJP: the key's USB port is shared now.")
+            return True
+        msg = out.stdout.decode("utf-8", "replace").strip()
+        low = msg.lower()
+        if "cancel" in low:
+            self._log("JJP: Windows' permission prompt was declined, so the "
+                      "key cannot be passed to WSL. Press Start again and "
+                      "say Yes.")
+        else:
+            self._log("JJP: sharing the key's USB port failed (usbipd exit "
+                      "%d). %s" % (out.returncode,
+                                   " ".join(msg.split())[:300]))
+        return False
 
     def _key_visible_in_wsl(self):
         try:

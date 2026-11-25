@@ -431,7 +431,7 @@ def test_a_key_in_the_pc_is_handed_over_whatever_shows(rig, tmp_path,
         monkeypatch.setattr(mod, "rig_off", lambda: False)
         attached = []
         monkeypatch.setattr(svc, "_attach_dongle",
-                            lambda: attached.append(1) or True)
+                            lambda **kw: attached.append(1) or True)
         w.run(svc._apply, {"wsl": "1", "game_procs": "0",
                            "dongle_present": "0", "key_on_pc": "1"})
         assert _wait(lambda: attached == [1])
@@ -648,7 +648,7 @@ def test_a_key_in_use_elsewhere_is_named_and_cleared_at_the_next_start(
         from pinball_decryptor.webui import emulate_jjp_common as common
         monkeypatch.setattr(common, "rig_off", lambda: False)
         seen = []
-        monkeypatch.setattr(svc, "_attach_dongle", lambda: (
+        monkeypatch.setattr(svc, "_attach_dongle", lambda **kw: (
             seen.append((svc._wrong_key, svc._key_verdict[0])) or False))
         w.window.jjp_emulate_iso_var.set(r"D:\x.iso")
         w.call(NS + ".toggle")

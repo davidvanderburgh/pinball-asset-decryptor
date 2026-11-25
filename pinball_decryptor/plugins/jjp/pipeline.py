@@ -2930,10 +2930,16 @@ class DecryptionPipeline:
         rc, stdout, stderr = self.executor.run_win(
             [usbipd, "list"], timeout=15
         )
-        if rc != 0:
+        if rc != 0 and config.HASP_VID_PID not in (stdout or ""):
+            # PAD-1573: usbipd's own words, not a guess.  A report came with
+            # "not found or failed" from a PC where usbipd WAS installed and
+            # listing the key a minute earlier - the line could not say which.
+            said = " ".join(((stderr or "") + " " + (stdout or "")).split())
             raise PipelineError("Dongle",
-                "usbipd-win not found or failed. "
-                "Install from: https://github.com/dorssel/usbipd-win")
+                "usbipd-win did not answer (exit %s)%s. If it is not "
+                "installed, install it from: "
+                "https://github.com/dorssel/usbipd-win"
+                % (rc, (": " + said[:300]) if said else ""))
 
         if config.HASP_VID_PID not in stdout:
             raise PipelineError("Dongle",

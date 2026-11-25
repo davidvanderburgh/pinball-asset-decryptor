@@ -232,6 +232,48 @@ def attach_dongle_cmd():
     return [exe, "attach", "--wsl", "--hardware-id", HASP_VID_PID]
 
 
+def attach_verdict(text):
+    """What ``usbipd attach`` said, as one word.
+
+    "nokey"     - no device with the key's id is plugged in
+    "notshared" - the key is plugged in, but into a USB port usbipd has not
+                  been allowed to share (``bind``) yet.  A binding belongs to
+                  the PORT, not the key, so moving the key to another socket -
+                  which the panel's own "unplug and replug it" advice invites -
+                  lands here, and only an administrator can bind (PAD-1573:
+                  the tab ran a plain ``usbipd bind``, Windows refused it
+                  without a word, and every retry met the same refusal)
+    "admin"     - usbipd wants administrator rights for what was asked
+    "already"   - the key is attached already (not a failure)
+    ""          - anything else, including success
+    """
+    low = (text or "").lower()
+    if "no devices found" in low or "no device" in low:
+        return "nokey"
+    if "not shared" in low:
+        return "notshared"
+    if "administrator" in low or "access denied" in low:
+        return "admin"
+    if "already attached" in low:
+        return "already"
+    return ""
+
+
+def bind_dongle_elevated_cmd():
+    """Share the key's USB port with usbipd, as administrator (one Windows
+    permission prompt).  The PowerShell exits with usbipd's own exit code, and
+    non-zero with Windows' words when the prompt is declined.  None without
+    usbipd."""
+    exe = usbipd_path()
+    if not exe:
+        return None
+    ps = ("$p = Start-Process -FilePath '%s' -ArgumentList "
+          "'bind','--hardware-id','%s' -Verb RunAs -WindowStyle Hidden "
+          "-Wait -PassThru; exit $p.ExitCode"
+          % (exe.replace("'", "''"), HASP_VID_PID))
+    return ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps]
+
+
 def key_on_pc():
     """Is the Sentinel key plugged into the PC, whatever WSL can see?
 

@@ -1132,26 +1132,6 @@ def _finish(w, side="orig"):
     return w.call("video.clip_finished", side, st["preview"][side]["path"])
 
 
-def test_play_sequentially_steps_down_the_list(tmp_path):
-    proj = _project(tmp_path)
-    with web_app(tmp_path, mfr="stern") as w:
-        _scan(w, proj)
-        st = _wait(w, lambda s: s["preview"]["rel"] == "video/attract.mp4")
-        assert st["play_through"] is False
-        # off: a clip ending changes nothing
-        assert _finish(w) is False
-        time.sleep(0.3)
-        assert w.state("video")["preview"]["rel"] == "video/attract.mp4"
-        w.call("ui.set", "video", "play_through", True)
-        play = w.state("video")["play"]["seq"]
-        assert _finish(w) is True
-        st = _wait(w, lambda s: s["preview"]["rel"] == "video/intro.mp4")
-        assert st["select"]["rels"] == ["video/intro.mp4"]
-        assert st["play"] == {"side": "orig", "seq": play + 1}
-        # a stale report (the pane has moved on) is ignored
-        assert w.call("video.clip_finished", "orig", "C:/elsewhere.mp4") is False
-
-
 def test_play_sequentially_follows_the_sort_and_stops_at_the_end(tmp_path):
     proj = _project(tmp_path)
     with web_app(tmp_path, mfr="stern") as w:

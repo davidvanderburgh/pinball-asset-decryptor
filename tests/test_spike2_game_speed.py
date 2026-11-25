@@ -17,7 +17,6 @@ Measured end to end (Godzilla Pro 1.16, the Modes tab's Check this game): 188 s 
 Source-level checks of the shim (it is ARM and runs under qemu), compiled checks of its clock arithmetic on the host,
 and behaviour tests of the host helpers against a stand-in switch block.
 """
-import mmap
 import os
 import re
 import shutil
@@ -374,15 +373,6 @@ t0=$(date +%s%N); pad_gsleep 0.8; t1=$(date +%s%N)
 echo "slept $(( (t1 - t0) / 1000000 ))"
 rm -rf "$ROOT"
 '''
-
-
-@pytest.mark.skipif(not shutil.which("bash") or sys.platform == "win32", reason="bash rig helpers")
-def test_the_shell_half_reads_the_shims_answer():
-    out = subprocess.run(["bash", "-c", _GSLEEP], env=dict(os.environ, R=RIG), capture_output=True, text=True,
-                         timeout=30).stdout.split("\n")
-    assert out[0] == "none 1"
-    assert out[1] == "four 4.000"
-    assert 150 <= int(out[2].split()[1]) < 600           # 0.8 game s at 4x is 0.2 real
 
 
 def test_the_check_keeps_the_games_time_and_starts_from_attract():

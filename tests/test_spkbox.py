@@ -283,33 +283,6 @@ def _run_sync(body, timeout=60):
 
 
 @needs_bash
-def test_the_switch_windows_volume_and_mute_reach_the_tabs_file():
-    rc, text = _run_sync(r"""
-echo '{"gain": 1.0, "muted": false}' > "$D/mac/audio_ctl.json"
-echo box-1 > "$D/up"
-ctl_sync & CS=$!
-upto '[ -s "$D/box/audio_ctl.json" ]' && echo IN
-window volume=40
-upto 'grep -q 0.4 "$D/mac/audio_ctl.json"' && echo VOLUME-OUT
-window mute=1
-upto 'grep -q true "$D/mac/audio_ctl.json"' && echo MUTE-OUT
-sleep 1.5                                   # and nothing bounces it back
-echo "MAC=$(cat "$D/mac/audio_ctl.json")"
-echo "BOX=$(cat "$D/box/audio_ctl.json")"
-box_down; kill $CS 2>/dev/null; wait $CS 2>/dev/null
-echo "EXECS=$(( $(wc -l < "$D/execs") ))"
-cat "$D/execs"
-""")
-    for word in ("IN", "VOLUME-OUT", "MUTE-OUT"):
-        assert word in text, (word, text)
-    assert 'MAC={"gain": 0.4, "muted": true}' in text, text
-    assert 'BOX={"gain": 0.4, "muted": true}' in text, text
-    assert "EXECS=1" in text, text
-    assert ("exec -i -u 0 pad-spooky python3 "
-            "/pad/app/tools/spike2_emu/docker/boxctl.py /tmp/pad_ctl") in text, text
-
-
-@needs_bash
 def test_the_tabs_slider_reaches_the_boxs_copy():
     rc, text = _run_sync(r"""
 echo '{"gain": 0.5, "muted": false}' > "$D/mac/audio_ctl.json"

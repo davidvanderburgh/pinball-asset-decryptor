@@ -4717,6 +4717,97 @@ class App:
         threading.Thread(target=self._run_port_chain, args=(project, jobs),
                          daemon=True).start()
 
+    def _start_machine_update(self, mid, project, card, on_built=None):
+        """PAD-1585: "Update to 1.0.1" on My machines - the machine's project
+        carried onto Stern's newer build by the app, never by Stern's updater
+        (which a card the app built refuses).  The owner points at the new
+        stock card image (the app downloads none); it must be the same game
+        and a newer build.  Then the one-click port's chain for that one
+        image (extract, transfer, stage, build beside the machine's card),
+        stopping after the transfer is planned to say what can NOT be carried
+        (core/game_update.carry_report) before anything is built.
+        *on_built(build, workspace, raw)* on the UI thread after a build."""
+        from .core import game_update, mod_port
+        if not getattr(self._current_mfr.capabilities, "mod_transfer", False):
+            return False
+        if self.window._running:
+            messagebox.showinfo("Update", "Finish or cancel the current operation first.")
+            return False
+        raw = filedialog.askopenfilename(
+            title="The new card image from Stern, for this machine",
+            initialdir=os.path.dirname(card) if card else None,
+            filetypes=[("Card images", "*.raw *.img *.bin"), ("All files", "*.*")])
+        if not raw:
+            return False
+        raw = os.path.normpath(raw)
+        try:
+            old_label, new_label = game_update.check_new_card(card, raw)
+        except game_update.UpdateRefused as e:
+            messagebox.showwarning("Update", str(e))
+            return False
+        out_dir = os.path.dirname(os.path.abspath(card)) if card else os.path.dirname(project)
+        jobs = mod_port.plan_ports(project, [raw], out_dir)
+        job = jobs[0]
+        if not messagebox.askyesno(
+                "Update to %s?" % new_label,
+                "This machine's project:\n    %s\n\nis carried onto %s%s:\n"
+                "    %s\n\nThe new image is extracted first%s. Before anything "
+                "is built you are told what can't be carried, and choose.\n\n"
+                "The update is built as:\n    %s\n\nStart?"
+                % (project, new_label, (" (from %s)" % old_label) if old_label else "",
+                   raw, "" if not mod_port.has_baseline(job["workspace"])
+                   else " (an earlier extract of it is reused)", job["output"])):
+            return False
+        mfr = self._current_mfr
+
+        def gate(ws, plan):
+            from .core import mod_transfer
+            from .plugins.stern.mode_project import list_modes
+            modes_line, blocked = "", False
+            try:
+                has_modes = bool(list_modes(project)[0])
+            except Exception:                           # noqa: BLE001
+                has_modes = False
+            if has_modes and hasattr(mfr, "mode_news"):
+                modes_line = mfr.mode_news(raw, project=project,
+                                           cancel=lambda: self._cancel_requested)
+                blocked = "can't run" in modes_line or "could not be read" in modes_line
+            report = game_update.carry_report(
+                plan, mod_transfer.plan_detail_lines(plan), modes_line, blocked, new_label)
+            title, message = game_update.question(report)
+            if report["clean"]:
+                return
+            box, done = {}, threading.Event()
+
+            def _q():
+                try:
+                    box["yes"] = messagebox.askyesno(title, message)
+                finally:
+                    done.set()
+            self.msg_queue.put(UiCallMsg(_q))
+            done.wait()
+            if not box.get("yes"):
+                raise mod_port.PortSkip("stopped before building: nothing was written")
+
+        def after(results):
+            built = [j for j, st, _d in results if st == "ok"]
+            if built and on_built is not None:
+                on_built(built[0]["output"], built[0]["workspace"], built[0]["raw"])
+
+        self._record_path_history(write_output=out_dir)
+        self._save_settings()
+        self._active_mode = "write"
+        self._port_active = True
+        self._port_words = ("Update", "Updated")
+        self._cancel_requested = False
+        self._chain_flash_after_build = None
+        self._staging_failures = []
+        self.window.set_running(True, mode="write")
+        self.window.reset_steps(mode="write")
+        threading.Thread(target=self._run_port_chain, args=(project, jobs),
+                         kwargs={"gate": gate, "after": after}, daemon=True).start()
+        return True
+
     def _port_targets(self):
         """``(raws, out_dir)`` for the one-click port and What's new (PAD-1388):
         the Mod Pack form's "New card image(s)" and "Build into" fields, and
@@ -4911,12 +5002,17 @@ class App:
             "couldn't" in h for h in heads)
         self.msg_queue.put(DoneMsg(ok, "\n".join(heads) or "Canceled"))
 
-    def _run_port_chain(self, project, jobs):
+    def _run_port_chain(self, project, jobs, gate=None, after=None):
         """Worker-thread body of the one-click port: bind the app's extract /
         transfer / stage / write services and hand the sequencing to
         :func:`core.mod_port.run_ports`.  Every sub-pipeline is installed as
         ``self.pipeline`` while it runs, so the ordinary Stop button cancels
-        the live step and the chain stops at the next boundary."""
+        the live step and the chain stops at the next boundary.
+
+        PAD-1585: *gate(ws, plan)* runs after the transfer is planned and
+        before anything is applied or built (an update's "what can't be
+        carried" question; it raises PortSkip to stop), *after(results)* on
+        the UI thread once the chain is done."""
         from .core import mod_port, mod_transfer
 
         log_cb, progress_cb, extract, run_sub = self._port_sub_runner()
@@ -4932,6 +5028,8 @@ class App:
             for level, line in mod_transfer.plan_detail_lines(plan):
                 log_cb(line, level)
             totals = plan["totals"]
+            if gate is not None:
+                gate(ws, plan)
             if totals["transfer"] == 0:
                 raise mod_port.PortSkip(
                     "none of the project's mods have a matching slot or "
@@ -5004,6 +5102,8 @@ class App:
             self._apply_card_size_env(self._card_size_setting())
         ok = bool(results) and all(s == "ok" for _j, s, _d in results)
         self.msg_queue.put(DoneMsg(ok, mod_port.summarize(results)))
+        if after is not None:
+            self.msg_queue.put(UiCallMsg(lambda: after(results)))
 
     def _run_pipeline_with_audio(self, assets_dir, original=None):
         """Worker-thread entry for a Write run: apply any Replace-Audio,

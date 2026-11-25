@@ -499,6 +499,34 @@ class MachinesMixin:
         return True
 
     @rpc
+    def machines_update(self, mid):
+        """PAD-1585: Update to <newer build> - this machine's project carried onto Stern's new card image by the
+        app (app._start_machine_update), told first what can't be carried.  Built, the machine is shown on the
+        update and the Write tab is set to put it on the machine: Send to machine (over the network, its
+        settings, audits and high scores stay) or Build / flash SD card."""
+        r = self._open_machine_project(mid)
+        if r is None or not r.get("transfer") or r["card_missing"]:
+            return False
+
+        def built(build, workspace, raw):
+            w = self.window
+            w.write_upd_var.set(raw)
+            w.write_assets_var.set(workspace)
+            w.write_output_var.set(os.path.dirname(build))
+            w.write_filename_var.set(os.path.basename(build))
+            if os.path.isfile(build):
+                self.machines_rebind(mid, build)
+            w.select_tab("write")
+            compat.messagebox.showinfo(
+                "Update built",
+                "%s is built:\n    %s\n\nPut it on the machine from the Write tab: Send to machine sends only "
+                "what changed over your network and keeps the machine's settings, audits and high scores. Or "
+                "Build / flash SD card writes a card; tick Keep the card's own settings there to keep them "
+                "when you write over the machine's card." % (r["name"] or "The update", build))
+
+        return bool(self.app._start_machine_update(mid, r["project"], r["card"], on_built=built))
+
+    @rpc
     def machines_write(self, mid):
         r = self._open_machine_project(mid)
         if r is None:

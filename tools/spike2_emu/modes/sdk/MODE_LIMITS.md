@@ -199,7 +199,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Foo Fighters LE 1.05 | no | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
-| Foo Fighters Pro 1.05 | no | ✓ | ✓ | no | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
+| Foo Fighters Pro 1.05 | no | ✓ | ✓ | shots | buttons, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed, intros and outros for game modes |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, building, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed, intros and outros for game modes |
 | Godzilla Pro 1.15 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, light shows, battle slot, challenges, game mode places, starts on game modes completed |
 | Godzilla Pro 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed, intros and outros for game modes |

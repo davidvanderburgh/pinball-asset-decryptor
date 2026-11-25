@@ -32,6 +32,10 @@ sw() { awk -v p="$1" '$1 ~ /^[0-9]+$/ { n = ""; for (i = 5; i <= NF; i++) n = n 
 START=$(sw 'START BUTTON'); LEFT=$(sw '^ (L|LEFT) FLIPPER BUTTON$'); RIGHT=$(sw '^ (R|RIGHT) FLIPPER BUTTON$')   # never UP LEFT FLIPPER EOS
 [ -n "$START" ] && [ -n "$LEFT" ] && [ -n "$RIGHT" ] || job_fail "no START ($START) or flippers ($LEFT $RIGHT) in the switch list"
 job_sleep 5
+# credits first: a machine not on free play (King Kong LE on the rig: "ADD CREDITS 1/1.00 3/2.00") shows the menu but
+# its START takes nothing without them - even the game's own STANDARD (plunge.py do_coin)
+python3 "$RIG/plunge.py" coin 4 > /dev/null 2>&1 < /dev/null
+job_sleep 2
 # CHOOSE YOUR MODE OF PLAY: both flipper buttons held in attract (PAD-619)
 for try in 1 2 3; do
     job_press "$LEFT" 2500 & job_press "$RIGHT" 2500; wait

@@ -3592,6 +3592,9 @@ LAMPS_PROVEN = frozenset((
     #   foo_fighters_le-1.05: 30/30 RGB, 74/74 single (its topper's TOPPER FRONT RAMI / TAYLOR / CHRIS are the cabinet's
     #   own lights, no inserts, as in the earlier proofs)
     "foo_fighters_le-1.05",
+    #   foo_fighters_pro-1.05: 25/25 RGB, 65/65 single - once its port had the RGB OVERLORD line (REVISION 16; the first
+    #   run left it dark: the port addressed only the single OVERLORD, twice)
+    "foo_fighters_pro-1.05",
     "king_kong_le-1.00", "king_kong_le-1.01", "king_kong_pro-1.01", "avengers_infinity_pro-1.12", "metallica_spike-1.05",
     "dungeons_and_dragons_le-1.11", "dungeons_and_dragons_pro-1.11",
 ))

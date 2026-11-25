@@ -173,11 +173,179 @@ def _hashing_reader(read, hashes):
     return hashed
 
 
+def _unchanged_note(n):
+    """The progress line's word on what a write left alone (PAD-1584)."""
+    return (" (%s already on the card)" % format_size(n)) if n else ""
+
+
 def _first_difference(got, exp):
     """Index of the first byte where *got* and *exp* differ (the shorter
     one's length when one is a prefix of the other)."""
     n = min(len(got), len(exp))
     return next((i for i in range(n) if got[i] != exp[i]), n)
+
+
+# ---- what was last written to a card (PAD-1584) ---------------------------
+#
+# A write keeps every chunk's hash (PAD-1583); after a write that finished,
+# they are remembered here, against the card.  The next write onto that card
+# then knows which chunks the new image has changed.  Those are written
+# straight away.  Every other chunk is READ OFF THE CARD and compared byte
+# for byte with the image, and only a chunk that is the same on the card is
+# left alone.  So the record only says where to look: what is skipped is
+# what the card was seen to hold, never what the record says it holds, and a
+# stale or wrong record costs time, never a wrong card.  The full verify
+# runs after it as always.
+
+#: Cards remembered (the newest first).  A record is a few dozen KB.
+_RECORD_KEEP = 6
+
+
+def write_every_chunk():
+    """True when ``PAD_WRITE_EVERY_CHUNK=1``: every chunk of a write goes onto
+    the card, even one the card already holds (PAD-1584), as before."""
+    return os.environ.get("PAD_WRITE_EVERY_CHUNK", "").strip() not in (
+        "", "0")
+
+
+def _card_record_path():
+    """The file the cards' records are kept in: ``PAD_CARD_RECORD`` if set,
+    else machine-local app data (the cards are in this PC's reader)."""
+    p = os.environ.get("PAD_CARD_RECORD", "").strip()
+    if p:
+        return p
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser(
+            "~/.local/state")
+    return os.path.join(base, "pinball_decryptor", "card_writes.json")
+
+
+def _load_card_records():
+    import json
+    try:
+        with open(_card_record_path(), "r", encoding="utf-8") as f:
+            recs = json.load(f)
+    except (OSError, ValueError):
+        return []
+    out = []
+    for r in recs if isinstance(recs, list) else []:
+        try:
+            chunks = [(int(p), int(n), bytes.fromhex(d))
+                      for p, n, d in r["chunks"]]
+        except (KeyError, TypeError, ValueError):
+            continue
+        if chunks:
+            out.append({"size": r.get("size"), "chunks": sorted(chunks)})
+    return out
+
+
+def _save_card_records(recs):
+    import json
+    path = _card_record_path()
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump([{"size": r["size"],
+                        "chunks": [[p, n, d.hex()] for p, n, d in r["chunks"]]}
+                       for r in recs[:_RECORD_KEEP]], f)
+        os.replace(tmp, path)
+    except OSError:
+        pass                    # only a hint: a write never fails over it
+
+
+def _record_key(rec):
+    """What a record is told apart by: the card's size and its first chunk."""
+    return rec["size"], rec["chunks"][0]
+
+
+class CardRecord:
+    """The chunks last written to the card in a reader (PAD-1584):
+    ``{(offset, length): digest}``.  :meth:`for_card` finds it by reading
+    the card's first recorded chunk and checking its hash, so a card that
+    was rewritten elsewhere, or another card of the same size, is not taken
+    for it."""
+
+    def __init__(self, rec):
+        self._rec = rec
+        self.chunks = {(p, n): d for p, n, d in rec["chunks"]}
+
+    @classmethod
+    def for_card(cls, dev):
+        """The record of the card open in *dev*, or None."""
+        size = dev.size
+        read = {}
+        for rec in _load_card_records():
+            if rec["size"] != size:
+                continue
+            pos, length, digest = rec["chunks"][0]
+            if (pos, length) not in read:
+                try:
+                    buf = dev._aligned_read(pos, length)
+                except OSError:
+                    buf = b""
+                read[pos, length] = (_chunk_digest(buf)
+                                     if len(buf) == length else None)
+            if read[pos, length] == digest:
+                return cls(rec)
+        return None
+
+    def says_changed(self, pos, length, digest):
+        """True when the record has a different hash for this chunk: the
+        card held other bytes there, so it is written without a look."""
+        was = self.chunks.get((pos, length))
+        return was is not None and was != digest
+
+    @staticmethod
+    def remember(size, digests, old=None, written=None):
+        """Remember *digests* ``[(offset, length, digest)]`` as what the card
+        of *size* holds now, in place of the record *old* it had.  With
+        *written* ``[(offset, length)]`` (a menu-only write) *digests* are
+        only those ranges: the rest of *old* is kept, less its chunks they
+        overlap."""
+        chunks = list(digests)
+        if written is not None:
+            if old is None:
+                return
+            def hit(p, n):
+                return any(p < o + w and o < p + n for o, w in written)
+            chunks += [(p, n, d) for (p, n), d in old.chunks.items()
+                       if not hit(p, n)]
+        if not chunks:
+            return
+        rec = {"size": size, "chunks": sorted(chunks)}
+        drop = {_record_key(rec)}
+        if old is not None:
+            drop.add(_record_key(old._rec))
+        _save_card_records([rec] + [r for r in _load_card_records()
+                                    if _record_key(r) not in drop])
+
+    def forget(self):
+        """Drop this record (a write onto the card did not finish)."""
+        key = _record_key(self._rec)
+        recs = _load_card_records()
+        keep = [r for r in recs if _record_key(r) != key]
+        if len(keep) != len(recs):
+            _save_card_records(keep)
+
+
+def _held_by_card(dev, pos, buf, digest, record):
+    """True when the card already holds *buf* at *pos* (PAD-1584): never for
+    a chunk *record* says changed (it is written without a look), else the
+    card's own bytes there are read and compared.  A chunk that is not whole
+    sectors, or that the card fails to read, is written."""
+    if record is None or len(buf) % dev.sector:
+        return False
+    if record.says_changed(pos, len(buf), digest):
+        return False
+    try:
+        return dev._aligned_read(pos, len(buf)) == buf
+    except OSError:
+        return False
 
 
 class FlashError(Exception):
@@ -789,7 +957,8 @@ class RawDeviceFile:
         self._write_aligned(a_start, region)
 
     def copy_image_onto(self, src, total, *, progress=None, cancel=None,
-                        chunk=None, overlay=None, ranges=None, digests=None):
+                        chunk=None, overlay=None, ranges=None, digests=None,
+                        record=None):
         """Bulk-copy ``total`` bytes from file object *src* onto this device,
         starting at offset 0 (a dd-style flash).
 
@@ -817,6 +986,12 @@ class RawDeviceFile:
         *digests*, a list, gets ``(offset, length, digest)`` appended for every
         chunk written (:func:`_chunk_digest`, PAD-1583), so the verify can
         read the card alone instead of the card and the image.
+
+        *record* (:class:`CardRecord`, PAD-1584) is what the card was last
+        written with: a chunk it does not say changed is read off the card
+        first and left alone when the card already holds it.  Those bytes
+        count as done but not as written; :attr:`unchanged` has their sum
+        afterwards.
         """
         if not self.writable:
             raise OSError("device opened read-only")
@@ -843,8 +1018,9 @@ class RawDeviceFile:
         # the same time.
         read = _file_reader(src, overlay)
         hashes = {}
-        if digests is not None:
+        if digests is not None or record is not None:
             read = _hashing_reader(read, hashes)
+        self.unchanged = 0
         with _ReadAhead(spans, read, step) as chunks:
             for pos, buf in chunks:
                 if cancel is not None and cancel():
@@ -853,7 +1029,11 @@ class RawDeviceFile:
                         % (written, total))
                 if not buf:
                     return written
-                if len(buf) % sec == 0:
+                digest = hashes.pop(pos, None)
+                held = _held_by_card(self, pos, buf, digest, record)
+                if held:
+                    self.unchanged += len(buf)
+                elif len(buf) % sec == 0:
                     # Aligned fast path: write directly, capped per write
                     # syscall.
                     self._io.seek(pos)
@@ -868,14 +1048,17 @@ class RawDeviceFile:
                     self.seek(pos)
                     self.write(buf)
                 if digests is not None:
-                    digests.append((pos, len(buf), hashes.pop(pos)))
+                    digests.append((pos, len(buf), digest))
                 written += len(buf)
-                undrained += len(buf)
-                if drain and (undrained >= _FLASH_DRAIN or written >= total):
+                if not held:
+                    undrained += len(buf)
+                if drain and undrained and (undrained >= _FLASH_DRAIN
+                                            or written >= total):
                     self._io.fsync()
                     undrained = 0
                 if progress is not None:
                     progress(written, total, "Writing image to SD card…"
+                             + _unchanged_note(self.unchanged)
                              + _rate_note(rate, written, total))
         return written
 
@@ -1411,6 +1594,14 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
                 if cancel is not None and cancel():
                     raise FlashCancelled("Canceled before anything was "
                                          "written.")
+                # What this card was last written with (PAD-1584): the
+                # chunks it already holds are read, compared and left alone.
+                record = None if write_every_chunk() else                     CardRecord.for_card(dev)
+                card_size = dev.size
+                if record is not None and log is not None:
+                    log("This card was written from an image before: the "
+                        "parts it already holds are checked on the card and "
+                        "left as they are.", "info")
                 with open(image_path, "rb") as src:
                     ranges = (_image_copy_ranges(src, img_size, dev.sector,
                                                  overlay, log)
@@ -1420,14 +1611,28 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
                     # verify checks the card against (PAD-1583): it then
                     # reads the card alone, not the image (often on a
                     # spinning disk) a second time.
-                    digests = [] if verify else None
-                    written = dev.copy_image_onto(
-                        src, img_size,
-                        progress=_slow_card_watch(
-                            log, progress, _has_menu_partition(image_path)),
-                        cancel=cancel, overlay=overlay, ranges=ranges,
-                        digests=digests)
+                    # They are also what the card is remembered by for the
+                    # next write onto it (PAD-1584).
+                    digests = []
+                    try:
+                        written = dev.copy_image_onto(
+                            src, img_size,
+                            progress=_slow_card_watch(
+                                log, progress,
+                                _has_menu_partition(image_path)),
+                            cancel=cancel, overlay=overlay, ranges=ranges,
+                            digests=digests, record=record)
+                    except BaseException:
+                        if record is not None:
+                            record.forget()
+                        raise
+                    unchanged = dev.unchanged
                 dev.flush()
+                if unchanged and log is not None:
+                    log("%s of it was already on the card and was left as "
+                        "it was; %s was written." % (
+                            format_size(unchanged),
+                            format_size(written - unchanged)), "info")
             # Read the card back and confirm it byte-for-byte matches the
             # image.  A raw flash has no other integrity check, and a
             # silently-bad write (flaky card/reader) produces a card the
@@ -1440,10 +1645,16 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
             if verify:
                 if on_verify_start is not None:
                     on_verify_start()
-                _verify_flash_readback(device_path, image_path, img_size,
-                                       log=log, progress=progress,
-                                       cancel=cancel, overlay=overlay,
-                                       ranges=ranges, digests=digests)
+                try:
+                    _verify_flash_readback(
+                        device_path, image_path, img_size, log=log,
+                        progress=progress, cancel=cancel, overlay=overlay,
+                        ranges=ranges, digests=digests)
+                except BaseException:
+                    if record is not None:
+                        record.forget()
+                    raise
+            CardRecord.remember(card_size, digests, old=record)
     except PermissionError as e:
         # Surface a denied device open (macOS TCC without Full Disk Access,
         # or a genuinely unelevated run) as a FlashError so the dialog shows
@@ -2306,17 +2517,26 @@ def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
     if log is not None:
         log("Menu-only write: checking that this card was flashed from %s"
             % os.path.basename(image_path), "info")
+    card = {}
     try:
-        digests = [] if verify else None
-        written = _flash_menu_plan(image_path, device_path, plan, log=log,
-                                   progress=progress, cancel=cancel,
-                                   digests=digests)
-        if verify:
-            if on_verify_start is not None:
-                on_verify_start()
-            _verify_menu_readback(device_path, image_path, plan,
-                                  log=log, progress=progress, cancel=cancel,
-                                  digests=digests)
+        try:
+            digests = []
+            written = _flash_menu_plan(image_path, device_path, plan, log=log,
+                                       progress=progress, cancel=cancel,
+                                       digests=digests, card=card)
+            if verify:
+                if on_verify_start is not None:
+                    on_verify_start()
+                _verify_menu_readback(device_path, image_path, plan,
+                                      log=log, progress=progress,
+                                      cancel=cancel, digests=digests)
+        except BaseException:
+            if card.get("record") is not None:
+                card["record"].forget()
+            raise
+        # The card's record now has the menu's new chunks (PAD-1584).
+        CardRecord.remember(card.get("size"), digests, old=card.get("record"),
+                            written=[(o, n) for o, n, _w in plan["write"]])
     except PermissionError as e:
         raise FlashError(str(e)) from e
     except OSError as e:
@@ -2328,11 +2548,13 @@ def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
 
 
 def _flash_menu_plan(image_path, device_path, plan, *, log=None,
-                     progress=None, cancel=None, digests=None):
+                     progress=None, cancel=None, digests=None, card=None):
     """The write half of :func:`flash_menu_to_device`: prove the card, then
     put the plan's ranges on it.  Returns the bytes written.  *digests*, a
     list, gets each written chunk's ``(offset, length, digest)``
-    (PAD-1583)."""
+    (PAD-1583).  *card*, a dict, gets the card's ``size`` and its
+    :class:`CardRecord` as ``record`` (PAD-1584): a chunk the card already
+    holds is read, compared and left alone."""
     written = 0
     with _disk_offline_for_write(device_path, log), \
             _locked_volumes(device_path, log):
@@ -2358,8 +2580,13 @@ def _flash_menu_plan(image_path, device_path, plan, *, log=None,
                 total = sum(length for _o, length, _w in plan["write"])
                 rate = []
                 spans = [(off, length) for off, length, _w in plan["write"]]
+                record = None if write_every_chunk() else \
+                    CardRecord.for_card(dev)
+                if card is not None:
+                    card.update(size=dev.size, record=record)
+                unchanged = 0
                 read, hashes = _file_reader(src), {}
-                if digests is not None:
+                if digests is not None or record is not None:
                     read = _hashing_reader(read, hashes)
                 with _ReadAhead(spans, read, _FLASH_CHUNK) as chunks:
                     for pos, buf in chunks:
@@ -2370,14 +2597,19 @@ def _flash_menu_plan(image_path, device_path, plan, *, log=None,
                                 "written again." % (written, total))
                         if not buf:
                             continue
-                        dev.seek(pos)
-                        dev.write(buf)
+                        digest = hashes.pop(pos, None)
+                        if _held_by_card(dev, pos, buf, digest, record):
+                            unchanged += len(buf)
+                        else:
+                            dev.seek(pos)
+                            dev.write(buf)
                         if digests is not None:
-                            digests.append((pos, len(buf), hashes.pop(pos)))
+                            digests.append((pos, len(buf), digest))
                         written += len(buf)
                         if progress is not None:
                             progress(written, total,
                                      "Writing the boot menu onto the card\u2026"
+                                     + _unchanged_note(unchanged)
                                      + _rate_note(rate, written, total))
                 dev.flush()
     return written

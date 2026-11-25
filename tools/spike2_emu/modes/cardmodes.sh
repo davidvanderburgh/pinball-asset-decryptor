@@ -245,6 +245,17 @@ if [ "$ACC" != 0 ]; then
     else WHAT="$WHAT and accessibility"; fi
 fi
 
+# BOOT MENU FLIPPER (2026-11-25): padmenu.cfg (where the service menu row's value is, for padmenu.so) is a reason of
+# its own too - a card whose only change is that row has nothing else beside the object
+FLIPROW=0
+[ -f "$S/padmenu.cfg" ] && FLIPROW=$(grep -c "^flip_row	" "$S/padmenu.cfg" 2>/dev/null)
+case "$FLIPROW" in ''|*[!0-9]*) FLIPROW=0 ;; esac
+if [ "$FLIPROW" != 0 ]; then
+    if [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ] && [ "$SCENES" = 0 ] && [ "$ACC" = 0 ]; then WHAT="the BOOT MENU FLIPPER row"
+    else WHAT="$WHAT and the BOOT MENU FLIPPER row"; fi
+fi
+
+
 # PAD-1552: THREE forms of the hook load the runtime (modehook.py BLOCKS). A single card's names the object
 # on its LD_PRELOAD line ($HOOK); a multi-boot card's (PAD-1309) and a remote-buttons card's (PAD-1467)
 # gather what is there into PADPRE and preload that. Looking for the first form alone, every multi-boot
@@ -266,7 +277,7 @@ if [ -n "${PAD_MODE_SO:-}" ]; then
         "(PAD_MODE_SO=$PAD_MODE_SO): that one runs, the card's own modes are left out"
     exit 0
 fi
-if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ] && [ "$SCENES" = 0 ] && [ "$ACC" = 0 ]; }; then
+if [ ! -f "$S/game.port" ] || { [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ] && [ "$SCENES" = 0 ] && [ "$ACC" = 0 ] && [ "$FLIPROW" = 0 ]; }; then
     forget
     say "$WHO carries a mode object but no $([ -f "$S/game.port" ] && echo "mode file" || echo "port file") beside it:"
     say "  nothing the emulator can run. This run boots without it"

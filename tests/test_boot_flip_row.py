@@ -144,6 +144,48 @@ def test_the_card_installer_and_the_emulator_carry_the_file():
     tryit = open(os.path.join(emu, "modes", "tryit.sh"), encoding="utf-8").read()
     assert 'put "$S/padmenu.cfg" "$DUMP/padmenu.cfg"' in tryit
     assert tryit.count('"$DUMP"/padmenu.cfg') == 2              # cleared with the other runtime files
-    assert open(os.path.join(emu, "modes", "cardmodes.sh"), encoding="utf-8").read().count("padmenu.cfg") == 2
+    cm = open(os.path.join(emu, "modes", "cardmodes.sh"), encoding="utf-8").read()
+    assert cm.count('"$DUMP/padmenu.cfg"') == 1 and cm.count('"$DUMP"/padmenu.cfg') == 1   # both clear-outs
     src = open(os.path.join(emu, "codeselect", "padmenu.c"), encoding="utf-8").read()
     assert '"/dump/padmenu.cfg"' in src                        # the rig's place for it
+
+
+def test_the_row_alone_is_a_write_of_its_own():
+    """The second end-to-end Write (the row and nothing else) stopped twice: "Screen times: the app could not tell which
+    game..." and then "none of the project's random clips can go on this card"."""
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    src = inspect.getsource(E)
+    assert 'else "Service menu settings")' in src
+    assert "if (flip_cfg or settings_cfg) and not (mode_list or code_list):" in src
+    assert "scenes_prof, _menu_prof))" in src
+    assert "menu_prof=_menu_prof or _mprof if (flip_cfg or settings_cfg) else None" in src
+    assert "menu_prof=None" in str(inspect.signature(MW.plan))
+    plan_src = inspect.getsource(MW.plan)
+    assert "if result is None and menu_prof is not None:" in plan_src
+    assert "result = menu_plan(project, game_elf, menu_prof)" in plan_src
+
+
+def test_menu_plan_carries_the_runtime_and_the_port(monkeypatch):
+    from pinball_decryptor.plugins.stern import mode_write as MW
+
+    class _P:
+        label = "Godzilla LE 1.16"
+    monkeypatch.setattr(MW, "find_port", lambda prof, elf: "/x/game.port")
+    plan = MW.menu_plan("proj", b"elf", _P())
+    assert plan.port == "/x/game.port" and plan.build is None and plan.profile.label == "Godzilla LE 1.16"
+
+    def _no(prof, elf):
+        raise MW.ModeWriteError("no")
+    monkeypatch.setattr(MW, "find_port", _no)
+    with pytest.raises(MW.ModeWriteError, match="service menu settings"):
+        MW.menu_plan("proj", b"elf", _P())
+
+
+def test_the_emulator_runs_a_multi_boot_cards_own_runtime_files():
+    """A multi-boot card's hook preloads padmenu.so and the runtime on one line; the rig looked for the plain hook only
+    and ran neither the card's runtime nor its padmenu.cfg."""
+    src = open(os.path.join(ROOT, "tools", "spike2_emu", "modes", "cardmodes.sh"), encoding="utf-8").read()
+    assert 'grep -qF -e "$HOOK" -e "PADPRE:}$CARD_DIR/mode.so"' in src
+    assert 'FLIPROW=$(grep -c "^flip_row\t" "$S/padmenu.cfg"' in src
+    assert '[ "$SCENES" = 0 ] && [ "$FLIPROW" = 0 ]; }; then' in src

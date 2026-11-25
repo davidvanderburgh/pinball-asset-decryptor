@@ -10614,7 +10614,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "High score records" if _rec_on and not _feed_on and not _stime_on   # PAD-1280
                 else "Score feed" if _feed_on and not _stime_on
                 else "Image sets" if _scenes_on and not _stime_on
-                else "Screen times")
+                else "Screen times" if _stime_on
+                else "Service menu settings")
         _who_hud = _who
         if (bank_plan is not None and bank_plan.retired
                 and not (_modes_on or _clips_on or sound_modes_cfg or picture_cfg
@@ -10652,9 +10653,15 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _stime_on else "Adding the service menu settings...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
+                # BOOT MENU FLIPPER (or shared rows) with no other feature: none of the features names the
+                # game, so the card's own title does (the first Write of the row alone stopped here)
+                _menu_prof = None
+                if (flip_cfg or settings_cfg) and not (mode_list or code_list):
+                    from .clip_variants import project_title as _CV_pt
+                    _menu_prof = _CV_pt(assets_dir, probe=True)
                 _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
                     variant_prof, sound_modes_prof, picture_prof, attract_prof, coop_prof, idle_prof,
-                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof, scenes_prof, acc_prof))
+                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof, scenes_prof, acc_prof, _menu_prof))
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -10738,6 +10745,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     records=rec_list, records_prof=rec_prof,          # PAD-1280
                     saved=bool(_saved_modes), saved_setting=saved_setting,   # PAD-1402
                     scenes=scenes_staged, scenes_prof=scenes_prof,    # image sets
+                    menu_prof=_menu_prof or _mprof if (flip_cfg or settings_cfg) else None,   # service menu rows alone
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))

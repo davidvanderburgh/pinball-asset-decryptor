@@ -150,8 +150,12 @@ run() {   # run NAME RUN_MS WANT_CALLS [ENV-ARG...]
     case "$name" in conf-*|row-*|shared-*) mode=attract ;; esac
     rm -f "$T/calls" "$T/trace"
     : > "$T/dev/ttymxc1"
+    # no row unless the case names one: never the rig's /dump/padmenu.cfg (qemu -L finds $ROOT/dump/padmenu.cfg, which
+    # an emulator run of a card with the row leaves there)
+    local row=-E\ PADMENU_ROW_CFG="$T/no-row.cfg"
+    case " $* " in *PADMENU_ROW_CFG=*) row= ;; esac
     "$QEMU" -L "$ROOT" -E LD_PRELOAD="$SO" -E PADMENU_CMD="$T/reboot.sh" \
-        -E "CODESELECT_REBOOT=touch /dump/reboot.req" -E PADMENU_TRACE="$T/trace" "$@" \
+        -E "CODESELECT_REBOOT=touch /dump/reboot.req" -E PADMENU_TRACE="$T/trace" $row "$@" \
         "$T/driver" "$mode" "$T/dev/ttymxc1" "$run_ms" "${ROWV:-0}" 2>"$T/err" \
         || { echo "padmenu_flip_test: $name: driver failed"; cat "$T/err"; fail=1; return; }
     sleep 0.3

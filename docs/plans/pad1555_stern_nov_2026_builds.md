@@ -369,9 +369,10 @@ Install: a stage folder with `pad_mode.so` (= `modes/sdk/prebuilt/mode.so`), `ga
   bank song of a mode file's. BANK_SONG_NO_ROOM.
 - **Metallica 1.05's live records:** the derive had dropped `mode_records_1..5`; its song starts create 178 / 183 /
   188 / 193 where 1.04's create 177 / 182 / 187 / 192, so each range is 1.04's + 1 (the runtime now says it can tell the
-  timed modes from the live records). The rig proof (`recjob.sh`: `stack no` refused while Enter Sandman runs) is held
-  up by the second ball Metallica keeps out early.
-- **Left for run 11:** STACK_RECORDS_PROVEN for Metallica 1.05 (recjob.sh); the two sound sweeps - sounds in turn
+  timed modes from the live records). `recjob.sh` (the save waited out, the second ball Metallica keeps out early
+  drained): a `stack no` mode started with nothing running, then refused while the game's Enter Sandman ran - "one of
+  the game's modes (a song mode) is running"; 1.04 the same. STACK_RECORDS_PROVEN.
+- **Left for run 11:** the two sound sweeps - sounds in turn
   (sound_modes.TURN_PROVEN) and MUSIC MODE / EDITION (menu_settings.PROVEN = sound_modes.PROVEN) on the nine latest
   builds. Both kits are gone (C:/tmp/PAD-724, the PAD-565 sweep): a set built by engine.write_overrides on a project
   whose `.staged_changes.json` replaces a short one-request sound with a 500 Hz tone, `sound_modes` `turns` (1000 /

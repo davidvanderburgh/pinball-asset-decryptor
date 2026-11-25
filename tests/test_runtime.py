@@ -725,3 +725,40 @@ def test_a_reinstall_is_a_new_guid_so_the_kept_manifest_is_not_used(
     _registry(monkeypatch, tmp_path, running=True, guid="{new}")
     assert runtime.status(refresh=True)[0] == "ready"
     assert [c for c in calls if "cat" in c]
+
+
+def test_a_good_import_deletes_the_runtimes_it_replaced_but_keeps_its_own(
+        monkeypatch, tmp_path):
+    """PAD-1595: every re-cut left a ~400 MB tarball behind for good.  The
+    current one stays (a broken distro re-imports without a download), and
+    nothing is pruned out from under the import while it runs."""
+    import os
+    import time
+    from pinball_decryptor.core import payloads
+    monkeypatch.setenv("PAD_PAYLOAD_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("PAD_RUNTIME_DIR", str(tmp_path / "dest"))
+    os.makedirs(payloads.cache_root())
+    tar = payloads.cache_path(runtime.IMAGE)
+    old = os.path.join(payloads.cache_root(),
+                       "0f02672384fe-pad-runtime-full.tar.gz")
+    def put(path):
+        with open(path, "wb") as f:
+            f.write(b"x")
+        os.utime(path, (time.time() - 7200,) * 2)
+    put(tar)
+    monkeypatch.setattr(runtime, "ensure_cached", lambda *a, **k: tar)
+    base = _runner(listed=[runtime.DISTRO])
+    during = []
+
+    def run(args, **k):
+        if "--import" in args:
+            # even a prune that pins nothing leaves the importing file alone
+            during.append(payloads.prune_cache(keep=[]))
+            assert os.path.exists(tar)
+            put(old)            # what the finished import should then delete
+        return base(args, **k)
+    said = []
+    runtime.install(runner=run, replace=True, log=said.append)
+    assert during and all(tar not in [p for p, _n in d] for d, _f in during)
+    assert os.path.exists(tar) and not os.path.exists(old)
+    assert any(s.startswith("Deleted 1 superseded") for s in said)

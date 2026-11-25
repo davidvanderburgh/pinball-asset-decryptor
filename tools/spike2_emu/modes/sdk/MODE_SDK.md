@@ -7655,6 +7655,63 @@ panel showed them, both marker ids in player order; game 2 with the server down:
 apart, dropped, and the machine played on; game 3, server back: posted as game_number 3.
 Elvira 3 1.13 (its port names no game_over), one player, three balls: after the last drain nothing was pressed, and 30 s later `game 1 over (play stopped with no new ball)` posted 2,269,300, the score the game's own end-of-game screen showed; one report, none between balls. An earlier run whose job pressed Start inside the 30 s sent the finished game's 500,100 at the next game's first ball (`the next game started`).
 
+### Live events during a game (PAD-1575)
+
+David (idea 9): "a live event feed for streaming ... score, ball and mode events over the network to an OBS overlay or
+a second screen". The Network tab's **Also during the game** (under the Score feed's address, off by default) adds a
+`live` line to `scorefeed.cfg`, and with it the runtime posts, besides each game's report, one small JSON object for
+each thing that happens while a game is played, to the same address:
+
+    {"source":"PAD score feed","event":"ball_start","seq":12,"game":"Godzilla Premium/LE 1.16","game_number":3,
+     "ms":81234,"time":1794326400,"players":2,"player":2,"ball":1,"scores":[123450,0]}
+
+| event | when |
+|---|---|
+| `game_start` | the bus's game_start |
+| `ball_start` | the bus's ball_start (after a `player_change` when the player up changed) |
+| `player_change` | the player-up byte changed in a game |
+| `score` | a score changed: at most once a second (LIVE_SCORE_MS), while scores change |
+| `mode_start` / `mode_end` | with `mode` (its name) and `kind`: `card` a mode of the card's own (the base and its layers, looked at ten times a second), `game` one of the game's own modes where the runtime follows their starts (`block_name_<n>`: a card with modes), `multiball` / `bonus` the port's events of those names, on the bus or a site (Godzilla's `mball_start`: through the runtime's event counters, events_arm, armed for this on a card of only the feed) |
+| `tilt` | the port's tilt event |
+| `ball_end` | the bus's ball_end |
+| `game_end` | a game's report is queued: its final scores and number, just before the report itself |
+
+Every event carries the whole state - players, the player up, that player's ball, every score - so an overlay needs
+only the latest. `seq` counts events since boot (a gap: some were dropped); `game_number` is the number the game's
+report will carry; `ms` the runtime's clock. The players and ball are the game's own bytes when `scorefeed.cfg` has
+`players <player> <count>` (the app writes it off co-op's finder, `portcoop.player_change`: the framework's player-up
+byte, the ball in play next to it, and the count of players, so a player added with Start shows at once); without it
+they are counted (the most players seen up, the ball starts of each player).
+
+It never holds the game: its own non-blocking socket, stepped once a tick after the report's own work (so a game's
+end goes out before the next game's start), 1.5 s for each part of a post, and no second try. An event the server
+does not take is dropped and the next ones wait 5 s; 24 wait at most (the oldest go first), and a score update
+waiting is replaced by the next instead of queueing behind it. mode.log:
+
+    score feed: live - while a game is played its events are posted too (bus 0x4d game, 0x25 ball, a ball end, ...)
+    score feed: live - the players and each ball read off the game's own bytes
+    score feed: live - from the port's site events: multiball start multiball end
+    score feed: live - the first event was taken (HTTP 204)
+    score feed: live - an event was not taken (the server refused the connection): dropped, as the next ones are ...
+    score feed: live - the server takes them again (HTTP 204); 3 event(s) dropped meanwhile
+    score feed: live - game 1: 61 event(s) posted, 0 dropped; the live work on 21750 ticks: 4 us a tick on average,
+      at most 921 us, 0 tick(s) over 1 ms (two clock reads back to back took up to 34 us: the host's own pauses)
+
+The sample overlay (`examples/score_feed_overlay/`: `overlay_server.py`, standard-library Python, takes the posts and
+serves `overlay.html`, a transparent page for an OBS Browser source that reads its `/state` four times a second) is
+what the Network tab's **Save the sample overlay...** copies out. Tests: `tests/test_pad1575_live_feed.py`.
+
+**Proof** (emulator, Godzilla LE 1.16, real speed, hidden and muted; the stub server is the sample overlay server on
+127.0.0.1): a card of the runtime with two rig instruments (a mode of ours started by a trigger file, the game's own
+Battle vs Ebirah started and stopped through its rules) and `scorefeed.cfg` with `live` and `players 0x00713b94
+0x007d116c`. Game 1, two players (the second added with Start in ball 1: `players` 2 from the next event on), each
+ball tilted and drained: 61 live events in order - game_start, ball_start p1 b1, the card mode and the battle's
+mode_start / mode_end, then for each ball tilt, ball_end naming the player and ball that ended, player_change,
+ball_start - then game_end with 5,273,940 and 23,940, and the game's own report after it; score updates never closer
+than 1000 ms. Game 2, one player, the server stopped for 20 s mid-game: one refusal said, 3 events dropped (seq
+67 -> 71), the server taken again, the game played on, its game_end and report posted. The live work: 4 us a tick on
+average over 21,750 ticks, at most 921 us, none over 1 ms (game 2, with the outage: 7 us, one tick of 3.9 ms).
+
 ## Online co-op (PAD-1479)
 
 Captain Gordon (Discord): "A peer to peer mode for spike 2 co op mode, where asynchronous gameplay effects a shared

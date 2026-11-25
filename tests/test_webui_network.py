@@ -160,12 +160,14 @@ def test_network_tab_follows_the_era_the_card_switches_to(tmp_path, era, shown):
             assert _network_row(w)['visible'] is True
 
 
-def test_offered_is_stern_spike2_and_spike3_only():
+def test_offered_is_stern_spike2_and_spike3_and_jjp_only():
     class M:
         def __init__(self, key, era):
             self.key, self._era = key, era
     assert ssh_card.offered(M('stern', 'spike3')) and ssh_card.offered(M('stern', 'spike2'))
-    assert not ssh_card.offered(M('stern', 'sam')) and not ssh_card.offered(M('jjp', 'spike3'))
+    assert not ssh_card.offered(M('stern', 'sam'))
+    # PAD-1587: a JJP install takes it too; the other makers do not
+    assert ssh_card.offered(M('jjp', None)) and not ssh_card.offered(M('spooky', None))
 
 
 def test_no_card_picked_says_so(tmp_path, monkeypatch):

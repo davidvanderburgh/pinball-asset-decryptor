@@ -635,6 +635,11 @@ class App:
         if not os.environ.get("PAD_UI_NO_UPDATE_CHECK"):
             # captures and tests never delete the PC's real files
             self.root.after(2500, self._prune_old_versions, True)
+        if not os.environ.get("PAD_UI_NO_UPDATE_CHECK") or os.environ.get(
+                "PAD_PAYLOAD_DIR"):
+            # a payload folder named on purpose is a scratch one: a capture
+            # may tidy it (PAD-1595's own proof shot does)
+            self.root.after(3000, self._prune_payload_cache)
         self._schedule_autosave()
         # PAD-1514: a card image double-clicked in Explorer started this run
         pending = getattr(self.ctx, "open_image", None) if getattr(
@@ -3209,7 +3214,23 @@ class App:
             self._current_run_is_direct_ssd = False
             self.window.set_running(False, mode="write")
             raise
-        threading.Thread(target=self.pipeline.run, daemon=True).start()
+        run = self.pipeline.run
+        if not menu_only:
+            # PAD-1588: a card written whole loses the machine's settings, audits and high scores; a machine running
+            # this game that answers on the network is backed up first (only reads; it says so in the log)
+            from .core import machine_backups
+            if machine_backups.auto_on(self._settings) and machine_backups.known():
+                keep, mfr_key, pipe = machine_backups.keep_of(self._settings), mfr.key, self.pipeline
+
+                def run():
+                    try:
+                        game = machine_backups.game_of_card(image_path, mfr_key)
+                        if game:
+                            machine_backups.before_write(game, keep, log_cb)
+                    except Exception:                   # noqa: BLE001 - the write is never stopped by it
+                        pass
+                    pipe.run()
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_build_send_request(self, address):
         """PAD-1397: the Write tab's Send to machine - build to the Write tab's destination as usual, then send the
@@ -3234,7 +3255,10 @@ class App:
         self.window._set_footer(run_label="Sending")
         self.window.reset_steps(mode="write")
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
-        self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb)
+        from .core import machine_backups
+        keep = machine_backups.keep_of(self._settings) if machine_backups.auto_on(self._settings) else None
+        self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb,
+                                                 backup_keep=keep)
         threading.Thread(target=self.pipeline.run, daemon=True, name="pad-send").start()
 
     def _start_read_card(self, device_path, image_path):
@@ -6351,6 +6375,31 @@ class App:
                     pass                   # window gone
         threading.Thread(target=_run, daemon=True,
                          name="prune-old-versions").start()
+
+    def _prune_payload_cache(self):
+        """Delete emulator downloads this version no longer pins (PAD-1595):
+        a runtime re-cut used to leave its ~400 MB tarball behind for good.
+        Off the main thread; one log line says what went."""
+        from .core import payloads
+
+        def _run():
+            try:
+                lines = payloads.prune_summary(*payloads.prune_cache())
+            except Exception as e:                      # noqa: BLE001
+                lines = ["Couldn't tidy the emulator downloads: %s" % e]
+
+            def _report():
+                for line in lines:
+                    self.window.append_log(
+                        line, "warning" if line.startswith("Couldn't")
+                        else "info")
+            if lines:
+                try:
+                    self.root.after(0, _report)
+                except RuntimeError:
+                    pass                   # window gone
+        threading.Thread(target=_run, daemon=True,
+                         name="prune-payload-cache").start()
 
     def _schedule_autosave(self):
         """(Re-)arm the ⚙ "Save automatically" timer (PAD-541).

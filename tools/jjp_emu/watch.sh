@@ -4,6 +4,7 @@
 #
 # Order matters, and each step is a thing that was learned the hard way:
 #
+#   0. tools    - what the rig needs from this Linux, installed if missing
 #   1. mount    - ISO -> read-only game filesystem (cached; usually a no-op)
 #   2. jail     - overlayfs so a run can never write to the image
 #   3. dongle   - register the Sentinel key the way udev would, start the
@@ -35,6 +36,13 @@ export JJP_ISO
 
 ISO=$JJP_ISO
 step() { echo "== $* =="; }
+
+# The rig's own tools, installed into this Linux when missing (PAD-1590): once
+# the installer put the JJP packages into the app's own Linux, a new PC's
+# default distro - where this rig runs - had none of them.  Not fatal here:
+# each later step names what it still lacks, and mount.sh stops on its own.
+step "tools"
+bash "$HERE/rigtools.sh" || echo "watch.sh: some of the rig's tools are missing - later steps say which"
 
 if [ -n "$ISO" ]; then
     step "mount image"

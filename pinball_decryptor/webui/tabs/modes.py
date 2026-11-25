@@ -466,7 +466,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         from ...plugins.stern import mode_project as _MPk
         self.set(keeps_ic_head=_MPk.KEEPS_IC_HEAD, keeps_ic_note=_MPk.KEEPS_IC_NOTE)   # PAD-1204: their own group
         self.set(feed_on=False, feed_url="", feed_note="", feed_note_kind="", feed_shown=False,   # PAD-1204
-                 feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="", feed_contract=None)
+                 feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="", feed_contract=None,
+                 feed_live=False, feed_live_label="", feed_live_tip="", feed_live_note="",   # PAD-1575
+                 feed_overlay_tip="")
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), mode_shows=[], show_pick={}, rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -1855,8 +1857,46 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 note, kind = why, "err"
             else:
                 note = _SF.NOTE
+        live = bool(project) and _SF.live_on(project)                   # PAD-1575: also during the game
         self.set(feed_shown=shown or on, feed_on=on, feed_url=url, feed_note=note, feed_note_kind=kind,
-                 feed_placeholder=_SF.PLACEHOLDER, feed_contract=_SF.contract(url))   # the Play options tab shows it
+                 feed_placeholder=_SF.PLACEHOLDER, feed_contract=_SF.contract(url),   # the Network tab shows it
+                 feed_live=live, feed_live_label=_SF.LIVE_LABEL, feed_live_tip=_SF.LIVE_TIP,
+                 feed_live_note=_SF.LIVE_NOTE if on and live and kind != "err" else "",
+                 feed_overlay_tip=_SF.OVERLAY_TIP)
+
+    @rpc
+    def set_score_feed_live(self, on):
+        """PAD-1575: tick or untick "Also during the game": the events while a game is played posted too."""
+        from ...core import history_log
+        from ...plugins.stern import score_feed as _SF
+        project = self.project()
+        if not project:
+            return False
+        was = _SF.save_live(project, bool(on))
+        history_log.record(project, [h for h in (history_log.diff_scalar(
+            "modes  score feed during the game", "on" if was else "off", "on" if on else "off"),) if h])
+        self._say("score feed: %s" % ("the events while a game is played are posted too, from the next Write" if on
+                                      else "only each game's final scores are posted, from the next Write"))
+        self._publish_feed(project)
+        return True
+
+    @rpc
+    def save_feed_overlay(self):
+        """PAD-1575: copy the sample overlay (a small server and an OBS browser-source page) into a folder the owner
+        picks."""
+        import os
+        from ...plugins.stern import score_feed as _SF
+        folder = self.window.ask_folder("score_feed_overlay", "Pick a folder for the sample score overlay")
+        if not folder:
+            return False
+        dest = os.path.join(folder, "score_feed_overlay")
+        try:
+            _SF.save_overlay(dest)
+        except OSError as e:
+            self._say("score feed: the sample overlay could not be saved in %s: %s" % (dest, e))
+            return False
+        self._say("score feed: the sample overlay is in %s - README.md there says how to run it" % dest)
+        return True
 
     @rpc
     def set_score_feed(self, on, url=None):

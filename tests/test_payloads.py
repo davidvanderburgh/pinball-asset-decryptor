@@ -344,3 +344,90 @@ def test_the_qemu_source_the_payload_is_built_from_is_pinned_too():
         "the qemu tarball must be pinned by digest")
     assert "sha512sum" in src and "Nothing was unpacked" in src, (
         "and a mismatch must stop the build before anything is unpacked")
+
+
+# ------------------------------------------------- PAD-1595: superseded ones --
+
+def _cached(root, name, body=b"x" * 10, age=7200):
+    import time
+    root.mkdir(parents=True, exist_ok=True)
+    f = root / name
+    f.write_bytes(body)
+    t = time.time() - age
+    os.utime(f, (t, t))
+    return f
+
+
+def test_a_stale_download_beside_the_current_one_is_deleted(sample, cache):
+    root = pathlib.Path(payloads.cache_root())
+    current = pathlib.Path(payloads.cache_path(sample))
+    _cached(root, current.name, BODY)
+    stale = _cached(root, "0f02672384fe-pad-runtime-full.tar.gz", b"y" * 400)
+    stale_part = _cached(root, "75e2b61ccf2b-thing.part")
+    mine = _cached(root, "notes.txt")           # not a name cache_path makes
+    deleted, failed = payloads.prune_cache(keep=[sample])
+    assert failed == []
+    assert sorted(pathlib.Path(p).name for p, _n in deleted) == sorted(
+        [stale.name, stale_part.name])
+    assert dict((pathlib.Path(p).name, n) for p, n in deleted)[stale.name] == 400
+    assert current.exists() and mine.exists()
+    assert not stale.exists() and not stale_part.exists()
+    line, = payloads.prune_summary(deleted, failed)
+    assert line.startswith("Deleted 2 superseded emulator downloads")
+
+
+def test_a_download_under_way_is_never_deleted(sample, cache):
+    root = pathlib.Path(payloads.cache_root())
+    # the current payload's .part: its download is running right now
+    part = _cached(root, pathlib.Path(payloads.cache_path(sample)).name + ".part")
+    # one another copy of the app finished a minute ago, before its import
+    fresh = _cached(root, "cb056136596f-pad-runtime-full.tar.gz", age=60)
+    # one this process is importing
+    held = _cached(root, "d883a6dfc29b-pad-runtime-full.tar.gz")
+    with payloads.in_use(str(held)):
+        deleted, _f = payloads.prune_cache(keep=[sample])
+    assert deleted == []
+    assert part.exists() and fresh.exists() and held.exists()
+    # once the import is over, the held one goes
+    deleted, _f = payloads.prune_cache(keep=[sample])
+    assert [pathlib.Path(p).name for p, _n in deleted] == [held.name]
+
+
+def test_the_default_keep_is_every_pinned_payload_and_the_runtime(cache):
+    from pinball_decryptor.core import runtime
+    root = pathlib.Path(payloads.cache_root())
+    kept = [payloads.cache_path(p) for p in payloads.PAYLOADS.values()
+            if p.sha256] + [payloads.cache_path(runtime.IMAGE)]
+    for path in kept:
+        _cached(root, os.path.basename(path))
+    stale = _cached(root, "e34f7d1f2521-pad-runtime-base.tar.gz")
+    deleted, _f = payloads.prune_cache()
+    assert [p for p, _n in deleted] == [str(stale)]
+    assert all(os.path.exists(p) for p in kept)
+
+
+def test_a_file_windows_will_not_delete_is_reported_not_raised(
+        sample, cache, monkeypatch):
+    root = pathlib.Path(payloads.cache_root())
+    stale = _cached(root, "7ec524367af3-pad-runtime-full.tar.gz")
+
+    def refuse(path):
+        raise PermissionError(13, "The process cannot access the file")
+    monkeypatch.setattr(payloads.os, "remove", refuse)
+    deleted, failed = payloads.prune_cache(keep=[sample])
+    assert deleted == [] and failed[0][0] == str(stale)
+    assert "Couldn't delete" in payloads.prune_summary(deleted, failed)[0]
+
+
+def test_installing_prunes_what_it_supersedes(sample, cache, monkeypatch):
+    root = pathlib.Path(payloads.cache_root())
+    stale = _cached(root, "988a4951564f-thing")
+    monkeypatch.setattr(payloads, "PAYLOADS", {sample.key: sample})
+    monkeypatch.setattr(payloads, "current_payloads", lambda: [sample])
+    said = []
+    got = payloads.ensure(opener=_opener(), installer=lambda p, s: None,
+                          prober=lambda p: False, log=said.append)
+    assert got == [sample.key]
+    assert not stale.exists()
+    assert os.path.exists(payloads.cache_path(sample))
+    assert any(s.startswith("Deleted 1 superseded") for s in said)

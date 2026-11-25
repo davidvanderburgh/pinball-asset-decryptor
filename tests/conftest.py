@@ -172,6 +172,16 @@ def _no_linux_root(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_card_record(tmp_path_factory, monkeypatch):
+    """Every test gets its own empty record of what was written to which card
+    (rawdevice.CardRecord, PAD-1584), so no test reads or writes the
+    developer's own, and one test's card is not remembered in the next."""
+    monkeypatch.setenv("PAD_CARD_RECORD", str(
+        tmp_path_factory.mktemp("cards") / "card_writes.json"))
+    monkeypatch.delenv("PAD_WRITE_EVERY_CHUNK", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_title_cache(tmp_path_factory, monkeypatch):
     """Every test gets its own empty per-build cache (title_reader.cache_dir: ports and
     tables worked out on this machine), so no test reads or writes the developer's own,
@@ -325,6 +335,9 @@ def _isolate_title_cache_session(tmp_path_factory):
     # PAD-1307: a test that starts a rig must never turn off timesyncd in the
     # developer's own distros (core/timesync.py runs real wsl.exe calls).
     os.environ["PAD_KEEP_TIMESYNC"] = "1"
+    # PAD-1595: a successful install prunes the payload download cache, so no
+    # test may ever see the developer's real one.
+    os.environ["PAD_PAYLOAD_DIR"] = str(tmp_path_factory.mktemp("payloads"))
 
 
 

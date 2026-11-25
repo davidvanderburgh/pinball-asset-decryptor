@@ -1249,7 +1249,8 @@ def feed_into(result, game_elf, scratch, url, only):
     if why:
         raise ModeWriteError(why)
     try:
-        text = SF.cfg_text(url, getattr(result.profile, "label", ""), game_elf, only)
+        live = bool(getattr(result, "project", "")) and SF.live_wanted(result.project)     # PAD-1575
+        text = SF.cfg_text(url, getattr(result.profile, "label", ""), game_elf, only, live=live)
     except SF.ScoreFeedError as e:
         raise ModeWriteError(str(e)) from None
     from . import online_coop as OC                 # PAD-1479: the campaign this card plays in
@@ -1264,6 +1265,8 @@ def feed_into(result, game_elf, scratch, url, only):
     result.scorefeed_file = path
     result.lines.append("score feed: %s%s" % (SF.HOW % url, "" if "\nusers " in text
                                               else " (this game's Insider logins are not known: the reports name none)"))
+    if live:                                        # PAD-1575
+        result.lines.append("score feed: and while a game is played, its events (balls, players, scores, modes)")
     return result
 
 

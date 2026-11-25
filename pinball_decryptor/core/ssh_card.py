@@ -16,7 +16,8 @@ from .rawdevice import is_device_path
 from ..plugins.stern.ext4 import Ext4Reader, Ext4Error
 
 # Add entries ONLY with committed functional emulator evidence for this adapter.
-QUALIFIED_PLATFORMS = {'stern-spike2', 'stern-spike3'}  # docs/validation/2026-11-17-extras-ssh*.md
+QUALIFIED_PLATFORMS = {'stern-spike2', 'stern-spike3',  # docs/validation/2026-11-17-extras-ssh*.md
+                       'jjp'}  # PAD-1587: docs/validation/2026-11-25-pad-1587-jjp-remote-access.md
 RESOURCES = Path(__file__).resolve().parents[1] / 'resources' / 'ssh'
 HASHES = {
     'dropbear': '01ccdc69e1047f3c301fad7f0de7d522dde16a5c8cc6684d6846d54714dfe236',
@@ -36,12 +37,20 @@ DIRS = ('/usr', '/usr/local', '/usr/local/bin', '/usr/libexec', '/etc', '/etc/in
 ERAS = ('spike2', 'spike3')
 
 
+#: PAD-1587: the other makers remote access is qualified on (an install ISO the JJP Write builds)
+MAKERS = ('jjp',)
+
+
 def offered(mfr):
-    """True when remote access can go on a card of *mfr* as it is set now (Stern Spike 2 or Spike 3).
+    """True when remote access can go on a card of *mfr* as it is set now (Stern Spike 2 or Spike 3, or a JJP
+    install, PAD-1587).
 
     PAD-1399: the Network tab's rail gate and the tab itself both ask this, so the tab is never hidden on an era
     remote access supports (it was gated on the Spike 2 mode runtime, and so vanished on Spike 3)."""
-    return getattr(mfr, 'key', '') == 'stern' and getattr(mfr, '_era', 'spike2') in ERAS
+    key = getattr(mfr, 'key', '')
+    if key in MAKERS:
+        return True
+    return key == 'stern' and getattr(mfr, '_era', 'spike2') in ERAS
 
 
 def layout(platform='stern-spike2'):
@@ -57,6 +66,9 @@ def layout(platform='stern-spike2'):
                     '/usr/local/libexec', '/etc', '/etc/init.d', '/root', '/root/.ssh'),
                     hook='/etc/init.d/S60padsshd', target='sshd', linked=True, ssh_dir='/root/.ssh',
                     arch='aarch64', hashes=AARCH64_HASHES)
+    if platform == 'jjp':
+        from . import ssh_jjp
+        return ssh_jjp.layout()
     raise ExtrasError('SSH has not been qualified for this card platform.')
 
 def ensure_not_incomplete(path, links_ok=True):
@@ -155,6 +167,10 @@ def _managed(reader):
 
 def _inspect(path, allow_pending=False, key_source=None):
     _regular(path, allow_pending=allow_pending)
+    from . import ssh_jjp
+    if ssh_jjp.is_iso(path):
+        # PAD-1587: a JJP install ISO (its root is partclone inside; a PAD build's Send record says what it carries)
+        return ssh_jjp.inspect_iso(path)
     with open(path, 'rb') as f:
         parts = _partitions(f)
         p2 = next((p for p in parts if p[0] == 2 and p[1] == 0x83), None)

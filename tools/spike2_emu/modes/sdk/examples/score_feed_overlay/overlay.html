@@ -1,0 +1,73 @@
+<!doctype html>
+<!-- The score feed's sample overlay (PAD-1575): served by overlay_server.py, which takes the machine's posts.
+     OBS: add a Browser source with the server's address (http://localhost:8080/ on the computer that runs it),
+     1280 x 300 or so; the background is transparent. Add ?bg=1 for a dark background on a second screen. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Score feed overlay</title>
+<style>
+  html, body { margin: 0; background: transparent; font-family: "Segoe UI", system-ui, sans-serif; color: #fff; }
+  body.bg { background: #101418; }
+  #wrap { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; text-shadow: 0 2px 4px rgba(0,0,0,.7); }
+  #head { display: flex; gap: 16px; align-items: baseline; font-size: 18px; opacity: .9; }
+  #title { font-weight: 600; }
+  #ball { margin-left: auto; font-weight: 700; letter-spacing: .05em; }
+  #players { display: flex; gap: 12px; }
+  .p { flex: 1; background: rgba(0,0,0,.55); border: 2px solid rgba(255,255,255,.15); border-radius: 10px;
+       padding: 8px 14px; min-width: 0; }
+  .p.up { border-color: #ffc83d; background: rgba(60,45,0,.7); }
+  .p .who { font-size: 15px; opacity: .8; }
+  .p .score { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #modes { display: flex; gap: 8px; flex-wrap: wrap; min-height: 28px; }
+  .m { padding: 3px 10px; border-radius: 14px; background: #2f6fd6; font-size: 15px; font-weight: 600; }
+  .m.multiball { background: #d6402f; } .m.bonus { background: #2f9d55; } .m.game { background: #7a4fd0; }
+  #status { font-size: 13px; opacity: .6; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="head"><span id="title">Waiting for the machine…</span><span id="status"></span><span id="ball"></span></div>
+  <div id="players"></div>
+  <div id="modes"></div>
+</div>
+<script>
+  if (new URLSearchParams(location.search).get("bg")) document.body.classList.add("bg");
+  const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+  function draw(s) {
+    document.getElementById("title").textContent = s.game || "Waiting for the machine…";
+    const players = document.getElementById("players");
+    let scores = s.scores || [], n = s.players || scores.length, up = s.player;
+    if (!s.in_game && s.last_game) { scores = s.last_game.scores || []; n = s.last_game.players || scores.length; up = 0; }
+    players.innerHTML = "";
+    for (let i = 0; i < n; i++) {
+      const d = document.createElement("div");
+      d.className = "p" + (s.in_game && up === i + 1 ? " up" : "");
+      d.innerHTML = '<div class="who"></div><div class="score"></div>';
+      d.querySelector(".who").textContent = "Player " + (i + 1);
+      d.querySelector(".score").textContent = fmt(scores[i]);
+      players.appendChild(d);
+    }
+    document.getElementById("ball").textContent = s.in_game && s.ball ? "BALL " + s.ball
+      : s.last_game ? "GAME OVER" : "";
+    const modes = document.getElementById("modes");
+    modes.innerHTML = "";
+    for (const m of (s.in_game ? s.modes || [] : [])) {
+      const c = document.createElement("span");
+      c.className = "m " + (m.kind || "");
+      c.textContent = m.name;
+      modes.appendChild(c);
+    }
+    document.getElementById("status").textContent = s.dropped ? s.dropped + " event(s) missed" : "";
+  }
+  async function poll() {
+    try {
+      const r = await fetch("/state", { cache: "no-store" });
+      if (r.ok) draw(await r.json());
+    } catch (e) { /* the server is away: keep the last picture */ }
+    setTimeout(poll, 250);
+  }
+  poll();
+</script>
+</body>
+</html>

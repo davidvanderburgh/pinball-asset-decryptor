@@ -1913,6 +1913,9 @@ class DecryptionPipeline:
         self._iso_mount = None      # temp mount for ISO
         self._iso_mounted = False   # True if ISO was loop-mounted (vs xorriso)
         self._raw_img_path = None   # extracted raw ext4 (cached between runs)
+        # (wsl dest, host path) the raw image moves to once cleanup has
+        # unmounted it; set by a finished copy phase (PAD-1592)
+        self._image_to_output = None
         # When True, a dongle extract also dumps the game's decrypted crypto
         # routines for the developer (see _phase_dev_capture).  Set by the
         # manufacturer's make_dongle_extract_pipeline factory.
@@ -3758,33 +3761,17 @@ class DecryptionPipeline:
         # Generate checksums for future modification comparison
         self._generate_checksums(wsl_out)
 
-        # Move the raw image to the output folder so the mod pipeline can
-        # mount it directly from there, and /tmp stays clean.
+        # The raw image goes to the output folder too, so the mod pipeline
+        # can mount it from there and /var/tmp stays clean -- but only once
+        # cleanup has unmounted it (PAD-1592).  It is still loop-mounted
+        # read-write here, with the chroot's daemons running on it, so a
+        # copy taken now changes under rsync: rsync refused to delete the
+        # 34 GB source ("Skipping sender remove for changed file") and the
+        # copy in the output folder was a live filesystem mid-write.
         if self._raw_img_path:
-            import os
             img_name = self._raw_img_path.rsplit("/", 1)[-1]
-            dest = f"{wsl_out}/{img_name}"
-            self.log("Moving game image to output folder...", "info")
-            try:
-                # rsync + delete is more reliable than mv across filesystems
-                last_pct = -1
-                for line in self.executor.stream(
-                    f"rsync --info=progress2 --no-inc-recursive --remove-source-files "
-                    f"'{self._raw_img_path}' '{dest}'",
-                    timeout=config.COPY_TIMEOUT,
-                ):
-                    self._check_cancel()
-                    m = re.search(r'(\d+)%', line)
-                    if m:
-                        pct = int(m.group(1))
-                        if pct > last_pct:
-                            last_pct = pct
-                            self.on_progress(pct, 100, line.strip())
-                self.on_progress(100, 100, "Done")
-                win_path = os.path.join(self.output_path, img_name)
-                self.log(f"Game image saved to: {win_path}", "success")
-            except CommandError as e:
-                self.log(f"Warning: Could not move image to output: {e.output}", "info")
+            self._image_to_output = (f"{wsl_out}/{img_name}",
+                                     os.path.join(self.output_path, img_name))
 
     # --- Phase 7: Cleanup ---
 
@@ -3813,9 +3800,12 @@ class DecryptionPipeline:
                 except CommandError:
                     pass
 
-            # Unmount the ext4 image
+            # Unmount the ext4 image: a real unmount first, so the image is
+            # complete on disk before it is moved; lazy only if it is busy.
             try:
-                self.executor.run(f"umount -l '{mp}' 2>/dev/null; true", timeout=30)
+                self.executor.run(
+                    f"umount '{mp}' 2>/dev/null || umount -l '{mp}' "
+                    f"2>/dev/null; true", timeout=60)
             except CommandError:
                 pass
 
@@ -3828,7 +3818,18 @@ class DecryptionPipeline:
         # Clean up ISO mount / extraction directory
         self._discard_iso_scratch()
 
-        # Clean up any leftover raw image in temp dirs (it was moved to output folder)
+        # A finished extract keeps its raw image: it moves to the output
+        # folder now that nothing has it mounted (PAD-1592).
+        pending, self._image_to_output = self._image_to_output, None
+        if pending and self._raw_img_path:
+            dest, win_path = pending
+            self._wait_image_released(self._raw_img_path)
+            self.log("Moving game image to output folder...", "info")
+            if self._move_image(self._raw_img_path, dest):
+                self.log(f"Game image saved to: {win_path}", "success")
+
+        # Whatever is left of the raw image in temp dirs goes: a 34 GB card
+        # must never stay behind in WSL's disk.
         if self._raw_img_path and (self._raw_img_path.startswith("/tmp/") or
                                    self._raw_img_path.startswith("/var/tmp/")):
             try:
@@ -3837,6 +3838,86 @@ class DecryptionPipeline:
                 pass
 
         self.log("Cleanup complete.", "success")
+
+    def _wait_image_released(self, wsl_img, wait_s=20):
+        """Wait until no loop device holds ``wsl_img`` any more.
+
+        ``mount -o loop`` frees its loop device by itself once the mount is
+        gone, but a lazy unmount only lets go when the last process inside
+        the chroot does.  Until then the image can still be written to, so
+        a copy taken meanwhile is not the filesystem the run finished with.
+        """
+        deadline = time.monotonic() + wait_s
+        while True:
+            try:
+                held = self.executor.run(
+                    f"losetup -j '{wsl_img}' 2>/dev/null; true",
+                    timeout=10).strip()
+            except CommandError:
+                return
+            if not held:
+                return
+            if time.monotonic() >= deadline:
+                self.log("  Note: the game image is still attached to a "
+                         "loop device; moving it anyway.", "info")
+                return
+            time.sleep(1)
+
+    #: an rsync --info=progress2 line ("  27,705,573,376  80%  141.66MB/s ...")
+    _RSYNC_PROGRESS = re.compile(r"^\s*[\d,]+\s+\d+%")
+
+    def _move_image(self, src, dest):
+        """Move the card image ``src`` to ``dest`` (another filesystem: the
+        output folder on the Windows drive), with progress.  The source is
+        deleted only once ``dest`` holds every byte of it.
+
+        Returns True when moved.  A failure is one short warning carrying
+        rsync's error, never its progress lines (PAD-1592: a failed move
+        logged ~45 progress lines as the warning).  The caller's temp-dir
+        cleanup still removes a source left behind.
+        """
+        last_pct = -1
+        try:
+            for line in self.executor.stream(
+                f"rsync --info=progress2 --no-inc-recursive '{src}' '{dest}'",
+                timeout=config.COPY_TIMEOUT,
+            ):
+                self._check_cancel()
+                m = re.search(r'(\d+)%', line)
+                if m:
+                    pct = int(m.group(1))
+                    if pct > last_pct:
+                        last_pct = pct
+                        self.on_progress(pct, 100, line.strip())
+            sizes = self.executor.run(
+                f"stat -c%s '{src}' '{dest}'", timeout=30).split()
+            if len(sizes) != 2 or sizes[0] != sizes[1]:
+                raise CommandError(
+                    "stat", 1,
+                    f"the copy is {sizes[-1] if sizes else '?'} bytes, "
+                    f"the image {sizes[0] if sizes else '?'}")
+            self.executor.run(f"rm -f '{src}'", timeout=30)
+        except PipelineError:
+            self.log("Image move canceled.", "info")
+            return False
+        except CommandError as e:
+            why = []
+            for ln in (e.output or "").splitlines():
+                if self._RSYNC_PROGRESS.match(ln):
+                    # rsync glues its closing "rsync error: ..." onto the
+                    # last progress line, with no newline between them
+                    at = ln.find("rsync")
+                    if at < 0:
+                        continue
+                    ln = ln[at:]
+                if ln.strip():
+                    why.append(ln.strip())
+            self.log("Warning: Could not move image to output: "
+                     + ("; ".join(why[-3:]) or f"exit {e.returncode}"),
+                     "info")
+            return False
+        self.on_progress(100, 100, "Done")
+        return True
 
     # ---- debugfs helpers (shared by all pipelines) ----
 
@@ -3895,6 +3976,22 @@ class DecryptionPipeline:
         if name in (".", ".."):
             return None
         return inode, mode, name
+
+    def _note_sent(self, path):
+        """PAD-1587: a file this build wrote into the root, for its Send record."""
+        sent = getattr(self, '_send_paths', None)
+        if sent is None:
+            sent = self._send_paths = set()
+        sent.add(path)
+
+    def _scratch(self, name):
+        """A scratch file of THIS run in /var/tmp (PAD-1587): the names were shared by every JJP build, so one
+        left behind by another user's run (root-owned) stopped the next build at "Permission denied"."""
+        tag = getattr(self, '_scratch_tag', None)
+        if tag is None:
+            import uuid as _uuid
+            tag = self._scratch_tag = _uuid.uuid4().hex[:8]
+        return f"/var/tmp/jjp_{name.replace('.', '_' + tag + '.', 1)}"
 
     def _debugfs_run(self, command, writable=False, timeout=120):
         """Run a single debugfs command against the raw ext4 image.
@@ -4383,23 +4480,7 @@ class ModPipeline(DecryptionPipeline):
 
                 if self._raw_img_path and self._raw_img_path != dest:
                     self.log("Moving modified image to output folder...", "info")
-                    try:
-                        last_pct = -1
-                        for line in self.executor.stream(
-                            f"rsync --info=progress2 --no-inc-recursive --remove-source-files "
-                            f"'{self._raw_img_path}' '{dest}'",
-                            timeout=config.COPY_TIMEOUT,
-                        ):
-                            self._check_cancel()
-                            m = re.search(r'(\d+)%', line)
-                            if m:
-                                pct = int(m.group(1))
-                                if pct > last_pct:
-                                    last_pct = pct
-                                    self.on_progress(pct, 100, line.strip())
-                        self.on_progress(100, 100, "Done")
-                    except CommandError as e:
-                        self.log(f"Warning: Could not move image to output: {e.output}", "info")
+                    self._move_image(self._raw_img_path, dest)
 
                 self.log(f"Modified image ready at: {win_path}", "success")
                 self.on_done(True,
@@ -5018,7 +5099,7 @@ class ModPipeline(DecryptionPipeline):
         # buffering on the stderr redirect.
         convert_cmd = (
             f"set -o pipefail && "
-            f"partclone.ext4 -c -s '{wsl_img}' -o - 2> >(stdbuf -oL tr '\\r' '\\n' > /var/tmp/jjp_ptcl.log) "
+            f"partclone.ext4 -c -s '{wsl_img}' -o - 2> >(stdbuf -oL tr '\\r' '\\n' > {self._scratch('ptcl.log')}) "
             f"| {compressor} "
             f"| split -b {split_size} -a 2 - '{output_prefix}'"
         )
@@ -5032,7 +5113,7 @@ class ModPipeline(DecryptionPipeline):
             f"while kill -0 $PID 2>/dev/null; do\n"
             f"  sleep 3\n"
             f"  # Extract latest progress from partclone log\n"
-            f"  PCT=$(grep -oP 'Completed:\\s*\\K[\\d.]+' /var/tmp/jjp_ptcl.log 2>/dev/null | tail -1)\n"
+            f"  PCT=$(grep -oP 'Completed:\\s*\\K[\\d.]+' {self._scratch('ptcl.log')} 2>/dev/null | tail -1)\n"
             f"  # Get output size\n"
             f"  OSIZE=$(du -sb '{output_prefix}'* 2>/dev/null | awk '{{s+=$1}} END {{printf \"%d\", s}}')\n"
             f"  if [ -n \"$PCT\" ]; then\n"
@@ -5050,7 +5131,7 @@ class ModPipeline(DecryptionPipeline):
             f"wait $PID\n"
             f"exit $?\n"
         )
-        monitor_path = "/var/tmp/jjp_convert_monitor.sh"
+        monitor_path = self._scratch('convert_monitor.sh')
         monitor_b64 = base64.b64encode(monitor_script.encode()).decode()
         self.executor.run(
             f"echo '{monitor_b64}' | base64 -d > {monitor_path} && "
@@ -5086,7 +5167,7 @@ class ModPipeline(DecryptionPipeline):
             log_content = ""
             try:
                 log_content = self.executor.run(
-                    "tail -5 /var/tmp/jjp_ptcl.log 2>/dev/null", timeout=5).strip()
+                    f"tail -5 {self._scratch('ptcl.log')} 2>/dev/null", timeout=5).strip()
             except CommandError:
                 pass
             raise PipelineError("Convert",
@@ -5210,7 +5291,7 @@ class ModPipeline(DecryptionPipeline):
             f"  {map_str} \\\n"
             f"  -end 2>&1\n"
         )
-        script_path = "/var/tmp/jjp_build_iso.sh"
+        script_path = self._scratch('build_iso.sh')
         script_b64 = base64.b64encode(script.encode()).decode()
         self.executor.run(
             f"echo '{script_b64}' | base64 -d > {script_path} && "
@@ -5433,8 +5514,8 @@ class ModPipeline(DecryptionPipeline):
         # Clean up partclone log and temp scripts
         try:
             self.executor.run(
-                "rm -f /var/tmp/jjp_ptcl.log /var/tmp/jjp_convert_monitor.sh "
-                "/var/tmp/jjp_build_iso.sh 2>/dev/null; true", timeout=5)
+                f"rm -f {self._scratch('ptcl.log')} {self._scratch('convert_monitor.sh')} "
+                f"{self._scratch('build_iso.sh')} 2>/dev/null; true", timeout=5)
         except CommandError:
             pass
 
@@ -5983,6 +6064,9 @@ class StandaloneModPipeline(ModPipeline):
         # uses) whose replacement should keep its own full length instead of
         # being trimmed/padded to the original slot.  See _resize_*_to_duration.
         self.keep_full_length_paths = frozenset(keep_full_length_paths or ())
+        # PAD-1587: every file this build writes into the root (its Send record), and the project's remote access
+        self._send_paths = set()
+        self._remote_config = None
 
     def run(self):
         """Execute the standalone mod pipeline."""
@@ -6028,7 +6112,12 @@ class StandaloneModPipeline(ModPipeline):
             self._phase_scan()
             self._check_cancel()
 
-            if not self.changed_files:
+            from . import remote_access
+            try:
+                self._remote_config = remote_access.config_for(self)
+            except remote_access.RemoteAccessError as e:
+                raise PipelineError("Scan", str(e)) from None
+            if not self.changed_files and self._remote_config is None:
                 self.on_done(True,
                     "No changes detected in the assets folder.\n"
                     "Modify files in the output folder and try again.")
@@ -6046,6 +6135,13 @@ class StandaloneModPipeline(ModPipeline):
             self._timed("Encrypt", self._phase_encrypt_standalone)
             self._check_cancel()
 
+            # PAD-1587: the project's remote access, into the same root (checked as it is read back)
+            try:
+                remote_access.apply(self, self._remote_config)
+            except remote_access.RemoteAccessError as e:
+                raise PipelineError("Encrypt", str(e)) from None
+            self._check_cancel()
+
             if self._is_iso():
                 self.on_phase(4)  # Convert
                 self._timed("Convert", self._phase_convert_standalone)
@@ -6054,6 +6150,13 @@ class StandaloneModPipeline(ModPipeline):
                 self.on_phase(5)  # Build ISO
                 self._timed("Build ISO", self._phase_build_iso)
                 self._check_cancel()
+
+                # PAD-1587: what this build changed, file by file, for Send to machine
+                try:
+                    remote_access.write_send_record(self, self._output_iso_path, self._remote_config)
+                except (remote_access.RemoteAccessError, OSError, CommandError) as e:
+                    self.log(f"No Send record for this build ({e}); it installs from a USB stick as "
+                             f"usual, but Send to machine needs it built again.", "warning")
 
             self._succeeded = True
             self.on_phase(cleanup_phase)
@@ -6135,16 +6238,7 @@ class StandaloneModPipeline(ModPipeline):
                 win_path = os.path.join(self.assets_folder, img_name)
                 if self._raw_img_path and self._raw_img_path != dest:
                     self.log("Moving modified image to output folder...", "info")
-                    try:
-                        for line in self.executor.stream(
-                            f"rsync --info=progress2 --no-inc-recursive "
-                            f"--remove-source-files "
-                            f"'{self._raw_img_path}' '{dest}'",
-                            timeout=config.COPY_TIMEOUT,
-                        ):
-                            self._check_cancel()
-                    except CommandError:
-                        pass
+                    self._move_image(self._raw_img_path, dest)
                 self.log(f"Modified image ready at: {win_path}", "success")
                 self.on_done(True,
                     f"Asset modification complete!\n"
@@ -7186,6 +7280,7 @@ class StandaloneModPipeline(ModPipeline):
                 self._debugfs_run(
                     f'write "{staging}" "{entry.path}"',
                     writable=True, timeout=120)
+                self._note_sent(entry.path)  # PAD-1587: the build's Send record
 
                 # One stat serves both jobs: confirm the size landed, and
                 # tell the metadata restore which fields actually need
@@ -7314,6 +7409,7 @@ class StandaloneModPipeline(ModPipeline):
                 self._debugfs_run(
                     f'write "{staging}" "{fs_path}"',
                     writable=True, timeout=120)
+                self._note_sent(fs_path)  # PAD-1587: the build's Send record
                 self._debugfs_restore_inode_meta(fs_path, meta)
                 if meta:
                     perms, uid, gid = meta
@@ -7584,7 +7680,7 @@ class StandaloneModPipeline(ModPipeline):
         convert_cmd = (
             f"set -o pipefail && "
             f"partclone.ext4 -c -s '{wsl_img}' -o - "
-            f"2> >(stdbuf -oL tr '\\r' '\\n' > /var/tmp/jjp_ptcl.log) "
+            f"2> >(stdbuf -oL tr '\\r' '\\n' > {self._scratch('ptcl.log')}) "
             f"| {compressor} "
             f"| split -b {split_size} -a 2 - '{output_prefix}'"
         )
@@ -7596,7 +7692,7 @@ class StandaloneModPipeline(ModPipeline):
             f"while kill -0 $PID 2>/dev/null; do\n"
             f"  sleep 3\n"
             f"  PCT=$(grep -oP 'Completed:\\s*\\K[\\d.]+' "
-            f"/var/tmp/jjp_ptcl.log 2>/dev/null | tail -1)\n"
+            f"{self._scratch('ptcl.log')} 2>/dev/null | tail -1)\n"
             f"  OSIZE=$(du -sb '{output_prefix}'* 2>/dev/null "
             f"| awk '{{s+=$1}} END {{printf \"%d\", s}}')\n"
             f"  if [ -n \"$PCT\" ]; then\n"
@@ -7613,7 +7709,7 @@ class StandaloneModPipeline(ModPipeline):
             f"exit $?\n"
         )
         import base64
-        monitor_path = "/var/tmp/jjp_convert_monitor.sh"
+        monitor_path = self._scratch('convert_monitor.sh')
         monitor_b64 = base64.b64encode(monitor_script.encode()).decode()
         self.executor.run(
             f"echo '{monitor_b64}' | base64 -d > {monitor_path} && "
@@ -7649,7 +7745,7 @@ class StandaloneModPipeline(ModPipeline):
             log_content = ""
             try:
                 log_content = self.executor.run(
-                    "tail -5 /var/tmp/jjp_ptcl.log 2>/dev/null",
+                    f"tail -5 {self._scratch('ptcl.log')} 2>/dev/null",
                     timeout=5).strip()
             except CommandError:
                 pass
@@ -7728,8 +7824,8 @@ class StandaloneModPipeline(ModPipeline):
 
         try:
             self.executor.run(
-                "rm -f /var/tmp/jjp_ptcl.log /var/tmp/jjp_convert_monitor.sh "
-                "/var/tmp/jjp_build_iso.sh 2>/dev/null; true", timeout=5)
+                f"rm -f {self._scratch('ptcl.log')} {self._scratch('convert_monitor.sh')} "
+                f"{self._scratch('build_iso.sh')} 2>/dev/null; true", timeout=5)
         except CommandError:
             pass
 
@@ -9804,6 +9900,17 @@ class DirectSSDModPipeline(StandaloneModPipeline):
             self.on_phase(0)  # Scan
             self._phase_scan()
             self._check_cancel()
+
+            # PAD-1587: remote access goes on with an install build (Build USB ISO), whose Send record Send to
+            # machine needs; writing straight to the SSD changes the game's files only, so say so
+            try:
+                from . import remote_access
+                if remote_access.config_for(self) is not None:
+                    self.log("Remote access (Network tab) is not changed by Write to SSD: it goes on the machine "
+                             "with a USB install build (Build USB ISO). The SSD keeps the remote access it has.",
+                             "warning")
+            except Exception:                           # noqa: BLE001 - only a note
+                pass
 
             if not self.changed_files:
                 self.on_done(True,

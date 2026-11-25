@@ -8,7 +8,8 @@
 | Stern Spike 1 | Unavailable | Distinct ABI/rootfs/boot integration; no passing test of this adapter. |
 | Stern Spike 3, recognized encrypted Buildroot rootfs | Available | Real Fallout LE 0.81.0 image; [SSH lifecycle, encrypted-image preservation and game attract checks passed](2026-11-17-extras-ssh-spike3.md). |
 | CGC Pulp Fiction | Unavailable | Investigated related Dropbear work. Its game OS is inside `emmc.img` inside the installer, with a competing stock OpenSSH Upstart job. This Spike 2 adapter cannot safely apply there; no PAD adapter qualified. |
-| Other CGC, JJP, Spooky, Barrels of Fun, Dutch Pinball, American Pinball, Pinball Brothers | Unavailable | No platform-specific PAD injector and passing emulator qualification. |
+| Jersey Jack Pinball (install ISO) | Qualified (PAD-1587) | x86-64 key-only payload and a systemd hook in the install's root; emulator stand-in proof in `2026-11-25-pad-1587-jjp-remote-access.md`. |
+| Other CGC, Spooky, Barrels of Fun, Dutch Pinball, American Pinball, Pinball Brothers | Unavailable | PAD builds only game updates for them, never the system root a server must go in; see the maker-by-maker reasons in `2026-11-25-pad-1587-jjp-remote-access.md`. |
 
 Availability depends on the card contents, not its filename or manufacturer label. Unrecognized/competing SSH services and unsafe layouts are refused. This does not claim every historical Spike 2 release or altered Linux distribution was tested.
 

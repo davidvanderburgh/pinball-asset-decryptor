@@ -16,6 +16,11 @@ and everything but :func:`restore_settings`, :func:`restart_game` and :func:`res
   is kept beside it as ``nv.pad-old``), checks every file, and starts the game again.
 - :func:`mode_log_tail`: the end of PAD's mode log, for following it while a game is played.
 
+PAD-1587: a Jersey Jack Pinball machine (an x86-64 PC running Ubuntu) gets the same, from its own places: the game's
+logs in ``/jjpe/temp``, the system's (syslog, kern.log, Xorg, the systemd journal), and ``/jjpe/perm`` (where the
+game keeps its adjustments, audits and high scores, in ``vf``).  ``/jjpe/perm`` is a partition of its own, so a
+restore empties it and fills it again, the contents it replaces kept as ``/var/lib/pad/perm.pad-old.tar``.
+
 A copy of the whole card was built and taken out again (David: "takes far too long"): the machine reads its card
 at 3.5 to 6 MB a second, so 16 GB held the game for over an hour, and the settings backup is what is worth keeping.
 """
@@ -62,6 +67,34 @@ df -k /games /dump 2>/dev/null | awk 'NR>1 && NF>=6 {print "disk " $6 " " $4 " "
 [ -f /usr/local/padmode/mode.so ] && echo "pad modes yes"
 '''
 
+#: PAD-1587: a JJP machine's own logs (its jjpe/gen1/scripts/dumplogs.sh collects the same for JJP's support)
+JJP_LOG_LIST = ('for f in /jjpe/temp/*.log* /var/log/syslog /var/log/syslog.1 /var/log/kern.log '
+                '/var/log/Xorg.0.log /var/log/dmesg; do [ -f "$f" ] && echo "$(wc -c < "$f") $f"; done')
+JJP_GAME = '. /jjpe/gen1/setenv.sh >/dev/null 2>&1; echo "$GAMENAME"'
+JJP_REPORT = r'''
+echo "== when"; date; uptime
+echo "== versions"; . /jjpe/gen1/setenv.sh >/dev/null 2>&1; echo "game $GAMENAME"; grep PRETTY_NAME /etc/os-release; uname -r; cat /etc/hostname 2>/dev/null
+echo "== disk"; df -k / /jjpe/perm /jjpe/temp 2>/dev/null
+echo "== memory"; sed -n 1,5p /proc/meminfo
+echo "== processes"; ps -eo pid,etime,rss,args 2>/dev/null | grep -v " \[" | cut -c1-140
+echo "== network"; ip -br addr 2>/dev/null; ip route 2>/dev/null | head -5
+echo "== wifi"; nmcli -t -f ACTIVE,SSID,FREQ,SIGNAL,RATE dev wifi 2>/dev/null | grep "^yes"
+echo "== usb"; lsusb 2>/dev/null
+echo "== pad"; ls -la /usr/local/bin/dropbear /usr/local/sbin/pad-sshd /etc/systemd/system/pad-sshd.service /var/lib/pad/send 2>/dev/null
+echo "== game"; ls -la /jjpe/gen1 /jjpe/perm 2>/dev/null
+echo "== kernel log now"; dmesg 2>/dev/null | tail -n 200
+'''
+JJP_STATUS = r'''
+. /jjpe/gen1/setenv.sh >/dev/null 2>&1; echo "game $GAMENAME"
+echo "system $(. /etc/os-release 2>/dev/null; echo "$PRETTY_NAME")"
+read u _ < /proc/uptime; echo "up ${u%%.*}"
+nmcli -t -f ACTIVE,SSID,FREQ,SIGNAL dev wifi 2>/dev/null | grep "^yes:" | head -1 | sed "s/^/nm /"
+d=$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}'); [ -n "$d" ] && echo "net $d $(ip -4 -br addr show "$d" 2>/dev/null | awk '{print $3}')"
+df -k / /jjpe/perm 2>/dev/null | awk 'NR>1 && NF>=6 {print "disk " $6 " " $4 " " $2}'
+[ -L /etc/systemd/system/multi-user.target.wants/pad-sshd.service ] && echo "pad remote yes"
+[ -f /var/lib/pad/send/ledger.json ] && echo "pad send yes"
+'''
+
 
 class CareError(Exception):
     """Why it could not be done, in words for the user."""
@@ -73,6 +106,26 @@ def _text(answer):
 
 def _sh(machine, script, timeout=60):
     return _text(machine.sh(script, timeout=timeout, check=False)) or ''
+
+
+def kind(machine):
+    """PAD-1587: ``'jjp'`` for a Jersey Jack Pinball machine, ``'stern'`` otherwise (asked once a connection)."""
+    got = getattr(machine, '_care_kind', None)
+    if got is None:
+        out = _sh(machine, '[ -d /jjpe/gen1 ] && [ -f /jjpe/gen1/setenv.sh ] && echo jjp || echo stern', 20).strip()
+        got = 'jjp' if out.endswith('jjp') else 'stern'
+        try:
+            machine._care_kind = got
+        except AttributeError:
+            pass
+    return got
+
+
+def game_on(machine):
+    """The game the machine runs."""
+    if kind(machine) == 'jjp':
+        return _sh(machine, JJP_GAME, 20).strip()
+    return _sh(machine, 'readlink /games/game', 20).strip().split('/')[0]
 
 
 def _human(n):
@@ -91,19 +144,29 @@ def _duration(seconds):
     return '%d h %d min' % (h, m) if h else '%d min' % m
 
 
+#: where each disk the status names is, in words
+_DISKS = {'/games': 'Room on the card, games', '/dump': 'Room on the card, logs',
+          '/': 'Room on the disk, system', '/jjpe/perm': 'Room on the disk, settings'}
+
+
 def parse_status(text):
-    """``[(what, value), ...]`` for the Network tab, from :data:`STATUS`'s answer."""
+    """``[(what, value), ...]`` for the Network tab, from :data:`STATUS`'s (or :data:`JJP_STATUS`'s) answer."""
     got, wifi, disks, pad = {}, {}, [], []
     for line in (text or '').splitlines():
         a = line.split(None, 1)
         if len(a) < 2:
             continue
         key, rest = a[0], a[1].strip()
-        if key in ('game', 'system', 'up'):
+        if key in ('game', 'system', 'up', 'net'):
             got[key] = rest
         elif key == 'wifi' and '=' in rest:
             k, v = rest.split('=', 1)
             wifi[k] = v
+        elif key == 'nm':
+            # PAD-1587: NetworkManager's active Wi-Fi (JJP): yes:SSID:FREQ:SIGNAL
+            f = rest.split(':')
+            if len(f) >= 4:
+                wifi.update(wpa_state='COMPLETED', ssid=f[1], freq=re.sub(r'\D', '', f[2]), signal_pct=f[3])
         elif key == 'disk':
             b = rest.split()
             if len(b) == 3 and b[1].isdigit() and b[2].isdigit():
@@ -126,14 +189,17 @@ def parse_status(text):
             said += ' (%d MHz)' % freq
         if wifi.get('RSSI', '').lstrip('-').isdigit():
             said += ', signal %s dBm' % wifi['RSSI']
+        elif wifi.get('signal_pct', '').isdigit():
+            said += ', signal %s%%' % wifi['signal_pct']
         if wifi.get('LINKSPEED', '').isdigit():
             said += ', link %s Mbit/s' % wifi['LINKSPEED']
         rows.append(('Wi-Fi', said))
     elif wifi:
         rows.append(('Wi-Fi', 'not connected (%s)' % wifi.get('wpa_state', 'unknown')))
+    if got.get('net'):
+        rows.append(('Network', got['net']))
     for mount, free, total in disks:
-        rows.append(('Room on the card, %s' % ('games' if mount == '/games' else 'logs'),
-                     '%s free of %s' % (_human(free), _human(total))))
+        rows.append((_DISKS.get(mount, 'Room on ' + mount), '%s free of %s' % (_human(free), _human(total))))
     names = []
     for item in pad:
         if item.startswith('wifi-startup'):
@@ -144,18 +210,20 @@ def parse_status(text):
             names.append('remote buttons')
         elif item.startswith('modes'):
             names.append("PAD's mode runtime")
+        elif item.startswith('send'):
+            names.append('files sent from PAD')
     rows.append(('From PAD on this card', ', '.join(names) if names else 'remote access only'))
     return rows
 
 
 def status(machine):
-    return parse_status(_sh(machine, STATUS, 40))
+    return parse_status(_sh(machine, JJP_STATUS if kind(machine) == 'jjp' else STATUS, 40))
 
 
 # ------------------------------------------------------------------ logs
 def _files(machine):
     out = []
-    for line in _sh(machine, LOG_LIST, 60).splitlines():
+    for line in _sh(machine, JJP_LOG_LIST if kind(machine) == 'jjp' else LOG_LIST, 60).splitlines():
         a = line.split(None, 1)
         if len(a) == 2 and a[0].isdigit() and a[1].startswith('/'):
             out.append((a[1], int(a[0])))
@@ -166,30 +234,49 @@ def _quote(path):
     return "'" + path.replace("'", "'\\''") + "'"
 
 
+README = ('Logs from a pinball machine, collected by Pinball Asset Decryptor over remote access.\n\n'
+          'report.txt        the machine at that moment: versions, card space, processes, Wi-Fi\n'
+          'var/log/messages  the system log since the machine was switched on\n'
+          'var/log/dmesg     the kernel log at start-up\n'
+          'dump/mode.log     the log of PAD\'s own modes\n'
+          'dump/log/...      the connectivity logs\n\n'
+          'It names your Wi-Fi network and the machine\'s addresses. It holds no password.\n'
+          'Of a long log only the last %d MB is kept.\n' % (LOG_CAP >> 20))
+JJP_README = ('Logs from a Jersey Jack Pinball machine, collected by Pinball Asset Decryptor over remote access.\n\n'
+              'report.txt          the machine at that moment: versions, disk space, processes, network\n'
+              'jjpe/temp/*.log     the game\'s own logs (game.log is what the game and its start-up loop print)\n'
+              'var/log/...         the system log, the kernel log and the display server\'s log\n'
+              'journal.txt         the systemd journal since the machine was switched on\n\n'
+              'It names your network and the machine\'s addresses. It holds no password.\n'
+              'Of a long log only the last %d MB is kept.\n' % (LOG_CAP >> 20))
+
+
 def grab_logs(machine, dest, progress=None):
     """Write the machine's logs and a status report to the zip at *dest*; ``(files, bytes)``."""
-    report = _sh(machine, REPORT, 90)
+    jjp = kind(machine) == 'jjp'
+    report = _sh(machine, JJP_REPORT if jjp else REPORT, 90)
     files = _files(machine)
+    steps = len(files) + (1 if jjp else 0)
     total = 0
     with zipfile.ZipFile(dest, 'w', zipfile.ZIP_DEFLATED) as z:
-        z.writestr('README.txt',
-                   'Logs from a pinball machine, collected by Pinball Asset Decryptor over remote access.\n\n'
-                   'report.txt        the machine at that moment: versions, card space, processes, Wi-Fi\n'
-                   'var/log/messages  the system log since the machine was switched on\n'
-                   'var/log/dmesg     the kernel log at start-up\n'
-                   'dump/mode.log     the log of PAD\'s own modes\n'
-                   'dump/log/...      the connectivity logs\n\n'
-                   'It names your Wi-Fi network and the machine\'s addresses. It holds no password.\n'
-                   'Of a long log only the last %d MB is kept.\n' % (LOG_CAP >> 20))
+        z.writestr('README.txt', JJP_README if jjp else README)
         z.writestr('report.txt', report)
         total += len(report)
         for i, (path, size) in enumerate(files):
             if progress:
-                progress(i, len(files), path)
+                progress(i, steps, path)
             data = machine_screen._bytes_of(machine, 'tail -c %d %s 2>/dev/null' % (LOG_CAP, _quote(path)), 120)
             z.writestr(path.lstrip('/'), data)
             total += len(data)
-    return len(files) + 1, total
+        if jjp:
+            # the systemd journal: what the game's service, the display and the network said since start-up
+            if progress:
+                progress(len(files), steps, 'journal')
+            journal = machine_screen._bytes_of(
+                machine, 'journalctl -b -o short-precise --no-pager 2>/dev/null | tail -c %d' % LOG_CAP, 180)
+            z.writestr('journal.txt', journal)
+            total += len(journal)
+    return steps + 1, total
 
 
 def mode_log_tail(machine, lines=200):
@@ -200,12 +287,20 @@ def mode_log_tail(machine, lines=200):
 # ------------------------------------------------------------------ settings, audits and scores
 MANIFEST = 'pad-machine-settings.json'
 TAR_NAME = 'nv.tar'
+#: PAD-1587: a JJP machine's settings partition, and what of it a backup holds (all but lost+found, the file
+#: system's own)
+JJP_DIR = '/jjpe/perm'
+JJP_TAR = 'perm.tar'
+JJP_BACKUP = 'cd /jjpe && tar cf - --exclude=perm/lost+found perm 2>/dev/null'
+JJP_UPLOAD = '/var/lib/pad/settings-restore.tar'
+JJP_OLD = '/var/lib/pad/perm.pad-old.tar'
 
 
 def backup_settings(machine, dest):
-    """Save the machine's settings, audits and high scores (``/data/nv``) to the zip at *dest*.
-    ``dict(game, files, bytes)``."""
-    raw = machine_screen._bytes_of(machine, 'cd /data && tar cf - nv 2>/dev/null', 180)
+    """Save the machine's settings, audits and high scores (``/data/nv``; ``/jjpe/perm`` on JJP) to the zip at
+    *dest*.  ``dict(game, files, bytes)``."""
+    jjp = kind(machine) == 'jjp'
+    raw = machine_screen._bytes_of(machine, JJP_BACKUP if jjp else 'cd /data && tar cf - nv 2>/dev/null', 180)
     try:
         with tarfile.open(fileobj=io.BytesIO(raw)) as t:
             members = [m for m in t.getmembers() if m.isfile()]
@@ -213,14 +308,15 @@ def backup_settings(machine, dest):
     except tarfile.TarError as e:
         raise CareError("The machine's settings did not arrive whole (%s); try again." % e) from None
     if not sums:
-        raise CareError('The machine has no saved settings yet (%s is empty).' % SETTINGS_DIR)
+        raise CareError('The machine has no saved settings yet (%s is empty).' % (JJP_DIR if jjp else SETTINGS_DIR))
     games = sorted({n.split('/')[1] for n in sums if n.count('/') >= 2})
     manifest = dict(kind='pad-machine-settings', version=1, taken=time.strftime('%Y-%m-%d %H:%M:%S'),
-                    games=games, game=_sh(machine, 'readlink /games/game', 20).strip().split('/')[0],
-                    files=sums, bytes=sum(m.size for m in members))
+                    games=games, game=game_on(machine), files=sums, bytes=sum(m.size for m in members))
+    if jjp:
+        manifest.update(maker='jjp', root='perm')
     with zipfile.ZipFile(dest, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr(MANIFEST, json.dumps(manifest, indent=1, sort_keys=True))
-        z.writestr(TAR_NAME, raw)
+        z.writestr(JJP_TAR if jjp else TAR_NAME, raw)
     return dict(game=manifest['game'], files=len(sums), bytes=manifest['bytes'])
 
 
@@ -229,16 +325,18 @@ def read_backup(path):
     try:
         with zipfile.ZipFile(path) as z:
             manifest = json.loads(z.read(MANIFEST).decode('utf-8'))
-            raw = z.read(TAR_NAME)
+            jjp = isinstance(manifest, dict) and manifest.get('root') == 'perm'
+            raw = z.read(JJP_TAR if jjp else TAR_NAME)
     except (OSError, KeyError, ValueError, zipfile.BadZipFile):
         raise CareError('That file is not a settings backup this app made.') from None
     if not isinstance(manifest, dict) or manifest.get('kind') != 'pad-machine-settings' or not manifest.get('files'):
         raise CareError('That file is not a settings backup this app made.')
+    top = 'perm' if jjp else 'nv'
     try:
         with tarfile.open(fileobj=io.BytesIO(raw)) as t:
             sums = {m.name: hashlib.sha1(t.extractfile(m).read()).hexdigest() for m in t.getmembers() if m.isfile()}
             bad = [m.name for m in t.getmembers()
-                   if not (m.name == 'nv' or m.name.startswith('nv/')) or '..' in m.name.split('/')
+                   if not (m.name == top or m.name.startswith(top + '/')) or '..' in m.name.split('/')
                    or not (m.isfile() or m.isdir())]
     except tarfile.TarError:
         raise CareError('The settings backup is damaged.') from None
@@ -261,13 +359,36 @@ sync
 cd /data && find nv -type f | sort | while read f; do echo "$(sha1sum "$f" | cut -d" " -f1) $f"; done
 '''
 ROLL_BACK = 'cd /data && [ -d nv.pad-old ] && { rm -rf nv; mv nv.pad-old nv; sync; }; rm -rf /data/nv.pad-new'
+#: PAD-1587: /jjpe/perm is a partition (its folder can't be renamed away): what is on it goes into a tar first, it
+#: is emptied and filled from the backup; the rollback empties it and unpacks that tar
+JJP_RESTORE = r'''
+set -e
+[ -d /jjpe/perm ]
+rm -rf /var/lib/pad/settings-new && mkdir -p /var/lib/pad/settings-new
+tar xf @UP@ -C /var/lib/pad/settings-new
+[ -d /var/lib/pad/settings-new/perm ]
+cd /jjpe && tar cf @OLD@.tmp --exclude=perm/lost+found perm && mv -f @OLD@.tmp @OLD@
+find /jjpe/perm -mindepth 1 -maxdepth 1 ! -name lost+found -exec rm -rf {} +
+cp -a /var/lib/pad/settings-new/perm/. /jjpe/perm/
+rm -rf /var/lib/pad/settings-new @UP@
+sync
+cd /jjpe && find perm -type f ! -path "perm/lost+found/*" | sort | while read f; do echo "$(sha1sum "$f" | cut -d" " -f1) $f"; done
+'''.replace('@UP@', JJP_UPLOAD).replace('@OLD@', JJP_OLD)
+JJP_ROLL_BACK = ('[ -f %s ] && { find /jjpe/perm -mindepth 1 -maxdepth 1 ! -name lost+found -exec rm -rf {} +; '
+                 'cd /jjpe && tar xf %s; sync; }; rm -rf /var/lib/pad/settings-new %s'
+                 % (JJP_OLD, JJP_OLD, JJP_UPLOAD))
 
 
 def restore_settings(machine, path, log=None):
     """Put a settings backup back on *machine*: the game is held, ``/data/nv`` swapped (the one it replaces kept
-    as ``/data/nv.pad-old``), every file checked, and the game started again.  ``dict(game, files)``."""
+    as ``/data/nv.pad-old``; on JJP ``/jjpe/perm`` refilled, its old contents kept as
+    ``/var/lib/pad/perm.pad-old.tar``), every file checked, and the game started again.  ``dict(game, files)``."""
     manifest, raw = read_backup(path)
-    game = _sh(machine, 'readlink /games/game', 20).strip().split('/')[0]
+    jjp = kind(machine) == 'jjp'
+    if jjp != (manifest.get('root') == 'perm'):
+        raise CareError('That backup is from a %s machine and this one is a %s machine. It is not put on.'
+                        % (('Stern', 'Jersey Jack Pinball') if jjp else ('Jersey Jack Pinball', 'Stern')))
+    game = game_on(machine)
     if manifest.get('game') and game and manifest['game'] != game:
         raise CareError('That backup is from another game (%s); this machine runs %s. It is not put on.'
                         % (manifest['game'], game))
@@ -276,9 +397,11 @@ def restore_settings(machine, path, log=None):
     machine.pause_game()
     ok = False
     try:
-        with machine.sftp.open('/dump/pad-settings-restore.tar', 'wb') as f:
+        if jjp:
+            _sh(machine, 'mkdir -p /var/lib/pad', 20)
+        with machine.sftp.open(JJP_UPLOAD if jjp else '/dump/pad-settings-restore.tar', 'wb') as f:
             f.write(raw)
-        out = _sh(machine, RESTORE, 180)
+        out = _sh(machine, JJP_RESTORE if jjp else RESTORE, 180)
         got = {}
         for line in out.splitlines():
             a = line.split(None, 1)
@@ -291,7 +414,7 @@ def restore_settings(machine, path, log=None):
     finally:
         if not ok:
             try:
-                _sh(machine, ROLL_BACK, 60)
+                _sh(machine, JJP_ROLL_BACK if jjp else ROLL_BACK, 60)
             except Exception:                               # noqa: BLE001 - the first failure is the one to report
                 pass
         machine.resume_game()

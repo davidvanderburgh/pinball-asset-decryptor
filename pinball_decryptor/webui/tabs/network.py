@@ -31,6 +31,18 @@ SEND_INTRO = ("Changes go to the machine over your network instead of writing th
 
 #: the page's lead: what the tab is for, said to someone who has never heard of either
 INTRO = "For a machine connected to your home network, by the same cable or Wi-Fi Insider Connected uses."
+#: PAD-1587: a JJP machine's Send: the build's changed files go over, no USB stick
+JJP_SEND_INTRO = ("Changes go to the machine over your network instead of installing from a USB stick: only the "
+                  "files your build changed are copied, and the game restarts on them (a game being played ends). "
+                  "Use Send to machine on the Write tab after you change something. Install a build with Remote "
+                  "access on from a USB stick once first; the machine's settings, audits and high scores stay as "
+                  "they are.")
+#: the makers remote access works on, for the note where it does not
+NOT_OFFERED = 'Remote access works on Stern Spike 2 and Spike 3 cards and Jersey Jack Pinball installs only.'
+
+
+def _maker(mfr):
+    return getattr(mfr, 'key', '') or ''
 
 
 def _game_name(game):
@@ -124,8 +136,7 @@ class NetworkTab(TabService):
     def _inspect(self):
         mfr = self.mfr
         if not ssh_card.offered(mfr):
-            return dict(supported=False, reason='Remote access works on Stern Spike 2 and Spike 3 cards only.',
-                        enabled=False, public_keys='')
+            return dict(supported=False, reason=NOT_OFFERED, enabled=False, public_keys='')
         if not self._source():
             # PAD-1399: no card picked yet read as "needs a regular card image file, not a device"
             return dict(supported=False, reason='Select the card image first (Select card tab).',
@@ -251,7 +262,8 @@ class NetworkTab(TabService):
         self.set(project=project, source=self._source(), supported=bool(info['supported'] and os.path.isdir(project)),
                  reason=info['reason'] if project else 'Select a project folder on the Extract tab first.',
                  enabled=enabled, public_keys=keys, error=error, offered=ssh_card.offered(self.mfr),
-                 known=self._known())
+                 known=self._known(), maker=_maker(self.mfr),
+                 send_intro=JJP_SEND_INTRO if _maker(self.mfr) == 'jjp' else SEND_INTRO)
 
     # ---- PAD-1479: online co-op - machines in different places, one shared goal (plugins/stern/online_coop.py)
     #: PAD-1486: in place of the Score feed and Online co-op boxes when they cannot show yet, so they do not just
@@ -765,8 +777,13 @@ class NetworkTab(TabService):
         if not address:
             compat.messagebox.showinfo('Send to machine', "Enter the machine's network address first.")
             return False
-        path = self.window.ask_open('send_image', 'Select the card image to send to the machine',
-                                    filetypes=[('SD card images', '*.raw *.img'), ('All files', '*.*')])
+        if _maker(self.mfr) == 'jjp':
+            # PAD-1587: a JJP build (an install ISO with its Send record beside it)
+            path = self.window.ask_open('send_image', 'Select the JJP build to send to the machine',
+                                        filetypes=[('JJP install builds', '*.iso'), ('All files', '*.*')])
+        else:
+            path = self.window.ask_open('send_image', 'Select the card image to send to the machine',
+                                        filetypes=[('SD card images', '*.raw *.img'), ('All files', '*.*')])
         if not path:
             return False
         game = self.get('machine_game')
@@ -1270,7 +1287,7 @@ class NetworkTab(TabService):
     def on_show(self):
         self.publish()
         self._show_machine()
-        if not self.get('cards_state'):
+        if not self.get('cards_state') and _maker(self.mfr) != 'jjp':     # PAD-1587: no SD card on a JJP
             self.refresh_cards()
 
     def on_hide(self):

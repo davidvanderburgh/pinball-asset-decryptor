@@ -48,6 +48,7 @@ struct gclip_yuv {
     int w, h;                       /* the picture */
     int stride, rows;               /* the Y plane's row length and rows (padded) */
     int ow, oh;                     /* the size it is shown at */
+    long long k;                    /* its frame number since the clip last started */
 };
 void  gclip_want_rgba(struct gclip *g, int on);
 int   gclip_yuv_take(struct gclip *g, struct gclip_yuv *f);

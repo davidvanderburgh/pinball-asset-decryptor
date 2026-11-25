@@ -197,6 +197,9 @@ struct gclip {
     unsigned raw_len[2], raw_size[2];
     int held;
     int want_rgba;                  /* 0: the graphics chip converts (gclip_want_rgba) */
+    /* the clip's own frame number since it last started, for each copy: the scene over it
+     * follows THIS, not the clock (the table, 2026-11-25: the 0s did not line up) */
+    long long pos, raw_k[2];
     int front;
     long long made, taken;          /* frames converted / frames handed out */
     long long last_frame_ms;
@@ -286,6 +289,7 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     const unsigned char *px = *(const unsigned char **)((char *)buf + G.off_data);
     unsigned size = *(unsigned *)((char *)buf + G.off_size);
     int back, want;
+    long long k;
     (void)sink; (void)pad;
     if (!px || !g->ow) return;
     /* a frame too short for its picture (not decoded YUV) is skipped, never read past */
@@ -299,6 +303,7 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     }
     pthread_mutex_lock(&g->mu);
     if (g->closing) { pthread_mutex_unlock(&g->mu); return; }
+    k = g->pos++;
     back = !g->front;
     if (back == g->held) {                  /* the upload is reading it: this one goes */
         g->dropped++;
@@ -333,6 +338,7 @@ static void on_handoff(void *sink, void *buf, void *pad, void *data)
     g->in_cb--;
     if (g->made > g->taken) g->dropped++;   /* the one before was never shown */
     g->front = back;
+    g->raw_k[back] = k;
     g->made++;
     g->last_frame_ms = now_ms();
     if (g->made % 30 == 0)                  /* what a frame costs here (the table's 1.4 fps) */
@@ -412,6 +418,9 @@ struct gclip *gclip_open(const char *path, int max_w, int max_h, char *err, int 
          * passes the demuxer's frames on, which proves the links) */
         const char *dn = getenv("CODESELECT_CLIP_DECODER");
         g->dec = G.factory_make(dn && *dn ? dn : "vpudec", "dec");
+        /* planar I420, as the game asks for ("output-format" is in its strings) and hands
+         * to the graphics chip as GL_VIV_I420 - the table gave NV12 when nothing was said */
+        if (g->dec && !(dn && *dn)) G.object_set(g->dec, "output-format", 1, NULL);
     }
     g->sink = G.factory_make("fakesink", "sink");
     if (!g->pipe || !g->src || !g->demux || !g->queue || !g->dec || !g->sink) {
@@ -498,6 +507,8 @@ static void maybe_loop(struct gclip *g, long long now)
     g->loops++;
     pthread_mutex_lock(&g->mu);
     g->last_frame_ms = now;
+    g->pos = 0;                             /* frame 0 again */
+    g->shown = g->dropped = 0;              /* the caption's fps is per start (the table: "200FPS") */
     pthread_mutex_unlock(&g->mu);
 }
 
@@ -549,6 +560,7 @@ int gclip_yuv_take(struct gclip *g, struct gclip_yuv *f)
         planes(g, f->size, &f->stride, &f->rows);
         f->ow = g->ow;
         f->oh = g->oh;
+        f->k = g->raw_k[i];
         fresh = 1;
     }
     pthread_mutex_unlock(&g->mu);

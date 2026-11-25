@@ -144,7 +144,8 @@ def test_the_card_builder_puts_the_overlay_with_the_test_files(mk, tmp_path):
 def test_the_menu_draws_the_scene_over_the_clip():
     s = _read(SEL, "settings.c")
     assert 'strcpy(dot, ".pado");' in s and "ovl_open(snd, e->g->w, e->g->h" in s
-    assert "ovl_at(st->t_ovl, now - st->t_vstart, &x, &y)" in s
+    assert "ovl_at(st->t_ovl, scene_ms(st, now), &x, &y)" in s
+    assert "    return now - st->t_vstart;" in s           # a .padv / the CPU path: the clock
     assert "st->t_vstart = now;                      /* the scene over it starts again too */" in s
     assert "if (st->t_ovl) { ovl_close(st->t_ovl); st->t_ovl = NULL; }" in s
     c = _read(SEL, "overlay.c")
@@ -212,6 +213,31 @@ def test_the_graphics_chip_converts_a_clip():
     assert c.count("se.video = video_cb;") == 3 and 'getenv("CODESELECT_VIDEO_CPU")' in c
     gfx = _read(SEL, "gfx.c")
     assert "void gfx_clear(struct gfx *g" in gfx and "if (p[3] != 0xff) {" in gfx
+
+
+def test_vivantes_direct_texture_first_as_the_game_does():
+    """The table, 2026-11-25: the one-channel textures went up at ~40 ms a frame (20 fps).  The
+    game asks vpudec for I420 and writes it into a Vivante direct texture; so does the menu, the
+    shader staying for a machine without it.  Emulator (the bridge answers): 30 fps."""
+    e = _read(SEL, "egl_stern.c")
+    assert 'eglGetProcAddress("glTexDirectVIV")' in e and 'eglGetProcAddress("glTexDirectInvalidateVIV")' in e
+    assert "#define GL_VIV_I420        0x8FC5" in e
+    assert "e->v_on = video_direct(e, data, fourcc, w, h, stride, rows) == 0;" in e
+    assert "p_viv_inval(GL_TEXTURE_2D);" in e
+    g = _read(SEL, "gstclip.c")
+    assert 'G.object_set(g->dec, "output-format", 1, NULL);' in g
+
+
+def test_the_scene_follows_the_clips_own_frame():
+    """The table, 2026-11-25: timed by the clock, the scene ran ahead of a clip a little behind its
+    pace.  Each copy carries its frame number since the clip started; the caption's fps restarts
+    with the clip too ("200FPS")."""
+    g = _read(SEL, "gstclip.c")
+    assert "k = g->pos++;" in g and "g->raw_k[back] = k;" in g and "f->k = g->raw_k[i];" in g
+    assert "g->pos = 0;" in g and "g->shown = g->dropped = 0;" in g
+    s = _read(SEL, "settings.c")
+    assert "return (long long)((double)st->t_vk * 1000.0 / vid_fps(st->t_vid));" in s
+    assert "im = ovl_at(st->t_ovl, scene_ms(st, now), &x, &y);" in s
 
 
 def test_closing_a_clip_waits_for_a_frame_under_way():

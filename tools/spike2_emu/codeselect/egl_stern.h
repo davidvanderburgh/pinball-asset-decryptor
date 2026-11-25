@@ -24,6 +24,11 @@ struct egl_stern {
     unsigned yprog, yvao, yvbo, ytex[3];
     int y_on, y_nv12, y_stride, y_rows;
     int y_ok;                 /* 1 made, -1 refused (the CPU draws the clip instead) */
+    /* Vivante's direct texture (GL_VIV_direct_texture), the game's own way: the frame is
+     * written into the texture's memory and the texture unit converts YUV itself */
+    unsigned vtex;
+    int v_on, v_w, v_h, v_fmt, v_bad;
+    unsigned char *v_pl[3];
 };
 
 /* Bring the display up. Retries the whole sequence `retries` times, `retry_ms`

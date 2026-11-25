@@ -120,6 +120,7 @@ struct state {
     struct ovl *t_ovl;                       /* the scene over it (overlay.h), or NULL */
     int t_gpu;                               /* the graphics chip draws the clip (test_gpu) */
     int t_vw, t_vh;                          /* ...at this size, centred (0: no frame yet) */
+    long long t_vk;                          /* ...and the clip's frame number on screen (-1: none) */
     const struct art_image *t_ovl_shown;     /* the scene's picture on the canvas now */
     long long t_perf_due, t_draw_ms;         /* the video's 5 s account in the log */
     int t_draws;
@@ -440,6 +441,7 @@ static void test_unload(struct state *st)
     if (st->t_gpu && st->e->video) st->e->video(st->e->ctx, NULL, 0, 0, 0, 0);
     st->t_gpu = 0;
     st->t_vw = st->t_vh = 0;
+    st->t_vk = -1;
     st->t_ovl_shown = NULL;
     if (st->t_ovl) { ovl_close(st->t_ovl); st->t_ovl = NULL; }
     if (st->t_vsound) {
@@ -630,6 +632,7 @@ static int test_tick(struct state *st, long long now)
                 } else {
                     st->t_vw = f.ow;
                     st->t_vh = f.oh;
+                    st->t_vk = f.k;
                     changed = first ? 2 : 1;            /* the first one cuts the hole */
                 }
             }
@@ -839,6 +842,16 @@ static void draw_colour(struct state *st)
 
 /* THE TEST PICTURE UP, full screen, through the correction picked; then the
  * caption, which is never corrected */
+/* the scene's time: the clip's own frame on screen when the graphics chip draws it (the
+ * table, 2026-11-25: on the clock, the scene ran ahead of a clip a little behind its pace
+ * and the 0s did not line up), else the clock since the clip started */
+static long long scene_ms(const struct state *st, long long now)
+{
+    if (test_gpu(st) && st->t_vk >= 0 && vid_fps(st->t_vid) > 0)
+        return (long long)((double)st->t_vk * 1000.0 / vid_fps(st->t_vid));
+    return now - st->t_vstart;
+}
+
 /* THE LAYERED TEST (overlay.h): the scene's frame for the clip's time, over the clip,
  * after the colour correction - the scene is the game's own drawing, not the picture
  * under test; the canvas is centred on the screen, as the clip is */
@@ -848,7 +861,7 @@ static void draw_overlay(struct state *st, long long now)
     const struct art_image *im;
     int x, y, cw, ch;
     if (!st->t_ovl) return;
-    im = ovl_at(st->t_ovl, now - st->t_vstart, &x, &y);
+    im = ovl_at(st->t_ovl, scene_ms(st, now), &x, &y);
     st->t_ovl_shown = im;
     if (!im) return;
     ovl_canvas(st->t_ovl, &cw, &ch);
@@ -975,7 +988,7 @@ static void draw_test_frame(struct state *st)
          * only when the scene over it moves to another picture */
         int ox, oy, cw, ch;
         if (!st->t_ovl || !st->t_vw) return;
-        if (ovl_at(st->t_ovl, sel_now_ms() - st->t_vstart, &ox, &oy) == st->t_ovl_shown) return;
+        if (ovl_at(st->t_ovl, scene_ms(st, sel_now_ms()), &ox, &oy) == st->t_ovl_shown) return;
         ovl_canvas(st->t_ovl, &cw, &ch);
         x = (W - st->t_vw) / 2;
         y = (H - st->t_vh) / 2;

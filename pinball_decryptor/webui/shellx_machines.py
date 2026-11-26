@@ -11,7 +11,9 @@ the row links to the page.
 
 ``shellx.machines``::
 
-    {"rows": [...], "watch": bool, "watch_text": str, "checking": bool}
+    {"rows": [...], "watch": bool, "watch_text": str, "checking": bool,
+     "open": bool (PAD-1585: its own page, from the top bar), "network": [...] (machines remote access found
+     that no row runs), "newer_count": int}
 """
 
 import datetime
@@ -62,8 +64,10 @@ class MachinesMixin:
     def _machines_init(self):
         self._mach_token = 0
         self._mach_checking = False
+        self._mach_open = False
+        self._mach_last = ([], False, [])
         self.set(machines={"rows": [], "watch": False, "watch_text": "",
-                           "checking": False})
+                           "checking": False, "open": False, "network": [], "newer_count": 0})
         self.ctx.loop.after(0, self._machines_refresh)
         self.ctx.loop.after(WATCH_FIRST_MS, self._machines_tick)
 
@@ -96,18 +100,72 @@ class MachinesMixin:
             except Exception:                           # noqa: BLE001
                 log.exception("My machines rows")
                 built = []
-            self.ctx.loop.post(self._machines_publish, token, built, on)
+            network = _network_machines()
+            self.ctx.loop.post(self._machines_publish, token, built, on, network)
 
         threading.Thread(target=work, name="pad-machines", daemon=True).start()
 
-    def _machines_publish(self, token, rows, on):
+    def _machines_publish(self, token, rows, on, network=()):
         if token != self._mach_token:
             return
         if on:
             self._tell_newer(rows)
+        rows, unlinked = link_network(rows, network)
+        self._mach_last = (rows, on, unlinked)
+        self._machines_set()
+
+    def _machines_set(self):
+        rows, on, unlinked = self._mach_last
         self.set(machines={"rows": rows, "watch": on,
                            "watch_text": self._watch_text(rows, on),
-                           "checking": self._mach_checking})
+                           "checking": self._mach_checking,
+                           "open": bool(self._mach_open), "network": unlinked,
+                           "newer_count": sum(1 for r in rows if r.get("newer"))})
+
+    # -- the page (PAD-1585: its own place, from the top bar) ----------------------
+    @rpc
+    def machines_open(self):
+        """My machines' own page; Getting started closes (one page over the app at a time)."""
+        self._mach_open = True
+        if getattr(self, "_gs_open", False):
+            self.getting_started_close()
+        self._machines_set()
+        self._machines_refresh()
+        return True
+
+    @rpc
+    def machines_close(self):
+        self._mach_open = False
+        self._machines_set()
+        return True
+
+    @rpc
+    def machines_go_network(self):
+        """The empty page's way to remote access: Stern's Network tab (Find my machine)."""
+        if not self._enter("stern"):
+            return False
+        try:
+            self.window.select_tab("network")
+        except Exception:                               # noqa: BLE001
+            return False
+        return True
+
+    @rpc
+    def machines_add_network(self, address):
+        """A machine remote access found: the card image it runs is picked (My machines knows a machine by its
+        card), and the machine is linked to *address*, so Update's Send to machine goes to it."""
+        from ..core import machines
+        found = next((n for n in _network_machines() if n["address"] == address), None)
+        what = found["title"] if found and found.get("title") else "the machine"
+        path = self._pick_card("Pick the card image %s at %s runs" % (what, address))
+        if not path:
+            return None
+        mid = self.machines_add(path, name=None)
+        if mid:
+            machines.set_address(self.app._settings, mid, address)
+            self._mach_save()
+            self._machines_refresh()
+        return mid
 
     def _tell_newer(self, rows):
         """Newer code for a machine is said once, wherever the owner is (the
@@ -123,8 +181,8 @@ class MachinesMixin:
         if not fresh:
             return
         for r in fresh:
-            text = ("%s has %s %s out; %s runs %s. My machines (manufacturer "
-                    "menu) links to %s."
+            text = ("%s has %s %s out; %s runs %s. My machines (top bar) "
+                    "updates it, and links to %s."
                     % (r["maker"], r["title"], r["newer"], r["name"],
                        r["build"], r["page_words"]))
             self.window.append_log(text, "info")
@@ -157,6 +215,8 @@ class MachinesMixin:
                "project_missing": bool(found) and not os.path.isdir(found[0][0]),
                "more_projects": [f for f, _w, _l in found[1:]],
                "newer": "", "newer_url": "",
+               # PAD-1585: the game it runs (to find it on the network) and the address remote access reaches it at
+               "game": (info or {}).get("key") or "", "address": m.get("address") or "",
                # PAD-1585: Update on a multi-boot card updates every image of the game on it
                "multi": mfr == "stern" and os.path.isfile(card) and _multi(card)}
         if info and code_watch.has_source(mfr):
@@ -437,6 +497,9 @@ class MachinesMixin:
     def _enter(self, mfr_key):
         """Switch to the machine's manufacturer (Spike 2 era) as a click on
         its picker card does.  False when it is not loaded or a run is on."""
+        if getattr(self, "_mach_open", False):          # PAD-1585: the working view, not the page over it
+            self._mach_open = False
+            self._machines_set()
         if self.window._is_running():
             return False
         mfr = next((m for m in self.window.manufacturers
@@ -536,6 +599,13 @@ class MachinesMixin:
                 "settings." % (how, card))
 
         def built(build, workspace, raw):
+            if r.get("address"):
+                # PAD-1585: the machine remote access reaches this one at is the one Send to machine uses
+                try:
+                    from ..core import pad_ssh_key
+                    pad_ssh_key.select_machine(r["address"])
+                except Exception:                       # noqa: BLE001
+                    log.exception("select the machine for Send")
             w = self.window
             w.write_upd_var.set(raw)
             w.write_assets_var.set(workspace)
@@ -567,6 +637,45 @@ class MachinesMixin:
             return False
         self.window.select_tab("write")
         return True
+
+
+def _network_machines():
+    """PAD-1585: the machines remote access found (Network tab, remote_access/machines.json), each
+    ``{"address", "game", "title"}``; [] when it has none or the file cannot be read."""
+    try:
+        from ..core import pad_ssh_key
+        found = pad_ssh_key.machines()
+    except Exception:                                   # noqa: BLE001
+        return []
+    out = []
+    for m in found:
+        game = m.get("game") or ""
+        title = ""
+        if game:
+            try:
+                from ..core import machines
+                rel = machines.release_info({"manufacturer": "stern", "sidx": game + "-0_00_0.sidx"}) or {}
+                title = " ".join(x for x in (rel.get("title"), (rel.get("edition") or "").split(" /")[0]) if x)
+            except Exception:                           # noqa: BLE001
+                title = ""
+        out.append({"address": m["address"], "game": game, "title": title or game.replace("_", " ").title()})
+    return out
+
+
+def link_network(rows, network):
+    """*rows* with each one's network address - the one it was linked to, else the one machine remote access found
+    running its game (several of the same game: none is guessed) - and the found machines no row runs.
+    -> ``(rows, unlinked)``."""
+    rows = [dict(r) for r in rows]
+    taken = {r["address"] for r in rows if r.get("address")}
+    for r in rows:
+        if r.get("address") or not r.get("game"):
+            continue
+        same = [n for n in network if n["game"] == r["game"] and n["address"] not in taken]
+        if len(same) == 1:
+            r["address"] = same[0]["address"]
+            taken.add(r["address"])
+    return rows, [n for n in network if n["address"] not in taken]
 
 
 def _multi(card):

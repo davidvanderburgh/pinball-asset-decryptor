@@ -394,6 +394,7 @@ function TopBar({ shell }) {
   const sx = useNs("shellx");
   const working = shell.view === "mfr";
   const gsOpen = !!(sx.getting_started && sx.getting_started.open);
+  const machOpen = !!(sx.machines && sx.machines.open);
   const dots = shell.gear_dots || {};
   const connectedNow = useConnected();
   const [connected, setShown] = useState(true);
@@ -431,6 +432,10 @@ function TopBar({ shell }) {
         onClick=${() => call(gsOpen ? "shellx.getting_started_close" : "shellx.getting_started_open")}
         ...${tip("Short videos and steps for the common jobs: extract a card, swap a song, build and flash, multi-boot.")} aria-label="Getting started">
         <${Icon} name="play" /><span class="hide-narrow">Getting started</span></button>
+    <button type="button" class=${cx("btn sm sx-mach-open", machOpen && "on")}
+        onClick=${() => call(machOpen ? "shellx.machines_close" : "shellx.machines_open")}
+        ...${tip(MACH.header(sx.machines || {}))} aria-label="My machines">
+        <${Icon} name="sd" /><span class="hide-narrow">My machines</span>${(sx.machines || {}).newer_count ? html`<span class="sx-mach-badge">${sx.machines.newer_count}</span>` : null}</button>
     <button type="button" class="btn sm sx-discord-btn" onClick=${() => call("shellx.open_discord")}
         ...${tip("Join the PAD Discord server: ask questions, share what you made and hear about new releases.")} aria-label="Join our Discord">
         <${Icon} name="discord" /><span class="hide-narrow">Discord</span></button>
@@ -929,6 +934,19 @@ const MACH = {
   transfer: { head: "Transfer Mods", lines: ["Opens this machine's project and the Mod Pack tab's transfer, with this project as the one whose mods move.", "Pick the new code's card image there."] },
   modpack: { head: "Mod Pack", lines: ["Opens this machine's project on the Mod Pack tab: export its changes as a pack, to import into a project of newer code."] },
   noProject: (r) => "No project of this " + r.noun + " yet. Extract opens the Extract tab with it picked; the project you make from it joins this row.",
+  lede: "The pinball machines you own, each by the file it runs. PAD shows the build and project of each, tells you when the maker has newer code, and updates your work onto it.",
+  emptyHead: "Add the machines you own",
+  emptyText: "One row per machine: the card image or install file it runs. Any machine can be added, with or without remote access.",
+  wayCard: "From its card image",
+  wayCardText: "The .raw or .img of a Stern SD card (Save card as image on Select card reads one), a Jersey Jack install ISO or a Barrels of Fun .fun.",
+  wayNet: "Found on your network",
+  wayNetText: "A Stern machine with remote access (Network tab) shows up here once Find my machine finds it. Add it with the card image it runs, and Update's Send to machine goes straight to it.",
+  wayNetNone: "None found yet: set up remote access on the Network tab, then Find my machine.",
+  netHead: "Found on your network",
+  netText: "Remote access found these machines. Add one with the card image it runs to update it from here.",
+  netAdd: (n) => ({ head: "Add " + (n.title || "this machine"), lines: ["Pick the card image the machine at " + n.address + " runs: My machines knows a machine by its card.", "It stays linked to " + n.address + ", so Update's Send to machine goes to it."] }),
+  address: (r) => ({ head: "On your network", lines: [r.name + " is reached at " + r.address + " (remote access, Network tab).", "Update sends to this machine."] }),
+  header: (m) => ({ head: "My machines", lines: [(m.rows || []).length ? (m.rows.length + " machine" + (m.rows.length === 1 ? "" : "s")) + (m.newer_count ? ": newer game code is out for " + m.newer_count + "." : ".") : "The pinball machines you own: add one to see its build, hear about new code and update your work onto it."] }),
 };
 
 function MachineRow({ r }) {
@@ -948,6 +966,7 @@ function MachineRow({ r }) {
         <span class="notr">${r.title}${r.edition ? html` <span class="muted">${r.edition}</span>` : null}</span>
         ${r.build ? html`<${Chip} kind="info" sm>${r.build}<//>` : null}
         <${Chip} sm kind=${r.lineage === "Stock" ? "" : "warn"}>${r.lineage}<//>
+        ${r.address ? html`<${Chip} sm kind="info" title=${MACH.address(r)}><${Icon} name="globe" />${r.address}<//>` : null}
         ${r.newer ? html`<button type="button" class="mach-newer" onClick=${() => call("shellx.machines_open_page", r.id)}
             ...${tip(MACH.newer({ ...r, build_next: r.newer }))}><${Icon} name="star" />${r.newer} is out<${Icon} name="external" /></button>` : null}
       </div>
@@ -969,22 +988,48 @@ function MachineRow({ r }) {
   </div>`;
 }
 
-function MyMachines({ running }) {
+// PAD-1585: My machines is a page of its own, opened from the top bar (David: "it's out of place on the
+// manufacturer page"), as Getting started is.
+function MyMachines({ shell }) {
   const sx = useNs("shellx");
   const m = sx.machines || { rows: [] };
+  const running = shell.running;
   useEffect(() => { call("shellx.machines_refresh"); }, []);
   const rows = m.rows || [];
-  return html`<section class="mach">
-    <div class="row wrap" style="align-items:center;gap:8px 16px">
-      <h2 class="h1 grow" style="margin:0;font-size:24px">My machines</h2>
+  const net = m.network || [];
+  const working = shell.view === "mfr";
+  const add = html`<${Button} drop icon="plus" kind=${rows.length ? "" : "primary"} disabled=${running} title=${MACH.add}
+      onClick=${() => call("shellx.machines_add")}>${rows.length ? "Add machine…" : "Add a card image…"}<//>`;
+  return html`<div class="picker sx-mach-page"><div class="inner">
+    <div class="row wrap" style="align-items:flex-end;gap:12px 24px">
+      <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">My machines</h1>
+        <p class="dim" style="margin:6px 0 0">${MACH.lede}</p></div>
       ${rows.length ? html`<${Check} checked=${m.watch === true} title=${MACH.watch} label="Check for new game code once a day"
         onChange=${(v) => call("shellx.machines_set_watch", v)} />` : null}
-      <${Button} drop icon="plus" disabled=${running} title=${MACH.add} onClick=${() => call("shellx.machines_add")}>Add machine…<//>
+      ${rows.length ? add : null}
+      <${Button} cls="sx-mach-close" onClick=${() => call("shellx.machines_close")}>${working && shell.mfr ? "Back to " + shell.mfr.display : "Choose a manufacturer"}<//>
     </div>
-    ${rows.length ? html`<div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} />`)}</div>
-      ${m.watch_text ? html`<div class="muted small">${m.watch_text}</div>` : null}`
-      : html`<p class="dim" style="margin:0">${MACH.intro}</p>`}
-  </section>`;
+    ${rows.length ? html`<section class="mach"><div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} />`)}</div>
+      ${m.watch_text ? html`<div class="muted small">${m.watch_text}</div>` : null}</section>`
+      : html`<section class="mach-empty">
+        <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="sd" /></span>
+        <div class="stack grow" style="gap:12px">
+          <div><h2 class="h2" style="margin:0">${MACH.emptyHead}</h2><p class="dim" style="margin:4px 0 0">${MACH.emptyText}</p></div>
+          <ol class="mach-ways">
+            <li><div class="grow"><b>${MACH.wayCard}</b><div class="dim small">${MACH.wayCardText}</div></div>${add}</li>
+            <li><div class="grow"><b>${MACH.wayNet}</b><div class="dim small">${net.length ? MACH.wayNetText : MACH.wayNetNone}</div></div>
+              ${net.length ? null : html`<${Button} icon="globe" onClick=${() => call("shellx.machines_go_network")}>Network tab<//>`}</li>
+          </ol>
+        </div>
+      </section>`}
+    ${net.length ? html`<section class="mach">
+      <div><h2 class="h2" style="margin:0">${MACH.netHead}</h2><p class="dim small" style="margin:2px 0 0">${MACH.netText}</p></div>
+      <div class="mach-list">${net.map((n) => html`<div class="mach-row mach-net" key=${n.address}>
+        <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="globe" /></span>
+        <div class="stack grow" style="gap:2px"><span class="t">${n.title || "A Stern machine"}</span><span class="muted small mono">${n.address}</span></div>
+        <${Button} size="sm" icon="plus" disabled=${running} title=${MACH.netAdd(n)} onClick=${() => call("shellx.machines_add_network", n.address)}>Add with its card image…<//>
+      </div>`)}</div></section>` : null}
+  </div></div>`;
 }
 
 // --------------------------------------------------------------- picker
@@ -996,7 +1041,6 @@ function Picker({ shell }) {
   const sx = useNs("shellx");
   const cards = sx.picker && sx.picker.length ? sx.picker : (shell.mfrs || []).map((m) => ({ ...m, stats: "", letter: "", peek: "" }));
   return html`<div class="picker"><div class="inner">
-    <${MyMachines} running=${shell.running} />
     <div class="row" style="align-items:flex-end;gap:16px">
       <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">Choose a manufacturer</h1>
         <p class="dim" style="margin:6px 0 0">Pick the maker of the game you are working on. You can switch at any time from the manufacturer menu in the top bar.</p>
@@ -1118,6 +1162,7 @@ export function Shell() {
   const shell = useNs("shell");
   const sx = useNs("shellx");
   const gsOpen = !!(sx.getting_started && sx.getting_started.open);
+  const machOpen = !!(sx.machines && sx.machines.open);
   const [logOpen, setLogOpen] = useState(() => { try { return localStorage.getItem("pad.log.open") !== "0"; } catch (e) { return true; } });
   const [logH, setLogH] = useState(() => { try { return Number(localStorage.getItem("pad.log.h")) || 150; } catch (e) { return 150; } });
   useEffect(() => { try { localStorage.setItem("pad.log.open", logOpen ? "1" : "0"); localStorage.setItem("pad.log.h", String(Math.round(logH))); } catch (e) {} }, [logOpen, logH]);
@@ -1170,7 +1215,7 @@ export function Shell() {
   return html`<div class="app">
     <${TopBar} shell=${shell} />
     <${Banners} shell=${shell} />
-    ${gsOpen ? html`<${GettingStarted} shell=${shell} />` : shell.view === "picker" ? html`<${Picker} shell=${shell} />` : html`
+    ${gsOpen ? html`<${GettingStarted} shell=${shell} />` : machOpen ? html`<${MyMachines} shell=${shell} />` : shell.view === "picker" ? html`<${Picker} shell=${shell} />` : html`
       <${Prereqs} shell=${shell} />
       <div class="body">
         <${Rail} shell=${shell} />

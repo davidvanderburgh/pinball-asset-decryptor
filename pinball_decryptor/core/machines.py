@@ -123,6 +123,17 @@ def add(settings, card, info, name, manufacturer, stamp=""):
     return entry
 
 
+def set_address(settings, mid, address):
+    """PAD-1585: the network address remote access reaches machine *mid* at ("" unlinks it). True when stored."""
+    rows = entries(settings)
+    for e in rows:
+        if e.get("id") == mid:
+            e["address"] = (address or "").strip()
+            settings[SECTION] = rows
+            return True
+    return False
+
+
 def rebind(settings, mid, card, info):
     """Point machine *mid* at another card (new code, a new build)."""
     rows = entries(settings)

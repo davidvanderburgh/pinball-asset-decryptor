@@ -69,6 +69,8 @@ class GettingStartedMixin:
     @rpc
     def getting_started_open(self):
         self._gs_open = True
+        if getattr(self, "_mach_open", False):          # PAD-1585: one page over the app at a time
+            self.machines_close()
         self._gs_publish()
         return True
 

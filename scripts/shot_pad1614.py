@@ -2,8 +2,8 @@
 
     python scripts/shot_pad1614.py <repo> <out.png> --screen menu|svcmenu
 
-menu: the Multi-boot tab's Menu settings dialog, centred on Hold BACK. After, the Boot menu and After a game rows
-sit under it (Boot menu set to the right flipper choice, so After a game is live). svcmenu: the Service menu tab on a
+menu: the Multi-boot tab's Menu settings dialog, centred on Hold BACK. After, Back to this menu (set to Either) heads
+the Hold BACK and After a game rows. svcmenu: the Service menu tab on a
 scratch project made from the Godzilla LE 1.16 card; after, BOOT MENU FLIPPER is a row of its own, ticked.
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
@@ -65,9 +65,9 @@ def main():
                 time.sleep(3)
                 page.get_by_role("button", name="Menu settings…").first.click()
                 time.sleep(2)
-                pick = page.locator("#mb-f-boot_menu")
+                pick = page.locator("#mb-f-way_back")
                 if pick.count():
-                    pick.select_option("flipper")
+                    pick.select_option("both")          # BACK or the right flipper: every row live
                     time.sleep(1)
                 line = page.locator(".mb-dlg-menu").get_by_text("Hold BACK (s):", exact=False).first
                 page.evaluate("(el) => el.scrollIntoView({block: 'center'})", line.element_handle())

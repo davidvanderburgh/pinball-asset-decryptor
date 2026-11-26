@@ -44,6 +44,10 @@
  *                            menu; otherwise that image boots, and the flipper
  *                            comes back to the menu from attract as with 'flipper'.
  *                            An unknown word is warned about and read as 'menu'
+ *   back_hold=<seconds>      PAD-1309: BACK held this long in a game restarts into the
+ *                            menu (padmenu.so; default 3, 0 off).  A card that says
+ *                            boot_menu= gets a line on the menu naming the ways back
+ *                            that are on (BACK, the right flipper, both)
  *   flip_hold=<seconds>      the right flipper's hold for boot_menu=flipper|hidden
  *                            (default 5; 1..30)
  *   flip_guard=<seconds>     ...and how long the flippers must have been off - no
@@ -234,6 +238,7 @@
 #define BOOT_MENU_HIDDEN  2          /* no menu unless the right flipper is held */
 #define FLIP_HOLD_DEFAULT 5
 #define FLIP_GUARD_DEFAULT 60
+#define BACK_HOLD_DEFAULT 3          /* padmenu.so's own when back_hold= is absent */
 
 /* dropped members, dropped groups and the like: never fatal, so they are
  * collected here and the caller logs them */
@@ -332,6 +337,8 @@ struct conf {
     int boot_menu;                   /* boot_menu= BOOT_MENU_* (Simon, 2026-11-22) */
     int flip_hold;                   /* flip_hold= seconds (5) */
     int flip_guard;                  /* flip_guard= seconds (60; padmenu.so's) */
+    int back_hold;                   /* back_hold= seconds (3; 0 off) - padmenu.so's, said on the menu */
+    int boot_menu_set;               /* the card said boot_menu= at all: its menu names the ways back */
     int settings;                    /* settings=: 1 = offer the tile when it has something to set */
     int settings_card;               /* the tile's card index (always the last), or -1 */
     struct conf_image settings_face; /* what the tile draws */

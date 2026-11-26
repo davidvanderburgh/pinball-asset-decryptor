@@ -1435,18 +1435,27 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         gfx_text_center(g, f, cpx, W / 2, (int)(718 * s), cut, TH(L, COUNTDOWN));
     }
 
-    /* THE WAY BACK, SAID ON THE GLASS (boot_menu=flipper|hidden).  Simon,
-     * 2026-11-22: "the only problem is that users just won't know about this" -
-     * this screen is the one every owner of the card sees, so it says so here,
-     * small, along the bottom edge under the countdown. */
-    if (c->boot_menu != BOOT_MENU_MENU) {
-        const int wmax = W - (int)(40 * s);
-        float px;
-        snprintf(buf, sizeof buf, "Hold the right flipper %d s in attract to come back to this menu",
-                 c->flip_hold);
-        px = gfx_fit_px(f, buf, wmax, 20 * s, 14 * s);
-        gfx_ellipsize(f, px, buf, wmax, cut, sizeof cut);
-        gfx_text_center(g, f, px, W / 2, (int)(756 * s), cut, TH(L, FOOTER));
+    /* THE WAY BACK, SAID ON THE GLASS.  Simon, 2026-11-22: "the only problem is
+     * that users just won't know about this" - and David (PR #48 review): BACK
+     * and the right flipper are a choice, named on the menu as such.  So a card
+     * that says boot_menu= (the Multi-boot tab writes it) gets one small line
+     * along the bottom naming each way back that is on; one with neither, none. */
+    if (c->boot_menu_set) {
+        const int back = c->back_hold > 0, flip = c->boot_menu != BOOT_MENU_MENU;
+        buf[0] = 0;
+        if (back && flip)
+            snprintf(buf, sizeof buf, "Back to this menu: hold BACK %d s in a game, or the right flipper %d s "
+                     "in attract", c->back_hold, c->flip_hold);
+        else if (back)
+            snprintf(buf, sizeof buf, "Back to this menu: hold BACK %d s in a game", c->back_hold);
+        else if (flip)
+            snprintf(buf, sizeof buf, "Back to this menu: hold the right flipper %d s in attract", c->flip_hold);
+        if (buf[0]) {
+            const int wmax = W - (int)(40 * s);
+            float px = gfx_fit_px(f, buf, wmax, 20 * s, 14 * s);
+            gfx_ellipsize(f, px, buf, wmax, cut, sizeof cut);
+            gfx_text_center(g, f, px, W / 2, (int)(756 * s), cut, TH(L, FOOTER));
+        }
     }
 
     /* SOUND OFF, SAID ON THE GLASS.  The GNR's menu came up with no sound anyone

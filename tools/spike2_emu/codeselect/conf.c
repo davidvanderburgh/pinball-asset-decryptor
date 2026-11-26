@@ -288,6 +288,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     c->def_card = -1;
     c->timeout = -1;
     c->flip_hold = FLIP_HOLD_DEFAULT;
+    c->back_hold = BACK_HOLD_DEFAULT;
+    c->boot_menu_set = 0;
     c->flip_guard = FLIP_GUARD_DEFAULT;
     c->volume = -1;
     c->volume_machine = 0;
@@ -529,7 +531,14 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 snprintf(c->colour[idx].name, sizeof c->colour[idx].name, "%s",
                          fld[5] ? fld[5] : "");
             }
+        } else if (!strcmp(key, "back_hold")) {
+            /* PAD-1309's Hold BACK seconds (padmenu.so times it): read here only to say it on the glass */
+            int v = atoi(val);
+            if (*val >= '0' && *val <= '9' && v <= 60) c->back_hold = v;
+            else conf_warn(c, "%s:%d: back_hold=%s is not 0..60 seconds: %d is used",
+                           path, lineno, val, c->back_hold);
         } else if (!strcmp(key, "boot_menu")) {
+            c->boot_menu_set = 1;
             if (!*val || !strcmp(val, "menu")) c->boot_menu = BOOT_MENU_MENU;
             else if (!strcmp(val, "flipper")) c->boot_menu = BOOT_MENU_FLIPPER;
             else if (!strcmp(val, "hidden")) c->boot_menu = BOOT_MENU_HIDDEN;

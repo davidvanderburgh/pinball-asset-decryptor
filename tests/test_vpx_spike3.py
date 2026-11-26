@@ -343,8 +343,76 @@ Sub Table1_Init
 End Sub
 SolCallback(15)    = "SolLFlipper"
 SolCallback(16)    = "SolRFlipper"
+Sub Dazz_Motor(enabled)
+\tDim xlss
+\tIf enabled Then
+\t\tcbdir = 1 : Darryl.enabled = 1
+\tElse
+\t\tDarryl.enabled = 0\t
+\tEnd If
+End Sub
+
+Dim cbdir, ckdir, ccount : cbdir = 1
+Dim CBDist: CBDist = Distance(Cannon_Load.x, Cannon_Load.y, BM_crossbow.x, BM_crossbow.y)
+Dim CBDrop, CBrotZ: CBDrop = 0 : CBRotZ = 55 + 125
+
 Sub Darryl_Timer()
 \tDim nrx
+\tPlaySound SoundFX("bridge2",DOFGear), , 0.001
+\tckdir = CBRotZ - 180
+\tSelect Case cbdir
+\tCase 1:
+\t\tIf CBRotZ => 127 Then
+\t\t\tController.Switch(50) = 0 : Controller.Switch(52) = 0
+\t\t\tIf CBDrop < 85 Then CBDrop = CBDrop + 2.5
+\t\tEnd If
+\t\tIf CBRotZ => 160 Then Controller.Switch(51) = 1
+\t\tIf CBRotZ => 198 Then cbdir = 3
+\t\tCBRotZ = CBRotZ + 0.2 + Rnd(1) * 0.3
+\t\tFor Each nrx in BP_crossbow : nrx.RotZ = CBRotZ - 180.5: Next : crossshadow.RotZ = CBRotZ - 180.5
+\tCase 2:
+\t\tIf CBRotZ <= 127 Then
+\t\t\tController.Switch(50) = 1
+\t\t\tIf Not isEmpty(CBBall) Then Controller.Switch(52) = 1
+\t\tEnd If
+\t\tIf CBRotZ <= 160 Then Controller.Switch(51) = 0
+\t\tIf CBRotZ <= 124.8 Then
+\t\t\tCBRotZ = 125
+\t\t\tFor Each nrx in BP_crossbow : nrx.RotZ = CBRotZ - 180.5: Next : crossshadow.RotZ = CBRotZ - 180.5
+\t\t\tme.enabled = 0
+\t\tEnd If
+\t\tCBRotZ = CBRotZ - 0.2 - Rnd(1) * 0.3
+\t\tFor Each nrx in BP_crossbow : nrx.RotZ = CBRotZ - 180.5: Next : crossshadow.RotZ = CBRotZ - 180.5
+\tCase 3:
+\t\tIf ccount = 20 Then cbdir = 2 : ccount = -1
+\t\tccount = ccount + 1
+\tEnd Select
+\tIf not isEmpty(CBBall) Then
+\t\tCBBall.x = (CBDist - CBDrop) * dCos(CBRotZ + 90) + BM_crossbow.x
+\t\tCBBall.y = (CBDist - CBDrop) * dSin(CBRotZ + 90) + BM_crossbow.y
+\tElse
+\t\tCBDrop = 0
+\tEnd If
+End Sub
+
+Dim CBBall
+
+Sub Cannon_Load_Hit()
+\tWireRampOff\t 'Turn off the Plastic Ramp Sound
+\tSoundSaucerLock
+\tSet CBBall = Activeball
+\tController.Switch(52) = 1
+End Sub
+
+Sub Shoot_Cannon(Enabled)
+\tIf Enabled Then
+\t\tdim kang
+\t\tIf cbdir = 1 Then kang = 0.8 Else kang = -0.8
+\t\tkang = kang + CBRotZ - 180
+\t\tSoundSaucerKick 1, BM_crossbow
+\t\tCannon_Load.kick kang, 50, 0.05
+\t\tCBBall = Empty
+\tEnd If
 End Sub
 Sub LampTimer_Timer()
 \tDim chgLamp, ii, cnt : chgLamp = Controller.ChangedLamps
@@ -372,5 +440,133 @@ def test_the_patcher_rewires_the_tables_script():
     assert 'PadFlash.Add "211", GetRef("WellWalkerFlash")' in text
     assert "Controller.Switch(1060) = 1" in text and "Controller.Switch(1059) = 1" in text
     assert "Sub Table1_Exit" in text and "PadStopB2S" in text
-    with pytest.raises(SystemExit, match="no encoder"):
+    with pytest.raises(SystemExit, match="encoder"):
         pw.patch_script(SAM_SCRIPT.replace("Sub Darryl_Timer()", "Sub Other_Timer()"), m)
+
+
+def test_the_walking_dead_crossbow_rests_at_home_and_sweeps_like_a_motor():
+    """PAD-1560 (Mike): the crossbow stood straight up between the flippers. The
+    table starts it out (RotZ 180) for the SAM ROM to home at power-on, which
+    the Remastered game never does in attract; and the game stops and restarts
+    the motor mid-sweep, which the table's Dazz_Motor took as a new aim outward."""
+    import patch_walking_dead as pw
+    text, _ = pw.patch_script(SAM_SCRIPT, _twd_map())
+    assert "CBDrop = 0 : CBRotZ = 125\t' PAD: at home" in text
+    assert "If CBRotZ <= 125.5 Then cbdir = 1" in text
+    assert "cbdir = 1 : Darryl.enabled = 1" not in text
+    assert "me.enabled = 0" not in text.split("Sub Darryl_Timer")[1].split("End Sub")[0]
+    assert "Controller.Switch(50) = (CBRotZ <= 127)" in text
+    for gone in ("Dim CBDrop, CBrotZ: CBDrop = 0 : CBRotZ = 55 + 125", "cbdir = 1 : Darryl.enabled = 1"):
+        with pytest.raises(SystemExit, match="no cb"):
+            pw.patch_script(SAM_SCRIPT.replace(gone, "' gone"), _twd_map())
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cscript runs the table's VBScript")
+def test_the_patched_crossbow_carries_on_through_a_motor_restart(tmp_path):
+    """The table's own patched crossbow code under cscript: it starts at home;
+    a motor run sweeps out and back; the motor stopped and restarted on the
+    way back carries it on home instead of swinging it out again."""
+    import subprocess
+    import patch_walking_dead as pw
+    text, _ = pw.patch_script(SAM_SCRIPT, _twd_map())
+    lines = text.split("\n")
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("Sub Dazz_Motor"))
+    end = next(i for i in range(start, len(lines)) if lines[i].startswith("Sub Cannon_Load_Hit"))
+    enc0 = next(i for i, ln in enumerate(lines) if ln.startswith("Dim PadEncPh"))
+    enc1 = next(i for i in range(enc0, len(lines)) if lines[i] == "End Sub")
+    harness = "\n".join([
+        "Class Sw : Public s(2000)",
+        "  Public Property Let Switch(n, v) : s(n) = v : End Property",
+        "  Public Property Get Switch(n) : Switch = s(n) : End Property",
+        "End Class",
+        "Class Obj : Public x, y, RotZ, enabled : End Class",
+        "Dim Controller : Set Controller = New Sw",
+        "Dim Cannon_Load, BM_crossbow, crossshadow, Darryl",
+        "Set Cannon_Load = New Obj : Set BM_crossbow = New Obj : Set crossshadow = New Obj",
+        "Set Darryl = New Obj",
+        "Cannon_Load.x = 0 : Cannon_Load.y = 50 : BM_crossbow.x = 0 : BM_crossbow.y = 0",
+        "Dim BP_crossbow : BP_crossbow = Array(crossshadow)",
+        "Const DOFGear = 0",
+        "Function Distance(a, b, c, d) : Distance = Sqr((a - c) ^ 2 + (b - d) ^ 2) : End Function",
+        "Function dCos(a) : dCos = Cos(a * 3.14159265 / 180) : End Function",
+        "Function dSin(a) : dSin = Sin(a * 3.14159265 / 180) : End Function",
+        "Function SoundFX(a, b) : SoundFX = a : End Function",
+        "Sub PlaySound(a, b, c) : End Sub",
+    ] + lines[enc0:enc1 + 1] + lines[start:end] + [
+        "Sub Run(n)",
+        "  Dim i : For i = 1 To n : If Darryl.enabled Then Darryl_Timer",
+        "  Next",
+        "End Sub",
+        "Dim peak, i",
+        'WScript.Echo "start " & CBRotZ',
+        "Dazz_Motor True : Run 280",
+        'WScript.Echo "back " & cbdir & " " & Round(CBRotZ, 1)',
+        "Dazz_Motor False : Dazz_Motor True",
+        "peak = CBRotZ",
+        "For i = 1 To 400",
+        "  Run 1 : If CBRotZ > peak Then peak = CBRotZ",
+        "  If Controller.Switch(50) Then Exit For",
+        "Next",
+        "Dazz_Motor False",
+        'WScript.Echo "home " & Controller.Switch(50) & " " & Round(CBRotZ, 1) & " peak " & Round(peak, 1)',
+    ])
+    vbs = tmp_path / "xbow.vbs"
+    vbs.write_text(harness, encoding="latin-1")
+    out = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    got = out.stdout.split()
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert got[:2] == ["start", "125"], out.stdout
+    assert got[2] == "back" and got[3] == "2" and 127 < float(got[4]) < 198, out.stdout
+    assert got[5] == "home" and got[6] in ("1", "True") and float(got[7]) <= 127, out.stdout
+    assert float(got[9]) <= float(got[4]) + 0.01, out.stdout       # never swung out again
+
+
+_S3_DEVICES = """# walking_dead_remastered_le device positions (Spike 3, s3pf.py).
+# binary: spike3
+# reader-rev 3
+# class     name                                   x     y    w    h  grp index  conn   image
+led       SPEAKER L 1-R                         24   196   30   30    3     1  -      System/TestMode/spike_3_speaker_panel
+led       SPEAKER L 1-G                         24   196   30   30    3     0  -      System/TestMode/spike_3_speaker_panel
+led       SPEAKER L 1-B                         24   196   30   30    3     2  -      System/TestMode/spike_3_speaker_panel
+led       SPEAKER L 2-R                         30   218   30   30    3     4  -      System/TestMode/spike_3_speaker_panel
+led       SPEAKER L 2-G                         30   218   30   30    3     3  -      System/TestMode/spike_3_speaker_panel
+led       SPEAKER L 2-B                         30   218   30   30    3     5  -      System/TestMode/spike_3_speaker_panel
+led       SPEAKER R 1-R                        591   196   30   30    3    61  -      System/TestMode/spike_3_speaker_panel
+led       SPEAKER R 1-G                        591   196   30   30    3    60  -      System/TestMode/spike_3_speaker_panel
+led       SPEAKER R 1-B                        591   196   30   30    3    62  -      System/TestMode/spike_3_speaker_panel
+coil      SHAKER MOTOR                           0     0    0    0    6     0  -      System/TestMode/shaker_motor_cropped
+led       START BUTTON                         102   228   30   30    6     2  -      System/TestMode/spike_2_no_tournament_cabinet_front_cropped
+"""
+
+
+def test_a_spike3_run_reads_the_cabinet_from_the_titles_own_tables(tmp_path, monkeypatch):
+    """PAD-1560 (Mike: "does spike3 led signals work differently?"): the
+    cabinet's DOF light strips and shaker were read from the run's
+    tables/game, which holds only the switch list, so Walking Dead found no
+    shaker and no speaker lights. The title's own folder has the card's
+    device list and node directory."""
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(padlaunch, "BOARD", str(tmp_path))
+    _post(tmp_path, 7, TITLE)
+    rig = pc.Rig(TITLE, emu="spike3")
+    slot = tmp_path / "slot7"
+    (slot / "dump").mkdir(parents=True)
+    (slot / "tables" / "game").mkdir(parents=True)
+    (slot / "tables" / "game" / "switch_list.txt").write_text("13 13 1 11 START BUTTON\n")
+    own = slot / "tables" / TITLE
+    own.mkdir(parents=True)
+    (own / "device_xy.txt").write_text(_S3_DEVICES)
+    (own / "group_node_exact.txt").write_text("# group node\n3 7\n6 1\n7 8\n")
+    (own / "node_ident.txt").write_text(
+        "node=7 type=ws2812node group=3 name=ws2812node\nnode=1 type=pinnode group=6 name=pinnode\n"
+        "node=8 type=pinnode group=7 name=pinnode\n")
+    rig.dump = str(slot / "dump")
+    rig.share = True
+    assert rig.tables_dir(TITLE).replace("\\", "/").endswith("slot7/tables/game")
+    assert rig.tables_dir(TITLE, own=True).replace("\\", "/").endswith("slot7/tables/" + TITLE)
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.rig, b.map, b.title = rig, None, TITLE
+    b._read_cabinet(kit={"cabinet": {"dof_shaker": 192, "dof_strips": 836}})
+    assert b.cab_shaker == (1, 0)
+    assert b.cab_strips and b.cab_strips["source"] == "speakers" and b.cab_strips["node"] == 7
+    assert b.cab_strips["sides"][0][0] == {"R": (7, 1), "G": (7, 0), "B": (7, 2)}

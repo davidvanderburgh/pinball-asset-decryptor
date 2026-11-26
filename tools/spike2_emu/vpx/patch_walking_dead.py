@@ -28,6 +28,8 @@ WHAT CHANGES, all of it driven by walking_dead_remastered_le.vpxmap.json:
            table's own SolModCallback subs from the LampTimer.
   crossbow the Remastered crossbow motor counts encoder edges: the table's
            crossbow sweep (Darryl_Timer) steps ENCODER 1 / 2 in quadrature.
+           It starts at home (PadSync holds HOME / MARK to where it is) and
+           the sweep carries on through the game's motor stop-restarts.
   trough   the Remastered game is a six-ball game and the table has four:
            TROUGH 5 and 6 are held, and the table's held switches re-sent
            every two seconds (PadSync), as Metallica's (PAD-811).
@@ -142,6 +144,27 @@ def patch_script(src, m):
             seen.add("flash")
             continue
 
+        # ---- the crossbow rests at home: the SAM ROM homed it at power-on, the
+        #      Remastered game leaves it until a game starts (PAD-1560: it stood
+        #      straight up between the flippers all through attract)
+        if re.match(r"^dim cbdrop, cbrotz:\s*cbdrop = 0 : cbrotz = 55 \+ 125$", low):
+            out.append("Dim CBDrop, CBrotZ: CBDrop = 0 : CBRotZ = 125\t' PAD: at home (was 55 + 125, "
+                       "straight out, homed by the SAM ROM at power-on)")
+            seen.add("cbhome")
+            continue
+        # ---- the Remastered game stops and restarts the motor mid-sweep: a
+        #      real motor carries on, so only a crossbow at home starts out
+        if cur_sub == "dazz_motor" and re.match(r"^cbdir = 1 : darryl\.enabled = 1$", low):
+            out.append("\t\tIf CBRotZ <= 125.5 Then cbdir = 1\t' PAD: a restart carries on the sweep")
+            out.append("\t\tDarryl.enabled = 1")
+            seen.add("cbmotor")
+            continue
+        # ---- ... and the motor still on at home sweeps out again
+        if cur_sub == "darryl_timer" and low == "me.enabled = 0":
+            out.append("\t\t\tcbdir = 1\t' PAD: the motor is still on: it sweeps on (the table stopped it at home)")
+            seen.add("cbsweep")
+            continue
+
         # ---- the crossbow sweep steps the Remastered encoder
         if low.startswith("sub darryl_timer"):
             out.append(line)
@@ -151,7 +174,7 @@ def patch_script(src, m):
         out.append(line)
 
     want = {"system", "gamename", "usesol", "modsol", "loadvpm", "fflips", "tilt", "flip15", "flip16",
-            "flash", "encoder"}
+            "flash", "encoder", "cbhome", "cbmotor", "cbsweep"}
     missing = want - seen
     if missing:
         raise SystemExit("the script is not the one this patcher knows: no %s" % ", ".join(sorted(missing)))
@@ -209,6 +232,8 @@ def gen_pad_block(m, src):
         out.append("\tController.Switch(%d) = 1" % (1000 + sid))
     for n in (21, 20, 19, 18):
         out.append("\tController.Switch(%d) = (sw%d.BallCntOver > 0)" % (n, n))
+    out.append("\tController.Switch(50) = (CBRotZ <= 127)\t' PAD: CROSSBOW HOME, from the start")
+    out.append("\tController.Switch(51) = (CBRotZ >= 160)\t' PAD: CROSSBOW MARK")
     out += ["End Sub",
             "Sub PadTestTimer_Timer",
             "\tOn Error Resume Next",

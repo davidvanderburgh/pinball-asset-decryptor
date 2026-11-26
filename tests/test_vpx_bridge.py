@@ -3382,6 +3382,81 @@ def test_munsters_mod_flips_with_nfozzy_and_fleep(tmp_path):
     ), r.stdout + r.stderr
 
 
+def _deadpool_mod_map():
+    sys.path.insert(0, VPX)
+    import gen_deadpool_mod_map as gen
+    base = json.load(open(os.path.join(VPX, "deadpool_pro.shadow.json"), encoding="utf-8"))
+    return gen, base, json.load(open(os.path.join(VPX, "deadpool_pro_mod.shadow.json"), encoding="utf-8"))
+
+
+def test_deadpool_mod_map_is_the_generators():
+    # PAD-1610: masonm's Color Rush mod's map is written from the 6.10's; a
+    # change to that one without running the generator again fails here
+    gen, base, mod = _deadpool_mod_map()
+    assert open(gen.OUT, encoding="utf-8").read() == gen.text(gen.build(base))
+    assert mod["title"] == "deadpool_pro_mod" and mod["game"] == "deadpool_pro"
+    assert mod["output"] != base["output"] and "28212" in mod["table"]["url"]
+    # the playfield is the 6.10's: every switch, coil and light the same,
+    # bar the Hell House eject the mod kicks harder
+    for key in ("switches", "solenoids", "lamps", "trough", "cabinet"):
+        assert mod[key] == base[key], key
+    assert base["saucers"]["HellHouse"]["power"] == 30 and mod["saucers"]["HellHouse"]["power"] == 40
+
+
+def test_deadpool_maps_each_fit_their_own_table(monkeypatch):
+    # PAD-1610: the Color Rush mod still names itself JP's Deadpool v6.10 and
+    # jpsdeadpool, so the 6.10's map took it, patched it under the 6.10's
+    # name, and its nFozzy flippers never armed: each table fits its own map
+    pv = pytest.importorskip("padvpx")
+    old = "'           JP's Deadpool v6.10 for VISUAL PINBALL X 10.8\nConst cGameName = \"jpsdeadpool\"\n"
+    script = {"old.vpx": old, "mod.vpx": old + "pupflasher3.VideoCapUpdate = \"\"\n"}
+
+    class Fake:
+        def __init__(self, p):
+            self.p = p
+
+        def script(self):
+            return script[self.p]
+    monkeypatch.setattr(pv.vpxfile, "VpxTable", Fake)
+    assert [t for t, _ in pv.fitting("old.vpx")] == ["deadpool_pro"]
+    assert [t for t, _ in pv.fitting("mod.vpx")] == ["deadpool_pro_mod"]
+    card = "D:/c/deadpool_pro-1_16_0.Release.8G.sdcard.raw"
+    assert pv.recognise("mod.vpx", card=card)[0] == "deadpool_pro_mod", "the card's game, the mod's map"
+    assert pv.maps()["deadpool_pro_mod"]["game"] == "deadpool_pro"
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_deadpool_mod_flips_with_nfozzy(tmp_path):
+    # PAD-1610: the mod arms nFozzy's flipper tricks (FlipperActivate) in its
+    # key handler, which a patched table never reaches, then calls its
+    # SolLFlipper; the machine's coils called SolLFlipper alone. Now they arm
+    # them first, and release them before the flipper falls, as its handler
+    vs = pytest.importorskip("vpxshadow")
+    _, _, m = _deadpool_mod_map()
+    assert vs.flipper_subs(m, {}) == {"sLLFlipper": "PadLFlip", "sLRFlipper": "PadRFlip"}
+    assert vs.flipper_warnings(m, {}, []) == []
+    harness = "\n".join([
+        "Option Explicit", "Dim calls : calls = \"\"", "Dim LFPress, RFPress",
+        "Sub FlipperActivate(f, p) : p = 1 : calls = calls & \"Activate \" & f & \" \" : End Sub",
+        "Sub FlipperDeActivate(f, p) : p = 0 : calls = calls & \"Deactivate \" & f & \" \" : End Sub",
+        # stand-ins for the mod's SolLFlipper/SolRFlipper: the press each one flips with
+        "Sub SolLFlipper(e) : calls = calls & \"SolLFlipper=\" & CBool(e) & \" press=\" & LFPress & \" \" : End Sub",
+        "Sub SolRFlipper(e) : calls = calls & \"SolRFlipper=\" & CBool(e) & \" press=\" & RFPress & \" \" : End Sub",
+        "Dim LeftFlipper : LeftFlipper = \"LeftFlipper\"",
+        "Dim RightFlipper : RightFlipper = \"RightFlipper\"",
+        m["extra_vbs"].split("(gen_deadpool_mod_map.py, PAD-1610)")[1].split("\n", 1)[1],
+        "PadLFlip True : PadLFlip False : PadRFlip 1 : PadRFlip 0",
+        "WScript.Echo calls"])
+    vbs = tmp_path / "flip.vbs"
+    vbs.write_text(harness, encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == (
+        "Activate LeftFlipper SolLFlipper=True press=1 Deactivate LeftFlipper SolLFlipper=False press=0 "
+        "Activate RightFlipper SolRFlipper=True press=1 Deactivate RightFlipper SolRFlipper=False press=0"
+    ), r.stdout + r.stderr
+
+
 def test_shadow_lamps_drive_the_tables_lights():
     # with `lamps` the machine lights the table: a dictionary from the lamp
     # number (1000 + node*100 + index, the FIRST LED of an RGB insert) to the
@@ -4229,7 +4304,7 @@ def test_generator_shapes_carry_their_points():
     assert vg.ident("LEFT RAMP ENTER OPTO") == "LeftRampEnterOpto" and vg.ident("3 BANK") == "X3Bank"
 
 
-@pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le", "foo_fighters_pro", "deadpool_pro"])
+@pytest.mark.parametrize("title", ["rush_le", "foo_fighters_le", "foo_fighters_pro", "deadpool_pro", "deadpool_pro_mod"])
 def test_shadow_maps_are_consistent(title):
     vs = pytest.importorskip("vpxshadow")
     path = os.path.join(VPX, title + ".shadow.json")

@@ -215,10 +215,12 @@ def test_mkdtemp_notes_this_process_and_the_owner_states(temp):
     with open(rec, "w") as f:
         json.dump({"pid": _dead_pid(), "started": None}, f)
     assert pad_temp.owner_state(os.path.basename(d)) == "dead"
-    # the same pid running another program (started differs) is not ours
-    with open(rec, "w") as f:
-        json.dump({"pid": os.getpid(), "started": 12345}, f)
-    assert pad_temp.owner_state(os.path.basename(d)) == "dead"
+    # the same pid running another program (started differs) is not ours -
+    # where a start time can be read at all (Windows, /proc; not macOS)
+    if pad_temp._started(os.getpid()) is not None:
+        with open(rec, "w") as f:
+            json.dump({"pid": os.getpid(), "started": 12345}, f)
+        assert pad_temp.owner_state(os.path.basename(d)) == "dead"
     assert pad_temp.owner_state("pad-scenes-nobody") is None
     elsewhere = pad_temp.mkdtemp(prefix="pad-scenes-", dir=str(temp.parent))
     assert pad_temp.owner_state(os.path.basename(elsewhere)) is None

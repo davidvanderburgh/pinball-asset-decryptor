@@ -164,4 +164,8 @@ def test_read_only_copy_is_still_compacted(moved):
     assert pipe._move_image(src, "/mnt/c/out/x.img", host)
     assert os.access(host, os.W_OK)
     assert _sha(host) == want
-    assert not any("stays at full size" in m for _, m in pipe.logs), pipe.logs
+    full = [m for _, m in pipe.logs if "stays at full size" in m]
+    if sparse_card.takes_less(host):
+        assert not full, pipe.logs
+    else:   # a filesystem with no holes (macOS): it was opened, just not punched
+        assert all("hole refused" in m for m in full), pipe.logs

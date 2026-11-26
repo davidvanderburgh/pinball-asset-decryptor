@@ -124,8 +124,16 @@ def _private_temp_dir(tmp_path_factory):
     own space keeper then counted as a user's leftovers.  Child processes
     get it too (``TEMP`` / ``TMP`` / ``TMPDIR``)."""
     import tempfile
-    d = tmp_path_factory.getbasetemp() / "systemp"
-    d.mkdir(exist_ok=True)
+    short = sys.platform == "darwin"
+    if short:
+        # macOS caps a unix socket path at 104 bytes and pytest's folder there
+        # is long (/private/var/folders/../pytest-of-runner/pytest-0/popen-gw1):
+        # gpg's agent socket in a temp GNUPGHOME no longer fitted.  A short
+        # folder of the session's own instead, gone when the session ends.
+        d = tempfile.mkdtemp(prefix="padt-", dir="/tmp")
+    else:
+        d = tmp_path_factory.getbasetemp() / "systemp"
+        d.mkdir(exist_ok=True)
     keys = ("TEMP", "TMP", "TMPDIR")
     was = tempfile.tempdir, {k: os.environ.get(k) for k in keys}
     tempfile.tempdir = str(d)
@@ -140,6 +148,8 @@ def _private_temp_dir(tmp_path_factory):
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+        if short:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 @pytest.fixture(scope="session", autouse=True)

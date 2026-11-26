@@ -145,7 +145,16 @@ class WilliamsManufacturer(Manufacturer):
         Auto-transcribe controls and the "Extract audio" phase are
         hidden for them."""
         from . import dcs_decode
-        return is_williams_zip(path) and dcs_decode.is_dcs_rom(path)
+        if not is_williams_zip(path):
+            return False
+        # Runs on the UI thread, so it never downloads the decoder
+        # (PAD-1606).  Not fetched yet: assume DCS; the extract fetches
+        # it and skips the audio phase for a pre-DCS game.
+        if (dcs_decode._dcs_explorer_path is None
+                and dcs_decode._fetch_allowed()
+                and dcs_decode.find_dcs_explorer(fetch=False) is None):
+            return True
+        return dcs_decode.is_dcs_rom(path, fetch=False)
 
     def extract_input_help(self):
         return ("Pick a MAME-format ROM zip — e.g. `ft_l5.zip` "

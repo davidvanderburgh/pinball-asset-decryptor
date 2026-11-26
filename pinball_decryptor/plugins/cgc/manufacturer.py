@@ -245,7 +245,7 @@ class CGCManufacturer(Manufacturer):
                 "card — image the whole card to a .img (e.g. with dd / "
                 "Win32DiskImager) and name it so it contains "
                 "\"CactusCanyon\"; its original DCS sound ROMs are decoded "
-                "to WAV under dcs_audio/ via the bundled DCSExplorer. "
+                "to WAV under dcs_audio/ via DCSExplorer (downloaded on first use). "
                 "Requires WSL2 "
                 "(Windows) / Docker (macOS) with e2fsprogs (debugfs). "
                 "Note: CGC games render all video in real time (no .mp4 "

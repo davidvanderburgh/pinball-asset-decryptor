@@ -655,9 +655,11 @@ class ExtractPipeline(BasePipeline):
             self._log(f"  No {info['data_dir']}/rom/ directory — skipping DCS "
                       f"audio decode.", "warning")
             return 0
-        if dcs_decode.find_dcs_explorer() is None:
+        if dcs_decode.find_dcs_explorer(
+                log=lambda m: self._log(m, "info")) is None:
             self._log("  DCS audio decode skipped: "
-                      + dcs_decode.missing_tool_message("DCSExplorer"),
+                      + (dcs_decode._tool_problem
+                         or dcs_decode.missing_tool_message("DCSExplorer")),
                       "warning")
             return 0
         self._check_cancel()
@@ -2240,7 +2242,7 @@ def _repack_modified_cc_assets(assets_dir, log=None):
     if os.path.isdir(data_rom) and os.path.isdir(dcs_dir):
         try:
             from . import cc_dcs
-            cc_dcs.repack(data_rom, dcs_dir, data_rom)
+            cc_dcs.repack(data_rom, dcs_dir, data_rom, log_cb=log)
         except Exception as e:
             # Said out loud (PAD-919): a blob that could not be rebuilt
             # ships stock, so the user's edits are NOT on the card.

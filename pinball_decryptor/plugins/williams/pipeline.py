@@ -139,7 +139,8 @@ class ExtractPipeline(BasePipeline):
         # from the indicator, so the remaining phases renumber.
         dcs_track_count = 0
         cleanup_phase = 5
-        if dcs_decode.is_dcs_rom(self.zip_path):
+        if dcs_decode.is_dcs_rom(self.zip_path,
+                                 log=lambda m: self._log(m, "info")):
             self._set_phase(5)
             dcs_track_count = self._extract_dcs_audio(game_dir)
             cleanup_phase = 6
@@ -193,7 +194,7 @@ class ExtractPipeline(BasePipeline):
 
         DCS games (1993-1998) store music, speech, and SFX as
         compressed digital audio; :mod:`.dcs_decode` extracts every
-        track via the bundled DCSExplorer decoder.  Pre-DCS games use
+        track via the DCSExplorer decoder (downloaded on first use).  Pre-DCS games use
         the older YM2151 sound board, which can't be decoded
         statically — those are reported and skipped, no error.
 

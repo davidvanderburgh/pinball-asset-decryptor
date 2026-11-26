@@ -463,7 +463,7 @@ tables.
 | `dmd_scenes/browse.mp4` | Every scene at 2 fps, to skim |
 | `animations/anim_*.mp4` | The game's animations, one MP4 each |
 | `fonts/font_*.png` | Every DMD font as a sprite sheet |
-| `sounds/track_*.wav` | Every DCS music cue, voice line and effect (1993+ games only), via a bundled [DCSExplorer](https://github.com/mjrgh/DCSExplorer) |
+| `sounds/track_*.wav` | Every DCS music cue, voice line and effect (1993+ games only), via [DCSExplorer](https://github.com/mjrgh/DCSExplorer), which PAD downloads the first time it is needed (PAD does not ship it: antivirus programs flag it by mistake) |
 
 **Auto-transcribe samples to callouts.csv** (DCS games) names the sounds
 by their spoken callouts, as on CGC.

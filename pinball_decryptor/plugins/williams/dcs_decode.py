@@ -12,9 +12,12 @@ line, or a sound effect — addressable by the numeric command the
 WPC game board would send to the sound board.  Extracting every
 track gives you the game's music and SFX as separate assets.
 
-The DCSExplorer Windows binary is bundled in ``vendor/``; on other
-platforms (or to override the bundled copy) it is also looked up on
-PATH.
+PAD does not ship DCSExplorer (PAD-1606: antivirus programs flag it by
+mistake, so carrying it in every install and update made users switch
+their scanner off to update PAD).  On Windows the first DCS sound job
+downloads the upstream v1.1 release file, pinned by SHA-256 in
+:mod:`core.payloads`, into PAD's payload cache.  A copy in ``vendor/``
+or on PATH is used first if there is one.
 
 Pre-DCS games (Funhouse, Fish Tales, White Water, T2, Addams Family
 — the ~1990-1992 YM2151-based WPC sound board) are NOT DCS.  Their
@@ -37,6 +40,8 @@ import wave
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
+from ...core import payloads
+
 
 # Suppress the console window that would otherwise flash on Windows
 # each time we spawn the decoder.
@@ -58,20 +63,29 @@ _AV_WINERRORS = (225, 226)
 _tool_problem: Optional[str] = None
 
 
+def tool_folder() -> str:
+    """Where PAD keeps the DCS tools it downloaded (PAD-1606)."""
+    return payloads.cache_root()
+
+
 def missing_tool_message(tool: str) -> str:
     """Why *tool* ("DCSExplorer" / "DCSEncoder") is not there, in words a
-    user can act on (PAD-1391).  Antivirus programs flag these unsigned,
-    rarely seen tools (Norton: "Trojan.Gen.MBT") and quarantine them;
-    PAD's copies are the upstream v1.1 release byte for byte."""
+    user can act on (PAD-1391, PAD-1606).  PAD fetches the tools on first
+    use from mjrgh's release; antivirus programs flag these unsigned,
+    rarely seen tools (Norton: "Trojan.Gen.MBT") and may remove them."""
     if sys.platform == "win32":
-        return (f"{tool}.exe is missing from PAD's folder. Antivirus "
-                f"programs sometimes remove it by mistake: it is the "
-                f"open-source DCS sound tool by mjrgh "
-                f"(github.com/mjrgh/DCSExplorer), shipped unchanged. "
-                f"Restore it from your antivirus quarantine, or reinstall "
-                f"PAD.")
-    return (f"{tool} is not installed (PAD bundles it only on Windows); "
+        return (f"{tool}.exe is not on this PC. PAD downloads it the first "
+                f"time DCS sound is needed: it is the open-source DCS sound "
+                f"tool by mjrgh (github.com/mjrgh/DCSExplorer, release "
+                f"v1.1). " + _manual_hint(tool))
+    return (f"{tool} is not installed (PAD fetches it only on Windows); "
             f"put it on PATH.")
+
+
+def _manual_hint(tool: str) -> str:
+    return (f"If the download failed or your antivirus removed it, restart "
+            f"PAD to try again, or save {tool}.exe from that release into "
+            f"{tool_folder()} (or anywhere on PATH).")
 
 
 def launch_error_message(tool: str, exc: BaseException) -> str:
@@ -81,7 +95,8 @@ def launch_error_message(tool: str, exc: BaseException) -> str:
     if getattr(exc, "winerror", None) in _AV_WINERRORS:
         return (f"your antivirus blocked {tool}.exe from running. It is "
                 f"the open-source DCS sound tool by mjrgh "
-                f"(github.com/mjrgh/DCSExplorer), shipped unchanged.")
+                f"(github.com/mjrgh/DCSExplorer), the unchanged v1.1 "
+                f"release file.")
     return f"{tool} failed to launch: {exc}"
 
 
@@ -89,7 +104,7 @@ def tool_problem() -> Optional[str]:
     """The reason DCS audio cannot be decoded here, or None if
     DCSExplorer is present and last started fine."""
     if find_dcs_explorer() is None:
-        return missing_tool_message("DCSExplorer")
+        return _tool_problem or missing_tool_message("DCSExplorer")
     return _tool_problem
 
 
@@ -116,80 +131,103 @@ class DcsResult:
 
 
 _dcs_explorer_path: Optional[str] = None
-
-
-def find_dcs_explorer() -> Optional[str]:
-    """Locate the DCSExplorer executable.
-
-    Prefers the binary bundled in ``vendor/`` (Windows), then falls
-    back to PATH.  Caches the result — including a negative result —
-    for the life of the process.
-    """
-    global _dcs_explorer_path
-    if _dcs_explorer_path is not None:
-        return _dcs_explorer_path or None
-
-    # 1. Bundled copy.  We only ship the Windows binary, so on other
-    # platforms this path simply won't exist and we fall through.
-    bundled = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "vendor",
-        "DCSExplorer.exe" if sys.platform == "win32" else "DCSExplorer")
-    if os.path.isfile(bundled):
-        _dcs_explorer_path = bundled
-        return bundled
-
-    # 2. PATH.
-    for name in ("DCSExplorer", "DCSExplorer.exe", "dcsexplorer"):
-        found = shutil.which(name)
-        if found:
-            _dcs_explorer_path = found
-            return found
-
-    _dcs_explorer_path = ""
-    return None
-
-
 _dcs_encoder_path: Optional[str] = None
 
 
-def find_dcs_encoder() -> Optional[str]:
-    """Locate the DCSEncoder executable (used by the CGC Cactus Canyon DCS
-    *repack* path).  Prefers the binary bundled in ``vendor/`` (Windows),
-    then falls back to PATH.  Caches the result for the life of the process."""
+def _fetch_allowed() -> bool:
+    """Only Windows gets the download (the upstream files are .exe), and
+    never with PAD_NO_TOOL_DOWNLOAD set (the test suite, air-gapped use)."""
+    return (sys.platform == "win32"
+            and not os.environ.get("PAD_NO_TOOL_DOWNLOAD"))
+
+
+def _locate(tool: str, fetch: bool,
+            log: Optional[Callable[[str], None]]) -> Optional[str]:
+    """*tool*'s executable: a copy in ``vendor/`` (older installs, a
+    developer's checkout), then PAD's verified download, then PATH, and
+    last, if *fetch*, a fresh download of the pinned upstream file."""
+    global _tool_problem
+    exe = tool + ".exe" if sys.platform == "win32" else tool
+    bundled = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "vendor", exe)
+    if os.path.isfile(bundled):
+        return bundled
+    payload = payloads.HOST_PAYLOADS[tool]
+    cached = payloads.cache_path(payload)
+    if (sys.platform == "win32" and os.path.isfile(cached)
+            and payloads.verify(cached, payload)[0]):
+        return cached
+    for name in (tool, tool + ".exe", tool.lower()):
+        found = shutil.which(name)
+        if found:
+            return found
+    if not (fetch and _fetch_allowed()):
+        return None
+    say = log or (lambda _m: None)
+    say(f"  {tool}.exe is not on this PC yet: downloading the open-source "
+        f"DCS sound tool by mjrgh (github.com/mjrgh/DCSExplorer v1.1, "
+        f"{payloads._human(payload.size)}).")
+    try:
+        return payloads.ensure_cached(payload, log=say)
+    except RuntimeError as e:
+        why = str(e).splitlines()[0] if str(e) else type(e).__name__
+        _tool_problem = (f"{tool}.exe could not be downloaded ({why}). "
+                         + _manual_hint(tool))
+        say("  " + _tool_problem)
+        return None
+
+
+def find_dcs_explorer(fetch: bool = True,
+                      log: Optional[Callable[[str], None]] = None
+                      ) -> Optional[str]:
+    """Locate DCSExplorer, downloading it on first use on Windows
+    (PAD-1606).  Caches the result, including a negative one, for the
+    life of the process; ``fetch=False`` never downloads and never caches
+    a miss, for callers on the UI thread."""
+    global _dcs_explorer_path
+    if _dcs_explorer_path is not None:
+        return _dcs_explorer_path or None
+    found = _locate("DCSExplorer", fetch, log)
+    if found or fetch:
+        _dcs_explorer_path = found or ""
+    return found
+
+
+def find_dcs_encoder(fetch: bool = True,
+                     log: Optional[Callable[[str], None]] = None
+                     ) -> Optional[str]:
+    """Locate DCSEncoder (the CGC Cactus Canyon DCS *repack* path), the
+    same way as :func:`find_dcs_explorer`."""
     global _dcs_encoder_path
     if _dcs_encoder_path is not None:
         return _dcs_encoder_path or None
-    bundled = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "vendor",
-        "DCSEncoder.exe" if sys.platform == "win32" else "DCSEncoder")
-    if os.path.isfile(bundled):
-        _dcs_encoder_path = bundled
-        return bundled
-    for name in ("DCSEncoder", "DCSEncoder.exe", "dcsencoder"):
-        found = shutil.which(name)
-        if found:
-            _dcs_encoder_path = found
-            return found
-    _dcs_encoder_path = ""
-    return None
+    found = _locate("DCSEncoder", fetch, log)
+    if found or fetch:
+        _dcs_encoder_path = found or ""
+    return found
 
 
 _is_dcs_cache: dict = {}
 
 
-def is_dcs_rom(zip_path: str) -> bool:
+def is_dcs_rom(zip_path: str, fetch: bool = True,
+               log: Optional[Callable[[str], None]] = None) -> bool:
     """Return True if *zip_path* is a DCS-audio ROM set DCSExplorer
     can decode — i.e. audio export is supported for this game.
 
     Runs DCSExplorer's fast ``--info`` mode; the result is cached per
     path for the life of the process.  Pre-DCS games (the YM2151
     sound board — Fish Tales, White Water, ...) and anything
-    DCSExplorer can't identify return False.
+    DCSExplorer can't identify return False.  So does a missing decoder,
+    but that answer is not cached: it is about this PC, not the ROM.
+    *fetch* / *log* go to :func:`find_dcs_explorer` (PAD-1606).
     """
     key = os.path.abspath(zip_path)
     cached = _is_dcs_cache.get(key)
     if cached is not None:
         return cached
+    if find_dcs_explorer(fetch=fetch, log=log) is None:
+        return False
     result = _probe_is_dcs(zip_path)
     _is_dcs_cache[key] = result
     return result
@@ -262,12 +300,12 @@ def extract_dcs(rom_zip_path: str, output_dir: str,
         if log_cb is not None:
             log_cb(msg, level)
 
-    exe = find_dcs_explorer()
+    exe = find_dcs_explorer(log=log)
     if exe is None:
         return DcsResult(
             is_dcs=False,
             message=("DCS audio skipped: "
-                     + missing_tool_message("DCSExplorer")))
+                     + (_tool_problem or missing_tool_message("DCSExplorer"))))
 
     created_dir = not os.path.isdir(output_dir)
     os.makedirs(output_dir, exist_ok=True)

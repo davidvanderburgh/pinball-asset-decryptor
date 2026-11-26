@@ -42,21 +42,27 @@ def _av_error():
 
 
 @pytest.mark.parametrize("name", sorted(UPSTREAM_V1_1))
-def test_bundled_tools_are_the_upstream_release(name):
-    # What the reply to the user rests on: our copies are unchanged.
-    with open(os.path.join(VENDOR, name), "rb") as f:
-        assert hashlib.sha256(f.read()).hexdigest() == UPSTREAM_V1_1[name]
+def test_fetched_tools_are_the_upstream_release(name):
+    # What the reply to the user rests on: PAD fetches the upstream
+    # v1.1 file unchanged, and no longer ships a copy (PAD-1606).
+    from pinball_decryptor.core import payloads
+    p = payloads.HOST_PAYLOADS[name[:-4]]
+    assert p.sha256 == UPSTREAM_V1_1[name]
+    assert p.url == ("https://github.com/mjrgh/DCSExplorer/releases/"
+                     "download/v1.1/" + name)
+    assert not os.path.exists(os.path.join(VENDOR, name))
 
 
 def test_missing_message_names_the_antivirus(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     msg = dcs_decode.missing_tool_message("DCSExplorer")
-    assert "DCSExplorer.exe is missing" in msg
-    assert "Antivirus" in msg and "reinstall PAD" in msg
+    assert "DCSExplorer.exe is not on this PC" in msg
+    assert "antivirus" in msg and "restart PAD" in msg
+    assert dcs_decode.tool_folder() in msg
 
 
 @pytest.mark.parametrize('platform, missing', [
-    ('win32', 'is missing'), ('linux', 'is not installed'), ('darwin', 'is not installed')])
+    ('win32', 'is not on this PC'), ('linux', 'is not installed'), ('darwin', 'is not installed')])
 def test_launch_error_messages(monkeypatch, platform, missing):
     monkeypatch.setattr(sys, 'platform', platform)
     assert "antivirus blocked DCSEncoder.exe" in \
@@ -68,7 +74,7 @@ def test_launch_error_messages(monkeypatch, platform, missing):
 
 
 @pytest.mark.parametrize('platform, missing', [
-    ('win32', 'is missing'), ('linux', 'is not installed'), ('darwin', 'is not installed')])
+    ('win32', 'is not on this PC'), ('linux', 'is not installed'), ('darwin', 'is not installed')])
 def test_tool_problem_when_missing(fresh_state, monkeypatch, platform, missing):
     monkeypatch.setattr(sys, 'platform', platform)
     monkeypatch.setattr(dcs_decode, "_dcs_explorer_path", "")
@@ -114,7 +120,7 @@ def test_cc_repack_refuses_out_loud_when_a_tool_is_gone(
     monkeypatch.setattr(dcs_decode, "_dcs_encoder_path",
                         "" if gone == "DCSEncoder" else "DCSEncoder.exe")
     rom, streams = _cc_tree(tmp_path)
-    with pytest.raises(cc_dcs.DcsRepackError, match=f"{gone}.exe is missing"):
+    with pytest.raises(cc_dcs.DcsRepackError, match=f"{gone}.exe is not on this PC"):
         cc_dcs.repack(rom, streams, rom)
 
 

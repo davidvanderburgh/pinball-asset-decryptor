@@ -9,6 +9,10 @@ import pytest
 
 from tests import _worker_budget
 
+# PAD-1606: the DCS tools download on first use on Windows; no test may
+# reach the network for them by accident.  Tests of the fetch delenv this.
+os.environ.setdefault("PAD_NO_TOOL_DOWNLOAD", "1")
+
 
 # ---------------------------------------------------------------------------
 # PAD-1536: `-n auto` takes a share of one machine-wide worker budget, so

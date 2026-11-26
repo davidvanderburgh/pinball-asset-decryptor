@@ -320,7 +320,10 @@ def runtime(tmp_path_factory):
     # PAD-1401: the layers the section asks about live outside it - here none of ours ever runs as a layer
     helpers += ("\nstatic long layer_rank(const struct pm_mode *m) { return m ? 0 : -1; }"
                 "\nstatic int runs_now(const struct pm_mode *m) { return 0; }"
-                "\nint pm_layers(void) { return 0; }\n")
+                "\nint pm_layers(void) { return 0; }\n"
+                # PAD-1589: lamp_write's colour-blind remap is defined in the accessibility section, outside this
+                # one; the preset (acc_cvd_now) is never set here, so colours pass through as they are
+                "\nstatic unsigned acc_remap(unsigned rgb, int preset) { return rgb & 0xffffffu; }\n")
     # PAD-1282 / PAD-1283: the runtime's PM_PTR and lamp_group_fn, which the section uses but sit outside it
     types = "\n".join(ln for ln in src.splitlines()
                       if ln.startswith(("#define PM_PTR ", "typedef pm_addr (*lamp_group_fn)")))

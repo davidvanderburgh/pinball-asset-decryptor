@@ -456,11 +456,19 @@ def inserts(elf, image=None):
     t = find_tables(elf)
     if image is None:
         image = playfield_image(t)
-    lights, lamps = t["lights"], t["lamps"]
     bits, how = shot_lamps(elf)
     by_lamp = {}
     for mask, lamp in (bits or {}).items():
         by_lamp[lamp] = by_lamp.get(lamp, 0) | mask
+    return inserts_of(t["lights"], t["lamps"], image, by_lamp), how, t
+
+
+def inserts_of(lights, lamps, image, by_lamp=None):
+    """The inserts of *lamps* (``[{lamp, kind, lights}]``) whose *lights* (light id -> ``{name, image, group, index,
+    x, y}``, None for none) are drawn on *image*: an RGB fixture's three channels by their -R/-G/-B names, a
+    one-light lamp as it is, the cabinet's expression lights left out. *by_lamp*: lamp -> shot mask. PAD-1607: the
+    Spike 3 reader (tools/spike3_emu/s3port.py ``inserts_a64``) gives its own 64-bit tables."""
+    by_lamp = by_lamp or {}
     out = []
     order = {"R": 0, "G": 1, "B": 2}
     by_stem = {}
@@ -499,7 +507,7 @@ def inserts(elf, image=None):
         if suf:
             by_stem[name] = ins
         out.append(ins)
-    return out, how, t
+    return out
 
 
 def cabinet(elf, t=None):

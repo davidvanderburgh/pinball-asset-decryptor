@@ -18305,6 +18305,10 @@ const char *pm_event_name(unsigned id)
  * as the game's own handler of that id would run: on The Beatles 1.29 the ball_end site IS a bus
  * 0x34 handler, called from inside this dispatch. -1: the ball_end site is the end of a ball. */
 static int ball_end_event = -1;
+/* PAD-1607: a card of the accessibility options only, on a port that ends a ball on the bus (Spike 3): the event goes
+ * to their own ball's end (on_acc_ball_end) - on_ball_end is the modes' gate's */
+static int acc_bus_end;
+static void on_acc_ball_end(pm_reg *r);
 
 static int coop_bonus_id;                   /* PAD-1028 round 3, the co-op section */
 static void coop_bonus_end(void);
@@ -18319,7 +18323,10 @@ static void on_event_dispatch(pm_reg *r)
     og_event((unsigned)r[0]);                    /* PAD-1400: the tilt warning passes, before the game acts on it */
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
-    if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
+    if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) {
+        if (acc_bus_end) on_acc_ball_end(r);
+        else on_ball_end(r);
+    }
     if (coop_bonus_id >= 0 && r[0] == (unsigned)coop_bonus_id) coop_bonus_end();   /* PAD-1028: the cards on its screen */
     on_team_dispatch(r);                         /* PAD-1052: ball 1 of the start menu's TEAM PLAY */
     /* PAD-663: from a process of the game's - a bus call on the game-logic thread only: the bus is called from other
@@ -34373,6 +34380,21 @@ static void acc_hold_tick(void)
               && !(mask & (unsigned)pm_port_value("mode_mask_game_end", 0x88)) && !pm_in_game();
     if (!attract || !switch_held(acc.sw[0]) || (acc.sw[1] && switch_held(acc.sw[1]))
         || (acc.menu_ms && (long)(now - acc.menu_ms) < (long)ACC_MENU_MS)) {
+        /* PAD-1607: the left button held alone, but not taken - said once, with why (the mode mask's attract bits are
+         * the port's, or Spike 2's 0x10 / 0x88 where it names none) */
+        static unsigned long blocked_at;
+        static int blocked_said;
+        if (!attract && switch_held(acc.sw[0]) && !(acc.sw[1] && switch_held(acc.sw[1]))) {
+            if (!blocked_at) blocked_at = now | 1;
+            else if (!blocked_said && (long)(now - blocked_at) >= (long)ACC_HOLD_MS) {
+                blocked_said = 1;
+                say("spoken scores: the left flipper button held, but not in attract: mode mask 0x%x (attract 0x%lx, "
+                    "game end 0x%lx), in game %d", mask, pm_port_value("mode_mask_attract", 0x10),
+                    pm_port_value("mode_mask_game_end", 0x88), pm_in_game());
+            }
+        } else {
+            blocked_at = 0;
+        }
         acc.left_at = 0;
         acc.left_said = 0;
         return;
@@ -34539,7 +34561,19 @@ static void acc_arm(void)
             if (pm_sound_priority(spk.request, 3, 0) < 0)
                 say("spoken scores: the carrier's priority stays its own - the port has no request table");
             spk_live = 1;
-            if (acc.sw[0] && edge_arm(&why)) {
+            int edges = acc.sw[0] && edge_arm(&why);
+#if PM_A64
+            /* PAD-1607: a 64-bit program's switch levels are the edge hook's own record, filled only by the hook (as
+             * the handicaps', PAD-1326): without it the left flipper button never reads held */
+            if (edges) {
+                struct site *e = site("switch_edge");
+                if (!e || !e->ok || !edge_hook(e)) {
+                    edges = 0;
+                    why = "switch_edge could not be hooked";
+                }
+            }
+#endif
+            if (edges) {
                 static const char *const menu_sites[] = { "challenge_menu_pick", "challenge_menu", 0 };
                 int i;
                 acc.hold_ok = 1;
@@ -34618,9 +34652,27 @@ static void pad_mode_start(void)
         }
         if (acc.on && spk_live) {                 /* PAD-1589: the ball's end, for its score said */
             ball_end_hold_arm();
-            if (!site("ball_end") || !hook(fn("ball_end"), on_acc_ball_end))
+            if (site("ball_end")) {
+                if (!hook(fn("ball_end"), on_acc_ball_end))
+                    say("spoken scores: not at a ball's end - the port's ball_end site cannot be hooked (only on the "
+                        "left flipper button held in attract)");
+            } else if (pm_port_value("ball_end_event", -1) >= 0) {
+                /* PAD-1607: a Spike 3 port ends a ball on the bus (value ball_end_event, site hook_dispatch) */
+                ball_end_event = (int)pm_port_value("ball_end_event", -1);
+                acc_bus_end = 1;
+                events_arm();
+                if (!events_bus_hooked) {
+                    acc_bus_end = 0;
+                    say("spoken scores: not at a ball's end - the game's event dispatch cannot be hooked (only on the "
+                        "left flipper button held in attract)");
+                } else {
+                    say("spoken scores: the ball's end is the game's event 0x%x, from its dispatch",
+                        (unsigned)ball_end_event);
+                }
+            } else {
                 say("spoken scores: not at a ball's end - the port has no ball_end site that can be hooked (only on "
                     "the left flipper button held in attract)");
+            }
         }
         return;
     }

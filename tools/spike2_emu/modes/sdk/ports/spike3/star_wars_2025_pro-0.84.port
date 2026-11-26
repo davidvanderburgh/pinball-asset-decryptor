@@ -204,6 +204,102 @@ text example_start_shot     Right target
 
 # not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 17 text, 20 value
 
+# ---- lamps (PAD-1607): read off the 64-bit light table (40-byte records, a light's device at +26), the lamp records and the device table ----
+# 93 inserts on the playfield picture; shot ties not read (shot mask 0)
+lamp 129          0              LEFT OUTLANE  # lamp 46, I/O group 7 index 51, at 47,684
+lamp 130          0              LEFT RETURN LANE-LEFT  # lamp 47, I/O group 7 index 52, at 76,649
+lamp 131          0              LEFT RETURN LANE-RIGHT  # lamp 48, I/O group 7 index 53, at 102,656
+lamp 132          0              RIGHT RETURN LANE  # lamp 49, I/O group 7 index 54, at 339,650
+lamp 133          0              RIGHT OUTLANE  # lamp 50, I/O group 7 index 55, at 370,668
+lamp 134          0              SHOOT AGAIN  # lamp 51, I/O group 7 index 49, at 208,783
+lamp 135          0              SHOOTER LANE RUNWAY 1  # lamp 52, I/O group 7 index 9, at 397,607
+lamp 136          0              SHOOTER LANE RUNWAY 2  # lamp 53, I/O group 7 index 10, at 397,549
+lamp 137          0              SHOOTER LANE RUNWAY 3  # lamp 54, I/O group 7 index 11, at 397,492
+lamp 138          0              SHOOTER LANE RUNWAY 4  # lamp 55, I/O group 7 index 12, at 397,434
+lamp 139          0              SCENE 1  # lamp 56, I/O group 7 index 50, at 133,610
+lamp 140          0              SCENE 2  # lamp 57, I/O group 7 index 33, at 151,592
+lamp 141          0              SCENE 3  # lamp 58, I/O group 7 index 34, at 173,577
+lamp 142          0              SCENE 4  # lamp 59, I/O group 7 index 35, at 198,569
+lamp 143          0              SCENE 5  # lamp 60, I/O group 7 index 36, at 242,569
+lamp 144          0              SCENE 6  # lamp 61, I/O group 7 index 37, at 268,577
+lamp 145          0              SCENE 7  # lamp 62, I/O group 7 index 38, at 290,592
+lamp 146          0              SCENE 8  # lamp 63, I/O group 7 index 39, at 308,610
+lamp 147,148,149  0              LEFT POP ARROW  # lamp 64, I/O group 7 index 20, at 121,632
+lamp 150,151,152  0              LEFT POP  # lamp 65, I/O group 7 index 40, at 66,578
+lamp 153,154,155  0              DARTH VADER X2  # lamp 66, I/O group 7 index 43, at 94,578
+lamp 156,157,158  0              RIGHT POP ARROW  # lamp 67, I/O group 7 index 17, at 319,634
+lamp 159,160,161  0              RIGHT POP  # lamp 68, I/O group 7 index 13, at 358,588
+lamp 162          0              RIGHT TARGET  # lamp 69, I/O group 7 index 23, at 332,557
+lamp 163,164,165  0              YODA  # lamp 70, I/O group 7 index 61, at 74,382
+lamp 166,167,168  0              YODA ARROW  # lamp 71, I/O group 7 index 58, at 91,440
+lamp 169          0              YODA-WHT  # lamp 72, I/O group 7 index 57, at 100,471
+lamp 170          0              ICON 1  # lamp 73, I/O group 7 index 56, at 107,495
+lamp 171          0              (F)ORCE  # lamp 74, I/O group 7 index 47, at 113,439
+lamp 172,173,174  0              LUKE  # lamp 75, I/O group 7 index 69, at 122,391
+lamp 175,176,177  0              LUKE ARROW  # lamp 76, I/O group 7 index 66, at 139,447
+lamp 178          0              LUKE-WHT  # lamp 77, I/O group 7 index 65, at 150,478
+lamp 179          0              ICON 2  # lamp 78, I/O group 7 index 64, at 158,503
+lamp 180,181,182  0              R2D2  # lamp 79, I/O group 7 index 77, at 163,391
+lamp 183,184,185  0              R2D2 ARROW  # lamp 80, I/O group 7 index 74, at 180,445
+lamp 186          0              R2D2-WHT  # lamp 81, I/O group 7 index 73, at 191,477
+lamp 187          0              ICON 3  # lamp 82, I/O group 7 index 72, at 198,501
+lamp 188,189,190  0              LANDO  # lamp 83, I/O group 8 index 69, at 187,330
+lamp 191,192,193  0              LANDO ARROW  # lamp 84, I/O group 8 index 66, at 195,383
+lamp 194          0              LANDO-WHT  # lamp 85, I/O group 8 index 65, at 203,418
+lamp 195          0              ICON 4  # lamp 86, I/O group 8 index 64, at 207,443
+lamp 196          0              F(O)RCE  # lamp 87, I/O group 8 index 29, at 210,336
+lamp 197,198,199  0              HAN SOLO  # lamp 88, I/O group 8 index 61, at 232,324
+lamp 200,201,202  0              HAN SOLO ARROW  # lamp 89, I/O group 8 index 58, at 232,385
+lamp 203          0              HAN SOLO-WHT  # lamp 90, I/O group 8 index 57, at 232,417
+lamp 204          0              ICON 5  # lamp 91, I/O group 8 index 56, at 232,443
+lamp 205          0              FO(R)CE  # lamp 92, I/O group 8 index 30, at 255,335
+lamp 206,207,208  0              CHEWIE  # lamp 93, I/O group 8 index 53, at 262,429
+lamp 209,210,211  0              CHEWIE ARROW  # lamp 94, I/O group 8 index 50, at 246,486
+lamp 212          0              CHEWIE-WHT  # lamp 95, I/O group 8 index 49, at 237,518
+lamp 213          0              ICON 6  # lamp 96, I/O group 8 index 48, at 230,542
+lamp 214          0              FOR(C)E  # lamp 97, I/O group 8 index 40, at 303,385
+lamp 215          0              EXTRA BALL-RIGHT  # lamp 98, I/O group 8 index 23, at 326,381
+lamp 216,217,218  0              LEIA  # lamp 99, I/O group 8 index 41, at 312,423
+lamp 219,220,221  0              LEIA ARROW  # lamp 100, I/O group 8 index 44, at 295,478
+lamp 222          0              LEIA-WHT  # lamp 101, I/O group 8 index 47, at 286,507
+lamp 223          0              ICON 7  # lamp 102, I/O group 8 index 8, at 278,531
+lamp 224          0              FORC(E)  # lamp 103, I/O group 8 index 22, at 341,400
+lamp 225,226,227  0              OBI-WAN  # lamp 104, I/O group 8 index 19, at 361,420
+lamp 228,229,230  0              OBI-WAN ARROW  # lamp 105, I/O group 8 index 16, at 345,471
+lamp 231          0              OBI-WAN-WHT  # lamp 106, I/O group 8 index 10, at 336,501
+lamp 232          0              ICON 8  # lamp 107, I/O group 8 index 9, at 326,526
+lamp 233          0              LOCK 1  # lamp 108, I/O group 8 index 24, at 175,268
+lamp 234          0              LOCK 2  # lamp 109, I/O group 8 index 25, at 172,251
+lamp 235          0              LOCK 3  # lamp 110, I/O group 8 index 26, at 168,232
+lamp 236          0              FEATURE 1  # lamp 111, I/O group 8 index 11, at 317,238
+lamp 237          0              FEATURE 2  # lamp 112, I/O group 8 index 12, at 311,259
+lamp 238          0              FEATURE 3  # lamp 113, I/O group 8 index 13, at 304,279
+lamp 239          0              FEATURE 4  # lamp 114, I/O group 8 index 14, at 298,300
+lamp 240          0              LUKE SHOT 1  # lamp 115, I/O group 7 index 27, at 110,359
+lamp 241          0              LUKE SHOT 2  # lamp 116, I/O group 7 index 28, at 103,341
+lamp 242          0              LUKE SHOT 3  # lamp 117, I/O group 7 index 29, at 98,324
+lamp 243          0              EXTRA BALL-LEFT  # lamp 118, I/O group 7 index 30, at 86,302
+lamp 245          0              BOTTOM GI-WHT (x14)  # lamp 120, I/O group 7 index 0, at 0,0
+lamp 246          0              BOTTOM GI-RED (x11)  # lamp 121, I/O group 7 index 1, at 0,0
+lamp 247          0              BOTTOM GI-BLU (x7)  # lamp 122, I/O group 7 index 2, at 0,0
+lamp 248          0              TOP GI-WHT (x18)  # lamp 123, I/O group 8 index 0, at 0,0
+lamp 249          0              TOP GI-RED (x5)  # lamp 124, I/O group 8 index 1, at 0,0
+lamp 250          0              TOP GI-BLU (x10)  # lamp 125, I/O group 8 index 2, at 0,0
+lamp 251          0              MINI WIZ 1  # lamp 126, I/O group 7 index 24, at 196,620
+lamp 252          0              MINI WIZ 2  # lamp 127, I/O group 7 index 8, at 245,620
+lamp 253          0              MINI WIZ 3  # lamp 128, I/O group 7 index 32, at 176,711
+lamp 254          0              MINI WIZ 4  # lamp 129, I/O group 7 index 48, at 266,711
+lamp 255          0              WIZARD MODE  # lamp 130, I/O group 7 index 16, at 221,673
+lamp 256          0              DARTH VADER FLASH  # lamp 131, I/O group 7 index 46, at 96,537
+lamp 257          0              LEFT SPINNER FLASH  # lamp 132, I/O group 7 index 25, at 64,451
+lamp 258          0              AT-AT FLASH  # lamp 133, I/O group 8 index 28, at 139,315
+lamp 259          0              STORMTROOPER FLASH  # lamp 134, I/O group 8 index 27, at 366,513
+lamp 260          0              SARLACC FLASH  # lamp 135, I/O group 8 index 37, at 313,135
+lamp 261          0              RT SPINNER FLASH  # lamp 136, I/O group 8 index 39, at 376,375
+lamp 262          0              AT-AT SPOTLIGHT  # lamp 137, I/O group 7 index 31, at 68,472
+lamp 263          0              DEATH STAR SPOTLIGHT  # lamp 138, I/O group 8 index 32, at 247,204
+lamp 264          0              MILLENIUM FALCON FLASH  # lamp 139, I/O group 8 index 31, at 230,260
+
 # ---- checks ----
 # value sound_channel_voice_ptrs: 1 of the 5 lined-up instructions holding 144 on the reference hold 112 here
 # value lamp_slot_level: 1 of the 29 lined-up instructions holding 2 on the reference hold 0 here

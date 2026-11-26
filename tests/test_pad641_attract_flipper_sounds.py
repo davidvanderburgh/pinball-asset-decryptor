@@ -124,7 +124,7 @@ def test_the_runtime_reads_the_lines_and_hooks_the_drain_and_the_lookup_once():
     # PAD-1031: so does the co-op characters' pick)
     # PAD-1322: all four through edge_hook, once (Spike 3's drain hooks with hook_callee there)
     # PAD-1403: the button shots (press, release, hold) hook it too
-    assert c.count("edge_hook(e)") == 7 and c.count("return edge_hooked = hook(e->addr, on_switch_edge);") == 1
+    assert c.count("edge_hook(e)") == 8 and c.count("return edge_hooked = hook(e->addr, on_switch_edge);") == 1
     # only in attract (the mode mask's attract bit, no game), not while the last one still plays
     assert "if (!(mask & att.attract_bit) || pm_in_game()) return;" in c
     assert "if (att.plays && (long)(att.until - now) > 0) return;" in c

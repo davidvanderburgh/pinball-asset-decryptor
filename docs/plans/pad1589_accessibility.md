@@ -72,10 +72,73 @@ and `job4.sh` (rigbatch, x1, muted, hidden); RESULTS.txt there has the detail.
   the row. Godzilla's Action button light is driven outside the light layers the runtime paints over: it keeps the
   game's colors (it is no shot's light).
 
-## Spike 3
+## Spike 3 (PAD-1607)
 
-The 64-bit runtime object (`mode64.so`) carries the same section and builds; the app refuses both ticks for a Spike 3
-card for now (`accessibility.NO_SPIKE3`). What Spike 3 can take, from its ports: every one names the light layers, the
-sound lookup and the scores, so the runtime side holds; inserts are named only in Star Wars ELG 1.10's port so far
-(the others need their lamp lines first); the Spike 3 Write (`spike3_modes.plan`) would have to carry `access.cfg` and
-the words (its sounds go by `spike3_music`'s record swap), and the menu rows are `spike3_menu`'s. A ticket of its own.
+The 64-bit runtime object (`mode64.so`) carries the same section. What a Spike 3 card needed was the Write and the
+ports:
+
+- **The gate** (`accessibility.title_refusal`): a Spike 3 title by its 64-bit port, as a Spike 2 one by its own. The
+  colors need `lamp` lines with at least one RGB insert (`NO_RGB`, on both platforms: Star Wars ELG, James Bond 60th LE
+  and Jurassic Park have only one-color inserts, which the runtime leaves alone, so the tick says there is nothing to
+  change instead of doing nothing). The words need a carrier, a request of the game's it never plays
+  (`carrier_calls`, `mode_sounds.TITLES_A64`): Star Wars ELG 1.10 only so far (`NO_CARRIER_A64` for the rest).
+- **The inserts** (`tools/spike3_emu/s3port.py` `inserts_a64` / `lamp_lines_a64`): read off the 64-bit program's own
+  tables - the lamp records (`light_lists`: each fixture's light ids), the LIGHT table (40-byte records indexed by
+  light id, the u16 at +26 the light's device, counted from 1; found as the table a GOT slot names whose lights are
+  distinct lamps: ELG's at 0x6f5e70), and each device's name, picture (+0x18) and place (+0x2c) - and grouped by
+  `lampmap.inserts_of` (RGB by their -R/-G/-B names, the cabinet's lights out). On ELG it gives the proven port's
+  66 light ids exactly. The picture is the one giving the most inserts: Walking Dead draws them on
+  `TestMenu/picnic_pf` (its "playfield" holds only cabinet lights), Fallout on none. Every Spike 3 port now has its
+  block: Fallout 180 (41 RGB; it also holds its toy flashers and a few one-color GI lights, which the colors leave
+  alone), Pokemon LE 0.82 / Pro 0.87 90 (identical sets; carried to LE 0.87, whose card is not on this PC), Star Wars
+  2025 LE 95 / Pro 93, Transformers 89, Walking Dead 96. Shot ties are not read (mask 0): the mode features that
+  light inserts stay behind `LAMPS_PROVEN`.
+- **The Write** (`spike3_modes.access_wanted` / `spoken_words`, `spike3_menu.access_rows`, `spike3_write`): COLOR
+  BLIND and SPOKEN SCORES grow into the program's menu with the other rows (on Attract Mode on ELG and Transformers;
+  with the music modes, into `game.pad`'s same grow); `access.cfg` rides the payload; each word is a record appended
+  to the game's `image.bin`, keyed beside the carrier's record (after the modes' own sounds, before the music modes'
+  files, so no key is taken twice), its `sword` line in `sounds.cfg` (the music modes' file, or one of its own). As
+  on Spike 2, a card whose menu cannot take SPOKEN SCORES says no scores.
+- **The runtime**: a card of these only took the ball's end from a `ball_end` site, which no Spike 3 port has (they
+  end a ball on the bus, `value ball_end_event`): it now takes that event from the dispatch hook (`acc_bus_end`).
+
+Proof (emulator, Spike 3 rig slot 167, hidden and muted; sets built by the app's own `spike3_menu.plan` +
+`spike3_modes.plan` and staged as Try it stages them, the grown program put in whole: `C:/tmp/PAD-1607` `mkset.py`,
+`run_s3.sh`):
+
+- Star Wars ELG 1.10, spoken scores alone: each of three ball ends said "player N twenty eight thousand six hundred
+  twenty" (the 3-player game's scores), every word a lookup of request 135 taking that word's record, and the end of
+  the ball held for it (3.3 s) through the bus event (`the ball's end is the game's event 0x34`).
+- Transformers LE 0.96, color-blind alone, COLOR BLIND grown into its menu at 0xa8c100 and read there: 12 RGB inserts
+  (Right Ramp, Optimus, the Megatron targets ...) shown 7f000b for the game's 7f0000, `accessibility.remap`'s value;
+  all 89 lamp lines within the game's 856 lights.
+
+### The carriers on the other Spike 3 builds (PAD-1607, run 2)
+
+Star Wars ELG's carriers came from its Spike 2 build's census; no other Spike 3 build has a Spike 2 sibling. Each
+build's carriers (`accessibility.SPEAK_CARRIERS_A64`, kept apart from `mode_sounds.TITLES_A64` so the modes' own
+sounds stay off those builds until proven) were picked in two steps (`C:/tmp/PAD-1607` `cands.py`, `census.sh`,
+`pick.py`):
+
+1. Off the card: requests of ONE sound id whose recording is mono, 1.5-2.6 s and named by no other request. On ELG
+   that gives 8, among them all five of its census carriers (135 202 201 74 238).
+2. A census on the Spike 3 rig (hidden, muted): the card with only its port and the sound log (`soundlog.on` +
+   `soundlog.only` in the set: the game runs stock), attract and a 3-ball game with every playfield switch of the port
+   pressed in each ball (tilt, slam, trough, shooter, start, coin, service and flipper switches left out): 54-88
+   requests played per title. Candidates played there are out; the longest five left are the carriers. Request 24
+   (2.52 s on every title, the framework's own) is never one: ELG's Spike 2 census heard it played, a 3-ball census
+   does not. A carrier the game does play at another moment still plays its own sound (the words swap its record only
+   while one of them is said).
+
+Pokemon LE 0.87 has none: its card is not on this PC (its spoken scores stay refused, with the reason).
+
+The flipper hold in attract needs the runtime to see the switch edges: Pokemon and both Star Wars 2025 ports have no
+`site switch_edge` (PAD-1326), so there `access.cfg` names no flipper buttons and the app says the scores come at
+each ball's end only (`accessibility.flipper_hold_ok`).
+
+The flipper hold on Spike 3 needed one more runtime step: a 64-bit program's switch levels are the edge hook's own
+record (PAD-1326), filled only once `switch_edge` is hooked, and the accessibility arming called only `edge_arm` (all
+Spike 2 needs: it reads the switch table). On the rig the left flipper button was held in attract after a whole game
+and nothing was said; the arming now hooks the edges as the handicaps do, and a hold the runtime sees outside attract
+says why it was not taken (the mode mask and in-game state).
+

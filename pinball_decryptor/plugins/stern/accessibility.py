@@ -335,15 +335,65 @@ SOUND_SITES = ("sound_lookup",)
 NO_TITLE = "The app cannot tell which game this project is for."
 NO_LAMPS = "The app does not know where %s keeps its insert lights yet, so it cannot recolor them."
 NO_SOUND = "The app cannot add sounds of its own to %s yet, so it cannot say the scores."
-NO_SPIKE3 = "Spike 3 cards cannot take this yet."
+#: PAD-1607: a title whose inserts each have one fixed color (its port names no RGB insert: Star Wars ELG, James Bond
+#: 60th LE, Jurassic Park): the runtime leaves those alone, so the colors would change nothing
+NO_RGB = "%s's inserts each have one color of their own, so there is nothing for the color-blind colors to change."
+#: PAD-1607: a Spike 3 card's words ride a carrier, a request of the game's it never plays, measured per build
+#: (:data:`.mode_sounds.TITLES_A64`)
+NO_CARRIER_A64 = ("The app does not know a sound of %s's that the game never plays yet, which the spoken numbers need "
+                  "on a Spike 3 card, so it cannot say the scores.")
+
+
+def is_spike3(prof):
+    return prof is not None and getattr(prof, "arch", "arm") == "a64"
+
+
+#: PAD-1607: the spoken words' carriers on the Spike 3 builds with no modes' carriers (mode_sounds.TITLES_A64; kept
+#: apart so the modes' own sounds stay off these builds until proven): requests of ONE sound id whose recording is
+#: mono, 1.5-2.6 s and named by no other request, none of them played in an emulator census (attract and a 3-ball game
+#: with every playfield switch pressed, the sound log on), longest first. Request 24 (2.52 s on every title: the
+#: framework's own, which Star Wars ELG's Spike 2 census heard played) is never one. The words only swap the carrier's
+#: record while one of them is being said, so a carrier the game plays at another moment still plays its own sound.
+SPEAK_CARRIERS_A64 = {
+    "fallout_le_0_82_spike3": (1296, 1290, 1288, 1293, 1294),
+    "pokemon_le_0_82_spike3": (416, 442, 578, 471, 526),
+    "pokemon_pro_0_87_spike3": (469, 495, 633, 524, 581),
+    "star_wars_2025_le_0_96_spike3": (232, 281, 622, 701, 98),
+    "star_wars_2025_pro_0_84_spike3": (224, 269, 557, 636, 93),
+    "transformers_mtmte_le_0_96_spike3": (867, 865, 841, 874, 1058),
+    "walking_dead_remastered_le_0_92_spike3": (596, 775, 83, 160, 221),
+}
+
+
+def carrier_calls(prof):
+    """PAD-1607: the requests a Spike 3 build's spoken words may ride (its measured carriers' calls), or ``()``."""
+    from . import mode_sounds as MSo
+    if not is_spike3(prof):
+        return ()
+    c = MSo.profile_carriers(prof.key)
+    if c is not None:
+        return tuple(int(r) for r in c.calls)
+    return tuple(SPEAK_CARRIERS_A64.get(prof.key, ()))
+
+
+def flipper_hold_ok(prof):
+    """PAD-1607: whether the runtime can see the left flipper button held in attract on ``prof``'s title (the scores
+    said on it): a Spike 3 port needs its switch edges (``site switch_edge``, as the handicaps' flippers; Pokemon and
+    both Star Wars 2025 have none), a Spike 2 one has its switch drain."""
+    if not is_spike3(prof):
+        return True
+    from . import mode_project as MP
+    try:
+        return "switch_edge" in MP.read_port(MP.port_path(prof)).get("site", {})
+    except (OSError, MP.ModeProjectError):
+        return False
 
 
 def title_refusal(prof, what):
-    """Why ``prof``'s title cannot take *what* (``"cvd"``, ``"spoken"``), or ``""``."""
+    """Why ``prof``'s title cannot take *what* (``"cvd"``, ``"spoken"``), or ``""``. PAD-1607: a Spike 3 title by its
+    64-bit port as a Spike 2 one by its own, and its spoken words need a carrier (:func:`carrier_calls`)."""
     if prof is None:
         return NO_TITLE
-    if getattr(prof, "arch", "arm") == "a64":
-        return NO_SPIKE3
     from . import mode_project as MP
     try:
         port = MP.read_port(MP.port_path(prof))
@@ -352,10 +402,14 @@ def title_refusal(prof, what):
     if what == "cvd":
         if not all(d in port.get("data", {}) for d in LAMP_DATA) or not port.get("lamp"):
             return NO_LAMPS % prof.label
+        if not any(len(ids) == 3 and all(ids) for _n, ids, _m in port["lamp"]):
+            return NO_RGB % prof.label              # PAD-1607: nothing the colors could change
         return ""
     if not all(s in port.get("site", {}) for s in SOUND_SITES) or "scores" not in port.get("data", {}) \
             and "scores32" not in port.get("data", {}):
         return NO_SOUND % prof.label
+    if is_spike3(prof) and not carrier_calls(prof):
+        return NO_CARRIER_A64 % prof.label
     return ""
 
 

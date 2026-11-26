@@ -2137,6 +2137,137 @@ def attract_lines(t, placed):
     return out
 
 
+# ---- PAD-1607: the playfield inserts of a Spike 3 program, read off its own tables ------------------------------
+#: a light's record in the 64-bit light table: 40 bytes indexed by light id, the u16 at +26 its device (its place in
+#: the device table, from 1). Star Wars ELG 1.10: the table at 0x6f5e70 (its GOT slot 0x6a34f8), light 66 -> device
+#: 78 DEATH STAR (X2), light 3 -> device 31 LEFT OUTLANE: the same light ids as its Spike 2 build's port, all 66.
+LIGHT_REC = 40
+LIGHT_DEV = 26
+#: a device record's picture (a pointer at +0x18) and its place on it (two s16 at +0x2c: ELG's DEATH STAR (X2) at
+#: 49,60 and LEFT OUTLANE at 21,353, as the Spike 2 build's device table has them)
+DEV_IMAGE = 0x18
+DEV_XY = 0x2C
+
+
+def _device_table(t, recs):
+    """the address of the device table's first record (*recs*: device_records' list of it), or None"""
+    if len(recs) < 3:
+        return None
+    for a in t.ptr:
+        if all(_dev_name(t, a + 0x50 * k) == recs[k][0] for k in range(3)):
+            return a
+    return None
+
+
+def _dev_name(t, a):
+    p = t.ptr.get(a)
+    o = t.off(p) if p else None
+    if o is None:
+        return None
+    raw = t.b[o:t.b.find(b"\0", o, o + 80)]
+    try:
+        name = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        name = raw.decode("latin1")
+    return name if name and len(name) <= 40 and name.isprintable() else None
+
+
+def light_devices(t, n_lights, recs):
+    """{light id: index into *recs*} of the 64-bit light table (:data:`LIGHT_REC`-byte records indexed by light id,
+    a light's device at +:data:`LIGHT_DEV`): the table some pointer of the program names (its GOT slot; ELG:
+    0x6a34f8 -> 0x6f5e70) whose lights 1..*n_lights* are distinct lamps of *recs* (:func:`device_records`); {} when
+    none is. The device numbers count from 1 (ELG: light 67 names device 28, PLAYFIELD GI 1, recs[27]: the table's
+    first record is no device)."""
+    if not n_lights:
+        return {}
+
+    def dev(a):
+        o = t.off(a + LIGHT_DEV)
+        return struct.unpack_from("<H", t.b, o)[0] if o is not None else None
+    targets = sorted(set(t.ptr.values()))
+    for one in (1, 0):
+        lamp = {k + one for k, r in enumerate(recs) if r[3] == 3}
+        if not lamp:
+            return {}
+        for v in targets:
+            if dev(v + LIGHT_REC) not in lamp or dev(v + LIGHT_REC * n_lights) not in lamp:
+                continue
+            got = {}
+            for k in range(1, n_lights + 1):
+                d = dev(v + LIGHT_REC * k)
+                if d not in lamp:
+                    break
+                got[k] = d - one
+            if len(got) == n_lights and len(set(got.values())) >= 0.9 * n_lights:   # each light its own channel
+                return got
+    return {}
+
+
+def inserts_a64(t, lamp_group):
+    """PAD-1607: the playfield inserts of a 64-bit program as lampmap.inserts' dicts ([] when its tables are not
+    read): the lamp records (light_lists: the light ids of each fixture), each light's device off the light table
+    (light_devices: the run of light records whose devices are distinct lamps), each device's name, picture and place off the device table. A title with no Spike 2 build of
+    its own gets its `lamp` lines this way; shot ties are not read (shot mask 0)."""
+    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from pinball_decryptor.plugins.stern import lampmap as LM
+    calls = [b for a, w in _window(t, lamp_group, 40) for b in [_bl(a, w)] if b] if lamp_group else []
+    lists = light_lists(t, calls[1]) if len(calls) > 1 else []
+    recs = device_records(t)
+    base = _device_table(t, recs)
+    if not lists or not recs or base is None:
+        return [], ""
+    n_lights = max(i for l in lists for i in l) if any(lists) else 0
+    devs = light_devices(t, n_lights, recs)
+    if not devs:
+        return [], ""
+
+    def device(k):
+        a = base + 0x50 * k
+        name, g, idx, cls = recs[k]
+        pi = t.ptr.get(a + DEV_IMAGE)
+        po = t.off(pi) if pi else None
+        image = t.b[po:t.b.find(b"\0", po, po + 200)].decode("latin1") if po is not None else ""
+        o = t.off(a + DEV_XY)
+        x, y = struct.unpack_from("<hh", t.b, o) if o is not None else (0, 0)
+        return dict(dev=k, name=name, image=image, group=g, index=idx, cls=cls, x=x, y=y)
+    lights = [None] + [device(devs[i]) for i in range(1, n_lights + 1)]
+    lamps = [dict(lamp=k, kind=0, lights=list(ids)) for k, ids in enumerate(lists)]
+    # the picture the inserts are drawn on: the one giving the most inserts, its cabinet lights left out (Walking Dead
+    # Remastered LE 0.92 draws them on TestMenu/picnic_pf; its "playfield" holds only the cabinet's expression lights;
+    # Fallout LE 0.82 draws them on no picture at all ("": its "playfield" holds the cabinet's lights)
+    pics = sorted({d["image"] for d in lights[1:] if d
+                   and not any(w in d["image"].lower() for w in LM._NOT_PLAYFIELD)})
+    best = max(((LM.inserts_of(lights, lamps, im), im) for im in pics), key=lambda x: (len(x[0]), x[1]),
+               default=([], ""))
+    ins, image = best
+    seen, out = set(), []
+    for i in ins:                                       # a fixture the lamp table lists twice (ELG's DEATH STAR (X2))
+        key = tuple(i["lights"])
+        if key not in seen:
+            seen.add(key)
+            out.append(i)
+    return out, image
+
+
+def lamp_lines_a64(t, placed):
+    """PAD-1607: the port's `lamp` lines read off the 64-bit program's own tables (inserts_a64), [] when not read"""
+    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from pinball_decryptor.plugins.stern import lampmap as LM
+    ins, image = inserts_a64(t, placed.get("lamp_group"))
+    if not ins:
+        return []
+    return (["# ---- lamps (PAD-1607): read off the 64-bit light table (%d-byte records, a light's device at +%d), "
+             "the lamp records and the device table ----" % (LIGHT_REC, LIGHT_DEV),
+             "# %d inserts %s; shot ties not read (shot mask 0)" % (
+                 len(ins), "on the %s picture" % image if image else
+                 "drawn on no picture (the device table names none for them)")]
+            + [LM.lamp_line(dict(i, shot=0)) for i in ins])
+
+
 # ---- PAD-1328: the cabinet's expression lights on a Spike 3 program --------------------------------------------
 def cabinet_a64(t, lamp_group):
     """the cabinet's expression lights of a 64-bit program, as lampmap.cabinet's dicts (placed on the cabinet drawing),

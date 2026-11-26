@@ -208,10 +208,10 @@ def test_the_file_list_is_read_from_the_installers_own_files_section(tmp_path):
 
 
 @pytest.mark.parametrize("line, says", [
-    ('Source: "a.txt"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist',
+    ('Source: "a.txt"; DestDir: "{app}"; Flags: ignoreversion deleteafterinstall',
      "unknown [Files] flag"),
-    ('Source: "a.txt"; DestDir: "{app}"; Check: SomeCheck',
-     "unknown [Files] parameter"),
+    ('Source: "a.txt"; DestDir: "{app}"; Check: SomeCheck("x")',
+     "unknown [Files] Check"),
     ('Source: "a.txt"; DestDir: "{sys}"', "DestDir outside"),
     ('Source: "nothing*.zip"; DestDir: "{app}"', "matches no file"),
 ])

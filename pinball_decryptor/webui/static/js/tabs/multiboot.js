@@ -9,6 +9,7 @@ import { html, useEffect, useRef, useState, PageHead, Card, Button, Field, Selec
          menuOpen, InfoBadge, tip, Icon, mediaUrl, call, setField, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { Booting } from "../core/booting.js";
+import { MenuWifi } from "../core/menu_wifi.js";
 
 export const css = true;
 
@@ -578,6 +579,28 @@ const TEST_ENTRY_TIP = { head: "TEST CARD entry", lines: [
   "Its files are the Test card tab's list when the card is built, plus the default PAD test card. Remembered as the last choice like a game.",
   "Not with editions (No menu: boot the edition ...)." ] };
 
+// Simon (2026-11-26): the boot menu on the network with no game running, as a test card is
+// (core/menu_network.py): the wired port and the Wi-Fi saved for both tabs, put on the card after it is written.
+// Saved at once (not with OK): it is the same Wi-Fi the Test card tab keeps.
+const MB_NET_TIP = { head: "Network while the menu shows", lines: [
+  "The menu starts the machine's wired port, and joins the Wi-Fi below, while it is on the screen, so this computer can reach the machine before any game has started. It stops the moment a game is chosen: the game then sets up its own network as Stern ships it.",
+  "Needs remote access on the card: give the first game remote access on the Network tab and Write it before it goes on this card.",
+  "Takes effect the next time the card is built, updated or applied." ] };
+
+function MbNetwork() {
+  const [st, setSt] = useState(null);
+  const load = async () => setSt(await call("testcard.menu_wifi"));
+  useEffect(() => { load(); }, []);
+  if (!st) return null;
+  return html`<${Box} legend="Network">
+    <${Check} checked=${st.multiboot} wrap title=${MB_NET_TIP}
+      label="Start the network while the menu shows (the card needs remote access)"
+      onChange=${async (v) => { await call("testcard.set_menu_multiboot", v); load(); }} />
+    <${MenuWifi} saved=${st} address=${st.address} off=${st.multiboot ? "" : "Tick the box above first."}
+      onSaved=${load} />
+  <//>`;
+}
+
 // --------------------------------------------------------- Menu settings…
 function MenuDialog({ s, w }) {
   const md = s.md;
@@ -661,6 +684,7 @@ function MenuDialog({ s, w }) {
           <span class="small muted">the flippers must have been off this long before the right flipper's hold counts</span></div>`}
       </div>
     <//>
+    ${w.menu_network ? html`<${MbNetwork} />` : null}
     ${w.test_entry ? html`<${Box} legend="Test card">
       <${Check} ns=${NS} k="test_entry" checked=${s.test_entry} wrap
         label="Add a TEST CARD entry to the menu (the Test card tab's list, and the default PAD test card)"

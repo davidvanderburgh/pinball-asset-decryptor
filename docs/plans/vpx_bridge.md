@@ -610,6 +610,15 @@ reads them from) before it starts DOF, and a clone ROM in `DOF_PARENT_ROMS`
 whose name has no row there but whose parent's has is started under the
 parent's name. A config that has its own `seawitfp` row keeps it.
 
+DOF events list (PAD-1610, Msaint30 asked for the events to write DOF configs
+of his own): a table's checklist sheet (its row's Coverage cell, or Check a
+table) has a DOF events section, saved with the Markdown and the CSV.
+`vpxauthor.dof_events` lists what PAD.Controller sends (the map's solenoid,
+l<n>/f<n> lamp and switch-rewrite numbers as S/L/W, the cabinet's E events)
+and `script_dof_calls` the script's own DOF calls with the sub each sits in,
+read from the script as the patch leaves it: a sub renamed `_orig` that
+nothing calls any more (a stand-in, `quiet_subs`) never fires, so is left out.
+
 ### PAD-933: four balls, and the playfield window of a bare `Controller.Run`
 
 "Always ejects two balls": The Beatles counts **4 balls installed**, and the

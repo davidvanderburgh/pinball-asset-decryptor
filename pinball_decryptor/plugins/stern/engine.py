@@ -12042,6 +12042,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     modes.intro = _coop_intro_wav(assets_dir, log)    # PAD-1114: and the co-op intro's sound
     modes.picks = _coop_picked_wavs(assets_dir, log)  # PAD-1123: and the co-op characters' sounds once picked
     modes.ceremony = _coop_ceremony_wav(assets_dir, log)   # PAD-1317: and the co-op awards ceremony's music
+    modes.select = _coop_select_wav(assets_dir, log)       # PAD-1611: and the co-op character select's music
     modes.speak = _spoken_wavs(assets_dir, log)         # PAD-1589: and the spoken scores' number words
     if not modes.any:
         return None, None
@@ -12107,9 +12108,9 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
             i_why = _SMo.title_refusal(prof, turns=True)
             if i_why:
                 log("Co-op %s: left out of this build (it plays without them): %s"
-                    % ("intro's sound" if modes.intro and not modes.picks and not modes.ceremony else "sounds",
-                       i_why.rstrip(".")), "warning")
-                modes.intro, modes.picks, modes.ceremony = "", [], ""
+                    % ("intro's sound" if modes.intro and not modes.picks and not modes.ceremony
+                       and not modes.select else "sounds", i_why.rstrip(".")), "warning")
+                modes.intro, modes.picks, modes.ceremony, modes.select = "", [], "", ""
                 if not modes.any:
                     return None, None
         if modes.speak:
@@ -12187,6 +12188,8 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
         log("Found %d co-op character sound(s) to play once picked." % len(modes.picks), "info")
     if modes.ceremony:
         log("Found the co-op awards ceremony's music.", "info")
+    if modes.select:
+        log("Found the co-op character select's music.", "info")
     if modes.jukebox:
         log("Found a jukebox of %d song(s) (%d with an intro video of its own) for the game's %d "
             "musics in %d pool(s)." % (len(modes.jukebox), sum(1 for s in box.songs if s.video),
@@ -14375,13 +14378,15 @@ def _intro_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, mo
         log("Co-op sounds: left out of this build (the intro and the picks play without them): %s." % why,
             "warning")
         modes.intro, modes.intro_rel, modes.intro_plan, modes.picks, modes.ceremony = "", "", {}, [], ""
+        modes.select = ""
         return None
     modes.intro_rel = rel
     modes.intro_plan = {"request": request, "slot": slot}
     log("Co-op %s ride request %d (sound idx %d, %s)." % (
-        "intro's sound" if not modes.picks and not modes.ceremony else "sounds (%s)" % ", ".join(
+        "intro's sound" if not modes.picks and not modes.ceremony and not modes.select else "sounds (%s)" % ", ".join(
             w for w, on in (("the intro's", modes.intro), ("the characters' once picked", modes.picks),
-                            ("the awards ceremony's music", modes.ceremony)) if on),
+                            ("the awards ceremony's music", modes.ceremony),
+                            ("the character select's music", modes.select)) if on),
         request, slot, whose), "info")
     return None
 
@@ -14394,14 +14399,16 @@ def _intro_lines(params, used, modes, log):
     if not used or not plan:
         return None
     byidx = {p["idx"]: p for p in params}
-    out = {"request": int(plan["request"]), "key": None, "host": None, "ms": 0, "picks": [], "ceremony": None}
+    out = {"request": int(plan["request"]), "key": None, "host": None, "ms": 0, "picks": [], "ceremony": None,
+           "select": None}
     for u in used:
         sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
         n = _SMo_picked_of(u["mode"])
         cer = _SMo_is_ceremony(u["mode"])                # PAD-1317: the awards ceremony's music
+        sel = _SMo_is_select(u["mode"])                  # PAD-1611: the character select's music
         if not sp or not hp or not hp.get("grown") or not sp.get("findkey") or not hp.get("findkey"):
             log("Co-op %s: left out: its record did not come out of the grown bank." % (
-                "awards ceremony's music" if cer else
+                "awards ceremony's music" if cer else "character select's music" if sel else
                 "character %d's sound once picked" % n if n else "intro's sound"), "warning")
             continue
         u["lines"] = 1
@@ -14409,6 +14416,8 @@ def _intro_lines(params, used, modes, log):
         ms = int(-(-int(u["frames"]) * 1000 // 44100))
         if cer:
             out["ceremony"] = (bytes(hp["findkey"]), ms)
+        elif sel:
+            out["select"] = (bytes(hp["findkey"]), ms)
         elif n:                                         # PAD-1123: a co-op character's sound once picked
             out["picks"].append((n, bytes(hp["findkey"]), ms))
         else:
@@ -14561,6 +14570,51 @@ def _coop_ceremony_wav(assets_dir, log):
         return ""
     if not got:
         log("Co-op awards: %s has no sound, so the ceremony has no music of its own." % os.path.basename(src), "info")
+    return got
+
+
+def _coop_select_wav(assets_dir, log):
+    """PAD-1611: the co-op character select's music (a sound file of the owner's, or a video's own sound) as a WAV in
+    the project's write cache, or ``""`` when co-op is off, there is none, it has no sound, or ffmpeg cannot take it
+    out. Named for the source as it is (as the intro's: the build reads the sound set several times)."""
+    from . import coop_play as _CP
+    from . import sound_modes as _SMo
+    try:
+        src = _CP.select_sound_path(assets_dir) if _CP.load(assets_dir) else ""
+    except Exception:  # noqa: BLE001 - an unreadable sidecar: none
+        src = ""
+    if not src:
+        return ""
+    from ...core.audio import find_ffmpeg
+    ff = find_ffmpeg()
+    if not ff:
+        log("Co-op characters: the character select's music is left out of this build: ffmpeg was not found.",
+            "warning")
+        return ""
+    folder = os.path.join(assets_dir, _SMo.CACHE_DIR)
+    try:
+        st = os.stat(src)
+        out = os.path.join(folder, "coop_select_%s.wav" % hashlib.md5(
+            ("%s|%d|%d" % (os.path.abspath(src), st.st_size, st.st_mtime_ns)).encode()).hexdigest()[:12])
+        os.makedirs(folder, exist_ok=True)
+        if os.path.isfile(out) and os.path.getsize(out) > 44:
+            return out
+        for f in os.listdir(folder):                    # an older track's
+            if f.startswith("coop_select_") and f.endswith(".wav"):
+                try:
+                    os.remove(os.path.join(folder, f))
+                except OSError:
+                    pass
+        got = _CP.select_audio(src, out + ".part.wav", ff)
+        if got:
+            os.replace(got, out)
+            got = out
+    except (OSError, _CP.CoopError) as e:
+        log("Co-op characters: the character select's music is left out of this build: %s." % e, "warning")
+        return ""
+    if not got:
+        log("Co-op characters: %s has no sound, so the character select has no music of its own."
+            % os.path.basename(src), "info")
     return got
 
 
@@ -23157,6 +23211,12 @@ def _SMo_is_intro(mode):
     co-op characters' sounds once picked)."""
     from . import sound_modes as _SMo
     return _SMo.is_intro(mode)
+
+
+def _SMo_is_select(mode):
+    """PAD-1611: :func:`.sound_modes.is_select`."""
+    from . import sound_modes as _SMo
+    return _SMo.is_select(mode)
 
 
 def _SMo_is_ceremony(mode):

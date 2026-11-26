@@ -486,6 +486,14 @@ export function CoopCharsDialog({ s, onClose }) {
       <span class="small dim wrap">${ch.intro_show_off || ((s.mode_shows || []).length ? "Each is listed under the game's mode that plays it (its How it works lists them too)." : "The game's modes' light shows are listed once the card has been read.")}</span>
     </div>` : null}
     <div class="row" style="margin-top:8px; gap:8px">
+      <${Button} size="sm" kind="ghost" icon="wave" disabled=${!rows.length || !ch.pick} onClick=${() => call("modes.coop_select_sound", false)}
+        title=${ch.select_sound ? "The music that loops while a teammate picks a character: choose another." : "A music track of your own (a sound file, or a video's sound) that loops while a teammate picks a character."}>
+        ${ch.select_sound ? "Select music ✓" : "Select music…"}<//>
+      ${ch.select_sound ? html`<${Button} size="xs" kind="ghost" icon="x" title="No music of your own: the character pick plays with the game's own sounds."
+        onClick=${() => call("modes.coop_select_sound", true)} />` : null}
+      <span class="small dim wrap">${ch.select_sound ? `${ch.select_sound} plays while a teammate picks a character, starting over each time it ends, with the game's own sounds faded under it. Once a character is taken it stops and the game's own music comes back (up to ${ch.select_max || 60} seconds of it, looped).` : "Loop a music track of your own while a teammate picks a character; the game's own music comes back once a character is taken."}</span>
+    </div>
+    <div class="row" style="margin-top:8px; gap:8px">
       <${Button} size="sm" kind="ghost" icon="film" disabled=${!rows.length || !ch.pick} onClick=${() => call("modes.coop_ceremony", false)}
         title=${ch.ceremony ? "The video behind the award cards at a co-op game's end: choose another." : "A video of your own that plays behind the award cards at a co-op game's end, in place of the game's End of Ball Bonus loop."}>
         ${ch.ceremony ? "Awards video ✓" : "Awards video…"}<//>

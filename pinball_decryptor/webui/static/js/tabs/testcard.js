@@ -4,6 +4,7 @@
 // into the TEST CARD menu.  The default PAD test card is always on it.
 import { html, PageHead, Card, Button, Check, Field, Note, Progress, tip, call, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { MenuWifi as MenuWifiLine } from "../core/menu_wifi.js";
 
 const NS = "testcard";
 const LISTS = [
@@ -62,6 +63,14 @@ const WIFI_TIP = { head: "Wi-Fi start-up", lines: [
   "For a machine on Wi-Fi: the test card starts its Wi-Fi the way the Network tab sets it up on a game card.",
   "Not needed when the machine is connected by cable." ] };
 
+
+// Simon (2026-11-26): the test card on the network with no game running (core/menu_wifi.js, shared with Multi-boot)
+function MenuWifi({ s }) {
+  const n = s.network || {};
+  return html`<${MenuWifiLine} saved=${{ name: n.wifi_name || "", open: !!s.wifi_open }} address=${s.address}
+    off=${s.busy ? "Wait for the build to finish." : !n.ssh ? "Tick Remote access first." : ""} label="Wi-Fi for the test card:" />`;
+}
+
 function NetworkBits({ s }) {
   const n = s.network || {};
   const busy = !!s.busy;
@@ -81,6 +90,7 @@ function NetworkBits({ s }) {
         title=${n.wifi ? "Wi-Fi on the 5 GHz band, as the Network tab offers it" : "Tick Wi-Fi start-up first"}
         onChange=${(v) => call("testcard.set_network", "band5", v)} />
     </div>
+    <${MenuWifi} s=${s} />
   </div>`;
 }
 

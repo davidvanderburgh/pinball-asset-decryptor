@@ -43,6 +43,8 @@ _LOCK = threading.RLock()
 #: game card (Network tab), so Send to machine can reach it.
 ROOM_GB_DEFAULT = 2
 NETWORK_DEFAULTS = {"room": False, "room_gb": ROOM_GB_DEFAULT, "ssh": False, "wifi": False, "band5": False}
+# Simon (2026-11-26): the Wi-Fi the test card joins with no game is core/menu_network.saved() - one for the Test card
+# and Multi-boot tabs
 
 
 def clean_network(d):

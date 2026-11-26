@@ -34161,6 +34161,21 @@ static void acc_hold_tick(void)
               && !(mask & (unsigned)pm_port_value("mode_mask_game_end", 0x88)) && !pm_in_game();
     if (!attract || !switch_held(acc.sw[0]) || (acc.sw[1] && switch_held(acc.sw[1]))
         || (acc.menu_ms && (long)(now - acc.menu_ms) < (long)ACC_MENU_MS)) {
+        /* PAD-1607: the left button held alone, but not taken - said once, with why (the mode mask's attract bits are
+         * the port's, or Spike 2's 0x10 / 0x88 where it names none) */
+        static unsigned long blocked_at;
+        static int blocked_said;
+        if (!attract && switch_held(acc.sw[0]) && !(acc.sw[1] && switch_held(acc.sw[1]))) {
+            if (!blocked_at) blocked_at = now | 1;
+            else if (!blocked_said && (long)(now - blocked_at) >= (long)ACC_HOLD_MS) {
+                blocked_said = 1;
+                say("spoken scores: the left flipper button held, but not in attract: mode mask 0x%x (attract 0x%lx, "
+                    "game end 0x%lx), in game %d", mask, pm_port_value("mode_mask_attract", 0x10),
+                    pm_port_value("mode_mask_game_end", 0x88), pm_in_game());
+            }
+        } else {
+            blocked_at = 0;
+        }
         acc.left_at = 0;
         acc.left_said = 0;
         return;
@@ -34327,7 +34342,19 @@ static void acc_arm(void)
             if (pm_sound_priority(spk.request, 3, 0) < 0)
                 say("spoken scores: the carrier's priority stays its own - the port has no request table");
             spk_live = 1;
-            if (acc.sw[0] && edge_arm(&why)) {
+            int edges = acc.sw[0] && edge_arm(&why);
+#if PM_A64
+            /* PAD-1607: a 64-bit program's switch levels are the edge hook's own record, filled only by the hook (as
+             * the handicaps', PAD-1326): without it the left flipper button never reads held */
+            if (edges) {
+                struct site *e = site("switch_edge");
+                if (!e || !e->ok || !edge_hook(e)) {
+                    edges = 0;
+                    why = "switch_edge could not be hooked";
+                }
+            }
+#endif
+            if (edges) {
                 static const char *const menu_sites[] = { "challenge_menu_pick", "challenge_menu", 0 };
                 int i;
                 acc.hold_ok = 1;

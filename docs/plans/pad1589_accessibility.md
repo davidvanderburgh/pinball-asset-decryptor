@@ -135,3 +135,10 @@ Pokemon LE 0.87 has none: its card is not on this PC (its spoken scores stay ref
 The flipper hold in attract needs the runtime to see the switch edges: Pokemon and both Star Wars 2025 ports have no
 `site switch_edge` (PAD-1326), so there `access.cfg` names no flipper buttons and the app says the scores come at
 each ball's end only (`accessibility.flipper_hold_ok`).
+
+The flipper hold on Spike 3 needed one more runtime step: a 64-bit program's switch levels are the edge hook's own
+record (PAD-1326), filled only once `switch_edge` is hooked, and the accessibility arming called only `edge_arm` (all
+Spike 2 needs: it reads the switch table). On the rig the left flipper button was held in attract after a whole game
+and nothing was said; the arming now hooks the edges as the handicaps do, and a hold the runtime sees outside attract
+says why it was not taken (the mode mask and in-game state).
+

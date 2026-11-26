@@ -329,3 +329,13 @@ def test_the_flipper_hold_only_where_the_runtime_sees_the_edges(tmp_path):
     text = open(res.access_file, encoding="utf-8").read()
     assert "spoken\t0x10\t0,0" in text
     assert "flipper" not in res.lines[0]
+
+
+def test_the_runtime_hooks_the_switch_edges_for_the_flipper_hold_on_64bit():
+    """A 64-bit program's switch levels are the edge hook's own record (PAD-1326): the flipper hold arms it, or the
+    left flipper button never reads held on a Spike 3 card (seen on the rig before the fix: held, nothing said)."""
+    src = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
+    arm = src[src.index("int edges = acc.sw[0] && edge_arm(&why);"):]
+    arm = arm[:arm.index("if (edges) {\n                static const char")]
+    assert "#if PM_A64" in arm and 'site("switch_edge")' in arm and "edge_hook(e)" in arm
+    assert "the left flipper button held, but not in attract" in src

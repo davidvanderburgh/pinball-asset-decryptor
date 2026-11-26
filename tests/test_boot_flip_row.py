@@ -59,6 +59,7 @@ def test_the_values_and_help():
     assert (BF.MAX_SECONDS, BF.MENU_VALUES, BF.DEFAULT_SECONDS, BF.MENU_DEFAULT) == (120, 121, 15, 16)
     assert MS.WIDE_VALUES == {"boot_flip": 121}
     assert len(BF.MENU_HELP) <= 63                          # the spare help lines' room
+    assert BF.MENU_HELP == "R flipper 5s: boot menu. 0 Off, secs after game. Min/default 15"   # Simon's wording
     assert MS.SETTINGS[MS.BOOT_FLIP][1:] == ("BOOT MENU FLIPPER", "Boot Menu Flipper", 16)
 
 

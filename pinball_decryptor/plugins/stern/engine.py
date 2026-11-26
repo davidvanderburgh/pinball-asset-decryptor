@@ -12878,7 +12878,8 @@ class _BootFlipMenu(_MusicModeMenu):
 
     def done(self):
         self.ok = True
-        self.log("Boot menu flipper: BOOT MENU FLIPPER is in the operator menu (%s), 15 to start with. On a "
+        self.log("Boot menu flipper: BOOT MENU FLIPPER is in the operator menu (%s), 15 to start with (the "
+                 "recommended minimum). On a "
                  "multi-boot card it sets the right flipper hold back to the boot menu: 0 Off, else the seconds the "
                  "flippers must have been off (no game on) first; it wins over the Multi-boot tab's setting."
                  % self.setting.where, "info")

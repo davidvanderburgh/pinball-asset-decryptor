@@ -107,6 +107,11 @@ function Sheet({ d, onClose }) {
       <tbody>${ins.map((g) => html`<tr class=${g.ok === "no" ? "miss" : ""}>${marked ? html`<td><${Ok} v=${g.ok} /></td>` : null}
         <td class="mono">${g.lamp}</td><td class="mono muted">${g.leds}</td><td><b>${g.name}</b></td><td>${g.rgb ? "yes" : ""}</td><td class="mono muted">${at(g)}</td></tr>`)}</tbody></table>
     ${off.length && !onlyMissing ? html`<div class="small muted"><b>Off the playfield</b> (no table light): ${off.slice(0, 120).map((g) => g.name + " (" + g.lamp + ")").join(", ")}${off.length > 120 ? " …" : ""}</div>` : null}
+    ${d.dof && d.dof.length && !onlyMissing ? html`<h3>DOF events <span class="small muted">${d.dof.length}${d.dof_rom ? ", table name " + d.dof_rom : ""}</span></h3>
+      <div class="small muted">What DOF hears from this table once patched, to write DOF configs of your own (Save Markdown or Export CSV keeps the list). S, L and W are the table's own solenoid, lamp and switch numbers (a ROM table's are the original machine's, the ones its DOF config already uses); E are named events: the table script's own DOF calls, and the cabinet's events set in the Cabinet row.</div>
+      <table class="vpx-sheet-table">${head(["kind", "number", "what", "from", "sent"])}
+        <tbody>${d.dof.map((r) => html`<tr><td class="mono">${r.kind}</td><td class="mono">${r.number}</td><td><b>${r.name}</b></td>
+          <td class="small muted">${r.from}</td><td class="small">${r.when}</td></tr>`)}</tbody></table>` : null}
     ${d.wrong && d.wrong.length ? html`<h3>The map and this PC's switch table disagree <span class="small muted">${d.wrong.length}</span></h3>
       <div class="small muted">Either the map was built from an older reading of the title or the switch table here is stale: the switch table of the run the table attaches to is the numbering that counts.</div>
       <table class="vpx-sheet-table">${head(["object", "map id", "the map says", "this PC's switch table says"])}

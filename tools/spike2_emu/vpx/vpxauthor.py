@@ -1086,7 +1086,161 @@ def table_inventory(path):
     brain = script_brain(script)
     return {"path": path, "name": os.path.basename(path), "kinds": {k: sorted(v) for k, v in by.items()},
             "counts": {k: len(v) for k, v in by.items()}, "brain": brain,
-            "script_lines": script.count("\n") + 1 if script else 0}
+            "script_lines": script.count("\n") + 1 if script else 0, "script": script or ""}
+
+
+# ------------------------------------------------------- DOF events --
+# PAD-1610 (Msaint30): "a list of exposed events, their event numbers and
+# what they correspond to", to write DOF configs of one's own. What DOF hears
+# from a patched table, exactly as PAD.Controller sends it (its _load_dof,
+# _poll_dof, set_switch and _cab_events) plus the table's own DOF calls,
+# which its script still makes through B2S.Server.
+
+#: the sheet's words over its DOF table (the Markdown's and the app's)
+DOF_WORDS = ("What DOF hears from this table once patched, under the table name %s (DOF Config Tool keys its "
+             "table config by it). S, L and W are the table's own solenoid, lamp and switch numbers (a ROM "
+             "table's are the original machine's, the ones its DOF config already uses); E are named events: the table script's own DOF calls, "
+             "and the cabinet's events set in the Visual Pinball tab's Cabinet row.")
+
+_SUB_RE = re.compile(r"^\s*(?:(?:public|private)\s+)?(?:sub|function)\s+(\w+)", re.I)
+_END_SUB_RE = re.compile(r"^\s*end\s+(?:sub|function)\b", re.I)
+_CONST_RE = re.compile(r"\bconst\s+(\w+)\s*=\s*(\d+)\b", re.I)
+#: `DOF 107, DOFPulse`, `DOF(107, 2)`, the bridge's `PadDOF 107, DOFPulse, Empty`
+_DOF_CALL_RE = re.compile(r"(?<![\w.])(?:pad)?dof\s*\(?\s*(\w+)\s*,\s*(\w+)", re.I)
+#: `SoundFXDOF("snd", 141, DOFPulse, DOFContactors)`: its first argument may hold commas of its own
+_FXDOF_RE = re.compile(r"\bsoundfxdof\s*\((?:[^,()]|\([^()]*\))*,\s*(\w+)\s*,\s*(\w+)\s*,\s*(\w+)", re.I)
+_DOF_HOW = {"dofpulse": "pulse", "dofon": "on", "dofoff": "off", "2": "pulse", "1": "on", "0": "off"}
+
+
+def dof_rom_name(map_info, script):
+    """The table name DOF keys its config by: the map's `b2s_name` (it
+    renames cGameName), else the script's cGameName."""
+    if (map_info or {}).get("b2s_name"):
+        return map_info["b2s_name"]
+    hit = re.search(r'\bcGameName\s*=\s*"([^"]+)"', _uncommented(script or ""), re.I)
+    return hit.group(1) if hit else ""
+
+
+def script_dof_calls(script):
+    """{E number: {"subs": [where it is called], "how": [pulse/on/off/...],
+    "toys": [DOFContactors, ...]}} for every DOF call in the script with a
+    number (or a numeric Const) for its event."""
+    text = _uncommented(script or "")
+    consts = {k.lower(): int(v) for k, v in _CONST_RE.findall(text)}
+
+    def num(tok):
+        tok = tok.strip()
+        if tok.isdigit():
+            return int(tok)
+        return consts.get(tok.lower())
+    words = {}
+    for wd in re.findall(r"\w+", text):
+        words[wd.lower()] = words.get(wd.lower(), 0) + 1
+    out, sub = {}, ""
+    for line in text.splitlines():
+        hit = _SUB_RE.match(line)
+        if hit:
+            sub = hit.group(1)
+            # the bridge's patch renames a sub it stands in for to <name>_orig;
+            # one nothing calls any more never fires its DOF (Deadpool's Trigger001_Hit)
+            if sub.lower().endswith("_orig") and words.get(sub.lower(), 0) < 2:
+                sub = "-dead-"
+        found = [(n, how, toy) for n, how, toy in _FXDOF_RE.findall(line)]
+        rest = _FXDOF_RE.sub("", line)
+        found += [(n, how, "") for n, how in _DOF_CALL_RE.findall(rest)]
+        for n, how, toy in found:
+            e = num(n)
+            if e is None or not 0 < e < 1000 or sub.lower() in ("dof", "paddof", "-dead-"):
+                continue
+            where = re.sub(r"_orig$", "", sub, flags=re.I)
+            ent = out.setdefault(e, {"subs": [], "how": [], "toys": []})
+            for key, v in (("subs", where or "(table script)"), ("how", _DOF_HOW.get(how.lower(), how)),
+                           ("toys", toy)):
+                if v and v not in ent[key]:
+                    ent[key].append(v)
+        # a one-line `Sub x : ... : End Sub` ends where it starts
+        if _END_SUB_RE.match(line) or re.search(r":\s*end\s+(?:sub|function)\s*$", line, re.I):
+            sub = ""
+    return out
+
+
+def dof_events(map_info, machine, script, cab=None):
+    """Every DOF event the patched table sends, in DOF's own kinds: S a coil
+    (or a flasher, at its level), L a lamp, W a switch, E a named event (the
+    table script's own, the map's flipper events, the cabinet's). A list of
+    {"kind", "number", "name", "from", "when"}, sorted by kind and number."""
+    m = map_info or {}
+    names = {s["id"]: s["name"] for s in (machine or {}).get("switches", []) if s.get("id") is not None}
+    rows = []
+    for k, v in _entries(m.get("solenoids")):
+        if not isinstance(v, dict):
+            continue
+        try:
+            n = v["dof"] if "dof" in v else int(k)
+        except (TypeError, ValueError):
+            continue
+        if n is not None and 0 < int(n) < 1000 and len(v.get("coil") or ()) == 2:
+            rows.append({"kind": "S", "number": int(n), "name": v.get("name") or k,
+                         "from": "machine coil %d/%d" % tuple(v["coil"]), "when": "on while the game fires it"})
+    for name, v in _entries(m.get("lamps")):
+        hit = re.match(r"^([lf])(\d+)[a-z]?$", name, re.I)
+        if not hit or not isinstance(v, dict) or not v.get("leds"):
+            continue
+        leds = ", ".join("%d/%d" % tuple(x) for x in v["leds"])
+        if hit.group(1).lower() == "l":
+            rows.append({"kind": "L", "number": int(hit.group(2)), "name": v.get("name") or name,
+                         "from": "machine LED " + leds, "when": "on while lit"})
+        else:
+            rows.append({"kind": "S", "number": int(hit.group(2)), "name": v.get("name") or name,
+                         "from": "machine flasher LED " + leds, "when": "its brightness, 0 off"})
+    for k, v in (m.get("switch_rewrite") or {}).items():
+        try:
+            w, sid = int(k), int(v)
+        except (TypeError, ValueError):
+            continue
+        if sid > 0:
+            rows.append({"kind": "W", "number": w, "name": names.get(sid, "switch id %d" % sid),
+                         "from": "machine switch %d" % sid, "when": "on while closed"})
+    calls = script_dof_calls(script)
+    for obj, n in (m.get("flipper_dof") or {}).items():
+        if obj != "_" and isinstance(n, int) and 0 < n < 1000 and n not in calls:
+            calls[n] = {"subs": [obj], "how": ["on while held"], "toys": []}
+    sol_names = {}
+    for k, v in _entries(m.get("solenoids")):
+        if v.get("name") and k.isdigit():
+            sol_names[k] = v["name"]
+
+    def where(sub):
+        # the bridge's own coil sub (PadSol3) carries the table's DOF for that coil
+        hit = re.match(r"^PadSol(\d+)$", sub, re.I)
+        if hit:
+            return ("coil %s %s" % (hit.group(1), sol_names.get(hit.group(1), ""))).strip()
+        return sub
+    for n, c in calls.items():
+        c["subs"] = list(dict.fromkeys(where(x) for x in c["subs"]))
+        rows.append({"kind": "E", "number": n, "name": ", ".join(c["subs"][:6]) + (" ..." if len(c["subs"]) > 6 else ""),
+                     "from": "the table's script" + (" (%s)" % ", ".join(c["toys"]) if c["toys"] else ""),
+                     "when": ", ".join(c["how"])})
+    cab = cab or {}
+    for key, name, when in (("dof_start", "START button LED", "its brightness, 0 off"),
+                            ("dof_lockdown", "LOCKDOWN button LED", "its brightness, 0 off"),
+                            ("dof_shaker", "SHAKER MOTOR", "on while the game drives it")):
+        if cab.get(key):
+            rows.append({"kind": "E", "number": cab[key], "name": name, "from": "PAD's Cabinet row",
+                         "when": when})
+    if cab.get("dof_strips"):
+        import padcabinet
+        parts = cab.get("strip_parts", 1)
+        for (side, part, c), n in sorted(padcabinet.strip_numbers(cab["dof_strips"], parts).items(),
+                                         key=lambda kv: kv[1]):
+            rows.append({"kind": "E", "number": n,
+                         "name": "%s light strip%s %s" % (("left", "right")[side],
+                                                          " part %d of %d (1 = bottom)" % (part + 1, parts)
+                                                          if parts > 1 else "", padcabinet.STRIP_COLOURS[c][0]),
+                         "from": "PAD's Cabinet row", "when": "brightness while it shows that colour, else 0"})
+    order = {"S": 0, "L": 1, "W": 2, "E": 3}
+    rows.sort(key=lambda r: (order[r["kind"]], r["number"], r["name"]))
+    return rows
 
 
 # ------------------------------------------------------------ the text --
@@ -1104,7 +1258,7 @@ def _hint(table, kind):
 
 
 def markdown(machine, table=None, map_info=None, cov=None, gap=None, inventory=None, starter=None,
-             wrong=None):
+             wrong=None, dof=None, dof_rom=""):
     """The checklist as Markdown."""
     title = machine["title"]
     m = []
@@ -1313,6 +1467,18 @@ def markdown(machine, table=None, map_info=None, cov=None, gap=None, inventory=N
         w("")
         for kind, obj, name in cov["guesses"]:
             w("- %s `%s`: %s" % (kind, obj, name))
+
+    if dof:
+        w("")
+        w("## DOF events")
+        w("")
+        w(DOF_WORDS % (dof_rom or "the table's cGameName"))
+        w("")
+        w("| kind | number | what | from | sent |")
+        w("|---|---|---|---|---|")
+        for r in dof:
+            w("| %s | %d | %s | %s | %s |" % (r["kind"], r["number"], r["name"].replace("|", "/"), r["from"],
+                                             r["when"]))
 
     if inventory:
         w("")
@@ -1532,8 +1698,24 @@ def build(title, table=None, tables_dir=None):
             wrong = misnumbered(machine, map_info)
         else:
             starter = starter_map(machine, inventory["name"])
+    dof, dof_rom = [], ""
+    if map_info and inventory:
+        import padcabinet
+        import padlaunch
+        script = inventory.get("script", "")
+        if inventory["brain"] != "pad" and pick[1].get("kind") == "shadow":
+            # a download: its DOF calls as the patched table makes them
+            try:
+                import copy
+                import vpxshadow
+                script = vpxshadow.patch(script, copy.deepcopy(
+                    {k: v for k, v in map_info.items() if k != "_path"}))[0]
+            except Exception:              # noqa: BLE001  the list is still the script's own
+                pass
+        dof = dof_events(map_info, machine, script, padcabinet.settings(padlaunch.kit_load()))
+        dof_rom = dof_rom_name(map_info, script)
     text = markdown(machine, table, map_info, cov, gap, inventory,
-                    "%s.starter.shadow.json" % title if starter else None, wrong)
+                    "%s.starter.shadow.json" % title if starter else None, wrong, dof, dof_rom)
 
     missing_ids = {s["id"] for s in gap["switches"]} if gap else set()
     missing_ins = {id(g) for g in gap["inserts"]} if gap else set()
@@ -1609,7 +1791,7 @@ def build(title, table=None, tables_dir=None):
                            "script_lines": inventory["script_lines"],
                            "kinds": {k: inventory["kinds"].get(k) or [] for k in TABLE_KINDS}}
                           if inventory else None),
-            "starter": starter, "markdown": text}
+            "starter": starter, "markdown": text, "dof": dof, "dof_rom": dof_rom}
     data["csv"] = to_csv(data)
     return data
 
@@ -1639,6 +1821,8 @@ def to_csv(data):
         w.writerow(["guess", "", "", "", "", "", name, kind, "", "", obj, ""])
     for obj, sid, name, got in data["wrong"]:
         w.writerow(["map id disagrees", "", sid, "", "", "", name, "", "", "", obj, "this PC's game: " + got])
+    for r in data.get("dof") or []:
+        w.writerow(["DOF " + r["kind"], "", "", r["number"], "", "", r["name"], r["when"], "", "", r["from"], ""])
     return out.getvalue()
 
 

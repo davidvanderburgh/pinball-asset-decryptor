@@ -1091,6 +1091,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                           # PAD-1317: and its own music
                           "ceremony_sound": os.path.basename(_CP.ceremony_sound_path(project, chars)) if project else "",
                           "ceremony_max": _CP.CEREMONY_SOUND_MAX_SECONDS,
+                          # PAD-1611: the character select's own music
+                          "select_sound": os.path.basename(_CP.select_sound_path(project, chars)) if project else "",
+                          "select_max": _CP.SELECT_SOUND_MAX_SECONDS,
                           "bonus": bool(chars.get("bonus")),                                     # PAD-1123
                           "picked_max": _CP.PICKED_MAX_SECONDS, "still_s": _CP.PICKED_STILL_SECONDS,
                           "videos": "" if prof is None or _CP.can_video(prof) else (
@@ -1366,6 +1369,33 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 self._say(str(e))
                 return False
             self._say("co-op characters: %s shows %s once picked" % (name, os.path.basename(path)))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_select_sound(self, clear=False):
+        """PAD-1611: Select music...: a music track of the owner's (a sound file, or a video's sound) looped while a
+        teammate picks a character, the game's own music back once one is taken; *clear* takes it off (the pick plays
+        with the game's own sounds)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        if clear:
+            _CP.save_select_sound(project, None)
+            self._say("co-op characters: no select music of your own - the pick plays with the game's own sounds")
+        else:
+            path = self.window.ask_open("modes_file", "Choose the music that loops while a teammate picks a character",
+                                        [("Sounds", " ".join("*" + e for e in _CP.SOUND_EXTS)),
+                                         ("A video's sound", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_select_sound(project, path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op characters: %s loops while a teammate picks a character" % os.path.basename(path))
         self._publish_coop_chars(project)
         return True
 

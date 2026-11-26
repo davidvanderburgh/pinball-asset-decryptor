@@ -400,9 +400,23 @@ primary() {
     exit 0
 }
 
+# the menu and the test card on the network with no game running (Simon, 2026-11-26; core/menu_network.py):
+# padnet brings the wired port (and the owner's Wi-Fi) up while the menu shows, and goes down the moment a
+# game is chosen, so the game sets up its own network as Stern ships it
+PADNET=/etc/init.d/padnet
+PADNET_PID=
+if [ -x "$PADNET" ]; then
+    "$PADNET" start >/dev/null 2>&1 &
+    PADNET_PID=$!
+fi
+
 rm -f "$OUT"
 "$BIN" --conf "$CONF" --out "$OUT" ${LOG:+--log "$LOG"}
 rc=$?
+if [ -n "$PADNET_PID" ]; then
+    kill "$PADNET_PID" 2>/dev/null          # a start still waiting for the Wi-Fi adapter goes no further
+    "$PADNET" stop >/dev/null 2>&1
+fi
 [ "$rc" -eq 0 ] || { log "selector exit $rc: booting primary"; primary; }
 
 idx=$(head -n 1 "$OUT" 2>/dev/null | tr -cd '0-9')

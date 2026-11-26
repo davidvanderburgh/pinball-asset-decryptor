@@ -60,13 +60,16 @@ class TestCardTab(TabService):
                          "problem": tc.item_problem(it)})
         rows.sort(key=lambda r: KIND_ORDER[r["kind"]])        # stable: each list in its own order
         source_ok = bool(lst.source) and os.path.isfile(lst.source)
+        from ...core import menu_network
+        _wifi = menu_network.shown()
         self.set(rows=rows, counts=lst.counts(), source=lst.source,
                  source_ok=source_ok, out=lst.out,
                  # PAD-1586: the card it is made from is a Spike 3 one: its own words and route
                  s3=bool(source_ok and tc.is_spike3_source(lst.source)),
                  busy=self._busy, log=self._lines[-400:], pct=self._pct, step=self._step,
                  msg=list(self._msg), max=tc.MAX_ITEMS, full=len(lst.items) >= tc.MAX_ITEMS,
-                 network=dict(lst.network), room_mib=tc.room_mib(lst.network), address=self._address())
+                 network=dict(lst.network, wifi_name=_wifi["name"]), wifi_open=_wifi["open"],
+                 room_mib=tc.room_mib(lst.network), address=self._address())
 
     # ------------------------------------------------------------ network updates
     # Simon (2026-11-22): "we need the same feature on the test card... even more important" - a test card
@@ -84,6 +87,39 @@ class TestCardTab(TabService):
             return pad_ssh_key.last_address() or ""
         except Exception:                                       # noqa: BLE001
             return ""
+
+    @rpc(loop=False)
+    def menu_wifi(self):
+        """The saved Wi-Fi as a page may show it (name, open, multiboot - never the key), and the machine's address
+        for a scan from it: for the Multi-boot tab's Menu settings, which share it."""
+        from ...core import menu_network
+        return dict(menu_network.shown(), address=self._address())
+
+    @rpc
+    def set_menu_multiboot(self, on):
+        """Multi-boot cards get the menu network (Menu settings)."""
+        from ...core import menu_network
+        menu_network.save(multiboot=bool(on))
+        return True
+
+    @rpc(loop=False)
+    def scan_wifi(self, where):
+        """The Wi-Fi networks in reach (core/wifi_scan.py), from this computer (*where* "pc") or from the machine
+        ("machine", over remote access): ``{"ok", "why", "networks", "current"}``. Off the UI loop: a scan takes
+        seconds. Simon: "make sure they can still manually enter tho" - it only offers names."""
+        from ...core import wifi_scan
+        if where == "machine":
+            return wifi_scan.scan_machine(self._address())
+        return wifi_scan.scan_pc()
+
+    @rpc
+    def set_menu_wifi(self, name, password):
+        """The Wi-Fi the test card joins with no game running (core/menu_network.py): *name* and *password* -> the
+        name and its WPA key are kept, never the password; an empty *name* forgets it. Returns '' or why not."""
+        from ...core import menu_network
+        why = menu_network.set_wifi(name, password)     # one Wi-Fi for the Test card and Multi-boot tabs
+        self._pub()
+        return why
 
     @rpc
     def set_network(self, key, value):
@@ -321,6 +357,14 @@ class TestCardTab(TabService):
                     log=self._say, cancel=lambda: self._cancel)
                 if note:
                     self._say("test card: " + note)
+                # Simon (2026-11-26): reachable with no game running - the wired port, and the Wi-Fi given here
+                step = "The menu network"
+                self._step = "Adding the menu network"
+                self._pub_soon()
+                from ...core import menu_network
+                note = menu_network.apply_to_build(source, out, menu_network.saved(),
+                                                   log=self._say, cancel=lambda: self._cancel)
+                self._say("test card: " + note)
             if net["wifi"]:
                 step = "Wi-Fi start-up"
                 self._step = "Adding Wi-Fi start-up"

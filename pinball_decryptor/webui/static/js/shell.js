@@ -940,8 +940,8 @@ const MACH = {
   wayCard: "From its card image",
   wayCardText: "The .raw or .img of a Stern SD card (Save card as image on Select card reads one), a Jersey Jack install ISO or a Barrels of Fun .fun.",
   wayNet: "Found on your network",
-  wayNetText: "A Stern machine with remote access (Network tab) shows up here once Find my machine finds it. Add it with the card image it runs, and Update's Send to machine goes straight to it.",
-  wayNetNone: "None found yet: set up remote access on the Network tab, then Find my machine.",
+  wayNetText: "A Stern machine with remote access (Network tab) shows up here once Find my machines finds it. Add it with the card image it runs, and Update's Send to machine goes straight to it.",
+  wayNetNone: "None found yet: set up remote access on the Network tab, then Find my machines.",
   netHead: "Found on your network",
   netText: "Remote access found these machines. Add one with the card image it runs to update it from here.",
   netAdd: (n) => ({ head: "Add " + (n.title || "this machine"), lines: ["Pick the card image the machine at " + n.address + " runs: My machines knows a machine by its card.", "It stays linked to " + n.address + ", so Update's Send to machine goes to it."] }),
@@ -949,6 +949,11 @@ const MACH = {
     on === true ? r.name + " answers at " + r.address + " right now (remote access)." : on === false ? "Nothing answers at " + r.address + " right now: the machine is off, or on another network." : r.name + " is reached at " + r.address + " (remote access, Network tab); checking whether it is on…",
     "Update sends to this machine. The light is checked every 30 seconds while this page is open."] }),
   online: (n, on) => on === true ? n.address + " answers right now: the machine is on." : on === false ? "Nothing answers at " + n.address + " right now." : "Checking " + n.address + "…",
+  // PAD-1627: Find my machines on the page, a name for a machine found, and an address nothing ever answered at
+  find: { head: "Find my machines", lines: ["Looks over your home network for the machines that let this computer in (remote access, Network tab), and lights the ones that are on.", "A machine your router has given a new address is found there, and its row follows it.", "It only looks: nothing on a machine changes. About half a minute; a couple of minutes when one of your machines is off."] },
+  netName: (n) => ({ head: n.name ? "Named by you" : "Name this machine", lines: ["The machine says only which build it runs (" + (n.title || "unknown") + "): Stern's LE and Premium run the same one. Click to give it your own name."] }),
+  unknown: "An address typed in",
+  unknownText: (n) => "Typed in on the Network tab; nothing at " + n.address + " has ever let this computer in. Forget it if it is not yours.",
   header: (m) => ({ head: "My machines", lines: [(m.rows || []).length ? (m.rows.length + " machine" + (m.rows.length === 1 ? "" : "s")) + (m.newer_count ? ": newer game code is out for " + m.newer_count + "." : ".") : "The pinball machines you own: add one to see its build, hear about new code and update your work onto it."] }),
   // PAD-1588: settings and score backups by themselves
   backup: { head: "Back up settings and scores by itself", lines: ["For each machine here that this computer reaches over remote access: once a day, while it is on, PAD copies its adjustments, audits and high scores to this computer when they changed. It only reads them: the game goes on.", "Also before a Send to the machine, and before a whole card for its game is written.", "A card written whole loses them; Restore (the row's More menu) puts a kept backup back."] },
@@ -1023,10 +1028,26 @@ function MyMachines({ shell }) {
   const working = shell.view === "mfr";
   const found = net.map((n) => html`<div class="mach-row mach-net" key=${n.address}>
     <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="globe" /></span>
-    <div class="stack grow" style="gap:2px"><span class="t">${n.title || "A Stern machine"}</span>
-      <span class="muted small mono" ...${tip(MACH.online(n, online[n.address]))}><${Light} on=${online[n.address]} />${n.address}${online[n.address] === true ? " · online" : ""}</span></div>
+    <div class="stack grow" style="gap:2px;min-width:0">
+      <div class="row wrap" style="gap:2px 10px;align-items:baseline">
+        ${n.known === false ? html`<span class="t">${n.name || MACH.unknown}</span>`
+          : html`<button type="button" class="t mach-name" ...${tip(MACH.netName(n))} onClick=${() => call("shellx.machines_name_network", n.address)}>${n.name || n.title || "A Stern machine"}<${Icon} name="edit" /></button>`}
+        ${n.name && n.title ? html`<span class="notr muted">${n.title}</span>` : null}
+      </div>
+      <span class="muted small" ...${tip(MACH.online(n, online[n.address]))}><${Light} on=${online[n.address]} /><span class="mono">${n.address}</span>${online[n.address] === true ? " · online" : online[n.address] === false ? " · not answering" : ""}</span>
+      ${n.known === false ? html`<span class="muted small">${MACH.unknownText(n)}</span>` : null}
+    </div>
+    ${n.known === false ? html`<${Button} size="sm" icon="trash" onClick=${() => call("shellx.machines_forget_network", n.address)}>Forget<//>` : null}
     <${Button} size="sm" icon="plus" disabled=${running} title=${MACH.netAdd(n)} onClick=${() => call("shellx.machines_add_network", n.address)}>Add with its card image…<//>
+    ${n.known === false ? null : html`<${Button} size="sm" kind="ghost" icon="more" title="More" onClick=${(e) => openShellMenu(e.currentTarget, [
+      { label: "Name this machine…", icon: "edit", onClick: () => call("shellx.machines_name_network", n.address) },
+      { sep: true },
+      { label: "Forget this machine", icon: "trash", onClick: () => call("shellx.machines_forget_network", n.address) },
+    ])} />`}
   </div>`);
+  const find = html`<${Button} cls="sx-mach-find" icon="search" disabled=${m.finding === true} title=${MACH.find} onClick=${() => call("shellx.machines_find")}>${m.finding ? "Looking…" : "Find my machines"}<//>`;
+  const findLine = m.finding ? html`<div class="mach-find row" style="gap:10px;align-items:center"><div class="grow"><${Progress} pct=${m.find_pct || 0} /></div><span class="muted small">${m.find_note}</span></div>`
+    : m.find_note ? html`<div class=${cx("mach-find small", m.find_kind === "err" ? "err-ink" : m.find_kind === "ok" ? "ok-ink" : "muted")}>${m.find_note}</div>` : null;
   const add = html`<${Button} drop icon="plus" kind=${rows.length ? "" : "primary"} disabled=${running} title=${MACH.add}
       onClick=${() => call("shellx.machines_add")}>${rows.length ? "Add machine…" : "Add a card image…"}<//>`;
   return html`<div class="picker sx-mach-page"><div class="inner">
@@ -1043,8 +1064,10 @@ function MyMachines({ shell }) {
           onChange=${(v) => call("shellx.machines_set_backup", null, parseInt(v, 10))} />
       </div>` : null}
       ${rows.length ? add : null}
+      ${find}
       <${Button} cls="sx-mach-close" onClick=${() => call("shellx.machines_close")}>${working && shell.mfr ? "Back to " + shell.mfr.display : "Choose a manufacturer"}<//>
     </div>
+    ${findLine}
     ${rows.length ? html`<section class="mach"><div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} on=${online[r.address]} />`)}</div>
       ${m.watch_text ? html`<div class="muted small">${m.watch_text}</div>` : null}</section>`
       : html`<section class="mach-empty">

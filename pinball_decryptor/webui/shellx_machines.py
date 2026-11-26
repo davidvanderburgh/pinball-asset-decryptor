@@ -71,9 +71,13 @@ class MachinesMixin:
         self._mach_last = ([], False, [])
         self._mach_online = {}          # PAD-1585: address -> True (answers now) / False; absent = not checked yet
         self._mach_probing = False
+        self._mach_finding = False      # PAD-1627: the page's own look over the network
+        self._mach_find = {"pct": 0, "note": "", "kind": ""}
+        self._mach_found_once = False
         self.set(machines={"rows": [], "watch": False, "watch_text": "",
                            "checking": False, "open": False, "network": [], "newer_count": 0,
-                           "online": {}})
+                           "online": {}, "finding": False, "find_pct": 0, "find_note": "",
+                           "find_kind": ""})
         self.ctx.loop.after(0, self._machines_refresh)
         self.ctx.loop.after(WATCH_FIRST_MS, self._machines_tick)
         self._backing_up = False
@@ -134,6 +138,8 @@ class MachinesMixin:
                            "open": bool(self._mach_open), "network": unlinked,
                            "newer_count": sum(1 for r in rows if r.get("newer")),
                            "online": dict(self._mach_online),
+                           "finding": bool(self._mach_finding), "find_pct": self._mach_find["pct"],
+                           "find_note": self._mach_find["note"], "find_kind": self._mach_find["kind"],
                            # PAD-1588: settings and score backups by themselves
                            "backup": {"auto": machine_backups.auto_on(settings),
                                       "keep": machine_backups.keep_of(settings),
@@ -181,6 +187,108 @@ class MachinesMixin:
         self._mach_probing = False
         self._mach_online = got
         self._machines_set()
+        # PAD-1627 (David: "I don't see my godzilla that is turned on right now"): a machine this computer knows
+        # that doesn't answer at its address has most likely been given another by the router, so the network is
+        # looked over for it, once per run by itself (Find my machines on the page does it whenever asked)
+        if self._mach_open and not self._mach_found_once and not os.environ.get("PAD_UI_CAPTURE"):
+            known = {n["address"] for n in _network_machines() if n["known"]}
+            if any(got.get(a) is False for a in known):
+                self._machines_find()
+
+    # -- PAD-1627: Find my machines, from the page ------------------------------------------------------------
+    def _machines_find(self):
+        if self._mach_finding:
+            return False
+        self._mach_finding = True
+        self._mach_found_once = True
+        self._mach_find = {"pct": 0, "note": "Looking over your network for your machines…", "kind": ""}
+        self._machines_set()
+        loop = self.ctx.loop
+
+        def progress(done, total):
+            loop.post(self._machines_find_pct, int(done * 100 / total) if total else 0)
+
+        def work():
+            from ..core import machine_scan
+            try:
+                found, err = machine_scan.scan(progress=progress, careful=_find_careful), ""
+            except Exception as e:                      # noqa: BLE001 - said on the page, never raised
+                found, err = [], str(e) or e.__class__.__name__
+            loop.post(self._machines_found, found, err)
+        threading.Thread(target=work, name="pad-machines-find", daemon=True).start()
+        return True
+
+    def _machines_find_pct(self, pct):
+        if self._mach_finding and pct != self._mach_find["pct"]:
+            self._mach_find["pct"] = pct
+            self._machines_set()
+
+    def _machines_found(self, found, err):
+        from ..core import machine_scan, machines
+        before = {n["address"] for n in _network_machines()}
+        try:
+            ours, moved = machine_scan.remember(found)
+        except Exception as e:                          # noqa: BLE001
+            log.exception("remember found machines")
+            ours, moved, err = [], {}, err or str(e)
+        settings = self._mach_settings()
+        if settings is not None and moved:
+            # a row linked to the old address follows its machine to the new one
+            for m in machines.entries(settings):
+                if m.get("address") in moved:
+                    machines.set_address(settings, m["id"], moved[m["address"]])
+            self._mach_save()
+        self._mach_finding = False
+        self._mach_find = {"pct": 100, "kind": "err" if err else ("ok" if ours else ""),
+                           "note": ("Couldn't look over the network: %s" % err) if err
+                           else find_words(ours, moved, before, _network_machines())}
+        self._mach_online = {}
+        self._machines_refresh()
+
+    @rpc
+    def machines_find(self):
+        """Find my machines: look over the home network for the machines that let this computer in, remember
+        each (one at a new address is followed there) and light the ones that are on."""
+        return self._machines_find()
+
+    @rpc
+    def machines_name_network(self, address, name=None):
+        """The owner's name for a machine found on the network ("" puts the game's name back)."""
+        from ..core import pad_ssh_key
+        found = next((n for n in _network_machines() if n["address"] == address), None)
+        if found is None:
+            return False
+        if name is None:
+            name = compat.simpledialog.askstring(
+                "Name this machine", "A name for the machine at %s (yours to choose):" % address,
+                initialvalue=found["name"] or found["title"])
+            if name is None:
+                return False
+        if name.strip() == found["title"]:
+            name = ""
+        pad_ssh_key.name_machine(address, name)
+        self._machines_refresh()
+        return True
+
+    @rpc
+    def machines_forget_network(self, address):
+        """Take a machine found on the network off this computer's list (Find my machines finds it again when
+        it is on and lets this computer in)."""
+        from ..core import pad_ssh_key, remote_send
+        if not any(n["address"] == address for n in _network_machines()):
+            return False
+        if not compat.messagebox.askyesno(
+                "Forget machine", "Forget the machine at %s?\n\nNothing on the machine changes. Find my machines "
+                "finds it again when it is on and lets this computer in." % address):
+            return False
+        try:
+            host, port = remote_send.parse_address(address)
+            pad_ssh_key.forget_host(host, port)
+        except Exception:                               # noqa: BLE001 - the list entry still goes
+            pass
+        pad_ssh_key.forget_machine(address)
+        self._machines_refresh()
+        return True
 
     def _machines_online_tick(self):
         """While the page is open, the lights are checked again every :data:`ONLINE_EVERY_MS`."""
@@ -231,7 +339,8 @@ class MachinesMixin:
         path = self._pick_card("Pick the card image %s at %s runs" % (what, address))
         if not path:
             return None
-        mid = self.machines_add(path, name=None)
+        # PAD-1627: a machine already named on the page keeps that name as its row's
+        mid = self.machines_add(path, name=(found or {}).get("name") or None)
         if mid:
             machines.set_address(self.app._settings, mid, address)
             self._mach_save()
@@ -892,11 +1001,54 @@ def _network_machines():
             try:
                 from ..core import machines
                 rel = machines.release_info({"manufacturer": "stern", "sidx": game + "-0_00_0.sidx"}) or {}
-                title = " ".join(x for x in (rel.get("title"), (rel.get("edition") or "").split(" /")[0]) if x)
+                # PAD-1627: the whole edition ("LE / Premium": one build runs both, so the machine cannot say
+                # which it is; David's Premium read "Godzilla LE")
+                title = " ".join(x for x in (rel.get("title"), rel.get("edition")) if x)
             except Exception:                           # noqa: BLE001
                 title = ""
-        out.append({"address": m["address"], "game": game, "title": title or game.replace("_", " ").title()})
+        out.append({"address": m["address"], "game": game, "title": title or game.replace("_", " ").title(),
+                    # the owner's own name for it, and whether anything ever answered there (False: an address
+                    # only typed in on the Network tab)
+                    "name": m.get("name") or "", "known": bool(game or m.get("host_key"))})
     return out
+
+
+def _find_careful(recs):
+    """Whether the page's look over the network goes on to the slow pass: while a machine this computer knows
+    is not accounted for (a machine just switched on is missed by the quick sweep, PAD-1456), or when it knows
+    none and none let it in.  A known machine is accounted for by its identity, or by a machine of its game that
+    let this computer in (its card written again has a new identity)."""
+    from ..core import pad_ssh_key
+    known = [m for m in pad_ssh_key.machines() if m["host_key"] or m["game"]]
+    seen = {tuple(r["host_key"]) for r in recs if r.get("host_key")}
+    games = {r.get("game") for r in recs if r.get("lets_in") and r.get("game")}
+    if known:
+        return not all(m["host_key"] in seen or m["game"] in games for m in known)
+    return not any(r.get("lets_in") for r in recs)
+
+
+def find_words(ours, moved, before, network):
+    """What Find my machines found, in a line for the page."""
+    by = {n["address"]: n for n in network}
+
+    def said(a):
+        n = by.get(a) or {}
+        return n.get("name") or n.get("title") or "A machine"
+    if not ours:
+        return ("No machine that lets this computer in answered. Is it switched on, on this network, and its card "
+                "set up for remote access (Network tab)?")
+    new_at = {v: k for k, v in moved.items()}
+    parts = []
+    for r in ours:
+        a = r["address"]
+        if a in new_at:
+            parts.append("%s is on at %s (it was at %s)" % (said(a), a, new_at[a]))
+        elif a not in before:
+            parts.append("found %s at %s" % (said(a), a))
+        else:
+            parts.append("%s is on at %s" % (said(a), a))
+    text = "; ".join(parts)
+    return text[:1].upper() + text[1:] + "."
 
 
 def link_network(rows, network):

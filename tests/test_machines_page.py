@@ -70,7 +70,7 @@ def test_the_page_opens_from_the_top_bar_and_offers_what_remote_access_found(tmp
         assert _until(w, lambda: len(_m(w)["network"]) == 2)
         m = _m(w)
         assert not m["open"] and m["rows"] == []
-        assert [(n["address"], n["title"]) for n in m["network"]] == [("10.0.0.7", "Godzilla LE"),
+        assert [(n["address"], n["title"]) for n in m["network"]] == [("10.0.0.7", "Godzilla LE / Premium"),
                                                                      ("10.0.0.9", "Jaws Pro")]
         # its own page; Getting started and My machines are one page over the app at a time
         assert w.call("shellx.machines_open") and _m(w)["open"]
@@ -129,3 +129,111 @@ def test_online_is_the_banner_check(monkeypatch):
     from pinball_decryptor.core import machine_scan
     monkeypatch.setattr(machine_scan, "_banner", lambda h, p, t: "SSH-2.0-x" if h == "a" else None)
     assert machine_scan.online("a") is True and machine_scan.online("b") is False
+
+
+KEY = ["ssh-ed25519", "AAAAgodzilla"]
+MOVED = {"current": "10.0.0.7", "machines": [
+    {"address": "10.0.0.50", "host_key": None, "game": ""},                 # typed in, never answered
+    {"address": "10.0.0.7", "host_key": KEY, "game": "godzilla_le"}]}
+
+
+def _keys(tmp_path, monkeypatch, data):
+    keys = tmp_path / "remote_access"
+    keys.mkdir()
+    (keys / "machines.json").write_text(json.dumps(data))
+    monkeypatch.setattr(pad_ssh_key, "KEY_DIR", str(keys))
+    return keys
+
+
+def test_find_my_machines_follows_a_machine_to_its_new_address(tmp_path, monkeypatch):
+    """PAD-1627 (David: "I don't see my godzilla that is turned on right now"): the router gave the machine a new
+    address; the page looks over the network by itself when a known machine doesn't answer, finds it by its
+    identity, and the row linked to the old address follows it."""
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import machine_scan
+    _keys(tmp_path, monkeypatch, MOVED)
+    monkeypatch.delenv("PAD_UI_CAPTURE", raising=False)
+    card = tmp_path / "godzilla_le-1_16_0.raw"
+    card.write_bytes(b"x" * 4096)
+    monkeypatch.setattr(lineage, "card_print",
+                        lambda p, measure=False: dict(INFO) if os.path.samefile(p, card) else None)
+    monkeypatch.setattr(machine_scan, "online", lambda a, **kw: a == "10.0.0.12")
+    scans = []
+
+    def scan(*a, **kw):
+        scans.append(kw)
+        return [dict(address="10.0.0.12", banner="SSH-2.0-dropbear", lets_in=True, game="godzilla_le",
+                     host_key=tuple(KEY), note="")]
+    monkeypatch.setattr(machine_scan, "scan", scan)
+    with web_app(tmp_path) as w:
+        assert _until(w, lambda: len(_m(w)["network"]) == 2)
+        w.answers.append(str(card))
+        w.answers.append("Basement Godzilla")
+        mid = w.call("shellx.machines_add_network", "10.0.0.7")
+        assert mid and not scans
+        assert w.call("shellx.machines_open")           # the old address doesn't answer: it looks by itself
+        assert _until(w, lambda: _m(w)["rows"] and _m(w)["rows"][0]["address"] == "10.0.0.12")
+        assert _until(w, lambda: _m(w)["online"].get("10.0.0.12") is True)
+        m = _m(w)
+        assert len(scans) == 1 and not m["finding"] and m["find_kind"] == "ok"
+        assert m["find_note"] == "Godzilla LE / Premium is on at 10.0.0.12 (it was at 10.0.0.7)."
+        assert [n["address"] for n in m["network"]] == ["10.0.0.50"]
+        saved = json.loads((tmp_path / "cfg" / "settings.json").read_text(encoding="utf-8"))
+        assert saved["machines"][0]["address"] == "10.0.0.12"
+        assert pad_ssh_key.last_address() == "10.0.0.12"
+        # asked for again from the page, whenever
+        assert w.call("shellx.machines_find")
+        assert _until(w, lambda: len(scans) == 2 and not _m(w)["finding"])
+        assert _m(w)["find_note"] == "Godzilla LE / Premium is on at 10.0.0.12."
+
+
+def test_a_found_machine_is_named_and_an_address_nothing_answered_at_is_said_and_forgotten(tmp_path, monkeypatch):
+    """PAD-1627 (David: "I should be able to name it. I don't have a godzilla LE, it's a premium" and "'A stern
+    machine' I have no idea what that is")."""
+    from tests.webui_harness import web_app
+    _keys(tmp_path, monkeypatch, MOVED)
+    with web_app(tmp_path) as w:
+        assert _until(w, lambda: len(_m(w)["network"]) == 2)
+        typed, god = _m(w)["network"]
+        assert (typed["known"], typed["title"], typed["name"]) == (False, "", "")
+        assert (god["known"], god["title"], god["name"]) == (True, "Godzilla LE / Premium", "")
+        w.answers.append("Godzilla Premium")
+        assert w.call("shellx.machines_name_network", "10.0.0.7")
+        assert _until(w, lambda: _m(w)["network"][1]["name"] == "Godzilla Premium")
+        assert pad_ssh_key.machines()[1]["name"] == "Godzilla Premium"
+        # the name stays with the machine when it is found at another address
+        pad_ssh_key.remember_machine("10.0.0.12", tuple(KEY), "godzilla_le", make_current=False)
+        assert [(x["address"], x["name"]) for x in pad_ssh_key.machines()][-1] == ("10.0.0.12", "Godzilla Premium")
+        w.answers.append("yes")
+        assert w.call("shellx.machines_forget_network", "10.0.0.50")
+        assert _until(w, lambda: [n["address"] for n in _m(w)["network"]] == ["10.0.0.12"])
+        assert not w.call("shellx.machines_forget_network", "10.0.0.50")
+
+
+def test_the_page_has_find_names_and_forget():
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "shell.js").read_text(encoding="utf-8")
+    for needle in ('call("shellx.machines_find")', 'call("shellx.machines_name_network", n.address)',
+                   'call("shellx.machines_forget_network", n.address)', "Find my machines", "MACH.unknownText(n)"):
+        assert needle in js
+
+
+def test_a_machine_on_a_new_card_and_a_new_address_takes_its_old_place(tmp_path, monkeypatch):
+    """PAD-1627, on David's network: his Godzilla was at a new address AND on a card written since (a new
+    identity), so it came back as a second Godzilla.  One machine of a game gone, one new of that game found:
+    the same machine, its name kept.  Two of a game: none is guessed."""
+    from pinball_decryptor.core import machine_scan
+    _keys(tmp_path, monkeypatch, MOVED)
+    pad_ssh_key.name_machine("10.0.0.7", "Godzilla Premium")
+    new = dict(address="10.0.0.12", banner="SSH-2.0-dropbear", lets_in=True, game="godzilla_le",
+               host_key=("ssh-ed25519", "AAAAnewcard"), note="")
+    ours, moved = machine_scan.remember([new])
+    assert moved == {"10.0.0.7": "10.0.0.12"} and len(ours) == 1
+    assert [(m["address"], m["name"], m["host_key"][1] if m["host_key"] else None)
+            for m in pad_ssh_key.machines()] == [("10.0.0.50", "", None),
+                                                 ("10.0.0.12", "Godzilla Premium", "AAAAnewcard")]
+    assert pad_ssh_key.last_address() == "10.0.0.12"
+    assert SM._find_careful([new]) is False            # accounted for: the slow pass is not needed
+    # a second Godzilla turns up while the first still answers: it is another machine
+    other = dict(new, address="10.0.0.13", host_key=("ssh-ed25519", "AAAAother"))
+    _ours, moved = machine_scan.remember([new, other])
+    assert moved == {} and [m["address"] for m in pad_ssh_key.machines()] == ["10.0.0.50", "10.0.0.12", "10.0.0.13"]

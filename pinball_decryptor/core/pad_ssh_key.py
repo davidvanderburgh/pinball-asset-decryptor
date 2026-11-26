@@ -119,7 +119,9 @@ def _entry(rec):
     hk = rec.get("host_key")
     return {"address": str(rec.get("address") or "").strip(),
             "host_key": tuple(hk) if isinstance(hk, (list, tuple)) and len(hk) == 2 else None,
-            "game": str(rec.get("game") or "")}
+            "game": str(rec.get("game") or ""),
+            # PAD-1627: the owner's own name for it (My machines), kept when the router moves it
+            "name": str(rec.get("name") or "").strip()}
 
 
 def _load_machines():
@@ -181,16 +183,20 @@ def remember_address(address):
         _save_machines(address, ms)
 
 
-def remember_machine(address, host_key=None, game="", make_current=True):
+def remember_machine(address, host_key=None, game="", make_current=True, replaces=""):
     """A machine found (a scan, or a connection that let this computer in), with its identity and game.  The same
-    identity at a new address is the same machine, moved."""
+    identity at a new address is the same machine, moved.  PAD-1627: *replaces* is the address of the remembered
+    machine this one IS although its identity is new (a card written again has a new one): its place, and the
+    owner's name for it, are kept."""
     address = (address or "").strip()
     with _lock:
         current, ms = _load_machines()
         old = (next((m for m in ms if host_key and m["host_key"] == tuple(host_key)), None)
-               or next((m for m in ms if m["address"] == address), None))
+               or next((m for m in ms if m["address"] == address), None)
+               or next((m for m in ms if replaces and m["address"] == replaces), None))
         rec = _entry({"address": address, "host_key": host_key or (old or {}).get("host_key"),
-                      "game": game or (old or {}).get("game") or ""})
+                      "game": game or (old or {}).get("game") or "",
+                      "name": (old or {}).get("name") or ""})
         if old is not None:
             if current == old["address"]:
                 current = address
@@ -199,6 +205,18 @@ def remember_machine(address, host_key=None, game="", make_current=True):
         else:
             ms = [m for m in ms if m["address"] != address] + [rec]
         _save_machines(address if make_current or not current else current, ms)
+
+
+def name_machine(address, name):
+    """PAD-1627: the owner's name for the known machine at *address* ("" takes it off). True when stored."""
+    with _lock:
+        current, ms = _load_machines()
+        hit = next((m for m in ms if m["address"] == address), None)
+        if hit is None:
+            return False
+        hit["name"] = (name or "").strip()
+        _save_machines(current, ms)
+        return True
 
 
 def select_machine(address):

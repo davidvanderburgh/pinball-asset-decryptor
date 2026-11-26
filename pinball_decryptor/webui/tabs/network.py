@@ -602,22 +602,12 @@ class NetworkTab(TabService):
         from ...core import machine_scan
         scope = _scan_scope(report)
         looked = (' Looked at %s.' % scope) if scope else ''
-        ours = [r for r in found if r['lets_in']]
         rows = [dict(address=r['address'], lets_in=False, game='', line=_found_line(r))
                 for r in found if not r['lets_in']]
         # every machine that lets this computer in is remembered (David: "I can have MANY machines on my
         # network"), each by its identity: one found at a new address is the same machine, moved
         known = {m['address'] for m in pad_ssh_key.machines()}
-        for r in ours:
-            if r.get('host_key'):
-                pad_ssh_key.forget_host(r['address'], machine_scan.PORT)
-                pad_ssh_key.remember_host(r['address'], machine_scan.PORT, *r['host_key'])
-            pad_ssh_key.remember_machine(r['address'], r.get('host_key'), r.get('game') or '', make_current=False)
-        current = pad_ssh_key.last_address()
-        if ours and current not in {m['address'] for m in pad_ssh_key.machines()} | {r['address'] for r in ours}:
-            current = ''
-        if ours and not current:
-            pad_ssh_key.select_machine(ours[0]['address'])
+        ours, _moved = machine_scan.remember(found)
         self.set(scanning=False, scan_pct=100, found=rows if not ours else [])
         self._show_machine()
         new = [r for r in ours if r['address'] not in known]

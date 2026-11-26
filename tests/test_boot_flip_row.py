@@ -60,7 +60,8 @@ def test_the_values_and_help():
     # "I'd rather the row jump to off from 15": 0, 15, 30 ... 120 by the game's own step
     assert MS.STEPS == {"boot_flip": 15} and BF.STEP_SECONDS == 15
     assert len(BF.MENU_HELP) <= 63                          # the spare help lines' room
-    assert BF.MENU_HELP == "R flipper 5s: boot menu. 0 Off, secs after game. Min/default 15"   # Simon's wording
+    # Simon's facts (5 s hold, 0 Off, seconds idle, minimum 15), said plainly (PR #48 review, David: "more explicit")
+    assert BF.MENU_HELP == "Hold R flipper 5s=boot menu if no game for N s. 0 Off, min 15"
     assert MS.SETTINGS[MS.BOOT_FLIP][1:] == ("BOOT MENU FLIPPER", "Boot Menu Flipper", 16)
 
 

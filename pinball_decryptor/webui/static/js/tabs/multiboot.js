@@ -24,10 +24,10 @@ const FID = "mb-f-";
 // right flipper held in attract with no game on (Simon, boot_menu=flipper; After a game = flip_guard=), either, or
 // neither. The card keeps its two keys; this one choice sets both, and the menu names the ones that are on.
 const WAY_BACK_OPTS = [
-  { value: "back", label: "Hold BACK on the coin door (in a game)" },
-  { value: "flipper", label: "Hold the right flipper (no game on)" },
-  { value: "both", label: "Either: BACK or the right flipper" },
-  { value: "off", label: "Neither (power the machine off and on)" },
+  { value: "back", label: "Hold the coin door BACK button during a game" },
+  { value: "flipper", label: "Hold the right flipper button when no game is running" },
+  { value: "both", label: "Either: the coin door BACK button or the right flipper" },
+  { value: "off", label: "Neither: only by switching the machine off and on" },
 ];
 const FLIP_GUARD_OPTS = [{ value: "20", label: "20 s" }, { value: "60", label: "60 s" }];
 const wayBack = (s) => {
@@ -676,20 +676,20 @@ function MenuDialog({ s, w }) {
           <span class="small muted">highlighted at power-up (the last choice wins once one was made)</span></div>
         ${md.flip_ok ? html`
         <label class="k" for=${fid("way_back")}>Back to this menu:</label>
-        <div class="row wrap"><${Select} id=${fid("way_back")} value=${wayBack(s)} width=${330} options=${WAY_BACK_OPTS}
+        <div class="row wrap"><${Select} id=${fid("way_back")} value=${wayBack(s)} width=${400} options=${WAY_BACK_OPTS}
             onChange=${(v) => setWayBack(s, v)} />
-          <span class="small muted">from a game, without powering off; the menu says which</span></div>
-        <label class="k" for=${fid("back_hold")}>Hold BACK (s):</label>
+          <span class="small muted">how a player leaves a game and comes back to this menu without switching the machine off. The menu lists the ways that are on along its bottom.</span></div>
+        <label class="k" for=${fid("back_hold")}>Hold BACK for (s):</label>
         <div class="row wrap"><${Field} id=${fid("back_hold")} ns=${NS} k="back_hold" value=${s.back_hold} ...${num} min=${1} max=${60}
             disabled=${Number(s.back_hold) <= 0} />
-          <span class="small muted">in a game, holding the coin door's BACK this long restarts into this menu</span></div>
-        <label class="k" for=${fid("flip_guard")}>After a game:</label>
+          <span class="small muted">seconds the coin door BACK button must be held during a game before the machine restarts into this menu</span></div>
+        <label class="k" for=${fid("flip_guard")}>Right flipper waits:</label>
         <div class="row wrap"><${Select} id=${fid("flip_guard")} ns=${NS} k="flip_guard" value=${String(s.flip_guard)} width=${120}
             disabled=${(s.boot_menu || "menu") === "menu"} options=${FLIP_GUARD_OPTS} />
-          <span class="small muted">the right flipper is held 5 s, and counts only once the flippers have been off this long (a tilt, the bonus, the end of a game)</span></div>
+          <span class="small muted">the right flipper is always held for 5 s. So it can never fire by accident during play, that hold only works once no game has been running for this long (after a game ends, a tilt, or the bonus count). This is not how long to hold it.</span></div>
         <span></span>
         <${Check} checked=${s.boot_menu !== "hidden"} disabled=${(s.boot_menu || "menu") === "menu"} wrap
-          label="Show this menu at power-up (unticked: a short start-up screen; holding the right flipper there opens the menu)"
+          label="Show this menu at power-up. Unticked, the machine shows a short start-up screen and then starts the default image; holding the right flipper on that screen opens this menu."
           onChange=${(on) => setField(NS, "boot_menu", on ? "flipper" : "hidden", { flush: true })} />`
         : md.back_hold_ok !== false && html`
         <label class="k" for=${fid("back_hold")}>Hold BACK (s):</label>

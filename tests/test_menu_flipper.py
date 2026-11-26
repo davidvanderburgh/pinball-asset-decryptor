@@ -124,8 +124,8 @@ def test_the_menu_names_each_way_back():
     conf_c = open(os.path.join(SEL, "conf.c"), encoding="utf-8").read()
     assert '"back_hold"' in conf_c and "boot_menu_set = 1" in conf_c
     cs = open(os.path.join(SEL, "codeselect.c"), encoding="utf-8").read()
-    for words in ('hold BACK %d s in a game, or the right flipper %d s', 'hold BACK %d s in a game"',
-                  'hold the right flipper %d s in attract"'):
+    for words in ('hold the coin door BACK button %d s during a "', 'or the right flipper %d s when no game is running',
+                  'BACK button %d s during a game",', 'hold the right flipper %d s when no game is running",'):
         assert words in cs
     js = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui", "static", "js", "tabs",
                            "multiboot.js"), encoding="utf-8").read()

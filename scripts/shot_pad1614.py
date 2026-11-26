@@ -69,7 +69,7 @@ def main():
                 if pick.count():
                     pick.select_option("both")          # BACK or the right flipper: every row live
                     time.sleep(1)
-                line = page.locator(".mb-dlg-menu").get_by_text("Hold BACK (s):", exact=False).first
+                line = page.locator(".mb-dlg-menu").get_by_text("Hold BACK for (s):", exact=False).first
                 page.evaluate("(el) => el.scrollIntoView({block: 'center'})", line.element_handle())
             else:
                 try:

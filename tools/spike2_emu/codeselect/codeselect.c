@@ -1444,12 +1444,14 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         const int back = c->back_hold > 0, flip = c->boot_menu != BOOT_MENU_MENU;
         buf[0] = 0;
         if (back && flip)
-            snprintf(buf, sizeof buf, "Back to this menu: hold BACK %d s in a game, or the right flipper %d s "
-                     "in attract", c->back_hold, c->flip_hold);
+            snprintf(buf, sizeof buf, "To come back to this menu: hold the coin door BACK button %d s during a "
+                     "game, or the right flipper %d s when no game is running", c->back_hold, c->flip_hold);
         else if (back)
-            snprintf(buf, sizeof buf, "Back to this menu: hold BACK %d s in a game", c->back_hold);
+            snprintf(buf, sizeof buf, "To come back to this menu: hold the coin door BACK button %d s during a game",
+                     c->back_hold);
         else if (flip)
-            snprintf(buf, sizeof buf, "Back to this menu: hold the right flipper %d s in attract", c->flip_hold);
+            snprintf(buf, sizeof buf, "To come back to this menu: hold the right flipper %d s when no game is running",
+                     c->flip_hold);
         if (buf[0]) {
             const int wmax = W - (int)(40 * s);
             float px = gfx_fit_px(f, buf, wmax, 20 * s, 14 * s);

@@ -35,10 +35,12 @@ SETTINGS = (
     ("brightness", "Picture settings", "Brightness, Contrast and Saturation (Write tab)."),
     ("saved_progress", "Saved Progress", "On the card when the project keeps progress between games (a variable "
                                          "saved between games). Clear clears it; so does a factory reset."),
-    ("boot_flip", "Boot Menu Flipper", "For a multi-boot card (Multi-boot tab): the operator sets the right flipper "
-                                       "hold back to the boot menu - 0 Off, or the seconds after a game before it "
-                                       "works (15 to start with and the recommended minimum, up to 120). It wins "
-                                       "over the Multi-boot tab's own setting."),
+    ("boot_flip", "Boot Menu Flipper", "For a multi-boot card (Multi-boot tab): the operator's switch for the right "
+                                       "flipper hold back to the boot menu. The hold is always 5 s; the value is "
+                                       "how many seconds no game must have been running before that hold works, "
+                                       "so it never fires during play (0 Off, 15 to start with and the "
+                                       "recommended minimum, up to 120). It wins over the Multi-boot tab's own "
+                                       "setting."),
 )
 
 #: a ticked row with nothing behind it yet goes on the card with placeholder values (PR #40 review: shown after the

@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import uuid
 
 from . import runtime
 from .executor import CommandError
@@ -282,6 +283,7 @@ def extract(iso_path, output_dir, executor,
 
     progress(0, 4, "Mounting ISO...")
     log("Mounting ISO...", "info")
+    raw_path_exec = None
     host_mount, exec_mount, unmount = mount_iso(
         iso_path, executor=executor, log_cb=log)
     log(f"  Mounted at {host_mount}", "info")
@@ -319,7 +321,11 @@ def extract(iso_path, output_dir, executor,
             "info")
 
         image_dir_exec = f"{exec_mount}/home/partimag/{image_name}"
-        raw_path_exec = "/tmp/pad_raw.img"
+        # PAD-1597: named for this run and removed in the finally, not on
+        # the success path only - a failed or cancelled restore left the
+        # whole partition in the app's Linux.  A run killed outright leaves
+        # it for the space keeper (core/wsl_disk.py lists pad_raw*).
+        raw_path_exec = "/tmp/pad_raw_%s.img" % uuid.uuid4().hex[:8]
         cat_pattern = f"{image_dir_exec}/{partition}.dd-ptcl-img.gz.*"
         cmd = (
             f"set -o pipefail && "
@@ -384,17 +390,17 @@ def extract(iso_path, output_dir, executor,
                 if n == 0:
                     raise RuntimeError(f"debugfs rdump failed: {e.output}")
 
-        try:
-            executor.run(f"rm -f {raw_path_exec}", timeout=10)
-        except Exception:
-            pass
-
         n_files = sum(len(fs) for _, _, fs in os.walk(output_dir))
         log(f"Extracted {n_files} files.", "success")
         progress(4, 4, "Done")
         return partition
 
     finally:
+        if raw_path_exec:
+            try:
+                executor.run(f"rm -f {raw_path_exec}", timeout=60)
+            except Exception:
+                pass
         try:
             unmount()
             log("ISO unmounted.", "info")

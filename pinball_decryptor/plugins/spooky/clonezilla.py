@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 
 from .executor import CommandError, DockerExecutor
 from ...core import pad_temp
@@ -552,6 +553,7 @@ def extract_clonezilla(image_path, output_dir, executor, game_key=None,
 
     iso_cleanup = None
     temp_dir = None
+    staged = []
 
     try:
         if ext == ".iso":
@@ -595,11 +597,13 @@ def extract_clonezilla(image_path, output_dir, executor, game_key=None,
         progress(2, total_steps, "Decompressing partition image...")
         log("Step 2: Decompressing partition image...")
 
-        exec_tmp = "/tmp/spooky_partclone_decompressed"
-        exec_raw = "/tmp/spooky_raw.img"
-
-        # Clean up any previous files
-        _exec_run(executor, f"rm -f {exec_tmp} {exec_raw}", log_cb=log)
+        # PAD-1597: named for this run, so two extracts never share (or
+        # remove) each other's, and removed in the finally below whatever
+        # happens - the raw image is a whole ext4 partition and stayed in
+        # the app's Linux for good.  A run killed outright leaves them for
+        # the space keeper (core/wsl_disk.py lists these names).
+        exec_tmp, exec_raw = _staging_names()
+        staged = [exec_tmp, exec_raw]
 
         if part_info["compression"] == "zstd":
             log("Decompressing zstd (this may take several minutes)...")
@@ -668,6 +672,8 @@ def extract_clonezilla(image_path, output_dir, executor, game_key=None,
         return extracted
 
     finally:
+        if staged:
+            cleanup_temp_files(executor, staged)
         # Cleanup host-side resources
         if iso_cleanup:
             try:
@@ -763,13 +769,22 @@ def _extract_ext4_recursive(exec_raw_img, base_path, output_dir, executor,
     return extracted
 
 
-def cleanup_temp_files(executor=None, log_cb=None):
-    """Remove temporary extraction files from executor."""
+def _staging_names():
+    """This run's decompressed partclone image and restored raw ext4, in the
+    executor's /tmp (``spooky_partclone_<id>`` / ``spooky_raw_<id>.img``)."""
+    tag = uuid.uuid4().hex[:8]
+    return ("/tmp/spooky_partclone_%s" % tag, "/tmp/spooky_raw_%s.img" % tag)
+
+
+def cleanup_temp_files(executor=None, paths=None, log_cb=None):
+    """Remove a run's staging files (*paths*, default the old fixed names)
+    from the executor.  Never raises: it runs from a ``finally``."""
     if executor is None:
         return
-    for f in ["/tmp/spooky_partclone_decompressed", "/tmp/spooky_raw.img"]:
+    for f in paths or ["/tmp/spooky_partclone_decompressed",
+                       "/tmp/spooky_raw.img"]:
         try:
-            executor.run(f"rm -f {f}", timeout=10)
+            executor.run(f"rm -f '{f}'", timeout=60)
             if log_cb:
                 log_cb(f"Removed {f}", "info")
         except Exception:

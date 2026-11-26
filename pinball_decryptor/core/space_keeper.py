@@ -68,6 +68,11 @@ log = logging.getLogger(__name__)
 STALE_SECS = 24 * 3600
 UNUSED_SECS = 30 * 24 * 3600
 RECENT_SECS = 3600
+#: PAD-1597: a rig's "Leftover:" folder (Manage disk space lists them under
+#: each emulator) goes once nothing has touched it for this long and no game
+#: of that emulator runs.  Longer than a staging leftover's day: these sit
+#: beside the rig's own folders, and a session may come back to one.
+RIG_LEFTOVER_SECS = 7 * 24 * 3600
 #: The room an extract needs: the biggest titles want 20+ GB while they
 #: stage, and a game unpacked for an emulator 4-8 GB.  15 GB keeps a normal
 #: extract safe without clearing every game off a small disk.
@@ -172,6 +177,10 @@ def set_auto(on):
 #   C <root> <bytes> <last> <path>   an emulator cache entry; <last> is the
 #                                    newest of its own date and its markers
 #   B <build> <entry>                a PB I/O-board build stacked on <entry>
+#   W <path>                         a JJP builder's work folder a process
+#                                    names or works in (wsl_disk.WORK_BUSY)
+#   R <root> <bytes> <newest> <path> a top-level folder of an emulator's root
+#                                    that may be a leftover (PAD-1597)
 #: The L and H lines alone: what runs and what is held.  PAD-1599 asks the
 #: same of the user's previous Linux (core/old_distro.py).
 SCAN_LIVE = r"""
@@ -197,9 +206,15 @@ awk '{print $5}' /proc/self/mountinfo | grep -aE '^/(var/)?tmp/' |
 _SCAN = r"""
 df -B1 --output=avail,used /var/tmp | tail -1 | awk '{print "D\t" $1 "\t" $2}'
 """ + SCAN_LIVE + r"""
-newest() { find "$1" -xdev -printf '%T@\n' 2>/dev/null | sort -rn | head -1 | cut -d. -f1; }
-find /tmp /var/tmp -maxdepth 1 \( -name 'cgc_stage_*' -o -name 'bof_*' \
-    -o -name 'jjp_*' -o -name 'pad_aaiw_*' \) 2>/dev/null |
+# The newest change on the entry's own filesystem: -xdev still lists a mount
+# point, whose date is the mounted thing's - a killed JJP build's ISO mount
+# is not activity in its work folder (PAD-1597).
+newest() {
+  d=$(stat -c %d "$1" 2>/dev/null)
+  find "$1" -xdev -printf '%D %T@\n' 2>/dev/null |
+    awk -v d="$d" '$1 == d {print $2}' | sort -rn | head -1 | cut -d. -f1
+}
+find /tmp /var/tmp -maxdepth 1 \( @NAMES@ \) 2>/dev/null |
 while IFS= read -r p; do
   s=$(du -sxb "$p" 2>/dev/null | cut -f1)
   [ "${s:-0}" -ge @MIN@ ] || continue
@@ -226,6 +241,18 @@ for c in /var/tmp/jjp_*/; do
   s=$(du -sxb "$c" 2>/dev/null | cut -f1)
   printf 'C\tjjp\t%s\t%s\t%s\n' "${s:-0}" "${last:-0}" "$c"
 done
+for r in /var/tmp/pad_*/; do
+  r=${r%/}; n=${r##*/}
+  case $n in pad_aaiw_*|pad_jjpmulti_work*|pad_jjpmodes_work*|@BOFMULTI@) continue ;; esac
+  for c in "$r"/*/; do
+    [ -d "$c" ] || continue
+    c=${c%/}; nm=${c##*/}
+    case $nm in cache|rig[0-9]*|nv|nv[0-9]*|home|lower|loctmp|py27*|py3*|mamba*|env*|bin*|site*) continue ;; esac
+    s=$(du -sxb "$c" 2>/dev/null | cut -f1)
+    [ "${s:-0}" -ge @MIN@ ] || continue
+    printf 'R\t%s\t%s\t%s\t%s\n' "$n" "$s" "$(newest "$c")" "$c"
+  done
+done
 for b in /var/tmp/pad_pbio/cache/build-*/; do
   [ -f "$b/layers" ] || continue
   b=${b%/}
@@ -233,14 +260,19 @@ for b in /var/tmp/pad_pbio/cache/build-*/; do
     while IFS= read -r e; do printf 'B\t%s\t%s\n' "$b" "$e"; done
 done
 true
-""".replace("@MIN@", str(_MIN_LEFTOVER)).replace("@BOFMULTI@",
-                                                  wsl_disk.BOFMULTI_ROOT)
+""" + "{\n" + (wsl_disk.WORK_BUSY % " ".join(
+    "/var/tmp/%s*" % n for n in wsl_disk.JJP_WORK)) + "} | sed 's/^/W\\t/'\n"
+_SCAN = _SCAN.replace("@MIN@", str(_MIN_LEFTOVER)).replace(
+    "@BOFMULTI@", wsl_disk.BOFMULTI_ROOT).replace(
+    "@NAMES@", " -o ".join("-name '%s'" % n for n in wsl_disk._SCAN_NAMES))
 
 
 def parse_scan(text):
-    """The scan's lines -> ``{free, used, live, held, staging, cache, deps}``."""
+    """The scan's lines -> ``{free, used, live, held, staging, cache, deps,
+    work_busy, rig_left}``."""
     out = {"free": None, "used": None, "live": set(), "held": set(),
-           "staging": [], "cache": [], "deps": {}}
+           "staging": [], "cache": [], "deps": {}, "work_busy": set(),
+           "rig_left": []}
     for line in (text or "").splitlines():
         bits = line.rstrip("\r").split("\t")
         tag = bits[0]
@@ -260,6 +292,12 @@ def parse_scan(text):
                                      "path": bits[4]})
             elif tag == "B" and len(bits) == 3:
                 out["deps"].setdefault(bits[2], []).append(bits[1])
+            elif tag == "W" and len(bits) == 2:
+                out["work_busy"].add(bits[1].rstrip("/"))
+            elif tag == "R" and len(bits) == 5:
+                out["rig_left"].append({"root": bits[1], "size": int(bits[2]),
+                                        "last": int(bits[3] or 0),
+                                        "path": bits[4]})
         except ValueError:
             continue
     return out
@@ -302,10 +340,35 @@ def plan_wsl(scan, now, room=None, floor=FLOOR_BYTES):
         if not (wsl_disk._is_safe_staging_path(e["path"])
                 and is_leftover_name(e["path"])):
             continue
-        if _held(e["path"], held) or now - e["last"] < STALE_SECS:
+        if wsl_disk.is_jjp_work(e["path"]):
+            # A JJP builder's scratch: a killed build leaves its ISO mounts
+            # in it, so "held" is judged by the processes alone - and with
+            # nobody using it, it is no use to anybody after an hour.
+            if (e["path"] in scan.get("work_busy", ())
+                    or now - e["last"] < RECENT_SECS):
+                continue
+        elif _held(e["path"], held) or now - e["last"] < STALE_SECS:
             continue
         mfr, detail = wsl_disk._classify(e["path"])
         take(e, "leftover", "%s: %s" % (mfr, detail))
+
+    for e in scan.get("rig_left", ()):
+        m = wsl_disk._RIG_PATH_RE.match(e["path"])
+        if (not m or m.group(2) or m.group(1) != e["root"]
+                or not wsl_disk._is_rig_path(e["path"])
+                or e["root"] in live or _held(e["path"], held)
+                or now - e["last"] < RIG_LEFTOVER_SECS):
+            continue
+        detail, kind = wsl_disk._rig_detail(m.group(1), None, m.group(3))
+        if kind != "leftover":
+            continue
+        if detail.startswith("Leftover: "):
+            detail = detail[len("Leftover: "):]
+        what = "%s: %s" % (wsl_disk.RIG_MAKERS.get(e["root"], "Emulator"),
+                           detail)
+        if e["root"] in wsl_disk.RIG_VARIANTS:
+            what += " (%s)" % wsl_disk.RIG_VARIANTS[e["root"]]
+        take(e, "leftover", what)
 
     games = []
     for e in scan["cache"]:

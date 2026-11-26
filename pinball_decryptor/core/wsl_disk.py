@@ -71,6 +71,13 @@ def _decode_wsl(b):
 #   BoF  -> /tmp/bof_<game>_*             (bof/pipeline.py)
 #   JJP  -> /tmp/jjp_* , /var/tmp/jjp_*   (jjp/pipeline.py)
 #   DP   -> /tmp/pad_aaiw_*               (dp/aaiw.py)
+#   Spooky Clonezilla -> /tmp/spooky_raw*, /tmp/spooky_partclone_*
+#                                         (spooky/clonezilla.py)
+#   Clonezilla restore (CGC, PB) -> /tmp/pad_raw*  (core/clonezilla.py)
+#   JJP multi-boot / custom modes work folders -> /var/tmp/pad_jjpmulti_work*,
+#        /var/tmp/pad_jjpmodes_work*  (webui/multiboot_core.py JJP_WORKDIR,
+#        plugins/jjp/custom_modes.py WORKDIR; PAD-1597: a killed build
+#        never reaches mkjjpmulti's rmtree, and these were never listed)
 _ALLOWED_PREFIXES = (
     "/tmp/cgc_stage_",
     "/tmp/bof_",
@@ -80,20 +87,55 @@ _ALLOWED_PREFIXES = (
     "/var/tmp/bof_",
     "/var/tmp/jjp_",
     "/var/tmp/pad_aaiw_",
+    "/tmp/spooky_raw",
+    "/tmp/spooky_partclone_",
+    "/tmp/pad_raw",
+    "/var/tmp/pad_jjpmulti_work",
+    "/var/tmp/pad_jjpmodes_work",
 )
+
+#: The JJP builders' work folders (see above): scratch a build makes and
+#: removes, never reused - but while a build runs it is in use, so they are
+#: deleted only when no process names them (:data:`WORK_BUSY`).
+JJP_WORK = ("pad_jjpmulti_work", "pad_jjpmodes_work")
+
+
+def is_jjp_work(path):
+    """``/var/tmp/pad_jjpmulti_work[_verify]`` / ``pad_jjpmodes_work``."""
+    return (path.startswith("/var/tmp/")
+            and path.count("/") == 3
+            and path[len("/var/tmp/"):].startswith(JJP_WORK))
+
+
+# Which of these work folders (%s, quoted literals) a process names on its
+# command line - the build itself and the mount/debugfs it runs - or works
+# in (cwd / an open file).  "[/]" keeps grep from matching its own line.
+WORK_BUSY = r"""
+held=$(for p in /proc/[0-9]*; do readlink "$p/cwd" "$p"/fd/* 2>/dev/null; done)
+for d in %s; do
+  [ -e "$d" ] || continue
+  pat="[/]${d#/}"
+  if grep -aqlE "$pat" /proc/[0-9]*/cmdline 2>/dev/null ||
+     printf '%%s\n' "$held" | grep -aqE "^$d(/|\$)"; then echo "$d"; fi
+done
+true
+"""
 
 # The scan looks for these top-level name patterns under both staging roots
 # (``/tmp`` + ``/var/tmp``).  Searching both roots for every name is harmless --
 # a name simply won't match where that plugin doesn't stage -- and ``delete``
 # re-validates each hit against _ALLOWED_PREFIXES, so the scan can be broad.
 _SCAN_ROOTS = ("/tmp", "/var/tmp")
-_SCAN_NAMES = ("cgc_stage_*", "bof_*", "jjp_*", "pad_aaiw_*")
+_SCAN_NAMES = ("cgc_stage_*", "bof_*", "jjp_*", "pad_aaiw_*",
+               "spooky_raw*", "spooky_partclone_*", "pad_raw*",
+               "pad_jjpmulti_work*", "pad_jjpmodes_work*")
 
 # Friendly manufacturer label per prefix (matches plugin `display` strings).
 _CGC = "Chicago Gaming Company"
 _BOF = "Barrels of Fun"
 _JJP = "Jersey Jack Pinball"
 _DP = "Dutch Pinball"
+_SPOOKY = "Spooky Pinball"
 
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./ \-]+$")
 
@@ -328,6 +370,16 @@ def _classify(path):
         return _JJP, _jjp_detail(base)
     if base.startswith("pad_aaiw_"):
         return _DP, "Alice in Wonderland staging"
+    if base.startswith(("spooky_raw", "spooky_partclone_")):
+        return _SPOOKY, "Clonezilla restore staging"
+    if base.startswith("pad_raw"):
+        return "Clonezilla restore", "partition image staging"
+    if base.startswith("pad_jjpmulti_work"):
+        return _JJP, ("multi-boot check work folder"
+                      if base.endswith("_verify")
+                      else "multi-boot build work folder")
+    if base.startswith("pad_jjpmodes_work"):
+        return _JJP, "custom modes build work folder"
     return "Other", base
 
 
@@ -515,7 +567,7 @@ _RIG_PATH_RE = re.compile(
 _RIG_SCAN = r"""
 for r in /var/tmp/pad_*/; do
   r=${r%/}; n=${r##*/}
-  case $n in pad_aaiw_*) continue ;; esac
+  case $n in pad_aaiw_*|pad_jjpmulti_work*|pad_jjpmodes_work*) continue ;; esac
   live=0
   for f in "$r"/*.pid "$r"/rig*/*.pid; do
     [ -f "$f" ] || continue
@@ -640,6 +692,15 @@ def delete(paths):
     # mounted inside and remove (_UNMOUNT_AND_REMOVE).  An emulator's folder
     # is never deleted while a game of it runs - checked again here, not just
     # at scan time (the game may have started since).
+    work = [p for p in paths if is_jjp_work(p)]
+    if work:
+        busy = _wsl_script(WORK_BUSY % " ".join("'%s'" % p for p in work),
+                           timeout=60).split()
+        if busy:
+            raise WslDiskError(
+                "A Jersey Jack multi-boot or custom modes build is still "
+                "using %s - let it finish first; nothing was deleted."
+                % ", ".join(busy))
     roots = sorted({_RIG_PATH_RE.match(p).group(1) for p in paths
                     if _is_rig_path(p)})
     if roots:

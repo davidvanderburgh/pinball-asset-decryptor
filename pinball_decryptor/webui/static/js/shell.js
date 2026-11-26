@@ -7,6 +7,7 @@ import { Component } from "./vendor/preact-htm.js";
 import { useNs, useLog, useConnected, useEvent, state } from "./core/store.js";
 import { call, onCallError } from "./core/rpc.js";
 import { DialogHost, openDialog } from "./core/dialogs.js";
+import { dismissPageBoot } from "./core/pageboot.js";
 import { tabLock } from "./core/locks.js";
 import { setLanguage } from "./core/i18n.js";
 import { Spike3KeyGuide } from "./core/spike3_guide.js";
@@ -108,6 +109,8 @@ function TabHost({ ns }) {
       force((n) => n + 1);
     });
   }, [ns]);
+  // the starting screen's ball stays until the first tab has something to show
+  useEffect(() => { if (!ns || tabState.placeholder || loaded.get(ns)) dismissPageBoot(); });
   if (!ns) return html`<div class="page"><${Empty} title="Nothing to show" icon="info">This manufacturer has no tabs.<//></div>`;
   const C = loaded.get(ns);
   if (tabState.placeholder) {
@@ -1204,6 +1207,18 @@ export function Shell() {
   useEffect(() => applyTheme(shell.theme), [shell.theme]);
   useEffect(() => { setLanguage(shell.lang || "en"); }, [shell.lang]);
   useEffect(() => { document.title = shell.title || "Pinball Asset Decryptor"; }, [shell.title]);
+  // The starting screen (index.html's bouncing ball, PAD-1628) leaves once a
+  // first screen is drawn: at once for the ones the shell draws itself, and
+  // when the first tab is in for a project (TabHost; the timer is only the
+  // net under it).
+  const started = !!shell.disclaimer || (!!shell.view && !shell.opening);
+  const ownScreen = !!shell.disclaimer || gsOpen || machOpen || shell.view === "picker";
+  useEffect(() => {
+    if (!started) return undefined;
+    if (ownScreen) { dismissPageBoot(); return undefined; }
+    const t = setTimeout(dismissPageBoot, 2500);
+    return () => clearTimeout(t);
+  }, [started, ownScreen]);
   useEvent("clipboard", (e) => { if (navigator.clipboard) navigator.clipboard.writeText(e.text).catch(() => {}); }, []);
   useEvent("open_url", (e) => window.open(e.url, "_blank"), []);
   // hot reload (a development checkout only; webui/devreload.py): a saved
@@ -1245,7 +1260,8 @@ export function Shell() {
     </div>`;
   }
   // shell.opening: the last project is still being opened (PAD-1545)
-  if (!shell.view || shell.opening) return html`<div class="app"><div class="page"><div class="row"><${Spinner} /><span class="muted">Starting…</span></div></div></div>`;
+  // (index.html's bouncing ball is still over the window: nothing to draw)
+  if (!shell.view || shell.opening) return html`<div class="app"></div>`;
   return html`<div class="app">
     <${TopBar} shell=${shell} />
     <${Banners} shell=${shell} />

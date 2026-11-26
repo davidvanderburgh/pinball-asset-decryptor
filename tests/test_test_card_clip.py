@@ -114,5 +114,5 @@ def test_action_freezes_on_a_quick_press_and_backs_out_when_held():
     assert "now - st.t_act_down >= TEST_HOLD_BACK_MS" in s
     assert "st.t_frozen = !st.t_frozen;" in s
     assert "if (st->t_frozen) return 0;" in s
-    assert "ACTION: freeze / play, hold: back" in s
+    assert "K_BACK \": freeze / play, hold: back\"" in s          # K_BACK is "ACTION" on Spike 2 (David's button names)
     assert "#define TEST_HOLD_BACK_MS 700" in _read(SEL, "settings.h")

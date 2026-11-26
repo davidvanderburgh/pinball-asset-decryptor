@@ -87,6 +87,16 @@ class TestCardTab(TabService):
         except Exception:                                       # noqa: BLE001
             return ""
 
+    @rpc(loop=False)
+    def scan_wifi(self, where):
+        """The Wi-Fi networks in reach (core/wifi_scan.py), from this computer (*where* "pc") or from the machine
+        ("machine", over remote access): ``{"ok", "why", "networks", "current"}``. Off the UI loop: a scan takes
+        seconds. Simon: "make sure they can still manually enter tho" - it only offers names."""
+        from ...core import wifi_scan
+        if where == "machine":
+            return wifi_scan.scan_machine(self._address())
+        return wifi_scan.scan_pc()
+
     @rpc
     def set_menu_wifi(self, name, password):
         """The Wi-Fi the test card joins with no game running (core/menu_network.py): *name* and *password* -> the

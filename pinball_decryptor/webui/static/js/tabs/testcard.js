@@ -2,7 +2,7 @@
 // One list - what is ticked TEST in the Images, Video, Scenes and Audio tabs, and files
 // added here - and one button that makes a small card booting any Stern Spike 2 machine
 // into the TEST CARD menu.  The default PAD test card is always on it.
-import { html, PageHead, Card, Button, Check, Field, Note, Progress, tip, call, cx, useState } from "../core/ui.js";
+import { html, PageHead, Card, Button, Check, Field, Note, Progress, tip, call, cx, useState, openMenu } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 const NS = "testcard";
@@ -69,14 +69,47 @@ const MENU_WIFI_TIP = { head: "Wi-Fi for the test card", lines: [
   "The wired port is always started too. Leave the password empty for an open network.",
   "PAD keeps the network name and the key Wi-Fi makes from your password, not the password itself; the card holds that key in a file only the machine's system can read." ] };
 
+// Simon (2026-11-26): "if the PC or machine PAD is running on has a wireless facility to scan for access points
+// then ideally we should let them do that ... make sure they can still manually enter tho"
+const SCAN_TIP = { head: "Scan for Wi-Fi networks", lines: [
+  "This computer: the networks this PC's Wi-Fi can see.",
+  "The machine: the networks the machine itself can see, over remote access, while its game runs. This is the better list: Stern's Wi-Fi adapter sees 2.4 GHz networks only.",
+  "Pick one to fill in the name, or type the name yourself." ] };
+
+function ScanList({ scan, onPick }) {
+  if (!scan) return null;
+  if (scan.busy) return html`<span class="small muted">${"Scanning " + (scan.where === "machine" ? "from the machine" : "from this computer") + "…"}</span>`;
+  if (!scan.ok) return html`<span class="small bad">${scan.why}</span>`;
+  return html`<div class="stack tc-scan">
+    <span class="small muted">${(scan.where === "machine" ? "The machine sees " : "This computer sees ") + scan.networks.length + " network" + (scan.networks.length === 1 ? "" : "s") + ". Pick yours:"}</span>
+    ${scan.networks.map((w) => html`<div class="row" key=${w.name}>
+      <${Button} size="sm" onClick=${() => onPick(w.name)}
+        title=${w.name === scan.current ? "The network it is joined to now" : "Use this network"}>${w.name}<//>
+      <span class="small muted">${[w.signal + "%", w.band, w.secure === false ? "open" : w.secure ? "secured" : "",
+        w.name === scan.current ? "joined now" : ""].filter(Boolean).join(" · ")}</span>
+    </div>`)}
+  </div>`;
+}
+
 function MenuWifi({ s }) {
   const n = s.network || {};
   const busy = !!s.busy || !n.ssh;
   const [name, setName] = useState(n.wifi_name || "");
   const [pw, setPw] = useState("");
   const [why, setWhy] = useState("");
+  const [scan, setScan] = useState(null);
   const save = async () => { setWhy((await call("testcard.set_menu_wifi", name, pw)) || ""); setPw(""); };
   const forget = async () => { setName(""); setPw(""); setWhy((await call("testcard.set_menu_wifi", "", "")) || ""); };
+  const doScan = async (where) => {
+    setScan({ busy: true, where });
+    const got = (await call("testcard.scan_wifi", where)) || { ok: false, why: "The scan did not answer." };
+    setScan({ ...got, where });
+  };
+  const scanMenu = (e) => openMenu(e.currentTarget, [
+    { label: "From this computer", onClick: () => doScan("pc") },
+    { label: "From the machine", onClick: () => doScan("machine"), disabled: !s.address,
+      title: s.address ? "Over remote access, at " + s.address : "Find the machine on the Network tab first" },
+  ]);
   return html`<div class="stack">
     <div class="row" ...${tip(MENU_WIFI_TIP)}>
       <span class="k">Wi-Fi for the test card:</span>
@@ -84,12 +117,14 @@ function MenuWifi({ s }) {
         onChange=${setName} onCommit=${setName} />
       <${Field} sm type="password" width="180px" value=${pw} readOnly=${busy}
         placeholder=${n.wifi_name ? "password (key saved)" : "password"} onChange=${setPw} onCommit=${setPw} />
+      <${Button} size="sm" disabled=${busy || (scan && scan.busy)} onClick=${scanMenu} title=${SCAN_TIP}>Scan…<//>
       <${Button} size="sm" disabled=${busy || !name.trim()} onClick=${save}>Save<//>
       <${Button} size="sm" disabled=${busy || !n.wifi_name} onClick=${forget}>Forget<//>
     </div>
     <span class=${cx("small", why ? "bad" : "muted")}>${why || (!n.ssh ? "Tick Remote access first."
       : n.wifi_name ? "Joins \u201c" + n.wifi_name + "\u201d" + (s.wifi_open ? " (an open network)" : "") + " while the test card shows, and the wired port."
       : "No Wi-Fi given: the test card starts its wired port only.")}</span>
+    ${!busy ? html`<${ScanList} scan=${scan} onPick=${(v) => { setName(v); setScan(null); }} />` : null}
   </div>`;
 }
 

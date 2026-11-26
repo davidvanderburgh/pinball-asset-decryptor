@@ -335,15 +335,31 @@ SOUND_SITES = ("sound_lookup",)
 NO_TITLE = "The app cannot tell which game this project is for."
 NO_LAMPS = "The app does not know where %s keeps its insert lights yet, so it cannot recolor them."
 NO_SOUND = "The app cannot add sounds of its own to %s yet, so it cannot say the scores."
-NO_SPIKE3 = "Spike 3 cards cannot take this yet."
+#: PAD-1607: a title whose inserts each have one fixed color (its port names no RGB insert: Star Wars ELG, James Bond
+#: 60th LE, Jurassic Park): the runtime leaves those alone, so the colors would change nothing
+NO_RGB = "%s's inserts each have one color of their own, so there is nothing for the color-blind colors to change."
+#: PAD-1607: a Spike 3 card's words ride a carrier, a request of the game's it never plays, measured per build
+#: (:data:`.mode_sounds.TITLES_A64`)
+NO_CARRIER_A64 = ("The app does not know a sound of %s's that the game never plays yet, which the spoken numbers need "
+                  "on a Spike 3 card, so it cannot say the scores.")
+
+
+def is_spike3(prof):
+    return prof is not None and getattr(prof, "arch", "arm") == "a64"
+
+
+def carrier_calls(prof):
+    """PAD-1607: the requests a Spike 3 build's spoken words may ride (its measured carriers' calls), or ``()``."""
+    from . import mode_sounds as MSo
+    c = MSo.profile_carriers(prof.key) if is_spike3(prof) else None
+    return tuple(int(r) for r in (c.calls if c is not None else ()))
 
 
 def title_refusal(prof, what):
-    """Why ``prof``'s title cannot take *what* (``"cvd"``, ``"spoken"``), or ``""``."""
+    """Why ``prof``'s title cannot take *what* (``"cvd"``, ``"spoken"``), or ``""``. PAD-1607: a Spike 3 title by its
+    64-bit port as a Spike 2 one by its own, and its spoken words need a carrier (:func:`carrier_calls`)."""
     if prof is None:
         return NO_TITLE
-    if getattr(prof, "arch", "arm") == "a64":
-        return NO_SPIKE3
     from . import mode_project as MP
     try:
         port = MP.read_port(MP.port_path(prof))
@@ -352,10 +368,14 @@ def title_refusal(prof, what):
     if what == "cvd":
         if not all(d in port.get("data", {}) for d in LAMP_DATA) or not port.get("lamp"):
             return NO_LAMPS % prof.label
+        if not any(len(ids) == 3 and all(ids) for _n, ids, _m in port["lamp"]):
+            return NO_RGB % prof.label              # PAD-1607: nothing the colors could change
         return ""
     if not all(s in port.get("site", {}) for s in SOUND_SITES) or "scores" not in port.get("data", {}) \
             and "scores32" not in port.get("data", {}):
         return NO_SOUND % prof.label
+    if is_spike3(prof) and not carrier_calls(prof):
+        return NO_CARRIER_A64 % prof.label
     return ""
 
 

@@ -222,6 +222,189 @@ text example_start_shot     Junk target
 
 # not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 17 text, 20 value
 
+# ---- lamps (PAD-1607): read off the 64-bit light table (40-byte records, a light's device at +26), the lamp records and the device table ----
+# 180 inserts drawn on no picture (the device table names none for them); shot ties not read (shot mask 0)
+lamp 1            0              BACKBOX GI  # lamp 1, I/O group 5 index 0, at 0,0
+lamp 2            0              QR SCANNER BACKLIGHT  # lamp 2, I/O group 2 index 0, at 0,0
+lamp 834          0              COIN ENABLE  # lamp 280, I/O group 6 index 0, at 0,0
+lamp 841          0              STIMPAK LEFT  # lamp 285, I/O group 7 index 16, at 0,0
+lamp 842          0              LEFT ROLLOVER BUTTON  # lamp 286, I/O group 7 index 7, at 0,0
+lamp 843          0              LEFT INLANE 3  # lamp 287, I/O group 7 index 22, at 0,0
+lamp 844          0              LEFT INLANE 2  # lamp 288, I/O group 7 index 21, at 0,0
+lamp 845          0              LEFT INLANE 1  # lamp 289, I/O group 7 index 20, at 0,0
+lamp 846          0              RIGHT INLANE 1  # lamp 290, I/O group 7 index 27, at 0,0
+lamp 847          0              RIGHT INLANE 2  # lamp 291, I/O group 7 index 28, at 0,0
+lamp 848          0              RIGHT INLANE 3  # lamp 292, I/O group 7 index 29, at 0,0
+lamp 849          0              NUKA CAP RIGHT  # lamp 293, I/O group 7 index 35, at 0,0
+lamp 850          0              STIMPAK RIGHT  # lamp 294, I/O group 7 index 3, at 0,0
+lamp 851          0              SHOOT AGAIN  # lamp 295, I/O group 7 index 30, at 0,0
+lamp 852          0              VICTOR  # lamp 296, I/O group 7 index 15, at 0,0
+lamp 853          0              MR HANDY  # lamp 297, I/O group 7 index 12, at 0,0
+lamp 854          0              PROTECTRON  # lamp 298, I/O group 7 index 14, at 0,0
+lamp 855          0              DOGMEAT  # lamp 299, I/O group 7 index 13, at 0,0
+lamp 856          0              JUNK  # lamp 300, I/O group 7 index 11, at 0,0
+lamp 857,858,859  0              FALLOUT RADIO JUNK TARGET  # lamp 301, I/O group 7 index 8, at 0,0
+lamp 860          0              NUKA CAP LEFT  # lamp 302, I/O group 7 index 52, at 0,0
+lamp 861          0              POP TARGET LEFT  # lamp 303, I/O group 7 index 17, at 0,0
+lamp 862          0              POP TARGET CENTER  # lamp 304, I/O group 7 index 18, at 0,0
+lamp 863          0              POP TARGET RIGHT  # lamp 305, I/O group 7 index 19, at 0,0
+lamp 864,865,866  0              FALLOUT RADIO POP  # lamp 306, I/O group 7 index 46, at 0,0
+lamp 867          0              FUSION CORE POWER 1  # lamp 307, I/O group 7 index 38, at 0,0
+lamp 868          0              FUSION CORE POWER 2  # lamp 308, I/O group 7 index 39, at 0,0
+lamp 869          0              FUSION CORE POWER 3  # lamp 309, I/O group 7 index 40, at 0,0
+lamp 870          0              FUSION CORE POWER 4  # lamp 310, I/O group 7 index 41, at 0,0
+lamp 871          0              FUSION CORE POWER 5  # lamp 311, I/O group 7 index 42, at 0,0
+lamp 872          0              FUSION CORE POWER 6  # lamp 312, I/O group 7 index 43, at 0,0
+lamp 873          0              FILLY  # lamp 313, I/O group 7 index 53, at 0,0
+lamp 874          0              GULPER  # lamp 314, I/O group 7 index 54, at 0,0
+lamp 875          0              SUPER DUPER MART  # lamp 315, I/O group 7 index 55, at 0,0
+lamp 876          0              RADROACH TARGET 4  # lamp 316, I/O group 7 index 31, at 0,0
+lamp 877,878,879  0              FALLOUT RADIO RADROACH 4  # lamp 317, I/O group 7 index 32, at 0,0
+lamp 880          0              MINI NUKE TOP  # lamp 318, I/O group 8 index 51, at 0,0
+lamp 881          0              MINI NUKE MIDDLE  # lamp 319, I/O group 8 index 52, at 0,0
+lamp 882          0              MINI NUKE BOTTOM  # lamp 320, I/O group 8 index 53, at 0,0
+lamp 883          0              MAIN QUEST-MIND CONTROL  # lamp 321, I/O group 8 index 48, at 0,0
+lamp 884          0              MAIN QUEST-NOVAC  # lamp 322, I/O group 8 index 49, at 0,0
+lamp 885          0              MAIN QUEST-FIND THE TARGET  # lamp 323, I/O group 8 index 50, at 0,0
+lamp 886          0              WHAT MAKES YOU SPECIAL  # lamp 324, I/O group 8 index 94, at 0,0
+lamp 887          0              COLD FUSION  # lamp 325, I/O group 8 index 95, at 0,0
+lamp 888          0              OBSERVATORY  # lamp 326, I/O group 8 index 80, at 0,0
+lamp 889          0              MAIN QUEST-WEDDING DAY  # lamp 327, I/O group 8 index 32, at 0,0
+lamp 890          0              MAIN QUEST-RADSCORPION ATTACK  # lamp 328, I/O group 8 index 33, at 0,0
+lamp 891          0              MAIN QUEST-THE KINGS  # lamp 329, I/O group 8 index 34, at 0,0
+lamp 892          0              RADROACH TARGET 1  # lamp 330, I/O group 8 index 35, at 0,0
+lamp 893          0              EXTRA BALL  # lamp 331, I/O group 8 index 36, at 0,0
+lamp 894          0              TERMINAL  # lamp 332, I/O group 8 index 37, at 0,0
+lamp 895,896,897  0              PIP-BOY LEFT RAMP  # lamp 333, I/O group 7 index 24, at 0,0
+lamp 898          0              VAULT-1  # lamp 334, I/O group 7 index 44, at 0,0
+lamp 899          0              PIP-BOY LIT LEFT  # lamp 335, I/O group 7 index 45, at 0,0
+lamp 900,901,902  0              FALLOUT RADIO LEFT RAMP  # lamp 336, I/O group 7 index 49, at 0,0
+lamp 903          0              VAULT PLAYFIELD 1  # lamp 337, I/O group 7 index 88, at 0,0
+lamp 904          0              VAULT PLAYFIELD 2  # lamp 338, I/O group 7 index 89, at 0,0
+lamp 905          0              VAULT PLAYFIELD 3  # lamp 339, I/O group 7 index 90, at 0,0
+lamp 906          0              VAULT PLAYFIELD 4  # lamp 340, I/O group 7 index 91, at 0,0
+lamp 907          0              VAULT PLAYFIELD 5  # lamp 341, I/O group 7 index 92, at 0,0
+lamp 908,909,910  0              VAULT ARROW LEFT  # lamp 342, I/O group 7 index 84, at 0,0
+lamp 911,912,913  0              VAULT ARROW RIGHT  # lamp 343, I/O group 7 index 72, at 0,0
+lamp 914          0              VAULT RIGHT TARGET 1  # lamp 344, I/O group 7 index 77, at 0,0
+lamp 915          0              VAULT RIGHT TARGET 2  # lamp 345, I/O group 7 index 76, at 0,0
+lamp 916          0              VAULT RIGHT TARGET 3  # lamp 346, I/O group 7 index 75, at 0,0
+lamp 917          0              VAULT CENTER TARGET 1  # lamp 347, I/O group 7 index 78, at 0,0
+lamp 918          0              VAULT CENTER TARGET 2  # lamp 348, I/O group 7 index 79, at 0,0
+lamp 919          0              VAULT CENTER TARGET 3  # lamp 349, I/O group 7 index 83, at 0,0
+lamp 920          0              VAULT LEFT TARGET 1  # lamp 350, I/O group 7 index 80, at 0,0
+lamp 921          0              VAULT LEFT TARGET 2  # lamp 351, I/O group 7 index 81, at 0,0
+lamp 922          0              VAULT LEFT TARGET 3  # lamp 352, I/O group 7 index 82, at 0,0
+lamp 923,924,925  0              PIP-BOY RIGHT RAMP  # lamp 353, I/O group 7 index 65, at 0,0
+lamp 926          0              VAULT-2  # lamp 354, I/O group 7 index 70, at 0,0
+lamp 927          0              PIP-BOY LIT RIGHT  # lamp 355, I/O group 7 index 71, at 0,0
+lamp 928,929,930  0              CENTER RAMP  # lamp 356, I/O group 7 index 62, at 0,0
+lamp 931,932,933  0              FALLOUT RADIO CENTER RAMP  # lamp 357, I/O group 7 index 59, at 0,0
+lamp 934          0              SIDE QUEST CENTER RAMP  # lamp 358, I/O group 7 index 58, at 0,0
+lamp 935          0              COMPANION CENTER RAMP  # lamp 359, I/O group 7 index 57, at 0,0
+lamp 936          0              STIMPAK CENTER RAMP  # lamp 360, I/O group 7 index 56, at 0,0
+lamp 937,938,939  0              MINI LOOP  # lamp 361, I/O group 8 index 8, at 0,0
+lamp 940          0              VAULT-3  # lamp 362, I/O group 8 index 11, at 0,0
+lamp 941,942,943  0              FALLOUT RADIO MINI LOOP  # lamp 363, I/O group 8 index 12, at 0,0
+lamp 944          0              SIDE QUEST MINI LOOP  # lamp 364, I/O group 8 index 15, at 0,0
+lamp 945          0              COMPANION MINI LOOP  # lamp 365, I/O group 8 index 16, at 0,0
+lamp 946          0              STIMPAK MINI LOOP  # lamp 366, I/O group 8 index 17, at 0,0
+lamp 947          0              JUMP RAMP TOP-ENTER VAULT  # lamp 367, I/O group 8 index 45, at 0,0
+lamp 948          0              JUMP RAMP MID-OPEN VAULT  # lamp 368, I/O group 8 index 44, at 0,0
+lamp 949          0              JUMP RAMP BOT-VAULT LETTER  # lamp 369, I/O group 8 index 43, at 0,0
+lamp 950,951,952  0              JUMP RAMP  # lamp 370, I/O group 8 index 29, at 0,0
+lamp 953,954,955  0              FALLOUT RADIO JUMP RAMP  # lamp 371, I/O group 8 index 21, at 0,0
+lamp 956          0              RADROACH TARGET 2  # lamp 372, I/O group 8 index 28, at 0,0
+lamp 957,958,959  0              FALLOUT RADIO TARGET 3  # lamp 373, I/O group 8 index 25, at 0,0
+lamp 960          0              RADROACH TARGET 3  # lamp 374, I/O group 8 index 24, at 0,0
+lamp 961,962,963  0              FALLOUT RADIO OUTER LOOP  # lamp 375, I/O group 8 index 56, at 0,0
+lamp 964          0              RADAWAY JACKPOT  # lamp 376, I/O group 8 index 59, at 0,0
+lamp 965,966,967  0              OUTER LOOP BOLT  # lamp 377, I/O group 8 index 18, at 0,0
+lamp 968          0              SPINNER ARROW  # lamp 378, I/O group 8 index 92, at 0,0
+lamp 969          0              CAP STASH  # lamp 379, I/O group 8 index 93, at 0,0
+lamp 970,971,972  0              RADIO TOWER TARGET 5  # lamp 380, I/O group 8 index 88, at 0,0
+lamp 973          0              BEGIN QUEST  # lamp 381, I/O group 8 index 85, at 0,0
+lamp 974          0              SUNDRIES  # lamp 382, I/O group 8 index 86, at 0,0
+lamp 975          0              LOOT  # lamp 383, I/O group 8 index 87, at 0,0
+lamp 976          0              DEATHCLAW FIRE  # lamp 384, I/O group 8 index 82, at 0,0
+lamp 977          0              DEATHCLAW 1  # lamp 385, I/O group 8 index 84, at 0,0
+lamp 978          0              DEATHCLAW 2  # lamp 386, I/O group 8 index 83, at 0,0
+lamp 979          0              DEATHCLAW 3  # lamp 387, I/O group 8 index 81, at 0,0
+lamp 980          0              DEATHCLAW 4  # lamp 388, I/O group 8 index 72, at 0,0
+lamp 981,982,983  0              RIGHT RAMP  # lamp 389, I/O group 8 index 77, at 0,0
+lamp 984          0              VAULT-4  # lamp 390, I/O group 8 index 76, at 0,0
+lamp 985,986,987  0              FALLOUT RADIO RIGHT RAMP  # lamp 391, I/O group 8 index 73, at 0,0
+lamp 988          0              SIDE QUEST RIGHT RAMP  # lamp 392, I/O group 8 index 71, at 0,0
+lamp 989          0              COMPANION RIGHT RAMP  # lamp 393, I/O group 8 index 70, at 0,0
+lamp 990          0              STIMPAK RIGHT RAMP  # lamp 394, I/O group 8 index 69, at 0,0
+lamp 991,992,0    0              PIP-BOY RAD-METER  # lamp 395+396, I/O group 8 index 40, at 0,0
+lamp 993          0              PIP-BOY RADIO W  # lamp 397, I/O group 8 index 42, at 0,0
+lamp 994,995,996  0              RAIDER 1  # lamp 398, I/O group 8 index 60, at 0,0
+lamp 997,998,999  0              RAIDER 2  # lamp 399, I/O group 8 index 63, at 0,0
+lamp 1000,1001,1002 0              RAIDER 3  # lamp 400, I/O group 8 index 66, at 0,0
+lamp 1004         0              BOTTOM GI-WHT  # lamp 402, I/O group 7 index 0, at 0,0
+lamp 1005,0,0     0              BOTTOM GI  # lamp 403, I/O group 7 index 1, at 0,0
+lamp 1006         0              BOTTOM ARCH GI  # lamp 404, I/O group 7 index 2, at 0,0
+lamp 1007         0              TOP GI-WHT  # lamp 405, I/O group 8 index 0, at 0,0
+lamp 1008,0,0     0              TOP GI  # lamp 406, I/O group 8 index 1, at 0,0
+lamp 1009         0              RAIDER GI  # lamp 407, I/O group 8 index 2, at 0,0
+lamp 1010         0              POP FLASH  # lamp 408, I/O group 7 index 23, at 0,0
+lamp 1011         0              DEATHCLAW SPOT  # lamp 409, I/O group 7 index 36, at 0,0
+lamp 1012         0              VAULT PLAYFIELD FLASH  # lamp 410, I/O group 7 index 87, at 0,0
+lamp 1013         0              BOTTLE CAP FLASH  # lamp 411, I/O group 8 index 91, at 0,0
+lamp 1014         0              PIP BOY FLASH  # lamp 412, I/O group 8 index 38, at 0,0
+lamp 1015         0              VAULT SPOT  # lamp 413, I/O group 8 index 39, at 0,0
+lamp 1016         0              SUNDRIES FLASH  # lamp 414, I/O group 7 index 37, at 0,0
+lamp 1017         0              VAULT BACKPANEL FLASH  # lamp 415, I/O group 8 index 3, at 0,0
+lamp 1018         0              NUKA COLA QUANTUM FLASH  # lamp 416, I/O group 7 index 68, at 0,0
+lamp 1019         0              RAIDER FLASH-1  # lamp 417, I/O group 8 index 46, at 0,0
+lamp 1020         0              RAIDER FLASH-2  # lamp 418, I/O group 8 index 47, at 0,0
+lamp 1021         0              RAIDER FLASH-3  # lamp 419, I/O group 8 index 54, at 0,0
+lamp 1022         0              RAIDER FLASH-4  # lamp 420, I/O group 8 index 55, at 0,0
+lamp 1023         0              FRONT LEFT-FRONT FLASH LEFT  # lamp 421, I/O group 10 index 63, at 0,0
+lamp 1024,1025,1026 0              FRONT LEFT-FRONT LEFT  # lamp 422, I/O group 10 index 60, at 0,0
+lamp 1027         0              FRONT LEFT-FRONT FLASH CENTER  # lamp 423, I/O group 10 index 56, at 0,0
+lamp 1028,1029,1030 0              FRONT LEFT-FRONT RIGHT  # lamp 424, I/O group 10 index 53, at 0,0
+lamp 1031         0              FRONT LEFT-FRONT FLASH RIGHT  # lamp 425, I/O group 10 index 52, at 0,0
+lamp 1032,1033,1034 0              FRONT LEFT-MID  # lamp 426, I/O group 10 index 49, at 0,0
+lamp 1035         0              FRONT LEFT-BACK FLASH  # lamp 427, I/O group 10 index 48, at 0,0
+lamp 1036         0              FORWARD FLASH LEFT  # lamp 428, I/O group 10 index 57, at 0,0
+lamp 1037         0              FORWARD FLASH LEFT CENTER  # lamp 429, I/O group 10 index 58, at 0,0
+lamp 1038         0              BUILDING LEFT-FRONT FLASH LEFT  # lamp 430, I/O group 10 index 78, at 0,0
+lamp 1039         0              BUILDING LEFT-FRONT FLASH RIGHT  # lamp 431, I/O group 10 index 79, at 0,0
+lamp 1040,1041,1042 0              BUILDING LEFT-MID LEFT  # lamp 432, I/O group 10 index 69, at 0,0
+lamp 1043         0              BUILDING LEFT-MID FLASH  # lamp 433, I/O group 10 index 68, at 0,0
+lamp 1044,1045,1046 0              BUILDING LEFT-MID RIGHT  # lamp 434, I/O group 10 index 64, at 0,0
+lamp 1047         0              BUILDING LEFT-BACK FLASH LEFT  # lamp 435, I/O group 10 index 77, at 0,0
+lamp 1048         0              BUILDING LEFT-BACK FLASH RIGHT  # lamp 436, I/O group 10 index 67, at 0,0
+lamp 1049         0              EXTERNAL FLASH LEFT  # lamp 437, I/O group 10 index 72, at 0,0
+lamp 1050         0              EXTERNAL FLASH LEFT TOP  # lamp 438, I/O group 10 index 73, at 0,0
+lamp 1051         0              EXTERNAL FLASH LEFT BACK  # lamp 439, I/O group 10 index 74, at 0,0
+lamp 1052         0              FRONT RIGHT-FRONT FLASH LEFT  # lamp 440, I/O group 10 index 36, at 0,0
+lamp 1053,1054,1055 0              FRONT RIGHT-FRONT LEFT  # lamp 441, I/O group 10 index 37, at 0,0
+lamp 1056         0              FRONT RIGHT-FRONT FLASH CENTER  # lamp 442, I/O group 10 index 40, at 0,0
+lamp 1057,1058,1059 0              FRONT RIGHT-FRONT RIGHT  # lamp 443, I/O group 10 index 44, at 0,0
+lamp 1060         0              FRONT RIGHT-FRONT FLASH RIGHT  # lamp 444, I/O group 10 index 47, at 0,0
+lamp 1061,1062,1063 0              FRONT RIGHT-MID  # lamp 445, I/O group 10 index 33, at 0,0
+lamp 1064         0              FRONT RIGHT-BACK FLASH  # lamp 446, I/O group 10 index 32, at 0,0
+lamp 1065         0              FORWARD FLASH RIGHT  # lamp 447, I/O group 10 index 41, at 0,0
+lamp 1066         0              FORWARD FLASH RIGHT CENTER  # lamp 448, I/O group 10 index 42, at 0,0
+lamp 1067         0              BUILDING RIGHT-FRONT FLASH LEFT  # lamp 449, I/O group 10 index 30, at 0,0
+lamp 1068         0              BUILDING RIGHT-FRONT FLASH RIGHT  # lamp 450, I/O group 10 index 31, at 0,0
+lamp 1069,1070,1071 0              BUILDING RIGHT-MID LEFT  # lamp 451, I/O group 10 index 27, at 0,0
+lamp 1072         0              BUILDING RIGHT-MID FLASH  # lamp 452, I/O group 10 index 25, at 0,0
+lamp 1073,1074,1075 0              BUILDING RIGHT-MID RIGHT  # lamp 453, I/O group 10 index 22, at 0,0
+lamp 1076         0              BUILDING RIGHT-BACK FLASH LEFT  # lamp 454, I/O group 10 index 26, at 0,0
+lamp 1077         0              BUILDING RIGHT-BACK FLASH RIGHT  # lamp 455, I/O group 10 index 21, at 0,0
+lamp 1078         0              EXTERNAL FLASH RIGHT  # lamp 456, I/O group 10 index 16, at 0,0
+lamp 1079         0              EXTERNAL FLASH RIGHT TOP  # lamp 457, I/O group 10 index 17, at 0,0
+lamp 1080         0              EXTERNAL FLASH RIGHT BACK  # lamp 458, I/O group 10 index 18, at 0,0
+lamp 1081,1082,1083 0              CLOUD LEFT  # lamp 459, I/O group 10 index 80, at 0,0
+lamp 1084,1085,1086 0              CLOUD LEFT CENTER  # lamp 460, I/O group 10 index 83, at 0,0
+lamp 1087,1088,1089 0              CLOUD CENTER  # lamp 461, I/O group 10 index 86, at 0,0
+lamp 1090,1091,1092 0              CLOUD RIGHT CENTER  # lamp 462, I/O group 10 index 89, at 0,0
+lamp 1093,1094,1095 0              CLOUD RIGHT  # lamp 463, I/O group 10 index 92, at 0,0
+
 # ---- checks ----
 # value sound_channel_voice_ptrs: 1 of the 5 lined-up instructions holding 144 on the reference hold 112 here
 # value lamp_slot_level: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here

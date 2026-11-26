@@ -215,6 +215,99 @@ text example_start_shot     Berry target left
 
 # not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 17 text, 20 value
 
+# ---- lamps (PAD-1607): read off the 64-bit light table (40-byte records, a light's device at +26), the lamp records and the device table ----
+# 90 inserts on the playfield picture; shot ties not read (shot mask 0)
+lamp 837          0              LEFT BALL SAVE  # lamp 283, I/O group 7 index 84, at 53,683
+lamp 838          0              RIGHT BALL SAVE  # lamp 284, I/O group 7 index 31, at 375,683
+lamp 839          0              (T)EAM  # lamp 285, I/O group 7 index 83, at 53,664
+lamp 840          0              T(E)AM  # lamp 286, I/O group 7 index 85, at 88,648
+lamp 841          0              TE(A)M  # lamp 287, I/O group 7 index 11, at 340,648
+lamp 842          0              TEA(M)  # lamp 288, I/O group 7 index 32, at 375,664
+lamp 843          0              ELECTRIC HURRY UP  # lamp 289, I/O group 7 index 30, at 139,775
+lamp 844          0              CATCH AGAIN  # lamp 290, I/O group 7 index 29, at 214,836
+lamp 845          0              PIKACHU CHEEK L  # lamp 291, I/O group 7 index 40, at 203,750
+lamp 846,0,0      0              PIKACHU CHEEK  # lamp 292, I/O group 7 index 41, at 225,750
+lamp 847          0              FOREST RIVAL  # lamp 293, I/O group 7 index 16, at 175,616
+lamp 848          0              FOREST  # lamp 294, I/O group 7 index 26, at 167,634
+lamp 849          0              LAKE RIVAL  # lamp 295, I/O group 7 index 27, at 191,657
+lamp 850          0              LAKE  # lamp 296, I/O group 7 index 28, at 182,675
+lamp 851          0              MOUNTAIN RIVAL  # lamp 297, I/O group 7 index 8, at 236,605
+lamp 852          0              MOUNTAIN  # lamp 298, I/O group 7 index 9, at 227,623
+lamp 853          0              DESERT RIVAL  # lamp 299, I/O group 7 index 45, at 252,644
+lamp 854          0              DESERT  # lamp 300, I/O group 7 index 43, at 243,663
+lamp 855          0              DISCOVER  # lamp 301, I/O group 7 index 47, at 282,632
+lamp 856          0              CATCH  # lamp 302, I/O group 7 index 46, at 273,652
+lamp 857          0              TRAIN  # lamp 303, I/O group 7 index 44, at 265,672
+lamp 858          0              BATTLE  # lamp 304, I/O group 7 index 42, at 255,692
+lamp 859          0              PIKACHU VS CHARIZARD  # lamp 305, I/O group 7 index 13, at 230,542
+lamp 860          0              PIKACHU VS LUCARIO  # lamp 306, I/O group 7 index 14, at 205,542
+lamp 861          0              POKÉMON ARENA  # lamp 307, I/O group 7 index 12, at 217,564
+lamp 862          0              POKÉMON MASTER  # lamp 308, I/O group 7 index 15, at 217,520
+lamp 863,864,865  0              TRAINING 1  # lamp 309, I/O group 7 index 48, at 112,609
+lamp 866,867,868  0              TRAINING 2  # lamp 310, I/O group 7 index 51, at 112,585
+lamp 869,870,871  0              TRAINING 3  # lamp 311, I/O group 7 index 54, at 112,561
+lamp 872          0              TOWN TARGET TOP  # lamp 312, I/O group 8 index 63, at 357,566
+lamp 873          0              TOWN TARGET BOTTOM  # lamp 313, I/O group 8 index 64, at 357,588
+lamp 874,875,876  0              TOWN  # lamp 314, I/O group 7 index 36, at 324,580
+lamp 877          0              TOWN BILLBOARD - EXTRA BALL  # lamp 315, I/O group 8 index 59, at 369,503
+lamp 878          0              TOWN BILLBOARD - MYSTERY  # lamp 316, I/O group 8 index 60, at 369,499
+lamp 879          0              TOWN BILLBOARD - TRAVEL  # lamp 317, I/O group 8 index 61, at 369,495
+lamp 880          0              TOWN BILLBOARD - BATTLE  # lamp 318, I/O group 8 index 62, at 369,491
+lamp 881,882,883  0              LEFT ORBIT  # lamp 319, I/O group 7 index 62, at 74,422
+lamp 884          0              BULBASAUR  # lamp 320, I/O group 7 index 61, at 89,467
+lamp 885,886,887  0              LEFT ORBIT COMBO  # lamp 321, I/O group 7 index 58, at 102,502
+lamp 888          0              LEFT ORBIT SHOT X  # lamp 322, I/O group 7 index 57, at 110,525
+lamp 889,890,891  0              BERRY TARGET LEFT  # lamp 323, I/O group 7 index 65, at 104,443
+lamp 892,893,894  0              LEFT RAMP  # lamp 324, I/O group 7 index 68, at 139,464
+lamp 895          0              SQUIRTLE  # lamp 325, I/O group 7 index 78, at 150,508
+lamp 896,897,898  0              LEFT RAMP COMBO  # lamp 326, I/O group 7 index 79, at 162,543
+lamp 899          0              LEFT RAMP SHOT X  # lamp 327, I/O group 7 index 82, at 168,566
+lamp 900,901,902  0              POKÉ BALL  # lamp 328, I/O group 8 index 20, at 125,422
+lamp 903,904,905  0              BERRY TARGET CENTER  # lamp 329, I/O group 7 index 75, at 172,417
+lamp 906          0              TEAM ROCKET 1  # lamp 330, I/O group 7 index 71, at 220,419
+lamp 907          0              TEAM ROCKET 2  # lamp 331, I/O group 7 index 72, at 206,434
+lamp 908          0              TEAM ROCKET 3  # lamp 332, I/O group 7 index 73, at 220,449
+lamp 909          0              TEAM ROCKET 4  # lamp 333, I/O group 7 index 74, at 234,434
+lamp 910,911,912  0              BERRY TARGET RIGHT  # lamp 334, I/O group 8 index 17, at 255,394
+lamp 913,914,915  0              CAPTIVE BALL 1  # lamp 335, I/O group 8 index 71, at 275,414
+lamp 916,917,918  0              CAPTIVE BALL 2  # lamp 336, I/O group 8 index 77, at 269,435
+lamp 919,920,921  0              RIGHT RAMP  # lamp 337, I/O group 8 index 74, at 305,442
+lamp 922          0              PIKACHU  # lamp 338, I/O group 8 index 46, at 290,484
+lamp 923,924,925  0              RIGHT RAMP COMBO  # lamp 339, I/O group 8 index 33, at 278,520
+lamp 926          0              RIGHT RAMP SHOT X  # lamp 340, I/O group 8 index 32, at 270,543
+lamp 927,928,929  0              RIGHT ORBIT  # lamp 341, I/O group 8 index 68, at 360,404
+lamp 930          0              CHARMANDER  # lamp 342, I/O group 8 index 67, at 346,448
+lamp 931,932,933  0              RIGHT ORBIT COMBO  # lamp 343, I/O group 8 index 56, at 332,483
+lamp 934          0              RIGHT ORBIT SHOT X  # lamp 344, I/O group 8 index 45, at 326,506
+lamp 935,936,937  0              ARENA POP  # lamp 345, I/O group 8 index 8, at 165,303
+lamp 938,939,940  0              ARENA LEFT 10 POINT  # lamp 346, I/O group 8 index 11, at 173,347
+lamp 941,942,943  0              TEAM ROCKET  # lamp 347, I/O group 8 index 14, at 220,357
+lamp 944,945,946  0              ARENA RIGHT 10 POINT  # lamp 348, I/O group 8 index 29, at 264,321
+lamp 947,948,949  0              (B)ATTLE  # lamp 349, I/O group 8 index 36, at 162,275
+lamp 950,951,952  0              B(A)TTLE  # lamp 350, I/O group 8 index 39, at 176,254
+lamp 953,954,955  0              BA(T)TLE  # lamp 351, I/O group 8 index 42, at 190,234
+lamp 956,957,958  0              BAT(T)LE  # lamp 352, I/O group 8 index 47, at 250,234
+lamp 959,960,961  0              BATT(L)E  # lamp 353, I/O group 8 index 50, at 264,254
+lamp 962,963,964  0              BATTL(E)  # lamp 354, I/O group 8 index 53, at 278,275
+lamp 965,966,967  0              TEAM ROCKET JACKPOT  # lamp 355, I/O group 8 index 26, at 220,223
+lamp 968,969,970  0              POP  # lamp 356, I/O group 8 index 23, at 108,256
+lamp 971          0              TOP LANE LEFT  # lamp 357, I/O group 8 index 65, at 118,124
+lamp 972          0              TOP LANE RIGHT  # lamp 358, I/O group 8 index 66, at 156,124
+lamp 974          0              BOTTOM GI  # lamp 360, I/O group 7 index 0, at 0,0
+lamp 975          0              BOTTOM ARCH GI  # lamp 361, I/O group 7 index 1, at 0,0
+lamp 976          0              TOP LEFT GI  # lamp 362, I/O group 8 index 0, at 0,0
+lamp 977          0              TOP RIGHT GI  # lamp 363, I/O group 8 index 1, at 0,0
+lamp 979          0              LEFT EJECT FLASH  # lamp 365, I/O group 7 index 86, at 73,506
+lamp 980          0              LOWER LEFT SPOT  # lamp 366, I/O group 7 index 87, at 119,676
+lamp 981          0              LOWER RIGHT SPOT  # lamp 367, I/O group 7 index 10, at 295,707
+lamp 982          0              POKÉ BALL SPOT  # lamp 368, I/O group 8 index 80, at 72,534
+lamp 983          0              SPINNER FLASH  # lamp 369, I/O group 8 index 81, at 366,455
+lamp 984          0              RIGHT EJECT FLASH  # lamp 370, I/O group 7 index 39, at 355,529
+lamp 985          0              MEOWTH BALLOON SPOT  # lamp 371, I/O group 8 index 82, at 139,338
+lamp 986          0              TOP POP FLASH  # lamp 372, I/O group 8 index 86, at 91,205
+lamp 987          0              BOTTOM POP FLASH  # lamp 373, I/O group 8 index 85, at 125,297
+lamp 988          0              PIKACHU SPOT  # lamp 374, I/O group 8 index 84, at 366,210
+
 # ---- checks ----
 # value sound_channel_voice_ptrs: 1 of the 5 lined-up instructions holding 144 on the reference hold 112 here
 # value lamp_slot_level: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here

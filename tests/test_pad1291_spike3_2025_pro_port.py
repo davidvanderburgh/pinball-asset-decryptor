@@ -111,7 +111,10 @@ def test_the_pro_port_carries_the_core_and_its_measured_switches():
     assert re.search(r"^text example_start_shot\s+Right target$", text, re.M)
     body = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
     # PAD-1380: the title's own video bank, named and proven on the rig, is its own scene
-    assert not [l for l in body if l.split()[0] in ("lamp", "callout") or l.split()[:2] == ["scene", "hud"]]
+    assert not [l for l in body if l.split()[0] == "callout" or l.split()[:2] == ["scene", "hud"]]
+    # PAD-1607: its lamp lines are its own, read off its program (none before that block)
+    assert not [x for x in text.split("# ---- lamps (PAD-1607): read off the 64-bit light")[0].splitlines()
+                if x.startswith("lamp ")]
     assert not [l for l in body if re.match(r"(site|value|text)\s+(show_(\d|name|kind|secs|proc)|block_|right_gate|"
                                             r"mode_flag|held_coils|place_flag|done_flag|coil_take|coil_give)", l)]
     assert "NOT RUN" not in text and "Emulator-proven 2026-11-15 (PAD-1291)" in text

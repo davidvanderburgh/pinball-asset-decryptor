@@ -102,7 +102,10 @@ def test_the_walking_dead_port_carries_the_core_and_none_of_star_wars_content():
     assert re.search(r"^text example_start_shot\s+Tower target$", text, re.M)
     body = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
     # PAD-1380: its own video bank (71e39c43, its play clips), never Star Wars ELG's scenes
-    assert not [l for l in body if l.split()[0] in ("lamp", "callout")]
+    assert not [l for l in body if l.split()[0] == "callout"]
+    # PAD-1607: its lamp lines are its own, read off its program (none before that block)
+    assert not [x for x in text.split("# ---- lamps (PAD-1607): read off the 64-bit light")[0].splitlines()
+                if x.startswith("lamp ")]
     assert [l for l in body if l.split()[0] == "scene"] == ["scene video_bank           71e39c438cff72938ff0dd6dddecd582fb133415",
                                                            # PAD-1415: its attract items' own bank
                                                            "scene attract_bank         60ed7e5036b8ce09d35a3e101ea6fc1380b37d97"]

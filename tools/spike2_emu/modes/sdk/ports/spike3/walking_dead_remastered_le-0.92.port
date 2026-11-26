@@ -217,6 +217,105 @@ text example_start_shot     Tower target
 
 # not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 17 text, 20 value
 
+# ---- lamps (PAD-1607): read off the 64-bit light table (40-byte records, a light's device at +26), the lamp records and the device table ----
+# 96 inserts on the TestMenu/picnic_pf picture; shot ties not read (shot mask 0)
+lamp 565          0              LEFT OUTLANE  # lamp 193, I/O group 7 index 64, at 48,696
+lamp 566          0              LEFT RETURN LANE  # lamp 194, I/O group 7 index 65, at 83,673
+lamp 567          0              SHOOT AGAIN  # lamp 195, I/O group 7 index 66, at 208,860
+lamp 568          0              RIGHT RETURN LANE  # lamp 196, I/O group 7 index 67, at 332,673
+lamp 569          0              RIGHT OUTLANE  # lamp 197, I/O group 7 index 68, at 361,696
+lamp 570          0              1 WALKER KILLED  # lamp 198, I/O group 7 index 86, at 236,791
+lamp 571          0              2 WALKERS KILLED  # lamp 199, I/O group 7 index 84, at 218,800
+lamp 572          0              3 WALKERS KILLED  # lamp 200, I/O group 7 index 81, at 198,800
+lamp 573          0              4 WALKERS KILLED  # lamp 201, I/O group 7 index 79, at 180,791
+lamp 574          0              5 WALKERS KILLED  # lamp 202, I/O group 7 index 78, at 171,765
+lamp 575          0              10 WALKERS KILLED  # lamp 203, I/O group 7 index 80, at 189,758
+lamp 576          0              20 WALKERS KILLED  # lamp 204, I/O group 7 index 83, at 208,750
+lamp 577          0              30 WALKERS KILLED  # lamp 205, I/O group 7 index 85, at 226,758
+lamp 578          0              40 WALKERS KILLED  # lamp 206, I/O group 7 index 87, at 245,765
+lamp 579          0              LAST MAN STANDING  # lamp 207, I/O group 7 index 82, at 208,777
+lamp 580          0              HAMMER MULTIKILL  # lamp 208, I/O group 7 index 72, at 154,721
+lamp 581          0              SWORD MULTIKILL  # lamp 209, I/O group 7 index 73, at 176,721
+lamp 582          0              CROSSBOW MULTIKILL  # lamp 210, I/O group 7 index 74, at 197,721
+lamp 583          0              GUN MULTIKILL  # lamp 211, I/O group 7 index 75, at 219,721
+lamp 584          0              KNIFE MULTIKILL  # lamp 212, I/O group 7 index 76, at 240,721
+lamp 585          0              AXE MULTIKILL  # lamp 213, I/O group 7 index 77, at 262,721
+lamp 586          0              FIRST AID  # lamp 214, I/O group 7 index 32, at 95,600
+lamp 587          0              WEAPONS  # lamp 215, I/O group 7 index 33, at 123,583
+lamp 588          0              FOOD  # lamp 216, I/O group 7 index 34, at 123,544
+lamp 589,590,591  0              BLOOD BATH  # lamp 217, I/O group 7 index 35, at 142,614
+lamp 592          0              WELL WALKER KILL  # lamp 218, I/O group 7 index 16, at 201,621
+lamp 593,594,595  0              (W)ELL  # lamp 219, I/O group 7 index 26, at 190,581
+lamp 596,597,598  0              W(E)LL  # lamp 220, I/O group 7 index 23, at 202,591
+lamp 599,600,601  0              WE(L)L  # lamp 221, I/O group 7 index 20, at 218,597
+lamp 602,603,604  0              WEL(L)  # lamp 222, I/O group 7 index 17, at 234,596
+lamp 605,606,607  0              WELL WALKER  # lamp 223, I/O group 7 index 29, at 220,562
+lamp 608          0              RIGHT RAMP WALKER KILL  # lamp 224, I/O group 7 index 40, at 247,667
+lamp 609          0              RIGHT RAMP MULTIKILL  # lamp 225, I/O group 7 index 41, at 257,647
+lamp 610,611,612  0              ARENA  # lamp 226, I/O group 7 index 42, at 276,615
+lamp 613,614,615  0              RIGHT RAMP ARROW  # lamp 227, I/O group 7 index 45, at 298,575
+lamp 616          0              EXTRA BALL  # lamp 228, I/O group 7 index 69, at 289,664
+lamp 617          0              WELCOME TO WOODBURY  # lamp 229, I/O group 7 index 70, at 302,642
+lamp 618          0              LEFT LOOP WALKER KILL  # lamp 230, I/O group 8 index 16, at 98,492
+lamp 619          0              LEFT LOOP MULTIKILL  # lamp 231, I/O group 8 index 17, at 92,470
+lamp 620,621,622  0              BARN  # lamp 232, I/O group 8 index 18, at 82,434
+lamp 623,624,625  0              LEFT LOOP ARROW  # lamp 233, I/O group 8 index 21, at 69,390
+lamp 626          0              LEFT RAMP WALKER KILL  # lamp 234, I/O group 8 index 24, at 156,552
+lamp 627          0              LEFT RAMP MULTIKILL  # lamp 235, I/O group 8 index 25, at 151,530
+lamp 628,629,630  0              CDC  # lamp 236, I/O group 8 index 26, at 142,493
+lamp 631,632,633  0              LEFT RAMP ARROW  # lamp 237, I/O group 8 index 29, at 131,449
+lamp 634          0              CENTER LANE WALKER KILL  # lamp 238, I/O group 8 index 8, at 154,337
+lamp 635          0              CENTER LANE MULTIKILL  # lamp 239, I/O group 8 index 9, at 150,314
+lamp 636,637,638  0              RIOT  # lamp 240, I/O group 8 index 10, at 144,277
+lamp 639,640,641  0              CENTER LANE ARROW  # lamp 241, I/O group 8 index 13, at 136,226
+lamp 642          0              LEFT PRISON TARGET  # lamp 242, I/O group 8 index 70, at 170,320
+lamp 643          0              RIGHT PRISON TARGET  # lamp 243, I/O group 8 index 71, at 237,320
+lamp 644,645,646  0              (P)RISON  # lamp 244, I/O group 8 index 32, at 168,369
+lamp 647,648,649  0              P(R)ISON  # lamp 245, I/O group 8 index 35, at 180,381
+lamp 650,651,652  0              PR(I)SON  # lamp 246, I/O group 8 index 38, at 195,387
+lamp 653,654,655  0              PRI(S)ON  # lamp 247, I/O group 8 index 41, at 212,387
+lamp 656,657,658  0              PRIS(O)N  # lamp 248, I/O group 8 index 44, at 227,381
+lamp 659,660,661  0              PRISO(N)  # lamp 249, I/O group 8 index 47, at 238,370
+lamp 662          0              RIGHT LOOP WALKER KILL  # lamp 250, I/O group 7 index 8, at 275,540
+lamp 663          0              RIGHT LOOP MULTIKILL  # lamp 251, I/O group 7 index 9, at 283,519
+lamp 664,665,666  0              TUNNEL  # lamp 252, I/O group 7 index 10, at 295,484
+lamp 667,668,669  0              RIGHT LOOP ARROW  # lamp 253, I/O group 7 index 13, at 313,443
+lamp 670,671,672  0              LEFT POP BUMPER  # lamp 254, I/O group 8 index 52, at 281,381
+lamp 673,674,675  0              RIGHT POP BUMPER  # lamp 255, I/O group 8 index 56, at 378,354
+lamp 676,677,678  0              TOP POP BUMPER  # lamp 256, I/O group 8 index 59, at 318,295
+lamp 679,680,681  0              BUTTON ROLLOVER TOP  # lamp 257, I/O group 8 index 79, at 259,200
+lamp 682,683,684  0              BUTTON ROLLOVER MIDDLE  # lamp 258, I/O group 8 index 82, at 259,246
+lamp 685,686,687  0              BUTTON ROLLOVER BOTTOM  # lamp 259, I/O group 8 index 85, at 337,379
+lamp 688          0              TOWER  # lamp 260, I/O group 8 index 72, at 293,148
+lamp 689          0              LEFT TOP LANE  # lamp 261, I/O group 8 index 73, at 298,172
+lamp 690          0              RIGHT TOP LANE  # lamp 262, I/O group 8 index 74, at 331,177
+lamp 691          0              BILLBOARD BICYCLE GIRL  # lamp 263, I/O group 8 index 78, at 123,287
+lamp 692          0              BILLBOARD CROSSBOW  # lamp 264, I/O group 7 index 48, at 355,484
+lamp 693          0              BILLBOARD FISH TANK  # lamp 265, I/O group 7 index 49, at 374,489
+lamp 697          0              DEMUX LAMP A  # lamp 269, I/O group 8 index 3, at 0,0
+lamp 0,0,698      0              DEMUX LAMP  # lamp 270, I/O group 8 index 4, at 0,0
+lamp 700          0              BOTTOM GI-WHT  # lamp 272, I/O group 7 index 0, at 0,0
+lamp 701,0,0      0              BOTTOM GI  # lamp 273, I/O group 7 index 1, at 0,0
+lamp 702          0              BOTTOM ARCH  # lamp 274, I/O group 7 index 2, at 0,0
+lamp 703          0              TOP GI-WHT  # lamp 275, I/O group 8 index 0, at 0,0
+lamp 704,0,0      0              TOP GI  # lamp 276, I/O group 8 index 1, at 0,0
+lamp 706          0              HORDE FLASH  # lamp 278, I/O group 7 index 71, at 208,682
+lamp 707          0              2X PLAYFIELD FLASH  # lamp 279, I/O group 8 index 51, at 171,455
+lamp 708          0              SIEGE FLASH  # lamp 280, I/O group 8 index 50, at 203,417
+lamp 709          0              WELL WALKER FLASH  # lamp 281, I/O group 7 index 52, at 257,451
+lamp 710          0              POP FLASH  # lamp 282, I/O group 8 index 55, at 357,320
+lamp 711          0              LEFT DOME FLASH  # lamp 283, I/O group 7 index 38, at 49,555
+lamp 712          0              RIGHT DOME FLASH  # lamp 284, I/O group 7 index 51, at 364,521
+lamp 713          0              RIGHT SPINNER FLASH  # lamp 285, I/O group 7 index 50, at 345,583
+lamp 714          0              LEFT LOOP FLASH  # lamp 286, I/O group 8 index 64, at 58,344
+lamp 715          0              BICYCLE GIRL FLASH-WHT  # lamp 287, I/O group 8 index 65, at 99,321
+lamp 716,0,0      0              BICYCLE GIRL FLASH  # lamp 288, I/O group 8 index 66, at 99,321
+lamp 717          0              CENTER LANE FLASH  # lamp 289, I/O group 8 index 67, at 136,224
+lamp 718          0              PRISON BOTTOM FLASH-X2  # lamp 290, I/O group 8 index 68, at 179,212
+lamp 719          0              PRISON TOP FLASH  # lamp 291, I/O group 8 index 69, at 203,219
+lamp 720          0              LEFT SLING HEAD FLASH  # lamp 292, I/O group 7 index 56, at 111,724
+lamp 721          0              RIGHT SLING HEAD FLASH  # lamp 293, I/O group 7 index 57, at 304,724
+
 # ---- checks ----
 # value sound_channel_voice_ptrs: 1 of the 5 lined-up instructions holding 144 on the reference hold 112 here
 # value lamp_slot_level: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here

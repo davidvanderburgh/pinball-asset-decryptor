@@ -41,6 +41,7 @@ import struct
 from . import mode_project as MP
 from . import mode_write as MW
 from . import saved_progress as SP
+from . import sound_modes as SMo
 
 #: on the games partition (relative to /games)
 MODE_DIR = "pad/padmode"
@@ -205,6 +206,34 @@ def _wav_ms(path, channels):
     return int(math.ceil(n * 1000.0 / 44100)) if n else 0
 
 
+def carrier_view(reader, game_raw):
+    """``(container card path, its ImageSound view, stock_record)`` of the game's sound container: *stock_record*
+    (request) is the record a carrier request's first sound id names, or None. Raises ValueError saying why not."""
+    from . import spike3_requests as Q
+    from . import spike3_write as W
+    from .info import container_counts
+    conts = W.project_sound_dirs(reader)
+    if not conts:
+        raise ValueError("it has no sound container")
+    card_path, node = conts[0][0], conts[0][1]
+    _hdr, img = W.read_container(reader, node)
+    f = _NodeFile(reader, node)
+    fragments, _count = container_counts(f.read(0x100))
+    try:
+        lists = Q.request_table(Q.Program(bytes(game_raw)), fragments)
+    except ValueError:
+        lists = []
+    parts = Q.sound_parts(f) if lists else {}
+    if not lists or not parts:
+        raise ValueError("its sound requests could not be read off the game program and %s" % card_path)
+
+    def stock_record(request):
+        sids = lists[request] if 0 < request < len(lists) else []
+        idx = (parts.get(sids[0]) or [None])[0] if sids else None
+        return img.records[idx] if idx is not None and idx < img.count else None
+    return card_path, img, stock_record
+
+
 def own_sounds(project, modes, reader, game_raw, prof, log=None, code=()):
     """PAD-1296: a Spike 3 card's own sounds for *modes*: ``(used, adds)``.
 
@@ -223,10 +252,7 @@ def own_sounds(project, modes, reader, game_raw, prof, log=None, code=()):
     (:func:`.mode_write.choose_code_sounds`, ``call:<cue>`` / ``music:<bed>`` keys), each a
     record of its own on a carrier the same way."""
     log = log or (lambda *a, **k: None)
-    from . import mode_sounds as MS
-    from . import spike3_requests as Q
     from . import spike3_write as W
-    from .info import container_counts
     wanted = MW.choose_own_sounds(project, modes, (True, ""), end_sound=None, log=log)
     if code:
         req, beds = MW.own_sounds_taken(wanted)
@@ -234,29 +260,11 @@ def own_sounds(project, modes, reader, game_raw, prof, log=None, code=()):
                                                       taken_beds=beds, log=log)
     if not wanted:
         return [], {}
-    conts = W.project_sound_dirs(reader)
-    if not conts:
-        log("Modes: the modes' own sounds are not put on this card: it has no sound container.",
-            "warning")
-        return [], {}
-    card_path, node = conts[0][0], conts[0][1]
-    _hdr, img = W.read_container(reader, node)
-    f = _NodeFile(reader, node)
-    fragments, _count = container_counts(f.read(0x100))
     try:
-        lists = Q.request_table(Q.Program(bytes(game_raw)), fragments)
-    except ValueError:
-        lists = []
-    parts = Q.sound_parts(f) if lists else {}
-    if not lists or not parts:
-        log("Modes: the modes' own sounds are not put on this card: its sound requests could not "
-            "be read off the game program and %s." % card_path, "warning")
+        card_path, img, stock_record = carrier_view(reader, game_raw)
+    except ValueError as e:
+        log("Modes: the modes' own sounds are not put on this card: %s." % e, "warning")
         return [], {}
-
-    def stock_record(request):
-        sids = lists[request] if 0 < request < len(lists) else []
-        idx = (parts.get(sids[0]) or [None])[0] if sids else None
-        return img.records[idx] if idx is not None and idx < img.count else None
 
     used, adds, taken, p2s = [], [], [], []
     mine = {}                           # slug -> carriers this mode already took (distinct within one)
@@ -525,6 +533,84 @@ def attract_wanted(project, real_card=True):
     return prof
 
 
+def access_wanted(project, real_card=True):
+    """PAD-1607: ``({"cvd": preset or "", "spoken": bool}, profile)`` of the accessibility options
+    (:mod:`.accessibility`) this Spike 3 build carries, else None. The 64-bit runtime recolors the game's RGB inserts
+    (the port's ``lamp`` lines) and says the scores on a carrier (:func:`spoken_words`). Quiet: the engine's Write
+    (``_access_for_build``) has already said why not."""
+    from . import accessibility as AC
+    from . import handicap as HC
+    preset, spoken = AC.load_cvd(project), AC.load_spoken(project)
+    if (not preset and not spoken) or MW.host_refusal():
+        return None
+    if real_card:
+        from ...core import ext4_grow
+        if not ext4_grow.available()[0]:
+            return None
+    prof = HC.project_title(project, probe=True)
+    if prof is None:
+        return None
+    if preset and AC.title_refusal(prof, "cvd"):
+        preset = ""
+    if spoken and AC.title_refusal(prof, "spoken"):
+        spoken = False
+    if not preset and not spoken:
+        return None
+    return {"cvd": preset, "spoken": spoken}, prof
+
+
+def spoken_words(project, reader, game_raw, prof, log=None, taken_requests=(), adds=None):
+    """PAD-1607: the spoken scores' words on a Spike 3 card: ``(speak, adds)``, *speak* the ``sword`` lines' entries
+    (:func:`.sound_modes.cfg_text` *speak*: ``{"request", "key", "words": [(word, its record's key, ms)]}``) and
+    *adds* ``{container card path: [NewRecord]}`` (after the build's other new records, *adds*), or ``(None, {})``
+    with the reason in the log (the card then says no scores). Each word (made in this computer's voice, as on
+    Spike 2) is a record of its own appended to the game's ``image.bin``, keyed beside the carrier's record: a
+    request of the game's it never plays (:func:`.accessibility.carrier_calls`), not one the modes' own sounds
+    took (*taken_requests*). The runtime plays the carrier once per word and its lookup takes the word's record."""
+    from . import accessibility as AC
+    from . import engine
+    from . import spike3_write as W
+    log = log or (lambda *a, **k: None)
+    wavs = engine._spoken_wavs(project, log)
+    if not wavs:
+        return None, {}
+    try:
+        card_path, img, stock_record = carrier_view(reader, game_raw)
+    except ValueError as e:
+        log("Spoken scores: left out of this build: %s." % e, "warning")
+        return None, {}
+    taken_r = {int(r) for r in taken_requests}
+    req, rec = 0, None
+    for r in AC.carrier_calls(prof):
+        if r in taken_r:
+            continue
+        rec = stock_record(r)
+        if rec is not None:
+            req = r
+            break
+    if rec is None:
+        log("Spoken scores: left out of this build: every sound of %s's the game never plays is taken by a mode's "
+            "own sound, or names no recording of %s." % (prof.label, card_path), "warning")
+        return None, {}
+    before = list((adds or {}).get(card_path) or ())
+    taken = [(r.flags_lo, r.param) for r in before]
+    p2s = [r.param2 for r in before]
+    news, words = [], []
+    for k, wav in wavs:
+        flags, param = W.free_key(img.records, rec.flags_lo, rec.param, taken)
+        taken.append((flags, param))
+        p2 = W.free_param2(img.records, ("speak|%d|%s" % (k, AC.WORDS[k])).encode(), p2s)
+        p2s.append(p2)
+        nr = W.NewRecord(wav, rec.channels, flags, param, p2)
+        news.append(nr)
+        words.append((int(k), nr.key, int(_wav_ms(wav, rec.channels))))
+    first = img.count + len(before)
+    log("Spoken scores: %d spoken numbers ride request %d (a sound the game never plays), records %d-%d appended "
+        "to %s." % (len(words), req, first, first + len(news) - 1, card_path), "info")
+    return ({"request": req, "key": struct.pack("<II", rec.flags_lo, rec.param), "words": words},
+            {card_path: news})
+
+
 def variants_wanted(project, real_card=True):
     """PAD-1323: ``(slots, profile)`` of the random clips (:mod:`.clip_variants`) this Spike 3 build carries,
     else ``({}, None)``. The 64-bit runtime hooks the game's ask on the video bank's surface (clip v2: a port
@@ -567,7 +653,7 @@ def screen_times_wanted(project, game_raw, log, real_card=True):
 
 
 def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, ""), coop_setting=0, coop_ok=True,
-         hand_setting=0, saved_setting=0):
+         hand_setting=0, saved_setting=0, cvd_setting=0, spk_setting=0):
     """The project's modes for the Spike 3 games volume *reader*, built into *scratch*, or
     None when it has none this card can carry (each reason said in the log, as a Spike 2
     Write leaves modes out: the rest of the project is still written). Raises
@@ -587,7 +673,10 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     handicaps (:func:`hand_wanted`: ``handicap.cfg``), *hand_setting* the HANDICAP row's live value (0: always on).
     With the music modes the machine runs their program, so both values are read off it.
     PAD-1327: and Prolonged Competition (:func:`comp_wanted`: ``comp.cfg``, its flag
-    and captions read off the card's own program)."""
+    and captions read off the card's own program).
+    PAD-1607: and the accessibility options (:func:`access_wanted`: ``access.cfg``; the spoken scores' words appended
+    to image.bin, their ``sword`` lines in ``sounds.cfg``: :func:`spoken_words`), *cvd_setting* / *spk_setting* the
+    COLOR BLIND and SPOKEN SCORES rows' live values (spike3_menu placed them; 0: no row)."""
     log = log or (lambda *a, **k: None)
     from . import spike3_music as S3MU
     music, music_prof = S3MU.wanted(project, real_card=real_card)
@@ -605,6 +694,10 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     recs, recs_prof = records_wanted(project, real_card=real_card)       # PAD-1327
     att_prof = attract_wanted(project, real_card=real_card)              # PAD-1328
     cabs, cabs_prof = cabs_wanted(project, real_card=real_card)          # PAD-1379
+    acc_opts, acc_prof = access_wanted(project, real_card=real_card) or (None, None)   # PAD-1607
+    if acc_opts is not None and acc_opts["spoken"] and real_card and not spk_setting:
+        # never on without the operator's say, as on Spike 2: no SPOKEN SCORES row (spike3_menu said why), no scores
+        acc_opts = dict(acc_opts, spoken=False) if acc_opts["cvd"] else None
     from . import screen_time as ST
     stime_maybe = ST.enabled() and bool(_changed_videos(project))
     modes, code = [], []
@@ -617,7 +710,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         code = MW.code_mode_list(project)        # PAD-1295: compiled for the card's 64-bit ARM
     if (not modes and not code and not feed and not slots and not stime_maybe and music is None and coop_prof is None
             and hand_prof is None and comp_prof is None and not recs and att_prof is None
-            and not cabs):
+            and not cabs and acc_opts is None):
         return None
 
     def left(why):
@@ -634,7 +727,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
             modes, code = left(why)
     if (not modes and not code and not feed and not slots and not stime_maybe and music is None and coop_prof is None
             and hand_prof is None and comp_prof is None and not recs and att_prof is None
-            and not cabs):
+            and not cabs and acc_opts is None):
         return None
     state, target = card_state(reader)
     if state == "multiboot":
@@ -667,6 +760,9 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         if cabs:                                    # PAD-1379
             log("Expression lights: left out of this build: %s." % MULTIBOOT_WORDS.replace(
                 "modes go on", "the light shows go on"), "warning")
+        if acc_opts is not None:                    # PAD-1607
+            log("Accessibility: left out of this build: %s." % MULTIBOOT_WORDS.replace(
+                "modes go on", "the accessibility options go on"), "warning")
         return None
     fw = game_program(reader, target) if target else None
     if fw is None:
@@ -677,7 +773,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                          else ([], None))
     if (not modes and not code and not feed and not slots and not stime and music is None and coop_prof is None
             and hand_prof is None and comp_prof is None and not recs and att_prof is None
-            and not cabs):
+            and not cabs and acc_opts is None):
         return None
     used, adds = [], {}
     hud, bank = b"", b""
@@ -707,6 +803,19 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         node = MW.lookup(reader, _vbank) if _vbank else None
         bank = bytes(reader.read_file_bytes(node)) if node is not None else b""
 
+    speak = None                                    # PAD-1607: the spoken scores' words, after the modes' own sounds
+    if acc_opts is not None and acc_opts["spoken"]:
+        speak, w_adds = spoken_words(project, reader, game_raw, acc_prof, log,
+                                     taken_requests=[u["request"] for u in used], adds=adds)
+        if speak is None:
+            acc_opts = dict(acc_opts, spoken=False)
+            if not acc_opts["cvd"]:
+                acc_opts = None
+        else:
+            adds = dict(adds)
+            for cp, news in w_adds.items():
+                adds[cp] = list(adds.get(cp) or ()) + list(news)
+
     mus, mus_cfg, mus_prog = None, "", ""
     if music is not None:
         try:
@@ -723,9 +832,11 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
             mus_prog = os.path.join(mdir, S3MU.PROGRAM_NAME)
             with open(mus_prog, "wb") as f:
                 f.write(mus.program)
-            if coop_prof is not None or hand_prof is not None:
+            if (coop_prof is not None or hand_prof is not None or saved_setting or cvd_setting
+                    or spk_setting):
                 # PAD-1326: the machine runs the music modes' program, MUSIC MODE grown first and then the rows
                 # of spike3_menu.rows_wanted: CO-OP PLAY's and HANDICAP's live values are read off that same grow
+                # (PAD-1607: and COLOR BLIND's and SPOKEN SCORES')
                 from . import menu_settings as MS, spike3_menu
                 _g, _placed, _r = spike3_menu.grow(game_raw, [(MS.MUSIC_MODE, music.count, music.menu_names())]
                                                    + list(spike3_menu.rows_wanted(project)))
@@ -740,13 +851,37 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                     hand_setting = live.get(MS.HANDICAP, 0)    # none: the handicaps always on, as on Spike 2
                 if saved_setting:
                     saved_setting = live.get(MS.SAVED_PROGRESS, 0)   # PAD-1402: the same grow's row
+                if cvd_setting:
+                    cvd_setting = live.get(MS.COLOUR_BLIND, 0)       # none: the preset always on, as on Spike 2
+                if spk_setting:
+                    spk_setting = live.get(MS.SPOKEN_SCORES, 0)
+                    if not spk_setting and speak is not None:
+                        log("Spoken scores: left out of this build: the game's operator menu has no room for SPOKEN "
+                            "SCORES beside MUSIC MODE.", "warning")
+                        speak = None
+                        acc_opts = dict(acc_opts, spoken=False) if acc_opts["cvd"] else None
             adds = dict(adds)
             for cp, news in mus.news.items():
                 adds[cp] = list(adds.get(cp) or ()) + list(news)
     if (not modes and not code and not feed and not slots and not stime and mus is None and coop_prof is None
             and hand_prof is None and comp_prof is None and not recs and att_prof is None
-            and not cabs):   # PAD-1326: co-op or handicaps alone; PAD-1327: or Competition
+            and not cabs and acc_opts is None):   # PAD-1326: co-op or handicaps alone; PAD-1327: or Competition
         return None
+
+    words_cfg = ""
+    if speak is not None:                           # PAD-1607: the words' sword lines, in the music modes' file or own
+        if mus is not None:
+            with open(mus_cfg, "a", encoding="utf-8", newline="\n") as f:
+                f.write(SMo.cfg_text(0, 0, [], False, speak=speak).split("\n", 1)[1])
+        else:
+            adir = os.path.join(scratch, "access")
+            os.makedirs(adir, exist_ok=True)
+            words_cfg = os.path.join(adir, SMo.CFG_NAME)
+            with open(words_cfg, "w", encoding="utf-8", newline="\n") as f:
+                f.write(SMo.cfg_text(0, 0, [], not (modes or code), speak=speak))
+    access = ({"cvd": acc_opts["cvd"], "cvd_setting": cvd_setting if acc_opts["cvd"] else 0,
+               "spoken": bool(acc_opts["spoken"]), "spoken_setting": spk_setting if acc_opts["spoken"] else 0}
+              if acc_opts is not None else None)
 
     def read_card(rel):
         node = MW.lookup(reader, rel)
@@ -769,9 +904,12 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                      attract=att_prof is not None, attract_prof=att_prof,             # PAD-1328
                      cabs=cabs or None, cabs_prof=cabs_prof,                          # PAD-1379
                      cabs_sids=cab_sids(reader, os.path.dirname(target), game_raw, cabs, log) if cabs else None,
+                     access=access, access_prof=acc_prof,                            # PAD-1607
                      read_card=read_card, scan_card=scan_card)
     if result is None:
         return None
+    if words_cfg:                                   # PAD-1607: the words alone (no music modes): their sounds.cfg
+        result.sounds_file = words_cfg
     payload = MW.p2_payload(result, os.path.join(scratch, "modes", "padmode"), project=project,
                             arch="a64")
     names = (list(getattr(result, "mode_names", None) or [s.name for _g, s in modes])
@@ -786,7 +924,9 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                      ("prolonged competition: ", "Prolonged Competition: "),   # PAD-1327
                      ("records: ", "Records on the high scores: "),
                      ("attract items: ", "Attract items: "),                            # PAD-1328
-                     ("expression lights: ", "Expression lights: ")):                   # PAD-1379
+                     ("expression lights: ", "Expression lights: "),                    # PAD-1379
+                     ("color-blind inserts: ", "Color-blind inserts: "),                # PAD-1607
+                     ("spoken scores: ", "Spoken scores: ")):
         lines = [(cap + l[len(low):]) if l.startswith(low) else l for l in lines]
     if mus is not None:                      # PAD-1324
         lines.append("Music modes: MUSIC MODE (%d modes: %s) goes on the operator menu's %s; %d file(s) "

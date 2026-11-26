@@ -552,7 +552,8 @@ def _sidx_new_files(reader, jobs, work, log):
     return [r for r, _s in new], (sidx_path.lstrip("/"), staged)
 
 
-def _plan_modes(assets_dir, reader, work, log, coop_setting=0, coop_ok=True, hand_setting=0, saved_setting=0):
+def _plan_modes(assets_dir, reader, work, log, coop_setting=0, coop_ok=True, hand_setting=0, saved_setting=0,
+                cvd_setting=0, spk_setting=0):
     """PAD-1272: ``(plan, remove)`` - the project's modes for this card, and its score
     feed (:func:`.spike3_modes.plan`, or None), and whether the card carries an
     earlier build's modes that this build, with none, takes off.  A mode that
@@ -561,7 +562,8 @@ def _plan_modes(assets_dir, reader, work, log, coop_setting=0, coop_ok=True, han
     try:
         mplan = spike3_modes.plan(assets_dir, reader, os.path.join(work, "modes"),
                                   log, coop_setting=coop_setting, coop_ok=coop_ok,
-                                  hand_setting=hand_setting, saved_setting=saved_setting)
+                                  hand_setting=hand_setting, saved_setting=saved_setting,
+                                  cvd_setting=cvd_setting, spk_setting=spk_setting)    # PAD-1607
     except MW.ModeWriteError as e:
         raise PipelineError("Encode", "Modes: %s. Nothing was written." % e) from None
     if mplan is not None:
@@ -572,7 +574,8 @@ def _plan_modes(assets_dir, reader, work, log, coop_setting=0, coop_ok=True, han
             elif line.startswith(("handicaps: ", "handicap ")):   # and the handicaps'
                 line = "Handicaps: " + line[len("handicaps: "):] if line.startswith("handicaps: ") else "H" + line[1:]
             log(line if line.startswith(("Score feed:", "Random clips:", "Screen times:", "Co-op play:", "Handicap",
-                                        "Prolonged Competition:", "Records on the high scores:"))   # PAD-1327
+                                        "Prolonged Competition:", "Records on the high scores:",   # PAD-1327
+                                        "Color-blind inserts:", "Spoken scores:"))                 # PAD-1607
                 else "Modes: %s" % line,
                 "info")
         return mplan, False
@@ -635,8 +638,11 @@ def write_card(original_path, assets_dir, output_path, log=None,
         coop_ok = bool(coop_setting) or not spike3_menu.coop_row_asked(assets_dir)
         hand_setting = menu.live(MS.HANDICAP) if menu is not None else 0
         saved_setting = menu.live(MS.SAVED_PROGRESS) if menu is not None else 0     # PAD-1402
+        cvd_setting = menu.live(MS.COLOUR_BLIND) if menu is not None else 0        # PAD-1607
+        spk_setting = menu.live(MS.SPOKEN_SCORES) if menu is not None else 0
         mplan, mremove = _plan_modes(assets_dir, reader, work, log, coop_setting=coop_setting,
-                                     coop_ok=coop_ok, hand_setting=hand_setting, saved_setting=saved_setting)
+                                     coop_ok=coop_ok, hand_setting=hand_setting, saved_setting=saved_setting,
+                                     cvd_setting=cvd_setting, spk_setting=spk_setting)
         sounds = plan_sounds(reader, assets_dir, baseline, work, log, check,
                              adds=mplan.sound_adds if mplan is not None else None)
         n_audio = sum(p.n_fit + p.n_grown for p in sounds)

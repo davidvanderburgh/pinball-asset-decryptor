@@ -8926,7 +8926,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         scenes_prof, scenes_sets = None, None
         attract_prof = coop_prof = idle_prof = hand_prof = comp_prof = None
         _attract_on = _coop_on = _idle_on = _hand_on = _comp_on = False
-        acc_prof, acc_preset, _acc_spoken, _acc_on = None, "", False, False   # PAD-1589: Spike 2 only for now
+        # PAD-1607: the accessibility options are spike3_modes.access_wanted's (_access_for_build above has said
+        # whether they go on)
+        acc_prof, acc_preset, _acc_spoken, _acc_on = None, "", False, False
         cabs_prof, cabs_shows, _cabs_on = None, [], False
         feed_prof, feed_url, _feed_on = None, "", False
         stime_lines, stime_prof, _stime_on = [], None, False

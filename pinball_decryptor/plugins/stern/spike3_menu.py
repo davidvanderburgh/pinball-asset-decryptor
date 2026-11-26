@@ -58,6 +58,23 @@ def _hand_row():
     return (MS.HANDICAP, HC.MENU_VALUES, (), {"default": 1, "help_text": HC.MENU_HELP, "onoff": True})
 
 
+def access_rows(project):
+    """PAD-1607: the COLOR BLIND and SPOKEN SCORES rows this Spike 3 build's accessibility options ask for
+    (:func:`.spike3_modes.access_wanted`), as Spike 2's (engine ``_ColourBlindMenu`` / ``_SpokenScoresMenu``)."""
+    from . import accessibility as AC
+    from . import spike3_modes
+    acc = spike3_modes.access_wanted(project)
+    if acc is None:
+        return []
+    rows = []
+    if acc[0].get("cvd"):
+        rows.append((MS.COLOUR_BLIND, AC.CVD_MENU_VALUES, (), {"default": AC.preset_value(acc[0]["cvd"]) + 1,
+                                                               "help_text": AC.CVD_MENU_HELP, "from_zero": True}))
+    if acc[0].get("spoken"):
+        rows.append((MS.SPOKEN_SCORES, 2, (), {"default": 1, "help_text": AC.SPOKEN_MENU_HELP, "onoff": True}))
+    return rows
+
+
 def saved_row_asked(project):
     """PAD-1402: whether one of the project's modes keeps saved progress, so SAVED PROGRESS goes in the operator menu."""
     from . import saved_progress as SP
@@ -105,6 +122,7 @@ def rows_wanted(project):
         rows.append(_hand_row())
     if saved_row_asked(project):                        # PAD-1402
         rows.append(_saved_row())
+    rows += access_rows(project)                        # PAD-1607
     return rows
 
 
@@ -142,9 +160,13 @@ _LEFT = {
                    "is left out of this card."),
     MS.HANDICAP: ("Handicaps: HANDICAP could not be added to the operator menu (%s), so the handicaps are "
                   "always on on this card."),
+    MS.COLOUR_BLIND: ("Color-blind inserts: COLOR BLIND could not be added to the operator menu (%s), so the "
+                      "color-blind colors are always on on this card."),             # PAD-1607, as on Spike 2
+    MS.SPOKEN_SCORES: ("Spoken scores: SPOKEN SCORES could not be added to the operator menu (%s), so this card "
+                       "says no scores."),
 }
 #: PAD-1326: a row whose absence is no warning (the part goes on without it)
-_QUIET = (MS.HANDICAP,)
+_QUIET = (MS.HANDICAP, MS.COLOUR_BLIND)
 
 
 def _placed(s, names, log):
@@ -160,6 +182,12 @@ def _placed(s, names, log):
     elif s.key == MS.HANDICAP:
         log("Handicaps: HANDICAP is in the operator menu (%s), Off to start with: set it to On and each "
             "player picks a handicap at their first ball." % s.where, "info")
+    elif s.key == MS.COLOUR_BLIND:                      # PAD-1607
+        log("Color-blind inserts: COLOR BLIND is in the operator menu (%s): 0 Off, 1 red-green, 2 blue-yellow."
+            % s.where, "info")
+    elif s.key == MS.SPOKEN_SCORES:
+        log("Spoken scores: SPOKEN SCORES is in the operator menu (%s), Off to start with: set it to On and the "
+            "machine says each player's score at the end of each ball." % s.where, "info")
 
 
 def plan(project, reader, work, log=None):
@@ -174,7 +202,8 @@ def plan(project, reader, work, log=None):
     coop = coop_row_asked(project)
     hand = hand_row_asked(project)
     wanted = (([(MS.EDITION, len(names), names)] if names else [])
-              + ([_coop_row()] if coop else []) + ([_hand_row()] if hand else []))
+              + ([_coop_row()] if coop else []) + ([_hand_row()] if hand else [])
+              + access_rows(project))                   # PAD-1607: COLOR BLIND, SPOKEN SCORES
     if not wanted:
         return None
 

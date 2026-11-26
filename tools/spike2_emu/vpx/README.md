@@ -19,7 +19,13 @@ it through; the switch lines go down the same pipe, and each one is read back
 off the game's merge and written again until the game has taken it
 (padsw.Confirmer, which swkeys.py uses too). No HELLO, an ERR, or 6 s without a
 ping and the controller falls back to swkeys.py plus re-reading padled over
-\\wsl.localhost, handing over every switch still held. `PAD_VPX_LINK=0` in the
+\\wsl.localhost, handing over every switch still held. The fallback is not
+the rest of the session (PAD-1617): a new link is started beside it 5 s on
+(then 10, 20, 40, every 60 s while it fails), and once that one is up the held
+switches go over to it and the fallback's swkeys.py is retired with a "keep"
+line, so its EOF lets go of nothing the table holds. Live, Walking Dead on
+Spike 3: a sling's switch-to-coil 9 ms on the link, 12 ms (29 ms worst) on the
+fallback, the link back 5 s after it was dropped. `PAD_VPX_LINK=0` in the
 environment VPX starts in skips the link.
 
 A PC whose Windows cannot open the run's files over \\wsl.localhost at all

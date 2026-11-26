@@ -1122,9 +1122,14 @@ class SwitchPipe:
             log("swkeys write failed: %s" % exc)
             return False
 
-    def close(self):
+    def close(self, keep=False):
+        """EOF to the helper, which releases what it held - unless `keep`: a
+        hand-over to a helper holding the same switches (PAD-1617)."""
         try:
             if self._p is not None and self._p.poll() is None:
+                if keep:
+                    self._p.stdin.write(b"keep\n")
+                    self._p.stdin.flush()
                 self._p.stdin.close()          # EOF: the helper releases all
                 self._p.wait(timeout=3)
         except Exception:                                   # noqa: BLE001
@@ -1333,12 +1338,20 @@ class RigLink:
         return {"state": self.state, "why": self.why, "frames": self.frames,
                 "lost": list(self.lost[-8:])}
 
-    def close(self):
+    def close(self, keep=False):
+        """`keep`: handed over to another helper holding the same switches, so
+        neither this link's helper nor its fallback releases them (PAD-1617)."""
         with self._lock:
             self.state = "down"
+        if keep and self._p is not None:
+            try:
+                self._p.stdin.write(b"keep\n")
+                self._p.stdin.flush()
+            except Exception:                               # noqa: BLE001
+                pass
         self._kill()
         if self._fallback is not None:
-            self._fallback.close()
+            self._fallback.close(keep=keep)
         self.held.clear()
 
 
@@ -2867,6 +2880,50 @@ class Bridge:
         link.close()
         log("link started again (the run's files cannot be read over the share)")
 
+    #: PAD-1617: a dropped link on a run the share reaches is started again
+    #: beside the fallback, first after RELINK_S, then doubling to this
+    RELINK_MAX_S = 60.0
+
+    def _relink_beside(self, link):
+        """A link that went down on a run Windows can read (PAD-1617). The
+        fallback - 9p reads every poll, switches through swkeys - keeps the
+        table playing, but slower (a switch round trip 19 ms against the
+        link's 3.4, PAD-1306), and it used to be the rest of the session: a
+        Walking Dead game whose link fell silent once at 85 s, or one whose
+        link came before the run's switch block did, played the whole game
+        on it. A new link is started BESIDE the fallback, which carries on
+        until the new one is up; then the held switches are handed over and
+        the fallback retired with "keep", so the trough switches the table
+        holds closed are never let go in between."""
+        if not LINK_ON:
+            return
+        new = getattr(self, "_standby", None)
+        if new is not None:
+            if new.state == "up":
+                self._standby = None
+                with self.lock:
+                    if self.pipe is not link:
+                        new.close()
+                        return
+                    self.pipe = new
+                for sw, level in sorted(link.held.items()):
+                    new.set(sw, level)
+                link.close(keep=True)
+                self._relink_n, self._beside_t = 0, None
+                log("link back up: lights, coils and switches pushed from WSL again")
+            elif new.state == "down":
+                self._standby = None
+                new.close()
+            return
+        now = time.monotonic()
+        if getattr(self, "_beside_t", None) is None:
+            self._beside_t = now                    # the drop: the first try waits RELINK_S
+        n = getattr(self, "_relink_n", 0)
+        if now - self._beside_t < min(self.RELINK_MAX_S, self.RELINK_S * 2 ** n):
+            return
+        self._beside_t, self._relink_n = now, n + 1
+        self._standby = RigLink(self.rig)
+
     def _poll_starting(self):
         """Once a second until the run this bridge started is up."""
         if self.launch is None:
@@ -2969,6 +3026,9 @@ class Bridge:
             self._grips = None
         if self.pipe:
             self.pipe.close()
+        standby, self._standby = getattr(self, "_standby", None), None
+        if standby is not None:
+            standby.close()
         link, self._unshared = getattr(self, "_unshared", None), None
         if link is not None:
             link.close()
@@ -3565,6 +3625,8 @@ class Bridge:
                 and getattr(link, "state", "up") == "down"):
             self._relink(link)
             return
+        if link is not None and getattr(link, "state", "up") == "down":
+            self._relink_beside(link)
         if link is not None and link.alive():
             # PAD-1306: the link's copy, no 9p read - and when the link sent
             # nothing and the table no switch since the last look, nothing

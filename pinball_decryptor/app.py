@@ -6239,11 +6239,11 @@ class App:
                 elif success:
                     self.window.set_phase(len(testcard_grow.GROW_PHASES), mode="write")
                     self.window.set_status("Grown")
-                    messagebox.showinfo("Test card grown", summary)
+                    messagebox.showinfo("Card grown", summary)
                 else:
                     self.window.set_status("Grow failed")
                     self.window.append_log(summary, "error")
-                    messagebox.showerror("Grow the test card", summary)
+                    messagebox.showerror("Grow the card", summary)
                 return
             if self._cancel_requested:
                 self._cancel_requested = False

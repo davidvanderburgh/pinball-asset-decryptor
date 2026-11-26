@@ -173,7 +173,7 @@ def offered(mfr):
 
 def _read(reader, path, limit=32 << 20):
     """The bytes of the regular file at *path*, None when there is none."""
-    node = ssh_card._node(reader, path)
+    node = ssh_card.resolve(reader, path)[1]                # PAD-1619: Stern's updater links game_monitor
     if node is None:
         return None
     if stat.S_IFMT(node['mode']) != stat.S_IFREG or node['size'] > limit:
@@ -510,8 +510,9 @@ def prepare_rootfs(part, work, on, members=None, tag='', cancel=None, platform=S
                 commands.append('rmdir %s' % DIR)
             if not s3 and plain(r, WRAPPER) is not None:
                 commands.append('rm %s' % WRAPPER)
+        monitor = ssh_card.script_dest(r, MONITOR, 'Bluetooth')
         if want_script != script:
-            put(r, MONITOR, want_script, 0o755)
+            put(r, monitor, want_script, 0o755)
     script_file = work / 'debugfs.commands'
     script_file.write_text('\n'.join(commands) + '\n')
     if commands:
@@ -520,7 +521,7 @@ def prepare_rootfs(part, work, on, members=None, tag='', cancel=None, platform=S
     with part.open('rb') as f:
         r = Ext4Reader(f, 0, size)
         after = inspect_root(r, platform)
-        node = ssh_card._node(r, MONITOR)
+        node = ssh_card.resolve(r, MONITOR)[1]
         ok = after['enabled'] == on and _read(r, MONITOR, 64 << 10) == want_script \
             and stat.S_IMODE(node['mode']) == 0o755
         if on:

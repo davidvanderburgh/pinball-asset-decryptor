@@ -29,6 +29,22 @@
 #       reinstalls the slot's own copies when the sha1s differ.
 #   s1cuse.map - written by the s1criu.so plugin during the dump: one line per
 #       CUSE device fd, reopened by path at restore.
+#
+# PACKED ON DISK (PAD-1601), as the Spike 2 and Spike 3 rigs pack theirs:
+#   - the checkpoint is a tar | zstd -3 slot.tar.zst, made once the game is
+#     thawed (the save feels the same; only the disk waits).  slot.meta and
+#     restore.env stay PLAIN beside it, so s1slots.sh lists the slot and the
+#     restore checks its title without unpacking.
+#   - the two binaries are the same in every slot of a title (26 MB of a
+#     Ghostbusters slot's 43), so they are kept ONCE per title, as
+#     saves/<cache label>/.bin/<sha1>.zst, named by sha1 in restore.env.
+#     s1slots.sh drops a stored binary that no slot names any more.
+#   - dump.log is criu's -v4 diary: deleted once the dump is good, kept on a
+#     failure (as $S1_WORK/s1save.failed.log) because it IS the diagnosis.
+#   - the dump goes to a staging dir and replaces the slot only when it is
+#     good, so a failed save over an existing name keeps the earlier save.
+# No zstd, or S1_SAVE_NOPACK=1, keeps the old raw layout (bin/ in the slot).
+# Slots saved before this are raw and still load (s1restorestate.sh).
 set -u
 SLOT=${1:-quicksave}
 LABEL=${2:-}
@@ -66,10 +82,15 @@ GAMEDIR=$(readlink -f "$S1_WORK/game")
 CLABEL=$(basename "$(dirname "$GAMEDIR")")
 GAME_NAME="$(tr -d '[:space:]' < "$GAMEDIR/.game_name" 2>/dev/null)"; : "${GAME_NAME:=$CLABEL}"
 R=$(readlink -f "$S1_WORK/rootfs")
-DDIR="$S1_WORK/saves/$CLABEL/$SLOT"
-rm -rf "$DDIR"; mkdir -p "$DDIR"
-: > "$DDIR/restore.env"
-echo "game $CLABEL" >> "$DDIR/restore.env"
+GSAVES="$S1_WORK/saves/$CLABEL"
+DDIR="$GSAVES/$SLOT"
+# Dump into a staging dir; it becomes the slot only once the dump is good.
+STAGE="$GSAVES/.new.$SLOT"
+rm -rf "$STAGE"; mkdir -p "$STAGE" || { echo "[s1save] cannot create $STAGE"; exit 1; }
+PACK=0
+[ "${S1_SAVE_NOPACK:-0}" = 0 ] && command -v zstd >/dev/null 2>&1 && PACK=1
+: > "$STAGE/restore.env"
+echo "game $CLABEL" >> "$STAGE/restore.env"
 
 # --- externals: every mount except /, /proc, /sys, source resolved ---------
 DUMP_EXT=()
@@ -85,14 +106,15 @@ while IFS= read -r line; do
     else
         hostmnt=$(awk -v mm="$majmin" '$3==mm {print $5; exit}' /proc/self/mountinfo)
         if [ -z "$hostmnt" ]; then
-            echo "[s1save] cannot resolve the host mount behind $mp ($majmin)"; exit 1
+            echo "[s1save] cannot resolve the host mount behind $mp ($majmin)"
+            rm -rf "$STAGE"; exit 1
         fi
         src=$hostmnt
         [ "$fsroot" != "/" ] && src="$hostmnt$fsroot"
         src=${src//\/\///}
     fi
     DUMP_EXT+=(--external "mnt[$mp]:$key")
-    echo "mnt $key $mp $src" >> "$DDIR/restore.env"
+    echo "mnt $key $mp $src" >> "$STAGE/restore.env"
 done < "/proc/$PID/mountinfo"
 
 # --- the tty fd (node-bus pty slave bound at /dev/ttyS4) -------------------
@@ -103,7 +125,7 @@ for fd in /proc/$PID/fd/*; do
     /dev/pts/*|*ttyS4*)
         key=$(python3 -c 'import os,sys;s=os.stat(sys.argv[1]);print("%x:%x"%(s.st_rdev,s.st_dev))' "$fd" 2>/dev/null) || continue
         TTY_EXT+=(--external "tty[$key]")
-        echo "tty ${fd##*/} $key $tgt" >> "$DDIR/restore.env"
+        echo "tty ${fd##*/} $key $tgt" >> "$STAGE/restore.env"
         ;;
     esac
 done
@@ -113,34 +135,57 @@ done
 # where a restore can honestly compare and reinstall: the guest path
 # /games/<title>/game resolves only inside the namespace, and its host-side
 # mountpoint is an empty dir - comparing there "mismatches" every time.
-mkdir -p "$DDIR/bin"
+# A packed slot keeps each binary ONCE per title, in .bin/<sha1>.zst beside
+# the slots (compressed while the game still plays); a store that cannot be
+# written falls back to the slot's own bin/ copy.
 for spec in "$R/.padqemu/game qemu" "$GAMEDIR/game gamelf"; do
     f=${spec% *}; name=${spec#* }
     [ -f "$f" ] || continue
     sum=$(sha1sum "$f" | cut -d' ' -f1)
-    cp -f "$f" "$DDIR/bin/$name"
-    echo "bin $sum $f $name" >> "$DDIR/restore.env"
+    stored=0
+    if [ "$PACK" = 1 ]; then
+        st="$GSAVES/.bin/$sum.zst"
+        if [ -s "$st" ]; then
+            stored=1
+        elif mkdir -p "$GSAVES/.bin" \
+                && zstd -9 -T0 -q -f "$f" -o "$st.part.$$" && mv -f "$st.part.$$" "$st"; then
+            stored=1
+        else
+            rm -f "$st.part.$$"
+        fi
+    fi
+    if [ "$stored" = 0 ]; then
+        mkdir -p "$STAGE/bin"
+        cp -f "$f" "$STAGE/bin/$name"
+    fi
+    echo "bin $sum $f $name" >> "$STAGE/restore.env"
 done
 
 # --- dump ------------------------------------------------------------------
 echo "[s1save] dumping pid $PID to $DDIR"
-"$CRIU" dump -t "$PID" -D "$DDIR" -v4 -o dump.log --leave-stopped \
+"$CRIU" dump -t "$PID" -D "$STAGE" -v4 -o dump.log --leave-stopped \
     -L "$PLUGDIR" \
     ${DUMP_EXT[@]+"${DUMP_EXT[@]}"} ${TTY_EXT[@]+"${TTY_EXT[@]}"}
 RC=$?
-if [ "$RC" != 0 ] || grep -aq 'Dumping FAILED' "$DDIR/dump.log"; then
+if [ "$RC" != 0 ] || ! [ -f "$STAGE/dump.log" ] || grep -aq 'Dumping FAILED' "$STAGE/dump.log"; then
     echo "[s1save] FAILED (exit $RC):"
-    grep -aE 'Error' "$DDIR/dump.log" | tail -8 | sed 's/^/    /'
+    grep -aE 'Error' "$STAGE/dump.log" 2>/dev/null | tail -8 | sed 's/^/    /'
     kill -CONT "$PID" 2>/dev/null
-    rm -rf "$DDIR"
+    # the verbose log IS the diagnosis: keep it, outside the slot tree
+    cp -f "$STAGE/dump.log" "$S1_WORK/s1save.failed.log" 2>/dev/null \
+        && echo "[s1save] criu's full log: $S1_WORK/s1save.failed.log"
+    rm -rf "$STAGE"
+    [ -d "$DDIR" ] && echo "[s1save] the slot's earlier save is kept"
     echo "[s1save] save failed - the game keeps playing"
     exit 1
 fi
+# a good dump: criu's -v4 diary has nothing more to say
+rm -f "$STAGE/dump.log" "$S1_WORK/s1save.failed.log"
 
 # --- the ball keeper's state rides in the slot -----------------------------
 # (the keeper is not in the checkpoint; a mid-game load must hand the fresh
 # keeper the balls-in-play picture the restored game believes in)
-cp -f "$S1_WORK/s1ball.state" "$DDIR/s1ball.state" 2>/dev/null || true
+cp -f "$S1_WORK/s1ball.state" "$STAGE/s1ball.state" 2>/dev/null || true
 
 # --- meta + thaw -----------------------------------------------------------
 {
@@ -148,7 +193,7 @@ cp -f "$S1_WORK/s1ball.state" "$DDIR/s1ball.state" 2>/dev/null || true
     echo "game=$CLABEL"
     echo "title=$GAME_NAME"
     echo "epoch=$(date +%s)"
-} > "$DDIR/slot.meta"
+} > "$STAGE/slot.meta"
 
 if [ "${S1_SAVE_STOP:-0}" = 1 ]; then
     kill -9 "$PID" 2>/dev/null
@@ -161,4 +206,24 @@ else
         kill -CONT "$PID" 2>/dev/null; sleep 0.2
     done
 fi
-echo "[s1save] ok - $CLABEL/$SLOT, $(du -sh "$DDIR" | cut -f1)"
+
+# --- pack (the game already plays on), then swap the slot in --------------
+RAW=$(du -sh "$STAGE" | cut -f1)
+if [ "$PACK" = 1 ]; then
+    PK="$GSAVES/.pack.$SLOT.$$"
+    if tar -C "$STAGE" -cf - --exclude=./slot.meta --exclude=./restore.env . 2>/dev/null \
+            | zstd -3 -T0 -q -f -o "$PK"; then
+        find "$STAGE" -mindepth 1 ! -name slot.meta ! -name restore.env -delete
+        mv -f "$PK" "$STAGE/slot.tar.zst"
+    else
+        rm -f "$PK"
+        echo "[s1save] NOTE: packing failed - the slot stays raw ($RAW)"
+    fi
+elif [ "${S1_SAVE_NOPACK:-0}" = 0 ]; then
+    echo "[s1save] NOTE: no zstd here - the slot stays raw ($RAW)"
+fi
+rm -rf "$DDIR"
+mv "$STAGE" "$DDIR" || { echo "[s1save] could not move the save into $DDIR"; exit 1; }
+# a stored binary that the replaced save was the last to name goes now
+bash "$HERE/s1slots.sh" prune "$CLABEL" >/dev/null 2>&1 || true
+echo "[s1save] ok - $CLABEL/$SLOT, $(du -sh "$DDIR" | cut -f1) on disk ($RAW unpacked)"

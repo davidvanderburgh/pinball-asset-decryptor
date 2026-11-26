@@ -4,6 +4,7 @@
 #   wsl -u root -e bash s1slots.sh list
 #   wsl -u root -e bash s1slots.sh label <game/slot> <new label...>
 #   wsl -u root -e bash s1slots.sh delete <game/slot>
+#   wsl -u root -e bash s1slots.sh prune <game>     (s1savestate.sh runs it)
 #
 # The one place the app's Spike 1 slot manager learns what exists and what it
 # costs.  Same pipe protocol as the Spike 2 rig's slots.sh so the GUI parsers
@@ -15,6 +16,11 @@
 # Slots are per cache label ($S1_WORK/saves/<label>/<slot>); <game> in the
 # record is the cache label, which carries title AND card version - the honest
 # compatibility key.
+#
+# Packed slots (PAD-1601) share their title's binaries in
+# saves/<game>/.bin/<sha1>.zst: a slot's <bytes> is its own, the shared store
+# counts once in total|, and delete/prune drop a stored binary no slot of the
+# title names any more.
 set -u
 CMD=${1:-list}
 S1_WORK=${S1_WORK:-/home/david/s1emu}
@@ -36,12 +42,32 @@ slot_ref() {   # <game>/<slot>, both components filename-safe
 meta() {   # meta <dir> <key>
     sed -n "s/^$2=//p" "$1/slot.meta" 2>/dev/null | head -1
 }
+# prune_store <game dir>: drop each shared binary no slot names; tidy the dir
+prune_store() {
+    local gd=$1 f sum keep
+    if [ -d "$gd/.bin" ]; then
+        keep=$(cat "$gd"/*/restore.env 2>/dev/null | awk '$1 == "bin" {print $2}' | sort -u)
+        for f in "$gd/.bin"/*.zst; do
+            [ -e "$f" ] || continue
+            sum=$(basename "$f" .zst)
+            grep -qxF "$sum" <<<"$keep" || rm -f "$f"
+        done
+        rmdir "$gd/.bin" 2>/dev/null
+    fi
+    rmdir "$gd" 2>/dev/null   # tidy an emptied per-game dir
+    return 0
+}
 
 case "$CMD" in
 list)
     echo "root|$SAVES"
     total=0
     if [ -d "$SAVES" ]; then
+        for b in "$SAVES"/*/.bin/; do
+            [ -d "$b" ] || continue
+            bytes=$(du -sb "$b" 2>/dev/null | cut -f1)
+            total=$((total + ${bytes:-0}))
+        done
         for d in "$SAVES"/*/*/; do
             [ -d "$d" ] || continue
             [ -e "$d/restore.env" ] || continue
@@ -78,9 +104,15 @@ delete)
     d="$SAVES/$REF"
     [ -d "$d" ] || { echo "s1slots: no slot $REF"; exit 1; }
     rm -rf "$d"
-    rmdir "$(dirname "$d")" 2>/dev/null   # tidy an emptied per-game dir
+    prune_store "$(dirname "$d")"
+    echo "ok"
+    ;;
+prune)
+    G=${2:?usage: s1slots.sh prune <game>}
+    ok_name "$G" || { echo "s1slots: bad game '$G'"; exit 2; }
+    [ -d "$SAVES/$G" ] && prune_store "$SAVES/$G"
     echo "ok"
     ;;
 *)
-    echo "s1slots: unknown command '$CMD' (list|label|delete)"; exit 2 ;;
+    echo "s1slots: unknown command '$CMD' (list|label|delete|prune)"; exit 2 ;;
 esac

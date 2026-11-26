@@ -118,22 +118,25 @@ class Item(object):
 
     THE LAYERED TEST (Simon, 2026-11-22/26): a video item with `layers` - the project's scenes drawn over the clip
     (plugins/stern/layered_test.py specs, ``HASH`` or ``HASH@FRAME``, the lowest first), made on the Scenes tab's
-    Layered test… button."""
-    __slots__ = ("kind", "label", "path", "project", "rel", "game", "layers")
+    Layered test… button.  `player` (Simon, 2026-11-26: the number "is in the wrong place"): the state of the game's
+    video player the clip is shown in (a label of layered_test.clip_states, e.g. ScoreFrame); empty = the default."""
+    __slots__ = ("kind", "label", "path", "project", "rel", "game", "layers", "player")
 
-    def __init__(self, kind, label="", path="", project="", rel="", game="", layers=()):
+    def __init__(self, kind, label="", path="", project="", rel="", game="", layers=(), player=""):
         self.kind, self.label, self.path = kind, label, path
         self.project, self.rel, self.game = project, rel, game
         self.layers = tuple(str(x) for x in (layers or ()) if str(x).strip())
+        self.player = str(player or "").strip() if self.layers else ""
 
     @property
     def from_project(self):
         return bool(self.project)
 
     def key(self):
+        tail = self.layers + ((self.player,) if self.player else ())
         if self.project:
-            return (self.kind, norm_dir(self.project), self.rel.replace("\\", "/")) + self.layers
-        return (self.kind, "", norm_dir(self.path)) + self.layers
+            return (self.kind, norm_dir(self.project), self.rel.replace("\\", "/")) + tail
+        return (self.kind, "", norm_dir(self.path)) + tail
 
     def to_json(self):
         d = {k: getattr(self, k) for k in self.__slots__ if getattr(self, k)} | {"kind": self.kind}
@@ -146,7 +149,8 @@ class Item(object):
         if not isinstance(d, dict) or d.get("kind") not in KINDS:
             return None
         it = cls(d["kind"], *(str(d.get(k) or "") for k in ("label", "path", "project", "rel", "game")),
-                 layers=d.get("layers") if isinstance(d.get("layers"), list) and d["kind"] == "video" else ())
+                 layers=d.get("layers") if isinstance(d.get("layers"), list) and d["kind"] == "video" else (),
+                 player=str(d.get("player") or ""))
         if not it.project and not it.path:
             return None
         return it
@@ -492,6 +496,7 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None,
                     log("test card: layered test %r left out: its video cannot play as a clip" % label)
                     continue
                 try:
+                    path = place_layered_clip(src, path, work, n, log=log, cancel=cancel)
                     made.append((kind, path, label, layer_overlay(src, path, work, n, log=log)))
                 except Exception as exc:                        # noqa: BLE001
                     log("test card: layered test %r left out: %s" % (label, exc))
@@ -503,6 +508,30 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None,
             log("test card: layered test %r left out: a Spike 3 test card plays no clips" % it.label)
         out = [o[1:] for o in out if id(o[0]) not in layered]
     return out
+
+
+def place_layered_clip(item, clip, work, n, log=print, cancel=None):
+    """Simon (2026-11-26): "the number overlay ... is in the wrong place" - a layered test's clip as the game's video
+    player shows it (plugins/stern/layered_test.clip_placement: Godzilla's draws a 1360x768 clip zoomed 1.32x about
+    the centre), so the clip's own pictures sit under the scenes where the game puts them; *clip* itself when no
+    scene of the project plays it or the player shows it 1:1."""
+    from pinball_decryptor.plugins.stern import layered_test as LT
+    name = os.path.splitext(os.path.basename(item.rel or item.path or ""))[0]
+    place = LT.clip_placement(item.project, name, getattr(item, "player", ""))
+    if place is None:
+        return clip
+    stage = (1360, 768)
+    try:
+        spec = LT.parse_scene(item.layers[0])[0]
+        stage = tuple(int(x) for x in LT.find_scene(LT.scene_tree(item.project), spec)[1]["stage"][:2])
+    except Exception:                                           # noqa: BLE001 - Spike 2's screen
+        pass
+    _frames, fps = LT.clip_frames(clip)
+    dst = os.path.join(work, "placed%02d.mp4" % n)
+    LT.place_clip(clip, dst, place, stage, fps=fps, cancel=cancel)
+    log("test card: %s placed as the game's player shows it (%.2fx, corner at %d,%d)"
+        % (name, place[0], round(place[2]), round(place[3])))
+    return dst
 
 
 def layer_overlay(item, clip, work, n, log=print):

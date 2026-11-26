@@ -114,7 +114,9 @@ def test_the_scenes_tab_offers_it():
     js = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "text_scenes.js"),
               encoding="utf-8").read()
     assert "function LayeredDialog" in js and ">Layered test…<//>" in js
-    assert 'call("text_scenes.add_layered", layers.map((l) => ({ d: l.d, pin: l.pin })), clip, label)' in js
+    # Simon (2026-11-26): with the video player's state and the ticked scenes' untick
+    assert ('call("text_scenes.add_layered", layers.map((l) => ({ d: l.d, pin: l.pin })), clip, label, player,'
+            in js)
 
 
 def test_both_builds_ask_for_clips():

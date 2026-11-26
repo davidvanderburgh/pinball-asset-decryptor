@@ -18,14 +18,14 @@ html, body { margin: 0; height: 100%; background: #15171a; }
   animation: pb-in .6s ease both; transition: opacity .45s cubic-bezier(.4,0,.2,1); }
 #page-boot.out { opacity: 0; pointer-events: none; }
 @keyframes pb-in { from { opacity: 0; } }
-.pb-x, .pb-y, .pb-x i { position: absolute; left: 0; top: 0; width: 26px; height: 26px; }
+.pb-x, .pb-y, .pb-x i { position: absolute; left: 0; top: 0; width: 44px; height: 44px; }
 .pb-x { animation: pb-x 3.1s linear infinite alternate; animation-delay: calc(var(--g, 0) * 16ms - 1.2s); }
 .pb-y { animation: pb-y 2.2s linear infinite alternate; animation-delay: calc(var(--g, 0) * 16ms - .7s); }
-@keyframes pb-x { from { transform: translateX(0); } to { transform: translateX(calc(100vw - 26px)); } }
-@keyframes pb-y { from { transform: translateY(0); } to { transform: translateY(calc(100vh - 26px)); } }
+@keyframes pb-x { from { transform: translateX(0); } to { transform: translateX(calc(100vw - 44px)); } }
+@keyframes pb-y { from { transform: translateY(0); } to { transform: translateY(calc(100vh - 44px)); } }
 .pb-x i { border-radius: 50%;
   background: radial-gradient(circle at 34% 30%, #ffffff 0 12%, #cfd4da 26%, #7c848d 62%, #3b4046 100%);
-  box-shadow: 0 0 16px rgba(232,163,61,.4), 0 3px 5px rgba(0,0,0,.55);
+  box-shadow: 0 0 26px rgba(232,163,61,.4), 0 5px 8px rgba(0,0,0,.55);
   transition: transform .45s cubic-bezier(.3,0,.2,1), opacity .35s ease; }
 /* the trail: fainter, smaller copies a few frames behind the ball */
 .pb-x[style] i { background: radial-gradient(circle, rgba(232,163,61,.9), rgba(232,163,61,0) 70%); box-shadow: none;
@@ -35,7 +35,7 @@ html, body { margin: 0; height: 100%; background: #15171a; }
 #page-boot.out .pb-x[style] i { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   #page-boot, .pb-x, .pb-y { animation: none; }
-  .pb-x { left: calc(50% - 13px); top: calc(50% - 13px); }
+  .pb-x { left: calc(50% - 22px); top: calc(50% - 22px); }
   .pb-x[style] { display: none; }
 }
 </style>

@@ -317,3 +317,12 @@ def test_the_page_offers_it():
     assert "Allow additional space on the test card for network updates?" in js
     assert 'call("testcard.set_network", "ssh", v)' in js and 'call("testcard.set_network", "wifi", v)' in js
     assert 'call("testcard.send")' in js and "Send to machine…" in js
+
+
+def test_the_build_log_takes_the_card_helpers_level():
+    """Simon (2026-11-26): Send to machine stopped at "remote access could not be added: TestCardTab._say() takes 2
+    positional arguments but 3 were given" - ssh_card, menu_network and wifi_card log (text, level)."""
+    tab = _tab()
+    tab._say("SSH server enabled (key-only, port 22).", "info")
+    tab._say("a plain line")
+    assert tab._lines[-2:] == ["SSH server enabled (key-only, port 22).", "a plain line"]

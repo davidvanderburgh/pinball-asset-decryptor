@@ -139,7 +139,10 @@ class TestCardTab(TabService):
         self._pub()
         return True
 
-    def _say(self, line):
+    def _say(self, line, level=None):
+        # *level*: the card helpers' log(text, level) (ssh_card.say_who_gets_in, menu_network, wifi_card) - Simon
+        # (2026-11-26): "remote access could not be added: TestCardTab._say() takes 2 positional arguments but 3
+        # were given"; the build's own log is plain lines
         self._lines.append(line)
         self._pub_soon()
 

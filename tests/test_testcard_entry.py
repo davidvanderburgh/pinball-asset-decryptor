@@ -128,3 +128,15 @@ def test_menu_settings_offer_it_on_spike_2():
     assert '"test_entry": be.key == "stern",' in panel
     tab = open(os.path.join(ROOT, "pinball_decryptor", "webui", "tabs", "multiboot.py"), encoding="utf-8").read()
     assert '("test_entry", "_test_entry_var")' in tab
+
+
+def test_the_entry_is_a_change_and_always_remakes_the_media():
+    """The first real update in place (2026-11-26) said "no menu change" and put the entry on with no files."""
+    import dataclasses
+    from pinball_decryptor.webui import multiboot_core as mbc
+    before = mbc.MultibootForm(images=[], out="x.raw")
+    after = dataclasses.replace(before, test_entry=True)
+    assert "TEST CARD entry" in mbc.diff_forms(before, after)[0]
+    assert mbc.media_specs_changed(before, after) is True
+    assert mbc.media_specs_changed(after, after) is True, "the Test card tab's list may have changed since"
+    assert mbc.media_specs_changed(before, before) is False

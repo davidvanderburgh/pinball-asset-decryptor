@@ -5129,7 +5129,9 @@ MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "high scores",
                     # the right flipper back to the menu (Simon, 2026-11-22): a change of either on a loaded card
                     # is one an Update in place carries - unlisted here it read "No change pending"
-                    "boot menu", "after a game")
+                    "boot menu", "after a game",
+                    # ...and the TEST CARD entry (Simon, 2026-11-26)
+                    "TEST CARD entry")
 
 #: Of those, the ones the media has to be rendered again for.
 MEDIA_FIELDS = ("art", "animation", "music", "move sound", "confirm sound")

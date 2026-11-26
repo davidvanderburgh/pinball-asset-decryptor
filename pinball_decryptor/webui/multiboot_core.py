@@ -12581,7 +12581,7 @@ class MultibootPanel:
         def run():
             try:
                 shutil.rmtree(folder, ignore_errors=True)
-                staged = tc.stage(items, folder, None, log=log) if items else []
+                staged = tc.stage(items, folder, None, log=log, clips=True) if items else []
                 specs = tuple(tc.test_specs(staged, wsl))
             except Exception as exc:                        # noqa: BLE001 - reported, never lost
                 err = str(exc)

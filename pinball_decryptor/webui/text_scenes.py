@@ -1071,6 +1071,62 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
         path = os.path.join(self.assets_dir, *rel.split("/"))
         return path if os.path.isfile(path) else ""
 
+    # ---- THE LAYERED TEST (Simon, 2026-11-22/26): "a layered test on the TEST CARD - a clip with scenes over it
+    # (e.g. Match clip + 0335207f MATCH/digits + 9d578751 score panel)". The scene shown here, the scenes drawn
+    # over it and the clip under them go on the Test card tab's list as one video (testcard_core.Item.layers); the
+    # build draws the scenes per clip frame (plugins/stern/layered_test.py) and the machine plays the clip through
+    # its own decoder with them on top.
+    @rpc
+    def layered_options(self):
+        """What the Layered test… dialog offers: the shown scene, every scene, the project's videos (the shown
+        scene's own first), or ``why`` it cannot be made here."""
+        from . import testcard_core as tc
+        if not tc.available(getattr(self.window, "current_mfr", None)):
+            return {"why": "Test cards are for Stern Spike 2 and Spike 3 games."}
+        d = getattr(self, "_sel", None)
+        if not self.assets_dir or not d or d not in self._scenes:
+            return {"why": "Pick a scene in the list first."}
+        scenes = [{"d": k, "label": v.get("label") or os.path.basename(k), "hash": os.path.basename(k)[:8]}
+                  for k, v in sorted(self._scenes.items(), key=lambda kv: (kv[1].get("label") or "").lower())]
+        own = list(self._scenes[d].get("videos") or [])
+        clips = []
+        vdir = os.path.join(self.assets_dir, "video")
+        for root, _dirs, files in os.walk(vdir):
+            for f in files:
+                if os.path.splitext(f)[1].lower() in tc.VIDEO_EXTS:
+                    rel = os.path.relpath(os.path.join(root, f), self.assets_dir).replace("\\", "/")
+                    clips.append({"rel": rel, "label": os.path.splitext(f)[0], "own": rel in own})
+        clips.sort(key=lambda c: (not c["own"], c["label"].lower()))
+        return {"why": "" if clips else "This project has no videos to put under the scenes (Extract its videos).",
+                "scene": {"d": d, "label": self._scenes[d].get("label") or os.path.basename(d),
+                          "hash": os.path.basename(d)[:8]},
+                "scenes": scenes, "clips": clips, "clip": clips[0]["rel"] if clips and clips[0]["own"] else ""}
+
+    @rpc
+    def add_layered(self, layers, clip_rel, label=""):
+        """Put a layered test on the Test card tab's list: *layers* ``[{"d": scene dir, "pin": frame or label}]``,
+        the lowest first, over the project's video *clip_rel*. Returns '' or why not."""
+        from . import testcard_core as tc
+        specs = []
+        for ly in layers or []:
+            d = (ly or {}).get("d")
+            if d not in self._scenes:
+                return "A scene of the layered test is not in this project."
+            pin = str((ly or {}).get("pin") or "").strip()
+            specs.append(os.path.basename(d) + ("@" + pin if pin else ""))
+        if not specs:
+            return "Pick at least one scene to draw over the clip."
+        path = os.path.join(self.assets_dir, *str(clip_rel or "").split("/"))
+        if not clip_rel or not os.path.isfile(path):
+            return "Pick the video to play under the scenes."
+        name = tc.clean_label(label or "%s over %s" % (self._scenes[layers[-1]["d"]].get("label") or "scene",
+                                                        os.path.splitext(os.path.basename(path))[0]), "layered test")
+        why = tc.shared().add_layered(tc.Item("video", name, path, self.assets_dir, clip_rel, self._tc_game(),
+                                              layers=specs))
+        if not why:
+            tc.changed(self.window)
+        return why
+
     @rpc
     def select_item(self, iid):
         """A contents row was picked: an image shows as a thumbnail."""

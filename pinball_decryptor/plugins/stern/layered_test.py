@@ -184,7 +184,12 @@ def make_overlay(project, scene_specs, out, frames, fps=30.0, log=print):
 def clip_frames(path):
     """(frames, fps) of a video, from ffprobe."""
     import subprocess
-    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets",
+    try:                                    # PAD's own ffprobe (a Windows install has none on the PATH)
+        from pinball_decryptor.core.audio import find_ffprobe
+        probe = find_ffprobe() or "ffprobe"
+    except Exception:                       # noqa: BLE001 - the command line, outside the app
+        probe = "ffprobe"
+    r = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-count_packets",
                         "-show_entries", "stream=nb_read_packets,r_frame_rate", "-of", "json", path],
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:

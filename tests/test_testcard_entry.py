@@ -107,7 +107,7 @@ def test_the_panel_stages_the_test_card_list_before_the_write():
     assert 'return self._stage_test_entry(lambda: self._do_build_flash(do_write, do_flash))' in go
     assert go.index("_stage_test_entry") < go.index('self._write_plan()["action"]')
     st = inspect.getsource(mbc.MultibootPanel._stage_test_entry)
-    assert "tc.shared().items" in st and "tc.stage(items, folder, None, log=log)" in st
+    assert "tc.shared().items" in st and "tc.stage(items, folder, None, log=log, clips=True)" in st
     assert "tc.test_specs(staged, wsl)" in st and "self._kick_drain()" in st
     assert 'getattr(self, "_stage_busy", False)' in inspect.getsource(mbc.MultibootPanel._drain)
 

@@ -140,3 +140,70 @@ def test_the_entry_is_a_change_and_always_remakes_the_media():
     assert mbc.media_specs_changed(before, after) is True
     assert mbc.media_specs_changed(after, after) is True, "the Test card tab's list may have changed since"
     assert mbc.media_specs_changed(before, before) is False
+
+
+# ---- PR #49 review (PAD-1615): the entry's files through update, and taken off with the entry -------------------
+def test_the_entry_is_on_when_asked_kept_when_not_and_off_when_taken_off(mk):
+    A = argparse.Namespace
+    assert mk.test_entry_wanted(A(test_entry=True, no_test_entry=False), {}) is True
+    assert mk.test_entry_wanted(A(test_entry=False, no_test_entry=False), {"test_entry": ("TEST CARD", "")}) is True
+    assert mk.test_entry_wanted(A(test_entry=False, no_test_entry=False), {"test_entry": None}) is False
+    assert mk.test_entry_wanted(A(test_entry=False, no_test_entry=True), {"test_entry": ("TEST CARD", "")}) is False
+    assert mk.test_entry_wanted(A(), None) is False
+
+
+def test_a_games_tree_walk_leaves_the_entrys_folder_out_at_the_root_only(mk):
+    class P:
+        layout = "parts"
+        store_subdirs = ()
+    assert mk.TEST_ENTRY_SUBDIR in mk.tree_skip(P(), "")
+    assert mk.TEST_ENTRY_SUBDIR not in mk.tree_skip(P(), "img1")
+    P.layout = "store"
+    assert mk.TEST_ENTRY_SUBDIR in mk.tree_skip(P(), "")
+
+
+def _fake_p3(mk, monkeypatch, have, free=1 << 30):
+    script = []
+    monkeypatch.setattr(mk, "need_tools", lambda *a: None)
+    monkeypatch.setattr(mk, "_test_entry_dir", lambda card: ("ref", free, None if have is None else dict(have)))
+    monkeypatch.setattr(mk, "debugfs_write_script", lambda ref, cmds: script.extend(cmds))
+    monkeypatch.setattr(mk, "e2fsck", lambda ref: (0, ""))
+    return script
+
+
+def test_the_entrys_files_replace_what_the_folder_held(mk, monkeypatch, tmp_path):
+    src = tmp_path / "t2.png"
+    src.write_bytes(b"x" * 10)
+    script = _fake_p3(mk, monkeypatch, {"t1.png": 5, "s1.wav": 5})
+    mk.put_test_entry_files("card.img", {"t2.png": str(src)})
+    assert script[:2] == ['rm "/padtest/s1.wav"', 'rm "/padtest/t1.png"']
+    assert not any(c.startswith("mkdir") for c in script)
+    assert any(c.startswith("write ") and c.endswith('"/padtest/t2.png"') for c in script)
+
+
+def test_the_entry_taken_off_empties_its_folder_and_makes_none(mk, monkeypatch):
+    script = _fake_p3(mk, monkeypatch, {"t1.png": 5})
+    mk.put_test_entry_files("card.img", {})
+    assert script == ['rm "/padtest/t1.png"']
+    script = _fake_p3(mk, monkeypatch, None)
+    mk.put_test_entry_files("card.img", {})
+    assert script == []                                 # no folder, nothing to take off: p3 untouched
+
+
+def test_the_room_counts_what_the_folder_gives_back(mk, monkeypatch, tmp_path):
+    src = tmp_path / "big.padv"
+    src.write_bytes(b"x" * 1000)
+    head = mk.TEST_ENTRY_HEADROOM
+    _fake_p3(mk, monkeypatch, {"old.padv": 1000}, free=head)
+    mk.check_test_entry_room("card.img", {"big.padv": str(src)})          # the old file's room comes back
+    _fake_p3(mk, monkeypatch, {}, free=head)
+    with pytest.raises(mk.Refused, match="games partition has"):
+        mk.check_test_entry_room("card.img", {"big.padv": str(src)})
+
+
+def test_update_sets_the_entrys_files_apart_and_checks_their_room_first(mk):
+    import inspect
+    src = inspect.getsource(mk._update_locked)
+    assert src.count("tests_apart=entry_on") == 2      # the plan and the inject both
+    assert src.index("check_test_entry_room(") < src.index("# ---- execute")
+    assert "put_test_entry_files(card, {})" in src     # taken off: its files go with it

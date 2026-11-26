@@ -14,14 +14,19 @@ const LISTS = [
   { kind: "sound", title: "Sounds", how: "Tick TEST on a sound in the Audio tab, or add your own sounds." },
 ];
 
+// Simon (2026-11-26): "the controls are FAR too far right" - on a wide window the row's spacer put the buttons a
+// screen away from the item; a grid keeps them beside it (name, where it came from - cut, whole on hover - buttons)
+const ITEM_GRID = "display:grid;grid-template-columns:minmax(140px,240px) minmax(0,360px) auto auto auto;" +
+  "gap:6px;align-items:center;justify-content:start";
+
 function ItemRow({ r, first, last, busy }) {
   const from = r.from ? r.from : "Your file";
-  return html`<div class="row tc-item" key=${r.i}>
+  return html`<div class="tc-item" style=${ITEM_GRID} key=${r.i}>
     <${Field} sm cls="tc-label" value=${r.label} placeholder="its name on the machine" readOnly=${busy}
       onChange=${() => {}} onCommit=${(v) => call("testcard.rename", r.i, v)} />
-    <span class=${cx("small", r.problem ? "bad" : "muted")} ...${tip({ head: from, lines: [r.where, r.problem].filter(Boolean) })}>
+    <span class=${cx("small ellip", r.problem ? "bad" : "muted")} style="min-width:0"
+      ...${tip({ head: from, lines: [r.where, r.problem].filter(Boolean) })}>
       ${r.problem ? r.problem : from}</span>
-    <span class="grow"></span>
     <${Button} size="sm" disabled=${busy || first} onClick=${() => call("testcard.move", r.i, -1)} title="Earlier on the machine's list">↑<//>
     <${Button} size="sm" disabled=${busy || last} onClick=${() => call("testcard.move", r.i, 1)} title="Later on the machine's list">↓<//>
     <${Button} size="sm" disabled=${busy} onClick=${() => call("testcard.remove", r.i)} title="Take it off the test card">✕<//>

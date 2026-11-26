@@ -927,7 +927,11 @@ class SternFlashImagePipeline(BasePipeline):
             inner = SternWritePipeline(self.image_path, folder, out, self._log, lambda *a, **k: None,
                                        self._progress, lambda *a, **k: None)
             self._inner = inner
-            inner._run()
+            # PAD-1626: the flash writes the image it was given as it is: the Write tab's SD card size (and
+            # "as small as it can be") is for the project's own build, and a multi-boot card refuses one
+            from .card_size import own_size
+            with own_size():
+                inner._run()
             self._check_cancel()
             ok = True
             self._log("The copy has %s on it; writing it to the card." % ", ".join(kept), "info")

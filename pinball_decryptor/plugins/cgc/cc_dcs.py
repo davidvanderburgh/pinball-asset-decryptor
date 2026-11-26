@@ -15,8 +15,8 @@ every unmodified track/stream verbatim and swaps in the edits), producing a new
 ``s2..s7.rom`` set.  Verified round-trip: silencing one stream re-extracts as
 silent while every other stream is preserved.
 
-Both tools come from mjrgh's DCSExplorer project (BSD), bundled in
-``williams/vendor/``.  The ROM zip handed to them MUST be named ``cc_<digit>*``
+Both tools come from mjrgh's DCSExplorer project (BSD), fetched on
+first use by :mod:`..williams.dcs_decode` (PAD-1606).  The ROM zip handed to them MUST be named ``cc_<digit>*``
 (``_ZIP_NAME``) — see :mod:`pinball_decryptor.plugins.williams.dcs_decode` and
 ``docs/CC_REVISITED_RE.md`` for the Cactus-Canyon U7-mislabel special case.
 """
@@ -34,6 +34,7 @@ import zipfile
 import zipfile as _zip
 from typing import Callable, List, Optional
 
+from ..williams import dcs_decode as _dcs_decode
 from ..williams.dcs_decode import (find_dcs_encoder, find_dcs_explorer,
                                    launch_error_message,
                                    missing_tool_message)
@@ -118,17 +119,22 @@ def repack(rom_dir: str, streams_dir: str, out_rom_dir: str,
         if log_cb:
             log_cb(msg, level)
 
-    explorer = find_dcs_explorer()
-    encoder = find_dcs_encoder()
     roms = _sound_roms(rom_dir)
     edited = _glob.glob(os.path.join(streams_dir, "*.wav"))
     if len(roms) < 2 or not edited:
         return {"modified_count": 0, "total": 0}
+    # Fetched on first use (PAD-1606), so only once there is work to do.
+    say = (lambda m: log_cb(m, "info")) if log_cb else None
+    explorer = find_dcs_explorer(log=say)
+    encoder = find_dcs_encoder(log=say)
     # WAVs to write but no tool to write them with: refuse out loud, or
     # the user's sound edits never reach the card (PAD-919, PAD-1391).
     for tool, exe in (("DCSExplorer", explorer), ("DCSEncoder", encoder)):
         if exe is None:
-            raise DcsRepackError(missing_tool_message(tool))
+            problem = _dcs_decode._tool_problem
+            raise DcsRepackError(
+                problem if problem and tool in problem
+                else missing_tool_message(tool))
 
     with tempfile.TemporaryDirectory(prefix="cc_dcs_rp_") as td:
         zp = os.path.join(td, _ZIP_NAME)

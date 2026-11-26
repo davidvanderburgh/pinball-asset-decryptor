@@ -66,14 +66,8 @@ ISS = os.path.join(_HERE, "pinball_decryptor.iss")
 
 #: [Files] parameters and flags whose meaning this reader implements (or
 #: that do not change which file lands where).  Anything else is refused.
-_KNOWN_PARAMS = {"source", "destdir", "flags", "excludes", "afterinstall",
-                 "check"}
-_KNOWN_FLAGS = {"recursesubdirs", "ignoreversion", "onlyifdoesntexist"}
-#: the only Check functions modelled (PAD-1606): KeptAsInstalled skips a
-#: file only when the running install already has it, so the version's
-#: file list still holds it.  ``onlyifdoesntexist`` likewise: a fresh
-#: install has the file.  Any other Check could leave a file out.
-_KNOWN_CHECKS = {"keptasinstalled"}
+_KNOWN_PARAMS = {"source", "destdir", "flags", "excludes", "afterinstall"}
+_KNOWN_FLAGS = {"recursesubdirs", "ignoreversion"}
 
 
 class IssError(ValueError):
@@ -187,10 +181,6 @@ def iss_files(iss_path=ISS, defines=None):
         if flags - _KNOWN_FLAGS:
             raise IssError("unknown [Files] flag %s in: %s"
                            % (sorted(flags - _KNOWN_FLAGS), line))
-        check = p.get("check", "").split("(")[0].strip().lower()
-        if check and check not in _KNOWN_CHECKS:
-            raise IssError("unknown [Files] Check %s in: %s"
-                           % (p["check"], line))
         if "source" not in p or "destdir" not in p:
             raise IssError("no Source/DestDir in: %s" % line)
         dest = p["destdir"]

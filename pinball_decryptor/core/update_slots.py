@@ -187,29 +187,8 @@ def carry_over(app_dir, new_dir):
       already exists - so an upgrade is not undone by an old copy.
     * ``python\\Scripts`` entries the new bundle lacks (pip's console
       scripts for those packages).
-    * The DCS sound tools (update_delta.KEEP_AS_INSTALLED, PAD-1606) the
-      staged setup exe skipped because this install has them: hard-linked,
-      not copied, so an antivirus that flags them sees nothing new written.
     """
-    from .update_delta import KEEP_AS_INSTALLED
     copied = []
-    for rel in KEEP_AS_INSTALLED:
-        rel = rel.replace("/", os.sep)
-        src = os.path.join(app_dir, rel)
-        dst = os.path.join(new_dir, rel)
-        if not os.path.isfile(src) or os.path.lexists(dst):
-            continue
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        try:
-            os.link(src, dst)
-        except OSError:
-            try:
-                shutil.copy2(src, dst)
-            except OSError:
-                # blocked by the very antivirus this is about: the app
-                # says the tool is missing when DCS sound needs it
-                continue
-        copied.append(rel)
 
     def _copy(src, dst, rel):
         if os.path.isdir(src):

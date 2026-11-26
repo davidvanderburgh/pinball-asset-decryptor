@@ -252,6 +252,10 @@ def file_digest(path, cache_dir=None):
                 got = f.read().strip()
             if len(got) == 64 and all(c in "0123456789abcdef" for c in got):
                 _DIGESTS[key] = got
+                try:
+                    os.utime(name, None)            # a use: kept caches age by use (PAD-1598)
+                except OSError:
+                    pass
                 return got
         except OSError:
             pass

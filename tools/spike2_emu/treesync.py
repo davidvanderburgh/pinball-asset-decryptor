@@ -447,8 +447,18 @@ def load_cached(stamp, uuid, sub="", cache_dir=None):
             continue
         if man.uuid != uuid or not stamps_equal(man.stamp, stamp) or man.sub != sub:
             continue
+        touch_cached(p)
         return man
     return None
+
+
+def touch_cached(p):
+    """a cache entry was used: the space keeper drops the ones unused for 30 days, counted from
+    the last use, not from when it was written (PAD-1598)"""
+    try:
+        os.utime(p, None)
+    except OSError:
+        pass
 
 
 def store_cached(man, cache_dir=None):
@@ -1192,6 +1202,7 @@ def load_cached_delta(base_sha, new_sha, size, cache_dir=None):
                 rec = json.loads(f.read().decode("utf-8"))
             if rec.get("format") != _DELTA_CACHE_FORMAT or int(rec.get("size", -1)) != size:
                 continue
+            touch_cached(p)
             ranges = rec.get("ranges")
             return None if ranges is None else [(int(o), int(n)) for o, n in ranges]
         except (OSError, ValueError, TypeError):

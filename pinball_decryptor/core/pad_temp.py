@@ -58,8 +58,13 @@ NAMES = (
        exact=True, kept=True, child_days=30),
     _n("pinball_spike2_params", STERN, "build settings kept for faster rebuilds",
        exact=True, kept=True, child_days=30),
-    _n("pinball_spike2_multiboot", STERN, "Multi-boot menu card staging",
-       exact=True),
+    # PAD-1598: a cache, not scratch - Stern's card lists, menus read off a card, and a Spooky
+    # update's unpacked layer and member list (one per update, keyed by its content).  As
+    # scratch the keeper took it whole a day after the last build, and the next plan of a
+    # Stern multi-boot read every card again
+    _n("pinball_spike2_multiboot", SHARED,
+       "Multi-boot card lists and unpacked updates kept for faster rebuilds",
+       exact=True, kept=True, child_days=30),
     _n("spike1_", STERN, "Spike 1 flat image staging"),
     _n("pad_engine_", STERN, "Emulate tab game staging"),
     _n("pad-network-", STERN, "network settings staging"),
@@ -84,6 +89,7 @@ NAMES = (
        exact=True, kept=True, child_days=7),
     _n("pad-webui-multiboot", STERN, "Multi-boot pictures", exact=True,
        kept=True),
+    _n("pad_speak_", STERN, "spoken scores staging"),
     _n("pad_attract_quiet.wav", STERN, "quiet attract sound", exact=True),
     # -- other makers -----------------------------------------------------
     _n("williams_", "Williams DMD render", "DMD / video render"),
@@ -323,10 +329,10 @@ def mkdtemp(suffix=None, prefix=None, dir=None):
 
 
 #: A cache entry being written beside its final name (``<key>.tmp<pid>``).
-_TMP_PID = re.compile(r"\.tmp(\d+)$")
+_TMP_PID = re.compile(r"\.tmp\.?(\d+)$")     # <key>.tmp<pid>, or the multi-boot tools' <key>.tmp.<pid>
 
 
 def tmp_writer(name):
-    """The pid in a ``<name>.tmp<pid>`` half-written cache entry, or None."""
+    """The pid in a ``<name>.tmp<pid>`` (or ``.tmp.<pid>``) half-written cache entry, or None."""
     m = _TMP_PID.search(name)
     return int(m.group(1)) if m else None

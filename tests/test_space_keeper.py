@@ -213,6 +213,26 @@ def test_temp_folder_leftovers_go_after_a_day_not_the_stern_caches(tmp_path):
     assert str(tmp_path / "spike2_card_cache") not in paths(plan)
 
 
+def test_the_multiboot_cache_stays_its_unused_entries_go(tmp_path):
+    """PAD-1598: pinball_spike2_multiboot was scratch, taken whole a day after a build (Stern's
+    card lists with it); it is a kept cache now, whose entries go after 30 days unused"""
+    d = tmp_path / "pinball_spike2_multiboot"
+    d.mkdir()
+    for name, age in (("100-200-abc.json", 31 * DAY),                       # Stern card list
+                      ("code_UM.pkg.9015.0123456789ab.tar.gz", 31 * DAY),   # Spooky layer
+                      ("code_UM.pkg.9035.ba9876543210.tar.gz", 2 * DAY),    # used two days ago
+                      ("delta-aa-bb.json", 5 * DAY),
+                      ("200-300-def.json.tmp.%d" % 2 ** 22, 2 * DAY)):        # a dead writer's
+        (d / name).write_bytes(b"x" * (2 << 20))
+        _aged(str(d / name), age)
+    os.utime(str(d), (time.time() - 40 * DAY,) * 2)
+    plan = sk.plan_host([{"path": str(d), "size": 10 << 20, "manufacturer": "Shared tooling",
+                          "detail": "multi-boot"}], time.time())
+    assert sorted(os.path.basename(p) for p in paths(plan)) == [
+        "100-200-abc.json", "200-300-def.json.tmp.%d" % 2 ** 22, "code_UM.pkg.9015.0123456789ab.tar.gz"]
+    assert str(d) not in paths(plan)
+
+
 # ---------------------------------------------------------------- Spike 2 cards
 def test_a_card_not_booted_for_30_days_goes_a_never_booted_one_stays():
     rows = [{"label": "gz", "real_kb": 7 << 20, "boot": NOW - 31 * DAY},

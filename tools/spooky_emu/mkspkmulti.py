@@ -160,6 +160,96 @@ INDEX_CACHE = os.environ.get("SPK_MULTI_INDEX") or (
     else os.path.join(tempfile.gettempdir(), "pad_spkmulti"))
 
 
+#: PAD-1598: a cache entry (an update's unpacked layer, its member list) nobody has used for this
+#: long goes; a use touches it.  An update has ONE of each: keyed by its name, size and a quick
+#: hash of its content, so a re-downloaded or re-copied update finds the copy it left before
+#: (the key once held the file's modified time: every copy unpacked the 2 GB again, and kept it).
+#: Never "the newest per name": a title's mod builds are named as its stock update is (code_UM.pkg),
+#: and one multi-boot reads both.
+CACHE_DAYS = 30
+#: what a half-written entry left by a run that died is, after this long
+CACHE_PART_SECS = 24 * 3600
+#: the layer and list names: <name>.<size>.<quick hash>.<kind>, and before PAD-1598
+#: <name>.<size>.<mtime>.<layer kind> / <name>.<path hash>.<size>.<mtime>.index.json
+_ENTRY = re.compile(r"^(?P<stem>.+?)\.(?P<size>\d+)\.(?P<qh>[0-9a-f]{12})\.(?P<kind>tar\.gz|zip|index\.json)$")
+_OLD_LAYER = re.compile(r"^(?P<stem>.+?)\.(?P<size>\d+)\.(?P<mtime>\d+)\.(?P<kind>tar\.gz|zip)$")
+_OLD_INDEX = re.compile(r"^(?P<stem>.+?)\.[0-9a-f]{10}\.(?P<size>\d+)\.(?P<mtime>\d+)\.(?P<kind>index\.json)$")
+_PART = re.compile(r"\.(?:tar\.gz|zip|index\.json)(?:\.part|\.tmp\d+)$")
+#: entries this process has in hand: never tidied away under it
+_IN_USE = set()
+
+
+def _cache_entry(name):
+    """(stem, size, kind, new form?) of a Spooky cache entry's file name, or None (the folder is
+    shared: Stern's card lists live beside these and are never ours to touch)"""
+    m = _ENTRY.match(name)
+    if m:
+        return m.group("stem"), int(m.group("size")), m.group("kind"), True
+    m = _OLD_LAYER.match(name) or _OLD_INDEX.match(name)
+    if m:
+        return m.group("stem"), int(m.group("size")), m.group("kind"), False
+    return None
+
+
+def quick_hash(path, size=None, span=1 << 20):
+    """12 hex digits from a file's size, first and last MiB: what tells one update from another of
+    the same name in a blink (a re-copy keeps it, a changed file does not)"""
+    size = os.path.getsize(path) if size is None else size
+    h = hashlib.sha1(str(size).encode())
+    with open(path, "rb") as f:
+        h.update(f.read(span))
+        if size > span:
+            f.seek(max(span, size - span))
+            h.update(f.read(span))
+    return h.hexdigest()[:12]
+
+
+def _touch(path):
+    try:
+        os.utime(path, None)
+    except OSError:
+        pass
+
+
+def tidy_cache(cdir, now=None, days=CACHE_DAYS):
+    """PAD-1598: the cache folder down to what earns its room - nothing unused for *days*, no
+    half-written file of a run that died, and nothing named the way it was before PAD-1598 (by
+    the update's modified time: nothing reads those any more, and a re-copied update had left one
+    each time).  Only names :func:`_cache_entry` knows are looked at; an entry this process holds
+    is never taken.  -> bytes freed."""
+    now = time.time() if now is None else now
+    try:
+        names = os.listdir(cdir)
+    except OSError:
+        return 0
+    gone = []
+    for name in names:
+        p = os.path.join(cdir, name)
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        if _PART.search(name):
+            if now - st.st_mtime >= CACHE_PART_SECS:
+                gone.append((p, st.st_size))
+            continue
+        e = _cache_entry(name)
+        if e is None:
+            continue
+        if not e[3] or now - st.st_mtime >= days * 86400:
+            gone.append((p, st.st_size))
+    freed = 0
+    for p, sz in gone:
+        if p in _IN_USE:
+            continue
+        try:
+            os.remove(p)
+            freed += sz
+        except OSError:
+            pass
+    return freed
+
+
 def _gb(n):
     return "%.2f GB" % (n / 1e9) if n is not None else "?"
 
@@ -198,11 +288,39 @@ class SpkUpdate:
         self._tar = None
         self.size = os.path.getsize(self.path)
         self._index = None
+        self._key = None
+
+    # -- the cache (PAD-1598)
+    def stem(self):
+        return re.sub(r"[^\w.-]", "_", os.path.basename(self.path))
+
+    def cache_key(self):
+        """<name>.<size>.<quick hash>: the same for a re-copy of this update, not for another file"""
+        if self._key is None:
+            self._key = "%s.%d.%s" % (self.stem(), self.size, quick_hash(self.path, self.size))
+        return self._key
+
+    def _cached(self, cdir, kind):
+        """this update's *kind* entry in *cdir*, touched (a use) and held, or None.  One from
+        before PAD-1598 is never taken for it: the same name and size can be another file (two
+        plain-tar Looney Tunes builds pad to the same size), and its list would build the wrong one"""
+        out = os.path.join(cdir, "%s.%s" % (self.cache_key(), kind))
+        if not os.path.isfile(out):
+            return None
+        _touch(out)
+        _IN_USE.add(out)
+        return out
+
+    def _kept(self, cdir, path):
+        """*path* is this update's entry in *cdir* now: hold it, and tidy the rest"""
+        _IN_USE.add(path)
+        tidy_cache(cdir)
 
     # -- the plain tar under the packing
     def tar_path(self, work):
         """the update as a tar(.gz) tarfile can read: itself, or its GPG layer taken off into
-        the cache (kept by name, size and time - the next run reads it again for nothing)"""
+        the cache - one per update, found again by a re-copy of it (PAD-1598) - or, with no
+        --cache-dir, into this run's *work* folder"""
         if self.fmt in ("tar_gz", "plain_tar"):
             return self.path
         if self._tar and os.path.isfile(self._tar):
@@ -210,19 +328,18 @@ class SpkUpdate:
         _f, gpg, games = _spooky()
         base = self.cache_dir or work
         os.makedirs(base, exist_ok=True)
-        st = os.stat(self.path)
-        out = os.path.join(base, "%s.%d.%d.%s" % (re.sub(r"[^\w.-]", "_", os.path.basename(self.path)),
-                                                  st.st_size, int(st.st_mtime),
-                                                  "zip" if self.fmt in AES_FMTS else "tar.gz"))
+        kind = "zip" if self.fmt in AES_FMTS else "tar.gz"
+        out = (self._cached(base, kind) if self.cache_dir else None) \
+            or os.path.join(base, "%s.%s" % (self.cache_key(), kind))
+        part = out + ".tmp%d" % os.getpid()
         if not os.path.isfile(out) and self.fmt in AES_FMTS:
             say("unpacking %s's encryption layer" % os.path.basename(self.path))
             try:
-                sp.aes_decrypt(self.path, out + ".part", self.fmt)
+                sp.aes_decrypt(self.path, part, self.fmt)
             except sp.Refused as e:
                 raise Refused(str(e))
-            os.replace(out + ".part", out)
+            os.replace(part, out)
         if not os.path.isfile(out):
-            part = out + ".part"
             say("unpacking %s's %s layer" % (os.path.basename(self.path),
                                              "signature" if self.fmt == "gpg_tar_gz" else "encryption"))
             if self.fmt == "gpg_tar_gz":
@@ -233,6 +350,8 @@ class SpkUpdate:
                 raise Refused("%s: packed as %s, which a multi-boot cannot take" % (
                     os.path.basename(self.path), self.fmt))
             os.replace(part, out)
+        if self.cache_dir:
+            self._kept(base, out)
         self._tar = out
         return out
 
@@ -278,6 +397,11 @@ class SpkUpdate:
         unpacked into the cache, or no gpg here)"""
         if self.fmt in ("tar_gz", "plain_tar") + AES_FMTS or (self._tar and os.path.isfile(self._tar)):
             return None
+        if self.cache_dir:                  # unpacked by an earlier run: read that, decrypt nothing
+            kept = self._cached(self.cache_dir, "tar.gz")
+            if kept:
+                self._tar = kept
+                return None
         _f, gpg, games = _spooky()
         exe = gpg._find_gpg()
         if not exe or (self.fmt != "gpg_tar_gz" and self.fmt not in games.GPG_PASSPHRASES):
@@ -296,10 +420,9 @@ class SpkUpdate:
         """{build path: (kind, size, sha1 or link target, mode)} - every member, hashed once and
         kept: in --cache-dir, else in INDEX_CACHE.  The tab plans again on every change of the
         list, and reading a 2 GB signed update through gpg takes a minute or two; its list,
-        kept by path, size and time, makes every plan after the first instant."""
+        kept by name, size and a quick hash, makes every plan after the first instant."""
         if self._index is not None:
             return self._index
-        st = os.stat(self.path)
         cache = None
         cdir = self.cache_dir or INDEX_CACHE
         try:
@@ -307,13 +430,13 @@ class SpkUpdate:
         except OSError:
             cdir = None
         if cdir:
-            tag = hashlib.sha1(self.path.encode("utf-8", "replace")).hexdigest()[:10]
-            cache = os.path.join(cdir, "%s.%s.%d.%d.index.json" % (
-                re.sub(r"[^\w.-]", "_", os.path.basename(self.path)), tag, st.st_size, int(st.st_mtime)))
+            # keyed by name, size and quick hash (PAD-1598): a re-copied update is not read again
+            cache = self._cached(cdir, "index.json") or os.path.join(cdir, self.cache_key() + ".index.json")
             if os.path.isfile(cache):
                 try:
                     with open(cache, encoding="utf-8") as f:
                         self._index = {k: tuple(v) for k, v in json.load(f).items()}
+                    self._kept(cdir, cache)
                     return self._index
                 except (OSError, ValueError):
                     pass
@@ -335,10 +458,12 @@ class SpkUpdate:
                     PROGRESS.add(len(b))
                 idx[bp] = ("f", ti.size, h.hexdigest(), ti.mode)
         if cache:
+            part = cache + ".tmp%d" % os.getpid()
             try:
-                with open(cache + ".part", "w", encoding="utf-8") as f:
+                with open(part, "w", encoding="utf-8") as f:
                     json.dump(idx, f)
-                os.replace(cache + ".part", cache)
+                os.replace(part, cache)
+                self._kept(cdir, cache)
             except OSError:
                 pass
         self._index = idx

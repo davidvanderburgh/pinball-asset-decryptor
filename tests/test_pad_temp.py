@@ -161,6 +161,9 @@ def test_lookup_longest_prefix_and_exact_names():
     assert pad_temp.lookup("spike2_card_cache").kept
     assert not pad_temp.lookup("spike2_card_cache_x").kept   # just a spike2_
     assert pad_temp.lookup("pad_card_preview").child_days == 7
+    mb = pad_temp.lookup("pinball_spike2_multiboot")      # PAD-1598: a cache, not scratch
+    assert mb.kept and mb.child_days == 30
+    assert pad_temp.tmp_writer("x.json.tmp.123") == 123 == pad_temp.tmp_writer("x.tmp123")
     assert pad_temp.lookup("someone_elses") is None
     for name in ("spike1_x", "pad-modes-x", "pad-scenes-x", "pad-audio-x",
                  "image_sound_selftest_x", "pinball_spike2_multiboot",

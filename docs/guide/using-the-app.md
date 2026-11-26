@@ -31,10 +31,9 @@ Every tab has a **?** button in the top bar with tips for that tab.
   manufacturer.
 - **My machines** (top bar) opens its own page: one row per Stern, JJP or
   BoF machine, with its card or file, its projects and the build it runs.
-  Add a machine by the card image it runs; a machine remote access found on
-  your network is offered there to add. Tick
-  "Check for new game code once a day" and the app reads each of your
-  makers' code pages and says when a newer build is out (off by default).
+  Add a machine by the card image it runs (a machine remote access found on
+  your network is offered there), and tick "Check for new game code once a
+  day" to hear when a newer build is out.
   Each row can open the project, extract, write, or change and rename the
   machine; Stern rows can also transfer mods.
 - **Update to 1.17** shows on a Stern Spike 2 row when newer code is out:

@@ -142,6 +142,24 @@ def _private_temp_dir(tmp_path_factory):
                 os.environ[k] = v
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _private_space_keeper_state(tmp_path_factory):
+    """The space keeper's record (what it removed, the give-back's dates) is
+    the session's own.  PAD-1600: a Manage disk space test that cleaned 19 GB
+    marked a give-back owed in the developer's REAL space_keeper.json.  A
+    test that sets ``PAD_SPACE_STATE`` itself still wins."""
+    p = tmp_path_factory.getbasetemp() / "space_keeper.json"
+    was = os.environ.get("PAD_SPACE_STATE")
+    os.environ["PAD_SPACE_STATE"] = str(p)
+    try:
+        yield str(p)
+    finally:
+        if was is None:
+            os.environ.pop("PAD_SPACE_STATE", None)
+        else:
+            os.environ["PAD_SPACE_STATE"] = was
+
+
 @pytest.fixture(autouse=True)
 def _isolate_rig_dirs(tmp_path_factory, monkeypatch):
     """Point both emulator rigs at an empty directory, for every test.

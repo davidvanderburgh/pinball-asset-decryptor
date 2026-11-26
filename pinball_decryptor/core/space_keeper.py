@@ -77,10 +77,16 @@ FLOOR_BYTES = 15 * 1024 ** 3
 CHECK_EVERY_SECS = 30 * 60
 #: A full run at most this often - unless the room left is under the floor.
 MIN_INTERVAL_SECS = 6 * 3600
-#: PAD-1458: the app's WSL disks are compacted at close when one holds this
-#: much more than it uses, at most this often (padcompact.ps1's rules)
-GIVEBACK_SLACK_BYTES = 20 * 1024 ** 3
-GIVEBACK_EVERY_SECS = 7 * 24 * 3600
+#: PAD-1458: the app's WSL disks are compacted when one holds more than it
+#: uses by its slack (:func:`giveback_slack`): this much, or
+#: GIVEBACK_SLACK_SHARE of the file, whichever is larger.  PAD-1600: it was
+#: 20 GB a disk and weekly, so with four disk files up to 80 GB sat trapped
+#: on C: - the difference between working and "disk full" on a 256 GB laptop.
+GIVEBACK_SLACK_BYTES = 5 * 1024 ** 3
+GIVEBACK_SLACK_SHARE = 0.10
+#: ...looked at this often; a clean-up that freed more than the slack makes
+#: it due at once (``giveback_owed``, see :func:`owe_giveback`).
+GIVEBACK_EVERY_SECS = 24 * 3600
 #: Under this a leftover is noise, and the small ones in /var/tmp are often
 #: a rig's live logs or settings (jjp_devices.json, jjp_ui.log).
 _MIN_LEFTOVER = 1 << 20
@@ -611,6 +617,9 @@ def _tidy(force, cards, now, dry_run, wsl):
             log.info("space keeper: card cache drop failed (%s)", exc)
 
     freed = sum(p["size"] for p in done)
+    # PAD-1600: freed inside the app's Linux disks reaches Windows only by
+    # a give-back; a big clean makes it due now, not at its next look
+    owe = sum(p["size"] for p in done if p["where"] in ("wsl", "card"))
     for p in done:
         log.info("space keeper: removed %s (%s, %s)", p["path"], p["what"],
                  _WHY.get(p["why"], p["why"]))
@@ -623,18 +632,43 @@ def _tidy(force, cards, now, dry_run, wsl):
     if done:
         st["last"] = rec
         st["freed_total"] = int(st.get("freed_total") or 0) + freed
+    if owe >= GIVEBACK_SLACK_BYTES:
+        st["giveback_owed"] = now
     _save_state(st)
     return rec
+
+
+def giveback_slack(size):
+    """What a disk file of *size* bytes may hold above what it uses before
+    it is given back: 5 GB, or 10% of the file, whichever is larger."""
+    return max(GIVEBACK_SLACK_BYTES, int(GIVEBACK_SLACK_SHARE * (size or 0)))
+
+
+def owe_giveback(freed, now=None):
+    """A clean-up freed *freed* bytes inside the app's Linux disks: when that
+    is more than the slack, the give-back is due at once instead of at its
+    next daily look (PAD-1600).  True when it was marked."""
+    if freed < GIVEBACK_SLACK_BYTES:
+        return False
+    st = load_state()
+    st["giveback_owed"] = time.time() if now is None else now
+    _save_state(st)
+    return True
 
 
 def record_giveback(rec=None, checked=None):
     """What the close-time give-back (core/disk_giveback.py, PAD-1458) did.
     *rec* ``{"at", "freed", "disks": [{"name", "before", "after"}]}`` when it
     compacted; *checked* alone when it looked and found nothing due, so the
-    week starts again.  A run that found something busy saves neither."""
+    day starts again.  A run that found something busy saves neither (what
+    a clean-up owed stays owed)."""
     st = load_state()
     if checked is not None:
         st["giveback_checked"] = checked
+    # a look that started after the clean-up answered what it owed
+    at = rec["at"] if rec is not None else checked
+    if at is not None and float(st.get("giveback_owed") or 0) <= at:
+        st.pop("giveback_owed", None)
     if rec is not None:
         st["giveback"] = rec
         st["giveback_checked"] = rec["at"]
@@ -715,5 +749,6 @@ def _when(t, now):
 __all__ = ["tidy", "plan_wsl", "plan_host", "plan_cards", "parse_scan",
            "room_left", "summary", "load_state", "due", "disabled",
            "auto_enabled", "set_auto", "record_giveback", "giveback_sentence",
+           "giveback_slack", "owe_giveback", "GIVEBACK_SLACK_SHARE",
            "GIVEBACK_SLACK_BYTES", "GIVEBACK_EVERY_SECS",
            "FLOOR_BYTES", "STALE_SECS", "UNUSED_SECS"]

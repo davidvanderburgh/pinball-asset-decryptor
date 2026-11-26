@@ -275,6 +275,18 @@ def test_tidy_removes_the_plan_records_it_and_waits_six_hours(keeper):
     assert keeper["scan"] == 2
 
 
+def test_a_clean_freeing_more_than_the_slack_owes_a_giveback(keeper):
+    """PAD-1600: 8 GB freed inside Linux makes the give-back due now."""
+    sk.tidy(now=NOW, wsl=True)
+    assert sk.load_state()["giveback_owed"] == NOW
+
+
+def test_a_small_clean_owes_nothing(keeper):
+    keeper["refuse_ap"] = True                  # only the 1 GB image goes
+    sk.tidy(now=NOW, wsl=True)
+    assert "giveback_owed" not in sk.load_state()
+
+
 def test_tidy_runs_early_when_room_is_short(keeper, monkeypatch):
     sk.tidy(now=NOW, wsl=True)
     monkeypatch.setattr(wsl_disk, "usage", lambda: {

@@ -905,12 +905,19 @@ def test_freed_cards_say_windows_gets_them_back_by_reclaim(tmp_path, monkeypatch
             status = w.state("shellx")["disk"]["status"]
             reclaimable = svc._disk["vhdx"]["reclaimable"]
             if counts:
-                assert status == ("Freed 19.00 GiB inside WSL: Windows gets it "
-                                  "back with Reclaim space to Windows below.")
+                assert status == ("Freed 19.00 GiB inside WSL: it goes back "
+                                  "to Windows by itself once nothing is "
+                                  "running, or now with Reclaim space to "
+                                  "Windows below.")
                 assert reclaimable == 21 * gb
             else:
                 assert status == "Freed 19.00 GiB."
                 assert reclaimable == 2 * gb
+            # PAD-1600: either disk is given back, so 19 GB owes it now
+            from pinball_decryptor.core import space_keeper
+            st = space_keeper.load_state()
+            assert st.pop("giveback_owed") > 0
+            space_keeper._save_state(st)
     assert emu_cache.on_distro_disk({"dir": "/home/pad/cardcache"})
     assert not emu_cache.on_distro_disk({"dir": "/mnt/wsl/paddata/spike2/cardcache"})
     assert not emu_cache.on_distro_disk({"dir": ""}) and not emu_cache.on_distro_disk(None)

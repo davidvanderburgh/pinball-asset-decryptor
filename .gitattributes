@@ -53,3 +53,8 @@ pinball_decryptor/resources/remote/build.sh text eol=lf
 # the Windows 11 short-menu package and its certificate are built binaries (PAD-1523)
 *.msix binary
 *.cer binary
+
+# The machine's own e2fsck and resize2fs a card grown over the network uses (installer/build_machine_e2fsprogs.sh):
+# programs, never line-ending converted
+pinball_decryptor/resources/remote/padgrow/resize2fs binary
+pinball_decryptor/resources/remote/padgrow/e2fsck binary

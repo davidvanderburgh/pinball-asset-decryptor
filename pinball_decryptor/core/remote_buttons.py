@@ -328,8 +328,9 @@ def prepare_rootfs(part, work, on, cancel=None):
                 put(r, SO, stage('pad-buttons.so', shim_bytes()), 0o755)
         elif state['file']:
             commands.append('rm %s' % SO)
+        monitor = ssh_card.script_dest(r, MONITOR, 'remote-buttons')    # PAD-1619: the file a link leads to
         if want_script != script:
-            put(r, MONITOR, stage('game_monitor', want_script), 0o755)
+            put(r, monitor, stage('game_monitor', want_script), 0o755)
     script_file = work / 'debugfs.commands'
     script_file.write_text('\n'.join(commands) + '\n')
     if commands:
@@ -338,7 +339,7 @@ def prepare_rootfs(part, work, on, cancel=None):
     with part.open('rb') as f:
         r = Ext4Reader(f, 0, size)
         after = inspect_root(r)
-        node = ssh_card._node(r, MONITOR)
+        node = ssh_card.resolve(r, MONITOR)[1]
         if (after['enabled'] != on or _read(r, MONITOR, 64 << 10) != want_script or (not on and after['file'])
                 or stat.S_IMODE(node['mode']) != 0o755):
             raise ExtrasError('The remote-buttons files did not read back from the card as written.')
